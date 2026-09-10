@@ -1,6 +1,7 @@
-import { useMemo, useRef, useState, type ReactNode } from 'react'
+import { SecondaryRailToggle } from '@/components/secondary-rail-toggle'
+import { useMemo, useRef, useState } from 'react'
 import { FileListContextMenu } from '@/components/file-list-context-menu'
-import { Archive, ArchiveRestore, Bot, CornerDownRight, FileText, FolderPlus, MessageSquareOff, MessagesSquare, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, PenTool, Plus, Trash2, Upload } from 'lucide-react'
+import { Archive, ArchiveRestore, Bot, CornerDownRight, FileText, FolderPlus, MessageSquareOff, MessagesSquare, MoreHorizontal, Pencil, PenTool, Plus, Trash2, Upload } from 'lucide-react'
 import { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
@@ -8,6 +9,8 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator,
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { toast } from '@/lib/toast'
 import { SecondaryRail, type SecondaryRailContext } from '@/components/secondary-rail'
+import { SecondaryRailDivider, SecondaryRailSectionHeader } from '@/components/secondary-rail-section'
+import { useSecondaryRailSections } from '@/hooks/use-secondary-rail-sections'
 import { FileTree } from '@/components/spaces/files-tab'
 import { ServerOptionsMenu } from '@/components/spaces/server-options-menu'
 import { ServerSpaceNavigation } from '@/components/spaces-sidebar-section'
@@ -25,15 +28,6 @@ import type { RailSelection } from '@/lib/spaces-selection'
 // scrolling pane. The selected space's files retain their resizable lower
 // pane. SecondaryRail owns docking, resizing, and the hover drawer.
 
-type RailSection = 'files'
-/** Collapsed sections persist like the rail's own pin. */
-const COLLAPSED_KEY = 'spaces:railCollapsed'
-/** A dragged Files height persists too (null = the 60/40 default). */
-const FILES_HEIGHT_KEY = 'spaces:filesHeight'
-/** Resizing never leaves Files shorter than this (divider + label + a couple of rows). */
-const FILES_MIN = 96
-/** ...or Chat shorter than this (label + Messages + a discussion). */
-const CHAT_MIN = 120
 
 export function SpaceRail({
     org, onOpenSpace, onOpenDiscussion, orgId, spaceId, selfMemberId, stream, topics, changeSets, entries, draftFolders, presence, unreadPaths, selection, onSelect, onCreateFile, onCreateBoard, onUploadFiles, onOpenTrash, onAddFolder, onRemoveFolder,
@@ -77,53 +71,10 @@ export function SpaceRail({
     const [showArchived, setShowArchived] = useState(() => sessionStorage.getItem(archivedKey) === 'true')
     const uploadInputRef = useRef<HTMLInputElement | null>(null)
 
-    // Resizable panes: null = the 60/40 default until the divider is dragged;
-    // then the Files height sticks. Dragging up grows Files.
-    const [filesHeight, setFilesHeight] = useState<number | null>(() => {
-        const stored = Number(localStorage.getItem(FILES_HEIGHT_KEY))
-        return Number.isFinite(stored) && stored >= FILES_MIN ? stored : null
-    })
-    const [resizing, setResizing] = useState(false)
-    const bodyRef = useRef<HTMLDivElement | null>(null)
-    const filesRef = useRef<HTMLElement | null>(null)
-    const startResize = (e: React.MouseEvent) => {
-        e.preventDefault()
-        const start = { y: e.clientY, height: filesRef.current?.clientHeight ?? 0 }
-        setResizing(true)
-        const onMove = (ev: MouseEvent) => {
-            const bodyHeight = bodyRef.current?.clientHeight ?? window.innerHeight
-            const next = start.height + (start.y - ev.clientY)
-            setFilesHeight(Math.min(Math.max(next, FILES_MIN), Math.max(FILES_MIN, bodyHeight - CHAT_MIN)))
-        }
-        const onUp = () => {
-            window.removeEventListener('mousemove', onMove)
-            window.removeEventListener('mouseup', onUp)
-            setResizing(false)
-            setFilesHeight((h) => {
-                if (h !== null) localStorage.setItem(FILES_HEIGHT_KEY, String(h))
-                return h
-            })
-        }
-        window.addEventListener('mousemove', onMove)
-        window.addEventListener('mouseup', onUp)
-    }
-
-    const [collapsed, setCollapsed] = useState<ReadonlySet<RailSection>>(() => {
-        try {
-            const raw = localStorage.getItem(COLLAPSED_KEY)
-            return new Set(raw ? (JSON.parse(raw) as RailSection[]) : [])
-        } catch {
-            return new Set()
-        }
-    })
-    const toggleSection = (section: RailSection) =>
-        setCollapsed((prev) => {
-            const next = new Set(prev)
-            if (next.has(section)) next.delete(section)
-            else next.add(section)
-            localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]))
-            return next
-        })
+    const {
+        bodyRef, bottomRef: filesRef, topStyle: chatStyle, bottomStyle: filesStyle,
+        bottomCollapsed: filesCollapsed, toggleBottom: toggleFiles, resizing, dividerProps,
+    } = useSecondaryRailSections({ collapsedKey: 'spaces:railCollapsed', heightKey: 'spaces:filesHeight' })
 
     // Row-level lifecycle actions. Rename edits inline in the row; the topic
     // event the server emits updates every other client, the refresh updates
@@ -187,19 +138,6 @@ export function SpaceRail({
     const unreadTopics = topics.filter((t) => !t.archived && isUnread(t)).length + (generalBadge > 0 ? 1 : 0)
     const badge = unreadTopics + unreadPaths.size
 
-    const filesCollapsed = collapsed.has('files')
-    const bothOpen = !filesCollapsed
-    // A collapsed pane is just its label; the other takes everything left.
-    // With both open, a dragged Files height wins over the 60/40 default.
-    const chatStyle: React.CSSProperties = !bothOpen || filesHeight !== null ? { flex: '1 1 0%' } : { flex: '60 1 0%' }
-    const filesStyle: React.CSSProperties = filesCollapsed
-        ? { flex: '0 0 auto' }
-        : !bothOpen
-            ? { flex: '1 1 0%' }
-            : filesHeight !== null
-                ? { flex: `0 0 ${filesHeight}px`, maxHeight: `calc(100% - ${CHAT_MIN}px)` }
-                : { flex: '40 1 0%' }
-
     // The rail's content — the shell renders it docked or inside the peek
     // drawer at the fixed open width.
     const renderBody = ({ togglePin, onMenuOpenChange }: SecondaryRailContext) => (
@@ -208,15 +146,7 @@ export function SpaceRail({
                 <div className="flex shrink-0 items-center gap-0.5 px-2 py-1">
                     <span className="min-w-0 flex-1 px-1 text-[13px] font-semibold text-muted-foreground">Spaces</span>
                     <ServerOptionsMenu org={org} showArchived={showArchived} onToggleArchived={() => setShowArchived((value) => { sessionStorage.setItem(archivedKey, String(!value)); return !value })} onMenuOpenChange={onMenuOpenChange} />
-                    {/* Docked: close. Peeked: the lock — dock it. Same spot, flipped glyph. */}
-                    <button
-                        type="button"
-                        onClick={togglePin}
-                        title={open ? 'Close sidebar' : 'Lock sidebar open'}
-                        className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-                    >
-                        {open ? <PanelLeftClose className="size-3.5" /> : <PanelLeftOpen className="size-3.5" />}
-                    </button>
+                    <SecondaryRailToggle open={open} onToggle={togglePin} />
                 </div>
                     <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-2 pb-2">
                         <ServerSpaceNavigation org={org} spaceId={spaceId} onOpenSpace={onOpenSpace}
@@ -358,17 +288,8 @@ export function SpaceRail({
                     if (files.length > 0) onUploadFiles(files)
                 }}
             >
-                {/* The divider: a hairline always, a drag handle while both panes are open. */}
-                <div
-                    onMouseDown={bothOpen ? startResize : undefined}
-                    title={bothOpen ? 'Drag to resize' : undefined}
-                    className={cn(
-                        'h-1.5 shrink-0 border-t border-border transition-colors',
-                        bothOpen && 'cursor-row-resize hover:bg-primary/20',
-                        resizing && 'bg-primary/30',
-                    )}
-                />
-                <SectionHeader label="Files" collapsed={filesCollapsed} count={liveFiles} onToggle={() => toggleSection('files')}>
+                <SecondaryRailDivider {...dividerProps} />
+                <SecondaryRailSectionHeader label="Files" collapsed={filesCollapsed} count={liveFiles} onToggle={toggleFiles}>
                     <DropdownMenu onOpenChange={onMenuOpenChange}>
                         <DropdownMenuTrigger asChild>
                             <button
@@ -411,7 +332,7 @@ export function SpaceRail({
                             </DropdownMenuItem>
                         </DropdownMenuContent>
                     </DropdownMenu>
-                </SectionHeader>
+                </SecondaryRailSectionHeader>
                 {!filesCollapsed && (
                     <FileListContextMenu onOpenChange={onMenuOpenChange} actions={[
                         { label: 'New file', onSelect: () => { setCreatingBoard(false); setCreatingFile({ prefix: '' }) } },
@@ -490,36 +411,5 @@ export function SpaceRail({
         >
             {renderBody}
         </SecondaryRail>
-    )
-}
-
-/**
- * A pane's label: click collapses the pane. The count shows only while
- * collapsed — that is the one moment a number says something the rows
- * can't. `children` are the pane's actions, right-aligned (hover-revealed
- * ones key off group/section, which the PANE carries — hovering anywhere in
- * it shows them).
- */
-function SectionHeader({ label, collapsed, count, onToggle, children }: {
-    label: string
-    collapsed: boolean
-    count: number
-    onToggle: () => void
-    children?: ReactNode
-}) {
-    return (
-        <div className="flex h-8 shrink-0 items-center gap-1 pl-3 pr-1.5">
-            <button
-                type="button"
-                onClick={onToggle}
-                aria-expanded={!collapsed}
-                title={collapsed ? `Show ${label.toLowerCase()}` : `Hide ${label.toLowerCase()}`}
-                className="flex h-full min-w-0 flex-1 items-center gap-1.5 text-left text-[13px] font-semibold text-muted-foreground hover:text-foreground"
-            >
-                <span className="truncate">{label}</span>
-                {collapsed && count > 0 && <span className="font-normal tabular-nums">{count}</span>}
-            </button>
-            {children}
-        </div>
     )
 }

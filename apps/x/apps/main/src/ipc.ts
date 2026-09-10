@@ -1,3 +1,4 @@
+import { listProjects, createProjectChat } from '@x/core/dist/projects/projects.js';
 import { ipcMain, BrowserWindow, shell, dialog, systemPreferences, desktopCapturer, app, powerSaveBlocker } from 'electron';
 import { ipc } from '@x/shared';
 import path from 'node:path';
@@ -1409,6 +1410,11 @@ export function setupIpcHandlers() {
     // turnId immediately; the turn advances in the background and the
     // renderer reconciles via the sessions:events feed. Input-routing calls
     // settle with that advance's outcome (the renderer fire-and-forgets).
+    'projects:list': async () => {
+      await sessionsIndexReady;
+      return { projects: await listProjects(container.resolve<ISessions>('sessions')) };
+    },
+    'projects:createChat': async (_event, args) => ({ sessionId: await createProjectChat(container.resolve<ISessions>('sessions'), args.projectId) }),
     'sessions:create': async (_event, args) => {
       const sessionId = await container.resolve<ISessions>('sessions').createSession(args);
       return { sessionId };

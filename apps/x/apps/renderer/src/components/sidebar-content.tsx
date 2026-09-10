@@ -674,8 +674,8 @@ export function SidebarContentPanel({
     onRenameRun?.(chatId, title)
   }, [renameDraft, recentChats, onRenameRun])
 
-  // Workspace count for the Workspaces sublabel — top-level dir children of
-  // knowledge/Workspace (matches WorkspaceView's root listing).
+  // Workspace count for the Projects sublabel — top-level dir children of
+  // knowledge/Workspace (matches the Projects rail).
   const workspaceCount = React.useMemo(() => {
     const find = (nodes: TreeNode[]): TreeNode | null => {
       for (const n of nodes) {
@@ -1076,9 +1076,9 @@ export function SidebarContentPanel({
                 >
                   <Folder className="mt-0.5 size-4 shrink-0" />
                   <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate">Workspaces</span>
+                    <span className="truncate">Projects</span>
                     <span className="truncate text-[11px] text-muted-foreground">
-                      {workspaceCount === 0 ? 'No workspaces' : `${workspaceCount} workspace${workspaceCount === 1 ? '' : 's'}`}
+                      {workspaceCount === 0 ? 'No projects' : `${workspaceCount} project${workspaceCount === 1 ? '' : 's'}`}
                     </span>
                   </div>
                 </SidebarMenuButton>

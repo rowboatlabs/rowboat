@@ -258,7 +258,8 @@ export function DocxFileViewer({ path }: DocxFileViewerProps) {
   }
 
   return (
-    <div className="relative flex h-full w-full flex-col overflow-hidden">
+    // Keep the editor's toolbar layers below surrounding app overlays, including secondary rails.
+    <div className="relative isolate flex h-full w-full flex-col overflow-hidden">
       {saveError && (
         <div role="alert" className="flex shrink-0 items-center gap-3 border-b border-border px-3 py-2 text-xs">
           <span className="min-w-0 flex-1">{saveError}</span>

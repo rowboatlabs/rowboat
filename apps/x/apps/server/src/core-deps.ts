@@ -1,3 +1,4 @@
+import { listProjects, createProjectChat } from '@x/core/dist/projects/projects.js';
 import container from '@x/core/dist/di/container.js';
 import { deliverLoopbackCallback } from './loopback-relay.js';
 import { spacesRpcHandlers, subscribeSpacesEvents } from './spaces-deps.js';
@@ -156,6 +157,11 @@ import type { EventSources } from './server.js';
 export function createCoreRpcHandlers(opts?: { sessionsIndexReady?: Promise<void> }): RpcHandlers {
   const sessions = () => container.resolve<ISessions>('sessions');
   return {
+    'projects:list': async () => {
+      await opts?.sessionsIndexReady;
+      return { projects: await listProjects(container.resolve<ISessions>('sessions')) };
+    },
+    'projects:createChat': async (args) => ({ sessionId: await createProjectChat(container.resolve<ISessions>('sessions'), args.projectId) }),
     'sessions:create': async (args) => {
       const sessionId = await sessions().createSession(args);
       return { sessionId };

@@ -22,7 +22,7 @@ export const WORK_DIRECTORY_CAPABILITY: EagerCapability = {
 };
 
 const WORK_DIR_TEMPLATE = (userWorkDir: string): string => `# User Work Directory
-The user has chosen the following directory as their current **work directory**:
+For a chat in Projects, this is the selected project’s local folder. Use the project folder name as its name, and save project outputs here by default.\n\nThe user has chosen the following directory as their current **work directory**:
 
 \`${userWorkDir}\`
 
