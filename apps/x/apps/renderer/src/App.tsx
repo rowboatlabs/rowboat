@@ -1,3 +1,4 @@
+import { WorkspaceSessionTabs } from './components/code/workspace-session-tabs'
 import { DocumentFileViewer } from '@/components/document-file-viewer'
 import { readLastSpace, resolveSpacesLocation } from '@/lib/spaces-navigation'
 import * as React from 'react'
@@ -2811,7 +2812,7 @@ function App() {
   const [codePanel, setCodePanel] = useState<CodePanel | null>(null)
   // Working-tree status of the selected code session — the chat header shows
   // the changed-file count even while the drawer is closed.
-  const codeGit = useCodeGitStatus(activeCodeSession?.session.id ?? null, activeCodeSession?.status ?? 'idle')
+  const codeGit = useCodeGitStatus(activeCodeSession?.session.id ?? null, activeCodeSession?.status ?? 'idle', activeCodeSession?.session.worktree?.baseCommit)
   // Composer locks for runs that are code sessions: the session's cwd + agent
   // are frozen in the chat input (the backend pins them server-side anyway).
   // Kept after the Code view unmounts — the chat stays bound to the session.
@@ -8100,7 +8101,8 @@ function App() {
                 defaultWidth={DEFAULT_CHAT_PANE_WIDTH}
                 isOpen={dockFullScreen || chatPaneOpen}
                 isMaximized={projectViewActive ? !selectedPath : dockFullScreen || isRightPaneMaximized}
-                chatTabs={chatTabs}
+                codeSessionTabs={codeChatMain && activeCodeSession ? <WorkspaceSessionTabs session={activeCodeSession.session} onSelect={setCodeFocusSessionId} /> : undefined}
+                chatTabs={isCodeOpen ? chatTabs.filter((tab) => tab.runId === activeCodeSession?.session.id) : chatTabs}
                 onSwitchChatTab={switchChatTab}
                 onCloseChatTabs={closeChatTabs}
                 activeChatTabId={activeChatTabId}
@@ -8226,6 +8228,7 @@ function App() {
                 terminal — one of the chat header's buttons opens it. */}
             {codeChatMain && activeCodeSession && codePanel && (
               <CodeWorkspaceDrawer
+                key={`${activeCodeSession.session.id}:${activeCodeSession.session.worktree?.baseCommit ?? ''}`}
                 session={activeCodeSession.session}
                 panel={codePanel}
                 onPanelChange={setCodePanel}

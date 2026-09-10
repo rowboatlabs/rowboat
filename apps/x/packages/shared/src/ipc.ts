@@ -1800,6 +1800,22 @@ export const ipcSchemas = {
       })),
     }),
   },
+  'codeProject:branches': {
+    req: z.object({ projectId: z.string() }),
+    res: z.object({ branches: z.array(z.string()), currentBranch: z.string().nullable() }),
+  },
+  'codeProject:switchBranch': {
+    req: z.object({ projectId: z.string(), branch: z.string().min(1) }),
+    res: z.object({ git: GitRepoInfo }),
+  },
+  'codeSession:baseBranchStatus': {
+    req: z.object({ sessionId: z.string() }),
+    res: z.object({ canChange: z.boolean(), reason: z.string().nullable(), baseBranch: z.string().nullable() }),
+  },
+  'codeSession:changeBaseBranch': {
+    req: z.object({ sessionId: z.string(), baseBranch: z.string().min(1) }),
+    res: z.object({ success: z.literal(true) }),
+  },
   'codeSession:create': {
     req: z.object({
       projectId: z.string(),
@@ -1809,6 +1825,9 @@ export const ipcSchemas = {
       // follows the composer chip / global setting ("Auto").
       policy: ApprovalPolicy.optional(),
       isolation: z.enum(['in-repo', 'worktree']),
+      baseBranch: z.string().min(1).optional(),
+      // Reuse this session's workspace instead of creating a worktree.
+      workspaceSessionId: z.string().optional(),
       // The coding agent's own model + reasoning effort (ACP engine),
       // re-applied each turn so they stay editable. The copilot LLM is
       // whatever the chat composer picks — same as any other chat.

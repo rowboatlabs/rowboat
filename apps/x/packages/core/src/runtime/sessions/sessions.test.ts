@@ -327,7 +327,7 @@ class FlakySessionRepo implements ISessionRepo {
     }
 }
 
-function makeSessions(opts: { repo?: ISessionRepo; fake?: FakeTurnRuntime } = {}) {
+function makeSessions(opts: { repo?: ISessionRepo; fake?: FakeTurnRuntime; beforeSessionStart?: (id: string) => Promise<void> } = {}) {
     const repo = opts.repo ?? new InMemorySessionRepo();
     const fake = opts.fake ?? new FakeTurnRuntime();
     const bus = new RecordingBus();
@@ -337,6 +337,7 @@ function makeSessions(opts: { repo?: ISessionRepo; fake?: FakeTurnRuntime } = {}
         idGenerator: new FakeIdGen(),
         clock: new FakeClock(),
         sessionBus: bus,
+        beforeSessionStart: opts.beforeSessionStart,
     });
     return { sessions, repo, fake, bus };
 }
@@ -1658,5 +1659,30 @@ describe("pending queue (sendOrQueueMessage, steering, promotion)", () => {
         });
         await sessions.deleteSession(sessionId);
         expect(sessions.listQueued(sessionId)).toEqual([]);
+    });
+});
+
+describe('before first session message', () => {
+    it('awaits the start hook before a turn is created', async () => {
+        let release!: () => void;
+        let entered!: () => void;
+        const ready = new Promise<void>((resolve) => { entered = resolve; });
+        const { sessions } = makeSessions({ beforeSessionStart: async () => {
+            entered();
+            await new Promise<void>((resolve) => { release = resolve; });
+        } });
+        const id = await sessions.createSession();
+        const send = sessions.sendMessage(id, user('start'), { agent: { agentId: 'copilot' } });
+        await ready;
+        expect((await sessions.getSession(id)).turns).toHaveLength(0);
+        release();
+        await send;
+        expect((await sessions.getSession(id)).turns).toHaveLength(1);
+    });
+    it('does not start a turn if the durable start hook fails', async () => {
+        const { sessions } = makeSessions({ beforeSessionStart: async () => { throw new Error('Cannot persist start'); } });
+        const id = await sessions.createSession();
+        await expect(sessions.sendOrQueueMessage(id, user('start'), { agent: { agentId: 'copilot' } })).rejects.toThrow('Cannot persist start');
+        expect((await sessions.getSession(id)).turns).toHaveLength(0);
     });
 });
