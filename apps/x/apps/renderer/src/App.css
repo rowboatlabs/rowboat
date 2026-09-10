@@ -1715,36 +1715,3 @@
 @media (prefers-reduced-motion: reduce) {
   .caffeinate-steam path { animation: none; }
 }
-
-/* Assistant has one section-wide titlebar. Its rail and chat occupy the
-   row below it, so docking the rail cannot resize or clip the titlebar.
-   Keep the existing chat DOM in place when entering/leaving the section. */
-.assistant-section {
-  display: grid;
-  flex: 1 1 0;
-  min-width: 0;
-  min-height: 0;
-  grid-template-columns: auto minmax(0, 1fr);
-  grid-template-rows: auto minmax(0, 1fr);
-}
-.assistant-section > [data-slot="sidebar-inset"] { display: contents; }
-.assistant-section > [data-slot="sidebar-inset"] > header {
-  grid-column: 1 / -1;
-  grid-row: 1;
-}
-.assistant-section [data-assistant-content] {
-  grid-column: 1;
-  grid-row: 2;
-}
-.assistant-section > [data-chat-sidebar-root] {
-  grid-column: 2;
-  grid-row: 2;
-  width: 100% !important;
-  min-height: 0;
-  border-left: 0;
-}
-.assistant-section[data-document-open][data-chat-open] {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-}
-.assistant-section:not([data-chat-open]) [data-assistant-content] { grid-column: 1 / -1; }
-.assistant-section:not([data-chat-open]) > [data-chat-sidebar-root] { display: none; }

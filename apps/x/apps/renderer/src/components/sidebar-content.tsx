@@ -2,7 +2,7 @@
 
 import { SidebarChatContextMenu } from "./sidebar-chat-context-menu"
 import * as React from "react"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   AppWindow,
   ArrowUpRight,
@@ -10,6 +10,7 @@ import {
   ChevronRight,
   Code2,
   FileText,
+  Folder,
   Globe,
   AlertTriangle,
   Home,
@@ -590,6 +591,16 @@ export function SidebarContentPanel({
       .slice(0, 10)
   }, [tree])
 
+  // The most recently touched chat, for the Assistant row (recency only —
+  // pinning shouldn't hijack "continue where I left off"). Mirrors the dock.
+  const lastChat = useMemo(() => {
+    const recency = (r: { createdAt: string; modifiedAt?: string }) => {
+      const ms = new Date(r.modifiedAt ?? r.createdAt).getTime()
+      return Number.isFinite(ms) ? ms : 0
+    }
+    return [...recentRuns].sort((a, b) => recency(b) - recency(a))[0] ?? null
+  }, [recentRuns])
+
   // Pinned chats: a per-machine UI preference, persisted in localStorage.
   const [pinnedChatIds, setPinnedChatIds] = useState<string[]>(() => {
     try {
@@ -662,6 +673,23 @@ export function SidebarContentPanel({
     if (!title || title === (current?.title ?? '')) return
     onRenameRun?.(chatId, title)
   }, [renameDraft, recentChats, onRenameRun])
+
+  // Workspace count for the Projects sublabel — top-level dir children of
+  // knowledge/Workspace (matches the Projects rail).
+  const workspaceCount = React.useMemo(() => {
+    const find = (nodes: TreeNode[]): TreeNode | null => {
+      for (const n of nodes) {
+        if (n.path === 'knowledge/Workspace') return n
+        if (n.kind === 'dir' && n.children?.length) {
+          const found = find(n.children)
+          if (found) return found
+        }
+      }
+      return null
+    }
+    const node = find(tree)
+    return node?.children?.filter((c) => c.kind === 'dir').length ?? 0
+  }, [tree])
 
   // "Updated 4m ago" sublabel under Knowledge, based on the most recently
   // modified note. Recomputed in an effect (not during render) and ticked so
@@ -827,10 +855,10 @@ export function SidebarContentPanel({
             <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton
-                  data-tour-id="nav-assistant"
                   isActive={activeNav === 'assistant'}
                   onClick={() => {
-                    knowledgeActions.openWorkspaceAt()
+                    if (lastChat && onOpenRun) onOpenRun(lastChat.id)
+                    else onNewChat?.()
                   }}
                 >
                   <MascotFaceIcon className="size-4 shrink-0" />
@@ -1036,6 +1064,22 @@ export function SidebarContentPanel({
                         {bgAgentsLabel}
                       </span>
                     )}
+                  </div>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  data-tour-id="nav-workspaces"
+                  isActive={activeNav === 'workspaces'}
+                  onClick={() => knowledgeActions.openWorkspaceAt()}
+                  className="h-auto items-start py-1"
+                >
+                  <Folder className="mt-0.5 size-4 shrink-0" />
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate">Projects</span>
+                    <span className="truncate text-[11px] text-muted-foreground">
+                      {workspaceCount === 0 ? 'No projects' : `${workspaceCount} project${workspaceCount === 1 ? '' : 's'}`}
+                    </span>
                   </div>
                 </SidebarMenuButton>
               </SidebarMenuItem>

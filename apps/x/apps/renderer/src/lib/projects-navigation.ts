@@ -5,12 +5,11 @@ export type ProjectLocation = { path: string; runId?: string; filePath?: string 
 /** Section entry restores the last project instead of opening a pathless
  * root and clearing its chats/files. History entries still apply exactly. */
 export function resolveProjectsLocation(projects: Project[], previous: ProjectLocation | null): ProjectLocation | null {
-    const project = projects.find((item) => previous && (previous.path === item.path || (!item.isDefault && previous.path.startsWith(`${item.path}/`))))
+    const project = projects.find((item) => previous && (previous.path === item.path || previous.path.startsWith(`${item.path}/`)))
         ?? projects.find((item) => previous?.runId && item.chats.some((chat) => chat.id === previous.runId))
-        ?? projects.find((item) => item.isDefault)
         ?? projects[0]
     if (!project) return null
-    const sameProject = previous && (previous.path === project.path || (!project.isDefault && previous.path.startsWith(`${project.path}/`))
+    const sameProject = previous && (previous.path === project.path || previous.path.startsWith(`${project.path}/`)
         || project.chats.some((chat) => chat.id === previous.runId))
     if (!sameProject) return { path: project.path }
     const runId = project.chats.some((chat) => chat.id === previous.runId) ? previous.runId : undefined

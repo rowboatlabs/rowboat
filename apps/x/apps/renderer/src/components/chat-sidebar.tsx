@@ -69,8 +69,6 @@ interface ChatSidebarProps {
   onCloseChatTabs: (tabIds: string[]) => void
   activeChatTabId: string
   getChatTabTitle: (tab: ChatTab) => string
-  embedded?: boolean
-  projectName?: string
   onNewChatTab: () => void
   recentRuns?: { id: string; title?: string; createdAt: string }[]
   onSelectRun?: (runId: string) => void
@@ -167,8 +165,6 @@ export function ChatSidebar({
   onCloseChatTabs,
   activeChatTabId,
   getChatTabTitle,
-  embedded = false,
-  projectName,
   onNewChatTab,
   recentRuns = [],
   onSelectRun,
@@ -457,9 +453,9 @@ export function ChatSidebar({
       {showContent && (
         <>
           <header
-            className={cn(floating || embedded ? 'titlebar-no-drag' : 'titlebar-drag-region', 'flex h-10 shrink-0 items-stretch border-b border-border bg-sidebar')}
+            className={cn(floating ? 'titlebar-no-drag' : 'titlebar-drag-region', 'flex h-10 shrink-0 items-stretch border-b border-border bg-sidebar')}
             style={{
-              paddingLeft: embedded ? 12 : isMaximized ? (sidebarState === 'collapsed' ? collapsedLeftPaddingPx : 12) : undefined,
+              paddingLeft: isMaximized ? (sidebarState === 'collapsed' ? collapsedLeftPaddingPx : 12) : undefined,
               paddingRight: isMaximized ? 12 : undefined,
               transition: isMaximized ? 'padding-left 200ms linear' : undefined,
             }}
@@ -467,7 +463,7 @@ export function ChatSidebar({
             {/* Maximized, the pane covers the main ContentHeader — carry the
                 same back/forward pair so history navigation stays reachable
                 (navigating restores the underlying view and un-maximizes). */}
-            {!embedded && isMaximized && onNavigateBack && onNavigateForward && (
+            {isMaximized && onNavigateBack && onNavigateForward && (
               <>
                 <div className="titlebar-no-drag flex items-center gap-1 pr-2 shrink-0">
                   <button
@@ -571,7 +567,6 @@ export function ChatSidebar({
               <div className={cn('sticky bottom-0 z-10 bg-background pt-0 shadow-lg', floating ? 'pb-3' : 'pb-12')}>
                 <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t from-background to-transparent" />
                 <div className="mx-auto w-full max-w-4xl px-3">
-                  {projectName && <div className="mb-2 text-xs text-muted-foreground" aria-label="Current project">Project: {projectName}</div>}
                   {chatTabs.map((tab) => {
                     const isActive = tab.id === activeChatTabId && isOpen
                     return (

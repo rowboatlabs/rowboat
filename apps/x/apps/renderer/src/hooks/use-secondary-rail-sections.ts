@@ -6,13 +6,11 @@ const NAVIGATION_MIN = 120
 /** Spaces and Projects share the same 60/40 split, persisted file-pane
  * height, and collapse behavior. Keys are supplied to preserve existing
  * Spaces preferences and keep each section's preferences independent. */
-export function useSecondaryRailSections({ collapsedKey, heightKey, topKey = 'navigation', bottomKey = 'files', topHasExpandedContent = false, bottomEnabled = true }: {
+export function useSecondaryRailSections({ collapsedKey, heightKey, topKey = 'navigation', bottomKey = 'files' }: {
     collapsedKey: string
     heightKey: string
     topKey?: string
-    topHasExpandedContent?: boolean
     bottomKey?: string
-    bottomEnabled?: boolean
 }) {
     const [height, setHeight] = useState<number | null>(() => {
         const stored = Number(localStorage.getItem(heightKey))
@@ -38,9 +36,8 @@ export function useSecondaryRailSections({ collapsedKey, heightKey, topKey = 'na
         return next
     })
     const topCollapsed = collapsed.has(topKey)
-    const bottomCollapsed = !bottomEnabled || collapsed.has(bottomKey)
-    const topFullyCollapsed = topCollapsed && !topHasExpandedContent
-    const bothOpen = !topFullyCollapsed && !bottomCollapsed
+    const bottomCollapsed = collapsed.has(bottomKey)
+    const bothOpen = !topCollapsed && !bottomCollapsed
     const startResize = (event: MouseEvent) => {
         event.preventDefault()
         dragCleanup.current?.()
@@ -68,7 +65,7 @@ export function useSecondaryRailSections({ collapsedKey, heightKey, topKey = 'na
         window.addEventListener('mousemove', onMove)
         window.addEventListener('mouseup', onUp)
     }
-    const topStyle: CSSProperties = topFullyCollapsed ? { flex: '0 0 auto' }
+    const topStyle: CSSProperties = topCollapsed ? { flex: '0 0 auto' }
         : !bothOpen || height !== null ? { flex: '1 1 0%' } : { flex: '60 1 0%' }
     const bottomStyle: CSSProperties = bottomCollapsed ? { flex: '0 0 auto' }
         : !bothOpen ? { flex: '1 1 0%' }
@@ -76,7 +73,7 @@ export function useSecondaryRailSections({ collapsedKey, heightKey, topKey = 'na
         : { flex: '40 1 0%' }
     return {
         bodyRef, bottomRef, topStyle, bottomStyle, topCollapsed, bottomCollapsed, resizing,
-        toggleTop: () => toggle(topKey), toggleBottom: () => { if (bottomEnabled) toggle(bottomKey) },
+        toggleTop: () => toggle(topKey), toggleBottom: () => toggle(bottomKey),
         dividerProps: { enabled: bothOpen, resizing, onMouseDown: startResize },
     }
 }
