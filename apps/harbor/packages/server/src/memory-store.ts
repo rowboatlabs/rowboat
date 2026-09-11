@@ -643,12 +643,15 @@ export class MemoryStore implements Store {
     memberId: string,
     offset: number,
     at: string,
-  ): Promise<number | undefined> {
+  ): Promise<number> {
     const s = this.must(spaceId);
     const key = this.threadMarkKey(rootMessageId, memberId);
-    const current = s.threadMarks.get(key);
-    if (!current?.following) return undefined;
-    if (offset <= current.readOffset) return current.readOffset;
+    // An unfollowed thread takes a mark too; the row starts unfollowed.
+    const current = s.threadMarks.get(key) ?? { following: false, readOffset: 0, updatedAt: at };
+    if (offset <= current.readOffset) {
+      s.threadMarks.set(key, current);
+      return current.readOffset;
+    }
     s.threadMarks.set(key, { ...current, readOffset: offset, updatedAt: at });
     return offset;
   }

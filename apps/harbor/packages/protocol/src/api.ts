@@ -492,7 +492,7 @@ export const routes = {
       topic: Topic.nullable(),
       messages: z.array(Message),
       hasMore: z.boolean(),
-      /** The caller's mark in this thread; null = not following (no mark is kept). */
+      /** The caller's mark in this thread, followed or not; null = never read nor followed. */
       readOffset: StreamOffset.nullable(),
       following: z.boolean(),
     }),
@@ -665,25 +665,28 @@ export const routes = {
    * timestamp. Marks only advance: a lower offset is a 200 no-op returning
    * the stored mark; an offset past the space's head is refused. Posting
    * directly advances the author's own mark (Slack/Mattermost posture; an
-   * agent's post does not). A thread mark exists only while the member
-   * follows the thread — marking an unfollowed thread returns null and
-   * records nothing. Every accepted mark is echoed to the member's other
-   * connections as a `read_mark` frame (events.ts).
+   * agent's post does not). A thread takes a mark whether or not the member
+   * follows it (2026-09-11 — until then an unfollowed thread refused marks,
+   * which left @here-in-thread, DM-thread and unfollowed-thread Activity rows
+   * unread forever): following governs badges, counts and notifications, the
+   * mark governs what is read. Every accepted mark is echoed to the member's
+   * other connections as a `read_mark` frame (events.ts).
    */
   markRead: {
     method: 'POST',
     path: '/v1/spaces/:spaceId/read',
     params: z.object({ spaceId: SpaceId }),
     request: z.object({
-      /** Absent = the stream; present = a followed thread. */
+      /** Absent = the stream; present = a thread (a reply's id resolves to its root). */
       threadRootId: MessageId.optional(),
       offset: StreamOffset,
     }),
-    response: z.object({ readOffset: StreamOffset.nullable() }),
+    /** The stored mark after the call (never lower than before). */
+    response: z.object({ readOffset: StreamOffset }),
   },
   /**
-   * Follow or unfollow a thread. Only followed threads carry a mark and count
-   * toward unread (v1 tracks followed threads only). Which acts follow
+   * Follow or unfollow a thread. Only followed threads count toward unread
+   * and badge (v1 tracks followed threads only); a mark can sit on any thread. Which acts follow
    * automatically is org behaviour, not client convention — provisional rules
    * today: replying follows, and a root's author follows from the first reply
    * on. Unfollowing keeps the mark, so re-following never floods.

@@ -1123,7 +1123,8 @@ export class HarborService {
       topic: (await this.store.getTopicByRoot(spaceId, root.id)) ?? null,
       messages: await this.foldPage(spaceId, replies),
       hasMore,
-      readOffset: mark?.following ? mark.readOffset : null,
+      // The mark, followed or not (null = the member never read or followed it).
+      readOffset: mark?.readOffset ?? null,
       following: mark?.following ?? false,
     };
   }
@@ -1828,8 +1829,14 @@ export class HarborService {
   // member state, not a space fact — the member's other connections learn by
   // an ephemeral read_mark frame, and a reconnecting client refetches unread().
 
-  /** Advance the stream mark, or a followed thread's mark. Monotone; past head refuses. */
-  async markRead(ctx: ActorCtx, spaceId: string, input: MarkReadInput): Promise<{ readOffset: number | null }> {
+  /**
+   * Advance the stream mark, or a thread's mark. Monotone; past head refuses.
+   * A thread mark is recorded whether or not the member follows the thread
+   * (2026-09-11): reading is what clears an Activity row, and @here in a
+   * thread, a DM thread you never replied in, or a thread you unfollowed can
+   * all put one there — following only governs badges and notifications.
+   */
+  async markRead(ctx: ActorCtx, spaceId: string, input: MarkReadInput): Promise<{ readOffset: number }> {
     await this.requireMember(ctx, spaceId);
     const head = await this.store.head(spaceId);
     if (input.offset > head) {
@@ -1837,13 +1844,11 @@ export class HarborService {
     }
     const at = this.now();
     let threadRootId: string | undefined;
-    let readOffset: number | undefined;
+    let readOffset: number;
     if (input.threadRootId !== undefined) {
       const root = await this.resolveRoot(spaceId, input.threadRootId);
       threadRootId = root.id;
       readOffset = await this.store.advanceThreadReadMark(spaceId, root.id, ctx.memberId, input.offset, at);
-      // Not following: nothing is recorded (v1 tracks followed threads only).
-      if (readOffset === undefined) return { readOffset: null };
     } else {
       readOffset = await this.store.advanceStreamReadMark(spaceId, ctx.memberId, input.offset, at);
     }

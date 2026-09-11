@@ -350,14 +350,18 @@ export interface Store {
     following: boolean,
     at: string,
   ): Promise<ThreadReadMark>;
-  /** Monotone; undefined when the member is not following the thread (nothing recorded). */
+  /**
+   * Monotone upsert — greatest(stored, offset). A thread the member does not
+   * follow takes a mark too (the row is created with `following: false`):
+   * reading clears Activity there, while badges and counts stay followed-only.
+   */
   advanceThreadReadMark(
     spaceId: string,
     rootMessageId: string,
     memberId: string,
     offset: number,
     at: string,
-  ): Promise<number | undefined>;
+  ): Promise<number>;
   /** Roots after `afterOffset` that are neither the member's nor tombstoned. */
   countUnreadRoots(spaceId: string, memberId: string, afterOffset: number): Promise<number>;
   /** Of those, the ones addressed to the member: a mention token naming them, or @here. */

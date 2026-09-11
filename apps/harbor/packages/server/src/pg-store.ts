@@ -1123,16 +1123,20 @@ export class PgStore implements Store {
     memberId: string,
     offset: number,
     at: string,
-  ): Promise<number | undefined> {
+  ): Promise<number> {
+    // An unfollowed thread takes a mark too (the row starts with following =
+    // false); `following` is never touched here — setThreadFollowing owns it.
     const rows = await this.sql.query<{ read_offset: number }>(
-      `update thread_read_marks set
-         read_offset = greatest(read_offset, $4::int),
-         updated_at = case when $4::int > read_offset then $5 else updated_at end
-       where space_id = $1 and root_message_id = $2 and member_id = $3 and following
+      `insert into thread_read_marks (space_id, root_message_id, member_id, following, read_offset, updated_at)
+       values ($1, $2, $3, false, $4, $5)
+       on conflict (space_id, root_message_id, member_id) do update set
+         read_offset = greatest(thread_read_marks.read_offset, excluded.read_offset),
+         updated_at = case when excluded.read_offset > thread_read_marks.read_offset
+                           then excluded.updated_at else thread_read_marks.updated_at end
        returning read_offset`,
       [spaceId, rootMessageId, memberId, offset, at],
     );
-    return rows[0]?.read_offset;
+    return rows[0]!.read_offset;
   }
 
   async countUnreadRoots(spaceId: string, memberId: string, afterOffset: number): Promise<number> {

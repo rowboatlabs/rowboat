@@ -4166,13 +4166,13 @@ export const ipcSchemas = {
     res: z.object({ success: z.literal(true) }),
   },
   // Read state — org-owned cursors in OFFSETS (2026-09-09). markRead advances
-  // the stream mark (no threadRootId) or a followed thread's; the org answers
-  // with the stored mark (null = not following, nothing recorded). getUnread
+  // the stream mark (no threadRootId) or a thread's — followed or not, since
+  // 2026-09-11 — and the org answers with the stored mark. getUnread
   // is the snapshot the renderer folds live frames onto; the org's read_mark
   // member frames arrive on 'spaces:events' like every other frame.
   'spaces:markRead': {
     req: z.object({ orgId: z.string(), spaceId: z.string(), threadRootId: z.string().optional(), offset: z.number() }),
-    res: z.object({ readOffset: z.number().nullable() }),
+    res: z.object({ readOffset: z.number() }),
   },
   'spaces:followThread': {
     req: z.object({ orgId: z.string(), spaceId: z.string(), rootMessageId: z.string(), following: z.boolean() }),

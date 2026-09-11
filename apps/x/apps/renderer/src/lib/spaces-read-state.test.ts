@@ -54,6 +54,22 @@ describe('badges', () => {
         expect(spaceBadge('org', 'road', false)).toBe(NO_BADGE)
     })
 
+    it('reading a discussion we do not follow sends the mark and badges nothing (2026-09-11)', async () => {
+        vi.useFakeTimers()
+        const invoke = vi.fn().mockResolvedValue({ readOffset: 27 })
+        vi.stubGlobal('ipc', { invoke })
+        markThreadRead('org', 'road', 'launch-checklist', 27)
+        expect(threadBadge('org', 'road', 'launch-checklist', false)).toBe(NO_BADGE)
+        expect(spaceBadge('org', 'road', false)).toEqual({ unread: 23, forYou: 2 })
+        await vi.advanceTimersByTimeAsync(2_000)
+        expect(invoke).toHaveBeenCalledWith('spaces:markRead', { orgId: 'org', spaceId: 'road', threadRootId: 'launch-checklist', offset: 27 })
+        // A lower offset later is a no-op: nothing more goes to the org.
+        markThreadRead('org', 'road', 'launch-checklist', 20)
+        await vi.advanceTimersByTimeAsync(2_000)
+        expect(invoke).toHaveBeenCalledTimes(1)
+        vi.useRealTimers()
+    })
+
     it('an unknown space has no badge', () => {
         expect(spaceBadge('org', 'nowhere', false)).toBe(NO_BADGE)
         expect(streamBadge('other-org', 'road', false)).toBe(NO_BADGE)

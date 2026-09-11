@@ -398,7 +398,7 @@ export class SpacesClient {
   // The org owns the cursors (offsets, per member); these are pass-throughs.
 
   /** Advance the stream mark (no threadRootId) or a followed thread's. Monotone; null = not following. */
-  async markRead(spaceId: string, input: { threadRootId?: string; offset: number }): Promise<{ readOffset: number | null }> {
+  async markRead(spaceId: string, input: { threadRootId?: string; offset: number }): Promise<{ readOffset: number }> {
     return this.request('POST', this.space(spaceId, '/read'), routes.markRead.response, input);
   }
 
