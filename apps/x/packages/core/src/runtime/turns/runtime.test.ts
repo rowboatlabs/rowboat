@@ -3492,7 +3492,7 @@ describe("added inputs (steering)", () => {
 it('runs OpenCode direct dispatch through durable turns once per prompt and resumes without replay', async () => {
     const { OPENCODE_DIRECT, openCodeDirectModel } = await import('./bridges/opencode-direct.js');
     const descriptor = { ...echoDescriptor, name: 'code_agent_run', toolId: 'builtin:code_agent_run' };
-    const execute = vi.fn(async (_input: unknown) => ({ output: { summary: 'native response' }, isError: false }));
+    const execute = vi.fn<SyncRuntimeTool["execute"]>(async () => ({ output: { summary: 'native response' }, isError: false }));
     const { runtime, repo, classifier } = makeRuntime({
         agent: { agentId: 'copilot', systemPrompt: '{}', model: OPENCODE_DIRECT, tools: [descriptor] },
         modelRegistry: { resolve: async () => openCodeDirectModel() },

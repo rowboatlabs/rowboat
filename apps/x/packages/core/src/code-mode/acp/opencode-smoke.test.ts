@@ -15,6 +15,7 @@ it.skipIf(process.env.ROWBOAT_OPENCODE_SMOKE !== '1')('downloads and launches th
     let setup: import('./opencode-setup.js').OpenCodeSetupService | undefined;
     let providerServer: http.Server | undefined;
     let failure: unknown;
+    let failed = false;
     let closeLogin: (() => void) | undefined;
     try {
         const engine = await ensureEngine('opencode');
@@ -193,14 +194,19 @@ it.skipIf(process.env.ROWBOAT_OPENCODE_SMOKE !== '1')('downloads and launches th
         await removeOpenCodeEngine();
         expect(isEngineProvisioned('opencode')).toBe(false);
         expect(fs.readFileSync(sentinel, 'utf8')).toBe('retained');
-    } catch (error) { failure = error; throw error; } finally {
+    } catch (error) { failure = error; failed = true; } finally {
         closeLogin?.();
         setup?.stop();
         providerServer?.closeAllConnections(); providerServer?.close();
         openCodeProcesses.stopAll();
-        // Checked literal target: only this test's freshly allocated temporary home.
-        if (path.dirname(home) !== os.tmpdir() || !path.basename(home).startsWith('rowboat opencode smoke ')) throw new Error('Unexpected smoke-test cleanup target');
-        try { await fs.promises.rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); }
-        catch (error) { if (!failure) throw error; }
+        // Only remove this test's freshly allocated temporary home. Preserve
+        // the original test failure if cleanup also fails.
+        if (path.dirname(home) !== os.tmpdir() || !path.basename(home).startsWith('rowboat opencode smoke ')) {
+            if (!failed) { failure = new Error('Unexpected smoke-test cleanup target'); failed = true; }
+        } else {
+            try { await fs.promises.rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); }
+            catch (error) { if (!failed) { failure = error; failed = true; } }
+        }
     }
+    if (failed) throw failure;
 }, 600_000);

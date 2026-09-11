@@ -37,8 +37,8 @@ export const openCodeSetupHandlers = {
         const auth = await openCodeSetup.authorize(args.setupId, args.providerId, args.method, args.inputs);
         try { await shell.openExternal(auth.url); }
         catch { openCodeSetup.cancel(args.setupId); throw new SetupError('failed', 'Could not open the browser. Retry sign-in or use the managed login flow.'); }
-        const { url: _url, ...safe } = auth;
-        return safe;
+        const { attemptId, method, instructions, expiresAt } = auth;
+        return { attemptId, method, instructions, expiresAt };
     }),
     'opencodeSetup:complete': async (_event: IpcMainInvokeEvent, args: Setup & { attemptId: string; code?: string }) => result(() => openCodeSetup.complete(args.setupId, args.attemptId, args.code)),
     'opencodeSetup:cancel': async (_event: IpcMainInvokeEvent, args: Setup) => result(() => { openCodeSetup.cancel(args.setupId); return null; }),

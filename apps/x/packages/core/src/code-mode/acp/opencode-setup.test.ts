@@ -7,7 +7,7 @@ import type { OpenCodeProcess } from './opencode-process.js';
 
 let root: string, service: OpenCodeSetupService, fetcher: ReturnType<typeof vi.fn>, launch: ReturnType<typeof vi.fn>;
 let connected: boolean, modelError: unknown, wrongModel: boolean;
-const calls: { route: string; method: string; body: any; server: string }[] = [];
+const calls: { route: string; method: string; body: unknown; server: string }[] = [];
 beforeEach(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'rowboat provider test '));
     connected = false; modelError = undefined; wrongModel = false; calls.length = 0;
@@ -51,8 +51,8 @@ describe('OpenCode provider setup', () => {
         expect(fs.readFileSync(path.join(root, 'selection.json'), 'utf8')).toBe('{"providerId":"openai","modelId":"openai/model"}');
         const verified = await service.verify(id);
         expect(verified.verified).toMatchObject({ providerId: 'openai', modelId: 'openai/model', generation: verified.generation });
-        expect(calls.find(c => c.route === '/session')?.body.permission).toEqual([{ permission: '*', pattern: '*', action: 'deny' }]);
-        expect(calls.find(c => c.route.endsWith('/message'))?.body.tools).toEqual({ '*': false });
+        expect(calls.find(c => c.route === '/session')?.body).toMatchObject({ permission: [{ permission: '*', pattern: '*', action: 'deny' }] });
+        expect(calls.find(c => c.route.endsWith('/message'))?.body).toMatchObject({ tools: { '*': false } });
         expect(JSON.stringify(calls.filter(c => c.route.startsWith('/session')))).not.toContain('test-secret');
         expect(calls.some(c => c.route === '/session/session-test' && c.method === 'DELETE')).toBe(true);
     });
@@ -105,7 +105,7 @@ describe('OpenCode provider setup', () => {
         const auth = await service.authorize(setupId, 'openai', 0, {});
         await expect(service.complete(setupId, auth.attemptId)).rejects.toMatchObject({ code: 'invalid-input' });
         await service.complete(setupId, auth.attemptId, 'one-time-code');
-        expect(calls.find(c => c.route.endsWith('/callback'))?.body.code).toBe('one-time-code');
+        expect(calls.find(c => c.route.endsWith('/callback'))?.body).toMatchObject({ code: 'one-time-code' });
     });
     it('disconnects and invalidates verification while retaining selection', async () => {
         const id = await configured(); await service.verify(id);
