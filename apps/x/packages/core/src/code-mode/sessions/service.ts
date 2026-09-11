@@ -3,13 +3,14 @@ import path from 'path';
 import fs from 'fs/promises';
 import { WorkDir } from '../../config/config.js';
 import { codeWorkspaceKey, type CodeSession } from '@x/shared/dist/code-sessions.js';
-import type { CodingAgent, ApprovalPolicy } from '@x/shared/dist/code-mode.js';
+import type { EnabledCodingAgent as CodingAgent, ApprovalPolicy } from '@x/shared/dist/code-mode.js';
 import type { ISessions } from '../../runtime/sessions/api.js';
 import type { ISessionRepo } from '../../runtime/sessions/repo.js';
 import type { CodeModeManager } from '../acp/manager.js';
 import type { ICodeSessionsRepo } from './repo.js';
 import type { ICodeProjectsRepo } from '../projects/repo.js';
 import { clearStoredSession } from '../acp/session-store.js';
+
 import * as gitService from '../git/service.js';
 import { withFileLock } from '../../knowledge/file-lock.js';
 import type { EmitterSessionBus } from '../../runtime/sessions/bus.js';
@@ -29,6 +30,7 @@ export interface CreateSessionArgs {
     // the engine default. Re-applied to the ACP session on every turn.
     agentModel?: string;
     agentEffort?: string;
+    agentMode?: string;
     // In-repo only: pin a working directory inside the project (an adopted
     // run may target a subdirectory). Worktree isolation always works in the
     // worktree root.
@@ -240,6 +242,7 @@ export class CodeSessionService {
                 ...(worktree ? { worktree } : {}),
                 ...(args.agentModel ? { agentModel: args.agentModel } : {}),
                 ...(args.agentEffort ? { agentEffort: args.agentEffort } : {}),
+                ...(args.agentMode ? { agentMode: args.agentMode } : {}),
                 createdAt: new Date().toISOString(),
             };
             await this.codeSessionsRepo.save(session);
@@ -324,9 +327,12 @@ export class CodeSessionService {
         return best;
     }
 
-    async update(sessionId: string, patch: Partial<Pick<CodeSession, 'title' | 'policy' | 'agent' | 'agentModel' | 'agentEffort'>>): Promise<CodeSession> {
+    async update(sessionId: string, patch: Partial<Pick<CodeSession, 'title' | 'policy' | 'agent' | 'agentModel' | 'agentEffort' | 'agentMode'>>): Promise<CodeSession> {
         const session = await this.codeSessionsRepo.get(sessionId);
         if (!session) throw new Error(`Unknown session: ${sessionId}`);
+        if (this.codeModeManager.isRunning(sessionId) && (patch.policy !== undefined || patch.agent !== undefined || patch.agentModel !== undefined || patch.agentEffort !== undefined || patch.agentMode !== undefined)) {
+            throw new Error('Stop the current coding operation before changing its agent, approvals, model, effort or mode.');
+        }
         const updated: CodeSession = { ...session, ...patch };
         // Model and effort are ids of ONE engine's catalog — a Codex model on
         // a Claude Code session is nonsense. Switching agents drops them back
@@ -334,6 +340,15 @@ export class CodeSessionService {
         if (patch.agent && patch.agent !== session.agent) {
             if (patch.agentModel === undefined) delete updated.agentModel;
             if (patch.agentEffort === undefined) delete updated.agentEffort;
+            if (patch.agentMode === undefined) delete updated.agentMode;
+        }
+        const selectionChanged = patch.agent !== undefined || patch.agentModel !== undefined || patch.agentEffort !== undefined || patch.agentMode !== undefined;
+        if (updated.agent === 'opencode' && selectionChanged) {
+            const options = await this.codeModeManager.listModelOptions('opencode', updated.cwd, updated.agentModel,
+                patch.agentModel !== undefined && patch.agentEffort === undefined ? undefined : updated.agentEffort, updated.agentMode);
+            updated.agentModel = options.currentModel;
+            updated.agentEffort = options.currentEffort;
+            updated.agentMode = options.currentMode;
         }
         await this.codeSessionsRepo.save(updated);
         if (patch.title && patch.title !== session.title) {

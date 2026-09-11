@@ -1,3 +1,4 @@
+import { isOpenCodeDirect } from './opencode-direct.js';
 import { captureLlmUsage } from "../../../analytics/usage.js";
 import type { IUsageReporter, ModelUsageReport } from "../usage-reporter.js";
 
@@ -16,6 +17,7 @@ export class RealUsageReporter implements IUsageReporter {
     }
 
     reportModelUsage(report: ModelUsageReport): void {
+        if (isOpenCodeDirect(report.model)) return;
         this.capture({
             useCase: report.analytics.useCase,
             ...(report.analytics.subUseCase

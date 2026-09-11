@@ -6,6 +6,7 @@ import fs from 'fs/promises';
 import { AgentAccount, CodeModeAgentStatus } from './types.js';
 import { isEngineProvisioned, getProvisionedEnginePath } from './acp/engine-provisioner.js';
 import { decodeJwtPayload } from '../auth/jwt.js';
+import { storedProviderIds } from './acp/opencode-setup.js';
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -296,5 +297,6 @@ export async function checkCodeModeAgentStatus(): Promise<CodeModeAgentStatus> {
     return {
         claude: { installed: isEngineProvisioned('claude'), signedIn: claude.signedIn, account: claude.account },
         codex: { installed: isEngineProvisioned('codex'), signedIn: codex.signedIn, account: codex.account },
+        opencode: { installed: isEngineProvisioned('opencode'), signedIn: [...await storedProviderIds()].some(id => id === 'opencode' || id === 'opencode-go') },
     };
 }

@@ -9,7 +9,8 @@ import type { CodeAgentModelOptions, CodeAgentOption } from '@x/shared/src/code-
 const EMPTY: CodeAgentModelOptions = { models: [], efforts: [] }
 const cache = new Map<CodingAgent, Promise<CodeAgentModelOptions>>()
 
-export function fetchCodeAgentOptions(agent: CodingAgent): Promise<CodeAgentModelOptions> {
+export function fetchCodeAgentOptions(agent: CodingAgent, cwd?: string, model?: string, mode?: string): Promise<CodeAgentModelOptions> {
+  if (agent === 'opencode') return window.ipc.invoke('codeMode:listModelOptions', { agent, cwd, model, mode })
   let pending = cache.get(agent)
   if (!pending) {
     pending = window.ipc.invoke('codeMode:listModelOptions', { agent }).catch(() => EMPTY)

@@ -25,6 +25,8 @@ import type {
     ResolvedModel,
 } from "../model-registry.js";
 
+import { isOpenCodeDirect, openCodeDirectModel } from './opencode-direct.js';
+
 // Injectable seam over streamText so normalization is testable without a
 // provider. The bridge always requests exactly one step.
 export type StreamTextInvoker = (options: {
@@ -85,6 +87,7 @@ export class RealModelRegistry implements IModelRegistry {
     async resolve(
         descriptor: z.infer<typeof ModelDescriptor>,
     ): Promise<ResolvedModel> {
+        if (isOpenCodeDirect(descriptor)) return openCodeDirectModel();
         const providerConfig = await this.resolveProvider(descriptor.provider);
         const provider = this.createProviderImpl(providerConfig);
         // Local settings (Ollama context window) are applied here.

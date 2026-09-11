@@ -1,3 +1,4 @@
+import { isOpenCodeDirect } from '../turns/bridges/opencode-direct.js';
 import type { z } from "zod";
 import type { UserMessage } from "@x/shared/dist/message.js";
 import type { SessionOrigin } from "@x/shared/dist/origins.js";
@@ -463,7 +464,7 @@ export class SessionsImpl implements ISessions {
         this.publishEntry(
             sessionIndexEntry(reduceSession([...events, ...batch]), "idle"),
         );
-        if (!state.title) {
+        if (!state.title && !isOpenCodeDirect(await this.resolvedModelOf(turnId))) {
             this.generateTitleInBackground(
                 sessionId,
                 defaultTitle(input),

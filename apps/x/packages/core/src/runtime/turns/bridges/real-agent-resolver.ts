@@ -22,6 +22,8 @@ import {
     toJsonValue,
 } from "../../tools/descriptors.js";
 
+import { isOpenCodeDirect } from './opencode-direct.js';
+
 export const ASK_HUMAN_TOOL = "ask-human";
 
 const ASK_HUMAN_DESCRIPTOR: z.infer<typeof ToolDescriptor> = {
@@ -149,6 +151,8 @@ export class RealAgentResolver {
 
         // Model precedence: createTurn override > agent config > app default.
         let model = requested.overrides?.model;
+        // A prior OpenCode turn is not a selectable LLM when switching engines.
+        if (isOpenCodeDirect(model)) model = undefined;
         if (!model) {
             const fallback = await this.defaultModel();
             model = {

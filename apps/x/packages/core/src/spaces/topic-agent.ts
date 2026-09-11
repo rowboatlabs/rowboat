@@ -49,7 +49,7 @@ export interface InvokeTopicAgentInput {
     model?: { provider: string; model: string; effort?: 'low' | 'medium' | 'high' };
     permissionMode?: 'auto' | 'manual';
     searchEnabled?: boolean;
-    codeMode?: 'claude' | 'codex';
+    codeMode?: 'claude' | 'codex' | 'opencode';
   };
 }
 

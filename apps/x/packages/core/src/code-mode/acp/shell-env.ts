@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import * as path from 'path';
 
 let cached: string | null = null;
@@ -22,7 +22,9 @@ export function loginShellPath(): string | undefined {
 
     for (const shell of shells) {
         try {
-            const out = execSync(`${shell} -lc 'echo $PATH'`, { timeout: 5000, encoding: 'utf-8' });
+            const out = execFileSync(shell, ['-lc', 'printf "%s\\n" "$PATH"'], {
+                timeout: 5000, maxBuffer: 64 * 1024, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'],
+            });
             // Profile scripts may echo their own lines; our `echo $PATH` runs last,
             // so take the last non-empty line and sanity-check it looks like a PATH.
             const lines = out.split('\n').map((l) => l.trim()).filter(Boolean);

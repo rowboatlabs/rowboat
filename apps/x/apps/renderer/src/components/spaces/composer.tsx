@@ -58,7 +58,7 @@ export interface AgentOptions {
     model?: { provider: string; model: string; effort?: 'low' | 'medium' | 'high' }
     permissionMode?: 'auto' | 'manual'
     searchEnabled?: boolean
-    codeMode?: 'claude' | 'codex'
+    codeMode?: 'claude' | 'codex' | 'opencode'
 }
 
 /** A pane-provided slash command; `args` absent = picking it runs immediately. */
@@ -273,7 +273,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     const [model, setModel] = useState<ModelSelection | null>(null)
     const [permissionMode, setPermissionMode] = useState<'auto' | 'manual'>('auto')
     const [searchEnabled, setSearchEnabled] = useState(false)
-    const [codeMode, setCodeMode] = useState<'claude' | 'codex' | null>(null)
+    const [codeMode, setCodeMode] = useState<'claude' | 'codex' | 'opencode' | null>(null)
     const [codeModeAvailable, setCodeModeAvailable] = useState(false)
     useEffect(() => {
         const load = () => {

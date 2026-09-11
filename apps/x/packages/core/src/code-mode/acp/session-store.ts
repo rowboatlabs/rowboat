@@ -11,6 +11,9 @@ export interface StoredSession {
     agent: CodingAgent;
     cwd: string;
     sessionId: string;
+    engineVersion?: string;
+    stateNamespace?: string;
+    capabilities?: unknown;
 }
 
 // Per-run ACP session state lives in its own directory (not WorkDir/config): it's
@@ -26,10 +29,11 @@ export async function readStoredSession(runId: string): Promise<StoredSession | 
     try {
         const raw = await fs.readFile(sessionFile(runId), 'utf8');
         const parsed = JSON.parse(raw) as StoredSession;
-        if (parsed && parsed.sessionId && parsed.agent && parsed.cwd) return parsed;
-        return null;
-    } catch {
-        return null;
+        if (parsed && typeof parsed.sessionId === 'string' && ['claude', 'codex', 'opencode'].includes(parsed.agent) && typeof parsed.cwd === 'string') return parsed;
+        throw new Error('Invalid coding session metadata');
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+        throw new Error('Saved coding session metadata could not be read. Restore it or create a new Code session; the existing history has been preserved.');
     }
 }
 

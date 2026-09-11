@@ -50,6 +50,10 @@ import container, { registerBrowserControlService, registerNotificationService, 
 import { forwardRpc } from "./rpc-forwarder.js";
 import { bounceAllLive, getClient as getSpaceClient } from "@x/core/dist/spaces/orgs.js";
 import type { CodeModeManager } from "@x/core/dist/code-mode/acp/manager.js";
+import { openCodeProcesses } from '@x/core/dist/code-mode/acp/opencode-process.js';
+import { openCodeSetup } from '@x/core/dist/code-mode/acp/opencode-setup.js';
+import { stopOpenCodeLogin } from '@x/core/dist/code-mode/acp/opencode-login.js';
+import { cancelEngineInstallations } from '@x/core/dist/code-mode/acp/engine-provisioner.js';
 import type { ISessions } from "@x/core/dist/runtime/sessions/index.js";
 import { browserViewManager, BROWSER_PARTITION } from "./browser/view.js";
 import { setupBrowserEventForwarding } from "./browser/ipc.js";
@@ -820,6 +824,10 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
+  cancelEngineInstallations();
+  stopOpenCodeLogin();
+  openCodeSetup.stop();
+  openCodeProcesses.stopAll();
   // Clean up watcher on app quit
   stopWorkspaceWatcher();
   stopRunsWatcher();

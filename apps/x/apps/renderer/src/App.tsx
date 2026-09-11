@@ -1563,11 +1563,11 @@ function App() {
     })
   }, [voice, cancelPttForSteal])
 
-  const handlePromptSubmitRef = useRef<((message: PromptInputMessage, mentions?: FileMention[], stagedAttachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => Promise<void>) | null>(null)
+  const handlePromptSubmitRef = useRef<((message: PromptInputMessage, mentions?: FileMention[], stagedAttachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex' | 'opencode', permissionMode?: PermissionMode) => Promise<void>) | null>(null)
   // Companion sends (bar submits, call utterances) — filled once
   // handleHoverSubmit exists; early callers (startCall's PTT callback) fire
   // at event time, long after render.
-  const handleHoverSubmitRef = useRef<((message: PromptInputMessage, mentions?: FileMention[], stagedAttachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => Promise<void>) | null>(null)
+  const handleHoverSubmitRef = useRef<((message: PromptInputMessage, mentions?: FileMention[], stagedAttachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex' | 'opencode', permissionMode?: PermissionMode) => Promise<void>) | null>(null)
   // Late-bound handle to bindChatToRun (declared with the chat plumbing far
   // below) for early-declared effects like quick-ask open-chat.
   const bindChatToRunRef = useRef<((rid: string) => void) | null>(null)
@@ -2407,7 +2407,7 @@ function App() {
     mentions?: FileMention[],
     stagedAttachments: StagedAttachment[] = [],
     searchEnabled?: boolean,
-    codeMode?: 'claude' | 'codex',
+    codeMode?: 'claude' | 'codex' | 'opencode',
     permissionMode?: PermissionMode,
   ) => {
     const userMessage = message.text.trim()
@@ -2816,7 +2816,7 @@ function App() {
   // Composer locks for runs that are code sessions: the session's cwd + agent
   // are frozen in the chat input (the backend pins them server-side anyway).
   // Kept after the Code view unmounts — the chat stays bound to the session.
-  const [codeSessionLocks, setCodeSessionLocks] = useState<Record<string, { cwd: string; agent: 'claude' | 'codex' }>>({})
+  const [codeSessionLocks, setCodeSessionLocks] = useState<Record<string, { cwd: string; agent: 'claude' | 'codex' | 'opencode' }>>({})
   const codeSessionLocksRef = useRef(codeSessionLocks)
   codeSessionLocksRef.current = codeSessionLocks
   // Undo/redo handlers of the (single) mounted markdown editor.
@@ -4198,7 +4198,7 @@ function App() {
     mentions?: FileMention[],
     stagedAttachments: StagedAttachment[] = [],
     searchEnabled?: boolean,
-    codeMode?: 'claude' | 'codex',
+    codeMode?: 'claude' | 'codex' | 'opencode',
     permissionMode?: PermissionMode,
   ) => {
     const submitTabId = activeChatTabIdRef.current
@@ -5111,7 +5111,7 @@ function App() {
     mentions?: FileMention[]
     attachments: StagedAttachment[]
     searchEnabled?: boolean
-    codeMode?: 'claude' | 'codex'
+    codeMode?: 'claude' | 'codex' | 'opencode'
     permissionMode?: PermissionMode
   } | null>(null)
 
@@ -5120,7 +5120,7 @@ function App() {
     mentions?: FileMention[],
     stagedAttachments: StagedAttachment[] = [],
     searchEnabled?: boolean,
-    codeMode?: 'claude' | 'codex',
+    codeMode?: 'claude' | 'codex' | 'opencode',
     permissionMode?: PermissionMode,
   ) => {
     const text = message.text?.trim() ?? ''

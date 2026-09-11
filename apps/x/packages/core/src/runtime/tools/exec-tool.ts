@@ -22,7 +22,7 @@ export interface ToolContext {
     // The composer code-mode chip for the message that triggered this turn. When set,
     // it is the authoritative coding agent — code_agent_run uses it rather than the
     // agent the model guessed, so switching the chip deterministically switches agents.
-    codeMode?: 'claude' | 'codex' | null;
+    codeMode?: 'claude' | 'codex' | 'opencode' | null;
     // Set for Code-section sessions: the session's working directory and approval
     // policy. code_agent_run honors these over the model's cwd argument and the
     // global approval policy.

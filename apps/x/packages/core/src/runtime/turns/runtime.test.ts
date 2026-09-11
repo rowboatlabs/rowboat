@@ -3487,3 +3487,25 @@ describe("added inputs (steering)", () => {
         ]);
     });
 });
+
+
+it('runs OpenCode direct dispatch through durable turns once per prompt and resumes without replay', async () => {
+    const { OPENCODE_DIRECT, openCodeDirectModel } = await import('./bridges/opencode-direct.js');
+    const descriptor = { ...echoDescriptor, name: 'code_agent_run', toolId: 'builtin:code_agent_run' };
+    const execute = vi.fn<SyncRuntimeTool["execute"]>(async () => ({ output: { summary: 'native response' }, isError: false }));
+    const { runtime, repo, classifier } = makeRuntime({
+        agent: { agentId: 'copilot', systemPrompt: '{}', model: OPENCODE_DIRECT, tools: [descriptor] },
+        modelRegistry: { resolve: async () => openCodeDirectModel() },
+        tools: [syncTool(descriptor, execute)],
+    });
+    const first = await newTurn(runtime, { input: user('inspect project') });
+    expect((await advanceAndSettle(runtime, first)).outcome?.status).toBe('completed');
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute.mock.calls[0][0]).toEqual({ agent: 'opencode', prompt: 'inspect project' });
+    const second = await newTurn(runtime, { context: { previousTurnId: first }, input: user('now test it') });
+    expect((await advanceAndSettle(runtime, second)).outcome?.status).toBe('completed');
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(execute.mock.calls[1][0]).toEqual({ agent: 'opencode', prompt: 'now test it' });
+    expect(classifier.batches).toHaveLength(0);
+    expect((await repo.read(second)).filter(e => e.type === 'tool_result')).toHaveLength(1);
+});

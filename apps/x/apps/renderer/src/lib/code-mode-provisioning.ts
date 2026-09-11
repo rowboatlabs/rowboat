@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import type { CodingAgent } from '@x/shared/dist/code-mode'
 
 export type AgentAccount = { email?: string; plan?: string }
 export type AgentStatus = { installed: boolean; signedIn: boolean; account?: AgentAccount }
@@ -10,7 +11,7 @@ export type CodeModeAgentStatus = { claude: AgentStatus; codex: AgentStatus }
 // instead of restarting. This is what lets a download kicked off from onboarding show
 // its progress later in Settings → Code Mode. A single persistent listener on the
 // progress channel feeds this store.
-export type ProvState = { pct: number | null; error?: string }
+export type ProvState = { pct: number | null; phase?: string; error?: string }
 const provStore: Record<string, ProvState | undefined> = {}
 // Agents we provisioned this session — used to show "Ready" immediately on success
 // without waiting for the async status refresh to round-trip (which caused the row to
@@ -21,7 +22,7 @@ let provChannelHooked = false
 
 function notifyProv() { provListeners.forEach((l) => l()) }
 
-export function startProvisioning(agent: 'claude' | 'codex', onDone: () => void | Promise<void>): void {
+export function startProvisioning(agent: CodingAgent, onDone: () => void | Promise<void>): void {
   if (provStore[agent] && !provStore[agent]!.error) return // already in flight
   provStore[agent] = { pct: null }
   notifyProv()
@@ -31,7 +32,7 @@ export function startProvisioning(agent: 'claude' | 'codex', onDone: () => void 
       const cur = provStore[p.agent]
       if (!cur) return
       const pct = p.totalBytes ? Math.floor(((p.receivedBytes ?? 0) / p.totalBytes) * 100) : cur.pct
-      provStore[p.agent] = { pct }
+      provStore[p.agent] = { pct, phase: p.phase }
       notifyProv()
     })
   }
@@ -44,7 +45,10 @@ export function startProvisioning(agent: 'claude' | 'codex', onDone: () => void 
         // in the background to sync the real status.
         enabledOptimistic.add(agent)
         provStore[agent] = undefined
-        void onDone()
+        Promise.resolve().then(onDone).catch(() => {}).finally(() => {
+          enabledOptimistic.delete(agent)
+          notifyProv()
+        })
       } else {
         provStore[agent] = { pct: null, error: res.error ?? 'Failed to enable' }
       }

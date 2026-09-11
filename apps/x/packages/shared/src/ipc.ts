@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { OpenCodeEngineStatus, EnabledCodingAgent } from './code-mode.js';
+import { OpenCodeSetupState, OpenCodeProviderId, OpenCodeAuthorization, setupResult } from './opencode-setup.js';
 import { UseCase } from './analytics.js';
 import { DeckOutline, DeckOutlineSlide, EditSlideRequest, GenerateDeckOutlineRequest, GenerateSlideRequest } from './deck.js';
 import { RelPath, Encoding, Stat, DirEntry, ReaddirOptions, ReadFileResult, WorkspaceChangeEvent, WriteFileOptions, WriteFileResult, RemoveOptions } from './workspace.js';
@@ -80,7 +82,7 @@ const QuickAskSubmitPayload = z.object({
     )
     .optional(),
   searchEnabled: z.boolean().optional(),
-  codeMode: z.enum(['claude', 'codex']).optional(),
+  codeMode: z.enum(['claude', 'codex', 'opencode']).optional(),
   permissionMode: z.enum(['manual', 'auto']).optional(),
   model: ModelRef.nullable().optional(),
   reasoningEffort: ReasoningEffort.nullable().optional(),
@@ -550,7 +552,7 @@ export const ipcSchemas = {
       voiceInput: z.boolean().optional(),
       voiceOutput: z.enum(['summary', 'full']).optional(),
       searchEnabled: z.boolean().optional(),
-      codeMode: z.enum(['claude', 'codex']).optional(),
+      codeMode: z.enum(['claude', 'codex', 'opencode']).optional(),
       // Code-section sessions pin the coding agent's working directory and
       // approval policy for the whole turn (see code_agent_run overrides).
       codeCwd: z.string().optional(),
@@ -1741,6 +1743,7 @@ export const ipcSchemas = {
   'codeMode:checkAgentStatus': {
     req: z.null(),
     res: z.object({
+      opencode: z.object({ installed: z.boolean(), signedIn: z.boolean() }),
       claude: z.object({
         installed: z.boolean(),
         signedIn: z.boolean(),
@@ -1758,14 +1761,14 @@ export const ipcSchemas = {
   // Download + install an agent's native engine (the Settings "Enable" action).
   // Streams progress over the 'codeMode:engineProgress' push channel while it runs.
   'codeMode:provisionEngine': {
-    req: z.object({ agent: z.enum(['claude', 'codex']) }),
+    req: z.object({ agent: CodingAgent }),
     res: z.object({ success: z.boolean(), error: z.string().optional() }),
   },
   // Push (main -> renderer): engine provisioning progress for the Settings UI.
   'codeMode:engineProgress': {
     req: z.object({
-      agent: z.enum(['claude', 'codex']),
-      phase: z.enum(['download', 'verify', 'extract', 'done']),
+      agent: CodingAgent,
+      phase: z.enum(['download', 'verify', 'extract', 'validate', 'done']),
       receivedBytes: z.number().optional(),
       totalBytes: z.number().optional(),
     }),
@@ -1773,6 +1776,27 @@ export const ipcSchemas = {
   },
   // ==========================================================================
   // Code section: project registry + coding sessions
+  'codeMode:openCodeEngineStatus': {
+    req: z.null(), res: OpenCodeEngineStatus,
+  },
+  'opencodeSetup:openAccount': { req: z.null(), res: setupResult(z.null()) },
+  'opencodeSetup:start': { req: z.null(), res: setupResult(OpenCodeSetupState) },
+  'opencodeSetup:stop': { req: z.object({ setupId: z.string().optional() }), res: setupResult(z.null()) },
+  'opencodeSetup:refresh': { req: z.object({ setupId: z.string() }), res: setupResult(OpenCodeSetupState) },
+  'opencodeSetup:saveKey': { req: z.object({ setupId: z.string(), providerId: OpenCodeProviderId, method: z.number().int().min(0), key: z.string().min(1).max(16000) }), res: setupResult(OpenCodeSetupState) },
+  'opencodeSetup:disconnect': { req: z.object({ setupId: z.string(), providerId: OpenCodeProviderId }), res: setupResult(OpenCodeSetupState) },
+  'opencodeSetup:authorize': { req: z.object({ setupId: z.string(), providerId: OpenCodeProviderId, method: z.number().int().min(0), inputs: z.record(z.string().max(100), z.string().max(4000)) }), res: setupResult(OpenCodeAuthorization) },
+  'opencodeSetup:complete': { req: z.object({ setupId: z.string(), attemptId: z.string(), code: z.string().max(16000).optional() }), res: setupResult(OpenCodeSetupState) },
+  'opencodeSetup:cancel': { req: z.object({ setupId: z.string() }), res: setupResult(z.null()) },
+  'opencodeSetup:select': { req: z.object({ setupId: z.string(), providerId: OpenCodeProviderId, modelId: z.string().min(1).max(500) }), res: setupResult(OpenCodeSetupState) },
+  'opencodeSetup:verify': { req: z.object({ setupId: z.string() }), res: setupResult(OpenCodeSetupState) },
+  'opencodeSetup:loginStart': { req: z.object({ setupId: z.string() }), res: setupResult(z.null()) },
+  'opencodeSetup:loginRead': { req: z.object({ setupId: z.string() }), res: setupResult(z.object({ output: z.string(), running: z.boolean(), exitCode: z.number().optional() })) },
+  'opencodeSetup:loginInput': { req: z.object({ setupId: z.string(), input: z.string().max(16000) }), res: setupResult(z.null()) },
+  'opencodeSetup:loginStop': { req: z.object({ setupId: z.string() }), res: setupResult(z.null()) },
+  'codeMode:removeOpenCodeEngine': {
+    req: z.null(), res: z.object({ success: z.boolean(), error: z.string().optional() }),
+  },
   // ==========================================================================
   'codeProject:add': {
     req: z.object({
@@ -1820,7 +1844,7 @@ export const ipcSchemas = {
     req: z.object({
       projectId: z.string(),
       title: z.string().optional(),
-      agent: CodingAgent,
+      agent: EnabledCodingAgent,
       // Only an explicit user choice; a quick-created session omits it and
       // follows the composer chip / global setting ("Auto").
       policy: ApprovalPolicy.optional(),
@@ -1848,7 +1872,7 @@ export const ipcSchemas = {
   'codeSession:update': {
     req: z.object({
       sessionId: z.string(),
-      patch: CodeSession.pick({ title: true, policy: true, agent: true, agentModel: true, agentEffort: true }).partial(),
+      patch: CodeSession.pick({ title: true, policy: true, agent: true, agentModel: true, agentEffort: true, agentMode: true }).partial(),
     }),
     res: z.object({
       session: CodeSession,
@@ -1857,7 +1881,7 @@ export const ipcSchemas = {
   // Live model + effort choices for a coding agent, discovered from the engine
   // (cached per agent in the main process). Mirrors what `/model` would show.
   'codeMode:listModelOptions': {
-    req: z.object({ agent: CodingAgent }),
+    req: z.object({ agent: CodingAgent, cwd: z.string().optional(), model: z.string().optional(), effort: z.string().optional(), mode: z.string().optional() }),
     res: CodeAgentModelOptions,
   },
   // Done is a flag, not a lifecycle change: the worktree, branch and chat are
@@ -3132,7 +3156,7 @@ export const ipcSchemas = {
       // resolves the pin server-side.
       code: z.object({
         projectId: z.string(),
-        agent: z.enum(['claude', 'codex']).optional(),
+        agent: z.enum(['claude', 'codex', 'opencode']).optional(),
         isolation: z.enum(['in-repo', 'worktree']).optional(),
       }).optional(),
     }),
@@ -4067,7 +4091,7 @@ export const ipcSchemas = {
           model: z.object({ provider: z.string(), model: z.string(), effort: z.enum(['low', 'medium', 'high']).optional() }).optional(),
           permissionMode: z.enum(['auto', 'manual']).optional(),
           searchEnabled: z.boolean().optional(),
-          codeMode: z.enum(['claude', 'codex']).optional(),
+          codeMode: z.enum(['claude', 'codex', 'opencode']).optional(),
         })
         .optional(),
     }),

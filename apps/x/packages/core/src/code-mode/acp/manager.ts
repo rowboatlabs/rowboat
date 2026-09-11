@@ -1,7 +1,11 @@
+import { OPEN_CODE_ACCESS_ERROR } from './opencode-model-access.js';
 import * as os from 'os';
 import type { ApprovalPolicy, CodeRunEvent, CodingAgent, PermissionAsk, PermissionDecision, RunPromptResult } from './types.js';
 import { AcpClient, type CodeAgentModelOptions } from './client.js';
 import { PermissionBroker } from './permission-broker.js';
+
+import { ENGINE_MANIFEST } from './engine-manifest.js';
+import { OPENCODE_ROOT } from './opencode-environment.js';
 import { readStoredSession, writeStoredSession, clearStoredSession } from './session-store.js';
 
 export interface RunPromptArgs {
@@ -15,6 +19,7 @@ export interface RunPromptArgs {
     model?: string;
     /** Reasoning-effort level (e.g. "high"); applied alongside the model. */
     effort?: string;
+    mode?: string;
     /** Called when the policy needs the user to decide (the "ask" path). */
     ask: (ask: PermissionAsk) => Promise<PermissionDecision>;
     /** Stream sink for this prompt's run. */
@@ -55,6 +60,9 @@ const CANCEL_GRACE_MS = 2_000;
 // resumes the persisted session via session/load.
 export class CodeModeManager {
     private readonly runs = new Map<string, ActiveRun>();
+    private readonly busy = new Set<string>();
+    private readonly starting = new Map<string, AcpClient>();
+    isRunning(runId: string): boolean { return this.busy.has(runId); }
     // Per-agent model/effort choices, discovered once from the engine and reused
     // (the list only changes when the provider ships new models, and the app can
     // be restarted to pick those up). Avoids cold-starting an adapter per picker.
@@ -64,15 +72,39 @@ export class CodeModeManager {
     // the engine (what its `/model` picker would show). Spawns a short-lived
     // adapter, opens a throwaway session to read its advertised options, and
     // tears it down. Cached per agent for the lifetime of the process.
-    async listModelOptions(agent: CodingAgent): Promise<CodeAgentModelOptions> {
-        const cached = this.modelOptionsCache.get(agent);
+    async listModelOptions(agent: CodingAgent, cwd?: string, model?: string, effort?: string, mode?: string, strict = true): Promise<CodeAgentModelOptions> {
+        if (agent === 'opencode' && !cwd) throw new Error('Select a project before discovering OpenCode models.');
+
+        // OpenCode discovery is deliberately uncached: project config, credentials
+        // and model variants must all be read by a fresh process.
+        const cached = agent === 'opencode' ? undefined : this.modelOptionsCache.get(agent);
         if (cached) return cached;
         const broker = new PermissionBroker({ policy: 'yolo', ask: async () => 'reject' });
-        const client = new AcpClient({ agent, cwd: os.homedir(), broker, onEvent: () => {} });
+        const client = new AcpClient({ agent, cwd: cwd ?? os.homedir(), broker, onEvent: () => {} });
         try {
             await client.start();
-            const options = await client.describeModelOptions();
-            this.modelOptionsCache.set(agent, options);
+            const access = agent === 'opencode' ? await client.getOpenCodeModelAccess() : undefined;
+            let selectionError: string | undefined;
+            if (access && model && model !== 'default' && !access.models.has(model)) {
+                if (strict) throw new Error(OPEN_CODE_ACCESS_ERROR);
+                selectionError = OPEN_CODE_ACCESS_ERROR;
+                model = undefined;
+            }
+            if (access && !access.models.size) {
+                const message = 'No models are available through your current OpenCode connection. Refresh models or reconnect your account.';
+                if (strict) throw new Error(message);
+                return { models: [], efforts: [], openCodeProviders: access.groups, selectionError: message };
+            }
+            const discoveryModel = access && (!model || model === 'default') ? access.models.keys().next().value : model;
+            const options = await client.describeModelOptions(discoveryModel, effort, mode, strict);
+            if (access) {
+                options.openCodeProviders = access.groups;
+                options.models = options.models.filter(m => access.models.has(m.value)).map(m => ({ ...m,
+                    label: m.label + ' (' + ({ free: 'Free', zen: 'Zen', go: 'Go' }[access.models.get(m.value)!]) + ')',
+                }));
+                if (selectionError) { options.selectionError = selectionError; options.currentModel = undefined; options.currentEffort = undefined; }
+            }
+            if (agent !== 'opencode') this.modelOptionsCache.set(agent, options);
             return options;
         } finally {
             client.dispose();
@@ -80,19 +112,38 @@ export class CodeModeManager {
     }
 
     async runPrompt(args: RunPromptArgs): Promise<RunPromptResult> {
+        if (this.busy.has(args.runId)) throw new Error('This coding session already has a running operation.');
+        args.signal?.throwIfAborted();
+        this.busy.add(args.runId);
+        try { return await this.runPromptExclusive(args); }
+        finally { this.busy.delete(args.runId); }
+    }
+
+    private async runPromptExclusive(args: RunPromptArgs): Promise<RunPromptResult> {
         const { runId, agent, cwd, prompt, policy, model, effort, ask, onEvent, signal } = args;
 
         const broker = new PermissionBroker({
             policy,
             ask,
+            signal,
+            allowPersistent: agent !== 'opencode',
             onResolved: (a, decision, auto) => onEvent({ type: 'permission', ask: a, decision, auto }),
         });
 
-        const run = await this.ensureRun(runId, agent, cwd, broker, onEvent);
+        const run = await this.ensureRun(runId, agent, cwd, broker, onEvent, signal);
         // Re-apply the session's model + effort each turn (idempotent): a warm
         // connection keeps the last selection, but a cold session/load resets it,
         // and the user may have changed it from the header since the last turn.
-        await this.applyModelAndEffort(run, model, effort);
+        const abortPreparation = () => this.dispose(runId);
+        signal?.addEventListener('abort', abortPreparation, { once: true });
+        try {
+            signal?.throwIfAborted();
+            if (args.mode) await run.client.setMode(run.sessionId, args.mode);
+            await this.applyModelAndEffort(run, model, effort);
+            await run.client.preparePermissions(run.sessionId);
+            signal?.throwIfAborted();
+        } catch (error) { this.dispose(runId); throw error; }
+        finally { signal?.removeEventListener('abort', abortPreparation); }
         run.inflight++;
 
         let graceTimer: ReturnType<typeof setTimeout> | undefined;
@@ -128,6 +179,7 @@ export class CodeModeManager {
             if (signal?.aborted) return { stopReason: 'cancelled', sessionId: run.sessionId };
             throw e;
         } finally {
+            broker.cancel();
             if (signal && onAbort) signal.removeEventListener('abort', onAbort);
             if (graceTimer) clearTimeout(graceTimer);
             run.inflight--;
@@ -139,6 +191,17 @@ export class CodeModeManager {
     // doesn't support, must not abort the turn — we log and proceed with the
     // engine default rather than surfacing a hard error to the user.
     private async applyModelAndEffort(run: ActiveRun, model?: string, effort?: string): Promise<void> {
+        if (run.agent === 'opencode') {
+            const access = await run.client.getOpenCodeModelAccess();
+            const explicit = model && model !== 'default' ? model : undefined;
+            if (explicit && !access.models.has(explicit)) throw new Error(OPEN_CODE_ACCESS_ERROR);
+            const current = run.client.configuration.currentModel;
+            const selected = explicit ?? (current && access.models.has(current) ? current : access.models.keys().next().value);
+            if (!selected) throw new Error('No OpenCode models are available. Refresh models or reconnect your account.');
+            await run.client.setModel(run.sessionId, selected);
+            if (effort) await run.client.setEffort(run.sessionId, effort);
+            return;
+        }
         if (model && model !== 'default') {
             try {
                 await run.client.setModel(run.sessionId, model);
@@ -156,6 +219,7 @@ export class CodeModeManager {
     }
 
     dispose(runId: string): void {
+        this.starting.get(runId)?.dispose();
         const run = this.runs.get(runId);
         if (!run) return;
         this.cancelDispose(run);
@@ -170,7 +234,7 @@ export class CodeModeManager {
         const run = this.runs.get(runId);
         if (!run || run.inflight > 0) return;
         this.cancelDispose(run);
-        if (DISPOSE_GRACE_MS <= 0) {
+        if (DISPOSE_GRACE_MS <= 0 || run.agent === 'opencode') {
             this.dispose(runId);
             return;
         }
@@ -190,6 +254,7 @@ export class CodeModeManager {
     }
 
     disposeAll(): void {
+        for (const client of this.starting.values()) client.dispose();
         for (const runId of [...this.runs.keys()]) this.dispose(runId);
     }
 
@@ -201,6 +266,7 @@ export class CodeModeManager {
         cwd: string,
         broker: PermissionBroker,
         onEvent: (event: CodeRunEvent) => void,
+        signal?: AbortSignal,
     ): Promise<ActiveRun> {
         const existing = this.runs.get(runId);
         if (existing && existing.agent === agent && existing.cwd === cwd) {
@@ -222,9 +288,14 @@ export class CodeModeManager {
         });
         // Dispose the client if startup fails (e.g. the startup-timeout fires) so the
         // spawned adapter process doesn't leak.
+        const abort = () => client.dispose();
+        this.starting.set(runId, client);
+        signal?.addEventListener('abort', abort, { once: true });
         try {
+            signal?.throwIfAborted();
             await client.start();
             const sessionId = await this.openSession(runId, agent, cwd, client);
+            signal?.throwIfAborted();
             client.setHandlers(broker, onEvent);
             const run: ActiveRun = { client, sessionId, agent, cwd, inflight: 0 };
             this.runs.set(runId, run);
@@ -232,6 +303,9 @@ export class CodeModeManager {
         } catch (e) {
             client.dispose();
             throw e;
+        } finally {
+            this.starting.delete(runId);
+            signal?.removeEventListener('abort', abort);
         }
     }
 
@@ -239,17 +313,22 @@ export class CodeModeManager {
     // and persist its id so a later restart can resume it.
     private async openSession(runId: string, agent: CodingAgent, cwd: string, client: AcpClient): Promise<string> {
         const stored = await readStoredSession(runId);
+        if (stored?.agent === 'opencode' && stored.stateNamespace && stored.stateNamespace !== OPENCODE_ROOT) throw new Error('The saved OpenCode session belongs to a different state directory. Restore its state or create a new Code session.');
         if (stored && stored.agent === agent && stored.cwd === cwd && client.loadSupported) {
             try {
                 await client.loadSession(stored.sessionId);
                 return stored.sessionId;
             } catch {
+                if (agent === 'opencode') throw new Error('The saved OpenCode session could not be loaded. Its history was preserved. Restore the managed OpenCode state or create a new Code session.');
                 // Stored session is stale/unloadable — fall through to a fresh one.
                 await clearStoredSession(runId);
             }
         }
+        if (stored && agent === 'opencode' && stored.agent === agent) throw new Error('The saved OpenCode session cannot resume in this working directory or engine. Create a new Code session.');
         const sessionId = await client.newSession();
-        await writeStoredSession({ runId, agent, cwd, sessionId });
+        await writeStoredSession({ runId, agent, cwd, sessionId,
+            ...(agent === 'opencode' ? { engineVersion: ENGINE_MANIFEST.opencode.version, stateNamespace: OPENCODE_ROOT, capabilities: client.capabilities } : {}),
+        });
         return sessionId;
     }
 }

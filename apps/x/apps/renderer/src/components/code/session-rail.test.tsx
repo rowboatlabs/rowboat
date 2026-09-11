@@ -16,6 +16,7 @@ const session: CodeSession = {
   cwd: '/Example', createdAt: '2026-09-08T00:00:00Z',
 }
 const ready: CodeAgentsStatus = {
+  opencode: { installed: true, signedIn: true },
   claude: { installed: true, signedIn: true },
   codex: { installed: true, signedIn: true },
 }
@@ -66,7 +67,7 @@ describe('code rail context menus', () => {
   })
 
   it.each([
-    ['New worktree', undefined], ['New Claude Code worktree', 'claude'], ['New Codex worktree', 'codex'],
+    ['New worktree', undefined], ['New Claude Code worktree', 'claude'], ['New Codex worktree', 'codex'], ['New OpenCode worktree', 'opencode'],
   ] as const)('creates %s in the clicked project without collapsing it', (name, agent) => {
     const { onNewSession } = setup()
     openProjectMenu()
@@ -77,6 +78,7 @@ describe('code rail context menus', () => {
 
   it('disables agents that are missing or signed out', () => {
     const { onNewSession } = setup(false, {
+      opencode: { installed: true, signedIn: false },
       claude: { installed: false, signedIn: false },
       codex: { installed: true, signedIn: false },
     })
@@ -87,6 +89,8 @@ describe('code rail context menus', () => {
       fireEvent.click(item)
     }
     expect(onNewSession).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'New OpenCode worktree' }))
+    expect(onNewSession).toHaveBeenCalledWith('project', 'opencode')
   })
 
   it('keeps explicit agent choices enabled while status is loading', () => {

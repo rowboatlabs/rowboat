@@ -20,6 +20,8 @@ import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { ENGINE_MANIFEST } from './engine-manifest.js';
 import type { CodingAgent } from './types.js';
+import { CODING_AGENT_CAPABILITIES } from '@x/shared/dist/code-mode.js';
+import { buildOpenCodeEnvironment, prepareOpenCodeState, OPENCODE_ROOT } from './opencode-environment.js';
 
 export const ENGINES_ROOT = path.join(os.homedir(), '.rowboat', 'engines');
 
@@ -31,7 +33,7 @@ interface PlatformEntry {
 }
 
 export interface EngineProgress {
-    phase: 'check' | 'download' | 'verify' | 'extract' | 'done';
+    phase: 'check' | 'download' | 'verify' | 'extract' | 'validate' | 'done';
     /** Bytes received so far (download phase). */
     receivedBytes?: number;
     /** Total bytes, when the server reports content-length. */
@@ -61,7 +63,10 @@ function platformKey(agent: CodingAgent): string | null {
         candidates.push(`win32-${arch}`);
     } else if (process.platform === 'linux') {
         // Prefer a musl build on musl systems (Alpine); fall back to the glibc build.
-        if (isMuslLibc()) candidates.push(`linux-${arch}-musl`);
+        if (isMuslLibc()) {
+            candidates.push(`linux-${arch}-musl`);
+            if (agent === 'opencode') return candidates.find(c => c in plats) ?? null;
+        }
         candidates.push(`linux-${arch}`);
     }
     return candidates.find((c) => c in plats) ?? null;
@@ -73,15 +78,23 @@ function isMuslLibc(): boolean {
     try {
         const report = (process as unknown as { report?: { getReport?: () => unknown } }).report?.getReport?.();
         const header = (report as { header?: Record<string, unknown> } | undefined)?.header;
-        return !(header && 'glibcVersionRuntime' in header);
+        if (header) return !('glibcVersionRuntime' in header);
     } catch {
-        return false;
+        // Some embedded Node runtimes don't expose diagnostic reports.
     }
+    // A missing report is not evidence of musl. Probe its standard interpreter
+    // path before defaulting to glibc (the normal Linux Electron target).
+    const machine = process.arch === 'arm64' ? 'aarch64' : 'x86_64';
+    return fs.existsSync(`/lib/ld-musl-${machine}.so.1`);
 }
 
 // Locate the engine executable inside an extracted package root. We extract the whole npm
 // package (so codex's bundled ripgrep travels with it), then find the binary.
 function locateExecutable(agent: CodingAgent, root: string): string | null {
+    if (agent === 'opencode') {
+        const executable = path.join(root, 'bin', process.platform === 'win32' ? 'opencode.exe' : 'opencode');
+        try { return fs.statSync(executable).isFile() ? executable : null; } catch { return null; }
+    }
     if (agent === 'claude') {
         for (const name of ['claude', 'claude.exe']) {
             const p = path.join(root, name);
@@ -115,10 +128,19 @@ export function isEngineProvisioned(agent: CodingAgent): boolean {
     const version = ENGINE_MANIFEST[agent].version;
     const versionDir = path.join(ENGINES_ROOT, agent, version);
     const metaPath = path.join(ENGINES_ROOT, agent, '.meta', `${agent}-${version}.json`);
-    return locateExecutable(agent, versionDir) !== null && fs.existsSync(metaPath);
+    const executable = locateExecutable(agent, versionDir);
+    if (!executable) return false;
+    try {
+        const metadata = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+        const key = platformKey(agent);
+        const platform = key && (ENGINE_MANIFEST[agent].platforms as Record<string, PlatformEntry>)[key];
+        return !!platform && metadata.version === version && metadata.platform === key &&
+            metadata.integrity === platform.integrity && metadata.binRelPath === path.relative(versionDir, executable) &&
+            (agent !== 'opencode' || metadata.validated === true);
+    } catch { return false; }
 }
 
-const AGENT_LABEL: Record<CodingAgent, string> = { claude: 'Claude Code', codex: 'Codex' };
+const AGENT_LABEL = Object.fromEntries(Object.entries(CODING_AGENT_CAPABILITIES).map(([id, value]) => [id, value.name]));
 
 // Return the provisioned engine's executable path, or throw a clear, user-facing error.
 // The chat/run path uses this — we deliberately do NOT download here: the engine must be
@@ -128,7 +150,7 @@ const AGENT_LABEL: Record<CodingAgent, string> = { claude: 'Claude Code', codex:
 export function getProvisionedEnginePath(agent: CodingAgent): string {
     const version = ENGINE_MANIFEST[agent].version;
     const exe = locateExecutable(agent, path.join(ENGINES_ROOT, agent, version));
-    if (!exe) {
+    if (!exe || !isEngineProvisioned(agent)) {
         throw new Error(
             `${AGENT_LABEL[agent]} isn't enabled yet. Open Settings → Code Mode and click Enable to download it.`,
         );
@@ -163,7 +185,7 @@ function pruneOldVersions(agent: CodingAgent, keepVersion: string): void {
 
 async function downloadTo(url: string, dest: string, opts: EnsureEngineOptions): Promise<void> {
     opts.onProgress?.({ phase: 'download', receivedBytes: 0 });
-    const res = await fetch(url, { signal: opts.signal });
+    const res = await fetch(url, { signal: opts.signal ? AbortSignal.any([opts.signal, AbortSignal.timeout(600_000)]) : AbortSignal.timeout(600_000) });
     if (!res.ok || !res.body) {
         throw new Error(`Code mode: engine download failed (HTTP ${res.status}) — ${url}`);
     }
@@ -174,7 +196,7 @@ async function downloadTo(url: string, dest: string, opts: EnsureEngineOptions):
         received += chunk.length;
         opts.onProgress?.({ phase: 'download', receivedBytes: received, totalBytes: total });
     });
-    await pipeline(body, fs.createWriteStream(dest));
+    await pipeline(body, fs.createWriteStream(dest), { signal: opts.signal });
 }
 
 // Verify the tarball against the npm Subresource Integrity string ("sha512-<base64>").
@@ -214,7 +236,7 @@ function extractTarball(tarPath: string, destDir: string): void {
         }
     }
 
-    const r = spawnSync(tarCmd, tarArgs, spawnOpts);
+    const r = spawnSync(tarCmd, tarArgs, { ...spawnOpts, windowsHide: true, timeout: 120_000, maxBuffer: 1024 * 1024 });
     if (r.status !== 0) {
         const err = r.stderr?.toString().trim() || r.error?.message || `tar exited ${r.status}`;
         throw new Error(`Code mode: failed to extract engine — ${err}`);
@@ -240,7 +262,8 @@ function makeExecutable(agent: CodingAgent, root: string, exe: string): void {
  * Ensure the pinned engine for `agent` is provisioned locally, downloading it on first
  * use. Returns the absolute path to the engine executable. Idempotent and cached.
  */
-export async function ensureEngine(agent: CodingAgent, opts: EnsureEngineOptions = {}): Promise<ProvisionedEngine> {
+async function installEngine(agent: CodingAgent, opts: EnsureEngineOptions = {}): Promise<ProvisionedEngine> {
+    opts.signal?.throwIfAborted();
     const entry = ENGINE_MANIFEST[agent];
     const version = entry.version;
     const key = platformKey(agent);
@@ -257,18 +280,20 @@ export async function ensureEngine(agent: CodingAgent, opts: EnsureEngineOptions
     opts.onProgress?.({ phase: 'check' });
     // Fast path: already provisioned and intact.
     const existing = locateExecutable(agent, versionDir);
-    if (existing && fs.existsSync(metaPath)) {
+    if (existing && isEngineProvisioned(agent)) {
         opts.onProgress?.({ phase: 'done' });
         return { executablePath: existing, version };
     }
 
-    // Download to a unique temp dir, verify, extract, then swap into place. Concurrent
-    // callers each use their own temp dir; the final rename is idempotent (same content).
+    // Download to a unique temp dir, verify, extract, then swap into place.
+    // ensureEngine shares this operation among concurrent backend callers.
     fs.mkdirSync(agentRoot, { recursive: true });
+    fs.rmSync(metaPath, { force: true });
     const tmpRoot = fs.mkdtempSync(path.join(agentRoot, `.tmp-${version}-`));
     try {
         const tarPath = path.join(tmpRoot, 'engine.tgz');
         await downloadTo(plat.tarball, tarPath, opts);
+        opts.signal?.throwIfAborted();
 
         opts.onProgress?.({ phase: 'verify' });
         verifyIntegrity(tarPath, plat.integrity);
@@ -277,12 +302,25 @@ export async function ensureEngine(agent: CodingAgent, opts: EnsureEngineOptions
         const extractDir = path.join(tmpRoot, 'pkg');
         fs.mkdirSync(extractDir);
         extractTarball(tarPath, extractDir);
+        opts.signal?.throwIfAborted();
 
         const exe = locateExecutable(agent, extractDir);
         if (!exe) {
             throw new Error(`Code mode: ${agent} engine binary not found in the downloaded package.`);
         }
         if (process.platform !== 'win32') makeExecutable(agent, extractDir, exe);
+        if (agent === 'opencode') {
+            opts.onProgress?.({ phase: 'validate' });
+            prepareOpenCodeState();
+            const result = spawnSync(exe, ['--version'], {
+                env: buildOpenCodeEnvironment(), cwd: OPENCODE_ROOT,
+                windowsHide: true, timeout: 15_000, maxBuffer: 8192, encoding: 'utf8',
+            });
+            if (result.status !== 0 || result.stdout.trim() !== version) {
+                throw new Error(`OpenCode engine version validation failed; expected ${version}. Retry installation.`);
+            }
+        }
+        opts.signal?.throwIfAborted();
 
         // Swap the freshly extracted package into the versioned location.
         if (fs.existsSync(versionDir)) fs.rmSync(versionDir, { recursive: true, force: true });
@@ -298,15 +336,86 @@ export async function ensureEngine(agent: CodingAgent, opts: EnsureEngineOptions
             platform: key,
             integrity: plat.integrity,
             binRelPath: path.relative(versionDir, finalExe),
+            validated: true,
         }, null, 2));
 
         // A new version is in place — remove superseded versions so old engines
         // (~200 MB each) don't accumulate after a bump. Best-effort.
-        pruneOldVersions(agent, version);
+        if (agent !== 'opencode') pruneOldVersions(agent, version);
 
         opts.onProgress?.({ phase: 'done' });
         return { executablePath: finalExe, version };
     } finally {
-        fs.rmSync(tmpRoot, { recursive: true, force: true });
+        try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch { /* cleanup must not mask validation errors or a successful install */ }
     }
+}
+
+interface Installation {
+    controller: AbortController;
+    listeners: Set<(progress: EngineProgress) => void>;
+    promise: Promise<ProvisionedEngine>;
+    last?: EngineProgress;
+    subscribers: number;
+}
+const installations = new Map<CodingAgent, Installation>();
+let removingOpenCode = false;
+
+/** Subscribers share a download. An individual cancellation only detaches that
+ * subscriber; the operation aborts when nobody remains or the engine is removed. */
+export function ensureEngine(agent: CodingAgent, opts: EnsureEngineOptions = {}): Promise<ProvisionedEngine> {
+    if (agent === 'opencode' && removingOpenCode) return Promise.reject(new Error('OpenCode removal is in progress. Retry Enable when it finishes.'));
+    if (opts.signal?.aborted) return Promise.reject(opts.signal.reason);
+    let installation = installations.get(agent);
+    if (!installation) {
+        const state: Installation = { controller: new AbortController(), listeners: new Set(), subscribers: 0, promise: undefined! };
+        installations.set(agent, state);
+        state.promise = Promise.resolve().then(() => installEngine(agent, {
+            signal: state.controller.signal,
+            onProgress: progress => {
+                state.last = progress;
+                for (const listener of state.listeners) { try { listener(progress); } catch { /* closed renderer */ } }
+            },
+        })).finally(() => { if (installations.get(agent) === state) installations.delete(agent); });
+        installation = state;
+    }
+    const state = installation;
+    state.subscribers++;
+    if (opts.onProgress) {
+        state.listeners.add(opts.onProgress);
+        if (state.last) { try { opts.onProgress(state.last); } catch { /* closed renderer */ } }
+    }
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        const finish = () => {
+            if (settled) return false;
+            settled = true;
+            opts.signal?.removeEventListener('abort', abort);
+            if (opts.onProgress) state.listeners.delete(opts.onProgress);
+            if (--state.subscribers === 0) state.controller.abort();
+            return true;
+        };
+        const abort = () => { if (finish()) reject(opts.signal?.reason); };
+        opts.signal?.addEventListener('abort', abort, { once: true });
+        state.promise.then(value => { if (finish()) resolve(value); }, error => { if (finish()) reject(error); });
+    });
+}
+
+export function cancelEngineInstallations(): void {
+    for (const state of installations.values()) state.controller.abort();
+}
+
+/** Caller must stop owned processes first. Only the managed engine directory is removed. */
+export async function removeOpenCodeEngine(): Promise<void> {
+    if (removingOpenCode) throw new Error('OpenCode removal is already in progress.');
+    removingOpenCode = true;
+    try {
+        const installation = installations.get('opencode');
+        if (installation) {
+            installation.controller.abort();
+            await installation.promise.catch(() => {});
+        }
+        // Yield while deleting so Windows can deliver child exit/close callbacks
+        // and release executable handles after setup stops its native process.
+        await fs.promises.rm(path.join(ENGINES_ROOT, 'opencode'), { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    } finally { removingOpenCode = false; }
 }
