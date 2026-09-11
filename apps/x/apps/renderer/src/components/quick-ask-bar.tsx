@@ -1256,38 +1256,39 @@ const COMPANION_MOTION_CSS = `
   .qa-spin { animation: qa-spin-slow 2.4s linear infinite; }
   .qa-logo-glow { animation: qa-glow 1.8s ease-in-out infinite; }
   /* Animate only the halo: the icon and its clickable bounds stay still. */
-  .qa-dock-logo { position: relative; }
+  .qa-dock-logo { position: relative; --qa-halo-rgb: 23 23 23; }
+  html.dark .qa-dock-logo { --qa-halo-rgb: 229 229 229; }
   .qa-dock-logo::after {
     content: ''; position: absolute; inset: 0; border-radius: 50%;
     pointer-events: none; border: 1.5px solid transparent;
   }
   .qa-dock-logo[data-status="listening"]::after {
-    border: 2px solid #10b981;
-    box-shadow: 0 0 6px rgb(16 185 129 / 30%);
+    border: 2px solid rgb(var(--qa-halo-rgb));
+    box-shadow: 0 0 6px rgb(var(--qa-halo-rgb) / 30%);
     animation: qa-dock-listening 1.4s ease-in-out infinite;
   }
   .qa-dock-logo[data-status="listening"]::before {
     content: ''; position: absolute; inset: 0; border-radius: 50%;
-    pointer-events: none; border: 1px solid #34d399;
+    pointer-events: none; border: 1px solid rgb(var(--qa-halo-rgb));
     animation: qa-dock-listening-ripple 1.4s ease-out infinite;
   }
   .qa-dock-logo[data-status="thinking"]::after {
-    border-top-color: #f59e0b; border-right-color: #f59e0b;
+    border-top-color: rgb(var(--qa-halo-rgb)); border-right-color: rgb(var(--qa-halo-rgb));
     animation: qa-spin-slow 2.4s linear infinite;
   }
   .qa-dock-logo[data-status="speaking"]::after {
-    border: 3px double #38bdf8;
-    box-shadow: 0 0 0 2px rgb(56 189 248 / 12%);
+    border: 3px double rgb(var(--qa-halo-rgb));
+    box-shadow: 0 0 0 2px rgb(var(--qa-halo-rgb) / 12%);
     animation: qa-dock-speaking 1.4s ease-out infinite;
   }
   @keyframes qa-dock-listening {
     0%, 100% {
       opacity: 0.45; transform: scale(0.9);
-      box-shadow: 0 0 3px rgb(16 185 129 / 15%);
+      box-shadow: 0 0 3px rgb(var(--qa-halo-rgb) / 15%);
     }
     50% {
       opacity: 1; transform: scale(1.12);
-      box-shadow: 0 0 0 2px rgb(16 185 129 / 18%), 0 0 14px rgb(16 185 129 / 65%);
+      box-shadow: 0 0 0 2px rgb(var(--qa-halo-rgb) / 18%), 0 0 14px rgb(var(--qa-halo-rgb) / 65%);
     }
   }
   @keyframes qa-dock-listening-ripple {
@@ -1295,8 +1296,8 @@ const COMPANION_MOTION_CSS = `
     85%, 100% { opacity: 0; transform: scale(1.3); }
   }
   @keyframes qa-dock-speaking {
-    0% { box-shadow: 0 0 0 0 rgb(56 189 248 / 25%); }
-    100% { box-shadow: 0 0 0 4px rgb(56 189 248 / 0%); }
+    0% { box-shadow: 0 0 0 0 rgb(var(--qa-halo-rgb) / 25%); }
+    100% { box-shadow: 0 0 0 4px rgb(var(--qa-halo-rgb) / 0%); }
   }
   @media (prefers-reduced-motion: reduce) {
     .qa-card-in, .qa-rise, .qa-pop, .qa-wave-bar, .qa-speak-bar, .qa-logo-glow, .qa-spin { animation: none; }
@@ -1880,11 +1881,16 @@ function TalkButton({
   state,
   sendAction,
   className,
+  monochrome = false,
 }: {
   state: CallState
   sendAction: (action: PopoutAction) => void
   className: string
+  monochrome?: boolean
 }) {
+  const activeStyle = monochrome
+    ? 'bg-neutral-900 text-white ring-neutral-900 hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:ring-neutral-100 dark:hover:bg-white'
+    : 'bg-sky-500 text-white ring-sky-500 hover:bg-sky-400'
   const busy = state.status === 'thinking' || state.status === 'speaking'
   const micOpen = !state.micMuted && (state.status === 'listening' || state.pttLocked)
   if (busy) {
@@ -1896,7 +1902,7 @@ function TalkButton({
             style={noDragRegion}
             onClick={() => sendAction('stop-speaking')}
             aria-label="Stop the assistant"
-            className={`flex flex-none items-center justify-center rounded-full bg-sky-500 text-white transition hover:bg-sky-400 active:scale-95 ${className}`}
+            className={`flex flex-none items-center justify-center rounded-full transition active:scale-95 ${activeStyle} ${className}`}
           >
             <Square className="h-3.5 w-3.5 fill-current" />
           </button>
@@ -1933,7 +1939,7 @@ function TalkButton({
           }
           className={`flex flex-none select-none items-center justify-center rounded-full ring-1 ring-inset transition active:scale-95 ${
             micOpen
-              ? 'bg-sky-500 text-white ring-sky-500'
+              ? (monochrome ? activeStyle : 'bg-sky-500 text-white ring-sky-500')
               : state.micMuted
                 ? 'bg-red-500/10 text-red-500 ring-red-500/30 hover:bg-red-500/20'
                 : CHIP_IDLE
@@ -2050,7 +2056,7 @@ function TuckedDock({
             <span role="status" className="sr-only">{statusLabel}</span>
           ) : <StatusLane state={state} activity={activity} bars={20} className="w-[112px]" />}
           <ShareButton state={state} sendAction={sendAction} className="h-7 w-7" />
-          <TalkButton state={state} sendAction={sendAction} className={vertical ? 'h-7 w-7' : 'h-8 w-8'} />
+          <TalkButton state={state} sendAction={sendAction} monochrome={vertical} className={vertical ? 'h-7 w-7' : 'h-8 w-8'} />
           {!vertical && <EndButton sendAction={sendAction} className="h-7 w-7" />}
         </div>
         {/* The vertical dock expands through its Assistant icon. Keep the
