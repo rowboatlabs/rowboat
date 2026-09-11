@@ -707,6 +707,11 @@ interface ModelCallFailed extends BaseTurnEvent {
   type: "model_call_failed";
   modelCallIndex: number;
   error: string;
+  // Present when a live call died: ms since model_call_requested, and ms
+  // since the provider's last stream event. A dropped connection shows a
+  // long idle gap; a slow but healthy stream does not.
+  elapsedMs?: number;
+  idleMs?: number;
 }
 ```
 
@@ -715,7 +720,10 @@ content duplicates provider step events.
 
 Any successfully completed assistant response without tool calls completes the
 turn, including responses whose finish reason is `length` or `content-filter`.
-Provider and stream failures fail the turn.
+Provider and stream failures fail the turn. `error` is the provider's message
+plus, when available, the HTTP status, the response body, and the error's
+`cause` chain — a socket failure such as `read ETIMEDOUT` or a body timeout
+surfaces only there, behind a generic `terminated`.
 
 Only the primary model calls directly controlled by the turn loop are recorded
 as model calls. Internal model calls hidden inside the permission classifier or
