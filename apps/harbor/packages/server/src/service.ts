@@ -1,4 +1,5 @@
-import type { ActivityItem, ActivityKind, ActivityPage } from '@rowboat/spaces-protocol';
+import type { ActivityItem, ActivityKind, ActivityPage, ServerFrame } from '@rowboat/spaces-protocol';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomBytes } from 'node:crypto';
 import { createTwoFilesPatch } from 'diff';
 import { monotonicFactory } from 'ulid';
@@ -213,11 +214,34 @@ export class HarborService {
     }
   }
 
-  /** Append a durable event at `offset` (allocated by the caller inside the space lock) and fan it out. */
+  /**
+   * Publish after commit (2026-09-11). Inside the space lock — which on
+   * Postgres IS the transaction — a frame must not reach the hub yet: a
+   * subscriber arriving in that window would miss the event live (nobody
+   * was listening) AND on replay (its catch-up read cannot see the
+   * uncommitted row), and a rollback would leave phantoms on every socket.
+   * So `append` parks frames in the lock's outbox and `locked` flushes them
+   * once the lock — and the commit — has returned. Outside a lock the
+   * outbox is empty and frames go straight out.
+   */
+  private readonly outbox = new AsyncLocalStorage<Array<{ spaceId: string; frame: ServerFrame }>>();
+
+  /** The space lock, with the hub held back until the commit is durable; a thrown lock publishes nothing. */
+  private async locked<T>(spaceId: string, fn: () => Promise<T>): Promise<T> {
+    const pending: Array<{ spaceId: string; frame: ServerFrame }> = [];
+    const result = await this.store.withSpaceLock(spaceId, () => this.outbox.run(pending, fn));
+    for (const { spaceId: target, frame } of pending) this.hub.publish(target, frame);
+    return result;
+  }
+
+  /** Append a durable event at `offset` (allocated by the caller inside the space lock) and fan it out after commit. */
   private async append(spaceId: string, offset: number, at: string, event: SpaceEvent): Promise<void> {
     const stored: StoredEvent = { offset, at, event };
     await this.store.appendEvent(spaceId, stored);
-    this.hub.publish(spaceId, { kind: 'event', spaceId, offset, at, event });
+    const frame: ServerFrame = { kind: 'event', spaceId, offset, at, event };
+    const pending = this.outbox.getStore();
+    if (pending) pending.push({ spaceId, frame });
+    else this.hub.publish(spaceId, frame);
   }
 
   // --- spaces & membership ---------------------------------------------------
@@ -231,7 +255,7 @@ export class HarborService {
     const now = this.now();
     const space: Space = { id: this.ulid(), name, createdAt: now, kind: 'shared' };
     await this.store.putSpace(space);
-    return this.store.withSpaceLock(space.id, async () => {
+    return this.locked(space.id, async () => {
       const membership: Membership = { spaceId: space.id, memberId: ctx.memberId, joinedAt: now };
       await this.store.putMembership(membership);
       const offset = (await this.store.head(space.id)) + 1;
@@ -260,7 +284,7 @@ export class HarborService {
       actingMode: input.actingMode,
       ...(input.agentName ? { agentName: input.agentName } : {}),
     };
-    return this.store.withSpaceLock(spaceId, async () => {
+    return this.locked(spaceId, async () => {
       const current = (await this.store.getSpace(spaceId)) ?? space;
       if (current.name === input.name) return current; // idempotent, no event
       const updated: Space = { ...current, name: input.name };
@@ -307,7 +331,7 @@ export class HarborService {
       if (raced) return { space: raced, created: false };
       throw err;
     }
-    await this.store.withSpaceLock(space.id, async () => {
+    await this.locked(space.id, async () => {
       let offset = await this.store.head(space.id);
       for (const memberId of participants) {
         const membership: Membership = { spaceId: space.id, memberId, joinedAt: now };
@@ -367,7 +391,7 @@ export class HarborService {
     if (space.kind === 'direct') {
       throw new HarborError('invalid_request', 'a direct message has a fixed membership — it cannot be left');
     }
-    await this.store.withSpaceLock(spaceId, async () => {
+    await this.locked(spaceId, async () => {
       const membership = await this.store.getMembership(spaceId, ctx.memberId);
       if (!membership) return;
       await this.store.deleteMembership(spaceId, ctx.memberId);
@@ -454,7 +478,7 @@ export class HarborService {
     this.guardWrite();
     const spaceId = resolved.space.id;
     const space = await this.requireSpace(spaceId);
-    return this.store.withSpaceLock(spaceId, async () => {
+    return this.locked(spaceId, async () => {
       const existing = await this.store.getMembership(spaceId, ctx.memberId);
       if (existing) return { membership: existing, space }; // idempotent join
       const membership: Membership = { spaceId, memberId: ctx.memberId, joinedAt: this.now() };
@@ -552,7 +576,7 @@ export class HarborService {
       actingMode: input.actingMode,
       ...(input.agentName ? { agentName: input.agentName } : {}),
     };
-    return this.store.withSpaceLock(spaceId, async () => {
+    return this.locked(spaceId, async () => {
       if (input.toPath === input.fromPath) {
         throw new HarborError('invalid_request', 'destination is the same path');
       }
@@ -604,7 +628,7 @@ export class HarborService {
       actingMode: input.actingMode,
       ...(input.agentName ? { agentName: input.agentName } : {}),
     };
-    return this.store.withSpaceLock(spaceId, async () => {
+    return this.locked(spaceId, async () => {
       const asset = await this.store.getLiveAssetByPath(spaceId, input.path);
       if (!asset) throw new HarborError('not_found', 'no such asset');
       if (input.baseVersion > asset.version) {
@@ -640,7 +664,7 @@ export class HarborService {
       actingMode: input.actingMode,
       ...(input.agentName ? { agentName: input.agentName } : {}),
     };
-    return this.store.withSpaceLock(spaceId, async () => {
+    return this.locked(spaceId, async () => {
       const dead = await this.store.getLatestDeletedByPath(spaceId, input.path);
       if (!dead) throw new HarborError('not_found', 'nothing deleted at this path');
       if (await this.store.getLiveAssetByPath(spaceId, input.path)) {
@@ -808,7 +832,7 @@ export class HarborService {
       ...(input.agentName ? { agentName: input.agentName } : {}),
     };
 
-    return this.store.withSpaceLock(spaceId, async () => {
+    return this.locked(spaceId, async () => {
       const asset = await this.store.getLiveAssetByPath(spaceId, input.assetPath);
 
       if (!asset) {
@@ -1126,7 +1150,7 @@ export class HarborService {
     };
 
     const stamps = await this.stampsFor(spaceId, input.body);
-    const result = await this.store.withSpaceLock(spaceId, async () => {
+    const result = await this.locked(spaceId, async () => {
       const at = this.now();
       // The org stamps the poll from its own clock: answer ids 1..n, a
       // duration in becomes an expiry out (the Discord create asymmetry).
@@ -1252,7 +1276,7 @@ export class HarborService {
       ...(input.agentName ? { agentName: input.agentName } : {}),
     };
 
-    return this.store.withSpaceLock(spaceId, async () => {
+    return this.locked(spaceId, async () => {
       const at = this.now();
 
       let root: Message;
@@ -1350,7 +1374,7 @@ export class HarborService {
     if (!opts.force && (await this.store.backfillDone('017-mentions'))) return out;
     const names = new Map((await this.store.listAllMembers()).map((m) => [m.id, m.displayName]));
     for (const space of await this.store.listAllSpaces()) {
-      await this.store.withSpaceLock(space.id, async () => {
+      await this.locked(space.id, async () => {
         for (const m of await this.store.listMessagesBySpace(space.id)) {
           if (m.deletedAt) continue;
           // A poll's body is its immutable fallback rendering — left alone.
@@ -1407,7 +1431,7 @@ export class HarborService {
       ...(input.agentName ? { agentName: input.agentName } : {}),
     };
 
-    return this.store.withSpaceLock(spaceId, async () => {
+    return this.locked(spaceId, async () => {
       const message = await this.store.getMessage(spaceId, messageId);
       if (!message) throw new HarborError('not_found', 'no such message');
       if (message.author.memberId !== ctx.memberId) {
@@ -1462,7 +1486,7 @@ export class HarborService {
     };
 
     const stamps = await this.stampsFor(spaceId, input.body);
-    return this.store.withSpaceLock(spaceId, async () => {
+    return this.locked(spaceId, async () => {
       const message = await this.store.getMessage(spaceId, messageId);
       if (!message) throw new HarborError('not_found', 'no such message');
       if (message.author.memberId !== ctx.memberId) {
@@ -1497,7 +1521,7 @@ export class HarborService {
       ...(input.agentName ? { agentName: input.agentName } : {}),
     };
 
-    return this.store.withSpaceLock(spaceId, async () => {
+    return this.locked(spaceId, async () => {
       const message = await this.store.getMessage(spaceId, messageId);
       if (!message) throw new HarborError('not_found', 'no such message');
       if (message.deletedAt && input.action === 'add') {
@@ -1546,7 +1570,7 @@ export class HarborService {
       ...(input.agentName ? { agentName: input.agentName } : {}),
     };
 
-    return this.store.withSpaceLock(spaceId, async () => {
+    return this.locked(spaceId, async () => {
       const message = await this.store.getMessage(spaceId, messageId);
       if (!message) throw new HarborError('not_found', 'no such message');
       const poll = message.poll;
@@ -1612,7 +1636,7 @@ export class HarborService {
       ...(input.agentName ? { agentName: input.agentName } : {}),
     };
 
-    return this.store.withSpaceLock(spaceId, async () => {
+    return this.locked(spaceId, async () => {
       const message = await this.store.getMessage(spaceId, messageId);
       if (!message) throw new HarborError('not_found', 'no such message');
       const poll = message.poll;
@@ -1648,7 +1672,7 @@ export class HarborService {
       ...(action.agentName ? { agentName: action.agentName } : {}),
     };
 
-    return this.store.withSpaceLock(spaceId, async () => {
+    return this.locked(spaceId, async () => {
       const topic = await this.store.getTopic(spaceId, topicId);
       if (!topic) throw new HarborError('not_found', 'no such topic');
       const at = this.now();

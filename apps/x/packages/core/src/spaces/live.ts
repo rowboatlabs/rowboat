@@ -337,6 +337,11 @@ export class SpacesLive {
       const sub = this.subs.get(spaceId);
       if (!sub) return;
       if (frame.kind === 'event') sub.lastOffset = frame.offset;
+      // A live-only subscription learns its resume point from the server's
+      // acknowledgement (2026-09-11): `fromOffset` is the head it went live
+      // at, so a space that stays quiet until the socket blinks resubscribes
+      // from there and replays the gap, instead of from "now" with nothing.
+      else if (frame.kind === 'subscribed' && sub.lastOffset === undefined) sub.lastOffset = frame.fromOffset;
       for (const h of sub.handlers) h(frame);
     });
 

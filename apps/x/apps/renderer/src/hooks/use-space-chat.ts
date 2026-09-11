@@ -4,7 +4,7 @@ import { subscribeSpacesFeed } from '@/lib/spaces-feed'
 import { useSpaceAgentActivity } from '@/lib/spaces-agent-activity'
 import { applyReaction, mergeMessages } from '@/lib/spaces-conventions'
 import { applyPollVote } from '@/lib/spaces-poll'
-import { feedSyncedRecently, getSpaceFeed, getSpacesOrgs, refreshSpaceFeed, subscribeOrgs, subscribeSpaceFeedStore, useSpaceLive } from '@/hooks/use-spaces'
+import { feedSyncedRecently, getSpaceFeed, getSpacesOrgs, isReconnect, refreshSpaceFeed, subscribeOrgs, subscribeSpaceFeedStore, useSpaceLive } from '@/hooks/use-spaces'
 import { countUnread, noteStreamReadOffset, spaceBadge, subscribeReadState, type SpaceBadge } from '@/lib/spaces-read-state'
 
 export type { SpaceBadge } from '@/lib/spaces-read-state'
@@ -353,12 +353,15 @@ function wireBus(): void {
         const frame = event.frame
         if (frame.kind === 'subscribed') {
             // A (re)connected subscription. Whatever was published while the
-            // socket was dead may be gone for good (a subscription that never
-            // saw an event resumes live-only, with no offset to replay from) —
-            // resync the HTTP views so the stream is whole again. The BOOT
-            // subscribe is exempt: it lands right behind the store's own first
-            // fetch, and resyncing then just doubles every request.
-            if (feedSyncedRecently(event.orgId, frame.spaceId)) return
+            // socket was dead may be gone for good — resync the HTTP views so
+            // the stream is whole again. The BOOT subscribe is exempt: it
+            // lands right behind the store's own first fetch, and resyncing
+            // then just doubles every request. A RECONNECT is never exempt
+            // (2026-09-11): it tends to land beside other fetches too, and
+            // the "fetched moments ago" test used to swallow exactly the
+            // resync that mattered.
+            const reconnect = isReconnect(event.orgId, frame.spaceId, frame)
+            if (!reconnect && feedSyncedRecently(event.orgId, frame.spaceId)) return
             const k = key(event.orgId, frame.spaceId)
             void refreshSpaceFeed(event.orgId, frame.spaceId)
             if (streamState.get(k)?.ready) void loadStream(event.orgId, frame.spaceId)
