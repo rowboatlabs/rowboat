@@ -1288,6 +1288,10 @@ export class HarborService {
         offset += 1;
       }
 
+      // The file the discussion is about, resolved before anything is
+      // written: a bad path refuses the whole ceremony (no half-born topic).
+      const document = input.documentPath !== undefined ? await this.requireLiveAsset(spaceId, input.documentPath) : undefined;
+
       const topic: Topic = {
         id: this.ulid(),
         spaceId,
@@ -1296,8 +1300,10 @@ export class HarborService {
         createdBy: by,
         createdAt: at,
         archived: false,
+        ...(document ? { documentPath: document.path } : {}),
       };
       await this.store.putTopic(topic);
+      if (document) await this.store.setTopicDocument(spaceId, topic.id, document.id);
       await this.append(spaceId, offset, at, { type: 'topic', topic, action: 'created', by });
       return { topic, rootMessage: root };
     });
@@ -1679,8 +1685,38 @@ export class HarborService {
           await this.append(spaceId, offset, at, { type: 'topic_removed', removal });
           return topic;
         }
+        case 'attach_document': {
+          // Resolves through redirects, so an old link to a moved file lands
+          // on the file; the row keeps the asset id, the wire the live path.
+          const asset = await this.requireLiveAsset(spaceId, action.path);
+          if (topic.documentPath === asset.path) return topic; // idempotent, no event
+          await this.store.setTopicDocument(spaceId, topicId, asset.id);
+          const updated: Topic = { ...topic, documentPath: asset.path };
+          const offset = (await this.store.head(spaceId)) + 1;
+          await this.append(spaceId, offset, at, { type: 'topic', topic: updated, action: 'document_attached', by });
+          return updated;
+        }
+        case 'detach_document': {
+          // A link to a trashed file projects no path but still exists —
+          // detaching it is a real change, so the row (not the projection)
+          // decides idempotency.
+          if (!(await this.store.getTopicDocument(spaceId, topicId))) return topic;
+          await this.store.setTopicDocument(spaceId, topicId, null);
+          const { documentPath: _gone, ...rest } = topic;
+          const updated: Topic = rest;
+          const offset = (await this.store.head(spaceId)) + 1;
+          await this.append(spaceId, offset, at, { type: 'topic', topic: updated, action: 'document_detached', by });
+          return updated;
+        }
       }
     });
+  }
+
+  /** A live asset at `path` (moved paths follow their redirect), else not_found. */
+  private async requireLiveAsset(spaceId: string, path: string): Promise<AssetRecord> {
+    const resolved = await this.resolveAsset(spaceId, path);
+    if (!resolved) throw new HarborError('not_found', `no such file: ${path}`);
+    return resolved.asset;
   }
 
   /**

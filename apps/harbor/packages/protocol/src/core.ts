@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
+import { AssetPath, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 
 // Core objects shared by both faces. Every act in a space belongs to a member
 // (spec §2, principle 4); attribution carries the acting mode, never a separate
@@ -92,6 +92,15 @@ export const Topic = z.object({
   createdAt: z.iso.datetime(),
   /** Off the rail. Nothing else anywhere changes; a new reply revives (un-archives). */
   archived: z.boolean(),
+  /**
+   * The one file this discussion is about (2026-09-11): a space asset the
+   * UI opens beside the thread. Stored as the asset's internal id, so a
+   * rename keeps the link; PROJECTED here as the asset's CURRENT live path
+   * at read time — absent when nothing is attached and while the file sits
+   * in the trash (a restore brings it back, nothing to clean up). Set via
+   * createTopic.documentPath or manageTopic attach_document/detach_document.
+   */
+  documentPath: AssetPath.optional(),
 });
 export type Topic = z.infer<typeof Topic>;
 

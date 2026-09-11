@@ -37,7 +37,8 @@ interface SpaceState {
   blobs: Map<string, StoredSpaceBlob>; // hash → registration (first write wins)
   changeSets: ChangeSet[]; // append order == offset order
   changeSetsById: Map<string, ChangeSet>;
-  topics: Map<string, Topic>; // annotation rows (id → row); messages never reference them
+  topics: Map<string, Topic>; // annotation rows (id → row, never carrying documentPath); messages never reference them
+  topicDocuments: Map<string, string>; // topicId → linked assetId (migration 019); reads project the live path
   messages: Message[]; // the one stream, roots and replies interleaved, oldest first
   messagesById: Map<string, Message>;
   reactions: Map<string, StoredReaction[]>; // messageId → oldest first
@@ -115,6 +116,7 @@ export class MemoryStore implements Store {
       changeSets: [],
       changeSetsById: new Map(),
       topics: new Map(),
+      topicDocuments: new Map(),
       messages: [],
       messagesById: new Map(),
       reactions: new Map(),
@@ -298,24 +300,53 @@ export class MemoryStore implements Store {
     return out;
   }
 
+  /** The wire shape: the row plus the linked document's CURRENT live path (mirrors pg TOPIC_SELECT). */
+  private projectTopic(s: SpaceState, topic: Topic): Topic {
+    const assetId = s.topicDocuments.get(topic.id);
+    const asset = assetId ? s.assets.get(assetId) : undefined;
+    const { documentPath: _drop, ...row } = topic;
+    return asset && asset.state === 'live' ? { ...row, documentPath: asset.path } : row;
+  }
+
+  private topicsOf(spaceId: string): Topic[] {
+    const s = this.must(spaceId);
+    return [...s.topics.values()].map((t) => this.projectTopic(s, t));
+  }
+
   async getTopic(spaceId: string, topicId: string): Promise<Topic | undefined> {
-    return this.state(spaceId)?.topics.get(topicId);
+    const s = this.state(spaceId);
+    const topic = s?.topics.get(topicId);
+    return s && topic ? this.projectTopic(s, topic) : undefined;
   }
 
   async putTopic(topic: Topic): Promise<void> {
-    this.must(topic.spaceId).topics.set(topic.id, topic);
+    // The projected path never lands in the row — the link lives in topicDocuments.
+    const { documentPath: _drop, ...row } = topic;
+    this.must(topic.spaceId).topics.set(topic.id, row);
+  }
+
+  async setTopicDocument(spaceId: string, topicId: string, assetId: string | null): Promise<void> {
+    const s = this.must(spaceId);
+    if (assetId === null) s.topicDocuments.delete(topicId);
+    else s.topicDocuments.set(topicId, assetId);
+  }
+
+  async getTopicDocument(spaceId: string, topicId: string): Promise<string | undefined> {
+    return this.state(spaceId)?.topicDocuments.get(topicId);
   }
 
   async deleteTopic(spaceId: string, topicId: string): Promise<void> {
-    this.must(spaceId).topics.delete(topicId);
+    const s = this.must(spaceId);
+    s.topics.delete(topicId);
+    s.topicDocuments.delete(topicId);
   }
 
   async listTopics(spaceId: string, includeArchived: boolean): Promise<Topic[]> {
-    return [...this.must(spaceId).topics.values()].filter((t) => includeArchived || !t.archived);
+    return this.topicsOf(spaceId).filter((t) => includeArchived || !t.archived);
   }
 
   async getTopicByRoot(spaceId: string, rootMessageId: string): Promise<Topic | undefined> {
-    return [...this.must(spaceId).topics.values()].find((t) => t.rootMessageId === rootMessageId);
+    return this.topicsOf(spaceId).find((t) => t.rootMessageId === rootMessageId);
   }
 
   async getMessage(spaceId: string, messageId: string): Promise<Message | undefined> {
@@ -365,7 +396,7 @@ export class MemoryStore implements Store {
 
   async searchTopics(spaceId: string, query: SearchQuery, limit: number): Promise<Topic[]> {
     if (query.terms.length === 0) return [];
-    return [...this.must(spaceId).topics.values()]
+    return this.topicsOf(spaceId)
       .filter((t) => matchesAllTerms(searchTextFor(t.title), query))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
       .slice(0, limit);

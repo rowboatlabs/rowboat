@@ -324,6 +324,29 @@ describe('agent face (MCP)', () => {
     ).structuredContent as { topic: { title: string } };
     expect(managed.topic.title).toBe('Decide: webhook retry policy (v2)');
 
+    // The discussion can be about one file: attach needs a path, read_thread shows it.
+    const proposed = await client.callTool({
+      name: 'propose_change',
+      arguments: { spaceId, path: 'retries.md', baseVersion: 0, newContent: '# Retry policy\n', reason: 'the policy doc' },
+    });
+    expect(proposed.isError, JSON.stringify(proposed.content)).toBeFalsy();
+    const noPath = await client.callTool({
+      name: 'manage_topic',
+      arguments: { spaceId, topicId: annotated.topic.id, action: 'attach_document' },
+    });
+    expect(noPath.isError).toBe(true);
+    const attachedResult = await client.callTool({
+      name: 'manage_topic',
+      arguments: { spaceId, topicId: annotated.topic.id, action: 'attach_document', path: 'retries.md' },
+    });
+    expect(attachedResult.isError, JSON.stringify(attachedResult.content)).toBeFalsy();
+    const attached = attachedResult.structuredContent as { topic: { documentPath?: string } };
+    expect(attached.topic.documentPath).toBe('retries.md');
+    const withDoc = (
+      await client.callTool({ name: 'read_thread', arguments: { spaceId, rootMessageId: started.messageId } })
+    ).structuredContent as { topic: { documentPath?: string } | null };
+    expect(withDoc.topic?.documentPath).toBe('retries.md');
+
     // remove converts back to a thread — the messages stay readable.
     await client.callTool({
       name: 'manage_topic',

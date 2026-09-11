@@ -196,7 +196,8 @@ export const readStream = tool({
 export const readThread = tool({
   name: 'read_thread',
   description:
-    'Read one flat thread: the root message, its topic row (null = a plain untitled thread), and ' +
+    'Read one flat thread: the root message, its topic row (null = a plain untitled thread; its ' +
+    'documentPath, when set, is the file the discussion is about — read_asset it for context), and ' +
     'the replies (each attributed to its member and acting mode), oldest first (default 50). ' +
     'Use this to catch up before replying or to answer questions about a conversation. A reply id ' +
     'resolves to its root. When `truncated` is true, pass `beforeOffset` to page back before ' +
@@ -346,13 +347,16 @@ export const createTopic = tool({
     'Give a thread a title (the UI calls it a Discussion), putting it on the rail. Provide ' +
     'rootMessageId to title an existing thread (use its root, not a reply), or body to post a new ' +
     'root message and title it in one step — exactly one of the two. Titles are goals ' +
-    '("Decide: launch cut"), not summaries. At most one topic per thread. ' +
+    '("Decide: launch cut"), not summaries. At most one topic per thread. Pass documentPath ' +
+    "(a live file's path from list_assets) to make the discussion about that file — the UI " +
+    'opens it beside the thread. ' +
     MENTION_GRAMMAR,
   input: z.object({
     spaceId: SpaceId,
     rootMessageId: MessageId.optional(),
     title: z.string().min(1).max(256),
     body: z.string().min(1).max(65_536).optional(),
+    documentPath: AssetPath.optional(),
   }),
   output: z.object({ topic: Topic, rootMessageId: MessageId }),
 });
@@ -361,14 +365,17 @@ export const manageTopic = tool({
   name: 'manage_topic',
   description:
     'One-row lifecycle ops on a topic: retitle (needs title), archive (off the rail; a new reply ' +
-    'revives it), unarchive, or remove (deletes the annotation — the thread and every message stay ' +
-    'in the stream untouched; "convert back to thread"). None of these can touch a message. ' +
-    'Attributed to your person like everything else.',
+    'revives it), unarchive, remove (deletes the annotation — the thread and every message stay ' +
+    'in the stream untouched; "convert back to thread"), attach_document (needs path: link ONE ' +
+    "live space file as what the discussion is about — the topic's documentPath; the UI opens it " +
+    'beside the thread; read it with read_asset), or detach_document. None of these can touch a ' +
+    'message. Attributed to your person like everything else.',
   input: z.object({
     spaceId: SpaceId,
     topicId: TopicId,
-    action: z.enum(['retitle', 'archive', 'unarchive', 'remove']),
+    action: z.enum(['retitle', 'archive', 'unarchive', 'remove', 'attach_document', 'detach_document']),
     title: z.string().min(1).max(256).optional(),
+    path: AssetPath.optional(),
   }),
   output: z.object({ topic: Topic }),
 });
