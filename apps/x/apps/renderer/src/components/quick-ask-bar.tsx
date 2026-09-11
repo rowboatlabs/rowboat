@@ -1832,13 +1832,15 @@ function ShareButton({
   state,
   sendAction,
   className,
+  tooltipDelay,
 }: {
   state: CallState
   sendAction: (action: PopoutAction) => void
   className: string
+  tooltipDelay?: number
 }) {
   return (
-    <Tooltip>
+    <Tooltip delayDuration={tooltipDelay}>
       <TooltipTrigger asChild>
         <button
           type="button"
@@ -1881,11 +1883,13 @@ function TalkButton({
   state,
   sendAction,
   className,
+  tooltipDelay,
   monochrome = false,
 }: {
   state: CallState
   sendAction: (action: PopoutAction) => void
   className: string
+  tooltipDelay?: number
   monochrome?: boolean
 }) {
   const activeStyle = monochrome
@@ -1895,7 +1899,7 @@ function TalkButton({
   const micOpen = !state.micMuted && (state.status === 'listening' || state.pttLocked)
   if (busy) {
     return (
-      <Tooltip>
+      <Tooltip delayDuration={tooltipDelay}>
         <TooltipTrigger asChild>
           <button
             type="button"
@@ -1912,7 +1916,7 @@ function TalkButton({
     )
   }
   return (
-    <Tooltip>
+    <Tooltip delayDuration={tooltipDelay}>
       <TooltipTrigger asChild>
         <button
           type="button"
@@ -1969,12 +1973,14 @@ function TalkButton({
 function EndButton({
   sendAction,
   className,
+  tooltipDelay,
 }: {
   sendAction: (action: PopoutAction) => void
   className: string
+  tooltipDelay?: number
 }) {
   return (
-    <Tooltip>
+    <Tooltip delayDuration={tooltipDelay}>
       <TooltipTrigger asChild>
         <button
           type="button"
@@ -2016,6 +2022,7 @@ function TuckedDock({
   onExpand: () => void
   vertical?: boolean
 }) {
+  const tooltipDelay = 700
   const shortcutState = useQuickAskShortcut()
   const shortcutLabel = quickAskShortcut.formatShortcut(shortcutState.accelerator, isMac)
   const expandTip = `Bring the text back (${shortcutLabel} works too)`
@@ -2029,10 +2036,9 @@ function TuckedDock({
       <div className="relative">
         <div
           style={dragRegion}
-          title="Drag to move your Skipper"
           className={`flex cursor-grab items-center gap-2.5 border border-black/10 bg-white/[0.97] shadow-[0_12px_32px_rgba(0,0,0,0.18),0_2px_10px_rgba(0,0,0,0.10)] dark:border-white/15 dark:bg-neutral-900/[0.97] dark:shadow-[0_12px_32px_rgba(0,0,0,0.55),0_2px_10px_rgba(0,0,0,0.4)] ${vertical ? 'w-12 flex-col rounded-l-2xl border-r-0 px-1 py-2' : 'rounded-full p-2 pr-2.5'}`}
         >
-          <Tooltip>
+          <Tooltip delayDuration={tooltipDelay}>
             <TooltipTrigger asChild>
               <button
                 type="button"
@@ -2040,7 +2046,6 @@ function TuckedDock({
                 onClick={onExpand}
                 aria-label={vertical ? `${statusLabel} · Open text panel` : 'Bring the text back'}
                 aria-expanded={false}
-                title={logoTip}
                 className={`flex-none transition active:scale-95 ${vertical ? 'cursor-pointer rounded-[11px] hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:hover:bg-white/10' : ''}`}
               >
                 {vertical ? (
@@ -2055,9 +2060,9 @@ function TuckedDock({
           {vertical ? (
             <span role="status" className="sr-only">{statusLabel}</span>
           ) : <StatusLane state={state} activity={activity} bars={20} className="w-[112px]" />}
-          <ShareButton state={state} sendAction={sendAction} className="h-7 w-7" />
-          <TalkButton state={state} sendAction={sendAction} monochrome={vertical} className={vertical ? 'h-7 w-7' : 'h-8 w-8'} />
-          {!vertical && <EndButton sendAction={sendAction} className="h-7 w-7" />}
+          <ShareButton tooltipDelay={tooltipDelay} state={state} sendAction={sendAction} className="h-7 w-7" />
+          <TalkButton tooltipDelay={tooltipDelay} state={state} sendAction={sendAction} monochrome={vertical} className={vertical ? 'h-7 w-7' : 'h-8 w-8'} />
+          {!vertical && <EndButton tooltipDelay={tooltipDelay} sendAction={sendAction} className="h-7 w-7" />}
         </div>
         {/* The vertical dock expands through its Assistant icon. Keep the
             camera pill's existing external handle. */}
@@ -2065,7 +2070,7 @@ function TuckedDock({
           className="pointer-events-none absolute z-10 flex h-8 w-8 items-center justify-center"
           style={{ ...noDragRegion, top: 'calc(50% - 16px)', left: '-16px' }}
         >
-          <Tooltip>
+          <Tooltip delayDuration={tooltipDelay}>
             <TooltipTrigger asChild>
               <button
                 type="button"
