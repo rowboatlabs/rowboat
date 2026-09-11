@@ -252,8 +252,16 @@ export interface Store {
   getTopic(spaceId: string, topicId: string): Promise<Topic | undefined>;
   /** The topic annotating this thread, if one exists (rootMessageId is unique). */
   getTopicByRoot(spaceId: string, rootMessageId: string): Promise<Topic | undefined>;
-  /** Insert or update (retitle / archive flips) — the row is the whole object. */
+  /**
+   * Insert or update (retitle / archive flips) — the row is the whole object
+   * EXCEPT the document link, which only setTopicDocument writes (the wire
+   * shape carries a projected path, never the stored asset id).
+   */
   putTopic(topic: Topic): Promise<void>;
+  /** Point the topic at one asset (by internal id) or clear it (null). Reads project the live path. */
+  setTopicDocument(spaceId: string, topicId: string, assetId: string | null): Promise<void>;
+  /** The stored link itself (live or trashed asset alike) — what detach's idempotency reads. */
+  getTopicDocument(spaceId: string, topicId: string): Promise<string | undefined>;
   /** "Convert back to thread": the row goes, the messages never knew it existed. */
   deleteTopic(spaceId: string, topicId: string): Promise<void>;
   listTopics(spaceId: string, includeArchived: boolean): Promise<Topic[]>;

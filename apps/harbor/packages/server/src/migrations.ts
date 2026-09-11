@@ -601,6 +601,19 @@ export const MIGRATIONS: Migration[] = [
       )`,
     ],
   },
+  {
+    id: '019-topic-document',
+    statements: [
+      // The discussion's one file (2026-09-11): a nullable pointer on the
+      // annotation row to the asset's INTERNAL id (the inode model, 007), so
+      // a rename never breaks the link. Reads project the asset's current
+      // live path onto the wire; a trashed file simply projects nothing
+      // until restored — no cascade, no cleanup. The partial index answers
+      // "which discussions are about this file" from the file's side.
+      `alter table topics add column if not exists document_asset_id text`,
+      `create index if not exists topics_document on topics (space_id, document_asset_id) where document_asset_id is not null`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

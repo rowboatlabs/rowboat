@@ -14,15 +14,15 @@ export const SpaceEvent = z.discriminatedUnion('type', [
   z.object({ type: z.literal('message'), message: Message }),
   /**
    * A topic's lifecycle: created (promote or from-scratch), retitled,
-   * archived, unarchived — the full row plus who did it, so clients can
-   * render attributed lifecycle lines in the thread. Idempotent re-archives
-   * emit nothing; a reply reviving an archived topic emits 'unarchived'
-   * attributed to the replier.
+   * archived, unarchived, document attached/detached — the full row plus
+   * who did it, so clients can render attributed lifecycle lines in the
+   * thread. Idempotent re-archives emit nothing; a reply reviving an
+   * archived topic emits 'unarchived' attributed to the replier.
    */
   z.object({
     type: z.literal('topic'),
     topic: Topic,
-    action: z.enum(['created', 'retitled', 'archived', 'unarchived']),
+    action: z.enum(['created', 'retitled', 'archived', 'unarchived', 'document_attached', 'document_detached']),
     by: Attribution,
   }),
   /** The row deleted ("convert back to thread") — the thread itself is untouched. */

@@ -112,8 +112,15 @@ team and a Roadboard space (`src/main.ts`).
 - **EOF newline** merges as a three-way property: the side that changed it wins;
   both-changed-and-disagree keeps the newline.
 - **Replying to an archived topic unarchives it** (and emits a topic event).
-- **Topic events** fire on create/retitle/archive/unarchive/merge — not on
-  every reply; clients derive `lastActivityAt`/counts from message events.
+- **Topic events** fire on create/retitle/archive/unarchive/merge and on
+  document attach/detach — not on every reply; clients derive
+  `lastActivityAt`/counts from message events.
+- **A topic may be about one file** (`Topic.documentPath`, migration 019 —
+  2026-09-11): the row stores the asset's internal id, the wire projects the
+  asset's CURRENT live path (renames keep the link; a trashed file projects
+  nothing until restored). `createTopic.documentPath` sets it at birth;
+  `manageTopic` `attach_document` (path, replaces) / `detach_document` change
+  it, idempotently. The UI opens the file beside the thread.
 - **Every space is born with its stream**: a `kind: 'general'` topic (titled
   "messages", empty — no seed message) seeded at space creation, exactly one
   per space (partial unique index). All other topics are `kind: 'discussion'`.

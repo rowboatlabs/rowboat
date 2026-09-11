@@ -1,13 +1,14 @@
 import { MESSAGE_PROSE } from '@/components/spaces/message-prose'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
-import { Anchor, Archive, ArchiveRestore, ArrowLeft, ArrowUp, Bell, BellOff, Bot, Loader2, MessageSquareOff, MoreHorizontal, Maximize2, Minimize2, Pencil, ShieldAlert, Square, Tag, X } from 'lucide-react'
+import { Anchor, Archive, ArchiveRestore, ArrowLeft, ArrowUp, Bell, BellOff, Bot, FileText, Loader2, MessageSquareOff, MoreHorizontal, Maximize2, Minimize2, Paperclip, Pencil, ShieldAlert, Square, Tag, Unlink, X } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { ArtifactsSummary } from '@/components/spaces/artifacts'
+import { AttachDocumentDialog } from '@/components/spaces/attach-document-dialog'
 import { MemberAvatar, MemberProfilePopover } from '@/components/spaces/atoms'
 import { Composer, type AgentOptions } from '@/components/spaces/composer'
 import { ForwardDialog } from '@/components/spaces/forward-dialog'
@@ -561,6 +562,10 @@ export function ThreadPane({
         }
     }
 
+    // The one file this discussion is about: picked from the space's live
+    // files; the org keeps the link by asset id, so it survives renames.
+    const [attaching, setAttaching] = useState(false)
+
     // Inline title editing (window.prompt is a no-op in Electron). null = not
     // editing; the same field serves rename AND first-time goal setting.
     const [editingTitle, setEditingTitle] = useState<string | null>(null)
@@ -705,6 +710,17 @@ export function ThreadPane({
                         </>
                     )}
                 </span>
+                {topic?.documentPath && (
+                    <button
+                        type="button"
+                        onClick={() => onOpenFile(topic.documentPath!)}
+                        title={`Open ${topic.documentPath} beside this discussion`}
+                        className="inline-flex h-6 max-w-[12rem] shrink-0 items-center gap-1 rounded-md border border-border bg-background px-1.5 text-[11px] text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                    >
+                        <FileText className="size-3 shrink-0" />
+                        <span className="truncate font-mono">{topic.documentPath.split('/').pop()}</span>
+                    </button>
+                )}
                 <span className="flex-1" />
                 {hasSession && onOpenSession && (
                     // Persistent, unlike the working chip: the conversation the
@@ -736,6 +752,14 @@ export function ThreadPane({
                                 <DropdownMenuItem onClick={() => setEditingTitle(topic.title)}>
                                     <Pencil className="size-3.5 mr-2" /> Rename
                                 </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => setAttaching(true)}>
+                                    <Paperclip className="size-3.5 mr-2" /> {topic.documentPath ? 'Change linked file…' : 'Link a file…'}
+                                </DropdownMenuItem>
+                                {topic.documentPath && (
+                                    <DropdownMenuItem onClick={() => void manage({ action: 'detach_document' })}>
+                                        <Unlink className="size-3.5 mr-2" /> Unlink file
+                                    </DropdownMenuItem>
+                                )}
                                 {topic.archived ? (
                                     <DropdownMenuItem onClick={() => void manage({ action: 'unarchive' })}><ArchiveRestore className="size-3.5 mr-2" /> Unarchive</DropdownMenuItem>
                                 ) : (
@@ -918,6 +942,17 @@ export function ThreadPane({
             )}
             </div>
 
+            {attaching && topic && (
+                <AttachDocumentDialog
+                    entries={entries}
+                    current={topic.documentPath}
+                    onClose={() => setAttaching(false)}
+                    onPick={(path) => {
+                        setAttaching(false)
+                        if (path !== topic.documentPath) void manage({ action: 'attach_document', path })
+                    }}
+                />
+            )}
             {forwarding && (
                 <ForwardDialog org={org} space={space} message={forwarding} memberNames={memberNames} onClose={() => setForwarding(null)} />
             )}

@@ -347,7 +347,7 @@ async function dispatch(
       return { topics: await service.listTopics(ctx, a.spaceId, a.includeArchived ?? false) };
     }
     case 'create_topic': {
-      const a = args as { spaceId: string; rootMessageId?: string; title: string; body?: string };
+      const a = args as { spaceId: string; rootMessageId?: string; title: string; body?: string; documentPath?: string };
       // One-of lives here rather than in the JSON schema (kept plain on purpose).
       if ((a.rootMessageId === undefined) === (a.body === undefined)) {
         throw new HarborError('invalid_request', 'provide exactly one of rootMessageId (promote a thread) or body (post + annotate)');
@@ -356,6 +356,7 @@ async function dispatch(
         ...(a.rootMessageId !== undefined ? { rootMessageId: a.rootMessageId } : {}),
         title: a.title,
         ...(a.body !== undefined ? { body: a.body } : {}),
+        ...(a.documentPath !== undefined ? { documentPath: a.documentPath } : {}),
         actingMode: actor.actingMode,
         ...(actor.agentName ? { agentName: actor.agentName } : {}),
       });
@@ -365,8 +366,9 @@ async function dispatch(
       const a = args as {
         spaceId: string;
         topicId: string;
-        action: 'retitle' | 'archive' | 'unarchive' | 'remove';
+        action: 'retitle' | 'archive' | 'unarchive' | 'remove' | 'attach_document' | 'detach_document';
         title?: string;
+        path?: string;
       };
       const attribution = {
         actingMode: actor.actingMode,
@@ -376,6 +378,9 @@ async function dispatch(
       if (a.action === 'retitle') {
         if (!a.title) throw new HarborError('invalid_request', 'retitle needs a title');
         action = { action: 'retitle', title: a.title, ...attribution };
+      } else if (a.action === 'attach_document') {
+        if (!a.path) throw new HarborError('invalid_request', 'attach_document needs a path');
+        action = { action: 'attach_document', path: a.path, ...attribution };
       } else {
         action = { action: a.action, ...attribution };
       }

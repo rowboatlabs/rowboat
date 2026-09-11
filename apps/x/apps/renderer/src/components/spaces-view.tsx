@@ -586,6 +586,35 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         // current width when it runs; a resize must not re-place anything.
     }, [selKey])
 
+    // A discussion's linked file opens beside it (2026-09-11). The org
+    // projects the link as the file's CURRENT live path, so whatever lands
+    // here exists. Once per visit: closing the column marks the thread as
+    // dismissed until the reader leaves it (closeDoc); a different file they
+    // open themselves is never fought — this only fires when the selection
+    // or the link itself changes, and only where two columns fit (narrow,
+    // the chat wins, as everywhere). The stream copy is read first: it is
+    // the one a local attach updates before the feed refetches.
+    const selectedThreadRoot = selection.kind === 'thread' ? selection.rootMessageId : null
+    const linkedDocPath = selectedThreadRoot
+        ? (stream.topicsByRoot.get(selectedThreadRoot) ?? feed.topics.find((t) => t.rootMessageId === selectedThreadRoot))?.documentPath ?? null
+        : null
+    const linkedDocDismissedRef = useRef<string | null>(null)
+    useEffect(() => {
+        // Leaving the dismissed thread — for the stream or another thread —
+        // forgets the dismissal; a file opened from it keeps it.
+        if (selection.kind === 'general' || (selectedThreadRoot && linkedDocDismissedRef.current !== selectedThreadRoot)) {
+            linkedDocDismissedRef.current = null
+        }
+    }, [selection.kind, selectedThreadRoot])
+    useEffect(() => {
+        if (!selectedThreadRoot || !linkedDocPath || !twoFits) return
+        if (linkedDocDismissedRef.current === selectedThreadRoot) return
+        setDocPath((open) => (open === linkedDocPath ? open : linkedDocPath))
+        setChatOpen(true)
+        // Keyed on the thread and the link — not on docPath, which the
+        // reader moves freely once the column is open.
+    }, [selectedThreadRoot, linkedDocPath, twoFits])
+
     // The last closed file — the header chip reopens it beside the chat.
     const [lastDoc, setLastDoc] = useState<{ path: string; fromThreadRootId?: string } | null>(null)
 
@@ -631,6 +660,9 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         if (selection.kind === 'file' && !spaces.isWhiteboardPath(selection.path)) {
             setLastDoc({ path: selection.path, fromThreadRootId: selection.fromThreadRootId })
         }
+        // Closing beside a discussion is a choice: its linked file stays
+        // closed until the reader leaves and comes back.
+        if (chatRootId) linkedDocDismissedRef.current = chatRootId
         setDocPath(null)
         setChatOpen(true)
         if (selection.kind === 'file' || selection.kind === 'whiteboard' || selection.kind === 'attachment') {

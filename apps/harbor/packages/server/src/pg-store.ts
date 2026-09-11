@@ -121,7 +121,18 @@ interface TopicRow {
   created_by: Topic['createdBy'];
   created_at: string;
   archived: boolean;
+  /** Projected by TOPIC_SELECT: the linked asset's current path, null unless it is live. */
+  document_path: string | null;
 }
+
+/**
+ * Every topic read goes through this projection: the row plus the linked
+ * document's CURRENT live path (migration 019). A trashed file projects
+ * null — the link is kept on the row and comes back on restore.
+ */
+const TOPIC_SELECT = `select t.*, a.path as document_path
+  from topics t
+  left join assets a on a.space_id = t.space_id and a.id = t.document_asset_id and a.state = 'live'`;
 
 function rowToTopic(r: TopicRow): Topic {
   return {
@@ -132,6 +143,7 @@ function rowToTopic(r: TopicRow): Topic {
     createdBy: r.created_by,
     createdAt: r.created_at,
     archived: r.archived,
+    ...(r.document_path !== null && r.document_path !== undefined ? { documentPath: r.document_path } : {}),
   };
 }
 
@@ -686,8 +698,20 @@ export class PgStore implements Store {
   // --- topics & messages -----------------------------------------------------
 
   async getTopic(spaceId: string, topicId: string): Promise<Topic | undefined> {
-    const rows = await this.sql.query<TopicRow>('select * from topics where space_id = $1 and id = $2', [spaceId, topicId]);
+    const rows = await this.sql.query<TopicRow>(`${TOPIC_SELECT} where t.space_id = $1 and t.id = $2`, [spaceId, topicId]);
     return rows[0] ? rowToTopic(rows[0]) : undefined;
+  }
+
+  async setTopicDocument(spaceId: string, topicId: string, assetId: string | null): Promise<void> {
+    await this.sql.query('update topics set document_asset_id = $3 where space_id = $1 and id = $2', [spaceId, topicId, assetId]);
+  }
+
+  async getTopicDocument(spaceId: string, topicId: string): Promise<string | undefined> {
+    const rows = await this.sql.query<{ document_asset_id: string | null }>(
+      'select document_asset_id from topics where space_id = $1 and id = $2',
+      [spaceId, topicId],
+    );
+    return rows[0]?.document_asset_id ?? undefined;
   }
 
   async putTopic(topic: Topic): Promise<void> {
@@ -715,7 +739,7 @@ export class PgStore implements Store {
 
   async getTopicByRoot(spaceId: string, rootMessageId: string): Promise<Topic | undefined> {
     const rows = await this.sql.query<TopicRow>(
-      'select * from topics where space_id = $1 and root_message_id = $2',
+      `${TOPIC_SELECT} where t.space_id = $1 and t.root_message_id = $2`,
       [spaceId, rootMessageId],
     );
     return rows[0] ? rowToTopic(rows[0]) : undefined;
@@ -723,8 +747,8 @@ export class PgStore implements Store {
 
   async listTopics(spaceId: string, includeArchived: boolean): Promise<Topic[]> {
     const rows = await this.sql.query<TopicRow>(
-      `select * from topics where space_id = $1 ${includeArchived ? '' : 'and archived = false'}
-       order by created_at desc, id desc`,
+      `${TOPIC_SELECT} where t.space_id = $1 ${includeArchived ? '' : 'and t.archived = false'}
+       order by t.created_at desc, t.id desc`,
       [spaceId],
     );
     return rows.map(rowToTopic);
@@ -788,8 +812,8 @@ export class PgStore implements Store {
   async searchTopics(spaceId: string, query: SearchQuery, limit: number): Promise<Topic[]> {
     if (query.terms.length === 0) return [];
     const rows = await this.sql.query<TopicRow>(
-      `select * from topics where space_id = $1 and title_tsv @@ to_tsquery('simple', $2)
-       order by ts_rank(title_tsv, to_tsquery('simple', $2)) desc, created_at desc, id desc limit $3`,
+      `${TOPIC_SELECT} where t.space_id = $1 and t.title_tsv @@ to_tsquery('simple', $2)
+       order by ts_rank(t.title_tsv, to_tsquery('simple', $2)) desc, t.created_at desc, t.id desc limit $3`,
       [spaceId, toTsQueryString(query), limit],
     );
     return rows.map(rowToTopic);

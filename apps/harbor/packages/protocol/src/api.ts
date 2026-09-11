@@ -621,6 +621,8 @@ export const routes = {
         rootMessageId: MessageId.optional(),
         title: z.string().min(1).max(256),
         body: z.string().min(1).max(65_536).optional(),
+        /** Attach a space file at birth (a live asset path; moved paths resolve). */
+        documentPath: AssetPath.optional(),
         actingMode: ActingMode,
         agentName: z.string().max(64).optional(),
       })
@@ -635,6 +637,9 @@ export const routes = {
    * One-row lifecycle ops on the annotation — none can touch a message.
    * `remove` deletes the row ("convert back to thread"); the conversation
    * stays in the stream untouched, and re-promoting later is lossless.
+   * `attach_document` links one live space file (Topic.documentPath) —
+   * replacing any earlier link; `detach_document` clears it. Both are
+   * idempotent (no event when nothing changes).
    */
   manageTopic: {
     method: 'POST',
@@ -645,6 +650,8 @@ export const routes = {
       z.object({ action: z.literal('archive'), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
       z.object({ action: z.literal('unarchive'), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
       z.object({ action: z.literal('remove'), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+      z.object({ action: z.literal('attach_document'), path: AssetPath, actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+      z.object({ action: z.literal('detach_document'), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
     ]),
     response: z.object({ topic: Topic }),
   },

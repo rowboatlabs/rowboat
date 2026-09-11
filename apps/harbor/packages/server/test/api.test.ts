@@ -568,6 +568,86 @@ describe('feed: the stream, threads, and topic annotations', () => {
     expect(removedEvent.removal).toMatchObject({ topicId: made.body.topic.id, rootMessageId: made.body.rootMessage.id, by: { memberId: 'ramnique' } });
     live.close();
   });
+
+  it('a discussion can be about one file: the link follows renames, hides in the trash, returns on restore', async () => {
+    const live = await liveClient(harbor, 'dev-ramnique');
+    live.send({ kind: 'subscribe', spaceId });
+    await live.until((frames) => frames.some((f) => f.kind === 'subscribed'), 'subscribed');
+
+    const file = await ramnique.post(`/v1/spaces/${spaceId}/changes`, {
+      assetPath: 'briefs/launch.md', baseVersion: 0, newContent: '# Launch brief\n', actingMode: 'direct',
+    });
+    expect(file.body.outcome).toBe('applied');
+
+    // Born with its file — the path is validated before anything is written.
+    const missing = await gagan.post(`/v1/spaces/${spaceId}/topics`, {
+      title: 'Review: launch brief', body: 'Thoughts on the brief?', documentPath: 'briefs/nope.md', actingMode: 'direct',
+    });
+    expect(missing.status).toBe(404);
+    const made = await gagan.post(`/v1/spaces/${spaceId}/topics`, {
+      title: 'Review: launch brief', body: 'Thoughts on the brief?', documentPath: 'briefs/launch.md', actingMode: 'direct',
+    });
+    expect(made.status).toBe(200);
+    expect(made.body.topic.documentPath).toBe('briefs/launch.md');
+    const topicId = made.body.topic.id;
+
+    // Every read surface projects it: the rail, the thread, the stream page.
+    const thread = await ramnique.get(`/v1/spaces/${spaceId}/threads/${made.body.rootMessage.id}`);
+    expect(thread.body.topic.documentPath).toBe('briefs/launch.md');
+    const rail = await ramnique.get(`/v1/spaces/${spaceId}/topics`);
+    expect(rail.body.topics.find((t: any) => t.id === topicId).documentPath).toBe('briefs/launch.md');
+
+    // Re-attaching the same file is a no-op; attaching another replaces.
+    const same = await ramnique.post(`/v1/spaces/${spaceId}/topics/${topicId}`, { action: 'attach_document', path: 'briefs/launch.md', actingMode: 'direct' });
+    expect(same.body.topic.documentPath).toBe('briefs/launch.md');
+    await ramnique.post(`/v1/spaces/${spaceId}/changes`, { assetPath: 'briefs/faq.md', baseVersion: 0, newContent: '# FAQ\n', actingMode: 'direct' });
+    const swapped = await ramnique.post(`/v1/spaces/${spaceId}/topics/${topicId}`, { action: 'attach_document', path: 'briefs/faq.md', actingMode: 'direct' });
+    expect(swapped.body.topic.documentPath).toBe('briefs/faq.md');
+    // An old path still reaches its file through the redirect; a missing one refuses.
+    const bad = await ramnique.post(`/v1/spaces/${spaceId}/topics/${topicId}`, { action: 'attach_document', path: 'briefs/nope.md', actingMode: 'direct' });
+    expect(bad.status).toBe(404);
+    const back = await ramnique.post(`/v1/spaces/${spaceId}/topics/${topicId}`, { action: 'attach_document', path: 'briefs/launch.md', actingMode: 'direct' });
+    expect(back.body.topic.documentPath).toBe('briefs/launch.md');
+
+    // The link is to the FILE, not the path: a rename shows the new path.
+    const moved = await gagan.post(`/v1/spaces/${spaceId}/assets/move`, {
+      fromPath: 'briefs/launch.md', toPath: 'briefs/launch-v2.md', baseVersion: 1, actingMode: 'direct',
+    });
+    expect(moved.body.outcome).toBe('moved');
+    expect((await ramnique.get(`/v1/spaces/${spaceId}/topics`)).body.topics.find((t: any) => t.id === topicId).documentPath).toBe('briefs/launch-v2.md');
+
+    // Trash hides it (no cleanup anywhere); restore brings it straight back.
+    const deleted = await gagan.post(`/v1/spaces/${spaceId}/assets/delete`, { path: 'briefs/launch-v2.md', baseVersion: 1, actingMode: 'direct' });
+    expect(deleted.body.outcome).toBe('deleted');
+    expect((await ramnique.get(`/v1/spaces/${spaceId}/topics`)).body.topics.find((t: any) => t.id === topicId).documentPath).toBeUndefined();
+    await gagan.post(`/v1/spaces/${spaceId}/assets/restore`, { path: 'briefs/launch-v2.md', actingMode: 'direct' });
+    expect((await ramnique.get(`/v1/spaces/${spaceId}/topics`)).body.topics.find((t: any) => t.id === topicId).documentPath).toBe('briefs/launch-v2.md');
+
+    // Detach clears it; detaching again is silent.
+    const detached = await ramnique.post(`/v1/spaces/${spaceId}/topics/${topicId}`, { action: 'detach_document', actingMode: 'direct' });
+    expect(detached.status).toBe(200);
+    expect(detached.body.topic.documentPath).toBeUndefined();
+    await ramnique.post(`/v1/spaces/${spaceId}/topics/${topicId}`, { action: 'detach_document', actingMode: 'direct' });
+
+    await live.until(
+      (frames) => frames.some((f) => f.kind === 'event' && f.event.type === 'topic' && f.event.action === 'document_detached'),
+      'document lifecycle events',
+    );
+    const actions = live
+      .events()
+      .filter((f) => f.event.type === 'topic' && f.event.topic.id === topicId)
+      .map((f) => (f.event.type === 'topic' ? f.event.action : ''));
+    // created (with the file), the swap, the swap back, the detach — no-ops emit nothing.
+    expect(actions).toEqual(['created', 'document_attached', 'document_attached', 'document_detached']);
+    const createdEvent = live.events().find((f) => f.event.type === 'topic' && f.event.topic.id === topicId)!.event as Extract<
+      ReturnType<typeof live.events>[number]['event'],
+      { type: 'topic' }
+    >;
+    expect(createdEvent.topic.documentPath).toBe('briefs/launch.md');
+    live.close();
+
+    await ramnique.post(`/v1/spaces/${spaceId}/topics/${topicId}`, { action: 'remove', actingMode: 'direct' });
+  });
 });
 
 describe('reactions', () => {
