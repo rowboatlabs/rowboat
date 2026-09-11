@@ -557,10 +557,7 @@ export function SidebarContentPanel({
         }))
         const items: UpcomingMeeting[] = []
         for (const r of settled) if (r.status === 'fulfilled' && r.value) items.push(r.value)
-        items.sort((a, b) => {
-          if (a.isAllDay !== b.isAllDay) return a.isAllDay ? -1 : 1
-          return a.start.getTime() - b.start.getTime()
-        })
+        items.sort((a, b) => a.start.getTime() - b.start.getTime())
         if (!cancelled) setMeetings(items.slice(0, 1))
       } catch { /* ignore */ }
     }
@@ -1503,8 +1500,11 @@ function isSameLocalDay(a: Date, b: Date): boolean {
 }
 
 function formatMeetingTime(event: UpcomingMeeting): string {
-  if (event.isAllDay) return 'All day'
   const now = new Date()
+  if (event.isAllDay) {
+    if (isSameLocalDay(event.start, now)) return 'All day'
+    return `${event.start.toLocaleDateString([], { month: 'numeric', day: 'numeric' })} All day`
+  }
   const tomorrow = new Date(now)
   tomorrow.setDate(tomorrow.getDate() + 1)
   const time = event.start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
