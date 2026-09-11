@@ -3,9 +3,9 @@
  * the SKIPPER, the hover companion.
  *
  * `pinned`: a live voice session's floating surface. The Skipper card —
- * control strip + composer, one corner-anchored draggable unit (text
- * visible by default, foldable down to the mini call pill — folding never
- * moves the corner). A live CAMERA swaps the card for the pill (top-right),
+ * control strip + composer, freely draggable (text
+ * visible by default, foldable down to a vertical control rail — folding
+ * docks the controls to the right edge). A live CAMERA swaps the card for the pill (top-right),
  * where the self-view lives. Both survive blur — this is a companion the
  * user works next to.
  *
@@ -29,7 +29,7 @@
  * window. While the Skipper is up the chord folds/unfolds its text panel.
  *
  * Geometry: a transparent frame with the card bottom-anchored, its
- * bottom-right at the anchor corner. The zone above the card is invisible
+ * collapsed rail flush against the display’s right edge. The zone above the card is invisible
  * stage — it
  * exists so in-window popovers (the @-mention list, the model picker, menus)
  * can open upward without being clipped, and so the text panel can grow
@@ -167,13 +167,10 @@ export function onAppWindowClosed() {
   if (mode === 'pinned') setCompanionPinned(false);
 }
 
-// The Skipper's anchor: the bottom-right corner of the window — where the
-// card (and, folded, the mini pill) sits. The user can drag the Skipper
-// anywhere; collapsing and expanding the text panel both keep this corner
-// fixed, so the dock never jumps — the panel folds toward it and unfolds
-// from it. Updated from user drags (the 'move' listener); programmatic
-// setBounds are guarded out.
+// Keep the floating text panel's position separate from the collapsed dock.
+// Only explicit moves of the expanded card update its remembered bounds.
 let skipperCorner: { x: number; y: number } | null = null;
+let skipperFloatingBounds: Electron.Rectangle | null = null;
 let applyingBounds = false;
 
 // --- Drag cursor ---
@@ -198,7 +195,11 @@ function markDragging(win: BrowserWindow) {
   dragIdleTimer = setTimeout(() => {
     dragIdleTimer = null;
     dragging = false;
-    if (!win.isDestroyed()) win.webContents.send('quick-ask:dragging', { dragging: false });
+    if (!win.isDestroyed()) {
+      // Keep the chosen height/display, then settle back against its right edge.
+      if (mode === 'pinned' && pinnedCollapsed && appliedExpandedSurface === 'card') applyExpandedSurface(win, 'card');
+      win.webContents.send('quick-ask:dragging', { dragging: false });
+    }
   }, DRAG_IDLE_MS);
 }
 
@@ -310,7 +311,7 @@ function setBoundsGuarded(win: BrowserWindow, bounds: Electron.Rectangle) {
 
 function defaultSkipperCorner(display: Electron.Display): { x: number; y: number } {
   const wa = display.workArea;
-  return { x: wa.x + wa.width - 24, y: wa.y + wa.height - 24 };
+  return { x: wa.x + wa.width - 1, y: wa.y + wa.height - 24 };
 }
 
 // Corner-anchored bounds: the window's bottom-right pinned to the corner,
@@ -498,7 +499,11 @@ function createWindow(): BrowserWindow {
   win.on('move', () => {
     if (applyingBounds || win.isDestroyed() || mode !== 'pinned') return;
     const b = win.getBounds();
-    skipperCorner = { x: b.x + b.width, y: b.y + b.height };
+    // Keep the display lookup inside the window, even at a shared screen edge.
+    if (!pinnedCollapsed) {
+      skipperCorner = { x: b.x + b.width - 1, y: b.y + b.height - 1 };
+      if (appliedExpandedSurface === 'card') skipperFloatingBounds = { ...b };
+    }
     markDragging(win);
   });
   win.on('closed', () => {
@@ -635,7 +640,7 @@ export function setCompanionPinned(pinned: boolean) {
     // ONE landing for every entry point: the Skipper lands as one unit —
     // the card with the text panel already open (text is the default;
     // tucking is the user's gesture, never the arrival state) — anchored
-    // at its corner (last dragged spot, else bottom-right of the cursor's
+    // at its corner (last dragged spot, else the right edge of the cursor's
     // display). A camera-on call lands as the pill instead (self-view).
     pinnedCollapsed = false;
     const surface = getExpandedSurface();
@@ -680,13 +685,7 @@ export function setCompanionPinned(pinned: boolean) {
   }
 }
 
-/**
- * Text-panel fold/unfold of the Skipper (and the pill's tuck). Both states
- * anchor on the SAME corner — the mascot's spot — so folding the text never
- * moves the mascot: the panel collapses toward it and unfolds from it,
- * wherever the user last dragged it. The pill keeps its edge-preserving
- * resize (camera surface, different geometry).
- */
+/** Fold to the right edge; unfold to the text panel's remembered position. */
 export function setPinnedCollapsed(collapsed: boolean) {
   const win = getQuickAskWindow();
   if (!win || mode !== 'pinned') return;
@@ -695,23 +694,27 @@ export function setPinnedCollapsed(collapsed: boolean) {
   // drifted out of sync (or a window left at the wrong size) self-heals on
   // the next request instead of wedging — a "no change" request is cheap
   // and idempotent.
+  if (collapsed && !pinnedCollapsed && appliedExpandedSurface === 'card') {
+    skipperFloatingBounds = { ...win.getBounds() };
+  }
   pinnedCollapsed = collapsed;
   if (collapsed) {
-    // Fold the CARD: the frame does not change at all. The card simply
-    // stops painting beside the mascot and the space it leaves is
-    // click-through, so there is nothing to shrink — and nothing to flash.
-    // (Shrinking here is what made the fold flicker: the frame is
-    // bottom-right anchored, so a 504px square becoming a 225px one moves
-    // its origin by 279px. On a transparent window the OS frame change and
-    // Chromium's repaint of the newly-sized viewport are not atomic, so for
-    // a frame or two the tucked layout was composited against the other
-    // geometry — the mascot appearing well above where it lands.)
+    // Keep the frame size stable, and dock after the text folds away.
     const seq = pushMode(win);
     // Decided on the surface just PUSHED (not the one whose geometry is
     // currently applied), so the bounds always match the layout the
     // renderer is about to paint — the two can disagree for a tick when a
     // device flips mid-fold.
-    if (getExpandedSurface() === 'card') return;
+    if (getExpandedSurface() === 'card') {
+      afterModePainted(win, seq, () => {
+        // Match the renderer's CARD_EXIT_MS; a rapid unfold cancels this move.
+        setTimeout(() => {
+          if (win.isDestroyed() || mode !== 'pinned' || !pinnedCollapsed || modeSeq !== seq) return;
+          if (getExpandedSurface() === 'card') applyExpandedSurface(win, 'card');
+        }, 200);
+      });
+      return;
+    }
     // The PILL still resizes: it folds to a DIFFERENT layout (the corner
     // mini call pill), which only lands right in pill-sized bounds. Push
     // the layout FIRST and shrink once it's painted — shrinking first
@@ -732,8 +735,7 @@ export function setPinnedCollapsed(collapsed: boolean) {
     });
     return;
   }
-  // Unfold: grow the window first (the extra area is transparent stage —
-  // the mascot doesn't move), then the card paints into it.
+  // Restore the floating position before the text panel paints.
   applyExpandedSurface(win, getExpandedSurface());
   pushMode(win);
   if (appliedExpandedSurface === 'card') win.focus();
@@ -742,12 +744,20 @@ export function setPinnedCollapsed(collapsed: boolean) {
 function applyExpandedSurface(win: BrowserWindow, surface: 'card' | 'pill') {
   appliedExpandedSurface = surface;
   if (surface === 'card') {
-    // Skipper geometry: corner-anchored frame — the card sits at the
-    // bottom with the mascot at its right edge, i.e. at the anchor.
+    // Expanded text is free-floating; only the collapsed rail snaps to the edge.
     if (!skipperCorner) {
       skipperCorner = defaultSkipperCorner(screen.getDisplayMatching(win.getBounds()));
     }
-    setBoundsGuarded(win, cornerBounds(skipperCorner, scaled(SKIPPER_FRAME_WIDTH), scaled(SKIPPER_FRAME_HEIGHT)));
+    const bounds = pinnedCollapsed
+      ? { ...win.getBounds(), width: scaled(SKIPPER_FRAME_WIDTH), height: scaled(SKIPPER_FRAME_HEIGHT) }
+      : { ...(skipperFloatingBounds ?? cornerBounds(skipperCorner, scaled(SKIPPER_FRAME_WIDTH), scaled(SKIPPER_FRAME_HEIGHT))) };
+    const wa = screen.getDisplayMatching(bounds).workArea;
+    bounds.x = pinnedCollapsed
+      ? wa.x + wa.width - bounds.width
+      : Math.max(wa.x, Math.min(bounds.x, wa.x + wa.width - bounds.width));
+    bounds.y = Math.max(wa.y, Math.min(bounds.y, wa.y + wa.height - bounds.height));
+    if (!pinnedCollapsed) skipperFloatingBounds = { ...bounds };
+    setBoundsGuarded(win, bounds);
     win.setHasShadow(false);
     return;
   }

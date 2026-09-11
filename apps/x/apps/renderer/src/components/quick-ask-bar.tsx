@@ -45,7 +45,7 @@ import * as pttKey from '@x/shared/src/ptt-key.js'
 import { useQuickAskShortcut } from '@/hooks/use-quick-ask-shortcut'
 import { useWindowTheme } from '@/hooks/use-window-theme'
 
-import { TalkingHead } from '@/components/talking-head'
+import { MascotFaceIcon, TalkingHead } from '@/components/talking-head'
 import { isMac } from '@/lib/shortcut'
 import { isChatMessage } from '@/lib/chat-conversation'
 import { runLogToConversation } from '@/lib/run-to-conversation'
@@ -635,9 +635,8 @@ export function QuickAskBar() {
   }
 
   // THE SKIPPER — the one hover surface: a single self-contained card
-  // (destination strip, composer, footer dock). Folded, the same corner
-  // shows the mini call pill instead (TuckedDock below) — the two swap in
-  // place, anchored on the bottom-right corner main keeps fixed.
+  // (destination strip, composer, footer dock). The text card floats freely;
+  // folding replaces it with a vertical dock at the screen's right edge.
   return (
     <div data-qa-passthrough className="flex h-screen w-screen select-none flex-col overflow-hidden">
       <style>{COMPANION_MOTION_CSS}</style>
@@ -657,13 +656,9 @@ export function QuickAskBar() {
         onMouseDown={collapsed ? undefined : stageTuck}
       />
 
-      {/* Bottom row: the card (or, folded, the mini pill) on the transparent
-          stage. The row is PADDED so the card's CSS shadow fades inside the
-          window instead of clipping at its rectangular edge (which read as
-          a grey rectangle around the card). The paddings are IDENTICAL in
-          both states — with the corner-anchored window, that keeps the
-          fold/unfold swap on the exact same screen pixels. */}
-      <div data-qa-passthrough className="flex shrink-0 items-end justify-end px-6 pb-5">
+      {/* Preserve the text panel's original padding. Only the collapsed dock
+          removes the right gutter to meet the screen edge. */}
+      <div data-qa-passthrough className={`flex shrink-0 items-end justify-end pb-5 ${card.mounted ? 'px-6' : 'pl-6'}`}>
       {card.mounted && (
       <div
         data-qa-passthrough
@@ -710,7 +705,9 @@ export function QuickAskBar() {
             the answer will land); window actions, the device controls
             (share, talk/stop) and the small ✕ dismiss on the right. */}
         <div className="flex items-center gap-2 px-4 pt-3">
-          <LogoTile size={28} glow={callState.status === 'thinking'} />
+          <span className={`flex h-7 w-7 flex-none items-center justify-center rounded-[11px] text-neutral-700 dark:text-neutral-200 ${callState.status === 'thinking' ? 'qa-logo-glow' : ''}`}>
+            <MascotFaceIcon size={24} />
+          </span>
           {/* Destination chip: WHICH chat this session is continuing — click
               for the recents switcher (opens upward into the transparent
               stage). Retargets subsequent questions mid-session. */}
@@ -997,13 +994,11 @@ export function QuickAskBar() {
       </div>
       )}
 
-      {/* Folded: the mini call pill takes the card's corner — the whole
-          card compressed to one row (its lane keeps narrating, and a live
-          share's consent badge never folds away). Mounted only after the
-          card's exit finishes (usePresence), so the two never fight over
-          the row. */}
+      {/* After the text card exits, main moves this vertical dock to the
+          screen's right edge while remembering the floating card position. */}
       {!card.mounted && (
         <TuckedDock
+          vertical
           state={callState}
           activity={heldActivity}
           sendAction={sendAction}
@@ -1260,8 +1255,63 @@ const COMPANION_MOTION_CSS = `
   }
   .qa-spin { animation: qa-spin-slow 2.4s linear infinite; }
   .qa-logo-glow { animation: qa-glow 1.8s ease-in-out infinite; }
+  /* Animate only the halo: the icon and its clickable bounds stay still. */
+  .qa-dock-logo { position: relative; --qa-halo-rgb: 23 23 23; }
+  html.dark .qa-dock-logo { --qa-halo-rgb: 229 229 229; }
+  .qa-dock-logo::after {
+    content: ''; position: absolute; inset: 0; border-radius: 50%;
+    pointer-events: none; border: 1.5px solid transparent;
+  }
+  .qa-dock-logo[data-status="listening"]::after {
+    border: 2px solid rgb(var(--qa-halo-rgb));
+    box-shadow: 0 0 6px rgb(var(--qa-halo-rgb) / 30%);
+    animation: qa-dock-listening 1.4s ease-in-out infinite;
+  }
+  .qa-dock-logo[data-status="listening"]::before {
+    content: ''; position: absolute; inset: 0; border-radius: 50%;
+    pointer-events: none; border: 1px solid rgb(var(--qa-halo-rgb));
+    animation: qa-dock-listening-ripple 1.4s ease-out infinite;
+  }
+  .qa-dock-logo[data-status="thinking"]::after {
+    border-top-color: rgb(var(--qa-halo-rgb)); border-right-color: rgb(var(--qa-halo-rgb));
+    animation: qa-spin-slow 2.4s linear infinite;
+  }
+  .qa-speech-crests {
+    position: absolute; inset: -5px; width: 44px; height: 44px;
+    pointer-events: none; color: rgb(var(--qa-halo-rgb));
+  }
+  .qa-speech-crest {
+    transform-box: fill-box; transform-origin: center;
+    opacity: 0; animation: qa-speech-crest 1.35s ease-in-out infinite;
+  }
+  .qa-speech-crest-left { --qa-crest-shift: -1px; }
+  .qa-speech-crest-right { --qa-crest-shift: 1px; animation-delay: 0.08s; }
+  .qa-speech-crest-outer { animation-delay: 0.18s; }
+  .qa-speech-crest-right.qa-speech-crest-outer { animation-delay: 0.26s; }
+  @keyframes qa-dock-listening {
+    0%, 100% {
+      opacity: 0.45; transform: scale(0.9);
+      box-shadow: 0 0 3px rgb(var(--qa-halo-rgb) / 15%);
+    }
+    50% {
+      opacity: 1; transform: scale(1.12);
+      box-shadow: 0 0 0 2px rgb(var(--qa-halo-rgb) / 18%), 0 0 14px rgb(var(--qa-halo-rgb) / 65%);
+    }
+  }
+  @keyframes qa-dock-listening-ripple {
+    0% { opacity: 0.7; transform: scale(0.95); }
+    85%, 100% { opacity: 0; transform: scale(1.3); }
+  }
+  @keyframes qa-speech-crest {
+    0%, 100% { opacity: 0; transform: translateX(0) scaleY(0.88); }
+    25% { opacity: 0.8; transform: translateX(0) scaleY(1); }
+    75% { opacity: 0; transform: translateX(var(--qa-crest-shift)) scaleY(1.1); }
+  }
   @media (prefers-reduced-motion: reduce) {
     .qa-card-in, .qa-rise, .qa-pop, .qa-wave-bar, .qa-speak-bar, .qa-logo-glow, .qa-spin { animation: none; }
+    .qa-speech-crest { animation: none; opacity: 0.65; transform: none; }
+    .qa-dock-logo[data-status]::after { animation: none; }
+    .qa-dock-logo[data-status]::before { animation: none; opacity: 0; }
     .qa-card-out { animation: none; opacity: 0; }
     .qa-shimmer { animation: none; background: none; -webkit-text-fill-color: currentColor; }
   }
@@ -1791,13 +1841,15 @@ function ShareButton({
   state,
   sendAction,
   className,
+  tooltipDelay,
 }: {
   state: CallState
   sendAction: (action: PopoutAction) => void
   className: string
+  tooltipDelay?: number
 }) {
   return (
-    <Tooltip>
+    <Tooltip delayDuration={tooltipDelay}>
       <TooltipTrigger asChild>
         <button
           type="button"
@@ -1840,23 +1892,30 @@ function TalkButton({
   state,
   sendAction,
   className,
+  tooltipDelay,
+  monochrome = false,
 }: {
   state: CallState
   sendAction: (action: PopoutAction) => void
   className: string
+  tooltipDelay?: number
+  monochrome?: boolean
 }) {
+  const activeStyle = monochrome
+    ? 'bg-neutral-900 text-white ring-neutral-900 hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:ring-neutral-100 dark:hover:bg-white'
+    : 'bg-sky-500 text-white ring-sky-500 hover:bg-sky-400'
   const busy = state.status === 'thinking' || state.status === 'speaking'
   const micOpen = !state.micMuted && (state.status === 'listening' || state.pttLocked)
   if (busy) {
     return (
-      <Tooltip>
+      <Tooltip delayDuration={tooltipDelay}>
         <TooltipTrigger asChild>
           <button
             type="button"
             style={noDragRegion}
             onClick={() => sendAction('stop-speaking')}
             aria-label="Stop the assistant"
-            className={`flex flex-none items-center justify-center rounded-full bg-sky-500 text-white transition hover:bg-sky-400 active:scale-95 ${className}`}
+            className={`flex flex-none items-center justify-center rounded-full transition active:scale-95 ${activeStyle} ${className}`}
           >
             <Square className="h-3.5 w-3.5 fill-current" />
           </button>
@@ -1866,7 +1925,7 @@ function TalkButton({
     )
   }
   return (
-    <Tooltip>
+    <Tooltip delayDuration={tooltipDelay}>
       <TooltipTrigger asChild>
         <button
           type="button"
@@ -1893,7 +1952,7 @@ function TalkButton({
           }
           className={`flex flex-none select-none items-center justify-center rounded-full ring-1 ring-inset transition active:scale-95 ${
             micOpen
-              ? 'bg-sky-500 text-white ring-sky-500'
+              ? (monochrome ? activeStyle : 'bg-sky-500 text-white ring-sky-500')
               : state.micMuted
                 ? 'bg-red-500/10 text-red-500 ring-red-500/30 hover:bg-red-500/20'
                 : CHIP_IDLE
@@ -1923,12 +1982,14 @@ function TalkButton({
 function EndButton({
   sendAction,
   className,
+  tooltipDelay,
 }: {
   sendAction: (action: PopoutAction) => void
   className: string
+  tooltipDelay?: number
 }) {
   return (
-    <Tooltip>
+    <Tooltip delayDuration={tooltipDelay}>
       <TooltipTrigger asChild>
         <button
           type="button"
@@ -1958,6 +2019,7 @@ function EndButton({
  * direction (the user tucked the text away; unfold to read).
  */
 function TuckedDock({
+  vertical = false,
   state,
   activity,
   sendAction,
@@ -1967,49 +2029,65 @@ function TuckedDock({
   activity?: string | null
   sendAction: (action: PopoutAction) => void
   onExpand: () => void
+  vertical?: boolean
 }) {
+  const tooltipDelay = 700
   const shortcutState = useQuickAskShortcut()
   const shortcutLabel = quickAskShortcut.formatShortcut(shortcutState.accelerator, isMac)
   const expandTip = `Bring the text back (${shortcutLabel} works too)`
+  const statusKind = laneKind(state)
+  const statusLabel = statusKind === 'thinking'
+    ? (activity ?? 'Thinking…')
+    : STATUS_DISPLAY[statusKind].label
+  const logoTip = vertical ? `${statusLabel} · Click to open text (${shortcutLabel})` : expandTip
   return (
     <div data-qa-passthrough className="qa-pop flex min-w-0 flex-col items-end">
       <div className="relative">
         <div
           style={dragRegion}
-          title="Drag to move your Skipper"
-          className="flex cursor-grab items-center gap-2.5 rounded-full border border-black/10 bg-white/[0.97] p-2 pr-2.5 shadow-[0_12px_32px_rgba(0,0,0,0.18),0_2px_10px_rgba(0,0,0,0.10)] dark:border-white/15 dark:bg-neutral-900/[0.97] dark:shadow-[0_12px_32px_rgba(0,0,0,0.55),0_2px_10px_rgba(0,0,0,0.4)]"
+          className={`flex cursor-grab items-center gap-2.5 border border-black/10 bg-white/[0.97] shadow-[0_12px_32px_rgba(0,0,0,0.18),0_2px_10px_rgba(0,0,0,0.10)] dark:border-white/15 dark:bg-neutral-900/[0.97] dark:shadow-[0_12px_32px_rgba(0,0,0,0.55),0_2px_10px_rgba(0,0,0,0.4)] ${vertical ? 'w-12 flex-col rounded-l-2xl border-r-0 px-1 py-2' : 'rounded-full p-2 pr-2.5'}`}
         >
-          <Tooltip>
+          <Tooltip delayDuration={tooltipDelay}>
             <TooltipTrigger asChild>
               <button
                 type="button"
                 style={noDragRegion}
                 onClick={onExpand}
-                aria-label="Bring the text back"
-                className="flex-none transition active:scale-95"
+                aria-label={vertical ? `${statusLabel} · Open text panel` : 'Bring the text back'}
+                aria-expanded={false}
+                className={`flex-none transition active:scale-95 ${vertical ? 'cursor-pointer rounded-[11px] hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:hover:bg-white/10' : ''}`}
               >
-                <LogoTile size={34} glow={state.status === 'thinking'} />
+                {vertical ? (
+                  <span data-status={statusKind} className="qa-dock-logo flex h-[34px] w-[34px] items-center justify-center text-neutral-700 dark:text-neutral-200">
+                    <MascotFaceIcon size={24} />
+                    {statusKind === 'speaking' && (
+                      <svg className="qa-speech-crests" viewBox="0 0 44 44" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
+                        <g className="qa-speech-crest qa-speech-crest-left"><path d="M9 16 Q5 22 9 28" /></g>
+                        <g className="qa-speech-crest qa-speech-crest-left qa-speech-crest-outer"><path d="M5 12 Q-1 22 5 32" /></g>
+                        <g className="qa-speech-crest qa-speech-crest-right"><path d="M35 16 Q39 22 35 28" /></g>
+                        <g className="qa-speech-crest qa-speech-crest-right qa-speech-crest-outer"><path d="M39 12 Q45 22 39 32" /></g>
+                      </svg>
+                    )}
+                  </span>
+                ) : <LogoTile size={34} glow={state.status === 'thinking'} />}
               </button>
             </TooltipTrigger>
-            <TooltipContent side="top">{expandTip}</TooltipContent>
+            <TooltipContent side={vertical ? 'left' : 'top'}>{logoTip}</TooltipContent>
           </Tooltip>
-          <StatusLane state={state} activity={activity} bars={20} className="w-[112px]" />
-          <ShareButton state={state} sendAction={sendAction} className="h-7 w-7" />
-          <TalkButton state={state} sendAction={sendAction} className="h-8 w-8" />
-          <EndButton sendAction={sendAction} className="h-7 w-7" />
+          {vertical ? (
+            <span role="status" className="sr-only">{statusLabel}</span>
+          ) : <StatusLane state={state} activity={activity} bars={20} className="w-[112px]" />}
+          <ShareButton tooltipDelay={tooltipDelay} state={state} sendAction={sendAction} className="h-7 w-7" />
+          <TalkButton tooltipDelay={tooltipDelay} state={state} sendAction={sendAction} monochrome={vertical} className={vertical ? 'h-7 w-7' : 'h-8 w-8'} />
+          {!vertical && <EndButton tooltipDelay={tooltipDelay} sendAction={sendAction} className="h-7 w-7" />}
         </div>
-        {/* Unfold handle on the pill's left edge — the MIRROR of the card's
-            tuck handle (same circle, chevrons pointing the other way), so
-            hiding and un-hiding read as one gesture with two directions.
-            Same drag-region-hole discipline as that handle: the wrapper is
-            the static, transform-free hole, oversized around the art, with
-            pointer-events-none + the button opting back in; the motion
-            lives on the button. */}
-        <span
+        {/* The vertical dock expands through its Assistant icon. Keep the
+            camera pill's existing external handle. */}
+        {!vertical && <span
           className="pointer-events-none absolute z-10 flex h-8 w-8 items-center justify-center"
           style={{ ...noDragRegion, top: 'calc(50% - 16px)', left: '-16px' }}
         >
-          <Tooltip>
+          <Tooltip delayDuration={tooltipDelay}>
             <TooltipTrigger asChild>
               <button
                 type="button"
@@ -2022,7 +2100,7 @@ function TuckedDock({
             </TooltipTrigger>
             <TooltipContent side="top">{expandTip}</TooltipContent>
           </Tooltip>
-        </span>
+        </span>}
       </div>
     </div>
   )
