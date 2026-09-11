@@ -1272,6 +1272,27 @@ describe("failures (26.6)", () => {
         ]);
     });
 
+    it("a stream failure records its cause chain and timing", async () => {
+        const cause = Object.assign(new Error("read ETIMEDOUT"), { code: "ETIMEDOUT" });
+        const dropped: ScriptedCall = async function* () {
+            yield { type: "reasoning_delta", delta: "thinking" };
+            throw new TypeError("terminated", { cause });
+        };
+        const { runtime, repo } = makeRuntime({ models: [dropped] });
+        const turnId = await newTurn(runtime);
+        const { outcome } = await advanceAndSettle(runtime, turnId);
+        expect(outcome).toMatchObject({
+            status: "failed",
+            error: "terminated [cause: read ETIMEDOUT]",
+        });
+        const log = await persisted(repo, turnId);
+        expect(log.find((e) => e.type === "model_call_failed")).toMatchObject({
+            error: "terminated [cause: read ETIMEDOUT]",
+            elapsedMs: expect.any(Number),
+            idleMs: expect.any(Number),
+        });
+    });
+
     it("a sync tool throw becomes an error result and the turn continues", async () => {
         const tools: RuntimeTool[] = [
             syncTool(echoDescriptor, async () => {
