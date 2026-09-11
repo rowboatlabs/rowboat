@@ -656,13 +656,13 @@ export function QuickAskBar() {
         onMouseDown={collapsed ? undefined : stageTuck}
       />
 
-      {/* The collapsed dock meets the right edge. The expanded card adds its
-          own right margin so it floats with room for its shadow on both sides. */}
-      <div data-qa-passthrough className="flex shrink-0 items-end justify-end pl-6 pb-5">
+      {/* Preserve the text panel's original padding. Only the collapsed dock
+          removes the right gutter to meet the screen edge. */}
+      <div data-qa-passthrough className={`flex shrink-0 items-end justify-end pb-5 ${card.mounted ? 'px-6' : 'pl-6'}`}>
       {card.mounted && (
       <div
         data-qa-passthrough
-        className={`relative mr-6 min-w-0 flex-1 ${card.exiting ? 'qa-card-out pointer-events-none' : 'qa-card-in'}`}
+        className={`relative min-w-0 flex-1 ${card.exiting ? 'qa-card-out pointer-events-none' : 'qa-card-in'}`}
       >
       {/* Near-white card with a hairline dark border in light; near-black
           with a hairline light one in dark. #810 introduced the light skin as
@@ -973,7 +973,7 @@ export function QuickAskBar() {
           beneath it. */}
       <span
         className="pointer-events-none absolute z-10 flex h-8 w-8 items-center justify-center"
-        style={{ ...noDragRegion, top: 'calc(50% - 16px)', left: '-16px' }}
+        style={{ ...noDragRegion, top: 'calc(50% - 16px)', right: '-16px' }}
       >
         <Tooltip>
           <TooltipTrigger asChild>
