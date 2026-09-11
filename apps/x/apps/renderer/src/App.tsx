@@ -7974,6 +7974,7 @@ function App() {
                     const isActive = tab.id === activeChatTabId
                     return (
                       <ChatSessionPane
+                        onOpenRevisedChat={openAssistantRun}
                         // Keyed by CHAT identity: rebinding this tab to a
                         // different session remounts the panel (fresh
                         // scroll/DOM state); first-send runId binding does not.
@@ -8086,6 +8087,7 @@ function App() {
             {(isRightPaneContext || useBottomTabs) && (
               <CodeDiffOpenerProvider onOpenDiff={codeChatMain ? openCodeDiff : null}>
               <ChatSidebar
+                onOpenRevisedChat={openAssistantRun}
                 floating={floatingAssistant && !isRightPaneMaximized}
                 keepMounted={projectViewActive || useBottomTabs || chatTabs.length > 1}
                 onMinimize={showAssistantDock && !dockFullScreen ? () => {

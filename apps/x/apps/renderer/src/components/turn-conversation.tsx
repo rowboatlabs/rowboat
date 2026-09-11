@@ -1,6 +1,7 @@
 import * as React from 'react'
 import { cn } from '@/lib/utils'
 import { MessageContextMenu } from '@/components/message-context-menu'
+import { EditChatMessage } from '@/components/edit-chat-message'
 import {
   Message,
   MessageContent,
@@ -109,6 +110,7 @@ const EMPTY_AUTO_DECISIONS: ChatTabViewState['autoPermissionDecisions'] = new Ma
 
 export interface TurnConversationProps {
   items: ConversationItem[]
+  onEditMessage?: (messageId: string, text: string) => Promise<void>
   /**
    * Tool-row open state. Chat panes lift this to the tab store so it survives
    * tab switches; omit both for local per-mount state (transcript surfaces).
@@ -134,6 +136,7 @@ export interface TurnConversationProps {
 
 export function TurnConversation({
   items,
+  onEditMessage,
   isToolOpen: isToolOpenProp,
   onToolOpenChange: onToolOpenChangeProp,
   permissionRequests = EMPTY_PERMISSION_REQUESTS,
@@ -187,7 +190,10 @@ export function TurnConversation({
                       </MessageResponse>
                     </MessageContent>
                   </MessageContextMenu>
-                  <MessageCopyButton text={item.content} className="mt-0.5" />
+                  <div className="mt-0.5 flex items-center gap-1">
+                    <MessageCopyButton text={item.content} />
+                    {onEditMessage && item.id.endsWith(':user') && <EditChatMessage text={item.content} onSave={text => onEditMessage(item.id, text)} />}
+                  </div>
                 </div>
               )}
             </Message>
@@ -219,7 +225,10 @@ export function TurnConversation({
                   </MessageResponse>
                 </MessageContent>
               </MessageContextMenu>
-              <MessageCopyButton text={message} className="mt-0.5" />
+              <div className="mt-0.5 flex items-center gap-1">
+                <MessageCopyButton text={message} />
+                {onEditMessage && item.id.endsWith(':user') && <EditChatMessage text={message} onSave={text => onEditMessage(item.id, text)} />}
+              </div>
             </div>
           </Message>
         )

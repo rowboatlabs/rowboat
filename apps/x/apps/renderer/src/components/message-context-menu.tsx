@@ -1,15 +1,17 @@
 import { useState, type ReactNode } from 'react'
 import { Copy } from 'lucide-react'
 import { toast } from '@/lib/toast'
+import { copyChatMessage } from '@/lib/chat-clipboard'
 import {
   ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 
 export function MessageContextMenu({ text, children }: { text: string; children: ReactNode }) {
   const [selectionText, setSelectionText] = useState('')
-  const copy = async (value: string) => {
+  const copy = async (value: string, formatted = false) => {
     try {
-      await navigator.clipboard.writeText(value)
+      if (formatted) await copyChatMessage(value)
+      else await navigator.clipboard.writeText(value)
       toast('Copied to clipboard', 'success')
     } catch {
       toast('Could not copy to clipboard', 'error')
@@ -45,7 +47,7 @@ export function MessageContextMenu({ text, children }: { text: string; children:
             <ContextMenuSeparator />
           </>
         )}
-        <ContextMenuItem disabled={!text} onSelect={() => { void copy(text) }}>
+        <ContextMenuItem disabled={!text} onSelect={() => { void copy(text, true) }}>
           <Copy /> Copy message
         </ContextMenuItem>
       </ContextMenuContent>

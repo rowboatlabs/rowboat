@@ -1419,6 +1419,7 @@ export function setupIpcHandlers() {
       const sessionId = await container.resolve<ISessions>('sessions').createSession(args);
       return { sessionId };
     },
+    'sessions:editMessage': async (_event, args) => container.resolve<ISessions>('sessions').editMessage(args.sessionId, args.turnId, args.text),
     'sessions:list': async () => {
       await sessionsIndexReady;
       return { sessions: container.resolve<ISessions>('sessions').listSessions() };

@@ -24,6 +24,8 @@ import {
 import type { ComponentProps, HTMLAttributes, ReactElement } from "react";
 import { createContext, memo, useContext, useEffect, useState } from "react";
 import { Streamdown } from "streamdown";
+import { copyChatMessage } from "@/lib/chat-clipboard";
+import { toast } from "@/lib/toast";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"];
@@ -56,13 +58,17 @@ export const MessageCopyButton = ({
     <button
       type="button"
       aria-label="Copy message"
-      onClick={() => {
-        void navigator.clipboard.writeText(text);
-        setCopied(true);
-        window.setTimeout(() => setCopied(false), 1200);
+      onClick={async () => {
+        try {
+          await copyChatMessage(text);
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1200);
+        } catch {
+          toast('Could not copy to clipboard', 'error');
+        }
       }}
       className={cn(
-        "shrink-0 rounded-md p-1.5 text-muted-foreground/60 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100",
+        "shrink-0 rounded-md p-1.5 text-muted-foreground/60 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100",
         className
       )}
     >
