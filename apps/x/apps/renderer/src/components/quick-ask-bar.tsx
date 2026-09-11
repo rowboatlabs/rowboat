@@ -2005,11 +2005,16 @@ function TuckedDock({
           <TalkButton state={state} sendAction={sendAction} className={vertical ? 'h-7 w-7' : 'h-8 w-8'} />
           <EndButton sendAction={sendAction} className="h-7 w-7" />
         </div>
-        {/* Keep the unfold control outside the rail, stacked above the vertical
-            dock. The camera pill retains its original left-edge handle. */}
+        {/* Unfold handle on the pill's left edge — the MIRROR of the card's
+            tuck handle (same circle, chevrons pointing the other way), so
+            hiding and un-hiding read as one gesture with two directions.
+            Same drag-region-hole discipline as that handle: the wrapper is
+            the static, transform-free hole, oversized around the art, with
+            pointer-events-none + the button opting back in; the motion
+            lives on the button. */}
         <span
           className="pointer-events-none absolute z-10 flex h-8 w-8 items-center justify-center"
-          style={{ ...noDragRegion, ...(vertical ? { top: '-40px', right: '8px' } : { top: 'calc(50% - 16px)', left: '-16px' }) }}
+          style={{ ...noDragRegion, top: 'calc(50% - 16px)', left: '-16px' }}
         >
           <Tooltip>
             <TooltipTrigger asChild>
