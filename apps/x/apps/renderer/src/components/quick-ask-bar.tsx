@@ -1276,11 +1276,18 @@ const COMPANION_MOTION_CSS = `
     border-top-color: rgb(var(--qa-halo-rgb)); border-right-color: rgb(var(--qa-halo-rgb));
     animation: qa-spin-slow 2.4s linear infinite;
   }
-  .qa-dock-logo[data-status="speaking"]::after {
-    border: 3px double rgb(var(--qa-halo-rgb));
-    box-shadow: 0 0 0 2px rgb(var(--qa-halo-rgb) / 12%);
-    animation: qa-dock-speaking 1.4s ease-out infinite;
+  .qa-speech-crests {
+    position: absolute; inset: -5px; width: 44px; height: 44px;
+    pointer-events: none; color: rgb(var(--qa-halo-rgb));
   }
+  .qa-speech-crest {
+    transform-box: fill-box; transform-origin: center;
+    opacity: 0; animation: qa-speech-crest 1.35s ease-in-out infinite;
+  }
+  .qa-speech-crest-left { --qa-crest-shift: -1px; }
+  .qa-speech-crest-right { --qa-crest-shift: 1px; animation-delay: 0.08s; }
+  .qa-speech-crest-outer { animation-delay: 0.18s; }
+  .qa-speech-crest-right.qa-speech-crest-outer { animation-delay: 0.26s; }
   @keyframes qa-dock-listening {
     0%, 100% {
       opacity: 0.45; transform: scale(0.9);
@@ -1295,12 +1302,14 @@ const COMPANION_MOTION_CSS = `
     0% { opacity: 0.7; transform: scale(0.95); }
     85%, 100% { opacity: 0; transform: scale(1.3); }
   }
-  @keyframes qa-dock-speaking {
-    0% { box-shadow: 0 0 0 0 rgb(var(--qa-halo-rgb) / 25%); }
-    100% { box-shadow: 0 0 0 4px rgb(var(--qa-halo-rgb) / 0%); }
+  @keyframes qa-speech-crest {
+    0%, 100% { opacity: 0; transform: translateX(0) scaleY(0.88); }
+    25% { opacity: 0.8; transform: translateX(0) scaleY(1); }
+    75% { opacity: 0; transform: translateX(var(--qa-crest-shift)) scaleY(1.1); }
   }
   @media (prefers-reduced-motion: reduce) {
     .qa-card-in, .qa-rise, .qa-pop, .qa-wave-bar, .qa-speak-bar, .qa-logo-glow, .qa-spin { animation: none; }
+    .qa-speech-crest { animation: none; opacity: 0.65; transform: none; }
     .qa-dock-logo[data-status]::after { animation: none; }
     .qa-dock-logo[data-status]::before { animation: none; opacity: 0; }
     .qa-card-out { animation: none; opacity: 0; }
@@ -2051,6 +2060,14 @@ function TuckedDock({
                 {vertical ? (
                   <span data-status={statusKind} className="qa-dock-logo flex h-[34px] w-[34px] items-center justify-center text-neutral-700 dark:text-neutral-200">
                     <MascotFaceIcon size={24} />
+                    {statusKind === 'speaking' && (
+                      <svg className="qa-speech-crests" viewBox="0 0 44 44" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
+                        <g className="qa-speech-crest qa-speech-crest-left"><path d="M9 16 Q5 22 9 28" /></g>
+                        <g className="qa-speech-crest qa-speech-crest-left qa-speech-crest-outer"><path d="M5 12 Q-1 22 5 32" /></g>
+                        <g className="qa-speech-crest qa-speech-crest-right"><path d="M35 16 Q39 22 35 28" /></g>
+                        <g className="qa-speech-crest qa-speech-crest-right qa-speech-crest-outer"><path d="M39 12 Q45 22 39 32" /></g>
+                      </svg>
+                    )}
                   </span>
                 ) : <LogoTile size={34} glow={state.status === 'thinking'} />}
               </button>
