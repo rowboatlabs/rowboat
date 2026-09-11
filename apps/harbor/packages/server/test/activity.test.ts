@@ -4,7 +4,7 @@ import { readActivity } from '@rowboat/spaces-protocol';
 import { PgStore } from '../src/pg-store.js';
 import { startHarbor, type HarborOptions, type RunningHarbor } from '../src/server.js';
 import type { SqlDb } from '../src/sql.js';
-import { agentClient, callStructured, restClient } from './helpers.js';
+import { agentClient, callStructured, liveClient, restClient } from './helpers.js';
 import { pgliteDb } from './pglite.js';
 
 // Activity (2026-09-10, layer 3): everything that involves the member, as a
@@ -196,12 +196,57 @@ describe.each([['memory'], ['postgres']] as const)('activity (%s store)', (store
     expect(await unreadIds()).not.toContain(`m:${dmRoot.id}`);
   });
 
+  it('mark everything read: streams to head, involved threads to their newest reply, reactions seen — echoed as read_mark frames', async () => {
+    // Fresh unread of every kind, incl. a thread Ramnique does not follow.
+    const root = await post(arjun, main, 'another root by arjun');
+    await tick();
+    const here = await post(harsh, main, '[@here](#here) again, in a thread', { threadRoot: root.id });
+    await tick();
+    await post(harsh, dm.id, 'dm: still there?');
+    await tick();
+    await react(arjun, main, r1.id, '🚀');
+    expect((await activity(ramnique, '?unread=true')).items.length).toBeGreaterThanOrEqual(3);
+
+    const mine = await liveClient(harbor, 'dev-ramnique');
+    const theirs = await liveClient(harbor, 'dev-harsh');
+    const res = await ramnique.post('/v1/activity/read-all', {});
+    expect(res.status).toBe(200);
+    const heads = (await ramnique.get('/v1/unread')).body.spaces as Array<{ spaceId: string; head: number; readOffset: number; unreadRoots: number; threads: unknown[] }>;
+    expect(res.body.spaces).toEqual(expect.arrayContaining(heads.map((s) => ({ spaceId: s.spaceId, readOffset: s.head }))));
+    expect(res.body.threads).toBeGreaterThanOrEqual(1);
+    expect(heads.every((s) => s.readOffset === s.head && s.unreadRoots === 0 && s.threads.length === 0)).toBe(true);
+    expect((await activity(ramnique, '?unread=true')).items).toEqual([]);
+    expect((await activity(ramnique)).seenAt).toBe(res.body.seenAt);
+    // The unfollowed thread took a mark at the @here without a follow.
+    expect((await ramnique.get(`/v1/spaces/${main}/threads/${root.id}`)).body).toMatchObject({ following: false, readOffset: here.offset });
+    // Every mark that moved echoed to Ramnique's connections, none to Harsh's.
+    await mine.until((frames) => frames.some((f) => f.kind === 'read_mark' && f.threadRootId === root.id), 'thread read_mark');
+    expect(mine.frames.some((f) => f.kind === 'read_mark' && f.spaceId === main && f.threadRootId === undefined)).toBe(true);
+    expect(theirs.frames.filter((f) => f.kind === 'read_mark')).toEqual([]);
+    mine.close();
+    theirs.close();
+    // Idempotent: nothing moves twice.
+    const again = await ramnique.post('/v1/activity/read-all', {});
+    expect(again.body.threads).toBe(0);
+    // Scoped to one space: only that space's stream and threads.
+    await post(harsh, main, 'one more root');
+    await post(harsh, dm.id, 'one more dm');
+    expect((await ramnique.post('/v1/activity/read-all', { spaceId: main })).body.spaces.map((s: { spaceId: string }) => s.spaceId)).toEqual([main]);
+    expect(kinds(await activity(ramnique, '?unread=true'))).toEqual(['dm']);
+    // The agent face does the same.
+    const agent = await agentClient(harbor, 'dev-ramnique', { agentName: 'Rowboat' });
+    const out = await callStructured<{ spaces: Array<{ spaceId: string }>; threads: number }>(agent, 'mark_all_read', {});
+    expect(out.spaces.map((s) => s.spaceId)).toEqual(expect.arrayContaining([main, dm.id]));
+    expect((await activity(ramnique, '?unread=true')).items).toEqual([]);
+    await agent.close();
+  });
+
   it('a deleted message leaves the feed; my own messages never enter it', async () => {
     const del = await harsh.post(`/v1/spaces/${main}/messages/${h1.id}/delete`, { actingMode: 'direct' });
     expect(del.status).toBe(200);
     const ids = (await activity(ramnique)).items.map((i) => i.id);
     expect(ids).not.toContain(`m:${h1.id}`);
-    expect(ids).toHaveLength(9);
+    expect(ids).toHaveLength(13);
     // Harsh's own view: the @here, my DM reply to him, and arjun's reply in a thread he follows (he replied in it).
     expect(kinds(await activity(harsh))).toEqual(['here', 'dm', 'reply']);
   });

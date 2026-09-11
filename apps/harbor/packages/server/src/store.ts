@@ -380,6 +380,13 @@ export interface Store {
    * reactions — so `unreadOnly` pages correctly.
    */
   listActivity(memberId: string, query: ActivityQuery): Promise<ActivityRow[]>;
+  /**
+   * "Mark everything read" for threads (2026-09-11): every thread in `spaceIds`
+   * holding an Activity row for the member — a mention, an @here, a reply in a
+   * DM, a reply in a thread they follow — takes a mark at its newest live reply
+   * (created unfollowed when no row exists). Returns only the marks that moved.
+   */
+  readAllThreads(memberId: string, spaceIds: string[], at: string): Promise<Array<{ spaceId: string; rootMessageId: string; readOffset: number }>>;
   getActivitySeenAt(memberId: string): Promise<string | undefined>;
   /** Monotone: an older `at` leaves the mark; returns the mark that stands. */
   advanceActivitySeenAt(memberId: string, at: string): Promise<string>;

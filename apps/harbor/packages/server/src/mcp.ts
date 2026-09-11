@@ -231,6 +231,10 @@ async function dispatch(
         ...(page.nextCursor !== undefined ? { cursor: page.nextCursor } : {}),
       };
     }
+    case 'mark_all_read': {
+      const a = args as { spaceId?: string };
+      return service.readAll(ctx, a.spaceId !== undefined ? { spaceId: a.spaceId } : {});
+    }
     case 'read_asset': {
       const a = args as { spaceId: string; path: string; version?: number };
       return service.readAsset(ctx, a.spaceId, a.path, a.version);

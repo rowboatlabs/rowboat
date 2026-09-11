@@ -746,6 +746,25 @@ export const routes = {
     request: z.object({ at: z.iso.datetime() }),
     response: z.object({ seenAt: z.iso.datetime() }),
   },
+  /**
+   * Mark everything read (2026-09-11): every space the member is in — or the
+   * one named — reads through its head, every thread holding an Activity row
+   * for them (a mention, an @here, a reply in a DM, a reply in a thread they
+   * follow) reads through its newest reply, and reactions read as seen. The
+   * same marks single reads move, all at once, so Activity, the badges and
+   * every device agree afterwards. Marks only advance: idempotent, and each
+   * mark that moved echoes as a `read_mark` frame. `threads` = marks moved.
+   */
+  readAll: {
+    method: 'POST',
+    path: '/v1/activity/read-all',
+    request: z.object({ spaceId: SpaceId.optional() }),
+    response: z.object({
+      spaces: z.array(z.object({ spaceId: SpaceId, readOffset: StreamOffset })),
+      threads: z.number().int().nonnegative(),
+      seenAt: z.iso.datetime(),
+    }),
+  },
 
   // --- search ---------------------------------------------------------------
   /**

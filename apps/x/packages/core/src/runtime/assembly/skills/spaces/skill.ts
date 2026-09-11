@@ -57,6 +57,7 @@ nobody and badges nobody.
 | "react", "pin" | \`react\` (pin is the 📌 emoji) |
 | "start a poll", "vote" | \`post_message\` with \`poll\` / \`vote_poll\` |
 | "title this thread", "archive it", "make it about roadmap.md" | \`create_topic\` / \`manage_topic\` (\`attach_document\`) |
+| "mark everything read", "clear my unread", "I'm caught up" | \`mark_all_read\` (\`spaceId\` for one space) — after the summary, never instead of it; it cannot be undone |
 | "add X to roadmap.md" | \`read_asset\` → \`propose_change\` |
 | "rename / move / delete / restore a file" | \`move_asset\` / \`delete_asset\` / \`restore_asset\` |
 | "share this image / PDF" | \`spaces-upload-blob\` → reference it in a post or file |

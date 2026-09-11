@@ -4198,6 +4198,13 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), at: z.string() }),
     res: z.object({ seenAt: z.string() }),
   },
+  // Mark everything read (2026-09-11): every space (or one) to head, every
+  // involved thread to its newest reply, reactions seen — the org moves the
+  // marks, the renderer refetches its snapshot.
+  'spaces:readAll': {
+    req: z.object({ orgId: z.string(), spaceId: z.string().optional() }),
+    res: z.object({ spaces: z.array(z.object({ spaceId: z.string(), readOffset: z.number() })), threads: z.number(), seenAt: z.string() }),
+  },
   // Scheduled sends and reminders — the main-side queue (core scheduler).
   // 'message' posts to the topic at `at`; 'reminder' notifies the member.
   'spaces:schedule': {

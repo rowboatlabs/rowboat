@@ -1227,6 +1227,31 @@ export class PgStore implements Store {
     return sortActivity(out).slice(0, q.limit);
   }
 
+  async readAllThreads(memberId: string, spaceIds: string[], at: string): Promise<Array<{ spaceId: string; rootMessageId: string; readOffset: number }>> {
+    if (spaceIds.length === 0) return [];
+    // One statement: the threads with an Activity row for the member (the
+    // same predicate listActivity uses, so the same indexes carry it), each
+    // marked at its newest live reply. `following` is never touched.
+    const rows = await this.sql.query<{ space_id: string; root_message_id: string; read_offset: number }>(
+      `insert into thread_read_marks (space_id, root_message_id, member_id, following, read_offset, updated_at)
+       select m.space_id, m.thread_root, $1, false, greatest(max(m.stream_offset), coalesce(r.last_reply_offset, 0)), $4
+         from messages m
+         join spaces s on s.id = m.space_id
+         join messages r on r.space_id = m.space_id and r.id = m.thread_root
+         left join thread_read_marks t on t.space_id = m.space_id and t.root_message_id = m.thread_root and t.member_id = $1
+        where m.space_id = any($2::text[]) and m.thread_root is not null and m.deleted_at is null
+          and m.author->>'memberId' <> $1
+          and (m.mentions @> $3::jsonb or m.mentions_here or s.kind = 'direct' or t.following)
+        group by m.space_id, m.thread_root, r.last_reply_offset
+       on conflict (space_id, root_message_id, member_id) do update set
+         read_offset = excluded.read_offset, updated_at = excluded.updated_at
+         where excluded.read_offset > thread_read_marks.read_offset
+       returning space_id, root_message_id, read_offset`,
+      [memberId, spaceIds, JSON.stringify([memberId]), at],
+    );
+    return rows.map((r) => ({ spaceId: r.space_id, rootMessageId: r.root_message_id, readOffset: r.read_offset }));
+  }
+
   async getActivitySeenAt(memberId: string): Promise<string | undefined> {
     const rows = await this.sql.query<{ seen_at: string }>('select seen_at from activity_seen where member_id = $1', [memberId]);
     return rows[0]?.seen_at;

@@ -1942,6 +1942,38 @@ export class HarborService {
     return { seenAt: await this.store.advanceActivitySeenAt(ctx.memberId, at) };
   }
 
+  /**
+   * "Mark everything read" (2026-09-11): every space the member is in (or the
+   * one named) reads through its head, every thread holding an Activity row
+   * for them reads through its newest reply, and reactions read as seen — so
+   * Activity, the rail and every other device agree. Cheap: one stream mark
+   * per space plus one statement for the threads. Marks only advance, so the
+   * call is idempotent; each mark that moved echoes to the member's other
+   * connections as a `read_mark` frame, the way single marks do.
+   */
+  async readAll(ctx: ActorCtx, input: { spaceId?: string }): Promise<{ spaces: Array<{ spaceId: string; readOffset: number }>; threads: number; seenAt: string }> {
+    let spaces = await this.store.listSpacesFor(ctx.memberId, { includeDirect: true });
+    if (input.spaceId !== undefined) {
+      await this.requireMember(ctx, input.spaceId);
+      spaces = spaces.filter((s) => s.id === input.spaceId);
+    }
+    const at = this.now();
+    const out: Array<{ spaceId: string; readOffset: number }> = [];
+    for (const space of spaces) {
+      const head = await this.store.head(space.id);
+      const before = await this.store.getStreamReadMark(space.id, ctx.memberId);
+      const readOffset = head > before ? await this.store.advanceStreamReadMark(space.id, ctx.memberId, head, at) : before;
+      out.push({ spaceId: space.id, readOffset });
+      if (readOffset > before) this.hub.publishToMember(ctx.memberId, { kind: 'read_mark', spaceId: space.id, offset: readOffset, at });
+    }
+    const threads = await this.store.readAllThreads(ctx.memberId, spaces.map((s) => s.id), at);
+    for (const t of threads) {
+      this.hub.publishToMember(ctx.memberId, { kind: 'read_mark', spaceId: t.spaceId, threadRootId: t.rootMessageId, offset: t.readOffset, at });
+    }
+    const seenAt = await this.store.advanceActivitySeenAt(ctx.memberId, at);
+    return { spaces: out, threads: threads.length, seenAt };
+  }
+
   /** Every space the member is in (DMs included): cursor, unread roots, unread followed threads. */
   async unread(ctx: ActorCtx): Promise<UnreadSnapshot> {
     const spaces = await this.store.listSpacesFor(ctx.memberId, { includeDirect: true });

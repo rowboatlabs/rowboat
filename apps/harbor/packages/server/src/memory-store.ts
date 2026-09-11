@@ -727,6 +727,32 @@ export class MemoryStore implements Store {
     return sortActivity(out).slice(0, q.limit);
   }
 
+  async readAllThreads(memberId: string, spaceIds: string[], at: string): Promise<Array<{ spaceId: string; rootMessageId: string; readOffset: number }>> {
+    const moved: Array<{ spaceId: string; rootMessageId: string; readOffset: number }> = [];
+    for (const spaceId of spaceIds) {
+      const s = this.spaces.get(spaceId);
+      if (!s) continue;
+      // Thread root → the newest offset an Activity row for the member sits at.
+      const targets = new Map<string, number>();
+      for (const m of s.messages) {
+        if (m.threadRoot === undefined || m.deletedAt || m.author.memberId === memberId) continue;
+        const mark = s.threadMarks.get(this.threadMarkKey(m.threadRoot, memberId));
+        const involved = m.mentions.includes(memberId) || m.mentionsHere || s.space.kind === 'direct' || mark?.following === true;
+        if (!involved) continue;
+        targets.set(m.threadRoot, Math.max(targets.get(m.threadRoot) ?? 0, m.offset));
+      }
+      for (const [rootMessageId, newest] of targets) {
+        const key = this.threadMarkKey(rootMessageId, memberId);
+        const current = s.threadMarks.get(key) ?? { following: false, readOffset: 0, updatedAt: at };
+        const readOffset = Math.max(newest, s.messagesById.get(rootMessageId)?.lastReplyOffset ?? 0);
+        if (readOffset <= current.readOffset) continue;
+        s.threadMarks.set(key, { ...current, readOffset, updatedAt: at });
+        moved.push({ spaceId, rootMessageId, readOffset });
+      }
+    }
+    return moved;
+  }
+
   async getActivitySeenAt(memberId: string): Promise<string | undefined> {
     return this.activitySeen.get(memberId);
   }

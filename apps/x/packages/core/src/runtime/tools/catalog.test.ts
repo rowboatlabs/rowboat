@@ -230,6 +230,7 @@ const HISTORICAL_KEY_ORDER = [
     "read_stream",
     "read_thread",
     "read_activity",
+    "mark_all_read",
     "search_space",
     "post_message",
     "edit_message",
@@ -354,6 +355,8 @@ describe("BuiltinTools permission audit", () => {
             end_poll: "prompt",
             create_topic: "prompt",
             manage_topic: "prompt",
+            // Personal state, but irreversible (marks only advance) — gated like a write.
+            mark_all_read: "prompt",
             propose_change: "prompt",
             move_asset: "prompt",
             delete_asset: "prompt",

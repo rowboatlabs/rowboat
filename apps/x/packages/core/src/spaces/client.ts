@@ -437,6 +437,10 @@ export class SpacesClient {
     return this.request('POST', routes.markActivitySeen.path, routes.markActivitySeen.response, { at });
   }
 
+  async readAll(input: { spaceId?: string } = {}): Promise<{ spaces: Array<{ spaceId: string; readOffset: number }>; threads: number; seenAt: string }> {
+    return this.request('POST', routes.readAll.path, routes.readAll.response, input);
+  }
+
   /** A root (no threadRoot) or a reply (threadRoot) — never creates a topic. */
   async postMessage(spaceId: string, input: NewMessage): Promise<{ message: Message }> {
     return this.request('POST', this.space(spaceId, '/messages'), routes.postMessage.response, input);
