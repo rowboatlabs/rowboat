@@ -1968,6 +1968,10 @@ function TuckedDock({
   const shortcutState = useQuickAskShortcut()
   const shortcutLabel = quickAskShortcut.formatShortcut(shortcutState.accelerator, isMac)
   const expandTip = `Bring the text back (${shortcutLabel} works too)`
+  const statusKind = laneKind(state)
+  const statusLabel = statusKind === 'thinking'
+    ? (activity ?? 'Thinking…')
+    : STATUS_DISPLAY[statusKind].label
   return (
     <div data-qa-passthrough className="qa-pop flex min-w-0 flex-col items-end">
       <div className="relative">
@@ -1999,14 +2003,19 @@ function TuckedDock({
           {vertical ? (
             <Tooltip>
               <TooltipTrigger asChild>
-                <span style={noDragRegion} role="status" aria-label={activity ?? STATUS_DISPLAY[state.status ?? 'idle'].label} className="flex h-7 w-8 items-center justify-center">
-                  {laneKind(state) === 'listening' ? <WaveLane bars={5} className="w-full" />
-                    : laneKind(state) === 'speaking' ? <SpeakLane bars={5} className="w-full" />
-                    : laneKind(state) === 'thinking' ? <Loader className="qa-spin h-4 w-4 text-sky-500" />
+                <span style={noDragRegion} role="status" aria-label={statusLabel} className="relative flex h-7 w-8 items-center justify-center">
+                  {statusKind === 'listening' ? <WaveLane bars={5} className="w-full" />
+                    : statusKind === 'speaking' ? <SpeakLane bars={5} className="w-full" />
+                    : statusKind === 'thinking' ? <Loader className="qa-spin h-4 w-4 text-sky-500" />
                     : <span className="h-1.5 w-1.5 rounded-full bg-neutral-400" />}
+                  {statusKind === 'thinking' && (
+                    <span aria-hidden="true" className="pointer-events-none absolute right-full top-0 mr-4 flex h-7 w-max max-w-[240px] items-center rounded-full border border-black/10 bg-white/[0.97] px-3 shadow-sm dark:border-white/15 dark:bg-neutral-900/[0.97]">
+                      <span className="qa-shimmer truncate text-[11px] font-medium">{statusLabel}</span>
+                    </span>
+                  )}
                 </span>
               </TooltipTrigger>
-              <TooltipContent side="left">{activity ?? STATUS_DISPLAY[state.status ?? 'idle'].label}</TooltipContent>
+              <TooltipContent side="left">{statusLabel}</TooltipContent>
             </Tooltip>
           ) : <StatusLane state={state} activity={activity} bars={20} className="w-[112px]" />}
           <ShareButton state={state} sendAction={sendAction} className="h-7 w-7" />
