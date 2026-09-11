@@ -635,9 +635,8 @@ export function QuickAskBar() {
   }
 
   // THE SKIPPER — the one hover surface: a single self-contained card
-  // (destination strip, composer, footer dock). Folded, the same corner
-  // shows the mini call pill instead (TuckedDock below) — the two swap in
-  // place, anchored on the bottom-right corner main keeps fixed.
+  // (destination strip, composer, footer dock). The text card floats freely;
+  // folding replaces it with a vertical dock at the screen's right edge.
   return (
     <div data-qa-passthrough className="flex h-screen w-screen select-none flex-col overflow-hidden">
       <style>{COMPANION_MOTION_CSS}</style>
@@ -657,17 +656,13 @@ export function QuickAskBar() {
         onMouseDown={collapsed ? undefined : stageTuck}
       />
 
-      {/* Bottom row: the card (or, folded, the mini pill) on the transparent
-          stage. The row is PADDED so the card's CSS shadow fades inside the
-          window instead of clipping at its rectangular edge (which read as
-          a grey rectangle around the card). The paddings are IDENTICAL in
-          both states — with the corner-anchored window, that keeps the
-          fold/unfold swap on the exact same screen pixels. */}
-      <div data-qa-passthrough className="flex shrink-0 items-end justify-end px-6 pb-5">
+      {/* The collapsed dock meets the right edge. The expanded card adds its
+          own right margin so it floats with room for its shadow on both sides. */}
+      <div data-qa-passthrough className="flex shrink-0 items-end justify-end pl-6 pb-5">
       {card.mounted && (
       <div
         data-qa-passthrough
-        className={`relative min-w-0 flex-1 ${card.exiting ? 'qa-card-out pointer-events-none' : 'qa-card-in'}`}
+        className={`relative mr-6 min-w-0 flex-1 ${card.exiting ? 'qa-card-out pointer-events-none' : 'qa-card-in'}`}
       >
       {/* Near-white card with a hairline dark border in light; near-black
           with a hairline light one in dark. #810 introduced the light skin as
@@ -978,7 +973,7 @@ export function QuickAskBar() {
           beneath it. */}
       <span
         className="pointer-events-none absolute z-10 flex h-8 w-8 items-center justify-center"
-        style={{ ...noDragRegion, top: 'calc(50% - 16px)', right: '-16px' }}
+        style={{ ...noDragRegion, top: 'calc(50% - 16px)', left: '-16px' }}
       >
         <Tooltip>
           <TooltipTrigger asChild>
@@ -997,13 +992,11 @@ export function QuickAskBar() {
       </div>
       )}
 
-      {/* Folded: the mini call pill takes the card's corner — the whole
-          card compressed to one row (its lane keeps narrating, and a live
-          share's consent badge never folds away). Mounted only after the
-          card's exit finishes (usePresence), so the two never fight over
-          the row. */}
+      {/* After the text card exits, main moves this vertical dock to the
+          screen's right edge while remembering the floating card position. */}
       {!card.mounted && (
         <TuckedDock
+          vertical
           state={callState}
           activity={heldActivity}
           sendAction={sendAction}
@@ -1958,6 +1951,7 @@ function EndButton({
  * direction (the user tucked the text away; unfold to read).
  */
 function TuckedDock({
+  vertical = false,
   state,
   activity,
   sendAction,
@@ -1967,6 +1961,7 @@ function TuckedDock({
   activity?: string | null
   sendAction: (action: PopoutAction) => void
   onExpand: () => void
+  vertical?: boolean
 }) {
   const shortcutState = useQuickAskShortcut()
   const shortcutLabel = quickAskShortcut.formatShortcut(shortcutState.accelerator, isMac)
@@ -1977,7 +1972,7 @@ function TuckedDock({
         <div
           style={dragRegion}
           title="Drag to move your Skipper"
-          className="flex cursor-grab items-center gap-2.5 rounded-full border border-black/10 bg-white/[0.97] p-2 pr-2.5 shadow-[0_12px_32px_rgba(0,0,0,0.18),0_2px_10px_rgba(0,0,0,0.10)] dark:border-white/15 dark:bg-neutral-900/[0.97] dark:shadow-[0_12px_32px_rgba(0,0,0,0.55),0_2px_10px_rgba(0,0,0,0.4)]"
+          className={`flex cursor-grab items-center gap-2.5 border border-black/10 bg-white/[0.97] p-2 shadow-[0_12px_32px_rgba(0,0,0,0.18),0_2px_10px_rgba(0,0,0,0.10)] dark:border-white/15 dark:bg-neutral-900/[0.97] dark:shadow-[0_12px_32px_rgba(0,0,0,0.55),0_2px_10px_rgba(0,0,0,0.4)] ${vertical ? 'w-14 flex-col rounded-l-2xl border-r-0 py-3' : 'rounded-full pr-2.5'}`}
         >
           <Tooltip>
             <TooltipTrigger asChild>
@@ -1993,7 +1988,19 @@ function TuckedDock({
             </TooltipTrigger>
             <TooltipContent side="top">{expandTip}</TooltipContent>
           </Tooltip>
-          <StatusLane state={state} activity={activity} bars={20} className="w-[112px]" />
+          {vertical ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span style={noDragRegion} role="status" aria-label={activity ?? STATUS_DISPLAY[state.status ?? 'idle'].label} className="flex h-7 w-8 items-center justify-center">
+                  {laneKind(state) === 'listening' ? <WaveLane bars={5} className="w-full" />
+                    : laneKind(state) === 'speaking' ? <SpeakLane bars={5} className="w-full" />
+                    : laneKind(state) === 'thinking' ? <Loader className="qa-spin h-4 w-4 text-sky-500" />
+                    : <span className="h-1.5 w-1.5 rounded-full bg-neutral-400" />}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="left">{activity ?? STATUS_DISPLAY[state.status ?? 'idle'].label}</TooltipContent>
+            </Tooltip>
+          ) : <StatusLane state={state} activity={activity} bars={20} className="w-[112px]" />}
           <ShareButton state={state} sendAction={sendAction} className="h-7 w-7" />
           <TalkButton state={state} sendAction={sendAction} className="h-8 w-8" />
           <EndButton sendAction={sendAction} className="h-7 w-7" />
