@@ -19,6 +19,11 @@ import {
 import type { CodingAgent, CodeRunEvent } from './types.js';
 import type { PermissionBroker } from './permission-broker.js';
 import { getAgentLaunchSpec } from './agents.js';
+import { openCodeProcesses, type OpenCodeProcess } from './opencode-process.js';
+import { enforceOpenCodePolicy, openCodeRequest } from './opencode-policy.js';
+import { toolDetail } from './tool-detail.js';
+import { storedProviderIds } from './opencode-setup.js';
+import { openCodeModelAccess, type OpenCodeAccessGroup } from './opencode-model-access.js';
 
 export interface AcpClientOptions {
     agent: CodingAgent;
@@ -38,7 +43,7 @@ const STARTUP_TIMEOUT_MS = Number(process.env.ROWBOAT_ACP_STARTUP_TIMEOUT_MS) > 
     : 60_000;
 
 export interface CodeAgentOption { value: string; label: string }
-export interface CodeAgentModelOptions { models: CodeAgentOption[]; efforts: CodeAgentOption[] }
+export interface CodeAgentModelOptions { models: CodeAgentOption[]; efforts: CodeAgentOption[]; modes?: CodeAgentOption[]; currentModel?: string; currentEffort?: string; currentMode?: string; selectionError?: string; openCodeProviders?: OpenCodeAccessGroup[] }
 
 // The agent advertises its model + effort choices on the session it opens (the
 // same data that backs its `/model` picker), in one of two shapes:
@@ -48,7 +53,7 @@ export interface CodeAgentModelOptions { models: CodeAgentOption[]; efforts: Cod
 // We read configOptions first and fall back to `models`, then prepend a
 // synthetic "Default" so the user can always keep the engine default.
 type RawSelectOption = { value?: unknown; name?: unknown; options?: Array<{ value?: unknown; name?: unknown }> };
-type RawConfigOption = { id?: string; options?: RawSelectOption[] };
+type RawConfigOption = { id?: string; currentValue?: string; options?: RawSelectOption[] };
 type RawModelState = { availableModels?: Array<{ modelId?: unknown; name?: unknown }> };
 
 function withDefault(choices: CodeAgentOption[]): CodeAgentOption[] {
@@ -70,7 +75,7 @@ function modelStateChoices(models: RawModelState | undefined): CodeAgentOption[]
         .map((m) => ({ value: m.modelId, label: typeof m.name === 'string' && m.name ? m.name : m.modelId }));
 }
 
-export function extractModelOptions(configOptions: unknown, models?: unknown): CodeAgentModelOptions {
+export function extractModelOptions(configOptions: unknown, models?: unknown, native = false): CodeAgentModelOptions {
     const list = (Array.isArray(configOptions) ? configOptions : []) as RawConfigOption[];
     const modelOpt = list.find((o) => o.id === 'model');
     const effortOpt = list.find((o) => o.id === 'effort');
@@ -78,8 +83,9 @@ export function extractModelOptions(configOptions: unknown, models?: unknown): C
     return {
         // configOptions is authoritative when present; otherwise fall back to the
         // SessionModelState list (Codex reports models only there).
-        models: withDefault(modelChoices.length ? modelChoices : modelStateChoices(models as RawModelState)),
-        efforts: effortOpt ? withDefault(toChoices(effortOpt)) : [],
+        models: native ? modelChoices : withDefault(modelChoices.length ? modelChoices : modelStateChoices(models as RawModelState)),
+        efforts: effortOpt ? (native ? toChoices(effortOpt) : withDefault(toChoices(effortOpt))) : [],
+        ...(native ? { modes: toChoices(list.find(o => o.id === 'mode')), currentModel: modelOpt?.currentValue, currentEffort: effortOpt?.currentValue, currentMode: list.find(o => o.id === 'mode')?.currentValue } : {}),
     };
 }
 
@@ -106,8 +112,14 @@ function withClaudeAliases(options: CodeAgentModelOptions): CodeAgentModelOption
 }
 
 // Map a raw ACP session/update notification onto our small CodeRunEvent union.
-function toEvent(update: SessionUpdate): CodeRunEvent {
+export function toEvent(update: SessionUpdate): CodeRunEvent {
     switch (update.sessionUpdate) {
+        case 'config_option_update': {
+            const options = extractModelOptions(update.configOptions, undefined, true);
+            return { type: 'configuration', model: options.currentModel, effort: options.currentEffort, mode: options.currentMode };
+        }
+        case 'current_mode_update':
+            return { type: 'configuration', mode: update.currentModeId };
         case 'agent_message_chunk':
         case 'user_message_chunk': {
             const c = update.content;
@@ -123,12 +135,13 @@ function toEvent(update: SessionUpdate): CodeRunEvent {
                 title: update.title,
                 kind: update.kind ?? undefined,
                 status: update.status ?? undefined,
+                detail: toolDetail(update.content, update.rawInput),
             };
         case 'tool_call_update': {
             const diffs = (update.content ?? [])
                 .filter((c): c is Extract<typeof c, { type: 'diff' }> => c.type === 'diff')
                 .map((c) => c.path);
-            return { type: 'tool_call_update', id: update.toolCallId, status: update.status ?? undefined, diffs };
+            return { type: 'tool_call_update', id: update.toolCallId, title: update.title ?? undefined, kind: update.kind ?? undefined, status: update.status ?? undefined, diffs, detail: toolDetail(update.content, update.rawInput) };
         }
         case 'plan':
             return {
@@ -160,6 +173,10 @@ export class AcpClient {
     private child?: ChildProcess;
     private connection?: ClientSideConnection;
     private loadSession_ = false;
+    private managed?: OpenCodeProcess;
+    private readonly lifetime = new AbortController();
+    capabilities: unknown;
+    configuration: CodeAgentModelOptions = { models: [], efforts: [] };
     // Diagnostics: the adapter's stderr/exit are captured so a dropped connection
     // reports WHY (e.g. a crash) instead of the SDK's bare "ACP connection closed".
     private stderrTail = '';
@@ -184,18 +201,22 @@ export class AcpClient {
 
     // Spawn the adapter and negotiate the protocol. Returns once initialized.
     async start(): Promise<void> {
-        const spec = getAgentLaunchSpec(this.agent);
-        const child = spawn(spec.command, spec.args, {
+        this.lifetime.signal.throwIfAborted();
+        if (this.agent === 'opencode') this.managed = await openCodeProcesses.start('acp', { cwd: this.cwd, signal: this.lifetime.signal });
+        const spec = this.agent === 'opencode' ? undefined : getAgentLaunchSpec(this.agent);
+        const child = this.managed?.child ?? spawn(spec!.command, spec!.args, {
             cwd: this.cwd,
-            env: spec.env,
+            env: spec!.env,
             // Capture stderr (not inherit) so we can attribute a dropped connection.
             stdio: ['pipe', 'pipe', 'pipe'],
         });
         this.child = child;
         child.stderr?.on('data', (d: Buffer) => {
+            if (this.agent === 'opencode') return;
             this.stderrTail = (this.stderrTail + d.toString()).slice(-4000);
         });
         child.on('exit', (code, signal) => {
+            this.broker.cancel();
             this.exitInfo = `adapter exited (code ${code}${signal ? `, signal ${signal}` : ''})`;
         });
         child.on('error', (err) => {
@@ -212,9 +233,10 @@ export class AcpClient {
         try {
             const init = await this.withStartupTimeout(this.connection.initialize({
                 protocolVersion: PROTOCOL_VERSION,
-                clientCapabilities: { fs: { readTextFile: true, writeTextFile: true } },
+                clientCapabilities: { fs: { readTextFile: this.agent !== 'opencode', writeTextFile: this.agent !== 'opencode' } },
             }));
             this.loadSession_ = init.agentCapabilities?.loadSession === true;
+            this.capabilities = init.agentCapabilities;
         } catch (e) {
             throw this.enrich(e, 'initialize');
         }
@@ -244,6 +266,7 @@ export class AcpClient {
     async newSession(): Promise<string> {
         try {
             const res = await this.withStartupTimeout(this.conn().newSession({ cwd: this.cwd, mcpServers: [] }));
+            this.recordConfiguration(res);
             return res.sessionId;
         } catch (e) {
             throw this.enrich(e, 'newSession');
@@ -253,12 +276,23 @@ export class AcpClient {
     // Open a throwaway session purely to read the agent's advertised model +
     // effort choices, then let the caller dispose this client. Used for the
     // model picker before any real session exists.
-    async describeModelOptions(): Promise<CodeAgentModelOptions> {
+    async describeModelOptions(model?: string, effort?: string, mode?: string, strict = true): Promise<CodeAgentModelOptions> {
         try {
             const res = await this.withStartupTimeout(this.conn().newSession({ cwd: this.cwd, mcpServers: [] }));
             const r = res as { configOptions?: unknown; models?: unknown };
-            const options = extractModelOptions(r.configOptions, r.models);
-            return this.agent === 'claude' ? withClaudeAliases(options) : options;
+            this.recordConfiguration(r);
+            try {
+                if (mode) await this.setMode(res.sessionId, mode);
+                if (model && model !== 'default') await this.setModel(res.sessionId, model);
+                if (effort) await this.setEffort(res.sessionId, effort);
+                return this.agent === 'claude' ? withClaudeAliases(this.configuration) : this.configuration;
+            } catch (error) {
+                if (strict || this.agent !== 'opencode') throw error;
+                return { ...this.configuration, currentModel: undefined, currentEffort: undefined, currentMode: undefined,
+                    selectionError: 'The selected OpenCode model, effort or mode is unavailable. Choose an advertised option.' };
+            } finally {
+                if (this.managed) await openCodeRequest(this.managed, this.cwd, `/session/${encodeURIComponent(res.sessionId)}`, 'DELETE').catch(() => {});
+            }
         } catch (e) {
             throw this.enrich(e, 'describeModelOptions');
         }
@@ -266,7 +300,8 @@ export class AcpClient {
 
     async loadSession(sessionId: string): Promise<void> {
         try {
-            await this.withStartupTimeout(this.conn().loadSession({ sessionId, cwd: this.cwd, mcpServers: [] }));
+            const res = await this.withStartupTimeout(this.conn().loadSession({ sessionId, cwd: this.cwd, mcpServers: [] }));
+            this.recordConfiguration(res);
         } catch (e) {
             throw this.enrich(e, 'loadSession');
         }
@@ -278,15 +313,44 @@ export class AcpClient {
     // ACP 1.x folded model selection into the generic config-option system (the
     // 'model' category), so this goes through setSessionConfigOption just like
     // effort does — matching the id extractModelOptions reads.
+    async getOpenCodeModelAccess() {
+        if (!this.managed) throw new Error('OpenCode is not running. Refresh models to retry.');
+        const [credentials, catalog] = await Promise.all([
+            storedProviderIds(), openCodeRequest(this.managed, this.cwd, '/provider'),
+        ]);
+        return openCodeModelAccess(credentials, catalog);
+    }
+
     async setModel(sessionId: string, modelId: string): Promise<void> {
-        await this.conn().setSessionConfigOption({ sessionId, configId: 'model', value: modelId });
+        await this.setOption(sessionId, 'model', modelId);
     }
 
     // Set the reasoning-effort level via the agent's "effort" config option.
     // The option only exists for models that support it, so this throws for
     // others — again applied best-effort by the caller.
     async setEffort(sessionId: string, value: string): Promise<void> {
-        await this.conn().setSessionConfigOption({ sessionId, configId: 'effort', value });
+        await this.setOption(sessionId, 'effort', value);
+    }
+
+    async setMode(sessionId: string, value: string): Promise<void> { await this.setOption(sessionId, 'mode', value); }
+
+    private recordConfiguration(res: { configOptions?: unknown; models?: unknown }): void {
+        this.configuration = extractModelOptions(res.configOptions, res.models, this.agent === 'opencode');
+    }
+
+    private async setOption(sessionId: string, id: 'model' | 'effort' | 'mode', value: string): Promise<void> {
+        const choices = id === 'model' ? this.configuration.models : id === 'effort' ? this.configuration.efforts : this.configuration.modes ?? [];
+        if (this.agent === 'opencode' && !choices.some(o => o.value === value)) throw new Error(`OpenCode ${id} is unavailable: ${value}. Refresh the session options.`);
+        const res = await this.withStartupTimeout(this.conn().setSessionConfigOption({ sessionId, configId: id, value }))
+            .catch(error => { throw this.agent === 'opencode' ? this.enrich(error, `select ${id}`) : error; });
+        this.recordConfiguration(res);
+        const accepted = id === 'model' ? this.configuration.currentModel : id === 'effort' ? this.configuration.currentEffort : this.configuration.currentMode;
+        if (this.agent === 'opencode' && accepted !== value) throw new Error(`OpenCode did not accept the selected ${id}. Refresh the session options.`);
+    }
+
+    async preparePermissions(sessionId: string): Promise<void> {
+        if (this.managed) await enforceOpenCodePolicy(this.managed, this.cwd, sessionId, this.configuration.currentMode ?? 'build');
+        if (this.agent === 'opencode') this.onEvent({ type: 'configuration', model: this.configuration.currentModel, effort: this.configuration.currentEffort, mode: this.configuration.currentMode });
     }
 
     async prompt(sessionId: string, text: string): Promise<PromptResponse> {
@@ -300,6 +364,16 @@ export class AcpClient {
     // Wrap a connection error with the adapter's exit/stderr so failures are
     // self-explanatory rather than the SDK's opaque "ACP connection closed".
     private enrich(err: unknown, phase: string): Error {
+        if (this.agent === 'opencode') {
+            // Provider errors may echo request headers. Never persist that raw
+            // payload or stderr in Rowboat's durable conversation/logs.
+            const message = err instanceof Error ? err.message : '';
+            const reason = /401|403|unauthori[sz]ed|authentication/i.test(message) ? 'OpenCode account authentication failed. Reconnect Go / Zen in Settings, or choose a free model in Code mode.'
+                : /model.*not.*found|model.*unavailable/i.test(message) ? 'The selected model is unavailable. Refresh the session model options.'
+                : /timed out|timeout/i.test(message) ? 'The operation timed out. Retry or check the provider connection.'
+                : 'The engine request failed. Check the model in Code mode and your optional Go / Zen account in Settings, then retry.';
+            return new Error(`OpenCode ${phase}: ${reason}${this.exitInfo ? ` (${this.exitInfo})` : ''}`);
+        }
         const base = err instanceof Error ? err.message : String(err);
         const parts = [
             this.exitInfo,
@@ -313,6 +387,9 @@ export class AcpClient {
     }
 
     dispose(): void {
+        this.broker.cancel();
+        this.lifetime.abort();
+        if (this.managed) { this.managed.stop(); this.managed = undefined; }
         try {
             this.child?.kill();
         } catch {
@@ -338,10 +415,12 @@ export class AcpClient {
                 this.onEvent(toEvent(params.update));
             },
             readTextFile: async (params: ReadTextFileRequest): Promise<ReadTextFileResponse> => {
+                if (this.agent === 'opencode') throw new Error('Client filesystem access is disabled for OpenCode.');
                 const content = await fs.readFile(params.path, 'utf8');
                 return { content };
             },
             writeTextFile: async (params: WriteTextFileRequest): Promise<WriteTextFileResponse> => {
+                if (this.agent === 'opencode') throw new Error('Client filesystem access is disabled for OpenCode.');
                 await fs.writeFile(params.path, params.content);
                 return {};
             },

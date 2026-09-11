@@ -73,7 +73,12 @@ import { ICodeModeConfigRepo } from '@x/core/dist/code-mode/repo.js';
 import { CodePermissionRegistry } from '@x/core/dist/code-mode/acp/permission-registry.js';
 import type { CodeRunFeed } from '@x/core/dist/code-mode/feed.js';
 import { checkCodeModeAgentStatus } from '@x/core/dist/code-mode/status.js';
-import { ensureEngine } from '@x/core/dist/code-mode/acp/engine-provisioner.js';
+import { ensureEngine, isEngineProvisioned, isEngineSupported, removeOpenCodeEngine } from '@x/core/dist/code-mode/acp/engine-provisioner.js';
+import { ENGINE_MANIFEST } from '@x/core/dist/code-mode/acp/engine-manifest.js';
+import { openCodeProcesses } from '@x/core/dist/code-mode/acp/opencode-process.js';
+import { openCodeSetup } from '@x/core/dist/code-mode/acp/opencode-setup.js';
+import { stopOpenCodeLogin } from '@x/core/dist/code-mode/acp/opencode-login.js';
+import { openCodeSetupHandlers } from './opencode-setup-ipc.js';
 import type { ICodeProjectsRepo } from '@x/core/dist/code-mode/projects/repo.js';
 import type { ICodeSessionsRepo } from '@x/core/dist/code-mode/sessions/repo.js';
 import { CodeSessionService } from '@x/core/dist/code-mode/sessions/service.js';
@@ -1714,13 +1719,29 @@ export function setupIpcHandlers() {
     'codeMode:checkAgentStatus': async () => {
       return await checkCodeModeAgentStatus();
     },
+    ...openCodeSetupHandlers,
+    'codeMode:openCodeEngineStatus': async () => ({
+      installed: isEngineProvisioned('opencode'), supported: isEngineSupported('opencode'),
+      version: ENGINE_MANIFEST.opencode.version, connection: 'not-verified' as const, ready: false as const,
+    }),
+    'codeMode:removeOpenCodeEngine': async () => {
+      try {
+        stopOpenCodeLogin();
+        openCodeSetup.stop();
+        openCodeProcesses.stopAll();
+        await removeOpenCodeEngine();
+        return { success: true };
+      } catch {
+        return { success: false, error: 'Could not remove OpenCode. Close running engine processes and retry.' };
+      }
+    },
     'codeMode:provisionEngine': async (_event, args) => {
       // Download + install the agent's engine, streaming progress back to the
       // requesting window so Settings can show a live bar. 'check' is instant — skip it.
       try {
         await ensureEngine(args.agent, {
           onProgress: (p) => {
-            if (p.phase === 'check') return;
+            if (p.phase === 'check' || _event.sender.isDestroyed()) return;
             _event.sender.send('codeMode:engineProgress', {
               agent: args.agent,
               phase: p.phase,
@@ -1791,7 +1812,7 @@ export function setupIpcHandlers() {
     },
     'codeMode:listModelOptions': async (_event, args) => {
       const manager = container.resolve<CodeModeManager>('codeModeManager');
-      return manager.listModelOptions(args.agent);
+      return manager.listModelOptions(args.agent, args.cwd, args.model, args.effort, args.mode, false);
     },
     'codeSession:setDone': async (_event, args) => {
       const service = container.resolve<CodeSessionService>('codeSessionService');

@@ -35,6 +35,7 @@ import type { ApprovalPolicy } from "@x/shared/src/code-mode.js"
 import { DEFAULT_TURN_LIMITS_SETTINGS } from "@x/shared/src/turn-limits.js"
 import type { ipc as ipcShared } from "@x/shared"
 import { startProvisioning, useProvisioning, enabledOptimistic, type AgentStatus, type CodeModeAgentStatus } from "@/lib/code-mode-provisioning"
+import { OpenCodeEngineSettings } from '@/components/opencode-engine-settings'
 import { ModelSelectionSection } from "@/components/settings/model-selection-section"
 import { PermissionsSettings } from "@/components/settings/permissions-settings"
 import { ShortcutSettings } from "@/components/settings/shortcut-settings"
@@ -1419,6 +1420,7 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
             status={status?.codex ?? null}
             onProvisioned={loadStatus}
           />
+          <OpenCodeEngineSettings active={dialogOpen} />
         </div>
       </div>
 

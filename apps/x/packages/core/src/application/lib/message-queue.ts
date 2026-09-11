@@ -8,7 +8,7 @@ export type MiddlePaneContext =
     | { kind: 'note'; path: string; content: string }
     | { kind: 'browser'; url: string; title: string };
 
-export type CodeMode = 'claude' | 'codex';
+export type CodeMode = 'claude' | 'codex' | 'opencode';
 export type CodePolicy = 'ask' | 'auto-approve-reads' | 'yolo';
 
 type EnqueuedMessage = {

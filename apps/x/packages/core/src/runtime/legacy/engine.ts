@@ -685,7 +685,7 @@ export async function* streamAgent({
     let voiceInput = false;
     let voiceOutput: 'summary' | 'full' | null = null;
     let searchEnabled = false;
-    let codeMode: 'claude' | 'codex' | null = null;
+    let codeMode: 'claude' | 'codex' | 'opencode' | null = null;
     let codeCwd: string | null = null;
     let codePolicy: 'ask' | 'auto-approve-reads' | 'yolo' | null = null;
     let middlePaneContext:

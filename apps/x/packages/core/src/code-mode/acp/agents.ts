@@ -4,14 +4,11 @@ import { fileURLToPath } from 'url';
 import type { CodingAgent } from './types.js';
 import { getProvisionedEnginePath } from './engine-provisioner.js';
 import { loginShellPath } from './shell-env.js';
+import { CODING_AGENT_CAPABILITIES } from '@x/shared/dist/code-mode.js';
 
 const require = createRequire(import.meta.url);
 
 // The ACP adapter npm package that exposes each coding agent as an ACP server.
-const ADAPTER_PACKAGE: Record<CodingAgent, string> = {
-    claude: '@agentclientprotocol/claude-agent-acp',
-    codex: '@agentclientprotocol/codex-acp',
-};
 
 export interface AgentLaunchSpec {
     /** Executable to spawn — always `node` so we never hit the Windows .cmd EINVAL. */
@@ -61,7 +58,9 @@ function resolveAdapterEntry(pkg: string): string {
 }
 
 export function getAgentLaunchSpec(agent: CodingAgent): AgentLaunchSpec {
-    const entry = resolveAdapterEntry(ADAPTER_PACKAGE[agent]);
+    const descriptor = CODING_AGENT_CAPABILITIES[agent];
+    if (descriptor.launch !== 'adapter') throw new Error('OpenCode must launch through the managed native process service.');
+    const entry = resolveAdapterEntry(descriptor.adapter);
     const env: NodeJS.ProcessEnv = { ...process.env };
 
     // Graft the user's login-shell PATH onto the engine's env. GUI (Finder) launches

@@ -49,11 +49,11 @@ export const codeAgentRunTools: z.infer<typeof BuiltinToolsSchema> = {
         permission: "none",
         description: 'Run a coding/software task with the selected on-device coding agent (Claude Code or Codex) inside a project folder. Streams the agent\'s tool calls, file diffs, and plan into the chat and surfaces permission requests inline. Use this for ALL code-mode work (writing/editing/reading code, running tests, debugging, exploring a repo). Reuses one persistent session per chat, so follow-up requests keep context. The agent\'s entire output is directly visible to the user in the run card, so after the run reply with a ~2-line confirmation only — never re-summarize the agent\'s output.',
         inputSchema: z.object({
-            agent: z.enum(['claude', 'codex']).describe('Which coding agent to use: "claude" (Claude Code) or "codex". Set this to the active code-mode chip agent. Note: when the chip is set, the backend uses the chip agent regardless of this value — this only takes effect in the ask-human flow where no chip is set.'),
+            agent: z.enum(['claude', 'codex', 'opencode']).describe('Which coding agent to use: "claude" (Claude Code), "codex", or "opencode". Set this to the active code-mode chip agent. Note: when the chip is set, the backend uses the chip agent regardless of this value — this only takes effect in the ask-human flow where no chip is set.'),
             cwd: z.string().optional().describe('Absolute path to the working directory / project folder the agent should operate in. OMIT this when the user has not named a path — the run then uses their default code repo (the single registered project, or the one picked in Settings → Code). Only pass a path the user actually named or that prior context established.'),
             prompt: z.string().describe("The user's coding request, forwarded almost verbatim — fix only transcription artifacts, typos, and minor grammar; do NOT expand, rephrase, or add details the user never stated. Append extra context (clearly labeled) only when the user explicitly asked you to gather it first."),
         }),
-        execute: async ({ agent, cwd, prompt }: { agent: 'claude' | 'codex', cwd?: string, prompt: string }, ctx?: ToolContext) => {
+        execute: async ({ agent, cwd, prompt }: { agent: 'claude' | 'codex' | 'opencode', cwd?: string, prompt: string }, ctx?: ToolContext) => {
             if (!ctx) {
                 throw new Error('code_agent_run requires run context (runId / streaming).');
             }
@@ -199,6 +199,8 @@ export const codeAgentRunTools: z.infer<typeof BuiltinToolsSchema> = {
             // The full ordered timeline, published ONCE as a durable batch when the
             // run settles (see finally). The per-event copies below are ephemeral.
             const collected: CodeRunEventType[] = [];
+            const ownedApprovals = new Set<string>();
+            let acceptedConfiguration: Extract<CodeRunEventType, { type: 'configuration' }> | undefined;
             const feed = container.resolve<CodeRunFeed>('codeRunFeed');
             try {
                 const result = await manager.runPrompt({
@@ -212,8 +214,10 @@ export const codeAgentRunTools: z.infer<typeof BuiltinToolsSchema> = {
                     policy,
                     ...(pinned?.agentModel ? { model: pinned.agentModel } : {}),
                     ...(pinned?.agentEffort ? { effort: pinned.agentEffort } : {}),
+                    ...(pinned?.agentMode ? { mode: pinned.agentMode } : {}),
                     signal: ctx.signal,
                     onEvent: (event) => {
+                        if (event.type === 'configuration') acceptedConfiguration = { ...acceptedConfiguration, ...event };
                         if (event.type === 'message' && event.role === 'agent') finalText += event.text;
                         if (event.type === 'tool_call_update') for (const f of event.diffs) changedFiles.add(f);
                         collected.push(event);
@@ -230,6 +234,7 @@ export const codeAgentRunTools: z.infer<typeof BuiltinToolsSchema> = {
                         });
                     },
                     ask: (permAsk) => registry.request(ctx.runId, (requestId) => {
+                        ownedApprovals.add(requestId);
                         void ctx.publish({
                             runId: ctx.runId,
                             type: 'code-run-permission-request',
@@ -277,6 +282,13 @@ export const codeAgentRunTools: z.infer<typeof BuiltinToolsSchema> = {
                 }
                 throw new Error(`Coding agent failed: ${error instanceof Error ? error.message : String(error)}`);
             } finally {
+                for (const requestId of ownedApprovals) registry.resolve(requestId, 'reject');
+                if (acceptedConfiguration && effectiveAgent === 'opencode' && ctx.sessionId) {
+                    const repo = container.resolve<ICodeSessionsRepo>('codeSessionsRepo');
+                    const current = await repo.get(ctx.sessionId).catch(() => null);
+                    if (current?.agent === 'opencode') await repo.save({ ...current, agentModel: acceptedConfiguration.model ?? current.agentModel,
+                        agentEffort: acceptedConfiguration.effort, agentMode: acceptedConfiguration.mode ?? current.agentMode }).catch(() => {});
+                }
                 ctx.signal.removeEventListener('abort', onAbort);
                 // Durable record for replay-on-reload — one event with the whole
                 // (coalesced) timeline, on every settle path including errors and

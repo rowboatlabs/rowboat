@@ -1419,7 +1419,7 @@ export function createCoreRpcHandlers(opts?: { sessionsIndexReady?: Promise<void
     },
     'codeMode:listModelOptions': async (args) => {
       const manager = container.resolve<CodeModeManager>('codeModeManager');
-      return manager.listModelOptions(args.agent);
+      return manager.listModelOptions(args.agent, args.cwd, args.model, args.effort, args.mode, false);
     },
     'codeProject:add': async (args) => {
       const repo = container.resolve<ICodeProjectsRepo>('codeProjectsRepo');

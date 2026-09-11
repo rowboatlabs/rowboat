@@ -53,7 +53,7 @@ export const MODE_CAPABILITIES: readonly EagerCapability[] = [
         promptFragment: (ctx: CapabilityContext) => {
             const { codeMode, codeCwd } = ctx;
             if (!codeMode) return null;
-            const agentDisplay = codeMode === "claude" ? "Claude Code" : "Codex";
+            const agentDisplay = codeMode === "claude" ? "Claude Code" : codeMode === "codex" ? "Codex" : "OpenCode";
             return CODE_MODE_TEMPLATE(agentDisplay, codeMode, codeCwd);
         },
     },
@@ -141,7 +141,7 @@ Confirmations name the work, not the mechanics: "Dispatched — taking down the 
 
 const CODE_MODE_TEMPLATE = (
     agentDisplay: string,
-    codeMode: "claude" | "codex",
+    codeMode: "claude" | "codex" | "opencode",
     codeCwd: string | null,
 ): string => `# Code Mode (Active) — Agent: ${agentDisplay}
 The user has turned on **code mode** and the composer chip is set to **${agentDisplay}** (\`${codeMode}\`). For EVERY task and question this turn — writing and editing code, but ALSO design, product, architecture, and infra questions about the project — use **${agentDisplay}**, and narrate that agent ("Using ${agentDisplay} to …").

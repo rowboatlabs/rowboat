@@ -1,5 +1,5 @@
 import z from "zod";
-import { CodingAgent, ApprovalPolicy } from "./code-mode.js";
+import { EnabledCodingAgent as CodingAgent, ApprovalPolicy } from "./code-mode.js";
 
 // Shared zod schemas for the Code section: registered projects and coding
 // sessions. A coding session IS a chat session on the turns runtime (session
@@ -69,6 +69,7 @@ export const CodeSession = z.object({
     doneAt: z.iso.datetime().optional(),
     agentModel: z.string().optional(),
     agentEffort: z.string().optional(),
+    agentMode: z.string().optional(),
     createdAt: z.iso.datetime(),
     lastActivityAt: z.iso.datetime().optional(),
 });
@@ -89,6 +90,12 @@ export type CodeAgentOption = z.infer<typeof CodeAgentOption>;
 export const CodeAgentModelOptions = z.object({
     models: z.array(CodeAgentOption),
     efforts: z.array(CodeAgentOption),
+    modes: z.array(CodeAgentOption).optional(),
+    currentModel: z.string().optional(),
+    currentEffort: z.string().optional(),
+    currentMode: z.string().optional(),
+    selectionError: z.string().optional(),
+    openCodeProviders: z.array(z.enum(['free', 'zen', 'go'])).optional(),
 });
 export type CodeAgentModelOptions = z.infer<typeof CodeAgentModelOptions>;
 

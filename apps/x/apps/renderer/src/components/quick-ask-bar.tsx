@@ -382,7 +382,7 @@ export function QuickAskBar() {
       mentions?: FileMention[],
       attachments?: StagedAttachment[],
       searchEnabled?: boolean,
-      codeMode?: 'claude' | 'codex',
+      codeMode?: 'claude' | 'codex' | 'opencode',
       permissionMode?: PermissionMode,
     ) => {
       const text = message.text.trim()

@@ -20,6 +20,17 @@ import * as path from 'path';
 
 const require = createRequire(import.meta.url);
 const REGISTRY = 'https://registry.npmjs.org';
+const OPENCODE_VERSION = '1.18.30';
+const OPENCODE_PACKAGES = {
+    'win32-x64': 'opencode-windows-x64-baseline',
+    'win32-arm64': 'opencode-windows-arm64',
+    'darwin-x64': 'opencode-darwin-x64-baseline',
+    'darwin-arm64': 'opencode-darwin-arm64',
+    'linux-x64': 'opencode-linux-x64-baseline',
+    'linux-arm64': 'opencode-linux-arm64',
+    'linux-x64-musl': 'opencode-linux-x64-baseline-musl',
+    'linux-arm64-musl': 'opencode-linux-arm64-musl',
+};
 
 // Platform keys we publish for each agent. These mirror the optionalDependencies of the
 // engine packages. claude ships musl variants; codex does not.
@@ -84,6 +95,7 @@ async function main() {
     console.log(`codex engine:  @openai/codex@${codexVersion}`);
 
     const manifest = {
+        opencode: await buildAgent(OPENCODE_VERSION, Object.keys(OPENCODE_PACKAGES), (key) => ({ pkg: OPENCODE_PACKAGES[key], version: OPENCODE_VERSION })),
         claude: await buildAgent(claudeVersion, CLAUDE_PLATFORMS, (key) => ({
             pkg: `@anthropic-ai/claude-agent-sdk-${key}`,
             version: claudeVersion,

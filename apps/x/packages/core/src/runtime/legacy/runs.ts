@@ -41,7 +41,7 @@ export async function createRun(opts: z.infer<typeof CreateRunOptions>): Promise
     return run;
 }
 
-export async function createMessage(runId: string, message: UserMessageContentType, voiceInput?: boolean, voiceOutput?: VoiceOutputMode, searchEnabled?: boolean, middlePaneContext?: MiddlePaneContext, codeMode?: 'claude' | 'codex', codeCwd?: string, codePolicy?: 'ask' | 'auto-approve-reads' | 'yolo'): Promise<string> {
+export async function createMessage(runId: string, message: UserMessageContentType, voiceInput?: boolean, voiceOutput?: VoiceOutputMode, searchEnabled?: boolean, middlePaneContext?: MiddlePaneContext, codeMode?: 'claude' | 'codex' | 'opencode', codeCwd?: string, codePolicy?: 'ask' | 'auto-approve-reads' | 'yolo'): Promise<string> {
     // Code-section sessions carry their coding context in the session meta.
     // Pin it here — not in the composer — so EVERY path into the run (assistant
     // chat pane, voice, palette) drives the session's agent in its directory,

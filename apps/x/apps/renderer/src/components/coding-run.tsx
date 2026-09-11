@@ -29,7 +29,8 @@ import { useCodeDiffOpener } from '@/contexts/code-diff-context'
 // folding tool_call + tool_call_update (by id) and the latest plan in place.
 
 type TextRow = { kind: 'text'; id: string; text: string }
-type ToolRow = { kind: 'tool'; id: string; title?: string; toolKind?: string; status?: string; diffs: string[] }
+type Detail = NonNullable<PermissionAsk['detail']>
+type ToolRow = { kind: 'tool'; id: string; title?: string; toolKind?: string; status?: string; diffs: string[]; detail?: Detail }
 type PlanRow = { kind: 'plan'; id: string; entries: { content: string; status?: string }[] }
 type PermRow = { kind: 'perm'; id: string; title: string; decision: string }
 type Row = TextRow | ToolRow | PlanRow | PermRow
@@ -56,9 +57,10 @@ export function reduceEvents(events: CodeRunEvent[]): Row[] {
           r.title = e.title ?? r.title
           r.toolKind = e.kind ?? r.toolKind
           r.status = e.status ?? r.status
+          r.detail = e.detail ?? r.detail
         } else {
           toolIdx.set(id, rows.length)
-          rows.push({ kind: 'tool', id, title: e.title, toolKind: e.kind, status: e.status, diffs: [] })
+          rows.push({ kind: 'tool', id, title: e.title, toolKind: e.kind, status: e.status, diffs: [], detail: e.detail })
         }
         break
       }
@@ -72,6 +74,9 @@ export function reduceEvents(events: CodeRunEvent[]): Row[] {
         }
         const r = rows[at] as ToolRow
         if (e.status) r.status = e.status
+        r.title = e.title ?? r.title
+        r.toolKind = e.kind ?? r.toolKind
+        if (e.detail) r.detail = { ...r.detail, ...e.detail }
         for (const d of e.diffs) if (!r.diffs.includes(d)) r.diffs.push(d)
         break
       }
@@ -113,6 +118,20 @@ function planMarker(status?: string) {
 }
 
 const basename = (p: string) => p.split(/[\\/]/).pop() || p
+
+function ToolDetails({ detail }: { detail?: Detail }) {
+  if (!detail?.command && !detail?.output && !detail?.edits?.length) return null
+  return <details className="ml-7 min-w-0 text-xs">
+    <summary className="cursor-pointer text-muted-foreground">Output and changes</summary>
+    {detail.command && <pre className="overflow-auto whitespace-pre-wrap break-words rounded bg-muted p-2">{detail.command}</pre>}
+    {detail.output && <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded bg-muted p-2">{detail.output}</pre>}
+    {detail.edits?.map((edit, i) => <div key={`${edit.path}-${i}`} className="my-2">
+      <p className="break-all font-mono">{edit.path}</p>
+      <pre className="max-h-64 overflow-auto whitespace-pre-wrap bg-red-500/5 p-2">{edit.oldText ?? '(new file)'}</pre>
+      <pre className="max-h-64 overflow-auto whitespace-pre-wrap bg-green-500/5 p-2">{edit.newText}</pre>
+    </div>)}
+  </details>
+}
 
 export function CodingRunTimeline({
   events,
@@ -187,6 +206,7 @@ export function CodingRunTimeline({
                   ))}
                 </div>
               )}
+              <ToolDetails detail={row.detail} />
             </div>
           )
         }
@@ -250,22 +270,23 @@ export function CodeRunPermissionRequest({
           className={cn(btn, 'bg-foreground text-background hover:bg-foreground/90')}>
           Allow
         </button>
-        <button type="button" disabled={busy} onClick={() => decide('allow_always')}
+        {ask.allowAlways !== false && <button type="button" disabled={busy} onClick={() => decide('allow_always')}
           className={cn(btn, 'border hover:bg-muted')}>
-          Always allow{ask.kind ? ` (${ask.kind})` : ''}
-        </button>
+          Always allow
+        </button>}
         <button type="button" disabled={busy} onClick={() => decide('reject')}
           className={cn(btn, 'border border-red-500/40 text-red-600 hover:bg-red-500/10')}>
           Deny
         </button>
       </div>
+      <div className="w-full"><ToolDetails detail={ask.detail} /></div>
     </div>
   )
 }
 
 // ── Block wrapper (rendered in the chat for a code_agent_run tool call) ──
 
-const AGENT_LABEL: Record<string, string> = { claude: 'Claude Code', codex: 'Codex' }
+const AGENT_LABEL: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode' }
 
 export function CodingRunBlock({
   item,

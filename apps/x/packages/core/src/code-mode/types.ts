@@ -30,6 +30,7 @@ export const AgentStatus = z.object({
 export type AgentStatus = z.infer<typeof AgentStatus>;
 
 export const CodeModeAgentStatus = z.object({
+    opencode: AgentStatus,
     claude: AgentStatus,
     codex: AgentStatus,
 });

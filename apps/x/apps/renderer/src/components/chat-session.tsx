@@ -266,7 +266,7 @@ export interface ChatSessionComposerProps {
     mentions?: FileMention[],
     stagedAttachments?: StagedAttachment[],
     searchEnabled?: boolean,
-    codeMode?: 'claude' | 'codex',
+    codeMode?: 'claude' | 'codex' | 'opencode',
     permissionMode?: PermissionMode,
   ) => void | Promise<void>
   onStop?: () => void | Promise<void>
@@ -284,7 +284,7 @@ export interface ChatSessionComposerProps {
   onPullQueued?: (queueId: string) => void
   presetMessage: string | undefined
   onPresetMessageConsumed: () => void
-  codeSessionLocks: Record<string, { cwd: string; agent: 'claude' | 'codex' }>
+  codeSessionLocks: Record<string, { cwd: string; agent: 'claude' | 'codex' | 'opencode' }>
   initialDraft: string | undefined
   onDraftChange: (tabId: string, text: string) => void
   /**

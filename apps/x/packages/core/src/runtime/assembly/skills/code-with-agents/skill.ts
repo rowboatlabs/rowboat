@@ -5,7 +5,7 @@ Use this skill whenever the user asks you to write code, build a project, create
 
 Coding agents operate on **arbitrary file paths** (including paths outside the Rowboat workspace root, like \`G:/4th sem/CN\` or \`~/projects/foo\`). Do NOT raise "outside workspace" concerns, and do NOT fall back to your own \`executeCommand\` (PowerShell / bash) or workspace file tools to do code work yourself.
 
-All coding work runs through the **\`code_agent_run\`** tool. It launches the selected on-device coding agent (Claude Code / Codex), streams its tool calls, file diffs, and plan into the chat, and surfaces any action needing approval as an inline permission card. One persistent session is kept per chat, so follow-up requests resume with full context automatically.
+All coding work runs through the **\`code_agent_run\`** tool. It launches the selected on-device coding agent (Claude Code / Codex / OpenCode), streams its tool calls, file diffs, and plan into the chat, and surfaces any action needing approval as an inline permission card. One persistent session is kept per chat, so follow-up requests resume with full context automatically.
 
 ---
 
@@ -30,17 +30,17 @@ No chip is set, but code mode is enabled (this skill only loads when it is). **P
 2. The path from a "# User Work Directory" block in your context.
 3. **Neither exists → OMIT \`cwd\` entirely.** The run lands in the user's default code repo (their registered project), isolated on its own branch — this is the normal case when the user just says what they want ("take down the overview tab") without naming a folder. Do NOT ask "which folder?" — only if the tool errors that no default repo exists, relay that error (it tells the user how to set one up).
 
-**Pick the agent** (\`claude\` or \`codex\`): use the agent from the "# Code Mode (Active)" block (the composer chip) / the Step 1 choice. The chip is authoritative — do NOT carry over a different agent from earlier in this thread, and do NOT switch on an in-chat text request ("use codex"); tell the user to toggle the chip instead.
+**Pick the agent** (OpenCode \`opencode\`, or \`claude\` or \`codex\`): use the agent from the "# Code Mode (Active)" block (the composer chip) / the Step 1 choice. The chip is authoritative — do NOT carry over a different agent from earlier in this thread, and do NOT switch on an in-chat text request ("use codex"); tell the user to toggle the chip instead.
 
 **State your intent in one line, then call the tool immediately — do NOT wait for a "yes".** The tool's own permission cards are the user's confirmation, so an extra in-chat "reply yes to proceed" is redundant friction. Say something like:
 
-> Using [Claude Code / Codex] to [task description] in \`[folder]\` — or "in your default repo" when cwd is omitted.
+> Using [Claude Code / Codex / OpenCode] to [task description] in \`[folder]\` — or "in your default repo" when cwd is omitted.
 
 …and then immediately call:
 
 \`\`\`
 code_agent_run({
-  agent: "<claude|codex>",
+  agent: "<claude|codex|opencode>",
   cwd: "<resolved absolute folder — OMIT when unresolved, see above>",
   prompt: "<the user's request, forwarded almost verbatim>"
 })

@@ -3,6 +3,59 @@
 // Maps each agent + platform to the npm tarball + integrity of its native engine.
 
 export const ENGINE_MANIFEST = {
+    "opencode": {
+        "version": "1.18.30",
+        "platforms": {
+            "win32-x64": {
+                "pkg": "opencode-windows-x64-baseline",
+                "pkgVersion": "1.18.30",
+                "tarball": "https://registry.npmjs.org/opencode-windows-x64-baseline/-/opencode-windows-x64-baseline-1.18.30.tgz",
+                "integrity": "sha512-BaqwQxA2TWBUNKsmrDoTF1gg3x6lbt7vA4WluRNuT6GuuJJhQ+lJzOTk2G9tqp4bMybR31p5zXAmPf9JwHP2GA=="
+            },
+            "win32-arm64": {
+                "pkg": "opencode-windows-arm64",
+                "pkgVersion": "1.18.30",
+                "tarball": "https://registry.npmjs.org/opencode-windows-arm64/-/opencode-windows-arm64-1.18.30.tgz",
+                "integrity": "sha512-NLnAzRNqv+6ebLeK5DBGRcN6Fk3PM4STXyrp+IuI8w2WNLJ6JbIk7xxTfbMsrO+CBEV88DCurFOKHB4dpDBaYQ=="
+            },
+            "darwin-x64": {
+                "pkg": "opencode-darwin-x64-baseline",
+                "pkgVersion": "1.18.30",
+                "tarball": "https://registry.npmjs.org/opencode-darwin-x64-baseline/-/opencode-darwin-x64-baseline-1.18.30.tgz",
+                "integrity": "sha512-DMQWRe9blvI+639fcwqG+JUxppTOVrPyasMF/uWhTi5N+5veXpB1K/wV15D8Lz7uqblH/CE7apxroaz/E7vudA=="
+            },
+            "darwin-arm64": {
+                "pkg": "opencode-darwin-arm64",
+                "pkgVersion": "1.18.30",
+                "tarball": "https://registry.npmjs.org/opencode-darwin-arm64/-/opencode-darwin-arm64-1.18.30.tgz",
+                "integrity": "sha512-KO4FJGZpgmSz+NNQ6PizynT5qAzVfoZI5HJLpyD0tYNqePPu87g2/UgVmNW663Bock2r75koLZFjR5waZiFiqw=="
+            },
+            "linux-x64": {
+                "pkg": "opencode-linux-x64-baseline",
+                "pkgVersion": "1.18.30",
+                "tarball": "https://registry.npmjs.org/opencode-linux-x64-baseline/-/opencode-linux-x64-baseline-1.18.30.tgz",
+                "integrity": "sha512-//sHZuMaNZXo6fzBtgUI5vf1oXiMX9Un2a2R3AUzajRahuW42+98wg9J33uuICblE3RS6G4HxobrvnWA8mr4VA=="
+            },
+            "linux-arm64": {
+                "pkg": "opencode-linux-arm64",
+                "pkgVersion": "1.18.30",
+                "tarball": "https://registry.npmjs.org/opencode-linux-arm64/-/opencode-linux-arm64-1.18.30.tgz",
+                "integrity": "sha512-KU2VO9oGRhV3M9LCYJXeBBtadIIgJYf620KMHFeghrGL0967Zz7PAcMBFZqTy7gUqNEnMaqOqAkSGx57BIw41Q=="
+            },
+            "linux-x64-musl": {
+                "pkg": "opencode-linux-x64-baseline-musl",
+                "pkgVersion": "1.18.30",
+                "tarball": "https://registry.npmjs.org/opencode-linux-x64-baseline-musl/-/opencode-linux-x64-baseline-musl-1.18.30.tgz",
+                "integrity": "sha512-8VAJb4VnNP6MbqWHMDMUwJ5k47tb5SPDqM0lcsCgfbeGjDy7rgFtlA8PYSgUgA9VTByBWmpfERR/34VVOHe82g=="
+            },
+            "linux-arm64-musl": {
+                "pkg": "opencode-linux-arm64-musl",
+                "pkgVersion": "1.18.30",
+                "tarball": "https://registry.npmjs.org/opencode-linux-arm64-musl/-/opencode-linux-arm64-musl-1.18.30.tgz",
+                "integrity": "sha512-IQedvhqaisv886gwk3bR603fPTErdExQa0z3hmqi7waIeuSsQG9B+suhg6iaD74lmxMbYMRlPlg4kIioytiHGg=="
+            }
+        }
+    },
     "claude": {
         "version": "0.3.257",
         "platforms": {

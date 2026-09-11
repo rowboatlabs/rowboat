@@ -39,7 +39,7 @@ export const ModeFlags = z.object({
     voiceInput: z.boolean().default(false),
     voiceOutput: z.enum(["summary", "full"]).nullable().default(null),
     searchEnabled: z.boolean().default(false),
-    codeMode: z.enum(["claude", "codex"]).nullable().default(null),
+    codeMode: z.enum(["claude", "codex", "opencode"]).nullable().default(null),
     codeCwd: z.string().nullable().default(null),
     videoMode: z.boolean().default(false),
     coachMode: z.boolean().default(false),

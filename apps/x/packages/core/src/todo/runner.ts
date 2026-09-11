@@ -424,7 +424,7 @@ export async function runTodoItem(
         // item's thread before the first turn — worktree lane by default,
         // visible in the Code section, status-tracked. code_agent_run then
         // resolves the pin server-side like any Code-section session.
-        code?: { projectId: string; agent?: 'claude' | 'codex'; isolation?: 'in-repo' | 'worktree' };
+        code?: { projectId: string; agent?: 'claude' | 'codex' | 'opencode'; isolation?: 'in-repo' | 'worktree' };
     },
 ): Promise<TodoRunResult> {
     const norm = normalizeKey(key);

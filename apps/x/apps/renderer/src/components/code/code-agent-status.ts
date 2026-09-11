@@ -1,9 +1,9 @@
-import type { CodingAgent } from '@x/shared/src/code-mode.js'
+import { CODING_AGENT_CAPABILITIES, type EnabledCodingAgent as CodingAgent } from '@x/shared/src/code-mode.js'
 
 export type CodeAgentStatus = { installed: boolean; signedIn: boolean }
 export type CodeAgentsStatus = Record<CodingAgent, CodeAgentStatus>
 
-export const AGENT_LABEL: Record<CodingAgent, string> = { claude: 'Claude Code', codex: 'Codex' }
+export const AGENT_LABEL: Record<CodingAgent, string> = { claude: CODING_AGENT_CAPABILITIES.claude.name, codex: CODING_AGENT_CAPABILITIES.codex.name, opencode: CODING_AGENT_CAPABILITIES.opencode.name }
 
 // Which coding agents are installed and signed in. The probe touches the
 // shell and keychain, so it's cached briefly: the Code view warms it on
@@ -11,11 +11,13 @@ export const AGENT_LABEL: Record<CodingAgent, string> = { claude: 'Claude Code',
 // the click.
 const TTL_MS = 60_000
 let cached: { at: number; value: Promise<CodeAgentsStatus> } | null = null
+if (typeof window !== 'undefined') window.addEventListener('opencode-configuration-changed', () => { cached = null })
 
 export function fetchCodeAgentsStatus(opts?: { fresh?: boolean }): Promise<CodeAgentsStatus> {
   const now = Date.now()
   if (!opts?.fresh && cached && now - cached.at < TTL_MS) return cached.value
   const value = window.ipc.invoke('codeMode:checkAgentStatus', null).then((s) => ({
+    opencode: { installed: s.opencode?.installed ?? false, signedIn: s.opencode?.signedIn ?? false },
     claude: { installed: s.claude.installed, signedIn: s.claude.signedIn },
     codex: { installed: s.codex.installed, signedIn: s.codex.signedIn },
   }))
@@ -26,5 +28,5 @@ export function fetchCodeAgentsStatus(opts?: { fresh?: boolean }): Promise<CodeA
 
 export function isAgentReady(status: CodeAgentsStatus | null | undefined, agent: CodingAgent): boolean {
   const s = status?.[agent]
-  return Boolean(s && s.installed && s.signedIn)
+  return Boolean(s && s.installed && (agent === 'opencode' || s.signedIn))
 }

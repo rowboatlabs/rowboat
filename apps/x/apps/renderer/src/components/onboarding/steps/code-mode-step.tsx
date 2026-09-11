@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { startProvisioning, type CodeModeAgentStatus } from "@/lib/code-mode-provisioning"
 import type { OnboardingState } from "../use-onboarding-state"
+import { OpenCodeEngineSettings } from '@/components/opencode-engine-settings'
 
 interface CodeModeStepProps {
   state: OnboardingState
@@ -35,7 +36,7 @@ export function CodeModeStep({ state }: CodeModeStepProps) {
         setStatus(result)
         const claudeInstalled = result.claude.installed
         const codexInstalled = result.codex.installed
-        if (claudeInstalled || codexInstalled) {
+        if (claudeInstalled || codexInstalled || result.opencode?.installed) {
           setEnabled(true)
           setSelected({ claude: claudeInstalled, codex: codexInstalled })
         }
@@ -128,6 +129,7 @@ export function CodeModeStep({ state }: CodeModeStepProps) {
       )}
 
       {/* Footer */}
+      {enabled && <div className="mt-4"><OpenCodeEngineSettings active={enabled} /></div>}
       <div className="flex flex-col gap-3 mt-8 pt-4 border-t">
         <Button onClick={onContinue} size="lg" className="h-12 text-base font-medium" disabled={saving}>
           {saving ? <Loader2 className="size-5 animate-spin" /> : "Continue"}

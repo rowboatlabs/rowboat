@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Code2, Plus } from 'lucide-react'
 import { codeWorkspaceKey, type CodeSession, type CodeSessionStatus } from '@x/shared/src/code-sessions.js'
-import type { CodingAgent } from '@x/shared/src/code-mode.js'
+import type { EnabledCodingAgent as CodingAgent } from '@x/shared/src/code-mode.js'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import {
@@ -69,8 +69,10 @@ export function CodeView({
   const [agentsStatus, setAgentsStatus] = useState<CodeAgentsStatus | null>(null)
   useEffect(() => {
     let cancelled = false
-    fetchCodeAgentsStatus().then((s) => { if (!cancelled) setAgentsStatus(s) }).catch(() => {})
-    return () => { cancelled = true }
+    const refreshStatus = () => { void fetchCodeAgentsStatus().then((s) => { if (!cancelled) setAgentsStatus(s) }).catch(() => {}) }
+    refreshStatus()
+    window.addEventListener('opencode-configuration-changed', refreshStatus)
+    return () => { cancelled = true; window.removeEventListener('opencode-configuration-changed', refreshStatus) }
   }, [])
 
   useEffect(() => {
@@ -122,8 +124,8 @@ export function CodeView({
         agent = lastUsed ?? 'claude'
       } else if (lastUsed && ready(lastUsed)) {
         agent = lastUsed
-      } else if (ready('claude') || ready('codex')) {
-        agent = ready('claude') ? 'claude' : 'codex'
+      } else if (ready('claude') || ready('codex') || ready('opencode')) {
+        agent = ready('claude') ? 'claude' : ready('codex') ? 'codex' : 'opencode'
       } else {
         throw new Error('No coding agent is ready — sign in to Claude Code or Codex in Settings.')
       }

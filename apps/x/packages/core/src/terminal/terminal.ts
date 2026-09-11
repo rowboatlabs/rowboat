@@ -49,7 +49,7 @@ function broadcast(channel: 'terminal:data' | 'terminal:exit', payload: unknown)
 // main bundle happened to work.
 let helperFixed = false;
 let helperPath: string | null = null;
-function ensureSpawnHelperExecutable(): void {
+export function ensureSpawnHelperExecutable(): void {
   if (helperFixed || process.platform === 'win32') return;
   helperFixed = true;
   try {

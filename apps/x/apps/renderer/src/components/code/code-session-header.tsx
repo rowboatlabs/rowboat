@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Check, ChevronDown, Copy, GitBranch, RotateCcw, SlidersHorizontal } from 'lucide-react'
 import type { CodeSession, CodeSessionStatus, CodeAgentModelOptions } from '@x/shared/src/code-sessions.js'
-import type { ApprovalPolicy, CodingAgent } from '@x/shared/src/code-mode.js'
+import type { ApprovalPolicy, EnabledCodingAgent as CodingAgent } from '@x/shared/src/code-mode.js'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -39,7 +39,7 @@ export interface CodeSessionHeaderProps {
   onTogglePanel: (panel: CodePanel) => void
 }
 
-type SessionPatch = { agent?: CodingAgent; policy?: ApprovalPolicy; agentModel?: string; agentEffort?: string }
+type SessionPatch = { agent?: CodingAgent; policy?: ApprovalPolicy; agentModel?: string; agentEffort?: string; agentMode?: string }
 
 function StatusPill({ status }: { status: CodeSessionStatus }) {
   if (status === 'idle') return null
@@ -102,29 +102,47 @@ function WorktreeChip({ branch, path }: { branch: string; path: string }) {
 
 // Header of the chat while it is bound to a coding session — the chat is the
 // main surface, so this is where the session lives: its title and branch,
-// the agent's model / effort / approvals in one menu, and the doors to the
+// a visible model picker, additional session settings, and the doors to the
 // workspace drawer (changes, files, terminal).
 export function CodeSessionHeader({ session, status, changedCount, panel, onTogglePanel }: CodeSessionHeaderProps) {
   const [modelOpts, setModelOpts] = useState<CodeAgentModelOptions>({ models: [], efforts: [] })
+  const [optionsError, setOptionsError] = useState<string>()
+  const [optionsLoading, setOptionsLoading] = useState(true)
+  const [updating, setUpdating] = useState(false)
+  const [openCodeGroup, setOpenCodeGroup] = useState<'go' | 'zen'>()
+  useEffect(() => { setOpenCodeGroup(undefined) }, [session.id])
+  const [refreshOptions, setRefreshOptions] = useState(0)
   useEffect(() => {
     let cancelled = false
-    void fetchCodeAgentOptions(session.agent).then((opts) => { if (!cancelled) setModelOpts(opts) })
+    setModelOpts({ models: [], efforts: [] }); setOptionsError(undefined); setOptionsLoading(true)
+    void fetchCodeAgentOptions(session.agent, session.cwd, session.agentModel, session.agentMode)
+      .then((opts) => { if (!cancelled) { setModelOpts(opts); setOptionsError(opts.selectionError) } })
+      .catch((error: unknown) => { if (!cancelled) setOptionsError(error instanceof Error ? error.message : 'Could not discover model options') })
+      .finally(() => { if (!cancelled) setOptionsLoading(false) })
     return () => { cancelled = true }
-  }, [session.agent])
+  }, [session.agent, session.cwd, session.agentModel, session.agentMode, refreshOptions])
   // Which agents can be switched to (cached probe; null until known).
   const [agentsStatus, setAgentsStatus] = useState<CodeAgentsStatus | null>(null)
   useEffect(() => {
     let cancelled = false
-    fetchCodeAgentsStatus().then((s) => { if (!cancelled) setAgentsStatus(s) }).catch(() => {})
-    return () => { cancelled = true }
+    const refreshStatus = () => {
+      setRefreshOptions(n => n + 1)
+      void fetchCodeAgentsStatus().then((s) => { if (!cancelled) setAgentsStatus(s) }).catch(() => {})
+    }
+    void fetchCodeAgentsStatus().then((s) => { if (!cancelled) setAgentsStatus(s) }).catch(() => {})
+    window.addEventListener('opencode-configuration-changed', refreshStatus)
+    return () => { cancelled = true; window.removeEventListener('opencode-configuration-changed', refreshStatus) }
   }, [])
 
   const update = async (patch: SessionPatch) => {
+    setUpdating(true)
     try {
       await window.ipc.invoke('codeSession:update', { sessionId: session.id, patch })
       await refreshCodeSessions()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to update session')
+    } finally {
+      setUpdating(false)
     }
   }
 
@@ -137,8 +155,15 @@ export function CodeSessionHeader({ session, status, changedCount, panel, onTogg
       toast.error(err instanceof Error ? err.message : 'Failed to update session')
     }
   }
-  const models = withDefault(modelOpts.models)
-  const efforts = withDefault(modelOpts.efforts)
+  const allModels = session.agent === 'opencode' ? modelOpts.models : withDefault(modelOpts.models)
+  const providers = modelOpts.openCodeProviders ?? []
+  const bothServices = session.agent === 'opencode' && providers.includes('go') && providers.includes('zen')
+  const activeGroup = bothServices ? (openCodeGroup ?? (session.agentModel?.startsWith('opencode-go/') ? 'go' : 'zen')) : providers[0]
+  const models = bothServices ? allModels.filter(model => model.value.startsWith(activeGroup === 'go' ? 'opencode-go/' : 'opencode/')) : allModels
+  const efforts = session.agent === 'opencode' ? modelOpts.efforts : withDefault(modelOpts.efforts)
+  const selectedModel = session.agentModel ?? modelOpts.currentModel
+  const modelLabel = selectedModel ? optionLabel(allModels, selectedModel) : 'Choose model'
+  const configurationLocked = updating || status !== 'idle'
 
   return (
     <div className="titlebar-no-drag flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden pl-3 pr-1 @container">
@@ -150,19 +175,45 @@ export function CodeSessionHeader({ session, status, changedCount, panel, onTogg
         )}
       </div>
 
-      {/* Session settings: one menu, three choices. */}
       <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="outline" size="sm" aria-label="Choose coding model" title={modelLabel} className="h-7 min-w-0 max-w-52 shrink gap-1 px-2 text-xs">
+            <span className="shrink-0">Model:</span>
+            <span className="truncate">{updating ? 'Applying...' : optionsLoading ? 'Loading...' : modelLabel}</span>
+            <ChevronDown className="size-3 shrink-0" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="max-h-80 w-72 overflow-y-auto">
+          <DropdownMenuLabel>{AGENT_LABEL[session.agent]} models</DropdownMenuLabel>
+          {bothServices && <div className="flex gap-1 px-2 pb-2" role="group" aria-label="OpenCode service">
+            {(['zen', 'go'] as const).map(group => <Button key={group} size="sm" variant={activeGroup === group ? 'secondary' : 'ghost'} aria-pressed={activeGroup === group} onClick={() => setOpenCodeGroup(group)}>{group === 'go' ? 'Go' : 'Zen'}</Button>)}
+          </div>}
+          {!bothServices && activeGroup && <p className="px-2 pb-1 text-xs text-muted-foreground">{activeGroup === 'free' ? 'Free models — no OpenCode account connected' : activeGroup === 'go' ? 'Go subscription models' : 'Zen models'}</p>}
+          {optionsLoading && <p role="status" className="px-2 py-1 text-xs text-muted-foreground">Loading models from the coding agent...</p>}
+          {optionsError && <p role="alert" className="px-2 py-1 text-xs text-destructive">{optionsError}</p>}
+          {!optionsLoading && !models.length && !optionsError && <p className="px-2 py-1 text-xs text-muted-foreground">No models are available. Refresh to try again.</p>}
+          {configurationLocked && <p className="px-2 py-1 text-xs text-muted-foreground">{updating ? 'Applying your selection...' : 'Stop the current operation before changing models.'}</p>}
+          <DropdownMenuRadioGroup value={selectedModel} onValueChange={value => void update({ agentModel: value })}>
+            {!optionsLoading && models.map(model => <DropdownMenuRadioItem key={model.value} value={model.value} disabled={configurationLocked}>{model.label}</DropdownMenuRadioItem>)}
+          </DropdownMenuRadioGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem disabled={optionsLoading || updating} onSelect={event => { event.preventDefault(); setRefreshOptions(n => n + 1) }}>Refresh models</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      {/* Additional session configuration. Models are directly accessible above. */}
+      <DropdownMenu onOpenChange={(open) => { if (open && session.agent === 'opencode') setRefreshOptions(n => n + 1) }}>
         <Tooltip>
           <TooltipTrigger asChild>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-7 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground">
+              <Button variant="ghost" size="sm" aria-label="Coding session settings" className="h-7 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground">
                 <SlidersHorizontal className="size-3.5" />
                 <span className="hidden @[400px]:inline">{AGENT_LABEL[session.agent] ?? session.agent}</span>
                 <ChevronDown className="size-3" />
               </Button>
             </DropdownMenuTrigger>
           </TooltipTrigger>
-          <TooltipContent side="bottom">Model, effort and approvals for this session</TooltipContent>
+          <TooltipContent side="bottom">Agent, mode, effort and approvals for this session</TooltipContent>
         </Tooltip>
         <DropdownMenuContent align="end" className="w-64">
           <DropdownMenuLabel className="flex flex-col gap-0.5">
@@ -172,6 +223,8 @@ export function CodeSessionHeader({ session, status, changedCount, panel, onTogg
             </span>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
+          {optionsError && <p role="alert" className="px-2 py-1 text-xs text-destructive">{optionsError}</p>}
+          {session.agent === 'opencode' && <p className="px-2 py-1 text-xs text-muted-foreground">Approvals apply once. Subagent tasks are unavailable.</p>}
           {/* A quick-created session lands on the last-used agent; switching
               here starts the other engine fresh on the next turn. */}
           <DropdownMenuSub>
@@ -185,7 +238,7 @@ export function CodeSessionHeader({ session, status, changedCount, panel, onTogg
                   value={session.agent}
                   onValueChange={(v) => void update({ agent: v as CodingAgent })}
                 >
-                  {(['claude', 'codex'] as CodingAgent[]).map((agent) => (
+                  {(['claude', 'codex', 'opencode'] as CodingAgent[]).map((agent) => (
                     <DropdownMenuRadioItem
                       key={agent}
                       value={agent}
@@ -198,34 +251,27 @@ export function CodeSessionHeader({ session, status, changedCount, panel, onTogg
               </DropdownMenuSubContent>
             </DropdownMenuPortal>
           </DropdownMenuSub>
-          <DropdownMenuSub>
+          {!!modelOpts.modes?.length && <DropdownMenuSub>
             <DropdownMenuSubTrigger>
-              <span className="flex-1">Model</span>
-              <span className="ml-3 truncate text-xs text-muted-foreground">{optionLabel(models, session.agentModel)}</span>
+              <span className="flex-1">Mode</span>
+              <span className="ml-3 text-xs text-muted-foreground">{optionLabel(modelOpts.modes, session.agentMode ?? modelOpts.currentMode)}</span>
             </DropdownMenuSubTrigger>
-            <DropdownMenuPortal>
-              <DropdownMenuSubContent className="max-h-80 overflow-y-auto">
-                <DropdownMenuRadioGroup
-                  value={session.agentModel ?? 'default'}
-                  onValueChange={(v) => void update({ agentModel: v })}
-                >
-                  {models.map((m) => (
-                    <DropdownMenuRadioItem key={m.value} value={m.value}>{m.label}</DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              </DropdownMenuSubContent>
-            </DropdownMenuPortal>
-          </DropdownMenuSub>
+            <DropdownMenuPortal><DropdownMenuSubContent>
+              <DropdownMenuRadioGroup value={session.agentMode ?? modelOpts.currentMode} onValueChange={v => void update({ agentMode: v })}>
+                {modelOpts.modes.map(mode => <DropdownMenuRadioItem key={mode.value} value={mode.value}>{mode.label}</DropdownMenuRadioItem>)}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuSubContent></DropdownMenuPortal>
+          </DropdownMenuSub>}
           {modelOpts.efforts.length > 0 && (
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>
                 <span className="flex-1">Effort</span>
-                <span className="ml-3 truncate text-xs text-muted-foreground">{optionLabel(efforts, session.agentEffort)}</span>
+                <span className="ml-3 truncate text-xs text-muted-foreground">{optionLabel(efforts, session.agentEffort ?? modelOpts.currentEffort)}</span>
               </DropdownMenuSubTrigger>
               <DropdownMenuPortal>
                 <DropdownMenuSubContent>
                   <DropdownMenuRadioGroup
-                    value={session.agentEffort ?? 'default'}
+                    value={session.agentEffort ?? modelOpts.currentEffort ?? 'default'}
                     onValueChange={(v) => void update({ agentEffort: v })}
                   >
                     {efforts.map((e) => (
