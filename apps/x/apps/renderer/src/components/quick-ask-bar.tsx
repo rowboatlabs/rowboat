@@ -1983,7 +1983,9 @@ function TuckedDock({
                 style={noDragRegion}
                 onClick={onExpand}
                 aria-label="Bring the text back"
-                className="flex-none transition active:scale-95"
+                aria-expanded={false}
+                title={expandTip}
+                className={`flex-none transition active:scale-95 ${vertical ? 'cursor-pointer rounded-[11px] hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:hover:bg-white/10' : ''}`}
               >
                 {vertical ? (
                   <span className={`flex h-[34px] w-[34px] items-center justify-center rounded-[11px] text-neutral-700 dark:text-neutral-200 ${state.status === 'thinking' ? 'qa-logo-glow' : ''}`}>
@@ -1992,7 +1994,7 @@ function TuckedDock({
                 ) : <LogoTile size={34} glow={state.status === 'thinking'} />}
               </button>
             </TooltipTrigger>
-            <TooltipContent side="top">{expandTip}</TooltipContent>
+            <TooltipContent side={vertical ? 'left' : 'top'}>{expandTip}</TooltipContent>
           </Tooltip>
           {vertical ? (
             <Tooltip>
@@ -2011,14 +2013,9 @@ function TuckedDock({
           <TalkButton state={state} sendAction={sendAction} className={vertical ? 'h-7 w-7' : 'h-8 w-8'} />
           {!vertical && <EndButton sendAction={sendAction} className="h-7 w-7" />}
         </div>
-        {/* Unfold handle on the pill's left edge — the MIRROR of the card's
-            tuck handle (same circle, chevrons pointing the other way), so
-            hiding and un-hiding read as one gesture with two directions.
-            Same drag-region-hole discipline as that handle: the wrapper is
-            the static, transform-free hole, oversized around the art, with
-            pointer-events-none + the button opting back in; the motion
-            lives on the button. */}
-        <span
+        {/* The vertical dock expands through its Assistant icon. Keep the
+            camera pill's existing external handle. */}
+        {!vertical && <span
           className="pointer-events-none absolute z-10 flex h-8 w-8 items-center justify-center"
           style={{ ...noDragRegion, top: 'calc(50% - 16px)', left: '-16px' }}
         >
@@ -2035,7 +2032,7 @@ function TuckedDock({
             </TooltipTrigger>
             <TooltipContent side="top">{expandTip}</TooltipContent>
           </Tooltip>
-        </span>
+        </span>}
       </div>
     </div>
   )
