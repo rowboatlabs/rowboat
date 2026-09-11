@@ -705,7 +705,9 @@ export function QuickAskBar() {
             the answer will land); window actions, the device controls
             (share, talk/stop) and the small ✕ dismiss on the right. */}
         <div className="flex items-center gap-2 px-4 pt-3">
-          <LogoTile size={28} glow={callState.status === 'thinking'} />
+          <span className={`flex h-7 w-7 flex-none items-center justify-center rounded-[11px] text-neutral-700 dark:text-neutral-200 ${callState.status === 'thinking' ? 'qa-logo-glow' : ''}`}>
+            <MascotFaceIcon size={24} />
+          </span>
           {/* Destination chip: WHICH chat this session is continuing — click
               for the recents switcher (opens upward into the transparent
               stage). Retargets subsequent questions mid-session. */}
