@@ -2007,7 +2007,7 @@ function TuckedDock({
           ) : <StatusLane state={state} activity={activity} bars={20} className="w-[112px]" />}
           <ShareButton state={state} sendAction={sendAction} className="h-7 w-7" />
           <TalkButton state={state} sendAction={sendAction} className={vertical ? 'h-7 w-7' : 'h-8 w-8'} />
-          <EndButton sendAction={sendAction} className="h-7 w-7" />
+          {!vertical && <EndButton sendAction={sendAction} className="h-7 w-7" />}
         </div>
         {/* Unfold handle on the pill's left edge — the MIRROR of the card's
             tuck handle (same circle, chevrons pointing the other way), so
