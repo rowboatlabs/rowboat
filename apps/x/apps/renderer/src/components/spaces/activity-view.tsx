@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Loader2, RefreshCw } from 'lucide-react'
+import { CheckCheck, Loader2, RefreshCw } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { MemberAvatar, Segmented } from '@/components/spaces/atoms'
 import { DayDivider } from '@/components/spaces/message-row'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { dayKey, formatDayLabel } from '@/lib/spaces-conventions'
 import { subscribeSpacesFeed } from '@/lib/spaces-feed'
+import { loadUnread } from '@/lib/spaces-read-state'
+import { toast } from '@/lib/toast'
 import { formatFeedTime, resolveMentions } from '@/lib/spaces-presentation'
 import type { RailSelection } from '@/lib/spaces-selection'
 import { cn } from '@/lib/utils'
@@ -121,6 +123,25 @@ export function ActivityView({ org, active = true, onOpenMessage }: {
         }
     }, [active, org.id, load])
 
+    // "Mark all read" (2026-09-11): the org moves every mark at once — streams
+    // to head, involved threads to their newest reply, reactions seen — then
+    // the snapshot refetch clears the rail and this list reloads. Other
+    // devices hear the read_mark echoes.
+    const [clearing, setClearing] = useState(false)
+    const markAllRead = async () => {
+        if (clearing) return
+        setClearing(true)
+        try {
+            await window.ipc.invoke('spaces:readAll', { orgId: org.id })
+            await loadUnread(org.id, org.memberId)
+            await load()
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not mark everything read', 'error')
+        } finally {
+            setClearing(false)
+        }
+    }
+
     const loadMore = async () => {
         if (!page?.nextCursor || more) return
         setMore(true)
@@ -146,8 +167,12 @@ export function ActivityView({ org, active = true, onOpenMessage }: {
                     <input type="checkbox" className="size-3.5 accent-[var(--stream-alert)]" checked={unreadOnly} onChange={(e) => setUnreadOnly(e.target.checked)} />
                     Unread only
                 </label>
+                <button type="button" onClick={() => void markAllRead()} disabled={clearing} title="Mark everything read — every space, thread and reaction"
+                    className="ml-auto flex items-center gap-1 rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50">
+                    <CheckCheck className="size-3.5" /> Mark all read
+                </button>
                 <button type="button" onClick={() => void load()} title="Refresh" aria-label="Refresh"
-                    className="ml-auto rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground">
+                    className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground">
                     <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} />
                 </button>
             </div>

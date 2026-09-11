@@ -464,6 +464,10 @@ export function buildHttpApp(deps: {
     const body = parseWith(routes.markActivitySeen.request, await c.req.json());
     return reply(c, routes.markActivitySeen.response, await service.markActivitySeen(actor(c), body.at));
   });
+  app.post(routes.readAll.path, async (c) => {
+    const body = parseWith(routes.readAll.request, await c.req.json());
+    return reply(c, routes.readAll.response, await service.readAll(actor(c), body));
+  });
 
   return app;
 }

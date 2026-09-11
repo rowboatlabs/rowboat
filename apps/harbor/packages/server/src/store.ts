@@ -350,14 +350,18 @@ export interface Store {
     following: boolean,
     at: string,
   ): Promise<ThreadReadMark>;
-  /** Monotone; undefined when the member is not following the thread (nothing recorded). */
+  /**
+   * Monotone upsert — greatest(stored, offset). A thread the member does not
+   * follow takes a mark too (the row is created with `following: false`):
+   * reading clears Activity there, while badges and counts stay followed-only.
+   */
   advanceThreadReadMark(
     spaceId: string,
     rootMessageId: string,
     memberId: string,
     offset: number,
     at: string,
-  ): Promise<number | undefined>;
+  ): Promise<number>;
   /** Roots after `afterOffset` that are neither the member's nor tombstoned. */
   countUnreadRoots(spaceId: string, memberId: string, afterOffset: number): Promise<number>;
   /** Of those, the ones addressed to the member: a mention token naming them, or @here. */
@@ -376,6 +380,13 @@ export interface Store {
    * reactions — so `unreadOnly` pages correctly.
    */
   listActivity(memberId: string, query: ActivityQuery): Promise<ActivityRow[]>;
+  /**
+   * "Mark everything read" for threads (2026-09-11): every thread in `spaceIds`
+   * holding an Activity row for the member — a mention, an @here, a reply in a
+   * DM, a reply in a thread they follow — takes a mark at its newest live reply
+   * (created unfollowed when no row exists). Returns only the marks that moved.
+   */
+  readAllThreads(memberId: string, spaceIds: string[], at: string): Promise<Array<{ spaceId: string; rootMessageId: string; readOffset: number }>>;
   getActivitySeenAt(memberId: string): Promise<string | undefined>;
   /** Monotone: an older `at` leaves the mark; returns the mark that stands. */
   advanceActivitySeenAt(memberId: string, at: string): Promise<string>;

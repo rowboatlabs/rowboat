@@ -57,6 +57,7 @@ describe('agent face (MCP)', () => {
       'list_spaces',
       'list_topics',
       'manage_topic',
+      'mark_all_read',
       'move_asset',
       'open_direct',
       'post_message',

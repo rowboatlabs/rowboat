@@ -398,7 +398,7 @@ export class SpacesClient {
   // The org owns the cursors (offsets, per member); these are pass-throughs.
 
   /** Advance the stream mark (no threadRootId) or a followed thread's. Monotone; null = not following. */
-  async markRead(spaceId: string, input: { threadRootId?: string; offset: number }): Promise<{ readOffset: number | null }> {
+  async markRead(spaceId: string, input: { threadRootId?: string; offset: number }): Promise<{ readOffset: number }> {
     return this.request('POST', this.space(spaceId, '/read'), routes.markRead.response, input);
   }
 
@@ -435,6 +435,10 @@ export class SpacesClient {
   /** Reactions through `at` read as seen in Activity. Monotone. */
   async markActivitySeen(at: string): Promise<{ seenAt: string }> {
     return this.request('POST', routes.markActivitySeen.path, routes.markActivitySeen.response, { at });
+  }
+
+  async readAll(input: { spaceId?: string } = {}): Promise<{ spaces: Array<{ spaceId: string; readOffset: number }>; threads: number; seenAt: string }> {
+    return this.request('POST', routes.readAll.path, routes.readAll.response, input);
   }
 
   /** A root (no threadRoot) or a reply (threadRoot) — never creates a topic. */

@@ -134,13 +134,17 @@ describe.each([['memory'], ['postgres']] as const)('read marks (%s store)', (sto
     expect((await unreadOf(ramnique))!.threads).toEqual([]);
   });
 
-  it('a thread mark clears it; marking an unfollowed thread records nothing', async () => {
+  it('a thread mark clears it; an unfollowed thread takes a mark too, without following', async () => {
     const marked = await harsh.post(`/v1/spaces/${main}/read`, { threadRootId: r4.id, offset: arjunReply.offset });
     expect(marked.body).toEqual({ readOffset: arjunReply.offset });
     expect((await unreadOf(harsh))!.threads).toEqual([]);
 
-    const nothing = await ramnique.post(`/v1/spaces/${main}/read`, { threadRootId: r4.id, offset: arjunReply.offset });
-    expect(nothing.body).toEqual({ readOffset: null });
+    // Ramnique reads the thread without following it (2026-09-11): the mark
+    // is kept — Activity needs it — but the thread still badges nobody.
+    const unfollowed = await ramnique.post(`/v1/spaces/${main}/read`, { threadRootId: r4.id, offset: arjunReply.offset });
+    expect(unfollowed.body).toEqual({ readOffset: arjunReply.offset });
+    expect((await ramnique.get(`/v1/spaces/${main}/threads/${r4.id}`)).body).toMatchObject({ following: false, readOffset: arjunReply.offset });
+    expect((await unreadOf(ramnique))!.threads).toEqual([]);
     // A reply's id marks its thread (resolves to the root).
     const viaReply = await harsh.post(`/v1/spaces/${main}/read`, { threadRootId: arjunReply.id, offset: arjunReply.offset });
     expect(viaReply.body).toEqual({ readOffset: arjunReply.offset });
@@ -155,8 +159,9 @@ describe.each([['memory'], ['postgres']] as const)('read marks (%s store)', (sto
     const off = await arjun.post(`/v1/spaces/${main}/threads/${r4.id}/follow`, { following: false });
     expect(off.body).toEqual({ following: false, readOffset: arjunReply.offset });
     expect((await unreadOf(arjun))!.threads).toEqual([]);
-    // Marking while unfollowed records nothing.
-    expect((await arjun.post(`/v1/spaces/${main}/read`, { threadRootId: r4.id, offset: h1.offset })).body).toEqual({ readOffset: null });
+    // Ramnique's unfollowed mark advances like any other, and still badges nothing.
+    expect((await ramnique.post(`/v1/spaces/${main}/read`, { threadRootId: r4.id, offset: h1.offset })).body).toEqual({ readOffset: h1.offset });
+    expect((await unreadOf(ramnique))!.threads).toEqual([]);
 
     const on = await arjun.post(`/v1/spaces/${main}/threads/${r4.id}/follow`, { following: true });
     expect(on.body).toEqual({ following: true, readOffset: arjunReply.offset });

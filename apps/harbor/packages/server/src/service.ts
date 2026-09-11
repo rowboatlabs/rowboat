@@ -1123,7 +1123,8 @@ export class HarborService {
       topic: (await this.store.getTopicByRoot(spaceId, root.id)) ?? null,
       messages: await this.foldPage(spaceId, replies),
       hasMore,
-      readOffset: mark?.following ? mark.readOffset : null,
+      // The mark, followed or not (null = the member never read or followed it).
+      readOffset: mark?.readOffset ?? null,
       following: mark?.following ?? false,
     };
   }
@@ -1828,8 +1829,14 @@ export class HarborService {
   // member state, not a space fact — the member's other connections learn by
   // an ephemeral read_mark frame, and a reconnecting client refetches unread().
 
-  /** Advance the stream mark, or a followed thread's mark. Monotone; past head refuses. */
-  async markRead(ctx: ActorCtx, spaceId: string, input: MarkReadInput): Promise<{ readOffset: number | null }> {
+  /**
+   * Advance the stream mark, or a thread's mark. Monotone; past head refuses.
+   * A thread mark is recorded whether or not the member follows the thread
+   * (2026-09-11): reading is what clears an Activity row, and @here in a
+   * thread, a DM thread you never replied in, or a thread you unfollowed can
+   * all put one there — following only governs badges and notifications.
+   */
+  async markRead(ctx: ActorCtx, spaceId: string, input: MarkReadInput): Promise<{ readOffset: number }> {
     await this.requireMember(ctx, spaceId);
     const head = await this.store.head(spaceId);
     if (input.offset > head) {
@@ -1837,13 +1844,11 @@ export class HarborService {
     }
     const at = this.now();
     let threadRootId: string | undefined;
-    let readOffset: number | undefined;
+    let readOffset: number;
     if (input.threadRootId !== undefined) {
       const root = await this.resolveRoot(spaceId, input.threadRootId);
       threadRootId = root.id;
       readOffset = await this.store.advanceThreadReadMark(spaceId, root.id, ctx.memberId, input.offset, at);
-      // Not following: nothing is recorded (v1 tracks followed threads only).
-      if (readOffset === undefined) return { readOffset: null };
     } else {
       readOffset = await this.store.advanceStreamReadMark(spaceId, ctx.memberId, input.offset, at);
     }
@@ -1935,6 +1940,38 @@ export class HarborService {
   /** Reactions through `at` read as seen. Monotone. */
   async markActivitySeen(ctx: ActorCtx, at: string): Promise<{ seenAt: string }> {
     return { seenAt: await this.store.advanceActivitySeenAt(ctx.memberId, at) };
+  }
+
+  /**
+   * "Mark everything read" (2026-09-11): every space the member is in (or the
+   * one named) reads through its head, every thread holding an Activity row
+   * for them reads through its newest reply, and reactions read as seen — so
+   * Activity, the rail and every other device agree. Cheap: one stream mark
+   * per space plus one statement for the threads. Marks only advance, so the
+   * call is idempotent; each mark that moved echoes to the member's other
+   * connections as a `read_mark` frame, the way single marks do.
+   */
+  async readAll(ctx: ActorCtx, input: { spaceId?: string }): Promise<{ spaces: Array<{ spaceId: string; readOffset: number }>; threads: number; seenAt: string }> {
+    let spaces = await this.store.listSpacesFor(ctx.memberId, { includeDirect: true });
+    if (input.spaceId !== undefined) {
+      await this.requireMember(ctx, input.spaceId);
+      spaces = spaces.filter((s) => s.id === input.spaceId);
+    }
+    const at = this.now();
+    const out: Array<{ spaceId: string; readOffset: number }> = [];
+    for (const space of spaces) {
+      const head = await this.store.head(space.id);
+      const before = await this.store.getStreamReadMark(space.id, ctx.memberId);
+      const readOffset = head > before ? await this.store.advanceStreamReadMark(space.id, ctx.memberId, head, at) : before;
+      out.push({ spaceId: space.id, readOffset });
+      if (readOffset > before) this.hub.publishToMember(ctx.memberId, { kind: 'read_mark', spaceId: space.id, offset: readOffset, at });
+    }
+    const threads = await this.store.readAllThreads(ctx.memberId, spaces.map((s) => s.id), at);
+    for (const t of threads) {
+      this.hub.publishToMember(ctx.memberId, { kind: 'read_mark', spaceId: t.spaceId, threadRootId: t.rootMessageId, offset: t.readOffset, at });
+    }
+    const seenAt = await this.store.advanceActivitySeenAt(ctx.memberId, at);
+    return { spaces: out, threads: threads.length, seenAt };
   }
 
   /** Every space the member is in (DMs included): cursor, unread roots, unread followed threads. */

@@ -293,13 +293,23 @@ function threadCaughtUp(t: ThreadReadState): void {
     t.unreadMentions = 0
 }
 
-/** Same for a followed thread. A thread we don't follow takes no mark (the org would record nothing either). */
+/**
+ * Same for a thread — followed or not (2026-09-11). Following decides whether
+ * the thread badges; the mark decides what is read, and Activity rows in a
+ * thread we don't follow (@here, a DM thread we never replied in, a thread we
+ * unfollowed) clear only through it. A thread we hold nothing on takes an
+ * unfollowed entry so the mark still reaches the org.
+ */
 export function markThreadRead(orgId: string, spaceId: string, rootMessageId: string, offset: number, opts?: { sync?: boolean }): void {
-    const s = space(orgId, spaceId)
-    const t = s?.threads.get(rootMessageId)
-    if (!s || !t?.following || offset <= t.readOffset) return
+    const s = space(orgId, spaceId, true)
+    let t = s.threads.get(rootMessageId)
+    if (!t) {
+        t = { following: false, readOffset: 0, lastReplyOffset: 0, unreadReplies: 0, unreadMentions: 0 }
+        s.threads.set(rootMessageId, t)
+    }
+    if (offset <= t.readOffset) return
     t.readOffset = offset
-    if (offset >= t.lastReplyOffset) threadCaughtUp(t)
+    if (!t.following || offset >= t.lastReplyOffset) threadCaughtUp(t)
     else {
         t.unreadReplies = null
         scheduleReload(orgId)

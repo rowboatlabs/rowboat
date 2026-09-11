@@ -542,6 +542,26 @@ export const readActivity = tool({
   }),
 });
 
+/**
+ * Mark everything read for the person — the org's "mark all as read" (2026-09-11).
+ */
+export const markAllRead = tool({
+  name: 'mark_all_read',
+  description:
+    'Mark everything read for your person: every space and DM they are in reads through its newest ' +
+    'message, every thread with something for them (mentions, @here, DM replies, replies in threads they ' +
+    'follow) reads through its newest reply, and reactions on their messages read as seen — so Activity, ' +
+    'the unread badges and their other devices all clear together. Pass `spaceId` to do it for one space ' +
+    'only. Use it when they say "mark everything read", "clear my unread", "I\'m caught up" — after they ' +
+    'have heard the summary, not instead of it. Marks only advance: this cannot be undone.',
+  input: z.object({ spaceId: SpaceId.optional() }),
+  output: z.object({
+    spaces: z.array(z.object({ spaceId: SpaceId, readOffset: z.number().int().nonnegative() })),
+    threads: z.number().int().nonnegative(),
+    seenAt: z.iso.datetime(),
+  }),
+});
+
 export const mcpTools = [
   whoami,
   listMembers,
@@ -554,6 +574,7 @@ export const mcpTools = [
   readStream,
   readThread,
   readActivity,
+  markAllRead,
   searchSpace,
   postMessage,
   editMessage,

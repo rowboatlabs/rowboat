@@ -4,7 +4,7 @@ import { readActivity } from '@rowboat/spaces-protocol';
 import { PgStore } from '../src/pg-store.js';
 import { startHarbor, type HarborOptions, type RunningHarbor } from '../src/server.js';
 import type { SqlDb } from '../src/sql.js';
-import { agentClient, callStructured, restClient } from './helpers.js';
+import { agentClient, callStructured, liveClient, restClient } from './helpers.js';
 import { pgliteDb } from './pglite.js';
 
 // Activity (2026-09-10, layer 3): everything that involves the member, as a
@@ -164,12 +164,89 @@ describe.each([['memory'], ['postgres']] as const)('activity (%s store)', (store
     expect(older.body.seenAt).toBe(seen.body.seenAt);
   });
 
+  it('reading a thread I do not follow clears its rows (@here, DM replies) — the mark needs no follow', async () => {
+    // Arjun's root, Harsh's @here under it: Ramnique follows nothing here.
+    const root = await post(arjun, main, 'thread root by arjun');
+    await tick();
+    const here = await post(harsh, main, '[@here](#here) in a thread nobody follows', { threadRoot: root.id });
+    await tick();
+    // Harsh's own DM thread, a reply in it: Ramnique never replied, so no follow row either.
+    const dmRoot = await post(harsh, dm.id, 'dm thread root');
+    await tick();
+    const dmReply = await post(harsh, dm.id, 'dm thread reply', { threadRoot: dmRoot.id });
+    const unreadIds = async () => (await activity(ramnique, '?unread=true')).items.map((i) => i.id);
+    const before = await activity(ramnique, '?unread=true');
+    expect(before.items.find((i) => i.id === `m:${here.id}`)).toMatchObject({ kind: 'here', threadRootId: root.id, unread: true });
+    expect(before.items.find((i) => i.id === `m:${dmReply.id}`)).toMatchObject({ kind: 'dm', threadRootId: dmRoot.id, unread: true });
+    expect(before.items.find((i) => i.id === `m:${dmRoot.id}`)).toMatchObject({ kind: 'dm', unread: true });
+    expect((await ramnique.get(`/v1/spaces/${main}/threads/${root.id}`)).body).toMatchObject({ following: false, readOffset: null });
+
+    // Reading in place: the thread pane marks the thread, followed or not.
+    expect((await ramnique.post(`/v1/spaces/${main}/read`, { threadRootId: root.id, offset: here.offset })).body).toEqual({ readOffset: here.offset });
+    expect((await ramnique.post(`/v1/spaces/${dm.id}/read`, { threadRootId: dmRoot.id, offset: dmReply.offset })).body).toEqual({ readOffset: dmReply.offset });
+    const after = await unreadIds();
+    expect(after).not.toContain(`m:${here.id}`);
+    expect(after).not.toContain(`m:${dmReply.id}`);
+    expect(after).toContain(`m:${dmRoot.id}`); // a root clears through the stream mark, as before
+    // The mark is kept without a follow: nothing badges, the thread stays unfollowed.
+    expect((await ramnique.get(`/v1/spaces/${main}/threads/${root.id}`)).body).toMatchObject({ following: false, readOffset: here.offset });
+    expect((await ramnique.get('/v1/unread')).body.spaces.flatMap((s: { threads: unknown[] }) => s.threads)).toEqual([]);
+    const dmHead = (await ramnique.get('/v1/unread')).body.spaces.find((s: { spaceId: string }) => s.spaceId === dm.id).head;
+    await ramnique.post(`/v1/spaces/${dm.id}/read`, { offset: dmHead });
+    expect(await unreadIds()).not.toContain(`m:${dmRoot.id}`);
+  });
+
+  it('mark everything read: streams to head, involved threads to their newest reply, reactions seen — echoed as read_mark frames', async () => {
+    // Fresh unread of every kind, incl. a thread Ramnique does not follow.
+    const root = await post(arjun, main, 'another root by arjun');
+    await tick();
+    const here = await post(harsh, main, '[@here](#here) again, in a thread', { threadRoot: root.id });
+    await tick();
+    await post(harsh, dm.id, 'dm: still there?');
+    await tick();
+    await react(arjun, main, r1.id, '🚀');
+    expect((await activity(ramnique, '?unread=true')).items.length).toBeGreaterThanOrEqual(3);
+
+    const mine = await liveClient(harbor, 'dev-ramnique');
+    const theirs = await liveClient(harbor, 'dev-harsh');
+    const res = await ramnique.post('/v1/activity/read-all', {});
+    expect(res.status).toBe(200);
+    const heads = (await ramnique.get('/v1/unread')).body.spaces as Array<{ spaceId: string; head: number; readOffset: number; unreadRoots: number; threads: unknown[] }>;
+    expect(res.body.spaces).toEqual(expect.arrayContaining(heads.map((s) => ({ spaceId: s.spaceId, readOffset: s.head }))));
+    expect(res.body.threads).toBeGreaterThanOrEqual(1);
+    expect(heads.every((s) => s.readOffset === s.head && s.unreadRoots === 0 && s.threads.length === 0)).toBe(true);
+    expect((await activity(ramnique, '?unread=true')).items).toEqual([]);
+    expect((await activity(ramnique)).seenAt).toBe(res.body.seenAt);
+    // The unfollowed thread took a mark at the @here without a follow.
+    expect((await ramnique.get(`/v1/spaces/${main}/threads/${root.id}`)).body).toMatchObject({ following: false, readOffset: here.offset });
+    // Every mark that moved echoed to Ramnique's connections, none to Harsh's.
+    await mine.until((frames) => frames.some((f) => f.kind === 'read_mark' && f.threadRootId === root.id), 'thread read_mark');
+    expect(mine.frames.some((f) => f.kind === 'read_mark' && f.spaceId === main && f.threadRootId === undefined)).toBe(true);
+    expect(theirs.frames.filter((f) => f.kind === 'read_mark')).toEqual([]);
+    mine.close();
+    theirs.close();
+    // Idempotent: nothing moves twice.
+    const again = await ramnique.post('/v1/activity/read-all', {});
+    expect(again.body.threads).toBe(0);
+    // Scoped to one space: only that space's stream and threads.
+    await post(harsh, main, 'one more root');
+    await post(harsh, dm.id, 'one more dm');
+    expect((await ramnique.post('/v1/activity/read-all', { spaceId: main })).body.spaces.map((s: { spaceId: string }) => s.spaceId)).toEqual([main]);
+    expect(kinds(await activity(ramnique, '?unread=true'))).toEqual(['dm']);
+    // The agent face does the same.
+    const agent = await agentClient(harbor, 'dev-ramnique', { agentName: 'Rowboat' });
+    const out = await callStructured<{ spaces: Array<{ spaceId: string }>; threads: number }>(agent, 'mark_all_read', {});
+    expect(out.spaces.map((s) => s.spaceId)).toEqual(expect.arrayContaining([main, dm.id]));
+    expect((await activity(ramnique, '?unread=true')).items).toEqual([]);
+    await agent.close();
+  });
+
   it('a deleted message leaves the feed; my own messages never enter it', async () => {
     const del = await harsh.post(`/v1/spaces/${main}/messages/${h1.id}/delete`, { actingMode: 'direct' });
     expect(del.status).toBe(200);
     const ids = (await activity(ramnique)).items.map((i) => i.id);
     expect(ids).not.toContain(`m:${h1.id}`);
-    expect(ids).toHaveLength(6);
+    expect(ids).toHaveLength(13);
     // Harsh's own view: the @here, my DM reply to him, and arjun's reply in a thread he follows (he replied in it).
     expect(kinds(await activity(harsh))).toEqual(['here', 'dm', 'reply']);
   });
