@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
 import type { spaces } from '@x/shared'
 import { subscribeSpacesFeed } from '@/lib/spaces-feed'
 import { SPACES_ENABLED } from '@/lib/feature-flags'
-import { loadUnread } from '@/lib/spaces-read-state'
+import { getSpaceReadState, loadUnread } from '@/lib/spaces-read-state'
 
 export interface OrgWithSpaces extends spaces.SpacesOrgSummary {
     /** Shared spaces — what every "the spaces" surface renders. */
@@ -38,13 +38,21 @@ let orgsState: OrgsState = { orgs: [], loading: true }
 const orgsListeners = new Set<() => void>()
 let orgsInflight: Promise<void> | null = null
 let orgsFetchedOnce = false
+/** A refresh asked for while one is in flight: run once more when it settles (the in-flight one may predate the reason). */
+let orgsDirty = false
+let orgsRefreshedAt = 0
+/** Spaces whose live subscription has been acknowledged once in this process — a later `subscribed` is a reconnect. */
+const subscribedOnce = new Set<string>()
 
 function emitOrgs(): void {
     for (const listener of orgsListeners) listener()
 }
 
 export function refreshSpacesOrgs(): Promise<void> {
-    if (orgsInflight) return orgsInflight
+    if (orgsInflight) {
+        orgsDirty = true
+        return orgsInflight
+    }
     orgsInflight = (async () => {
         try {
             const { orgs: records } = await window.ipc.invoke('spaces:listOrgs', null)
@@ -80,6 +88,7 @@ export function refreshSpacesOrgs(): Promise<void> {
                 }),
             )
             orgsState = { orgs: withSpaces, loading: false }
+            orgsRefreshedAt = Date.now()
             // The org-owned read state rides the same moment: one snapshot per
             // reachable org, folded live from here on (spaces-read-state).
             for (const org of withSpaces) if (!org.error) void loadUnread(org.id, org.memberId)
@@ -90,9 +99,33 @@ export function refreshSpacesOrgs(): Promise<void> {
             orgsInflight = null
             emitOrgs()
             syncFeedSubscriptions()
+            if (orgsDirty) {
+                orgsDirty = false
+                void refreshSpacesOrgs()
+            }
         }
     })()
     return orgsInflight
+}
+
+/**
+ * The listing is how we learn about spaces and DMs we were put in: the
+ * `space_added` frame that announces one is ephemeral, and if the socket
+ * was down at that moment nothing ever repeats it (2026-09-11). So the
+ * listing is refetched at every moment we may have been dark — a reconnect
+ * (a re-acknowledged subscription), the window regaining focus — unless it
+ * was fetched moments ago.
+ */
+const LISTING_FRESH_MS = 5_000
+let listingResyncTimer: ReturnType<typeof setTimeout> | null = null
+function resyncListing(): void {
+    if (Date.now() - orgsRefreshedAt < LISTING_FRESH_MS) return
+    if (listingResyncTimer) return
+    // A reconnect re-acknowledges every space in a burst: one refetch, not one per space.
+    listingResyncTimer = setTimeout(() => {
+        listingResyncTimer = null
+        void refreshSpacesOrgs()
+    }, 300)
 }
 
 export function subscribeOrgs(listener: () => void): () => void {
@@ -145,7 +178,12 @@ export function acquireSpaceLive(orgId: string, spaceId: string): () => void {
     const count = liveRefs.get(key) ?? 0
     liveRefs.set(key, count + 1)
     if (count === 0) {
-        void window.ipc.invoke('spaces:subscribeSpace', { orgId, spaceId }).catch(() => {
+        // Resume from the head we already hold (the unread snapshot's), so the
+        // gap between our last read and going live is replayed rather than
+        // lost; unknown = live-only, and the socket layer then learns its
+        // resume point from the server's acknowledgement.
+        const head = getSpaceReadState(orgId, spaceId)?.head
+        void window.ipc.invoke('spaces:subscribeSpace', { orgId, spaceId, ...(head ? { afterOffset: head } : {}) }).catch(() => {
             // org unreachable — REST fetches surface the error state
         })
     }
@@ -266,12 +304,41 @@ export function refreshSpaceFeed(orgId: string, spaceId: string): Promise<void> 
 
 const feedRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
+/**
+ * Is this `subscribed` frame a reconnect — the space's subscription had been
+ * acknowledged before in this process? Every store that sees the frame asks
+ * the same question, in whatever order the bus calls them, so the answer is
+ * memoised on the frame itself and the record is made exactly once.
+ */
+const reconnectAnswers = new WeakMap<object, boolean>()
+export function isReconnect(orgId: string, spaceId: string, frame: object): boolean {
+    const memo = reconnectAnswers.get(frame)
+    if (memo !== undefined) return memo
+    const key = liveKey(orgId, spaceId)
+    const again = subscribedOnce.has(key)
+    subscribedOnce.add(key)
+    reconnectAnswers.set(frame, again)
+    return again
+}
+
 function wireFeedBus(): void {
     if (feedBusWired) return
     feedBusWired = true
+    if (typeof window !== 'undefined') {
+        window.addEventListener('focus', resyncListing)
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') resyncListing()
+        })
+    }
     subscribeSpacesFeed((event) => {
         if (!('frame' in event)) return
         const frame = event.frame
+        if (frame.kind === 'subscribed') {
+            // A re-acknowledged subscription = the socket was down: anything
+            // we were put in meanwhile was announced to nobody.
+            if (isReconnect(event.orgId, frame.spaceId, frame)) resyncListing()
+            return
+        }
         if (frame.kind === 'space_added') {
             // Someone opened a DM with us. The listing is how we learn its
             // label and start watching it — no per-space subscription can
