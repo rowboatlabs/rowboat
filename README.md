@@ -212,6 +212,29 @@ This connects through Rowboat's existing Streamable HTTP client. Ask Rowboat to 
 
 Once configured, Rowboat can invoke these tools during its work, subject to your MCP tool permissions. Queries, requested URLs, and any supplied objectives or context are sent to Parallel. This setup leaves Exa and other configured providers unchanged. To remove it, delete the `parallel` entry in **Settings → MCP Servers** and save.
 
+### Example: Serply web search
+
+[Serply MCP](https://serply.io/docs) provides `google_search`, `bing_search`, `google_news_search`, `google_scholar_search`, `google_maps_search`, and `scrape_url` for keyed web search and page scraping. It requires a [Serply](https://serply.io) API key, which is sent in the `X-Api-Key` header. New accounts start with free credits.
+
+Open **Settings**, then **MCP Servers**, add the `serply` entry to your existing `mcpServers` object with your key, and click **Save**. Keep any other server entries. If no servers are configured, use:
+
+```json
+{
+  "mcpServers": {
+    "serply": {
+      "url": "https://api.serply.io/mcp",
+      "headers": {
+        "X-Api-Key": "YOUR_SERPLY_API_KEY"
+      }
+    }
+  }
+}
+```
+
+This connects through Rowboat's existing Streamable HTTP client, which forwards the configured headers. Ask Rowboat to list the tools on the `serply` server, then try: "Use Serply to find recent news about Model Context Protocol."
+
+Once configured, Rowboat can invoke these tools during its work, subject to your MCP tool permissions. Queries, requested URLs, and your API key are sent to Serply. This setup leaves Exa and other configured providers unchanged. To remove it, delete the `serply` entry under **Settings**, **MCP Servers** and save.
+
 ## Local-first by design
 
 - All data is stored locally as plain Markdown
