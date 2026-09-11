@@ -56,7 +56,7 @@ nobody and badges nobody.
 | "edit / delete my message" | \`edit_message\` / \`delete_message\` |
 | "react", "pin" | \`react\` (pin is the 📌 emoji) |
 | "start a poll", "vote" | \`post_message\` with \`poll\` / \`vote_poll\` |
-| "title this thread", "archive it" | \`create_topic\` / \`manage_topic\` |
+| "title this thread", "archive it", "make it about roadmap.md" | \`create_topic\` / \`manage_topic\` (\`attach_document\`) |
 | "add X to roadmap.md" | \`read_asset\` → \`propose_change\` |
 | "rename / move / delete / restore a file" | \`move_asset\` / \`delete_asset\` / \`restore_asset\` |
 | "share this image / PDF" | \`spaces-upload-blob\` → reference it in a post or file |

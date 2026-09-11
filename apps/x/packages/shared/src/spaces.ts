@@ -159,7 +159,10 @@ export type SpacesManageTopicAction =
   | { action: 'retitle'; title: string }
   | { action: 'archive' }
   | { action: 'unarchive' }
-  | { action: 'remove' };
+  | { action: 'remove' }
+  /** Link one live space file as what the discussion is about (replaces any earlier link). */
+  | { action: 'attach_document'; path: string }
+  | { action: 'detach_document' };
 
 /**
  * What the renderer may propose. actingMode is deliberately absent: everything
