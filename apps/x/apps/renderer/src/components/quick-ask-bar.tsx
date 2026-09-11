@@ -2002,7 +2002,7 @@ function TuckedDock({
             </Tooltip>
           ) : <StatusLane state={state} activity={activity} bars={20} className="w-[112px]" />}
           <ShareButton state={state} sendAction={sendAction} className="h-7 w-7" />
-          <TalkButton state={state} sendAction={sendAction} className="h-8 w-8" />
+          <TalkButton state={state} sendAction={sendAction} className={vertical ? 'h-7 w-7' : 'h-8 w-8'} />
           {vertical ? (
             <div style={noDragRegion} className="flex items-center gap-0.5">
               <Tooltip>
