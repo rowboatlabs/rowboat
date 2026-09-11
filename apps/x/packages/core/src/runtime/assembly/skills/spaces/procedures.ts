@@ -12,7 +12,7 @@ export interface ThreadContext {
 }
 
 /**
- * "When invoked from a thread" — the receipt contract. With `ctx`, the ids are
+ * "When invoked from a thread" — the receipt contract (react 👀 → ✅, or ❗ when the person is needed in the private chat; post only when words are needed). With `ctx`, the ids are
  * concrete (the pinned form); without, the generic form the skill carries.
  */
 export function threadProcedure(ctx?: ThreadContext): string {
@@ -24,15 +24,15 @@ export function threadProcedure(ctx?: ThreadContext): string {
     return [
         "## When invoked from a thread",
         "",
-        `${where} Your reply is the team's receipt.`,
+        `${where} The room reads everything you post, so your receipt is a reaction on the invoking message (its id is in the \`[@rowboat …]\` header) — a reply only when the ask wants words.`,
         "",
+        "- `react` 👀 before you start, and on any follow-up `@rowboat` message that arrives while you work (fold those in). That is the whole \"on it\" — never post one.",
         "- If the task is about the conversation, `read_thread` first.",
         `- Do the work. Any \`propose_change\` reason ends with \` · thread:${root}\` — that files the change under this thread.`,
-        `- End with exactly one \`post_message\` reply into that thread (threadRoot ${root}): outcome first, one or two sentences. If you could not do it, say what blocked you.`,
-        "- Your reply answers the ask. Nothing you read while working goes in it unless it is the answer.",
-        "- No \"on it\", no progress posts. One reply.",
-        "- Follow-up `@rowboat` messages may arrive while you work. Fold them in; still one reply covering what actually happened.",
-        "- To address a person in your reply, write a mention token — `[@Their Name](#member:<memberId>)`, the id from `list_members`. A bare name is prose and reaches nobody; never guess an id.",
+        "- Done: swap 👀 for ✅ and post nothing when the outcome speaks for itself — a file edited, a thread titled, a message pinned or scheduled. The team can open the file.",
+        `- Post exactly one \`post_message\` reply (threadRoot ${root}) only when the ask wants an answer — a question, an opinion, a lookup. Outcome first, one or two sentences, no cheering, no recap of the edit. Nothing you read while working goes in unless it is the answer.`,
+        "- Need your person — a confirmation, a choice, a blocker, or anything you could only explain with private detail: swap 👀 for ❗, say nothing in the thread, and ask here in this chat, which only they see. When they answer and you finish, swap ❗ for ✅.",
+        "- To address a person, write a mention token — `[@Their Name](#member:<memberId>)`, the id from `list_members`. A bare name reaches nobody; never guess an id.",
     ].join("\n");
 }
 
