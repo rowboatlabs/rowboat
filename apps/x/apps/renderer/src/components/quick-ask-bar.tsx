@@ -1255,8 +1255,36 @@ const COMPANION_MOTION_CSS = `
   }
   .qa-spin { animation: qa-spin-slow 2.4s linear infinite; }
   .qa-logo-glow { animation: qa-glow 1.8s ease-in-out infinite; }
+  /* Animate only the halo: the icon and its clickable bounds stay still. */
+  .qa-dock-logo { position: relative; }
+  .qa-dock-logo::after {
+    content: ''; position: absolute; inset: 0; border-radius: 50%;
+    pointer-events: none; border: 1.5px solid transparent;
+  }
+  .qa-dock-logo[data-status="listening"]::after {
+    border-color: #10b981; box-shadow: 0 0 5px rgb(16 185 129 / 18%);
+    animation: qa-dock-listening 2s ease-in-out infinite;
+  }
+  .qa-dock-logo[data-status="thinking"]::after {
+    border-top-color: #f59e0b; border-right-color: #f59e0b;
+    animation: qa-spin-slow 2.4s linear infinite;
+  }
+  .qa-dock-logo[data-status="speaking"]::after {
+    border: 3px double #38bdf8;
+    box-shadow: 0 0 0 2px rgb(56 189 248 / 12%);
+    animation: qa-dock-speaking 1.4s ease-out infinite;
+  }
+  @keyframes qa-dock-listening {
+    0%, 100% { opacity: 0.45; }
+    50% { opacity: 1; }
+  }
+  @keyframes qa-dock-speaking {
+    0% { box-shadow: 0 0 0 0 rgb(56 189 248 / 25%); }
+    100% { box-shadow: 0 0 0 4px rgb(56 189 248 / 0%); }
+  }
   @media (prefers-reduced-motion: reduce) {
     .qa-card-in, .qa-rise, .qa-pop, .qa-wave-bar, .qa-speak-bar, .qa-logo-glow, .qa-spin { animation: none; }
+    .qa-dock-logo[data-status]::after { animation: none; }
     .qa-card-out { animation: none; opacity: 0; }
     .qa-shimmer { animation: none; background: none; -webkit-text-fill-color: currentColor; }
   }
@@ -1972,6 +2000,7 @@ function TuckedDock({
   const statusLabel = statusKind === 'thinking'
     ? (activity ?? 'Thinking…')
     : STATUS_DISPLAY[statusKind].label
+  const logoTip = vertical ? `${statusLabel} · Click to open text (${shortcutLabel})` : expandTip
   return (
     <div data-qa-passthrough className="qa-pop flex min-w-0 flex-col items-end">
       <div className="relative">
@@ -1986,32 +2015,22 @@ function TuckedDock({
                 type="button"
                 style={noDragRegion}
                 onClick={onExpand}
-                aria-label="Bring the text back"
+                aria-label={vertical ? `${statusLabel} · Open text panel` : 'Bring the text back'}
                 aria-expanded={false}
-                title={expandTip}
+                title={logoTip}
                 className={`flex-none transition active:scale-95 ${vertical ? 'cursor-pointer rounded-[11px] hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:hover:bg-white/10' : ''}`}
               >
                 {vertical ? (
-                  <span className={`flex h-[34px] w-[34px] items-center justify-center rounded-[11px] text-neutral-700 dark:text-neutral-200 ${state.status === 'thinking' ? 'qa-logo-glow' : ''}`}>
+                  <span data-status={statusKind} className="qa-dock-logo flex h-[34px] w-[34px] items-center justify-center text-neutral-700 dark:text-neutral-200">
                     <MascotFaceIcon size={24} />
                   </span>
                 ) : <LogoTile size={34} glow={state.status === 'thinking'} />}
               </button>
             </TooltipTrigger>
-            <TooltipContent side={vertical ? 'left' : 'top'}>{expandTip}</TooltipContent>
+            <TooltipContent side={vertical ? 'left' : 'top'}>{logoTip}</TooltipContent>
           </Tooltip>
           {vertical ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span style={noDragRegion} role="status" aria-label={statusLabel} className="flex h-7 w-8 items-center justify-center">
-                  {statusKind === 'listening' ? <WaveLane bars={5} className="w-full" />
-                    : statusKind === 'speaking' ? <SpeakLane bars={5} className="w-full" />
-                    : statusKind === 'thinking' ? <Loader className="qa-spin h-4 w-4 text-sky-500" />
-                    : <span className="h-1.5 w-1.5 rounded-full bg-neutral-400" />}
-                </span>
-              </TooltipTrigger>
-              <TooltipContent side="left">{statusLabel}</TooltipContent>
-            </Tooltip>
+            <span role="status" className="sr-only">{statusLabel}</span>
           ) : <StatusLane state={state} activity={activity} bars={20} className="w-[112px]" />}
           <ShareButton state={state} sendAction={sendAction} className="h-7 w-7" />
           <TalkButton state={state} sendAction={sendAction} className={vertical ? 'h-7 w-7' : 'h-8 w-8'} />
