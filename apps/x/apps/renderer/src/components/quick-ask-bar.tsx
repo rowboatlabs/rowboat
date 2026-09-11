@@ -1972,7 +1972,7 @@ function TuckedDock({
         <div
           style={dragRegion}
           title="Drag to move your Skipper"
-          className={`flex cursor-grab items-center gap-2.5 border border-black/10 bg-white/[0.97] p-2 shadow-[0_12px_32px_rgba(0,0,0,0.18),0_2px_10px_rgba(0,0,0,0.10)] dark:border-white/15 dark:bg-neutral-900/[0.97] dark:shadow-[0_12px_32px_rgba(0,0,0,0.55),0_2px_10px_rgba(0,0,0,0.4)] ${vertical ? 'w-14 flex-col rounded-l-2xl border-r-0 py-3' : 'rounded-full pr-2.5'}`}
+          className={`flex cursor-grab items-center gap-2.5 border border-black/10 bg-white/[0.97] shadow-[0_12px_32px_rgba(0,0,0,0.18),0_2px_10px_rgba(0,0,0,0.10)] dark:border-white/15 dark:bg-neutral-900/[0.97] dark:shadow-[0_12px_32px_rgba(0,0,0,0.55),0_2px_10px_rgba(0,0,0,0.4)] ${vertical ? 'w-12 flex-col rounded-l-2xl border-r-0 px-1 py-2' : 'rounded-full p-2 pr-2.5'}`}
         >
           <Tooltip>
             <TooltipTrigger asChild>
