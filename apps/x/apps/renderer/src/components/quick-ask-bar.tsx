@@ -1972,7 +1972,7 @@ function TuckedDock({
         <div
           style={dragRegion}
           title="Drag to move your Skipper"
-          className={`flex cursor-grab items-center gap-2.5 border border-black/10 bg-white/[0.97] shadow-[0_12px_32px_rgba(0,0,0,0.18),0_2px_10px_rgba(0,0,0,0.10)] dark:border-white/15 dark:bg-neutral-900/[0.97] dark:shadow-[0_12px_32px_rgba(0,0,0,0.55),0_2px_10px_rgba(0,0,0,0.4)] ${vertical ? 'w-12 flex-col rounded-l-2xl border-r-0 px-0.5 py-2' : 'rounded-full p-2 pr-2.5'}`}
+          className={`flex cursor-grab items-center gap-2.5 border border-black/10 bg-white/[0.97] shadow-[0_12px_32px_rgba(0,0,0,0.18),0_2px_10px_rgba(0,0,0,0.10)] dark:border-white/15 dark:bg-neutral-900/[0.97] dark:shadow-[0_12px_32px_rgba(0,0,0,0.55),0_2px_10px_rgba(0,0,0,0.4)] ${vertical ? 'w-12 flex-col rounded-l-2xl border-r-0 px-1 py-2' : 'rounded-full p-2 pr-2.5'}`}
         >
           <Tooltip>
             <TooltipTrigger asChild>
@@ -2003,36 +2003,13 @@ function TuckedDock({
           ) : <StatusLane state={state} activity={activity} bars={20} className="w-[112px]" />}
           <ShareButton state={state} sendAction={sendAction} className="h-7 w-7" />
           <TalkButton state={state} sendAction={sendAction} className={vertical ? 'h-7 w-7' : 'h-8 w-8'} />
-          {vertical ? (
-            <div style={noDragRegion} className="flex items-center gap-0.5">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    style={noDragRegion}
-                    onClick={onExpand}
-                    aria-label="Bring the text back"
-                    className="flex h-5 w-5 flex-none items-center justify-center rounded-full text-neutral-400 ring-1 ring-inset ring-black/10 transition hover:bg-black/5 hover:text-neutral-900 active:scale-95 dark:text-neutral-500 dark:ring-white/10 dark:hover:bg-white/10 dark:hover:text-neutral-100"
-                  >
-                    <ChevronsLeft className="h-4 w-4" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="left">{expandTip}</TooltipContent>
-              </Tooltip>
-              <EndButton sendAction={sendAction} className="h-5 w-5" />
-            </div>
-          ) : <EndButton sendAction={sendAction} className="h-7 w-7" />}
+          <EndButton sendAction={sendAction} className="h-7 w-7" />
         </div>
-        {/* Unfold handle on the pill's left edge — the MIRROR of the card's
-            tuck handle (same circle, chevrons pointing the other way), so
-            hiding and un-hiding read as one gesture with two directions.
-            Same drag-region-hole discipline as that handle: the wrapper is
-            the static, transform-free hole, oversized around the art, with
-            pointer-events-none + the button opting back in; the motion
-            lives on the button. */}
-        {!vertical && <span
+        {/* Keep the unfold control outside the rail, stacked above the vertical
+            dock. The camera pill retains its original left-edge handle. */}
+        <span
           className="pointer-events-none absolute z-10 flex h-8 w-8 items-center justify-center"
-          style={{ ...noDragRegion, top: 'calc(50% - 16px)', left: '-16px' }}
+          style={{ ...noDragRegion, ...(vertical ? { top: '-40px', right: '8px' } : { top: 'calc(50% - 16px)', left: '-16px' }) }}
         >
           <Tooltip>
             <TooltipTrigger asChild>
@@ -2047,7 +2024,7 @@ function TuckedDock({
             </TooltipTrigger>
             <TooltipContent side="top">{expandTip}</TooltipContent>
           </Tooltip>
-        </span>}
+        </span>
       </div>
     </div>
   )
