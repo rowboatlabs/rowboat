@@ -45,7 +45,7 @@ import * as pttKey from '@x/shared/src/ptt-key.js'
 import { useQuickAskShortcut } from '@/hooks/use-quick-ask-shortcut'
 import { useWindowTheme } from '@/hooks/use-window-theme'
 
-import { TalkingHead } from '@/components/talking-head'
+import { MascotFaceIcon, TalkingHead } from '@/components/talking-head'
 import { isMac } from '@/lib/shortcut'
 import { isChatMessage } from '@/lib/chat-conversation'
 import { runLogToConversation } from '@/lib/run-to-conversation'
@@ -1983,7 +1983,11 @@ function TuckedDock({
                 aria-label="Bring the text back"
                 className="flex-none transition active:scale-95"
               >
-                <LogoTile size={34} glow={state.status === 'thinking'} />
+                {vertical ? (
+                  <span className={`flex h-[34px] w-[34px] items-center justify-center rounded-[11px] text-neutral-700 dark:text-neutral-200 ${state.status === 'thinking' ? 'qa-logo-glow' : ''}`}>
+                    <MascotFaceIcon size={24} />
+                  </span>
+                ) : <LogoTile size={34} glow={state.status === 'thinking'} />}
               </button>
             </TooltipTrigger>
             <TooltipContent side="top">{expandTip}</TooltipContent>
