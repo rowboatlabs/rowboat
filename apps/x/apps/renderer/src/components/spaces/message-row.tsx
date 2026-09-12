@@ -55,8 +55,8 @@ function ReactionChips({ message, memberNames, selfMemberId, onReact, onPickerOp
     onReact: (message: spaces.Message, emoji: string) => void
     onPickerOpenChange: (open: boolean) => void
 }) {
-    // The 📌 group is the pin's storage, not a reaction to show: the stream's
-    // pinned banner is its only surface.
+    // The 📌 group is the pin's storage, not a reaction to show: the Bookmarks
+    // panel's Pinned section is its only surface.
     const groups = (message.reactions ?? []).filter((g) => g.emoji !== PIN_EMOJI)
     if (groups.length === 0) return null
     return (
