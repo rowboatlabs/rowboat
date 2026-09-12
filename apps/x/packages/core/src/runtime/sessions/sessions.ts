@@ -378,6 +378,7 @@ export class SessionsImpl implements ISessions {
                     ? ((await this.sessionCompositionPins(sessionId).catch(() => null)) ?? {})
                     : {}),
                 ...spaceThreadPins(state.origin),
+                ...spaceMentionPins(input),
             };
             if (Object.keys(pins).length > 0) {
                 const provided = agentRequest.overrides?.composition;
@@ -954,6 +955,18 @@ function spaceThreadPins(origin: SessionState["origin"]): Record<string, JsonVal
         },
         activeSkills: ["spaces"],
     };
+}
+
+// A message that @-names a space or a person (the composer's @ menu, carried
+// as userMessageContext.spaceMentions) is a spaces ask by construction: the
+// spaces skill joins this turn so its tools attach at assembly, instead of
+// the model spending its first call on loadSkill. activeSkills merges, and
+// skills carry forward, so the session stays spaces-capable afterwards —
+// the same outcome loadSkill would have produced.
+function spaceMentionPins(input: z.infer<typeof UserMessage>): Record<string, JsonValue> {
+    const mentions = input.userMessageContext?.spaceMentions;
+    if (!mentions || mentions.length === 0) return {};
+    return { activeSkills: ["spaces"] };
 }
 
 function deriveActiveSkills(turnState: TurnState): string[] {

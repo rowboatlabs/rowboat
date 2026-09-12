@@ -57,7 +57,7 @@ import {
   type PermissionMode,
   type StagedAttachment,
 } from '@/components/chat-input-with-mentions'
-import type { FileMention, PromptInputMessage } from '@/components/ai-elements/prompt-input'
+import type { Mention, PromptInputMessage } from '@/components/ai-elements/prompt-input'
 
 // Hold-to-speak key by platform (shared/ptt-key.ts is the one place that
 // decides): macOS right ⌘, elsewhere right Ctrl — the same physical position
@@ -379,7 +379,7 @@ export function QuickAskBar() {
   const submit = useCallback(
     (
       message: PromptInputMessage,
-      mentions?: FileMention[],
+      mentions?: Mention[],
       attachments?: StagedAttachment[],
       searchEnabled?: boolean,
       codeMode?: 'claude' | 'codex',

@@ -36,7 +36,10 @@ You act as your person. Everything you write shows to the team as
 | a file's contents and version | \`read_asset\` |
 | what changed in a file, and when | \`asset_history\`, \`diff\` |
 
-Never guess an id or a path. Every id comes from one of these calls.
+Never guess an id or a path. Every id comes from one of these calls — or
+from the user context: a space or person your person picked from the
+composer's @ menu arrives under "Spaces mentioned" with its exact spaceId or
+memberId and org. Use those directly; no lookup needed.
 Messages carry member ids, not names — resolve them with \`list_members\`
 before naming anyone.
 

@@ -7,7 +7,7 @@ import { readAssistantPreference, writeAssistantPreference } from '@/lib/assista
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { ChatHeader } from '@/components/chat-header'
 import { CodeSessionHeader, type CodeSessionHeaderProps } from '@/components/code/code-session-header'
-import { type PromptInputMessage, type FileMention } from '@/components/ai-elements/prompt-input'
+import { type PromptInputMessage, type Mention } from '@/components/ai-elements/prompt-input'
 import { FileCardProvider } from '@/contexts/file-card-context'
 import { TabBar, type ChatTab } from '@/components/tab-bar'
 import { type CallPreset, type PermissionMode, type StagedAttachment, type ModelSelection } from '@/components/chat-input-with-mentions'
@@ -92,7 +92,7 @@ interface ChatSidebarProps {
   isWaitingOnHuman?: boolean
   isStopping?: boolean
   onStop?: () => void
-  onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => void
+  onSubmit: (message: PromptInputMessage, mentions?: Mention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => void
   /** Pending-queue mirror for the ACTIVE tab's session (single store — see App). */
   queuedForActive?: QueuedSessionMessage[]
   onRemoveQueued?: (queueId: string) => void

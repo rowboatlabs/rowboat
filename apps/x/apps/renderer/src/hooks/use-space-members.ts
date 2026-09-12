@@ -1,4 +1,4 @@
-import { useEffect, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useSyncExternalStore } from 'react'
 import type { spaces } from '@x/shared'
 
 // The space roster, module-level and persisted per install (localStorage),
@@ -192,4 +192,28 @@ export function useOrgRoster(orgId: string, spaceIds: readonly string[]): spaces
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [orgId, idsKey])
     return state.get(orgKey(orgId)) ?? EMPTY_MEMBERS
+}
+
+/**
+ * The org roster for EVERY org at once (the assistant composer's @ menu lists
+ * people across orgs). Same store, same cache-then-refresh contract as
+ * useOrgRoster; one hook call for a variable number of orgs. Keyed on the
+ * org ids, so a new org signs in and its roster follows without a remount.
+ */
+export function useOrgRosters(orgs: ReadonlyArray<{ id: string; spaceIds: readonly string[] }>): ReadonlyMap<string, spaces.Member[]> {
+    const orgsKey = orgs.map((o) => `${o.id}:${o.spaceIds.join('|')}`).join(';')
+    for (const org of orgs) hydrateMembers(orgKey(org.id))
+    const state = useSyncExternalStore(subscribeMembers, () => memberState)
+    useEffect(() => {
+        for (const org of orgs) void loadOrgRoster(org.id, org.spaceIds)
+        // The joined key IS the dependency — the array identity changes every render.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [orgsKey])
+    // Identity-stable while nothing changed: callers memo on the map.
+    return useMemo(() => {
+        const out = new Map<string, spaces.Member[]>()
+        for (const org of orgs) out.set(org.id, state.get(orgKey(org.id)) ?? EMPTY_MEMBERS)
+        return out
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [state, orgsKey])
 }

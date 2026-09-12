@@ -21,6 +21,10 @@ function formatUserMessageContextForLlm(userMessageContext: z.infer<typeof UserM
         );
     }
 
+    if (userMessageContext.spaceMentions && userMessageContext.spaceMentions.length > 0) {
+        sections.push(formatSpaceMentions(userMessageContext.spaceMentions));
+    }
+
     if (userMessageContext.middlePane) {
         if (userMessageContext.middlePane.kind === 'empty') {
             sections.push(`Middle pane:\nState: empty`);
@@ -42,6 +46,36 @@ ${sections.join('\n\n')}
 
 # User Message
 `;
+}
+
+/**
+ * The Spaces objects the user picked from the composer's @ menu, one line
+ * each, keyed by the exact "@Name" that appears in their text. The ids are
+ * authoritative — the picker resolved them — so the model is told to skip
+ * the name lookups the spaces skill otherwise mandates. Rendered in the
+ * order picked, deduped by id, so the block is byte-stable per message.
+ */
+function formatSpaceMentions(mentions: NonNullable<z.infer<typeof UserMessageContext>["spaceMentions"]>): string {
+    const lines: string[] = [];
+    const seen = new Set<string>();
+    for (const m of mentions) {
+        const key = m.kind === 'space' ? `space:${m.orgId}/${m.spaceId}` : `member:${m.orgId}/${m.memberId}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        if (m.kind === 'space') {
+            lines.push(`- @${m.name} = space "${m.name}" on org "${m.orgName}" (spaceId: ${m.spaceId})`);
+        } else {
+            lines.push(
+                `- @${m.displayName} = person "${m.displayName}" on org "${m.orgName}" (memberId: ${m.memberId}; ` +
+                    'open_direct with this memberId to DM them, or address them with a mention token)',
+            );
+        }
+    }
+    return [
+        'Spaces mentioned (picked from the @ menu — these ids are exact; use them directly instead of ' +
+            'resolving names with list_spaces / list_members, and pass the org name as `org` on every spaces tool call):',
+        ...lines,
+    ].join('\n');
 }
 
 function formatBytes(bytes: number): string {

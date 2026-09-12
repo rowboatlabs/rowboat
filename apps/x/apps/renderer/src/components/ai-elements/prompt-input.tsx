@@ -48,9 +48,19 @@ import {
 } from "lucide-react";
 import { nanoid } from "nanoid";
 import { useMentionDetection } from "@/hooks/use-mention-detection";
-import { MentionPopover, ROWBOAT_MENTION_SENTINEL } from "@/components/mention-popover";
-import { toKnowledgePath, wikiLabel } from "@/lib/wiki-links";
+import { MentionPopover } from "@/components/mention-popover";
+import { toKnowledgePath } from "@/lib/wiki-links";
 import { getMentionHighlightSegments } from "@/lib/mention-highlights";
+import {
+  EMPTY_SPACES_MENTION_TARGETS,
+  mentionLabelsFor,
+  mentionTargetLabel,
+  type MemberMentionTarget,
+  type MentionSources,
+  type MentionTarget,
+  type SpaceMentionTarget,
+  type SpacesMentionTargets,
+} from "@/lib/mention-targets";
 import {
   type ChangeEvent,
   type ChangeEventHandler,
@@ -78,6 +88,8 @@ import {
 // Provider Context & Types
 // ============================================================================
 
+const EMPTY_FILES: string[] = [];
+
 export type AttachmentsContext = {
   files: (FileUIPart & { id: string })[];
   add: (files: File[] | FileList) => void;
@@ -87,16 +99,56 @@ export type AttachmentsContext = {
   fileInputRef: RefObject<HTMLInputElement | null>;
 };
 
+// What the composer's @ menu can attach to a message. Every kind carries
+// `displayName` — the text after "@" in the textarea — so the highlight and
+// backspace-as-one-token logic treat them alike. A file becomes an
+// attachment content part on send; a space or a person rides
+// userMessageContext.spaceMentions (@x/shared message.ts) with its ids.
 export type FileMention = {
+  kind: 'file';
   id: string;
   path: string;         // "knowledge/notes.md"
   displayName: string;  // "notes"
   lineNumber?: number;  // 1-indexed source-line reference (for editor-context mentions)
 };
 
+export type SpaceMention = {
+  kind: 'space';
+  id: string;
+  orgId: string;
+  orgName: string;
+  spaceId: string;
+  displayName: string;  // the space's name
+};
+
+export type MemberMention = {
+  kind: 'member';
+  id: string;
+  orgId: string;
+  orgName: string;
+  memberId: string;
+  displayName: string;  // the person's display name
+};
+
+export type Mention = FileMention | SpaceMention | MemberMention;
+
+/** A mention before the provider assigns its id. */
+export type MentionInput =
+  | Omit<FileMention, 'id'>
+  | Omit<SpaceMention, 'id'>
+  | Omit<MemberMention, 'id'>;
+
+/** Same target, whatever the id: the dedupe rule for addMention. */
+function sameMentionTarget(a: MentionInput, b: MentionInput): boolean {
+  if (a.kind === 'file' && b.kind === 'file') return a.path === b.path && a.lineNumber === b.lineNumber;
+  if (a.kind === 'space' && b.kind === 'space') return a.orgId === b.orgId && a.spaceId === b.spaceId;
+  if (a.kind === 'member' && b.kind === 'member') return a.orgId === b.orgId && a.memberId === b.memberId;
+  return false;
+}
+
 export type MentionsContext = {
-  mentions: FileMention[];
-  addMention: (path: string, displayName: string, lineNumber?: number) => void;
+  mentions: Mention[];
+  addMention: (mention: MentionInput) => void;
   removeMention: (id: string) => void;
   clearMentions: () => void;
 };
@@ -165,10 +217,15 @@ export const useProviderMentions = () => {
 
 const useOptionalProviderMentions = () => useContext(ProviderMentionsContext);
 
+// Everything the @ menu can name: knowledge files (with the tree's open and
+// recent files ranked first) plus the Spaces targets — the shared spaces the
+// user is in and the people they can DM (empty with Spaces dark).
 export type KnowledgeFilesContext = {
   files: string[];
   recentFiles: string[];
   visibleFiles: string[];
+  spaces: SpaceMentionTarget[];
+  members: MemberMentionTarget[];
 };
 
 const ProviderKnowledgeFilesContext = createContext<KnowledgeFilesContext | null>(null);
@@ -182,6 +239,8 @@ export type PromptInputProviderProps = PropsWithChildren<{
   knowledgeFiles?: string[];
   recentFiles?: string[];
   visibleFiles?: string[];
+  /** The Spaces half of the @ menu — see useSpacesMentionTargets. */
+  mentionTargets?: SpacesMentionTargets;
 }>;
 
 /**
@@ -193,6 +252,7 @@ export function PromptInputProvider({
   knowledgeFiles = [],
   recentFiles = [],
   visibleFiles = [],
+  mentionTargets = EMPTY_SPACES_MENTION_TARGETS,
   children,
 }: PromptInputProviderProps) {
   // ----- textInput state
@@ -277,16 +337,16 @@ export function PromptInputProvider({
     [attachmentFiles, add, remove, clear, openFileDialog]
   );
 
-  // ----- mentions state (for @ file mentions)
-  const [mentionsList, setMentionsList] = useState<FileMention[]>([]);
+  // ----- mentions state (the @ menu's picks: files, spaces, people)
+  const [mentionsList, setMentionsList] = useState<Mention[]>([]);
 
-  const addMention = useCallback((path: string, displayName: string, lineNumber?: number) => {
+  const addMention = useCallback((mention: MentionInput) => {
     setMentionsList((prev) => {
-      // Avoid duplicates (same path AND same lineNumber — line-specific mentions are distinct)
-      if (prev.some((m) => m.path === path && m.lineNumber === lineNumber)) {
+      // Avoid duplicates (a file at a specific line is distinct from the whole file)
+      if (prev.some((m) => sameMentionTarget(m, mention))) {
         return prev;
       }
-      return [...prev, { id: nanoid(), path, displayName, lineNumber }];
+      return [...prev, { ...mention, id: nanoid() } as Mention];
     });
   }, []);
 
@@ -331,8 +391,14 @@ export function PromptInputProvider({
   );
 
   const knowledgeFilesContext = useMemo<KnowledgeFilesContext>(
-    () => ({ files: knowledgeFiles, recentFiles, visibleFiles }),
-    [knowledgeFiles, recentFiles, visibleFiles]
+    () => ({
+      files: knowledgeFiles,
+      recentFiles,
+      visibleFiles,
+      spaces: mentionTargets.spaces,
+      members: mentionTargets.members,
+    }),
+    [knowledgeFiles, recentFiles, visibleFiles, mentionTargets.spaces, mentionTargets.members]
   );
 
   return (
@@ -947,24 +1013,27 @@ export const PromptInputTextarea = ({
   const highlightRef = useRef<HTMLDivElement>(null);
 
   const currentValue = controller?.textInput.value ?? "";
-  const knowledgeFiles = knowledgeFilesCtx?.files ?? [];
-  const recentFiles = knowledgeFilesCtx?.recentFiles ?? [];
-  const visibleFiles = knowledgeFilesCtx?.visibleFiles ?? [];
+  const knowledgeFiles = knowledgeFilesCtx?.files ?? EMPTY_FILES;
+  const recentFiles = knowledgeFilesCtx?.recentFiles ?? EMPTY_FILES;
+  const visibleFiles = knowledgeFilesCtx?.visibleFiles ?? EMPTY_FILES;
+  const spaceTargets = knowledgeFilesCtx?.spaces ?? EMPTY_SPACES_MENTION_TARGETS.spaces;
+  const memberTargets = knowledgeFilesCtx?.members ?? EMPTY_SPACES_MENTION_TARGETS.members;
+
+  // Everything "@" can name here: files, spaces, people (mention-targets.ts).
+  const mentionSources = useMemo<MentionSources>(
+    () => ({ files: knowledgeFiles, recentFiles, visibleFiles, spaces: spaceTargets, members: memberTargets }),
+    [knowledgeFiles, recentFiles, visibleFiles, spaceTargets, memberTargets]
+  );
+  const mentionsEnabled =
+    knowledgeFiles.length > 0 || spaceTargets.length > 0 || memberTargets.length > 0;
 
   // Build mention labels for highlighting (handles multi-word names like "AI Agents")
-  const mentionLabels = useMemo(() => {
-    if (knowledgeFiles.length === 0) return [];
-    const labels = knowledgeFiles
-      .map((path) => wikiLabel(path))
-      .map((label) => label.trim())
-      .filter(Boolean);
-    return Array.from(new Set(labels));
-  }, [knowledgeFiles]);
+  const mentionLabels = useMemo(() => mentionLabelsFor(mentionSources), [mentionSources]);
 
   const { activeMention, cursorCoords } = useMentionDetection(
     textareaRef,
     currentValue,
-    knowledgeFiles.length > 0
+    mentionsEnabled
   );
 
   // Escape-dismissal: `open` derives from the text, so closing needs real
@@ -995,7 +1064,7 @@ export const PromptInputTextarea = ({
   }, [currentValue, mentionHighlights.hasHighlights, syncHighlightScroll]);
 
   const handleMentionSelect = useCallback(
-    (path: string, displayName: string) => {
+    (target: MentionTarget) => {
       if (!controller || !activeMention) return;
 
       // Calculate the text before and after the @query
@@ -1005,17 +1074,41 @@ export const PromptInputTextarea = ({
         activeMention.triggerIndex + 1 + activeMention.query.length
       );
 
-      // Replace @query with @displayName followed by a space
+      // Replace @query with @label followed by a space
+      const displayName = mentionTargetLabel(target);
       const newText = `${beforeAt}@${displayName} ${afterQuery}`;
       controller.textInput.setInput(newText);
 
-      // Convert to knowledge path and add mention. The rowboat sentinel is
-      // a literal @rowboat insertion — not a file mention.
-      if (path !== ROWBOAT_MENTION_SENTINEL) {
-        const fullPath = toKnowledgePath(path);
-        if (fullPath && mentionsCtx) {
-          mentionsCtx.addMention(fullPath, displayName);
+      // Record what the label stands for. @rowboat is a literal insertion —
+      // it addresses the assistant, nothing to attach.
+      switch (target.kind) {
+        case "file": {
+          const fullPath = toKnowledgePath(target.path);
+          if (fullPath && mentionsCtx) {
+            mentionsCtx.addMention({ kind: "file", path: fullPath, displayName });
+          }
+          break;
         }
+        case "space":
+          mentionsCtx?.addMention({
+            kind: "space",
+            orgId: target.orgId,
+            orgName: target.orgName,
+            spaceId: target.spaceId,
+            displayName,
+          });
+          break;
+        case "member":
+          mentionsCtx?.addMention({
+            kind: "member",
+            orgId: target.orgId,
+            orgName: target.orgName,
+            memberId: target.memberId,
+            displayName,
+          });
+          break;
+        case "rowboat":
+          break;
       }
 
       // Focus back on textarea
@@ -1213,11 +1306,9 @@ export const PromptInputTextarea = ({
         {...props}
         {...controlledProps}
       />
-      {knowledgeFiles.length > 0 && (
+      {mentionsEnabled && (
         <MentionPopover
-          files={knowledgeFiles}
-          recentFiles={recentFiles}
-          visibleFiles={visibleFiles}
+          sources={mentionSources}
           query={activeMention?.query ?? ""}
           position={cursorCoords}
           containerRef={containerRef}

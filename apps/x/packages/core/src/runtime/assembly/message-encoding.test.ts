@@ -79,7 +79,90 @@ describe("middle-pane user context encoding", () => {
     });
 });
 
+// The @ menu's Spaces picks ride userMessageContext.spaceMentions: the model
+// reads "@Name = <kind> ... (id)" lines and is told the ids are exact, so it
+// acts on the pick instead of re-resolving the name. Format pinned here.
+describe("space mentions user context encoding", () => {
+    const spaceMentions = [
+        { kind: "space" as const, orgId: "org-1", orgName: "rowboat", spaceId: "01SPACE", name: "Design" },
+        { kind: "member" as const, orgId: "org-1", orgName: "rowboat", memberId: "01HARSH", displayName: "Harsh Kumar" },
+    ];
+
+    it("lists each pick with its exact id, keyed by the @ text", () => {
+        const encoded = contentOf(
+            convertFromMessages([
+                {
+                    role: "user",
+                    content: "post the summary in @Design and ping @Harsh Kumar",
+                    userMessageContext: { spaceMentions },
+                },
+            ] as Parameters<typeof convertFromMessages>[0]),
+        );
+        expect(encoded).toContain("# User Context");
+        expect(encoded).toContain("Spaces mentioned");
+        expect(encoded).toContain('- @Design = space "Design" on org "rowboat" (spaceId: 01SPACE)');
+        expect(encoded).toContain('- @Harsh Kumar = person "Harsh Kumar" on org "rowboat" (memberId: 01HARSH;');
+        // The ids are authoritative — the block says so, so the model skips the lookups.
+        expect(encoded).toContain("use them directly");
+        expect(encoded.endsWith("post the summary in @Design and ping @Harsh Kumar")).toBe(true);
+    });
+
+    it("also rides a content-parts message, ahead of the attachment list", () => {
+        const encoded = contentOf(
+            convertFromMessages([
+                {
+                    role: "user",
+                    content: [
+                        { type: "attachment", path: "knowledge/notes.md", filename: "notes", mimeType: "text/markdown" },
+                        { type: "text", text: "share @notes in @Design" },
+                    ],
+                    userMessageContext: { spaceMentions: [spaceMentions[0]] },
+                },
+            ] as Parameters<typeof convertFromMessages>[0]),
+        );
+        expect(encoded.indexOf("Spaces mentioned")).toBeGreaterThan(-1);
+        expect(encoded.indexOf("Spaces mentioned")).toBeLessThan(encoded.indexOf("User has attached"));
+        expect(encoded).not.toContain("@Harsh Kumar =");
+    });
+
+    it("dedupes a target picked twice and skips the block when the list is empty", () => {
+        const twice = contentOf(
+            convertFromMessages([
+                {
+                    role: "user",
+                    content: "@Design @Design",
+                    userMessageContext: { spaceMentions: [spaceMentions[0], spaceMentions[0]] },
+                },
+            ] as Parameters<typeof convertFromMessages>[0]),
+        );
+        expect(twice.split("- @Design = space").length - 1).toBe(1);
+
+        const none = contentOf(
+            convertFromMessages([
+                { role: "user", content: "hello", userMessageContext: { spaceMentions: [] } },
+            ] as Parameters<typeof convertFromMessages>[0]),
+        );
+        expect(none).toBe("hello");
+    });
+});
+
 describe("UserMessageContext schema", () => {
+    it("accepts space and member mentions, and rejects an unknown kind", () => {
+        expect(
+            UserMessageContext.safeParse({
+                spaceMentions: [
+                    { kind: "space", orgId: "o", orgName: "rowboat", spaceId: "s", name: "Design" },
+                    { kind: "member", orgId: "o", orgName: "rowboat", memberId: "m", displayName: "Harsh" },
+                ],
+            }).success,
+        ).toBe(true);
+        expect(
+            UserMessageContext.safeParse({
+                spaceMentions: [{ kind: "file", path: "knowledge/a.md" }],
+            }).success,
+        ).toBe(false);
+    });
+
     it("accepts the deck member", () => {
         const parsed = UserMessageContext.safeParse({
             middlePane: { kind: "deck", path: "a.pptx", slideNumber: 3, slideCount: 12 },

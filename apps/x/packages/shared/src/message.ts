@@ -62,12 +62,38 @@ export const UserContentPart = z.union([UserTextPart, UserAttachmentPart, UserIm
 // Named type for user message content — used everywhere instead of repeating the union
 export const UserMessageContent = z.union([z.string(), z.array(UserContentPart)]);
 
+// A Spaces object the user picked from the composer's @ menu (2026-09-12):
+// a shared space, or a person they can DM. The composer inserts the plain
+// "@Name" into the text and carries the resolved ids here, so the model can
+// act on exactly what was picked (no list_spaces / list_members round trip,
+// and no same-name ambiguity). Knowledge files picked from the same menu
+// ride as attachment content parts instead — they are content, not context.
+export const SpaceMentionRef = z.discriminatedUnion("kind", [
+    z.object({
+        kind: z.literal("space"),
+        orgId: z.string(),                   // local org registry id (the tools' `org` argument accepts it)
+        orgName: z.string(),
+        spaceId: z.string(),
+        name: z.string(),                    // the space's name as inserted after "@"
+    }),
+    z.object({
+        kind: z.literal("member"),
+        orgId: z.string(),
+        orgName: z.string(),
+        memberId: z.string(),
+        displayName: z.string(),             // the person's display name as inserted after "@"
+    }),
+]);
+export type SpaceMentionRef = z.infer<typeof SpaceMentionRef>;
+
 export const UserMessageContext = z.object({
     currentDateTime: z.string().optional(),
     // Set on the first message after a screen share stops: history keeps the
     // captured frames inline forever (pruning would bust prefix caching), so
     // the model must be told they show the past, not the current screen.
     screenShareEnded: z.boolean().optional(),
+    // Spaces and people the user @-picked in this message (see SpaceMentionRef).
+    spaceMentions: z.array(SpaceMentionRef).optional(),
     middlePane: z.discriminatedUnion("kind", [
         z.object({
             kind: z.literal("empty"),
