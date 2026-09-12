@@ -7134,6 +7134,10 @@ function App() {
   const dockFullScreen = useBottomTabs && isFullScreenChat
   const showAssistantDock = useBottomTabs && !isCodeOpen && !projectViewActive
   const chatPaneOpen = projectViewActive ? !!projectChatId && !projectDocumentOnly : isCodeOpen ? codeChatMain : isChatSidebarOpen
+  // The document pane shares the window with a docked chat (not maximized
+  // over it, not floating above it). The editor reads this to step its
+  // headings down so they sit level with chat prose.
+  const isSplitPane = chatPaneOpen && !dockFullScreen && !floatingAssistant && (projectViewActive ? !!selectedPath : !isRightPaneMaximized)
   const isRightPaneOnlyMode = (isRightPaneContext || floatingAssistant) && chatPaneOpen && isRightPaneMaximized
   const shouldCollapseLeftPane = isRightPaneOnlyMode && !projectViewActive
   const nonChatPaneStyle = React.useMemo<React.CSSProperties>(() => {
@@ -7311,6 +7315,7 @@ function App() {
                 shouldCollapseLeftPane && "pointer-events-none select-none"
               )}
               style={nonChatPaneStyle}
+              data-split-pane={isSplitPane ? '' : undefined}
               aria-hidden={shouldCollapseLeftPane}
               onMouseDownCapture={() => setActiveShortcutPane('left')}
               onFocusCapture={() => setActiveShortcutPane('left')}

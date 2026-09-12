@@ -1016,7 +1016,12 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                 />
                             </Suspense>
                         ) : centerPath ? (
-                            <div className={cn('flex min-w-0 min-h-0 flex-1', !split && !getViewerType(centerPath) && 'mx-auto max-w-[880px]')}>
+                            <div
+                                className={cn('flex min-w-0 min-h-0 flex-1', !split && !getViewerType(centerPath) && 'mx-auto max-w-[880px]')}
+                                // Beside the stream the markdown editor steps its headings
+                                // down to the compact scale (see editor.css).
+                                data-split-pane={split ? '' : undefined}
+                            >
                                 <FileColumn
                                     key={centerPath}
                                     org={org}
