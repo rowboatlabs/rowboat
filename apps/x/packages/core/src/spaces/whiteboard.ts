@@ -236,7 +236,7 @@ const DEFAULT_STROKE = "#1e1e1e";
 const DEFAULT_FILL = "transparent";
 const HEX_RE = /^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
 
-export const WHITEBOARD_COLOR_NAMES = Object.keys(STROKE_PALETTE).filter((k) => k !== "grey");
+const WHITEBOARD_COLOR_NAMES = Object.keys(STROKE_PALETTE).filter((k) => k !== "grey");
 
 function resolveColor(value: string | undefined, role: "stroke" | "fill"): string | undefined {
     if (value === undefined) return undefined;

@@ -272,13 +272,12 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
     }
 
     /**
-     * Text assets cap at 1MB (contract). Snapshots at or below the shared
-     * threshold store as TEXT so agents read and draw them through the
-     * whiteboard tools (core/spaces/whiteboard.ts); bigger boards fall back
-     * to a blob version. One number for every writer (shared/spaces.ts).
+     * The saver's transport: one serialized snapshot → one propose. Text
+     * assets cap at 1MB (contract): snapshots at or below the shared threshold
+     * store as TEXT so agents read and draw them through the whiteboard tools
+     * (core/spaces/whiteboard.ts); bigger boards fall back to a blob version.
+     * One number for every writer (shared/spaces.ts).
      */
-
-    /** The saver's transport: one serialized snapshot → one propose (text or blob). */
     const proposeSnapshot = async (json: string, baseVersion: number): Promise<spaces.ProposeChangeResult> => {
         const encoded = new TextEncoder().encode(json)
         let input: spaces.SpacesProposeInput
