@@ -12,7 +12,7 @@ class ResizeObserverStub {
 ;(Element.prototype as unknown as { hasPointerCapture: () => boolean }).hasPointerCapture = () => false
 Element.prototype.scrollIntoView = () => {}
 
-const { org, topics, invoke } = vi.hoisted(() => {
+const { org, topics, visits, invoke } = vi.hoisted(() => {
     const org = {
         id: 'org', name: 'Acme', memberId: 'me', address: 'acme', baseUrl: 'http://acme', authKind: 'dev',
         spaces: [{ id: 'design', name: 'design', kind: 'shared', createdAt: '2026-09-01T00:00:00Z' }, { id: 'main', name: 'Main', kind: 'shared', createdAt: '2026-09-01T00:00:00Z' }],
@@ -24,6 +24,9 @@ const { org, topics, invoke } = vi.hoisted(() => {
         main: [{ id: 't2', rootMessageId: 'r2', title: 'Main street mural', lastActivityAt: '2026-09-09T00:00:00Z', archived: false }, { id: 't3', rootMessageId: 'r3', title: 'Archived thing', lastActivityAt: '2026-09-01T00:00:00Z', archived: true }],
         dm1: [],
     }
+    // When this install last opened each space (the visit log): Main most
+    // recently, then Pat's DM; design never.
+    const visits: Record<string, number> = { main: Date.UTC(2026, 8, 11), dm1: Date.UTC(2026, 8, 10) }
     const invoke = vi.fn(async (channel: string, args: unknown) => {
         if (channel === 'codeMode:getConfig') return { enabled: true }
         if (channel === 'search:query') {
@@ -48,15 +51,22 @@ const { org, topics, invoke } = vi.hoisted(() => {
                 truncated: { messages: false, topics: false, assets: false },
             }
         }
-        if (channel === 'spaces:listMembers') return { members: [{ id: 'pat', displayName: 'Pat Lee' }, { id: 'me', displayName: 'Me' }] }
         throw new Error(`unexpected ipc ${channel}`)
     })
-    return { org, topics, invoke }
+    return { org, topics, visits, invoke }
 })
 
 vi.mock('@/hooks/use-spaces', () => ({
     useSpacesOrgs: () => ({ orgs: [org], loading: false, refresh: vi.fn() }),
     useSpaceFeeds: () => (_orgId: string, spaceId: string) => ({ topics: topics[spaceId] ?? [], changeSets: [], loaded: true }),
+}))
+// The org roster (the assistant's @ menu reads the same): Sam has no DM yet.
+vi.mock('@/hooks/use-space-members', () => ({
+    useOrgRosters: () => new Map([['org', [{ id: 'me', displayName: 'Me' }, { id: 'pat', displayName: 'Pat Lee' }, { id: 'sam', displayName: 'Sam Rivera' }]]]),
+}))
+vi.mock('@/lib/spaces-visits', () => ({
+    spaceVisitedAt: (_orgId: string, spaceId: string) => visits[spaceId] ?? null,
+    useSpaceVisitsVersion: () => 0,
 }))
 vi.mock('@/components/code/use-code-sessions', () => ({
     useCodeSessions: () => ({
@@ -96,17 +106,21 @@ function open(props: Partial<React.ComponentProps<typeof CommandPalette>> = {}) 
 }
 
 const optionTitles = () => screen.getAllByRole('option').map((o) => o.querySelector('span')?.textContent)
+const groupTitles = (heading: string) =>
+    within(screen.getByText(heading, { selector: '[cmdk-group-heading]' }).closest('[cmdk-group]') as HTMLElement)
+        .getAllByRole('option').map((o) => o.querySelector('span')?.textContent)
 
 describe('CommandPalette', () => {
-    it('opens on the sections and recent chats, ordered as the dock is', async () => {
+    it('opens on the sections, the spaces you keep opening, and recent chats', async () => {
         open()
         const goTo = await screen.findByText('Go to')
         const group = goTo.closest('[cmdk-group]')!
         const labels = within(group as HTMLElement).getAllByRole('option').map((o) => o.textContent?.replace(/⌘\d|Ctrl\+\d/g, '').trim())
         expect(labels.slice(0, 6)).toEqual(['Todo', 'Spaces', 'Email', 'Code', 'Meetings', 'Brain'])
         expect(labels).toContain('Settings')
-        expect(screen.getByText('Recent chats')).toBeInTheDocument()
-        expect(screen.getByText('Grocery list')).toBeInTheDocument()
+        // Visited spaces and DMs, most recent first; never-opened ones stay out.
+        expect(groupTitles('Recent spaces')).toEqual(['Main', 'Pat Lee'])
+        expect(groupTitles('Recent chats')).toEqual(['Roadmap chat', 'Grocery list'])
         expect(screen.getAllByRole('button', { pressed: false }).map((b) => b.textContent)).toEqual(['Spaces', 'Chats', 'Brain', 'Code'])
         // Nothing is searched until something is typed.
         expect(invoke).not.toHaveBeenCalledWith('search:query', expect.anything())
@@ -147,7 +161,6 @@ describe('CommandPalette', () => {
         fireEvent.change(input, { target: { value: 'roadmap' } })
         expect(await screen.findByText('Roadmap chat')).toBeInTheDocument()
         await waitFor(() => expect(invoke).toHaveBeenCalledWith('search:query', expect.objectContaining({ types: ['chat'] })))
-        await waitFor(() => expect(invoke.mock.results.length).toBeGreaterThan(0))
         expect(screen.queryByText('In code chats')).toBeNull()
         expect(screen.queryByText('Fix the login bug')).toBeNull()
         fireEvent.click(screen.getByRole('button', { name: 'Code' }))
@@ -177,14 +190,31 @@ describe('CommandPalette', () => {
         expect(screen.getByText('Spaces', { selector: '[cmdk-group-heading]' })).toBeInTheDocument()
         fireEvent.keyDown(input, { key: 'Enter' })
         expect(onNavigate).toHaveBeenCalledWith({ kind: 'space', orgId: 'org', spaceId: 'main' })
-        // A bare # lists every space; @ does the same for people.
+        // A bare # lists every space, the ones you keep opening first.
         fireEvent.change(input, { target: { value: '#' } })
-        await waitFor(() => expect(optionTitles()).toEqual(['design', 'Main']))
-        fireEvent.change(input, { target: { value: '@pa' } })
-        await waitFor(() => expect(optionTitles()).toEqual(['Pat Lee']))
-        expect(screen.getByText('People')).toBeInTheDocument()
+        await waitFor(() => expect(optionTitles()).toEqual(['Main', 'design']))
         fireEvent.change(input, { target: { value: '#zzz' } })
         expect(await screen.findByText('No space matches "zzz".')).toBeInTheDocument()
+    })
+
+    it('reaches anyone on the roster with @, starting the DM for those without one', async () => {
+        const { input, onNavigate } = open()
+        fireEvent.change(input, { target: { value: '@' } })
+        await waitFor(() => expect(optionTitles()).toEqual(['Pat Lee', 'Sam Rivera']))
+        expect(screen.getByText('People')).toBeInTheDocument()
+        expect(screen.getByText('Direct message')).toBeInTheDocument()
+        expect(screen.getByText('Person')).toBeInTheDocument()
+        fireEvent.change(input, { target: { value: '@sa' } })
+        await waitFor(() => expect(optionTitles()).toEqual(['Sam Rivera']))
+        fireEvent.keyDown(input, { key: 'Enter' })
+        expect(onNavigate).toHaveBeenCalledWith({ kind: 'person', orgId: 'org', memberId: 'sam' })
+        // Someone with a DM already opens that DM; you are not listed.
+        fireEvent.change(input, { target: { value: '@pat' } })
+        await waitFor(() => expect(optionTitles()).toEqual(['Pat Lee']))
+        fireEvent.keyDown(input, { key: 'Enter' })
+        expect(onNavigate).toHaveBeenLastCalledWith({ kind: 'space', orgId: 'org', spaceId: 'dm1' })
+        fireEvent.change(input, { target: { value: '@me' } })
+        expect(await screen.findByText('No person matches "me".')).toBeInTheDocument()
     })
 
     it('lists sections, people, discussions, and notes among the navigation rows', async () => {
@@ -219,8 +249,10 @@ describe('CommandPalette', () => {
         expect(screen.getAllByText('Roadmap chat')).toHaveLength(1)
         // The code-mode chat's transcript hit shows as a code chat here.
         expect(screen.getByText('In code chats')).toBeInTheDocument()
-        // The author resolves through the space's roster, not as a raw id.
+        // The author resolves through the org roster, not as a raw id, and
+        // no roster is fetched for it.
         const author = await screen.findByText('Pat Lee')
+        expect(invoke).not.toHaveBeenCalledWith('spaces:listMembers', expect.anything())
         expect(screen.getByText('Files in spaces')).toBeInTheDocument()
         fireEvent.click(author)
         expect(onNavigate).toHaveBeenCalledWith({
@@ -234,7 +266,9 @@ describe('CommandPalette', () => {
         expect(screen.getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true')
         fireEvent.keyDown(input, { key: 'Tab' })
         expect(screen.getByRole('button', { name: 'Spaces' })).toHaveAttribute('aria-pressed', 'true')
-        expect(screen.getByText('Direct messages')).toBeInTheDocument()
+        // The browse lists put what you keep opening first.
+        expect(groupTitles('Spaces')).toEqual(['Main', 'design', 'Activity'])
+        expect(groupTitles('People')).toEqual(['Pat Lee', 'Sam Rivera'])
         fireEvent.keyDown(input, { key: 'Tab', shiftKey: true })
         expect(screen.getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true')
         fireEvent.click(screen.getByRole('button', { name: 'Chats' }))

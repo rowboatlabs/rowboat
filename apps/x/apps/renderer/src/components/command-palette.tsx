@@ -27,7 +27,7 @@ import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from '@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { projectLabel, useCodeSessions } from '@/components/code/use-code-sessions'
 import { highlight } from '@/components/spaces/highlight'
-import { useDebounce } from '@/hooks/use-debounce'
+import { useOrgRosters } from '@/hooks/use-space-members'
 import { useSpaceFeeds, useSpacesOrgs } from '@/hooks/use-spaces'
 import {
   PALETTE_SCOPES,
@@ -40,7 +40,6 @@ import type { PaletteNote } from '@/lib/command-palette/notes'
 import { rankItems } from '@/lib/command-palette/rank'
 import {
   EMPTY_CROSS_SPACE,
-  loadMemberNames,
   searchAllSpaces,
   type CrossSpaceResults,
   type SpaceRef,
@@ -48,6 +47,7 @@ import {
 import { SPACES_ENABLED } from '@/lib/feature-flags'
 import { chord } from '@/lib/shortcut'
 import { formatFeedTime, resolveMentions } from '@/lib/spaces-presentation'
+import { spaceVisitedAt, useSpaceVisitsVersion } from '@/lib/spaces-visits'
 import { cn } from '@/lib/utils'
 
 // The app's one ⌘K: Spotlight for Rowboat. Navigation and search in a single
@@ -58,6 +58,11 @@ import { cn } from '@/lib/utils'
 // a debounce). Scope chips narrow it; Tab cycles them. A leading "#" names a
 // space and "@" a person, as people write them. The space header's own bar
 // (⌘⇧K) stays for a search confined to one space with its filter grammar.
+//
+// Spaces and people read the same stores the sidebar and the assistant's @
+// menu do: the org listing, the org rosters (so "@" reaches anyone, not only
+// those with a DM already), and the visit log (so what you keep opening
+// comes first).
 
 export interface PaletteChat {
   id: string
@@ -124,6 +129,7 @@ interface NavItem {
   texts: string[]
   /** Lower wins a tie: a section before a space before a chat of the same name. */
   priority: number
+  /** ISO; newer wins a tie, and orders the browse lists. Spaces: when you last opened it. */
   recency?: string
   row: Row
 }
@@ -214,6 +220,11 @@ function splitSigil(text: string): { sigil: string | null; needle: string } {
   return { sigil: null, needle: text }
 }
 
+/** Most recently opened first; never opened keeps its listing order (stable sort). */
+function byRecency(a: NavItem, b: NavItem): number {
+  return (b.recency ?? '').localeCompare(a.recency ?? '')
+}
+
 /** The Code section exists only with code mode on (the dock reads the same flag). */
 function useCodeModeEnabled(): boolean {
   const [enabled, setEnabled] = useState(false)
@@ -242,21 +253,25 @@ export function CommandPalette({ open, onOpenChange, chats, notes, defaultScope,
   const [content, setContent] = useState<ContentHits>(EMPTY_CONTENT)
   const [spaceHits, setSpaceHits] = useState<CrossSpaceResults>(EMPTY_CROSS_SPACE)
   const [searching, setSearching] = useState(false)
-  /** Rosters for the spaces whose messages are showing, keyed org/space. */
-  const [names, setNames] = useState<ReadonlyMap<string, ReadonlyMap<string, string>>>(new Map())
-  const debounced = useDebounce(query, 250)
 
-  // Open: a fresh query in the caller's scope. Close: nothing lingers.
-  useEffect(() => {
+  // Open: a fresh query in the caller's scope. Close: nothing lingers. The
+  // reset is a render-time adjustment (the previous-render idiom, as the
+  // space search's candidate list does), so no effect sets state; opening's
+  // side effects follow in the effect below.
+  const [wasOpen, setWasOpen] = useState(open)
+  if (wasOpen !== open) {
+    setWasOpen(open)
     setQuery('')
     setContent(EMPTY_CONTENT)
     setSpaceHits(EMPTY_CROSS_SPACE)
-    if (open) {
-      setScope(defaultScope ?? 'all')
-      analytics.searchOpened()
-      inputRef.current?.focus()
-    }
-  }, [open, defaultScope])
+    setSearching(false)
+    if (open) setScope(defaultScope ?? 'all')
+  }
+  useEffect(() => {
+    if (!open) return
+    analytics.searchOpened()
+    inputRef.current?.focus()
+  }, [open])
 
   const scopes = useMemo(
     () => PALETTE_SCOPES.filter((s) => (s.key === 'spaces' ? SPACES_ENABLED : s.key === 'code' ? codeMode : true)),
@@ -277,6 +292,31 @@ export function CommandPalette({ open, onOpenChange, chats, notes, defaultScope,
     [codeMode, codeSessions],
   )
 
+  // The org rosters (cached, then refreshed): who "@" can reach, and the
+  // names on message rows — the palette has no space pane around it.
+  const rosterOrgs = useMemo(
+    () => orgs.filter((o) => !o.error).map((o) => ({ id: o.id, spaceIds: o.spaces.map((s) => s.id) })),
+    [orgs],
+  )
+  const rosters = useOrgRosters(rosterOrgs)
+  const rosterNames = useMemo(() => {
+    const out = new Map<string, ReadonlyMap<string, string>>()
+    for (const [orgId, members] of rosters) out.set(orgId, new Map(members.map((m) => [m.id, m.displayName])))
+    return out
+  }, [rosters])
+
+  // When each space was last opened here. The log exposes a version, not a
+  // value: bind the lookup to it so a visit yields a new lookup and the rows
+  // memo below follows.
+  const visitsVersion = useSpaceVisitsVersion()
+  const visitedAt = useMemo(() => {
+    void visitsVersion
+    return (orgId: string, spaceId: string): string | undefined => {
+      const at = spaceVisitedAt(orgId, spaceId)
+      return at === null ? undefined : new Date(at).toISOString()
+    }
+  }, [visitsVersion])
+
   // Every space and DM, flat — the fan-out targets and the rows' captions.
   const spaceRefs = useMemo<SpaceRef[]>(
     () => orgs.flatMap((org) => [
@@ -288,7 +328,9 @@ export function CommandPalette({ open, onOpenChange, chats, notes, defaultScope,
   // The listing refreshes on focus and on live frames; a search in flight
   // keys on the text, not on the listing's identity.
   const spaceRefsRef = useRef(spaceRefs)
-  spaceRefsRef.current = spaceRefs
+  useEffect(() => {
+    spaceRefsRef.current = spaceRefs
+  }, [spaceRefs])
 
   const navItems = useMemo<NavItem[]>(() => {
     const items: NavItem[] = []
@@ -314,6 +356,7 @@ export function CommandPalette({ open, onOpenChange, chats, notes, defaultScope,
         items.push({
           texts: [s.name],
           priority: 1,
+          recency: visitedAt(org.id, s.id),
           row: {
             key: `space:${org.id}/${s.id}`,
             kind: 'space',
@@ -324,11 +367,15 @@ export function CommandPalette({ open, onOpenChange, chats, notes, defaultScope,
           },
         })
       }
+      // People: those you already have a DM with, then everyone else on the
+      // roster (picking one starts the DM). Yourself is the self-DM row.
+      const withDm = new Set(org.directs.flatMap((d) => d.participants ?? []))
       for (const d of org.directs) {
         const name = org.directLabels[d.id] ?? d.name
         items.push({
           texts: [name],
           priority: 2,
+          recency: visitedAt(org.id, d.id),
           row: {
             key: `dm:${org.id}/${d.id}`,
             kind: 'dm',
@@ -336,6 +383,21 @@ export function CommandPalette({ open, onOpenChange, chats, notes, defaultScope,
             title: name,
             subtitle: manyOrgs ? `Direct message · ${org.name}` : 'Direct message',
             dest: { kind: 'space', orgId: org.id, spaceId: d.id },
+          },
+        })
+      }
+      for (const m of rosters.get(org.id) ?? []) {
+        if (m.id === org.memberId || withDm.has(m.id)) continue
+        items.push({
+          texts: [m.displayName],
+          priority: 2,
+          row: {
+            key: `person:${org.id}/${m.id}`,
+            kind: 'dm',
+            icon: User,
+            title: m.displayName,
+            subtitle: manyOrgs ? `Person · ${org.name}` : 'Person',
+            dest: { kind: 'person', orgId: org.id, memberId: m.id },
           },
         })
       }
@@ -427,7 +489,7 @@ export function CommandPalette({ open, onOpenChange, chats, notes, defaultScope,
       })
     }
     return items
-  }, [orgs, spaceRefs, feedOf, chats, codeIds, codeMode, codeSessions, projects, notes])
+  }, [orgs, rosters, visitedAt, spaceRefs, feedOf, chats, codeIds, codeMode, codeSessions, projects, notes])
 
   const q = query.trim()
   const { sigil, needle } = splitSigil(q)
@@ -446,7 +508,7 @@ export function CommandPalette({ open, onOpenChange, chats, notes, defaultScope,
     if (sigil) {
       const { kinds, heading } = SIGILS[sigil]!
       const pool = navItems.filter((i) => kinds.includes(i.row.kind))
-      return [{ heading, rows: needle ? rank(pool, needle, 20) : pool.map((i) => i.row) }]
+      return [{ heading, rows: needle ? rank(pool, needle, 20) : [...pool].sort(byRecency).map((i) => i.row) }]
     }
     const allowed = NAV_KINDS[scope]
     const pool = navItems.filter((i) => allowed.has(i.row.kind))
@@ -457,12 +519,16 @@ export function CommandPalette({ open, onOpenChange, chats, notes, defaultScope,
         case 'all':
           return [
             { heading: 'Go to', rows: rows(['section']) },
+            {
+              heading: 'Recent spaces',
+              rows: pool.filter((i) => (i.row.kind === 'space' || i.row.kind === 'dm') && i.recency).sort(byRecency).slice(0, 3).map((i) => i.row),
+            },
             { heading: 'Recent chats', rows: rows(['chat'], 5) },
           ]
         case 'spaces':
           return [
-            { heading: 'Spaces', rows: rows(['space', 'activity']) },
-            { heading: 'Direct messages', rows: rows(['dm']) },
+            { heading: 'Spaces', rows: pool.filter((i) => i.row.kind === 'space' || i.row.kind === 'activity').sort(byRecency).map((i) => i.row) },
+            { heading: 'People', rows: pool.filter((i) => i.row.kind === 'dm').sort(byRecency).map((i) => i.row) },
           ]
         case 'chats':
           return [{ heading: 'Recent chats', rows: rows(['chat'], 15) }]
@@ -475,83 +541,65 @@ export function CommandPalette({ open, onOpenChange, chats, notes, defaultScope,
     return [{ heading: NAV_HEADING[scope], rows: rank(pool, q, scope === 'all' ? 10 : 20) }]
   }, [navItems, q, sigil, needle, scope])
 
-  // Content search, after the debounce: Brain and chat transcripts through
-  // search:query, every space through the org's per-space search. A stale
-  // response never overwrites a newer one.
+  // Content search, a debounce after the last keystroke: Brain and chat
+  // transcripts through search:query, every space through the org's
+  // per-space search. Typing orphans whatever is in flight (the sequence
+  // moves on), so a stale response never overwrites a newer one.
   const seq = useRef(0)
   useEffect(() => {
-    const text = splitSigil(debounced.trim()).needle
+    const text = splitSigil(query.trim()).needle
     const mine = ++seq.current
-    if (!open || text.length < 2) {
-      setContent(EMPTY_CONTENT)
-      setSpaceHits(EMPTY_CROSS_SPACE)
-      setSearching(false)
-      return
-    }
-    const wantNotes = scope === 'all' || scope === 'brain'
-    const wantTranscripts = scope === 'all' || scope === 'chats' || scope === 'code'
-    const wantSpaces = SPACES_ENABLED && (scope === 'all' || scope === 'spaces')
-    const types: Array<'knowledge' | 'chat'> = [
-      ...(wantNotes ? ['knowledge' as const] : []),
-      ...(wantTranscripts ? ['chat' as const] : []),
-    ]
-    const perGroup = scope === 'all' ? 6 : 20
-    setSearching(true)
-    // One call per type: the core's limit is a single total with Brain
-    // first, so a shared call would starve chats of their rows.
-    const local = types.length > 0
-      ? Promise.all(types.map((type) => window.ipc.invoke('search:query', { query: text, limit: perGroup, types: [type] })))
-        .then((pages) => {
-          if (seq.current !== mine) return
-          const hits = pages.flatMap((p) => p.results)
-          setContent({
-            notes: hits.filter((r) => r.type === 'knowledge'),
-            transcripts: hits.filter((r) => r.type === 'chat'),
+    const timer = setTimeout(() => {
+      if (!open || text.length < 2) {
+        setContent(EMPTY_CONTENT)
+        setSpaceHits(EMPTY_CROSS_SPACE)
+        setSearching(false)
+        return
+      }
+      const wantNotes = scope === 'all' || scope === 'brain'
+      const wantTranscripts = scope === 'all' || scope === 'chats' || scope === 'code'
+      const wantSpaces = SPACES_ENABLED && (scope === 'all' || scope === 'spaces')
+      const types: Array<'knowledge' | 'chat'> = [
+        ...(wantNotes ? ['knowledge' as const] : []),
+        ...(wantTranscripts ? ['chat' as const] : []),
+      ]
+      const perGroup = scope === 'all' ? 6 : 20
+      setSearching(true)
+      // One call per type: the core's limit is a single total with Brain
+      // first, so a shared call would starve chats of their rows.
+      const local = types.length > 0
+        ? Promise.all(types.map((type) => window.ipc.invoke('search:query', { query: text, limit: perGroup, types: [type] })))
+          .then((pages) => {
+            if (seq.current !== mine) return
+            const hits = pages.flatMap((p) => p.results)
+            setContent({
+              notes: hits.filter((r) => r.type === 'knowledge'),
+              transcripts: hits.filter((r) => r.type === 'chat'),
+            })
           })
-        })
-        .catch((err) => {
-          console.error('Search failed:', err)
-          if (seq.current === mine) setContent(EMPTY_CONTENT)
-        })
-      : Promise.resolve(setContent(EMPTY_CONTENT))
-    const targets = spaceRefsRef.current
-    const remote = wantSpaces && targets.length > 0
-      ? searchAllSpaces(targets, text, { perSpace: scope === 'all' ? 3 : 5, limit: scope === 'all' ? 6 : 15 })
-        .then((r) => { if (seq.current === mine) setSpaceHits(r) })
-      : Promise.resolve(setSpaceHits(EMPTY_CROSS_SPACE))
-    analytics.searchExecuted([...types, ...(wantSpaces ? ['spaces'] : [])])
-    posthog.people.set_once({ has_used_search: true })
-    void Promise.allSettled([local, remote]).then(() => {
-      if (seq.current === mine) setSearching(false)
-    })
-  }, [debounced, scope, open])
-
-  // Author names for the message rows: one roster per space with a hit,
-  // loaded once (the module caches the promise).
-  useEffect(() => {
-    const seen = new Set<string>()
-    for (const { space } of spaceHits.messages) {
-      const key = `${space.orgId}/${space.spaceId}`
-      if (seen.has(key) || names.has(key)) continue
-      seen.add(key)
-      void loadMemberNames(space.orgId, space.spaceId).then((roster) => {
-        setNames((prev) => {
-          if (prev.has(key)) return prev
-          const next = new Map(prev)
-          next.set(key, roster)
-          return next
-        })
+          .catch((err) => {
+            console.error('Search failed:', err)
+            if (seq.current === mine) setContent(EMPTY_CONTENT)
+          })
+        : Promise.resolve(setContent(EMPTY_CONTENT))
+      const targets = spaceRefsRef.current
+      const remote = wantSpaces && targets.length > 0
+        ? searchAllSpaces(targets, text, { perSpace: scope === 'all' ? 3 : 5, limit: scope === 'all' ? 6 : 15 })
+          .then((r) => { if (seq.current === mine) setSpaceHits(r) })
+        : Promise.resolve(setSpaceHits(EMPTY_CROSS_SPACE))
+      analytics.searchExecuted([...types, ...(wantSpaces ? ['spaces'] : [])])
+      posthog.people.set_once({ has_used_search: true })
+      void Promise.allSettled([local, remote]).then(() => {
+        if (seq.current === mine) setSearching(false)
       })
-    }
-    // `names` is read to skip what has landed, not a trigger: a roster
-    // arriving must not refetch the others.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [spaceHits])
+    }, 250)
+    return () => clearTimeout(timer)
+  }, [query, scope, open])
 
   const contentGroups = useMemo<Group[]>(() => {
     const navKeys = new Set(navGroups.flatMap((g) => g.rows.map((r) => r.key)))
     const messages: Row[] = spaceHits.messages.map(({ space, hit }) => {
-      const roster = names.get(`${space.orgId}/${space.spaceId}`) ?? EMPTY_NAMES
+      const roster = rosterNames.get(space.orgId) ?? EMPTY_NAMES
       const author = roster.get(hit.author.memberId) ?? hit.author.memberId
       const isRoot = hit.threadRootId === hit.messageId
       return {
@@ -641,7 +689,7 @@ export function CommandPalette({ open, onOpenChange, chats, notes, defaultScope,
       { heading: 'In chats', rows: transcripts },
       { heading: 'In code chats', rows: codeTranscripts },
     ].filter((g) => g.rows.length > 0)
-  }, [navGroups, spaceHits, names, content, terms, scope, codeIds])
+  }, [navGroups, spaceHits, rosterNames, content, terms, scope, codeIds])
 
   const groups = [...navGroups.filter((g) => g.rows.length > 0), ...contentGroups]
   const count = groups.reduce((n, g) => n + g.rows.length, 0)

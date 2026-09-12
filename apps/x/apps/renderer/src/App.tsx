@@ -6717,6 +6717,16 @@ function App() {
         case 'activity':
           openActivity(dest.orgId)
           break
+        case 'person':
+          // No DM with this person yet: the org creates it on first use (as
+          // the New DM dialog does), the listing learns it, then it opens.
+          void window.ipc.invoke('spaces:openDirect', { orgId: dest.orgId, memberId: dest.memberId })
+            .then(async ({ space }) => {
+              await refreshSpacesOrgs()
+              openSpace(dest.orgId, space.id)
+            })
+            .catch((err) => toast.error(err instanceof Error ? err.message : String(err)))
+          break
         case 'chat':
           openAssistantRun(dest.sessionId)
           break

@@ -89,25 +89,3 @@ export async function searchAllSpaces(
     const pages = settled.flatMap((s) => (s.status === 'fulfilled' ? [s.value] : []))
     return mergeSpaceSearch(pages, opts.limit)
 }
-
-// Member names for the message rows: the palette has no space pane (and so no
-// SpaceMembersProvider) around it. One roster per space that produced a hit,
-// cached for the process — display names change rarely, and a stale one only
-// mislabels a search row until relaunch.
-const rosterNames = new Map<string, Promise<ReadonlyMap<string, string>>>()
-
-export function loadMemberNames(orgId: string, spaceId: string): Promise<ReadonlyMap<string, string>> {
-    const key = `${orgId}/${spaceId}`
-    let pending = rosterNames.get(key)
-    if (!pending) {
-        pending = window.ipc
-            .invoke('spaces:listMembers', { orgId, spaceId })
-            .then(({ members }) => new Map(members.map((m) => [m.id, m.displayName])))
-            .catch((): ReadonlyMap<string, string> => {
-                rosterNames.delete(key)
-                return new Map()
-            })
-        rosterNames.set(key, pending)
-    }
-    return pending
-}

@@ -50,6 +50,8 @@ export type PaletteDestination =
     /** A space (shared or direct), optionally a selection inside it and a message to land on. */
     | { kind: 'space'; orgId: string; spaceId: string; rail?: RailSelection; messageId?: string }
     | { kind: 'activity'; orgId: string }
+    /** A person without a DM yet: the org creates the DM on first use, then it opens. */
+    | { kind: 'person'; orgId: string; memberId: string }
     | { kind: 'chat'; sessionId: string }
     /** A code-mode chat: the Code section, focused on this session. */
     | { kind: 'code-session'; sessionId: string }
