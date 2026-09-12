@@ -566,7 +566,10 @@ export function ChatSidebar({
                 })}
               </div>
 
-              <div className={cn('sticky bottom-0 z-10 bg-background pt-0 shadow-lg', floating ? 'pb-3' : 'pb-12')}>
+              {/* rowboat-composer-dock drops the utility shadow (same as the
+                  full-screen dock): the gradient below does the scroll fade,
+                  so the docked pane carries no container drop shadow. */}
+              <div className={cn('rowboat-composer-dock sticky bottom-0 z-10 bg-background pt-0 shadow-lg', floating ? 'pb-3' : 'pb-12')}>
                 <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t from-background to-transparent" />
                 <div className="mx-auto w-full max-w-4xl px-3">
                   {chatTabs.map((tab) => {
