@@ -8,6 +8,7 @@ import { TourSounds } from '@/lib/tour-sounds'
 import type { TTSState } from '@/hooks/useVoiceTTS'
 import { cn } from '@/lib/utils'
 import tourClipWelcome from '@/assets/tour/welcome.mp3'
+import tourClipSpaces from '@/assets/tour/spaces.mp3'
 import tourClipHome from '@/assets/tour/home.mp3'
 import tourClipEmail from '@/assets/tour/email.mp3'
 import tourClipMeetings from '@/assets/tour/meetings.mp3'
@@ -15,11 +16,14 @@ import tourClipCode from '@/assets/tour/code.mp3'
 import tourClipKnowledge from '@/assets/tour/knowledge.mp3'
 import tourClipAgents from '@/assets/tour/agents.mp3'
 import tourClipApps from '@/assets/tour/apps.mp3'
+import tourClipWorkspaces from '@/assets/tour/workspaces.mp3'
 import tourClipChats from '@/assets/tour/chats.mp3'
 import tourClipComposer from '@/assets/tour/composer.mp3'
 import tourClipDone from '@/assets/tour/done.mp3'
 
 export type TourNavTarget =
+  | 'assistant'
+  | 'spaces'
   | 'home'
   | 'email'
   | 'meetings'
@@ -45,19 +49,24 @@ type TourStep = {
   voiceText?: string
 }
 
+// Stops follow the sidebar top to bottom (Spaces, then the destinations,
+// then Chats) and end back at the Assistant, where the app lands. A stop
+// whose anchor is missing (Spaces behind its flag, Code mode off) is skipped.
 const TOUR_STEPS: TourStep[] = [
   {
     id: 'welcome',
     title: 'All aboard! ⚓',
-    text: "I'm your captain for the next minute. The lights are down and the water's in — let me row you across Rowboat, one stop at a time. Use Next or your arrow keys.",
-    voiceText: "I'm your captain for the next minute. The lights are down and the water's in — let me row you across Rowboat, one stop at a time.",
+    text: "I'm your captain for the next minute. The lights are down and the water's in, so let me row you across Rowboat, one stop at a time. Use Next or your arrow keys.",
+    voiceText: "I'm your captain for the next minute. The lights are down and the water's in, so let me row you across Rowboat, one stop at a time.",
   },
   {
-    id: 'home',
-    targetId: 'nav-home',
-    navigate: 'home',
-    title: 'First stop: Todo',
-    text: 'Todo is your list — a quick overview of what needs your attention to get you back into the flow.',
+    id: 'spaces',
+    targetId: 'nav-spaces',
+    navigate: 'spaces',
+    hat: 'sailor',
+    vignette: 'spaces',
+    title: 'Spaces',
+    text: "Spaces is where your team talks. A server holds your spaces and direct messages, plus the files and boards you decide on together. Your agent and your teammates' agents work in there with you.",
   },
   {
     id: 'email',
@@ -66,7 +75,7 @@ const TOUR_STEPS: TourStep[] = [
     hat: 'mailcap',
     vignette: 'email',
     title: 'Email',
-    text: 'Read and triage your inbox right here. Rowboat can summarize threads, label messages, and help you draft replies.',
+    text: 'Read and triage your inbox right here. Rowboat sorts out what is important, labels the rest, and gets replies ready for you to send.',
   },
   {
     id: 'meetings',
@@ -75,7 +84,7 @@ const TOUR_STEPS: TourStep[] = [
     hat: 'headphones',
     vignette: 'meetings',
     title: 'Meetings',
-    text: 'Record or join meetings, and get transcripts and notes automatically — prep briefs show up before your calls, too.',
+    text: 'Record or join meetings and get transcripts and notes automatically. Prep briefs show up before your calls, too.',
   },
   {
     id: 'code',
@@ -83,7 +92,7 @@ const TOUR_STEPS: TourStep[] = [
     navigate: 'code',
     hat: 'hardhat',
     title: 'Code',
-    text: 'The Code section runs coding agents on your projects — point one at a folder and drive it from a chat.',
+    text: 'Code runs coding agents like Claude Code and Codex on your repos. Every session is a chat on its own worktree, with the diff, files, and a terminal one click away.',
   },
   {
     id: 'knowledge',
@@ -92,23 +101,15 @@ const TOUR_STEPS: TourStep[] = [
     hat: 'gradcap',
     vignette: 'brain',
     title: 'Brain',
-    text: "Brain is your knowledge base — notes, files, and everything Rowboat learns for you, all connected and searchable.",
+    text: 'Brain is your knowledge base. Notes, files, and everything Rowboat learns for you, all connected and searchable.',
   },
   {
-    id: 'agents',
-    targetId: 'nav-agents',
-    navigate: 'agents',
-    hat: 'captain',
-    vignette: 'agents',
-    title: 'Background agents',
-    text: 'Background agents work on schedules — they keep your Brain fresh and take care of recurring tasks while you row elsewhere.',
-  },
-  {
-    id: 'apps',
-    targetId: 'nav-apps',
-    navigate: 'apps',
-    title: 'Apps',
-    text: 'Apps are mini-apps you build right here in Rowboat — they get the same tools and integrations I do, and you can share them with other people. Just ask for one in chat.',
+    id: 'home',
+    targetId: 'nav-home',
+    navigate: 'home',
+    title: 'Todo',
+    text: 'Todo is one rolling list of what needs doing. Mention @rowboat on any line to hand it off, and my receipt lands right under the item when it is done.',
+    voiceText: 'Todo is one rolling list of what needs doing. Mention at-rowboat on any line to hand it off, and my receipt lands right under the item when it is done.',
   },
   {
     id: 'workspaces',
@@ -119,22 +120,39 @@ const TOUR_STEPS: TourStep[] = [
     text: 'Projects keep local files and related chats together. Pick a chat in the rail to work with Rowboat, or open a file alongside it.',
   },
   {
+    id: 'agents',
+    targetId: 'nav-agents',
+    navigate: 'agents',
+    hat: 'captain',
+    vignette: 'agents',
+    title: 'Background agents',
+    text: 'Background agents work on schedules. They keep your Brain fresh and take care of recurring tasks while you row elsewhere.',
+  },
+  {
+    id: 'apps',
+    targetId: 'nav-apps',
+    navigate: 'apps',
+    title: 'Apps',
+    text: 'Apps are mini-apps you build right here in Rowboat. They get the same tools and integrations I do, and you can share them with other people. Just ask for one in chat.',
+  },
+  {
     id: 'chats',
     targetId: 'nav-chats',
     title: 'Chats',
-    text: 'Your recent conversations live here — pick any of them back up right where you left off.',
+    text: 'Your recent conversations live here. Pick any of them back up right where you left off.',
   },
   {
     id: 'composer',
     targetId: 'chat-composer',
+    navigate: 'assistant',
     title: 'Talk to Rowboat',
-    text: 'And this is where we talk! Type, dictate with the mic, or turn on voice output — tap my face button and I’ll read replies out loud myself.',
+    text: 'And this is where we talk! Type, dictate with the mic, or start a call and I will talk it through with you out loud. The Assistant at the top of the sidebar always brings you back here.',
   },
   {
     id: 'done',
     hat: 'party',
-    title: "Land ho! 🎉",
-    text: "That's the whole bay — and there's my wake to prove it. Take this voyage again anytime from the bottom of the sidebar. Happy rowing!",
+    title: 'Land ho! 🎉',
+    text: "That's the whole bay, and there's my wake to prove it. Take this voyage again anytime from Take a tour at the bottom of the sidebar, or under Settings in the dock. Happy rowing!",
   },
 ]
 
@@ -143,6 +161,7 @@ const TOUR_STEPS: TourStep[] = [
 // editing any step's text. Steps without a clip fall back to live TTS.
 const TOUR_CLIPS: Record<string, string> = {
   welcome: tourClipWelcome,
+  spaces: tourClipSpaces,
   home: tourClipHome,
   email: tourClipEmail,
   meetings: tourClipMeetings,
@@ -150,6 +169,7 @@ const TOUR_CLIPS: Record<string, string> = {
   knowledge: tourClipKnowledge,
   agents: tourClipAgents,
   apps: tourClipApps,
+  workspaces: tourClipWorkspaces,
   chats: tourClipChats,
   composer: tourClipComposer,
   done: tourClipDone,
@@ -308,7 +328,12 @@ export function ProductTour({
   const lastSplashRef = useRef(0)
 
   const directionRef = useRef(1)
-  const enteredStepRef = useRef(-1)
+  // The stop whose navigate() has fired, and the stop the boat has fully
+  // arrived at (bubble up, narration started). Kept apart so an effect
+  // re-run before arrival (StrictMode's double mount, a resize mid-row)
+  // rows again instead of parking the boat with no bubble.
+  const navigatedStepRef = useRef(-1)
+  const arrivedStepRef = useRef(-1)
   const stepIndexRef = useRef(stepIndex)
 
   // Camera zoom state applied to the app shell (outside the portal)
@@ -347,16 +372,27 @@ export function ProductTour({
     }
   }, [])
 
-  // Grab the app shell for the camera zoom; restore it when the tour ends
+  // Grab the app shell for the camera zoom; restore it when the tour ends.
+  // While the shell is scaled up its box overflows the document, which makes
+  // the viewport scrollable; a focus() or scrollIntoView() during a stop (a
+  // composer taking focus as a section opens) then scrolls the whole app
+  // sideways and the sidebar ends up half off-screen. Clip at the shell's
+  // parent so there is nothing to scroll, and put the viewport back anyway.
   useEffect(() => {
     const shell = document.querySelector<HTMLElement>('.rowboat-shell')
     shellRef.current = shell
+    const frame = shell?.parentElement ?? null
+    const frameOverflow = frame?.style.overflow ?? ''
+    if (frame) frame.style.overflow = 'clip'
+    window.scrollTo(0, 0)
     return () => {
       if (shell) {
         shell.style.transform = ''
         shell.style.transformOrigin = ''
         shell.style.transition = ''
       }
+      if (frame) frame.style.overflow = frameOverflow
+      window.scrollTo(0, 0)
       shellRef.current = null
       zoomRef.current = null
     }
@@ -501,10 +537,13 @@ export function ProductTour({
   // and camera, row over, then narrate. Re-runs on resize to re-anchor.
   useEffect(() => {
     const step = TOUR_STEPS[stepIndex]
-    const entering = enteredStepRef.current !== stepIndex
+    // Still on the way to this stop (or not yet set off); an effect re-run
+    // after arrival is a resize, handled by jumping without a new bubble.
+    const entering = arrivedStepRef.current !== stepIndex
     let cancelled = false
 
-    if (entering && step.navigate) {
+    if (step.navigate && navigatedStepRef.current !== stepIndex) {
+      navigatedStepRef.current = stepIndex
       onNavigateRef.current(step.navigate)
     }
 
@@ -518,10 +557,10 @@ export function ProductTour({
         moveMascot(dest)
         return
       }
-      enteredStepRef.current = stepIndex
       setArrived(false)
       startTravel(dest, () => {
         if (cancelled) return
+        arrivedStepRef.current = stepIndex
         setArrived(true)
         soundsRef.current?.bump()
         cancelSpeechRef.current()
