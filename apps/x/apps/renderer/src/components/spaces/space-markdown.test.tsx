@@ -60,6 +60,57 @@ describe('Spaces message image carousel', () => {
     })
 })
 
+describe('Message body line breaks', () => {
+    it('renders a newline inside a paragraph as a break, the way both composers write one', async () => {
+        const { container } = render(<SpaceMarkdown body={'line one\nline two'} />)
+        await waitFor(() => expect(container.querySelector('p')).toBeInTheDocument())
+        expect(container.querySelector('p br')).toBeInTheDocument()
+    })
+
+    it('still separates paragraphs on a blank line', async () => {
+        const { container } = render(<SpaceMarkdown body={'first\n\nsecond'} />)
+        await waitFor(() => expect(container.querySelectorAll('p')).toHaveLength(2))
+        expect(container.querySelector('br')).not.toBeInTheDocument()
+    })
+})
+
+describe('External link gate', () => {
+    // Tunnel and preview hosts are long enough to blow a button's width out
+    // past the dialog card, which is what this shape guards.
+    const tunnel = '3f8a-2401-4900-1c1a-b5e8-6d31-9f04-a71c.ngrok-free.app'
+    const open = vi.fn()
+
+    beforeEach(() => { localStorage.clear(); open.mockReset(); vi.stubGlobal('open', open) })
+    afterEach(() => vi.unstubAllGlobals())
+
+    it('elides a long hostname down to its registrable tail, keeping the full one addressable', async () => {
+        render(<SpaceMarkdown body={`See [the preview](https://${tunnel}/session/abcdef)`} />)
+        fireEvent.click(await screen.findByRole('link', { name: 'the preview' }))
+        const dialog = screen.getByRole('dialog')
+        expect(within(dialog).getByText(`https://${tunnel}/session/abcdef`)).toBeVisible()
+        const trust = within(dialog).getByRole('button', { name: `Trust ${tunnel}` })
+        expect(trust).toHaveAttribute('title', tunnel)
+        expect(trust.textContent).not.toContain(tunnel)
+        expect(trust.textContent).toMatch(/^Trust ….*\.ngrok-free\.app$/)
+        // Enter on a warning must not mean "trust this domain forever".
+        await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus())
+    })
+
+    it('names a short hostname in full and remembers it once trusted', async () => {
+        render(<SpaceMarkdown body="See [the docs](https://example.com/docs)" />)
+        fireEvent.click(await screen.findByRole('link', { name: 'the docs' }))
+        const trust = screen.getByRole('button', { name: 'Trust example.com' })
+        expect(trust.textContent).toBe('Trust example.com')
+        fireEvent.click(trust)
+        expect(open).toHaveBeenCalledWith('https://example.com/docs')
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+        // A trusted domain opens straight through on the next click.
+        fireEvent.click(screen.getByRole('link', { name: 'the docs' }))
+        expect(open).toHaveBeenCalledTimes(2)
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+})
+
 describe('Space file attachments', () => {
     beforeEach(() => {
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, blob: async () => new Blob(['hello'], { type: 'text/plain' }) }))

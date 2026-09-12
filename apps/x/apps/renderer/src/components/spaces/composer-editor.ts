@@ -31,6 +31,50 @@ const ChatFormatKeys = Extension.create({
     },
 })
 
+/**
+ * Shift+Enter writes a plain newline, not CommonMark's backslash escape.
+ *
+ * tiptap-markdown serializes a hard break as `\` followed by a newline, which
+ * only reads as a line break while the paragraph keeps going: the moment the
+ * next line opens a block of its own (`- item`, `# heading`, `> quote`), the
+ * backslash has nothing to escape and renders as itself. That is where the
+ * trailing backslashes in sent messages came from, and every plain-text
+ * surface off the same body (copies, quotes, excerpts, thread titles, the
+ * text handed to @rowboat) showed them unconditionally. A newline carries the
+ * break instead — the composer parses one straight back to a hard break
+ * (markdown-it `breaks`), and so does every renderer of a space body. Inside
+ * a table a newline would end the row, so those keep the HTML break.
+ */
+function serializeHardBreak(
+    state: { write(text: string): void; inTable?: boolean },
+    node: ProseMirrorNode,
+    parent: ProseMirrorNode,
+    index: number,
+): void {
+    for (let i = index + 1; i < parent.childCount; i++) {
+        if (parent.child(i).type !== node.type) {
+            state.write(state.inTable ? '<br>' : '\n')
+            return
+        }
+    }
+}
+
+/**
+ * StarterKit owns the hardBreak node and doesn't re-export it, so the kit is
+ * re-wrapped to hand that one extension the markdown spec above —
+ * tiptap-markdown reads an extension's own spec before falling back to its
+ * default, and everything else in the kit passes through untouched.
+ */
+const ChatStarterKit = StarterKit.extend({
+    addExtensions() {
+        return (this.parent?.() ?? []).map((extension) =>
+            extension.name === 'hardBreak'
+                ? extension.extend({ addStorage: () => ({ markdown: { serialize: serializeHardBreak, parse: {} } }) })
+                : extension,
+        )
+    },
+})
+
 type MentionKind = 'member' | 'here' | 'rowboat'
 
 function refOf(attrs: { kind: MentionKind; id: string | null; label: string }): MentionRef {
@@ -123,7 +167,7 @@ export const MentionNode = Node.create({
  */
 export function composerExtensions(getPlaceholder: () => string) {
     return [
-        StarterKit.configure({ link: false }),
+        ChatStarterKit.configure({ link: false }),
         Link.configure({ openOnClick: false, autolink: true }),
         MentionNode,
         // Pasted GIF/image links become the image itself (matches what the
