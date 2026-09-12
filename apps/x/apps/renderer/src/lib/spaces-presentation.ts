@@ -172,6 +172,15 @@ export function shortId(id: string): string {
     return id.slice(-6).toLowerCase()
 }
 
+/**
+ * Whether a history row can offer "restore this version": op change-sets
+ * (move/delete/restore) carry no content of their own — they reuse the version
+ * the file already had — and the head is already what the file says.
+ */
+export function isRestorableChangeSet(cs: spaces.ChangeSet, currentVersion: number): boolean {
+    return !cs.op && cs.resultVersion < currentVersion
+}
+
 // ---------------------------------------------------------------------------
 // Blobs — uploads referenced from markdown (contract decision 1, amended).
 // The wire form is the link grammar's canonical https URL on the org address
