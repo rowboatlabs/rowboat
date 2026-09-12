@@ -96,8 +96,11 @@ export function ThreadPane({
     // Starts at the cache's depth: hasMore above describes exactly that.
     const oldestLoadedRef = useRef<number | null>(seeded?.messages[0]?.offset ?? null)
     const [folding, setFolding] = useState(false)
-    const bottomRef = useRef<HTMLDivElement | null>(null)
     const scrollRef = useRef<HTMLDivElement | null>(null)
+    /** The list's one measurable child — the tail pin observes its size. */
+    const contentRef = useRef<HTMLDivElement | null>(null)
+    /** null = following the tail; a number = where the reader parked (kept across hide/show). */
+    const parkedTopRef = useRef<number | null>(null)
     /** Composer prefill (quote-reply, mention-from-profile); a new nonce re-applies it. */
     const [seed, setSeed] = useState<{ text: string; nonce: number; append?: boolean } | null>(null)
     const { onType } = usePresenceSender(org.id, space.id, rootMessageId, visible)
@@ -254,7 +257,10 @@ export function ThreadPane({
         if (!mid) return
         const el = scrollRef.current
         if (!el) return
-        if (scrollToMessage(el, mid) || loaded) {
+        const landed = scrollToMessage(el, mid)
+        // The landing spot is the reader's own now — the tail pin lets go.
+        if (landed) parkedTopRef.current = el.scrollTop
+        if (landed || loaded) {
             // Landed — or the window is loaded and the row just isn't in it.
             setTimeout(() => {
                 pendingJumpRef.current = null
@@ -262,10 +268,57 @@ export function ThreadPane({
         }
     }, [jumpNonce, loaded, messages.length])
 
+    // Opening lands on the newest replies: the bottom, pinned before paint (a
+    // layout effect — no flash of the top). The pin is not one-shot: bodies
+    // keep growing after first layout (lazy images, code highlighting, the
+    // code-block chunk), and each late growth above the viewport would
+    // strand a one-time scroll mid-thread. While the reader is following
+    // the tail, any content-size change re-pins it; the moment they scroll
+    // away the pin lets go and their spot is kept — across a hide/show too
+    // (display:none drops the scroll geometry; the flip back restores it).
+    // Only a scroll the READER made may unpin: the browser fires scroll
+    // events of its own (anchoring compensates for a late layout above the
+    // viewport), indistinguishable by position alone — so track intent: a
+    // wheel/touch stamps a time, a pointer held down (the scrollbar, a
+    // selection drag) counts for as long as it's down.
+    const userScrollAtRef = useRef(0)
+    const pointerDownRef = useRef(false)
     useEffect(() => {
-        if (pendingJumpRef.current) return
-        bottomRef.current?.scrollIntoView({ block: 'end' })
-    }, [messages.length, workingAgents.length, permissionWait.length])
+        const up = () => {
+            pointerDownRef.current = false
+        }
+        window.addEventListener('pointerup', up)
+        window.addEventListener('pointercancel', up)
+        return () => {
+            window.removeEventListener('pointerup', up)
+            window.removeEventListener('pointercancel', up)
+        }
+    }, [])
+    const pinBottom = () => {
+        const el = scrollRef.current
+        if (el && parkedTopRef.current === null && !pendingJumpRef.current) el.scrollTop = el.scrollHeight
+    }
+    const typingCount = presence.typing.get(rootMessageId)?.length ?? 0
+    useLayoutEffect(pinBottom, [loaded, root?.id, messages.length, spinningAgents.length, permissionWait.length, typingCount])
+    useEffect(() => {
+        const el = scrollRef.current
+        const content = contentRef.current
+        if (!el || !content) return
+        const ro = new ResizeObserver(pinBottom)
+        // The content's growth, and the viewport's own (the column resized,
+        // the composer growing under it).
+        ro.observe(content)
+        ro.observe(el)
+        return () => ro.disconnect()
+    }, [])
+    const wasVisibleRef = useRef(visible)
+    useLayoutEffect(() => {
+        const was = wasVisibleRef.current
+        wasVisibleRef.current = visible
+        const el = scrollRef.current
+        if (!el || !visible || was) return
+        el.scrollTop = parkedTopRef.current ?? el.scrollHeight
+    }, [visible])
 
     const groups = useMemo(() => artifactsForThread(changeSets, rootMessageId), [changeSets, rootMessageId])
 
@@ -288,7 +341,10 @@ export function ThreadPane({
     }
     const jumpToNew = () => {
         setNewJumped(true)
-        scrollRef.current?.querySelector<HTMLElement>('[data-new-divider]')?.scrollIntoView({ block: 'center' })
+        const el = scrollRef.current
+        el?.querySelector<HTMLElement>('[data-new-divider]')?.scrollIntoView({ block: 'center' })
+        // The reader's own spot now — the tail pin lets go.
+        if (el) parkedTopRef.current = el.scrollTop
     }
     useEffect(() => {
         if (!visible || !loaded || !hasNewLine || newFading) return
@@ -807,7 +863,35 @@ export function ThreadPane({
             </div>
 
             <div className="relative flex-1 min-h-0 flex flex-col">
-            <div ref={scrollRef} className="flex-1 min-h-0 spaces-message-list overflow-y-auto py-2">
+            <div
+                ref={scrollRef}
+                className="flex-1 min-h-0 spaces-message-list overflow-y-auto py-2"
+                onWheel={() => {
+                    userScrollAtRef.current = performance.now()
+                }}
+                onTouchMove={() => {
+                    userScrollAtRef.current = performance.now()
+                }}
+                onPointerDown={() => {
+                    pointerDownRef.current = true
+                }}
+                onScroll={(e) => {
+                    const el = e.currentTarget
+                    const fromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+                    const userScroll = pointerDownRef.current || performance.now() - userScrollAtRef.current < 250
+                    if (fromBottom < 8) {
+                        // At the bottom = following the tail.
+                        parkedTopRef.current = null
+                    } else if (userScroll || parkedTopRef.current !== null) {
+                        parkedTopRef.current = el.scrollTop
+                    } else if (!pendingJumpRef.current) {
+                        // A scroll the reader didn't make, while following —
+                        // anchoring's compensation for a late layout. Re-pin.
+                        el.scrollTop = el.scrollHeight
+                    }
+                }}
+            >
+                <div ref={contentRef}>
                 {!loaded && !root && <div className="px-2 py-2 text-sm text-muted-foreground">Loading…</div>}
 
                 {/* Reply-to-activity-row provenance: the change this root answers. */}
@@ -928,7 +1012,7 @@ export function ThreadPane({
                     </div>
                 )}
                 <TypingIndicator names={typingNames} />
-                <div ref={bottomRef} />
+                </div>
             </div>
             {hasNewLine && newCount > 0 && !newJumped && (
                 <button
