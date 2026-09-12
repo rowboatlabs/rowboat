@@ -13,6 +13,7 @@ import {
 } from "../connections.js";
 import { loadDiskSkills } from "./disk-loader.js";
 import { SPACES_TOOL_NAMES } from "../../tools/domains/spaces.js";
+import { WHITEBOARD_TOOL_NAMES } from "../../tools/domains/whiteboard.js";
 import builtinToolsSkill from "./builtin-tools/skill.js";
 import deletionGuardrailsSkill from "./deletion-guardrails/skill.js";
 import docCollabSkill from "./doc-collab/skill.js";
@@ -33,6 +34,7 @@ import notifyUserSkill from "./notify-user/skill.js";
 import appsSkill from "./apps/skill.js";
 import slackSkill from "./slack/skill.js";
 import spacesSkill from "./spaces/skill.js";
+import whiteboardSkill from "./whiteboard/skill.js";
 import chartsSkill from "./charts/skill.js";
 import voiceSkill from "./voice/skill.js";
 
@@ -142,6 +144,14 @@ const definitions: SkillDefinition[] = [
     summary: "Your person's team workspace — like Slack: spaces (channels), DMs, threads, discussions, shared files, members. Use for ANY ask about a space, a DM, a teammate's message, 'message/DM <person>', 'what did the team say about', 'post/reply in <space>', 'push/add/update ... to <space>' (e.g. 'push my standup to Roadboard'), 'team roadmap', 'shared doc'. Attaches the full spaces toolset. Writes are visible to the whole team, attributed to your person.",
     content: spacesSkill,
     tools: [...SPACES_TOOL_NAMES],
+  },
+  {
+    id: "whiteboard",
+    availability: isSpacesAvailable,
+    title: "Whiteboards (shared drawing boards in Spaces)",
+    summary: "Draw on, read, or change a shared whiteboard — the board in a space: 'draw the flow on the board', 'sketch/diagram X on the whiteboard', 'add a box for Y', 'what's on the board', 'connect A to B', 'clean up the board'. Attaches whiteboard-read and whiteboard-draw (operations, never raw JSON) plus list_spaces to find the space. Drawing is visible to the whole team live.",
+    content: whiteboardSkill,
+    tools: [...WHITEBOARD_TOOL_NAMES, "list_spaces"],
   },
   {
     id: "composio-integration",

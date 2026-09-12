@@ -247,6 +247,14 @@ export const WHITEBOARD_EXT = '.excalidraw';
 export const DEFAULT_WHITEBOARD_PATH = `${WHITEBOARD_DIR}/board${WHITEBOARD_EXT}`;
 
 /**
+ * Snapshots at or below this many UTF-8 bytes store as TEXT assets (the
+ * contract caps text at 1MB); above it they fall back to a blob version. One
+ * number for every writer — the pane and the agent's whiteboard tools — so a
+ * board never flips transport depending on who saved it last.
+ */
+export const WHITEBOARD_TEXT_SNAPSHOT_MAX_BYTES = 900_000;
+
+/**
  * A just-created board's snapshot — the same single-line shape the pane
  * saves, so creating via the rail's "+" and the pane's first save write
  * byte-identical content for an empty scene (identical proposes merge clean).

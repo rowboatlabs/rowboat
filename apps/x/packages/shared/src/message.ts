@@ -83,6 +83,18 @@ export const SpaceMentionRef = z.discriminatedUnion("kind", [
         memberId: z.string(),
         displayName: z.string(),             // the person's display name as inserted after "@"
     }),
+    // A shared whiteboard (2026-09-12): a board is an asset under whiteboards/
+    // in one space, so the ref carries the space too — the whiteboard tools
+    // take spaceId + the board path.
+    z.object({
+        kind: z.literal("board"),
+        orgId: z.string(),
+        orgName: z.string(),
+        spaceId: z.string(),
+        spaceName: z.string(),
+        path: z.string(),                    // whiteboards/<name>.excalidraw
+        name: z.string(),                    // the board's display name as inserted after "@"
+    }),
 ]);
 export type SpaceMentionRef = z.infer<typeof SpaceMentionRef>;
 
@@ -118,6 +130,17 @@ export const UserMessageContext = z.object({
             path: z.string(),
             slideNumber: z.number().int().min(1),
             slideCount: z.number().int().min(1),
+        }),
+        // A shared whiteboard open in Spaces. No content — the board's
+        // content is what whiteboard-read reads; the ids here are what the
+        // whiteboard tools take, so "add a box for X" needs no lookup.
+        z.object({
+            kind: z.literal("whiteboard"),
+            orgId: z.string(),
+            orgName: z.string(),
+            spaceId: z.string(),
+            spaceName: z.string(),
+            path: z.string(),
         }),
     ]).optional(),
 });

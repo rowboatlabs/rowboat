@@ -55,6 +55,7 @@ import {
   EMPTY_SPACES_MENTION_TARGETS,
   mentionLabelsFor,
   mentionTargetLabel,
+  type BoardMentionTarget,
   type MemberMentionTarget,
   type MentionSources,
   type MentionTarget,
@@ -121,6 +122,17 @@ export type SpaceMention = {
   displayName: string;  // the space's name
 };
 
+export type BoardMention = {
+  kind: 'board';
+  id: string;
+  orgId: string;
+  orgName: string;
+  spaceId: string;
+  spaceName: string;
+  path: string;         // whiteboards/<name>.excalidraw
+  displayName: string;  // the board's name
+};
+
 export type MemberMention = {
   kind: 'member';
   id: string;
@@ -130,12 +142,13 @@ export type MemberMention = {
   displayName: string;  // the person's display name
 };
 
-export type Mention = FileMention | SpaceMention | MemberMention;
+export type Mention = FileMention | SpaceMention | BoardMention | MemberMention;
 
 /** A mention before the provider assigns its id. */
 export type MentionInput =
   | Omit<FileMention, 'id'>
   | Omit<SpaceMention, 'id'>
+  | Omit<BoardMention, 'id'>
   | Omit<MemberMention, 'id'>;
 
 /** Same target, whatever the id: the dedupe rule for addMention. */
@@ -225,6 +238,7 @@ export type KnowledgeFilesContext = {
   recentFiles: string[];
   visibleFiles: string[];
   spaces: SpaceMentionTarget[];
+  boards: BoardMentionTarget[];
   members: MemberMentionTarget[];
 };
 
@@ -396,9 +410,10 @@ export function PromptInputProvider({
       recentFiles,
       visibleFiles,
       spaces: mentionTargets.spaces,
+      boards: mentionTargets.boards,
       members: mentionTargets.members,
     }),
-    [knowledgeFiles, recentFiles, visibleFiles, mentionTargets.spaces, mentionTargets.members]
+    [knowledgeFiles, recentFiles, visibleFiles, mentionTargets.spaces, mentionTargets.boards, mentionTargets.members]
   );
 
   return (
@@ -1017,15 +1032,16 @@ export const PromptInputTextarea = ({
   const recentFiles = knowledgeFilesCtx?.recentFiles ?? EMPTY_FILES;
   const visibleFiles = knowledgeFilesCtx?.visibleFiles ?? EMPTY_FILES;
   const spaceTargets = knowledgeFilesCtx?.spaces ?? EMPTY_SPACES_MENTION_TARGETS.spaces;
+  const boardTargets = knowledgeFilesCtx?.boards ?? EMPTY_SPACES_MENTION_TARGETS.boards;
   const memberTargets = knowledgeFilesCtx?.members ?? EMPTY_SPACES_MENTION_TARGETS.members;
 
-  // Everything "@" can name here: files, spaces, people (mention-targets.ts).
+  // Everything "@" can name here: files, spaces, boards, people (mention-targets.ts).
   const mentionSources = useMemo<MentionSources>(
-    () => ({ files: knowledgeFiles, recentFiles, visibleFiles, spaces: spaceTargets, members: memberTargets }),
-    [knowledgeFiles, recentFiles, visibleFiles, spaceTargets, memberTargets]
+    () => ({ files: knowledgeFiles, recentFiles, visibleFiles, spaces: spaceTargets, boards: boardTargets, members: memberTargets }),
+    [knowledgeFiles, recentFiles, visibleFiles, spaceTargets, boardTargets, memberTargets]
   );
   const mentionsEnabled =
-    knowledgeFiles.length > 0 || spaceTargets.length > 0 || memberTargets.length > 0;
+    knowledgeFiles.length > 0 || spaceTargets.length > 0 || boardTargets.length > 0 || memberTargets.length > 0;
 
   // Build mention labels for highlighting (handles multi-word names like "AI Agents")
   const mentionLabels = useMemo(() => mentionLabelsFor(mentionSources), [mentionSources]);
@@ -1104,6 +1120,17 @@ export const PromptInputTextarea = ({
             orgId: target.orgId,
             orgName: target.orgName,
             spaceId: target.spaceId,
+            displayName,
+          });
+          break;
+        case "board":
+          mentionsCtx?.addMention({
+            kind: "board",
+            orgId: target.orgId,
+            orgName: target.orgName,
+            spaceId: target.spaceId,
+            spaceName: target.spaceName,
+            path: target.path,
             displayName,
           });
           break;

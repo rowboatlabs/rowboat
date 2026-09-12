@@ -32,6 +32,12 @@ function formatUserMessageContextForLlm(userMessageContext: z.infer<typeof UserM
             sections.push(`Middle pane:\nState: note\nPath: ${userMessageContext.middlePane.path}\n\nContent:\n\`\`\`\n${userMessageContext.middlePane.content}\n\`\`\``);
         } else if (userMessageContext.middlePane.kind === 'deck') {
             sections.push(`Middle pane:\nState: deck\nPath: ${userMessageContext.middlePane.path}\nSlide: ${userMessageContext.middlePane.slideNumber} of ${userMessageContext.middlePane.slideCount}`);
+        } else if (userMessageContext.middlePane.kind === 'whiteboard') {
+            const wb = userMessageContext.middlePane;
+            sections.push(
+                `Middle pane:\nState: whiteboard\nBoard: ${wb.path} in space "${wb.spaceName}" on org "${wb.orgName}" (spaceId: ${wb.spaceId}; pass org: "${wb.orgName}")\n` +
+                    'The user is looking at this shared board. "the board" / "here" / "add a box" means this one: whiteboard-read it (spaceId + board path above), then whiteboard-draw.',
+            );
         } else {
             sections.push(`Middle pane:\nState: browser\nURL: ${userMessageContext.middlePane.url}\nTitle: ${userMessageContext.middlePane.title}`);
         }
@@ -59,15 +65,25 @@ function formatSpaceMentions(mentions: NonNullable<z.infer<typeof UserMessageCon
     const lines: string[] = [];
     const seen = new Set<string>();
     for (const m of mentions) {
-        const key = m.kind === 'space' ? `space:${m.orgId}/${m.spaceId}` : `member:${m.orgId}/${m.memberId}`;
+        const key =
+            m.kind === 'space'
+                ? `space:${m.orgId}/${m.spaceId}`
+                : m.kind === 'member'
+                  ? `member:${m.orgId}/${m.memberId}`
+                  : `board:${m.orgId}/${m.spaceId}/${m.path}`;
         if (seen.has(key)) continue;
         seen.add(key);
         if (m.kind === 'space') {
             lines.push(`- @${m.name} = space "${m.name}" on org "${m.orgName}" (spaceId: ${m.spaceId})`);
-        } else {
+        } else if (m.kind === 'member') {
             lines.push(
                 `- @${m.displayName} = person "${m.displayName}" on org "${m.orgName}" (memberId: ${m.memberId}; ` +
                     'open_direct with this memberId to DM them, or address them with a mention token)',
+            );
+        } else {
+            lines.push(
+                `- @${m.name} = whiteboard "${m.name}" (board: ${m.path}) in space "${m.spaceName}" on org "${m.orgName}" (spaceId: ${m.spaceId}; ` +
+                    'whiteboard-read / whiteboard-draw with this spaceId and board)',
             );
         }
     }

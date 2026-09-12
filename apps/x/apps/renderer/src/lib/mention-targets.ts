@@ -1,17 +1,29 @@
 import { wikiLabel, stripKnowledgePrefix } from '@/lib/wiki-links'
 
 // The assistant composer's @ menu (2026-09-12): what "@" can name, and how
-// the list is ordered. Four kinds of target ride one popover — the agent
-// itself, knowledge files, the shared spaces the user is in, and the people
-// they can DM — grouped so a glance tells them apart, filtered as they type.
-// Pure: the composer feeds it the sources, the popover renders the result,
-// and the ranking is pinned by tests rather than left to the component.
+// the list is ordered. Five kinds of target ride one popover — the agent
+// itself, knowledge files, the shared spaces the user is in, the whiteboards
+// in those spaces, and the people they can DM — grouped so a glance tells
+// them apart, filtered as they type. Pure: the composer feeds it the sources,
+// the popover renders the result, and the ranking is pinned by tests rather
+// than left to the component.
 
 export interface SpaceMentionTarget {
   kind: 'space'
   orgId: string
   orgName: string
   spaceId: string
+  name: string
+}
+
+/** A shared whiteboard: an asset under whiteboards/ in one space. */
+export interface BoardMentionTarget {
+  kind: 'board'
+  orgId: string
+  orgName: string
+  spaceId: string
+  spaceName: string
+  path: string
   name: string
 }
 
@@ -27,9 +39,10 @@ export type MentionTarget =
   | { kind: 'rowboat' }
   | { kind: 'file'; path: string }
   | SpaceMentionTarget
+  | BoardMentionTarget
   | MemberMentionTarget
 
-export type MentionGroup = 'agent' | 'files' | 'spaces' | 'people'
+export type MentionGroup = 'agent' | 'files' | 'spaces' | 'boards' | 'people'
 
 export interface MentionEntry {
   target: MentionTarget
@@ -43,15 +56,18 @@ export interface MentionEntry {
 /** The Spaces half of the menu's sources — what useSpacesMentionTargets resolves. */
 export interface SpacesMentionTargets {
   spaces: SpaceMentionTarget[]
+  boards: BoardMentionTarget[]
   members: MemberMentionTarget[]
 }
 
-export const EMPTY_SPACES_MENTION_TARGETS: SpacesMentionTargets = { spaces: [], members: [] }
+export const EMPTY_SPACES_MENTION_TARGETS: SpacesMentionTargets = { spaces: [], boards: [], members: [] }
 
-export interface MentionSources extends SpacesMentionTargets {
+export interface MentionSources extends Omit<SpacesMentionTargets, 'boards'> {
   files: string[]
   recentFiles?: string[]
   visibleFiles?: string[]
+  /** Optional: a files-plus-spaces menu without boards is still a full menu. */
+  boards?: BoardMentionTarget[]
 }
 
 export function mentionTargetKey(target: MentionTarget): string {
@@ -62,6 +78,8 @@ export function mentionTargetKey(target: MentionTarget): string {
       return `file:${target.path}`
     case 'space':
       return `space:${target.orgId}/${target.spaceId}`
+    case 'board':
+      return `board:${target.orgId}/${target.spaceId}/${target.path}`
     case 'member':
       return `member:${target.orgId}/${target.memberId}`
   }
@@ -74,6 +92,8 @@ export function mentionTargetLabel(target: MentionTarget): string {
     case 'file':
       return wikiLabel(target.path)
     case 'space':
+      return target.name
+    case 'board':
       return target.name
     case 'member':
       return target.displayName
@@ -124,7 +144,8 @@ function orderFiles(files: string[], recentFiles: string[], visibleFiles: string
 
 export function buildMentionEntries(rawQuery: string, sources: MentionSources): MentionEntry[] {
   const query = rawQuery.toLowerCase()
-  const hasSpacesSources = sources.spaces.length > 0 || sources.members.length > 0
+  const boards = sources.boards ?? []
+  const hasSpacesSources = sources.spaces.length > 0 || boards.length > 0 || sources.members.length > 0
   const groupCap = query ? SEARCH_CAP : BROWSE_CAP
   const fileCap = hasSpacesSources ? groupCap : FILES_ALONE
 
@@ -144,6 +165,12 @@ export function buildMentionEntries(rawQuery: string, sources: MentionSources): 
     entries.push({ target, group: 'spaces', key: mentionTargetKey(target), label: target.name })
   }
 
+  // Boards sit right after their spaces: a board is something IN a space,
+  // and "draw X on @roadmap" is the ask this group exists for.
+  for (const target of rankByQuery(boards, (b) => b.name, query).slice(0, groupCap)) {
+    entries.push({ target, group: 'boards', key: mentionTargetKey(target), label: target.name })
+  }
+
   for (const target of rankByQuery(sources.members, (m) => m.displayName, query).slice(0, groupCap)) {
     entries.push({ target, group: 'people', key: mentionTargetKey(target), label: target.displayName })
   }
@@ -160,6 +187,10 @@ export function mentionLabelsFor(sources: MentionSources): string[] {
   }
   for (const space of sources.spaces) {
     const label = space.name.trim()
+    if (label) labels.add(label)
+  }
+  for (const board of sources.boards ?? []) {
+    const label = board.name.trim()
     if (label) labels.add(label)
   }
   for (const member of sources.members) {

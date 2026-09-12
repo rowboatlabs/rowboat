@@ -3,6 +3,7 @@ import {
   buildMentionEntries,
   mentionLabelsFor,
   mentionTargetKey,
+  type BoardMentionTarget,
   type MemberMentionTarget,
   type MentionSources,
   type SpaceMentionTarget,
@@ -26,6 +27,16 @@ const person = (displayName: string, org = 'rowboat'): MemberMentionTarget => ({
   orgName: org,
   memberId: `member-${org}-${displayName}`,
   displayName,
+})
+
+const board = (name: string, spaceName = 'Design', org = 'rowboat'): BoardMentionTarget => ({
+  kind: 'board',
+  orgId: `org-${org}`,
+  orgName: org,
+  spaceId: `space-${org}-${spaceName}`,
+  spaceName,
+  path: `whiteboards/${name}.excalidraw`,
+  name,
 })
 
 const files = ['alpha.md', 'beta.md', 'gamma.md', 'delta.md', 'design.md', 'epsilon.md', 'zeta.md', 'eta.md', 'theta.md']
@@ -110,6 +121,46 @@ describe('buildMentionEntries', () => {
     })
     expect(entries.filter((e) => e.group === 'people')).toHaveLength(2)
   })
+
+  // Boards (2026-09-12): whiteboards ride the same menu, between the spaces
+  // they live in and the people — "draw X on @roadmap" is the ask.
+  describe('boards', () => {
+    const withBoards: MentionSources = {
+      ...sources,
+      boards: [board('roadmap'), board('board'), board('design review', 'Design'), board('roadmap', 'Roadboard')],
+    }
+
+    it('groups boards after spaces and before people, capped like the other groups', () => {
+      const entries = buildMentionEntries('', withBoards)
+      const groups = entries.map((e) => e.group)
+      expect(groups).toEqual([...groups].sort((a, b) => ORDER[a] - ORDER[b]))
+      expect(entries.filter((e) => e.group === 'boards')).toHaveLength(3)
+      expect(groups.indexOf('boards')).toBeGreaterThan(groups.lastIndexOf('spaces'))
+      expect(groups.indexOf('people')).toBeGreaterThan(groups.lastIndexOf('boards'))
+    })
+
+    it('filters boards by the query and widens the cap on a search', () => {
+      expect(buildMentionEntries('road', withBoards).filter((e) => e.group === 'boards').map((e) => e.label)).toEqual(['roadmap', 'roadmap'])
+      expect(buildMentionEntries('review', withBoards).filter((e) => e.group === 'boards').map((e) => e.label)).toEqual(['design review'])
+    })
+
+    it('keys a board by org, space and path, so two spaces\' "roadmap" boards stay two entries', () => {
+      const entries = buildMentionEntries('roadmap', withBoards).filter((e) => e.group === 'boards')
+      expect(entries).toHaveLength(2)
+      expect(new Set(entries.map((e) => e.key)).size).toBe(2)
+      expect(entries[0].key).toBe(mentionTargetKey(board('roadmap')))
+    })
+
+    it('a board alone (no spaces or people yet) still turns the menu into the grouped form', () => {
+      const entries = buildMentionEntries('', { files, spaces: [], members: [], boards: [board('roadmap')] })
+      expect(entries.filter((e) => e.group === 'files')).toHaveLength(3)
+      expect(entries.filter((e) => e.group === 'boards')).toHaveLength(1)
+    })
+
+    it('is optional in the sources: a menu without boards is unchanged', () => {
+      expect(buildMentionEntries('', sources).some((e) => e.group === 'boards')).toBe(false)
+    })
+  })
 })
 
 describe('mentionLabelsFor', () => {
@@ -117,10 +168,11 @@ describe('mentionLabelsFor', () => {
     const labels = mentionLabelsFor({
       files: ['design.md', 'notes.md'],
       spaces: [space('design'), space('Ops')],
+      boards: [board('roadmap'), board('Ops')],
       members: [person('Ops'), person('Harsh Kumar')],
     })
-    expect(labels).toEqual(['design', 'notes', 'Ops', 'Harsh Kumar'])
+    expect(labels).toEqual(['design', 'notes', 'Ops', 'roadmap', 'Harsh Kumar'])
   })
 })
 
-const ORDER = { agent: 0, files: 1, spaces: 2, people: 3 } as const
+const ORDER = { agent: 0, files: 1, spaces: 2, boards: 3, people: 4 } as const

@@ -957,16 +957,20 @@ function spaceThreadPins(origin: SessionState["origin"]): Record<string, JsonVal
     };
 }
 
-// A message that @-names a space or a person (the composer's @ menu, carried
-// as userMessageContext.spaceMentions) is a spaces ask by construction: the
-// spaces skill joins this turn so its tools attach at assembly, instead of
-// the model spending its first call on loadSkill. activeSkills merges, and
-// skills carry forward, so the session stays spaces-capable afterwards —
-// the same outcome loadSkill would have produced.
+// A message that @-names a space, a person or a board (the composer's @ menu,
+// carried as userMessageContext.spaceMentions), or typed while a board is
+// open in Spaces (middlePane 'whiteboard'), is a spaces ask by construction:
+// the spaces skill — and the whiteboard skill when a board is in play — joins
+// this turn so the tools attach at assembly, instead of the model spending
+// its first call on loadSkill. activeSkills merges, and skills carry forward,
+// so the session stays capable afterwards — the same outcome loadSkill would
+// have produced.
 function spaceMentionPins(input: z.infer<typeof UserMessage>): Record<string, JsonValue> {
-    const mentions = input.userMessageContext?.spaceMentions;
-    if (!mentions || mentions.length === 0) return {};
-    return { activeSkills: ["spaces"] };
+    const mentions = input.userMessageContext?.spaceMentions ?? [];
+    const boardOpen = input.userMessageContext?.middlePane?.kind === "whiteboard";
+    const boardMentioned = mentions.some((m) => m.kind === "board");
+    if (mentions.length === 0 && !boardOpen) return {};
+    return { activeSkills: boardOpen || boardMentioned ? ["spaces", "whiteboard"] : ["spaces"] };
 }
 
 function deriveActiveSkills(turnState: TurnState): string[] {
