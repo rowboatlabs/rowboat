@@ -56,14 +56,36 @@ import type * as SpacesTypes from './spaces.js';
 // bar's model/effort picks are applied by the app window before submitting.
 const QuickAskSubmitPayload = z.object({
   text: z.string(),
+  // The composer's @ picks — knowledge files, plus the Spaces objects
+  // (shared spaces, people) the message names. Mirrors the renderer's
+  // Mention union (prompt-input.tsx).
   mentions: z
     .array(
-      z.object({
-        id: z.string(),
-        path: z.string(),
-        displayName: z.string(),
-        lineNumber: z.number().optional(),
-      }),
+      z.discriminatedUnion('kind', [
+        z.object({
+          kind: z.literal('file'),
+          id: z.string(),
+          path: z.string(),
+          displayName: z.string(),
+          lineNumber: z.number().optional(),
+        }),
+        z.object({
+          kind: z.literal('space'),
+          id: z.string(),
+          orgId: z.string(),
+          orgName: z.string(),
+          spaceId: z.string(),
+          displayName: z.string(),
+        }),
+        z.object({
+          kind: z.literal('member'),
+          id: z.string(),
+          orgId: z.string(),
+          orgName: z.string(),
+          memberId: z.string(),
+          displayName: z.string(),
+        }),
+      ]),
     )
     .optional(),
   attachments: z

@@ -13,7 +13,7 @@ import {
 } from '@/components/ai-elements/message'
 import {
   type PromptInputMessage,
-  type FileMention,
+  type Mention,
 } from '@/components/ai-elements/prompt-input'
 import { AskHumanRequest } from '@/components/ai-elements/ask-human-request'
 import { ReasoningRow } from '@/components/reasoning-row'
@@ -263,7 +263,7 @@ export interface ChatSessionComposerProps {
   visibleFiles: string[]
   onSubmit: (
     message: PromptInputMessage,
-    mentions?: FileMention[],
+    mentions?: Mention[],
     stagedAttachments?: StagedAttachment[],
     searchEnabled?: boolean,
     codeMode?: 'claude' | 'codex',

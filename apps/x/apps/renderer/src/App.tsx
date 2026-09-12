@@ -64,7 +64,9 @@ import { SidebarSectionProvider } from '@/contexts/sidebar-context';
 import {
   type PromptInputMessage,
   type FileMention,
+  type Mention,
 } from '@/components/ai-elements/prompt-input';
+import { splitMentions } from '@/lib/mention-payload';
 
 import { ToolPermissionAutoDecisionEvent, ToolPermissionRequestEvent, AskHumanRequestEvent } from '@x/shared/src/runs.js';
 import {
@@ -1577,11 +1579,11 @@ function App() {
     })
   }, [voice, cancelPttForSteal])
 
-  const handlePromptSubmitRef = useRef<((message: PromptInputMessage, mentions?: FileMention[], stagedAttachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => Promise<void>) | null>(null)
+  const handlePromptSubmitRef = useRef<((message: PromptInputMessage, mentions?: Mention[], stagedAttachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => Promise<void>) | null>(null)
   // Companion sends (bar submits, call utterances) — filled once
   // handleHoverSubmit exists; early callers (startCall's PTT callback) fire
   // at event time, long after render.
-  const handleHoverSubmitRef = useRef<((message: PromptInputMessage, mentions?: FileMention[], stagedAttachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => Promise<void>) | null>(null)
+  const handleHoverSubmitRef = useRef<((message: PromptInputMessage, mentions?: Mention[], stagedAttachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => Promise<void>) | null>(null)
   // Late-bound handle to bindChatToRun (declared with the chat plumbing far
   // below) for early-declared effects like quick-ask open-chat.
   const bindChatToRunRef = useRef<((rid: string) => void) | null>(null)
@@ -2418,7 +2420,7 @@ function App() {
   // involved, whatever it's currently bound to.
   const handleHoverSubmit = useCallback(async (
     message: PromptInputMessage,
-    mentions?: FileMention[],
+    mentions?: Mention[],
     stagedAttachments: StagedAttachment[] = [],
     searchEnabled?: boolean,
     codeMode?: 'claude' | 'codex',
@@ -2518,6 +2520,9 @@ function App() {
         ...(reasoningEffort ? { reasoningEffort } : {}),
         ...(chatMaxModelCalls !== undefined ? { maxModelCalls: chatMaxModelCalls } : {}),
       }
+      // The @ menu's picks: files become attachment parts; spaces and
+      // people ride the context with their ids (see splitMentions).
+      const { fileMentions, spaceMentions } = splitMentions(mentions)
       const userMessageContext = {
         currentDateTime: `${new Date().toLocaleString('en-US', {
           weekday: 'long',
@@ -2529,16 +2534,17 @@ function App() {
           timeZoneName: 'short',
         })} (${Intl.DateTimeFormat().resolvedOptions().timeZone})`,
         middlePane: { kind: 'empty' as const },
+        ...(spaceMentions.length > 0 ? { spaceMentions } : {}),
       }
 
       type HoverContentPart =
         | { type: 'text'; text: string }
         | { type: 'attachment'; path: string; filename: string; mimeType: string; size?: number; lineNumber?: number }
         | { type: 'image'; data: string; mediaType: string; source: 'camera' | 'screen'; capturedAt: string }
-      const hasMentions = (mentions?.length ?? 0) > 0
+      const hasMentions = fileMentions.length > 0
       const content: string | HoverContentPart[] = hasAttachments || hasMentions || videoFrames.length > 0
         ? [
-            ...(mentions ?? []).map((mention): HoverContentPart => ({
+            ...fileMentions.map((mention): HoverContentPart => ({
               type: 'attachment',
               path: mention.path,
               filename: mention.displayName || mention.path.split('/').pop() || mention.path,
@@ -4209,7 +4215,7 @@ function App() {
 
   const handlePromptSubmit = async (
     message: PromptInputMessage,
-    mentions?: FileMention[],
+    mentions?: Mention[],
     stagedAttachments: StagedAttachment[] = [],
     searchEnabled?: boolean,
     codeMode?: 'claude' | 'codex',
@@ -4335,7 +4341,10 @@ function App() {
       }
 
       let titleSource = userMessage
-      const hasMentions = (mentions?.length ?? 0) > 0
+      // The @ menu's picks: files become attachment parts; spaces and
+      // people ride userMessageContext with their ids (see splitMentions).
+      const { fileMentions, spaceMentions } = splitMentions(mentions)
+      const hasMentions = fileMentions.length > 0
 
       // Per-message turn config. Composition inputs land in the system prompt
       // via the agent resolver; keep them session-sticky where possible so the
@@ -4412,6 +4421,7 @@ function App() {
           })} (${Intl.DateTimeFormat().resolvedOptions().timeZone})`,
           middlePane: middlePane ?? { kind: 'empty' as const },
           ...(screenShareEnded ? { screenShareEnded: true } : {}),
+          ...(spaceMentions.length > 0 ? { spaceMentions } : {}),
         }
       }
 
@@ -4443,14 +4453,14 @@ function App() {
 
         const contentParts: ContentPart[] = []
 
-        if (mentions && mentions.length > 0) {
+        if (fileMentions.length > 0) {
           const mentionMimeTypes: Record<string, string> = {
             xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             xls: 'application/vnd.ms-excel',
             csv: 'text/csv',
             tsv: 'text/tab-separated-values',
           }
-          for (const mention of mentions) {
+          for (const mention of fileMentions) {
             const ext = mention.path.split('.').pop()?.toLowerCase() ?? ''
             contentParts.push({
               type: 'attachment',
@@ -4475,7 +4485,7 @@ function App() {
         if (userMessage) {
           contentParts.push({ type: 'text', text: userMessage })
         } else {
-          titleSource = stagedAttachments[0]?.filename ?? mentions?.[0]?.displayName ?? mentions?.[0]?.path ?? ''
+          titleSource = stagedAttachments[0]?.filename ?? fileMentions[0]?.displayName ?? fileMentions[0]?.path ?? ''
         }
 
         for (const frame of videoFrames) {
@@ -5051,6 +5061,7 @@ function App() {
     if (!pendingPaletteSubmit) return
     const fileMention: FileMention | undefined = pendingPaletteSubmit.mention
       ? {
+          kind: 'file',
           id: `palette-${Date.now()}`,
           path: pendingPaletteSubmit.mention.path,
           displayName: pendingPaletteSubmit.mention.displayName,
@@ -5124,7 +5135,7 @@ function App() {
   }, [])
   const [pendingHomeSubmit, setPendingHomeSubmit] = useState<{
     message: PromptInputMessage
-    mentions?: FileMention[]
+    mentions?: Mention[]
     attachments: StagedAttachment[]
     searchEnabled?: boolean
     codeMode?: 'claude' | 'codex'
@@ -5133,7 +5144,7 @@ function App() {
 
   const handleHomeComposerSubmit = useCallback((
     message: PromptInputMessage,
-    mentions?: FileMention[],
+    mentions?: Mention[],
     stagedAttachments: StagedAttachment[] = [],
     searchEnabled?: boolean,
     codeMode?: 'claude' | 'codex',
