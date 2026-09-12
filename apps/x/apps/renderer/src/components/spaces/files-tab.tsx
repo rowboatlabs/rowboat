@@ -20,7 +20,8 @@ import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { MemberText } from '@/components/spaces/member-text'
 import {
     attributionLabel, blobAppUrl, blobWireUrl, buildFileTree, formatBytes, formatFeedTime, isImageMime,
-    parseAssetWireUrl, parseBlobAppUrl, resolveSpaceLink, rewriteBlobLinks, rewriteRelativeImages, toggleTaskAt,
+    isRestorableChangeSet, parseAssetWireUrl, parseBlobAppUrl, resolveSpaceLink, rewriteBlobLinks,
+    rewriteRelativeImages, toggleTaskAt,
     type FileTreeNode,
 } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
@@ -29,8 +30,9 @@ import { uploadInputFor } from '@/lib/spaces-upload'
 
 // Files: the tree (README first) and the file column — rendered file
 // with one-tap checkboxes, Edit → draft→apply (merged / conflict handled),
-// History with diffs. Supported documents reuse the workspace viewers/editors;
-// other binary files retain the download card and versioned Replace action.
+// History with diffs and restore-to-version. Supported documents reuse the
+// workspace viewers/editors; other binary files retain the download card and
+// versioned Replace action.
 
 // ---------------------------------------------------------------------------
 // Files rail — the space's tree, README first, unread dots on moved files
@@ -409,7 +411,9 @@ export function FileColumn({ org, space, path, entries = [], memberNames, refres
     const [draft, setDraft] = useState<DraftState | null>(null)
     const [applying, setApplying] = useState(false)
     const [historyOpen, setHistoryOpen] = useState(false)
-    const [diffView, setDiffView] = useState<{ title: string; unified: string } | null>(null)
+    const [diffView, setDiffView] = useState<{ title: string; unified: string; restorable: number | null } | null>(null)
+    /** The older version the reader asked to bring back (confirmed in a dialog). */
+    const [restoreTarget, setRestoreTarget] = useState<number | null>(null)
 
     const load = useCallback(async () => {
         try {
@@ -488,10 +492,13 @@ export function FileColumn({ org, space, path, entries = [], memberNames, refres
         }
     }
 
-    const showDiff = async (from: number, to: number) => {
+    // `restorable` is the version the diff's change-set produced, when going
+    // back to it is offered — the history row decides that, so the dialog and
+    // the row can never disagree.
+    const showDiff = async (from: number, to: number, restorable: number | null) => {
         try {
             const res = await window.ipc.invoke('spaces:diff', { orgId: org.id, spaceId: space.id, path, from, to })
-            setDiffView({ title: `${path} · v${from} → v${to}`, unified: res.unified })
+            setDiffView({ title: `${path} · v${from} → v${to}`, unified: res.unified, restorable })
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not load the diff', 'error')
         }
@@ -891,8 +898,10 @@ export function FileColumn({ org, space, path, entries = [], memberNames, refres
                         path={path}
                         memberNames={memberNames}
                         refreshTick={refreshTick}
+                        currentVersion={asset.version}
                         onClose={() => setHistoryOpen(false)}
-                        onShowDiff={(from, to) => void showDiff(from, to)}
+                        onShowDiff={(from, to, restorable) => void showDiff(from, to, restorable)}
+                        onRestore={setRestoreTarget}
                     />
                 )}
             </div>
@@ -904,8 +913,39 @@ export function FileColumn({ org, space, path, entries = [], memberNames, refres
                     <pre className="max-h-[60vh] overflow-auto text-xs bg-muted/50 rounded p-3 whitespace-pre-wrap">
                         {diffView?.unified}
                     </pre>
+                    {/* Inspecting a diff is usually how someone decides to go back,
+                        so the action sits right where that decision is made. */}
+                    {diffView?.restorable != null && (
+                        <div className="flex justify-end">
+                            <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-xs"
+                                onClick={() => {
+                                    setRestoreTarget(diffView.restorable)
+                                    setDiffView(null)
+                                }}
+                            >
+                                <RotateCcw className="size-3 mr-1" /> Restore to v{diffView.restorable}
+                            </Button>
+                        </div>
+                    )}
                 </DialogContent>
             </Dialog>
+            {restoreTarget !== null && asset && (
+                <RestoreVersionDialog
+                    orgId={org.id}
+                    spaceId={space.id}
+                    path={path}
+                    version={restoreTarget}
+                    currentVersion={asset.version}
+                    onClose={() => setRestoreTarget(null)}
+                    onRestored={async () => {
+                        await load()
+                        onChanged()
+                    }}
+                />
+            )}
         </section>
     )
 }
@@ -946,14 +986,17 @@ function ConflictNotice({ conflict, memberNames, onUseCurrent, onRebase }: {
     )
 }
 
-function HistoryPanel({ org, space, path, memberNames, refreshTick, onClose, onShowDiff }: {
+function HistoryPanel({ org, space, path, memberNames, refreshTick, currentVersion, onClose, onShowDiff, onRestore }: {
     org: OrgWithSpaces
     space: spaces.Space
     path: string
     memberNames: Map<string, string>
     refreshTick: number
+    /** The head — rows at or above it have nothing to restore. */
+    currentVersion: number
     onClose: () => void
-    onShowDiff: (from: number, to: number) => void
+    onShowDiff: (from: number, to: number, restorable: number | null) => void
+    onRestore: (version: number) => void
 }) {
     const [changeSets, setChangeSets] = useState<spaces.ChangeSet[]>([])
 
@@ -980,29 +1023,129 @@ function HistoryPanel({ org, space, path, memberNames, refreshTick, onClose, onS
             </div>
             <div className="flex-1 overflow-y-auto">
                 {changeSets.map((cs) => (
-                    <button
-                        key={cs.id}
-                        className="w-full text-left px-3 py-2 border-b border-border/50 hover:bg-accent/40"
-                        onClick={() => onShowDiff(cs.baseVersion, cs.resultVersion)}
-                    >
-                        <div className="flex items-center gap-2">
-                            <MemberAvatar id={cs.attribution.memberId} name={memberNames.get(cs.attribution.memberId) ?? cs.attribution.memberId} size="sm" />
-                            <div className="text-xs font-medium truncate">{attributionLabel(cs.attribution, memberNames)}</div>
-                        </div>
-                        {cs.op && (
-                            <div className="mt-1 pl-7 text-[12px] text-muted-foreground">
-                                {cs.op === 'move' ? `moved from ${cs.movedFrom ?? '…'}` : cs.op === 'delete' ? 'deleted' : 'restored'}
+                    <div key={cs.id} className="group/histrow relative border-b border-border/50">
+                        <button
+                            className="w-full text-left px-3 py-2 hover:bg-accent/40"
+                            onClick={() => onShowDiff(cs.baseVersion, cs.resultVersion, isRestorableChangeSet(cs, currentVersion) ? cs.resultVersion : null)}
+                        >
+                            <div className="flex items-center gap-2 pr-14">
+                                <MemberAvatar id={cs.attribution.memberId} name={memberNames.get(cs.attribution.memberId) ?? cs.attribution.memberId} size="sm" />
+                                <div className="text-xs font-medium truncate">{attributionLabel(cs.attribution, memberNames)}</div>
                             </div>
+                            {cs.op && (
+                                <div className="mt-1 pl-7 text-[12px] text-muted-foreground">
+                                    {cs.op === 'move' ? `moved from ${cs.movedFrom ?? '…'}` : cs.op === 'delete' ? 'deleted' : 'restored'}
+                                </div>
+                            )}
+                            {cs.reason && <div className="text-xs text-muted-foreground mt-1 pl-7">&ldquo;<MemberText text={cs.reason} />&rdquo;</div>}
+                            <div className="text-[10.5px] text-muted-foreground mt-1 pl-7 flex items-center gap-1">
+                                <Clock className="size-2.5" /> {formatFeedTime(cs.committedAt)} · v{cs.resultVersion}
+                            </div>
+                        </button>
+                        {isRestorableChangeSet(cs, currentVersion) && (
+                            <button
+                                type="button"
+                                aria-label={`Restore to v${cs.resultVersion}`}
+                                title={`Bring this file back to v${cs.resultVersion}`}
+                                onClick={() => onRestore(cs.resultVersion)}
+                                className="absolute right-1.5 top-1.5 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] text-muted-foreground opacity-0 hover:bg-background hover:text-foreground focus-visible:opacity-100 group-hover/histrow:opacity-100"
+                            >
+                                <RotateCcw className="size-2.5" /> Restore
+                            </button>
                         )}
-                        {cs.reason && <div className="text-xs text-muted-foreground mt-1 pl-7">&ldquo;<MemberText text={cs.reason} />&rdquo;</div>}
-                        <div className="text-[10.5px] text-muted-foreground mt-1 pl-7 flex items-center gap-1">
-                            <Clock className="size-2.5" /> {formatFeedTime(cs.committedAt)} · v{cs.resultVersion}
-                        </div>
-                    </button>
+                    </div>
                 ))}
                 {changeSets.length === 0 && <div className="px-3 py-2 text-xs text-muted-foreground">No history yet.</div>}
             </div>
         </aside>
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Restore to a previous version. Going back is an ordinary change-set, not a
+// rewind: the old bytes are re-proposed against the head, so every version in
+// between survives in history (and the restore itself is restorable).
+// ---------------------------------------------------------------------------
+
+export function RestoreVersionDialog({ orgId, spaceId, path, version, currentVersion, onClose, onRestored }: {
+    orgId: string
+    spaceId: string
+    path: string
+    /** The older version whose content becomes the new head. */
+    version: number
+    /** The head as the reader last saw it — re-read at confirm time. */
+    currentVersion: number
+    onClose: () => void
+    onRestored: () => void
+}) {
+    const [busy, setBusy] = useState(false)
+    const [head, setHead] = useState(currentVersion)
+    const fileName = path.split('/').pop() ?? path
+
+    const confirm = async () => {
+        setBusy(true)
+        try {
+            // Read the head immediately before proposing so the base is as
+            // fresh as possible: a restore that three-way-merges someone's
+            // concurrent edit isn't the verbatim restore that was asked for.
+            const current = await window.ipc.invoke('spaces:readAsset', { orgId, spaceId, path })
+            setHead(current.version)
+            const snapshot = await window.ipc.invoke('spaces:readAsset', { orgId, spaceId, path, version })
+            const result = await window.ipc.invoke('spaces:proposeChange', {
+                orgId,
+                spaceId,
+                input: {
+                    assetPath: path,
+                    baseVersion: current.version,
+                    // Binary versions re-reference the blob they already point
+                    // at — the bytes never travel, and nothing is re-uploaded.
+                    ...(snapshot.blob ? { blob: snapshot.blob.hash } : { newContent: snapshot.content }),
+                    reason: `restore to v${version}`,
+                },
+            })
+            onRestored()
+            if (result.outcome === 'conflict') {
+                // Someone committed inside that window. Nothing was written;
+                // the dialog stays open so confirming again retries on the new head.
+                setHead(result.currentVersion)
+                toast(`${fileName} changed while restoring - it's now v${result.currentVersion}, try again`, 'error')
+                return
+            }
+            toast(
+                result.outcome === 'merged'
+                    ? `Restored v${version} with concurrent changes folded in - now v${result.version}`
+                    : `Restored v${version} - now v${result.version}`,
+                'success',
+            )
+            onClose()
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not restore', 'error')
+        } finally {
+            setBusy(false)
+        }
+    }
+
+    return (
+        <Dialog open onOpenChange={(open) => !open && !busy && onClose()}>
+            <DialogContent className="max-w-sm">
+                <DialogHeader>
+                    <DialogTitle className="break-words text-sm">Restore “{fileName}” to v{version}?</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-3">
+                    <p className="text-xs text-muted-foreground">
+                        This saves v{version}&rsquo;s content as v{head + 1} for everyone in the space. Nothing is lost -
+                        v{head} stays in history, so you can come back to it the same way.
+                    </p>
+                    <div className="flex justify-end gap-2">
+                        <Button variant="ghost" size="sm" className="h-7 text-xs" disabled={busy} onClick={onClose}>Cancel</Button>
+                        <Button size="sm" className="h-7 text-xs" disabled={busy} onClick={() => void confirm()}>
+                            {busy ? <Loader2 className="size-3 mr-1 animate-spin" /> : <RotateCcw className="size-3 mr-1" />}
+                            Restore v{version}
+                        </Button>
+                    </div>
+                </div>
+            </DialogContent>
+        </Dialog>
     )
 }
 
