@@ -37,6 +37,7 @@ describe('markdown round trip', () => {
         ['code block', '```\nconst x = 1\nconst y = 2\n```'],
         ['image', '![](https://example.com/cat.gif)'],
         ['two paragraphs', 'first\n\nsecond'],
+        ['line break', 'first\nsecond'],
         ['slash command draft', '/ask how do I ship this'],
         ['mention text (prose)', '@Ada Lovelace can you look?'],
         ['member mention token', '[@Ada Lovelace](#member:01HADA) can you look?'],
@@ -102,6 +103,27 @@ describe('formatting commands produce wire markdown', () => {
             { kind: 'rowboat', id: null, label: 'rowboat' },
         ])
         expect(composerMarkdown(editor)).toBe(body)
+    })
+
+    it('Shift+Enter serializes as a newline, never a backslash escape', () => {
+        const e = makeEditor('one')
+        e.chain().focus('end').setHardBreak().insertContent({ type: 'text', text: 'two' }).run()
+        expect(composerMarkdown(e)).toBe('one\ntwo')
+    })
+
+    it('a break before a line that opens a block leaves no stray backslash', () => {
+        // CommonMark's `\` hard break renders as itself once the next line
+        // starts a list/heading/quote — the case that put backslashes in
+        // sent messages.
+        const e = makeEditor('Plan:')
+        e.chain().focus('end').setHardBreak().insertContent({ type: 'text', text: '- one' }).run()
+        expect(composerMarkdown(e)).toBe('Plan:\n- one')
+    })
+
+    it('a break inside a list item indents the continuation', () => {
+        const e = makeEditor('- one')
+        e.chain().focus('end').setHardBreak().insertContent({ type: 'text', text: 'two' }).run()
+        expect(composerMarkdown(e)).toBe('- one\n  two')
     })
 
     it('a bare @name stays text — nothing rewrites prose into an address', () => {

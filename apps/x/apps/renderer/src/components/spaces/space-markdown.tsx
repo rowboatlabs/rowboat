@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { ImageLightbox as SharedImageLightbox } from '@/components/image-lightbox'
 import { isTrustedDomain, linkDomain, trustDomain } from '@/lib/trusted-domains'
+import { userMessageRemarkPlugins } from '@/lib/markdown-render'
 import { toast } from '@/lib/toast'
 import { MemberProfilePopover } from '@/components/spaces/atoms'
 import { useMemberNames, useSpaceProfiles } from '@/components/spaces/member-text'
@@ -454,12 +455,23 @@ function ExternalImage({ src, alt }: { src: string; alt: string }) {
 }
 
 /**
+ * A hostname short enough to label a button with. Tunnel and preview hosts
+ * (ngrok, vercel, codespaces) carry a long random head, so it is the head that
+ * goes: the registrable domain at the tail is the part the trust decision
+ * actually turns on, and the dialog shows the full URL above regardless.
+ */
+function shortDomain(domain: string): string {
+    return domain.length <= 28 ? domain : `…${domain.slice(-27)}`
+}
+
+/**
  * An external link: blue, clickable — and gated. The first click on a domain
  * shows the full destination and offers to trust the domain (stored locally);
  * links to trusted domains open straight in the system browser.
  */
 function ExternalLink({ href, children }: { href: string; children?: ReactNode }) {
     const [confirming, setConfirming] = useState(false)
+    const cancelRef = useRef<HTMLButtonElement>(null)
     const domain = linkDomain(href)
     // Only http(s) leaves the app; anything else renders inert.
     if (!domain) return <span>{children}</span>
@@ -481,18 +493,41 @@ function ExternalLink({ href, children }: { href: string; children?: ReactNode }
             </a>
             {confirming && (
                 <Dialog open onOpenChange={(o) => { if (!o) setConfirming(false) }}>
-                    <DialogContent className="sm:max-w-md">
+                    <DialogContent
+                        className="sm:max-w-md"
+                        // The trust control leads the row, so the opening focus
+                        // is pinned past it: Enter on a gate like this one must
+                        // not mean "trust this domain forever".
+                        onOpenAutoFocus={(e) => { e.preventDefault(); cancelRef.current?.focus() }}
+                    >
                         <DialogTitle>Leaving Rowboat</DialogTitle>
-                        <div className="text-sm text-muted-foreground">
+                        {/* min-w-0 throughout: these are grid children, which
+                            size to their content by default and would push a
+                            long hostname straight through the card's edge. */}
+                        <div className="min-w-0 text-sm text-muted-foreground">
                             This link opens in your browser:
                             <div className="mt-2 max-h-24 overflow-y-auto break-all rounded-md bg-muted px-2 py-1.5 font-mono text-xs text-foreground">{href}</div>
                         </div>
-                        <div className="flex flex-wrap justify-end gap-2">
-                            <Button variant="ghost" size="sm" onClick={() => setConfirming(false)}>Cancel</Button>
-                            <Button variant="outline" size="sm" onClick={() => { trustDomain(domain); setConfirming(false); open() }}>
-                                Trust {domain}
+                        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+                            {/* The one control the message gets to size, so it
+                                leads the row and takes the whole line when it
+                                wraps — shrinking and eliding, never growing. */}
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                className="mr-auto min-w-0 max-w-full"
+                                title={domain}
+                                aria-label={`Trust ${domain}`}
+                                onClick={() => { trustDomain(domain); setConfirming(false); open() }}
+                            >
+                                <span className="min-w-0 truncate">Trust {shortDomain(domain)}</span>
                             </Button>
-                            <Button size="sm" onClick={() => { setConfirming(false); open() }}>Open link</Button>
+                            {/* Grouped so the answer to the dialog never splits
+                                across lines when the trust control wraps. */}
+                            <div className="flex shrink-0 items-center gap-2">
+                                <Button ref={cancelRef} variant="ghost" size="sm" onClick={() => setConfirming(false)}>Cancel</Button>
+                                <Button size="sm" onClick={() => { setConfirming(false); open() }}>Open link</Button>
+                            </div>
                         </div>
                     </DialogContent>
                 </Dialog>
@@ -601,7 +636,11 @@ export const SpaceMarkdown = memo(function SpaceMarkdown({ body, className }: { 
     return (
         <div className={cn(className)}>
             <MessageImageGallery key={text}>
-                <Streamdown components={spaceComponents}>{text}</Streamdown>
+                {/* Chat line breaks are newlines on the wire (both composers
+                    write them that way), so a single newline inside a
+                    paragraph has to render as one — remarkBreaks, same as
+                    every other typed-message surface. */}
+                <Streamdown components={spaceComponents} remarkPlugins={userMessageRemarkPlugins}>{text}</Streamdown>
             </MessageImageGallery>
         </div>
     )

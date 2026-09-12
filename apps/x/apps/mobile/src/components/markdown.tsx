@@ -11,7 +11,10 @@ import { useColors } from '@/theme/colors';
 // \(…\)/\[…\] into math_* tokens; MathJax→SVG typesets them natively (no
 // WebView, Expo Go safe). The stub engine stops texmath require()-ing katex —
 // markdown-display walks tokens itself and never calls md.renderer.
-const markdownIt = MarkdownIt({ typographer: true }).use(texmath, {
+// `breaks` because typed line breaks reach here as plain newlines — the mobile
+// composer is a TextInput and the desktop one serializes Shift+Enter the same
+// way — and a chat line break has to survive without a blank line after it.
+const markdownIt = MarkdownIt({ typographer: true, breaks: true }).use(texmath, {
   delimiters: ['dollars', 'brackets'],
   engine: { renderToString: () => '' },
 });
