@@ -111,6 +111,21 @@ describe('External link gate', () => {
     })
 })
 
+describe('fenced code', () => {
+    it('renders a multi-line fence as one code block, every line in it, the prose around it as paragraphs', async () => {
+        const { container } = render(<SpaceMarkdown body={'before\n```ts\nconst a = 1\n\nconst b = 2\n```\nafter'} />)
+        // The code block is a lazy chunk — it lands a tick after the prose.
+        await waitFor(() => expect(container.querySelector('[data-streamdown="code-block-body"]')).toBeTruthy())
+        const body = container.querySelector('[data-streamdown="code-block-body"]')!
+        expect(body.tagName).toBe('PRE')
+        expect(container.querySelector('[data-streamdown="code-block"]')).toHaveAttribute('data-language', 'ts')
+        const lines = Array.from(body.querySelectorAll('code > span')).map((line) => line.textContent)
+        expect(lines.slice(0, 3)).toEqual(['const a = 1', '', 'const b = 2'])
+        expect(container.textContent).not.toContain('```')
+        expect(Array.from(container.querySelectorAll('p')).map((p) => p.textContent)).toEqual(['before', 'after'])
+    })
+})
+
 describe('Space file attachments', () => {
     beforeEach(() => {
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, blob: async () => new Blob(['hello'], { type: 'text/plain' }) }))

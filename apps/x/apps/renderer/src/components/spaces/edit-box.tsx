@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import type { EditorView } from '@tiptap/pm/view'
-import { composerExtensions, composerMarkdown } from '@/components/spaces/composer-editor'
+import { closeFenceLine, composerExtensions, composerMarkdown, openFenceLine } from '@/components/spaces/composer-editor'
 import { RichFormattingToolbar } from '@/components/spaces/composer-toolbar'
 import { MentionMenu, useMentionAutocomplete } from '@/components/spaces/mention-autocomplete'
 import { useSpaceProfiles } from '@/components/spaces/member-text'
@@ -61,9 +61,13 @@ export function MessageEditBox({ initial, onChange, onSave, onCancel, children }
                 onSave()
                 return true
             }
+            // A typed fence line (```) opens a code block on Enter or
+            // Shift+Enter, and Enter on a closing fence leaves it — the
+            // composer's posture.
+            if (e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && editor) return openFenceLine(editor)
             if (!e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && !view.composing) {
-                // Inside a code fence Enter breaks the line (the composer's
-                // posture); everywhere else it saves.
+                if (editor && (openFenceLine(editor) || closeFenceLine(editor))) return true
+                // Inside a code fence Enter breaks the line; everywhere else it saves.
                 if (view.state.selection.$from.parent.type.name === 'codeBlock') return false
                 onSave()
                 return true
