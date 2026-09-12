@@ -15,7 +15,7 @@ import { VoiceWaveform } from '@/components/chat-input-with-mentions'
 import { useVoiceMode } from '@/hooks/useVoiceMode'
 import { useVoiceInputAvailable } from '@/hooks/use-voice-available'
 import { CALL_VOICE_HOLDER, acquireVoice, releaseVoice, voiceOwnerId } from '@/lib/voice-ownership'
-import { caretContext, composerExtensions, composerMarkdown, type CaretContext } from '@/components/spaces/composer-editor'
+import { caretContext, closeFenceLine, composerExtensions, composerMarkdown, openFenceLine, type CaretContext } from '@/components/spaces/composer-editor'
 import { RichFormattingToolbar } from '@/components/spaces/composer-toolbar'
 import { MentionMenu, useMentionAutocomplete } from '@/components/spaces/mention-autocomplete'
 import { isDirectImageUrl, useSpaceRefs } from '@/components/spaces/space-markdown'
@@ -649,17 +649,20 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         }
         if (e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && editor) {
             // Shift+Enter continues a list — next item, or out of the list
-            // from an empty one; elsewhere the default hard break applies.
+            // from an empty one; a typed fence line (```) opens a code
+            // block; elsewhere the default hard break applies.
             if (editor.isActive('listItem')) {
                 const { $from } = editor.state.selection
                 if ($from.parent.textContent === '') return editor.chain().focus().liftListItem('listItem').run()
                 return editor.chain().focus().splitListItem('listItem').run()
             }
-            return false
+            return openFenceLine(editor)
         }
         if (!e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && !view.composing) {
-            // Inside a code fence Enter breaks the line (the editor behavior);
-            // everywhere else it sends.
+            // A typed fence line opens a code block (or, inside one, closes
+            // it) rather than sending; inside a code fence Enter breaks the
+            // line (the editor behavior); everywhere else it sends.
+            if (editor && (openFenceLine(editor) || closeFenceLine(editor))) return true
             if (view.state.selection.$from.parent.type.name === 'codeBlock') return false
             void send()
             return true
