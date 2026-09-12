@@ -48,21 +48,21 @@ function open(path: string) {
             onChanged={vi.fn()}
         />,
     )
-    return screen.findByRole('button', { name: 'Download' })
+    return screen.findByRole('button', { name: 'Download this file' })
 }
 
 describe('file viewer toolbar', () => {
     it('copies the stored source verbatim without entering edit mode', async () => {
         await open('notes/plan.md')
-        fireEvent.click(screen.getByRole('button', { name: 'Copy' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Copy the source text' }))
         await waitFor(() => expect(writeText).toHaveBeenCalledWith(SOURCE))
         // Still reading: Edit is the offer, not a mode we were pushed through.
-        expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Edit this file' })).toBeInTheDocument()
     })
 
     it('downloads a text file under its own name, extension included', async () => {
         await open('notes/data.csv')
-        fireEvent.click(screen.getByRole('button', { name: 'Download' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Download this file' }))
         await waitFor(() => expect(invoke).toHaveBeenCalledWith(
             'spaces:saveText',
             { content: 'a,b\n', suggestedName: 'data.csv' },
@@ -71,11 +71,23 @@ describe('file viewer toolbar', () => {
 
     it('keeps pulling binaries through the blob cache, and offers no source copy', async () => {
         await open('notes/deck.key')
-        expect(screen.queryByRole('button', { name: 'Copy' })).not.toBeInTheDocument()
-        fireEvent.click(screen.getByRole('button', { name: 'Download' }))
+        expect(screen.queryByRole('button', { name: 'Copy the source text' })).not.toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Download this file' }))
         await waitFor(() => expect(invoke).toHaveBeenCalledWith(
             'spaces:saveBlob',
             { orgId: 'org', spaceId: space.id, hash, suggestedName: 'deck.key' },
         ))
+    })
+
+    // Icons only: the row already carries the filename and its meta line, so
+    // every action has to name itself for screen readers and on hover.
+    it('names every action even though none of them render words', async () => {
+        await open('notes/plan.md')
+        const toolbar = ['Edit this file', 'Copy the source text', 'Download this file', 'Version history', 'File actions']
+        for (const name of toolbar) {
+            const button = screen.getByRole('button', { name })
+            expect(button).toHaveAttribute('title', name)
+            expect(button).toHaveTextContent('')
+        }
     })
 })

@@ -33,6 +33,11 @@ import { uploadInputFor } from '@/lib/spaces-upload'
 // documents reuse the workspace viewers/editors; other binary files retain
 // the download card and versioned Replace action.
 
+// The viewer toolbar is icons only — the filename and its meta line already
+// fill that row, so labels crowded it out in a split. Each carries its words
+// in aria-label + title, which is also the whole affordance now.
+const TOOLBAR_ACTION = 'flex size-5 shrink-0 items-center justify-center rounded hover:bg-accent hover:text-foreground disabled:opacity-50'
+
 // ---------------------------------------------------------------------------
 // Files rail — the space's tree, README first, unread dots on moved files
 // ---------------------------------------------------------------------------
@@ -727,53 +732,60 @@ export function FileColumn({ org, space, path, entries = [], memberNames, refres
                                         e.target.value = ''
                                     }}
                                 />
-                                <button type="button" className="hover:text-foreground flex items-center gap-1" onClick={() => void download()}>
-                                    <Download className="size-3" /> Download
+                                <button type="button" aria-label="Download this file" title="Download this file" className={TOOLBAR_ACTION} onClick={() => void download()}>
+                                    <Download className="size-3.5" />
                                 </button>
                                 <button
                                     type="button"
-                                    className="hover:text-foreground flex items-center gap-1"
+                                    aria-label="Replace this file"
+                                    title="Replace this file"
+                                    className={TOOLBAR_ACTION}
                                     disabled={replacing}
                                     onClick={() => replaceInputRef.current?.click()}
                                 >
-                                    {replacing ? <Loader2 className="size-3 animate-spin" /> : <Upload className="size-3" />} Replace
+                                    {replacing ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
                                 </button>
                             </>
                         ) : (
                             <>
-                                <button type="button" className="hover:text-foreground flex items-center gap-1" onClick={beginEdit}>
-                                    <Pencil className="size-3" /> Edit
+                                <button type="button" aria-label="Edit this file" title="Edit this file" className={TOOLBAR_ACTION} onClick={beginEdit}>
+                                    <Pencil className="size-3.5" />
                                 </button>
                                 {/* Reading is the common case: taking the source elsewhere
                                     shouldn't cost a trip through Edit and a discard. */}
                                 <button
                                     type="button"
+                                    aria-label="Copy the source text"
                                     title="Copy the source text"
-                                    className="hover:text-foreground flex items-center gap-1"
+                                    className={TOOLBAR_ACTION}
                                     onClick={() => void copySource()}
                                 >
-                                    <Copy className="size-3" /> Copy
+                                    <Copy className="size-3.5" />
                                 </button>
                                 <button
                                     type="button"
+                                    aria-label="Download this file"
                                     title="Download this file"
-                                    className="hover:text-foreground flex items-center gap-1"
+                                    className={TOOLBAR_ACTION}
                                     onClick={() => void download()}
                                 >
-                                    <Download className="size-3" /> Download
+                                    <Download className="size-3.5" />
                                 </button>
                             </>
                         )}
                         <button
                             type="button"
-                            className={cn('hover:text-foreground flex items-center gap-1', historyOpen && 'text-foreground')}
+                            aria-label="Version history"
+                            aria-pressed={historyOpen}
+                            title="Version history"
+                            className={cn(TOOLBAR_ACTION, historyOpen && 'text-foreground')}
                             onClick={() => setHistoryOpen((v) => !v)}
                         >
-                            <History className="size-3" /> History
+                            <History className="size-3.5" />
                         </button>
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                                <button type="button" aria-label="File actions" className="hover:text-foreground flex items-center">
+                                <button type="button" aria-label="File actions" title="File actions" className={TOOLBAR_ACTION}>
                                     <MoreHorizontal className="size-3.5" />
                                 </button>
                             </DropdownMenuTrigger>

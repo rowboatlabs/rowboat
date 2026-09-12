@@ -1,5 +1,6 @@
 import '@/styles/spaces.css'
 import { ThreadResizeHandle, THREAD_DEFAULT_WIDTH, THREAD_MIN_WIDTH, THREAD_DIVIDER_WIDTH, STREAM_MIN_WIDTH } from '@/components/spaces/thread-resize-handle'
+import { clampDocWidth, DIVIDER_W, SPLIT_FLOOR } from '@/components/spaces/doc-resize'
 import { getViewerType } from '@/lib/file-types'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Link as LinkIcon, Loader2, MoreHorizontal, PenTool, Plus, Users } from 'lucide-react'
@@ -60,22 +61,8 @@ export type SpaceSelection = {
     view?: 'activity'
 } | null
 
-/** Chat never squeezes below this beside a doc; the doc takes the rest. */
-const CHAT_FLOOR = 460
-
-/**
- * Two columns need at least this much content width (CHAT_FLOOR of chat +
- * ~466px of document + the 10px rail edge and divider). Below it the pane
- * is single-column, full stop. Kept low on purpose — a non-maximized laptop
- * window must still get two columns; the doc-width clamp handles the
- * squeeze from here up.
- */
-const SPLIT_FLOOR = 960
-
 /** Column slide in/out duration (matches the rail's own slides). */
 const COLUMN_ANIM_MS = 220
-/** The divider between two columns (w-1.5). */
-const DIVIDER_W = 6
 
 /**
  * A column in motion: `width` is what it grows to (enter) or shrinks from
@@ -383,10 +370,26 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         return () => window.removeEventListener('keydown', onKey)
     }, [])
 
+    // The columns box. Every width below is measured against THIS, never the
+    // pane: the rail docks IN THE FLOW at a width the reader drags (220-480),
+    // so the pane is that much wider than the space the columns actually get.
+    const columnsRef = useRef<HTMLDivElement | null>(null)
+    const [conversationWidth, setConversationWidth] = useState(0)
+    useEffect(() => {
+        const el = columnsRef.current
+        if (!el) return
+        const observer = new ResizeObserver(() => setConversationWidth(el.clientWidth))
+        observer.observe(el)
+        setConversationWidth(el.clientWidth)
+        return () => observer.disconnect()
+    }, [])
+    // Before the first measurement lands, the pane is the best guess.
+    const columnsWidth = conversationWidth || paneWidth
+
     // What renders. Wide: the chat shows when open, or when nothing else is;
     // the doc shows when open; both = two columns. Narrow: one column — the
     // doc if open, else the chat.
-    const twoFits = paneWidth >= SPLIT_FLOOR
+    const twoFits = columnsWidth >= SPLIT_FLOOR
     const docOpen = docPath !== null
     const showChat = twoFits ? chatOpen || !docOpen : !docOpen
     const showDoc = docOpen
@@ -408,9 +411,9 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
             if (!dragStart.current) return
             // Doc sits on the right: dragging the divider left grows it.
             const next = dragStart.current.width + (dragStart.current.x - ev.clientX)
-            const pane = paneRef.current?.clientWidth ?? window.innerWidth
-            // Chat keeps its floor; rail edge + divider ≈ 34px.
-            setDocWidth(Math.min(Math.max(next, 420), Math.max(420, pane - CHAT_FLOOR - 34)))
+            // Re-read every move: the window can resize mid-drag.
+            const columns = columnsRef.current?.clientWidth ?? paneRef.current?.clientWidth ?? window.innerWidth
+            setDocWidth(clampDocWidth(columns, next))
         }
         const onUp = () => {
             window.removeEventListener('mousemove', onMove)
@@ -425,8 +428,9 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         window.addEventListener('mousemove', onMove)
         window.addEventListener('mouseup', onUp)
     }
-    // A persisted width from a wider window must not crush the chat side.
-    const docWidthEff = Math.max(420, Math.min(docWidth, paneWidth - CHAT_FLOOR - 34))
+    // A persisted width from a wider window — or from before the rail was
+    // docked — must not crush the chat side.
+    const docWidthEff = clampDocWidth(columnsWidth, docWidth)
 
     // ------------------------------------------------------------------
     // Column slides. When a column appears or goes, it animates its width
@@ -440,8 +444,6 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // out with it.
     // ------------------------------------------------------------------
     const reducedMotion = useMemo(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false, [])
-    const columnsRef = useRef<HTMLDivElement | null>(null)
-    const [conversationWidth, setConversationWidth] = useState(0)
     const [threadExpanded, setThreadExpanded] = useState(() => localStorage.getItem('spaces:threadExpanded') === 'true')
     const toggleThreadExpanded = () => {
         const next = !threadExpanded
@@ -454,29 +456,22 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     })
     const maxThreadWidth = Math.max(THREAD_MIN_WIDTH, conversationWidth - STREAM_MIN_WIDTH - THREAD_DIVIDER_WIDTH)
     const threadWidthEff = Math.min(threadWidth, maxThreadWidth)
-    useEffect(() => {
-        const el = columnsRef.current
-        if (!el) return
-        const observer = new ResizeObserver(() => setConversationWidth(el.clientWidth))
-        observer.observe(el)
-        setConversationWidth(el.clientWidth)
-        return () => observer.disconnect()
-    }, [])
     const chatRef = useRef<HTMLDivElement | null>(null)
     const docRef = useRef<HTMLElement | null>(null)
     const [layout, setLayout] = useState<{ docOpen: boolean; showChat: boolean; docPath: string | null; anim: ColumnAnim | null }>({ docOpen, showChat, docPath, anim: null })
     if (layout.docOpen !== docOpen || layout.showChat !== showChat) {
         let anim: ColumnAnim | null = null
         if (!reducedMotion) {
-            const columnsWidth = columnsRef.current?.clientWidth ?? paneWidth
+            // The measured state lags a frame here; read the box live.
+            const liveColumnsWidth = columnsRef.current?.clientWidth ?? columnsWidth
             if (layout.docOpen !== docOpen) {
                 anim = docOpen
-                    ? { column: 'doc', phase: 'enter', width: showChat ? docWidthEff : columnsWidth, docPath }
+                    ? { column: 'doc', phase: 'enter', width: showChat ? docWidthEff : liveColumnsWidth, docPath }
                     // The DOM still shows the old layout mid-render: the live width is the start.
                     : { column: 'doc', phase: 'exit', width: docRef.current?.clientWidth ?? docWidthEff, docPath: layout.docPath }
             } else {
                 anim = showChat
-                    ? { column: 'chat', phase: 'enter', width: Math.max(0, columnsWidth - docWidthEff - DIVIDER_W), docPath }
+                    ? { column: 'chat', phase: 'enter', width: Math.max(0, liveColumnsWidth - docWidthEff - DIVIDER_W), docPath }
                     : { column: 'chat', phase: 'exit', width: chatRef.current?.clientWidth ?? 0, docPath }
             }
         }
