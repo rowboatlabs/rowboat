@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { makeOllamaThinkFetch, resolveThinkValue, rewrapOllamaErrorBody } from "./local.js";
+import {
+    makeOllamaThinkFetch,
+    resolveThinkValue,
+    rewrapOllamaErrorBody,
+    sanitizePatternsForGBNF,
+} from "./local.js";
 
 describe("resolveThinkValue", () => {
     it("passes effort levels straight through for gpt-oss variants", () => {
@@ -126,5 +131,139 @@ describe("makeOllamaThinkFetch", () => {
         });
         expect(res.status).toBe(200);
         expect(await res.json()).toEqual({});
+    });
+});
+
+describe("sanitizePatternsForGBNF", () => {
+    it("replaces \\d with [0-9]", () => {
+        const schema = { type: "object", properties: { time: { type: "string", pattern: "^([01]\\d|2[0-3]):[0-5]\\d$" } } };
+        const sanitized = sanitizePatternsForGBNF(schema);
+        expect(sanitized).toEqual({
+            type: "object",
+            properties: { time: { type: "string", pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" } },
+        });
+    });
+
+    it("replaces \\D with [^0-9]", () => {
+        const schema = { type: "object", properties: { name: { type: "string", pattern: "^\\D+$" } } };
+        const sanitized = sanitizePatternsForGBNF(schema);
+        expect(sanitized).toEqual({
+            type: "object",
+            properties: { name: { type: "string", pattern: "^[^0-9]+$" } },
+        });
+    });
+
+    it("replaces \\w with [A-Za-z0-9_]", () => {
+        const schema = { type: "object", properties: { id: { type: "string", pattern: "^\\w+$" } } };
+        const sanitized = sanitizePatternsForGBNF(schema);
+        expect(sanitized).toEqual({
+            type: "object",
+            properties: { id: { type: "string", pattern: "^[A-Za-z0-9_]+$" } },
+        });
+    });
+
+    it("replaces \\W with [^A-Za-z0-9_]", () => {
+        const schema = { type: "object", properties: { slug: { type: "string", pattern: "^\\W+$" } } };
+        const sanitized = sanitizePatternsForGBNF(schema);
+        expect(sanitized).toEqual({
+            type: "object",
+            properties: { slug: { type: "string", pattern: "^[^A-Za-z0-9_]+$" } },
+        });
+    });
+
+    it("replaces \\s with [ \\t\\n\\r]", () => {
+        const schema = { type: "object", properties: { text: { type: "string", pattern: "^\\s+$" } } };
+        const sanitized = sanitizePatternsForGBNF(schema);
+        expect(sanitized).toEqual({
+            type: "object",
+            properties: { text: { type: "string", pattern: "^[ \\t\\n\\r]+$" } },
+        });
+    });
+
+    it("replaces \\S with [^ \\t\\n\\r]", () => {
+        const schema = { type: "object", properties: { text: { type: "string", pattern: "^\\S+$" } } };
+        const sanitized = sanitizePatternsForGBNF(schema);
+        expect(sanitized).toEqual({
+            type: "object",
+            properties: { text: { type: "string", pattern: "^[^ \\t\\n\\r]+$" } },
+        });
+    });
+
+    it("removes \\b (word boundary)", () => {
+        const schema = { type: "object", properties: { word: { type: "string", pattern: "\\btest\\b" } } };
+        const sanitized = sanitizePatternsForGBNF(schema);
+        expect(sanitized).toEqual({
+            type: "object",
+            properties: { word: { type: "string", pattern: "test" } },
+        });
+    });
+
+    it("removes \\B (non-word boundary)", () => {
+        const schema = { type: "object", properties: { word: { type: "string", pattern: "\\Btest\\B" } } };
+        const sanitized = sanitizePatternsForGBNF(schema);
+        expect(sanitized).toEqual({
+            type: "object",
+            properties: { word: { type: "string", pattern: "test" } },
+        });
+    });
+
+    it("handles nested objects and arrays", () => {
+        const schema = {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: { type: "string", pattern: "^\\d+$" },
+                },
+                nested: {
+                    type: "object",
+                    properties: { time: { type: "string", pattern: "^\\d{2}:\\d{2}$" } },
+                },
+            },
+        };
+        const sanitized = sanitizePatternsForGBNF(schema);
+        expect(sanitized).toEqual({
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: { type: "string", pattern: "^[0-9]+$" },
+                },
+                nested: {
+                    type: "object",
+                    properties: { time: { type: "string", pattern: "^[0-9]{2}:[0-9]{2}$" } },
+                },
+            },
+        });
+    });
+
+    it("leaves non-pattern properties unchanged", () => {
+        const schema = {
+            type: "object",
+            properties: {
+                name: { type: "string", minLength: 1 },
+                time: { type: "string", pattern: "^\\d{2}:\\d{2}$" },
+            },
+        };
+        const sanitized = sanitizePatternsForGBNF(schema);
+        expect(sanitized).toEqual({
+            type: "object",
+            properties: {
+                name: { type: "string", minLength: 1 },
+                time: { type: "string", pattern: "^[0-9]{2}:[0-9]{2}$" },
+            },
+        });
+    });
+
+    it("handles null and primitive values", () => {
+        expect(sanitizePatternsForGBNF(null)).toBeNull();
+        expect(sanitizePatternsForGBNF("string")).toBe("string");
+        expect(sanitizePatternsForGBNF(123)).toBe(123);
+        expect(sanitizePatternsForGBNF(true)).toBe(true);
+    });
+
+    it("handles empty objects and arrays", () => {
+        expect(sanitizePatternsForGBNF({})).toEqual({});
+        expect(sanitizePatternsForGBNF([])).toEqual([]);
     });
 });
