@@ -28,6 +28,7 @@ export type MascotHat =
   | 'explorer'
   | 'party'
   | 'cowboy'
+  | 'sailor'
 
 type TalkingHeadProps = {
   ttsState: TTSState
@@ -488,6 +489,16 @@ function MascotHatArt({ hat }: { hat: MascotHat }) {
           <path d="M 91 2 Q 100 11 109 2" fill="none" stroke={BODY_STROKE} strokeWidth="3" strokeLinecap="round" />
           <path d="M 76 26 L 124 26 L 124 34 L 76 34 Z" fill="#5A3A26" {...outline} />
           <path d="M 48 34 Q 38 20 54 27 C 68 33 82 34 100 34 C 118 34 132 33 146 27 Q 162 20 152 34 Q 138 48 100 48 Q 62 48 48 34 Z" fill="#CE9455" {...outline} />
+        </g>
+      )
+    case 'sailor':
+      // The crew's white Dixie cup (Spaces stop): soft dome, rolled-up brim
+      // with a navy edge.
+      return (
+        <g>
+          <path d="M 72 40 Q 100 0 128 40 Z" fill="#F4F5F9" {...outline} />
+          <path d="M 62 42 Q 100 30 138 42 Q 136 54 100 56 Q 64 54 62 42 Z" fill="#FFFFFF" {...outline} />
+          <path d="M 68 42 Q 100 33 132 42" fill="none" stroke="#3D68B8" strokeWidth="3.5" strokeLinecap="round" />
         </g>
       )
   }

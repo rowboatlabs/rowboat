@@ -6663,6 +6663,22 @@ function App() {
   // Drives the mascot product tour through the app's main sections
   const handleTourNavigate = useCallback((target: TourNavTarget) => {
     switch (target) {
+      case 'assistant': {
+        // Same as the sidebar's Assistant item: resume the most recently
+        // touched chat, else start a fresh one. Either way the composer the
+        // final stop anchors on is laid out (Spaces closes the chat pane).
+        const recency = (r: { createdAt: string; modifiedAt?: string }) => {
+          const ms = new Date(r.modifiedAt ?? r.createdAt).getTime()
+          return Number.isFinite(ms) ? ms : 0
+        }
+        const lastChat = [...chatRuns].sort((a, b) => recency(b) - recency(a))[0]
+        if (lastChat) openAssistantRun(lastChat.id)
+        else handleNewChatTab()
+        break
+      }
+      case 'spaces':
+        void openSpaces()
+        break
       case 'home':
         void navigateToView({ type: 'home' })
         break
@@ -6688,7 +6704,7 @@ function App() {
         knowledgeActions.openWorkspaceAt()
         break
     }
-  }, [navigateToView, openEmailView, openMeetingsView, openCodeView, knowledgeActions, openBgTasksView, openAppsGrid])
+  }, [chatRuns, openAssistantRun, handleNewChatTab, openSpaces, navigateToView, openEmailView, openMeetingsView, openCodeView, knowledgeActions, openBgTasksView, openAppsGrid])
 
   // Handler for when a voice note is created/updated
   const handleVoiceNoteCreated = useCallback(async (notePath: string) => {
