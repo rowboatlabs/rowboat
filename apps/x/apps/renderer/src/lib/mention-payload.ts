@@ -3,9 +3,10 @@ import type { FileMention, Mention } from '@/components/ai-elements/prompt-input
 
 // The composer's @ picks split two ways at send (2026-09-12): a knowledge
 // file is CONTENT — it becomes an attachment part the runtime reads — while
-// a space or a person is CONTEXT: the ids ride userMessageContext.spaceMentions
-// so the model acts on exactly what was picked. Both send paths (the chat
-// composer and the hover bar) go through here so they cannot drift.
+// a space, a board or a person is CONTEXT: the ids ride
+// userMessageContext.spaceMentions so the model acts on exactly what was
+// picked. Both send paths (the chat composer and the hover bar) go through
+// here so they cannot drift.
 
 export type SpaceMentionRef = message.SpaceMentionRef
 
@@ -26,6 +27,17 @@ export function splitMentions(mentions: Mention[] | undefined): {
           orgId: mention.orgId,
           orgName: mention.orgName,
           spaceId: mention.spaceId,
+          name: mention.displayName,
+        })
+        break
+      case 'board':
+        spaceMentions.push({
+          kind: 'board',
+          orgId: mention.orgId,
+          orgName: mention.orgName,
+          spaceId: mention.spaceId,
+          spaceName: mention.spaceName,
+          path: mention.path,
           name: mention.displayName,
         })
         break

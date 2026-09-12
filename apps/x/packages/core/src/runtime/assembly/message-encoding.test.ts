@@ -69,6 +69,29 @@ describe("middle-pane user context encoding", () => {
         ).toContain("Middle pane:\nState: browser\nURL: https://x.test\nTitle: X");
     });
 
+    it("renders an open whiteboard with the ids the whiteboard tools take, and no content", () => {
+        const encoded = contentOf(
+            userTurn(
+                {
+                    kind: "whiteboard",
+                    orgId: "org-1",
+                    orgName: "rowboat",
+                    spaceId: "01SPACE",
+                    spaceName: "Design",
+                    path: "whiteboards/roadmap.excalidraw",
+                },
+                "add a QA box after review",
+            ),
+        );
+        expect(encoded).toContain(
+            'Middle pane:\nState: whiteboard\nBoard: whiteboards/roadmap.excalidraw in space "Design" on org "rowboat" (spaceId: 01SPACE; pass org: "rowboat")',
+        );
+        expect(encoded).toContain("whiteboard-read");
+        expect(encoded).toContain("whiteboard-draw");
+        expect(encoded).not.toContain("```");
+        expect(encoded.endsWith("add a QA box after review")).toBe(true);
+    });
+
     it("omits the context block entirely when there is none", () => {
         const encoded = contentOf(
             convertFromMessages([
@@ -125,6 +148,33 @@ describe("space mentions user context encoding", () => {
         expect(encoded).not.toContain("@Harsh Kumar =");
     });
 
+    it("lists a board with its space and path, pointed at the whiteboard tools", () => {
+        const encoded = contentOf(
+            convertFromMessages([
+                {
+                    role: "user",
+                    content: "add a QA step to @roadmap",
+                    userMessageContext: {
+                        spaceMentions: [
+                            {
+                                kind: "board",
+                                orgId: "org-1",
+                                orgName: "rowboat",
+                                spaceId: "01SPACE",
+                                spaceName: "Design",
+                                path: "whiteboards/roadmap.excalidraw",
+                                name: "roadmap",
+                            },
+                        ],
+                    },
+                },
+            ] as Parameters<typeof convertFromMessages>[0]),
+        );
+        expect(encoded).toContain(
+            '- @roadmap = whiteboard "roadmap" (board: whiteboards/roadmap.excalidraw) in space "Design" on org "rowboat" (spaceId: 01SPACE; whiteboard-read / whiteboard-draw with this spaceId and board)',
+        );
+    });
+
     it("dedupes a target picked twice and skips the block when the list is empty", () => {
         const twice = contentOf(
             convertFromMessages([
@@ -147,15 +197,23 @@ describe("space mentions user context encoding", () => {
 });
 
 describe("UserMessageContext schema", () => {
-    it("accepts space and member mentions, and rejects an unknown kind", () => {
+    it("accepts space, board and member mentions, and rejects an unknown kind", () => {
         expect(
             UserMessageContext.safeParse({
                 spaceMentions: [
                     { kind: "space", orgId: "o", orgName: "rowboat", spaceId: "s", name: "Design" },
+                    { kind: "board", orgId: "o", orgName: "rowboat", spaceId: "s", spaceName: "Design", path: "whiteboards/board.excalidraw", name: "board" },
                     { kind: "member", orgId: "o", orgName: "rowboat", memberId: "m", displayName: "Harsh" },
                 ],
+                middlePane: { kind: "whiteboard", orgId: "o", orgName: "rowboat", spaceId: "s", spaceName: "Design", path: "whiteboards/board.excalidraw" },
             }).success,
         ).toBe(true);
+        // A board ref without its space is not addressable by the tools.
+        expect(
+            UserMessageContext.safeParse({
+                spaceMentions: [{ kind: "board", orgId: "o", orgName: "rowboat", path: "whiteboards/board.excalidraw", name: "board" }],
+            }).success,
+        ).toBe(false);
         expect(
             UserMessageContext.safeParse({
                 spaceMentions: [{ kind: "file", path: "knowledge/a.md" }],

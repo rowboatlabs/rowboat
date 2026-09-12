@@ -78,6 +78,16 @@ const QuickAskSubmitPayload = z.object({
           displayName: z.string(),
         }),
         z.object({
+          kind: z.literal('board'),
+          id: z.string(),
+          orgId: z.string(),
+          orgName: z.string(),
+          spaceId: z.string(),
+          spaceName: z.string(),
+          path: z.string(),
+          displayName: z.string(),
+        }),
+        z.object({
           kind: z.literal('member'),
           id: z.string(),
           orgId: z.string(),

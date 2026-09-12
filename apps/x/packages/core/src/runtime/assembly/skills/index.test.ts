@@ -235,10 +235,47 @@ describe("availability (catalog visibility)", () => {
     const catalog = skills.buildSkillCatalog();
     // The ungated builder still lists them (loadSkill resolves explicit ids
     // regardless of availability — visibility gating is catalog-only).
-    for (const id of ["composio-integration", "code-with-agents", "slack"]) {
+    for (const id of ["composio-integration", "code-with-agents", "slack", "spaces", "whiteboard"]) {
       expect(catalog).toContain(id);
       expect(skills.resolveSkill(id)).not.toBeNull();
     }
+  });
+});
+
+// Boards are files under whiteboards/ in a space, so a model that only knows
+// the spaces skill would reach for read_asset/propose_change on raw Excalidraw
+// JSON. The whiteboard skill owns that intent and attaches the operation
+// tools; the spaces skill has to hand off to it, never edit the file itself.
+describe("whiteboard intent routes to the whiteboard tools", () => {
+  it("the whiteboard skill attaches its tools plus list_spaces, and claims the drawing vocabulary", async () => {
+    const skills = await import("./index.js");
+    expect(skills.skillToolNames("whiteboard")).toEqual(["whiteboard-read", "whiteboard-draw", "list_spaces"]);
+    const section = skills.buildSkillCatalog().split("## ").find((s) => s.startsWith("Whiteboards"))!;
+    expect(section).toBeDefined();
+    for (const phrase of ["draw", "whiteboard", "board", "diagram", "never raw JSON"]) {
+      expect(section.toLowerCase()).toContain(phrase.toLowerCase());
+    }
+  });
+
+  it("the spaces skill sends board asks to the whiteboard skill instead of propose_change", async () => {
+    const skills = await import("./index.js");
+    const body = skills.resolveSkill("spaces")!.content;
+    expect(body).toMatch(/Never\s+edit those with `propose_change`/);
+    expect(body).toContain("`whiteboard-draw`");
+    expect(body).toMatch(/draw \/ sketch \/ diagram X on the board/);
+  });
+
+  it("the whiteboard skill body carries the rules a tool description cannot", async () => {
+    const skills = await import("./index.js");
+    const body = skills.resolveSkill("whiteboard")!.content;
+    expect(body).toContain("**Read first when the board is not empty.**");
+    expect(body).toContain("**Add to, do not replace.**");
+    expect(body).toContain("**One call per ask.**");
+    expect(body).toContain("· thread:<rootId>");
+    // Relative placement is the layout primitive the model is steered to.
+    for (const anchor of ["`rightOf`", "`below`", "`leftOf`", "`above`"]) expect(body).toContain(anchor);
+    // The worked example is a valid ops list.
+    expect(body).toMatch(/\{ op: "connect", from: "verify", to: "home", label: "yes" \}/);
   });
 });
 

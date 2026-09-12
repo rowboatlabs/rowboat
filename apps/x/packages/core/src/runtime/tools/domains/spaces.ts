@@ -40,7 +40,7 @@ type BuiltinTool = z.infer<typeof BuiltinToolsSchema>[string];
 
 // --- org selection -------------------------------------------------------------
 
-const ORG_ARG = z
+export const ORG_ARG = z
     .string()
     .optional()
     .describe(
@@ -92,8 +92,11 @@ interface McpCallResult {
  * success, `{ success: false, error }` on a tool-level error. Harbor's error
  * text is `{code, message, retryable}` JSON — surfaced as-is, it tells the
  * model what to do next (not_found → re-list, conflict → re-read).
+ *
+ * Exported for the whiteboard domain, which composes read_asset and
+ * propose_change into one operation over the same agent face.
  */
-async function callOrgTool(org: OrgRecord, toolName: string, args: Record<string, unknown>): Promise<unknown> {
+export async function callOrgTool(org: OrgRecord, toolName: string, args: Record<string, unknown>): Promise<unknown> {
     const orgs = await import("../../../spaces/orgs.js");
     const { executeTool } = await import("../../../mcp/mcp.js");
     const serverName = orgs.spacesMcpServerNameFor(org.id);

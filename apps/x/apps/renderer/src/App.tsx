@@ -4174,9 +4174,28 @@ function App() {
     | { kind: 'note'; path: string; content: string }
     | { kind: 'browser'; url: string; title: string }
     | { kind: 'deck'; path: string; slideNumber: number; slideCount: number }
+    | { kind: 'whiteboard'; orgId: string; orgName: string; spaceId: string; spaceName: string; path: string }
   const buildMiddlePaneContext = async (): Promise<MiddlePaneContextPayload | undefined> => {
     // Nothing visible in the middle pane when the right pane is maximized.
     if (isRightPaneMaximized) return undefined
+
+    // A shared board open in Spaces: what the user is looking at is the board,
+    // and the ids here are exactly what the whiteboard tools take. No content
+    // — the board's content is what whiteboard-read reads.
+    if (isSpacesOpen && spaceSelection && !spaceSelection.view && railSelection.kind === 'whiteboard') {
+      const org = getSpacesOrgs().find((o) => o.id === spaceSelection.orgId)
+      const space = org ? findSpace(org, spaceSelection.spaceId) : undefined
+      if (org && space) {
+        return {
+          kind: 'whiteboard',
+          orgId: org.id,
+          orgName: org.name,
+          spaceId: space.id,
+          spaceName: org.directLabels[space.id] ?? space.name,
+          path: railSelection.path,
+        }
+      }
+    }
 
     // Browser is an overlay on top of any note — when it's open, it's what the user is looking at.
     if (isBrowserOpen) {

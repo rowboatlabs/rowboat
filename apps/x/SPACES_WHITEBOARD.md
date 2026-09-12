@@ -219,6 +219,17 @@ Everything in §4/§5 landed, with two deviations that improved on the plan:
 
 **Manual QA still to do (needs two running apps):** two-machine draw session (cursors, concurrent edits, join-mid-session), packaged-build font rendering (`Excalifont` vs fallback — the CDN fallback must never fire), agent drawing via MCP (`propose_change` on `whiteboards/*.excalidraw` with valid `version`/`versionNonce`/`index` fields appearing live), remote-server-mode cursor latency feel.
 
+## 10. Agent access (2026-09-12)
+
+Decision 2 (§7) said agents draw by writing snapshots through the asset path. Shipped as a tool pair plus a skill, so the model never hand-authors Excalidraw JSON:
+
+- **`packages/core/src/spaces/whiteboard.ts`** — the pure half. `parseWhiteboardSnapshot` / `serializeWhiteboardSnapshot` (the pane's exact single-line shape, so an unchanged scene is byte-identical), `summarizeWhiteboard` (the model-facing inventory: shapes with their bound label folded in, free text, connectors as from→to, `other` for freehand/frames, bounds), and `applyWhiteboardOps` — `add` / `connect` / `update` / `delete` over the existing scene. It owns the invariants a hand-written snapshot gets wrong: `version` bumps and fresh `versionNonce` on every touched element, fractional `index` appended after the highest existing key, deletion as `isDeleted` tombstones (never omission — an omitted element is resurrected by any open pane's next save), bound labels (`containerId` + `boundElements`), arrow bindings (`startBinding`/`endBinding` with focus 0 on a center-to-center line, endpoints a 5px gap off each outline, re-routed when a bound shape moves), text sized by a Nunito estimate. Untouched elements are passed through as the same objects. All-or-nothing: an unknown id anywhere in the batch writes nothing.
+- **`packages/core/src/runtime/tools/domains/whiteboard.ts`** — `whiteboard-read` (permission none) and `whiteboard-draw` (prompt), composed over the org's own agent face (`read_asset` / `propose_change` via `callOrgTool`, blob fallback past `WHITEBOARD_TEXT_SNAPSHOT_MAX_BYTES` in shared/spaces.ts — the same threshold the pane uses). Draw = read → apply → serialize → propose; on `conflict` it re-applies the same ops over `currentContent` and re-proposes (3 attempts). Core-only, so both hosts get it with no IPC/RPC plumbing.
+- **`packages/core/src/runtime/assembly/skills/whiteboard/skill.ts`** — the model-facing rules (read first, add beside existing content, one call per ask, relative placement); the spaces skill routes board asks to it and forbids `propose_change` on `whiteboards/`.
+- **Context so "the board" resolves:** the composer's @ menu lists boards (`hooks/use-space-boards.ts` → `SpaceMentionRef` kind `board`), and a board open in Spaces rides `userMessageContext.middlePane` kind `whiteboard`; either pins the `spaces` + `whiteboard` skills for the turn (`sessions.ts` `spaceMentionPins`).
+
+Why not `@excalidraw/excalidraw`'s own `convertToExcalidrawElements`: the package cannot be imported in plain Node — its bundle uses extensionless `roughjs/bin/rough` specifiers Vite tolerates and Node rejects, and it pulls React — so the element builder is hand-written from the 0.18 element types. `@excalidraw/mermaid-to-excalidraw` is browser-only as well.
+
 ## 8. Sources
 
 - Reconciliation: <https://github.com/excalidraw/excalidraw/blob/master/packages/excalidraw/data/reconcile.ts>

@@ -253,6 +253,8 @@ const HISTORICAL_KEY_ORDER = [
     "schedule_message",
     "list_scheduled",
     "cancel_scheduled",
+    "whiteboard-read",
+    "whiteboard-draw",
     "spawn-agent",
 ];
 
@@ -364,6 +366,9 @@ describe("BuiltinTools permission audit", () => {
             "spaces-upload-blob": "prompt",
             // Local: a scheduled send still lands in front of the team.
             schedule_message: "prompt",
+            // Whiteboards: a draw is a propose_change on a shared board;
+            // the read is a member-readable snapshot summary.
+            "whiteboard-draw": "prompt",
         });
     });
 });
