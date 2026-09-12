@@ -51,6 +51,23 @@ export function resolveWorkspacePath(relPath: string): string {
   return resolved;
 }
 
+function isInsidePath(root: string, target: string): boolean {
+  const rel = path.relative(root, target);
+  return rel === '' || (!!rel && !rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+export async function resolveExistingWorkspacePath(relPath: string): Promise<string> {
+  const resolved = resolveWorkspacePath(relPath);
+  const [realRoot, realTarget] = await Promise.all([
+    fs.realpath(WorkDir),
+    fs.realpath(resolved),
+  ]);
+  if (!isInsidePath(realRoot, realTarget)) {
+    throw new Error('Path outside workspace boundary');
+  }
+  return resolved;
+}
+
 /**
  * Convert absolute path to workspace-relative POSIX path
  * Returns null if path is outside workspace boundary
@@ -189,7 +206,7 @@ export async function readFile(
   relPath: string,
   encoding: z.infer<typeof workspace.Encoding> = 'utf8'
 ): Promise<z.infer<typeof workspace.ReadFileResult>> {
-  const filePath = resolveWorkspacePath(relPath);
+  const filePath = await resolveExistingWorkspacePath(relPath);
   const stats = await fs.lstat(filePath);
 
   let data: string;
