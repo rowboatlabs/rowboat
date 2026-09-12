@@ -91,7 +91,9 @@ import { extractConferenceLink } from '@/lib/calendar-event'
 import { OnboardingModal } from '@/components/onboarding'
 import { ComposioGoogleMigrationModal } from '@/components/composio-google-migration-modal'
 import { ModelRecommendationUpdateModal, type RecommendationUpdate } from '@/components/model-recommendation-update-modal'
-import { CommandPalette, type CommandPaletteMention, type SearchType } from '@/components/search-dialog'
+import { CommandPalette, type CommandPaletteMention } from '@/components/command-palette'
+import type { PaletteDestination, PaletteScope } from '@/lib/command-palette/destinations'
+import { brainNotes } from '@/lib/command-palette/notes'
 import { LiveNoteSidebar } from '@/components/live-note-sidebar'
 import { BackgroundTaskDetail } from '@/components/background-task-detail'
 import { BrowserPane } from '@/components/browser-pane/BrowserPane'
@@ -2940,7 +2942,7 @@ function App() {
   // Search state
   const [isSearchOpen, setIsSearchOpen] = useState(false)
   // Optional scope override for the next time search opens (cleared on close).
-  const [searchDefaultScope, setSearchDefaultScope] = useState<SearchType | undefined>(undefined)
+  const [searchDefaultScope, setSearchDefaultScope] = useState<PaletteScope | undefined>(undefined)
 
   // Background tasks state
   type BackgroundTaskItem = {
@@ -6213,12 +6215,14 @@ function App() {
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [handleCloseFullScreenChat, isFullScreenChat, expandedFrom, navigateToFullScreenChat, useBottomTabs, isCodeOpen])
 
-  // Keyboard shortcut: Cmd+K / Ctrl+K opens the search palette (search-only).
+  // Keyboard shortcut: Cmd+K / Ctrl+K toggles the palette (navigation and
+  // search, Spotlight-style). Plain K only — ⌘⇧K belongs to the open space's
+  // own search bar, which claims it in the capture phase.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') {
         e.preventDefault()
-        setIsSearchOpen(true)
+        setIsSearchOpen((open) => !open)
       }
     }
     document.addEventListener('keydown', handleKeyDown)
@@ -6675,6 +6679,62 @@ function App() {
   useEffect(() => {
     return window.ipc.on('menu:command', (cmd) => menuCommandRef.current(cmd))
   }, [])
+
+  // The ⌘K palette's destinations, routed through the same entry points the
+  // sidebar, the Go menu, and the tour use — every route records history and
+  // honours the section gates. Same ref idiom as menuCommandRef: the palette
+  // holds one stable callback, the dispatcher sees the current handlers.
+  const paletteNavigateRef = useRef<(dest: PaletteDestination) => void>(() => {})
+  useEffect(() => {
+    paletteNavigateRef.current = (dest) => {
+      switch (dest.kind) {
+        case 'section':
+          switch (dest.section) {
+            case 'home': void navigateToView({ type: 'home' }); break
+            case 'spaces': void openSpaces(); break
+            case 'email': openEmailView(); break
+            case 'code': openCodeView(); break
+            case 'meetings': openMeetingsView(); break
+            case 'brain': knowledgeActions.openKnowledgeView(); break
+            case 'apps': openAppsGrid(); break
+            case 'bg-tasks': openBgTasksView(); break
+            case 'projects': knowledgeActions.openWorkspaceAt(); break
+            case 'chat-history': void navigateToView({ type: 'chat-history' }); break
+            case 'live-notes': void navigateToView({ type: 'live-notes' }); break
+            case 'graph': void navigateToView({ type: 'graph' }); break
+            case 'settings': setMenuSettings({ open: true, tab: 'account' }); break
+          }
+          break
+        case 'space':
+          void navigateToView({
+            type: 'spaces',
+            orgId: dest.orgId,
+            spaceId: dest.spaceId,
+            rail: dest.rail ?? { kind: 'general' },
+            ...(dest.messageId ? { messageId: dest.messageId } : {}),
+          })
+          break
+        case 'activity':
+          openActivity(dest.orgId)
+          break
+        case 'chat':
+          openAssistantRun(dest.sessionId)
+          break
+        case 'code-session':
+          // The Code section, focused on this session (as Home's code strips do).
+          setCodeFocusSessionId(dest.sessionId)
+          void navigateToView({ type: 'code' })
+          break
+        case 'note':
+          navigateToFile(dest.path)
+          break
+      }
+    }
+  })
+  const handlePaletteNavigate = useCallback((dest: PaletteDestination) => paletteNavigateRef.current(dest), [])
+  // Brain notes for the palette's Notes scope and its "jump to a note" rows,
+  // off the same tree the Brain view renders.
+  const paletteNotes = React.useMemo(() => brainNotes(tree), [tree])
 
   // Drives the mascot product tour through the app's main sections
   const handleTourNavigate = useCallback((target: TourNavTarget) => {
@@ -7805,7 +7865,7 @@ function App() {
                       void navigateToView({ type: 'knowledge-view', folderPath: path ?? undefined, mode: 'files' })
                     }}
                     onOpenNote={(path) => navigateToFile(path)}
-                    onOpenSearch={() => { setSearchDefaultScope('knowledge'); setIsSearchOpen(true) }}
+                    onOpenSearch={() => { setSearchDefaultScope('brain'); setIsSearchOpen(true) }}
                     onVoiceNoteCreated={handleVoiceNoteCreated}
                   />
                 </div>
@@ -7836,7 +7896,7 @@ function App() {
                       }
                     }}
                     onNewChat={handleNewChatTab}
-                    onOpenSearch={() => setIsSearchOpen(true)}
+                    onOpenSearch={() => { setSearchDefaultScope('chats'); setIsSearchOpen(true) }}
                   />
                 </div>
               )}
@@ -8376,8 +8436,9 @@ function App() {
           open={isSearchOpen}
           onOpenChange={(o) => { setIsSearchOpen(o); if (!o) setSearchDefaultScope(undefined) }}
           defaultScope={searchDefaultScope}
-          onSelectFile={navigateToFile}
-          onSelectRun={openAssistantRun}
+          chats={chatRuns}
+          notes={paletteNotes}
+          onNavigate={handlePaletteNavigate}
         />
       </SidebarSectionProvider>
       <Toaster />

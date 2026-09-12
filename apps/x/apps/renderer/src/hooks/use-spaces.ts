@@ -409,3 +409,14 @@ export function useSpaceFeed(orgId: string | null, spaceId: string | null): Spac
     if (!orgId || !spaceId) return EMPTY_FEED
     return state.get(liveKey(orgId, spaceId)) ?? EMPTY_FEED
 }
+
+/**
+ * Every loaded feed at once, as a lookup, for surfaces that walk all spaces
+ * (the ⌘K palette lists every discussion). The store already keeps every
+ * known space loaded and live; the lookup's identity changes with each
+ * refresh, so a memo keyed on it recomputes exactly when a feed did.
+ */
+export function useSpaceFeeds(): (orgId: string, spaceId: string) => SpaceFeedData {
+    const state = useSyncExternalStore(subscribeFeed, () => feedState)
+    return useCallback((orgId: string, spaceId: string) => state.get(liveKey(orgId, spaceId)) ?? EMPTY_FEED, [state])
+}
