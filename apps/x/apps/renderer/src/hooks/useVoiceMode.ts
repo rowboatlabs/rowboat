@@ -16,7 +16,7 @@ const DEEPGRAM_PARAMS = new URLSearchParams({
     interim_results: 'true',
     smart_format: 'true',
     punctuate: 'true',
-    language: 'en',
+    language: 'multi',
     endpointing: '100',
     no_delay: 'true',
 });
