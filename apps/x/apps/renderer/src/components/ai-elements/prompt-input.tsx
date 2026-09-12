@@ -48,7 +48,7 @@ import {
 } from "lucide-react";
 import { nanoid } from "nanoid";
 import { useMentionDetection } from "@/hooks/use-mention-detection";
-import { MentionPopover } from "@/components/mention-popover";
+import { MentionPopover, type MentionAnchor } from "@/components/mention-popover";
 import { toKnowledgePath } from "@/lib/wiki-links";
 import { getMentionHighlightSegments } from "@/lib/mention-highlights";
 import {
@@ -1030,11 +1030,20 @@ export const PromptInputTextarea = ({
   // Build mention labels for highlighting (handles multi-word names like "AI Agents")
   const mentionLabels = useMemo(() => mentionLabelsFor(mentionSources), [mentionSources]);
 
-  const { activeMention, cursorCoords } = useMentionDetection(
+  const { activeMention } = useMentionDetection(
     textareaRef,
     currentValue,
     mentionsEnabled
   );
+
+  // The @ menu sits above the composer box (Slack's placement), never over
+  // the text: measured live from the nearest composer, or from this wrapper
+  // when the textarea is hosted bare.
+  const mentionAnchorRef = useRef<MentionAnchor>({
+    getBoundingClientRect: () =>
+      (containerRef.current?.closest<HTMLElement>("[data-mention-anchor]") ?? containerRef.current)
+        ?.getBoundingClientRect() ?? new DOMRect(),
+  });
 
   // Escape-dismissal: `open` derives from the text, so closing needs real
   // state. Dismissed stays true for the current mention; a fresh "@" (or
@@ -1310,8 +1319,7 @@ export const PromptInputTextarea = ({
         <MentionPopover
           sources={mentionSources}
           query={activeMention?.query ?? ""}
-          position={cursorCoords}
-          containerRef={containerRef}
+          anchorRef={mentionAnchorRef}
           onSelect={handleMentionSelect}
           onClose={handleMentionClose}
           open={Boolean(activeMention) && !mentionDismissed}

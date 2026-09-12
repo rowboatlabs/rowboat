@@ -769,6 +769,8 @@ function ChatInputInner({
   return (
     <div
       data-tour-id="chat-composer"
+      // The @ menu opens above this box, at its width (see MentionPopover).
+      data-mention-anchor=""
       className={cn(
         // Composer: radius 24, raised surface; the ring is folded into
         // the shadow (see .rowboat-chat-input in App.css).
