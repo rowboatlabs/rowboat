@@ -44,6 +44,7 @@ type SpacesHandlers = {
   'spaces:restoreAsset': InvokeHandler<'spaces:restoreAsset'>;
   'spaces:uploadBlob': InvokeHandler<'spaces:uploadBlob'>;
   'spaces:saveBlob': InvokeHandler<'spaces:saveBlob'>;
+  'spaces:saveText': InvokeHandler<'spaces:saveText'>;
   'spaces:saveImageUrl': InvokeHandler<'spaces:saveImageUrl'>;
   'spaces:linkPreview': InvokeHandler<'spaces:linkPreview'>;
   'spaces:readAsset': InvokeHandler<'spaces:readAsset'>;
@@ -267,6 +268,17 @@ export const spacesIpcHandlers: SpacesHandlers = {
     const result = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options);
     if (result.canceled || !result.filePath) return { saved: false };
     await fs.writeFile(result.filePath, bytes);
+    return { saved: true, path: result.filePath };
+  },
+
+  // Text asset save: the renderer hands over the source it already rendered,
+  // so there is no cache read — just the dialog and a write.
+  'spaces:saveText': async (event, args) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const options = { defaultPath: path.basename(args.suggestedName) };
+    const result = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options);
+    if (result.canceled || !result.filePath) return { saved: false };
+    await fs.writeFile(result.filePath, args.content, 'utf8');
     return { saved: true, path: result.filePath };
   },
 

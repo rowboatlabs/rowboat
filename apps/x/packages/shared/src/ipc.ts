@@ -4130,6 +4130,17 @@ export const ipcSchemas = {
     }),
     res: z.object({ saved: z.boolean(), path: z.string().optional() }),
   },
+  // Download for text assets — the blob-less half of saveBlob. There is
+  // nothing to pull: the viewer already holds the source, so main only shows
+  // the save dialog and writes it under the file's own name (extension
+  // included). saved:false = the person cancelled.
+  'spaces:saveText': {
+    req: z.object({
+      content: z.string(),
+      suggestedName: z.string(),
+    }),
+    res: z.object({ saved: z.boolean(), path: z.string().optional() }),
+  },
   // Save an external image (a pasted GIF/image link) to disk. Main fetches
   // the URL — the renderer can't (CORS) — after the save dialog, so a
   // cancel never downloads. https only. saved:false = the person cancelled.

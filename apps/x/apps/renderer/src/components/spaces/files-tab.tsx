@@ -4,7 +4,7 @@ import { MarkdownEditor } from '@/components/markdown-editor'
 import { SpaceDocumentViewer } from './document-viewer'
 import { getViewerType } from '@/lib/file-types'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowLeft, Check, Clock, Download, Eye, FileText, Folder, FolderOpen, History, Image as ImageIcon, Loader2, MoreHorizontal, Pencil, PenTool, Plus, RotateCcw, Trash2, Upload, X } from 'lucide-react'
+import { ArrowLeft, Check, Clock, Copy, Download, Eye, FileText, Folder, FolderOpen, History, Image as ImageIcon, Loader2, MoreHorizontal, Pencil, PenTool, Plus, RotateCcw, Trash2, Upload, X } from 'lucide-react'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
@@ -29,8 +29,9 @@ import { uploadInputFor } from '@/lib/spaces-upload'
 
 // Files: the tree (README first) and the file column — rendered file
 // with one-tap checkboxes, Edit → draft→apply (merged / conflict handled),
-// History with diffs. Supported documents reuse the workspace viewers/editors;
-// other binary files retain the download card and versioned Replace action.
+// Copy / Download straight from the viewer, History with diffs. Supported
+// documents reuse the workspace viewers/editors; other binary files retain
+// the download card and versioned Replace action.
 
 // ---------------------------------------------------------------------------
 // Files rail — the space's tree, README first, unread dots on moved files
@@ -607,18 +608,36 @@ export function FileColumn({ org, space, path, entries = [], memberNames, refres
         }
     }
 
+    // Download, either half: a blob pulls through main's content-addressed
+    // cache, a text asset hands main the source the viewer already holds.
+    // Both land in the save dialog under this file's own name.
     const download = async () => {
-        if (!blob) return
+        if (!asset) return
         try {
-            const res = await window.ipc.invoke('spaces:saveBlob', {
-                orgId: org.id,
-                spaceId: space.id,
-                hash: blob.hash,
-                suggestedName: fileName,
-            })
+            const res = blob
+                ? await window.ipc.invoke('spaces:saveBlob', {
+                    orgId: org.id,
+                    spaceId: space.id,
+                    hash: blob.hash,
+                    suggestedName: fileName,
+                })
+                : await window.ipc.invoke('spaces:saveText', { content: asset.content, suggestedName: fileName })
             if (res.saved) toast('Saved', 'success')
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not download', 'error')
+        }
+    }
+
+    // Copy takes the stored source verbatim — frontmatter and all, and never
+    // the viewer's rewritten links (renderedContent), which point at blobs
+    // that only resolve inside the app.
+    const copySource = async () => {
+        if (!asset) return
+        try {
+            await navigator.clipboard.writeText(asset.content)
+            toast('Copied', 'success')
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not copy', 'error')
         }
     }
 
@@ -721,9 +740,29 @@ export function FileColumn({ org, space, path, entries = [], memberNames, refres
                                 </button>
                             </>
                         ) : (
-                            <button type="button" className="hover:text-foreground flex items-center gap-1" onClick={beginEdit}>
-                                <Pencil className="size-3" /> Edit
-                            </button>
+                            <>
+                                <button type="button" className="hover:text-foreground flex items-center gap-1" onClick={beginEdit}>
+                                    <Pencil className="size-3" /> Edit
+                                </button>
+                                {/* Reading is the common case: taking the source elsewhere
+                                    shouldn't cost a trip through Edit and a discard. */}
+                                <button
+                                    type="button"
+                                    title="Copy the source text"
+                                    className="hover:text-foreground flex items-center gap-1"
+                                    onClick={() => void copySource()}
+                                >
+                                    <Copy className="size-3" /> Copy
+                                </button>
+                                <button
+                                    type="button"
+                                    title="Download this file"
+                                    className="hover:text-foreground flex items-center gap-1"
+                                    onClick={() => void download()}
+                                >
+                                    <Download className="size-3" /> Download
+                                </button>
+                            </>
                         )}
                         <button
                             type="button"
