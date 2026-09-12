@@ -116,13 +116,16 @@ it('groups sibling sessions into one worktree and exposes the parent branch cont
   const onSwitchBranch = vi.fn()
   const onSelectSession = vi.fn()
   render(<SessionRail projects={[project]} sessions={[
-    { ...session, worktree }, { ...session, id: 'second', title: 'Second chat', worktree },
+    { ...session, worktree },
+    { ...session, id: 'second', title: 'Second chat', createdAt: '2026-09-08T02:00:00Z', worktree },
   ]} selectedSessionId="second" statusOf={() => 'idle'} agentsStatus={ready}
     onSelectSession={onSelectSession} onSwitchBranch={onSwitchBranch}
     onAddProject={vi.fn()} onRemoveProject={vi.fn()} onNewSession={vi.fn()} onSetDone={vi.fn()} onDeleteSession={vi.fn()} />)
-  expect(screen.getAllByText('rowboat/work')).toHaveLength(1)
-  expect(screen.getByText('2 sessions · Second chat')).toBeTruthy()
-  fireEvent.click(screen.getByText('rowboat/work'))
+  // One card for the worktree, named after its first chat — never the branch.
+  expect(screen.queryByText('rowboat/work')).toBeNull()
+  expect(screen.getAllByText(session.title)).toHaveLength(1)
+  expect(screen.getByText('2 sessions')).toBeTruthy()
+  fireEvent.click(screen.getByText(session.title))
   expect(onSelectSession).toHaveBeenCalledWith('second')
   expect(screen.queryByRole('button', { name: 'Change branch for Example' })).toBeNull()
   openProjectMenu()

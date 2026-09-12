@@ -135,6 +135,7 @@ function StatusDot({ status }: { status: CodeSessionStatus }) {
 // membership and activity are aggregated by the rail below.
 function SessionRow({
   session,
+  workspaceTitle,
   sessionCount = 1,
   workspaceStarted = false,
   status,
@@ -147,6 +148,9 @@ function SessionRow({
   onDelete,
 }: {
   session: CodeSession
+  /** What the card is called: the first session's title, so the card keeps its
+   *  name as sibling chats come and go. */
+  workspaceTitle: string
   sessionCount?: number
   workspaceStarted?: boolean
   status: CodeSessionStatus
@@ -163,7 +167,7 @@ function SessionRow({
   const baseChange = useWorktreeBaseChange(session, actionsOpen, workspaceStarted)
   const worktree = session.worktree && !session.worktree.removedAt ? session.worktree : undefined
   const when = formatRelativeTime((done && session.doneAt) || session.lastActivityAt || session.createdAt)
-  const detail = `${sessionCount} session${sessionCount === 1 ? '' : 's'} · ${session.worktree?.removedAt ? 'Removed worktree' : session.title}`
+  const detail = `${sessionCount} session${sessionCount === 1 ? '' : 's'}${session.worktree?.removedAt ? ' · Removed worktree' : ''}`
   const ToggleIcon = done ? RotateCcw : Check
   const toggleLabel = done ? 'Reopen' : 'Mark as done'
   return (
@@ -173,7 +177,7 @@ function SessionRow({
         <div
           role="button"
           tabIndex={0}
-          title={`${session.title}\n${AGENT_LABEL[session.agent] ?? session.agent}${worktree ? ` · ${worktree.branch}` : ''}`}
+          title={`${workspaceTitle}\n${AGENT_LABEL[session.agent] ?? session.agent}${worktree ? ` · ${worktree.branch}` : ''}`}
           className={cn(
             'group relative mt-0.5 flex cursor-pointer items-start gap-2.5 rounded-lg py-1.5 pl-2.5 pr-1.5',
             indent && 'ml-3',
@@ -193,7 +197,7 @@ function SessionRow({
             <div className="flex items-baseline gap-2">
               <span className={cn('min-w-0 flex-1 truncate text-[13px] leading-5', selected ? 'font-medium' : 'text-foreground/90')}>
                 {prefix && <span className="text-muted-foreground">{prefix} · </span>}
-                {worktree?.branch ?? session.title}
+                {workspaceTitle}
               </span>
               {/* The time's slot is exactly as wide as the hover actions, so the
                   actions replace the time — never the title beside it. */}
@@ -308,6 +312,10 @@ export function SessionRail({
     groups.set(key, [...(groups.get(key) ?? []), session])
   }
   const representatives = [...groups.values()].map((members) => members.find((s) => s.id === selectedSessionId) ?? members.find((s) => !s.doneAt) ?? members[0])
+  // The card is named after the chat that opened the workspace — the store
+  // orders sessions by attention, so ask for the oldest one explicitly.
+  const workspaceTitle = (s: CodeSession) => groups.get(codeWorkspaceKey(s))!
+    .reduce((first, member) => (member.createdAt.localeCompare(first.createdAt) || member.id.localeCompare(first.id)) < 0 ? member : first).title
   const groupDone = (s: CodeSession) => groups.get(codeWorkspaceKey(s))!.every((member) => !!member.doneAt)
   const groupStatus = (s: CodeSession): CodeSessionStatus => {
     const statuses = groups.get(codeWorkspaceKey(s))!.map((member) => statusOf(member.id))
@@ -449,6 +457,7 @@ export function SessionRail({
                 <SessionRow
                   key={session.id}
                   session={session}
+                  workspaceTitle={workspaceTitle(session)}
                   sessionCount={groups.get(codeWorkspaceKey(session))!.length}
                   workspaceStarted={groups.get(codeWorkspaceKey(session))!.some((member) => !!member.lastActivityAt || statusOf(member.id) !== 'idle')}
                   status={groupStatus(session)}
@@ -491,6 +500,7 @@ export function SessionRail({
                 <SessionRow
                   key={session.id}
                   session={session}
+                  workspaceTitle={workspaceTitle(session)}
                   sessionCount={groups.get(codeWorkspaceKey(session))!.length}
                   workspaceStarted={groups.get(codeWorkspaceKey(session))!.some((member) => !!member.lastActivityAt || statusOf(member.id) !== 'idle')}
                   status={groupStatus(session)}
