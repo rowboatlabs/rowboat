@@ -15,6 +15,26 @@ describe('returning to Spaces', () => {
     it('keeps the previous server when its saved space was removed', () => {
         expect(resolveSpacesLocation(orgs, { orgId: 'second', spaceId: 'removed' })).toEqual({ orgId: 'second', spaceId: 'founders' })
     })
+    it.each([
+        { kind: 'thread', rootMessageId: 'msg1' },
+        { kind: 'file', path: 'notes/plan.md', fromThreadRootId: 'msg1' },
+        { kind: 'whiteboard', path: 'whiteboards/sketch.excalidraw' },
+    ] as const)('reopens what was open inside the space (%j)', (rail) => {
+        expect(resolveSpacesLocation(orgs, { orgId: 'second', spaceId: 'design', rail }))
+            .toEqual({ orgId: 'second', spaceId: 'design', rail })
+    })
+    it('leaves the rail behind when the saved space is gone', () => {
+        expect(resolveSpacesLocation(orgs, { orgId: 'second', spaceId: 'removed', rail: { kind: 'thread', rootMessageId: 'msg1' } }))
+            .toEqual({ orgId: 'second', spaceId: 'founders' })
+    })
+    it('returns to the Activity surface instead of a space', () => {
+        expect(resolveSpacesLocation(orgs, { orgId: 'second', spaceId: '', view: 'activity' }))
+            .toEqual({ orgId: 'second', spaceId: '', view: 'activity' })
+    })
+    it('falls back to a space when the Activity surface names a server that is gone', () => {
+        expect(resolveSpacesLocation(orgs, { orgId: 'removed', spaceId: '', view: 'activity' }))
+            .toEqual({ orgId: 'first', spaceId: 'main' })
+    })
     it.each([null, {}, 'invalid', { orgId: 'removed', spaceId: 'gone' }])('chooses an available server for invalid saved state %j', (saved) => {
         expect(resolveSpacesLocation(orgs, saved)).toEqual({ orgId: 'first', spaceId: 'main' })
     })

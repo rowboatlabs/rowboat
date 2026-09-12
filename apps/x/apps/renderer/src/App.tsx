@@ -942,6 +942,19 @@ function App() {
   }, [spaceSelection])
   // What's selected inside the open space (general / topic / file) — part of the history.
   const [railSelection, setRailSelection] = useState<RailSelection>({ kind: 'general' })
+  /**
+   * The Spaces view correcting its own selection (the open space was deleted,
+   * or the last server went away). Not a navigation — no history entry. The
+   * rail selection goes with it: it names a discussion or a file IN the space
+   * it was made in, so it cannot follow to another one, and re-entering the
+   * section restores whatever is left here.
+   */
+  const selectSpace = useCallback((next: SpaceSelection) => {
+    setSpaceSelection(next)
+    if ((next?.orgId ?? '') !== (spaceSelection?.orgId ?? '') || (next?.spaceId ?? '') !== (spaceSelection?.spaceId ?? '')) {
+      setRailSelection({ kind: 'general' })
+    }
+  }, [spaceSelection])
   const [isEmailOpen, setIsEmailOpen] = useState(false)
   const [isWorkspaceOpen, setIsWorkspaceOpen] = useState(false)
   const [workspaceInitialPath, setWorkspaceInitialPath] = useState<string | null>(null)
@@ -4845,7 +4858,9 @@ function App() {
     if (isCodeOpen) return { type: 'code' }
     if (isBgTasksOpen) return { type: 'bg-tasks' }
     if (isAppsOpen) return { type: 'apps' }
-    if (isSpacesOpen) return spaceSelection ? { type: 'spaces', orgId: spaceSelection.orgId, spaceId: spaceSelection.spaceId, rail: railSelection } : { type: 'spaces' }
+    // The org-level surface (Activity) belongs in here too: without it, history
+    // records Activity as a plain space view and ‹ lands somewhere else.
+    if (isSpacesOpen) return spaceSelection ? { type: 'spaces', orgId: spaceSelection.orgId, spaceId: spaceSelection.spaceId, rail: railSelection, ...(spaceSelection.view ? { view: spaceSelection.view } : {}) } : { type: 'spaces' }
     if (selectedPath) return { type: 'file', path: selectedPath }
     if (isGraphOpen) return { type: 'graph' }
     return { type: 'chat', runId }
@@ -5518,11 +5533,19 @@ function App() {
     void navigateToView({ type: 'spaces', orgId, view: 'activity' })
   }, [navigateToView])
 
+  /**
+   * Re-entering the section (the nav item, the ⌥Tab switcher, the assistant)
+   * lands exactly where Spaces was left: the same space AND what was open
+   * inside it — a discussion, a file, a board — or the org's Activity surface.
+   * Both selections survive a section switch in state, so the live values ARE
+   * the memory; storage only covers the first entry after a relaunch.
+   */
   const openSpaces = useCallback(async () => {
     if (spacesLoading) await refreshSpacesOrgs()
-    const target = resolveSpacesLocation(getSpacesOrgs(), spaceSelection ?? readLastSpace())
+    const previous = spaceSelection ? { ...spaceSelection, rail: railSelection } : readLastSpace()
+    const target = resolveSpacesLocation(getSpacesOrgs(), previous)
     void navigateToView(target ? { type: 'spaces', ...target } : { type: 'spaces' })
-  }, [spacesLoading, spaceSelection, navigateToView])
+  }, [spacesLoading, spaceSelection, railSelection, navigateToView])
 
   const openMeetingsView = useCallback(() => {
     void navigateToView({ type: 'meetings' })
@@ -5855,7 +5878,9 @@ function App() {
         case 'workspace': openProjects(); break
         case 'code': void navigateToView({ type: 'code' }); break
         case 'apps': openAppsGrid(); break
-        case 'spaces': void navigateToView({ type: 'spaces' }); break
+        // Through openSpaces, like the nav item: a bare spaces view state would
+        // reset the rail and close whatever discussion was open.
+        case 'spaces': void openSpaces(); break
       }
     }
 
@@ -5979,7 +6004,7 @@ function App() {
         break
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [navigateToFile, navigateToView, openAppsGrid, openProjects, selectedPath])
+  }, [navigateToFile, navigateToView, openAppsGrid, openProjects, openSpaces, selectedPath])
 
   // Legacy runs:events path: handleRunEvent stashes the result in a ref;
   // polled every render (the triggering event always causes one).
@@ -7655,7 +7680,7 @@ function App() {
                   <SpacesView
                     active={activeMiddle === 'spaces'}
                     selection={spaceSelection}
-                    onSelect={setSpaceSelection}
+                    onSelect={selectSpace}
                     onSwitchSpace={openSpace}
                     railSelection={railSelection}
                     onRailSelect={(rail) => {
