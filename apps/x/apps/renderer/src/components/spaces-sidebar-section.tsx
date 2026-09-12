@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Bell, ChevronRight, CornerDownRight, Hash, MessagesSquare, Pencil, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { SidebarGroup, SidebarGroupContent, SidebarMenu, SidebarMenuAction, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar'
@@ -17,11 +17,20 @@ import { directAvatarId, isSelfDirect, isSelfDirectUnsupported, markSelfDirectUn
 import { prefetchMembers, useSelfDisplayName } from '@/hooks/use-space-members'
 import { isSpaceExpanded, setSpaceExpanded, useSpaceExpansionVersion } from '@/lib/spaces-expansion'
 import { readLastSpace, resolveSpacesLocation } from '@/lib/spaces-navigation'
+import { serverFoldOverride, setServerFoldOverride, useServerFoldVersion } from '@/lib/spaces-sidebar-fold'
+import { spaceVisitedAt, useSpaceVisitsVersion } from '@/lib/spaces-visits'
+import { ITEMS_PER_SERVER, resolveExpanded, selectServerItems, serverItems, sumBadges, type WorkingSetItem } from '@/lib/spaces-working-set'
 import type { RailSelection } from '@/lib/spaces-selection'
 import { toast } from '@/lib/toast'
 
 const MAX_VISIBLE_DIRECTS = 3
 
+/**
+ * The sidebar's Spaces section: every server, and under the open ones the few
+ * channels and DMs the reader is likeliest to want next (spaces-working-set).
+ * The siderail is the full tree; this stays short and stable, so the rows only
+ * move when one of them enters or leaves the set.
+ */
 export function SpacesSidebarSection({ active, activeSpace, onOpenSpaces, onOpenSpace }: {
     active: boolean
     activeSpace: SpaceSelection
@@ -29,13 +38,17 @@ export function SpacesSidebarSection({ active, activeSpace, onOpenSpaces, onOpen
     onOpenSpace: (orgId: string, spaceId: string) => void
 }) {
     const { orgs, refresh } = useSpacesOrgs()
+    // The siderail's own counts, from the org-owned read state: one store, so
+    // reading a space anywhere clears it everywhere.
+    const unread = useSpacesUnreadCounts()
     const [addOrgOpen, setAddOrgOpen] = useState(false)
     const current = resolveSpacesLocation(orgs, activeSpace ?? readLastSpace())
     return <SidebarGroup className="pt-0">
         <SidebarGroupContent>
             <SidebarMenu>
                 <SidebarMenuItem>
-                    <SidebarMenuButton data-tour-id="nav-spaces" isActive={active} onClick={onOpenSpaces}>
+                    <SidebarMenuButton data-tour-id="nav-spaces" isActive={active} onClick={onOpenSpaces}
+                        title="Showing a few unread and recent channels">
                         <MessagesSquare className="size-4 shrink-0" />
                         <span>Spaces</span>
                     </SidebarMenuButton>
@@ -44,26 +57,111 @@ export function SpacesSidebarSection({ active, activeSpace, onOpenSpaces, onOpen
                         <Plus />
                     </SidebarMenuAction>
                     {orgs.length > 0 && <SidebarMenu className="ml-4 w-auto gap-0 border-l border-sidebar-border pl-2">
-                        {orgs.map((org) => {
-                            const selected = current?.orgId === org.id
-                            return <SidebarMenuItem key={org.id}>
-                                <SidebarMenuButton
-                                    aria-current={active && selected ? 'page' : undefined}
-                                    className="h-7 text-[13px]"
-                                    onClick={() => {
-                                        if (selected) onOpenSpaces()
-                                        else onOpenSpace(org.id, org.spaces[0]?.id ?? org.directs[0]?.id ?? '')
-                                    }}>
-                                    <span className={cn('truncate', selected ? 'font-medium text-sidebar-foreground' : 'font-normal text-muted-foreground')}>{org.name}</span>
-                                </SidebarMenuButton>
-                            </SidebarMenuItem>
-                        })}
+                        {/* Servers in the siderail's order; every one keeps its header row. */}
+                        {orgs.map((org) => <ServerWorkingSet key={org.id} org={org} unread={unread} active={active}
+                            currentItemId={current?.orgId === org.id ? (current.spaceId || null) : null}
+                            onOpenSpace={onOpenSpace} />)}
                     </SidebarMenu>}
                 </SidebarMenuItem>
             </SidebarMenu>
         </SidebarGroupContent>
         <AddOrgDialog open={addOrgOpen} onOpenChange={setAddOrgOpen} onAdded={() => void refresh()} />
     </SidebarGroup>
+}
+
+/** One server: its header, and while open its working set of channels and DMs. */
+function ServerWorkingSet({ org, unread, active, currentItemId, onOpenSpace }: {
+    org: OrgWithSpaces
+    unread: Map<string, SpaceBadge>
+    /** Is Spaces the section on screen? Only then does a row read as the open one. */
+    active: boolean
+    /** The open channel or DM, when it is this server's; it always keeps a row. */
+    currentItemId: string | null
+    onOpenSpace: (orgId: string, spaceId: string) => void
+}) {
+    const visits = useSpaceVisitsVersion()
+    useServerFoldVersion()
+    // Your notes-to-self DM is a DM like any other, labelled the way the
+    // siderail labels it: your name, then a quiet "you".
+    const selfDm = org.directs.find((dm) => isSelfDirect(dm, org.memberId))
+    const selfRosterIds = useMemo(
+        () => (selfDm ? [selfDm.id] : org.spaces.slice(0, 1).map((s) => s.id)),
+        [selfDm, org.spaces],
+    )
+    const selfName = useSelfDisplayName(org.id, org.memberId, selfRosterIds)
+        ?? (selfDm ? spaceDisplayName(org, selfDm).replace(/ \(you\)$/, '') : org.memberId)
+    const items = useMemo(
+        () => serverItems(org, {
+            badge: (spaceId) => unread.get(`${org.id}/${spaceId}`) ?? NO_BADGE,
+            visitedAt: (spaceId) => spaceVisitedAt(org.id, spaceId),
+            activityAt: (spaceId) => spaceLastActivityAt(org.id, spaceId),
+            label: (space) => (isSelfDirect(space, org.memberId) ? selfName : spaceDisplayName(org, space)),
+        }),
+        // `visits` and the unread map's identity are the two things that move underneath.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [org, unread, visits, selfName],
+    )
+    const expanded = resolveExpanded({ items }, currentItemId, serverFoldOverride(org.id))
+    // What is on screen now, so a row already there keeps its place.
+    const shown = useRef<string[]>([])
+    const rows = expanded ? selectServerItems(items, currentItemId, ITEMS_PER_SERVER, shown.current) : []
+    useEffect(() => {
+        // Collapsing remembers the rows, so reopening the server shows the same ones.
+        if (expanded) shown.current = rows.map((row) => row.id)
+    })
+    const badge = sumBadges(items)
+    return <>
+        <SidebarMenuItem>
+            <SidebarMenuButton
+                className="h-7 text-[13px]"
+                aria-expanded={expanded}
+                title={`${expanded ? 'Collapse' : 'Expand'} ${org.name}`}
+                onClick={() => setServerFoldOverride(org.id, !expanded)}
+            >
+                <ChevronRight className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', expanded && 'rotate-90')} />
+                <span className={cn('flex-1 truncate',
+                    currentItemId || (!expanded && badge.unread > 0) ? 'font-medium text-sidebar-foreground' : 'font-normal text-muted-foreground')}>
+                    {org.name}
+                </span>
+                {/* Closed, the header carries its items' badges; open, each row carries its own. */}
+                {!expanded && <UnreadBadge badge={badge} />}
+            </SidebarMenuButton>
+        </SidebarMenuItem>
+        {rows.map((item) => <WorkingSetRow key={item.id} orgId={org.id} item={item}
+            active={active && item.id === currentItemId} onOpenSpace={onOpenSpace} />)}
+    </>
+}
+
+/** A channel or a DM, in the siderail's own row shape. */
+function WorkingSetRow({ orgId, item, active, onOpenSpace }: {
+    orgId: string
+    item: WorkingSetItem
+    active: boolean
+    onOpenSpace: (orgId: string, spaceId: string) => void
+}) {
+    return <SidebarMenuItem>
+        <SidebarMenuButton
+            isActive={active}
+            aria-current={active ? 'page' : undefined}
+            className="h-7 pl-6 text-[13px]"
+            title={item.name}
+            onClick={() => onOpenSpace(orgId, item.id)}
+            // Hover = intent: warm the cached tail + roster so the click paints instantly.
+            onMouseEnter={() => {
+                prefetchStream(orgId, item.id)
+                prefetchMembers(orgId, item.id)
+            }}
+        >
+            {item.kind === 'channel'
+                ? <Hash className="size-3.5 shrink-0 text-muted-foreground" />
+                : <MemberAvatar id={item.avatarId ?? item.id} name={item.name} size="sm" className="size-4 rounded-[3px] text-[8px]" />}
+            <span className={cn('flex-1 truncate', item.badge.unread > 0 && !active && 'font-medium text-foreground')}>
+                {item.name}
+                {item.self && <span className="ml-1.5 font-normal text-muted-foreground">you</span>}
+            </span>
+            {!active && <UnreadBadge badge={item.badge} direct={item.kind === 'direct'} />}
+        </SidebarMenuButton>
+    </SidebarMenuItem>
 }
 
 function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, activityActive = false, onChanged, renderDiscussions, showArchived = false, activeDiscussionCount }: {

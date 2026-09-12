@@ -1,6 +1,7 @@
 import { WorkspaceSessionTabs } from './components/code/workspace-session-tabs'
 import { DocumentFileViewer } from '@/components/document-file-viewer'
 import { readLastSpace, resolveSpacesLocation } from '@/lib/spaces-navigation'
+import { noteSpaceVisit } from '@/lib/spaces-visits'
 import * as React from 'react'
 import { Activity, useCallback, useEffect, useLayoutEffect, useMemo, useState, useRef } from 'react'
 import { workspace, quickAskShortcut, pttKey, type ipc } from '@x/shared';
@@ -5414,6 +5415,10 @@ function App() {
         // so the app lands on the default full-screen chat.
         if (!SPACES_ENABLED) return
         if (view.orgId) setSpaceSelection({ orgId: view.orgId, spaceId: view.spaceId ?? '', ...(view.view ? { view: view.view } : {}) })
+        // A navigation IS the visit the sidebar's working set remembers — the
+        // Spaces view correcting its own selection goes through selectSpace
+        // instead and does not count.
+        if (view.orgId && view.spaceId) noteSpaceVisit(view.orgId, view.spaceId)
         setRailSelection(view.rail ?? { kind: 'general' })
         // A message to land on: the pane consumes the jump once it paints.
         if (view.messageId) requestJump({ topicId: view.rail?.kind === 'thread' ? view.rail.rootMessageId : STREAM_READ_KEY, messageId: view.messageId })
