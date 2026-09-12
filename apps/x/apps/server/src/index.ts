@@ -6,3 +6,4 @@ export { loadOrCreateServerKey, rotateServerKey, tokenMatches, extractBearer, SE
 export { loadServerConfig, saveServerConfig, ServerConfig, DEFAULT_PORT } from './config.js';
 export { buildPairingPayload, collectPairingUrls, type PairingPayload } from './pairing.js';
 export { createCoreRpcHandlers, createCoreEventSources, resolveWorkspacePath } from './core-deps.js';
+export { createFileCipher } from './file-cipher.js';
