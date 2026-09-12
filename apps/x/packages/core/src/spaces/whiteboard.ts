@@ -910,6 +910,7 @@ function doAdd(scene: Scene, op: AddOp, flow: { x: number; y: number }, result: 
         const wrapped = op.width ? wrapText(body, op.width, fontSize) : body;
         const size = measureText(wrapped, fontSize);
         const pos = resolvePosition(scene, op, size, flow);
+        if (!pos.flowed) warnIfOverlapping(scene, id, { x: pos.x, y: pos.y, ...size });
         const el = applyStyle(
             textElement(scene, id, wrapped, { x: pos.x, y: pos.y, ...size }, { fontSize, containerId: null, align: "left", originalText: body }),
             op.style,
@@ -937,6 +938,7 @@ function doAdd(scene: Scene, op: AddOp, flow: { x: number; y: number }, result: 
         shape = laid.container;
         const labelId = randomId(scene.random);
         shape = withBound(shape, { id: labelId, type: "text" });
+        if (!pos.flowed) warnIfOverlapping(scene, id, shape);
         commit(scene, shape);
         const label = textElement(scene, labelId, laid.text, laid.box, { fontSize, containerId: id, align: "center", originalText: text });
         commit(scene, applyStyle(label, op.style?.stroke ? { stroke: op.style.stroke } : undefined));
@@ -944,10 +946,33 @@ function doAdd(scene: Scene, op: AddOp, flow: { x: number; y: number }, result: 
             scene.warnings.push(`add ${id}: label is taller than the box; give it a bigger height or shorter text`);
         }
     } else {
+        if (!pos.flowed) warnIfOverlapping(scene, id, shape);
         commit(scene, shape);
     }
     if (pos.flowed) flow.x = pos.x + shape.width + AUTO_FLOW_GAP;
     result.added.push({ id, type: op.shape, ...(text ? { text } : {}) });
+}
+
+const describeBox = (e: WbElement): string => `${e.id} at (${Math.round(e.x)}, ${Math.round(e.y)}) ${Math.round(e.width)}×${Math.round(e.height)}`;
+
+/** The first live box-like element (not a connector, not a label inside its box) that a box intersects. */
+function overlapping(scene: Scene, box: { x: number; y: number; width: number; height: number }): WbElement | undefined {
+    for (const e of scene.all) {
+        if (e.isDeleted || isLinear(e)) continue;
+        if (isText(e) && typeof e.containerId === "string" && e.containerId) continue;
+        if (box.x < e.x + e.width && box.x + box.width > e.x && box.y < e.y + e.height && box.y + box.height > e.y) return e;
+    }
+    return undefined;
+}
+
+/** A placed addition that lands on something already there is a mistake nine times in ten — say so, with the fix. */
+function warnIfOverlapping(scene: Scene, id: string, box: { x: number; y: number; width: number; height: number }): void {
+    const hit = overlapping(scene, box);
+    if (hit) {
+        scene.warnings.push(
+            `add ${id}: overlaps ${describeBox(hit)} — sizes are computed from labels, so place elements with rightOf/below/leftOf/above instead of guessed coordinates, or move one with update x/y`,
+        );
+    }
 }
 
 function doConnect(scene: Scene, op: ConnectOp, result: ApplyResult): void {
@@ -955,7 +980,10 @@ function doConnect(scene: Scene, op: ConnectOp, result: ApplyResult): void {
     const to = live(scene, op.to)!;
     const geometry = connectorGeometry(from, to);
     if (!geometry) {
-        throw new WhiteboardOpError(`connect ${op.from} → ${op.to}: the elements overlap, there is no room for a connector`);
+        throw new WhiteboardOpError(
+            `connect ${op.from} → ${op.to}: the elements overlap (${describeBox(from)}; ${describeBox(to)}), so there is no room for a connector. ` +
+                "Sizes are computed from labels, so do not guess coordinates: place elements with rightOf/below/leftOf/above, or move one with update x/y.",
+        );
     }
     const id = op.id ?? randomId(scene.random);
     const kind = op.kind ?? "arrow";

@@ -12,14 +12,19 @@ a space's header. Boards are files under \`whiteboards/\` (the default one is
 Everyone with a board open sees your drawing appear live, attributed to your
 person.
 
-You never touch the file format. Two tools do everything:
+You never touch the file format. Two tools do everything, and they are the
+whole surface: there is no file to read, no source to look up, and no
+command to run for anything to do with boards.
 
 | You need | Call |
 |---|---|
 | what is on a board, its ids and layout | \`whiteboard-read\` (omit \`board\` for the default one) |
-| which boards a space has | \`whiteboard-read\` with a board name that does not exist — the error lists them |
-| draw, label, connect, move, restyle, delete | \`whiteboard-draw\` with a list of \`ops\` |
+| which boards a space has | \`whiteboard-read\` — a board that does not exist yet answers \`exists: false\` and lists the boards the space has |
+| draw, label, connect, move, restyle, delete | \`whiteboard-draw\` with a list of \`ops\` (plain JSON objects) |
 | the spaceId for a space named in the ask | \`list_spaces\` — unless the context already gives it (a board picked from the @ menu, or the board open in Spaces) |
+
+A board that does not exist yet is not a problem: \`whiteboard-draw\` creates
+it on the first draw. Start at \`x: 0, y: 0\` and go.
 
 ## Drawing
 
@@ -37,6 +42,8 @@ Think in elements, not pixels. Every op is one of:
 Placement: put the first element with \`x\`/\`y\` (or let it flow to the right
 of existing content), then place the rest **relative to it** — \`rightOf\`,
 \`below\`, \`leftOf\`, \`above\` — which aligns centers and leaves arrow room.
+Boxes size themselves to their labels, so coordinates you guess for the
+second element onward will overlap; relative placement never does.
 Flowcharts read left→right or top→bottom; pick one and keep it. Only reach
 for explicit coordinates when the layout is not a chain or a grid.
 
@@ -61,6 +68,10 @@ ops: [
 
 ## Rules
 
+- **The two tools are the whole surface.** Never open skill or tool source
+  files, grep the workspace, or run shell commands to work out how boards or
+  the app work. If a read says the board does not exist, draw. If a draw
+  fails, the error says what to change; change it and draw again.
 - **Read first when the board is not empty.** \`whiteboard-read\` gives the ids
   and the bounds; add beside what is there (to the right of \`bounds.maxX\`, or
   \`below\` an existing element). Never draw over existing content.

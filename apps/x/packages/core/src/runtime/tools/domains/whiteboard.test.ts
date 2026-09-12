@@ -119,6 +119,27 @@ describe("whiteboard-read", () => {
         expect((result.shapes as unknown[])).toHaveLength(1);
     });
 
+    // A missing board is the normal state of a fresh space, not an error: an
+    // error result here sent the model off reading skill sources and running
+    // shell commands instead of drawing (dogfood, 2026-09-12).
+    it("answers a fresh space with a successful 'does not exist yet, draw creates it'", async () => {
+        org({
+            read_asset: () => mcpError("not_found", "no such asset"),
+            list_spaces: () => ok({ spaces: [{ id: SPACE, name: "Notes", kind: "direct", memberCount: 1, assets: [{ path: "README.md", version: 1, updatedAt: "" }] }] }),
+        });
+        const result = (await read.execute({ spaceId: SPACE })) as Record<string, unknown>;
+        expect(result).toMatchObject({
+            success: true,
+            exists: false,
+            empty: true,
+            board: "whiteboards/board.excalidraw",
+            name: "board",
+            boards: [],
+        });
+        expect(result.error).toBeUndefined();
+        expect(result.next).toMatch(/no boards yet.*whiteboard-draw creates "board" on the first draw/);
+    });
+
     it("names the boards the space has when the one asked for does not exist", async () => {
         org({
             read_asset: () => mcpError("not_found", "no such asset"),
@@ -141,8 +162,10 @@ describe("whiteboard-read", () => {
                 }),
         });
         const result = (await read.execute({ spaceId: SPACE, board: "launch" })) as Record<string, unknown>;
-        expect(result.success).toBe(false);
-        expect(result.error).toBe('No board "launch" in this space. Boards: roadmap, board.');
+        expect(result).toMatchObject({ success: true, exists: false, empty: true, name: "launch", board: "whiteboards/launch.excalidraw" });
+        expect(result.next).toBe(
+            'No board "launch" here yet; whiteboard-draw creates it on the first draw. To draw on an existing board instead, pass board: one of "roadmap", "board".',
+        );
         expect(result.boards).toEqual([
             { path: "whiteboards/roadmap.excalidraw", name: "roadmap", version: 9 },
             { path: "whiteboards/board.excalidraw", name: "board", version: 2 },

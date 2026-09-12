@@ -268,6 +268,11 @@ describe("whiteboard intent routes to the whiteboard tools", () => {
   it("the whiteboard skill body carries the rules a tool description cannot", async () => {
     const skills = await import("./index.js");
     const body = skills.resolveSkill("whiteboard")!.content;
+    // Dogfood 2026-09-12: a model went reading skill sources and running
+    // shell commands after a "no board yet" answer. The surface is closed.
+    expect(body).toContain("**The two tools are the whole surface.**");
+    expect(body).toMatch(/Never open skill or tool source\s+files, grep the workspace, or run shell commands/);
+    expect(body).toMatch(/If a read says the board does not exist, draw\./);
     expect(body).toContain("**Read first when the board is not empty.**");
     expect(body).toContain("**Add to, do not replace.**");
     expect(body).toContain("**One call per ask.**");

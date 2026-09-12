@@ -161,8 +161,10 @@ export const whiteboardTools: Record<string, BuiltinTool> = {
             "Read a shared whiteboard (a board in a space) as a compact inventory: boxes with their labels, free text, " +
             "and connectors as from→to, each with an id and position, plus the bounds of everything drawn. Read before " +
             "drawing on a board that has content — the ids are what whiteboard-draw's connect/update/delete/rightOf take, " +
-            "and the bounds say where free space is. Omit `board` for the space's default board; naming a board that " +
-            "does not exist returns the boards the space has.",
+            "and the bounds say where free space is. Omit `board` for the space's default board. A board that does not " +
+            "exist yet is a normal answer (exists: false, with the boards the space has): whiteboard-draw creates it on " +
+            "the first draw, so just draw. This tool and whiteboard-draw are the whole whiteboard surface — there is no " +
+            "file to read and no command to run.",
         inputSchema: z.object({
             org: ORG_ARG,
             spaceId: z.string().describe("The space holding the board (from list_spaces, or the ids in your context)"),
@@ -174,14 +176,23 @@ export const whiteboardTools: Record<string, BuiltinTool> = {
                 const path = resolveBoardPath(input.board);
                 const loaded = await loadBoard(org, input.spaceId, path);
                 if (!loaded.found) {
+                    // Not an error: a board that is not there yet is the
+                    // normal state of a fresh space. An error result here sent
+                    // a model off debugging (reading skill sources, running
+                    // shell commands) instead of drawing.
                     const boards = await listBoards(org, input.spaceId);
+                    const name = whiteboardDisplayName(path);
                     return {
-                        success: false,
-                        error:
-                            boards.length === 0
-                                ? `No board "${whiteboardDisplayName(path)}" in this space, and the space has no boards yet — whiteboard-draw creates one.`
-                                : `No board "${whiteboardDisplayName(path)}" in this space. Boards: ${boards.map((b) => b.name).join(", ")}.`,
+                        success: true,
+                        exists: false,
+                        board: path,
+                        name,
+                        empty: true,
                         boards,
+                        next:
+                            boards.length === 0
+                                ? `This space has no boards yet. whiteboard-draw creates "${name}" on the first draw — place the first element at x: 0, y: 0 and the rest relative to it.`
+                                : `No board "${name}" here yet; whiteboard-draw creates it on the first draw. To draw on an existing board instead, pass board: one of ${boards.map((b) => `"${b.name}"`).join(", ")}.`,
                     };
                 }
                 const summary = summarizeWhiteboard(loaded.elements);
@@ -209,12 +220,23 @@ export const whiteboardTools: Record<string, BuiltinTool> = {
             "size or style; `delete` one. Give added elements an `id` so later ops in the same call can reference them; " +
             "existing ids come from whiteboard-read. Everything already on the board stays exactly as it is, and the " +
             "result appears live for everyone with the board open. Creates the board when it does not exist. " +
-            "All-or-nothing: one invalid op (an unknown id, overlapping elements) writes nothing and says why.",
+            "All-or-nothing: one invalid op (an unknown id, overlapping elements) writes nothing and says why. " +
+            "This tool and whiteboard-read are the whole whiteboard surface — never read source files or run commands " +
+            "to work out how boards work; the ops below are all there is.",
         inputSchema: z.object({
             org: ORG_ARG,
             spaceId: z.string().describe("The space holding the board"),
             board: BOARD_ARG,
-            ops: z.array(WhiteboardOp).min(1).max(MAX_OPS).describe("The operations, applied in order"),
+            ops: z
+                .array(WhiteboardOp)
+                .min(1)
+                .max(MAX_OPS)
+                .describe(
+                    "The operations, applied in order, as plain JSON objects. Example: " +
+                        '[{"op":"add","id":"a","shape":"rectangle","text":"Sign up","x":0,"y":0},' +
+                        '{"op":"add","id":"b","shape":"ellipse","text":"Done","rightOf":"a"},' +
+                        '{"op":"connect","from":"a","to":"b","label":"then"}]',
+                ),
             reason: z
                 .string()
                 .min(1)

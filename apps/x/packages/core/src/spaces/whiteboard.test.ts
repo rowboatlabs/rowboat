@@ -275,15 +275,46 @@ describe("applyWhiteboardOps — connect", () => {
         expect(line.elbowed).toBeUndefined();
     });
 
-    it("refuses to connect overlapping elements or a connector", () => {
+    it("refuses to connect overlapping elements, naming both boxes and the remedy, or a connector", () => {
         const base = apply([], [
             { op: "add", id: "a", shape: "rectangle", text: "A", x: 0, y: 0, width: 100, height: 60 },
             { op: "add", id: "b", shape: "rectangle", text: "B", x: 10, y: 10, width: 100, height: 60 },
             { op: "add", id: "c", shape: "rectangle", text: "C", x: 500, y: 0, width: 100, height: 60 },
         ]).elements;
-        expect(() => apply(base, [{ op: "connect", from: "a", to: "b" }])).toThrow(/overlap/);
+        expect(() => apply(base, [{ op: "connect", from: "a", to: "b" }])).toThrow(
+            /connect a → b: the elements overlap \(a at \(0, 0\) 100×60; b at \(10, 10\) 100×60\).*rightOf\/below\/leftOf\/above/,
+        );
         const withArrow = apply(base, [{ op: "connect", id: "ac", from: "a", to: "c" }]).elements;
         expect(() => apply(withArrow, [{ op: "connect", from: "ac", to: "b" }])).toThrow(/is a connector/);
+    });
+});
+
+// Boxes size themselves to their labels, so coordinates a model guesses for
+// the second element onward land on top of the first. The add still happens
+// (the model may mean it), but the result says so and names the fix.
+describe("applyWhiteboardOps — overlap warnings", () => {
+    it("warns when a placed addition lands on an existing element, naming it", () => {
+        const base = apply([], [{ op: "add", id: "animal", shape: "rectangle", text: "Animal (Superclass / Parent)\n• name\n• speak()", x: 220, y: 80 }]).elements;
+        const { elements, warnings } = apply(base, [{ op: "add", id: "dog", shape: "rectangle", text: "Dog", x: 240, y: 150 }]);
+        expect(elements.some((e) => e.id === "dog" && !e.isDeleted)).toBe(true);
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]).toMatch(/^add dog: overlaps animal at \(220, 80\) \d+×\d+ — .*rightOf\/below\/leftOf\/above/);
+    });
+
+    it("does not warn for relative or flowed placement, or for a label inside its own box", () => {
+        const base = apply([], [{ op: "add", id: "a", shape: "rectangle", text: "A", x: 0, y: 0 }]).elements;
+        const { warnings } = apply(base, [
+            { op: "add", id: "b", shape: "rectangle", text: "B", below: "a" },
+            { op: "add", id: "c", shape: "ellipse", text: "C" },
+            { op: "add", id: "d", shape: "text", text: "free text", x: 900, y: 900 },
+        ]);
+        expect(warnings).toEqual([]);
+    });
+
+    it("warns for free text placed over a box, too", () => {
+        const base = apply([], [{ op: "add", id: "a", shape: "rectangle", text: "A", x: 0, y: 0 }]).elements;
+        const { warnings } = apply(base, [{ op: "add", id: "t", shape: "text", text: "on top", x: 10, y: 10 }]);
+        expect(warnings).toEqual([expect.stringMatching(/^add t: overlaps a at/)]);
     });
 });
 
