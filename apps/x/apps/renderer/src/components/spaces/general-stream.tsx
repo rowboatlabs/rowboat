@@ -12,9 +12,7 @@ import {
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { subscribeComposeInsert } from '@/lib/spaces-compose'
 import { applyReaction, dayKey, formatDayLabel, isContinuation, threadLabelOf } from '@/lib/spaces-conventions'
-import { consumeJump, requestJump, scrollToMessage, subscribeJump } from '@/lib/spaces-jump'
-import { pinnedMessages } from '@/lib/spaces-corpus'
-import { PinnedBanner } from '@/components/spaces/pinned-banner'
+import { consumeJump, scrollToMessage, subscribeJump } from '@/lib/spaces-jump'
 import { PollDialogHost } from '@/components/spaces/poll-dialog'
 import { applyPollVote, myPollVotes, postPoll } from '@/lib/spaces-poll'
 import { resolveMentions } from '@/lib/spaces-presentation'
@@ -41,8 +39,6 @@ const RENDER_CAP = 100
 const NEW_LINGER_MS = 5_000
 /** Clear delay after the fade starts — must outlast the divider's duration-700. */
 const NEW_FADE_MS = 800
-/** The pinned strip shows the newest pins, stepped through with a chevron. */
-const PIN_BANNER_MAX = 3
 
 export function GeneralStream({
     org, space, stream, presence, members, memberNames, entries = [], onOpenThread, onOpenSession, onClose, visible = true, composeActive = true,
@@ -435,7 +431,6 @@ export function GeneralStream({
     // Streamdown, so an uncapped list makes the first paint crawl. "Show
     // earlier" just lifts the cap; the messages are already in memory.
     const streamMessages = stream.messages
-    const pinned = useMemo(() => pinnedMessages(streamMessages).slice(0, PIN_BANNER_MAX), [streamMessages])
     const [renderCap, setRenderCap] = useState(FIRST_PAINT_CAP)
     useEffect(() => setRenderCap(FIRST_PAINT_CAP), [memoryKey])
     // The short tail is on screen — widen to the full window right after, as
@@ -668,11 +663,6 @@ export function GeneralStream({
                     </button>
                 )}
             </div>
-            <PinnedBanner
-                pinned={pinned}
-                memberNames={memberNames}
-                onJump={(messageId) => requestJump({ topicId: STREAM_READ_KEY, messageId })}
-            />
             <div className="relative flex-1 min-h-0 flex flex-col">
             <div
                 ref={scrollRef}
