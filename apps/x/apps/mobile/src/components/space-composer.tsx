@@ -206,11 +206,12 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
               disabled={uploading}
               onPress={() => void pickMedia()}
               style={{
-                width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center',
-                backgroundColor: colors.separator, opacity: uploading ? 0.5 : 1,
+                width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center',
+                backgroundColor: colors.background === '#000000' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)',
+                opacity: uploading ? 0.5 : 1,
               }}
             >
-              {uploading ? <ActivityIndicator size="small" /> : <Image source="sf:plus" style={{ width: 16, height: 16 }} tintColor={colors.label} />}
+              {uploading ? <ActivityIndicator size="small" /> : <Image source="sf:plus" style={{ width: 14, height: 14 }} tintColor={colors.secondaryLabel} />}
             </Pressable>
           ) : null}
           <Pressable
