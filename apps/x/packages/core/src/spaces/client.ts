@@ -39,6 +39,27 @@ export interface SpacesApiError {
   retryable: boolean;
 }
 
+/**
+ * The shortest honest description of why the socket never answered: the
+ * errno when there is one (undici nests it — sometimes an AggregateError over
+ * ::1 and 127.0.0.1 — under `cause`), else the deepest message we can find.
+ */
+function describeTransportFailure(err: unknown): string {
+  let cur: unknown = err;
+  for (let depth = 0; cur instanceof Error && depth < 4; depth++) {
+    const code = (cur as { code?: unknown }).code;
+    if (typeof code === 'string' && code.length > 0) return code;
+    if (cur instanceof AggregateError && cur.errors.length > 0) {
+      cur = cur.errors[0];
+      continue;
+    }
+    if (cur.cause === undefined) break;
+    cur = cur.cause;
+  }
+  if (cur instanceof Error && cur.message) return cur.message;
+  return err instanceof Error ? err.message : String(err);
+}
+
 export class SpacesRequestError extends Error {
   readonly status: number;
   readonly code: string;
@@ -99,6 +120,25 @@ export class SpacesClient {
     return typeof this.token === 'string' ? this.token : this.token(opts);
   }
 
+  /**
+   * Every request crosses here. A transport failure (nothing listening,
+   * DNS, reset — undici's bare `TypeError: fetch failed`) becomes a
+   * SpacesRequestError that names the org and the cause, so an org that is
+   * down reads as such all the way up to the app's logs instead of as an
+   * anonymous "fetch failed" with the errno dropped at the first serializer.
+   */
+  private async transport(url: string, init?: RequestInit): Promise<Response> {
+    try {
+      return await this.fetchImpl(url, init);
+    } catch (err) {
+      throw new SpacesRequestError(0, {
+        code: 'unreachable',
+        message: `Rowboat org at ${this.baseUrl} is unreachable (${describeTransportFailure(err)})`,
+        retryable: true,
+      });
+    }
+  }
+
   private async request<S extends z.ZodType>(
     method: 'GET' | 'POST',
     path: string,
@@ -107,7 +147,7 @@ export class SpacesClient {
     auth = true,
   ): Promise<z.infer<S>> {
     const send = async (token: string | undefined) =>
-      this.fetchImpl(`${this.baseUrl}${path}`, {
+      this.transport(`${this.baseUrl}${path}`, {
         method,
         headers: {
           ...(token !== undefined ? { authorization: `Bearer ${token}` } : {}),
@@ -149,7 +189,7 @@ export class SpacesClient {
 
   /** Also the connectivity probe for "org unreachable" states. */
   async health(): Promise<{ ok: boolean; org: { name: string; address: string } }> {
-    const res = await this.fetchImpl(`${this.baseUrl}/v1/health`);
+    const res = await this.transport(`${this.baseUrl}/v1/health`);
     if (!res.ok) throw new SpacesRequestError(res.status, { code: 'internal', message: 'health check failed', retryable: true });
     return (await res.json()) as { ok: boolean; org: { name: string; address: string } };
   }
@@ -286,7 +326,7 @@ export class SpacesClient {
   async uploadBlob(spaceId: string, bytes: Uint8Array, opts: { declaredMime?: string } = {}): Promise<BlobInfo> {
     const hash = createHash('sha256').update(bytes).digest('hex');
     const send = async (token: string) =>
-      this.fetchImpl(`${this.baseUrl}${this.space(spaceId, '/blobs')}`, {
+      this.transport(`${this.baseUrl}${this.space(spaceId, '/blobs')}`, {
         method: 'PUT',
         headers: {
           authorization: `Bearer ${token}`,
@@ -325,7 +365,7 @@ export class SpacesClient {
    */
   async fetchBlob(spaceId: string, hash: string): Promise<{ bytes: Uint8Array; mime: string }> {
     const send = async (token: string) =>
-      this.fetchImpl(`${this.baseUrl}${this.space(spaceId, `/blobs/${hash}`)}`, {
+      this.transport(`${this.baseUrl}${this.space(spaceId, `/blobs/${hash}`)}`, {
         headers: { authorization: `Bearer ${token}` },
       });
     let res = await send(await this.currentToken());
