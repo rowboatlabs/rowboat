@@ -83,8 +83,8 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
   const [picked, setPicked] = useState<Map<string, MentionPick>>(new Map());
   const [uploading, setUploading] = useState(false);
   // The native multiline field keeps its grown height after the text is
-  // cleared — size it ourselves and reset on send.
-  const [inputHeight, setInputHeight] = useState(40);
+  // cleared — remount it after a send so it snaps back to one line.
+  const [inputKey, setInputKey] = useState(0);
   // Picked media rides as thumbnails above the field (iMessage/Slack); the
   // wire markdown joins the body only on send.
   const [attachments, setAttachments] = useState<{ key: string; uri: string; md: string; video: boolean }[]>([]);
@@ -134,7 +134,7 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
   const cancelEdit = () => {
     setEditing(null);
     setText('');
-    setInputHeight(40);
+    setInputKey((k) => k + 1);
   };
 
   const active = useMemo(() => activeMention(text, cursor), [text, cursor]);
@@ -174,7 +174,7 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
     setText('');
     setPicked(new Map());
     setAttachments([]);
-    setInputHeight(40);
+    setInputKey((k) => k + 1);
     if (editingId && onEdit) onEdit(editingId, body);
     else onSend(body);
   };
@@ -270,9 +270,8 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
         ) : null}
         <TextInput
           ref={inputRef}
-          style={{ height: Math.min(140, Math.max(40, inputHeight)), fontSize: 16, lineHeight: 22, color: colors.label, paddingVertical: 8 }}
-          onContentSizeChange={(e) => setInputHeight(text.length === 0 ? 40 : e.nativeEvent.contentSize.height + 16)}
-          scrollEnabled={inputHeight > 140}
+          key={inputKey}
+          style={{ minHeight: 40, maxHeight: 140, fontSize: 16, lineHeight: 22, color: colors.label, paddingVertical: 8 }}
           placeholder={placeholder}
           placeholderTextColor={colors.tertiaryLabel}
           onChangeText={setText}
