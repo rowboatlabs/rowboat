@@ -68,7 +68,6 @@ window.EXCALIDRAW_ASSET_PATH = './excalidraw-assets/'
 const CURSOR_SYNC_MS = 33 // ~30fps, Excalidraw's own cadence
 const FULL_SYNC_MS = 20_000 // periodic full-scene self-heal
 const SAVE_AFTER_MS = 15_000 // snapshot throttle once the board exists
-const FIRST_SAVE_AFTER_MS = 1_500 // a new board becomes an asset on the first stroke
 const HEARTBEAT_MS = 20_000
 const COLLABORATOR_TTL_MS = 65_000 // ~3 missed heartbeats
 
@@ -208,7 +207,6 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
                 baseVersion: version,
                 elements,
                 sceneVersion: getSceneVersion(elements),
-                firstSaveDelayMs: FIRST_SAVE_AFTER_MS,
                 saveDelayMs: SAVE_AFTER_MS,
                 io: { propose: proposeSnapshot, pullAndReconcile: pullSnapshot },
             })

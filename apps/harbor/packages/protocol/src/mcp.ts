@@ -193,7 +193,7 @@ export const readThread = tool({
   name: 'read_thread',
   description:
     'Read one flat thread: the root message, its topic row (null = a plain untitled thread; its ' +
-    'documentPath, when set, is the file the discussion is about — read_asset it for context), and ' +
+    'documentAssetId, when set, is the file the discussion is about — read_asset it for context), and ' +
     'the replies (each attributed to its member and acting mode), oldest first (default 50). ' +
     'Use this to catch up before replying or to answer questions about a conversation. A reply id ' +
     'resolves to its root. When `truncated` is true, pass `beforeOffset` to page back before ' +

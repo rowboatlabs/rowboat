@@ -5,7 +5,6 @@ import {
     applyWhiteboardOps,
     nextFractionalIndex,
     boardPathForName,
-    findBoardById,
     parseWhiteboardSnapshot,
     serializeWhiteboardSnapshot,
     summarizeWhiteboard,
