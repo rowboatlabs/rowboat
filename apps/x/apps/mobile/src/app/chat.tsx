@@ -20,6 +20,7 @@ import * as analytics from '@/lib/analytics';
 import { ModelPill } from '@/components/model-picker';
 import { TurnView } from '@/components/turn-view';
 import { useConnection } from '@/lib/connection';
+import { useKeyboardVisible } from '@/lib/use-keyboard-visible';
 import { useLiveTurn } from '@/lib/use-live-turn';
 import { useModels } from '@/lib/use-models';
 import { useColors } from '@/theme/colors';
@@ -69,6 +70,7 @@ function Turn({ turnId, isLatest, onStreaming }: { turnId: string; isLatest: boo
 export default function ChatScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const keyboardVisible = useKeyboardVisible();
   const models = useModels();
   const { pairing, sessions, events } = useConnection();
   const params = useLocalSearchParams<{ id?: string }>();
@@ -213,7 +215,7 @@ export default function ChatScreen() {
         {/* Composer — Claude-style card: input on top, model pill + send below */}
         <View
           style={{
-            marginHorizontal: 10, marginTop: 6, marginBottom: 4,
+            marginHorizontal: 10, marginTop: 6, marginBottom: keyboardVisible ? 16 : 4,
             backgroundColor: colors.background,
             borderWidth: 1, borderColor: colors.separator,
             borderRadius: 22, borderCurve: 'continuous',

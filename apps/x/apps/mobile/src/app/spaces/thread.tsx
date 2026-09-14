@@ -263,7 +263,7 @@ export default function SpaceThreadScreen() {
       )}
 
       {/* Composer */}
-      <View style={{ paddingTop: 8, paddingBottom: (keyboardVisible ? 0 : insets.bottom) + 10 }}>
+      <View style={{ paddingTop: 8, paddingBottom: keyboardVisible ? 16 : insets.bottom + 10 }}>
         <SpaceComposer
           ref={inputRef}
           placeholder="Add a reply"
