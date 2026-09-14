@@ -242,6 +242,8 @@ export default function SpaceChatScreen() {
         <ScrollView
           ref={scrollRef}
           keyboardDismissMode="interactive"
+          keyboardShouldPersistTaps="handled"
+          alwaysBounceVertical
           style={{ flex: 1 }}
           contentContainerStyle={{ paddingVertical: 12 }}
           onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: false })}

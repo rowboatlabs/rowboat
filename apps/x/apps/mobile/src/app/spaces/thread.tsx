@@ -233,6 +233,8 @@ export default function SpaceThreadScreen() {
         <ScrollView
           ref={scrollRef}
           keyboardDismissMode="interactive"
+          keyboardShouldPersistTaps="handled"
+          alwaysBounceVertical
           style={{ flex: 1 }}
           contentContainerStyle={{ paddingVertical: 12 }}
         >
