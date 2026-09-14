@@ -142,7 +142,7 @@ async function dispatch(
       // The same row /v1/me serves — the member the auth driver resolved.
       const member = await store.getMember(actor.memberId);
       if (!member) throw new HarborError('not_found', 'member not found');
-      return { member };
+      return { member, org: { name: service.org.name, address: service.org.address } };
     }
     case 'list_members': {
       const a = args as { spaceId?: string };

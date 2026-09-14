@@ -83,10 +83,11 @@ describe.each([['memory'], ['postgres']] as const)('agent face parity (%s store)
     sqlDb = undefined;
   });
 
-  it("whoami is the token's member — the same row /v1/me serves", async () => {
-    const { member } = await call<{ member: Member }>(ramAgent, 'whoami');
+  it("whoami is the token's member — the same row /v1/me serves — plus the org's name and address", async () => {
+    const { member, org } = await call<{ member: Member; org: { name: string; address: string } }>(ramAgent, 'whoami');
     expect(member).toMatchObject({ id: 'ramnique', displayName: 'Ramnique', role: 'member' });
     expect(member).toEqual((await ramnique.get('/v1/me')).body.member);
+    expect(org).toEqual({ name: harbor.service.org.name, address: harbor.service.org.address });
     const other = await call<{ member: Member }>(harshAgent, 'whoami');
     expect(other.member.id).toBe('harsh');
   });

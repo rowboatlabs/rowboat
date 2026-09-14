@@ -85,13 +85,14 @@ export const SpaceMentionRef = z.discriminatedUnion("kind", [
     }),
     // A shared whiteboard (2026-09-12): a board is an asset under whiteboards/
     // in one space, so the ref carries the space too — the whiteboard tools
-    // take spaceId + the board path.
+    // take spaceId + the board's asset id; path and name are display only.
     z.object({
         kind: z.literal("board"),
         orgId: z.string(),
         orgName: z.string(),
         spaceId: z.string(),
         spaceName: z.string(),
+        assetId: z.string(),                 // the board's asset id (what whiteboard-read/draw take)
         path: z.string(),                    // whiteboards/<name>.excalidraw
         name: z.string(),                    // the board's display name as inserted after "@"
     }),
@@ -140,7 +141,8 @@ export const UserMessageContext = z.object({
             orgName: z.string(),
             spaceId: z.string(),
             spaceName: z.string(),
-            path: z.string(),
+            assetId: z.string(),             // the board's asset id (boardId for the whiteboard tools)
+            path: z.string(),                // display path, whiteboards/<name>.excalidraw
         }),
     ]).optional(),
 });

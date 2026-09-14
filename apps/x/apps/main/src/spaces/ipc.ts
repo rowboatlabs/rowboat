@@ -39,6 +39,7 @@ type SpacesHandlers = {
   'spaces:resolveInvite': InvokeHandler<'spaces:resolveInvite'>;
   'spaces:acceptInvite': InvokeHandler<'spaces:acceptInvite'>;
   'spaces:listAssets': InvokeHandler<'spaces:listAssets'>;
+  'spaces:createAsset': InvokeHandler<'spaces:createAsset'>;
   'spaces:moveAsset': InvokeHandler<'spaces:moveAsset'>;
   'spaces:deleteAsset': InvokeHandler<'spaces:deleteAsset'>;
   'spaces:restoreAsset': InvokeHandler<'spaces:restoreAsset'>;

@@ -236,23 +236,23 @@ const blobTools: Record<string, BuiltinTool> = {
         permission: "prompt",
         isAvailable: isSpacesAvailable,
         description:
-            "Upload a local binary file (image, PDF, media, …) to a space's blob store, returning its sha256 " +
-            "hash and canonical link. Uploading alone publishes NOTHING — an unreferenced upload is an invisible " +
-            "orphan awaiting GC. Always follow up with a referencing act: pass the hash as " +
-            "propose_change's `blob` to commit it into the space's files, or embed the returned `markdown` in a " +
-            "post_message body to share it in the feed. Re-uploading identical bytes is a free no-op (content-addressed).",
+            "Upload a file from this machine's disk (image, PDF, media, …) to a space's blob store, returning its " +
+            "sha256 hash and canonical link. Uploading alone publishes NOTHING — an unreferenced upload is an invisible " +
+            "orphan awaiting GC. Always follow up with a referencing act: pass the hash as `blob` to create_asset " +
+            "(a new space file) or propose_change (replace an existing one's bytes, by assetId), or embed the returned " +
+            "`markdown` in a post_message body to share it in the feed. Re-uploading identical bytes is a free no-op (content-addressed).",
         inputSchema: z.object({
             org: ORG_ARG,
             spaceId: z.string().describe("The space to upload into (from list_spaces)"),
-            path: z.string().describe("The local file to upload (workspace-relative or absolute)"),
+            filePath: z.string().describe("The LOCAL file on this machine to upload (workspace-relative or absolute) — not a space file"),
             name: z.string().optional().describe("Display filename for the link (default: the file's basename)"),
         }),
-        execute: async (input: { org?: string; spaceId: string; path: string; name?: string }) => {
+        execute: async (input: { org?: string; spaceId: string; filePath: string; name?: string }) => {
             try {
                 const org = await resolveOrgArg(input.org);
                 const files = await import("../../../filesystem/files.js");
-                const { buffer, resolvedPath } = await files.readBuffer(input.path);
-                if (buffer.length === 0) return { success: false, error: `File is empty: ${input.path}` };
+                const { buffer, resolvedPath } = await files.readBuffer(input.filePath);
+                if (buffer.length === 0) return { success: false, error: `File is empty: ${input.filePath}` };
                 const displayName = input.name?.trim() || path.basename(resolvedPath);
                 const orgs = await import("../../../spaces/orgs.js");
                 const declaredMime = mimeForFilename(displayName) ?? mimeForFilename(resolvedPath);
@@ -280,11 +280,11 @@ const blobTools: Record<string, BuiltinTool> = {
         permission: "none",
         isAvailable: isSpacesAvailable,
         description:
-            "Download a space blob (a message attachment or a binary file in the space's files) to local disk and " +
-            "return the absolute path — feed that path to LLMParse/parseFile to inspect images, PDFs, and other " +
+            "Download a space blob (a message attachment or a binary space file) to this machine's disk and " +
+            "return the local absolute path — feed it to LLMParse/parseFile to inspect images, PDFs, and other " +
             "binaries, or copy it into the workspace with file tools. Identify the blob by its canonical link " +
             "(`https://<org>/s/<spaceId>/b/<hash>?name=…`, as seen in message bodies) or by spaceId + the `blob.hash` " +
-            "read_asset/list_spaces report. Downloads are cached by content hash — repeat calls are free.",
+            "that read_asset (by assetId) or list_spaces reports. Downloads are cached by content hash — repeat calls are free.",
         inputSchema: z.object({
             org: ORG_ARG,
             url: z.string().optional().describe("The blob link exactly as it appears in a message body or file listing"),
@@ -315,7 +315,7 @@ const blobTools: Record<string, BuiltinTool> = {
                 const blobCache = await import("../../../spaces/blob-cache.js");
                 const { bytes, mime } = await blobCache.getBlob(org.id, spaceId, hash);
                 const filePath = await blobCache.writeBlobFile(hash, blobFilename(name, hash, mime), bytes);
-                return { success: true, path: filePath, mime, size: bytes.length, hash };
+                return { success: true, filePath, mime, size: bytes.length, hash };
             } catch (e) {
                 return { success: false, error: e instanceof Error ? e.message : String(e) };
             }

@@ -59,11 +59,12 @@ function tool<In extends z.ZodType, Out extends z.ZodType>(t: McpToolDef<In, Out
 export const whoami = tool({
   name: 'whoami',
   description:
-    'Who your person is on this org: their memberId, display name, and role. Use it to recognise ' +
-    'their own messages and reactions in what you read, and to open their notes-to-self DM ' +
-    '(open_direct with their own memberId).',
+    'Who your person is on this org: their memberId, display name, and role, plus the org itself ' +
+    '(name and address — the host every link on this org is minted on, e.g. a file link ' +
+    'https://<address>/s/<spaceId>/a/<assetId>). Use it to recognise their own messages and ' +
+    'reactions in what you read, and to open their notes-to-self DM (open_direct with their own memberId).',
   input: z.object({}),
-  output: z.object({ member: Member }),
+  output: z.object({ member: Member, org: z.object({ name: z.string(), address: z.string() }) }),
 });
 
 export const listMembers = tool({

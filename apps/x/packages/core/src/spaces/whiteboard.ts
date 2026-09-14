@@ -121,16 +121,22 @@ export function serializeWhiteboardSnapshot(elements: readonly WbElement[]): str
 }
 
 /**
- * A board reference as the model gives it — a bare name ("roadmap"), a file
- * name ("roadmap.excalidraw"), or the asset path — to the asset path. Empty
- * or missing means the space's default board.
+ * A board name as the model gives it — a bare name ("roadmap"), a file name
+ * ("roadmap.excalidraw"), or the full path — to the path a NEW board is born
+ * at (create_asset). Empty or missing means the space's default board. Only
+ * creation is name-shaped; an existing board is addressed by its asset id.
  */
-export function resolveBoardPath(input: string | undefined): string {
+export function boardPathForName(input: string | undefined): string {
     const trimmed = input?.trim() ?? "";
     if (!trimmed) return DEFAULT_WHITEBOARD_PATH;
     if (isWhiteboardPath(trimmed)) return trimmed;
     const stripped = trimmed.startsWith(`${WHITEBOARD_DIR}/`) ? trimmed.slice(WHITEBOARD_DIR.length + 1) : trimmed;
     return whiteboardPathForName(stripped.endsWith(WHITEBOARD_EXT) ? stripped.slice(0, -WHITEBOARD_EXT.length) : stripped) ?? DEFAULT_WHITEBOARD_PATH;
+}
+
+/** The board with this asset id in a space's file listing (list_spaces `assets`), or undefined — non-board files never match. */
+export function findBoardById<T extends { id: string; path: string }>(assets: readonly T[], boardId: string): T | undefined {
+    return assets.find((a) => a.id === boardId && isWhiteboardPath(a.path));
 }
 
 // ---------------------------------------------------------------------------

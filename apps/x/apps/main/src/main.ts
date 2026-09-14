@@ -234,17 +234,34 @@ function registerAppProtocol() {
       })();
     }
 
-    // File-based URLs keep HTML's relative assets inside the same space.
+    // Space documents by asset id: app://space-document/<orgId>/<spaceId>/<assetId>[/<sub path>]
+    // An HTML document's relative references re-enter this route with a sub
+    // path; it resolves against the document's folder first, then the space
+    // root (so both `<assetId>/` and `<assetId>/<own path>` document URLs
+    // work), through the listing (path → id) — the read itself is by id.
     if (url.host === "space-document") {
       try {
-        const [orgId, spaceId, ...segments] = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
-        if (!orgId || !spaceId || !segments.length || segments.some((part) => part === '..' || part.includes('/') || part.includes('\\'))) {
+        const [orgId, spaceId, assetId, ...rest] = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+        if (!orgId || !spaceId || !assetId || rest.some((part) => part.includes('/') || part.includes('\\'))) {
           return new Response("Not Found", { status: 404 });
         }
-        const assetPath = segments.join('/');
-        const asset = await getSpaceClient(orgId).readAsset(spaceId, assetPath);
+        const client = getSpaceClient(orgId);
+        let targetId = assetId;
+        if (rest.length > 0) {
+          const listing = await client.listAssets(spaceId);
+          const doc = listing.find((a) => a.id === assetId);
+          if (!doc) return new Response("Not Found", { status: 404 });
+          const sub = rest.join('/');
+          const inFolder = path.posix.normalize(path.posix.join(path.posix.dirname(doc.path), sub));
+          const fromRoot = path.posix.normalize(sub);
+          const candidates = [inFolder, fromRoot].filter((p) => p !== '.' && !p.startsWith('../') && p !== '..');
+          const hit = candidates.map((p) => listing.find((a) => a.path === p)).find((a) => a !== undefined);
+          if (!hit) return new Response("Not Found", { status: 404 });
+          targetId = hit.id;
+        }
+        const asset = await client.readAsset(spaceId, targetId);
         const blob = asset.blob ? await spaceBlobCache.getBlob(orgId, spaceId, asset.blob.hash) : null;
-        const ext = path.extname(assetPath).toLowerCase();
+        const ext = path.extname(asset.path).toLowerCase();
         const textTypes: Record<string, string> = {
           '.html': 'text/html', '.htm': 'text/html', '.css': 'text/css',
           '.js': 'text/javascript', '.json': 'application/json', '.svg': 'image/svg+xml',

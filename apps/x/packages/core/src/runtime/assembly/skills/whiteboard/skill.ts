@@ -7,10 +7,10 @@ const skill = `
 # Whiteboards
 
 A whiteboard is a shared drawing board inside a space — the "Board" button in
-a space's header. Boards are files under \`whiteboards/\` (the default one is
-\`whiteboards/board.excalidraw\`); a space can have several, each with a name.
-Everyone with a board open sees your drawing appear live, attributed to your
-person.
+a space's header. A board is a file under \`whiteboards/\` (the default one is
+\`whiteboards/board.excalidraw\`), addressed by its **boardId** — the file's
+asset id; the name is display. A space can have several. Everyone with a
+board open sees your drawing appear live, attributed to your person.
 
 You never touch the file format. Two tools do everything, and they are the
 whole surface: there is no file to read, no source to look up, and no
@@ -18,13 +18,13 @@ command to run for anything to do with boards.
 
 | You need | Call |
 |---|---|
-| what is on a board, its ids and layout | \`whiteboard-read\` (omit \`board\` for the default one) |
-| which boards a space has | \`whiteboard-read\` — a board that does not exist yet answers \`exists: false\` and lists the boards the space has |
-| draw, label, connect, move, restyle, delete | \`whiteboard-draw\` with a list of \`ops\` (plain JSON objects) |
-| the spaceId for a space named in the ask | \`list_spaces\` — unless the context already gives it (a board picked from the @ menu, or the board open in Spaces) |
+| what is on a board, its ids and layout | \`whiteboard-read\` with its \`boardId\` (omit for the default board) |
+| a board's boardId by name, or which boards a space has | \`list_spaces\` — the space's \`assets[]\` under \`whiteboards/\`, \`id\` + \`path\`; unless the context already gives it (a board picked from the @ menu, or the board open in Spaces) |
+| draw, label, connect, move, restyle, delete | \`whiteboard-draw\` with \`boardId\` and a list of \`ops\` (plain JSON objects) |
+| a board that does not exist yet | \`whiteboard-draw\` with \`name\` instead of \`boardId\` — created on the first draw; the result carries the new boardId |
 
-A board that does not exist yet is not a problem: \`whiteboard-draw\` creates
-it on the first draw. Start at \`x: 0, y: 0\` and go.
+A board that does not exist yet is not a problem: \`whiteboard-draw\` with a
+\`name\` creates it. Start at \`x: 0, y: 0\` and go.
 
 ## Drawing
 
@@ -86,8 +86,8 @@ ops: [
 - **Say what you drew, briefly.** Name the board, count the elements, mention
   ids only if the person will refer to them. The board is the deliverable;
   do not narrate coordinates.
-- A board that does not exist is created on the first draw. To draw on a
-  named board, pass \`board: "<name>"\`.
+- A board that does not exist is created on the first draw by \`name\`. An
+  existing board is always \`boardId\` — never guess one; \`list_spaces\` has them.
 `;
 
 export default skill;
