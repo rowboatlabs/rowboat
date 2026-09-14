@@ -139,6 +139,39 @@ describe.each([['memory'], ['postgres']] as const)('windowed reads (%s store)', 
     expect(listing?.lastActivityAt).toBe(listing?.rootMessage?.lastReplyAt);
   });
 
+  it('aroundOffset lands on a row with half the window on each side; afterOffset pages forward to the head', async () => {
+    // Land on r3 (roots[2]) with limit 3: one below, r3, one above — more on both sides.
+    const r3 = roots[2]!;
+    const around = await ramnique.get(`/v1/spaces/${spaceId}/stream?aroundOffset=${r3.offset}&limit=3`);
+    expect(around.status).toBe(200);
+    expect((around.body.messages as Message[]).map((m) => m.body)).toEqual(['r2', 'r3', 'r4']);
+    expect(around.body).toMatchObject({ hasMore: true, hasMoreAfter: true });
+    // Forward from r4's offset: only r5 is above it, and nothing beyond.
+    const after = await ramnique.get(`/v1/spaces/${spaceId}/stream?afterOffset=${(around.body.messages as Message[])[2]!.offset}&limit=3`);
+    expect((after.body.messages as Message[]).map((m) => m.body)).toEqual(['r5']);
+    expect(after.body).toMatchObject({ hasMore: false, hasMoreAfter: false });
+    // Around the opener: nothing below it, the window fills from above.
+    const first = await ramnique.get(`/v1/spaces/${spaceId}/stream?aroundOffset=${roots[0]!.offset}&limit=4`);
+    expect((first.body.messages as Message[]).map((m) => m.body)).toEqual(['r1 — the opener', 'r2']);
+    expect(first.body).toMatchObject({ hasMore: false, hasMoreAfter: true });
+    // An anchor between rows (a reply's offset in the ROOT stream) still lands: the window straddles it.
+    const straddle = await ramnique.get(`/v1/spaces/${spaceId}/stream?aroundOffset=${replies[1]!.offset}&limit=2`);
+    expect((straddle.body.messages as Message[]).map((m) => m.body)).toEqual(['r2', 'r3']);
+    // The newest page never has more above it; two anchors at once is a bad request.
+    expect((await ramnique.get(`/v1/spaces/${spaceId}/stream?limit=2`)).body.hasMoreAfter).toBe(false);
+    expect((await ramnique.get(`/v1/spaces/${spaceId}/stream?aroundOffset=${r3.offset}&beforeOffset=${r3.offset}`)).status).toBe(400);
+  });
+
+  it('a thread lands on a reply the same way and pages forward from it', async () => {
+    const reply3 = replies[2]!;
+    const around = await ramnique.get(`/v1/spaces/${spaceId}/threads/${rootId}?aroundOffset=${reply3.offset}&limit=3`);
+    expect((around.body.messages as Message[]).map((m) => m.body)).toEqual(['reply2', 'reply3', 'reply4']);
+    expect(around.body).toMatchObject({ hasMore: true, hasMoreAfter: true, root: { id: rootId } });
+    const after = await ramnique.get(`/v1/spaces/${spaceId}/threads/${rootId}?afterOffset=${replies[3]!.offset}&limit=10`);
+    expect((after.body.messages as Message[]).map((m) => m.body)).toEqual(['reply5', 'reply6']);
+    expect(after.body.hasMoreAfter).toBe(false);
+  });
+
   it('read_stream and read_thread (MCP) window the same way and state truncation', async () => {
     const agent = await agentClient(harbor, 'dev-ramnique', { agentName: 'Rowboat' });
     const page = await callStructured<{ messages: Message[]; topics: Topic[]; truncated: boolean }>(agent, 'read_stream', {
@@ -158,6 +191,12 @@ describe.each([['memory'], ['postgres']] as const)('windowed reads (%s store)', 
     expect(thread.root.id).toBe(rootId);
     expect(thread.topic?.title).toBe('Decide: the opener thread');
     expect(thread.messages.map((m) => m.body)).toEqual(['reply5', 'reply6']);
+    // The agent lands on one message too, and is told the window has more above it.
+    const landed = await callStructured<{ messages: Message[]; truncated: boolean; truncatedAfter: boolean }>(agent, 'read_stream', {
+      spaceId, limit: 2, aroundOffset: roots[1]!.offset,
+    });
+    expect(landed.messages.map((m) => m.body)).toEqual(['r1 — the opener', 'r2']);
+    expect(landed).toMatchObject({ truncated: false, truncatedAfter: true });
     await agent.close();
   });
 });

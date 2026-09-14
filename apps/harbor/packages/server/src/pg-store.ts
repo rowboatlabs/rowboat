@@ -16,7 +16,8 @@ import { migrate } from './migrations.js';
 import { sortActivity } from './activity-sort.js';
 import { extractSearchText, matchesAllTerms, searchTextFor, snippetAround, toPathPatterns, toTsQueryString, type SearchQuery } from './search.js';
 import type { SqlDb, SqlExecutor } from './sql.js';
-import { type PushLevel,
+import {
+  type MessageWindow, type PushLevel,
   directKeyFor,
   type AssetRecord,
   type AssetSearchRow,
@@ -719,25 +720,33 @@ export class PgStore implements Store {
   }
 
   /** Shared window shape: NEWEST `limit` rows below `beforeOffset`, returned oldest first. */
-  private async windowMessages(where: string, params: unknown[], opts?: { beforeOffset?: number; limit?: number }): Promise<Message[]> {
+  private async windowMessages(where: string, params: unknown[], opts?: MessageWindow): Promise<Message[]> {
     if (opts?.beforeOffset !== undefined) {
       params.push(opts.beforeOffset);
       where += ` and stream_offset < $${params.length}`;
     }
+    if (opts?.afterOffset !== undefined) {
+      params.push(opts.afterOffset);
+      where += ` and stream_offset > $${params.length}`;
+    }
     let sql = `select * from messages where ${where} order by stream_offset`;
     if (opts?.limit !== undefined) {
       params.push(opts.limit);
-      sql = `select * from (select * from messages where ${where} order by stream_offset desc limit $${params.length}) w order by stream_offset`;
+      // Paging forward takes the OLDEST rows above the edge; every other page the newest below it.
+      sql =
+        opts.afterOffset !== undefined
+          ? `select * from messages where ${where} order by stream_offset limit $${params.length}`
+          : `select * from (select * from messages where ${where} order by stream_offset desc limit $${params.length}) w order by stream_offset`;
     }
     const rows = await this.sql.query<MessageRow>(sql, params);
     return rows.map(rowToMessage);
   }
 
-  async listStream(spaceId: string, opts?: { beforeOffset?: number; limit?: number }): Promise<Message[]> {
+  async listStream(spaceId: string, opts?: MessageWindow): Promise<Message[]> {
     return this.windowMessages('space_id = $1 and thread_root is null', [spaceId], opts);
   }
 
-  async listThread(spaceId: string, rootMessageId: string, opts?: { beforeOffset?: number; limit?: number }): Promise<Message[]> {
+  async listThread(spaceId: string, rootMessageId: string, opts?: MessageWindow): Promise<Message[]> {
     return this.windowMessages('space_id = $1 and thread_root = $2', [spaceId, rootMessageId], opts);
   }
 

@@ -337,6 +337,8 @@ export const spacesIpcHandlers: SpacesHandlers = {
   'spaces:listStream': async (_event, args) =>
     orgs.getClient(args.orgId).listStream(args.spaceId, {
       ...(args.beforeOffset !== undefined ? { beforeOffset: args.beforeOffset } : {}),
+      ...(args.afterOffset !== undefined ? { afterOffset: args.afterOffset } : {}),
+      ...(args.aroundOffset !== undefined ? { aroundOffset: args.aroundOffset } : {}),
       ...(args.limit !== undefined ? { limit: args.limit } : {}),
     }),
 
@@ -347,6 +349,8 @@ export const spacesIpcHandlers: SpacesHandlers = {
   'spaces:listThread': async (_event, args) =>
     orgs.getClient(args.orgId).listThread(args.spaceId, args.rootMessageId, {
       ...(args.beforeOffset !== undefined ? { beforeOffset: args.beforeOffset } : {}),
+      ...(args.afterOffset !== undefined ? { afterOffset: args.afterOffset } : {}),
+      ...(args.aroundOffset !== undefined ? { aroundOffset: args.aroundOffset } : {}),
       ...(args.limit !== undefined ? { limit: args.limit } : {}),
     }),
 

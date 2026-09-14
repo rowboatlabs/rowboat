@@ -391,6 +391,8 @@ export function buildHttpApp(deps: {
     const { spaceId } = parseWith(routes.listStream.params, c.req.param());
     const q = parseWith(routes.listStream.query, {
       ...(c.req.query('beforeOffset') !== undefined ? { beforeOffset: c.req.query('beforeOffset') } : {}),
+      ...(c.req.query('afterOffset') !== undefined ? { afterOffset: c.req.query('afterOffset') } : {}),
+      ...(c.req.query('aroundOffset') !== undefined ? { aroundOffset: c.req.query('aroundOffset') } : {}),
       ...(c.req.query('limit') !== undefined ? { limit: c.req.query('limit') } : {}),
     });
     return reply(c, routes.listStream.response, await service.listStream(actor(c), spaceId, q));
@@ -405,6 +407,8 @@ export function buildHttpApp(deps: {
     const { spaceId, rootMessageId } = parseWith(routes.listThread.params, c.req.param());
     const q = parseWith(routes.listThread.query, {
       ...(c.req.query('beforeOffset') !== undefined ? { beforeOffset: c.req.query('beforeOffset') } : {}),
+      ...(c.req.query('afterOffset') !== undefined ? { afterOffset: c.req.query('afterOffset') } : {}),
+      ...(c.req.query('aroundOffset') !== undefined ? { aroundOffset: c.req.query('aroundOffset') } : {}),
       ...(c.req.query('limit') !== undefined ? { limit: c.req.query('limit') } : {}),
     });
     return reply(c, routes.listThread.response, await service.listThread(actor(c), spaceId, rootMessageId, q));

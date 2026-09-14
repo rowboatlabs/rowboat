@@ -190,26 +190,30 @@ async function dispatch(
       };
     }
     case 'read_stream': {
-      const a = args as { spaceId: string; beforeOffset?: number; limit?: number };
-      const { messages, topics, hasMore } = await service.listStream(ctx, a.spaceId, {
+      const a = args as { spaceId: string; beforeOffset?: number; afterOffset?: number; aroundOffset?: number; limit?: number };
+      const { messages, topics, hasMore, hasMoreAfter } = await service.listStream(ctx, a.spaceId, {
         ...(a.beforeOffset !== undefined ? { beforeOffset: a.beforeOffset } : {}),
+        ...(a.afterOffset !== undefined ? { afterOffset: a.afterOffset } : {}),
+        ...(a.aroundOffset !== undefined ? { aroundOffset: a.aroundOffset } : {}),
         limit: a.limit ?? 50,
       });
       const names = await rosterNames(service, ctx, a.spaceId);
       const spaceNames = await spaceNamesFor(service, ctx);
       // Truncation is stated, never silent: the tool description tells the
       // agent to page back with beforeOffset before summarising.
-      return { messages: messages.map((m) => relabel(m, names, spaceNames)), topics, truncated: hasMore };
+      return { messages: messages.map((m) => relabel(m, names, spaceNames)), topics, truncated: hasMore, truncatedAfter: hasMoreAfter };
     }
     case 'read_thread': {
-      const a = args as { spaceId: string; rootMessageId: string; beforeOffset?: number; limit?: number };
-      const { root, topic, messages, hasMore } = await service.listThread(ctx, a.spaceId, a.rootMessageId, {
+      const a = args as { spaceId: string; rootMessageId: string; beforeOffset?: number; afterOffset?: number; aroundOffset?: number; limit?: number };
+      const { root, topic, messages, hasMore, hasMoreAfter } = await service.listThread(ctx, a.spaceId, a.rootMessageId, {
         ...(a.beforeOffset !== undefined ? { beforeOffset: a.beforeOffset } : {}),
+        ...(a.afterOffset !== undefined ? { afterOffset: a.afterOffset } : {}),
+        ...(a.aroundOffset !== undefined ? { aroundOffset: a.aroundOffset } : {}),
         limit: a.limit ?? 50,
       });
       const names = await rosterNames(service, ctx, a.spaceId);
       const spaceNames = await spaceNamesFor(service, ctx);
-      return { root: relabel(root, names, spaceNames), topic, messages: messages.map((m) => relabel(m, names, spaceNames)), truncated: hasMore };
+      return { root: relabel(root, names, spaceNames), topic, messages: messages.map((m) => relabel(m, names, spaceNames)), truncated: hasMore, truncatedAfter: hasMoreAfter };
     }
     case 'read_activity': {
       const a = args as { kinds?: ActivityKind[]; spaceId?: string; unread?: boolean; cursor?: string; limit?: number };

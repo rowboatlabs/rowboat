@@ -414,7 +414,7 @@ export class SpacesClient {
   /** The stream (roots only), windowed newest-first: without beforeOffset the LATEST page — never the full history. */
   async listStream(
     spaceId: string,
-    opts?: { beforeOffset?: number; limit?: number },
+    opts?: { beforeOffset?: number; afterOffset?: number; aroundOffset?: number; limit?: number },
   ): Promise<{ messages: Message[]; topics: Topic[]; hasMore: boolean; readOffset: number }> {
     return this.request('GET', this.space(spaceId, `/stream${this.windowQuery(opts)}`), routes.listStream.response);
   }
@@ -430,7 +430,7 @@ export class SpacesClient {
   async listThread(
     spaceId: string,
     rootMessageId: string,
-    opts?: { beforeOffset?: number; limit?: number },
+    opts?: { beforeOffset?: number; afterOffset?: number; aroundOffset?: number; limit?: number },
   ): Promise<{
     root: Message;
     topic: Topic | null;

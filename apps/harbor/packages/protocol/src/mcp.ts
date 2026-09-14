@@ -174,11 +174,17 @@ export const readStream = tool({
     'oldest first (default 50). Each message carries `replyCount` — a nonzero count means a flat ' +
     'thread hangs under it (read_thread). `topics` holds the annotation rows for these roots ' +
     "(a stated goal + archived flag). When `truncated` is true, older messages exist — pass " +
-    '`beforeOffset` (the oldest offset you received) to page back before summarising.',
+    '`beforeOffset` (the oldest offset you received) to page back before summarising. To read ' +
+    'around one message (a link, an activity item), pass its `offset` as `aroundOffset`; ' +
+    '`truncatedAfter` then says newer messages exist above the window (page forward with `afterOffset`).',
   input: z.object({
     spaceId: SpaceId,
     /** Page back: only messages with offset below this. */
     beforeOffset: z.number().int().positive().optional(),
+    /** Page forward: only messages with offset above this. */
+    afterOffset: z.number().int().nonnegative().optional(),
+    /** Land on a message: half the window on each side of this offset. */
+    aroundOffset: z.number().int().positive().optional(),
     limit: z.number().int().positive().max(200).optional(),
   }),
   output: z.object({
@@ -186,6 +192,8 @@ export const readStream = tool({
     topics: z.array(Topic),
     /** True when older messages exist beyond the returned window. */
     truncated: z.boolean(),
+    /** True when newer messages exist above the returned window (only after aroundOffset / afterOffset). */
+    truncatedAfter: z.boolean(),
   }),
 });
 
@@ -197,12 +205,14 @@ export const readThread = tool({
     'the replies (each attributed to its member and acting mode), oldest first (default 50). ' +
     'Use this to catch up before replying or to answer questions about a conversation. A reply id ' +
     'resolves to its root. When `truncated` is true, pass `beforeOffset` to page back before ' +
-    'summarising a whole thread.',
+    'summarising a whole thread; `aroundOffset` lands on one reply, `afterOffset` pages forward.',
   input: z.object({
     spaceId: SpaceId,
     /** The thread root message id (from read_stream, list_topics, or a message link). */
     rootMessageId: MessageId,
     beforeOffset: z.number().int().positive().optional(),
+    afterOffset: z.number().int().nonnegative().optional(),
+    aroundOffset: z.number().int().positive().optional(),
     limit: z.number().int().positive().max(200).optional(),
   }),
   output: z.object({
@@ -210,6 +220,7 @@ export const readThread = tool({
     topic: Topic.nullable(),
     messages: z.array(Message),
     truncated: z.boolean(),
+    truncatedAfter: z.boolean(),
   }),
 });
 

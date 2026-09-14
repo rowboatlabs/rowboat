@@ -3976,6 +3976,8 @@ export const ipcSchemas = {
       spaceId: z.string(),
       /** Page back: only roots below this offset. Absent = the latest page. */
       beforeOffset: z.number().optional(),
+      afterOffset: z.number().optional(),
+      aroundOffset: z.number().optional(),
       limit: z.number().optional(),
     }),
     res: z.custom<SpacesStreamPage>(),
@@ -3993,6 +3995,8 @@ export const ipcSchemas = {
       spaceId: z.string(),
       rootMessageId: z.string(),
       beforeOffset: z.number().optional(),
+      afterOffset: z.number().optional(),
+      aroundOffset: z.number().optional(),
       limit: z.number().optional(),
     }),
     res: z.custom<SpacesThreadPage>(),

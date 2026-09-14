@@ -454,18 +454,33 @@ export const routes = {
    * cursor (no timestamp ties). `topics` carries the rows annotating this
    * page's roots — the stream's badge decoration, one batched fetch.
    */
+  /**
+   * Windows (2026-09-14, load-around): a page is the NEWEST `limit` rows by
+   * default. `beforeOffset` pages back (rows below it), `afterOffset` pages
+   * forward (rows above it), and `aroundOffset` lands on a row — up to half
+   * the limit on each side of it, the row itself included when it exists in
+   * this window's set. At most one of the three. `hasMore` says whether older
+   * rows exist below the page; `hasMoreAfter` whether newer ones exist above
+   * it (always false for the newest page). A client that lands on an old
+   * row and pages both ways is Zulip's anchor / Discord's `around`; the
+   * offset is the space's event offset every message already carries.
+   */
   listStream: {
     method: 'GET',
     path: '/v1/spaces/:spaceId/stream',
     params: z.object({ spaceId: SpaceId }),
     query: z.object({
       beforeOffset: z.coerce.number().int().positive().optional(),
+      afterOffset: z.coerce.number().int().nonnegative().optional(),
+      aroundOffset: z.coerce.number().int().positive().optional(),
       limit: z.coerce.number().int().positive().max(200).optional(),
     }),
     response: z.object({
       messages: z.array(Message),
       topics: z.array(Topic),
       hasMore: z.boolean(),
+      /** Newer rows exist above this page. Optional on the wire so a client reading an older org treats absence as false. */
+      hasMoreAfter: z.boolean().optional(),
       /** The caller's stream mark (0 = never marked) — the New divider's anchor. */
       readOffset: StreamOffset,
     }),
@@ -482,6 +497,8 @@ export const routes = {
     params: z.object({ spaceId: SpaceId, rootMessageId: MessageId }),
     query: z.object({
       beforeOffset: z.coerce.number().int().positive().optional(),
+      afterOffset: z.coerce.number().int().nonnegative().optional(),
+      aroundOffset: z.coerce.number().int().positive().optional(),
       limit: z.coerce.number().int().positive().max(200).optional(),
     }),
     response: z.object({
@@ -489,6 +506,7 @@ export const routes = {
       topic: Topic.nullable(),
       messages: z.array(Message),
       hasMore: z.boolean(),
+      hasMoreAfter: z.boolean().optional(),
       /** The caller's mark in this thread, followed or not; null = never read nor followed. */
       readOffset: StreamOffset.nullable(),
       following: z.boolean(),
