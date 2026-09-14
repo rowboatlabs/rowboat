@@ -328,6 +328,43 @@ describe('SpacesClient.listOrgMembers', () => {
   });
 });
 
+describe('SpacesClient transport failures', () => {
+  // The dev-org-left-behind case (2026-09-14): an org whose Harbor is not
+  // running failed as a bare "fetch failed" with the errno dropped before it
+  // reached any log. The client owns naming the org and the cause.
+  it('names the org and the errno when nothing is listening', async () => {
+    const closed = await (async () => {
+      const { createServer } = await import('node:net');
+      const srv = createServer();
+      await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
+      const port = (srv.address() as { port: number }).port;
+      await new Promise<void>((r) => srv.close(() => r()));
+      return port;
+    })();
+    const client = new SpacesClient({ baseUrl: `http://127.0.0.1:${closed}`, token: 'dev-ramnique' });
+    const err = await client.listSpaces().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(SpacesRequestError);
+    expect(err).toMatchObject({ status: 0, code: 'unreachable', retryable: true });
+    expect((err as Error).message).toBe(`Rowboat org at http://127.0.0.1:${closed} is unreachable (ECONNREFUSED)`);
+  });
+
+  it('digs the code out of a nested cause and falls back to the deepest message', async () => {
+    const withCode = (async () => {
+      throw new TypeError('fetch failed', { cause: new AggregateError([Object.assign(new Error('connect ECONNREFUSED ::1:1'), { code: 'ECONNREFUSED' })]) });
+    }) as typeof fetch;
+    await expect(new SpacesClient({ baseUrl: 'http://org.test', token: 't', fetchImpl: withCode }).health()).rejects.toMatchObject({
+      code: 'unreachable',
+      message: 'Rowboat org at http://org.test is unreachable (ECONNREFUSED)',
+    });
+    const noCode = (async () => {
+      throw new TypeError('fetch failed', { cause: new Error('other side closed') });
+    }) as typeof fetch;
+    await expect(new SpacesClient({ baseUrl: 'http://org.test', token: 't', fetchImpl: noCode }).health()).rejects.toMatchObject({
+      message: 'Rowboat org at http://org.test is unreachable (other side closed)',
+    });
+  });
+});
+
 describe('SpacesLive', () => {
   it('replays from an offset, then goes live; resubscribes after the socket drops', async () => {
     const space = await ramnique.createSpace('Live Space');
