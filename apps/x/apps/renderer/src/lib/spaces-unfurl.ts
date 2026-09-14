@@ -1,3 +1,4 @@
+import { parseOrgUrl } from '@x/shared/dist/spaces.js'
 import { isDirectImageUrl } from '@/components/spaces/space-markdown'
 
 // Which links in a message body get an unfurl card (link-preview-card.tsx
@@ -9,7 +10,9 @@ export const MAX_UNFURLS = 3
 
 /**
  * The message's links worth a card, in order: skips code (fences and inline),
- * image embeds, and direct image links (those already render as images).
+ * image embeds, direct image links (those already render as images), and org
+ * links (a space, file, message, or person renders as a chip — and the org's
+ * hand-off page would only ever unfurl as "Open in Rowboat").
  */
 export function previewUrls(body: string): string[] {
     const stripped = body
@@ -19,7 +22,7 @@ export function previewUrls(body: string): string[] {
     const found: string[] = []
     for (const m of stripped.matchAll(/https:\/\/[^\s<>)"'\]]+/g)) {
         const url = m[0]!.replace(/[.,;:!?]+$/, '')
-        if (isDirectImageUrl(url)) continue
+        if (isDirectImageUrl(url) || parseOrgUrl(url)) continue
         if (!found.includes(url)) found.push(url)
         if (found.length >= MAX_UNFURLS) break
     }

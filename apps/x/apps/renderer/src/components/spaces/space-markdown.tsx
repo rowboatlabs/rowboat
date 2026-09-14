@@ -656,10 +656,11 @@ function PersonLinkChip({ orgAddress, memberId, fallback }: { orgAddress: string
     const refs = useContext(SpaceRefsContext)
     const nav = useContext(SpaceNavContext)
     const names = useMemberNames()
-    const label = `@${fallback.replace(/^@/, '')}`
+    // A bare pasted URL is its own label — never a name; the id stands in.
+    const hint = /^https:\/\//.test(fallback) ? memberId : fallback.replace(/^@/, '')
     const orgId = orgAddress === refs?.orgAddress ? refs.orgId : (nav?.resolveOrg?.(orgAddress) ?? null)
-    if (!orgId) return <span title="Not available to you" className="text-muted-foreground">{label}</span>
-    const name = `@${names.get(memberId) ?? fallback.replace(/^@/, '')}`
+    if (!orgId) return <span title="Not available to you" className="text-muted-foreground">{`@${hint}`}</span>
+    const name = `@${names.get(memberId) ?? hint}`
     if (!nav?.onOpenDirect) return <strong className={CHIP_CLASS}>{name}</strong>
     return (
         <button type="button" onClick={() => nav.onOpenDirect?.(orgId, memberId)} title="Message them" className={cn(CHIP_CLASS, 'cursor-pointer hover:brightness-95 dark:hover:brightness-110')}>

@@ -350,9 +350,11 @@ describe('Person and message link chips', () => {
         expect(onOpenDirect).toHaveBeenCalledWith('org', 'harsh')
     })
 
-    it('mutes a person link on an org the reader is not signed into, keeping the label', async () => {
-        const { onOpenDirect } = mount('ping [@Someone](https://elsewhere.example.com/u/x)')
-        expect(await screen.findByTitle('Not available to you')).toHaveTextContent('@Someone')
+    it('mutes a person link on an org the reader is not signed into, keeping the label — or the id for a bare URL', async () => {
+        const { onOpenDirect } = mount('ping [@Someone](https://elsewhere.example.com/u/x) and https://elsewhere.example.com/u/y')
+        const muted = await screen.findAllByTitle('Not available to you')
+        expect(muted[0]).toHaveTextContent('@Someone')
+        expect(muted[1]).toHaveTextContent('@y')
         expect(screen.queryByRole('button')).toBeNull()
         expect(onOpenDirect).not.toHaveBeenCalled()
     })

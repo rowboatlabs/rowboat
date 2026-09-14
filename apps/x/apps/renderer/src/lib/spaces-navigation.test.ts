@@ -66,6 +66,8 @@ describe('org link landings → app deep links', () => {
         expect(parseSpacesLink('rowboat://open?type=spaces&spaceId=S1&messageId=M1&org=acme.rowboat.space')).toEqual({ orgAddress: 'acme.rowboat.space', spaceId: 'S1', messageId: 'M1' })
         expect(parseSpacesLink('rowboat://open?type=spaces&spaceId=S1&assetId=A%2Fx&org=acme.rowboat.space')).toEqual({ orgAddress: 'acme.rowboat.space', spaceId: 'S1', assetId: 'A/x' })
         expect(parseSpacesLink('rowboat://open?type=spaces&memberId=google%7C1&org=acme.rowboat.space')).toEqual({ orgAddress: 'acme.rowboat.space', memberId: 'google|1' })
+        // The trailing-slash authority form some OS handlers hand over.
+        expect(parseSpacesLink('rowboat://open/?type=spaces&spaceId=S1&org=acme.rowboat.space')).toEqual({ orgAddress: 'acme.rowboat.space', spaceId: 'S1' })
     })
 
     it('leaves orgId links (notifications) and every other deep link to the plain parser', () => {

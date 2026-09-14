@@ -75,9 +75,11 @@ export interface SpacesLinkTarget {
 }
 
 export function parseSpacesLink(input: string): SpacesLinkTarget | null {
-  const SCHEME = 'rowboat://open?'
-  if (!input.startsWith(SCHEME)) return null
-  const params = new URLSearchParams(input.slice(SCHEME.length))
+  // Some OS handlers normalise the authority form to rowboat://open/?… — the
+  // same tolerance every other rowboat:// parser has.
+  const m = /^rowboat:\/\/open\/?\?(.*)$/.exec(input)
+  if (!m) return null
+  const params = new URLSearchParams(m[1]!)
   const orgAddress = params.get('org')
   if (params.get('type') !== 'spaces' || !orgAddress) return null
   const pick = (k: string) => params.get(k) || undefined
