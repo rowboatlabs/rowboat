@@ -26,7 +26,7 @@ import { railKey, type RailSelection } from '@/lib/spaces-selection'
 import { ThreadPane } from '@/components/spaces/thread-pane'
 import { STREAM_READ_KEY, useSpacePresence, useStream } from '@/hooks/use-space-chat'
 import { refreshMembers, useOrgRoster, useSpaceMembers } from '@/hooks/use-space-members'
-import { findSpace, refreshSpacesOrgs, useSpaceFeed, useSpaceLive, useSpaceNames, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
+import { findSpace, refreshSpacesAccountState, refreshSpacesOrgs, useSpaceFeed, useSpaceLive, useSpaceNames, useSpacesAccountState, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { noteListingFromEntries } from '@/hooks/use-space-boards'
 import { directAvatarId, directLabel, isSelfDirect } from '@/lib/spaces-direct'
 import { requestJump } from '@/lib/spaces-jump'
@@ -130,6 +130,23 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
 }) {
     const { orgs, loading, refresh } = useSpacesOrgs()
     const [addOrgOpen, setAddOrgOpen] = useState(false)
+    // No Rowboat session → the empty state offers the sign-in first (one
+    // session, two uses): one browser trip lists every managed org.
+    const account = useSpacesAccountState()
+    const [signingIn, setSigningIn] = useState(false)
+    const signInRowboat = async () => {
+        setSigningIn(true)
+        try {
+            const { orgs: signedIn } = await window.ipc.invoke('spaces:signInRowboat', null)
+            refreshSpacesAccountState()
+            await refreshSpacesOrgs()
+            if (signedIn.length === 0) toast('Signed in — no servers yet. Create one or join with an invite link.', 'success')
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Sign-in failed', 'error')
+        } finally {
+            setSigningIn(false)
+        }
+    }
     const [emptyShowArchived, setEmptyShowArchived] = useState(false)
 
     const selectedOrg = selection ? (orgs.find((o) => o.id === selection.orgId) ?? null) : null
@@ -213,9 +230,20 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
                             Spaces are where your team talks every day — and where the files you decide on live. Your agent and
                             your teammates&apos; agents work in them with you.
                         </p>
-                        <Button size="sm" className="mt-4" onClick={() => setAddOrgOpen(true)}>
-                            <Plus className="size-4 mr-1" /> Add a server
-                        </Button>
+                        {account && !account.hasSession ? (
+                            <div className="mt-4 flex flex-col items-center gap-2">
+                                <Button size="sm" onClick={() => void signInRowboat()} disabled={signingIn}>
+                                    {signingIn ? <Loader2 className="size-4 mr-1 animate-spin" /> : null} Sign in with Rowboat
+                                </Button>
+                                <button type="button" className="text-xs text-muted-foreground hover:underline" onClick={() => setAddOrgOpen(true)}>
+                                    Have an invite link or a server address?
+                                </button>
+                            </div>
+                        ) : (
+                            <Button size="sm" className="mt-4" onClick={() => setAddOrgOpen(true)}>
+                                <Plus className="size-4 mr-1" /> Add a server
+                            </Button>
+                        )}
                     </>
                 ) : (
                     <>

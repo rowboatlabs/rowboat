@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import { ipc, spaces as spacesShared } from '@x/shared';
 import * as orgs from '@x/core/dist/spaces/orgs.js';
 import * as spacesOAuth from '@x/core/dist/spaces/oauth.js';
+import { oauthConnectBus } from '@x/core/dist/auth/connector-events.js';
 import { cancelScheduled, listScheduled, scheduleItem } from '@x/core/dist/spaces/scheduler.js';
 import { invokeTopicAgent, stopTopicAgent, topicSessionId } from '@x/core/dist/spaces/topic-agent.js';
 import { onSpaceAgentActivity, startSpaceAgentActivity } from '@x/core/dist/spaces/agent-activity.js';
@@ -60,21 +61,29 @@ const liveSubscriptions = new Map<string, { live: unknown; unsubscribe: () => vo
 // them to every client as they arrive.
 orgs.onMemberFrame((orgId, frame) => emitSpacesEvent({ orgId, frame }));
 
-function orgSummary(record: orgs.OrgRecord): spacesShared.SpacesOrgSummary {
+async function orgSummary(record: orgs.OrgRecord): Promise<spacesShared.SpacesOrgSummary> {
   return {
     id: record.id,
     name: record.name,
     address: record.address,
     baseUrl: record.baseUrl,
     memberId: record.auth.memberId,
-    authKind: record.auth.kind,
-    ...(record.auth.kind === 'oauth' && record.auth.error ? { authError: record.auth.error } : {}),
+    ...(await orgs.describeOrgAuth(record)),
   };
 }
+
+const orgSummaries = (records: orgs.OrgRecord[]) => Promise.all(records.map(orgSummary));
+
+// A Rowboat sign-in or sign-out changes what the apex would list for us:
+// the next org listing re-syncs instead of trusting a recent one.
+oauthConnectBus.subscribe((event) => {
+  if (event.provider === 'rowboat') spacesOAuth.invalidateManagedOrgsSync();
+});
 
 type SpacesRpcChannel =
   | 'spaces:listOrgs' | 'spaces:addOrg' | 'spaces:resolveInviteLink' | 'spaces:joinInvite'
   | 'spaces:signInOrg' | 'spaces:createOrg' | 'spaces:apexInfo' | 'spaces:removeOrg'
+  | 'spaces:accountState' | 'spaces:signInRowboat' | 'spaces:addOrgByAddress'
   | 'spaces:listSpaces' | 'spaces:createSpace' | 'spaces:openDirect' | 'spaces:listMembers' | 'spaces:createInvite'
   | 'spaces:resolveInvite' | 'spaces:acceptInvite' | 'spaces:listAssets' | 'spaces:createAsset' | 'spaces:moveAsset'
   | 'spaces:deleteAsset' | 'spaces:restoreAsset' | 'spaces:uploadBlob' | 'spaces:readAsset'
@@ -97,10 +106,25 @@ type SpacesHandlers = {
 };
 
 export const spacesRpcHandlers: SpacesHandlers = {
-  'spaces:listOrgs': async () => ({ orgs: orgs.listOrgs().map(orgSummary) }),
+  // The listing first makes the managed orgs match the apex (cheap when a
+  // sync ran moments ago; a failed sync keeps the cached records and logs).
+  'spaces:listOrgs': async () => {
+    await spacesOAuth.syncManagedOrgs({ maxAgeMs: 30_000 }).catch((err) => {
+      console.warn('[spaces] managed org sync failed:', err instanceof Error ? err.message : err);
+    });
+    return { orgs: await orgSummaries(orgs.listOrgs()) };
+  },
+
+  'spaces:accountState': async () => spacesOAuth.accountState(),
+
+  'spaces:signInRowboat': async () => ({ orgs: await orgSummaries(await spacesOAuth.signInForSpaces()) }),
+
+  'spaces:addOrgByAddress': async (args) => ({
+    org: await orgSummary(await spacesOAuth.addOrgByAddress({ address: args.address, openBrowser })),
+  }),
 
   'spaces:addOrg': async (args) => {
-    const org = orgSummary(await orgs.addDevOrg({ baseUrl: args.baseUrl, memberId: args.memberId }));
+    const org = await orgSummary(await orgs.addDevOrg({ baseUrl: args.baseUrl, memberId: args.memberId }));
     return { org };
   },
 
@@ -111,18 +135,18 @@ export const spacesRpcHandlers: SpacesHandlers = {
 
   'spaces:joinInvite': async (args) => {
     const { org, result } = await spacesOAuth.joinViaInviteLink({ url: args.url, openBrowser });
-    return { org: orgSummary(org), space: result.space };
+    return { org: await orgSummary(org), space: result.space };
   },
 
   'spaces:signInOrg': async (args) => {
     const record = orgs.getOrg(args.orgId);
     if (!record) throw new Error(`unknown org ${args.orgId}`);
     const updated = await spacesOAuth.signInOrg({ baseUrl: record.baseUrl, openBrowser, orgId: record.id });
-    return { org: orgSummary(updated) };
+    return { org: await orgSummary(updated) };
   },
 
   'spaces:createOrg': async (args) => {
-    const org = orgSummary(await spacesOAuth.createOrgOnDeployment({ name: args.name, openBrowser }));
+    const org = await orgSummary(await spacesOAuth.createOrgOnDeployment({ name: args.name, openBrowser }));
     return { org };
   },
 

@@ -1,7 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 import * as oauthClient from '../auth/oauth-client.js';
+import { getSessionAccessToken, readSession } from '../auth/tokens.js';
 import { WorkDir } from '../config/config.js';
+import { getRowboatConfig } from '../config/rowboat.js';
 import type { ServerFrame } from '@rowboat/spaces-protocol';
 import { SpacesClient } from './client.js';
 import { SpacesLive } from './live.js';
@@ -11,12 +13,27 @@ import { SpacesLive } from './live.js';
 // and content always come live from the org (spec: one canonical copy, the app
 // is a browser).
 //
-// Two auth kinds: the stub's dev tokens, and real OAuth (the dance lives in
-// oauth.ts; this file owns the tokens' lifecycle). OAuth refresh tokens
-// ROTATE on every use (spike-verified), so refresh is single-flight per org
-// and the new refresh token is persisted BEFORE the new access token is
-// handed out. A dead refresh marks the org needs-relogin (`auth.error`) —
-// visible and gentle, never a silently failing org (spec §4).
+// Three auth kinds (2026-09-14, one session two uses — auth/tokens.ts):
+//
+//   session  a MANAGED org (one on the Rowboat deployment): the org trusts
+//            the same login desk the Rowboat account comes from, so the
+//            record holds no tokens — every request borrows the account's
+//            session. These records are a CACHE of the apex's "my orgs"
+//            listing (oauth.ts syncManagedOrgs): rebuilt on sign-in, launch
+//            and focus, dropped when the session goes.
+//   oauth    a FOREIGN org (self-hosted Harbor on its own login desk): the
+//            record owns its issuer, client id and tokens, exactly as before.
+//            An `oauth` record whose issuer IS the Rowboat desk — written by
+//            builds before `session` existed — is treated as session-backed
+//            at every read (its stored tokens are ignored, never migrated);
+//            the next sync rewrites it as `session`.
+//   dev      the stub Harbor's dev tokens.
+//
+// Foreign OAuth refresh tokens ROTATE on every use (spike-verified), so
+// refresh is single-flight per org and the new refresh token is persisted
+// BEFORE the new access token is handed out. A dead refresh marks the org
+// needs-relogin (`auth.error`) — visible and gentle, never a silently failing
+// org (spec §4). The Rowboat session's own refresh lives in auth/tokens.ts.
 
 export interface OrgOAuthTokens {
   access: string;
@@ -27,6 +44,12 @@ export interface OrgOAuthTokens {
 
 export type OrgAuth =
   | { kind: 'dev'; memberId: string }
+  | {
+      /** Managed org: borrows the Rowboat account session (auth/tokens.ts). */
+      kind: 'session';
+      issuer: string;
+      memberId: string;
+    }
   | {
       kind: 'oauth';
       issuer: string;
@@ -74,9 +97,59 @@ function writeConfig(config: SpacesOrgsConfig): void {
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
 }
 
-/** The bearer as of right now, no refresh — for synchronous derivation (MCP entries). */
-function currentBearer(auth: OrgAuth): string {
-  return auth.kind === 'dev' ? `dev-${auth.memberId}` : auth.tokens.access;
+// --- the managed issuer ------------------------------------------------------
+
+let managedIssuerCache: string | null | undefined;
+let managedIssuerFailedAt = 0;
+const MANAGED_ISSUER_RETRY_MS = 60_000;
+
+/**
+ * The login desk the Rowboat account comes from — `<supabaseUrl>/auth/v1`,
+ * from the api's /v1/config — which is also the issuer every managed org
+ * pins. Resolved once per process; null when the config cannot be fetched
+ * (offline first launch — retried a minute later, not on every call), in
+ * which case nothing is treated as managed until a later call succeeds.
+ */
+export async function managedIssuer(): Promise<string | null> {
+  if (managedIssuerCache) return managedIssuerCache;
+  if (Date.now() - managedIssuerFailedAt < MANAGED_ISSUER_RETRY_MS) return null;
+  try {
+    const config = await getRowboatConfig();
+    managedIssuerCache = config.supabaseUrl ? `${config.supabaseUrl.replace(/\/$/, '')}/auth/v1` : null;
+  } catch {
+    managedIssuerCache = null;
+  }
+  if (!managedIssuerCache) managedIssuerFailedAt = Date.now();
+  return managedIssuerCache;
+}
+
+/** Test seam: pin the managed issuer without the api round trip. */
+export function setManagedIssuerForTests(issuer: string | null): void {
+  managedIssuerCache = issuer;
+  managedIssuerFailedAt = 0;
+}
+
+/** Same issuer, trailing slash and case aside. */
+export function sameIssuer(a: string, b: string): boolean {
+  return a.replace(/\/$/, '').toLowerCase() === b.replace(/\/$/, '').toLowerCase();
+}
+
+/**
+ * Does this org ride the Rowboat session? `session` records by definition;
+ * pre-`session` `oauth` records by issuer (their stored tokens are ignored).
+ */
+export async function isSessionBacked(auth: OrgAuth): Promise<boolean> {
+  if (auth.kind === 'session') return true;
+  if (auth.kind !== 'oauth') return false;
+  const issuer = await managedIssuer();
+  return issuer !== null && sameIssuer(auth.issuer, issuer);
+}
+
+/** The bearer for a derived MCP entry: dev verbatim, session-backed = the account session, foreign = the record's own. */
+function currentBearer(auth: OrgAuth, sessionBearer: string | null, sessionBacked: boolean): string {
+  if (auth.kind === 'dev') return `dev-${auth.memberId}`;
+  if (sessionBacked || auth.kind === 'session') return sessionBearer ?? '';
+  return auth.tokens.access;
 }
 
 function mutateOrgAuth(orgId: string, fn: (auth: Extract<OrgAuth, { kind: 'oauth' }>) => void): void {
@@ -99,6 +172,8 @@ export async function freshTokenFor(orgId: string, opts?: { forceRefresh?: boole
   const org = getOrg(orgId);
   if (!org) throw new Error(`unknown org ${orgId}`);
   if (org.auth.kind === 'dev') return `dev-${org.auth.memberId}`;
+  if (await isSessionBacked(org.auth)) return getSessionAccessToken(opts);
+  if (org.auth.kind !== 'oauth') throw new Error(`org ${orgId} has no credentials`);
   const now = Math.floor(Date.now() / 1000);
   if (!opts?.forceRefresh && org.auth.tokens.expiresAt > now + 60) return org.auth.tokens.access;
   const inFlight = refreshFlights.get(orgId);
@@ -144,26 +219,33 @@ export interface DerivedMcpServer {
   headers: Record<string, string>;
 }
 
-function deriveWithNames(orgRecords: OrgRecord[]): {
+function deriveWithNames(
+  orgRecords: OrgRecord[],
+  session: { bearer: string | null; issuer: string | null },
+): {
   entries: Record<string, DerivedMcpServer>;
   nameByOrgId: Record<string, string>;
 } {
   const entries: Record<string, DerivedMcpServer> = {};
   const nameByOrgId: Record<string, string> = {};
   for (const org of orgRecords) {
+    const sessionBacked =
+      org.auth.kind === 'session' ||
+      (org.auth.kind === 'oauth' && session.issuer !== null && sameIssuer(org.auth.issuer, session.issuer));
     const slug = org.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || org.id;
     // Deterministic names, unique even when the same org is added under two
     // identities (the multiplayer-testing case): slug, then slug-member, then id.
     let name = `spaces-${slug}`;
     if (entries[name]) name = `spaces-${slug}-${org.auth.memberId}`;
     if (entries[name]) name = `spaces-${org.id}`;
-    // OAuth orgs: the CURRENT access token (entries derive per-read; a
-    // rotation mid-session means one failed MCP call, then recovery on the
-    // next derive).
+    // Session-backed orgs carry the account's FRESH token (spacesMcpServers
+    // refreshes it before deriving); foreign OAuth orgs their current one
+    // (a rotation mid-session means one failed MCP call, then recovery on
+    // the next derive).
     entries[name] = {
       url: `${org.baseUrl}/mcp`,
       headers: {
-        authorization: `Bearer ${currentBearer(org.auth)}`,
+        authorization: `Bearer ${currentBearer(org.auth, session.bearer, sessionBacked)}`,
         'x-agent-name': 'Rowboat',
       },
     };
@@ -173,13 +255,26 @@ function deriveWithNames(orgRecords: OrgRecord[]): {
 }
 
 /** Pure derivation — exported for tests; `spacesMcpServers()` is the live view. */
-export function deriveSpacesMcpServers(orgRecords: OrgRecord[]): Record<string, DerivedMcpServer> {
-  return deriveWithNames(orgRecords).entries;
+export function deriveSpacesMcpServers(
+  orgRecords: OrgRecord[],
+  session: { bearer: string | null; issuer: string | null } = { bearer: null, issuer: null },
+): Record<string, DerivedMcpServer> {
+  return deriveWithNames(orgRecords, session).entries;
 }
 
-export function spacesMcpServers(): Record<string, DerivedMcpServer> {
-  return deriveSpacesMcpServers(listOrgs());
+/** The live view: the account session's fresh token rides every managed org's entry. */
+export async function spacesMcpServers(): Promise<Record<string, DerivedMcpServer>> {
+  const orgRecords = listOrgs();
+  const issuer = orgRecords.some((o) => o.auth.kind !== 'dev') ? await managedIssuer() : null;
+  const needsSession = orgRecords.some(
+    (o) => o.auth.kind === 'session' || (o.auth.kind === 'oauth' && issuer !== null && sameIssuer(o.auth.issuer, issuer)),
+  );
+  const bearer = needsSession ? await getSessionAccessToken().catch(() => null) : null;
+  return deriveSpacesMcpServers(orgRecords, { bearer, issuer });
 }
+
+/** Names only — no credentials are resolved, so this stays synchronous. */
+const NO_SESSION = { bearer: null, issuer: null } as const;
 
 /**
  * The server name assigned to one org in the FULL derived view. Never derive
@@ -188,7 +283,7 @@ export function spacesMcpServers(): Record<string, DerivedMcpServer> {
  * first one's entry — the wrong credentials).
  */
 export function spacesMcpServerNameFor(orgId: string): string | null {
-  return deriveWithNames(listOrgs()).nameByOrgId[orgId] ?? null;
+  return deriveWithNames(listOrgs(), NO_SESSION).nameByOrgId[orgId] ?? null;
 }
 
 /**
@@ -199,7 +294,7 @@ export function spacesMcpServerNameFor(orgId: string): string | null {
  */
 export function orgForSpacesMcpServerName(serverName: string): OrgRecord | null {
   const orgRecords = listOrgs();
-  const { nameByOrgId } = deriveWithNames(orgRecords);
+  const { nameByOrgId } = deriveWithNames(orgRecords, NO_SESSION);
   for (const org of orgRecords) {
     if (nameByOrgId[org.id] === serverName) return org;
   }
@@ -254,11 +349,7 @@ export async function removeOrg(orgId: string): Promise<void> {
   const config = readConfig();
   config.orgs = config.orgs.filter((o) => o.id !== orgId);
   writeConfig(config);
-  const runtime = runtimes.get(orgId);
-  if (runtime) {
-    runtime.live.close();
-    runtimes.delete(orgId);
-  }
+  resetRuntime(orgId);
 }
 
 /**
@@ -347,12 +438,124 @@ export function upsertOAuthOrg(input: {
   if (input.serverOrgId) record.serverOrgId = input.serverOrgId;
   if (!existing) config.orgs.push(record);
   writeConfig(config);
-  const runtime = runtimes.get(record.id);
+  resetRuntime(record.id);
+  return record;
+}
+
+/**
+ * How the renderer should show an org's auth: its kind, and the one gentle
+ * error state — a foreign org whose refresh died, or a session-backed org
+ * with no Rowboat session (signed out, or a pre-`session` record after an
+ * upgrade). Both read as "Sign in again" in the sidebar.
+ */
+export async function describeOrgAuth(record: OrgRecord): Promise<{
+  authKind: 'dev' | 'oauth' | 'session';
+  authError?: string;
+}> {
+  if (record.auth.kind === 'dev') return { authKind: 'dev' };
+  if (await isSessionBacked(record.auth)) {
+    const session = await readSession();
+    if (!session) return { authKind: 'session', authError: 'Sign in with your Rowboat account' };
+    return { authKind: 'session', ...(session.error ? { authError: session.error } : {}) };
+  }
+  if (record.auth.kind === 'oauth') {
+    return { authKind: 'oauth', ...(record.auth.error ? { authError: record.auth.error } : {}) };
+  }
+  return { authKind: record.auth.kind };
+}
+
+/** One org as the apex's `GET /v1/orgs` lists it (apex.ts): the caller's membership on each managed org. */
+export interface ManagedOrgListing {
+  id: string;
+  name: string;
+  address: string;
+  memberId: string;
+}
+
+function resetRuntime(orgId: string): void {
+  const runtime = runtimes.get(orgId);
   if (runtime) {
     runtime.live.close();
-    runtimes.delete(record.id);
+    runtimes.delete(orgId);
   }
+}
+
+/**
+ * Save a managed org after joining, creating, or listing it: the record
+ * borrows the account session, so it carries no tokens. Matches an existing
+ * record by server org id, else by address (a pre-`session` `oauth` record
+ * of the same org is rewritten in place — its ignored tokens go away here).
+ */
+export function upsertSessionOrg(input: {
+  baseUrl: string;
+  name: string;
+  address: string;
+  serverOrgId?: string;
+  issuer: string;
+  memberId: string;
+}): OrgRecord {
+  const baseUrl = input.baseUrl.replace(/\/$/, '');
+  const config = readConfig();
+  const existing = config.orgs.find(
+    (o) =>
+      o.auth.kind !== 'dev' &&
+      ((input.serverOrgId && o.serverOrgId === input.serverOrgId) || o.baseUrl === baseUrl),
+  );
+  const record: OrgRecord = existing ?? {
+    id: `org-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    name: input.name,
+    address: input.address,
+    baseUrl,
+    auth: { kind: 'session', issuer: input.issuer, memberId: input.memberId },
+  };
+  record.name = input.name;
+  record.address = input.address;
+  record.baseUrl = baseUrl;
+  record.auth = { kind: 'session', issuer: input.issuer, memberId: input.memberId };
+  if (input.serverOrgId) record.serverOrgId = input.serverOrgId;
+  if (!existing) config.orgs.push(record);
+  writeConfig(config);
+  resetRuntime(record.id);
   return record;
+}
+
+/**
+ * Make the registry's managed orgs match the apex's listing (the truth for
+ * them): every listed org is upserted, every `session` record the listing no
+ * longer names is dropped. Foreign and dev records are untouched. Pure over
+ * the config file — the fetch lives in oauth.ts.
+ */
+export function applyManagedListing(listing: ManagedOrgListing[], input: { apexOrigin: string; issuer: string }): OrgRecord[] {
+  const protocol = new URL(input.apexOrigin).protocol;
+  for (const org of listing) {
+    upsertSessionOrg({
+      baseUrl: `${protocol}//${org.address}`,
+      name: org.name,
+      address: org.address,
+      serverOrgId: org.id,
+      issuer: input.issuer,
+      memberId: org.memberId,
+    });
+  }
+  const listed = new Set(listing.map((o) => o.id));
+  const config = readConfig();
+  const dropped = config.orgs.filter((o) => o.auth.kind === 'session' && (!o.serverOrgId || !listed.has(o.serverOrgId)));
+  if (dropped.length > 0) {
+    config.orgs = config.orgs.filter((o) => !dropped.includes(o));
+    writeConfig(config);
+    for (const o of dropped) resetRuntime(o.id);
+  }
+  return readConfig().orgs;
+}
+
+/** No Rowboat session (signed out): the managed orgs that borrowed it go too. */
+export function dropSessionOrgs(): void {
+  const config = readConfig();
+  const dropped = config.orgs.filter((o) => o.auth.kind === 'session');
+  if (dropped.length === 0) return;
+  config.orgs = config.orgs.filter((o) => o.auth.kind !== 'session');
+  writeConfig(config);
+  for (const o of dropped) resetRuntime(o.id);
 }
 
 export function getClient(orgId: string): SpacesClient {
