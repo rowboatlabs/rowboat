@@ -100,6 +100,20 @@ describe('useMentionAutocomplete', () => {
         await waitFor(() => expect(ids(result.current.candidates)).toEqual([`space:${DESIGN}`]))
     })
 
+    it('a short query never drowns the files: ids match only as a prefix, and files keep a few rows of their own', async () => {
+        // "01h" is a substring of every seeded ULID; as a prefix it names nobody
+        // by display name, so only the id-prefixed members and the files show.
+        const { result } = await mountAndType('see @01h')
+        await waitFor(() => expect(result.current.candidates.length).toBeGreaterThan(0))
+        expect(result.current.candidates.every((c) => c.file || c.id.toLowerCase().startsWith('01h'))).toBe(true)
+        expect(result.current.candidates.some((c) => c.file)).toBe(false) // no file has "01h" in its path
+        act(() => {
+            editor.chain().focus('end').deleteRange({ from: editor.state.selection.from - 3, to: editor.state.selection.from }).insertContent('a').run()
+        })
+        // "a" matches Ada, Harsh, and the plan files: people first, but the files are there.
+        await waitFor(() => expect(result.current.candidates.some((c) => c.file)).toBe(true))
+    })
+
     it('picking a space inserts a space mention node — the wire token on serialization', async () => {
         const { result } = await mountAndType('moved to @des')
         await waitFor(() => expect(result.current.candidates[0]?.space).toBeDefined())

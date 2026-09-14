@@ -71,9 +71,20 @@ function setListing(k: string, entries: spaces.SpacesAssetEntry[]): void {
   emit()
 }
 
-async function loadListing(orgId: string, spaceId: string): Promise<void> {
+/** Spaces whose listing changed while a fetch was already in flight — that fetch's snapshot predates the change, so one more run follows it. */
+const dirty = new Set<string>()
+
+/**
+ * `changed`: the space's listing is known to have changed, so a fetch already
+ * in flight (whose snapshot may predate the change) is followed by one more.
+ * A mount-time load just joins the in-flight one.
+ */
+async function loadListing(orgId: string, spaceId: string, changed = false): Promise<void> {
   const k = key(orgId, spaceId)
-  if (loading.has(k)) return
+  if (loading.has(k)) {
+    if (changed) dirty.add(k)
+    return
+  }
   loading.add(k)
   try {
     const { entries } = await window.ipc.invoke('spaces:listAssets', { orgId, spaceId })
@@ -84,6 +95,7 @@ async function loadListing(orgId: string, spaceId: string): Promise<void> {
   } finally {
     loading.delete(k)
   }
+  if (dirty.delete(k)) void loadListing(orgId, spaceId, true)
 }
 
 /** Any change in a space the store holds: refetch its listing once the burst settles. */
@@ -100,7 +112,7 @@ function wireBus(): void {
       k,
       setTimeout(() => {
         refreshTimers.delete(k)
-        void loadListing(event.orgId, frame.spaceId)
+        void loadListing(event.orgId, frame.spaceId, true)
       }, CHANGE_DEBOUNCE_MS),
     )
   })

@@ -102,7 +102,9 @@ export function useMentionAutocomplete(editor: Editor | null) {
         // this space can be named but is not notified (the org drops their
         // stamp) — the hint says so.
         const inSpace = new Set(spaceMembers.map((m) => m.id))
-        const matches = (m: spaces.Member) => !q || `${m.id} ${m.displayName}`.toLowerCase().includes(q)
+        // A name matches anywhere; an id only as a prefix — a one-letter query
+        // is a substring of most ULIDs and would drown the files below.
+        const matches = (m: spaces.Member) => !q || m.displayName.toLowerCase().includes(q) || m.id.toLowerCase().startsWith(q)
         for (const m of spaceMembers) {
             if (matches(m)) people.push({ id: m.id, label: m.displayName, ...(m.id === selfMemberId ? { hint: 'you' } : {}) })
         }
@@ -133,7 +135,10 @@ export function useMentionAutocomplete(editor: Editor | null) {
         }
         if (spaceId) fileRows(spaceId)
         for (const s of org?.spaces ?? []) if (s.id !== spaceId) fileRows(s.id, s.name)
-        return [...people, ...spaceRows, ...files].slice(0, MAX_ROWS)
+        // Files keep a few rows of their own: a query heading for a file must
+        // not be buried under every person whose name shares its letters.
+        const fileQuota = Math.min(files.length, 4)
+        return [...[...people, ...spaceRows].slice(0, MAX_ROWS - fileQuota), ...files].slice(0, MAX_ROWS)
     }, [match, spaceMembers, orgRoster, org, listings, spaceId, selfMemberId])
 
     // Reset the highlighted row whenever the query changes (adjust-on-change, not an effect).

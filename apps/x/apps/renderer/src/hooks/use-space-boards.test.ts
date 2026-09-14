@@ -74,4 +74,25 @@ describe('useOrgListings', () => {
         await vi.advanceTimersByTimeAsync(1_000)
         expect(listings()).toBe(1)
     })
+
+    it('a change that lands while a fetch is in flight runs one more fetch after it — the first snapshot predates the change', async () => {
+        let release: (() => void) | null = null
+        invoke.mockImplementation((channel: string) => {
+            if (channel !== 'spaces:listAssets') throw new Error(`unexpected ${channel}`)
+            if (release) return Promise.resolve({ entries })
+            return new Promise((resolve) => { release = () => resolve({ entries }) })
+        })
+        const mod = await import('./use-space-boards')
+        mod.noteListingFromEntries('org', 's1', entries)
+        renderHook(() => mod.useOrgListings([{ id: 'org', spaceIds: ['s1'] }]))
+        const change = { orgId: 'org', frame: { kind: 'event', spaceId: 's1', event: { type: 'change', changeSet: { assetPath: 'a.md' } } } }
+        emit(change)
+        await vi.advanceTimersByTimeAsync(1_000)
+        expect(listings()).toBe(1) // in flight, slow
+        emit(change)
+        await vi.advanceTimersByTimeAsync(1_000)
+        expect(listings()).toBe(1) // not dropped: parked as dirty
+        await act(async () => { release!(); await vi.advanceTimersByTimeAsync(0) })
+        expect(listings()).toBe(2)
+    })
 })

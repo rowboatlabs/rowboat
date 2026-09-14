@@ -426,9 +426,13 @@ async function rosterNames(service: HarborService, ctx: ActorCtx, spaceId: strin
   return new Map((await service.listMembers(ctx, spaceId)).map((m) => [m.id, m.displayName]));
 }
 
-/** Space tokens relabel from the caller's own listing; a space they are not in keeps its label. */
+/**
+ * Space tokens relabel from the caller's own listing; a space they are not in
+ * keeps its label, and so does a DM — its stored name is a placeholder, the
+ * person is the name, and only the client knows how to say that.
+ */
 async function spaceNamesFor(service: HarborService, ctx: ActorCtx): Promise<Map<string, string>> {
-  return new Map((await service.listSpaces(ctx, { includeDirect: true })).map((s) => [s.id, s.name]));
+  return new Map((await service.listSpaces(ctx)).map((s) => [s.id, s.name]));
 }
 
 function relabel(message: Message, names: ReadonlyMap<string, string>, spaceNames?: ReadonlyMap<string, string>): Message {
