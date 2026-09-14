@@ -195,10 +195,10 @@ export function AddOrgDialog({ open, onOpenChange, onAdded, initialAction }: {
     onAdded: (orgId: string, spaceId?: string) => void
     initialAction?: 'create' | 'join'
 }) {
-    // One dialog, two doors: paste an invite link (resolve pre-auth, then
-    // join with a system-browser sign-in), or name a new server on the
-    // managed deployment (free for now — the address is generated in core,
-    // the user only names it). A dev org against the stub stays behind a
+    // One dialog, two doors: name a new server on the managed deployment
+    // (free for now — the address is generated in core, the user only names
+    // it), or paste an invite link (resolve pre-auth, then join with a
+    // system-browser sign-in). A dev org against the stub stays behind a
     // tertiary link.
     const [mode, setMode] = useState<'main' | 'dev'>('main')
     const [inviteUrl, setInviteUrl] = useState('')
@@ -291,23 +291,52 @@ export function AddOrgDialog({ open, onOpenChange, onAdded, initialAction }: {
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-md">
+            {/* Only the dev door carries a description; without one, clear the
+                link so Radix doesn't point at an element that isn't there. */}
+            <DialogContent className="max-w-md" {...(mode === 'dev' ? {} : { 'aria-describedby': undefined })}>
                 <DialogHeader>
                     <DialogTitle>{mode === 'dev' ? 'Add a dev server' : initialAction === 'create' ? 'Create a server' : initialAction === 'join' ? 'Join a server' : 'Add a server'}</DialogTitle>
-                    <DialogDescription>
-                        {mode === 'dev'
-                            ? 'Dev sign-in against a stub Harbor (run pnpm dev in apps/harbor/packages/server).'
-                            : 'Signing in opens your browser.'}
-                    </DialogDescription>
+                    {mode === 'dev' && (
+                        <DialogDescription>
+                            Dev sign-in against a stub Harbor (run pnpm dev in apps/harbor/packages/server).
+                        </DialogDescription>
+                    )}
                 </DialogHeader>
                 {mode === 'main' ? (
                     <div className="space-y-3">
+                        <div>
+                            <div className="text-sm font-medium">Create a new server</div>
+                            <p className="text-xs text-muted-foreground">Home for your team and their assistants, with spaces for each project. Free, and you’re its admin.</p>
+                            <div className="mt-1.5 flex items-center gap-2">
+                                <Input
+                                    autoFocus={initialAction !== 'join'}
+                                    value={orgName}
+                                    onChange={(e) => setOrgName(e.target.value)}
+                                    placeholder="Acme, book club, just me…"
+                                    className="flex-1"
+                                    onKeyDown={(e) => e.key === 'Enter' && void createOrg()}
+                                />
+                                <Button onClick={() => void createOrg()} disabled={busy || !orgName.trim() || !apexDomain} className="shrink-0">
+                                    {waiting === 'create' && <Loader2 className="size-3.5 mr-1 animate-spin" />} Create
+                                </Button>
+                            </div>
+                            {apexDomain === null && (
+                                <p className="mt-1.5 text-xs text-muted-foreground">
+                                    Spaces isn’t available for this environment yet.
+                                </p>
+                            )}
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <div className="h-px flex-1 bg-border" />
+                            <span className="text-xs text-muted-foreground">or</span>
+                            <div className="h-px flex-1 bg-border" />
+                        </div>
                         <div>
                             <div className="text-sm font-medium">Join a server</div>
                             <p className="text-xs text-muted-foreground">Paste an invite link someone sent you.</p>
                             <div className="mt-1.5 flex items-center gap-2">
                                 <Input
-                                    autoFocus={initialAction !== 'create'}
+                                    autoFocus={initialAction === 'join'}
                                     value={inviteUrl}
                                     onChange={(e) => void resolvePreview(e.target.value)}
                                     placeholder="https://org.example/join/…"
@@ -324,33 +353,6 @@ export function AddOrgDialog({ open, onOpenChange, onAdded, initialAction }: {
                                     <span className="font-medium">{preview.org}</span>
                                     {preview.invitedBy ? <span className="text-muted-foreground"> — invited by {preview.invitedBy}</span> : null}
                                 </div>
-                            )}
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <div className="h-px flex-1 bg-border" />
-                            <span className="text-xs text-muted-foreground">or</span>
-                            <div className="h-px flex-1 bg-border" />
-                        </div>
-                        <div>
-                            <div className="text-sm font-medium">Create a new server</div>
-                            <p className="text-xs text-muted-foreground">Free — you name it and you’re its admin.</p>
-                            <div className="mt-1.5 flex items-center gap-2">
-                                <Input
-                                    autoFocus={initialAction === 'create'}
-                                    value={orgName}
-                                    onChange={(e) => setOrgName(e.target.value)}
-                                    placeholder="Acme, book club, just me…"
-                                    className="flex-1"
-                                    onKeyDown={(e) => e.key === 'Enter' && void createOrg()}
-                                />
-                                <Button onClick={() => void createOrg()} disabled={busy || !orgName.trim() || !apexDomain} className="shrink-0">
-                                    {waiting === 'create' && <Loader2 className="size-3.5 mr-1 animate-spin" />} Create
-                                </Button>
-                            </div>
-                            {apexDomain === null && (
-                                <p className="mt-1.5 text-xs text-muted-foreground">
-                                    Spaces isn’t available for this environment yet.
-                                </p>
                             )}
                         </div>
                         {waiting && (
