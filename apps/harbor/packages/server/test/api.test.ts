@@ -114,11 +114,28 @@ describe('spaces, invites, membership', () => {
     expect((await prakhar.post('/v1/invites/accept', { token: inv.body.token })).status).toBe(403);
   });
 
-  it('the /join/<token> page names the space pre-auth', async () => {
+  it('the /join/<token> page names the space pre-auth and hands the invite to the app', async () => {
     const inv = await ramnique.post('/v1/invites', { spaceId });
     const res = await fetch(`${harbor.url}/join/${inv.body.token}`);
     expect(res.status).toBe(200);
-    expect(await res.text()).toContain('Show HN draft');
+    expect(res.headers.get('content-type')).toContain('text/html');
+    const html = await res.text();
+    expect(html).toContain('Show HN draft');
+    // The deep link names the org by address and carries the token — the app
+    // rebuilds the https invite link from those two (spaces-navigation.ts).
+    expect(html).toContain(
+      `rowboat://open?type=spaces&org=${encodeURIComponent(harbor.service.org.address)}&invite=${encodeURIComponent(inv.body.token)}`,
+    );
+    expect(html).toContain('location.replace(');
+
+    // A dead invite: says so, launches nothing.
+    const stored = await harbor.store.getInvite(inv.body.token);
+    await harbor.store.putInvite({ ...stored!, expiresAt: new Date(Date.now() - 1000).toISOString() });
+    const dead = await fetch(`${harbor.url}/join/${inv.body.token}`);
+    expect(dead.status).toBe(410);
+    const deadHtml = await dead.text();
+    expect(deadHtml).toContain('expired');
+    expect(deadHtml).not.toContain('rowboat://');
   });
 
   it('leave removes membership', async () => {
