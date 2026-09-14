@@ -53,7 +53,7 @@ function getInitialPaneWidth(defaultWidth: number): number {
   }
 }
 
-interface ChatSidebarProps {
+export interface ChatSidebarProps {
   floating?: boolean
   keepMounted?: boolean
   onMinimize?: () => void

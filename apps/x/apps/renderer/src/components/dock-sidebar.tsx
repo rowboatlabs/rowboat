@@ -158,6 +158,7 @@ export type DockSidebarProps = {
   /** The space currently open, for highlighting its flyout row. */
   activeSpace?: SpaceSelection
   recentRuns?: { id: string; title?: string; createdAt: string; modifiedAt?: string }[]
+  onOpenAssistant?: () => void
   onOpenRun?: (runId: string) => void
   /** Persist a custom chat title (sessions:setTitle) and refresh the runs list. */
   onRenameRun?: (runId: string, title: string) => void
@@ -559,6 +560,7 @@ export function DockSidebar({
   activeSpace = null,
   recentRuns = [],
   onOpenRun,
+  onOpenAssistant,
   onRenameRun,
   onDeleteRun,
   onOpenChatHistory,
@@ -955,7 +957,8 @@ export function DockSidebar({
             running: activeNav === 'assistant',
             onClick: () => {
               closeFlyouts()
-              if (lastChat && onOpenRun) onOpenRun(lastChat.id)
+              if (onOpenAssistant) onOpenAssistant()
+              else if (lastChat && onOpenRun) onOpenRun(lastChat.id)
               else onNewChat?.()
             },
           },
@@ -1095,7 +1098,7 @@ export function DockSidebar({
     knowledgeUpdatedLabel, knowledgeActions, onOpenApps, pinnedApps, onOpenApp,
     bgAgentsFailed, bgAgentsLabel, onToggleBrowser, browserOpen,
     switcherOnly, openLastSpace, onOpenChatHistory,
-    onNewChat, lastChat, onOpenRun,
+    onNewChat, lastChat, onOpenRun, onOpenAssistant,
     onOpenBgTasks, workspaceCount, totalSpacesUnread, totalSpaces, spacesOpen, chatsOpen,
     outOfCredits, hasOauthError, settingsStatus, settingsAlert,
   ])
