@@ -228,6 +228,52 @@ async function connectRemote(): Promise<RemoteServer> {
   return { kind: 'remote', baseUrl, key, events };
 }
 
+// Set by stopServerHost() right before it kills the child, so the exit
+// handler below can tell an intentional stop apart from a crash and skip
+// the respawn dance.
+let stoppingChild = false;
+
+// Consecutive failed respawn attempts since the last healthy child. Reset
+// once a respawned child becomes healthy; capped so a persistently crashing
+// server doesn't retry forever.
+let respawnAttempts = 0;
+let respawnTimer: ReturnType<typeof setTimeout> | null = null;
+const RESPAWN_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000];
+const MAX_RESPAWN_ATTEMPTS = 5;
+
+function scheduleRespawn(): void {
+  respawnAttempts += 1;
+  if (respawnAttempts > MAX_RESPAWN_ATTEMPTS) {
+    console.error(
+      `[server-host] child rowboat-server failed to respawn after ${MAX_RESPAWN_ATTEMPTS} attempts; please restart the app`,
+    );
+    return;
+  }
+  const delayMs = RESPAWN_DELAYS_MS[Math.min(respawnAttempts - 1, RESPAWN_DELAYS_MS.length - 1)];
+  console.error(
+    `[server-host] child rowboat-server crashed, respawning in ${delayMs / 1000}s (attempt ${respawnAttempts}/${MAX_RESPAWN_ATTEMPTS})`,
+  );
+  respawnTimer = setTimeout(() => {
+    respawnTimer = null;
+    void attemptRespawn();
+  }, delayMs);
+}
+
+async function attemptRespawn(): Promise<void> {
+  if (stoppingChild) return;
+  const oldServer = current;
+  try {
+    const child = await launchChild();
+    if (oldServer && 'events' in oldServer) oldServer.events.close();
+    current = child;
+    ready = Promise.resolve(child);
+    respawnAttempts = 0;
+    console.log('[server-host] child rowboat-server respawned');
+  } catch (err) {
+    console.error(`[server-host] respawn attempt failed: ${(err as Error).message}`);
+  }
+}
+
 async function launchChild(): Promise<ChildServer> {
   const fs = await import('node:fs/promises');
   const entry =
@@ -240,7 +286,13 @@ async function launchChild(): Promise<ChildServer> {
     stdio: ['ignore', 'inherit', 'inherit'],
   });
   child.on('exit', (code) => {
-    console.error(`[server-host] child rowboat-server exited (code ${code})`);
+    if (stoppingChild) {
+      stoppingChild = false;
+      console.log('[server-host] child rowboat-server stopped');
+      return;
+    }
+    console.error(`[server-host] child rowboat-server exited unexpectedly (code ${code})`);
+    scheduleRespawn();
   });
 
   const config = await loadServerConfig(WorkDir);
@@ -341,7 +393,10 @@ export async function stopServerHost(): Promise<void> {
     await server.close();
   } else {
     server.events.close();
-    if (server.kind === 'child') server.child.kill();
+    if (server.kind === 'child') {
+      stoppingChild = true;
+      server.child.kill();
+    }
   }
 }
 
