@@ -47,7 +47,7 @@ const { org, topics, visits, invoke } = vi.hoisted(() => {
             return {
                 messages: [{ messageId: 'm1', threadRootId: 'r1', topicTitle: 'Design review cadence', author: { memberId: 'pat' }, snippet: 'the roadmap is ready', postedAt: '2026-09-10T10:00:00Z', offset: 3 }],
                 topics: [],
-                assets: [{ path: 'docs/roadmap.md', version: 1, updatedAt: '2026-09-09T00:00:00Z', snippet: 'roadmap draft' }],
+                assets: [{ id: '01HXAMPLEASSET0000000000A1', path: 'docs/roadmap.md', version: 1, updatedAt: '2026-09-09T00:00:00Z', snippet: 'roadmap draft' }],
                 truncated: { messages: false, topics: false, assets: false },
             }
         }
@@ -258,6 +258,18 @@ describe('CommandPalette', () => {
         expect(onNavigate).toHaveBeenCalledWith({
             kind: 'space', orgId: 'org', spaceId: 'design',
             rail: { kind: 'thread', rootMessageId: 'r1' }, messageId: 'm1',
+        })
+    })
+
+    it('lands a file hit on the space with a file rail named by asset id', async () => {
+        const { input, onNavigate } = open()
+        fireEvent.change(input, { target: { value: 'roadmap' } })
+        expect(await screen.findByText('Files in spaces')).toBeInTheDocument()
+        // The path is the row's label (highlighted, so matched on the whole span); the id is what opens.
+        fireEvent.click(screen.getByText((_, el) => el?.tagName === 'SPAN' && el.classList.contains('font-mono') && el.textContent === 'docs/roadmap.md'))
+        expect(onNavigate).toHaveBeenCalledWith({
+            kind: 'space', orgId: 'org', spaceId: 'design',
+            rail: { kind: 'file', assetId: '01HXAMPLEASSET0000000000A1' },
         })
     })
 

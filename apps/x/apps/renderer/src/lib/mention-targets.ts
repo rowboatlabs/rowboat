@@ -23,6 +23,9 @@ export interface BoardMentionTarget {
   orgName: string
   spaceId: string
   spaceName: string
+  /** The board's asset id — what the whiteboard tools take. */
+  assetId: string
+  /** Display path (whiteboards/<name>.excalidraw). */
   path: string
   name: string
 }
@@ -79,7 +82,7 @@ export function mentionTargetKey(target: MentionTarget): string {
     case 'space':
       return `space:${target.orgId}/${target.spaceId}`
     case 'board':
-      return `board:${target.orgId}/${target.spaceId}/${target.path}`
+      return `board:${target.orgId}/${target.spaceId}/${target.assetId}`
     case 'member':
       return `member:${target.orgId}/${target.memberId}`
   }

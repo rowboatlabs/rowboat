@@ -1,7 +1,10 @@
 import { z } from 'zod';
 import { BlobInfo } from './blob.js';
 import {
+  Asset,
   ChangeSet,
+  CreateAsset,
+  CreateAssetResult,
   DeleteAssetResult,
   MoveAssetResult,
   ProposeChange,
@@ -10,7 +13,7 @@ import {
   RestoreAssetResult,
 } from './changeset.js';
 import { ActingMode, Attribution, Member, Message, ReactionEmoji, Space, SpaceKind, Topic } from './core.js';
-import { AssetPath, AssetVersion, BlobHash, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
+import { AssetId, AssetPath, BlobHash, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 import {
   AcceptInvite,
   AcceptInviteResult,
@@ -290,45 +293,40 @@ export const routes = {
   },
 
   // --- assets --------------------------------------------------------------
+  /**
+   * Files are addressed by id (2026-09-14, Google-Docs style): every call
+   * below takes an assetId that came from a listing, a create, a search hit,
+   * or a link. The path is a display property on the record — the tree's
+   * label — changed only by moveAsset and named only by createAsset, the one
+   * call that runs before an id exists. Namespace ops are property updates
+   * (history and bytes never move); only content edits bump versions; each
+   * op appends one attributed change-set (op: move|delete|restore) and its
+   * feed event. Deleted files freeze in place, listable via includeDeleted,
+   * restorable while their path is free among the living.
+   */
   listAssets: {
     method: 'GET',
     path: '/v1/spaces/:spaceId/assets',
     params: z.object({ spaceId: SpaceId }),
-    /** Default = live files only (today's shape, unchanged). includeDeleted adds the trash. */
+    /** Default = live files only. includeDeleted adds the trash. */
     query: z.object({ includeDeleted: z.coerce.boolean().optional() }),
-    response: z.object({
-      entries: z.array(
-        z.object({
-          path: AssetPath,
-          version: AssetVersion,
-          updatedAt: z.iso.datetime(),
-          /** Present when the head version is binary. Folders are display: clients group paths on `/`. */
-          blob: BlobInfo.optional(),
-          /** Present only on trash entries (includeDeleted); absent = live. */
-          state: z.literal('deleted').optional(),
-        }),
-      ),
-    }),
+    response: z.object({ entries: z.array(Asset) }),
   },
-  /**
-   * Namespace ops (2026-08-26): the path is the product's identity, but
-   * storage keys on an internal per-asset id (the inode model), so these are
-   * property updates — history and bytes never move. Only content edits bump
-   * versions; each op appends one attributed change-set (op: move|delete|
-   * restore) and its feed event. Old paths keep a redirect: reads follow it
-   * (the result's `path` says where the file lives now); proposes refuse with
-   * a pointer. Deleted files freeze in place, listable via includeDeleted,
-   * restorable while their path is free; a fresh create over a deleted path
-   * starts a new lineage and never blocks.
-   */
+  createAsset: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/assets',
+    params: z.object({ spaceId: SpaceId }),
+    request: CreateAsset,
+    response: CreateAssetResult, // occupied path = invalid_request
+  },
   moveAsset: {
     method: 'POST',
     path: '/v1/spaces/:spaceId/assets/move',
     params: z.object({ spaceId: SpaceId }),
     request: z.object({
-      fromPath: AssetPath,
+      assetId: AssetId,
       toPath: AssetPath,
-      /** Version of fromPath you last read — stale = conflict, same discipline as propose. */
+      /** Version you last read — stale = conflict, same discipline as propose. */
       baseVersion: z.number().int().positive(),
       reason: z.string().max(1_000).optional(),
       threadRootId: MessageId.optional(),
@@ -342,7 +340,7 @@ export const routes = {
     path: '/v1/spaces/:spaceId/assets/delete',
     params: z.object({ spaceId: SpaceId }),
     request: z.object({
-      path: AssetPath,
+      assetId: AssetId,
       baseVersion: z.number().int().positive(),
       reason: z.string().max(1_000).optional(),
       threadRootId: MessageId.optional(),
@@ -356,8 +354,8 @@ export const routes = {
     path: '/v1/spaces/:spaceId/assets/restore',
     params: z.object({ spaceId: SpaceId }),
     request: z.object({
-      /** The trash entry's path (most recently deleted wins if several share it). */
-      path: AssetPath,
+      /** A trash entry's id (listAssets includeDeleted). */
+      assetId: AssetId,
       reason: z.string().max(1_000).optional(),
       actingMode: ActingMode,
       agentName: z.string().max(64).optional(),
@@ -366,10 +364,9 @@ export const routes = {
   },
   readAsset: {
     method: 'GET',
-    path: '/v1/spaces/:spaceId/asset',
-    params: z.object({ spaceId: SpaceId }),
+    path: '/v1/spaces/:spaceId/assets/:assetId',
+    params: z.object({ spaceId: SpaceId, assetId: AssetId }),
     query: z.object({
-      path: AssetPath,
       /** Omit for the current version; set for time-travel reads. */
       version: z.coerce.number().int().positive().optional(),
     }),
@@ -387,7 +384,7 @@ export const routes = {
     path: '/v1/spaces/:spaceId/history',
     params: z.object({ spaceId: SpaceId }),
     query: z.object({
-      path: AssetPath.optional(), // omit for the whole space's change log
+      assetId: AssetId.optional(), // omit for the whole space's change log
       beforeOffset: z.coerce.number().int().nonnegative().optional(),
       limit: z.coerce.number().int().positive().max(200).optional(),
     }),
@@ -398,7 +395,7 @@ export const routes = {
     path: '/v1/spaces/:spaceId/diff',
     params: z.object({ spaceId: SpaceId }),
     query: z.object({
-      path: AssetPath,
+      assetId: AssetId,
       from: z.coerce.number().int().nonnegative(),
       to: z.coerce.number().int().positive(),
     }),
@@ -621,8 +618,8 @@ export const routes = {
         rootMessageId: MessageId.optional(),
         title: z.string().min(1).max(256),
         body: z.string().min(1).max(65_536).optional(),
-        /** Attach a space file at birth (a live asset path; moved paths resolve). */
-        documentPath: AssetPath.optional(),
+        /** Attach a space file at birth (a live asset's id). */
+        documentAssetId: AssetId.optional(),
         actingMode: ActingMode,
         agentName: z.string().max(64).optional(),
       })
@@ -637,7 +634,7 @@ export const routes = {
    * One-row lifecycle ops on the annotation — none can touch a message.
    * `remove` deletes the row ("convert back to thread"); the conversation
    * stays in the stream untouched, and re-promoting later is lossless.
-   * `attach_document` links one live space file (Topic.documentPath) —
+   * `attach_document` links one live space file (Topic.documentAssetId) —
    * replacing any earlier link; `detach_document` clears it. Both are
    * idempotent (no event when nothing changes).
    */
@@ -650,7 +647,7 @@ export const routes = {
       z.object({ action: z.literal('archive'), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
       z.object({ action: z.literal('unarchive'), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
       z.object({ action: z.literal('remove'), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
-      z.object({ action: z.literal('attach_document'), path: AssetPath, actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+      z.object({ action: z.literal('attach_document'), assetId: AssetId, actingMode: ActingMode, agentName: z.string().max(64).optional() }),
       z.object({ action: z.literal('detach_document'), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
     ]),
     response: z.object({ topic: Topic }),

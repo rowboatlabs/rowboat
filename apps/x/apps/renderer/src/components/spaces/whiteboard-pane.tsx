@@ -68,7 +68,6 @@ window.EXCALIDRAW_ASSET_PATH = './excalidraw-assets/'
 const CURSOR_SYNC_MS = 33 // ~30fps, Excalidraw's own cadence
 const FULL_SYNC_MS = 20_000 // periodic full-scene self-heal
 const SAVE_AFTER_MS = 15_000 // snapshot throttle once the board exists
-const FIRST_SAVE_AFTER_MS = 1_500 // a new board becomes an asset on the first stroke
 const HEARTBEAT_MS = 20_000
 const COLLABORATOR_TTL_MS = 65_000 // ~3 missed heartbeats
 
@@ -116,18 +115,24 @@ function initials(name: string | null | undefined): string {
     return ((parts[0][0] ?? '') + (parts[1]?.[0] ?? '')).toUpperCase()
 }
 
+/** A board as the switcher lists it: the asset id (identity) and its display path. */
+export interface BoardListing {
+    id: string
+    path: string
+}
+
 export default function WhiteboardPane({ org, space, boardId, memberNames, active, boards, onSelectBoard, onCreateBoard, onClose }: {
     org: OrgWithSpaces
     space: spaces.Space
-    /** The board's asset path (whiteboards/<name>.excalidraw). */
+    /** The board's ASSET ID — the collab channel, the frames and the snapshot saves all key on it. */
     boardId: string
     memberNames: ReadonlyMap<string, string>
     /** False while the pane is on screen but the app shows another section. */
     active: boolean
-    /** Every board in the space (asset paths) — the name chip's switcher list. */
-    boards: string[]
-    onSelectBoard: (path: string) => void
-    /** Create-or-open by path (SpacePane owns the empty-snapshot propose). */
+    /** Every board in the space — the name chip's switcher list. */
+    boards: BoardListing[]
+    onSelectBoard: (assetId: string) => void
+    /** Create by path (SpacePane owns the createAsset and opens the result by id). */
     onCreateBoard: (path: string) => void
     /** Closes the board's column; the chat takes the width. */
     onClose: () => void
@@ -138,17 +143,23 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
     /** Render mirror of collaboratorsRef — drives the top-right avatar stack. */
     const [liveCollabs, setLiveCollabs] = useState<Collaborator[]>([])
     const [switcherOpen, setSwitcherOpen] = useState(false)
+    /** The board's display path as the read record has it (a rename updates it on the next read). */
+    const [readPath, setReadPath] = useState<string | null>(null)
+    const boardPath = readPath ?? boards.find((b) => b.id === boardId)?.path ?? spaces.DEFAULT_WHITEBOARD_PATH
 
     // The chip's list: every board plus this one (a just-created board can
     // beat the entries refresh), by display name.
-    const allBoards = [...(boards.includes(boardId) ? boards : [boardId, ...boards])]
-        .sort((a, b) => spaces.whiteboardDisplayName(a).localeCompare(spaces.whiteboardDisplayName(b)))
+    const allBoards = [...(boards.some((b) => b.id === boardId) ? boards : [{ id: boardId, path: boardPath }, ...boards])]
+        .sort((a, b) => spaces.whiteboardDisplayName(a.path).localeCompare(spaces.whiteboardDisplayName(b.path)))
 
     const submitNewBoard = (name: string) => {
         const path = spaces.whiteboardPathForName(name)
         if (!path) return
         setSwitcherOpen(false)
-        if (path !== boardId) onCreateBoard(path) // create-or-open; a taken name just opens
+        // A taken name just opens that board; a new one is created by path.
+        const taken = allBoards.find((b) => b.path === path)
+        if (taken) { if (taken.id !== boardId) onSelectBoard(taken.id) }
+        else onCreateBoard(path)
     }
 
     const apiRef = useRef<ExcalidrawImperativeAPI | null>(null)
@@ -177,8 +188,9 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
     }
 
     // ------------------------------------------------------------------
-    // Load: the latest snapshot, or an empty scene for a board that does
-    // not exist yet (it becomes an asset on the first save).
+    // Load: the latest snapshot. A board exists before it opens (creating
+    // one is a createAsset), so an id the org does not answer to is an
+    // error state, never an empty scene to draw into.
     // ------------------------------------------------------------------
     useEffect(() => {
         let cancelled = false
@@ -195,15 +207,15 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
                 baseVersion: version,
                 elements,
                 sceneVersion: getSceneVersion(elements),
-                firstSaveDelayMs: FIRST_SAVE_AFTER_MS,
                 saveDelayMs: SAVE_AFTER_MS,
                 io: { propose: proposeSnapshot, pullAndReconcile: pullSnapshot },
             })
         }
         void (async () => {
             try {
-                const res = await window.ipc.invoke('spaces:readAsset', { orgId: org.id, spaceId: space.id, path: boardId })
+                const res = await window.ipc.invoke('spaces:readAsset', { orgId: org.id, spaceId: space.id, assetId: boardId })
                 if (cancelled) return
+                setReadPath(res.path)
                 let snapshot: SnapshotJson | null = null
                 if (res.blob) {
                     const resp = await fetch(blobUrl(org.id, space.id, res.blob.hash))
@@ -220,14 +232,7 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
                 setLoad({ phase: 'ready', elements })
             } catch (err) {
                 if (cancelled) return
-                const message = err instanceof Error ? err.message : String(err)
-                if (/not.?found|no such/i.test(message)) {
-                    // A board that hasn't been drawn on yet.
-                    adopt(0, [])
-                    setLoad({ phase: 'ready', elements: [] })
-                } else {
-                    setLoad({ phase: 'error', message })
-                }
+                setLoad({ phase: 'error', message: err instanceof Error ? err.message : String(err) })
             }
         })()
         return () => {
@@ -282,13 +287,13 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
         const encoded = new TextEncoder().encode(json)
         let input: spaces.SpacesProposeInput
         if (encoded.length <= spaces.WHITEBOARD_TEXT_SNAPSHOT_MAX_BYTES) {
-            input = { assetPath: boardId, baseVersion, newContent: json, reason: 'whiteboard' }
+            input = { assetId: boardId, baseVersion, newContent: json, reason: 'whiteboard' }
         } else {
-            const name = boardId.slice(boardId.lastIndexOf('/') + 1)
+            const name = boardPath.slice(boardPath.lastIndexOf('/') + 1)
             const uploaded = await window.ipc.invoke('spaces:uploadBlob', {
                 orgId: org.id, spaceId: space.id, bytes: bytesToBase64(encoded), name, mime: 'application/json',
             })
-            input = { assetPath: boardId, baseVersion, blob: uploaded.blob.hash, reason: 'whiteboard' }
+            input = { assetId: boardId, baseVersion, blob: uploaded.blob.hash, reason: 'whiteboard' }
         }
         return await window.ipc.invoke('spaces:proposeChange', { orgId: org.id, spaceId: space.id, input })
     }
@@ -298,8 +303,9 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
         const saver = saverRef.current
         if (!apiRef.current || !saver) return
         try {
-            const res = await window.ipc.invoke('spaces:readAsset', { orgId: org.id, spaceId: space.id, path: boardId })
+            const res = await window.ipc.invoke('spaces:readAsset', { orgId: org.id, spaceId: space.id, assetId: boardId })
             if (saverRef.current !== saver) return // the pane moved on while we fetched
+            setReadPath(res.path)
             saver.noteRemoteVersion(res.version)
             let snapshot: SnapshotJson | null = null
             if (res.blob) {
@@ -444,7 +450,10 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
         } else if (frame.kind === 'event' && frame.event.type === 'change') {
             const cs = frame.event.changeSet
             const saver = saverRef.current
-            if (!saver || cs.assetPath !== boardId || cs.op || cs.resultVersion <= saver.baseVersion) return
+            if (!saver || cs.assetId !== boardId) return
+            // A rename is a display change: the chip follows the new path.
+            if (cs.op === 'move') { setReadPath(cs.assetPath); return }
+            if (cs.op || cs.resultVersion <= saver.baseVersion) return
             // A snapshot we didn't write (another client, another window, or an
             // agent via the MCP face) — pull and reconcile it into the scene.
             void pullSnapshot()
@@ -567,27 +576,27 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
                                     className="flex h-9 items-center gap-1.5 rounded-lg border border-border bg-popover px-2.5 text-[13px] font-medium text-foreground shadow-sm hover:bg-accent/50"
                                 >
                                     <PenTool className="size-3.5 text-muted-foreground" />
-                                    <span className="max-w-40 truncate">{spaces.whiteboardDisplayName(boardId)}</span>
+                                    <span className="max-w-40 truncate">{spaces.whiteboardDisplayName(boardPath)}</span>
                                     <ChevronDown className="size-3 text-muted-foreground" />
                                 </button>
                             </PopoverTrigger>
                             <PopoverContent align="end" sideOffset={6} className="w-60 p-1">
                                 <div className="max-h-64 overflow-y-auto">
-                                    {allBoards.map((path) => (
+                                    {allBoards.map((b) => (
                                         <button
-                                            key={path}
+                                            key={b.id}
                                             type="button"
                                             onClick={() => {
                                                 setSwitcherOpen(false)
-                                                if (path !== boardId) onSelectBoard(path)
+                                                if (b.id !== boardId) onSelectBoard(b.id)
                                             }}
                                             className={cn(
                                                 'flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[13px]',
-                                                path === boardId ? 'font-medium text-foreground' : 'text-foreground/90 hover:bg-accent/50',
+                                                b.id === boardId ? 'font-medium text-foreground' : 'text-foreground/90 hover:bg-accent/50',
                                             )}
                                         >
-                                            <span className="flex-1 truncate">{spaces.whiteboardDisplayName(path)}</span>
-                                            {path === boardId && <Check className="size-3.5 shrink-0 text-muted-foreground" />}
+                                            <span className="flex-1 truncate">{spaces.whiteboardDisplayName(b.path)}</span>
+                                            {b.id === boardId && <Check className="size-3.5 shrink-0 text-muted-foreground" />}
                                         </button>
                                     ))}
                                 </div>

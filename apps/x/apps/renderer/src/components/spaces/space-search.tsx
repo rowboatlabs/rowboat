@@ -195,8 +195,8 @@ export function SpaceSearch({ orgId, spaceId, selfMemberId, onNavigate, classNam
         ...assets.map((a): Item => {
             const board = /\.excalidraw$/i.test(a.path)
             return {
-                key: `a:${a.path}`,
-                pick: () => pick(board ? { kind: 'whiteboard', path: a.path } : { kind: 'file', path: a.path }),
+                key: `a:${a.id}`,
+                pick: () => pick(board ? { kind: 'whiteboard', assetId: a.id } : { kind: 'file', assetId: a.id }),
                 row: (
                     <>
                         {board

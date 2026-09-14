@@ -103,12 +103,13 @@ describe('multi-org deployment', () => {
   it('deployment boot backfills asset_search — the path single-org init() covers, on the fleet', async () => {
     const ram = await as.mint({ sub: 'sub-ram' });
     const spaceId = (await http('acme.test', ram).get('/v1/spaces')).body.spaces[0].id;
-    await http('acme.test', ram).post(`/v1/spaces/${spaceId}/changes`, {
-      assetPath: 'notes/relics.md',
-      baseVersion: 0,
+    const made = await http('acme.test', ram).post(`/v1/spaces/${spaceId}/assets`, {
+      path: 'notes/relics.md',
       newContent: 'the amphora survives the reboot',
       actingMode: 'direct',
     });
+    expect(made.status).toBe(200);
+    const relicsId: string = made.body.asset.id;
 
     // Simulate pre-012 data: the asset exists, its search row does not.
     await db.query('delete from asset_search', []);
@@ -123,8 +124,8 @@ describe('multi-org deployment', () => {
       const res = await fetch(`${url}/v1/spaces/${spaceId}/search?q=amphora`, {
         headers: { 'x-forwarded-host': 'acme.test', authorization: `Bearer ${ram}` },
       });
-      const body = (await res.json()) as { assets: Array<{ path: string; snippet?: string }> };
-      expect(body.assets.map((a) => a.path)).toEqual(['notes/relics.md']);
+      const body = (await res.json()) as { assets: Array<{ id: string; path: string; snippet?: string }> };
+      expect(body.assets.map((a) => [a.id, a.path])).toEqual([[relicsId, 'notes/relics.md']]);
       expect(body.assets[0]!.snippet).toContain('amphora');
     } finally {
       await dep2.close();
@@ -226,10 +227,14 @@ describe('apex face (self-serve org creation)', () => {
     // Landing area: a Main space with a welcome README, attributed to the founder.
     const spaces = (await http('roadboard.spaces.test', token).get('/v1/spaces')).body.spaces;
     expect(spaces.map((s: any) => s.name)).toEqual(['Main']);
+    const entries = (await http('roadboard.spaces.test', token).get(`/v1/spaces/${spaces[0].id}/assets`)).body.entries;
+    expect(entries.map((e: any) => e.path)).toEqual(['README.md']);
     const readme = await http('roadboard.spaces.test', token).get(
-      `/v1/spaces/${spaces[0].id}/asset?path=README.md`,
+      `/v1/spaces/${spaces[0].id}/assets/${entries[0].id}`,
     );
     expect(readme.status).toBe(200);
+    expect(readme.body.id).toBe(entries[0].id);
+    expect(readme.body.path).toBe('README.md');
     expect(readme.body.content).toContain('# Welcome to Roadboard');
     expect(readme.body.content).toContain('When to make more spaces');
     expect(readme.body.recentHistory[0].attribution.memberId).toBe(created.body.member.id);

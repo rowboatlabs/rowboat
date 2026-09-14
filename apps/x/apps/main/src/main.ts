@@ -199,6 +199,21 @@ console.log("rendererPath", rendererPath);
 //     This is how <img> tags in space messages render: the renderer holds no
 //     org tokens, so blob bytes must resolve in main.
 //   app://<anything-else>/...   → renderer SPA (existing behavior)
+/**
+ * One space listing per (org, space) for a few seconds: an HTML document's
+ * every relative reference re-enters the space-document route, and each
+ * needs the path → id map — one fetch per page load, not one per <img>.
+ */
+const listingCache = new Map<string, { at: number; entries: Array<{ id: string; path: string }> }>();
+async function listSpaceAssets(orgId: string, spaceId: string): Promise<Array<{ id: string; path: string }>> {
+  const key = `${orgId}/${spaceId}`;
+  const hit = listingCache.get(key);
+  if (hit && Date.now() - hit.at < 5_000) return hit.entries;
+  const entries = await getSpaceClient(orgId).listAssets(spaceId);
+  listingCache.set(key, { at: Date.now(), entries });
+  return entries;
+}
+
 function registerAppProtocol() {
   protocol.handle("app", async (request) => {
     const url = new URL(request.url);
@@ -234,17 +249,31 @@ function registerAppProtocol() {
       })();
     }
 
-    // File-based URLs keep HTML's relative assets inside the same space.
+    // Space documents by asset id: app://space-document/<orgId>/<spaceId>/<assetId>[/<sub path>]
+    // An HTML document's relative references re-enter this route with a sub
+    // path; it resolves against the document's folder first, then the space
+    // root (so both `<assetId>/` and `<assetId>/<own path>` document URLs
+    // work), through the listing (path → id) — the read itself is by id.
     if (url.host === "space-document") {
       try {
-        const [orgId, spaceId, ...segments] = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
-        if (!orgId || !spaceId || !segments.length || segments.some((part) => part === '..' || part.includes('/') || part.includes('\\'))) {
+        const [orgId, spaceId, assetId, ...rest] = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+        if (!orgId || !spaceId || !assetId || rest.some((part) => part.includes('/') || part.includes('\\'))) {
           return new Response("Not Found", { status: 404 });
         }
-        const assetPath = segments.join('/');
-        const asset = await getSpaceClient(orgId).readAsset(spaceId, assetPath);
+        const client = getSpaceClient(orgId);
+        // The document's own URL is <assetId>/<its path>, so the browser has
+        // already resolved a page's relative references against its folder:
+        // what arrives after the id is the referenced file's space-root path.
+        let asset = await client.readAsset(spaceId, assetId);
+        const sub = path.posix.normalize(rest.join('/'));
+        if (rest.length > 0 && sub !== asset.path) {
+          if (sub === '.' || sub === '..' || sub.startsWith('../')) return new Response("Not Found", { status: 404 });
+          const hit = (await listSpaceAssets(orgId, spaceId)).find((a) => a.path === sub);
+          if (!hit) return new Response("Not Found", { status: 404 });
+          asset = await client.readAsset(spaceId, hit.id);
+        }
         const blob = asset.blob ? await spaceBlobCache.getBlob(orgId, spaceId, asset.blob.hash) : null;
-        const ext = path.extname(assetPath).toLowerCase();
+        const ext = path.extname(asset.path).toLowerCase();
         const textTypes: Record<string, string> = {
           '.html': 'text/html', '.htm': 'text/html', '.css': 'text/css',
           '.js': 'text/javascript', '.json': 'application/json', '.svg': 'image/svg+xml',

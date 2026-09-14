@@ -634,14 +634,14 @@ export function CommandPalette({ open, onOpenChange, chats, notes, defaultScope,
     const files: Row[] = spaceHits.assets.map(({ space, hit }) => {
       const board = /\.excalidraw$/i.test(hit.path)
       return {
-        key: `asset:${space.orgId}/${space.spaceId}/${hit.path}`,
+        key: `asset:${space.orgId}/${space.spaceId}/${hit.id}`,
         kind: 'file',
         icon: board ? PenTool : FileText,
         title: <span className="font-mono text-[13px]">{highlight(hit.path, terms)}</span>,
         subtitle: space.direct ? space.name : `#${space.name}`,
         detail: hit.snippet ? highlight(hit.snippet, terms) : undefined,
         aside: formatFeedTime(hit.updatedAt),
-        dest: { kind: 'space', orgId: space.orgId, spaceId: space.spaceId, rail: board ? { kind: 'whiteboard', path: hit.path } : { kind: 'file', path: hit.path } },
+        dest: { kind: 'space', orgId: space.orgId, spaceId: space.spaceId, rail: board ? { kind: 'whiteboard', assetId: hit.id } : { kind: 'file', assetId: hit.id } },
       }
     })
     // A note already ranked by its title is not listed twice for its text;

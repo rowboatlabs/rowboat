@@ -30,7 +30,7 @@ function versionLabel(g: ArtifactGroup): string {
 
 export function FoldIntoFileButton({ entries, onPick, busy }: {
     entries: spaces.SpacesAssetEntry[]
-    onPick: (path: string) => void
+    onPick: (file: { assetId: string; path: string }) => void
     busy?: boolean
 }) {
     return (
@@ -50,7 +50,7 @@ export function FoldIntoFileButton({ entries, onPick, busy }: {
                 <DropdownMenuSeparator />
                 {entries.length === 0 && <DropdownMenuItem disabled>No files in this space yet</DropdownMenuItem>}
                 {entries.map((e) => (
-                    <DropdownMenuItem key={e.path} onClick={() => onPick(e.path)}>
+                    <DropdownMenuItem key={e.id} onClick={() => onPick({ assetId: e.id, path: e.path })}>
                         <FileText className="size-3.5 mr-2 text-muted-foreground" /> <code className="text-xs">{e.path}</code>
                     </DropdownMenuItem>
                 ))}
@@ -67,18 +67,19 @@ export function ArtifactsRail({ org, space, groups, memberNames, working, entrie
     memberNames: Map<string, string>
     working: boolean
     entries: spaces.SpacesAssetEntry[]
-    onFold: (path: string) => void
+    onFold: (file: { assetId: string; path: string }) => void
     folding: boolean
-    onOpenFile: (path: string) => void
+    /** Opens a changed file by its asset id. */
+    onOpenFile: (assetId: string) => void
     onCollapse: () => void
 }) {
     const [diffView, setDiffView] = useState<{ title: string; unified: string } | null>(null)
     const [diffBusy, setDiffBusy] = useState<string | null>(null)
 
     const openDiff = async (g: ArtifactGroup) => {
-        setDiffBusy(g.assetPath)
+        setDiffBusy(g.assetId)
         try {
-            const res = await window.ipc.invoke('spaces:diff', { orgId: org.id, spaceId: space.id, path: g.assetPath, from: g.fromVersion, to: g.toVersion })
+            const res = await window.ipc.invoke('spaces:diff', { orgId: org.id, spaceId: space.id, assetId: g.assetId, from: g.fromVersion, to: g.toVersion })
             setDiffView({ title: `${g.assetPath} · ${versionLabel(g)}`, unified: res.unified })
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not load the diff', 'error')
@@ -105,8 +106,8 @@ export function ArtifactsRail({ org, space, groups, memberNames, working, entrie
                     </div>
                 )}
                 {groups.map((g) => (
-                    <div key={g.assetPath} className="group/row flex items-center gap-2 rounded-lg border border-border bg-background px-2.5 py-2 hover:border-foreground/20">
-                        <button type="button" onClick={() => onOpenFile(g.assetPath)} className="flex min-w-0 flex-1 items-center gap-2 text-left" title="Open the file">
+                    <div key={g.assetId} className="group/row flex items-center gap-2 rounded-lg border border-border bg-background px-2.5 py-2 hover:border-foreground/20">
+                        <button type="button" onClick={() => onOpenFile(g.assetId)} className="flex min-w-0 flex-1 items-center gap-2 text-left" title="Open the file">
                             <FileTile />
                             <div className="min-w-0 flex-1">
                                 <div className="text-[12.5px]"><code className="text-xs">{g.assetPath}</code> <span className="text-muted-foreground">{versionLabel(g)}</span></div>
@@ -123,7 +124,7 @@ export function ArtifactsRail({ org, space, groups, memberNames, working, entrie
                                 onClick={() => void openDiff(g)}
                                 className="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
                             >
-                                {diffBusy === g.assetPath ? <Loader2 className="size-3 animate-spin" /> : 'diff'}
+                                {diffBusy === g.assetId ? <Loader2 className="size-3 animate-spin" /> : 'diff'}
                             </button>
                         )}
                     </div>
@@ -151,7 +152,7 @@ export function ArtifactsSummary({ groups, working, railOpen, onToggleRail, entr
     railOpen: boolean
     onToggleRail: () => void
     entries: spaces.SpacesAssetEntry[]
-    onFold: (path: string) => void
+    onFold: (file: { assetId: string; path: string }) => void
     folding: boolean
 }) {
     return (

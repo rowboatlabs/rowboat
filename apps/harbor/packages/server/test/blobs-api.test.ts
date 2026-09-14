@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { ChangeSet, ProposeChangeResult, ReadAssetResult } from '@rowboat/spaces-protocol';
+import type { ChangeSet, CreateAssetResult, ReadAssetResult } from '@rowboat/spaces-protocol';
 import { blobHash } from '../src/blobs.js';
 import { PgStore } from '../src/pg-store.js';
 import { startHarbor, type HarborOptions, type RunningHarbor } from '../src/server.js';
@@ -22,6 +22,7 @@ const CSV_BYTES = new TextEncoder().encode('week,signups\n1,40\n2,55\n');
 let harbor: RunningHarbor;
 let sqlDb: SqlDb | undefined;
 let spaceId: string;
+let homePngId: string; // design/screens/home.png, born in phase 2 — every later call names it by id
 
 function api(token: string) {
   const base = (extra: Record<string, string> = {}): Record<string, string> => ({
@@ -177,64 +178,95 @@ describe.each([['memory'], ['postgres']] as const)('blob uploads over the render
     expect(r.status).toBe(404);
   });
 
-  // --- phase 2: the binary propose variant -----------------------------------
+  // --- phase 2: the binary create / propose variants ------------------------
 
   it('creates a binary asset at a nested path; change-set, listing, and read all carry blob metadata', async () => {
-    const propose = await ramnique.post(`/v1/spaces/${spaceId}/changes`, {
-      assetPath: 'design/screens/home.png',
-      baseVersion: 0,
+    const create = await ramnique.post(`/v1/spaces/${spaceId}/assets`, {
+      path: 'design/screens/home.png',
       blob: blobHash(PNG_1PX),
       reason: 'first mockup',
       actingMode: 'direct',
     });
-    expect(propose.status).toBe(200);
-    expect(propose.body.outcome).toBe('applied');
-    const changeSet = propose.body.changeSet as ChangeSet;
+    expect(create.status).toBe(200);
+    const { asset, changeSet } = create.body as CreateAssetResult;
+    expect(asset).toMatchObject({ path: 'design/screens/home.png', version: 1 });
+    expect(asset.blob).toEqual({ hash: blobHash(PNG_1PX), size: PNG_1PX.byteLength, mime: 'image/png', width: 1, height: 1 });
+    expect(changeSet.assetId).toBe(asset.id);
+    expect(changeSet.assetPath).toBe('design/screens/home.png');
     expect(changeSet.blob).toEqual({ hash: blobHash(PNG_1PX), size: PNG_1PX.byteLength, mime: 'image/png', width: 1, height: 1 });
+    homePngId = asset.id;
 
     const listing = await ramnique.get(`/v1/spaces/${spaceId}/assets`);
     const entry = listing.body.entries.find((e: { path: string }) => e.path === 'design/screens/home.png');
+    expect(entry.id).toBe(homePngId);
     expect(entry.blob.mime).toBe('image/png');
 
-    const read = await ramnique.get(`/v1/spaces/${spaceId}/asset?path=${encodeURIComponent('design/screens/home.png')}`);
-    const asset = read.body as ReadAssetResult;
-    expect(asset.content).toBe('');
-    expect(asset.blob?.hash).toBe(blobHash(PNG_1PX));
-    expect(asset.version).toBe(1);
+    const read = await ramnique.get(`/v1/spaces/${spaceId}/assets/${homePngId}`);
+    expect(read.status).toBe(200);
+    const readBody = read.body as ReadAssetResult;
+    expect(readBody.id).toBe(homePngId);
+    expect(readBody.path).toBe('design/screens/home.png');
+    expect(readBody.content).toBe('');
+    expect(readBody.blob?.hash).toBe(blobHash(PNG_1PX));
+    expect(readBody.version).toBe(1);
   });
 
-  it('rejects proposing a hash that was never uploaded to this space', async () => {
-    const r = await ramnique.post(`/v1/spaces/${spaceId}/changes`, {
-      assetPath: 'design/ghost.png',
-      baseVersion: 0,
-      blob: blobHash(new TextEncoder().encode('phantom bytes')),
+  it('rejects a hash that was never uploaded to this space — at birth and on a later propose', async () => {
+    const phantom = blobHash(new TextEncoder().encode('phantom bytes'));
+    const born = await ramnique.post(`/v1/spaces/${spaceId}/assets`, {
+      path: 'design/ghost.png',
+      blob: phantom,
       actingMode: 'direct',
     });
-    expect(r.status).toBe(400);
-    expect(r.body.message).toMatch(/not uploaded/);
+    expect(born.status).toBe(400);
+    expect(born.body.message).toMatch(/not uploaded/);
+
+    const proposed = await ramnique.post(`/v1/spaces/${spaceId}/changes`, {
+      assetId: homePngId,
+      baseVersion: 1,
+      blob: phantom,
+      actingMode: 'direct',
+    });
+    expect(proposed.status).toBe(400);
+    expect(proposed.body.message).toMatch(/not uploaded/);
+    // Nothing was written either way.
+    expect((await ramnique.get(`/v1/spaces/${spaceId}/assets/${homePngId}`)).body.version).toBe(1);
   });
 
-  it('rejects a propose carrying both newContent and blob, or neither', async () => {
-    const both = await ramnique.post(`/v1/spaces/${spaceId}/changes`, {
-      assetPath: 'design/confused.png',
-      baseVersion: 0,
+  it('rejects a create or propose carrying both newContent and blob, or neither', async () => {
+    const bothBorn = await ramnique.post(`/v1/spaces/${spaceId}/assets`, {
+      path: 'design/confused.png',
       newContent: 'text',
       blob: blobHash(PNG_1PX),
       actingMode: 'direct',
     });
-    expect(both.status).toBe(400);
-    const neither = await ramnique.post(`/v1/spaces/${spaceId}/changes`, {
-      assetPath: 'design/confused.png',
-      baseVersion: 0,
+    expect(bothBorn.status).toBe(400);
+    const neitherBorn = await ramnique.post(`/v1/spaces/${spaceId}/assets`, {
+      path: 'design/confused.png',
       actingMode: 'direct',
     });
-    expect(neither.status).toBe(400);
+    expect(neitherBorn.status).toBe(400);
+
+    const bothProposed = await ramnique.post(`/v1/spaces/${spaceId}/changes`, {
+      assetId: homePngId,
+      baseVersion: 1,
+      newContent: 'text',
+      blob: blobHash(PNG_1PX),
+      actingMode: 'direct',
+    });
+    expect(bothProposed.status).toBe(400);
+    const neitherProposed = await ramnique.post(`/v1/spaces/${spaceId}/changes`, {
+      assetId: homePngId,
+      baseVersion: 1,
+      actingMode: 'direct',
+    });
+    expect(neitherProposed.status).toBe(400);
   });
 
   it('replaces at the current base; stale binary proposes are conflict-or-replace with empty regions', async () => {
     // v2: replace the image with the csv bytes (content-addressing does not care).
     const replace = await ramnique.post(`/v1/spaces/${spaceId}/changes`, {
-      assetPath: 'design/screens/home.png',
+      assetId: homePngId,
       baseVersion: 1,
       blob: blobHash(CSV_BYTES),
       reason: 'swap in the data placeholder',
@@ -245,7 +277,7 @@ describe.each([['memory'], ['postgres']] as const)('blob uploads over the render
 
     // A stale binary propose (base v1, head v2): nothing to three-way-merge.
     const stale = await ramnique.post(`/v1/spaces/${spaceId}/changes`, {
-      assetPath: 'design/screens/home.png',
+      assetId: homePngId,
       baseVersion: 1,
       blob: blobHash(PNG_1PX),
       actingMode: 'direct',
@@ -259,7 +291,7 @@ describe.each([['memory'], ['postgres']] as const)('blob uploads over the render
 
     // Re-proposing at the current version is the explicit replace.
     const replay = await ramnique.post(`/v1/spaces/${spaceId}/changes`, {
-      assetPath: 'design/screens/home.png',
+      assetId: homePngId,
       baseVersion: 2,
       blob: blobHash(PNG_1PX),
       actingMode: 'direct',
@@ -270,7 +302,7 @@ describe.each([['memory'], ['postgres']] as const)('blob uploads over the render
 
   it('a stale TEXT propose against a binary head also conflicts instead of merging', async () => {
     const r = await ramnique.post(`/v1/spaces/${spaceId}/changes`, {
-      assetPath: 'design/screens/home.png',
+      assetId: homePngId,
       baseVersion: 1,
       newContent: 'not really an image',
       actingMode: 'direct',
@@ -281,37 +313,36 @@ describe.each([['memory'], ['postgres']] as const)('blob uploads over the render
   });
 
   it('time-travel reads return each version’s own blob; diff degrades to a readable binary stub', async () => {
-    const v1 = await ramnique.get(
-      `/v1/spaces/${spaceId}/asset?path=${encodeURIComponent('design/screens/home.png')}&version=1`,
-    );
+    const v1 = await ramnique.get(`/v1/spaces/${spaceId}/assets/${homePngId}?version=1`);
     expect((v1.body as ReadAssetResult).blob?.mime).toBe('image/png');
-    const v2 = await ramnique.get(
-      `/v1/spaces/${spaceId}/asset?path=${encodeURIComponent('design/screens/home.png')}&version=2`,
-    );
+    const v2 = await ramnique.get(`/v1/spaces/${spaceId}/assets/${homePngId}?version=2`);
     expect((v2.body as ReadAssetResult).blob?.mime).toBe('text/csv');
 
-    const diff = await ramnique.get(
-      `/v1/spaces/${spaceId}/diff?path=${encodeURIComponent('design/screens/home.png')}&from=1&to=2`,
-    );
+    const diff = await ramnique.get(`/v1/spaces/${spaceId}/diff?assetId=${homePngId}&from=1&to=2`);
     expect(diff.status).toBe(200);
     expect(diff.body.unified).toContain('Binary change — no text diff.');
   });
 
   it('text assets are untouched by all of this: create, merge, and history still work beside binaries', async () => {
-    const create = await ramnique.post(`/v1/spaces/${spaceId}/changes`, {
-      assetPath: 'design/README.md',
-      baseVersion: 0,
+    const create = await ramnique.post(`/v1/spaces/${spaceId}/assets`, {
+      path: 'design/README.md',
       newContent: '# Design\n\nMocks live under screens/.\n',
       actingMode: 'direct',
     });
-    expect(create.body.outcome).toBe('applied');
-    expect(create.body.changeSet.blob).toBeUndefined();
+    expect(create.status).toBe(200);
+    const readme = create.body as CreateAssetResult;
+    expect(readme.asset.blob).toBeUndefined();
+    expect(readme.changeSet.blob).toBeUndefined();
 
     const history = await ramnique.get(`/v1/spaces/${spaceId}/history`);
     const changeSets = history.body.changeSets as ChangeSet[];
     const binary = changeSets.filter((cs) => cs.blob !== undefined);
     expect(binary.length).toBeGreaterThanOrEqual(3); // v1..v3 of home.png
-    expect(changeSets.some((cs) => cs.assetPath === 'design/README.md' && cs.blob === undefined)).toBe(true);
+    expect(new Set(binary.map((cs) => cs.assetId))).toEqual(new Set([homePngId]));
+    expect(changeSets.some((cs) => cs.assetId === readme.asset.id && cs.assetPath === 'design/README.md' && cs.blob === undefined)).toBe(true);
+    // And the file's own lineage answers by id.
+    const mine = await ramnique.get(`/v1/spaces/${spaceId}/history?assetId=${homePngId}`);
+    expect((mine.body.changeSets as ChangeSet[]).map((cs) => cs.resultVersion)).toEqual([3, 2, 1]);
   });
 });
 

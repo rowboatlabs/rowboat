@@ -3,7 +3,7 @@ import type { spaces } from '@x/shared'
 import { createSpaceFileSource } from './space-file-source'
 
 const blob = { hash: 'a'.repeat(64), size: 4, mime: 'application/octet-stream' }
-const asset = (path = 'report.docx', version = 3) => ({ path, version, content: '', blob, recentHistory: [] }) as spaces.ReadAssetResult
+const asset = (path = 'report.docx', version = 3) => ({ id: 'A-doc', path, version, content: '', blob, recentHistory: [] }) as spaces.ReadAssetResult
 const invoke = vi.fn()
 beforeEach(() => {
   window.ipc = { ...window.ipc, invoke } as typeof window.ipc
@@ -25,7 +25,8 @@ describe('space document storage', () => {
     const source = createSpaceFileSource('org', 'space', asset(), changed)
     expect(await source.read({ path: 'report.docx', encoding: 'base64' })).toMatchObject({ data: 'AQIDBA==', etag: '3' })
     await source.write({ path: 'report.docx', data: 'BQ==', opts: { encoding: 'base64' } })
-    expect(invoke).toHaveBeenLastCalledWith('spaces:proposeChange', expect.objectContaining({ input: expect.objectContaining({ baseVersion: 3, blob: 'b'.repeat(64) }) }))
+    expect(invoke).toHaveBeenCalledWith('spaces:readAsset', { orgId: 'org', spaceId: 'space', assetId: 'A-doc' })
+    expect(invoke).toHaveBeenLastCalledWith('spaces:proposeChange', expect.objectContaining({ input: expect.objectContaining({ assetId: 'A-doc', baseVersion: 3, blob: 'b'.repeat(64) }) }))
     await source.write({ path: 'report.docx', data: 'Bg==', opts: { encoding: 'base64' } })
     expect(invoke).toHaveBeenLastCalledWith('spaces:proposeChange', expect.objectContaining({ input: expect.objectContaining({ baseVersion: 4 }) }))
     expect(changed).toHaveBeenCalledTimes(2)
@@ -43,14 +44,14 @@ describe('space document storage', () => {
     const source = createSpaceFileSource('org', 'space', asset('slides.pptx'), vi.fn())
     await source.read({ path: 'slides.pptx', encoding: 'base64' })
     await source.write({ path: 'slides.pptx', data: 'AA==', opts: { encoding: 'base64', expectedEtag: '2' } })
-    expect(invoke).toHaveBeenLastCalledWith('spaces:proposeChange', expect.objectContaining({ input: expect.objectContaining({ assetPath: 'slides.pptx', baseVersion: 2 }) }))
+    expect(invoke).toHaveBeenLastCalledWith('spaces:proposeChange', expect.objectContaining({ input: expect.objectContaining({ assetId: 'A-doc', baseVersion: 2 }) }))
   })
   it('pins spreadsheet paging and search to the same space and version', async () => {
     invoke.mockResolvedValue({})
     const source = createSpaceFileSource('org', 'space', asset('budget.xlsx'), vi.fn())
     await source.loadSheet({ path: 'budget.xlsx', offset: 500, limit: 500 })
     await source.findCells({ path: 'budget.xlsx', query: 'Total' })
-    for (const [, args] of invoke.mock.calls) expect(args.space).toEqual({ orgId: 'org', spaceId: 'space', version: 3 })
+    for (const [, args] of invoke.mock.calls) expect(args.space).toEqual({ orgId: 'org', spaceId: 'space', assetId: 'A-doc', version: 3 })
   })
   it('notifies editors about external versions but ignores their own save echo', async () => {
     handlers({ outcome: 'applied', version: 4 })
@@ -67,8 +68,10 @@ describe('space document storage', () => {
     source.notifyChanged!(6)
     expect(listener).toHaveBeenCalledOnce()
   })
-  it('uses encoded space URLs for HTML and blob URLs for media', () => {
-    expect(createSpaceFileSource('org', 'space', asset('web/my page.html'), vi.fn()).url('')).toBe('app://space-document/org/space/web/my%20page.html')
+  it('uses id-then-path space document URLs for HTML and blob URLs for media', () => {
+    // The id segment names the file; the record's path follows so the
+    // browser's relative refs keep the id segment while resolving ../x.
+    expect(createSpaceFileSource('org', 'space', asset('web/my page.html'), vi.fn()).url('')).toBe('app://space-document/org/space/A-doc/web/my%20page.html')
     expect(createSpaceFileSource('org', 'space', asset('report.pdf'), vi.fn()).url('')).toBe(`app://space-blob/org/space/${blob.hash}`)
   })
 })

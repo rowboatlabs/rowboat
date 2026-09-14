@@ -211,12 +211,11 @@ export interface Store {
   /** Absent = the member never registered — treat as the default ('dms'). */
   getPushLevel(memberId: string): Promise<PushLevel | undefined>;
 
-  // assets — id-keyed (inode model); every version's data is kept; version 0
-  // reads as { content: '', blob: null }
+  // assets — id-keyed (the id IS the wire identity, 2026-09-14); every
+  // version's data is kept; version 0 reads as { content: '', blob: null }
   listAssets(spaceId: string, includeDeleted: boolean): Promise<AssetRecord[]>;
+  /** The live occupant of a path, if any — what create and move check before claiming a name. */
   getLiveAssetByPath(spaceId: string, path: string): Promise<AssetRecord | undefined>;
-  /** Most recently deleted asset whose path is `path` (the trash entry restore targets). */
-  getLatestDeletedByPath(spaceId: string, path: string): Promise<AssetRecord | undefined>;
   getAssetById(spaceId: string, assetId: string): Promise<AssetRecord | undefined>;
   /** Insert the assets row (its first version arrives via putAssetVersion). */
   createAsset(spaceId: string, record: AssetRecord): Promise<void>;
@@ -226,19 +225,14 @@ export interface Store {
   setAssetPath(spaceId: string, assetId: string, path: string, updatedAt: string): Promise<void>;
   setAssetState(spaceId: string, assetId: string, state: 'live' | 'deleted', updatedAt: string): Promise<void>;
 
-  // redirects — old paths forwarding to their asset (hot only while the asset is live)
-  putRedirect(spaceId: string, path: string, assetId: string, movedAt: string): Promise<void>;
-  getRedirect(spaceId: string, path: string): Promise<string | undefined>;
-  deleteRedirect(spaceId: string, path: string): Promise<void>;
-
   // uploaded blobs (space-scoped registry; bytes live in the BlobStore)
   /** First write wins — re-uploading the same bytes never changes the recorded mime/uploader. */
   putSpaceBlob(blob: StoredSpaceBlob): Promise<void>;
   getSpaceBlob(spaceId: string, hash: string): Promise<StoredSpaceBlob | undefined>;
 
-  // change log (append-only). assetId is the internal lineage key — never on
-  // the wire; it makes per-file history a filter instead of a chain walk.
-  appendChangeSet(changeSet: ChangeSet, assetId: string): Promise<void>;
+  // change log (append-only). ChangeSet.assetId is the lineage key: per-file
+  // history is a filter instead of a chain walk.
+  appendChangeSet(changeSet: ChangeSet): Promise<void>;
   getChangeSet(spaceId: string, id: string): Promise<ChangeSet | undefined>;
   /** Newest first. `assetId` filters to one file's lineage; `beforeOffset` pages backwards. */
   listChangeSets(
@@ -254,14 +248,11 @@ export interface Store {
   getTopicByRoot(spaceId: string, rootMessageId: string): Promise<Topic | undefined>;
   /**
    * Insert or update (retitle / archive flips) — the row is the whole object
-   * EXCEPT the document link, which only setTopicDocument writes (the wire
-   * shape carries a projected path, never the stored asset id).
+   * EXCEPT the document link, which only setTopicDocument writes.
    */
   putTopic(topic: Topic): Promise<void>;
-  /** Point the topic at one asset (by internal id) or clear it (null). Reads project the live path. */
+  /** Point the topic at one asset (by id) or clear it (null). Reads carry it as Topic.documentAssetId. */
   setTopicDocument(spaceId: string, topicId: string, assetId: string | null): Promise<void>;
-  /** The stored link itself (live or trashed asset alike) — what detach's idempotency reads. */
-  getTopicDocument(spaceId: string, topicId: string): Promise<string | undefined>;
   /** "Convert back to thread": the row goes, the messages never knew it existed. */
   deleteTopic(spaceId: string, topicId: string): Promise<void>;
   listTopics(spaceId: string, includeArchived: boolean): Promise<Topic[]>;

@@ -354,29 +354,69 @@ export function encodeSpaceLinkTarget(path: string): string {
         .join('/')
 }
 
-/** The contract's canonical asset link (…/s/<spaceId>/f/<path>) → its path, for THIS space. */
-export function parseAssetWireUrl(url: string, refs: SpaceRefs): string | null {
-    const prefix = `https://${refs.orgAddress}/s/${refs.spaceId}/f/`
-    if (!url.startsWith(prefix)) return null
-    const rest = url.slice(prefix.length).split('#')[0]!.split('?')[0]!
-    return resolveSpaceLink(`/${rest}`, '')
+// ---------------------------------------------------------------------------
+// Asset links — the contract's canonical form names a file by its ID
+// (https://<org>/s/<spaceId>/a/<assetId>, protocol ids.ts `assetUrl`): stable
+// across renames, and the form the composer's @ file pick writes. Any space
+// on any org parses; whether the reader can open it is decided at click time.
+// ---------------------------------------------------------------------------
+
+/** The canonical wire link for a space file — what goes INTO a message body. Mirrors protocol `assetUrl`. */
+export function assetWireUrl(refs: { orgAddress: string; spaceId: string }, assetId: string): string {
+    return `https://${refs.orgAddress}/s/${refs.spaceId}/a/${encodeURIComponent(assetId)}`
+}
+
+const ASSET_WIRE_URL_RE = /^https:\/\/([^/?#]+)\/s\/([0-9A-HJKMNP-TV-Z]{26})\/a\/([^/?#]+)$/
+
+/** A canonical asset link → its org address, space and asset id (any space, any org); null for anything else. */
+export function parseAssetWireUrl(url: string): { orgAddress: string; spaceId: string; assetId: string } | null {
+    const m = ASSET_WIRE_URL_RE.exec(url.split('#')[0]!.split('?')[0]!)
+    if (!m) return null
+    try {
+        const assetId = decodeURIComponent(m[3]!)
+        return assetId ? { orgAddress: m[1]!, spaceId: m[2]!, assetId } : null
+    } catch {
+        return null
+    }
 }
 
 /**
  * The renderable form of a file link — a render-time-only internal URL (never
- * persisted). Chat markdown goes through Streamdown, whose harden pass strips
- * relative hrefs (a bare `a/b.md` isn't parseable as a URL) but passes custom
- * protocols untouched — so relative links rewrite to this before parsing, and
- * the anchor component maps it back to the path.
+ * persisted), naming the file by id. Chat markdown goes through Streamdown,
+ * whose harden pass strips relative hrefs (a bare `a/b.md` isn't parseable as
+ * a URL) but passes custom protocols untouched — so links rewrite to this
+ * before parsing, and the anchor component opens the id.
  */
-export function spaceFileAppUrl(refs: { orgId: string; spaceId: string }, path: string): string {
-    return `app://space-file/${encodeURIComponent(refs.orgId)}/${encodeURIComponent(refs.spaceId)}/${encodeSpaceLinkTarget(path)}`
+export function spaceFileAppUrl(refs: { orgId: string; spaceId: string }, assetId: string): string {
+    return `app://space-file/${encodeURIComponent(refs.orgId)}/${encodeURIComponent(refs.spaceId)}/${encodeURIComponent(assetId)}`
 }
 
-const SPACE_FILE_APP_URL_RE = /^app:\/\/space-file\/([^/]+)\/([^/]+)\/(.+)$/
+const SPACE_FILE_APP_URL_RE = /^app:\/\/space-file\/([^/]+)\/([^/]+)\/([^/?#]+)$/
 
-export function parseSpaceFileAppUrl(url: string): { orgId: string; spaceId: string; path: string } | null {
+export function parseSpaceFileAppUrl(url: string): { orgId: string; spaceId: string; assetId: string } | null {
     const m = SPACE_FILE_APP_URL_RE.exec(url)
+    if (!m) return null
+    try {
+        return { orgId: decodeURIComponent(m[1]!), spaceId: decodeURIComponent(m[2]!), assetId: decodeURIComponent(m[3]!) }
+    } catch {
+        return null
+    }
+}
+
+/**
+ * A relative link that names no live file at rewrite time keeps its PATH in
+ * this internal form: the anchor tries the listing once more when it renders
+ * (the listing may have landed since) and otherwise shows a muted link —
+ * still readable text, never a broken external link.
+ */
+export function spacePathAppUrl(refs: { orgId: string; spaceId: string }, path: string): string {
+    return `app://space-path/${encodeURIComponent(refs.orgId)}/${encodeURIComponent(refs.spaceId)}/${encodeSpaceLinkTarget(path)}`
+}
+
+const SPACE_PATH_APP_URL_RE = /^app:\/\/space-path\/([^/]+)\/([^/]+)\/(.+)$/
+
+export function parseSpacePathAppUrl(url: string): { orgId: string; spaceId: string; path: string } | null {
+    const m = SPACE_PATH_APP_URL_RE.exec(url)
     if (!m) return null
     const path = resolveSpaceLink(`/${m[3]!}`, '')
     if (!path) return null
@@ -384,11 +424,13 @@ export function parseSpaceFileAppUrl(url: string): { orgId: string; spaceId: str
 }
 
 /**
- * Rewrite relative markdown LINKS (not images) in a message body to their
- * app://space-file form so they survive Streamdown's URL hardening. Code
- * regions are cites; absolute URLs and in-page anchors stay literal.
+ * Rewrite relative markdown LINKS (not images) in a message body so they
+ * survive Streamdown's URL hardening: a path the current listing knows
+ * becomes app://space-file/…/<assetId>; one it does not keeps its path in
+ * app://space-path form. Code regions are cites; absolute URLs (the canonical
+ * https asset links among them) and in-page anchors stay literal.
  */
-export function rewriteFileLinks(body: string, refs: { orgId: string; spaceId: string }): string {
+export function rewriteFileLinks(body: string, refs: { orgId: string; spaceId: string }, assetIdFor: (path: string) => string | null): string {
     const parts = body.split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/g)
     return parts
         .map((part, i) => {
@@ -396,7 +438,9 @@ export function rewriteFileLinks(body: string, refs: { orgId: string; spaceId: s
             return part.replace(/(!?)\[([^\]]*)\]\(([^()\s]+)(\s+"[^"]*")?\)/g, (m, bang: string, text: string, target: string, title?: string) => {
                 if (bang) return m
                 const path = resolveSpaceLink(target, '')
-                return path ? `[${text}](${spaceFileAppUrl(refs, path)}${title ?? ''})` : m
+                if (!path) return m
+                const assetId = assetIdFor(path)
+                return `[${text}](${assetId ? spaceFileAppUrl(refs, assetId) : spacePathAppUrl(refs, path)}${title ?? ''})`
             })
         })
         .join('')

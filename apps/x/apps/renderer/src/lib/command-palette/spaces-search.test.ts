@@ -13,7 +13,7 @@ function topic(id: string): spaces.TopicSearchHit {
     return { topic: { id, spaceId: 'x', rootMessageId: id, title: id, createdBy: pat, createdAt: '2026-09-01T00:00:00Z', archived: false } }
 }
 function asset(path: string, updatedAt: string): spaces.AssetSearchHit {
-    return { path, version: 1, updatedAt }
+    return { id: `id:${path}`, path, version: 1, updatedAt }
 }
 function page(space: SpaceRef, partial: Partial<spaces.SearchResults>, truncated = false) {
     return {

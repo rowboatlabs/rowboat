@@ -78,14 +78,16 @@ describe("middle-pane user context encoding", () => {
                     orgName: "rowboat",
                     spaceId: "01SPACE",
                     spaceName: "Design",
+                    assetId: "01BOARD",
                     path: "whiteboards/roadmap.excalidraw",
                 },
                 "add a QA box after review",
             ),
         );
         expect(encoded).toContain(
-            'Middle pane:\nState: whiteboard\nBoard: whiteboards/roadmap.excalidraw in space "Design" on org "rowboat" (spaceId: 01SPACE; pass org: "rowboat")',
+            'Middle pane:\nState: whiteboard\nBoard: whiteboards/roadmap.excalidraw (boardId: 01BOARD) in space "Design" on org "rowboat" (spaceId: 01SPACE; pass org: "rowboat")',
         );
+        expect(encoded).toContain("spaceId + boardId above");
         expect(encoded).toContain("whiteboard-read");
         expect(encoded).toContain("whiteboard-draw");
         expect(encoded).not.toContain("```");
@@ -148,7 +150,7 @@ describe("space mentions user context encoding", () => {
         expect(encoded).not.toContain("@Harsh Kumar =");
     });
 
-    it("lists a board with its space and path, pointed at the whiteboard tools", () => {
+    it("lists a board with its space, path and boardId, pointed at the whiteboard tools", () => {
         const encoded = contentOf(
             convertFromMessages([
                 {
@@ -162,6 +164,7 @@ describe("space mentions user context encoding", () => {
                                 orgName: "rowboat",
                                 spaceId: "01SPACE",
                                 spaceName: "Design",
+                                assetId: "01BOARD",
                                 path: "whiteboards/roadmap.excalidraw",
                                 name: "roadmap",
                             },
@@ -171,7 +174,7 @@ describe("space mentions user context encoding", () => {
             ] as Parameters<typeof convertFromMessages>[0]),
         );
         expect(encoded).toContain(
-            '- @roadmap = whiteboard "roadmap" (board: whiteboards/roadmap.excalidraw) in space "Design" on org "rowboat" (spaceId: 01SPACE; whiteboard-read / whiteboard-draw with this spaceId and board)',
+            '- @roadmap = whiteboard "roadmap" (whiteboards/roadmap.excalidraw; boardId: 01BOARD) in space "Design" on org "rowboat" (spaceId: 01SPACE; whiteboard-read / whiteboard-draw with this spaceId and boardId)',
         );
     });
 
@@ -202,18 +205,25 @@ describe("UserMessageContext schema", () => {
             UserMessageContext.safeParse({
                 spaceMentions: [
                     { kind: "space", orgId: "o", orgName: "rowboat", spaceId: "s", name: "Design" },
-                    { kind: "board", orgId: "o", orgName: "rowboat", spaceId: "s", spaceName: "Design", path: "whiteboards/board.excalidraw", name: "board" },
+                    { kind: "board", orgId: "o", orgName: "rowboat", spaceId: "s", spaceName: "Design", assetId: "b", path: "whiteboards/board.excalidraw", name: "board" },
                     { kind: "member", orgId: "o", orgName: "rowboat", memberId: "m", displayName: "Harsh" },
                 ],
-                middlePane: { kind: "whiteboard", orgId: "o", orgName: "rowboat", spaceId: "s", spaceName: "Design", path: "whiteboards/board.excalidraw" },
+                middlePane: { kind: "whiteboard", orgId: "o", orgName: "rowboat", spaceId: "s", spaceName: "Design", assetId: "b", path: "whiteboards/board.excalidraw" },
             }).success,
         ).toBe(true);
-        // A board ref without its space is not addressable by the tools.
+        // A board ref without its space, or without its asset id, is not addressable by the tools.
         expect(
             UserMessageContext.safeParse({
-                spaceMentions: [{ kind: "board", orgId: "o", orgName: "rowboat", path: "whiteboards/board.excalidraw", name: "board" }],
+                spaceMentions: [{ kind: "board", orgId: "o", orgName: "rowboat", assetId: "b", path: "whiteboards/board.excalidraw", name: "board" }],
             }).success,
         ).toBe(false);
+        // A board ref without assetId is what turns logged before 2026-09-14
+        // carry — still parseable, so those sessions keep replaying.
+        expect(
+            UserMessageContext.safeParse({
+                spaceMentions: [{ kind: "board", orgId: "o", orgName: "rowboat", spaceId: "s", spaceName: "Design", path: "whiteboards/board.excalidraw", name: "board" }],
+            }).success,
+        ).toBe(true);
         expect(
             UserMessageContext.safeParse({
                 spaceMentions: [{ kind: "file", path: "knowledge/a.md" }],

@@ -1,7 +1,7 @@
 import { z } from 'zod';
-import { BlobInfo } from './blob.js';
+import { Asset } from './changeset.js';
 import { Attribution, Topic } from './core.js';
-import { AssetPath, AssetVersion, MessageId, StreamOffset } from './ids.js';
+import { MessageId, StreamOffset } from './ids.js';
 
 // Space search (2026-09-02): one contract, served identically on both faces
 // (GET /v1/spaces/:spaceId/search and the search_space MCP tool). Results come
@@ -43,13 +43,8 @@ export type MessageSearchHit = z.infer<typeof MessageSearchHit>;
 export const TopicSearchHit = z.object({ topic: Topic });
 export type TopicSearchHit = z.infer<typeof TopicSearchHit>;
 
-/** A file match: by extracted content (snippet present) or by path (snippet absent). */
-export const AssetSearchHit = z.object({
-  path: AssetPath,
-  version: AssetVersion,
-  updatedAt: z.iso.datetime(),
-  /** Present when the head version is binary (findable by filename only). */
-  blob: BlobInfo.optional(),
+/** A file match: by extracted content (snippet present) or by path (snippet absent). Live files only. */
+export const AssetSearchHit = Asset.omit({ state: true }).extend({
   /** Excerpt of the extracted searchable text around the first matched term. */
   snippet: z.string().optional(),
 });

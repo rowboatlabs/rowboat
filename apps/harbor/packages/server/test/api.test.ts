@@ -155,6 +155,7 @@ describe('spaces, invites, membership', () => {
 
 describe('assets and the change-set log', () => {
   let spaceId: string;
+  let notesId: string;
 
   beforeAll(async () => {
     const r = await ramnique.post('/v1/spaces', { name: 'Assets' });
@@ -163,38 +164,55 @@ describe('assets and the change-set log', () => {
     await gagan.post('/v1/invites/accept', { token: inv.body.token });
   });
 
-  it('baseVersion 0 creates; reading bundles recent history', async () => {
-    const r = await ramnique.post(`/v1/spaces/${spaceId}/changes`, {
-      assetPath: 'notes.md',
-      baseVersion: 0,
+  it('creating an asset mints its id; reading by id bundles recent history', async () => {
+    const r = await ramnique.post(`/v1/spaces/${spaceId}/assets`, {
+      path: 'notes.md',
       newContent: '# Notes\n- alpha\n',
       reason: 'start the notes',
       actingMode: 'direct',
     });
-    expect(r.body.outcome).toBe('applied');
-    expect(r.body.version).toBe(1);
+    expect(r.status).toBe(200);
+    expect(r.body.asset.path).toBe('notes.md');
+    expect(r.body.asset.version).toBe(1);
+    expect(r.body.changeSet.assetId).toBe(r.body.asset.id);
+    expect(r.body.changeSet.assetPath).toBe('notes.md');
+    expect(r.body.changeSet.resultVersion).toBe(1);
     expect(r.body.changeSet.attribution).toEqual({ memberId: 'ramnique', actingMode: 'direct' });
+    notesId = r.body.asset.id;
 
-    const read = await gagan.get(`/v1/spaces/${spaceId}/asset?path=notes.md`);
+    const read = await gagan.get(`/v1/spaces/${spaceId}/assets/${notesId}`);
+    expect(read.status).toBe(200);
+    expect(read.body.id).toBe(notesId);
+    expect(read.body.path).toBe('notes.md');
     expect(read.body.version).toBe(1);
     expect(read.body.recentHistory).toHaveLength(1);
     expect(read.body.recentHistory[0].reason).toBe('start the notes');
   });
 
-  it('creating an asset that already exists conflicts (create race)', async () => {
-    const r = await gagan.post(`/v1/spaces/${spaceId}/changes`, {
-      assetPath: 'notes.md',
-      baseVersion: 0,
+  it('creating an asset at an occupied path is invalid (create race); proposals cannot create', async () => {
+    const r = await gagan.post(`/v1/spaces/${spaceId}/assets`, {
+      path: 'notes.md',
       newContent: '# Different notes\n',
       actingMode: 'direct',
     });
-    expect(r.body.outcome).toBe('conflict');
-    expect(r.body.currentVersion).toBe(1);
+    expect(r.status).toBe(400);
+    expect(r.body.code).toBe('invalid_request');
+    expect(r.body.message).toContain(notesId); // names the occupant so the caller can address it
+
+    // baseVersion 0 no longer means "create" — birth is createAsset's job alone.
+    const zero = await gagan.post(`/v1/spaces/${spaceId}/changes`, {
+      assetId: notesId,
+      baseVersion: 0,
+      newContent: 'x\n',
+      actingMode: 'direct',
+    });
+    expect(zero.status).toBe(400);
+    expect((await gagan.get(`/v1/spaces/${spaceId}/assets/${notesId}`)).body.version).toBe(1); // nothing written
   });
 
   it('proposing against a version ahead of the asset is invalid', async () => {
     const r = await gagan.post(`/v1/spaces/${spaceId}/changes`, {
-      assetPath: 'notes.md',
+      assetId: notesId,
       baseVersion: 9,
       newContent: 'x\n',
       actingMode: 'direct',
@@ -203,19 +221,20 @@ describe('assets and the change-set log', () => {
     expect(r.body.code).toBe('invalid_request');
   });
 
-  it('proposing against a missing asset with baseVersion > 0 is 404', async () => {
+  it('proposing against an unknown asset id is 404', async () => {
     const r = await gagan.post(`/v1/spaces/${spaceId}/changes`, {
-      assetPath: 'ghost.md',
+      assetId: 'nope',
       baseVersion: 3,
       newContent: 'x\n',
       actingMode: 'direct',
     });
     expect(r.status).toBe(404);
+    expect((await gagan.get(`/v1/spaces/${spaceId}/assets/nope`)).status).toBe(404);
   });
 
   it('stale non-overlapping proposals merge; the proposer must adopt mergedContent', async () => {
     const fresh = await ramnique.post(`/v1/spaces/${spaceId}/changes`, {
-      assetPath: 'notes.md',
+      assetId: notesId,
       baseVersion: 1,
       newContent: '# Notes\n- alpha\n- beta (from Ramnique)\n',
       actingMode: 'direct',
@@ -224,7 +243,7 @@ describe('assets and the change-set log', () => {
     expect(fresh.body.version).toBe(2);
 
     const stale = await gagan.post(`/v1/spaces/${spaceId}/changes`, {
-      assetPath: 'notes.md',
+      assetId: notesId,
       baseVersion: 1,
       newContent: '# Notes (better title)\n- alpha\n',
       reason: 'sharpen the title',
@@ -234,13 +253,14 @@ describe('assets and the change-set log', () => {
     expect(stale.body.outcome).toBe('merged');
     expect(stale.body.version).toBe(3);
     expect(stale.body.mergedContent).toBe('# Notes (better title)\n- alpha\n- beta (from Ramnique)\n');
+    expect(stale.body.changeSet.assetId).toBe(notesId);
     expect(stale.body.changeSet.attribution).toEqual({ memberId: 'gagan', actingMode: 'agent', agentName: 'Rowboat' });
   });
 
   it('overlapping stale proposals conflict: nothing written, retry bundle included', async () => {
-    const before = await ramnique.get(`/v1/spaces/${spaceId}/asset?path=notes.md`);
+    const before = await ramnique.get(`/v1/spaces/${spaceId}/assets/${notesId}`);
     const r = (await gagan.post(`/v1/spaces/${spaceId}/changes`, {
-      assetPath: 'notes.md',
+      assetId: notesId,
       baseVersion: 1,
       newContent: '# Totally different heading\n- alpha\n',
       actingMode: 'direct',
@@ -254,48 +274,54 @@ describe('assets and the change-set log', () => {
     expect(r.body.regions[0]!.proposed).toEqual(['# Totally different heading']);
     expect(r.body.recentHistory.length).toBeGreaterThan(0);
 
-    const after = await ramnique.get(`/v1/spaces/${spaceId}/asset?path=notes.md`);
+    const after = await ramnique.get(`/v1/spaces/${spaceId}/assets/${notesId}`);
     expect(after.body.version).toBe(3); // nothing was written
   });
 
   it('time-travel reads and diffs', async () => {
-    const v1 = await ramnique.get(`/v1/spaces/${spaceId}/asset?path=notes.md&version=1`);
+    const v1 = await ramnique.get(`/v1/spaces/${spaceId}/assets/${notesId}?version=1`);
     expect(v1.body.content).toBe('# Notes\n- alpha\n');
     expect(v1.body.recentHistory).toHaveLength(1);
 
-    const diff = await ramnique.get(`/v1/spaces/${spaceId}/diff?path=notes.md&from=1&to=3`);
+    const diff = await ramnique.get(`/v1/spaces/${spaceId}/diff?assetId=${notesId}&from=1&to=3`);
     expect(diff.body.unified).toContain('-# Notes');
     expect(diff.body.unified).toContain('+# Notes (better title)');
-    expect((await ramnique.get(`/v1/spaces/${spaceId}/diff?path=notes.md&from=1&to=9`)).status).toBe(404);
+    expect((await ramnique.get(`/v1/spaces/${spaceId}/diff?assetId=${notesId}&from=1&to=9`)).status).toBe(404);
+    expect((await ramnique.get(`/v1/spaces/${spaceId}/diff?assetId=nope&from=1&to=3`)).status).toBe(404);
   });
 
-  it('history: whole space, per path, pagination', async () => {
-    await ramnique.post(`/v1/spaces/${spaceId}/changes`, {
-      assetPath: 'other.md',
-      baseVersion: 0,
+  it('history: whole space, per asset id, pagination', async () => {
+    const other = await ramnique.post(`/v1/spaces/${spaceId}/assets`, {
+      path: 'other.md',
       newContent: 'other\n',
       actingMode: 'direct',
     });
+    const otherId = other.body.asset.id;
     const all = await ramnique.get(`/v1/spaces/${spaceId}/history`);
     expect(all.body.changeSets.length).toBe(4); // notes v1..v3 + other v1
-    expect(all.body.changeSets[0].assetPath).toBe('other.md'); // newest first
+    expect(all.body.changeSets[0].assetId).toBe(otherId); // newest first
+    expect(all.body.changeSets[0].assetPath).toBe('other.md');
 
-    const notes = await ramnique.get(`/v1/spaces/${spaceId}/history?path=notes.md`);
+    const notes = await ramnique.get(`/v1/spaces/${spaceId}/history?assetId=${notesId}`);
     expect(notes.body.changeSets.map((cs: any) => cs.resultVersion)).toEqual([3, 2, 1]);
+    expect(notes.body.changeSets.every((cs: any) => cs.assetId === notesId)).toBe(true);
+    expect((await ramnique.get(`/v1/spaces/${spaceId}/history?assetId=nope`)).body.changeSets).toEqual([]);
 
     const page = await ramnique.get(
-      `/v1/spaces/${spaceId}/history?path=notes.md&beforeOffset=${notes.body.changeSets[0].offset}&limit=1`,
+      `/v1/spaces/${spaceId}/history?assetId=${notesId}&beforeOffset=${notes.body.changeSets[0].offset}&limit=1`,
     );
     expect(page.body.changeSets.map((cs: any) => cs.resultVersion)).toEqual([2]);
 
     const entries = await ramnique.get(`/v1/spaces/${spaceId}/assets`);
-    expect(entries.body.entries.map((e: any) => e.path)).toEqual(['notes.md', 'other.md']);
+    expect(entries.body.entries.map((e: any) => [e.id, e.path])).toEqual([
+      [notesId, 'notes.md'],
+      [otherId, 'other.md'],
+    ]);
   });
 
   it('asset paths with traversal are rejected', async () => {
-    const r = await ramnique.post(`/v1/spaces/${spaceId}/changes`, {
-      assetPath: '../escape.md',
-      baseVersion: 0,
+    const r = await ramnique.post(`/v1/spaces/${spaceId}/assets`, {
+      path: '../escape.md',
       newContent: 'x\n',
       actingMode: 'direct',
     });
@@ -485,9 +511,8 @@ describe('feed: the stream, threads, and topic annotations', () => {
   });
 
   it('reply-to-activity-row: anchorChangeSetId rides the root message, validated', async () => {
-    const cs = await ramnique.post(`/v1/spaces/${spaceId}/changes`, {
-      assetPath: 'draft.md',
-      baseVersion: 0,
+    const cs = await ramnique.post(`/v1/spaces/${spaceId}/assets`, {
+      path: 'draft.md',
       newContent: '# Draft\n',
       actingMode: 'direct',
     });
@@ -510,17 +535,17 @@ describe('feed: the stream, threads, and topic annotations', () => {
     const stream = await ramnique.get(`/v1/spaces/${spaceId}/stream`);
     const rootId = stream.body.messages[0].id;
 
-    const explicit = await ramnique.post(`/v1/spaces/${spaceId}/changes`, {
-      assetPath: 'provenance.md',
-      baseVersion: 0,
+    const explicit = await ramnique.post(`/v1/spaces/${spaceId}/assets`, {
+      path: 'provenance.md',
       newContent: '# From a thread\n',
       threadRootId: rootId,
       actingMode: 'direct',
     });
     expect(explicit.body.changeSet.threadRootId).toBe(rootId);
+    const provenanceId = explicit.body.asset.id;
 
     const derived = await ramnique.post(`/v1/spaces/${spaceId}/changes`, {
-      assetPath: 'provenance.md',
+      assetId: provenanceId,
       baseVersion: 1,
       newContent: '# From a thread, via the reason suffix\n',
       reason: `folded the discussion · thread:${rootId}`,
@@ -530,7 +555,7 @@ describe('feed: the stream, threads, and topic annotations', () => {
     expect(derived.body.changeSet.threadRootId).toBe(rootId);
 
     const bad = await ramnique.post(`/v1/spaces/${spaceId}/changes`, {
-      assetPath: 'provenance.md',
+      assetId: provenanceId,
       baseVersion: 2,
       newContent: '# Bad provenance\n',
       threadRootId: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
@@ -569,64 +594,72 @@ describe('feed: the stream, threads, and topic annotations', () => {
     live.close();
   });
 
-  it('a discussion can be about one file: the link follows renames, hides in the trash, returns on restore', async () => {
+  it('a discussion can be about one file: the id stays on the topic across rename, delete, and restore', async () => {
     const live = await liveClient(harbor, 'dev-ramnique');
     live.send({ kind: 'subscribe', spaceId });
     await live.until((frames) => frames.some((f) => f.kind === 'subscribed'), 'subscribed');
 
-    const file = await ramnique.post(`/v1/spaces/${spaceId}/changes`, {
-      assetPath: 'briefs/launch.md', baseVersion: 0, newContent: '# Launch brief\n', actingMode: 'direct',
+    const file = await ramnique.post(`/v1/spaces/${spaceId}/assets`, {
+      path: 'briefs/launch.md', newContent: '# Launch brief\n', actingMode: 'direct',
     });
-    expect(file.body.outcome).toBe('applied');
+    expect(file.status).toBe(200);
+    const launchId: string = file.body.asset.id;
+    const topicOnRail = async () =>
+      (await ramnique.get(`/v1/spaces/${spaceId}/topics`)).body.topics.find((t: any) => t.id === topicId);
 
-    // Born with its file — the path is validated before anything is written.
+    // Born with its file — the id is validated before anything is written.
     const missing = await gagan.post(`/v1/spaces/${spaceId}/topics`, {
-      title: 'Review: launch brief', body: 'Thoughts on the brief?', documentPath: 'briefs/nope.md', actingMode: 'direct',
+      title: 'Review: launch brief', body: 'Thoughts on the brief?', documentAssetId: 'nope', actingMode: 'direct',
     });
     expect(missing.status).toBe(404);
     const made = await gagan.post(`/v1/spaces/${spaceId}/topics`, {
-      title: 'Review: launch brief', body: 'Thoughts on the brief?', documentPath: 'briefs/launch.md', actingMode: 'direct',
+      title: 'Review: launch brief', body: 'Thoughts on the brief?', documentAssetId: launchId, actingMode: 'direct',
     });
     expect(made.status).toBe(200);
-    expect(made.body.topic.documentPath).toBe('briefs/launch.md');
+    expect(made.body.topic.documentAssetId).toBe(launchId);
     const topicId = made.body.topic.id;
 
     // Every read surface projects it: the rail, the thread, the stream page.
     const thread = await ramnique.get(`/v1/spaces/${spaceId}/threads/${made.body.rootMessage.id}`);
-    expect(thread.body.topic.documentPath).toBe('briefs/launch.md');
-    const rail = await ramnique.get(`/v1/spaces/${spaceId}/topics`);
-    expect(rail.body.topics.find((t: any) => t.id === topicId).documentPath).toBe('briefs/launch.md');
+    expect(thread.body.topic.documentAssetId).toBe(launchId);
+    expect((await topicOnRail()).documentAssetId).toBe(launchId);
 
     // Re-attaching the same file is a no-op; attaching another replaces.
-    const same = await ramnique.post(`/v1/spaces/${spaceId}/topics/${topicId}`, { action: 'attach_document', path: 'briefs/launch.md', actingMode: 'direct' });
-    expect(same.body.topic.documentPath).toBe('briefs/launch.md');
-    await ramnique.post(`/v1/spaces/${spaceId}/changes`, { assetPath: 'briefs/faq.md', baseVersion: 0, newContent: '# FAQ\n', actingMode: 'direct' });
-    const swapped = await ramnique.post(`/v1/spaces/${spaceId}/topics/${topicId}`, { action: 'attach_document', path: 'briefs/faq.md', actingMode: 'direct' });
-    expect(swapped.body.topic.documentPath).toBe('briefs/faq.md');
-    // An old path still reaches its file through the redirect; a missing one refuses.
-    const bad = await ramnique.post(`/v1/spaces/${spaceId}/topics/${topicId}`, { action: 'attach_document', path: 'briefs/nope.md', actingMode: 'direct' });
+    const same = await ramnique.post(`/v1/spaces/${spaceId}/topics/${topicId}`, { action: 'attach_document', assetId: launchId, actingMode: 'direct' });
+    expect(same.body.topic.documentAssetId).toBe(launchId);
+    const faq = await ramnique.post(`/v1/spaces/${spaceId}/assets`, { path: 'briefs/faq.md', newContent: '# FAQ\n', actingMode: 'direct' });
+    const faqId: string = faq.body.asset.id;
+    const swapped = await ramnique.post(`/v1/spaces/${spaceId}/topics/${topicId}`, { action: 'attach_document', assetId: faqId, actingMode: 'direct' });
+    expect(swapped.body.topic.documentAssetId).toBe(faqId);
+    // An unknown id refuses; the original id still reaches its file.
+    const bad = await ramnique.post(`/v1/spaces/${spaceId}/topics/${topicId}`, { action: 'attach_document', assetId: 'nope', actingMode: 'direct' });
     expect(bad.status).toBe(404);
-    const back = await ramnique.post(`/v1/spaces/${spaceId}/topics/${topicId}`, { action: 'attach_document', path: 'briefs/launch.md', actingMode: 'direct' });
-    expect(back.body.topic.documentPath).toBe('briefs/launch.md');
+    const back = await ramnique.post(`/v1/spaces/${spaceId}/topics/${topicId}`, { action: 'attach_document', assetId: launchId, actingMode: 'direct' });
+    expect(back.body.topic.documentAssetId).toBe(launchId);
 
-    // The link is to the FILE, not the path: a rename shows the new path.
+    // The link is to the FILE, not the path: a rename changes the asset's path, never the id on the topic.
     const moved = await gagan.post(`/v1/spaces/${spaceId}/assets/move`, {
-      fromPath: 'briefs/launch.md', toPath: 'briefs/launch-v2.md', baseVersion: 1, actingMode: 'direct',
+      assetId: launchId, toPath: 'briefs/launch-v2.md', baseVersion: 1, actingMode: 'direct',
     });
     expect(moved.body.outcome).toBe('moved');
-    expect((await ramnique.get(`/v1/spaces/${spaceId}/topics`)).body.topics.find((t: any) => t.id === topicId).documentPath).toBe('briefs/launch-v2.md');
+    expect(moved.body.changeSet).toMatchObject({ op: 'move', assetId: launchId, assetPath: 'briefs/launch-v2.md', movedFrom: 'briefs/launch.md' });
+    expect((await ramnique.get(`/v1/spaces/${spaceId}/assets/${launchId}`)).body.path).toBe('briefs/launch-v2.md');
+    expect((await topicOnRail()).documentAssetId).toBe(launchId);
 
-    // Trash hides it (no cleanup anywhere); restore brings it straight back.
-    const deleted = await gagan.post(`/v1/spaces/${spaceId}/assets/delete`, { path: 'briefs/launch-v2.md', baseVersion: 1, actingMode: 'direct' });
+    // Trash keeps the id on the topic (no cleanup anywhere — the client decides what to show); restore changes nothing.
+    const deleted = await gagan.post(`/v1/spaces/${spaceId}/assets/delete`, { assetId: launchId, baseVersion: 1, actingMode: 'direct' });
     expect(deleted.body.outcome).toBe('deleted');
-    expect((await ramnique.get(`/v1/spaces/${spaceId}/topics`)).body.topics.find((t: any) => t.id === topicId).documentPath).toBeUndefined();
-    await gagan.post(`/v1/spaces/${spaceId}/assets/restore`, { path: 'briefs/launch-v2.md', actingMode: 'direct' });
-    expect((await ramnique.get(`/v1/spaces/${spaceId}/topics`)).body.topics.find((t: any) => t.id === topicId).documentPath).toBe('briefs/launch-v2.md');
+    expect((await ramnique.get(`/v1/spaces/${spaceId}/assets/${launchId}`)).status).toBe(404);
+    expect((await topicOnRail()).documentAssetId).toBe(launchId);
+    const restored = await gagan.post(`/v1/spaces/${spaceId}/assets/restore`, { assetId: launchId, actingMode: 'direct' });
+    expect(restored.body.outcome).toBe('restored');
+    expect((await ramnique.get(`/v1/spaces/${spaceId}/assets/${launchId}`)).body.path).toBe('briefs/launch-v2.md');
+    expect((await topicOnRail()).documentAssetId).toBe(launchId);
 
     // Detach clears it; detaching again is silent.
     const detached = await ramnique.post(`/v1/spaces/${spaceId}/topics/${topicId}`, { action: 'detach_document', actingMode: 'direct' });
     expect(detached.status).toBe(200);
-    expect(detached.body.topic.documentPath).toBeUndefined();
+    expect(detached.body.topic.documentAssetId).toBeUndefined();
     await ramnique.post(`/v1/spaces/${spaceId}/topics/${topicId}`, { action: 'detach_document', actingMode: 'direct' });
 
     await live.until(
@@ -643,7 +676,7 @@ describe('feed: the stream, threads, and topic annotations', () => {
       ReturnType<typeof live.events>[number]['event'],
       { type: 'topic' }
     >;
-    expect(createdEvent.topic.documentPath).toBe('briefs/launch.md');
+    expect(createdEvent.topic.documentAssetId).toBe(launchId);
     live.close();
 
     await ramnique.post(`/v1/spaces/${spaceId}/topics/${topicId}`, { action: 'remove', actingMode: 'direct' });
@@ -1154,23 +1187,25 @@ describe('read-only limit (spec §4: never lockout)', () => {
   it('writes pause, reads keep working', async () => {
     const r = await ramnique.post('/v1/spaces', { name: 'Limits' });
     const spaceId = r.body.space.id;
-    await ramnique.post(`/v1/spaces/${spaceId}/changes`, {
-      assetPath: 'a.md',
-      baseVersion: 0,
+    const made = await ramnique.post(`/v1/spaces/${spaceId}/assets`, {
+      path: 'a.md',
       newContent: 'a\n',
       actingMode: 'direct',
     });
+    const assetId = made.body.asset.id;
     harbor.service.readOnly = true;
     try {
       const write = await ramnique.post(`/v1/spaces/${spaceId}/changes`, {
-        assetPath: 'a.md',
+        assetId,
         baseVersion: 1,
         newContent: 'b\n',
         actingMode: 'direct',
       });
       expect(write.status).toBe(403);
       expect(write.body.code).toBe('read_only_limit');
-      const read = await ramnique.get(`/v1/spaces/${spaceId}/asset?path=a.md`);
+      const create = await ramnique.post(`/v1/spaces/${spaceId}/assets`, { path: 'b.md', newContent: 'b\n', actingMode: 'direct' });
+      expect(create.status).toBe(403);
+      const read = await ramnique.get(`/v1/spaces/${spaceId}/assets/${assetId}`);
       expect(read.status).toBe(200);
     } finally {
       harbor.service.readOnly = false;

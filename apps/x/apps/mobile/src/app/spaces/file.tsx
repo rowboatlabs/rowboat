@@ -8,14 +8,15 @@ import { SpacesClient } from '@/lib/spaces/client';
 import { SpacesLive } from '@/lib/spaces/live';
 import { useColors } from '@/theme/colors';
 
-// One file, read-only (S3): markdown rendered like chat, other text in mono,
-// images from the blob store. Changesets touching this path refresh it live.
+// One file by asset id, read-only (S3): markdown rendered like chat, other
+// text in mono, images from the blob store. Changesets on this id refresh it
+// live; `path` is the display name the listing gave us.
 export default function SpaceFileScreen() {
   const colors = useColors();
   const account = useSpacesAccount();
   const { width } = useWindowDimensions();
-  const params = useLocalSearchParams<{ org: string; space: string; path: string; title: string; mime: string }>();
-  const { org, space, path, title, mime } = params;
+  const params = useLocalSearchParams<{ org: string; space: string; assetId: string; path: string; title: string; mime: string }>();
+  const { org, space, assetId, path, title, mime } = params;
 
   const client = useMemo(
     () => new SpacesClient({ baseUrl: `https://${org}`, token: (opts) => account.getAccessToken(opts) }),
@@ -30,7 +31,7 @@ export default function SpaceFileScreen() {
     let cancelled = false;
     const load = async () => {
       try {
-        const result = await client.readAsset(space, path);
+        const result = await client.readAsset(space, assetId);
         if (cancelled) return;
         if (result.blob) {
           // Binary: images render inline; anything else just states itself.
@@ -54,14 +55,14 @@ export default function SpaceFileScreen() {
 
     const live = new SpacesLive({ baseUrl: `https://${org}`, token: () => account.getAccessToken() });
     const off = live.subscribe(space, (frame) => {
-      if (frame.kind === 'event' && frame.event.type === 'change' && frame.event.changeSet.assetPath === path) void load();
+      if (frame.kind === 'event' && frame.event.type === 'change' && frame.event.changeSet.assetId === assetId) void load();
     });
     return () => {
       cancelled = true;
       off();
       live.close();
     };
-  }, [client, account, org, space, path]);
+  }, [client, account, org, space, assetId]);
 
   const markdown = path.endsWith('.md') || path.endsWith('.markdown');
   const mono = Platform.select({ ios: 'Menlo', default: 'monospace' });

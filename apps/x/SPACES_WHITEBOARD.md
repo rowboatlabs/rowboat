@@ -105,6 +105,8 @@ ClientFrame: { kind: 'whiteboard', spaceId, boardId, payload }
 ServerFrame: { kind: 'whiteboard', spaceId, boardId, memberId, at, payload }
 ```
 
+> Amended 2026-09-14: `boardId` is the board's **asset id**, not its path — asset ids became the identity of every space file (CONTRACT.md decision 1, 2026-09-14). A rename never splits a live session; the display name comes from the asset record's path.
+
 `payload` is **opaque to Harbor** (schema `z.unknown()` or a loosely-typed envelope). The server checks membership and hub-publishes to the space's subscribers — a near-copy of `service.publishPresence`: never persisted, never replayed, no offset. Inside `payload`, we mirror Excalidraw's own subtypes: `SCENE_UPDATE`, `SCENE_INIT`, `MOUSE_LOCATION`, `IDLE_STATUS`.
 
 We skip Excalidraw's end-to-end encryption (room key in URL fragment, AES-GCM per message). It exists to keep their public relay zero-knowledge; Harbor is a trusted, membership-gated server, and E2E would block future server-side features (thumbnails, agent access).

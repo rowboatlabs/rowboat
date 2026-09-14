@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { AttachmentColumn, BlobImage, SpaceMarkdown, SpaceNavProvider, SpaceRefsProvider } from './space-markdown'
-import { blobWireUrl } from '@/lib/spaces-presentation'
+import { AttachmentColumn, BlobImage, SpaceAssetsProvider, SpaceMarkdown, SpaceNavProvider, SpaceRefsProvider } from './space-markdown'
+import { assetWireUrl, blobWireUrl } from '@/lib/spaces-presentation'
 
 const refs = { orgId: 'org', spaceId: '01ARZ3NDEKTSV4RRFFQ69G5FAV', orgAddress: 'spaces.example.com' }
 const firstHash = 'a'.repeat(64)
@@ -161,7 +161,9 @@ describe('Space file attachments', () => {
     })
 
     it('previews in the panel, closes it, and hands saved files to the existing file view', async () => {
-        invoke.mockImplementation(async (channel) => channel === 'spaces:listAssets' ? { entries: [] } : { outcome: 'applied' })
+        invoke.mockImplementation(async (channel, args) => channel === 'spaces:listAssets'
+            ? { entries: [] }
+            : { asset: { id: 'A-notes', path: args.input.path, version: 1, updatedAt: '' }, changeSet: {} })
         const onSaved = vi.fn()
         const onDismiss = vi.fn()
         render(<AttachmentColumn src={`app://space-blob/org/${refs.spaceId}/${firstHash}?name=notes.txt`} onSaved={onSaved} onDismiss={onDismiss} />)
@@ -172,16 +174,18 @@ describe('Space file attachments', () => {
         expect(onDismiss).toHaveBeenCalledOnce()
         fireEvent.click(screen.getByRole('button', { name: 'Save to space files' }))
         fireEvent.click(screen.getByRole('button', { name: /^Save$/ }))
-        await waitFor(() => expect(onSaved).toHaveBeenCalledWith('notes.txt'))
-        expect(invoke).toHaveBeenCalledWith('spaces:proposeChange', {
+        // A new file is born by path; the file view then opens the id the org assigned.
+        await waitFor(() => expect(onSaved).toHaveBeenCalledWith({ assetId: 'A-notes', path: 'notes.txt' }))
+        expect(invoke).toHaveBeenCalledWith('spaces:createAsset', {
             orgId: refs.orgId, spaceId: refs.spaceId,
-            input: { assetPath: 'notes.txt', baseVersion: 0, blob: firstHash, reason: 'saved from chat' },
+            input: { path: 'notes.txt', blob: firstHash, reason: 'saved from chat' },
         })
+        expect(invoke).not.toHaveBeenCalledWith('spaces:proposeChange', expect.anything())
         expect(invoke).not.toHaveBeenCalledWith('spaces:saveBlob', expect.anything())
     })
 
     it('keeps the save dialog open when the filename conflicts', async () => {
-        invoke.mockImplementation(async (channel) => channel === 'spaces:listAssets' ? { entries: [{ path: 'notes.txt', version: 1 }] } : { outcome: 'conflict', currentVersion: 1 })
+        invoke.mockImplementation(async (channel) => channel === 'spaces:listAssets' ? { entries: [{ id: 'A-notes', path: 'notes.txt', version: 1 }] } : { outcome: 'conflict', currentVersion: 1 })
         render(<SpaceRefsProvider refs={refs}><SpaceMarkdown body={`[notes.txt](${blobWireUrl(refs, firstHash, 'notes.txt')})`} /></SpaceRefsProvider>)
         fireEvent.click(await screen.findByRole('button', { name: 'Save to space files' }))
         fireEvent.click(screen.getByRole('button', { name: /^Save$/ }))
@@ -202,7 +206,9 @@ describe.each(['carousel', 'standalone'] as const)('%s image preview actions', (
     }
 
     it('opens the save form and saves the selected image without dismissing the preview', async () => {
-        invoke.mockImplementation(async (channel) => channel === 'spaces:listAssets' ? { entries: [] } : { outcome: 'applied' })
+        invoke.mockImplementation(async (channel, args) => channel === 'spaces:listAssets'
+            ? { entries: [] }
+            : { asset: { id: 'A-photo', path: args.input.path, version: 1, updatedAt: '' }, changeSet: {} })
         const lightbox = await openPreview()
         expect(lightbox).toHaveClass('titlebar-no-drag')
         const action = within(lightbox).getByRole('button', { name: 'Save to space files' })
@@ -215,9 +221,9 @@ describe.each(['carousel', 'standalone'] as const)('%s image preview actions', (
         fireEvent.change(input, { target: { value: 'saved-photo.png' } })
         fireEvent.click(within(form).getByRole('button', { name: /^Save$/ }))
         await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Save to space files' })).not.toBeInTheDocument())
-        expect(invoke).toHaveBeenCalledWith('spaces:proposeChange', {
+        expect(invoke).toHaveBeenCalledWith('spaces:createAsset', {
             orgId: refs.orgId, spaceId: refs.spaceId,
-            input: { assetPath: 'saved-photo.png', baseVersion: 0, blob: secondHash, reason: 'saved from chat' },
+            input: { path: 'saved-photo.png', blob: secondHash, reason: 'saved from chat' },
         })
         expect(within(screen.getByRole('dialog')).getByRole('img', { name: 'Second' })).toBeVisible()
     })
@@ -232,5 +238,74 @@ describe.each(['carousel', 'standalone'] as const)('%s image preview actions', (
         expect(invoke).toHaveBeenLastCalledWith('spaces:saveBlob', { orgId: refs.orgId, spaceId: refs.spaceId, hash: secondHash, suggestedName: 'second.png' })
         expect(within(lightbox).queryByRole('alert')).not.toBeInTheDocument()
         expect(lightbox).toBeInTheDocument()
+    })
+})
+
+
+// File links (2026-09-14): a file is named by its asset id. The canonical
+// https link carries the id for any space; a relative link in a message
+// resolves through the space's listing at render time.
+describe('Space file links', () => {
+    const ASSET = '01HXAMPLEASSET0000000000A1'
+    const OTHER_SPACE = '01ARZ3NDEKTSV4RRFFQ69G5FB0'
+    const entries = [
+        { id: ASSET, path: 'decisions/sso.md', version: 2, updatedAt: '' },
+        { id: 'A-gone', path: 'old.md', version: 1, updatedAt: '', state: 'deleted' as const },
+    ]
+    function mount(body: string, nav: Partial<Parameters<typeof SpaceNavProvider>[0]> = {}) {
+        const onOpenFile = vi.fn()
+        const onOpenSpaceFile = vi.fn()
+        render(
+            <SpaceRefsProvider refs={refs}>
+                <SpaceAssetsProvider entries={entries}>
+                    <SpaceNavProvider onOpenFile={onOpenFile} onOpenSpaceFile={onOpenSpaceFile} {...nav}>
+                        <SpaceMarkdown body={body} />
+                    </SpaceNavProvider>
+                </SpaceAssetsProvider>
+            </SpaceRefsProvider>,
+        )
+        return { onOpenFile, onOpenSpaceFile }
+    }
+
+    it('opens a canonical /a/<assetId> link to this space by id, titled with the file\u2019s current path', async () => {
+        const { onOpenFile } = mount(`see [the decision](${assetWireUrl(refs, ASSET)})`)
+        const link = await screen.findByRole('button', { name: 'the decision' })
+        expect(link).toHaveAttribute('title', 'decisions/sso.md')
+        fireEvent.click(link)
+        expect(onOpenFile).toHaveBeenCalledWith(ASSET)
+    })
+
+    it('resolves a relative link through the listing (path \u2192 id)', async () => {
+        const { onOpenFile } = mount('see [sso](decisions/sso.md)')
+        fireEvent.click(await screen.findByRole('button', { name: 'sso' }))
+        expect(onOpenFile).toHaveBeenCalledWith(ASSET)
+    })
+
+    it('renders a relative link that names no live file as muted text, not an external link', async () => {
+        const { onOpenFile } = mount('see [old](old.md) and [nope](missing/thing.md)')
+        await screen.findByText('old')
+        expect(screen.queryByRole('button', { name: 'old' })).not.toBeInTheDocument()
+        expect(screen.queryByRole('link', { name: 'old' })).not.toBeInTheDocument()
+        expect(screen.getByText('nope').closest('span[title]')).toHaveAttribute('title', 'No file at missing/thing.md')
+        expect(onOpenFile).not.toHaveBeenCalled()
+    })
+
+    it('navigates to another space the reader is in for its canonical link', async () => {
+        const url = assetWireUrl({ orgAddress: refs.orgAddress, spaceId: OTHER_SPACE }, 'A-there')
+        const { onOpenFile, onOpenSpaceFile } = mount(`see [there](${url})`, { resolveSpace: (address, spaceId) => (address === refs.orgAddress && spaceId === OTHER_SPACE ? 'org' : null) })
+        fireEvent.click(await screen.findByRole('button', { name: 'there' }))
+        expect(onOpenSpaceFile).toHaveBeenCalledWith('org', OTHER_SPACE, 'A-there')
+        expect(onOpenFile).not.toHaveBeenCalled()
+    })
+
+    it('mutes a canonical link into a space the reader is not in', async () => {
+        const url = assetWireUrl({ orgAddress: 'elsewhere.example.com', spaceId: OTHER_SPACE }, 'A-secret')
+        const { onOpenFile, onOpenSpaceFile } = mount(`see [secret](${url})`, { resolveSpace: () => null })
+        await screen.findByText('secret')
+        expect(screen.queryByRole('button', { name: 'secret' })).not.toBeInTheDocument()
+        expect(screen.queryByRole('link', { name: 'secret' })).not.toBeInTheDocument()
+        expect(screen.getByText('secret').closest('span[title]')).toHaveAttribute('title', 'Not available to you')
+        expect(onOpenFile).not.toHaveBeenCalled()
+        expect(onOpenSpaceFile).not.toHaveBeenCalled()
     })
 })

@@ -82,6 +82,7 @@ function rowToSpace(r: SpaceRow): Space {
 interface ChangeSetRow {
   id: string;
   space_id: string;
+  asset_id: string;
   asset_path: string;
   base_version: number;
   result_version: number;
@@ -99,6 +100,7 @@ function rowToChangeSet(r: ChangeSetRow): ChangeSet {
   return {
     id: r.id,
     spaceId: r.space_id,
+    assetId: r.asset_id,
     assetPath: r.asset_path,
     baseVersion: r.base_version,
     resultVersion: r.result_version,
@@ -121,18 +123,11 @@ interface TopicRow {
   created_by: Topic['createdBy'];
   created_at: string;
   archived: boolean;
-  /** Projected by TOPIC_SELECT: the linked asset's current path, null unless it is live. */
-  document_path: string | null;
+  /** The linked file's id (migration 019), null when nothing is attached. */
+  document_asset_id: string | null;
 }
 
-/**
- * Every topic read goes through this projection: the row plus the linked
- * document's CURRENT live path (migration 019). A trashed file projects
- * null — the link is kept on the row and comes back on restore.
- */
-const TOPIC_SELECT = `select t.*, a.path as document_path
-  from topics t
-  left join assets a on a.space_id = t.space_id and a.id = t.document_asset_id and a.state = 'live'`;
+const TOPIC_SELECT = `select t.* from topics t`;
 
 function rowToTopic(r: TopicRow): Topic {
   return {
@@ -143,7 +138,7 @@ function rowToTopic(r: TopicRow): Topic {
     createdBy: r.created_by,
     createdAt: r.created_at,
     archived: r.archived,
-    ...(r.document_path !== null && r.document_path !== undefined ? { documentPath: r.document_path } : {}),
+    ...(r.document_asset_id !== null && r.document_asset_id !== undefined ? { documentAssetId: r.document_asset_id } : {}),
   };
 }
 
@@ -510,15 +505,6 @@ export class PgStore implements Store {
     return rows[0] ? this.assetRow(rows[0]) : undefined;
   }
 
-  async getLatestDeletedByPath(spaceId: string, path: string): Promise<AssetRecord | undefined> {
-    const rows = await this.sql.query<AssetRow>(
-      `${this.assetSelect} where a.space_id = $1 and a.path = $2 and a.state = 'deleted'
-       order by a.updated_at desc limit 1`,
-      [spaceId, path],
-    );
-    return rows[0] ? this.assetRow(rows[0]) : undefined;
-  }
-
   async getAssetById(spaceId: string, assetId: string): Promise<AssetRecord | undefined> {
     const rows = await this.sql.query<AssetRow>(
       `${this.assetSelect} where a.space_id = $1 and a.id = $2`,
@@ -582,28 +568,6 @@ export class PgStore implements Store {
     ]);
   }
 
-  // --- redirects -------------------------------------------------------------
-
-  async putRedirect(spaceId: string, path: string, assetId: string, movedAt: string): Promise<void> {
-    await this.sql.query(
-      `insert into asset_redirects (space_id, path, asset_id, moved_at) values ($1, $2, $3, $4)
-       on conflict (space_id, path) do update set asset_id = excluded.asset_id, moved_at = excluded.moved_at`,
-      [spaceId, path, assetId, movedAt],
-    );
-  }
-
-  async getRedirect(spaceId: string, path: string): Promise<string | undefined> {
-    const rows = await this.sql.query<{ asset_id: string }>(
-      'select asset_id from asset_redirects where space_id = $1 and path = $2',
-      [spaceId, path],
-    );
-    return rows[0]?.asset_id;
-  }
-
-  async deleteRedirect(spaceId: string, path: string): Promise<void> {
-    await this.sql.query('delete from asset_redirects where space_id = $1 and path = $2', [spaceId, path]);
-  }
-
   // --- uploaded blobs --------------------------------------------------------
 
   async putSpaceBlob(blob: StoredSpaceBlob): Promise<void> {
@@ -642,14 +606,14 @@ export class PgStore implements Store {
 
   // --- change log ------------------------------------------------------------
 
-  async appendChangeSet(changeSet: ChangeSet, assetId: string): Promise<void> {
+  async appendChangeSet(changeSet: ChangeSet): Promise<void> {
     await this.sql.query(
       `insert into change_sets (id, space_id, asset_id, asset_path, base_version, result_version, attribution, reason, thread_root_id, blob, op, moved_from, committed_at, stream_offset)
        values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10::jsonb, $11, $12, $13, $14)`,
       [
         changeSet.id,
         changeSet.spaceId,
-        assetId,
+        changeSet.assetId,
         changeSet.assetPath,
         changeSet.baseVersion,
         changeSet.resultVersion,
@@ -704,14 +668,6 @@ export class PgStore implements Store {
 
   async setTopicDocument(spaceId: string, topicId: string, assetId: string | null): Promise<void> {
     await this.sql.query('update topics set document_asset_id = $3 where space_id = $1 and id = $2', [spaceId, topicId, assetId]);
-  }
-
-  async getTopicDocument(spaceId: string, topicId: string): Promise<string | undefined> {
-    const rows = await this.sql.query<{ document_asset_id: string | null }>(
-      'select document_asset_id from topics where space_id = $1 and id = $2',
-      [spaceId, topicId],
-    );
-    return rows[0]?.document_asset_id ?? undefined;
   }
 
   async putTopic(topic: Topic): Promise<void> {

@@ -1,9 +1,10 @@
 import { z } from 'zod';
 import { MENTION_GRAMMAR } from './mentions.js';
 import { ActivityKind, NewPoll } from './api.js';
-import { BlobInfo } from './blob.js';
 import {
+  Asset,
   ChangeSet,
+  CreateAssetResult,
   DeleteAssetResult,
   MoveAssetResult,
   ProposeChangeResult,
@@ -11,7 +12,7 @@ import {
   RestoreAssetResult,
 } from './changeset.js';
 import { Attribution, Member, Message, ReactionEmoji, Space, SpaceKind, Topic } from './core.js';
-import { AssetPath, AssetVersion, BlobHash, MemberId, MessageId, SpaceId, TopicId } from './ids.js';
+import { AssetId, AssetPath, BlobHash, MemberId, MessageId, SpaceId, TopicId } from './ids.js';
 import { CreateInviteResult } from './invite.js';
 import { SearchKind, SearchLimit, SearchResults } from './search.js';
 
@@ -58,11 +59,12 @@ function tool<In extends z.ZodType, Out extends z.ZodType>(t: McpToolDef<In, Out
 export const whoami = tool({
   name: 'whoami',
   description:
-    'Who your person is on this org: their memberId, display name, and role. Use it to recognise ' +
-    'their own messages and reactions in what you read, and to open their notes-to-self DM ' +
-    '(open_direct with their own memberId).',
+    'Who your person is on this org: their memberId, display name, and role, plus the org itself ' +
+    '(name and address — the host every link on this org is minted on, e.g. a file link ' +
+    'https://<address>/s/<spaceId>/a/<assetId>). Use it to recognise their own messages and ' +
+    'reactions in what you read, and to open their notes-to-self DM (open_direct with their own memberId).',
   input: z.object({}),
-  output: z.object({ member: Member }),
+  output: z.object({ member: Member, org: z.object({ name: z.string(), address: z.string() }) }),
 });
 
 export const listMembers = tool({
@@ -84,8 +86,9 @@ export const listSpaces = tool({
   description:
     'List the spaces you are a member of on this org, each with its file listing. ' +
     'Call this first: it resolves a space name (e.g. "Roadboard") to the spaceId every other ' +
-    'tool needs, and shows the asset paths available to read_asset. Discovery is mechanical — ' +
-    'do not guess spaceIds or file paths. Shared spaces only by default; pass includeDirect to ' +
+    'tool needs, and lists every file with its assetId (what read_asset and every file tool take) ' +
+    'and its path (the display name). Discovery is mechanical — never guess a spaceId or an assetId. ' +
+    'Shared spaces only by default; pass includeDirect to ' +
     'also list your direct messages (kind "direct": a private conversation with exactly one other ' +
     'member — its participants are listed; label it by the other member, its name is a placeholder). ' +
     "A DM flagged self: true is your person's own notes-to-self space (they are its only participant) — " +
@@ -105,15 +108,8 @@ export const listSpaces = tool({
         /** Direct spaces only: true when the caller is the only participant — their notes to self. */
         self: z.boolean().optional(),
         memberCount: z.number().int().nonnegative(),
-        assets: z.array(
-          z.object({
-            path: AssetPath,
-            version: AssetVersion,
-            updatedAt: z.iso.datetime(),
-            /** Present = a binary file (image, pdf, …); read_asset returns its metadata, not bytes. */
-            blob: BlobInfo.optional(),
-          }),
-        ),
+        /** Every live file: its id (what every file tool takes), its path (the display name), version, and blob metadata for binaries. */
+        assets: z.array(Asset.omit({ state: true })),
       }),
     ),
   }),
@@ -197,7 +193,7 @@ export const readThread = tool({
   name: 'read_thread',
   description:
     'Read one flat thread: the root message, its topic row (null = a plain untitled thread; its ' +
-    'documentPath, when set, is the file the discussion is about — read_asset it for context), and ' +
+    'documentAssetId, when set, is the file the discussion is about — read_asset it for context), and ' +
     'the replies (each attributed to its member and acting mode), oldest first (default 50). ' +
     'Use this to catch up before replying or to answer questions about a conversation. A reply id ' +
     'resolves to its root. When `truncated` is true, pass `beforeOffset` to page back before ' +
@@ -223,8 +219,8 @@ export const searchSpace = tool({
     'Search a space: messages, topic titles, and files (by extracted content or filename), ' +
     'returned as three independently-ranked lists. Query words are AND-ed; a word that is a ' +
     "member's name also matches @-mentions of them. Message hits name their thread " +
-    '(threadRootId — feed it to read_thread for context); asset hits name the path for ' +
-    'read_asset. A truncated flag means more hits existed than limit — refine the query ' +
+    '(threadRootId — feed it to read_thread for context); asset hits carry the assetId for ' +
+    'read_asset and the path for display. A truncated flag means more hits existed than limit — refine the query ' +
     'rather than raising the limit. Use before posting a new root to avoid duplicating a ' +
     'conversation, and to locate files without listing everything.',
   input: z.object({
@@ -347,8 +343,8 @@ export const createTopic = tool({
     'Give a thread a title (the UI calls it a Discussion), putting it on the rail. Provide ' +
     'rootMessageId to title an existing thread (use its root, not a reply), or body to post a new ' +
     'root message and title it in one step — exactly one of the two. Titles are goals ' +
-    '("Decide: launch cut"), not summaries. At most one topic per thread. Pass documentPath ' +
-    "(a live file's path from list_assets) to make the discussion about that file — the UI " +
+    '("Decide: launch cut"), not summaries. At most one topic per thread. Pass documentAssetId ' +
+    "(a live file's id from list_spaces) to make the discussion about that file — the UI " +
     'opens it beside the thread. ' +
     MENTION_GRAMMAR,
   input: z.object({
@@ -356,7 +352,7 @@ export const createTopic = tool({
     rootMessageId: MessageId.optional(),
     title: z.string().min(1).max(256),
     body: z.string().min(1).max(65_536).optional(),
-    documentPath: AssetPath.optional(),
+    documentAssetId: AssetId.optional(),
   }),
   output: z.object({ topic: Topic, rootMessageId: MessageId }),
 });
@@ -366,8 +362,8 @@ export const manageTopic = tool({
   description:
     'One-row lifecycle ops on a topic: retitle (needs title), archive (off the rail; a new reply ' +
     'revives it), unarchive, remove (deletes the annotation — the thread and every message stay ' +
-    'in the stream untouched; "convert back to thread"), attach_document (needs path: link ONE ' +
-    "live space file as what the discussion is about — the topic's documentPath; the UI opens it " +
+    'in the stream untouched; "convert back to thread"), attach_document (needs assetId: link ONE ' +
+    "live space file as what the discussion is about — the topic's documentAssetId; the UI opens it " +
     'beside the thread; read it with read_asset), or detach_document. None of these can touch a ' +
     'message. Attributed to your person like everything else.',
   input: z.object({
@@ -375,32 +371,57 @@ export const manageTopic = tool({
     topicId: TopicId,
     action: z.enum(['retitle', 'archive', 'unarchive', 'remove', 'attach_document', 'detach_document']),
     title: z.string().min(1).max(256).optional(),
-    path: AssetPath.optional(),
+    assetId: AssetId.optional(),
   }),
   output: z.object({ topic: Topic }),
 });
 
 // --- files --------------------------------------------------------------------
+// Files are addressed by id (2026-09-14): every tool here takes the assetId
+// from list_spaces (each space's `assets`), search_space, or a link. The path
+// is the file's display name — create_asset names it, move_asset renames it,
+// nothing else reads it.
+
+export const createAsset = tool({
+  name: 'create_asset',
+  description:
+    'Create a new file in a space at a path (folders are just path prefixes — "notes/plan.md" ' +
+    'makes the folder). Provide EXACTLY ONE of newContent (text) or blob (binary: the sha256 of ' +
+    'bytes already uploaded to this space, e.g. the hash inside an attachment link ".../b/<hash>"). ' +
+    'Refuses when a live file already has that path — read it and propose_change instead. Returns ' +
+    "the new file's id: use it for every later call (read_asset, propose_change, move_asset, …).",
+  input: z.object({
+    spaceId: SpaceId,
+    path: AssetPath,
+    newContent: z.string().max(1_048_576).optional(),
+    blob: BlobHash.optional(),
+    /** One line: why this file exists. Shown in the feed and in history forever. */
+    reason: z.string().min(1).max(1_000),
+  }),
+  output: CreateAssetResult,
+});
 
 export const readAsset = tool({
   name: 'read_asset',
   description:
-    'Read a file in a space. Returns content, current version, and recent change history. ' +
-    'Always read before proposing a change; the version you read is your base version. ' +
-    'Pass `version` to read an older version (time travel); omit for the current one. ' +
-    'Binary files (images, pdfs, uploads) return empty content plus a `blob` {hash, size, mime} — ' +
-    'describe them by their metadata; the bytes are not readable over this face.',
-  input: z.object({ spaceId: SpaceId, path: AssetPath, version: z.number().int().positive().optional() }),
+    'Read a file by its assetId (from list_spaces or search_space). Returns its current path, ' +
+    'content, current version, and recent change history. Always read before proposing a change; ' +
+    'the version you read is your base version. Pass `version` to read an older version (time ' +
+    'travel); omit for the current one. Binary files (images, pdfs, uploads) return empty content ' +
+    'plus a `blob` {hash, size, mime} — describe them by their metadata; the bytes are not readable ' +
+    'over this face.',
+  input: z.object({ spaceId: SpaceId, assetId: AssetId, version: z.number().int().positive().optional() }),
   output: ReadAssetResult,
 });
 
 export const proposeChange = tool({
   name: 'propose_change',
   description:
-    'Propose the full new content of a file against the version you read (baseVersion; 0 to create). ' +
-    'Provide EXACTLY ONE of newContent (text) or blob (binary). `blob` files bytes already uploaded to ' +
-    'this space by their sha256 — e.g. the hash inside a message attachment link ".../b/<hash>" — so ' +
-    '"put that attachment in the space files" is a pure reference, no re-upload. ' +
+    'Propose the full new content of an existing file (by assetId) against the version you read ' +
+    '(baseVersion). New files are born with create_asset, not here. Provide EXACTLY ONE of ' +
+    'newContent (text) or blob (binary: the sha256 of bytes already uploaded to this space — e.g. the ' +
+    'hash inside a message attachment link ".../b/<hash>" — so "put that attachment in the space ' +
+    'files" is a pure reference, no re-upload). ' +
     'Outcome "applied"/"merged" means it is saved (on "merged", mergedContent is what now exists — re-read it). ' +
     'Outcome "conflict" means nothing was written: adjust against currentContent and re-propose ' +
     '(binary conflicts come with regions: [] — re-proposing at currentVersion is the explicit replace).',
@@ -408,8 +429,8 @@ export const proposeChange = tool({
   // the JSON-schema projection stays plain).
   input: z.object({
     spaceId: SpaceId,
-    path: AssetPath,
-    baseVersion: z.number().int().nonnegative(),
+    assetId: AssetId,
+    baseVersion: z.number().int().positive(),
     newContent: z.string().max(1_048_576).optional(),
     blob: BlobHash.optional(),
     /** One line: why this change. Shown in the feed and in history forever. */
@@ -421,13 +442,14 @@ export const proposeChange = tool({
 export const moveAsset = tool({
   name: 'move_asset',
   description:
-    'Move or rename a file (folders are just path prefixes — moving into a new folder creates it). ' +
-    'Content, history, and blame travel with the file; the old path keeps a redirect. Declare the ' +
-    'baseVersion you last read: outcome "conflict" means the file changed meanwhile — re-read and retry. ' +
-    'An occupied destination is refused (pick another name); this never overwrites.',
+    'Move or rename a file: set its path (folders are just path prefixes — moving into a new folder ' +
+    'creates it). The id, content, history, and blame are untouched — only the display path changes, ' +
+    'so nothing that references the file by id notices. Declare the baseVersion you last read: ' +
+    'outcome "conflict" means the file changed meanwhile — re-read and retry. An occupied ' +
+    'destination is refused (pick another name); this never overwrites.',
   input: z.object({
     spaceId: SpaceId,
-    fromPath: AssetPath,
+    assetId: AssetId,
     toPath: AssetPath,
     baseVersion: z.number().int().positive(),
     /** One line: why this move. Shown in the feed and in history forever. */
@@ -445,7 +467,7 @@ export const deleteAsset = tool({
     'prefer moving files into folders over deleting when tidying.',
   input: z.object({
     spaceId: SpaceId,
-    path: AssetPath,
+    assetId: AssetId,
     baseVersion: z.number().int().positive(),
     /** One line: why this delete. Shown in the feed and in history forever. */
     reason: z.string().min(1).max(1_000),
@@ -456,12 +478,11 @@ export const deleteAsset = tool({
 export const restoreAsset = tool({
   name: 'restore_asset',
   description:
-    'Bring a deleted file back from Trash at its old path, with its whole history. If several ' +
-    'deleted files share the path, the most recently deleted one is restored. Refuses when the ' +
-    'path is occupied by a live file — move that one first.',
+    'Bring a deleted file back from Trash at its old path, with its whole history and the same id. ' +
+    'Refuses when a live file now occupies that path — move that one first.',
   input: z.object({
     spaceId: SpaceId,
-    path: AssetPath,
+    assetId: AssetId,
     /** One line: why. Shown in the feed and in history forever. */
     reason: z.string().min(1).max(1_000),
   }),
@@ -471,13 +492,14 @@ export const restoreAsset = tool({
 export const assetHistory = tool({
   name: 'asset_history',
   description:
-    "Change history. With path: that file's changes (across renames, and after deletion), newest " +
-    "first. Without path: the whole space's change log — every file edit, move, delete, restore, " +
-    'with who, why, and when (the feed\'s Activity strand). Page back with beforeOffset. Use ' +
-    '`diff` to see what one change altered.',
+    "Change history. With assetId: that file's changes (across renames, and after deletion), newest " +
+    "first. Without: the whole space's change log — every file edit, move, delete, restore, " +
+    "with who, why, and when (the feed's Activity strand); each change-set names its file by " +
+    'assetId and by the path it had at the time. Page back with beforeOffset. Use `diff` to see ' +
+    'what one change altered.',
   input: z.object({
     spaceId: SpaceId,
-    path: AssetPath.optional(),
+    assetId: AssetId.optional(),
     beforeOffset: z.number().int().nonnegative().optional(),
     limit: z.number().int().positive().max(200).optional(),
   }),
@@ -489,10 +511,10 @@ export const diff = tool({
   description:
     'A unified diff of a text file between two versions (from < to; from 0 = the file did not ' +
     'exist yet). Versions come from read_asset and asset_history. Answers "what changed in ' +
-    'roadmap.md since yesterday" without reading both versions whole.',
+    'the roadmap since yesterday" without reading both versions whole.',
   input: z.object({
     spaceId: SpaceId,
-    path: AssetPath,
+    assetId: AssetId,
     from: z.number().int().nonnegative(),
     to: z.number().int().positive(),
   }),
@@ -585,6 +607,7 @@ export const mcpTools = [
   listTopics,
   createTopic,
   manageTopic,
+  createAsset,
   readAsset,
   proposeChange,
   moveAsset,

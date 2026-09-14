@@ -10,6 +10,7 @@ import { startHarbor, type RunningHarbor } from '../src/server.js';
 
 let harbor: RunningHarbor;
 let spaceId: string;
+let roadmapId: string; // the seeded roadmap.md's asset id — every later call names it by id
 
 beforeAll(async () => {
   harbor = await startHarbor({
@@ -23,6 +24,10 @@ beforeAll(async () => {
   });
   const spaces = await harbor.service.listSpaces({ memberId: 'harsh' });
   spaceId = spaces[0]!.id;
+  const listing = await fetch(`${harbor.url}/v1/spaces/${spaceId}/assets`, {
+    headers: { authorization: 'Bearer dev-harsh' },
+  }).then((r) => r.json() as Promise<{ entries: Array<{ id: string; path: string }> }>);
+  roadmapId = listing.entries.find((e) => e.path === 'roadmap.md')!.id;
 });
 
 afterAll(async () => {
@@ -39,11 +44,12 @@ async function mcpClient(token: string, headers: Record<string, string> = {}): P
 }
 
 describe('agent face (MCP)', () => {
-  it('lists exactly the twenty-eight protocol tools, with JSON schemas', async () => {
+  it('lists exactly the thirty protocol tools, with JSON schemas', async () => {
     const client = await mcpClient('dev-harsh');
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
       'asset_history',
+      'create_asset',
       'create_invite',
       'create_space',
       'create_topic',
@@ -76,27 +82,35 @@ describe('agent face (MCP)', () => {
     expect(tools.map((t) => t.name).sort()).toEqual([...mcpTools].map((t) => t.name).sort());
     const propose = tools.find((t) => t.name === 'propose_change')!;
     expect(propose.inputSchema.required).toContain('reason'); // required on this face only
+    expect(propose.inputSchema.required).toContain('assetId'); // files are named by id, never by path
+    const create = tools.find((t) => t.name === 'create_asset')!;
+    expect(create.inputSchema.required).toContain('path'); // birth is the one op that takes a path
+    expect(create.inputSchema.required).toContain('reason');
     await client.close();
   });
 
-  it('list_spaces makes discovery mechanical: name → spaceId → asset path → content', async () => {
+  it('list_spaces makes discovery mechanical: name → spaceId → asset path → assetId → content', async () => {
     const client = await mcpClient('dev-harsh');
     // The full resolution chain an agent runs for "read the Agent Space roadmap"
-    // with zero prior knowledge — no guessed ids, no guessed paths.
+    // with zero prior knowledge — no guessed ids, no guessed paths. The path is
+    // the display label; the id is what every later call takes.
     const listed = (await client.callTool({ name: 'list_spaces', arguments: {} }))
       .structuredContent as {
-      spaces: Array<{ id: string; name: string; memberCount: number; assets: Array<{ path: string; version: number }> }>;
+      spaces: Array<{ id: string; name: string; memberCount: number; assets: Array<{ id: string; path: string; version: number }> }>;
     };
     const space = listed.spaces.find((s) => s.name.toLowerCase() === 'agent space');
     expect(space).toBeDefined();
     expect(space!.memberCount).toBe(2); // harsh + ramnique seeded
     const roadmap = space!.assets.find((a) => a.path === 'roadmap.md');
     expect(roadmap).toBeDefined();
+    expect(roadmap!.id).toBe(roadmapId);
 
     const read = (await client.callTool({
       name: 'read_asset',
-      arguments: { spaceId: space!.id, path: roadmap!.path },
-    })).structuredContent as { content: string; version: number };
+      arguments: { spaceId: space!.id, assetId: roadmap!.id },
+    })).structuredContent as { id: string; path: string; content: string; version: number };
+    expect(read.id).toBe(roadmap!.id);
+    expect(read.path).toBe('roadmap.md');
     expect(read.content).toContain('# Roadmap');
     expect(read.version).toBe(roadmap!.version);
 
@@ -111,23 +125,25 @@ describe('agent face (MCP)', () => {
 
   it('read → propose(applied) round-trip, attributed as agent with the declared name', async () => {
     const client = await mcpClient('dev-harsh', { 'x-agent-name': 'Claude Code' });
-    const read = (await client.callTool({ name: 'read_asset', arguments: { spaceId, path: 'roadmap.md' } }))
+    const read = (await client.callTool({ name: 'read_asset', arguments: { spaceId, assetId: roadmapId } }))
       .structuredContent as { content: string; version: number };
     const propose = (
       await client.callTool({
         name: 'propose_change',
         arguments: {
           spaceId,
-          path: 'roadmap.md',
+          assetId: roadmapId,
           baseVersion: read.version,
           newContent: read.content.replace('- [ ] SSO', '- [x] SSO'),
           reason: 'standup: SSO shipped',
         },
       })
-    ).structuredContent as { outcome: string; changeSet: { attribution: unknown; reason: string } };
+    ).structuredContent as { outcome: string; changeSet: { assetId: string; assetPath: string; attribution: unknown; reason: string } };
     expect(propose.outcome).toBe('applied');
     expect(propose.changeSet.attribution).toEqual({ memberId: 'harsh', actingMode: 'agent', agentName: 'Claude Code' });
     expect(propose.changeSet.reason).toBe('standup: SSO shipped');
+    expect(propose.changeSet.assetId).toBe(roadmapId);
+    expect(propose.changeSet.assetPath).toBe('roadmap.md'); // the path at commit time, a record
     await client.close();
   });
 
@@ -135,7 +151,7 @@ describe('agent face (MCP)', () => {
     const harshAgent = await mcpClient('dev-harsh');
     const ramniqueAgent = await mcpClient('dev-ramnique');
 
-    const read = (await harshAgent.callTool({ name: 'read_asset', arguments: { spaceId, path: 'roadmap.md' } }))
+    const read = (await harshAgent.callTool({ name: 'read_asset', arguments: { spaceId, assetId: roadmapId } }))
       .structuredContent as { content: string; version: number };
 
     // Ramnique's agent lands first.
@@ -143,7 +159,7 @@ describe('agent face (MCP)', () => {
       name: 'propose_change',
       arguments: {
         spaceId,
-        path: 'roadmap.md',
+        assetId: roadmapId,
         baseVersion: read.version,
         newContent: read.content.replace('# Roadmap', '# Roadmap (Q3)'),
         reason: 'retitle for the quarter',
@@ -156,7 +172,7 @@ describe('agent face (MCP)', () => {
         name: 'propose_change',
         arguments: {
           spaceId,
-          path: 'roadmap.md',
+          assetId: roadmapId,
           baseVersion: read.version,
           newContent: read.content.replace('# Roadmap', '# Roadmap — August'),
           reason: 'retitle by month',
@@ -179,7 +195,7 @@ describe('agent face (MCP)', () => {
         name: 'propose_change',
         arguments: {
           spaceId,
-          path: 'roadmap.md',
+          assetId: roadmapId,
           baseVersion: conflict.currentVersion,
           newContent: conflict.currentContent.replace('(Q3)', '(Q3 — August)'),
           reason: 'fold both retitles together',
@@ -191,7 +207,7 @@ describe('agent face (MCP)', () => {
     await ramniqueAgent.close();
   });
 
-  it('propose_change blob variant files an already-uploaded attachment — no byte movement', async () => {
+  it('create_asset blob variant files an already-uploaded attachment — no byte movement', async () => {
     // A member attached bytes in chat (render-face upload, phase 1)…
     const bytes = new TextEncoder().encode('quarterly,signups\nQ1,40\nQ2,55\n');
     const hash = createHash('sha256').update(bytes).digest('hex');
@@ -205,32 +221,56 @@ describe('agent face (MCP)', () => {
     // …and the agent files it into the tree by hash alone (phase 2 over MCP).
     const client = await mcpClient('dev-harsh', { 'x-agent-name': 'Rowboat' });
     const filed = (await client.callTool({
-      name: 'propose_change',
-      arguments: { spaceId, path: 'data/signups.csv', baseVersion: 0, blob: hash, reason: 'file the chat attachment' },
+      name: 'create_asset',
+      arguments: { spaceId, path: 'data/signups.csv', blob: hash, reason: 'file the chat attachment' },
     })) as { isError?: boolean; structuredContent?: unknown };
     expect(filed.isError).toBeFalsy();
-    const applied = filed.structuredContent as { outcome: string; changeSet: { blob?: { hash: string; mime: string } } };
-    expect(applied.outcome).toBe('applied');
-    expect(applied.changeSet.blob).toMatchObject({ hash, mime: 'text/csv' });
+    const created = filed.structuredContent as {
+      asset: { id: string; path: string; version: number; blob?: { hash: string; mime: string } };
+      changeSet: { assetId: string; blob?: { hash: string; mime: string } };
+    };
+    expect(created.asset).toMatchObject({ path: 'data/signups.csv', version: 1 });
+    expect(created.asset.blob).toMatchObject({ hash, mime: 'text/csv' });
+    expect(created.changeSet.assetId).toBe(created.asset.id);
+    expect(created.changeSet.blob).toMatchObject({ hash, mime: 'text/csv' });
 
-    // Exactly one of newContent/blob — both and neither are refused.
+    // Exactly one of newContent/blob — both and neither are refused, at birth…
     const both = await client.callTool({
-      name: 'propose_change',
-      arguments: { spaceId, path: 'data/x.csv', baseVersion: 0, newContent: 'a', blob: hash, reason: 'nope' },
+      name: 'create_asset',
+      arguments: { spaceId, path: 'data/x.csv', newContent: 'a', blob: hash, reason: 'nope' },
     });
     expect(both.isError).toBe(true);
     const neither = await client.callTool({
-      name: 'propose_change',
-      arguments: { spaceId, path: 'data/x.csv', baseVersion: 0, reason: 'nope' },
+      name: 'create_asset',
+      arguments: { spaceId, path: 'data/x.csv', reason: 'nope' },
     });
     expect(neither.isError).toBe(true);
-
-    // A hash never uploaded to this space is refused, not invented.
-    const phantom = await client.callTool({
+    // …and on a later propose against the file's id.
+    const proposeBoth = await client.callTool({
       name: 'propose_change',
-      arguments: { spaceId, path: 'data/ghost.csv', baseVersion: 0, blob: 'e'.repeat(64), reason: 'nope' },
+      arguments: { spaceId, assetId: created.asset.id, baseVersion: 1, newContent: 'a', blob: hash, reason: 'nope' },
+    });
+    expect(proposeBoth.isError).toBe(true);
+
+    // A hash never uploaded to this space is refused, not invented — on create and on propose.
+    const phantom = await client.callTool({
+      name: 'create_asset',
+      arguments: { spaceId, path: 'data/ghost.csv', blob: 'e'.repeat(64), reason: 'nope' },
     });
     expect(phantom.isError).toBe(true);
+    const phantomReplace = await client.callTool({
+      name: 'propose_change',
+      arguments: { spaceId, assetId: created.asset.id, baseVersion: 1, blob: 'e'.repeat(64), reason: 'nope' },
+    });
+    expect(phantomReplace.isError).toBe(true);
+
+    // The path is taken by a live file: birth refuses, naming the occupant.
+    const occupied = await client.callTool({
+      name: 'create_asset',
+      arguments: { spaceId, path: 'data/signups.csv', newContent: 'x', reason: 'nope' },
+    });
+    expect(occupied.isError).toBe(true);
+    expect((occupied.content as Array<{ text: string }>)[0]!.text).toContain(created.asset.id);
     await client.close();
   });
 
@@ -238,10 +278,16 @@ describe('agent face (MCP)', () => {
     const client = await mcpClient('dev-harsh');
     const result = await client.callTool({
       name: 'propose_change',
-      arguments: { spaceId, path: 'roadmap.md', baseVersion: 1, newContent: 'x\n' },
+      arguments: { spaceId, assetId: roadmapId, baseVersion: 1, newContent: 'x\n' },
     });
     expect(result.isError).toBe(true);
     expect(JSON.stringify(result.content)).toContain('reason');
+    const birth = await client.callTool({
+      name: 'create_asset',
+      arguments: { spaceId, path: 'unreasoned.md', newContent: 'x\n' },
+    });
+    expect(birth.isError).toBe(true);
+    expect(JSON.stringify(birth.content)).toContain('reason');
     await client.close();
   });
 
@@ -325,28 +371,29 @@ describe('agent face (MCP)', () => {
     ).structuredContent as { topic: { title: string } };
     expect(managed.topic.title).toBe('Decide: webhook retry policy (v2)');
 
-    // The discussion can be about one file: attach needs a path, read_thread shows it.
-    const proposed = await client.callTool({
-      name: 'propose_change',
-      arguments: { spaceId, path: 'retries.md', baseVersion: 0, newContent: '# Retry policy\n', reason: 'the policy doc' },
+    // The discussion can be about one file: attach needs the file's id, read_thread shows it.
+    const born = await client.callTool({
+      name: 'create_asset',
+      arguments: { spaceId, path: 'retries.md', newContent: '# Retry policy\n', reason: 'the policy doc' },
     });
-    expect(proposed.isError, JSON.stringify(proposed.content)).toBeFalsy();
-    const noPath = await client.callTool({
+    expect(born.isError, JSON.stringify(born.content)).toBeFalsy();
+    const retriesId = (born.structuredContent as { asset: { id: string } }).asset.id;
+    const noId = await client.callTool({
       name: 'manage_topic',
       arguments: { spaceId, topicId: annotated.topic.id, action: 'attach_document' },
     });
-    expect(noPath.isError).toBe(true);
+    expect(noId.isError).toBe(true);
     const attachedResult = await client.callTool({
       name: 'manage_topic',
-      arguments: { spaceId, topicId: annotated.topic.id, action: 'attach_document', path: 'retries.md' },
+      arguments: { spaceId, topicId: annotated.topic.id, action: 'attach_document', assetId: retriesId },
     });
     expect(attachedResult.isError, JSON.stringify(attachedResult.content)).toBeFalsy();
-    const attached = attachedResult.structuredContent as { topic: { documentPath?: string } };
-    expect(attached.topic.documentPath).toBe('retries.md');
+    const attached = attachedResult.structuredContent as { topic: { documentAssetId?: string } };
+    expect(attached.topic.documentAssetId).toBe(retriesId);
     const withDoc = (
       await client.callTool({ name: 'read_thread', arguments: { spaceId, rootMessageId: started.messageId } })
-    ).structuredContent as { topic: { documentPath?: string } | null };
-    expect(withDoc.topic?.documentPath).toBe('retries.md');
+    ).structuredContent as { topic: { documentAssetId?: string } | null };
+    expect(withDoc.topic?.documentAssetId).toBe(retriesId);
 
     // remove converts back to a thread — the messages stay readable.
     await client.callTool({
@@ -363,14 +410,14 @@ describe('agent face (MCP)', () => {
 
   it('x-acting-mode: scheduled attributes automations honestly', async () => {
     const client = await mcpClient('dev-harsh', { 'x-acting-mode': 'scheduled', 'x-agent-name': 'Rowboat' });
-    const read = (await client.callTool({ name: 'read_asset', arguments: { spaceId, path: 'roadmap.md' } }))
+    const read = (await client.callTool({ name: 'read_asset', arguments: { spaceId, assetId: roadmapId } }))
       .structuredContent as { content: string; version: number };
     const propose = (
       await client.callTool({
         name: 'propose_change',
         arguments: {
           spaceId,
-          path: 'roadmap.md',
+          assetId: roadmapId,
           baseVersion: read.version,
           newContent: `${read.content}- [ ] (cron) weekly tidy ran\n`,
           reason: 'weekly housekeeping cron',
@@ -386,7 +433,7 @@ describe('agent face (MCP)', () => {
     const client = await mcpClient('dev-harsh');
     const result = await client.callTool({
       name: 'read_asset',
-      arguments: { spaceId, path: 'nope.md' },
+      arguments: { spaceId, assetId: 'no-such-asset' },
     });
     expect(result.isError).toBe(true);
     const text = (result.content as Array<{ text: string }>)[0]!.text;

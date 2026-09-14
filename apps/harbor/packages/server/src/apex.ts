@@ -110,9 +110,8 @@ export function buildApexApp(deps: ApexDeps): Hono {
     if (member) {
       const service = new HarborService(store, deps.hub, { name: org.name, address: domain });
       const space = await service.createSpace({ memberId: member.id }, 'Main');
-      await service.proposeChange({ memberId: member.id }, space.id, {
-        assetPath: 'README.md',
-        baseVersion: 0,
+      await service.createAsset({ memberId: member.id }, space.id, {
+        path: 'README.md',
         newContent: welcomeReadme(org.name),
         reason: 'seed the landing page',
         actingMode: 'direct',

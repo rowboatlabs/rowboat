@@ -28,7 +28,7 @@ export function threadProcedure(ctx?: ThreadContext): string {
         "",
         "- `react` 👀 before you start, and on any follow-up `@rowboat` message that arrives while you work (fold those in). That is the whole \"on it\" — never post one.",
         "- If the task is about the conversation, `read_thread` first.",
-        `- Do the work. Any \`propose_change\` reason ends with \` · thread:${root}\` — that files the change under this thread.`,
+        `- Do the work. Any file change's \`reason\` (\`create_asset\`, \`propose_change\`, \`move_asset\`, …) ends with \` · thread:${root}\` — that files the change under this thread.`,
         "- Done: swap 👀 for ✅ and post nothing when the outcome speaks for itself — a file edited, a thread titled, a message pinned or scheduled. The team can open the file.",
         `- Post exactly one \`post_message\` reply (threadRoot ${root}) only when the ask wants an answer — a question, an opinion, a lookup. Outcome first, one or two sentences, no cheering, no recap of the edit. Nothing you read while working goes in unless it is the answer.`,
         "- Need your person — a confirmation, a choice, a blocker, or anything you could only explain with private detail: swap 👀 for ❗, say nothing in the thread, and ask here in this chat, which only they see. When they answer and you finish, swap ❗ for ✅.",

@@ -43,14 +43,12 @@ export interface BoardSaverIO {
 }
 
 export interface BoardSaverInit {
-    /** The loaded asset version the first propose declares as base (0 = board not created yet). */
+    /** The loaded asset version the first propose declares as base (a board is an asset before it opens). */
     baseVersion: number
     /** The loaded elements — what `latest` starts as. */
     elements: readonly unknown[]
     /** getSceneVersion(elements) — the hydration fingerprint local changes must advance past. */
     sceneVersion: number
-    /** A board becomes an asset on the first stroke, so the first save is quick. */
-    firstSaveDelayMs: number
     saveDelayMs: number
     io: BoardSaverIO
 }
@@ -75,7 +73,7 @@ export interface BoardSaver {
 }
 
 export function createBoardSaver(init: BoardSaverInit): BoardSaver {
-    const { io, firstSaveDelayMs, saveDelayMs } = init
+    const { io, saveDelayMs } = init
     let baseVersion = init.baseVersion
     let latest = init.elements
     let lastSceneVersion = init.sceneVersion
@@ -96,7 +94,7 @@ export function createBoardSaver(init: BoardSaverInit): BoardSaver {
         timer = setTimeout(() => {
             timer = null
             void save()
-        }, baseVersion === 0 ? firstSaveDelayMs : saveDelayMs)
+        }, saveDelayMs)
     }
 
     const save = async () => {

@@ -3,8 +3,11 @@ import { createHash } from 'node:crypto';
 import {
   routes,
   type AcceptInviteResult,
+  type Asset,
   type BlobInfo,
   type ChangeSet,
+  type CreateAsset,
+  type CreateAssetResult,
   type DeleteAssetResult,
   type CreateInviteResult,
   type Member,
@@ -221,12 +224,14 @@ export class SpacesClient {
 
   // --- assets ---------------------------------------------------------------
 
-  async listAssets(
-    spaceId: string,
-    opts: { includeDeleted?: boolean } = {},
-  ): Promise<Array<{ path: string; version: number; updatedAt: string; blob?: BlobInfo; state?: 'deleted' }>> {
+  async listAssets(spaceId: string, opts: { includeDeleted?: boolean } = {}): Promise<Asset[]> {
     const qs = opts.includeDeleted ? '?includeDeleted=true' : '';
     return (await this.request('GET', this.space(spaceId, `/assets${qs}`), routes.listAssets.response)).entries;
+  }
+
+  /** Birth: the one call that names a file by path. The result carries the id every later call uses. */
+  async createAsset(spaceId: string, input: CreateAsset): Promise<CreateAssetResult> {
+    return this.request('POST', this.space(spaceId, '/assets'), routes.createAsset.response, input);
   }
 
   /** Move or rename. Conflict comes back as a value (the file changed meanwhile). */
@@ -243,9 +248,9 @@ export class SpacesClient {
     return this.request('POST', this.space(spaceId, '/assets/restore'), routes.restoreAsset.response, input);
   }
 
-  async readAsset(spaceId: string, path: string, version?: number): Promise<ReadAssetResult> {
-    const q = new URLSearchParams({ path, ...(version !== undefined ? { version: String(version) } : {}) });
-    return this.request('GET', this.space(spaceId, `/asset?${q}`), routes.readAsset.response);
+  async readAsset(spaceId: string, assetId: string, version?: number): Promise<ReadAssetResult> {
+    const qs = version !== undefined ? `?version=${version}` : '';
+    return this.request('GET', this.space(spaceId, `/assets/${encodeURIComponent(assetId)}${qs}`), routes.readAsset.response);
   }
 
   /** All three outcomes come back as values — a conflict is a result, not an exception. */
@@ -255,18 +260,18 @@ export class SpacesClient {
 
   async assetHistory(
     spaceId: string,
-    opts: { path?: string; beforeOffset?: number; limit?: number } = {},
+    opts: { assetId?: string; beforeOffset?: number; limit?: number } = {},
   ): Promise<ChangeSet[]> {
     const q = new URLSearchParams();
-    if (opts.path !== undefined) q.set('path', opts.path);
+    if (opts.assetId !== undefined) q.set('assetId', opts.assetId);
     if (opts.beforeOffset !== undefined) q.set('beforeOffset', String(opts.beforeOffset));
     if (opts.limit !== undefined) q.set('limit', String(opts.limit));
     const qs = q.size > 0 ? `?${q}` : '';
     return (await this.request('GET', this.space(spaceId, `/history${qs}`), routes.assetHistory.response)).changeSets;
   }
 
-  async diff(spaceId: string, path: string, from: number, to: number): Promise<string> {
-    const q = new URLSearchParams({ path, from: String(from), to: String(to) });
+  async diff(spaceId: string, assetId: string, from: number, to: number): Promise<string> {
+    const q = new URLSearchParams({ assetId, from: String(from), to: String(to) });
     return (await this.request('GET', this.space(spaceId, `/diff?${q}`), routes.diff.response)).unified;
   }
 

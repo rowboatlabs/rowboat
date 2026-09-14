@@ -48,18 +48,20 @@ describe('SpacesClient', () => {
     expect((await gagan.listMembers(spaceId)).map((m) => m.id).sort()).toEqual(['gagan', 'ramnique']);
   });
 
-  it('propose → read → history → diff, with all three outcomes typed', async () => {
-    const created = await ramnique.proposeChange(spaceId, {
-      assetPath: 'notes.md',
-      baseVersion: 0,
+  it('create → propose → read → history → diff, with all three outcomes typed', async () => {
+    // Birth is the one path-shaped call; everything after addresses the id.
+    const born = await ramnique.createAsset(spaceId, {
+      path: 'notes.md',
       newContent: '# Notes\n- alpha\n',
       reason: 'start',
       actingMode: 'direct',
     });
-    expect(created.outcome).toBe('applied');
+    const notes = born.asset.id;
+    expect(born.asset).toMatchObject({ path: 'notes.md', version: 1 });
+    expect(born.changeSet.assetId).toBe(notes);
 
     const fresh = await gagan.proposeChange(spaceId, {
-      assetPath: 'notes.md',
+      assetId: notes,
       baseVersion: 1,
       newContent: '# Notes\n- alpha\n- beta\n',
       actingMode: 'direct',
@@ -67,7 +69,7 @@ describe('SpacesClient', () => {
     expect(fresh.outcome).toBe('applied');
 
     const stale = await ramnique.proposeChange(spaceId, {
-      assetPath: 'notes.md',
+      assetId: notes,
       baseVersion: 1,
       newContent: '# Notes (titled)\n- alpha\n',
       actingMode: 'direct',
@@ -78,7 +80,7 @@ describe('SpacesClient', () => {
     }
 
     const conflict = await gagan.proposeChange(spaceId, {
-      assetPath: 'notes.md',
+      assetId: notes,
       baseVersion: 1,
       newContent: '# Different title\n- alpha\n',
       actingMode: 'direct',
@@ -89,12 +91,16 @@ describe('SpacesClient', () => {
       expect(conflict.regions.length).toBeGreaterThan(0);
     }
 
-    const read = await ramnique.readAsset(spaceId, 'notes.md');
-    expect(read.version).toBe(3);
+    const read = await ramnique.readAsset(spaceId, notes);
+    expect(read).toMatchObject({ id: notes, path: 'notes.md', version: 3 });
     expect(read.recentHistory.length).toBe(3);
-    expect((await ramnique.assetHistory(spaceId, { path: 'notes.md' })).length).toBe(3);
-    expect(await ramnique.diff(spaceId, 'notes.md', 1, 3)).toContain('+# Notes (titled)');
-    expect((await ramnique.listAssets(spaceId)).map((e) => e.path)).toEqual(['notes.md']);
+    expect((await ramnique.assetHistory(spaceId, { assetId: notes })).length).toBe(3);
+    expect(await ramnique.diff(spaceId, notes, 1, 3)).toContain('+# Notes (titled)');
+    expect((await ramnique.listAssets(spaceId)).map((e) => [e.id, e.path])).toEqual([[notes, 'notes.md']]);
+    // A second file at a live path is refused — the path is a name, unique among the living.
+    await expect(
+      ramnique.createAsset(spaceId, { path: 'notes.md', newContent: 'dup\n', actingMode: 'direct' }),
+    ).rejects.toMatchObject({ code: 'invalid_request' });
   });
 
   it('feed round-trip: root into the stream, flat reply, promote + retitle', async () => {
@@ -130,9 +136,8 @@ describe('SpacesClient', () => {
 
   it('search returns categorized hits with mention expansion over the wire', async () => {
     await ramnique.postMessage(spaceId, { body: 'hey @gagan the quarterly numbers landed', actingMode: 'direct' });
-    await ramnique.proposeChange(spaceId, {
-      assetPath: 'finance/quarterly.md',
-      baseVersion: 0,
+    const quarterly = await ramnique.createAsset(spaceId, {
+      path: 'finance/quarterly.md',
       newContent: 'Quarterly numbers: all green.',
       actingMode: 'direct',
     });
@@ -140,7 +145,8 @@ describe('SpacesClient', () => {
     const results = await ramnique.search(spaceId, { q: 'quarterly' });
     expect(results.messages.length).toBe(1);
     expect(results.messages[0]!.snippet).toContain('quarterly numbers');
-    expect(results.assets.map((a) => a.path)).toContain('finance/quarterly.md');
+    // File hits carry the id — the discovery surface for every later call.
+    expect(results.assets.map((a) => [a.id, a.path])).toContainEqual([quarterly.asset.id, 'finance/quarterly.md']);
     expect(results.truncated.messages).toBe(false);
 
     // "gagan" is a display name — the hit is the @-mention of the member id.
@@ -210,18 +216,16 @@ describe('SpacesClient', () => {
     expect(blob.size).toBe(bytes.byteLength);
     expect(blob.hash).toMatch(/^[0-9a-f]{64}$/);
 
-    const proposed = await ramnique.proposeChange(spaceId, {
-      assetPath: 'docs/spec.pdf',
-      baseVersion: 0,
+    const born = await ramnique.createAsset(spaceId, {
+      path: 'docs/spec.pdf',
       blob: blob.hash,
       reason: 'attach the spec',
       actingMode: 'direct',
     });
-    expect(proposed.outcome).toBe('applied');
-    if (proposed.outcome === 'applied') expect(proposed.changeSet.blob?.hash).toBe(blob.hash);
+    expect(born.changeSet.blob?.hash).toBe(blob.hash);
 
     const entries = await ramnique.listAssets(spaceId);
-    expect(entries.find((e) => e.path === 'docs/spec.pdf')?.blob?.mime).toBe('application/pdf');
+    expect(entries.find((e) => e.id === born.asset.id)?.blob?.mime).toBe('application/pdf');
 
     const fetched = await ramnique.fetchBlob(spaceId, blob.hash);
     expect(Buffer.from(fetched.bytes)).toEqual(Buffer.from(bytes));
@@ -231,31 +235,33 @@ describe('SpacesClient', () => {
     await expect(ramnique.fetchBlob(spaceId, 'f'.repeat(64))).rejects.toMatchObject({ code: 'not_found' });
   });
 
-  it('move → redirect-aware read → delete → trash listing → restore round-trip', async () => {
-    await ramnique.proposeChange(spaceId, {
-      assetPath: 'tmp/scratch.md', baseVersion: 0, newContent: 'scratch\n', actingMode: 'direct',
-    });
+  it('move → same-id read → delete → trash listing → restore round-trip', async () => {
+    const scratch = (await ramnique.createAsset(spaceId, {
+      path: 'tmp/scratch.md', newContent: 'scratch\n', actingMode: 'direct',
+    })).asset.id;
     const moved = await ramnique.moveAsset(spaceId, {
-      fromPath: 'tmp/scratch.md', toPath: 'notes/scratch.md', baseVersion: 1, reason: 'tidy', actingMode: 'direct',
+      assetId: scratch, toPath: 'notes/scratch.md', baseVersion: 1, reason: 'tidy', actingMode: 'direct',
     });
     expect(moved.outcome).toBe('moved');
-    if (moved.outcome === 'moved') expect(moved.changeSet).toMatchObject({ op: 'move', movedFrom: 'tmp/scratch.md' });
+    if (moved.outcome === 'moved') expect(moved.changeSet).toMatchObject({ op: 'move', assetId: scratch, assetPath: 'notes/scratch.md', movedFrom: 'tmp/scratch.md' });
 
-    // Old links answer with the file's CURRENT path — the client's redirect signal.
-    const read = await ramnique.readAsset(spaceId, 'tmp/scratch.md');
+    // The id is the identity: the same read answers with the file's CURRENT path.
+    const read = await ramnique.readAsset(spaceId, scratch);
     expect(read.path).toBe('notes/scratch.md');
 
     const deleted = await ramnique.deleteAsset(spaceId, {
-      path: 'notes/scratch.md', baseVersion: 1, reason: 'done with it', actingMode: 'direct',
+      assetId: scratch, baseVersion: 1, reason: 'done with it', actingMode: 'direct',
     });
     expect(deleted.outcome).toBe('deleted');
-    expect((await ramnique.listAssets(spaceId)).map((e) => e.path)).not.toContain('notes/scratch.md');
+    expect((await ramnique.listAssets(spaceId)).map((e) => e.id)).not.toContain(scratch);
     const trash = await ramnique.listAssets(spaceId, { includeDeleted: true });
-    expect(trash.find((e) => e.path === 'notes/scratch.md')?.state).toBe('deleted');
+    expect(trash.find((e) => e.id === scratch)).toMatchObject({ path: 'notes/scratch.md', state: 'deleted' });
+    // A trashed file is not readable — it must be restored first.
+    await expect(ramnique.readAsset(spaceId, scratch)).rejects.toMatchObject({ code: 'not_found' });
 
-    const restored = await ramnique.restoreAsset(spaceId, { path: 'notes/scratch.md', actingMode: 'direct' });
+    const restored = await ramnique.restoreAsset(spaceId, { assetId: scratch, actingMode: 'direct' });
     expect(restored.outcome).toBe('restored');
-    expect((await ramnique.readAsset(spaceId, 'notes/scratch.md')).content).toBe('scratch\n');
+    expect((await ramnique.readAsset(spaceId, scratch)).content).toBe('scratch\n');
   });
 
   it('direct messages: get-or-create from either side, hidden unless asked, fixed membership', async () => {
@@ -331,12 +337,7 @@ describe('SpacesClient.listOrgMembers', () => {
 describe('SpacesLive', () => {
   it('replays from an offset, then goes live; resubscribes after the socket drops', async () => {
     const space = await ramnique.createSpace('Live Space');
-    await ramnique.proposeChange(space.id, {
-      assetPath: 'a.md',
-      baseVersion: 0,
-      newContent: 'a\n',
-      actingMode: 'direct',
-    });
+    const a = (await ramnique.createAsset(space.id, { path: 'a.md', newContent: 'a\n', actingMode: 'direct' })).asset.id;
 
     const live = new SpacesLive({ baseUrl: harbor.url, token: 'dev-ramnique' });
     const seen: Array<{ kind: string; offset?: number }> = [];
@@ -354,7 +355,7 @@ describe('SpacesLive', () => {
 
     // Live event arrives on the same subscription.
     await ramnique.proposeChange(space.id, {
-      assetPath: 'a.md',
+      assetId: a,
       baseVersion: 1,
       newContent: 'a\nb\n',
       actingMode: 'direct',
@@ -420,7 +421,7 @@ describe('SpacesLive liveness', () => {
     try {
       const client = new SpacesClient({ baseUrl: silent.url, token: 'dev-ramnique' });
       const space = await client.createSpace('Liveness');
-      await client.proposeChange(space.id, { assetPath: 'a.md', baseVersion: 0, newContent: 'a\n', actingMode: 'direct' });
+      const a = (await client.createAsset(space.id, { path: 'a.md', newContent: 'a\n', actingMode: 'direct' })).asset.id;
 
       const live = new SpacesLive({
         baseUrl: silent.url,
@@ -439,7 +440,7 @@ describe('SpacesLive liveness', () => {
 
       // The resumed stream still carries new durable events (offset resume).
       const eventsBefore = frames.filter((f) => f.kind === 'event').length;
-      await client.proposeChange(space.id, { assetPath: 'a.md', baseVersion: 1, newContent: 'a\nb\n', actingMode: 'direct' });
+      await client.proposeChange(space.id, { assetId: a, baseVersion: 1, newContent: 'a\nb\n', actingMode: 'direct' });
       await waitFor(() => frames.filter((f) => f.kind === 'event').length > eventsBefore, 'event after bounce', 5000);
 
       live.close();

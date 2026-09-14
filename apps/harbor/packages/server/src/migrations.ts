@@ -614,6 +614,34 @@ export const MIGRATIONS: Migration[] = [
       `create index if not exists topics_document on topics (space_id, document_asset_id) where document_asset_id is not null`,
     ],
   },
+  {
+    id: '020-asset-ids-canonical',
+    statements: [
+      // Asset ids on the wire (2026-09-14): the id every operation addresses
+      // is the one 007 minted; the path is a display property. Redirects
+      // existed only because paths were addresses — a moved file kept
+      // answering at its old name. By id a move changes nothing an address
+      // depends on, so the table goes. The change log's lineage column is
+      // now a wire field (ChangeSet.assetId), so it binds NOT NULL, and the
+      // stored `change` events on the log gain it too (replay must parse).
+      `drop table if exists asset_redirects`,
+      // 007 filled asset_id by joining paths; a change-set whose path never
+      // matched an asset row (none are expected, but a bind must not fail a
+      // deploy) gets one minted lineage id per (space, path) so history stays
+      // coherent and the column can bind.
+      `update change_sets c set asset_id = o.id
+        from (select space_id, asset_path, gen_random_uuid()::text as id
+              from change_sets where asset_id is null group by space_id, asset_path) o
+        where c.space_id = o.space_id and c.asset_path = o.asset_path and c.asset_id is null`,
+      `alter table change_sets alter column asset_id set not null`,
+      `update events e set event = jsonb_set(e.event, '{changeSet,assetId}', to_jsonb(c.asset_id))
+        from change_sets c
+        where e.space_id = c.space_id
+          and e.event->>'type' = 'change'
+          and e.event->'changeSet'->>'id' = c.id
+          and e.event->'changeSet'->>'assetId' is null`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {
