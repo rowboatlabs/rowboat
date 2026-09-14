@@ -256,6 +256,8 @@ interface ChatInputInnerProps {
    * locked-chat effort pick. Never null after the seed resolves.
    */
   onSelectionChange?: (selection: ModelSelection | null) => void
+  /** Hide model controls on compact surfaces while retaining selection defaults. */
+  showModelSelector?: boolean
   /** The chat's prior selection (per-tab continuity within the app run); seeds the state before anything else. */
   initialSelection?: ModelSelection | null
   /**
@@ -309,6 +311,7 @@ function ChatInputInner({
   onEndCall,
   callAvailable,
   onSelectionChange,
+  showModelSelector = true,
   initialSelection = null,
   restoredSelection,
   workDir = null,
@@ -1283,12 +1286,14 @@ function ChatInputInner({
           </DropdownMenu>
         )}
         <div className="flex-1" />
-        <ModelSelector
-          value={selection}
-          onChange={handleSelectionChange}
-          lockedModel={lockedModel}
-          effortSelectable
-        />
+        {showModelSelector && (
+          <ModelSelector
+            value={selection}
+            onChange={handleSelectionChange}
+            lockedModel={lockedModel}
+            effortSelectable
+          />
+        )}
         {onStartCall && (
           <div className="flex shrink-0 items-center">
             <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
@@ -1541,6 +1546,8 @@ export interface ChatInputWithMentionsProps {
   onEndCall?: () => void
   callAvailable?: boolean
   onSelectionChange?: (selection: ModelSelection | null) => void
+  /** Hide model controls on compact surfaces while retaining selection defaults. */
+  showModelSelector?: boolean
   initialSelection?: ModelSelection | null
   restoredSelection?: ModelSelection | null
   workDir?: string | null
@@ -1587,6 +1594,7 @@ export function ChatInputWithMentions({
   onEndCall,
   callAvailable,
   onSelectionChange,
+  showModelSelector = true,
   initialSelection,
   restoredSelection,
   workDir,
@@ -1633,6 +1641,7 @@ export function ChatInputWithMentions({
         onEndCall={onEndCall}
         callAvailable={callAvailable}
         onSelectionChange={onSelectionChange}
+        showModelSelector={showModelSelector}
         initialSelection={initialSelection}
         restoredSelection={restoredSelection}
         workDir={workDir}
