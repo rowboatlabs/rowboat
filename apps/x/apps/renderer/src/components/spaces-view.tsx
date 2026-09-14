@@ -671,10 +671,10 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
             .then(({ message }) => {
                 const rootId = message.threadRoot ?? STREAM_READ_KEY
                 if (orgId === org.id && spaceId === space.id) {
-                    navigateToMessage(rootId, messageId)
+                    navigateToMessage(rootId, messageId, message.offset)
                     return
                 }
-                requestJump({ topicId: rootId, messageId })
+                requestJump({ topicId: rootId, messageId, offset: message.offset })
                 onSwitchSpace(orgId, spaceId, rootId === STREAM_READ_KEY ? { kind: 'general' } : { kind: 'thread', rootMessageId: rootId })
             })
             .catch((err) => toast(err instanceof Error ? err.message : 'Could not open the message', 'error'))
@@ -685,9 +685,9 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         else onSwitchSpace(orgId, spaceId)
     }
 
-    /** Search / pinned / saved landings: open the surface, then scroll + flash. */
-    const navigateToMessage = (rootMessageId: string, messageId: string) => {
-        requestJump({ topicId: rootMessageId, messageId })
+    /** Search / pinned / saved landings: open the surface, then scroll + flash (the offset, when held, spares the pane a lookup). */
+    const navigateToMessage = (rootMessageId: string, messageId: string, offset?: number) => {
+        requestJump({ topicId: rootMessageId, messageId, ...(offset !== undefined ? { offset } : {}) })
         // STREAM_READ_KEY stands for the stream itself; anything else is a thread.
         if (rootMessageId === STREAM_READ_KEY) select({ kind: 'general' })
         else select({ kind: 'thread', rootMessageId })

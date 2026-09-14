@@ -1,7 +1,7 @@
 import { MESSAGE_PROSE } from '@/components/spaces/message-prose'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
-import { Anchor, Archive, ArchiveRestore, ArrowLeft, ArrowUp, Bell, BellOff, Bot, FileText, Loader2, MessageSquareOff, MoreHorizontal, Maximize2, Minimize2, Paperclip, Pencil, ShieldAlert, Square, Tag, Unlink, X } from 'lucide-react'
+import { Anchor, Archive, ArchiveRestore, ArrowDown, ArrowLeft, ArrowUp, Bell, BellOff, Bot, FileText, Loader2, MessageSquareOff, MoreHorizontal, Maximize2, Minimize2, Paperclip, Pencil, ShieldAlert, Square, Tag, Unlink, X } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import {
@@ -22,7 +22,7 @@ import { useSpaceAgentActivity } from '@/lib/spaces-agent-activity'
 import { useSpaceNames, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { subscribeComposeInsert } from '@/lib/spaces-compose'
 import { applyReaction, artifactsForThread, isContinuation, mergeMessages, threadLabelOf } from '@/lib/spaces-conventions'
-import { consumeJump, scrollToMessage, subscribeJump } from '@/lib/spaces-jump'
+import { consumeJump, jumpFailureMessage, resolveJumpOffset, scrollToMessage, subscribeJump, type JumpAnchor } from '@/lib/spaces-jump'
 import { PollDialogHost } from '@/components/spaces/poll-dialog'
 import { applyPollVote, myPollVotes, postPoll } from '@/lib/spaces-poll'
 import { attributionLabel, formatFeedTime, resolveMentions, shortId } from '@/lib/spaces-presentation'
@@ -91,6 +91,22 @@ export function ThreadPane({
     const [loaded, setLoaded] = useState(!!seeded && !seeded.partial)
     const [hasMore, setHasMore] = useState(seeded?.hasMore ?? false)
     const [loadingOlder, setLoadingOlder] = useState(false)
+    // DETACHED: a jump landed on a reply the newest page did not hold, and
+    // the window is the page around it — newer replies exist above it. The
+    // bottom pin is off, the bottom edge pages forward, live replies are
+    // counted for the pill instead of merged, and a send snaps back first.
+    // The ref is for the async continuations (refetches, pages in flight).
+    const [hasMoreAfter, setHasMoreAfterState] = useState(false)
+    const hasMoreAfterRef = useRef(false)
+    const setDetached = (next: boolean) => {
+        hasMoreAfterRef.current = next
+        setHasMoreAfterState(next)
+    }
+    /** Replies above a detached window (the pill's count); null = more than a page — unknown. */
+    const [newerCount, setNewerCount] = useState<number | null>(0)
+    const loadingNewerRef = useRef(false)
+    /** Bumped whenever a page REPLACES the window: a page fetched for the window that left must not merge into the new one. */
+    const windowGenRef = useRef(0)
     // The deepest (oldest) offset any fetch has reached — a refetch of the
     // newest page must not reset hasMore after the reader paged further back.
     // Starts at the cache's depth: hasMore above describes exactly that.
@@ -153,14 +169,47 @@ export function ThreadPane({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [visible, org.id, space.id, rootMessageId])
 
+    // The messages as the refetch below sees them: a detached window's newest row is where its count starts.
+    const messagesRef = useRef(messages)
+    messagesRef.current = messages
+    /** A newest page landed (the refetch, the snap back to latest): everything on it but the replies. */
+    const noteNewestPage = (res: spaces.SpacesThreadPage) => {
+        setRoot(res.root)
+        setTopic(res.topic)
+        // Keep the stream's copy of the chip data current too.
+        updateStreamMessage(org.id, space.id, res.root)
+        if (res.topic) ingestTopic(org.id, space.id, res.topic)
+        // The org's word on this thread for us: following + mark. It
+        // arms the New line when nothing did yet, then reading starts.
+        setNewSince((current) => current ?? (res.following && res.readOffset ? res.readOffset : null))
+        noteThread(org.id, space.id, rootMessageId, {
+            following: res.following,
+            readOffset: res.readOffset,
+            ...(res.root.lastReplyOffset !== undefined ? { lastReplyOffset: res.root.lastReplyOffset } : {}),
+        })
+    }
     useEffect(() => {
         let cancelled = false
+        // Detached: the newest page cannot merge into a window that floats
+        // below it, so the refetch asks for what lies ABOVE the window
+        // instead — the pill's count (exact within a page), with the root
+        // and topic refreshed off the same response. Live replies reach the
+        // pane this way (every event ticks); they stay out of the window.
+        const detachedAt = hasMoreAfterRef.current ? newestOffset(messagesRef.current, 0) : null
+        const gen = windowGenRef.current
         void window.ipc
-            .invoke('spaces:listThread', { orgId: org.id, spaceId: space.id, rootMessageId })
+            .invoke('spaces:listThread', {
+                orgId: org.id, spaceId: space.id, rootMessageId, ...(detachedAt !== null ? { afterOffset: detachedAt } : {}),
+            })
             .then((res) => {
                 if (cancelled) return
-                setRoot(res.root)
-                setTopic(res.topic)
+                noteNewestPage(res)
+                if (detachedAt !== null) {
+                    setNewerCount(res.hasMoreAfter ? null : res.messages.length)
+                    return
+                }
+                // A jump landed while this newest page was in flight: not this window's.
+                if (gen !== windowGenRef.current) return
                 // A refetch merges (older loaded pages stay put) and must not
                 // eat optimistic sends: pending/failed rows the response
                 // doesn't already contain are carried over.
@@ -176,50 +225,45 @@ export function ThreadPane({
                     setHasMore(res.hasMore)
                 }
                 setLoaded(true)
-                // Keep the stream's copy of the chip data current too.
-                updateStreamMessage(org.id, space.id, res.root)
-                if (res.topic) ingestTopic(org.id, space.id, res.topic)
-                // The org's word on this thread for us: following + mark. It
-                // arms the New line when nothing did yet, then reading starts.
-                setNewSince((current) => current ?? (res.following && res.readOffset ? res.readOffset : null))
-                noteThread(org.id, space.id, rootMessageId, {
-                    following: res.following,
-                    readOffset: res.readOffset,
-                    ...(res.root.lastReplyOffset !== undefined ? { lastReplyOffset: res.root.lastReplyOffset } : {}),
-                })
                 if (visibleRef.current) markThreadRead(org.id, space.id, rootMessageId, newestOffset(res.messages, res.root.offset))
             })
             .catch(() => {})
         return () => {
             cancelled = true
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [org.id, space.id, rootMessageId, refreshTick])
     // Write the settled thread back to the cache: the next open (and live
     // replies arriving while it is closed) paints from it, no round trip.
+    // Never a detached window — the cache is the tail.
     useEffect(() => {
-        if (!loaded || !root) return
+        if (!loaded || !root || hasMoreAfter) return
         putThreadSnapshot(org.id, space.id, rootMessageId, {
             root,
             topic,
             messages: messages.filter((m) => !m.pending && !m.failed),
             hasMore,
         })
-    }, [org.id, space.id, rootMessageId, loaded, root, topic, messages, hasMore])
+    }, [org.id, space.id, rootMessageId, loaded, root, topic, messages, hasMore, hasMoreAfter])
     // Refetches that landed while hidden left the thread unread on purpose —
     // becoming visible again is the moment the reader actually sees them.
+    // Marks only advance, so a detached window never regresses one, and
+    // paging forward (or snapping back) moves it on.
     useEffect(() => {
         if (visible && loaded && root) markThreadRead(org.id, space.id, rootMessageId, newestOffset(messages, root.offset))
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [visible, loaded, org.id, space.id, rootMessageId, messages.length])
+    }, [visible, loaded, org.id, space.id, rootMessageId, messages.length, hasMoreAfter])
 
     const loadOlderReplies = async () => {
         const oldest = messages.find((m) => !m.pending && !m.failed)
         if (!oldest || loadingOlder) return
         setLoadingOlder(true)
+        const gen = windowGenRef.current
         try {
             const res = await window.ipc.invoke('spaces:listThread', {
                 orgId: org.id, spaceId: space.id, rootMessageId, beforeOffset: oldest.offset,
             })
+            if (gen !== windowGenRef.current) return
             setMessages((prev) => mergeMessages(prev, res.messages))
             oldestLoadedRef.current = res.messages[0]?.offset ?? oldestLoadedRef.current
             setHasMore(res.hasMore)
@@ -227,6 +271,50 @@ export function ThreadPane({
             toast(err instanceof Error ? err.message : 'Could not load earlier replies', 'error')
         } finally {
             setLoadingOlder(false)
+        }
+    }
+    /** Scroll-down pagination while detached: the page above the window, appended; reaching the head re-attaches. */
+    const loadNewerReplies = async () => {
+        const newest = newestOffset(messages, 0)
+        if (!hasMoreAfter || loadingNewerRef.current || newest === 0) return
+        loadingNewerRef.current = true
+        const gen = windowGenRef.current
+        try {
+            const res = await window.ipc.invoke('spaces:listThread', {
+                orgId: org.id, spaceId: space.id, rootMessageId, afterOffset: newest,
+            })
+            if (gen !== windowGenRef.current) return
+            setMessages((prev) => mergeMessages(prev, res.messages))
+            const more = res.hasMoreAfter ?? false
+            setDetached(more)
+            if (!more) setNewerCount(0)
+        } catch {
+            // The next scroll to the edge retries.
+        } finally {
+            loadingNewerRef.current = false
+        }
+    }
+    // The detached pill's action: the newest page replaces the window and
+    // the bottom pin takes over again. Sends go through here first — an
+    // optimistic reply belongs at the tail the reader would otherwise not see.
+    const [snapping, setSnapping] = useState(false)
+    const snapToLatest = async () => {
+        if (!hasMoreAfterRef.current) return
+        setSnapping(true)
+        try {
+            const res = await window.ipc.invoke('spaces:listThread', { orgId: org.id, spaceId: space.id, rootMessageId })
+            windowGenRef.current += 1
+            noteNewestPage(res)
+            setMessages(res.messages)
+            oldestLoadedRef.current = res.messages[0]?.offset ?? null
+            setHasMore(res.hasMore)
+            setDetached(false)
+            setNewerCount(0)
+            parkedTopRef.current = null
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not load the latest replies', 'error')
+        } finally {
+            setSnapping(false)
         }
     }
 
@@ -238,36 +326,74 @@ export function ThreadPane({
     // While blocked, the amber pill replaces the own-agent spinner.
     const spinningAgents = permissionWait.length > 0 ? workingAgents.filter((id) => id !== org.memberId) : workingAgents
 
-    // Jump-to-message (search, pinned, saved): a pending jump wins over the
-    // bottom pin for the commit it lands in — the pin effect checks the ref,
-    // which clears a tick later (after that commit's effects ran).
-    const pendingJumpRef = useRef<string | null>(null)
+    // Jump-to-message (search, pinned, saved, a link): a pending jump wins
+    // over the bottom pin for the commit it lands in — the pin effect checks
+    // the ref, which clears a tick later (after that commit's effects ran).
+    // A reply the loaded window lacks is fetched ONCE, around its offset (the
+    // page replaces the window, detached when newer replies exist above it);
+    // a window that still lacks it after that is a real miss — give up.
+    const pendingJumpRef = useRef<{ anchor: JumpAnchor; sought: boolean; settled: boolean } | null>(null)
     const [jumpNonce, setJumpNonce] = useState(0)
     useEffect(() => {
         if (!visible) return
         const attempt = () => {
-            const mid = consumeJump(rootMessageId)
-            if (!mid) return
-            pendingJumpRef.current = mid
+            const anchor = consumeJump(rootMessageId)
+            if (!anchor) return
+            pendingJumpRef.current = { anchor, sought: false, settled: false }
             setJumpNonce((n) => n + 1)
         }
         attempt()
         return subscribeJump(attempt)
     }, [visible, rootMessageId])
     useLayoutEffect(() => {
-        const mid = pendingJumpRef.current
-        if (!mid) return
+        const jump = pendingJumpRef.current
+        if (!jump) return
         const el = scrollRef.current
         if (!el) return
-        const landed = scrollToMessage(el, mid)
-        // The landing spot is the reader's own now — the tail pin lets go.
-        if (landed) parkedTopRef.current = el.scrollTop
-        if (landed || loaded) {
-            // Landed — or the window is loaded and the row just isn't in it.
+        const done = () => {
             setTimeout(() => {
-                pendingJumpRef.current = null
+                if (pendingJumpRef.current === jump) pendingJumpRef.current = null
             }, 0)
         }
+        if (scrollToMessage(el, jump.anchor.messageId)) {
+            // The landing spot is the reader's own now — the tail pin lets go.
+            parkedTopRef.current = el.scrollTop
+            done()
+            return
+        }
+        if (!loaded) return
+        if (jump.settled) {
+            // The org sent the window around it and the row still isn't rendered: deleted, or not a reply here.
+            if (messages.some((m) => m.id === jump.anchor.messageId)) toast('That message is no longer here', 'info')
+            done()
+            return
+        }
+        if (jump.sought) return
+        jump.sought = true
+        void (async () => {
+            try {
+                const offset = await resolveJumpOffset(org.id, space.id, jump.anchor)
+                const res = await window.ipc.invoke('spaces:listThread', {
+                    orgId: org.id, spaceId: space.id, rootMessageId, aroundOffset: offset,
+                })
+                if (pendingJumpRef.current !== jump) return
+                windowGenRef.current += 1
+                noteNewestPage(res)
+                // The page REPLACES the window; optimistic rows belong to the tail and come back with it.
+                setMessages(res.messages)
+                oldestLoadedRef.current = res.messages[0]?.offset ?? null
+                setHasMore(res.hasMore)
+                setDetached(res.hasMoreAfter ?? false)
+                setNewerCount(0)
+                jump.settled = true
+                setJumpNonce((n) => n + 1)
+            } catch (err) {
+                if (pendingJumpRef.current !== jump) return
+                toast(jumpFailureMessage(err), 'info')
+                pendingJumpRef.current = null
+            }
+        })()
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [jumpNonce, loaded, messages.length])
 
     // Opening lands on the newest replies: the bottom, pinned before paint (a
@@ -298,10 +424,11 @@ export function ThreadPane({
     }, [])
     const pinBottom = () => {
         const el = scrollRef.current
-        if (el && parkedTopRef.current === null && !pendingJumpRef.current) el.scrollTop = el.scrollHeight
+        if (el && parkedTopRef.current === null && !pendingJumpRef.current && !hasMoreAfterRef.current) el.scrollTop = el.scrollHeight
     }
     const typingCount = presence.typing.get(rootMessageId)?.length ?? 0
-    useLayoutEffect(pinBottom, [loaded, root?.id, messages.length, spinningAgents.length, permissionWait.length, typingCount])
+    // hasMoreAfter: re-attaching (the snap back to latest) pins the head page's bottom.
+    useLayoutEffect(pinBottom, [loaded, root?.id, messages.length, spinningAgents.length, permissionWait.length, typingCount, hasMoreAfter])
     useEffect(() => {
         const el = scrollRef.current
         const content = contentRef.current
@@ -397,6 +524,7 @@ export function ThreadPane({
     // pending), confirm — or fail into a retry/discard row — in the
     // background. The composer never waits on the round trip.
     const post = async (body: string, agent?: AgentOptions) => {
+        if (hasMoreAfterRef.current) await snapToLatest()
         const pending = buildPendingMessage(space.id, org.memberId, body, rootMessageId)
         setMessages((prev) => [...prev, pending])
         void window.ipc
@@ -488,6 +616,7 @@ export function ThreadPane({
     const openPollRef = useRef<(() => void) | null>(null)
     const createPoll = async (input: spaces.SpacesNewPollInput) => {
         try {
+            if (hasMoreAfterRef.current) await snapToLatest()
             const { message: posted } = await postPoll({ orgId: org.id, spaceId: space.id, rootMessageId, input })
             echo(posted)
             noteThread(org.id, space.id, rootMessageId, { following: true, readOffset: posted.offset, lastReplyOffset: posted.offset })
@@ -888,7 +1017,12 @@ export function ThreadPane({
                     const el = e.currentTarget
                     const fromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
                     const userScroll = pointerDownRef.current || performance.now() - userScrollAtRef.current < 250
-                    if (fromBottom < 8) {
+                    if (hasMoreAfter) {
+                        // The window's bottom is not the tail: every position
+                        // is the reader's own, and the bottom edge pages forward.
+                        parkedTopRef.current = el.scrollTop
+                        if (fromBottom < 80) void loadNewerReplies()
+                    } else if (fromBottom < 8) {
                         // At the bottom = following the tail.
                         parkedTopRef.current = null
                     } else if (userScroll || parkedTopRef.current !== null) {
@@ -1031,6 +1165,19 @@ export function ThreadPane({
                 >
                     <ArrowUp className="size-3" />
                     {newCount} new — jump to unread
+                </button>
+            )}
+            {hasMoreAfter && (
+                // Detached: the newest replies are not in the window at all —
+                // the pill fetches them, with what arrived since when known.
+                <button
+                    type="button"
+                    onClick={() => void snapToLatest()}
+                    disabled={snapping}
+                    className="absolute bottom-3 left-1/2 z-20 inline-flex -translate-x-1/2 animate-in fade-in slide-in-from-bottom-2 items-center gap-1.5 rounded-full border-none bg-[var(--rowboat-raised)] px-3 py-1 text-xs font-medium shadow-[var(--rowboat-shadow-soft)] hover:bg-accent disabled:opacity-60"
+                >
+                    {newerCount ? `Jump to latest · ${newerCount} new` : 'Jump to latest'}
+                    <ArrowDown className="size-3" />
                 </button>
             )}
             </div>

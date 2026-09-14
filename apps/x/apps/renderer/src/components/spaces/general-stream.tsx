@@ -6,13 +6,14 @@ import { ForwardDialog } from '@/components/spaces/forward-dialog'
 import { DayDivider, MessageRow, NewDivider, TypingIndicator, type ThreadRowData } from '@/components/spaces/message-row'
 import type { SpacePresence, StreamState } from '@/hooks/use-space-chat'
 import {
-    STREAM_READ_KEY, buildPendingMessage, failPendingStreamMessage, ingestStreamMessage, loadOlderStreamMessages,
-    prefetchThread, removeStreamMessage, resolvePendingStreamMessage, updateStreamMessage, usePresenceSender,
+    STREAM_READ_KEY, buildPendingMessage, failPendingStreamMessage, ingestStreamMessage, jumpToLatest, loadNewerStreamMessages,
+    loadOlderStreamMessages, loadStreamAround, prefetchThread, removeStreamMessage, resolvePendingStreamMessage, updateStreamMessage,
+    usePresenceSender,
 } from '@/hooks/use-space-chat'
 import { useSpaceNames, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { subscribeComposeInsert } from '@/lib/spaces-compose'
 import { applyReaction, dayKey, formatDayLabel, isContinuation, threadLabelOf } from '@/lib/spaces-conventions'
-import { consumeJump, scrollToMessage, subscribeJump } from '@/lib/spaces-jump'
+import { consumeJump, jumpFailureMessage, resolveJumpOffset, scrollToMessage, subscribeJump, type JumpAnchor } from '@/lib/spaces-jump'
 import { PollDialogHost } from '@/components/spaces/poll-dialog'
 import { applyPollVote, myPollVotes, postPoll } from '@/lib/spaces-poll'
 import { resolveMentions } from '@/lib/spaces-presentation'
@@ -101,8 +102,14 @@ export function GeneralStream({
 
     // First paint: start at the bottom — the newest messages, always. After
     // that: keep the tail in view when new messages land, unless the reader
-    // scrolled up.
+    // scrolled up. A DETACHED window (a jump landed on an old row; newer
+    // roots exist above it) has no tail to keep: every pin below is off
+    // until the reader pages forward to the head or jumps back to it.
     const memoryKey = `${org.id}/${space.id}`
+    const detached = stream.hasMoreAfter
+    // For the observers created once (the ResizeObserver, the scroll handler's closures).
+    const detachedRef = useRef(detached)
+    detachedRef.current = detached
     const restoredRef = useRef(false)
     const lastScrollTopRef = useRef<number | null>(null)
     // Only a scroll the READER made may turn follow-mode off. The browser
@@ -133,18 +140,37 @@ export function GeneralStream({
             el.scrollTop = el.scrollHeight
             return
         }
+        // Forward pages append below a detached window; the landing row is the position.
+        if (detached) return
         const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 160
         if (nearBottom) bottomRef.current?.scrollIntoView({ block: 'end' })
-    }, [stream.ready, stream.messages.length, presence.typing])
-    // The "jump to latest" pill: shown once the reader is meaningfully away
-    // from the tail, with a count of messages that arrived below since they
-    // left it. lastSeen tracks the newest offset that was ever on screen at
-    // the bottom (updated by the scroll events the pins fire).
+    }, [stream.ready, stream.messages.length, presence.typing, detached])
+    // The "latest" pill: shown once the reader is meaningfully away from the
+    // tail, with a count of messages that arrived below since they left it.
+    // lastSeen tracks the newest offset that was ever on screen at the
+    // bottom (updated by the scroll events the pins fire).
     const [awayFromBottom, setAwayFromBottom] = useState(false)
     const lastSeenOffsetRef = useRef(-1)
-    const jumpToLatest = () => {
+    const scrollToBottom = () => {
         const el = scrollRef.current
         if (el) el.scrollTop = el.scrollHeight
+    }
+    // The detached pill's action: back to the tail (the store swaps the
+    // window for the head page), pinned to the bottom again. Sends go
+    // through here first — an optimistic row belongs at the tail the reader
+    // would otherwise not see.
+    const [snapping, setSnapping] = useState(false)
+    const snapToLatest = async () => {
+        if (!detachedRef.current) return
+        setSnapping(true)
+        // Following again: the pins put the head page's bottom in view as it lands.
+        lastScrollTopRef.current = null
+        try {
+            await jumpToLatest(org.id, space.id)
+        } finally {
+            setSnapping(false)
+        }
+        scrollToBottom()
     }
     // Once the reader is with the new messages (on screen, at the tail) the
     // line has done its job: linger a beat, fade, drop. Keep-alive means no
@@ -200,6 +226,7 @@ export function GeneralStream({
     // leaving a retry/discard row — in the background. The composer never
     // waits on the round trip.
     const post = async (body: string, agent?: AgentOptions) => {
+        if (detachedRef.current) await snapToLatest()
         const pending = buildPendingMessage(space.id, org.memberId, body)
         ingestStreamMessage(org.id, space.id, pending)
         void window.ipc
@@ -296,6 +323,7 @@ export function GeneralStream({
     const openPollRef = useRef<(() => void) | null>(null)
     const createPoll = async (input: spaces.SpacesNewPollInput) => {
         try {
+            if (detachedRef.current) await snapToLatest()
             const { message: posted } = await postPoll({ orgId: org.id, spaceId: space.id, input })
             ingestStreamMessage(org.id, space.id, posted)
             markStreamRead(org.id, space.id, posted.offset, { sync: false })
@@ -444,7 +472,17 @@ export function GeneralStream({
         })
         return () => cancelAnimationFrame(raf)
     }, [stream.ready, memoryKey])
-    const hiddenCount = Math.max(0, streamMessages.length - renderCap)
+    // A detached window renders whole: forward pages append at the NEWER
+    // end, and the cap trims the OLDEST rows — the ones above the viewport,
+    // which would take the viewport with them. Re-attaching keeps that
+    // (adjust-on-change): the cap catches up to the corpus in the same
+    // render, so no row vanishes the moment the head lands.
+    const [wasDetached, setWasDetached] = useState(detached)
+    if (detached !== wasDetached) {
+        setWasDetached(detached)
+        if (!detached) setRenderCap((c) => Math.max(c, streamMessages.length + 10))
+    }
+    const hiddenCount = detached ? 0 : Math.max(0, streamMessages.length - renderCap)
     const visibleMessages = hiddenCount > 0 ? streamMessages.slice(hiddenCount) : streamMessages
 
     // "Earlier" is one gesture with two gears: locally-hidden rows reveal
@@ -492,41 +530,62 @@ export function GeneralStream({
         }
     }, [stream.messages, stream.loadingOlder])
 
-    // Jump-to-message (search, pinned, saved, Activity): consume the pending
-    // jump once visible, render the WHOLE loaded window, then scroll + flash.
-    // The landing position counts as a reader scroll (tail pin lets go).
-    // The full window first, even when the row is already in the short
+    // Jump-to-message (search, pinned, saved, Activity, a link): consume the
+    // pending jump once visible, render the WHOLE loaded window, then scroll
+    // + flash. The landing position counts as a reader scroll (tail pin lets
+    // go). The full window first, even when the row is already in the short
     // first-paint tail: the deferred lift above would otherwise prepend the
     // rest a frame after the landing, and with the tail pin released nothing
     // compensates — the viewport is left near the top of the window.
-    const [jumpMid, setJumpMid] = useState<string | null>(null)
+    // A row the loaded window lacks is fetched ONCE, around its offset (the
+    // store swaps the window; this effect lands on it when it re-runs); a
+    // window that still lacks it after that is a real miss — give up.
+    const [jump, setJump] = useState<{ anchor: JumpAnchor; sought: boolean; settled: boolean } | null>(null)
     useEffect(() => {
         if (!visible) return
         const attempt = () => {
-            const mid = consumeJump(STREAM_READ_KEY)
-            if (mid) setJumpMid(mid)
+            const anchor = consumeJump(STREAM_READ_KEY)
+            if (anchor) setJump({ anchor, sought: false, settled: false })
         }
         attempt()
         return subscribeJump(attempt)
     }, [visible])
     useLayoutEffect(() => {
-        if (!jumpMid) return
+        if (!jump) return
         const el = scrollRef.current
         if (!el) return
         // Rows still hidden by the cap: lift it and retry on the next commit.
-        if (streamMessages.length > renderCap) {
+        if (hiddenCount > 0) {
             setRenderCap(streamMessages.length + 10)
             return
         }
-        if (scrollToMessage(el, jumpMid)) {
+        if (scrollToMessage(el, jump.anchor.messageId)) {
             lastScrollTopRef.current = el.scrollTop
-            setJumpMid(null)
+            setJump(null)
             return
         }
-        // A fully-rendered window without the row is a real miss (the corpus
-        // only holds loaded pages) — give up, don't spin.
-        if (stream.ready) setJumpMid(null)
-    }, [jumpMid, renderCap, stream.ready, streamMessages.length])
+        if (!stream.ready) return
+        if (jump.settled) {
+            // The org sent the window around it and the row still isn't
+            // rendered: deleted (no tombstone without a thread), or not a root.
+            if (streamMessages.some((m) => m.id === jump.anchor.messageId)) toast('That message is no longer here', 'info')
+            setJump(null)
+            return
+        }
+        if (jump.sought) return
+        setJump({ ...jump, sought: true })
+        const { messageId } = jump.anchor
+        void (async () => {
+            try {
+                await loadStreamAround(org.id, space.id, await resolveJumpOffset(org.id, space.id, jump.anchor))
+            } catch (err) {
+                toast(jumpFailureMessage(err), 'info')
+                setJump((j) => (j?.anchor.messageId === messageId ? null : j))
+                return
+            }
+            setJump((j) => (j?.anchor.messageId === messageId ? { ...j, settled: true } : j))
+        })()
+    }, [jump, hiddenCount, stream.ready, streamMessages, org.id, space.id])
 
     // Jump-to-unread: the stream always opens at the bottom, so when the New
     // line sits above the fold a pill at the top scrolls to it. Dismissed by
@@ -569,7 +628,7 @@ export function GeneralStream({
         const content = contentRef.current
         if (!el || !content) return
         const ro = new ResizeObserver(() => {
-            if (lastScrollTopRef.current === null && !pendingRestoreRef.current) {
+            if (lastScrollTopRef.current === null && !pendingRestoreRef.current && !detachedRef.current) {
                 el.scrollTop = el.scrollHeight
             }
         })
@@ -688,7 +747,12 @@ export function GeneralStream({
                     const fromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
                     const userScroll = pointerDownRef.current || performance.now() - userScrollAtRef.current < 250
                     setAwayFromBottom(fromBottom > 200)
-                    if (fromBottom < 8) {
+                    if (detached) {
+                        // The window's bottom is not the tail: every position
+                        // is the reader's own, and the bottom edge pages forward.
+                        lastScrollTopRef.current = el.scrollTop
+                        if (fromBottom < 80) void loadNewerStreamMessages(org.id, space.id)
+                    } else if (fromBottom < 8) {
                         // At the bottom = "follow the tail" — and everything
                         // settled so far counts as seen.
                         for (let i = stream.messages.length - 1; i >= 0; i--) {
@@ -715,10 +779,10 @@ export function GeneralStream({
             >
                 {/* One measurable child — the tail pin observes its size. */}
                 <div ref={contentRef}>
-                {!stream.ready && (
+                {(!stream.ready || snapping) && (
                     <div className="flex items-center gap-2 px-2 py-3 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" /> Loading messages…</div>
                 )}
-                {stream.ready && rows.length === 0 && (
+                {stream.ready && !snapping && rows.length === 0 && (
                     <div className="px-2 py-6 text-sm text-muted-foreground">
                         {space.kind === 'direct' && (space.participants ?? []).length === 1
                             ? 'Your notes to self — drafts, links, files for later. Only you can see this, and @rowboat works here too.'
@@ -742,14 +806,26 @@ export function GeneralStream({
                     {newCount} new — jump to unread
                 </button>
             )}
-            {awayFromBottom && (() => {
+            {detached ? (
+                // Detached: the tail is not in the window at all — the pill
+                // fetches it, with what arrived since the landing when known.
+                <button
+                    type="button"
+                    onClick={() => void snapToLatest()}
+                    disabled={snapping}
+                    className="absolute bottom-3 left-1/2 z-20 inline-flex -translate-x-1/2 animate-in fade-in slide-in-from-bottom-2 items-center gap-1.5 rounded-full border-none bg-[var(--rowboat-raised)] px-3 py-1 text-xs font-medium shadow-[var(--rowboat-shadow-soft)] hover:bg-accent disabled:opacity-60"
+                >
+                    {stream.newerSince ? `Jump to latest · ${stream.newerSince} new` : 'Jump to latest'}
+                    <ArrowDown className="size-3" />
+                </button>
+            ) : awayFromBottom && (() => {
                 const unseen = streamMessages.filter(
                     (m) => m.offset > lastSeenOffsetRef.current && !m.pending && !m.failed && m.author.memberId !== org.memberId,
                 ).length
                 return (
                     <button
                         type="button"
-                        onClick={jumpToLatest}
+                        onClick={scrollToBottom}
                         className="absolute bottom-3 left-1/2 z-20 inline-flex -translate-x-1/2 animate-in fade-in slide-in-from-bottom-2 items-center gap-1.5 rounded-full border-none bg-[var(--rowboat-raised)] px-3 py-1 text-xs font-medium shadow-[var(--rowboat-shadow-soft)] hover:bg-accent"
                     >
                         {unseen > 0 ? `${unseen} new ${unseen === 1 ? 'message' : 'messages'}` : 'Latest'}

@@ -666,7 +666,19 @@ type ViewState =
       view?: 'activity'
       /** Scroll to this message once the pane paints (a notification or Activity click). */
       messageId?: string
+      /** Its offset, when the producer fetched the message — the pane can load around it without asking. */
+      messageOffset?: number
     }
+
+/** A view naming a message: the pane consumes the jump once it paints (the thread's when the rail is one, else the stream's). */
+function requestViewJump(view: ViewState): void {
+  if (view.type !== 'spaces' || !view.messageId) return
+  requestJump({
+    topicId: view.rail?.kind === 'thread' ? view.rail.rootMessageId : STREAM_READ_KEY,
+    messageId: view.messageId,
+    ...(view.messageOffset !== undefined ? { offset: view.messageOffset } : {}),
+  })
+}
 
 function viewStatesEqual(a: ViewState, b: ViewState): boolean {
   if (a.type !== b.type) return false
@@ -5356,8 +5368,7 @@ function App() {
         // Checked, not trusted: a history entry from before files were named by
         // id degrades to the stream rather than reaching the org with a path.
         setRailSelection(view.rail ? readRailSelection(view.rail) : { kind: 'general' })
-        // A message to land on: the pane consumes the jump once it paints.
-        if (view.messageId) requestJump({ topicId: view.rail?.kind === 'thread' ? view.rail.rootMessageId : STREAM_READ_KEY, messageId: view.messageId })
+        requestViewJump(view)
         // Spaces carries its own conversation surface, so entering it
         // collapses the assistant chat pane by default; in-space navigation
         // (topics, files, history within Spaces) leaves it as the user set it.
@@ -5395,9 +5406,7 @@ function App() {
       // Same view, but a message to land on (a message link or a
       // notification into the space already open): the jump still fires —
       // views compare without it, and the pane consumes it in place.
-      if (nextView.type === 'spaces' && nextView.messageId) {
-        requestJump({ topicId: nextView.rail?.kind === 'thread' ? nextView.rail.rootMessageId : STREAM_READ_KEY, messageId: nextView.messageId })
-      }
+      requestViewJump(nextView)
       return
     }
 
@@ -5691,6 +5700,7 @@ function App() {
           spaceId: target.spaceId,
           rail: message.threadRoot ? { kind: 'thread', rootMessageId: message.threadRoot } : { kind: 'general' },
           messageId: target.messageId,
+          messageOffset: message.offset,
         })
         return
       }

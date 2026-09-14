@@ -8,7 +8,9 @@ import type { SpacePresence } from '@/hooks/use-space-chat'
 // The pane's scroll contract, with everything around the list stubbed: it
 // opens on the newest replies, stays pinned there while bodies keep
 // growing, lets go once the reader scrolls up, and puts the spot back after
-// a hide/show. jsdom has no layout, so the list's geometry is faked.
+// a hide/show — and a jump to a reply the newest page lacks lands on it in
+// a detached window (load-around). jsdom has no layout, so the list's
+// geometry is faked.
 
 vi.mock('@/components/spaces/composer', () => ({ Composer: () => null }))
 vi.mock('@/components/spaces/message-row', () => ({
@@ -59,6 +61,13 @@ vi.mock('@/lib/analytics', () => ({
 }))
 
 import { ThreadPane } from './thread-pane'
+import { requestJump } from '@/lib/spaces-jump'
+import { toast } from '@/lib/toast'
+
+// scrollToMessage scrolls the row into view and flashes it — neither exists in jsdom.
+const scrollIntoView = vi.fn()
+Element.prototype.scrollIntoView = scrollIntoView
+;(Element.prototype as unknown as { animate: unknown }).animate = vi.fn()
 
 const message = (id: string, body: string, offset: number, threadRoot?: string) =>
     ({
@@ -67,7 +76,7 @@ const message = (id: string, body: string, offset: number, threadRoot?: string) 
     }) as spaces.Message
 
 const root = message('root', 'the root', 1)
-const replies = [message('r1', 'reply 1', 2, 'root'), message('r2', 'reply 2', 3, 'root')]
+const replies = [message('r1', 'reply 1', 20, 'root'), message('r2', 'reply 2', 21, 'root')]
 const org = { id: 'org', memberId: 'me', address: 'org.example', name: 'Org', spaces: [], directs: [], directLabels: {} } as unknown as OrgWithSpaces
 const space = { id: 'space', name: 'Space', createdAt: '2026-09-01T00:00:00Z', kind: 'shared' } as spaces.Space
 const presence: SpacePresence = { here: [], typing: new Map(), working: new Map() }
@@ -89,6 +98,8 @@ function fakeScrollBox(el: HTMLElement, box: { scrollHeight: number; clientHeigh
 const resizeCallbacks: Array<() => void> = []
 beforeEach(() => {
     resizeCallbacks.length = 0
+    scrollIntoView.mockClear()
+    vi.mocked(toast).mockClear()
     vi.stubGlobal('ResizeObserver', class {
         constructor(cb: () => void) {
             resizeCallbacks.push(cb)
@@ -123,7 +134,13 @@ function mount(visible = true) {
     const list = document.querySelector<HTMLElement>('.spaces-message-list')!
     const box = { scrollHeight: 1000, clientHeight: 300 }
     fakeScrollBox(list, box)
-    return { ...utils, list, box, rerender: (next: { visible: boolean }) => utils.rerender(<ThreadPane {...props} visible={next.visible} />) }
+    return {
+        ...utils,
+        list,
+        box,
+        rerender: (next: { visible?: boolean; refreshTick?: number }) =>
+            utils.rerender(<ThreadPane {...props} visible={next.visible ?? visible} refreshTick={next.refreshTick ?? 0} />),
+    }
 }
 
 /** The list grows (an image loaded, a code block highlighted) and the observer reports it. */
@@ -174,5 +191,97 @@ describe('ThreadPane scroll position', () => {
         list.scrollTop = 0
         rerender({ visible: true })
         expect(list.scrollTop).toBe(700)
+    })
+})
+
+// The thread's log: the root, an OLD reply the newest page does not hold,
+// then the newest page (r1, r2). A window "around" r0 is r0 alone with the
+// newest page above it; paging forward from it reaches r1, r2.
+const oldReply = message('r0', 'reply 0', 2, 'root')
+type Page = { messages: spaces.Message[]; hasMore: boolean; hasMoreAfter?: boolean }
+function threadOrg(opts: { getMessage?: () => Promise<{ message: spaces.Message }> } = {}) {
+    const invoke = vi.fn(async (channel: string, args: { aroundOffset?: number; afterOffset?: number }) => {
+        if (channel === 'spaces:getMessage') return (opts.getMessage ?? (async () => ({ message: oldReply })))()
+        if (channel === 'spaces:listThread') {
+            const page: Page =
+                args.aroundOffset !== undefined
+                    ? { messages: [oldReply], hasMore: false, hasMoreAfter: true }
+                    : args.afterOffset !== undefined
+                      ? { messages: replies, hasMore: false, hasMoreAfter: false }
+                      : { messages: replies, hasMore: true }
+            return { root, topic: null, ...page, following: false, readOffset: null }
+        }
+        if (channel === 'spaces:topicSession') return { sessionId: null }
+        return {}
+    })
+    Object.defineProperty(window, 'ipc', { configurable: true, value: { invoke } })
+    return { invoke, calls: (channel: string) => invoke.mock.calls.filter(([c]) => c === channel) }
+}
+const rowOf = (id: string) => document.querySelector<HTMLElement>(`[data-mid="${id}"]`)
+
+describe('ThreadPane jump to a reply outside the window', () => {
+    it('resolves the offset with one lookup, loads around it, lands on it, and pages forward from the bottom edge', async () => {
+        const org = threadOrg()
+        const { list, box } = mount()
+        await screen.findByText('reply 2')
+        await act(async () => {
+            requestJump({ topicId: 'root', messageId: 'r0' })
+        })
+        await screen.findByText('reply 0')
+        expect(org.calls('spaces:getMessage')).toHaveLength(1)
+        expect(org.calls('spaces:listThread').at(-1)?.[1]).toMatchObject({ aroundOffset: 2 })
+        // The window IS the around page — the newest replies are not in it.
+        expect(screen.queryByText('reply 2')).toBeNull()
+        expect(scrollIntoView.mock.instances).toContain(rowOf('r0'))
+        expect(screen.getByText('Jump to latest')).toBeTruthy()
+        // The bottom pin is off: growth leaves the landing spot alone.
+        list.scrollTop = 100
+        fireEvent.scroll(list)
+        grow(box, 400)
+        expect(list.scrollTop).toBe(100)
+        // The bottom edge pages forward; the head re-attaches and the pill goes.
+        list.scrollTop = box.scrollHeight - box.clientHeight
+        fireEvent.scroll(list)
+        await screen.findByText('reply 2')
+        expect(org.calls('spaces:listThread').at(-1)?.[1]).toMatchObject({ afterOffset: 2 })
+        expect(screen.getByText('reply 0')).toBeTruthy()
+        expect(screen.queryByText('Jump to latest')).toBeNull()
+    })
+
+    it('uses the offset the producer passed; live replies count on the pill, which reloads the newest page', async () => {
+        const org = threadOrg()
+        const { rerender } = mount()
+        await screen.findByText('reply 2')
+        await act(async () => {
+            requestJump({ topicId: 'root', messageId: 'r0', offset: 2 })
+        })
+        await screen.findByText('reply 0')
+        expect(org.calls('spaces:getMessage')).toHaveLength(0)
+        // A live event refetches the newest page: not merged into the detached window, counted.
+        rerender({ refreshTick: 1 })
+        await screen.findByText('Jump to latest · 2 new')
+        expect(screen.queryByText('reply 2')).toBeNull()
+        fireEvent.click(screen.getByText('Jump to latest · 2 new'))
+        await screen.findByText('reply 2')
+        expect(org.calls('spaces:listThread').at(-1)?.[1]).not.toHaveProperty('aroundOffset')
+        expect(org.calls('spaces:listThread').at(-1)?.[1]).not.toHaveProperty('afterOffset')
+        expect(screen.queryByText('reply 0')).toBeNull()
+        expect(screen.queryByText('Jump to latest')).toBeNull()
+    })
+
+    it('a jump to a message that is gone toasts once and stops', async () => {
+        const org = threadOrg({ getMessage: async () => { throw new Error('no such message') } })
+        mount()
+        await screen.findByText('reply 2')
+        await act(async () => {
+            requestJump({ topicId: 'root', messageId: 'r-gone' })
+        })
+        await act(async () => {})
+        expect(vi.mocked(toast)).toHaveBeenCalledTimes(1)
+        expect(vi.mocked(toast).mock.calls[0]?.[0]).toBe('That message is no longer here')
+        expect(org.calls('spaces:getMessage')).toHaveLength(1)
+        // No around page was asked for, and nothing keeps trying.
+        expect(org.calls('spaces:listThread').some(([, a]) => (a as { aroundOffset?: number }).aroundOffset !== undefined)).toBe(false)
+        expect(screen.getByText('reply 2')).toBeTruthy()
     })
 })
