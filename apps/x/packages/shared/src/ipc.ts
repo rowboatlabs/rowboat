@@ -85,6 +85,7 @@ const QuickAskSubmitPayload = z.object({
           orgName: z.string(),
           spaceId: z.string(),
           spaceName: z.string(),
+          assetId: z.string(),
           path: z.string(),
           displayName: z.string(),
         }),

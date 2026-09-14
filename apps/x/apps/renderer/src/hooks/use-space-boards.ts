@@ -9,6 +9,9 @@ import { subscribeSpacesFeed } from '@/lib/spaces-feed'
 // reports a board saved, created, renamed or trashed.
 
 export interface SpaceBoard {
+  /** The board's asset id — what the whiteboard tools and the collab channel take. */
+  id: string
+  /** Display path (whiteboards/<name>.excalidraw). */
   path: string
   name: string
 }
@@ -29,6 +32,32 @@ function key(orgId: string, spaceId: string): string {
 
 function emit(): void {
   for (const l of listeners) l()
+}
+
+function boardOf(e: spaces.SpacesAssetEntry): SpaceBoard {
+  return { id: e.id, path: e.path, name: spaces.whiteboardDisplayName(e.path) }
+}
+
+/**
+ * The open space's pane already holds its listing: prime the store from it so
+ * the assistant's context (the open board's path, by id) and the @ menu never
+ * wait on a second fetch.
+ */
+export function noteBoardsFromEntries(orgId: string, spaceId: string, entries: readonly spaces.SpacesAssetEntry[]): void {
+  const k = key(orgId, spaceId)
+  loadedAt.set(k, Date.now())
+  setBoards(
+    k,
+    entries
+      .filter((e) => spaces.isWhiteboardPath(e.path) && !e.state)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .map(boardOf),
+  )
+}
+
+/** A listed board's display path by id, or null when the store has not seen it. */
+export function boardPathById(orgId: string, spaceId: string, assetId: string): string | null {
+  return boardState.get(key(orgId, spaceId))?.find((b) => b.id === assetId)?.path ?? null
 }
 
 function setBoards(k: string, boards: SpaceBoard[]): void {
@@ -52,7 +81,7 @@ async function loadBoards(orgId: string, spaceId: string): Promise<void> {
       .filter((e) => spaces.isWhiteboardPath(e.path) && !e.state)
       // Most recently touched first — the board someone is working on ranks first in the menu.
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-      .map((e) => ({ path: e.path, name: spaces.whiteboardDisplayName(e.path) }))
+      .map(boardOf)
     setBoards(k, boards)
   } catch {
     // org unreachable — whatever was listed stands until a retry.

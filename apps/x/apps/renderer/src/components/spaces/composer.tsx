@@ -304,7 +304,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     // the editor's own events, so no wiring through onUpdate here. The menu
     // portals out and measures against the box, hence the element in state.
     const [box, setBox] = useState<HTMLDivElement | null>(null)
-    const mention = useMentionAutocomplete(editor, { members, entries, ...(selfMemberId ? { selfMemberId } : {}) })
+    const mention = useMentionAutocomplete(editor, { members, entries, refs, ...(selfMemberId ? { selfMemberId } : {}) })
     const showMentions = mention.show
 
     // --- :emoji: autocomplete ------------------------------------------------

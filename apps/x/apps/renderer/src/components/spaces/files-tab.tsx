@@ -38,22 +38,23 @@ import { uploadInputFor } from '@/lib/spaces-upload'
 // Files rail — the space's tree, README first, unread dots on moved files
 // ---------------------------------------------------------------------------
 
-/** Internal drag type for moving a file between folders (never set by OS file drags). */
-const ASSET_DRAG_MIME = 'application/x-rowboat-asset-path'
+/** Internal drag type for moving a file between folders (never set by OS file drags); the payload is the asset id. */
+const ASSET_DRAG_MIME = 'application/x-rowboat-asset-id'
 
-/** The space's file tree (README first, folders collapsible) — rendered inside the space rail. */
-export function FileTree({ orgId, spaceId, entries, draftFolders = [], selectedPath, unreadPaths, onOpenFile, creating, onCreateFile, onCancelCreate, onStartCreate, creatingFolder = false, onCreateFolder, onCancelCreateFolder, onRemoveFolder }: {
+/** The space's file tree (README first, folders collapsible) — rendered inside the space rail. Rows are files by id; paths are their labels. */
+export function FileTree({ orgId, spaceId, entries, draftFolders = [], selectedAssetId, unreadAssetIds, onOpenFile, creating, onCreateFile, onCancelCreate, onStartCreate, creatingFolder = false, onCreateFolder, onCancelCreateFolder, onRemoveFolder }: {
     orgId: string
     spaceId: string
     entries: spaces.SpacesAssetEntry[]
     /** Local-only empty folders (they become real when their first file lands). */
     draftFolders?: readonly string[]
-    selectedPath: string | null
-    /** Files with a change by someone else (or an agent) since the read mark. */
-    unreadPaths: ReadonlySet<string>
-    onOpenFile: (path: string) => void
+    selectedAssetId: string | null
+    /** Files (by id) with a change by someone else (or an agent) since the read mark. */
+    unreadAssetIds: ReadonlySet<string>
+    onOpenFile: (assetId: string) => void
     /** When set, shows the new-file input (prefilled with the prefix) at the bottom of the tree. */
     creating: { prefix: string } | null
+    /** The one path-shaped ask: a file that does not exist yet (the owner creates it, then opens it by id). */
     onCreateFile: (path: string) => void
     onCancelCreate: () => void
     /** A folder row's "New file" — asks the owner to open the create input with this prefix. */
@@ -78,18 +79,18 @@ export function FileTree({ orgId, spaceId, entries, draftFolders = [], selectedP
 
     // Drag a file onto a folder (or the tree's root) to move it there.
     const [dropTarget, setDropTarget] = useState<string | null>(null)
-    const entryByPath = useMemo(() => new Map(entries.map((e) => [e.path, e])), [entries])
+    const entryById = useMemo(() => new Map(entries.map((e) => [e.id, e])), [entries])
     const dragHasAsset = (e: React.DragEvent) => Array.from(e.dataTransfer.types).includes(ASSET_DRAG_MIME)
     const dropInto = (e: React.DragEvent, dir: string) => {
         e.preventDefault()
         e.stopPropagation()
         setDropTarget(null)
-        const fromPath = e.dataTransfer.getData(ASSET_DRAG_MIME)
-        const entry = fromPath ? entryByPath.get(fromPath) : undefined
+        const assetId = e.dataTransfer.getData(ASSET_DRAG_MIME)
+        const entry = assetId ? entryById.get(assetId) : undefined
         if (!entry) return
-        const name = fromPath.split('/').pop()!
+        const name = entry.path.split('/').pop()!
         const toPath = dir ? `${dir}/${name}` : name
-        if (toPath !== fromPath) void commitMove(entry, toPath)
+        if (toPath !== entry.path) void commitMove(entry, toPath)
     }
     const dirDragProps = (dir: string) => ({
         onDragOver: (e: React.DragEvent) => {
@@ -104,16 +105,17 @@ export function FileTree({ orgId, spaceId, entries, draftFolders = [], selectedP
     })
 
     // Row actions. Rename/move edits the FULL path inline (folders are key
-    // prefixes — typing a new prefix moves the file); the server's change
-    // event refreshes every pane. Deleting confirms the move to Trash.
-    const [renaming, setRenaming] = useState<{ path: string; value: string } | null>(null)
+    // prefixes — typing a new prefix moves the file); the file keeps its id,
+    // so whatever has it open stays open, and the server's change event
+    // refreshes every label. Deleting confirms the move to Trash.
+    const [renaming, setRenaming] = useState<{ assetId: string; value: string } | null>(null)
     const [deleting, setDeleting] = useState<spaces.SpacesAssetEntry | null>(null)
     const commitMove = async (entry: spaces.SpacesAssetEntry, toPath: string) => {
         setRenaming(null)
         if (!toPath || toPath === entry.path) return
         try {
             const res = await window.ipc.invoke('spaces:moveAsset', {
-                orgId, spaceId, fromPath: entry.path, toPath, baseVersion: entry.version,
+                orgId, spaceId, assetId: entry.id, toPath, baseVersion: entry.version,
             })
             if (res.outcome === 'conflict') toast(`${entry.path} changed meanwhile — try again`, 'error')
             else toast(`Moved to ${toPath}`, 'success')
@@ -210,20 +212,22 @@ export function FileTree({ orgId, spaceId, entries, draftFolders = [], selectedP
                 </div>
             )
         }
-        const active = node.path === selectedPath
-        const unread = unreadPaths.has(node.path)
-        const blob = node.entry?.blob
+        // Every file row is a listed entry (draft folders only add dirs).
+        const entry = node.entry
+        if (!entry) return null
+        const active = entry.id === selectedAssetId
+        const unread = unreadAssetIds.has(entry.id)
+        const blob = entry.blob
         // A board is a file at whiteboards/<name>.excalidraw — same tree,
         // pen icon, extension dropped from the label.
         const board = spaces.isWhiteboardPath(node.path)
-        if (renaming?.path === node.path && node.entry) {
-            const entry = node.entry
+        if (renaming?.assetId === entry.id) {
             return (
-                <div key={node.path} style={pad} className="py-0.5 pr-2">
+                <div key={entry.id} style={pad} className="py-0.5 pr-2">
                     <input
                         autoFocus
                         value={renaming.value}
-                        onChange={(e) => setRenaming({ path: node.path, value: e.target.value })}
+                        onChange={(e) => setRenaming({ assetId: entry.id, value: e.target.value })}
                         onKeyDown={(e) => {
                             if (e.key === 'Enter') void commitMove(entry, renaming.value.trim())
                             if (e.key === 'Escape') setRenaming(null)
@@ -236,7 +240,7 @@ export function FileTree({ orgId, spaceId, entries, draftFolders = [], selectedP
             )
         }
         return (
-            <div key={node.path} className="group/filerow relative">
+            <div key={entry.id} className="group/filerow relative">
                 <ContextMenu>
                     <ContextMenuTrigger asChild>
                         <button
@@ -244,11 +248,11 @@ export function FileTree({ orgId, spaceId, entries, draftFolders = [], selectedP
                             style={pad}
                             draggable
                             onDragStart={(e) => {
-                                e.dataTransfer.setData(ASSET_DRAG_MIME, node.path)
+                                e.dataTransfer.setData(ASSET_DRAG_MIME, entry.id)
                                 e.dataTransfer.effectAllowed = 'move'
                             }}
                             onDragEnd={() => setDropTarget(null)}
-                            onClick={() => onOpenFile(node.path)}
+                            onClick={() => onOpenFile(entry.id)}
                             className={cn(
                                 'flex h-7 w-full items-center gap-1.5 rounded-md pr-7 text-[13px] text-left',
                                 active ? 'bg-accent font-medium text-foreground' : 'text-foreground/90 hover:bg-accent/50',
@@ -268,44 +272,38 @@ export function FileTree({ orgId, spaceId, entries, draftFolders = [], selectedP
                         </button>
                     </ContextMenuTrigger>
                     <ContextMenuContent>
-                        <ContextMenuItem onSelect={() => onOpenFile(node.path)}>
+                        <ContextMenuItem onSelect={() => onOpenFile(entry.id)}>
                             <Eye className="size-3.5 mr-2" /> Open
                         </ContextMenuItem>
-                        {node.entry && (
-                            <>
-                                <ContextMenuItem onSelect={() => setRenaming({ path: node.path, value: node.path })}>
-                                    <Pencil className="size-3.5 mr-2" /> Rename / move
-                                </ContextMenuItem>
-                                <ContextMenuSeparator />
-                                <ContextMenuItem onSelect={() => setDeleting(node.entry!)}>
-                                    <Trash2 className="size-3.5 mr-2" /> Delete…
-                                </ContextMenuItem>
-                            </>
-                        )}
+                        <ContextMenuItem onSelect={() => setRenaming({ assetId: entry.id, value: entry.path })}>
+                            <Pencil className="size-3.5 mr-2" /> Rename / move
+                        </ContextMenuItem>
+                        <ContextMenuSeparator />
+                        <ContextMenuItem onSelect={() => setDeleting(entry)}>
+                            <Trash2 className="size-3.5 mr-2" /> Delete…
+                        </ContextMenuItem>
                     </ContextMenuContent>
                 </ContextMenu>
-                {node.entry && (
-                    <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                            <button
-                                type="button"
-                                aria-label="File actions"
-                                className="absolute right-1 top-1 inline-flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-background hover:text-foreground focus-visible:opacity-100 group-hover/filerow:opacity-100 data-[state=open]:opacity-100"
-                            >
-                                <MoreHorizontal className="size-3.5" />
-                            </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => setRenaming({ path: node.path, value: node.path })}>
-                                <Pencil className="size-3.5 mr-2" /> Rename / move
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem onClick={() => setDeleting(node.entry!)}>
-                                <Trash2 className="size-3.5 mr-2" /> Delete…
-                            </DropdownMenuItem>
-                        </DropdownMenuContent>
-                    </DropdownMenu>
-                )}
+                <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                        <button
+                            type="button"
+                            aria-label="File actions"
+                            className="absolute right-1 top-1 inline-flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-background hover:text-foreground focus-visible:opacity-100 group-hover/filerow:opacity-100 data-[state=open]:opacity-100"
+                        >
+                            <MoreHorizontal className="size-3.5" />
+                        </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => setRenaming({ assetId: entry.id, value: entry.path })}>
+                            <Pencil className="size-3.5 mr-2" /> Rename / move
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem onClick={() => setDeleting(entry)}>
+                            <Trash2 className="size-3.5 mr-2" /> Delete…
+                        </DropdownMenuItem>
+                    </DropdownMenuContent>
+                </DropdownMenu>
             </div>
         )
     }
@@ -385,11 +383,12 @@ interface DraftState {
     conflict: Extract<spaces.ProposeChangeResult, { outcome: 'conflict' }> | null
 }
 
-export function FileColumn({ org, space, path, entries = [], memberNames, refreshTick, onChanged, crumb, onDismiss, onRenamed, onDeleted, onRedirect, onOpenFile }: {
+export function FileColumn({ org, space, assetId, entries = [], memberNames, refreshTick, onChanged, crumb, onDismiss, onDeleted, onOpenFile, onOpenSpaceFile }: {
     org: OrgWithSpaces
     space: spaces.Space
-    path: string
-    /** The space's file list — resolves relative image links to their blobs. */
+    /** The file's identity. Its path (name, folder, extension) is the record's — read with the file, refreshed on rename. */
+    assetId: string
+    /** The space's file list — resolves relative links (images to their blobs, links to their ids). */
     entries?: spaces.SpacesAssetEntry[]
     memberNames: Map<string, string>
     refreshTick: number
@@ -398,13 +397,11 @@ export function FileColumn({ org, space, path, entries = [], memberNames, refres
     crumb?: { label: string; onBack: () => void } | null
     /** Split only: renders an × that closes the document and returns to Talk. */
     onDismiss?: (() => void) | null
-    /** The file moved (a rename here, or a followed redirect) — re-point the selection. */
-    onRenamed?: (path: string) => void
     onDeleted?: () => void
-    /** An old link resolved to the file's current path (server redirect signal). */
-    onRedirect?: (path: string) => void
-    /** A relative link in the document was clicked — open that file. */
-    onOpenFile?: (path: string) => void
+    /** A link in the document was clicked — open that file (of this space) by id. */
+    onOpenFile?: (assetId: string) => void
+    /** A canonical link to a file in ANOTHER space (by org address — the owner knows whether the reader is in it). */
+    onOpenSpaceFile?: (orgAddress: string, spaceId: string, assetId: string) => void
 }) {
     const [asset, setAsset] = useState<spaces.ReadAssetResult | null>(null)
     const [missing, setMissing] = useState(false)
@@ -417,20 +414,18 @@ export function FileColumn({ org, space, path, entries = [], memberNames, refres
 
     const load = useCallback(async () => {
         try {
-            const res = await window.ipc.invoke('spaces:readAsset', { orgId: org.id, spaceId: space.id, path })
-            if (res.path !== path) {
-                // The server followed a redirect: this file lives elsewhere now.
-                onRedirect?.(res.path)
-                return
-            }
+            const res = await window.ipc.invoke('spaces:readAsset', { orgId: org.id, spaceId: space.id, assetId })
             setAsset(res)
             setMissing(false)
         } catch {
             setAsset(null)
             setMissing(true)
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [org.id, space.id, path])
+    }, [org.id, space.id, assetId])
+
+    // The display path: the read record's, else the listing's while the read
+    // is in flight (so the name paints in the first frame).
+    const path = asset?.path ?? entries.find((e) => e.id === assetId)?.path ?? ''
 
     useEffect(() => {
         void load()
@@ -453,7 +448,8 @@ export function FileColumn({ org, space, path, entries = [], memberNames, refres
     }, [crumbBack, editing])
 
     const beginEdit = () => {
-        setDraft({ baseVersion: asset?.version ?? 0, text: asset?.content ?? '', reason: '', conflict: null })
+        if (!asset) return
+        setDraft({ baseVersion: asset.version, text: asset.content, reason: '', conflict: null })
     }
 
     const apply = async () => {
@@ -464,7 +460,7 @@ export function FileColumn({ org, space, path, entries = [], memberNames, refres
                 orgId: org.id,
                 spaceId: space.id,
                 input: {
-                    assetPath: path,
+                    assetId,
                     baseVersion: draft.baseVersion,
                     newContent: draft.text,
                     ...(draft.reason.trim() ? { reason: draft.reason.trim() } : {}),
@@ -497,7 +493,7 @@ export function FileColumn({ org, space, path, entries = [], memberNames, refres
     // the row can never disagree.
     const showDiff = async (from: number, to: number, restorable: number | null) => {
         try {
-            const res = await window.ipc.invoke('spaces:diff', { orgId: org.id, spaceId: space.id, path, from, to })
+            const res = await window.ipc.invoke('spaces:diff', { orgId: org.id, spaceId: space.id, assetId, from, to })
             setDiffView({ title: `${path} · v${from} → v${to}`, unified: res.unified, restorable })
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not load the diff', 'error')
@@ -515,7 +511,7 @@ export function FileColumn({ org, space, path, entries = [], memberNames, refres
             const result = await window.ipc.invoke('spaces:proposeChange', {
                 orgId: org.id,
                 spaceId: space.id,
-                input: { assetPath: path, baseVersion: asset.version, newContent: next },
+                input: { assetId, baseVersion: asset.version, newContent: next },
             })
             if (result.outcome === 'conflict') toast('Someone changed this line at the same time — refresh and retry', 'error')
             else {
@@ -552,9 +548,11 @@ export function FileColumn({ org, space, path, entries = [], memberNames, refres
         })
     }, [asset, wireRefs, dir, entryByPath, org.id, space.id])
 
-    // Link clicks inside the document: relative links (and the contract's
-    // canonical asset URLs) open the file in-app, GitHub-README style; blob
-    // links download; everything else keeps the default open-in-browser.
+    // Link clicks inside the document: relative links resolve through the
+    // listing (path → id) and open the file in-app, GitHub-README style; the
+    // contract's canonical asset URLs open by id (here, or in another space
+    // the reader is in); blob links download; everything else keeps the
+    // default open-in-browser.
     const openLink = (href: string): boolean => {
         const blobRef = parseBlobAppUrl(href)
         if (blobRef) {
@@ -571,9 +569,17 @@ export function FileColumn({ org, space, path, entries = [], memberNames, refres
                 .catch((err: unknown) => toast(err instanceof Error ? err.message : 'Could not download', 'error'))
             return true
         }
-        const target = resolveSpaceLink(href, dir) ?? parseAssetWireUrl(href, wireRefs)
-        if (target && onOpenFile) {
-            onOpenFile(target)
+        const wire = parseAssetWireUrl(href)
+        if (wire) {
+            if (wire.orgAddress === org.address && wire.spaceId === space.id) onOpenFile?.(wire.assetId)
+            else onOpenSpaceFile?.(wire.orgAddress, wire.spaceId, wire.assetId)
+            return true
+        }
+        const relative = resolveSpaceLink(href, dir)
+        if (relative) {
+            const target = entryByPath.get(relative)
+            if (target && target.state !== 'deleted') onOpenFile?.(target.id)
+            else toast(`No file at ${relative}`, 'error')
             return true
         }
         return false
@@ -598,7 +604,7 @@ export function FileColumn({ org, space, path, entries = [], memberNames, refres
             const result = await window.ipc.invoke('spaces:proposeChange', {
                 orgId: org.id,
                 spaceId: space.id,
-                input: { assetPath: path, baseVersion: asset.version, blob: uploaded.blob.hash, reason: `replace with ${file.name}` },
+                input: { assetId, baseVersion: asset.version, blob: uploaded.blob.hash, reason: `replace with ${file.name}` },
             })
             if (result.outcome === 'conflict') {
                 toast(`Someone changed this file meanwhile (now v${result.currentVersion}) — it reloaded; replace again to overwrite`, 'error')
@@ -629,7 +635,9 @@ export function FileColumn({ org, space, path, entries = [], memberNames, refres
         }
     }
 
-    // Rename/move edits the full path inline where the filename sits.
+    // Rename/move edits the full path inline where the filename sits. The
+    // file keeps its id: the column stays on it, the name refreshes from the
+    // reread, an open draft survives.
     const [editingPath, setEditingPath] = useState<string | null>(null)
     const [deleteOpen, setDeleteOpen] = useState(false)
     const commitMove = async () => {
@@ -638,27 +646,29 @@ export function FileColumn({ org, space, path, entries = [], memberNames, refres
         if (!asset || !toPath || toPath === path) return
         try {
             const res = await window.ipc.invoke('spaces:moveAsset', {
-                orgId: org.id, spaceId: space.id, fromPath: path, toPath, baseVersion: asset.version,
+                orgId: org.id, spaceId: space.id, assetId, toPath, baseVersion: asset.version,
             })
             if (res.outcome === 'conflict') {
                 toast('The file changed meanwhile — it reloaded, try again', 'error')
-                await load()
             } else {
                 toast(`Moved to ${toPath}`, 'success')
                 onChanged()
-                onRenamed?.(toPath)
             }
+            await load()
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not move', 'error')
         }
     }
 
+    // The id answers to nothing live: the file was moved to Trash (or the
+    // link named a file this space never had). Nothing to create here — new
+    // files are born through the tree's "New file".
     if (missing && !draft) {
         return (
             <section className="flex-1 min-w-0 flex flex-col">
                 <div className="p-8 text-sm text-muted-foreground">
-                    <p className="mb-3"><code className="font-mono text-xs">{path}</code> doesn&apos;t exist yet.</p>
-                    <Button size="sm" onClick={beginEdit}><Plus className="size-3.5 mr-1" /> Create it</Button>
+                    <p className="mb-3">{path ? <><code className="font-mono text-xs">{path}</code> is not in this space&apos;s files any more.</> : 'This file is not in this space’s files any more.'}</p>
+                    <p className="text-xs">If it was deleted, it can be restored from Trash.</p>
                 </div>
             </section>
         )
@@ -761,7 +771,7 @@ export function FileColumn({ org, space, path, entries = [], memberNames, refres
                     <DeleteAssetDialog
                         orgId={org.id}
                         spaceId={space.id}
-                        entry={{ path, version: asset.version, updatedAt: '' }}
+                        entry={{ id: assetId, path, version: asset.version, updatedAt: '' }}
                         onClose={() => setDeleteOpen(false)}
                         onDeleted={() => {
                             onChanged()
@@ -846,7 +856,9 @@ export function FileColumn({ org, space, path, entries = [], memberNames, refres
                         />
                     ) : asset && getViewerType(path) ? (
                         <SpaceDocumentViewer
-                            key={`${org.id}:${space.id}:${path}:${['docx', 'pptx'].includes(getViewerType(path)!) ? 'editor' : asset.version}`}
+                            // Keyed by id (a rename keeps the editor and its draft), and by the
+                            // viewer type in case a rename changes the extension.
+                            key={`${org.id}:${space.id}:${assetId}:${getViewerType(path)}:${['docx', 'pptx'].includes(getViewerType(path)!) ? 'editor' : asset.version}`}
                             orgId={org.id}
                             spaceId={space.id}
                             asset={asset}
@@ -895,7 +907,7 @@ export function FileColumn({ org, space, path, entries = [], memberNames, refres
                     <HistoryPanel
                         org={org}
                         space={space}
-                        path={path}
+                        assetId={assetId}
                         memberNames={memberNames}
                         refreshTick={refreshTick}
                         currentVersion={asset.version}
@@ -936,6 +948,7 @@ export function FileColumn({ org, space, path, entries = [], memberNames, refres
                 <RestoreVersionDialog
                     orgId={org.id}
                     spaceId={space.id}
+                    assetId={assetId}
                     path={path}
                     version={restoreTarget}
                     currentVersion={asset.version}
@@ -986,10 +999,10 @@ function ConflictNotice({ conflict, memberNames, onUseCurrent, onRebase }: {
     )
 }
 
-function HistoryPanel({ org, space, path, memberNames, refreshTick, currentVersion, onClose, onShowDiff, onRestore }: {
+function HistoryPanel({ org, space, assetId, memberNames, refreshTick, currentVersion, onClose, onShowDiff, onRestore }: {
     org: OrgWithSpaces
     space: spaces.Space
-    path: string
+    assetId: string
     memberNames: Map<string, string>
     refreshTick: number
     /** The head — rows at or above it have nothing to restore. */
@@ -1003,7 +1016,7 @@ function HistoryPanel({ org, space, path, memberNames, refreshTick, currentVersi
     useEffect(() => {
         let cancelled = false
         void window.ipc
-            .invoke('spaces:assetHistory', { orgId: org.id, spaceId: space.id, path, limit: 100 })
+            .invoke('spaces:assetHistory', { orgId: org.id, spaceId: space.id, assetId, limit: 100 })
             .then((res) => {
                 if (!cancelled) setChangeSets(res.changeSets)
             })
@@ -1011,7 +1024,7 @@ function HistoryPanel({ org, space, path, memberNames, refreshTick, currentVersi
         return () => {
             cancelled = true
         }
-    }, [org.id, space.id, path, refreshTick])
+    }, [org.id, space.id, assetId, refreshTick])
 
     return (
         <aside className="w-72 shrink-0 border-l border-border flex flex-col min-h-0">
@@ -1067,9 +1080,11 @@ function HistoryPanel({ org, space, path, memberNames, refreshTick, currentVersi
 // between survives in history (and the restore itself is restorable).
 // ---------------------------------------------------------------------------
 
-export function RestoreVersionDialog({ orgId, spaceId, path, version, currentVersion, onClose, onRestored }: {
+export function RestoreVersionDialog({ orgId, spaceId, assetId, path, version, currentVersion, onClose, onRestored }: {
     orgId: string
     spaceId: string
+    assetId: string
+    /** Display only — the file's name in the confirmation. */
     path: string
     /** The older version whose content becomes the new head. */
     version: number
@@ -1088,14 +1103,14 @@ export function RestoreVersionDialog({ orgId, spaceId, path, version, currentVer
             // Read the head immediately before proposing so the base is as
             // fresh as possible: a restore that three-way-merges someone's
             // concurrent edit isn't the verbatim restore that was asked for.
-            const current = await window.ipc.invoke('spaces:readAsset', { orgId, spaceId, path })
+            const current = await window.ipc.invoke('spaces:readAsset', { orgId, spaceId, assetId })
             setHead(current.version)
-            const snapshot = await window.ipc.invoke('spaces:readAsset', { orgId, spaceId, path, version })
+            const snapshot = await window.ipc.invoke('spaces:readAsset', { orgId, spaceId, assetId, version })
             const result = await window.ipc.invoke('spaces:proposeChange', {
                 orgId,
                 spaceId,
                 input: {
-                    assetPath: path,
+                    assetId,
                     baseVersion: current.version,
                     // Binary versions re-reference the blob they already point
                     // at — the bytes never travel, and nothing is re-uploaded.
@@ -1166,7 +1181,7 @@ export function DeleteAssetDialog({ orgId, spaceId, entry, onClose, onDeleted }:
         setBusy(true)
         try {
             const res = await window.ipc.invoke('spaces:deleteAsset', {
-                orgId, spaceId, path: entry.path, baseVersion: entry.version,
+                orgId, spaceId, assetId: entry.id, baseVersion: entry.version,
             })
             if (res.outcome === 'conflict') {
                 toast(`${entry.path} changed meanwhile — review and try again`, 'error')
@@ -1228,11 +1243,11 @@ export function TrashDialog({ org, space, onClose }: {
         void load()
     }, [load])
 
-    const restore = async (path: string) => {
-        setRestoring(path)
+    const restore = async (entry: spaces.SpacesAssetEntry) => {
+        setRestoring(entry.id)
         try {
-            await window.ipc.invoke('spaces:restoreAsset', { orgId: org.id, spaceId: space.id, path })
-            toast(`Restored ${path}`, 'success')
+            await window.ipc.invoke('spaces:restoreAsset', { orgId: org.id, spaceId: space.id, assetId: entry.id })
+            toast(`Restored ${entry.path}`, 'success')
             await load()
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not restore', 'error')
@@ -1251,7 +1266,7 @@ export function TrashDialog({ org, space, onClose }: {
                     {entries === null && <div className="py-2 text-xs text-muted-foreground">Loading…</div>}
                     {entries?.length === 0 && <div className="py-2 text-xs text-muted-foreground">Nothing here — deleted files land in this list, restorable any time.</div>}
                     {entries?.map((e) => (
-                        <div key={e.path} className="flex items-center gap-2 rounded-md border border-border px-2 py-1.5 text-xs">
+                        <div key={e.id} className="flex items-center gap-2 rounded-md border border-border px-2 py-1.5 text-xs">
                             {e.blob && isImageMime(e.blob.mime)
                                 ? <ImageIcon className="size-3.5 shrink-0 text-muted-foreground" />
                                 : <FileText className="size-3.5 shrink-0 text-muted-foreground" />}
@@ -1264,9 +1279,9 @@ export function TrashDialog({ org, space, onClose }: {
                                 variant="outline"
                                 className="h-6 shrink-0 text-xs"
                                 disabled={restoring !== null}
-                                onClick={() => void restore(e.path)}
+                                onClick={() => void restore(e)}
                             >
-                                {restoring === e.path ? <Loader2 className="size-3 mr-1 animate-spin" /> : <RotateCcw className="size-3 mr-1" />}
+                                {restoring === e.id ? <Loader2 className="size-3 mr-1 animate-spin" /> : <RotateCcw className="size-3 mr-1" />}
                                 Restore
                             </Button>
                         </div>
@@ -1278,9 +1293,10 @@ export function TrashDialog({ org, space, onClose }: {
 }
 
 // ---------------------------------------------------------------------------
-// Upload to space files: phase-1 upload each picked file, then a binary
-// propose per file at <folder>/<filename>. Folders are keys, not objects —
-// typing "design/screens" is what creates the "folder".
+// Upload to space files: phase-1 upload each picked file, then a create per
+// file at <folder>/<filename> (or a propose against the existing file's id
+// when the reader chooses Replace). Folders are keys, not objects — typing
+// "design/screens" is what creates the "folder".
 // ---------------------------------------------------------------------------
 
 interface UploadRow {
@@ -1318,7 +1334,7 @@ export function UploadFilesDialog({ org, space, files, entries, defaultFolder, o
             if (row.status === 'done' || row.status === 'cancelled') continue
             setRows((prev) => prev.map((r, j) => (j === i ? { ...r, status: 'uploading', error: undefined } : r)))
             try {
-                const savedPath = await fileSave.save({
+                const saved = await fileSave.save({
                     path: destFor(row.name),
                     reason: `upload ${row.name}`,
                     getBlob: async () => {
@@ -1333,8 +1349,8 @@ export function UploadFilesDialog({ org, space, files, entries, defaultFolder, o
                         return uploaded.blob.hash
                     },
                 })
-                setRows((prev) => prev.map((r, j) => (j === i ? { ...r, status: savedPath ? 'done' : 'cancelled', savedPath: savedPath ?? undefined, error: undefined } : r)))
-                if (savedPath) onDone()
+                setRows((prev) => prev.map((r, j) => (j === i ? { ...r, status: saved ? 'done' : 'cancelled', savedPath: saved?.path, error: undefined } : r)))
+                if (saved) onDone()
             } catch (err) {
                 failed += 1
                 const message = err instanceof Error ? err.message : 'upload failed'

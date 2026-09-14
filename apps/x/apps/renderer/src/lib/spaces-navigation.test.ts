@@ -17,11 +17,25 @@ describe('returning to Spaces', () => {
     })
     it.each([
         { kind: 'thread', rootMessageId: 'msg1' },
-        { kind: 'file', path: 'notes/plan.md', fromThreadRootId: 'msg1' },
-        { kind: 'whiteboard', path: 'whiteboards/sketch.excalidraw' },
+        { kind: 'file', assetId: '01HXAMPLEASSET0000000000A1', fromThreadRootId: 'msg1' },
+        { kind: 'whiteboard', assetId: '01HXAMPLEASSET0000000000B2' },
+        { kind: 'attachment', src: 'app://space-blob/second/design/abc?name=x.pdf', fromThreadRootId: 'msg1' },
     ] as const)('reopens what was open inside the space (%j)', (rail) => {
         expect(resolveSpacesLocation(orgs, { orgId: 'second', spaceId: 'design', rail }))
             .toEqual({ orgId: 'second', spaceId: 'design', rail })
+    })
+    // Files and boards were named by PATH before 2026-09-14; a stored rail
+    // from then must land on the stream, never reach the org as a path.
+    it.each([
+        { kind: 'file', path: 'notes/plan.md', fromThreadRootId: 'msg1' },
+        { kind: 'whiteboard', path: 'whiteboards/sketch.excalidraw' },
+        { kind: 'attachment', path: 'app://space-blob/second/design/abc' },
+        { kind: 'file' },
+        { kind: 'bogus', assetId: 'x' },
+        'file:notes/plan.md',
+    ])('degrades a legacy or malformed rail to the stream (%j)', (rail) => {
+        expect(resolveSpacesLocation(orgs, { orgId: 'second', spaceId: 'design', rail }))
+            .toEqual({ orgId: 'second', spaceId: 'design' })
     })
     it('leaves the rail behind when the saved space is gone', () => {
         expect(resolveSpacesLocation(orgs, { orgId: 'second', spaceId: 'removed', rail: { kind: 'thread', rootMessageId: 'msg1' } }))

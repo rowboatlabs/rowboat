@@ -69,7 +69,8 @@ export function ThreadPane({
     onToggleExpanded?: () => void
     /** Set while a doc column sits beside the chat: closes the chat column, the doc takes the width. */
     onCloseColumn?: () => void
-    onOpenFile: (path: string) => void
+    /** Opens a file of this space by asset id (beside the thread, with a crumb back). */
+    onOpenFile: (assetId: string) => void
     onOpenSession?: (sessionId: string) => void
     /** Whether the artifacts rail is showing; the summary line under the opener toggles it. */
     artifactsRailOpen: boolean
@@ -766,17 +767,23 @@ export function ThreadPane({
                         </>
                     )}
                 </span>
-                {topic?.documentPath && (
-                    <button
-                        type="button"
-                        onClick={() => onOpenFile(topic.documentPath!)}
-                        title={`Open ${topic.documentPath} beside this discussion`}
-                        className="inline-flex h-6 max-w-[12rem] shrink-0 items-center gap-1 rounded-md border border-border bg-background px-1.5 text-[11px] text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-                    >
-                        <FileText className="size-3 shrink-0" />
-                        <span className="truncate font-mono">{topic.documentPath.split('/').pop()}</span>
-                    </button>
-                )}
+                {topic?.documentAssetId && (() => {
+                    // The org projects the link as an id even while the file is
+                    // in Trash; the live listing says whether it can open.
+                    const linked = entries.find((e) => e.id === topic.documentAssetId && e.state !== 'deleted')
+                    return (
+                        <button
+                            type="button"
+                            disabled={!linked}
+                            onClick={() => onOpenFile(topic.documentAssetId!)}
+                            title={linked ? `Open ${linked.path} beside this discussion` : 'The linked file is in Trash'}
+                            className="inline-flex h-6 max-w-[12rem] shrink-0 items-center gap-1 rounded-md border border-border bg-background px-1.5 text-[11px] text-muted-foreground hover:bg-accent/50 hover:text-foreground disabled:opacity-60 disabled:hover:bg-background"
+                        >
+                            <FileText className="size-3 shrink-0" />
+                            <span className="truncate font-mono">{linked ? linked.path.split('/').pop() : 'linked file'}</span>
+                        </button>
+                    )
+                })()}
                 <span className="flex-1" />
                 {hasSession && onOpenSession && (
                     // Persistent, unlike the working chip: the conversation the
@@ -809,9 +816,9 @@ export function ThreadPane({
                                     <Pencil className="size-3.5 mr-2" /> Rename
                                 </DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => setAttaching(true)}>
-                                    <Paperclip className="size-3.5 mr-2" /> {topic.documentPath ? 'Change linked file…' : 'Link a file…'}
+                                    <Paperclip className="size-3.5 mr-2" /> {topic.documentAssetId ? 'Change linked file…' : 'Link a file…'}
                                 </DropdownMenuItem>
-                                {topic.documentPath && (
+                                {topic.documentAssetId && (
                                     <DropdownMenuItem onClick={() => void manage({ action: 'detach_document' })}>
                                         <Unlink className="size-3.5 mr-2" /> Unlink file
                                     </DropdownMenuItem>
@@ -898,7 +905,7 @@ export function ThreadPane({
                 {anchorChange && (
                     <button
                         type="button"
-                        onClick={() => onOpenFile(anchorChange.assetPath)}
+                        onClick={() => onOpenFile(anchorChange.assetId)}
                         className="mb-2 flex w-full items-start gap-2.5 rounded-lg border border-border bg-muted/30 px-3 py-2 text-left hover:border-foreground/20"
                     >
                         <Anchor className="mt-1 size-3.5 shrink-0 text-muted-foreground" />
@@ -1029,11 +1036,11 @@ export function ThreadPane({
             {attaching && topic && (
                 <AttachDocumentDialog
                     entries={entries}
-                    current={topic.documentPath}
+                    current={topic.documentAssetId}
                     onClose={() => setAttaching(false)}
-                    onPick={(path) => {
+                    onPick={(assetId) => {
                         setAttaching(false)
-                        if (path !== topic.documentPath) void manage({ action: 'attach_document', path })
+                        if (assetId !== topic.documentAssetId) void manage({ action: 'attach_document', assetId })
                     }}
                 />
             )}

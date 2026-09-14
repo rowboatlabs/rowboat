@@ -31,7 +31,7 @@ import type { RailSelection } from '@/lib/spaces-selection'
 
 
 export function SpaceRail({
-    org, onOpenSpace, onOpenActivity, onOpenDiscussion, orgId, spaceId, selfMemberId, stream, topics, changeSets, entries, draftFolders, presence, unreadPaths, selection, onSelect, onCreateFile, onCreateBoard, onUploadFiles, onOpenTrash, onAddFolder, onRemoveFolder,
+    org, onOpenSpace, onOpenActivity, onOpenDiscussion, orgId, spaceId, selfMemberId, stream, topics, changeSets, entries, draftFolders, presence, unreadAssetIds, selection, onSelect, onCreateFile, onCreateBoard, onUploadFiles, onOpenTrash, onAddFolder, onRemoveFolder,
     open, onTogglePin,
 }: {
     org: OrgWithSpaces
@@ -48,9 +48,11 @@ export function SpaceRail({
     /** Local-only empty folders — see SpacePane. */
     draftFolders: readonly string[]
     presence: SpacePresence
-    unreadPaths: ReadonlySet<string>
+    /** Files (by asset id) changed by someone else since the read mark. */
+    unreadAssetIds: ReadonlySet<string>
     selection: RailSelection
     onSelect: (selection: RailSelection) => void
+    /** "New file": creates the file at this path (or opens the one already there) and opens it by id. */
     onCreateFile: (path: string) => void
     /** "New board" in the Files menu: creates the board asset AND opens it (a taken name just opens). */
     onCreateBoard: (path: string) => void
@@ -110,14 +112,16 @@ export function SpaceRail({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [stream, orgId, spaceId, selfMemberId, readVersion])
 
+    // Files each discussion changed: one per asset id (a rename is the same
+    // file), shown by their latest path.
     const artifactFiles = useMemo(() => {
-        const counts = new Map<string, Set<string>>()
+        const counts = new Map<string, Map<string, string>>()
         for (const cs of changeSets) {
             const ref = cs.threadRootId ?? threadRefOf(cs.reason)
             if (!ref) continue
-            const set = counts.get(ref) ?? new Set<string>()
-            set.add(cs.assetPath)
-            counts.set(ref, set)
+            const files = counts.get(ref) ?? new Map<string, string>()
+            files.set(cs.assetId, cs.assetPath)
+            counts.set(ref, files)
         }
         return counts
     }, [changeSets])
@@ -133,8 +137,11 @@ export function SpaceRail({
 
     const selectedRootId = selection.kind === 'thread' ? selection.rootMessageId : null
     // A board is a file in the same tree, so either selection kind highlights its row.
-    const selectedPath = selection.kind === 'file' || selection.kind === 'whiteboard' ? selection.path : null
-    const openEntry = (path: string) => onSelect(spaces.isWhiteboardPath(path) ? { kind: 'whiteboard', path } : { kind: 'file', path })
+    const selectedAssetId = selection.kind === 'file' || selection.kind === 'whiteboard' ? selection.assetId : null
+    const openEntry = (assetId: string) => {
+        const entry = entries.find((e) => e.id === assetId)
+        onSelect(entry && spaces.isWhiteboardPath(entry.path) ? { kind: 'whiteboard', assetId } : { kind: 'file', assetId })
+    }
     const createBoard = (name: string) => {
         setCreatingBoard(false)
         const path = spaces.whiteboardPathForName(name)
@@ -144,7 +151,7 @@ export function SpaceRail({
 
     const generalBadge = generalUnread
     const unreadTopics = topics.filter((t) => !t.archived && isUnread(t)).length + (generalBadge > 0 ? 1 : 0)
-    const badge = unreadTopics + unreadPaths.size
+    const badge = unreadTopics + unreadAssetIds.size
 
     // The rail's content — the shell renders it docked or inside the peek
     // drawer at the fixed open width.
@@ -234,7 +241,7 @@ export function SpaceRail({
                                                 <div className="font-medium">{title}</div>
                                                 <div className="opacity-70">
                                                     {replies} {replies === 1 ? 'reply' : 'replies'} · {formatFeedTime(topic.lastActivityAt)}
-                                                    {files && files.size > 0 && ` · ${files.size} ${files.size === 1 ? 'file' : 'files'} changed: ${[...files].join(', ')}`}
+                                                    {files && files.size > 0 && ` · ${files.size} ${files.size === 1 ? 'file' : 'files'} changed: ${[...files.values()].join(', ')}`}
                                                 </div>
                                             </TooltipContent>
                                         </Tooltip>
@@ -367,8 +374,8 @@ export function SpaceRail({
                             spaceId={spaceId}
                             entries={entries}
                             draftFolders={draftFolders}
-                            selectedPath={selectedPath}
-                            unreadPaths={unreadPaths}
+                            selectedAssetId={selectedAssetId}
+                            unreadAssetIds={unreadAssetIds}
                             onOpenFile={openEntry}
                             creating={creatingFile}
                             onCreateFile={(path) => {

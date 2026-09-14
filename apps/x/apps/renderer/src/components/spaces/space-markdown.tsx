@@ -1,5 +1,6 @@
-import { FileConflictNotice, useSpaceFileSave } from './file-conflict'
+import { FileConflictNotice, useSpaceFileSave, type SavedSpaceFile } from './file-conflict'
 import { createContext, memo, useContext, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode } from 'react'
+import type { spaces } from '@x/shared'
 import { BlobPreview } from '@/components/spaces/blob-preview'
 import { Streamdown } from 'streamdown'
 import { Eye, FileDown, FilePlus2, FileText, Loader2, X } from 'lucide-react'
@@ -19,6 +20,7 @@ import {
     parseBlobAppUrl,
     parseSpaceFileAppUrl,
     parseSpaceMemberAppUrl,
+    parseSpacePathAppUrl,
     resolveSpaceLink,
     rewriteBlobLinks,
     rewriteFileLinks,
@@ -37,9 +39,11 @@ import {
 //   2. blobs — the org's canonical https blob links rewrite to app://space-blob
 //      (served by main through the content-addressed cache), images render
 //      inline, non-image blob links render as a preview card, and
-//   3. file links — a relative link in a message points at a space file
-//      (resolved from the root; plain markdown on the wire), as does the
-//      contract's canonical …/f/<path> form; both open in the file pane.
+//   3. file links — the contract's canonical …/a/<assetId> form names a file
+//      by id (any space; this one opens in the file pane, another one
+//      navigates there, one the reader is not in renders muted), and a
+//      relative link in a message resolves through the space's listing
+//      (path → id, from the root; plain markdown on the wire).
 // Every message-rendering path goes through here — fix it once.
 
 const SpaceRefsContext = createContext<SpaceRefs | null>(null)
@@ -53,13 +57,45 @@ export function useSpaceRefs(): SpaceRefs | null {
     return useContext(SpaceRefsContext)
 }
 
+/** The space's live listing, indexed both ways: relative links resolve path → id; links by id show their path. */
+export interface SpaceAssetsIndex {
+    byPath: ReadonlyMap<string, spaces.SpacesAssetEntry>
+    byId: ReadonlyMap<string, spaces.SpacesAssetEntry>
+}
+
+const EMPTY_ASSETS: SpaceAssetsIndex = { byPath: new Map(), byId: new Map() }
+const SpaceAssetsContext = createContext<SpaceAssetsIndex>(EMPTY_ASSETS)
+
+/** Mounted beside SpaceRefsProvider with the pane's listing — so anchors resolve synchronously, at render time. */
+export function SpaceAssetsProvider({ entries, children }: { entries: readonly spaces.SpacesAssetEntry[]; children: ReactNode }) {
+    const index = useMemo<SpaceAssetsIndex>(() => {
+        const live = entries.filter((e) => e.state !== 'deleted')
+        return { byPath: new Map(live.map((e) => [e.path, e])), byId: new Map(live.map((e) => [e.id, e])) }
+    }, [entries])
+    return <SpaceAssetsContext.Provider value={index}>{children}</SpaceAssetsContext.Provider>
+}
+
+export function useSpaceAssets(): SpaceAssetsIndex {
+    return useContext(SpaceAssetsContext)
+}
+
 const AttachmentNavContext = createContext<((src: string, name: string) => void) | null>(null)
 
-const SpaceNavContext = createContext<((path: string) => void) | null>(null)
+interface SpaceNav {
+    /** Open a file of THIS space by id. */
+    onOpenFile: (assetId: string) => void
+    /** Open a file of another space the reader is in (App's openSpace with a file rail). */
+    onOpenSpaceFile?: (orgId: string, spaceId: string, assetId: string) => void
+    /** The org id behind an address + space the reader is in — null when the space is not in their listing. */
+    resolveSpace?: (orgAddress: string, spaceId: string) => string | null
+}
 
-/** Mounted beside SpaceRefsProvider — lets any rendered file link open the file pane. */
-export function SpaceNavProvider({ onOpenFile, onOpenAttachment, children }: { onOpenFile: (path: string) => void; onOpenAttachment?: (src: string, name: string) => void; children: ReactNode }) {
-    return <SpaceNavContext.Provider value={onOpenFile}><AttachmentNavContext.Provider value={onOpenAttachment ?? null}>{children}</AttachmentNavContext.Provider></SpaceNavContext.Provider>
+const SpaceNavContext = createContext<SpaceNav | null>(null)
+
+/** Mounted beside SpaceRefsProvider — lets any rendered file link open the file pane (by asset id). */
+export function SpaceNavProvider({ onOpenFile, onOpenSpaceFile, resolveSpace, onOpenAttachment, children }: SpaceNav & { onOpenAttachment?: (src: string, name: string) => void; children: ReactNode }) {
+    const nav = useMemo<SpaceNav>(() => ({ onOpenFile, ...(onOpenSpaceFile ? { onOpenSpaceFile } : {}), ...(resolveSpace ? { resolveSpace } : {}) }), [onOpenFile, onOpenSpaceFile, resolveSpace])
+    return <SpaceNavContext.Provider value={nav}><AttachmentNavContext.Provider value={onOpenAttachment ?? null}>{children}</AttachmentNavContext.Provider></SpaceNavContext.Provider>
 }
 
 /** Attachments preview on tap; saving to space files keeps the original link intact. */
@@ -220,7 +256,7 @@ function tileStyle(dims: { width: number; height: number } | null): CSSPropertie
  * already in the org's blob store; saving is one proposeChange referencing
  * the hash. Duplicate names use the same explicit choices as direct uploads.
  */
-function SaveToSpaceDialog({ src, suggestedName, onSaved, onClose }: { src: string; suggestedName?: string; onSaved?: (path: string) => void; onClose: () => void }) {
+function SaveToSpaceDialog({ src, suggestedName, onSaved, onClose }: { src: string; suggestedName?: string; onSaved?: (saved: SavedSpaceFile) => void; onClose: () => void }) {
     const parsed = parseBlobAppUrl(src)
     const suggested = (() => {
         try {
@@ -241,10 +277,10 @@ function SaveToSpaceDialog({ src, suggestedName, onSaved, onClose }: { src: stri
         setSaving(true)
         setError(null)
         try {
-            const savedPath = await fileSave.save({ path: cleaned, getBlob: async () => parsed.hash, reason: 'saved from chat' })
-            if (!savedPath) { onClose(); return }
+            const saved = await fileSave.save({ path: cleaned, getBlob: async () => parsed.hash, reason: 'saved from chat' })
+            if (!saved) { onClose(); return }
             toast('Saved to space files', 'success')
-            onSaved?.(savedPath)
+            onSaved?.(saved)
             onClose()
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Could not save to space files')
@@ -579,9 +615,43 @@ function MentionChip({ memberId, broadcast, fallback }: { memberId?: string; bro
     )
 }
 
+/** A link into a space file: open (by id) here or in another space, or muted when it leads nowhere the reader can go. */
+type FileLinkTarget =
+    | { kind: 'open'; assetId: string; title: string }
+    | { kind: 'elsewhere'; orgId: string; spaceId: string; assetId: string }
+    | { kind: 'muted'; title: string }
+
+/**
+ * What a file-shaped href leads to. Canonical https asset links name an id in
+ * any space; app://space-file is the render form of a resolved relative link;
+ * app://space-path a relative link the listing did not know at rewrite time
+ * (tried once more here — the listing may have landed since); a bare relative
+ * href (a renderer without the rewrite pass) resolves the same way.
+ */
+function fileLinkTarget(url: string, refs: SpaceRefs | null, assets: SpaceAssetsIndex, nav: SpaceNav | null): FileLinkTarget | null {
+    const byId = (assetId: string): FileLinkTarget => ({ kind: 'open', assetId, title: assets.byId.get(assetId)?.path ?? assetId })
+    const byPath = (path: string): FileLinkTarget => {
+        const entry = assets.byPath.get(path)
+        return entry ? byId(entry.id) : { kind: 'muted', title: `No file at ${path}` }
+    }
+    const wire = parseAssetWireUrl(url)
+    if (wire) {
+        if (refs && wire.orgAddress === refs.orgAddress && wire.spaceId === refs.spaceId) return byId(wire.assetId)
+        const orgId = nav?.resolveSpace?.(wire.orgAddress, wire.spaceId) ?? null
+        return orgId ? { kind: 'elsewhere', orgId, spaceId: wire.spaceId, assetId: wire.assetId } : { kind: 'muted', title: 'Not available to you' }
+    }
+    const app = parseSpaceFileAppUrl(url)
+    if (app) return byId(app.assetId)
+    const dangling = parseSpacePathAppUrl(url)
+    if (dangling) return byPath(dangling.path)
+    const relative = resolveSpaceLink(url, '')
+    return relative ? byPath(relative) : null
+}
+
 function SpaceAnchor({ href, children }: ComponentProps<'a'>) {
     const refs = useContext(SpaceRefsContext)
-    const openFile = useContext(SpaceNavContext)
+    const nav = useContext(SpaceNavContext)
+    const assets = useContext(SpaceAssetsContext)
     const url = typeof href === 'string' ? href : ''
     // Mention tokens arrive here as app links (rewriteMentionLinks) — chips, by id.
     const mentionId = parseSpaceMemberAppUrl(url)
@@ -591,25 +661,31 @@ function SpaceAnchor({ href, children }: ComponentProps<'a'>) {
     if (url.startsWith('app://space-blob/')) {
         return <BlobLinkCard href={url}>{children}</BlobLinkCard>
     }
-    // A relative link in a message is a file link (resolved from the space
-    // root — rewritten pre-parse to app://space-file so Streamdown's URL
-    // hardening doesn't strip it); the contract's canonical asset URL for
-    // this space opens the same way.
-    const filePath = parseSpaceFileAppUrl(url)?.path
-        ?? resolveSpaceLink(url, '')
-        ?? (refs ? parseAssetWireUrl(url, refs) : null)
+    const target = fileLinkTarget(url, refs, assets, nav)
     // A pasted GIF/image address shows the picture, not the URL — but only
     // when the link IS its own text; a labelled [link](url) stays a link.
     // No <a> wrapper: the failure fallback is itself the link.
-    if (!filePath && plainLabel(children) === url && isDirectImageUrl(url)) {
+    if (!target && plainLabel(children) === url && isDirectImageUrl(url)) {
         return <ExternalImage src={url} alt="" />
     }
-    if (filePath && openFile) {
+    if (target?.kind === 'muted' || (target && target.kind === 'elsewhere' && !nav?.onOpenSpaceFile) || (target?.kind === 'open' && !nav)) {
+        const title = target.kind === 'muted' ? target.title : 'Not available here'
+        return (
+            <span title={title} className="inline-flex max-w-full items-baseline gap-1 align-baseline text-muted-foreground underline decoration-dotted underline-offset-2">
+                <FileText className="size-3 shrink-0 self-center" />
+                <span className="truncate">{children}</span>
+            </span>
+        )
+    }
+    if (target && nav) {
+        const open = target.kind === 'open'
+            ? () => nav.onOpenFile(target.assetId)
+            : () => nav.onOpenSpaceFile?.(target.orgId, target.spaceId, target.assetId)
         return (
             <button
                 type="button"
-                onClick={() => openFile(filePath)}
-                title={filePath}
+                onClick={open}
+                title={target.kind === 'open' ? target.title : 'Open in its space'}
                 className="inline-flex max-w-full items-baseline gap-1 align-baseline text-primary underline underline-offset-2 hover:opacity-80"
             >
                 <FileText className="size-3 shrink-0 self-center" />
@@ -625,14 +701,17 @@ function SpaceAnchor({ href, children }: ComponentProps<'a'>) {
 // markdown stands (the chips read the members context themselves).
 export const SpaceMarkdown = memo(function SpaceMarkdown({ body, className }: { body: string; className?: string }) {
     const refs = useContext(SpaceRefsContext)
+    const assets = useContext(SpaceAssetsContext)
     const text = useMemo(() => {
         const withBlobs = refs ? rewriteBlobLinks(body, refs) : body
-        const withFiles = refs ? rewriteFileLinks(withBlobs, refs) : withBlobs
+        // Relative links resolve through the listing (path → id) here, at
+        // render time; the listing changes rarely, so re-rendering on it is cheap.
+        const withFiles = refs ? rewriteFileLinks(withBlobs, refs, (path) => assets.byPath.get(path)?.id ?? null) : withBlobs
         // Pre-separator messages joined text and images in one paragraph —
         // normalize so every message gets text above, a clean tile row below.
         // Mentions last: their app links must never look like file links.
         return rewriteMentionLinks(separateImageParagraphs(withFiles))
-    }, [body, refs])
+    }, [body, refs, assets])
     return (
         <div className={cn(className)}>
             <MessageImageGallery key={text}>
@@ -648,7 +727,7 @@ export const SpaceMarkdown = memo(function SpaceMarkdown({ body, className }: { 
 
 
 /** Attachment content occupies the same document column as saved space files. */
-export function AttachmentColumn({ src, onDismiss, onSaved }: { src: string; onDismiss: () => void; onSaved: (path: string) => void }) {
+export function AttachmentColumn({ src, onDismiss, onSaved }: { src: string; onDismiss: () => void; onSaved: (saved: SavedSpaceFile) => void }) {
     const name = new URL(src).searchParams.get('name') || 'Attachment'
     const [saveOpen, setSaveOpen] = useState(false)
     const [downloading, setDownloading] = useState(false)

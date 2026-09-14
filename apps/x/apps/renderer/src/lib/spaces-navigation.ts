@@ -1,5 +1,5 @@
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
-import type { RailSelection } from '@/lib/spaces-selection'
+import { readRailSelection, type RailSelection } from '@/lib/spaces-selection'
 
 export const LAST_SPACE_STORAGE_KEY = 'x:last-space'
 
@@ -37,14 +37,16 @@ export function resolveSpacesLocation(orgs: OrgWithSpaces[], previous: unknown):
 
 /**
  * Shape-check a remembered location. It arrives either as live app state or as
- * whatever JSON.parse handed back from storage, so the identifying fields are
- * checked; `rail` only ever comes from the typed in-session record.
+ * whatever JSON.parse handed back from storage, so every field is checked —
+ * the rail included: a stored selection from before files were named by id
+ * (a path-shaped file or board rail) comes back as the stream, not a crash.
  */
 function readLocation(previous: unknown): SpaceLocation | null {
     if (!previous || typeof previous !== 'object') return null
     const { orgId, spaceId, rail, view } = previous as Partial<SpaceLocation>
     if (typeof orgId !== 'string' || typeof spaceId !== 'string') return null
-    return { orgId, spaceId, ...(rail ? { rail } : {}), ...(view === 'activity' ? { view } : {}) }
+    const checked = rail ? readRailSelection(rail) : undefined
+    return { orgId, spaceId, ...(checked && checked.kind !== 'general' ? { rail: checked } : {}), ...(view === 'activity' ? { view } : {}) }
 }
 
 /**

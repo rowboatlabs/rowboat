@@ -6,7 +6,7 @@ import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import { MemberAvatar } from '@/components/spaces/atoms'
 import { caretContext, type CaretContext } from '@/components/spaces/composer-editor'
-import { encodeSpaceLinkTarget } from '@/lib/spaces-presentation'
+import { assetWireUrl, encodeSpaceLinkTarget, type SpaceRefs } from '@/lib/spaces-presentation'
 
 // The @ autocomplete behind every mention surface — the composer and the
 // inline message editor. The hook owns the popup's whole lifecycle off the
@@ -19,19 +19,21 @@ export interface MentionCandidate {
     hint?: string
     isAgent?: boolean
     isBroadcast?: boolean
-    /** A file suggestion — picking it inserts a plain markdown link to the path. */
-    filePath?: string
+    /** A file suggestion — picking it inserts a markdown link naming the file by id (its path is the label). */
+    file?: { assetId: string; path: string }
 }
 
 // "/" so typing into a folder ("@design/sc…") keeps the file query alive.
 export const MENTION_RE = /(^|[\s([{])@([\w./-]*)$/
 
-export function useMentionAutocomplete(editor: Editor | null, { members = [], entries = [], selfMemberId }: {
+export function useMentionAutocomplete(editor: Editor | null, { members = [], entries = [], selfMemberId, refs = null }: {
     /** Space members — the people the popup offers. */
     members?: readonly spaces.Member[]
     /** Space files — the same popup offers them once a query exists. */
     entries?: readonly spaces.SpacesAssetEntry[]
     selfMemberId?: string
+    /** The org address + space the canonical file links are minted on; without it a pick falls back to a relative path link. */
+    refs?: SpaceRefs | null
 }) {
     /** Where the caret sits (text-before-caret + doc position) — what the trigger matches against. */
     const [context, setContext] = useState<CaretContext | null>(null)
@@ -82,10 +84,10 @@ export function useMentionAutocomplete(editor: Editor | null, { members = [], en
                   .filter((e) => e.state !== 'deleted' && e.path.toLowerCase().includes(q))
                   .slice(0, 4)
                   .map((e) => ({
-                      id: `file:${e.path}`,
+                      id: `file:${e.id}`,
                       label: e.path.split('/').pop() ?? e.path,
                       ...(e.path.includes('/') ? { hint: e.path } : {}),
-                      filePath: e.path,
+                      file: { assetId: e.id, path: e.path },
                   }))
             : []
         return [...people.slice(0, 8 - files.length), ...files]
@@ -102,14 +104,17 @@ export function useMentionAutocomplete(editor: Editor | null, { members = [], en
 
     // A person, @rowboat, or @here becomes ONE mention node (composer-editor
     // MentionNode): a pill holding the id, serialized to the wire's token on
-    // send. A file becomes a live link to the space path — standard markdown
-    // on the wire. Inserted as literal nodes, never re-parsed as markdown.
+    // send. A file becomes a live link — the contract's canonical asset URL
+    // naming the file by id (stable across renames), labelled with its name;
+    // standard markdown on the wire. Inserted as literal nodes, never
+    // re-parsed as markdown.
     const pick = (c: MentionCandidate) => {
         if (!match || !editor) return
         const chain = editor.chain().focus().deleteRange({ from: match.from, to: match.to })
-        if (c.filePath) {
+        if (c.file) {
+            const href = refs ? assetWireUrl(refs, c.file.assetId) : encodeSpaceLinkTarget(c.file.path)
             chain.insertContent([
-                { type: 'text', text: c.filePath, marks: [{ type: 'link', attrs: { href: encodeSpaceLinkTarget(c.filePath) } }] },
+                { type: 'text', text: c.file.path.split('/').pop() ?? c.file.path, marks: [{ type: 'link', attrs: { href } }] },
                 { type: 'text', text: ' ' },
             ]).run()
         } else if (c.isAgent || c.isBroadcast) {
@@ -213,7 +218,7 @@ export function MentionMenu({ anchor, candidates, index, onPick }: {
                         <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-foreground text-background"><Bot className="size-3.5" /></span>
                     ) : c.isBroadcast ? (
                         <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground"><Megaphone className="size-3.5" /></span>
-                    ) : c.filePath ? (
+                    ) : c.file ? (
                         <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground"><FileText className="size-3.5" /></span>
                     ) : (
                         <MemberAvatar id={c.id} name={c.label} size="sm" className="size-6 text-[10px]" />

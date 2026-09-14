@@ -32,6 +32,7 @@ function msg(over: Partial<spaces.Message> & { id: string }): spaces.Message {
 function cs(over: Partial<spaces.ChangeSet> & { id: string }): spaces.ChangeSet {
     return {
         spaceId: 's1',
+        assetId: 'A-roadmap',
         assetPath: 'roadmap.md',
         baseVersion: 31,
         resultVersion: 32,
@@ -74,15 +75,25 @@ describe('artifact provenance', () => {
         const groups = artifactsForThread([
             cs({ id: 'c1', baseVersion: 31, resultVersion: 32, committedAt: '2026-08-19T11:44:00Z', threadRootId: 'M1', reason: 'Folded SSO under P1' }),
             cs({ id: 'c2', baseVersion: 32, resultVersion: 33, committedAt: '2026-08-19T11:46:00Z', reason: 'tidy · thread:M1' }),
-            cs({ id: 'c3', assetPath: 'decisions/sso.md', baseVersion: 0, resultVersion: 1, committedAt: '2026-08-19T11:45:00Z', reason: 'SOW wording · thread:M1' }),
+            cs({ id: 'c3', assetId: 'A-sso', assetPath: 'decisions/sso.md', baseVersion: 0, resultVersion: 1, committedAt: '2026-08-19T11:45:00Z', reason: 'SOW wording · thread:M1' }),
             cs({ id: 'other', committedAt: '2026-08-19T12:00:00Z', reason: 'unrelated · thread:M9' }),
             cs({ id: 'cold', committedAt: '2026-08-19T12:01:00Z', reason: 'edited in Files' }),
         ], 'M1')
+        expect(groups.map((g) => g.assetId)).toEqual(['A-roadmap', 'A-sso'])
         expect(groups.map((g) => g.assetPath)).toEqual(['roadmap.md', 'decisions/sso.md'])
         expect(groups[0]).toMatchObject({ fromVersion: 31, toVersion: 33 })
         expect(groups[0]!.changeSets.map((c) => c.id)).toEqual(['c2', 'c1'])
         expect(groups[1]).toMatchObject({ fromVersion: 0, toVersion: 1 })
         expect(artifactsForThread([], 'M1')).toEqual([])
+    })
+    it('keeps a renamed file in one group, labelled by its latest path', () => {
+        const groups = artifactsForThread([
+            cs({ id: 'c1', baseVersion: 1, resultVersion: 2, committedAt: '2026-08-19T11:44:00Z', threadRootId: 'M1' }),
+            cs({ id: 'mv', baseVersion: 2, resultVersion: 2, op: 'move', assetPath: 'plans/roadmap.md', movedFrom: 'roadmap.md', committedAt: '2026-08-19T11:45:00Z', threadRootId: 'M1' }),
+            cs({ id: 'c2', baseVersion: 2, resultVersion: 3, assetPath: 'plans/roadmap.md', committedAt: '2026-08-19T11:46:00Z', threadRootId: 'M1' }),
+        ], 'M1')
+        expect(groups).toHaveLength(1)
+        expect(groups[0]).toMatchObject({ assetId: 'A-roadmap', assetPath: 'plans/roadmap.md', fromVersion: 1, toVersion: 3 })
     })
 })
 

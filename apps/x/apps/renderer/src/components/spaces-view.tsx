@@ -27,11 +27,12 @@ import { ThreadPane } from '@/components/spaces/thread-pane'
 import { STREAM_READ_KEY, useSpacePresence, useStream } from '@/hooks/use-space-chat'
 import { refreshMembers, useSpaceMembers } from '@/hooks/use-space-members'
 import { findSpace, useSpaceFeed, useSpaceLive, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
+import { noteBoardsFromEntries } from '@/hooks/use-space-boards'
 import { directAvatarId, directLabel, isSelfDirect } from '@/lib/spaces-direct'
 import { requestJump } from '@/lib/spaces-jump'
 import { chord } from '@/lib/shortcut'
 import { SpaceMembersProvider, SpaceProfilesProvider } from '@/components/spaces/member-text'
-import { AttachmentColumn, SpaceNavProvider, SpaceRefsProvider } from '@/components/spaces/space-markdown'
+import { AttachmentColumn, SpaceAssetsProvider, SpaceNavProvider, SpaceRefsProvider } from '@/components/spaces/space-markdown'
 import { artifactsForThread, threadLabelOf } from '@/lib/spaces-conventions'
 import { isUnreadChange, resolveMentions } from '@/lib/spaces-presentation'
 import { getSpaceReadState, markStreamRead, markThreadRead, useStreamReadOffset } from '@/lib/spaces-read-state'
@@ -78,17 +79,25 @@ const COLUMN_ANIM_MS = 220
 const DIVIDER_W = 6
 
 /**
- * A column in motion: `width` is what it grows to (enter) or shrinks from
- * (exit). An exiting doc keeps rendering its path until the slide is done.
+ * What the right column holds: a file or board by ASSET ID, or a message
+ * attachment by its blob URL (app://space-blob/…). Null = closed.
  */
-type ColumnAnim = { column: 'chat' | 'doc'; phase: 'enter' | 'exit'; width: number; docPath: string | null }
+type DocKey = string | null
+
+/**
+ * A column in motion: `width` is what it grows to (enter) or shrinks from
+ * (exit). An exiting doc keeps rendering its key until the slide is done.
+ */
+type ColumnAnim = { column: 'chat' | 'doc'; phase: 'enter' | 'exit'; width: number; docKey: DocKey }
 
 /**
  * Per-space column memory for this app session: switch to another space and
  * back, and the doc column (and whether the chat sat beside it) is as you
  * left it. Not persisted — a relaunch lands on the chat, clean.
  */
-const columnMemory = new Map<string, { docPath: string | null; chatOpen: boolean }>()
+const columnMemory = new Map<string, { docKey: DocKey; chatOpen: boolean }>()
+
+const isAttachmentKey = (key: string) => key.startsWith('app://space-blob/')
 
 // The whiteboard is heavy (the Excalidraw editor); it loads as its own chunk
 // the first time a board opens, never inflating the main renderer bundle.
@@ -241,6 +250,10 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     active?: boolean
 }) {
     const [entries, setEntries] = useState<spaces.SpacesAssetEntry[]>([])
+    const entryById = useMemo(() => new Map(entries.map((e) => [e.id, e])), [entries])
+    // The org listing (module store): resolves a canonical link's org address
+    // + space to an org this install is in.
+    const { orgs } = useSpacesOrgs()
     // Local-only empty folders: folders are key prefixes, so an empty one has
     // nothing to store — it lives here until its first file lands (then the
     // real entries carry it and it's pruned), or until removed.
@@ -276,6 +289,8 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
             .then((assetsRes) => {
                 if (cancelled) return
                 setEntries(assetsRes.entries)
+                // The boards store (assistant @ menu, open-board context) reads this listing too.
+                noteBoardsFromEntries(org.id, space.id, assetsRes.entries)
             })
             .catch(() => {
                 // org unreachable; panes show their own error states
@@ -331,29 +346,31 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         for (const [root, t] of state?.threads ?? []) if (t.following) markThreadRead(org.id, space.id, root, t.lastReplyOffset)
     }
 
-    const unreadPaths = useMemo(
-        // Boards are excluded: their saves are throttled snapshots, not reading
-        // material — the boards rail is their surface, not the files tree.
-        () => new Set(feed.changeSets.filter((c) => isUnreadChange(c, readOffset, org.memberId) && !spaces.isWhiteboardPath(c.assetPath)).map((c) => c.assetPath)),
+    // Files (by id) changed by someone else since the read mark. Boards are
+    // excluded: their saves are throttled snapshots, not reading material —
+    // the boards rail is their surface, not the files tree.
+    const unreadAssetIds = useMemo(
+        () => new Set(feed.changeSets.filter((c) => isUnreadChange(c, readOffset, org.memberId) && !spaces.isWhiteboardPath(c.assetPath)).map((c) => c.assetId)),
         [feed.changeSets, readOffset, org.memberId],
     )
 
     // ------------------------------------------------------------------
     // Columns. The chat (stream or thread) sits on the left; an open file or
-    // board on the right. `docPath` = what the right column holds (null =
+    // board on the right. `docKey` = what the right column holds (null =
     // closed); `chatOpen` = whether the left one is showing beside it. What
     // renders is derived below — two columns only when both are open AND
     // the pane is wide enough.
     // ------------------------------------------------------------------
     const memoryKey = `${org.id}/${space.id}`
-    const [docPath, setDocPath] = useState<string | null>(() => {
-        if (selection.kind === 'file' || selection.kind === 'whiteboard' || selection.kind === 'attachment') return selection.path
-        return columnMemory.get(memoryKey)?.docPath ?? null
+    const [docKey, setDocKey] = useState<DocKey>(() => {
+        if (selection.kind === 'file' || selection.kind === 'whiteboard') return selection.assetId
+        if (selection.kind === 'attachment') return selection.src
+        return columnMemory.get(memoryKey)?.docKey ?? null
     })
     const [chatOpen, setChatOpen] = useState(() => selection.kind === 'attachment' || (columnMemory.get(memoryKey)?.chatOpen ?? true))
     useEffect(() => {
-        columnMemory.set(memoryKey, { docPath, chatOpen })
-    }, [memoryKey, docPath, chatOpen])
+        columnMemory.set(memoryKey, { docKey, chatOpen })
+    }, [memoryKey, docKey, chatOpen])
     // The chat/files rail: docked by default (persisted), or a sliver at the
     // edge that peeks the rail as a drawer on hover — see SpaceRail. (The
     // shell sidebar contracts to the dock while in Spaces, so this rail is
@@ -387,7 +404,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // the doc shows when open; both = two columns. Narrow: one column — the
     // doc if open, else the chat.
     const twoFits = paneWidth >= SPLIT_FLOOR
-    const docOpen = docPath !== null
+    const docOpen = docKey !== null
     const showChat = twoFits ? chatOpen || !docOpen : !docOpen
     const showDoc = docOpen
     const split = showChat && showDoc
@@ -464,25 +481,25 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     }, [])
     const chatRef = useRef<HTMLDivElement | null>(null)
     const docRef = useRef<HTMLElement | null>(null)
-    const [layout, setLayout] = useState<{ docOpen: boolean; showChat: boolean; docPath: string | null; anim: ColumnAnim | null }>({ docOpen, showChat, docPath, anim: null })
+    const [layout, setLayout] = useState<{ docOpen: boolean; showChat: boolean; docKey: DocKey; anim: ColumnAnim | null }>({ docOpen, showChat, docKey, anim: null })
     if (layout.docOpen !== docOpen || layout.showChat !== showChat) {
         let anim: ColumnAnim | null = null
         if (!reducedMotion) {
             const columnsWidth = columnsRef.current?.clientWidth ?? paneWidth
             if (layout.docOpen !== docOpen) {
                 anim = docOpen
-                    ? { column: 'doc', phase: 'enter', width: showChat ? docWidthEff : columnsWidth, docPath }
+                    ? { column: 'doc', phase: 'enter', width: showChat ? docWidthEff : columnsWidth, docKey }
                     // The DOM still shows the old layout mid-render: the live width is the start.
-                    : { column: 'doc', phase: 'exit', width: docRef.current?.clientWidth ?? docWidthEff, docPath: layout.docPath }
+                    : { column: 'doc', phase: 'exit', width: docRef.current?.clientWidth ?? docWidthEff, docKey: layout.docKey }
             } else {
                 anim = showChat
-                    ? { column: 'chat', phase: 'enter', width: Math.max(0, columnsWidth - docWidthEff - DIVIDER_W), docPath }
-                    : { column: 'chat', phase: 'exit', width: chatRef.current?.clientWidth ?? 0, docPath }
+                    ? { column: 'chat', phase: 'enter', width: Math.max(0, columnsWidth - docWidthEff - DIVIDER_W), docKey }
+                    : { column: 'chat', phase: 'exit', width: chatRef.current?.clientWidth ?? 0, docKey }
             }
         }
-        setLayout({ docOpen, showChat, docPath, anim })
-    } else if (layout.docPath !== docPath) {
-        setLayout((l) => ({ ...l, docPath }))
+        setLayout({ docOpen, showChat, docKey, anim })
+    } else if (layout.docKey !== docKey) {
+        setLayout((l) => ({ ...l, docKey }))
     }
     const anim = layout.anim
     useEffect(() => {
@@ -494,7 +511,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     const docAnim = anim?.column === 'doc' ? anim : null
     // What is in the tree: the logical state, plus whatever is still sliding out
     // (or, narrow, the chat being pushed out by an entering doc).
-    const docRender = docPath ?? (docAnim?.phase === 'exit' ? docAnim.docPath : null)
+    const docRender = docKey ?? (docAnim?.phase === 'exit' ? docAnim.docKey : null)
     const chatRender = showChat || chatAnim?.phase === 'exit' || docAnim?.phase === 'enter'
     const columnStyle = (a: ColumnAnim): React.CSSProperties => ({
         ['--rb-col-w' as string]: `${a.width}px`,
@@ -505,33 +522,63 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // right; anything from Chat reopens the left — and, narrow, closes the
     // doc so the chat actually shows.
     const placeSelection = (next: RailSelection) => {
-        if (next.kind === 'file' || next.kind === 'whiteboard' || next.kind === 'attachment') {
-            if (next.kind === 'attachment') setChatOpen(true)
-            setDocPath(next.path)
+        if (next.kind === 'file' || next.kind === 'whiteboard') {
+            setDocKey(next.assetId)
+        } else if (next.kind === 'attachment') {
+            setChatOpen(true)
+            setDocKey(next.src)
         } else {
             setChatOpen(true)
-            if (!twoFits) setDocPath(null)
+            if (!twoFits) setDocKey(null)
         }
     }
 
+    /**
+     * A brand-new file (born here, or the tree's "+ New file"): the org hands
+     * back the record, the listing learns it before the refetch, the boards
+     * store follows, and the caller opens it by id.
+     */
+    const createFile = async (input: spaces.SpacesCreateInput): Promise<spaces.SpacesAssetEntry> => {
+        const { asset } = await window.ipc.invoke('spaces:createAsset', { orgId: org.id, spaceId: space.id, input })
+        setEntries((prev) => {
+            const next = [...prev.filter((e) => e.id !== asset.id), asset]
+            noteBoardsFromEntries(org.id, space.id, next)
+            return next
+        })
+        return asset
+    }
+
     // ------------------------------------------------------------------
-    // Whiteboard: a board is what the right column holds when the path is
-    // whiteboards/<name>.excalidraw — reached from the rail, the header
-    // button (⌘4, the most recent board; created on its first save when
-    // none exists yet), an artifact link, a deep link, or history. It must
-    // never render as raw JSON in the document pane.
+    // Whiteboard: a board is what the right column holds when the open asset's
+    // path is whiteboards/<name>.excalidraw — reached from the rail, the
+    // header button (⌘4, the most recent board; the default board is created
+    // when none exists yet), an artifact link, a deep link, or history. It
+    // must never render as raw JSON in the document pane.
     // ------------------------------------------------------------------
-    const boardPath = docRender && spaces.isWhiteboardPath(docRender) ? docRender : null
-    const isWhiteboard = !!docPath && spaces.isWhiteboardPath(docPath)
+    const isBoardKey = (key: string | null): key is string => {
+        if (!key || isAttachmentKey(key)) return false
+        const entry = entryById.get(key)
+        // A just-created board can beat the listing: the selection says what it is.
+        return entry ? spaces.isWhiteboardPath(entry.path) : selection.kind === 'whiteboard' && selection.assetId === key
+    }
+    const boardId = isBoardKey(docRender) ? docRender : null
+    const isWhiteboard = isBoardKey(docKey)
     const boards = entries.filter((e) => spaces.isWhiteboardPath(e.path) && !e.state)
     const toggleWhiteboard = () => {
         if (isWhiteboard) {
             closeDoc()
-        } else {
-            const recent = [...boards].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
-            onSelect({ kind: 'whiteboard', path: recent?.path ?? spaces.DEFAULT_WHITEBOARD_PATH })
-            analytics.spacesTabViewed('whiteboard')
+            return
         }
+        analytics.spacesTabViewed('whiteboard')
+        const recent = [...boards].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
+        if (recent) {
+            onSelect({ kind: 'whiteboard', assetId: recent.id })
+            return
+        }
+        // No board yet: the default one is born now, then opens.
+        createFile({ path: spaces.DEFAULT_WHITEBOARD_PATH, newContent: spaces.EMPTY_WHITEBOARD_CONTENT, reason: 'new whiteboard' })
+            .then((asset) => select({ kind: 'whiteboard', assetId: asset.id }))
+            .catch((err) => toast(err instanceof Error ? err.message : 'Could not create the board', 'error'))
     }
     toggleWhiteboardRef.current = toggleWhiteboard
     /**
@@ -541,13 +588,14 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
      * still survives navigating away. A taken name just opens that board.
      */
     const createBoard = (path: string) => {
-        select({ kind: 'whiteboard', path })
-        if (entries.some((e) => e.path === path && !e.state)) return
-        void window.ipc.invoke('spaces:proposeChange', {
-            orgId: org.id,
-            spaceId: space.id,
-            input: { assetPath: path, baseVersion: 0, newContent: spaces.EMPTY_WHITEBOARD_CONTENT, reason: 'new whiteboard' },
-        }).catch(() => {}) // org unreachable — the pane's own first save creates it instead
+        const existing = entries.find((e) => e.path === path && !e.state)
+        if (existing) {
+            select({ kind: 'whiteboard', assetId: existing.id })
+            return
+        }
+        createFile({ path, newContent: spaces.EMPTY_WHITEBOARD_CONTENT, reason: 'new whiteboard' })
+            .then((asset) => select({ kind: 'whiteboard', assetId: asset.id }))
+            .catch((err) => toast(err instanceof Error ? err.message : 'Could not create the board', 'error'))
     }
 
     /** The rail's lock: docked ⇄ edge sliver (the rail peeks on hover by itself). */
@@ -564,7 +612,31 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         analytics.spacesTabViewed(next.kind === 'general' ? 'general' : (next.kind === 'file' || next.kind === 'attachment') ? 'files' : next.kind === 'whiteboard' ? 'whiteboard' : 'topics')
         placeSelection(next)
     }
-    const openFile = (path: string) => select({ kind: 'file', path })
+    const openFile = (assetId: string) => select({ kind: 'file', assetId })
+    /**
+     * The tree's "+ New file": the file is born empty at the typed path (the
+     * org refuses an occupied one, so a name already in use just opens that
+     * file) and opens by id, ready to edit.
+     */
+    const createNamedFile = (path: string) => {
+        const existing = entries.find((e) => e.path === path && !e.state)
+        if (existing) {
+            openFile(existing.id)
+            return
+        }
+        createFile({ path, newContent: '', reason: 'new file' })
+            .then((asset) => openFile(asset.id))
+            .catch((err) => toast(err instanceof Error ? err.message : 'Could not create the file', 'error'))
+    }
+    /** A canonical link into another space the reader is in: the org address names the org, App does the navigation. */
+    const resolveSpace = (orgAddress: string, spaceId: string): string | null => {
+        const target = orgs.find((o) => o.address === orgAddress)
+        return target && findSpace(target, spaceId) ? target.id : null
+    }
+    const openSpaceFile = (orgId: string, spaceId: string, assetId: string) => {
+        if (orgId === org.id && spaceId === space.id) openFile(assetId)
+        else onSwitchSpace(orgId, spaceId, { kind: 'file', assetId })
+    }
 
     /** Search / pinned / saved landings: open the surface, then scroll + flash. */
     const navigateToMessage = (rootMessageId: string, messageId: string) => {
@@ -587,17 +659,19 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     }, [selKey])
 
     // A discussion's linked file opens beside it (2026-09-11). The org
-    // projects the link as the file's CURRENT live path, so whatever lands
-    // here exists. Once per visit: closing the column marks the thread as
-    // dismissed until the reader leaves it (closeDoc); a different file they
-    // open themselves is never fought — this only fires when the selection
-    // or the link itself changes, and only where two columns fit (narrow,
-    // the chat wins, as everywhere). The stream copy is read first: it is
-    // the one a local attach updates before the feed refetches.
+    // projects the link as an asset id (even while the file is in Trash —
+    // then the listing does not have it, and nothing opens). Once per visit:
+    // closing the column marks the thread as dismissed until the reader
+    // leaves it (closeDoc); a different file they open themselves is never
+    // fought — this only fires when the selection or the link itself
+    // changes, and only where two columns fit (narrow, the chat wins, as
+    // everywhere). The stream copy is read first: it is the one a local
+    // attach updates before the feed refetches.
     const selectedThreadRoot = selection.kind === 'thread' ? selection.rootMessageId : null
-    const linkedDocPath = selectedThreadRoot
-        ? (stream.topicsByRoot.get(selectedThreadRoot) ?? feed.topics.find((t) => t.rootMessageId === selectedThreadRoot))?.documentPath ?? null
+    const linkedAssetId = selectedThreadRoot
+        ? (stream.topicsByRoot.get(selectedThreadRoot) ?? feed.topics.find((t) => t.rootMessageId === selectedThreadRoot))?.documentAssetId ?? null
         : null
+    const linkedDocId = linkedAssetId && entryById.get(linkedAssetId)?.state !== 'deleted' && entryById.has(linkedAssetId) ? linkedAssetId : null
     const linkedDocDismissedRef = useRef<string | null>(null)
     useEffect(() => {
         // Leaving the dismissed thread — for the stream or another thread —
@@ -607,22 +681,23 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         }
     }, [selection.kind, selectedThreadRoot])
     useEffect(() => {
-        if (!selectedThreadRoot || !linkedDocPath || !twoFits) return
+        if (!selectedThreadRoot || !linkedDocId || !twoFits) return
         if (linkedDocDismissedRef.current === selectedThreadRoot) return
-        setDocPath((open) => (open === linkedDocPath ? open : linkedDocPath))
+        setDocKey((open) => (open === linkedDocId ? open : linkedDocId))
         setChatOpen(true)
-        // Keyed on the thread and the link — not on docPath, which the
+        // Keyed on the thread and the link — not on docKey, which the
         // reader moves freely once the column is open.
-    }, [selectedThreadRoot, linkedDocPath, twoFits])
+    }, [selectedThreadRoot, linkedDocId, twoFits])
 
     // The last closed file — the header chip reopens it beside the chat.
-    const [lastDoc, setLastDoc] = useState<{ path: string; fromThreadRootId?: string } | null>(null)
+    const [lastDoc, setLastDoc] = useState<{ assetId: string; fromThreadRootId?: string } | null>(null)
+    const lastDocEntry = lastDoc ? entryById.get(lastDoc.assetId) : undefined
 
-    // The document in the right column (a board renders through boardPath instead).
-    const centerPath = docRender && !spaces.isWhiteboardPath(docRender) ? docRender : null
+    // The document in the right column (a board renders through boardId, an attachment through its URL).
+    const centerAssetId = docRender && !isAttachmentKey(docRender) && !boardId ? docRender : null
 
     /** Open a file from inside a thread — the file view gets a crumb back to it. */
-    const openFileFromThread = (rootMessageId: string) => (path: string) => select({ kind: 'file', path, fromThreadRootId: rootMessageId })
+    const openFileFromThread = (rootMessageId: string) => (assetId: string) => select({ kind: 'file', assetId, fromThreadRootId: rootMessageId })
 
 
     const selfName = memberNames.get(org.memberId) ?? org.memberId
@@ -657,13 +732,13 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // the header chip can bring it back. Closing the left column just hides
     // it; the doc takes the width.
     function closeDoc() {
-        if (selection.kind === 'file' && !spaces.isWhiteboardPath(selection.path)) {
-            setLastDoc({ path: selection.path, fromThreadRootId: selection.fromThreadRootId })
+        if (selection.kind === 'file') {
+            setLastDoc({ assetId: selection.assetId, fromThreadRootId: selection.fromThreadRootId })
         }
         // Closing beside a discussion is a choice: its linked file stays
         // closed until the reader leaves and comes back.
         if (chatRootId) linkedDocDismissedRef.current = chatRootId
-        setDocPath(null)
+        setDocKey(null)
         setChatOpen(true)
         if (selection.kind === 'file' || selection.kind === 'whiteboard' || selection.kind === 'attachment') {
             onSelect(chatRootId ? { kind: 'thread', rootMessageId: chatRootId } : { kind: 'general' })
@@ -671,7 +746,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     }
     const closeChat = () => setChatOpen(false)
     const reopenDoc = () => {
-        if (lastDoc) select({ kind: 'file', path: lastDoc.path, fromThreadRootId: lastDoc.fromThreadRootId })
+        if (lastDoc) select({ kind: 'file', assetId: lastDoc.assetId, fromThreadRootId: lastDoc.fromThreadRootId })
     }
 
     // Crumb for a file opened from a thread: the discussion's goal, else the
@@ -691,10 +766,11 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         <SpaceMembersProvider members={memberNames}>
         <SpaceProfilesProvider members={members} here={hereSet} selfId={org.memberId}>
         <SpaceRefsProvider refs={{ orgId: org.id, orgAddress: org.address, spaceId: space.id }}>
-        <SpaceNavProvider onOpenFile={openFile} onOpenAttachment={(src, name) => {
+        <SpaceAssetsProvider entries={entries}>
+        <SpaceNavProvider onOpenFile={openFile} onOpenSpaceFile={openSpaceFile} resolveSpace={resolveSpace} onOpenAttachment={(src, name) => {
             const url = new URL(src)
             url.searchParams.set('name', name)
-            select({ kind: 'attachment', path: url.href, ...(chatRootId ? { fromThreadRootId: chatRootId } : {}) })
+            select({ kind: 'attachment', src: url.href, ...(chatRootId ? { fromThreadRootId: chatRootId } : {}) })
         }}>
         <div className="spaces-surface relative flex-1 min-h-0 flex flex-col">
             {/* One per pane — covers the stream and thread panes alike. */}
@@ -822,15 +898,15 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                     topics={feed.topics}
                     onNavigate={navigateToMessage}
                 />
-                {!docOpen && lastDoc && entries.some((e) => e.path === lastDoc.path) && (
+                {!docOpen && lastDocEntry && !lastDocEntry.state && (
                     <button
                         type="button"
                         onClick={reopenDoc}
-                        title={`Reopen ${lastDoc.path} beside the conversation`}
+                        title={`Reopen ${lastDocEntry.path} beside the conversation`}
                         className="inline-flex h-6 max-w-[14rem] items-center gap-1.5 rounded-md border border-border bg-background px-2 text-xs text-muted-foreground hover:bg-accent/50 hover:text-foreground"
                     >
                         <FileText className="size-3 shrink-0" />
-                        <span className="truncate font-mono text-[11px]">{lastDoc.path.split('/').pop()}</span>
+                        <span className="truncate font-mono text-[11px]">{lastDocEntry.path.split('/').pop()}</span>
                         <Columns2 className="size-3 shrink-0" />
                     </button>
                 )}
@@ -886,10 +962,10 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                     entries={entries}
                     draftFolders={draftFolders}
                     presence={presence}
-                    unreadPaths={unreadPaths}
+                    unreadAssetIds={unreadAssetIds}
                     selection={selection}
                     onSelect={select}
-                    onCreateFile={openFile}
+                    onCreateFile={createNamedFile}
                     onCreateBoard={createBoard}
                     onUploadFiles={setUploadFiles}
                     onOpenTrash={() => setTrashOpen(true)}
@@ -987,14 +1063,14 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                         style={docAnim ? columnStyle(docAnim) : split && !anim ? { width: docWidthEff } : undefined}
                         className={cn('min-w-0 min-h-0 flex', docAnim || (split && !anim) ? 'shrink-0 overflow-hidden' : 'flex-1')}
                     >
-                    <div style={docAnim ? { width: docAnim.width } : undefined} className={cn('flex min-w-0 min-h-0', docAnim ? 'shrink-0' : 'flex-1', !split && !boardPath && 'justify-center')}>
-                        {docRender.startsWith('app://space-blob/') ? (
-                            <AttachmentColumn key={docRender} src={docRender} onDismiss={closeDoc} onSaved={(path) => {
+                    <div style={docAnim ? { width: docAnim.width } : undefined} className={cn('flex min-w-0 min-h-0', docAnim ? 'shrink-0' : 'flex-1', !split && !boardId && 'justify-center')}>
+                        {isAttachmentKey(docRender) ? (
+                            <AttachmentColumn key={docRender} src={docRender} onDismiss={closeDoc} onSaved={(saved) => {
                                 setRefreshTick((tick) => tick + 1)
-                                select({ kind: 'file', path, ...(chatRootId ? { fromThreadRootId: chatRootId } : {}) })
+                                select({ kind: 'file', assetId: saved.assetId, ...(chatRootId ? { fromThreadRootId: chatRootId } : {}) })
                             }} />
-                        ) : boardPath ? (
-                            // Keyed by path so switching boards remounts a fresh collab session.
+                        ) : boardId ? (
+                            // Keyed by id so switching boards remounts a fresh collab session (a rename does not).
                             <Suspense
                                 fallback={
                                     <div className="flex-1 flex items-center justify-center gap-2 text-sm text-muted-foreground">
@@ -1003,38 +1079,41 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                 }
                             >
                                 <WhiteboardPane
-                                    key={boardPath}
+                                    key={boardId}
                                     org={org}
                                     space={space}
-                                    boardId={boardPath}
+                                    boardId={boardId}
                                     memberNames={memberNames}
                                     active={active}
-                                    boards={boards.map((b) => b.path)}
-                                    onSelectBoard={(path) => select({ kind: 'whiteboard', path })}
+                                    boards={boards.map((b) => ({ id: b.id, path: b.path }))}
+                                    onSelectBoard={(assetId) => select({ kind: 'whiteboard', assetId })}
                                     onCreateBoard={createBoard}
                                     onClose={closeDoc}
                                 />
                             </Suspense>
-                        ) : centerPath ? (
+                        ) : centerAssetId ? (
                             <div
-                                className={cn('flex min-w-0 min-h-0 flex-1', !split && !getViewerType(centerPath) && 'mx-auto max-w-[880px]')}
+                                className={cn('flex min-w-0 min-h-0 flex-1', !split && !getViewerType(entryById.get(centerAssetId)?.path ?? '') && 'mx-auto max-w-[880px]')}
                                 // Beside the stream the markdown editor steps its headings
                                 // down to the compact scale (see editor.css).
                                 data-split-pane={split ? '' : undefined}
                             >
                                 <FileColumn
-                                    key={centerPath}
+                                    key={centerAssetId}
                                     org={org}
                                     space={space}
-                                    path={centerPath}
+                                    assetId={centerAssetId}
                                     entries={entries}
                                     memberNames={memberNames}
                                     refreshTick={refreshTick}
                                     onChanged={() => setRefreshTick((t) => t + 1)}
-                                    onRenamed={openFile}
-                                    onRedirect={openFile}
                                     onOpenFile={openFile}
-                                    onDeleted={() => { setDocPath(null); select({ kind: 'general' }) }}
+                                    onOpenSpaceFile={(orgAddress, spaceId, assetId) => {
+                                        const orgId = resolveSpace(orgAddress, spaceId)
+                                        if (orgId) openSpaceFile(orgId, spaceId, assetId)
+                                        else toast('That file is in a space you are not in', 'error')
+                                    }}
+                                    onDeleted={() => { setDocKey(null); select({ kind: 'general' }) }}
                                     crumb={selection.kind === 'file' && crumbRootId && crumbLabel ? {
                                         label: crumbLabel,
                                         // Back to the thread means back to the conversation alone.
@@ -1065,6 +1144,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
             )}
         </div>
         </SpaceNavProvider>
+        </SpaceAssetsProvider>
         </SpaceRefsProvider>
         </SpaceProfilesProvider>
         </SpaceMembersProvider>

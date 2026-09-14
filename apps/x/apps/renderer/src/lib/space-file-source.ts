@@ -9,18 +9,24 @@ function base64(bytes: Uint8Array): string {
   return btoa(text)
 }
 
-/** One instance per open document; only successful reads/writes advance its edit base. */
+/**
+ * One instance per open document, bound to the file's ASSET ID; only
+ * successful reads/writes advance its edit base. The record's path is display
+ * only — the file's name, and the extension the viewers switch on — so a
+ * rename never re-points the source.
+ */
 export function createSpaceFileSource(
   orgId: string,
   spaceId: string,
   initial: spaces.ReadAssetResult,
   onChanged: () => void,
 ): FileViewerSource {
+  const assetId = initial.id
   const path = initial.path
   const name = path.split('/').pop() ?? path
   const listeners = new Set<() => void>()
   let snapshot = initial
-  const readAsset = () => window.ipc.invoke('spaces:readAsset', { orgId, spaceId, path })
+  const readAsset = () => window.ipc.invoke('spaces:readAsset', { orgId, spaceId, assetId })
   const statOf = (asset: spaces.ReadAssetResult, size?: number) => ({
     kind: 'file' as const,
     size: size ?? asset.blob?.size ?? new TextEncoder().encode(asset.content).length,
@@ -37,8 +43,12 @@ export function createSpaceFileSource(
     workspace: false,
     subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener) } },
     notifyChanged: (version) => { if (version !== snapshot.version) for (const listener of listeners) listener() },
+    // HTML documents render through main's space-document route: the id
+    // segment names the file, the record's path follows it so the browser's
+    // relative refs (../x) resolve against the document's folder while keeping
+    // the id segment intact.
     url: () => getViewerType(path) === 'html'
-      ? `app://space-document/${[orgId, spaceId, ...path.split('/')].map(encodeURIComponent).join('/')}`
+      ? `app://space-document/${[orgId, spaceId, assetId, ...path.split('/')].map(encodeURIComponent).join('/')}`
       : initial.blob
       ? blobAppUrl({ orgId, spaceId }, initial.blob.hash)
       : `data:text/html;charset=utf-8,${encodeURIComponent(initial.content)}`,
@@ -63,7 +73,7 @@ export function createSpaceFileSource(
       })
       const result = await window.ipc.invoke('spaces:proposeChange', {
         orgId, spaceId,
-        input: { assetPath: path, baseVersion, blob: uploaded.blob.hash, reason: `Edit ${name}` },
+        input: { assetId, baseVersion, blob: uploaded.blob.hash, reason: `Edit ${name}` },
       })
       if (result.outcome === 'conflict') throw new Error('ETag mismatch: Someone changed this document. Reload to see their changes before saving.')
       snapshot = { ...snapshot, version: result.version, blob: uploaded.blob }
@@ -79,7 +89,8 @@ export function createSpaceFileSource(
       const result = await download()
       return { saved: result.saved, dest: result.path }
     },
-    loadSheet: (args) => window.ipc.invoke('spreadsheet:load', { ...args, space: { orgId, spaceId, version: initial.version } }),
-    findCells: (args) => window.ipc.invoke('spreadsheet:find', { ...args, space: { orgId, spaceId, version: initial.version } }),
+    // Spreadsheet paging pins the space file by id at the version this source opened.
+    loadSheet: (args) => window.ipc.invoke('spreadsheet:load', { ...args, space: { orgId, spaceId, assetId, version: initial.version } }),
+    findCells: (args) => window.ipc.invoke('spreadsheet:find', { ...args, space: { orgId, spaceId, assetId, version: initial.version } }),
   }
 }

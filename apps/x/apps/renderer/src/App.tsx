@@ -39,7 +39,8 @@ import { LiveNotesView } from '@/components/live-notes-view';
 import { BgTasksView } from '@/components/bg-tasks-view';
 import { AppsView } from '@/components/apps/apps-view';
 import { SpacesView, type SpaceSelection } from '@/components/spaces-view';
-import { railKey, type RailSelection } from '@/lib/spaces-selection';
+import { railKey, readRailSelection, type RailSelection } from '@/lib/spaces-selection';
+import { boardPathById } from '@/hooks/use-space-boards';
 import { STREAM_READ_KEY } from '@/hooks/use-space-chat';
 import { requestJump } from '@/lib/spaces-jump';
 import { findSpace, getSpacesOrgs, refreshSpacesOrgs, useSpacesOrgs } from '@/hooks/use-spaces';
@@ -4174,7 +4175,7 @@ function App() {
     | { kind: 'note'; path: string; content: string }
     | { kind: 'browser'; url: string; title: string }
     | { kind: 'deck'; path: string; slideNumber: number; slideCount: number }
-    | { kind: 'whiteboard'; orgId: string; orgName: string; spaceId: string; spaceName: string; path: string }
+    | { kind: 'whiteboard'; orgId: string; orgName: string; spaceId: string; spaceName: string; assetId: string; path: string }
   const buildMiddlePaneContext = async (): Promise<MiddlePaneContextPayload | undefined> => {
     // Nothing visible in the middle pane when the right pane is maximized.
     if (isRightPaneMaximized) return undefined
@@ -4186,13 +4187,16 @@ function App() {
       const org = getSpacesOrgs().find((o) => o.id === spaceSelection.orgId)
       const space = org ? findSpace(org, spaceSelection.spaceId) : undefined
       if (org && space) {
+        // The board is named by its asset id; its display path comes from the
+        // boards store the open space pane primes from its listing.
         return {
           kind: 'whiteboard',
           orgId: org.id,
           orgName: org.name,
           spaceId: space.id,
           spaceName: org.directLabels[space.id] ?? space.name,
-          path: railSelection.path,
+          assetId: railSelection.assetId,
+          path: boardPathById(org.id, space.id, railSelection.assetId) ?? '',
         }
       }
     }
@@ -5451,7 +5455,9 @@ function App() {
         // Spaces view correcting its own selection goes through selectSpace
         // instead and does not count.
         if (view.orgId && view.spaceId) noteSpaceVisit(view.orgId, view.spaceId)
-        setRailSelection(view.rail ?? { kind: 'general' })
+        // Checked, not trusted: a history entry from before files were named by
+        // id degrades to the stream rather than reaching the org with a path.
+        setRailSelection(view.rail ? readRailSelection(view.rail) : { kind: 'general' })
         // A message to land on: the pane consumes the jump once it paints.
         if (view.messageId) requestJump({ topicId: view.rail?.kind === 'thread' ? view.rail.rootMessageId : STREAM_READ_KEY, messageId: view.messageId })
         // Spaces carries its own conversation surface, so entering it

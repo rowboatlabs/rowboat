@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { spaces } from '@x/shared'
 import { filterAttachable } from './spaces-documents'
 
-const entry = (path: string, state?: 'deleted'): spaces.SpacesAssetEntry => ({ path, version: 1, updatedAt: '2026-09-11T00:00:00Z', ...(state ? { state } : {}) })
+const entry = (path: string, state?: 'deleted'): spaces.SpacesAssetEntry => ({ id: `id:${path}`, path, version: 1, updatedAt: '2026-09-11T00:00:00Z', ...(state ? { state } : {}) })
 
 describe('filterAttachable', () => {
     const entries = [entry('roadmap.md'), entry('briefs/launch.md'), entry('briefs/faq.md'), entry('old/plan.md', 'deleted'), entry('whiteboards/arch.excalidraw')]
@@ -18,8 +18,10 @@ describe('filterAttachable', () => {
         expect(filterAttachable(entries, 'briefs nope')).toEqual([])
     })
 
-    it('the currently linked file floats to the top', () => {
-        expect(filterAttachable(entries, '', 'roadmap.md')[0]!.path).toBe('roadmap.md')
-        expect(filterAttachable(entries, 'briefs', 'roadmap.md').map((e) => e.path)).toEqual(['briefs/faq.md', 'briefs/launch.md'])
+    it('the currently linked file (by id) floats to the top', () => {
+        expect(filterAttachable(entries, '', 'id:roadmap.md')[0]!.path).toBe('roadmap.md')
+        expect(filterAttachable(entries, 'briefs', 'id:roadmap.md').map((e) => e.path)).toEqual(['briefs/faq.md', 'briefs/launch.md'])
+        // A path never matches as the current link — ids are the identity.
+        expect(filterAttachable(entries, '', 'roadmap.md')[0]!.path).toBe('briefs/faq.md')
     })
 })
