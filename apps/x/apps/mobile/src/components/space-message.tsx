@@ -4,6 +4,7 @@ import { Modal, Pressable, Text, View } from 'react-native';
 import type { Member, Message } from '@rowboat/spaces-protocol';
 
 import { Image } from 'expo-image';
+import * as Clipboard from 'expo-clipboard';
 import { spaces } from '@x/shared';
 
 import { ChatMarkdown } from '@/components/markdown';
@@ -209,6 +210,10 @@ export function MessageActionSheet({
   onClose,
   onToggleReaction,
   onReply,
+  onQuote,
+  onEdit,
+  onDelete,
+  linkFor,
   reactionsOnly,
 }: {
   message: Message | null;
@@ -217,12 +222,28 @@ export function MessageActionSheet({
   onToggleReaction: (message: Message, emoji: string) => void;
   /** Omit on the thread screen — the composer is already the reply box. */
   onReply?: (message: Message) => void;
+  onQuote?: (message: Message) => void;
+  /** Author-only (the content plane is role-flat). */
+  onEdit?: (message: Message) => void;
+  onDelete?: (message: Message) => void;
+  /** The message's canonical link (https://<org>/s/<space>/m/<id>). */
+  linkFor?: (message: Message) => string;
   /** The emoji+ pill's mode: just the reactions row. */
   reactionsOnly?: boolean;
 }) {
   const colors = useColors();
   if (!message) return null;
   const mine = new Set(message.reactions.filter((g) => g.memberIds.includes(me)).map((g) => g.emoji));
+  const isAuthor = message.author.memberId === me;
+
+  // Slack's long-press menu, cut to what the org supports.
+  const actions: { key: string; icon: string; label: string; destructive?: boolean; run: () => void }[] = [];
+  if (onReply) actions.push({ key: 'reply', icon: 'sf:arrowshape.turn.up.left', label: 'Reply in thread', run: () => onReply(message) });
+  if (onQuote) actions.push({ key: 'quote', icon: 'sf:quote.opening', label: 'Quote reply', run: () => onQuote(message) });
+  actions.push({ key: 'copy', icon: 'sf:doc.on.doc', label: 'Copy message', run: () => void Clipboard.setStringAsync(message.body) });
+  if (linkFor) actions.push({ key: 'link', icon: 'sf:link', label: 'Copy link', run: () => void Clipboard.setStringAsync(linkFor(message)) });
+  if (isAuthor && onEdit && !message.poll) actions.push({ key: 'edit', icon: 'sf:pencil', label: 'Edit message', run: () => onEdit(message) });
+  if (isAuthor && onDelete) actions.push({ key: 'delete', icon: 'sf:trash', label: 'Delete message', destructive: true, run: () => onDelete(message) });
 
   return (
     <Modal transparent visible animationType="fade" onRequestClose={onClose}>
@@ -230,11 +251,11 @@ export function MessageActionSheet({
         <Pressable
           onPress={(e) => e.stopPropagation()}
           style={{
-            marginHorizontal: 12, marginBottom: 40, padding: 14, gap: 12,
+            marginHorizontal: 12, marginBottom: 40, padding: 10, gap: 6,
             borderRadius: 20, borderCurve: 'continuous', backgroundColor: colors.background,
           }}
         >
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 4, paddingBottom: reactionsOnly ? 0 : 4 }}>
             {QUICK_REACTIONS.map((emoji) => (
               <Pressable
                 key={emoji}
@@ -252,20 +273,26 @@ export function MessageActionSheet({
               </Pressable>
             ))}
           </View>
-          {onReply && !reactionsOnly ? (
-            <Pressable
-              onPress={() => {
-                onReply(message);
-                onClose();
-              }}
-              style={({ pressed }) => ({
-                paddingVertical: 12, borderRadius: 12, borderCurve: 'continuous', alignItems: 'center',
-                backgroundColor: pressed ? colors.separator : colors.secondaryBackground,
-              })}
-            >
-              <Text style={{ fontSize: 16, fontWeight: '600', color: colors.label }}>Reply in thread</Text>
-            </Pressable>
-          ) : null}
+          {!reactionsOnly
+            ? actions.map((a) => (
+                <Pressable
+                  key={a.key}
+                  onPress={() => {
+                    if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
+                    onClose();
+                    a.run();
+                  }}
+                  style={({ pressed }) => ({
+                    flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 46,
+                    paddingHorizontal: 12, borderRadius: 12, borderCurve: 'continuous',
+                    backgroundColor: pressed ? colors.secondaryBackground : 'transparent',
+                  })}
+                >
+                  <Image source={a.icon} style={{ width: 20, height: 20 }} tintColor={a.destructive ? colors.destructive : colors.secondaryLabel} />
+                  <Text style={{ fontSize: 16, color: a.destructive ? colors.destructive : colors.label }}>{a.label}</Text>
+                </Pressable>
+              ))
+            : null}
         </Pressable>
       </Pressable>
     </Modal>

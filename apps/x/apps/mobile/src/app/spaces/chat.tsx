@@ -2,14 +2,15 @@ import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useKeyboardVisible } from '@/lib/use-keyboard-visible';
 import type { Member, Message } from '@rowboat/spaces-protocol';
+import { spaces } from '@x/shared';
 
 import { MessageActionSheet, MessageRow, applyReaction } from '@/components/space-message';
-import { SpaceComposer } from '@/components/space-composer';
+import { SpaceComposer, type SpaceComposerHandle } from '@/components/space-composer';
 import { applyPollVote } from '@/components/poll-card';
 import { setActiveSpace } from '@/lib/push';
 import { useSpacesAccount } from '@/lib/spaces/account';
@@ -41,6 +42,7 @@ export default function SpaceChatScreen() {
   const [actionMessage, setActionMessage] = useState<Message | null>(null);
   const [reactionsOnly, setReactionsOnly] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
+  const composerRef = useRef<SpaceComposerHandle>(null);
   const lastOffset = useRef<number | undefined>(undefined);
 
   // Fold one live message into the stream: roots append; replies bump their
@@ -212,6 +214,31 @@ export default function SpaceChatScreen() {
     [client, org, space],
   );
 
+  const quote = useCallback((message: Message) => composerRef.current?.quote(spaces.resolveMentions(message.body, memberNames)), [memberNames]);
+  const beginEdit = useCallback((message: Message) => composerRef.current?.beginEdit(message.id, message.body), []);
+  const saveEdit = useCallback(
+    (id: string, body: string) => {
+      client.editMessage(space, id, { body, actingMode: 'direct' }).then(replaceMessage).catch((err) => setError(err instanceof Error ? err.message : String(err)));
+    },
+    [client, space, replaceMessage],
+  );
+  const confirmDelete = useCallback(
+    (message: Message) => {
+      Alert.alert('Delete message?', 'This cannot be undone.', [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            client.deleteMessage(space, message.id, { actingMode: 'direct' }).then(replaceMessage).catch((err) => setError(err instanceof Error ? err.message : String(err)));
+          },
+        },
+      ]);
+    },
+    [client, space, replaceMessage],
+  );
+  const linkFor = useCallback((message: Message) => `https://${org}/s/${space}/m/${message.id}`, [org, space]);
+
   const openThread = useCallback(
     (message: Message) => {
       router.push({ pathname: '/spaces/thread', params: { org, space, root: message.id, title: title ?? 'Thread', me } });
@@ -276,12 +303,14 @@ export default function SpaceChatScreen() {
       {/* Composer */}
       <View style={{ paddingTop: 8, paddingBottom: keyboardVisible ? 16 : insets.bottom + 10 }}>
         <SpaceComposer
+          ref={composerRef}
           placeholder={`Message #${title ?? ''}`}
           members={[...members.values()]}
           me={me}
           sending={sending}
           onSend={(body) => void send(body)}
           onPickMedia={uploadMedia}
+          onEdit={saveEdit}
         />
       </View>
 
@@ -292,6 +321,10 @@ export default function SpaceChatScreen() {
         onClose={() => setActionMessage(null)}
         onToggleReaction={toggleReaction}
         onReply={openThread}
+        onQuote={quote}
+        onEdit={beginEdit}
+        onDelete={confirmDelete}
+        linkFor={linkFor}
       />
     </KeyboardAvoidingView>
   );

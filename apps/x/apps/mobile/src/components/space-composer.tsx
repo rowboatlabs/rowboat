@@ -17,6 +17,10 @@ import { useColors } from '@/theme/colors';
 
 export interface SpaceComposerHandle {
   focus(): void;
+  /** Prefill a quote of another message ("> …") and focus. */
+  quote(text: string): void;
+  /** Switch to editing an existing message: its body in the field, send = save. */
+  beginEdit(id: string, body: string): void;
 }
 
 interface MentionPick {
@@ -69,7 +73,9 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
   onSend: (body: string) => void;
   /** Upload a picked photo/video and return the markdown to insert (absent = no + button). */
   onPickMedia?: (file: { uri: string; mime: string; name: string }) => Promise<string>;
-}>(function SpaceComposer({ placeholder, members, me, sending, onSend, onPickMedia }, ref) {
+  /** Save an edit begun with beginEdit (absent = editing unsupported). */
+  onEdit?: (id: string, body: string) => void;
+}>(function SpaceComposer({ placeholder, members, me, sending, onSend, onPickMedia, onEdit }, ref) {
   const colors = useColors();
   const inputRef = useRef<TextInput>(null);
   const [text, setText] = useState('');
@@ -102,7 +108,34 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
     }
   };
 
-  useImperativeHandle(ref, () => ({ focus: () => inputRef.current?.focus() }), []);
+  const [editing, setEditing] = useState<string | null>(null);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      focus: () => inputRef.current?.focus(),
+      quote: (quoted: string) => {
+        const block = quoted.split('\n').map((l) => `> ${l}`).join('\n') + '\n\n';
+        setText((prev) => (prev.trim() ? `${prev}\n${block}` : block));
+        setCursor((c) => c + block.length);
+        inputRef.current?.focus();
+      },
+      beginEdit: (id: string, body: string) => {
+        setEditing(id);
+        setText(body);
+        setCursor(body.length);
+        setAttachments([]);
+        inputRef.current?.focus();
+      },
+    }),
+    [],
+  );
+
+  const cancelEdit = () => {
+    setEditing(null);
+    setText('');
+    setInputHeight(40);
+  };
 
   const active = useMemo(() => activeMention(text, cursor), [text, cursor]);
   const suggestions = useMemo(() => {
@@ -136,11 +169,14 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
     const body = [words, ...attachments.map((a) => a.md)].filter(Boolean).join('\n');
     if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
     Keyboard.dismiss();
+    const editingId = editing;
+    setEditing(null);
     setText('');
     setPicked(new Map());
     setAttachments([]);
     setInputHeight(40);
-    onSend(body);
+    if (editingId && onEdit) onEdit(editingId, body);
+    else onSend(body);
   };
 
   // Picked mentions read as pills: bold spans inside the field.
@@ -199,6 +235,15 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
           paddingHorizontal: 14, paddingTop: 4, paddingBottom: 6,
         }}
       >
+        {editing ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 10 }}>
+            <Image source="sf:pencil" style={{ width: 13, height: 13 }} tintColor={colors.secondaryLabel} />
+            <Text style={{ flex: 1, fontSize: 13, fontWeight: '600', color: colors.secondaryLabel }}>Editing message</Text>
+            <Pressable hitSlop={8} onPress={cancelEdit}>
+              <Text style={{ fontSize: 13, color: '#0a84ff' }}>Cancel</Text>
+            </Pressable>
+          </View>
+        ) : null}
         {attachments.length > 0 ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingTop: 10, paddingBottom: 2 }}>
             {attachments.map((a) => (
@@ -272,7 +317,7 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
             disabled={!canSend}
             style={{ opacity: canSend ? 1 : 0.3 }}
           >
-            <Image source="sf:paperplane.fill" style={{ width: 22, height: 22 }} tintColor={colors.label} />
+            <Image source={editing ? "sf:checkmark.circle.fill" : "sf:paperplane.fill"} style={{ width: 22, height: 22 }} tintColor={colors.label} />
           </Pressable>
         </View>
       </View>

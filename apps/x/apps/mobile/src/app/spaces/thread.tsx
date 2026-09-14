@@ -2,7 +2,7 @@ import { Stack, useLocalSearchParams } from 'expo-router';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useKeyboardVisible } from '@/lib/use-keyboard-visible';
@@ -46,7 +46,7 @@ export default function SpaceThreadScreen() {
   const [actionMessage, setActionMessage] = useState<Message | null>(null);
   const [reactionsOnly, setReactionsOnly] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
-  const inputRef = useRef<SpaceComposerHandle>(null);
+  const composerRef = useRef<SpaceComposerHandle>(null);
   const lastOffset = useRef<number | undefined>(undefined);
 
   useEffect(() => {
@@ -144,6 +144,35 @@ export default function SpaceThreadScreen() {
     return () => setActiveSpace(null);
   }, [space]);
 
+  const patchBoth = useCallback((folded: Message) => {
+    setRootMessage((prev) => (prev && prev.id === folded.id ? folded : prev));
+    setReplies((prev) => prev?.map((m) => (m.id === folded.id ? folded : m)) ?? null);
+  }, []);
+  const quote = useCallback((message: Message) => composerRef.current?.quote(spaces.resolveMentions(message.body, memberNames)), [memberNames]);
+  const beginEdit = useCallback((message: Message) => composerRef.current?.beginEdit(message.id, message.body), []);
+  const saveEdit = useCallback(
+    (id: string, body: string) => {
+      client.editMessage(space, id, { body, actingMode: 'direct' }).then(patchBoth).catch((err) => setError(err instanceof Error ? err.message : String(err)));
+    },
+    [client, space, patchBoth],
+  );
+  const confirmDelete = useCallback(
+    (message: Message) => {
+      Alert.alert('Delete message?', 'This cannot be undone.', [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            client.deleteMessage(space, message.id, { actingMode: 'direct' }).then(patchBoth).catch((err) => setError(err instanceof Error ? err.message : String(err)));
+          },
+        },
+      ]);
+    },
+    [client, space, patchBoth],
+  );
+  const linkFor = useCallback((message: Message) => `https://${org}/s/${space}/m/${message.id}`, [org, space]);
+
   // "+" media: upload the bytes to the space's blob store and hand the
   // composer the canonical wire link (space-blob-image.tsx renders it).
   const uploadMedia = useCallback(
@@ -161,10 +190,6 @@ export default function SpaceThreadScreen() {
     [client, org, space],
   );
 
-  const patchBoth = useCallback((folded: Message) => {
-    setRootMessage((prev) => (prev && prev.id === folded.id ? folded : prev));
-    setReplies((prev) => prev?.map((m) => (m.id === folded.id ? folded : m)) ?? null);
-  }, []);
   const vote = useCallback(
     (message: Message, answerIds: number[]) => {
       void (async () => {
@@ -255,7 +280,7 @@ export default function SpaceThreadScreen() {
           ) : null}
           {rootMessage && replies !== null ? (
             <Pressable
-              onPress={replies.length === 0 ? () => inputRef.current?.focus() : undefined}
+              onPress={replies.length === 0 ? () => composerRef.current?.focus() : undefined}
               style={{
                 flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8, marginBottom: 4,
                 paddingHorizontal: 16, paddingVertical: 12,
@@ -284,13 +309,14 @@ export default function SpaceThreadScreen() {
       {/* Composer */}
       <View style={{ paddingTop: 8, paddingBottom: keyboardVisible ? 16 : insets.bottom + 10 }}>
         <SpaceComposer
-          ref={inputRef}
+          ref={composerRef}
           placeholder="Add a reply"
           members={[...members.values()]}
           me={me}
           sending={sending}
           onSend={(body) => void send(body)}
           onPickMedia={uploadMedia}
+          onEdit={saveEdit}
         />
       </View>
 
@@ -300,6 +326,10 @@ export default function SpaceThreadScreen() {
         me={me}
         onClose={() => setActionMessage(null)}
         onToggleReaction={toggleReaction}
+        onQuote={quote}
+        onEdit={beginEdit}
+        onDelete={confirmDelete}
+        linkFor={linkFor}
       />
     </KeyboardAvoidingView>
   );
