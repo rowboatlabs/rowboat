@@ -76,6 +76,9 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
   const [cursor, setCursor] = useState(0);
   const [picked, setPicked] = useState<Map<string, MentionPick>>(new Map());
   const [uploading, setUploading] = useState(false);
+  // The native multiline field keeps its grown height after the text is
+  // cleared — size it ourselves and reset on send.
+  const [inputHeight, setInputHeight] = useState(40);
   // Picked media rides as thumbnails above the field (iMessage/Slack); the
   // wire markdown joins the body only on send.
   const [attachments, setAttachments] = useState<{ key: string; uri: string; md: string; video: boolean }[]>([]);
@@ -136,6 +139,7 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
     setText('');
     setPicked(new Map());
     setAttachments([]);
+    setInputHeight(40);
     onSend(body);
   };
 
@@ -221,7 +225,9 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
         ) : null}
         <TextInput
           ref={inputRef}
-          style={{ minHeight: 40, maxHeight: 140, fontSize: 16, lineHeight: 22, color: colors.label, paddingVertical: 8 }}
+          style={{ height: Math.min(140, Math.max(40, inputHeight)), fontSize: 16, lineHeight: 22, color: colors.label, paddingVertical: 8 }}
+          onContentSizeChange={(e) => setInputHeight(text.length === 0 ? 40 : e.nativeEvent.contentSize.height + 16)}
+          scrollEnabled={inputHeight > 140}
           placeholder={placeholder}
           placeholderTextColor={colors.tertiaryLabel}
           onChangeText={setText}
