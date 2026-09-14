@@ -1,4 +1,6 @@
 import process from 'node:process';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import { WorkDir } from '@x/core/dist/config/config.js';
 import { initConfigs } from '@x/core/dist/config/initConfigs.js';
 import container, {
@@ -18,6 +20,9 @@ import { installLoopbackRelay } from './loopback-relay.js';
 import { createFileCipher } from './file-cipher.js';
 import { setTokenCipher as setChatGPTTokenCipher } from '@x/core/dist/auth/chatgpt-auth.js';
 import { setTokenCipher as setGithubTokenCipher } from '@x/core/dist/apps/github-auth.js';
+import { SERVER_KEY_FILE } from './auth.js';
+import { loadServerConfig } from './config.js';
+import { buildPairingPayload } from './pairing.js';
 
 // Headless rowboat-server: the RFC's end-state entrypoint, where main spawns
 // this as a child process (or it runs on a remote box) and core lives here.
@@ -30,7 +35,47 @@ import { setTokenCipher as setGithubTokenCipher } from '@x/core/dist/apps/github
 // isolated ROWBOAT_WORKDIR.
 //
 
+// Lock-free by design: reads the same key file and config a live server
+// would use, but never calls createRowboatServer, so it works fine
+// alongside a running server (no lock contention) and needs no core boot.
+async function showPairing(): Promise<void> {
+  const config = await loadServerConfig(WorkDir);
+  const keyPath = path.join(WorkDir, SERVER_KEY_FILE);
+  let key: string;
+  try {
+    key = (await fs.readFile(keyPath, 'utf8')).trim();
+  } catch {
+    console.error(`[server] no server key found at ${keyPath}. Start the server once to generate one.`);
+    process.exit(1);
+    return;
+  }
+
+  const payload = buildPairingPayload(config.port, config.lanEnabled, key);
+  console.log('[server] pairing addresses:');
+  for (const url of payload.urls) {
+    console.log(`[server]   ${url}`);
+  }
+  console.log(`[server] access code: ${key}`);
+
+  const payloadJson = JSON.stringify(payload);
+  console.log('[server] pairing payload (scan with the mobile app):');
+  console.log(payloadJson);
+
+  if (process.argv.includes('--qr')) {
+    try {
+      const QRCode = (await import('qrcode')).default;
+      console.log(await QRCode.toString(payloadJson, { type: 'terminal', small: true }));
+    } catch (err) {
+      console.error('[server] failed to render QR code, showing pairing payload only:', err);
+    }
+  }
+}
+
 async function main(): Promise<void> {
+  if (process.argv.includes('--show-pairing')) {
+    await showPairing();
+    process.exit(0);
+  }
   // The workdir lock is acquired by createRowboatServer itself — a live
   // Electron-hosted transport makes this boot fail loudly, as it must.
   await initConfigs();
