@@ -180,12 +180,9 @@ export default function ChatScreen() {
   if (pairing === null) return <Redirect href="/pairing" />;
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['bottom']}>
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={process.env.EXPO_OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={process.env.EXPO_OS === 'ios' ? 92 : 0}
-      >
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      {/* Full-height view (transparent header), so the keyboard needs no offset. */}
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={0}>
         {id ? (
           <ScrollView
             ref={scrollRef}
@@ -215,7 +212,7 @@ export default function ChatScreen() {
         {/* Composer — Claude-style card: input on top, model pill + send below */}
         <View
           style={{
-            marginHorizontal: 10, marginTop: 6, marginBottom: keyboardVisible ? 16 : 4,
+            marginHorizontal: 10, marginTop: 6, marginBottom: keyboardVisible ? 16 : insets.bottom + 4,
             backgroundColor: colors.background,
             borderWidth: 1, borderColor: colors.separator,
             borderRadius: 22, borderCurve: 'continuous',
@@ -242,7 +239,7 @@ export default function ChatScreen() {
           </View>
         </View>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </View>
   );
 }
 
