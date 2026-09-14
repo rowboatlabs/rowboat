@@ -3,6 +3,7 @@ import { FileText, Hash, MessageSquare, PenTool, Search } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { useDebounce } from '@/hooks/use-debounce'
 import { STREAM_READ_KEY } from '@/hooks/use-space-chat'
+import { useSpaceNames } from '@/hooks/use-spaces'
 import { cn } from '@/lib/utils'
 import { hasKind, parseSearchQuery } from '@/lib/spaces-corpus'
 import { requestJump } from '@/lib/spaces-jump'
@@ -52,6 +53,7 @@ const FILTERED_PAGE = 50
 
 export function SpaceSearch({ orgId, spaceId, selfMemberId, onNavigate, className }: Props) {
     const names = useMemberNames()
+    const spaceNames = useSpaceNames(orgId)
     const inputRef = useRef<HTMLInputElement>(null)
     const [query, setQuery] = useState('')
     const [focused, setFocused] = useState(false)
@@ -117,7 +119,7 @@ export function SpaceSearch({ orgId, spaceId, selfMemberId, onNavigate, classNam
     }, [debounced, orgId, spaceId])
 
     const words = parsed.terms
-    const mark = (text: string) => highlight(resolveMentions(text, names), words)
+    const mark = (text: string) => highlight(resolveMentions(text, names, spaceNames), words)
 
     const pick = (sel: RailSelection) => {
         onNavigate(sel)

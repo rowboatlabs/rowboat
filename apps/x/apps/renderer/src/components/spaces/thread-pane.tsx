@@ -19,7 +19,7 @@ import type { ChatMessage, SpacePresence } from '@/hooks/use-space-chat'
 import { buildPendingMessage, getThreadSnapshot, ingestTopic, putThreadSnapshot, removeTopicByRoot, updateStreamMessage, usePresenceSender } from '@/hooks/use-space-chat'
 import { useTopicAgentPermissionWait } from '@/hooks/use-topic-agent-permission'
 import { useSpaceAgentActivity } from '@/lib/spaces-agent-activity'
-import type { OrgWithSpaces } from '@/hooks/use-spaces'
+import { useSpaceNames, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { subscribeComposeInsert } from '@/lib/spaces-compose'
 import { applyReaction, artifactsForThread, isContinuation, mergeMessages, threadLabelOf } from '@/lib/spaces-conventions'
 import { consumeJump, scrollToMessage, subscribeJump } from '@/lib/spaces-jump'
@@ -47,7 +47,7 @@ const NEW_LINGER_MS = 5_000
 const NEW_FADE_MS = 800
 
 export function ThreadPane({
-    org, space, rootMessageId, rootFromStream, topicFromStream, changeSets, entries, presence, members, memberNames, refreshTick,
+    org, space, rootMessageId, rootFromStream, topicFromStream, changeSets, entries, presence, memberNames, refreshTick,
     showBack, onBack, expanded = false, onToggleExpanded, onCloseColumn, onOpenFile, onOpenSession, artifactsRailOpen, onToggleArtifactsRail, onFolding, visible = true,
 }: {
     org: OrgWithSpaces
@@ -60,7 +60,6 @@ export function ThreadPane({
     changeSets: spaces.ChangeSet[]
     entries: spaces.SpacesAssetEntry[]
     presence: SpacePresence
-    members: spaces.Member[]
     memberNames: Map<string, string>
     refreshTick: number
     showBack: boolean
@@ -105,6 +104,8 @@ export function ThreadPane({
     /** Composer prefill (quote-reply, mention-from-profile); a new nonce re-applies it. */
     const [seed, setSeed] = useState<{ text: string; nonce: number; append?: boolean } | null>(null)
     const { onType } = usePresenceSender(org.id, space.id, rootMessageId, visible)
+    // The plain-text faces (quotes, titles, copies) name a space token by its current name.
+    const spaceNames = useSpaceNames(org.id)
 
     // The profile popover's "Mention" lands in whichever composer is visible.
     useEffect(() => {
@@ -466,7 +467,7 @@ export function ThreadPane({
     // composer — plain markdown on the wire; image embeds drop, names not ids.
     const quoteReply = (message: spaces.Message) => {
         const name = memberNames.get(message.author.memberId) ?? message.author.memberId
-        const text = resolveMentions(message.body, memberNames).replace(/!\[[^\]]*\]\([^)]*\)/g, '').trim()
+        const text = resolveMentions(message.body, memberNames, spaceNames).replace(/!\[[^\]]*\]\([^)]*\)/g, '').trim()
         if (!text) return
         const quote = text.split('\n').map((l) => `> ${l}`).join('\n')
         setSeed({ text: `${quote}\n> — ${name}\n\n`, nonce: Date.now() })
@@ -707,6 +708,7 @@ export function ThreadPane({
                 key={message.id}
                 message={message}
                 memberNames={memberNames}
+                spaceNames={spaceNames}
                 continuation={isContinuation(prev, message)}
                 selfMemberId={org.memberId}
                 onReact={(m, emoji) => void toggleReaction(m, emoji)}
@@ -1062,9 +1064,6 @@ export function ThreadPane({
                 onType={onType}
                 seed={seed}
                 autoFocus
-                members={members}
-                entries={entries}
-                selfMemberId={org.memberId}
                 draftKey={`${org.id}/${space.id}/${rootMessageId}`}
                 commands={[
                     {

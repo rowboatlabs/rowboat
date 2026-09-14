@@ -14,7 +14,7 @@ import { useSecondaryRailSections } from '@/hooks/use-secondary-rail-sections'
 import { FileTree } from '@/components/spaces/files-tab'
 import { ServerOptionsMenu } from '@/components/spaces/server-options-menu'
 import { ServerSpaceNavigation } from '@/components/spaces-sidebar-section'
-import { refreshSpaceFeed, type OrgWithSpaces } from '@/hooks/use-spaces'
+import { refreshSpaceFeed, useSpaceNames, type OrgWithSpaces } from '@/hooks/use-spaces'
 import type { SpacePresence, StreamState } from '@/hooks/use-space-chat'
 import { prefetchThread } from '@/hooks/use-space-chat'
 import { useMemberNames } from '@/components/spaces/member-text'
@@ -130,8 +130,9 @@ export function SpaceRail({
     const isUnread = (t: spaces.TopicListing) => isThreadUnread(orgId, spaceId, t.rootMessageId)
 
     const memberNames = useMemberNames()
+    const spaceNames = useSpaceNames(orgId)
     const byActivity = (a: { topic: spaces.TopicListing }, b: { topic: spaces.TopicListing }) => b.topic.lastActivityAt.localeCompare(a.topic.lastActivityAt)
-    const titled = topics.map((t) => ({ topic: t, title: resolveMentions(t.title, memberNames) }))
+    const titled = topics.map((t) => ({ topic: t, title: resolveMentions(t.title, memberNames, spaceNames) }))
     const liveRows = titled.filter((x) => !x.topic.archived).sort(byActivity)
     const topicRows = showArchived ? titled.sort(byActivity) : liveRows
 

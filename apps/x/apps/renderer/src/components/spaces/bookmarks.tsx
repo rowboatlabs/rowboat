@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { MemberAvatar } from '@/components/spaces/atoms'
 import { useMemberNames } from '@/components/spaces/member-text'
+import { useSpaceNames } from '@/hooks/use-spaces'
 import { loadSpaceCorpus, peekSpaceCorpus, pinnedMessages } from '@/lib/spaces-corpus'
 import { removeSaved, useSaved } from '@/lib/spaces-saved'
 import { formatFeedTime, resolveMentions } from '@/lib/spaces-presentation'
@@ -13,9 +14,9 @@ import { formatFeedTime, resolveMentions } from '@/lib/spaces-presentation'
 // (shared, the 📌 reaction; everyone sees the same list) and Saved (personal,
 // this install only). Both rows click through to the message itself.
 
-/** One notification-sized line: markdown scaffolding and image embeds dropped. */
-export function messageExcerpt(body: string, memberNames: ReadonlyMap<string, string>, max = 120): string {
-    const flat = resolveMentions(body, memberNames)
+/** One notification-sized line: mention tokens as names, markdown scaffolding and image embeds dropped. */
+export function messageExcerpt(body: string, memberNames: ReadonlyMap<string, string>, spaceNames?: ReadonlyMap<string, string>, max = 120): string {
+    const flat = resolveMentions(body, memberNames, spaceNames)
         .replace(/```[\s\S]*?(```|$)/g, ' ')
         .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
         .replace(/^[ \t]*>.*$/gm, ' ')
@@ -76,6 +77,7 @@ export function BookmarksPopover({ orgId, spaceId, streamKey, topics, onNavigate
     onNavigate: (rootMessageId: string, messageId: string) => void
 }) {
     const memberNames = useMemberNames()
+    const spaceNames = useSpaceNames(orgId)
     const [tab, setTab] = useState<'pinned' | 'saved'>('pinned')
     const [open, setOpen] = useState(false)
     const [corpus, setCorpus] = useState<spaces.Message[] | null>(() => peekSpaceCorpus(orgId, spaceId))
@@ -105,7 +107,7 @@ export function BookmarksPopover({ orgId, spaceId, streamKey, topics, onNavigate
     const topicLabel = (rootMessageId: string): string => {
         if (rootMessageId === streamKey) return 'Messages'
         const topic = topics.find((t) => t.rootMessageId === rootMessageId)
-        return topic ? resolveMentions(topic.title, memberNames) : 'thread'
+        return topic ? resolveMentions(topic.title, memberNames, spaceNames) : 'thread'
     }
     const nameOf = (id: string) => memberNames.get(id) ?? id
 
@@ -153,7 +155,7 @@ export function BookmarksPopover({ orgId, spaceId, streamKey, topics, onNavigate
                                 authorId={m.author.memberId}
                                 authorName={nameOf(m.author.memberId)}
                                 postedAt={m.postedAt}
-                                excerpt={messageExcerpt(m.body, memberNames)}
+                                excerpt={messageExcerpt(m.body, memberNames, spaceNames)}
                                 topicLabel={topicLabel(m.threadRoot ?? streamKey)}
                                 onOpen={() => {
                                     setOpen(false)
@@ -174,7 +176,7 @@ export function BookmarksPopover({ orgId, spaceId, streamKey, topics, onNavigate
                                 authorId={s.authorId}
                                 authorName={nameOf(s.authorId)}
                                 postedAt={s.postedAt}
-                                excerpt={messageExcerpt(s.body, memberNames)}
+                                excerpt={messageExcerpt(s.body, memberNames, spaceNames)}
                                 topicLabel={topicLabel(s.threadRootId)}
                                 onOpen={() => {
                                     setOpen(false)

@@ -9,7 +9,7 @@ import {
     STREAM_READ_KEY, buildPendingMessage, failPendingStreamMessage, ingestStreamMessage, loadOlderStreamMessages,
     prefetchThread, removeStreamMessage, resolvePendingStreamMessage, updateStreamMessage, usePresenceSender,
 } from '@/hooks/use-space-chat'
-import type { OrgWithSpaces } from '@/hooks/use-spaces'
+import { useSpaceNames, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { subscribeComposeInsert } from '@/lib/spaces-compose'
 import { applyReaction, dayKey, formatDayLabel, isContinuation, threadLabelOf } from '@/lib/spaces-conventions'
 import { consumeJump, scrollToMessage, subscribeJump } from '@/lib/spaces-jump'
@@ -41,16 +41,13 @@ const NEW_LINGER_MS = 5_000
 const NEW_FADE_MS = 800
 
 export function GeneralStream({
-    org, space, stream, presence, members, memberNames, entries = [], onOpenThread, onOpenSession, onClose, visible = true, composeActive = true,
+    org, space, stream, presence, memberNames, onOpenThread, onOpenSession, onClose, visible = true, composeActive = true,
 }: {
     org: OrgWithSpaces
     space: spaces.Space
     stream: StreamState
     presence: SpacePresence
-    members: spaces.Member[]
     memberNames: Map<string, string>
-    /** The space's files — the composer's @ typeahead offers them as links. */
-    entries?: spaces.SpacesAssetEntry[]
     /** Open a thread pane on this root (replying to a fresh message included — no draft state exists). */
     onOpenThread: (rootMessageId: string) => void
     /** Navigate to a chat session — the working strip's "Open chat" affordance. */
@@ -70,6 +67,8 @@ export function GeneralStream({
     const scrollRef = useRef<HTMLDivElement | null>(null)
     const bottomRef = useRef<HTMLDivElement | null>(null)
     const { onType } = usePresenceSender(org.id, space.id, undefined, visible)
+    // The plain-text faces (quotes, titles, copies) name a space token by its current name.
+    const spaceNames = useSpaceNames(org.id)
 
     // "New" divider: snapshot the read mark when the stream opens; mark read
     // from then on — but only while actually on screen. A kept-alive hidden
@@ -192,7 +191,7 @@ export function GeneralStream({
             // The org's count when it told us one; else 1 reads as "has new" on the row.
             unreadCount: hasNew && replyCount > 0 ? (getThreadReadState(org.id, space.id, message.id)?.unreadReplies || 1) : 0,
             workingAgents,
-            title: topic ? resolveMentions(topic.title, memberNames) : null,
+            title: topic ? resolveMentions(topic.title, memberNames, spaceNames) : null,
         }
     }
 
@@ -260,7 +259,7 @@ export function GeneralStream({
         const name = memberNames.get(message.author.memberId) ?? message.author.memberId
         // The quote is a cite, so it carries names, never tokens; the ask is a
         // token, which the composer's seed path parses into a pill.
-        const quote = resolveMentions(message.body, memberNames).split('\n').map((l) => `> ${l}`).join('\n')
+        const quote = resolveMentions(message.body, memberNames, spaceNames).split('\n').map((l) => `> ${l}`).join('\n')
         setSeed({ text: `[@rowboat](#rowboat) \n\n${quote}\n— ${name}`, nonce: Date.now() })
     }
 
@@ -269,7 +268,7 @@ export function GeneralStream({
     // Image embeds drop (a quote is text); names, not wire ids, like askRowboat.
     const quoteReply = (message: spaces.Message) => {
         const name = memberNames.get(message.author.memberId) ?? message.author.memberId
-        const text = resolveMentions(message.body, memberNames).replace(/!\[[^\]]*\]\([^)]*\)/g, '').trim()
+        const text = resolveMentions(message.body, memberNames, spaceNames).replace(/!\[[^\]]*\]\([^)]*\)/g, '').trim()
         if (!text) return
         const quote = text.split('\n').map((l) => `> ${l}`).join('\n')
         setSeed({ text: `${quote}\n> — ${name}\n\n`, nonce: Date.now() })
@@ -622,6 +621,7 @@ export function GeneralStream({
                 key={message.id}
                 message={message}
                 memberNames={memberNames}
+                spaceNames={spaceNames}
                 continuation={isContinuation(prev, message)}
                 thread={thread}
                 selfMemberId={org.memberId}
@@ -776,9 +776,6 @@ export function GeneralStream({
                 onCreatePoll={() => openPollRef.current?.()}
                 onType={onType}
                 seed={seed}
-                members={members}
-                entries={entries}
-                selfMemberId={org.memberId}
                 commands={[
                     {
                         name: 'invite',

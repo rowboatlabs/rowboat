@@ -14,6 +14,7 @@ import { userMessageRemarkPlugins } from '@/lib/markdown-render'
 import { toast } from '@/lib/toast'
 import { MemberProfilePopover } from '@/components/spaces/atoms'
 import { useMemberNames, useSpaceProfiles } from '@/components/spaces/member-text'
+import { findSpace, useSpacesOrgs } from '@/hooks/use-spaces'
 import {
     imageDimsFromUrl,
     parseAssetWireUrl,
@@ -21,6 +22,8 @@ import {
     parseSpaceFileAppUrl,
     parseSpaceMemberAppUrl,
     parseSpacePathAppUrl,
+    parseSpaceRefAppUrl,
+    parseSpaceWireUrl,
     resolveSpaceLink,
     rewriteBlobLinks,
     rewriteFileLinks,
@@ -34,8 +37,10 @@ import {
 // The one markdown renderer for space bodies (messages, thread parents).
 // Three responsibilities layered over Streamdown, all space-specific:
 //   1. mentions — the wire's link tokens (protocol mentions.ts) rewrite to
-//      app://space-member/<id> pre-parse and render as chips keyed on the ID,
-//      the name coming from the members context (never from the label),
+//      app://space-member/<id> (a person) or app://space-ref/<id> (a space)
+//      pre-parse and render as chips keyed on the ID, the name coming from
+//      the members context or the reader's own org listing (never from the
+//      label); the contract's canonical …/s/<spaceId> link is the same chip,
 //   2. blobs — the org's canonical https blob links rewrite to app://space-blob
 //      (served by main through the content-addressed cache), images render
 //      inline, non-image blob links render as a preview card, and
@@ -92,15 +97,25 @@ interface SpaceNav {
     onOpenFile: (assetId: string) => void
     /** Open a file of another space the reader is in (App's openSpace with a file rail). */
     onOpenSpaceFile?: (orgId: string, spaceId: string, assetId: string) => void
+    /** Open a space the reader is in (a space chip) — App's openSpace. */
+    onOpenSpace?: (orgId: string, spaceId: string) => void
     /** The org id behind an address + space the reader is in — null when the space is not in their listing. */
     resolveSpace?: (orgAddress: string, spaceId: string) => string | null
 }
 
 const SpaceNavContext = createContext<SpaceNav | null>(null)
 
-/** Mounted beside SpaceRefsProvider — lets any rendered file link open the file pane (by asset id). */
-export function SpaceNavProvider({ onOpenFile, onOpenSpaceFile, resolveSpace, onOpenAttachment, children }: SpaceNav & { onOpenAttachment?: (src: string, name: string) => void; children: ReactNode }) {
-    const nav = useMemo<SpaceNav>(() => ({ onOpenFile, ...(onOpenSpaceFile ? { onOpenSpaceFile } : {}), ...(resolveSpace ? { resolveSpace } : {}) }), [onOpenFile, onOpenSpaceFile, resolveSpace])
+/** Mounted beside SpaceRefsProvider — lets any rendered file link open the file pane (by asset id), and a space chip its space. */
+export function SpaceNavProvider({ onOpenFile, onOpenSpaceFile, onOpenSpace, resolveSpace, onOpenAttachment, children }: SpaceNav & { onOpenAttachment?: (src: string, name: string) => void; children: ReactNode }) {
+    const nav = useMemo<SpaceNav>(
+        () => ({
+            onOpenFile,
+            ...(onOpenSpaceFile ? { onOpenSpaceFile } : {}),
+            ...(onOpenSpace ? { onOpenSpace } : {}),
+            ...(resolveSpace ? { resolveSpace } : {}),
+        }),
+        [onOpenFile, onOpenSpaceFile, onOpenSpace, resolveSpace],
+    )
     return <SpaceNavContext.Provider value={nav}><AttachmentNavContext.Provider value={onOpenAttachment ?? null}>{children}</AttachmentNavContext.Provider></SpaceNavContext.Provider>
 }
 
@@ -591,6 +606,9 @@ const spaceComponents: StreamdownComponents = {
     a: SpaceAnchor,
 }
 
+/** The blue chip — a person who is not you, or a space; one class so the two read as the same kind of thing. */
+const CHIP_CLASS = 'rounded-[4px] px-[3px] py-px font-medium bg-[var(--stream-mention-wash)] text-[var(--stream-link)]'
+
 /**
  * A mention chip, keyed on the ID the token carries — the name is the roster's
  * current one, never the label (two members with the same name can no longer
@@ -602,12 +620,7 @@ function MentionChip({ memberId, broadcast, fallback }: { memberId?: string; bro
     const { selfId } = useSpaceProfiles()
     const label = broadcast ? `@${broadcast}` : `@${(memberId !== undefined ? names.get(memberId) : undefined) ?? fallback.replace(/^@/, '')}`
     const addressesMe = broadcast === 'here' || (!!selfId && memberId === selfId)
-    const chip = cn(
-        'rounded-[4px] px-[3px] py-px font-medium',
-        addressesMe
-            ? 'bg-[var(--stream-you-wash)] text-[var(--stream-you-ink)]'
-            : 'bg-[var(--stream-mention-wash)] text-[var(--stream-link)]',
-    )
+    const chip = addressesMe ? 'rounded-[4px] px-[3px] py-px font-medium bg-[var(--stream-you-wash)] text-[var(--stream-you-ink)]' : CHIP_CLASS
     // @here and @rowboat address the room and your agent — no profile to open.
     if (broadcast || memberId === undefined || !names.has(memberId)) {
         return <strong className={chip}>{label}</strong>
@@ -618,6 +631,34 @@ function MentionChip({ memberId, broadcast, fallback }: { memberId?: string; bro
                 {label}
             </button>
         </MemberProfilePopover>
+    )
+}
+
+/**
+ * A space reference as a `#Name` chip, keyed on the space's ID: the name is
+ * the reader's own listing's (a shared space by name, a DM by the other
+ * person's), never the token's label. Clicking opens the space. A space the
+ * reader is not in — not in their listing — is not theirs to open: the label
+ * renders muted, the way a file link into such a space does. `orgAddress`
+ * comes with a canonical https link; a token is read on the pane's own org.
+ */
+function SpaceChip({ spaceId, orgAddress, fallback }: { spaceId: string; orgAddress?: string; fallback: string }) {
+    const refs = useContext(SpaceRefsContext)
+    const nav = useContext(SpaceNavContext)
+    const { orgs } = useSpacesOrgs()
+    const org = orgAddress !== undefined ? orgs.find((o) => o.address === orgAddress) : orgs.find((o) => o.id === refs?.orgId)
+    const space = org ? findSpace(org, spaceId) : undefined
+    if (!org || !space) {
+        // A bare canonical URL is its own label; anything else reads as a #name.
+        const muted = /^https:\/\//.test(fallback) ? fallback : `#${fallback.replace(/^#/, '')}`
+        return <span title="Not available to you" className="text-muted-foreground">{muted}</span>
+    }
+    const label = `#${org.directLabels[space.id] ?? space.name}`
+    if (!nav?.onOpenSpace) return <strong className={CHIP_CLASS}>{label}</strong>
+    return (
+        <button type="button" onClick={() => nav.onOpenSpace?.(org.id, space.id)} title="Open space" className={cn(CHIP_CLASS, 'cursor-pointer hover:brightness-95 dark:hover:brightness-110')}>
+            {label}
+        </button>
     )
 }
 
@@ -664,6 +705,10 @@ function SpaceAnchor({ href, children }: ComponentProps<'a'>) {
     if (mentionId !== null) return <MentionChip memberId={mentionId} fallback={plainLabel(children) ?? mentionId} />
     if (url === HERE_APP_URL) return <MentionChip broadcast="here" fallback="@here" />
     if (url === ROWBOAT_APP_URL) return <MentionChip broadcast="rowboat" fallback="@rowboat" />
+    const spaceRefId = parseSpaceRefAppUrl(url)
+    if (spaceRefId !== null) return <SpaceChip spaceId={spaceRefId} fallback={plainLabel(children) ?? spaceRefId} />
+    const spaceWire = parseSpaceWireUrl(url)
+    if (spaceWire) return <SpaceChip spaceId={spaceWire.spaceId} orgAddress={spaceWire.orgAddress} fallback={plainLabel(children) ?? spaceWire.spaceId} />
     if (url.startsWith('app://space-blob/')) {
         return <BlobLinkCard href={url}>{children}</BlobLinkCard>
     }

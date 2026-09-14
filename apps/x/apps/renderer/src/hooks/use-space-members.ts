@@ -81,6 +81,8 @@ function hydrateMembers(k: string): void {
 }
 
 async function loadMembers(orgId: string, spaceId: string): Promise<void> {
+    // A composer mounted outside a space pane has no refs — nothing to ask for.
+    if (!orgId || !spaceId) return
     const k = key(orgId, spaceId)
     if (membersLoading.has(k)) return
     membersLoading.add(k)
@@ -127,6 +129,7 @@ function unionOfRosters(orgId: string, spaceIds: readonly string[]): spaces.Memb
 }
 
 async function loadOrgRoster(orgId: string, spaceIds: readonly string[]): Promise<void> {
+    if (!orgId) return
     const k = orgKey(orgId)
     if (membersLoading.has(k)) return
     membersLoading.add(k)

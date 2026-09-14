@@ -3,7 +3,7 @@ import { CheckCheck, Loader2, RefreshCw } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { MemberAvatar, Segmented } from '@/components/spaces/atoms'
 import { DayDivider } from '@/components/spaces/message-row'
-import type { OrgWithSpaces } from '@/hooks/use-spaces'
+import { useSpaceNames, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { dayKey, formatDayLabel } from '@/lib/spaces-conventions'
 import { subscribeSpacesFeed } from '@/lib/spaces-feed'
 import { loadUnread } from '@/lib/spaces-read-state'
@@ -156,6 +156,7 @@ export function ActivityView({ org, active = true, onOpenMessage }: {
     }
 
     const names = useMemo(() => new Map(Object.entries(page?.names ?? {})), [page?.names])
+    const spaceNames = useSpaceNames(org.id)
     const groups = useMemo(() => groupByDay(page?.items ?? []), [page?.items])
 
     return (
@@ -192,7 +193,7 @@ export function ActivityView({ org, active = true, onOpenMessage }: {
                         <ul className="flex flex-col gap-0.5">
                             {group.items.map((item) => (
                                 <li key={item.id}>
-                                    <ActivityRow item={item} names={names} onOpen={() => onOpenMessage(targetOf(org.id, item))} />
+                                    <ActivityRow item={item} names={names} spaceNames={spaceNames} onOpen={() => onOpenMessage(targetOf(org.id, item))} />
                                 </li>
                             ))}
                         </ul>
@@ -256,9 +257,9 @@ export function reasonLabel(item: Item): string {
     }
 }
 
-/** One line of the message, mention tokens as names, markdown scaffolding dropped. */
-export function excerptOf(body: string, names: ReadonlyMap<string, string>, max = 160): string {
-    const flat = resolveMentions(body, names)
+/** One line of the message, mention tokens as names (people and spaces), markdown scaffolding dropped. */
+export function excerptOf(body: string, names: ReadonlyMap<string, string>, spaceNames?: ReadonlyMap<string, string>, max = 160): string {
+    const flat = resolveMentions(body, names, spaceNames)
         .replace(/```[\s\S]*?```/g, ' ')
         .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
         .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
@@ -268,10 +269,10 @@ export function excerptOf(body: string, names: ReadonlyMap<string, string>, max 
     return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat
 }
 
-function ActivityRow({ item, names, onOpen }: { item: Item; names: ReadonlyMap<string, string>; onOpen: () => void }) {
+function ActivityRow({ item, names, spaceNames, onOpen }: { item: Item; names: ReadonlyMap<string, string>; spaceNames: ReadonlyMap<string, string>; onOpen: () => void }) {
     const lead = item.actors[0]
     const who = actorLabel(item.actors, names)
-    const excerpt = excerptOf(item.message.body, names)
+    const excerpt = excerptOf(item.message.body, names, spaceNames)
     return (
         <button type="button" onClick={onOpen}
             className={cn('group flex w-full items-start gap-3 rounded-lg px-2 py-2 text-left hover:bg-accent/60', item.unread && 'bg-accent/30')}

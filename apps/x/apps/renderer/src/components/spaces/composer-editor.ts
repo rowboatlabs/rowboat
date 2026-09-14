@@ -76,20 +76,32 @@ const ChatStarterKit = StarterKit.extend({
     },
 })
 
-type MentionKind = 'member' | 'here' | 'rowboat'
+type MentionKind = 'member' | 'space' | 'here' | 'rowboat'
 
-function refOf(attrs: { kind: MentionKind; id: string | null; label: string }): MentionRef {
-    if (attrs.kind === 'member') return { kind: 'member', id: attrs.id ?? '', label: attrs.label }
+interface MentionAttrs {
+    kind: MentionKind
+    id: string | null
+    label: string
+}
+
+function refOf(attrs: MentionAttrs): MentionRef {
+    if (attrs.kind === 'member' || attrs.kind === 'space') return { kind: attrs.kind, id: attrs.id ?? '', label: attrs.label }
     return { kind: attrs.kind }
+}
+
+/** The pill's text: `#Name` for a space reference, `@Name` for a person, `@here` / `@rowboat` for the fixed addresses. */
+function pillText(attrs: MentionAttrs): string {
+    if (attrs.kind === 'space') return `#${attrs.label}`
+    return `@${attrs.kind === 'member' ? attrs.label : attrs.kind}`
 }
 
 /**
  * A mention as ONE node (the Discord/Slack composer shape): an inline atom
  * carrying kind + id + label, rendered as a pill, deleted in one backspace,
  * serialized to the wire's link token (`[@Name](#member:<id>)`, `[@here](#here)`,
- * `[@rowboat](#rowboat)` — protocol mentions.ts) and parsed back from it, so
- * drafts, seeds, and the inline edit box round-trip. The autocomplete inserts
- * it; nothing ever rewrites typed text into an address.
+ * `[@rowboat](#rowboat)`, `[#Name](#space:<id>)` — protocol mentions.ts) and
+ * parsed back from it, so drafts, seeds, and the inline edit box round-trip.
+ * The autocomplete inserts it; nothing ever rewrites typed text into an address.
  */
 export const MentionNode = Node.create({
     name: 'mention',
@@ -117,6 +129,15 @@ export const MentionNode = Node.create({
                     return id ? { kind: 'member', id, label: (a.textContent ?? '').replace(/^@/, '') } : false
                 },
             },
+            {
+                tag: 'a[href^="#space:"]',
+                priority: 1001,
+                getAttrs: (el) => {
+                    const a = el as HTMLAnchorElement
+                    const id = decodeURIComponent((a.getAttribute('href') ?? '').slice('#space:'.length))
+                    return id ? { kind: 'space', id, label: (a.textContent ?? '').replace(/^#/, '') } : false
+                },
+            },
             { tag: 'a[href="#here"]', priority: 1001, getAttrs: () => ({ kind: 'here', id: null, label: 'here' }) },
             { tag: 'a[href="#rowboat"]', priority: 1001, getAttrs: () => ({ kind: 'rowboat', id: null, label: 'rowboat' }) },
             {
@@ -131,28 +152,26 @@ export const MentionNode = Node.create({
         ]
     },
     renderHTML({ node, HTMLAttributes }) {
-        const attrs = node.attrs as { kind: MentionKind; id: string | null; label: string }
-        const label = attrs.kind === 'member' ? attrs.label : attrs.kind
+        const attrs = node.attrs as MentionAttrs
         return [
             'span',
             mergeAttributes(HTMLAttributes, {
                 'data-mention': attrs.kind,
                 'data-id': attrs.id ?? '',
-                'data-label': label,
+                'data-label': pillText(attrs).slice(1),
                 class: 'composer-mention',
             }),
-            `@${label}`,
+            pillText(attrs),
         ]
     },
     renderText({ node }) {
-        const attrs = node.attrs as { kind: MentionKind; label: string }
-        return `@${attrs.kind === 'member' ? attrs.label : attrs.kind}`
+        return pillText(node.attrs as MentionAttrs)
     },
     addStorage() {
         return {
             markdown: {
                 serialize(state: { write(text: string): void }, node: ProseMirrorNode) {
-                    state.write(mentionToken(refOf(node.attrs as { kind: MentionKind; id: string | null; label: string })))
+                    state.write(mentionToken(refOf(node.attrs as MentionAttrs)))
                 },
                 parse: {
                     // handled by markdown-it (a link) + parseHTML above
