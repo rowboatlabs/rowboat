@@ -333,7 +333,7 @@ export function SessionRail({
   // The rail's content — the shell renders it at the docked width.
   const body = (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex h-9 shrink-0 items-center justify-between border-b border-border pl-3 pr-1.5">
+      <div className="rowboat-header flex shrink-0 items-center justify-between border-b border-border pl-3 pr-1.5">
         <span className="text-[13px] text-muted-foreground">Projects</span>
         <Tooltip>
           <TooltipTrigger asChild>

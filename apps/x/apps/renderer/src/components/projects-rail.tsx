@@ -144,7 +144,7 @@ export function ProjectsRail({ tree, selectedPath, selectedFile, selectedChat, p
             {({ togglePin, onMenuOpenChange }) => {
                 menuChanged = onMenuOpenChange
                 return <div ref={bodyRef} className={cn('flex h-full min-h-0 flex-col', resizing && 'select-none')}>
-                    <div className="flex shrink-0 items-center gap-0.5 px-2 py-1">
+                    <div className="rowboat-header flex shrink-0 items-center gap-0.5 px-2">
                         <span className="min-w-0 flex-1 px-1 text-[13px] font-semibold text-muted-foreground">Projects</span>
                         <SecondaryRailToggle open={open} onToggle={togglePin} />
                     </div>

@@ -5,7 +5,8 @@
   --spaces-avatar: 36px;
   --spaces-control: 32px;
   --spaces-reaction: 28px;
-  --spaces-header: 56px;
+  /* The app-wide section header height (App.css); Spaces set the standard. */
+  --spaces-header: var(--rowboat-header);
   --spaces-pane-header: 48px;
   --spaces-radius: 8px;
   --spaces-hover: color-mix(in srgb, var(--foreground) 4%, var(--background));

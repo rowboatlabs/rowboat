@@ -52,7 +52,7 @@ export function AppFrame({ app, onBack }: { app: rowboatApp.AppSummary; onBack: 
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+      <div className="rowboat-header flex shrink-0 items-center gap-2 border-b border-border px-3">
         <button
           type="button"
           onClick={onBack}

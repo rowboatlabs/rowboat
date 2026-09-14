@@ -131,7 +131,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  height: 52px;
+  min-height: var(--rowboat-header);
   padding: 0 20px;
   border-bottom: 1px solid var(--gm-border);
 }
@@ -1164,6 +1164,10 @@
      darker than the background in light mode and a hair lighter in dark mode.
      Shared by the web search card and tool-call group. */
   --card-surface: color-mix(in oklab, var(--background) 98.5%, var(--foreground));
+  /* The header row every section draws directly under the titlebar: toolbars,
+     rail headers, pane headers, the chat header. One height so the rules line
+     up across adjacent panes; the Spaces header set the standard. */
+  --rowboat-header: 56px;
   --rowboat-panel: #f4f4f4;
   /* Second-level rail (e.g. the Spaces topics rail): one step lighter than
      the main sidebar so adjacent rails read as distinct layers. */
@@ -1434,6 +1438,12 @@
 .rowboat-titlebar {
   background: var(--background);
   border-bottom-color: var(--border);
+}
+
+/* A section's header row (see --rowboat-header). min-height, like the Spaces
+   header, so a row whose content wraps can still grow. */
+.rowboat-header {
+  min-height: var(--rowboat-header);
 }
 
 .rowboat-tab {

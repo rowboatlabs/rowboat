@@ -417,7 +417,7 @@ export function SpreadsheetFileViewer({ path }: SpreadsheetFileViewerProps) {
 
   return (
     <div className="flex h-full w-full flex-col bg-background">
-      <div className="flex items-center gap-2 border-b border-border px-4 py-2">
+      <div className="rowboat-header flex shrink-0 items-center gap-2 border-b border-border px-4">
         <FileSpreadsheetIcon className="size-4 shrink-0 text-muted-foreground" />
         <span className="truncate text-sm font-medium text-foreground">{fileName}</span>
         <span className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[10px] font-medium text-muted-foreground">

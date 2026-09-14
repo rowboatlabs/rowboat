@@ -319,6 +319,10 @@
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
+  align-content: center;
+  align-items: center;
+  /* The section header height; the row still grows when the buttons wrap. */
+  min-height: var(--rowboat-header);
   gap: 0.25rem;
   padding: 0.5rem;
   border-bottom: 1px solid var(--border);

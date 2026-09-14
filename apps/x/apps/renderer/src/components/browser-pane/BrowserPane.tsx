@@ -66,7 +66,6 @@ const EMPTY_STATE: BrowserState = {
   tabs: [],
 }
 
-const CHROME_HEIGHT = 40
 const BLOCKING_OVERLAY_SLOTS = new Set([
   'alert-dialog-content',
   'context-menu-content',
@@ -659,10 +658,7 @@ export function BrowserPane({ onClose, forceHidden = false }: BrowserPaneProps) 
       />
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div
-          className="flex h-10 shrink-0 items-center gap-1 border-b border-border bg-sidebar px-2"
-          style={{ minHeight: CHROME_HEIGHT }}
-        >
+        <div className="rowboat-header flex shrink-0 items-center gap-1 border-b border-border bg-sidebar px-2">
           <button
             type="button"
             onClick={handleBack}

@@ -85,7 +85,7 @@ export function ChatHeader({
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className="titlebar-no-drag flex min-w-0 flex-1 items-center gap-2 rounded-md px-3 text-sm font-medium text-foreground outline-none hover:bg-accent/60"
+              className="titlebar-no-drag flex min-w-0 flex-1 self-stretch items-center gap-2 rounded-md px-3 text-sm font-medium text-foreground outline-none hover:bg-accent/60"
               aria-label="Chat history"
             >
               <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
@@ -123,7 +123,7 @@ export function ChatHeader({
           </DropdownMenuContent>
         </DropdownMenu>
       ) : (
-        <div className="flex min-w-0 flex-1 items-center gap-2 px-3 text-sm font-medium text-foreground">
+        <div className="flex min-w-0 flex-1 self-stretch items-center gap-2 px-3 text-sm font-medium text-foreground">
           <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
           <span className="truncate">{activeTitle}</span>
         </div>

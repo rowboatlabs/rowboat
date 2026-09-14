@@ -314,7 +314,7 @@ export function CodeWorkspaceDrawer({
 
       {/* Context strip: where this panel is looking. */}
       {panel === 'changes' && (
-        <div className="flex h-8 shrink-0 items-center gap-1.5 border-b border-border px-3 text-xs text-muted-foreground">
+        <div className="rowboat-header flex shrink-0 items-center gap-1.5 border-b border-border px-3 text-xs text-muted-foreground">
           {gitStatus?.isRepo ? (
             <>
               <GitBranch className="size-3.5 shrink-0" />
@@ -332,7 +332,7 @@ export function CodeWorkspaceDrawer({
         </div>
       )}
       {panel === 'terminal' && (
-        <div className="flex h-8 shrink-0 items-center gap-1.5 border-b border-border px-3 text-xs text-muted-foreground">
+        <div className="rowboat-header flex shrink-0 items-center gap-1.5 border-b border-border px-3 text-xs text-muted-foreground">
           <span className="min-w-0 truncate font-mono" title={session.cwd}>{basename(session.cwd)}</span>
           {worktreeActive && (
             <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px]">worktree</span>
