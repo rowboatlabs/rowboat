@@ -323,6 +323,56 @@ describe('Space chips', () => {
     })
 })
 
+// Person and message links (2026-09-14): the contract's https://<org>/u/<memberId>
+// renders as an @Name chip that opens the DM with them; https://<org>/s/<id>/m/<id>
+// as a chip that jumps to the message. Either mutes when the reader is not in
+// the org (or the space).
+describe('Person and message link chips', () => {
+    const MESSAGE = '01ARZ3NDEKTSV4RRFFQ69G5FC0'
+    function mount(body: string, nav: Partial<Parameters<typeof SpaceNavProvider>[0]> = {}) {
+        const onOpenDirect = vi.fn()
+        const onOpenMessage = vi.fn()
+        render(
+            <SpaceMembersProvider members={new Map([['harsh', 'Harsh Verma']])}>
+                <SpaceRefsProvider refs={refs}>
+                    <SpaceNavProvider onOpenFile={vi.fn()} onOpenDirect={onOpenDirect} onOpenMessage={onOpenMessage} resolveOrg={(a) => (a === refs.orgAddress ? 'org' : null)} resolveSpace={(a, id) => (a === refs.orgAddress && id === OTHER_SPACE ? 'org' : null)} {...nav}>
+                        <SpaceMarkdown body={body} />
+                    </SpaceNavProvider>
+                </SpaceRefsProvider>
+            </SpaceMembersProvider>,
+        )
+        return { onOpenDirect, onOpenMessage }
+    }
+
+    it('renders a person link as an @Name chip named from the roster, and opens the DM on click', async () => {
+        const { onOpenDirect } = mount(`ping [@H](https://${refs.orgAddress}/u/harsh)`)
+        fireEvent.click(await screen.findByRole('button', { name: '@Harsh Verma' }))
+        expect(onOpenDirect).toHaveBeenCalledWith('org', 'harsh')
+    })
+
+    it('mutes a person link on an org the reader is not signed into, keeping the label', async () => {
+        const { onOpenDirect } = mount('ping [@Someone](https://elsewhere.example.com/u/x)')
+        expect(await screen.findByTitle('Not available to you')).toHaveTextContent('@Someone')
+        expect(screen.queryByRole('button')).toBeNull()
+        expect(onOpenDirect).not.toHaveBeenCalled()
+    })
+
+    it('renders a message link as a chip that jumps to it — in this space, or another the reader is in', async () => {
+        const { onOpenMessage } = mount(`see [the call](https://${refs.orgAddress}/s/${refs.spaceId}/m/${MESSAGE}) and https://${refs.orgAddress}/s/${OTHER_SPACE}/m/${MESSAGE}`)
+        fireEvent.click(await screen.findByRole('button', { name: 'the call' }))
+        expect(onOpenMessage).toHaveBeenCalledWith('org', refs.spaceId, MESSAGE)
+        // A bare URL is labelled "message", not the URL.
+        fireEvent.click(await screen.findByRole('button', { name: 'message' }))
+        expect(onOpenMessage).toHaveBeenLastCalledWith('org', OTHER_SPACE, MESSAGE)
+    })
+
+    it('mutes a message link into a space the reader is not in', async () => {
+        const { onOpenMessage } = mount(`see [it](https://${refs.orgAddress}/s/01ARZ3NDEKTSV4RRFFQ69G5FZZ/m/${MESSAGE})`)
+        expect(await screen.findByTitle('Not available to you')).toHaveTextContent('it')
+        expect(onOpenMessage).not.toHaveBeenCalled()
+    })
+})
+
 // File links (2026-09-14): a file is named by its asset id. The canonical
 // https link carries the id for any space; a relative link in a message
 // resolves through the space's listing at render time.

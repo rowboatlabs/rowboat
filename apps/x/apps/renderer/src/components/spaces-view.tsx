@@ -26,7 +26,7 @@ import { railKey, type RailSelection } from '@/lib/spaces-selection'
 import { ThreadPane } from '@/components/spaces/thread-pane'
 import { STREAM_READ_KEY, useSpacePresence, useStream } from '@/hooks/use-space-chat'
 import { refreshMembers, useOrgRoster, useSpaceMembers } from '@/hooks/use-space-members'
-import { findSpace, useSpaceFeed, useSpaceLive, useSpaceNames, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
+import { findSpace, refreshSpacesOrgs, useSpaceFeed, useSpaceLive, useSpaceNames, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { noteListingFromEntries } from '@/hooks/use-space-boards'
 import { directAvatarId, directLabel, isSelfDirect } from '@/lib/spaces-direct'
 import { requestJump } from '@/lib/spaces-jump'
@@ -655,6 +655,30 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         if (orgId === org.id && spaceId === space.id) openFile(assetId)
         else onSwitchSpace(orgId, spaceId, { kind: 'file', assetId })
     }
+    const resolveOrg = (orgAddress: string): string | null => orgs.find((o) => o.address === orgAddress)?.id ?? null
+    /** A person link or the popover's Message action: the org creates the DM on first use, the listing learns it, then it opens. */
+    const openDirect = (orgId: string, memberId: string) => {
+        void window.ipc.invoke('spaces:openDirect', { orgId, memberId })
+            .then(async ({ space: dm }) => {
+                await refreshSpacesOrgs()
+                if (dm.id !== space.id) onSwitchSpace(orgId, dm.id)
+            })
+            .catch((err) => toast(err instanceof Error ? err.message : 'Could not open the conversation', 'error'))
+    }
+    /** A message link: read the message to learn its thread, then land on it — here, or in the space it lives in. */
+    const openMessage = (orgId: string, spaceId: string, messageId: string) => {
+        void window.ipc.invoke('spaces:getMessage', { orgId, spaceId, messageId })
+            .then(({ message }) => {
+                const rootId = message.threadRoot ?? STREAM_READ_KEY
+                if (orgId === org.id && spaceId === space.id) {
+                    navigateToMessage(rootId, messageId)
+                    return
+                }
+                requestJump({ topicId: rootId, messageId })
+                onSwitchSpace(orgId, spaceId, rootId === STREAM_READ_KEY ? { kind: 'general' } : { kind: 'thread', rootMessageId: rootId })
+            })
+            .catch((err) => toast(err instanceof Error ? err.message : 'Could not open the message', 'error'))
+    }
     /** A space chip: this space's lands on its stream; another's opens there. */
     const openSpace = (orgId: string, spaceId: string) => {
         if (orgId === org.id && spaceId === space.id) select({ kind: 'general' })
@@ -791,7 +815,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         <SpaceProfilesProvider members={profiles} here={hereSet} selfId={org.memberId}>
         <SpaceRefsProvider refs={spaceRefs}>
         <SpaceAssetsProvider entries={entries}>
-        <SpaceNavProvider onOpenFile={openFile} onOpenSpaceFile={openSpaceFile} onOpenSpace={openSpace} resolveSpace={resolveSpace} onOpenAttachment={(src, name) => {
+        <SpaceNavProvider onOpenFile={openFile} onOpenSpaceFile={openSpaceFile} onOpenSpace={openSpace} onOpenMessage={openMessage} onOpenDirect={openDirect} resolveOrg={resolveOrg} resolveSpace={resolveSpace} onOpenAttachment={(src, name) => {
             const url = new URL(src)
             url.searchParams.set('name', name)
             select({ kind: 'attachment', src: url.href, ...(chatRootId ? { fromThreadRootId: chatRootId } : {}) })

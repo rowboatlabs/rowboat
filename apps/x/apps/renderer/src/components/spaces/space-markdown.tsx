@@ -3,7 +3,7 @@ import { createContext, memo, useContext, useMemo, useRef, useState, type Compon
 import type { spaces } from '@x/shared'
 import { BlobPreview } from '@/components/spaces/blob-preview'
 import { Streamdown } from 'streamdown'
-import { Eye, FileDown, FilePlus2, FileText, Loader2, X } from 'lucide-react'
+import { Eye, FileDown, FilePlus2, FileText, Loader2, MessageSquare, X } from 'lucide-react'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -13,6 +13,8 @@ import { isTrustedDomain, linkDomain, trustDomain } from '@/lib/trusted-domains'
 import { userMessageRemarkPlugins } from '@/lib/markdown-render'
 import { toast } from '@/lib/toast'
 import { MemberProfilePopover } from '@/components/spaces/atoms'
+import { SpaceNavContext, SpaceRefsContext, SpaceRefsProvider, useSpaceNav, useSpaceRefs, type SpaceNav } from '@/components/spaces/space-nav'
+export { SpaceRefsProvider, useSpaceNav, useSpaceRefs, type SpaceNav }
 import { useMemberNames, useSpaceProfiles } from '@/components/spaces/member-text'
 import { findSpace, useSpacesOrgs } from '@/hooks/use-spaces'
 import {
@@ -22,6 +24,8 @@ import {
     parseSpaceFileAppUrl,
     parseSpaceMemberAppUrl,
     parseSpacePathAppUrl,
+    parseMemberWireUrl,
+    parseMessageWireUrl,
     parseSpaceRefAppUrl,
     parseSpaceWireUrl,
     resolveSpaceLink,
@@ -50,17 +54,6 @@ import {
 //      relative link in a message resolves through the space's listing
 //      (path → id, from the root; plain markdown on the wire).
 // Every message-rendering path goes through here — fix it once.
-
-const SpaceRefsContext = createContext<SpaceRefs | null>(null)
-
-/** Mounted once per space pane, beside SpaceMembersProvider. */
-export function SpaceRefsProvider({ refs, children }: { refs: SpaceRefs; children: ReactNode }) {
-    return <SpaceRefsContext.Provider value={refs}>{children}</SpaceRefsContext.Provider>
-}
-
-export function useSpaceRefs(): SpaceRefs | null {
-    return useContext(SpaceRefsContext)
-}
 
 /** The space's live listing, indexed both ways: relative links resolve path → id; links by id show their path. */
 export interface SpaceAssetsIndex {
@@ -92,29 +85,20 @@ export function useSpaceAssets(): SpaceAssetsIndex {
 
 const AttachmentNavContext = createContext<((src: string, name: string) => void) | null>(null)
 
-interface SpaceNav {
-    /** Open a file of THIS space by id. */
-    onOpenFile: (assetId: string) => void
-    /** Open a file of another space the reader is in (App's openSpace with a file rail). */
-    onOpenSpaceFile?: (orgId: string, spaceId: string, assetId: string) => void
-    /** Open a space the reader is in (a space chip) — App's openSpace. */
-    onOpenSpace?: (orgId: string, spaceId: string) => void
-    /** The org id behind an address + space the reader is in — null when the space is not in their listing. */
-    resolveSpace?: (orgAddress: string, spaceId: string) => string | null
-}
 
-const SpaceNavContext = createContext<SpaceNav | null>(null)
-
-/** Mounted beside SpaceRefsProvider — lets any rendered file link open the file pane (by asset id), and a space chip its space. */
-export function SpaceNavProvider({ onOpenFile, onOpenSpaceFile, onOpenSpace, resolveSpace, onOpenAttachment, children }: SpaceNav & { onOpenAttachment?: (src: string, name: string) => void; children: ReactNode }) {
+/** Mounted beside SpaceRefsProvider — lets every org link in rendered markdown open what it names: a file, a space, a message, a person's DM. */
+export function SpaceNavProvider({ onOpenFile, onOpenSpaceFile, onOpenSpace, onOpenMessage, onOpenDirect, resolveOrg, resolveSpace, onOpenAttachment, children }: SpaceNav & { onOpenAttachment?: (src: string, name: string) => void; children: ReactNode }) {
     const nav = useMemo<SpaceNav>(
         () => ({
             onOpenFile,
             ...(onOpenSpaceFile ? { onOpenSpaceFile } : {}),
             ...(onOpenSpace ? { onOpenSpace } : {}),
+            ...(onOpenMessage ? { onOpenMessage } : {}),
+            ...(onOpenDirect ? { onOpenDirect } : {}),
+            ...(resolveOrg ? { resolveOrg } : {}),
             ...(resolveSpace ? { resolveSpace } : {}),
         }),
-        [onOpenFile, onOpenSpaceFile, onOpenSpace, resolveSpace],
+        [onOpenFile, onOpenSpaceFile, onOpenSpace, onOpenMessage, onOpenDirect, resolveOrg, resolveSpace],
     )
     return <SpaceNavContext.Provider value={nav}><AttachmentNavContext.Provider value={onOpenAttachment ?? null}>{children}</AttachmentNavContext.Provider></SpaceNavContext.Provider>
 }
@@ -662,6 +646,56 @@ function SpaceChip({ spaceId, orgAddress, fallback }: { spaceId: string; orgAddr
     )
 }
 
+/**
+ * The contract's link to a person (https://<org>/u/<memberId>): an @Name
+ * chip that opens the DM with them. Distinct from a mention token — a link
+ * never addresses anyone — but drawn the same way, so a person reads the
+ * same everywhere. The name comes from the roster; the label is a hint.
+ */
+function PersonLinkChip({ orgAddress, memberId, fallback }: { orgAddress: string; memberId: string; fallback: string }) {
+    const refs = useContext(SpaceRefsContext)
+    const nav = useContext(SpaceNavContext)
+    const names = useMemberNames()
+    const label = `@${fallback.replace(/^@/, '')}`
+    const orgId = orgAddress === refs?.orgAddress ? refs.orgId : (nav?.resolveOrg?.(orgAddress) ?? null)
+    if (!orgId) return <span title="Not available to you" className="text-muted-foreground">{label}</span>
+    const name = `@${names.get(memberId) ?? fallback.replace(/^@/, '')}`
+    if (!nav?.onOpenDirect) return <strong className={CHIP_CLASS}>{name}</strong>
+    return (
+        <button type="button" onClick={() => nav.onOpenDirect?.(orgId, memberId)} title="Message them" className={cn(CHIP_CLASS, 'cursor-pointer hover:brightness-95 dark:hover:brightness-110')}>
+            {name}
+        </button>
+    )
+}
+
+/** The contract's link to a message ("Copy link"): a chip that jumps to it, in this space or another the reader is in. */
+function MessageLinkChip({ orgAddress, spaceId, messageId, children }: { orgAddress: string; spaceId: string; messageId: string; children?: ReactNode }) {
+    const refs = useContext(SpaceRefsContext)
+    const nav = useContext(SpaceNavContext)
+    const orgId = orgAddress === refs?.orgAddress && spaceId === refs.spaceId ? refs.orgId : (nav?.resolveSpace?.(orgAddress, spaceId) ?? null)
+    const label = plainLabel(children)
+    const text = label && !/^https:\/\//.test(label) ? label : 'message'
+    if (!orgId || !nav?.onOpenMessage) {
+        return (
+            <span title="Not available to you" className="inline-flex max-w-full items-baseline gap-1 align-baseline text-muted-foreground underline decoration-dotted underline-offset-2">
+                <MessageSquare className="size-3 shrink-0 self-center" />
+                <span className="truncate">{text}</span>
+            </span>
+        )
+    }
+    return (
+        <button
+            type="button"
+            onClick={() => nav.onOpenMessage?.(orgId, spaceId, messageId)}
+            title="Go to message"
+            className="inline-flex max-w-full items-baseline gap-1 align-baseline text-primary underline underline-offset-2 hover:opacity-80"
+        >
+            <MessageSquare className="size-3 shrink-0 self-center" />
+            <span className="truncate">{text}</span>
+        </button>
+    )
+}
+
 /** A link into a space file: open (by id) here or in another space, or muted when it leads nowhere the reader can go. */
 type FileLinkTarget =
     | { kind: 'open'; assetId: string; title: string }
@@ -707,6 +741,10 @@ function SpaceAnchor({ href, children }: ComponentProps<'a'>) {
     if (url === ROWBOAT_APP_URL) return <MentionChip broadcast="rowboat" fallback="@rowboat" />
     const spaceRefId = parseSpaceRefAppUrl(url)
     if (spaceRefId !== null) return <SpaceChip spaceId={spaceRefId} fallback={plainLabel(children) ?? spaceRefId} />
+    const person = parseMemberWireUrl(url)
+    if (person) return <PersonLinkChip orgAddress={person.orgAddress} memberId={person.memberId} fallback={plainLabel(children) ?? person.memberId} />
+    const messageLink = parseMessageWireUrl(url)
+    if (messageLink) return <MessageLinkChip {...messageLink}>{children}</MessageLinkChip>
     const spaceWire = parseSpaceWireUrl(url)
     if (spaceWire) return <SpaceChip spaceId={spaceWire.spaceId} orgAddress={spaceWire.orgAddress} fallback={plainLabel(children) ?? spaceWire.spaceId} />
     if (url.startsWith('app://space-blob/')) {

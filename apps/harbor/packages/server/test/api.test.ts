@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { ProposeChangeResult } from '@rowboat/spaces-protocol';
+import { memberUrl, messageUrl, parseOrgUrl, spaceUrl, assetUrl, type ProposeChangeResult } from '@rowboat/spaces-protocol';
 import { startHarbor, type RunningHarbor } from '../src/server.js';
 import { liveClient } from './helpers.js';
 
@@ -337,6 +337,52 @@ describe('feed: the stream, threads, and topic annotations', () => {
     spaceId = r.body.space.id;
     const inv = await ramnique.post('/v1/invites', { spaceId });
     await gagan.post('/v1/invites/accept', { token: inv.body.token });
+  });
+
+  it('one message reads by id, folded, and a reply names its thread root — what a message link resolves through', async () => {
+    // Its own space: the feed tests below read this space's stream by position.
+    const links = (await ramnique.post('/v1/spaces', { name: 'Links' })).body.space.id as string;
+    const inv = await ramnique.post('/v1/invites', { spaceId: links });
+    await gagan.post('/v1/invites/accept', { token: inv.body.token });
+    const root = (await ramnique.post(`/v1/spaces/${links}/messages`, { body: 'root for a link', actingMode: 'direct' })).body.message;
+    const reply = (await gagan.post(`/v1/spaces/${links}/messages`, { body: 'a reply', threadRoot: root.id, actingMode: 'direct' })).body.message;
+    await ramnique.post(`/v1/spaces/${links}/messages/${reply.id}/reactions`, { emoji: '👀', action: 'add', actingMode: 'direct' });
+    const r = await gagan.get(`/v1/spaces/${links}/messages/${reply.id}`);
+    expect(r.status).toBe(200);
+    expect(r.body.message).toMatchObject({ id: reply.id, threadRoot: root.id, reactions: [{ emoji: '👀', memberIds: ['ramnique'] }] });
+    expect((await ramnique.get(`/v1/spaces/${links}/messages/${root.id}`)).body.message.threadRoot).toBeUndefined();
+    expect((await ramnique.get(`/v1/spaces/${links}/messages/01JZZZZZZZZZZZZZZZZZZZZZZZ`)).status).toBe(404);
+    const outsider = api('dev-arjun');
+    expect((await outsider.get(`/v1/spaces/${links}/messages/${reply.id}`)).status).toBe(403);
+  });
+
+  it('every org link opened in a browser lands on a hand-off page that deep-links into the app, without looking anything up', async () => {
+    const address = harbor.service.org.address;
+    const cases: Array<[string, string]> = [
+      [spaceUrl(address, spaceId), `spaceId=${spaceId}&org=`],
+      [messageUrl(address, spaceId, '01JZZZZZZZZZZZZZZZZZZZZZZZ'), `messageId=01JZZZZZZZZZZZZZZZZZZZZZZZ&org=`],
+      [assetUrl(address, spaceId, 'A%2Fx'), 'assetId=A%252Fx&org='],
+      [memberUrl(address, 'google|123'), 'memberId=google%7C123&org='],
+    ];
+    for (const [link, expected] of cases) {
+      // The links are minted on the org's public address; the test server answers on its local url.
+      const res = await fetch(link.replace(`https://${address}`, harbor.url));
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toContain('text/html');
+      const html = await res.text();
+      expect(html).toContain('rowboat://open?type=spaces&');
+      expect(html).toContain(expected);
+      expect(html).not.toContain('Feed'); // never the space's name — nothing is looked up
+    }
+    // The one parser reads every one of them back.
+    expect(parseOrgUrl(spaceUrl(address, spaceId))).toEqual({ kind: 'space', orgAddress: address, spaceId });
+    expect(parseOrgUrl(messageUrl(address, spaceId, '01JZZZZZZZZZZZZZZZZZZZZZZZ'))).toEqual({ kind: 'message', orgAddress: address, spaceId, messageId: '01JZZZZZZZZZZZZZZZZZZZZZZZ' });
+    expect(parseOrgUrl(assetUrl(address, spaceId, 'A/x'))).toEqual({ kind: 'asset', orgAddress: address, spaceId, assetId: 'A/x' });
+    expect(parseOrgUrl(memberUrl(address, 'google|123'))).toEqual({ kind: 'member', orgAddress: address, memberId: 'google|123' });
+    expect(parseOrgUrl(`https://${address}/s/${spaceId}/b/${'a'.repeat(64)}`)).toBeNull();
+    expect(parseOrgUrl(`https://${address}/join/tok`)).toBeNull();
+    expect(parseOrgUrl(`https://${address}/s/not-a-ulid`)).toBeNull();
+    expect(parseOrgUrl('not a url')).toBeNull();
   });
 
   it('a new space has an empty stream and no topics — the stream is not an object', async () => {

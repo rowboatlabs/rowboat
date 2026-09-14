@@ -420,6 +420,13 @@ export class SpacesClient {
   }
 
   /** One flat thread: root + topic row (null = plain thread) + windowed replies. A reply id resolves to its root. */
+  /** One message by id, folded — a reply carries its threadRoot. */
+  async getMessage(spaceId: string, messageId: string): Promise<Message> {
+    return (
+      await this.request('GET', this.space(spaceId, `/messages/${encodeURIComponent(messageId)}`), routes.getMessage.response)
+    ).message;
+  }
+
   async listThread(
     spaceId: string,
     rootMessageId: string,

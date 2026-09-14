@@ -1,6 +1,6 @@
 import { WorkspaceSessionTabs } from './components/code/workspace-session-tabs'
 import { DocumentFileViewer } from '@/components/document-file-viewer'
-import { readLastSpace, resolveSpacesLocation } from '@/lib/spaces-navigation'
+import { parseSpacesLink, readLastSpace, resolveSpacesLocation, type SpacesLinkTarget } from '@/lib/spaces-navigation'
 import { noteSpaceVisit } from '@/lib/spaces-visits'
 import * as React from 'react'
 import { Activity, useCallback, useEffect, useLayoutEffect, useMemo, useState, useRef } from 'react'
@@ -749,6 +749,10 @@ function parseDeepLink(input: string): ViewState | null {
     case 'apps':
       return { type: 'apps' }
     case 'spaces': {
+      // Only the orgId form resolves synchronously here (notifications write
+      // it). The org's own landings name the org by ADDRESS and may point at
+      // a file, a person, or a message whose thread is unknown — those go
+      // through openSpacesLink, which looks things up first.
       const orgId = params.get('orgId')
       const spaceId = params.get('spaceId')
       if (orgId && params.get('view') === 'activity') return { type: 'spaces', orgId, view: 'activity' }
@@ -5643,8 +5647,60 @@ function App() {
     void navigateToViewRef.current({ type: 'file', path })
   }, [])
 
+  const openSpacesLink = useCallback(async (target: SpacesLinkTarget) => {
+    if (getSpacesOrgs().length === 0) await refreshSpacesOrgs()
+    const org = getSpacesOrgs().find((o) => o.address === target.orgAddress)
+    if (!org) {
+      toast.error(`Sign in to ${target.orgAddress} to open this link`)
+      void navigateToViewRef.current({ type: 'spaces' })
+      return
+    }
+    try {
+      if (target.memberId) {
+        // A person: their DM, created on first use, then opened.
+        const { space } = await window.ipc.invoke('spaces:openDirect', { orgId: org.id, memberId: target.memberId })
+        await refreshSpacesOrgs()
+        void navigateToViewRef.current({ type: 'spaces', orgId: org.id, spaceId: space.id, rail: { kind: 'general' } })
+        return
+      }
+      if (!target.spaceId) {
+        void navigateToViewRef.current({ type: 'spaces', orgId: org.id, view: 'activity' })
+        return
+      }
+      if (!findSpace(org, target.spaceId)) {
+        toast.error('That link points at a space you are not in')
+        void navigateToViewRef.current({ type: 'spaces', orgId: org.id, view: 'activity' })
+        return
+      }
+      if (target.assetId) {
+        void navigateToViewRef.current({ type: 'spaces', orgId: org.id, spaceId: target.spaceId, rail: { kind: 'file', assetId: target.assetId } })
+        return
+      }
+      if (target.messageId) {
+        // A reply lands in its thread; the org says which one.
+        const { message } = await window.ipc.invoke('spaces:getMessage', { orgId: org.id, spaceId: target.spaceId, messageId: target.messageId })
+        void navigateToViewRef.current({
+          type: 'spaces',
+          orgId: org.id,
+          spaceId: target.spaceId,
+          rail: message.threadRoot ? { kind: 'thread', rootMessageId: message.threadRoot } : { kind: 'general' },
+          messageId: target.messageId,
+        })
+        return
+      }
+      void navigateToViewRef.current({ type: 'spaces', orgId: org.id, spaceId: target.spaceId, rail: { kind: 'general' } })
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not open that link')
+    }
+  }, [])
+
   useEffect(() => {
     const handle = (url: string) => {
+      const link = parseSpacesLink(url)
+      if (link) {
+        void openSpacesLink(link)
+        return
+      }
       const view = parseDeepLink(url)
       if (view) void navigateToViewRef.current(view)
     }
@@ -5652,7 +5708,7 @@ function App() {
       if (url) handle(url)
     })
     return window.ipc.on('app:openUrl', ({ url }) => handle(url))
-  }, [])
+  }, [openSpacesLink])
 
   // "Updated to vX.Y.Z" card on the first launch after an update. Main
   // compares its persisted version stamp against the running version and

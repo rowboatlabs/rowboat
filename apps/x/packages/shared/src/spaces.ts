@@ -313,8 +313,14 @@ export {
   parseMentions,
   relabelMentions,
   MENTION_TOKEN_RE,
+  // The org link grammar (protocol ids.ts): builders and the one parser.
+  spaceUrl,
+  assetUrl,
+  messageUrl,
+  memberUrl,
+  parseOrgUrl,
 } from '@rowboat/spaces-protocol';
-export type { MentionRef, MentionStamps } from '@rowboat/spaces-protocol';
+export type { MentionRef, MentionStamps, OrgLink } from '@rowboat/spaces-protocol';
 
 /** Does the body deliberately address @rowboat — a token, never the bare word (spec §8)? */
 export function containsRowboatAddress(body: string): boolean {
