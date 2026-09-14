@@ -16,6 +16,8 @@ import {
     splitImageEmbeds,
     orgMonogram,
     parseAssetWireUrl,
+    parseMemberWireUrl,
+    parseMessageWireUrl,
     parseBlobAppUrl,
     parseSpaceFileAppUrl,
     parseSpaceMemberAppUrl,
@@ -356,6 +358,21 @@ describe('separateImageParagraphs — old messages get the tile-row layout too',
         expect(separateImageParagraphs(inline)).toBe(inline)
         const fenced = '```\ntext\n![x](y.png)\n```'
         expect(separateImageParagraphs(fenced)).toBe(fenced)
+    })
+})
+
+describe('parseMemberWireUrl / parseMessageWireUrl', () => {
+    it('read the contract\'s person and message links, and only those', () => {
+        expect(parseMemberWireUrl('https://rowboat.team/u/google%7C123')).toEqual({ orgAddress: 'rowboat.team', memberId: 'google|123' })
+        expect(parseMessageWireUrl('https://rowboat.team/s/01HXAMPZESPACE00000000000A/m/01HXAMPZEMSG000000000000A1')).toEqual({
+            orgAddress: 'rowboat.team',
+            spaceId: '01HXAMPZESPACE00000000000A',
+            messageId: '01HXAMPZEMSG000000000000A1',
+        })
+        expect(parseMemberWireUrl('https://rowboat.team/s/01HXAMPZESPACE00000000000A')).toBeNull()
+        expect(parseMessageWireUrl('https://rowboat.team/s/01HXAMPZESPACE00000000000A/a/x')).toBeNull()
+        expect(parseMessageWireUrl('https://rowboat.team/s/01HXAMPZESPACE00000000000A/m/not-a-ulid')).toBeNull()
+        expect(parseMemberWireUrl('https://rowboat.team/u/')).toBeNull()
     })
 })
 

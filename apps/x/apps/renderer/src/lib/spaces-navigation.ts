@@ -58,3 +58,37 @@ export function readLastSpace(): unknown {
     try { return JSON.parse(localStorage.getItem(LAST_SPACE_STORAGE_KEY) ?? 'null') }
     catch { return null }
 }
+
+/**
+ * The org link landings (Harbor http.ts) hand a browser-opened link into the
+ * app as rowboat://open?type=spaces&org=<address>&…: a space, a file in it, a
+ * message in it (root or reply), or a person. What they name is resolved
+ * before navigating — the org by address from the signed-in list, a reply's
+ * thread from the org, a person's DM created on first use.
+ */
+export interface SpacesLinkTarget {
+  orgAddress: string
+  spaceId?: string
+  assetId?: string
+  messageId?: string
+  memberId?: string
+}
+
+export function parseSpacesLink(input: string): SpacesLinkTarget | null {
+  // Some OS handlers normalise the authority form to rowboat://open/?… — the
+  // same tolerance every other rowboat:// parser has.
+  const m = /^rowboat:\/\/open\/?\?(.*)$/.exec(input)
+  if (!m) return null
+  const params = new URLSearchParams(m[1]!)
+  const orgAddress = params.get('org')
+  if (params.get('type') !== 'spaces' || !orgAddress) return null
+  const pick = (k: string) => params.get(k) || undefined
+  const target: SpacesLinkTarget = { orgAddress }
+  const spaceId = pick('spaceId'), assetId = pick('assetId'), messageId = pick('messageId'), memberId = pick('memberId')
+  if (spaceId) target.spaceId = spaceId
+  if (assetId) target.assetId = assetId
+  if (messageId) target.messageId = messageId
+  if (memberId) target.memberId = memberId
+  return target
+}
+

@@ -284,7 +284,7 @@ export function formatBytes(size: number): string {
 // The token → person faces live in @x/shared (the phone renders through the
 // same code); re-exported to keep the renderer's import path.
 export { decorateMentions, resolveMentions } from '@x/shared/dist/spaces.js'
-import { mapMentionTokens } from '@x/shared/dist/spaces.js'
+import { mapMentionTokens, parseOrgUrl } from '@x/shared/dist/spaces.js'
 
 /**
  * Mention tokens → app:// links the space anchor renders as chips (Streamdown's
@@ -324,7 +324,6 @@ export function parseSpaceRefAppUrl(url: string): string | null {
     return m ? decodeURIComponent(m[1]!) : null
 }
 
-const SPACE_WIRE_URL_RE = /^https:\/\/([^/?#]+)\/s\/([0-9A-HJKMNP-TV-Z]{26})\/?$/
 
 /**
  * The contract's canonical link to a SPACE (https://<org>/s/<spaceId>, nothing
@@ -333,8 +332,20 @@ const SPACE_WIRE_URL_RE = /^https:\/\/([^/?#]+)\/s\/([0-9A-HJKMNP-TV-Z]{26})\/?$
  * under the space is not one.
  */
 export function parseSpaceWireUrl(url: string): { orgAddress: string; spaceId: string } | null {
-    const m = SPACE_WIRE_URL_RE.exec(url.split('#')[0]!.split('?')[0]!)
-    return m ? { orgAddress: m[1]!, spaceId: m[2]! } : null
+    const link = parseOrgUrl(url)
+    return link?.kind === 'space' ? { orgAddress: link.orgAddress, spaceId: link.spaceId } : null
+}
+
+/** The contract's link to a PERSON (https://<org>/u/<memberId>) — renders as an @Name chip that opens the DM with them. */
+export function parseMemberWireUrl(url: string): { orgAddress: string; memberId: string } | null {
+    const link = parseOrgUrl(url)
+    return link?.kind === 'member' ? { orgAddress: link.orgAddress, memberId: link.memberId } : null
+}
+
+/** The contract's link to a MESSAGE (https://<org>/s/<spaceId>/m/<messageId>) — "Copy link" writes it; a chip jumps to it. */
+export function parseMessageWireUrl(url: string): { orgAddress: string; spaceId: string; messageId: string } | null {
+    const link = parseOrgUrl(url)
+    return link?.kind === 'message' ? { orgAddress: link.orgAddress, spaceId: link.spaceId, messageId: link.messageId } : null
 }
 
 // ---------------------------------------------------------------------------
@@ -392,18 +403,10 @@ export function assetWireUrl(refs: { orgAddress: string; spaceId: string }, asse
     return `https://${refs.orgAddress}/s/${refs.spaceId}/a/${encodeURIComponent(assetId)}`
 }
 
-const ASSET_WIRE_URL_RE = /^https:\/\/([^/?#]+)\/s\/([0-9A-HJKMNP-TV-Z]{26})\/a\/([^/?#]+)$/
-
 /** A canonical asset link → its org address, space and asset id (any space, any org); null for anything else. */
 export function parseAssetWireUrl(url: string): { orgAddress: string; spaceId: string; assetId: string } | null {
-    const m = ASSET_WIRE_URL_RE.exec(url.split('#')[0]!.split('?')[0]!)
-    if (!m) return null
-    try {
-        const assetId = decodeURIComponent(m[3]!)
-        return assetId ? { orgAddress: m[1]!, spaceId: m[2]!, assetId } : null
-    } catch {
-        return null
-    }
+    const link = parseOrgUrl(url)
+    return link?.kind === 'asset' ? { orgAddress: link.orgAddress, spaceId: link.spaceId, assetId: link.assetId } : null
 }
 
 /**

@@ -495,6 +495,17 @@ export const routes = {
     }),
   },
   /**
+   * One message by id, live-folded (reactions, poll votes) — what a message
+   * link resolves through: a reply names its thread via `threadRoot`, so the
+   * app can land in the thread and scroll to it.
+   */
+  getMessage: {
+    method: 'GET',
+    path: '/v1/spaces/:spaceId/messages/:messageId',
+    params: z.object({ spaceId: SpaceId, messageId: MessageId }),
+    response: z.object({ message: Message }),
+  },
+  /**
    * Post a message: a stream root (no threadRoot) or a reply (threadRoot).
    * Never creates a topic. A reply to an archived topic's thread revives it —
    * the 'unarchived' topic event narrates (Gmail semantics: activity returns

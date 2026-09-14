@@ -3982,6 +3982,11 @@ export const ipcSchemas = {
   },
   // One flat thread: root + topic annotation (null = plain thread) + windowed
   // replies. A reply id resolves to its root on the org.
+  /** One message by id — what a message link resolves through (a reply names its thread root). */
+  'spaces:getMessage': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), messageId: z.string() }),
+    res: z.object({ message: z.custom<SpacesTypes.Message>() }),
+  },
   'spaces:listThread': {
     req: z.object({
       orgId: z.string(),

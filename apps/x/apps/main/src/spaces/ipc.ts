@@ -54,6 +54,7 @@ type SpacesHandlers = {
   'spaces:listTopics': InvokeHandler<'spaces:listTopics'>;
   'spaces:search': InvokeHandler<'spaces:search'>;
   'spaces:listStream': InvokeHandler<'spaces:listStream'>;
+  'spaces:getMessage': InvokeHandler<'spaces:getMessage'>;
   'spaces:listThread': InvokeHandler<'spaces:listThread'>;
   'spaces:postMessage': InvokeHandler<'spaces:postMessage'>;
   'spaces:createTopic': InvokeHandler<'spaces:createTopic'>;
@@ -338,6 +339,10 @@ export const spacesIpcHandlers: SpacesHandlers = {
       ...(args.beforeOffset !== undefined ? { beforeOffset: args.beforeOffset } : {}),
       ...(args.limit !== undefined ? { limit: args.limit } : {}),
     }),
+
+  'spaces:getMessage': async (_event, args) => ({
+    message: await orgs.getClient(args.orgId).getMessage(args.spaceId, args.messageId),
+  }),
 
   'spaces:listThread': async (_event, args) =>
     orgs.getClient(args.orgId).listThread(args.spaceId, args.rootMessageId, {

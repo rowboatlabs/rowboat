@@ -80,7 +80,7 @@ type SpacesRpcChannel =
   | 'spaces:deleteAsset' | 'spaces:restoreAsset' | 'spaces:uploadBlob' | 'spaces:readAsset'
   | 'spaces:proposeChange' | 'spaces:assetHistory' | 'spaces:diff' | 'spaces:listTopics'
   | 'spaces:search'
-  | 'spaces:listStream' | 'spaces:listThread' | 'spaces:linkPreview' | 'spaces:postMessage' | 'spaces:createTopic'
+  | 'spaces:listStream' | 'spaces:getMessage' | 'spaces:listThread' | 'spaces:linkPreview' | 'spaces:postMessage' | 'spaces:createTopic'
   | 'spaces:manageTopic' | 'spaces:reactToMessage'
   | 'spaces:deleteMessage' | 'spaces:editMessage' | 'spaces:votePoll' | 'spaces:endPoll'
   | 'spaces:invokeRowboat' | 'spaces:topicSession' | 'spaces:responseSession' | 'spaces:stopRowboat'
@@ -264,6 +264,10 @@ export const spacesRpcHandlers: SpacesHandlers = {
       ...(args.beforeOffset !== undefined ? { beforeOffset: args.beforeOffset } : {}),
       ...(args.limit !== undefined ? { limit: args.limit } : {}),
     }),
+
+  'spaces:getMessage': async (args) => ({
+    message: await orgs.getClient(args.orgId).getMessage(args.spaceId, args.messageId),
+  }),
 
   'spaces:listThread': async (args) =>
     orgs.getClient(args.orgId).listThread(args.spaceId, args.rootMessageId, {

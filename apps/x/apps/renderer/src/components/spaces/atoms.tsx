@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { AtSign, Copy, Loader2, Mail, MoreHorizontal } from 'lucide-react'
+import { AtSign, Copy, Loader2, Mail, MessageSquare, MoreHorizontal } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -13,6 +13,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useMemberNames, useSpaceProfiles } from '@/components/spaces/member-text'
+import { useSpaceNav, useSpaceRefs } from '@/components/spaces/space-nav'
 import { requestComposeInsert } from '@/lib/spaces-compose'
 import { mentionToken } from '@x/shared/dist/spaces.js'
 import { avatarColorClass, initials, orgMonogram } from '@/lib/spaces-presentation'
@@ -55,6 +56,8 @@ export function MemberAvatar({ id, name, size = 'md', className }: {
 export function MemberProfilePopover({ id, children }: { id: string; children: ReactNode }) {
     const names = useMemberNames()
     const { byId, here, selfId } = useSpaceProfiles()
+    const refs = useSpaceRefs()
+    const nav = useSpaceNav()
     const [open, setOpen] = useState(false)
     const member = byId.get(id)
     const name = member?.displayName ?? names.get(id) ?? id
@@ -71,6 +74,11 @@ export function MemberProfilePopover({ id, children }: { id: string; children: R
         setOpen(false)
         requestComposeInsert(`${mentionToken({ kind: 'member', id, label: name })} `)
     }
+    // The DM with them — the org creates it on first use (the pane navigates).
+    const message = refs && nav?.onOpenDirect ? () => {
+        setOpen(false)
+        nav.onOpenDirect?.(refs.orgId, id)
+    } : null
     return (
         <Popover open={open} onOpenChange={setOpen}>
             <PopoverTrigger asChild>{children}</PopoverTrigger>
@@ -99,6 +107,17 @@ export function MemberProfilePopover({ id, children }: { id: string; children: R
                             <Mail className="size-3 shrink-0" />
                             <span className="truncate select-text">{email}</span>
                         </div>
+                    )}
+                    {id !== selfId && message && (
+                        <button
+                            type="button"
+                            onClick={message}
+                            title="Open your direct message with them"
+                            className="flex items-center gap-2 rounded-md px-1 py-0.5 text-left hover:bg-accent hover:text-foreground"
+                        >
+                            <MessageSquare className="size-3 shrink-0" />
+                            <span className="truncate">Message</span>
+                        </button>
                     )}
                     {id !== selfId && (
                         <button

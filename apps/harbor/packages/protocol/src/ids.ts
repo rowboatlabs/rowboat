@@ -65,14 +65,19 @@ export type StreamOffset = z.infer<typeof StreamOffset>;
  *
  *   space       https://<org>/s/<spaceId>
  *   asset       https://<org>/s/<spaceId>/a/<assetId>
- *   message     https://<org>/s/<spaceId>/m/<messageId>   (a thread's link is its root message's)
+ *   message     https://<org>/s/<spaceId>/m/<messageId>   (a reply's link lands in its thread)
  *   change-set  https://<org>/s/<spaceId>/c/<changeSetId>
  *   blob        https://<org>/s/<spaceId>/b/<blobHash>[?name=<filename>]
+ *   member      https://<org>/u/<memberId>                 (2026-09-14; opens the DM with them)
  *   invite      https://<org>/join/<inviteToken>
  *
- * Blob links are how message bodies reference uploads (`![shot](…/b/<hash>)`);
- * the app resolves them through the authenticated getBlob route. `name` is
- * display-only — storage is content-addressed and never learns filenames.
+ * Things that belong to a space carry the space (its membership is their read
+ * gate, and a reader tells "not mine" from the space alone); a member belongs
+ * to the org. Blob links are how message bodies reference uploads
+ * (`![shot](…/b/<hash>)`); the app resolves them through the authenticated
+ * getBlob route. `name` is display-only — storage is content-addressed and
+ * never learns filenames. Every link opened in a browser lands on the org's
+ * hand-off page, which sends it into the app (http.ts, the landings).
  */
 export function spaceUrl(orgAddress: string, spaceId: SpaceId): string {
   return `https://${orgAddress}/s/${spaceId}`;
@@ -90,6 +95,56 @@ export function blobLinkUrl(orgAddress: string, spaceId: SpaceId, hash: BlobHash
   const query = name ? `?name=${encodeURIComponent(name)}` : '';
   return `${spaceUrl(orgAddress, spaceId)}/b/${hash}${query}`;
 }
+export function memberUrl(orgAddress: string, memberId: MemberId): string {
+  return `https://${orgAddress}/u/${encodeURIComponent(memberId)}`;
+}
 export function inviteUrl(orgAddress: string, token: string): string {
   return `https://${orgAddress}/join/${token}`;
+}
+
+/** What an org link points at — the grammar above, read back. */
+export type OrgLink =
+  | { kind: 'space'; orgAddress: string; spaceId: string }
+  | { kind: 'asset'; orgAddress: string; spaceId: string; assetId: string }
+  | { kind: 'message'; orgAddress: string; spaceId: string; messageId: string }
+  | { kind: 'member'; orgAddress: string; memberId: string };
+
+const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
+
+/**
+ * The one parser for org links (every client, and the org's own landings).
+ * Returns null for anything that is not one of the four kinds above — blob
+ * and change-set links, invites, other hosts, or a trailing path. Query and
+ * fragment are ignored.
+ */
+export function parseOrgUrl(url: string): OrgLink | null {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== 'https:') return null;
+  const orgAddress = u.host;
+  const parts = u.pathname.split('/').filter(Boolean);
+  const dec = (s: string): string | null => {
+    try {
+      return decodeURIComponent(s);
+    } catch {
+      return null;
+    }
+  };
+  if (parts[0] === 'u' && parts.length === 2) {
+    const memberId = dec(parts[1]!);
+    return memberId ? { kind: 'member', orgAddress, memberId } : null;
+  }
+  if (parts[0] !== 's' || !parts[1] || !ULID_RE.test(parts[1])) return null;
+  const spaceId = parts[1];
+  if (parts.length === 2) return { kind: 'space', orgAddress, spaceId };
+  if (parts.length !== 4) return null;
+  const id = dec(parts[3]!);
+  if (!id) return null;
+  if (parts[2] === 'a') return { kind: 'asset', orgAddress, spaceId, assetId: id };
+  if (parts[2] === 'm') return ULID_RE.test(id) ? { kind: 'message', orgAddress, spaceId, messageId: id } : null;
+  return null;
 }

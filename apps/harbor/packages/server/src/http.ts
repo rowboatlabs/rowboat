@@ -213,6 +213,30 @@ export function buildHttpApp(deps: {
     );
   });
 
+  // --- link landings ---------------------------------------------------------
+  // Every org link (ids.ts grammar) opened in a browser lands here and is
+  // handed into the app as a rowboat:// deep link, the org named by its
+  // address. Nothing is looked up and nothing is rendered about the target,
+  // so a link says nothing to someone who cannot open it. The app itself
+  // intercepts these URLs before they ever reach a browser.
+  const landing = (target: URLSearchParams) => {
+    target.set('org', service.org.address);
+    const deep = `rowboat://open?type=spaces&${target.toString()}`;
+    return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Open in Rowboat</title>` +
+      `<style>body{font:15px/1.5 system-ui,sans-serif;margin:0;display:grid;place-items:center;min-height:100vh;color:#222;background:#fafafa}` +
+      `main{text-align:center;padding:2rem}a.b{display:inline-block;margin-top:1rem;padding:.6rem 1.1rem;border-radius:8px;background:#111;color:#fff;text-decoration:none}</style>` +
+      `<main><p>This link opens in Rowboat.</p><a class="b" href="${deep}">Open in Rowboat</a></main>` +
+      `<script>location.replace(${JSON.stringify(deep)})</script>`;
+  };
+  app.get('/s/:spaceId', (c) => c.html(landing(new URLSearchParams({ spaceId: c.req.param('spaceId') }))));
+  app.get('/s/:spaceId/m/:messageId', (c) =>
+    c.html(landing(new URLSearchParams({ spaceId: c.req.param('spaceId'), messageId: c.req.param('messageId') }))),
+  );
+  app.get('/s/:spaceId/a/:assetId', (c) =>
+    c.html(landing(new URLSearchParams({ spaceId: c.req.param('spaceId'), assetId: c.req.param('assetId') }))),
+  );
+  app.get('/u/:memberId', (c) => c.html(landing(new URLSearchParams({ memberId: c.req.param('memberId') }))));
+
   // --- assets ----------------------------------------------------------------
 
   app.get('/v1/spaces/:spaceId/assets', async (c) => {
@@ -370,6 +394,11 @@ export function buildHttpApp(deps: {
       ...(c.req.query('limit') !== undefined ? { limit: c.req.query('limit') } : {}),
     });
     return reply(c, routes.listStream.response, await service.listStream(actor(c), spaceId, q));
+  });
+
+  app.get('/v1/spaces/:spaceId/messages/:messageId', async (c) => {
+    const { spaceId, messageId } = parseWith(routes.getMessage.params, c.req.param());
+    return reply(c, routes.getMessage.response, { message: await service.getMessage(actor(c), spaceId, messageId) });
   });
 
   app.get('/v1/spaces/:spaceId/threads/:rootMessageId', async (c) => {

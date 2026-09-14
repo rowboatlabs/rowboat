@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
-import { resolveSpacesLocation } from './spaces-navigation'
+import { parseSpacesLink, resolveSpacesLocation } from './spaces-navigation'
 
 const orgs = [
     { id: 'first', spaces: [{ id: 'main' }], directs: [] },
@@ -57,5 +57,22 @@ describe('returning to Spaces', () => {
     })
     it('returns no location before joining the first server', () => {
         expect(resolveSpacesLocation([], null)).toBeNull()
+    })
+})
+
+describe('org link landings → app deep links', () => {
+    it('reads the org address and whichever target the landing named', () => {
+        expect(parseSpacesLink('rowboat://open?type=spaces&spaceId=S1&org=acme.rowboat.space')).toEqual({ orgAddress: 'acme.rowboat.space', spaceId: 'S1' })
+        expect(parseSpacesLink('rowboat://open?type=spaces&spaceId=S1&messageId=M1&org=acme.rowboat.space')).toEqual({ orgAddress: 'acme.rowboat.space', spaceId: 'S1', messageId: 'M1' })
+        expect(parseSpacesLink('rowboat://open?type=spaces&spaceId=S1&assetId=A%2Fx&org=acme.rowboat.space')).toEqual({ orgAddress: 'acme.rowboat.space', spaceId: 'S1', assetId: 'A/x' })
+        expect(parseSpacesLink('rowboat://open?type=spaces&memberId=google%7C1&org=acme.rowboat.space')).toEqual({ orgAddress: 'acme.rowboat.space', memberId: 'google|1' })
+        // The trailing-slash authority form some OS handlers hand over.
+        expect(parseSpacesLink('rowboat://open/?type=spaces&spaceId=S1&org=acme.rowboat.space')).toEqual({ orgAddress: 'acme.rowboat.space', spaceId: 'S1' })
+    })
+
+    it('leaves orgId links (notifications) and every other deep link to the plain parser', () => {
+        expect(parseSpacesLink('rowboat://open?type=spaces&orgId=org&spaceId=S1')).toBeNull()
+        expect(parseSpacesLink('rowboat://open?type=file&path=knowledge/a.md')).toBeNull()
+        expect(parseSpacesLink('https://acme.rowboat.space/s/S1')).toBeNull()
     })
 })

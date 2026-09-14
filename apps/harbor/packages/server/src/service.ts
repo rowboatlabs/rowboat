@@ -1133,6 +1133,14 @@ export class HarborService {
     };
   }
 
+  /** One message by id, folded — the read behind a message link. */
+  async getMessage(ctx: ActorCtx, spaceId: string, messageId: string): Promise<Message> {
+    await this.requireMember(ctx, spaceId);
+    const message = await this.store.getMessage(spaceId, messageId);
+    if (!message) throw new HarborError('not_found', 'no such message');
+    return this.foldLive(spaceId, message);
+  }
+
   /** Live folded state onto one message: reactions always, poll votes when a poll rides it. */
   private async foldLive(spaceId: string, message: Message): Promise<Message> {
     const folded: Message = {
