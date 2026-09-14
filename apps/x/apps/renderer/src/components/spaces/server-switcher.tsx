@@ -3,6 +3,7 @@ import { Check, ChevronsUpDown, LogIn, Plus } from 'lucide-react'
 import { AddOrgDialog, OrgMonogram } from '@/components/spaces/atoms'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { getSpacesOrgs, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
+import { serverLandingSpaceId } from '@/lib/spaces-navigation'
 
 export function ServerSwitcher({ org, onOpenSpace, onMenuOpenChange }: {
     org: OrgWithSpaces
@@ -13,7 +14,7 @@ export function ServerSwitcher({ org, onOpenSpace, onMenuOpenChange }: {
     const [menuOpen, setMenuOpen] = useState(false)
     const [action, setAction] = useState<'create' | 'join' | null>(null)
     const openServer = (server: OrgWithSpaces, spaceId?: string) => {
-        onOpenSpace(server.id, spaceId ?? server.spaces[0]?.id ?? server.directs[0]?.id ?? '')
+        onOpenSpace(server.id, spaceId ?? serverLandingSpaceId(server))
     }
 
     return <>

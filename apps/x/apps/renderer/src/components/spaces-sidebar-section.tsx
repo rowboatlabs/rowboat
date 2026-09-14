@@ -16,7 +16,7 @@ import { NewDirectDialog } from '@/components/spaces/new-direct-dialog'
 import { directAvatarId, isSelfDirect, isSelfDirectUnsupported, markSelfDirectUnsupported, selfDirectFailureMessage, selfDirectRefused, spaceDisplayName } from '@/lib/spaces-direct'
 import { prefetchMembers, useSelfDisplayName } from '@/hooks/use-space-members'
 import { isSpaceExpanded, setSpaceExpanded, useSpaceExpansionVersion } from '@/lib/spaces-expansion'
-import { readLastSpace, resolveSpacesLocation } from '@/lib/spaces-navigation'
+import { readLastSpace, resolveSpacesLocation, serverLandingSpaceId } from '@/lib/spaces-navigation'
 import { serverFoldOverride, setServerFoldOverride, useServerFoldVersion } from '@/lib/spaces-sidebar-fold'
 import { spaceVisitedAt, useSpaceVisitsVersion } from '@/lib/spaces-visits'
 import { ITEMS_PER_SERVER, resolveExpanded, selectServerItems, serverItems, sumBadges, type WorkingSetItem } from '@/lib/spaces-working-set'
@@ -112,20 +112,33 @@ function ServerWorkingSet({ org, unread, active, currentItemId, onOpenSpace }: {
     const badge = sumBadges(items)
     return <>
         <SidebarMenuItem>
-            <SidebarMenuButton
-                className="h-7 text-[13px]"
-                aria-expanded={expanded}
-                title={`${expanded ? 'Collapse' : 'Expand'} ${org.name}`}
-                onClick={() => setServerFoldOverride(org.id, !expanded)}
-            >
-                <ChevronRight className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', expanded && 'rotate-90')} />
-                <span className={cn('flex-1 truncate',
-                    currentItemId || (!expanded && badge.unread > 0) ? 'font-medium text-sidebar-foreground' : 'font-normal text-muted-foreground')}>
-                    {org.name}
-                </span>
-                {/* Closed, the header carries its items' badges; open, each row carries its own. */}
-                {!expanded && <UnreadBadge badge={badge} />}
-            </SidebarMenuButton>
+            {/* Two targets, one row: the chevron folds the list under it, the
+                name opens the server. Neither does the other's job. */}
+            <div className="flex items-center">
+                <button
+                    type="button"
+                    aria-expanded={expanded}
+                    aria-label={`${expanded ? 'Collapse' : 'Expand'} ${org.name}`}
+                    title={`${expanded ? 'Collapse' : 'Expand'} ${org.name}`}
+                    className="ml-1.5 shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                    onClick={() => setServerFoldOverride(org.id, !expanded)}
+                >
+                    <ChevronRight className={cn('size-3.5 transition-transform', expanded && 'rotate-90')} />
+                </button>
+                <SidebarMenuButton
+                    className="group/server h-7 min-w-0 flex-1 pl-1.5 text-[13px]"
+                    title={`Open ${org.name}`}
+                    onClick={() => onOpenSpace(org.id, serverLandingSpaceId(org))}
+                >
+                    {/* The name is a link, so hovering it brightens as well as washes. */}
+                    <span className={cn('flex-1 truncate group-hover/server:text-sidebar-accent-foreground',
+                        currentItemId || (!expanded && badge.unread > 0) ? 'font-medium text-sidebar-foreground' : 'font-normal text-muted-foreground')}>
+                        {org.name}
+                    </span>
+                    {/* Closed, the header carries its items' badges; open, each row carries its own. */}
+                    {!expanded && <UnreadBadge badge={badge} />}
+                </SidebarMenuButton>
+            </div>
         </SidebarMenuItem>
         {rows.map((item) => <WorkingSetRow key={item.id} orgId={org.id} item={item}
             active={active && item.id === currentItemId} onOpenSpace={onOpenSpace} />)}
