@@ -615,6 +615,7 @@ export function QuickAskBar() {
           onCollapse={() => requestCollapsed(true)}
           composer={
             <ChatInputWithMentions
+              showModelSelector={false}
               knowledgeFiles={knowledgeFiles}
               recentFiles={[]}
               visibleFiles={knowledgeFiles}
@@ -928,6 +929,7 @@ export function QuickAskBar() {
               around it stays a grab handle. */}
           <div style={noDragRegion}>
             <ChatInputWithMentions
+              showModelSelector={false}
               knowledgeFiles={knowledgeFiles}
               recentFiles={[]}
               visibleFiles={knowledgeFiles}
