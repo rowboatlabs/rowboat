@@ -1,9 +1,28 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { spaces } from '@x/shared'
 import { AttachmentColumn, BlobImage, SpaceAssetsProvider, SpaceMarkdown, SpaceNavProvider, SpaceRefsProvider } from './space-markdown'
+import { SpaceMembersProvider, SpaceProfilesProvider } from './member-text'
 import { assetWireUrl, blobWireUrl } from '@/lib/spaces-presentation'
 
 const refs = { orgId: 'org', spaceId: '01ARZ3NDEKTSV4RRFFQ69G5FAV', orgAddress: 'spaces.example.com' }
+const OTHER_SPACE = '01ARZ3NDEKTSV4RRFFQ69G5FB0'
+// The reader's own org listing — what a space chip resolves its name through.
+const { listing } = vi.hoisted(() => ({
+    listing: {
+        id: 'org', name: 'Org', address: 'spaces.example.com', baseUrl: 'https://spaces.example.com', memberId: 'me', authKind: 'dev',
+        spaces: [
+            { id: '01ARZ3NDEKTSV4RRFFQ69G5FAV', name: 'General', createdAt: '', kind: 'shared' },
+            { id: '01ARZ3NDEKTSV4RRFFQ69G5FB0', name: 'Design', createdAt: '', kind: 'shared' },
+        ],
+        directs: [{ id: '01ARZ3NDEKTSV4RRFFQ69G5FC0', name: 'direct', createdAt: '', kind: 'direct' }],
+        directLabels: { '01ARZ3NDEKTSV4RRFFQ69G5FC0': 'Harsh' },
+    },
+}))
+vi.mock('@/hooks/use-spaces', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('@/hooks/use-spaces')>()),
+    useSpacesOrgs: () => ({ orgs: [listing], loading: false, refresh: async () => {} }),
+}))
 const firstHash = 'a'.repeat(64)
 const secondHash = 'b'.repeat(64)
 const body = `Photos\n\n![First](${blobWireUrl(refs, firstHash, 'first.png')})\n\n![Second](${blobWireUrl(refs, secondHash, 'second.png')})\n\n![Third](https://example.com/third.png)`
@@ -242,12 +261,73 @@ describe.each(['carousel', 'standalone'] as const)('%s image preview actions', (
 })
 
 
+// Space references (2026-09-14): a `[#Name](#space:<id>)` token, or the
+// contract's canonical https://<org>/s/<spaceId> link, renders as a chip named
+// from the reader's OWN listing and opens the space; one they are not in
+// renders muted.
+describe('Space chips', () => {
+    function mount(body: string, nav: Partial<Parameters<typeof SpaceNavProvider>[0]> = {}) {
+        const onOpenSpace = vi.fn()
+        render(
+            <SpaceRefsProvider refs={refs}>
+                <SpaceNavProvider onOpenFile={vi.fn()} onOpenSpace={onOpenSpace} {...nav}>
+                    <SpaceMarkdown body={body} />
+                </SpaceNavProvider>
+            </SpaceRefsProvider>,
+        )
+        return { onOpenSpace }
+    }
+
+    it('renders a space token as a #Name chip named from the listing, and opens the space on click', async () => {
+        const { onOpenSpace } = mount(`moved to [#design-old](#space:${OTHER_SPACE})`)
+        const chip = await screen.findByRole('button', { name: '#Design' })
+        fireEvent.click(chip)
+        expect(onOpenSpace).toHaveBeenCalledWith('org', OTHER_SPACE)
+        expect(screen.queryByText('#design-old')).not.toBeInTheDocument()
+    })
+
+    it('names a DM by the other person', async () => {
+        mount('see [#dm](#space:01ARZ3NDEKTSV4RRFFQ69G5FC0)')
+        expect(await screen.findByRole('button', { name: '#Harsh' })).toBeInTheDocument()
+    })
+
+    it('renders a space the reader is not in muted, with the token\u2019s label', async () => {
+        const { onOpenSpace } = mount('see [#secret](#space:01ARZ3NDEKTSV4RRFFQ69G5FZZ)')
+        const muted = await screen.findByText('#secret')
+        expect(muted).toHaveAttribute('title', 'Not available to you')
+        expect(screen.queryByRole('button', { name: '#secret' })).not.toBeInTheDocument()
+        expect(onOpenSpace).not.toHaveBeenCalled()
+    })
+
+    it('renders the canonical space URL as the same chip — and muted for an org the reader is not on', async () => {
+        const { onOpenSpace } = mount(`see https://spaces.example.com/s/${OTHER_SPACE} and https://elsewhere.example.com/s/${OTHER_SPACE}`)
+        fireEvent.click(await screen.findByRole('button', { name: '#Design' }))
+        expect(onOpenSpace).toHaveBeenCalledWith('org', OTHER_SPACE)
+        expect(screen.getByText(`https://elsewhere.example.com/s/${OTHER_SPACE}`)).toHaveAttribute('title', 'Not available to you')
+        expect(screen.queryByRole('link')).not.toBeInTheDocument()
+    })
+
+    it('a member token for an org member outside this space is a clickable chip once the providers carry the org roster', async () => {
+        const outside = { id: '01HOUTSIDE', displayName: 'Outside Person', role: 'member' } as unknown as spaces.Member
+        render(
+            <SpaceMembersProvider members={new Map([[outside.id, outside.displayName]])}>
+                <SpaceProfilesProvider members={[outside]} here={new Set()} selfId="me">
+                    <SpaceRefsProvider refs={refs}>
+                        <SpaceMarkdown body={`ask [@O](#member:${outside.id})`} />
+                    </SpaceRefsProvider>
+                </SpaceProfilesProvider>
+            </SpaceMembersProvider>,
+        )
+        fireEvent.click(await screen.findByRole('button', { name: '@Outside Person' }))
+        expect(await screen.findByRole('dialog')).toHaveTextContent('Outside Person')
+    })
+})
+
 // File links (2026-09-14): a file is named by its asset id. The canonical
 // https link carries the id for any space; a relative link in a message
 // resolves through the space's listing at render time.
 describe('Space file links', () => {
     const ASSET = '01HXAMPLEASSET0000000000A1'
-    const OTHER_SPACE = '01ARZ3NDEKTSV4RRFFQ69G5FB0'
     const entries = [
         { id: ASSET, path: 'decisions/sso.md', version: 2, updatedAt: '' },
         { id: 'A-gone', path: 'old.md', version: 1, updatedAt: '', state: 'deleted' as const },

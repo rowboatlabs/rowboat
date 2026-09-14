@@ -23,6 +23,11 @@ afterEach(() => {
     editors = []
 })
 
+/** A Backspace keydown at the caret — ProseMirror deletes an atom before the caret itself (no native editing in jsdom). */
+function backspace(editor: Editor): void {
+    editor.view.dom.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', keyCode: 8, bubbles: true, cancelable: true }))
+}
+
 describe('markdown round trip', () => {
     const cases: [string, string][] = [
         ['plain text', 'hello world'],
@@ -43,6 +48,7 @@ describe('markdown round trip', () => {
         ['member mention token', '[@Ada Lovelace](#member:01HADA) can you look?'],
         ['here token', 'standup [@here](#here)'],
         ['rowboat token', '[@rowboat](#rowboat) summarise this'],
+        ['space token', 'see [#General](#space:01HSPACEGENERAL0000000000) for that'],
     ]
     it.each(cases)('%s', (_name, md) => {
         expect(composerMarkdown(makeEditor(md))).toBe(md)
@@ -103,6 +109,29 @@ describe('formatting commands produce wire markdown', () => {
             { kind: 'rowboat', id: null, label: 'rowboat' },
         ])
         expect(composerMarkdown(editor)).toBe(body)
+    })
+
+    it('a space token is ONE atom node showing #Name, serialized back to the same token', () => {
+        const body = 'moved to [#General](#space:01HSPACEGENERAL0000000000) today'
+        const editor = makeEditor(body)
+        const mentions: Array<{ kind: string; id: string | null; label: string }> = []
+        editor.state.doc.descendants((node) => {
+            if (node.type.name === 'mention') mentions.push(node.attrs as { kind: string; id: string | null; label: string })
+        })
+        expect(mentions).toEqual([{ kind: 'space', id: '01HSPACEGENERAL0000000000', label: 'General' }])
+        expect(editor.view.dom.querySelector('[data-mention="space"]')?.textContent).toBe('#General')
+        expect(composerMarkdown(editor)).toBe(body)
+    })
+
+    it('a space pill goes in one backspace, like a member pill', () => {
+        const spacePill = makeEditor('see [#General](#space:01HSPACEGENERAL0000000000)')
+        spacePill.commands.focus('end')
+        backspace(spacePill)
+        expect(composerMarkdown(spacePill)).toBe('see ')
+        const memberPill = makeEditor('hey [@Ada](#member:01HADA)')
+        memberPill.commands.focus('end')
+        backspace(memberPill)
+        expect(composerMarkdown(memberPill)).toBe('hey ')
     })
 
     it('Shift+Enter serializes as a newline, never a backslash escape', () => {

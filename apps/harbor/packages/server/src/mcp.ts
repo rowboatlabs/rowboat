@@ -196,9 +196,10 @@ async function dispatch(
         limit: a.limit ?? 50,
       });
       const names = await rosterNames(service, ctx, a.spaceId);
+      const spaceNames = await spaceNamesFor(service, ctx);
       // Truncation is stated, never silent: the tool description tells the
       // agent to page back with beforeOffset before summarising.
-      return { messages: messages.map((m) => relabel(m, names)), topics, truncated: hasMore };
+      return { messages: messages.map((m) => relabel(m, names, spaceNames)), topics, truncated: hasMore };
     }
     case 'read_thread': {
       const a = args as { spaceId: string; rootMessageId: string; beforeOffset?: number; limit?: number };
@@ -207,7 +208,8 @@ async function dispatch(
         limit: a.limit ?? 50,
       });
       const names = await rosterNames(service, ctx, a.spaceId);
-      return { root: relabel(root, names), topic, messages: messages.map((m) => relabel(m, names)), truncated: hasMore };
+      const spaceNames = await spaceNamesFor(service, ctx);
+      return { root: relabel(root, names, spaceNames), topic, messages: messages.map((m) => relabel(m, names, spaceNames)), truncated: hasMore };
     }
     case 'read_activity': {
       const a = args as { kinds?: ActivityKind[]; spaceId?: string; unread?: boolean; cursor?: string; limit?: number };
@@ -221,10 +223,11 @@ async function dispatch(
       // The page names everyone on it: every body relabelled, every actor
       // named, so the agent never looks up a name to say who wanted their person.
       const names = new Map(Object.entries(page.names));
+      const spaceNames = await spaceNamesFor(service, ctx);
       return {
         items: page.items.map((item: ActivityItem) => ({
           ...item,
-          message: relabel(item.message, names),
+          message: relabel(item.message, names, spaceNames),
           actors: item.actors.map((actor) => ({ ...actor, displayName: names.get(actor.memberId) ?? actor.memberId })),
         })),
         truncated: page.nextCursor !== undefined,
@@ -423,6 +426,15 @@ async function rosterNames(service: HarborService, ctx: ActorCtx, spaceId: strin
   return new Map((await service.listMembers(ctx, spaceId)).map((m) => [m.id, m.displayName]));
 }
 
-function relabel(message: Message, names: ReadonlyMap<string, string>): Message {
-  return { ...message, body: relabelMentions(message.body, names) };
+/**
+ * Space tokens relabel from the caller's own listing; a space they are not in
+ * keeps its label, and so does a DM — its stored name is a placeholder, the
+ * person is the name, and only the client knows how to say that.
+ */
+async function spaceNamesFor(service: HarborService, ctx: ActorCtx): Promise<Map<string, string>> {
+  return new Map((await service.listSpaces(ctx)).map((s) => [s.id, s.name]));
+}
+
+function relabel(message: Message, names: ReadonlyMap<string, string>, spaceNames?: ReadonlyMap<string, string>): Message {
+  return { ...message, body: relabelMentions(message.body, names, spaceNames) };
 }

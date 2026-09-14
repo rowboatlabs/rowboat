@@ -288,12 +288,14 @@ import { mapMentionTokens } from '@x/shared/dist/spaces.js'
 
 /**
  * Mention tokens → app:// links the space anchor renders as chips (Streamdown's
- * URL hardening would strip a bare `#member:` fragment href). Code regions
- * stay literal — the grammar's walker skips them.
+ * URL hardening would strip a bare `#member:` fragment href). A space token
+ * keeps its `#` sigil in the label. Code regions stay literal — the grammar's
+ * walker skips them.
  */
 export function rewriteMentionLinks(body: string): string {
     return mapMentionTokens(body, (ref) => {
         if (ref.kind === 'member') return `[@${ref.label}](${spaceMemberAppUrl(ref.id)})`
+        if (ref.kind === 'space') return `[#${ref.label}](${spaceRefAppUrl(ref.id)})`
         return `[@${ref.kind}](${ref.kind === 'here' ? HERE_APP_URL : ROWBOAT_APP_URL})`
     })
 }
@@ -309,6 +311,30 @@ export function spaceMemberAppUrl(memberId: string): string {
 export function parseSpaceMemberAppUrl(url: string): string | null {
     const m = /^app:\/\/space-member\/([^/?#]+)$/.exec(url)
     return m ? decodeURIComponent(m[1]!) : null
+}
+
+/** The render form of a space token: a chip that opens the space (on the org the body is read in). */
+export function spaceRefAppUrl(spaceId: string): string {
+    return `app://space-ref/${encodeURIComponent(spaceId)}`
+}
+
+/** The space id behind a rewritten space token, or null for any other URL. */
+export function parseSpaceRefAppUrl(url: string): string | null {
+    const m = /^app:\/\/space-ref\/([^/?#]+)$/.exec(url)
+    return m ? decodeURIComponent(m[1]!) : null
+}
+
+const SPACE_WIRE_URL_RE = /^https:\/\/([^/?#]+)\/s\/([0-9A-HJKMNP-TV-Z]{26})\/?$/
+
+/**
+ * The contract's canonical link to a SPACE (https://<org>/s/<spaceId>, nothing
+ * after) — what an agent or another client writes to point at a space; it
+ * renders as the same chip a space token does. A file, message or blob link
+ * under the space is not one.
+ */
+export function parseSpaceWireUrl(url: string): { orgAddress: string; spaceId: string } | null {
+    const m = SPACE_WIRE_URL_RE.exec(url.split('#')[0]!.split('?')[0]!)
+    return m ? { orgAddress: m[1]!, spaceId: m[2]! } : null
 }
 
 // ---------------------------------------------------------------------------

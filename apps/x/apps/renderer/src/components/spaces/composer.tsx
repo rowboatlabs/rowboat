@@ -3,7 +3,6 @@ import { EditorContent, useEditor } from '@tiptap/react'
 import type { EditorView } from '@tiptap/pm/view'
 import { uploadInputFor } from '@/lib/spaces-upload'
 import { ArrowUp, BarChart3, Clock, FileText, Globe, Loader2, LoaderIcon, Mic, Paperclip, ShieldCheck, Square, Terminal, X as XIcon } from 'lucide-react'
-import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
@@ -27,9 +26,10 @@ import { blobAppUrl, blobWireUrl, formatBytes, isImageMime } from '@/lib/spaces-
 import { toast } from '@/lib/toast'
 
 // The space composer. A plain message box — Enter sends, Shift+Enter breaks a
-// line — with two things layered on: `@` autocompletes members, @here (notify
-// everyone online), @rowboat, and — once a query exists — space files (picked
-// files land as plain markdown links),
+// line — with two things layered on: `@` autocompletes the org's people,
+// @here (notify everyone online), @rowboat, the org's spaces (#Name
+// references) and — once a query exists — files from every shared space
+// (picked files land as plain markdown links),
 // and the moment the draft addresses @rowboat, a strip of agent options
 // (model · permissions · search · terminal) appears; they ride along with the
 // invocation for that one turn. The message itself always goes to the team.
@@ -96,7 +96,7 @@ async function formatTranscript(raw: string): Promise<string> {
     }
 }
 
-export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, autoFocus, onType, seed, members = [], entries = [], selfMemberId, draftKey, commands = [] }: {
+export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, autoFocus, onType, seed, draftKey, commands = [] }: {
     placeholder: string
     onSend: (body: string, agent?: AgentOptions) => Promise<void>
     /** Send-later: the clock menu hands the built body + fire time here. */
@@ -109,11 +109,6 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     onType?: () => void
     /** Prefill (e.g. "Ask @rowboat about this"); a new nonce re-applies it. `append` adds to the draft instead of replacing it. */
     seed?: { text: string; nonce: number; append?: boolean } | null
-    /** Space members, for @ autocomplete. */
-    members?: spaces.Member[]
-    /** Space files — the same @ autocomplete offers them; picking one links it. */
-    entries?: spaces.SpacesAssetEntry[]
-    selfMemberId?: string
     /**
      * Persist the unsent text under this key (per install, like read marks) —
      * switching spaces or restarting the app hands the draft back. Sending
@@ -301,10 +296,11 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
 
     // --- @ autocomplete ------------------------------------------------------
     // The shared hook (same popup the inline message editor uses) — it rides
-    // the editor's own events, so no wiring through onUpdate here. The menu
-    // portals out and measures against the box, hence the element in state.
+    // the editor's own events and reads its sources off the pane's refs, so
+    // no wiring through onUpdate or props here. The menu portals out and
+    // measures against the box, hence the element in state.
     const [box, setBox] = useState<HTMLDivElement | null>(null)
-    const mention = useMentionAutocomplete(editor, { members, entries, refs, ...(selfMemberId ? { selfMemberId } : {}) })
+    const mention = useMentionAutocomplete(editor)
     const showMentions = mention.show
 
     // --- :emoji: autocomplete ------------------------------------------------

@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
-import { getSpaceFeed, getSpacesOrgs } from '@/hooks/use-spaces'
+import { getSpaceFeed, getSpacesOrgs, useSpaceNames } from '@/hooks/use-spaces'
 import { resolveMentions } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
 
@@ -36,6 +36,7 @@ export function ForwardDialog({ org, space, message, memberNames, onClose }: {
     const [comment, setComment] = useState('')
     const [picked, setPicked] = useState<Destination | null>(null)
     const [sending, setSending] = useState(false)
+    const spaceNames = useSpaceNames(org.id)
 
     const destinations = useMemo<Destination[]>(() => {
         // Straight off the feed store — every known space's topics are kept
@@ -50,7 +51,7 @@ export function ForwardDialog({ org, space, message, memberNames, onClose }: {
                 orgId: org.id,
                 spaceId: space.id,
                 threadRootId: t.rootMessageId,
-                label: resolveMentions(t.title, memberNames),
+                label: resolveMentions(t.title, memberNames, spaceNames),
                 sub: space.name,
                 kind: 'topic',
             })
@@ -62,7 +63,7 @@ export function ForwardDialog({ org, space, message, memberNames, onClose }: {
             }
         }
         return out
-    }, [org.id, org.name, space.id, space.name, memberNames])
+    }, [org.id, org.name, space.id, space.name, memberNames, spaceNames])
 
     const q = query.trim().toLowerCase()
     const shown = q ? destinations.filter((d) => `${d.label} ${d.sub}`.toLowerCase().includes(q)) : destinations
@@ -73,7 +74,7 @@ export function ForwardDialog({ org, space, message, memberNames, onClose }: {
         try {
             const cross = picked.orgId !== org.id || picked.spaceId !== space.id
             const authorName = memberNames.get(message.author.memberId) ?? message.author.memberId
-            let text = resolveMentions(message.body, memberNames).trim()
+            let text = resolveMentions(message.body, memberNames, spaceNames).trim()
             let stripped = false
             if (cross) {
                 // Blob links only resolve inside their own space — a forward

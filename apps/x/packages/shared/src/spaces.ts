@@ -323,17 +323,21 @@ export function containsRowboatAddress(body: string): boolean {
 
 /**
  * For markdown surfaces without the chip renderer (the phone): tokens become
- * "**@Name**". Ids resolve through the roster; an id the roster no longer
- * knows keeps the token's label.
+ * "**@Name**" / "**#Space**". Ids resolve through the roster (and the space
+ * listing, when given); an id the maps no longer know keeps the token's label.
  */
-export function decorateMentions(body: string, memberNames: ReadonlyMap<string, string>): string {
-  return mapMentionTokens(body, (ref) => `**@${ref.kind === 'member' ? (memberNames.get(ref.id) ?? ref.label) : ref.kind}**`);
+export function decorateMentions(body: string, memberNames: ReadonlyMap<string, string>, spaceNames?: ReadonlyMap<string, string>): string {
+  return mapMentionTokens(body, (ref) => {
+    if (ref.kind === 'member') return `**@${memberNames.get(ref.id) ?? ref.label}**`;
+    if (ref.kind === 'space') return `**#${spaceNames?.get(ref.id) ?? ref.label}**`;
+    return `**@${ref.kind}**`;
+  });
 }
 
 /**
  * For plain-text surfaces (titles, crumbs, quotes, forwards, copied text,
- * notification bodies): tokens become "@Name", no markup.
+ * notification bodies): tokens become "@Name" / "#Space", no markup.
  */
-export function resolveMentions(body: string, memberNames: ReadonlyMap<string, string>): string {
-  return mentionsAsText(body, memberNames);
+export function resolveMentions(body: string, memberNames: ReadonlyMap<string, string>, spaceNames?: ReadonlyMap<string, string>): string {
+  return mentionsAsText(body, memberNames, spaceNames);
 }

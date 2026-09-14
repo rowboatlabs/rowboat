@@ -304,6 +304,17 @@ export function CommandPalette({ open, onOpenChange, chats, notes, defaultScope,
     for (const [orgId, members] of rosters) out.set(orgId, new Map(members.map((m) => [m.id, m.displayName])))
     return out
   }, [rosters])
+  // Each org's space names, for the `#Name` face of a space token in a snippet.
+  const spaceNames = useMemo(() => {
+    const out = new Map<string, ReadonlyMap<string, string>>()
+    for (const org of orgs) {
+      out.set(org.id, new Map([
+        ...org.spaces.map((s): [string, string] => [s.id, s.name]),
+        ...org.directs.map((d): [string, string] => [d.id, org.directLabels[d.id] ?? d.name]),
+      ]))
+    }
+    return out
+  }, [orgs])
 
   // When each space was last opened here. The log exposes a version, not a
   // value: bind the lookup to it so a visit yields a new lookup and the rows
@@ -608,7 +619,7 @@ export function CommandPalette({ open, onOpenChange, chats, notes, defaultScope,
         icon: MessageSquare,
         title: hit.author.agentName ? `${author} · ${hit.author.agentName}` : author,
         subtitle: `${space.direct ? space.name : `#${space.name}`}${hit.topicTitle ? ` › ${hit.topicTitle}` : ''}`,
-        detail: highlight(resolveMentions(hit.snippet, roster), terms),
+        detail: highlight(resolveMentions(hit.snippet, roster, spaceNames.get(space.orgId)), terms),
         aside: formatFeedTime(hit.postedAt),
         dest: {
           kind: 'space',
@@ -689,7 +700,7 @@ export function CommandPalette({ open, onOpenChange, chats, notes, defaultScope,
       { heading: 'In chats', rows: transcripts },
       { heading: 'In code chats', rows: codeTranscripts },
     ].filter((g) => g.rows.length > 0)
-  }, [navGroups, spaceHits, rosterNames, content, terms, scope, codeIds])
+  }, [navGroups, spaceHits, rosterNames, spaceNames, content, terms, scope, codeIds])
 
   const groups = [...navGroups.filter((g) => g.rows.length > 0), ...contentGroups]
   const count = groups.reduce((n, g) => n + g.rows.length, 0)

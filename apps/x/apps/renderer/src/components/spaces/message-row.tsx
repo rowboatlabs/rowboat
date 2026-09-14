@@ -132,10 +132,12 @@ export interface ThreadRowData {
 }
 
 function MessageRowImpl({
-    message, memberNames, continuation, thread, onOpenThread, onPrefetchThread, onOpenAgentChat, onOpenResponseChat, onStopAgent, onReplyInThread, onAskRowboat, onCopyLink, onReact, onDelete, onEdit, onQuoteReply, onForward, onToggleSave, saved, onRetryFailed, onDiscardFailed, onVotePoll, onRemovePollVote, onEndPoll, dense, selfMemberId,
+    message, memberNames, spaceNames, continuation, thread, onOpenThread, onPrefetchThread, onOpenAgentChat, onOpenResponseChat, onStopAgent, onReplyInThread, onAskRowboat, onCopyLink, onReact, onDelete, onEdit, onQuoteReply, onForward, onToggleSave, saved, onRetryFailed, onDiscardFailed, onVotePoll, onRemovePollVote, onEndPoll, dense, selfMemberId,
 }: {
     message: spaces.Message & { pending?: boolean; failed?: boolean }
     memberNames: Map<string, string>
+    /** Space id → current name (useSpaceNames) — the `#Name` face of a space token in copied text. */
+    spaceNames?: ReadonlyMap<string, string>
     /** Names the viewer's own agent "Your Rowboat" on thread rows. */
     selfMemberId?: string
     continuation: boolean
@@ -245,7 +247,7 @@ function MessageRowImpl({
     // What "Copy message" copies: mentions resolved to names, image embeds
     // dropped — their app:// addresses mean nothing outside the app. Empty
     // (image-only message, tombstone) hides the item.
-    const messageText = deleted || unconfirmed ? '' : resolveMentions(message.body, memberNames).replace(/!\[[^\]]*\]\([^)]*\)/g, '').trim()
+    const messageText = deleted || unconfirmed ? '' : resolveMentions(message.body, memberNames, spaceNames).replace(/!\[[^\]]*\]\([^)]*\)/g, '').trim()
     // The selection as it stood when the context menu opened (opening keeps it).
     const [selectionText, setSelectionText] = useState('')
     const copyToClipboard = (text: string) => {
@@ -692,6 +694,7 @@ export const MessageRow = memo(MessageRowImpl, (prev: MessageRowProps, next: Mes
     prev.dense === next.dense &&
     prev.saved === next.saved &&
     prev.memberNames === next.memberNames &&
+    prev.spaceNames === next.spaceNames &&
     threadRowEqual(prev.thread, next.thread),
 )
 

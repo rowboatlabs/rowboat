@@ -19,6 +19,8 @@ import {
     parseBlobAppUrl,
     parseSpaceFileAppUrl,
     parseSpaceMemberAppUrl,
+    parseSpaceRefAppUrl,
+    parseSpaceWireUrl,
     rewriteMentionLinks,
     resolveMentions,
     resolveSpaceLink,
@@ -244,6 +246,25 @@ describe('mentions — tokens carry ids, the roster supplies names', () => {
         expect(rewriteMentionLinks('`' + tok('x', 'X') + '` stays')).toBe('`' + tok('x', 'X') + '` stays')
         expect(parseSpaceMemberAppUrl('app://space-member/01HXAMPLEULIDHARSH000000')).toBe('01HXAMPLEULIDHARSH000000')
         expect(parseSpaceMemberAppUrl('app://space-file/o/s/a.md')).toBeNull()
+    })
+
+    it('a space token maps to its own app link, keeping the # sigil; a mismatched sigil is prose', () => {
+        expect(rewriteMentionLinks('moved to [#General](#space:01HXAMPZESPACE00000000000A) — ask [@Harsh](#member:01HXAMPLEULIDHARSH000000)'))
+            .toBe('moved to [#General](app://space-ref/01HXAMPZESPACE00000000000A) — ask [@Harsh](app://space-member/01HXAMPLEULIDHARSH000000)')
+        // The grammar pairs the sigil with the href kind: neither of these is a token.
+        for (const prose of ['[#word](#member:x)', '[@x](#space:01HXAMPZESPACE00000000000A)']) expect(rewriteMentionLinks(prose)).toBe(prose)
+        expect(parseSpaceRefAppUrl('app://space-ref/01HXAMPZESPACE00000000000A')).toBe('01HXAMPZESPACE00000000000A')
+        expect(parseSpaceRefAppUrl('app://space-member/01HXAMPLEULIDHARSH000000')).toBeNull()
+        expect(resolveMentions('see [#General](#space:S1) and [#Old](#space:S9)', names, new Map([['S1', 'general-chat']]))).toBe('see #general-chat and #Old')
+    })
+
+    it('parseSpaceWireUrl takes the canonical space link and nothing under it', () => {
+        expect(parseSpaceWireUrl('https://rowboat.team/s/01HXAMPZESPACE00000000000A')).toEqual({ orgAddress: 'rowboat.team', spaceId: '01HXAMPZESPACE00000000000A' })
+        expect(parseSpaceWireUrl('https://rowboat.team/s/01HXAMPZESPACE00000000000A/')?.spaceId).toBe('01HXAMPZESPACE00000000000A')
+        expect(parseSpaceWireUrl('https://rowboat.team/s/01HXAMPZESPACE00000000000A/a/01HXAMPLEASSET0000000000A1')).toBeNull()
+        expect(parseSpaceWireUrl('https://rowboat.team/s/01HXAMPZESPACE00000000000A/m/01HXAMPLEMSG00000000000001')).toBeNull()
+        expect(parseSpaceWireUrl('https://rowboat.team/s/not-a-space')).toBeNull()
+        expect(parseSpaceWireUrl('http://rowboat.team/s/01HXAMPZESPACE00000000000A')).toBeNull()
     })
 })
 

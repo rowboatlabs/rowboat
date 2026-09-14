@@ -25,9 +25,9 @@ import { SpaceSearch } from '@/components/spaces/space-search'
 import { railKey, type RailSelection } from '@/lib/spaces-selection'
 import { ThreadPane } from '@/components/spaces/thread-pane'
 import { STREAM_READ_KEY, useSpacePresence, useStream } from '@/hooks/use-space-chat'
-import { refreshMembers, useSpaceMembers } from '@/hooks/use-space-members'
-import { findSpace, useSpaceFeed, useSpaceLive, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
-import { noteBoardsFromEntries } from '@/hooks/use-space-boards'
+import { refreshMembers, useOrgRoster, useSpaceMembers } from '@/hooks/use-space-members'
+import { findSpace, useSpaceFeed, useSpaceLive, useSpaceNames, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
+import { noteListingFromEntries } from '@/hooks/use-space-boards'
 import { directAvatarId, directLabel, isSelfDirect } from '@/lib/spaces-direct'
 import { requestJump } from '@/lib/spaces-jump'
 import { chord } from '@/lib/shortcut'
@@ -267,8 +267,20 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     const readOffset = useStreamReadOffset(org.id, space.id)
     // The roster comes from the module store (cached, hydrated in render) so
     // names resolve in the same first frame as the stream's cached tail.
+    // `members` is THIS space's roster — membership: header avatars, invites,
+    // presence. Names and profiles reach past it to the whole org (this
+    // roster winning on identity), so a chip for someone mentioned from
+    // another space still reads as a person here.
     const members = useSpaceMembers(org.id, space.id)
-    const memberNames = useMemo(() => new Map(members.map((m) => [m.id, m.displayName])), [members])
+    const orgSpaceIds = useMemo(() => org.spaces.map((s) => s.id), [org.spaces])
+    const orgRoster = useOrgRoster(org.id, orgSpaceIds)
+    const profiles = useMemo(() => {
+        const byId = new Map(orgRoster.map((m) => [m.id, m]))
+        for (const m of members) byId.set(m.id, m)
+        return [...byId.values()]
+    }, [orgRoster, members])
+    const memberNames = useMemo(() => new Map(profiles.map((m) => [m.id, m.displayName])), [profiles])
+    const spaceNames = useSpaceNames(org.id)
     // A direct message is this same pane with a two-person roster: named by
     // the other person, no invites.
     const isDirect = space.kind === 'direct'
@@ -289,8 +301,8 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
             .then((assetsRes) => {
                 if (cancelled) return
                 setEntries(assetsRes.entries)
-                // The boards store (assistant @ menu, open-board context) reads this listing too.
-                noteBoardsFromEntries(org.id, space.id, assetsRes.entries)
+                // The listing store (the @ menus, open-board context) reads this listing too.
+                noteListingFromEntries(org.id, space.id, assetsRes.entries)
             })
             .catch(() => {
                 // org unreachable; panes show their own error states
@@ -539,14 +551,14 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
 
     /**
      * A brand-new file (born here, or the tree's "+ New file"): the org hands
-     * back the record, the listing learns it before the refetch, the boards
+     * back the record, the listing learns it before the refetch, the listing
      * store follows, and the caller opens it by id.
      */
     const createFile = async (input: spaces.SpacesCreateInput): Promise<spaces.SpacesAssetEntry> => {
         const { asset } = await window.ipc.invoke('spaces:createAsset', { orgId: org.id, spaceId: space.id, input })
         setEntries((prev) => {
             const next = [...prev.filter((e) => e.id !== asset.id), asset]
-            noteBoardsFromEntries(org.id, space.id, next)
+            noteListingFromEntries(org.id, space.id, next)
             return next
         })
         return asset
@@ -642,6 +654,11 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     const openSpaceFile = (orgId: string, spaceId: string, assetId: string) => {
         if (orgId === org.id && spaceId === space.id) openFile(assetId)
         else onSwitchSpace(orgId, spaceId, { kind: 'file', assetId })
+    }
+    /** A space chip: this space's lands on its stream; another's opens there. */
+    const openSpace = (orgId: string, spaceId: string) => {
+        if (orgId === org.id && spaceId === space.id) select({ kind: 'general' })
+        else onSwitchSpace(orgId, spaceId)
     }
 
     /** Search / pinned / saved landings: open the surface, then scroll + flash. */
@@ -762,7 +779,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     const crumbTopic = crumbRootId ? feed.topics.find((t) => t.rootMessageId === crumbRootId) : undefined
     const crumbRoot = crumbRootId ? stream.messages.find((m) => m.id === crumbRootId) : undefined
     const crumbLabelRaw = crumbTopic?.title ?? (crumbRoot ? threadLabelOf(crumbRoot.body) : crumbRootId ? 'Back to thread' : null)
-    const crumbLabel = crumbLabelRaw === null ? null : resolveMentions(crumbLabelRaw, memberNames)
+    const crumbLabel = crumbLabelRaw === null ? null : resolveMentions(crumbLabelRaw, memberNames, spaceNames)
 
     // Files picked (rail Upload button) or dropped on the tree, awaiting the
     // upload confirmation. Default to Space files; choosing a folder is optional.
@@ -770,11 +787,11 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     const [trashOpen, setTrashOpen] = useState(false)
 
     return (
-        <SpaceMembersProvider members={memberNames}>
-        <SpaceProfilesProvider members={members} here={hereSet} selfId={org.memberId}>
+        <SpaceMembersProvider members={memberNames} spaceNames={spaceNames}>
+        <SpaceProfilesProvider members={profiles} here={hereSet} selfId={org.memberId}>
         <SpaceRefsProvider refs={spaceRefs}>
         <SpaceAssetsProvider entries={entries}>
-        <SpaceNavProvider onOpenFile={openFile} onOpenSpaceFile={openSpaceFile} resolveSpace={resolveSpace} onOpenAttachment={(src, name) => {
+        <SpaceNavProvider onOpenFile={openFile} onOpenSpaceFile={openSpaceFile} onOpenSpace={openSpace} resolveSpace={resolveSpace} onOpenAttachment={(src, name) => {
             const url = new URL(src)
             url.searchParams.set('name', name)
             select({ kind: 'attachment', src: url.href, ...(chatRootId ? { fromThreadRootId: chatRootId } : {}) })
@@ -1003,9 +1020,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                             space={space}
                             stream={stream}
                             presence={presence}
-                            members={members}
                             memberNames={memberNames}
-                            entries={entries}
                             onOpenThread={(id) => select({ kind: 'thread', rootMessageId: id })}
                             onOpenSession={onOpenSession}
                             onClose={split ? closeChat : undefined}
@@ -1033,7 +1048,6 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                 changeSets={feed.changeSets}
                                 entries={entries}
                                 presence={presence}
-                                members={members}
                                 memberNames={memberNames}
                                 refreshTick={refreshTick}
                                 showBack={!threadBesideStream}
