@@ -85,8 +85,9 @@ export const listSpaces = tool({
   description:
     'List the spaces you are a member of on this org, each with its file listing. ' +
     'Call this first: it resolves a space name (e.g. "Roadboard") to the spaceId every other ' +
-    'tool needs, and shows the asset paths available to read_asset. Discovery is mechanical — ' +
-    'do not guess spaceIds or file paths. Shared spaces only by default; pass includeDirect to ' +
+    'tool needs, and lists every file with its assetId (what read_asset and every file tool take) ' +
+    'and its path (the display name). Discovery is mechanical — never guess a spaceId or an assetId. ' +
+    'Shared spaces only by default; pass includeDirect to ' +
     'also list your direct messages (kind "direct": a private conversation with exactly one other ' +
     'member — its participants are listed; label it by the other member, its name is a placeholder). ' +
     "A DM flagged self: true is your person's own notes-to-self space (they are its only participant) — " +
@@ -217,8 +218,8 @@ export const searchSpace = tool({
     'Search a space: messages, topic titles, and files (by extracted content or filename), ' +
     'returned as three independently-ranked lists. Query words are AND-ed; a word that is a ' +
     "member's name also matches @-mentions of them. Message hits name their thread " +
-    '(threadRootId — feed it to read_thread for context); asset hits name the path for ' +
-    'read_asset. A truncated flag means more hits existed than limit — refine the query ' +
+    '(threadRootId — feed it to read_thread for context); asset hits carry the assetId for ' +
+    'read_asset and the path for display. A truncated flag means more hits existed than limit — refine the query ' +
     'rather than raising the limit. Use before posting a new root to avoid duplicating a ' +
     'conversation, and to locate files without listing everything.',
   input: z.object({
