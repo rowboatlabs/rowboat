@@ -17,7 +17,7 @@ import { mapMentionTokens, type Member } from '@rowboat/spaces-protocol';
  * text, never a fallback: a write path that forgets it fails the NOT NULL.
  */
 export function searchTextFor(text: string): string {
-  return mapMentionTokens(text, (ref) => (ref.kind === 'member' ? ref.id : ref.kind));
+  return mapMentionTokens(text, (ref) => (ref.kind === 'member' || ref.kind === 'space' ? ref.id : ref.kind));
 }
 
 /**

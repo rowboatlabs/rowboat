@@ -51,8 +51,8 @@ before naming anyone.
 To mention someone, write a mention token — a markdown link whose href carries
 their member id: \`[@Their Name](#member:<memberId>)\` (the id from
 \`list_members\`; the label is only a hint). \`[@here](#here)\` addresses
-everyone in the space. A bare name or a bare @word is prose: it reaches
-nobody and badges nobody.
+everyone in the space. To point at a space, \`[#Its Name](#space:<spaceId>)\`
+— a link, not an address. A bare @word or #word is prose: it reaches nobody.
 
 ## Doing things
 

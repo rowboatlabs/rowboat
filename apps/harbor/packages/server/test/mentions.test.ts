@@ -25,6 +25,7 @@ import { pgliteDb } from './pglite.js';
 // through the ordinary edit path as the author.
 
 const tok = (id: string, label = id) => mentionToken({ kind: 'member', id, label });
+const sp = (id: string, label = id) => mentionToken({ kind: 'space', id, label });
 
 describe('the grammar', () => {
   it('parses tokens, dedupes ids, and treats tokens inside code as cites', () => {
@@ -50,6 +51,21 @@ describe('the grammar', () => {
 
   it('the search text collapses tokens to bare keys so labels and "member" never index', () => {
     expect(searchTextFor(`ask ${tok('ramnique', 'Ramnique Singh')} about [@here](#here)`)).toBe('ask ramnique about here');
+    expect(searchTextFor(`see ${sp('S1', 'General')}`)).toBe('see S1');
+  });
+
+  it('a space token refers, never addresses: it stamps nothing, relabels from the listing, and flattens to #Name', () => {
+    expect(sp('S1', 'General')).toBe('[#General](#space:S1)');
+    expect(sp('S1', '')).toBe('[#S1](#space:S1)');
+    const body = `look at ${sp('S1', 'Old Name')} and ${sp('S2', 'Secret')} with ${tok('harsh', 'Harsh')}`;
+    expect(parseMentions(body)).toEqual({ members: ['harsh'], here: false, rowboat: false });
+    const spaceNames = new Map([['S1', 'General']]);
+    expect(relabelMentions(body, new Map(), spaceNames)).toBe(`look at ${sp('S1', 'General')} and ${sp('S2', 'Secret')} with ${tok('harsh', 'Harsh')}`);
+    expect(mentionsAsText(body, new Map(), spaceNames)).toBe('look at #General and #Secret with @Harsh');
+    expect(mentionsAsText(body, new Map())).toBe('look at #Old Name and #Secret with @Harsh');
+    // The sigil and the href kind must agree — a mismatch is prose.
+    expect(parseMentions('[#x](#member:harsh) [@y](#space:S1)')).toEqual({ members: [], here: false, rowboat: false });
+    expect(mapMentionTokens('[#x](#member:harsh) [@y](#space:S1)', () => 'T')).toBe('[#x](#member:harsh) [@y](#space:S1)');
   });
 
   it('the backfill rewrites the pre-token spelling for known ids only, punctuation intact, idempotently', () => {
@@ -183,11 +199,14 @@ describe.each([['memory'], ['postgres']] as const)('mentions (%s store)', (store
     expect(JSON.stringify(byKeyword.body.messages)).not.toContain(m.id);
   });
 
-  it('the agent face re-resolves every label from the roster', async () => {
-    const m = await post(harsh, `for ${tok('ramnique', 'Whoever')} and ${tok('ghost', 'Ghost')}`);
+  it('the agent face re-resolves every label from the roster, and space tokens from the reader\'s own listing', async () => {
+    const other = (await ramnique.post('/v1/spaces', { name: 'Private' })).body.space.id as string;
+    const m = await post(harsh, `for ${tok('ramnique', 'Whoever')} and ${tok('ghost', 'Ghost')} — see ${sp(main, 'Stale')} and ${sp(other, 'Hidden')}`);
+    expect(m).toMatchObject({ mentions: ['ramnique'] });
     const client: Client = await agentClient(harbor, 'dev-arjun');
     const thread = await callStructured<{ root: Message }>(client, 'read_thread', { spaceId: main, rootMessageId: m.id });
-    expect(thread.root.body).toBe(`for ${tok('ramnique', 'Ramnique')} and ${tok('ghost', 'Ghost')}`);
+    // Arjun is in Mentions but not Private: the first relabels, the second keeps its label.
+    expect(thread.root.body).toBe(`for ${tok('ramnique', 'Ramnique')} and ${tok('ghost', 'Ghost')} — see ${sp(main, 'Mentions')} and ${sp(other, 'Hidden')}`);
     const stream = await callStructured<{ messages: Message[] }>(client, 'read_stream', { spaceId: main });
     expect(stream.messages.find((x) => x.id === m.id)!.body).toContain(tok('ramnique', 'Ramnique'));
     await client.close();
