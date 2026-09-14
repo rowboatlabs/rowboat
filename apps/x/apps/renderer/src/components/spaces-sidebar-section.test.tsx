@@ -75,6 +75,9 @@ describe('the sidebar working set', () => {
             <SpacesSidebarSection active activeSpace={{ orgId: org.id, spaceId: 'founders' }}
                 onOpenSpaces={vi.fn()} onOpenSpace={vi.fn()} {...props} />
         </SidebarProvider>)
+    /** The header's two targets: the chevron that folds, and the name that opens the server. */
+    const fold = (name: string) => screen.getByRole('button', { name: new RegExp(`^(Collapse|Expand) ${name}$`) })
+    const header = (name: string) => screen.getByText(name).closest('button')!
     /** Put unread roots on spaces, the way the org's snapshot does. */
     const seedUnread = async (orgId: string, spaces: Array<{ spaceId: string; unreadRoots: number; unreadMentions?: number }>) => {
         vi.stubGlobal('ipc', {
@@ -99,12 +102,11 @@ describe('the sidebar working set', () => {
     it('opens a server holding the open space or anything unread, and leaves the rest closed', async () => {
         bothServers()
         sidebar()
-        const header = (name: string) => screen.getByText(name).closest('button')!
-        expect(header('Our server')).toHaveAttribute('aria-expanded', 'true')
-        expect(header('Other server')).toHaveAttribute('aria-expanded', 'false')
+        expect(fold('Our server')).toHaveAttribute('aria-expanded', 'true')
+        expect(fold('Other server')).toHaveAttribute('aria-expanded', 'false')
         expect(screen.queryByText('welcome')).toBeNull()
         await seedUnread(other.id, [{ spaceId: 'welcome', unreadRoots: 2 }])
-        expect(header('Other server')).toHaveAttribute('aria-expanded', 'true')
+        expect(fold('Other server')).toHaveAttribute('aria-expanded', 'true')
         expect(screen.getByText('welcome')).toHaveClass('font-medium')
     })
 
@@ -114,26 +116,45 @@ describe('the sidebar working set', () => {
         sidebar({ activeSpace: null })
         // Both servers are open (one holds the restored location, one has unread),
         // so close ours by hand to read its rolled-up badge.
-        fireEvent.click(screen.getByText('Our server'))
-        const header = screen.getByText('Our server').closest('button')!
-        expect(header).toHaveAttribute('aria-expanded', 'false')
+        fireEvent.click(fold('Our server'))
+        expect(fold('Our server')).toHaveAttribute('aria-expanded', 'false')
         // 3 roots + 4 in a DM, of which 1 mention + the DM's 4 are for me.
-        expect(within(header).getByLabelText('7 unread · 5 for you')).toBeTruthy()
+        expect(within(header('Our server')).getByLabelText('7 unread · 5 for you')).toBeTruthy()
         expect(screen.queryByText('main')).toBeNull()
-        fireEvent.click(screen.getByText('Our server'))
+        fireEvent.click(fold('Our server'))
         expect(screen.getByText('main')).toBeTruthy()
+    })
+
+    // --- the header's two targets ------------------------------------------
+    it('opens the server from its name, and folds only from the chevron', () => {
+        const onOpenSpace = vi.fn()
+        sidebar({ onOpenSpace })
+        // The name navigates to the server's landing channel; the list stays as it was.
+        fireEvent.click(header('Our server'))
+        expect(onOpenSpace).toHaveBeenCalledExactlyOnceWith('server', 'main')
+        expect(fold('Our server')).toHaveAttribute('aria-expanded', 'true')
+        expect(screen.getByText('founders')).toBeTruthy()
+        // The chevron folds, and navigates nowhere.
+        fireEvent.click(fold('Our server'))
+        expect(fold('Our server')).toHaveAttribute('aria-expanded', 'false')
+        expect(screen.queryByText('founders')).toBeNull()
+        expect(onOpenSpace).toHaveBeenCalledTimes(1)
+        // A collapsed server still opens from its name, and stays collapsed.
+        fireEvent.click(header('Our server'))
+        expect(onOpenSpace).toHaveBeenLastCalledWith('server', 'main')
+        expect(fold('Our server')).toHaveAttribute('aria-expanded', 'false')
     })
 
     it('keeps the reader\'s own toggle over the automatic rule, across relaunches', () => {
         const view = sidebar()
-        expect(screen.getByText('Our server').closest('button')).toHaveAttribute('aria-expanded', 'true')
-        fireEvent.click(screen.getByText('Our server'))
+        expect(fold('Our server')).toHaveAttribute('aria-expanded', 'true')
+        fireEvent.click(fold('Our server'))
         expect(screen.queryByText('founders')).toBeNull()
         view.unmount()
         // A relaunch: the in-memory mirror is gone, the answer is not.
         resetServerFoldForTest()
         sidebar()
-        expect(screen.getByText('Our server').closest('button')).toHaveAttribute('aria-expanded', 'false')
+        expect(fold('Our server')).toHaveAttribute('aria-expanded', 'false')
         expect(screen.queryByText('founders')).toBeNull()
     })
 

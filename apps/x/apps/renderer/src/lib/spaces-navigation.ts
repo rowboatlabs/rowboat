@@ -18,6 +18,15 @@ export type SpaceLocation = {
     view?: 'activity'
 }
 
+/**
+ * Where "open this server" lands: its first shared space, or its first DM when
+ * it has no channels, or nothing at all on an empty server. One answer, so the
+ * switcher, the sidebar and a restored location all enter a server the same way.
+ */
+export function serverLandingSpaceId(org: Pick<OrgWithSpaces, 'spaces' | 'directs'>): string {
+    return org.spaces[0]?.id ?? org.directs[0]?.id ?? ''
+}
+
 /** Restore a valid location, preferring another space on the same server if it was deleted. */
 export function resolveSpacesLocation(orgs: OrgWithSpaces[], previous: unknown): SpaceLocation | null {
     const saved = readLocation(previous)
@@ -32,7 +41,7 @@ export function resolveSpacesLocation(orgs: OrgWithSpaces[], previous: unknown):
     // Landing on a different space than the saved one: its rail selection named
     // a discussion or a file in the space that is gone, so it stays behind.
     const org = previousOrg ?? orgs.find((org) => org.spaces.length > 0 || org.directs.length > 0) ?? orgs[0]
-    return org ? { orgId: org.id, spaceId: org.spaces[0]?.id ?? org.directs[0]?.id ?? '' } : null
+    return org ? { orgId: org.id, spaceId: serverLandingSpaceId(org) } : null
 }
 
 /**
