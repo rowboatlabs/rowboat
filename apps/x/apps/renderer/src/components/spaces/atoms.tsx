@@ -17,6 +17,7 @@ import { useSpaceNav, useSpaceRefs } from '@/components/spaces/space-nav'
 import { requestComposeInsert } from '@/lib/spaces-compose'
 import { mentionToken } from '@x/shared/dist/spaces.js'
 import { avatarColorClass, initials, orgMonogram } from '@/lib/spaces-presentation'
+import { refreshSpacesAccountState, refreshSpacesOrgs, useSpacesAccountState } from '@/hooks/use-spaces'
 import { toast } from '@/lib/toast'
 
 // Shared atoms for the Spaces surfaces: identity visuals, the segmented
@@ -214,12 +215,18 @@ export function AddOrgDialog({ open, onOpenChange, onAdded, initialAction }: {
     onAdded: (orgId: string, spaceId?: string) => void
     initialAction?: 'create' | 'join'
 }) {
-    // One dialog, two doors: name a new server on the managed deployment
-    // (free for now — the address is generated in core, the user only names
-    // it), or paste an invite link (resolve pre-auth, then join with a
-    // system-browser sign-in). A dev org against the stub stays behind a
-    // tertiary link.
-    const [mode, setMode] = useState<'main' | 'dev'>('main')
+    // One dialog. With no Rowboat session the first door is "Sign in with
+    // Rowboat" — one browser trip, then every managed org the person belongs
+    // to appears (one session, two uses — the app itself stays signed out).
+    // Then two doors that need no browser when a session exists: name a new
+    // server on the managed deployment (free for now — the address is
+    // generated in core, the user only names it), or paste an invite link
+    // (resolved pre-auth, so the card shows what's being joined). A server
+    // by address (self-hosted orgs) and a dev org against the stub stay
+    // behind the … menu.
+    const [mode, setMode] = useState<'main' | 'address' | 'dev'>('main')
+    const account = useSpacesAccountState()
+    const [serverAddress, setServerAddress] = useState('')
     const [inviteUrl, setInviteUrl] = useState('')
     const [preview, setPreview] = useState<{ org: string; space: string; invitedBy?: string } | null>(null)
     const [orgName, setOrgName] = useState('')
@@ -237,7 +244,45 @@ export function AddOrgDialog({ open, onOpenChange, onAdded, initialAction }: {
     const [memberId, setMemberId] = useState('')
     const [busy, setBusy] = useState(false)
     // Which door fired the browser dance — its button carries the spinner.
-    const [waiting, setWaiting] = useState<'join' | 'create' | null>(null)
+    const [waiting, setWaiting] = useState<'join' | 'create' | 'signin' | 'address' | null>(null)
+
+    const signInRowboat = async () => {
+        setBusy(true)
+        setWaiting('signin')
+        try {
+            const { orgs } = await window.ipc.invoke('spaces:signInRowboat', null)
+            refreshSpacesAccountState()
+            void refreshSpacesOrgs()
+            toast(orgs.length > 0 ? `Signed in — ${orgs.length} ${orgs.length === 1 ? 'server' : 'servers'} ready` : 'Signed in to Rowboat', 'success')
+            if (orgs.length > 0) {
+                onOpenChange(false)
+                onAdded(orgs[0].id)
+            }
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Sign-in failed', 'error')
+        } finally {
+            setBusy(false)
+            setWaiting(null)
+        }
+    }
+
+    const addByAddress = async () => {
+        if (!serverAddress.trim()) return
+        setBusy(true)
+        setWaiting('address')
+        try {
+            const { org } = await window.ipc.invoke('spaces:addOrgByAddress', { address: serverAddress.trim() })
+            toast(`Signed into ${org.name}`, 'success')
+            onOpenChange(false)
+            setServerAddress('')
+            onAdded(org.id)
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not add the server', 'error')
+        } finally {
+            setBusy(false)
+            setWaiting(null)
+        }
+    }
 
     const createOrg = async () => {
         if (!orgName.trim()) return
@@ -310,19 +355,37 @@ export function AddOrgDialog({ open, onOpenChange, onAdded, initialAction }: {
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            {/* Only the dev door carries a description; without one, clear the
-                link so Radix doesn't point at an element that isn't there. */}
-            <DialogContent className="max-w-md" {...(mode === 'dev' ? {} : { 'aria-describedby': undefined })}>
+            {/* Only the dev and address doors carry a description; without one,
+                clear the link so Radix doesn't point at an element that isn't there. */}
+            <DialogContent className="max-w-md" {...(mode !== 'main' ? {} : { 'aria-describedby': undefined })}>
                 <DialogHeader>
-                    <DialogTitle>{mode === 'dev' ? 'Add a dev server' : initialAction === 'create' ? 'Create a server' : initialAction === 'join' ? 'Join a server' : 'Add a server'}</DialogTitle>
-                    {mode === 'dev' && (
+                    <DialogTitle>{mode === 'dev' ? 'Add a dev server' : mode === 'address' ? 'Add a server by address' : initialAction === 'create' ? 'Create a server' : initialAction === 'join' ? 'Join a server' : 'Add a server'}</DialogTitle>
+                    {mode !== 'main' && (
                         <DialogDescription>
-                            Dev sign-in against a stub Harbor (run pnpm dev in apps/harbor/packages/server).
+                            {mode === 'dev'
+                                ? 'Dev sign-in against a stub Harbor (run pnpm dev in apps/harbor/packages/server).'
+                                : 'A self-hosted server, or one you’re already a member of.'}
                         </DialogDescription>
                     )}
                 </DialogHeader>
                 {mode === 'main' ? (
                     <div className="space-y-3">
+                        {account && !account.hasSession && (
+                            <>
+                                <div>
+                                    <div className="text-sm font-medium">Sign in with Rowboat</div>
+                                    <p className="text-xs text-muted-foreground">Your servers appear once you’re signed in.</p>
+                                    <Button onClick={() => void signInRowboat()} disabled={busy} className="mt-1.5 w-full">
+                                        {waiting === 'signin' && <Loader2 className="size-3.5 mr-1 animate-spin" />} Sign in with Rowboat
+                                    </Button>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                    <div className="h-px flex-1 bg-border" />
+                                    <span className="text-xs text-muted-foreground">or</span>
+                                    <div className="h-px flex-1 bg-border" />
+                                </div>
+                            </>
+                        )}
                         <div>
                             <div className="text-sm font-medium">Create a new server</div>
                             <p className="text-xs text-muted-foreground">Home for your team and their assistants, with spaces for each project. Free, and you’re its admin.</p>
@@ -394,10 +457,41 @@ export function AddOrgDialog({ open, onOpenChange, onAdded, initialAction }: {
                                     </button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="start">
+                                    <DropdownMenuItem onClick={() => setMode('address')}>Add a server by address</DropdownMenuItem>
                                     <DropdownMenuItem onClick={() => setMode('dev')}>Add a dev server</DropdownMenuItem>
                                 </DropdownMenuContent>
                             </DropdownMenu>
                             <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+                        </div>
+                    </div>
+                ) : mode === 'address' ? (
+                    <div className="space-y-3">
+                        <div>
+                            <label className="text-xs font-medium text-muted-foreground">Server address</label>
+                            <Input
+                                autoFocus
+                                value={serverAddress}
+                                onChange={(e) => setServerAddress(e.target.value)}
+                                placeholder="acme.spaces.example or just the slug"
+                                onKeyDown={(e) => e.key === 'Enter' && void addByAddress()}
+                            />
+                            <p className="mt-1 text-xs text-muted-foreground">A URL, a host, or a Rowboat server’s slug. You need to already be a member — otherwise ask for an invite link.</p>
+                        </div>
+                        {waiting === 'address' && (
+                            <div className="text-xs text-muted-foreground flex items-center gap-1.5">
+                                <Loader2 className="size-3 animate-spin" /> Waiting for the browser sign-in…
+                            </div>
+                        )}
+                        <div className="flex items-center justify-between">
+                            <button type="button" className="text-xs text-muted-foreground hover:underline" onClick={() => setMode('main')}>
+                                back
+                            </button>
+                            <div className="flex gap-2">
+                                <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+                                <Button onClick={() => void addByAddress()} disabled={busy || !serverAddress.trim()}>
+                                    {waiting === 'address' && <Loader2 className="size-3.5 mr-1 animate-spin" />} Add
+                                </Button>
+                            </div>
                         </div>
                     </div>
                 ) : (

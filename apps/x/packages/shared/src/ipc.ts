@@ -3815,6 +3815,27 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string() }),
     res: z.object({ org: SpacesOrgSummary }),
   },
+  // One session, two uses (2026-09-14): the Rowboat account IS the identity
+  // every managed org trusts. accountState says whether a session exists and
+  // whether the app is signed in on it (a space joined while staying signed
+  // out of the app leaves a spaces-only session). signInRowboat is the Spaces
+  // door's sign-in: a browser trip only if there is no session, then the
+  // apex's listing of every managed org the person belongs to.
+  'spaces:accountState': {
+    req: z.null(),
+    res: z.object({ hasSession: z.boolean(), appSignedIn: z.boolean() }),
+  },
+  'spaces:signInRowboat': {
+    req: z.null(),
+    res: z.object({ orgs: z.array(SpacesOrgSummary) }),
+  },
+  // The advanced door: a server by address — a URL, a host, or a managed
+  // org's slug — for an existing member (self-hosted orgs, or checking a
+  // specific one). Strangers get the not_a_member message.
+  'spaces:addOrgByAddress': {
+    req: z.object({ address: z.string() }),
+    res: z.object({ org: SpacesOrgSummary }),
+  },
   // Self-serve org creation on the managed deployment's apex (free for now —
   // billing/limits parked by decision 2026-08-20). Browser sign-in, then the
   // caller is the org's first admin. The address is generated in core

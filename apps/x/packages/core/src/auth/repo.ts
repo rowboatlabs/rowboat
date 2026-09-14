@@ -16,7 +16,39 @@ const ProviderConnectionSchema = z.object({
    */
   mode: z.enum(['byok', 'rowboat']).optional(),
   error: z.string().nullable().optional(),
+  /**
+   * `rowboat` only. One session, two uses (2026-09-14): the Rowboat account
+   * is ALSO the identity every managed Spaces org trusts, so a person who
+   * joins a space while choosing to stay signed out of the app still holds
+   * a session here. `spacesOnly: true` marks that state — the tokens exist,
+   * but the app's own features (gateway models, billing, connectors) treat
+   * the user as signed out until they sign in from settings, which clears
+   * the flag without a second browser trip. Absent = an ordinary sign-in.
+   */
+  spacesOnly: z.boolean().optional(),
 });
+
+export type ProviderConnection = z.infer<typeof ProviderConnectionSchema>;
+
+/**
+ * THE reading of the `rowboat` record — every "is the user signed in?"
+ * answer in the app comes through these two, nowhere else (one session,
+ * two uses). `rowboatSession` = a session exists at all (the identity Spaces
+ * uses); `isAppSignIn` = that session is the app's, not spaces-only.
+ */
+export function rowboatSession(connection: ProviderConnection): { tokens: OAuthTokens; spacesOnly: boolean; error?: string } | null {
+  if (!connection.tokens) return null;
+  return {
+    tokens: connection.tokens,
+    spacesOnly: connection.spacesOnly === true,
+    ...(connection.error ? { error: connection.error } : {}),
+  };
+}
+
+export function isAppSignIn(connection: ProviderConnection): boolean {
+  const session = rowboatSession(connection);
+  return session !== null && !session.spacesOnly;
+}
 
 const OAuthConfigSchema = z.object({
   version: z.number().optional(),
@@ -118,7 +150,9 @@ export class FSOAuthRepo implements IOAuthRepo {
     const clientFacingConfig: z.infer<typeof ClientFacingConfigSchema> = {};
     for (const [provider, providerConfig] of Object.entries(config.providers)) {
       clientFacingConfig[provider] = {
-        connected: !!providerConfig.tokens,
+        // The settings/sidebar sign-in prompts key off this: for rowboat it
+        // is the app sign-in (a spaces-only session reads as not connected).
+        connected: provider === 'rowboat' ? isAppSignIn(providerConfig) : !!providerConfig.tokens,
         error: providerConfig.error,
         clientId: providerConfig.clientId ?? null,
       };
