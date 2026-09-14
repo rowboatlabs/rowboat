@@ -5392,6 +5392,12 @@ function App() {
       if (isBrowserOpen) {
         dismissBrowserOverlay()
       }
+      // Same view, but a message to land on (a message link or a
+      // notification into the space already open): the jump still fires —
+      // views compare without it, and the pane consumes it in place.
+      if (nextView.type === 'spaces' && nextView.messageId) {
+        requestJump({ topicId: nextView.rail?.kind === 'thread' ? nextView.rail.rootMessageId : STREAM_READ_KEY, messageId: nextView.messageId })
+      }
       return
     }
 
