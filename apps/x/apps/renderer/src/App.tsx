@@ -7953,7 +7953,10 @@ function App() {
                 onStartCallForTab={(id, preset) => { switchChatTab(id); handleStartCall(preset) }}
                 keepMounted placement={projectViewActive ? 'right' : chatPanePlacement}
                 paneSize={projectViewActive ? (selectedPath ? 'chat-smaller' : 'chat-bigger') : codeChatMain ? 'chat-bigger' : chatPaneSize}
-                className="order-3"
+                // Flex order of the legacy (Code / Projects) chat pane: after
+                // the SidebarInset, before the assistant sidebar (order-4).
+                // Middle placement in Code swaps it in front of the rail.
+                className={!projectViewActive && isChatPaneInMiddle ? "order-2" : "order-3"}
                 defaultWidth={DEFAULT_CHAT_PANE_WIDTH}
                 isOpen={chatPaneOpen}
                 isMaximized={projectViewActive ? !selectedPath : isRightPaneMaximized}
@@ -7967,7 +7970,8 @@ function App() {
                 recentRuns={chatRuns}
                 onSelectRun={projectViewActive ? openAssistantRun : bindChatToRun}
                 onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
-                onOpenFullScreen={projectViewActive ? (selectedPath ? () => { void navigateToView({ type: 'workspace', path: workspaceInitialPath ?? undefined, runId: projectChatId ?? undefined }) } : undefined) : toggleRightPaneMaximize}
+                // In Code the chat already is the main pane: no "Expand chat".
+                onOpenFullScreen={projectViewActive ? (selectedPath ? () => { void navigateToView({ type: 'workspace', path: workspaceInitialPath ?? undefined, runId: projectChatId ?? undefined }) } : undefined) : codeChatMain ? undefined : toggleRightPaneMaximize}
                 onNavigateBack={() => { void navigateBack() }}
                 onNavigateForward={() => { void navigateForward() }}
                 canNavigateBack={canNavigateBack}
@@ -8071,7 +8075,10 @@ function App() {
                 onDiffOpened={handleCodeDiffOpened}
                 onSessionChanged={() => void refreshCodeSessions()}
                 placement={chatPanePlacement}
-                className={isChatPaneInMiddle ? "order-2" : undefined}
+                // Same order as the chat pane; later in the DOM, so it lands on
+                // the chat's far side (right of it, or between it and the rail
+                // in middle placement) and its resize handle sits on the seam.
+                className={isChatPaneInMiddle ? "order-2" : "order-3"}
               />
             )}
             {/* Full-screen call: user tile + animated mascot tile. Shown only
