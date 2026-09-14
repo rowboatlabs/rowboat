@@ -49,6 +49,8 @@ export interface HarborOptions {
   maxBlobBytes?: number;
   /** Live-face heartbeat cadence (default 25s). A test knob; production keeps the default. */
   liveHeartbeatMs?: number;
+  /** Test knob: unsent-bytes ceiling before a stalled socket is terminated (ws.ts). */
+  liveMaxBufferedBytes?: number;
   /** Auth driver; defaults to dev tokens (never expose publicly). Pass an OidcAuthDriver for real deployments. */
   auth?: AuthDriver;
   /**
@@ -140,7 +142,10 @@ export async function startHarbor(options: HarborOptions = {}): Promise<RunningH
   const closeLive = attachLive(
     server,
     () => ({ service, hub, store, auth }),
-    options.liveHeartbeatMs !== undefined ? { heartbeatMs: options.liveHeartbeatMs } : {},
+    {
+      ...(options.liveHeartbeatMs !== undefined ? { heartbeatMs: options.liveHeartbeatMs } : {}),
+      ...(options.liveMaxBufferedBytes !== undefined ? { maxBufferedBytes: options.liveMaxBufferedBytes } : {}),
+    },
   );
 
   await new Promise<void>((resolve) => server.listen(options.port ?? 0, resolve));

@@ -203,6 +203,53 @@ describe('live face', () => {
     client.close();
   });
 
+  it('backpressure: a peer that stops draining is terminated instead of buffered onto', async () => {
+    // Own instance: a tiny ceiling so a few large whiteboard frames trip it.
+    const capped = await startHarbor({
+      seedMembers: [
+        { id: 'ramnique', displayName: 'Ramnique' },
+        { id: 'gagan', displayName: 'Gagan' },
+      ],
+      seedSpaces: [{ name: 'Board', creator: 'ramnique' }],
+      liveMaxBufferedBytes: 64 * 1024,
+    });
+    const boardSpace = (await capped.service.listSpaces({ memberId: 'ramnique' }))[0]!.id;
+    const stalled = new WebSocket(`ws://localhost:${capped.port}/v1/live?token=dev-gagan`);
+    const editor = new WebSocket(`ws://localhost:${capped.port}/v1/live?token=dev-ramnique`);
+    try {
+      await Promise.all(
+        [stalled, editor].map(
+          (ws) =>
+            new Promise<void>((resolve, reject) => {
+              ws.once('open', resolve);
+              ws.once('error', reject);
+            }),
+        ),
+      );
+      const closed = new Promise<number>((resolve) => stalled.once('close', resolve));
+      stalled.send(JSON.stringify({ kind: 'subscribe', spaceId: boardSpace }));
+      await new Promise<void>((resolve) => stalled.once('message', () => resolve())); // subscribed
+      // Stop reading: the kernel buffers fill, then `ws` queues in process memory.
+      (stalled as unknown as { _socket: { pause(): void; resume(): void } })._socket.pause();
+      const payload = { t: 'scene', elements: 'x'.repeat(256 * 1024) };
+      for (let i = 0; i < 64; i++) {
+        editor.send(JSON.stringify({ kind: 'whiteboard', spaceId: boardSpace, boardId: 'boards/b.excalidraw', payload }));
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      (stalled as unknown as { _socket: { resume(): void } })._socket.resume();
+      const code = await Promise.race([
+        closed,
+        new Promise<number>((_, reject) => setTimeout(() => reject(new Error('stalled socket was never terminated')), 5000)),
+      ]);
+      expect(code).toBe(1006);
+      expect(editor.readyState).toBe(WebSocket.OPEN);
+    } finally {
+      stalled.terminate();
+      editor.terminate();
+      await capped.close();
+    }
+  });
+
   it('heartbeat: ping beacons reach every connection, subscribed or not', async () => {
     // Separate instance so the fast cadence doesn't spam the shared harbor.
     const beating = await startHarbor({

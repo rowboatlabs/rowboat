@@ -16,8 +16,14 @@ export interface SqlDb extends SqlExecutor {
   close(): Promise<void>;
 }
 
-export function postgresDb(connectionString: string): SqlDb {
-  const pool = new pg.Pool({ connectionString });
+/**
+ * `max` caps the pool (pg's default is 10). Every space-locked write holds one
+ * connection for its transaction, and a multi-org deployment shares this one
+ * pool across every org, so size it to the database plan's connection limit
+ * with headroom for migrations and the odd psql session.
+ */
+export function postgresDb(connectionString: string, opts: { max?: number } = {}): SqlDb {
+  const pool = new pg.Pool({ connectionString, ...(opts.max !== undefined ? { max: opts.max } : {}) });
   return {
     async query<R>(text: string, params?: unknown[]): Promise<R[]> {
       const result = await pool.query(text, params);

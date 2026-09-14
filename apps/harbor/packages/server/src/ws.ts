@@ -17,6 +17,14 @@ import type { Store } from './store.js';
 // JSON {kind:'ping'} frame, which is the CLIENT'S evidence of life: a laptop
 // that slept or changed networks holds a half-open socket that will never see
 // a close event, so prolonged frame-silence is what tells it to bounce.
+//
+// Backpressure is one rule: a socket whose unsent bytes exceed MAX_BUFFERED_BYTES
+// is terminated rather than queued onto. A stalled peer (lid shut, tunnel) stops
+// draining TCP while whiteboard relay keeps producing ~30 frames/s per editor
+// plus full-scene syncs, and `ws` would hold all of it in process memory until
+// the heartbeat reaps the socket. Dropping is safe: the client reconnects and
+// replays durable events from its last offset; ephemeral frames were never
+// promised (the board self-heals on its next full sync).
 
 interface Deps {
   service: HarborService;
@@ -26,6 +34,7 @@ interface Deps {
 }
 
 const DEFAULT_HEARTBEAT_MS = 25_000;
+const DEFAULT_MAX_BUFFERED_BYTES = 2 * 1024 * 1024;
 
 interface LiveSocket extends WebSocket {
   /** False until the next pong/message proves the peer is still there. */
@@ -42,9 +51,10 @@ export type LiveDepsResolver = (host: string | undefined) => Deps | undefined | 
 export function attachLive(
   server: Server,
   resolve: LiveDepsResolver,
-  opts: { heartbeatMs?: number } = {},
+  opts: { heartbeatMs?: number; maxBufferedBytes?: number } = {},
 ): () => void {
   const wss = new WebSocketServer({ noServer: true });
+  const maxBufferedBytes = opts.maxBufferedBytes ?? DEFAULT_MAX_BUFFERED_BYTES;
 
   const heartbeat = setInterval(() => {
     const at = new Date().toISOString();
@@ -92,7 +102,7 @@ export function attachLive(
       }
       if (socket.destroyed) return;
       wss.handleUpgrade(req, socket, head, (ws) => {
-        handleConnection(ws, memberId, deps);
+        handleConnection(ws, memberId, deps, maxBufferedBytes);
       });
     })();
   });
@@ -104,7 +114,7 @@ export function attachLive(
   };
 }
 
-function handleConnection(ws: LiveSocket, memberId: string, deps: Deps): void {
+function handleConnection(ws: LiveSocket, memberId: string, deps: Deps, maxBufferedBytes: number): void {
   const subscriptions = new Map<string, () => void>();
 
   ws.sawLifeSinceLastBeat = true;
@@ -113,7 +123,14 @@ function handleConnection(ws: LiveSocket, memberId: string, deps: Deps): void {
   });
 
   const send = (frame: ServerFrame): void => {
-    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(frame));
+    if (ws.readyState !== WebSocket.OPEN) return;
+    if (ws.bufferedAmount > maxBufferedBytes) {
+      // Stalled peer: drop it now rather than buffer without bound (see header).
+      // terminate() fires 'close', which releases every hub subscription.
+      ws.terminate();
+      return;
+    }
+    ws.send(JSON.stringify(frame));
   };
   const sendError = (code: string, message: string, spaceId?: string): void => {
     send({ kind: 'error', ...(spaceId ? { spaceId } : {}), code, message });

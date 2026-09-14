@@ -85,6 +85,9 @@ function blobStoreFactory(): ((orgId: string) => BlobStore) | undefined {
 }
 
 const maxBlobBytes = process.env.HARBOR_MAX_BLOB_BYTES ? Number(process.env.HARBOR_MAX_BLOB_BYTES) : undefined;
+// Postgres pool ceiling (sql.ts): pg's default of 10 is shared by every org on
+// a deployment; set DATABASE_POOL_MAX below the plan's connection limit.
+const poolOpts = process.env.DATABASE_POOL_MAX ? { max: Number(process.env.DATABASE_POOL_MAX) } : {};
 
 // Deployment mode (the managed fleet / any multi-org host): HARBOR_MODE=deployment
 // + DATABASE_URL + APEX_DOMAIN + AUTH_ISSUER. No seeding, no dev tokens —
@@ -101,7 +104,7 @@ if (process.env.HARBOR_MODE === 'deployment') {
   }
   const blobs = blobStoreFactory();
   const deployment = await startHarborDeployment({
-    db: postgresDb(process.env.DATABASE_URL!),
+    db: postgresDb(process.env.DATABASE_URL!, poolOpts),
     port,
     apexDomain: process.env.APEX_DOMAIN!,
     issuer: process.env.AUTH_ISSUER!,
@@ -126,7 +129,7 @@ if (process.env.HARBOR_MODE === 'deployment') {
 async function startDevHarbor(): Promise<void> {
 let store: Store | undefined;
 if (process.env.DATABASE_URL) {
-  const pgStore = new PgStore(postgresDb(process.env.DATABASE_URL));
+  const pgStore = new PgStore(postgresDb(process.env.DATABASE_URL, poolOpts));
   await pgStore.init();
   store = pgStore;
 }
