@@ -8,6 +8,7 @@ import { spaces } from '@x/shared';
 
 import { ChatMarkdown } from '@/components/markdown';
 import { MessageLinkPreviews } from '@/components/link-preview-card';
+import { PollCard } from '@/components/poll-card';
 import { SpaceBlobImage } from '@/components/space-blob-image';
 import { useColors } from '@/theme/colors';
 
@@ -52,6 +53,9 @@ export const MessageRow = memo(function MessageRow({
   onLongPress,
   onAddReaction,
   alwaysShowReactionBar,
+  onVote,
+  onRemoveVote,
+  onEndPoll,
 }: {
   message: Message;
   member?: Member;
@@ -66,6 +70,10 @@ export const MessageRow = memo(function MessageRow({
   onAddReaction?: (message: Message) => void;
   /** Thread root: keep the emoji+ pill visible even with zero reactions (Slack). */
   alwaysShowReactionBar?: boolean;
+  /** Polls: cast / withdraw / end. Absent = read-only card. */
+  onVote?: (message: Message, answerIds: number[]) => void;
+  onRemoveVote?: (message: Message) => void;
+  onEndPoll?: (message: Message) => void;
 }) {
   const colors = useColors();
   const dark = colors.background === '#000000';
@@ -127,8 +135,21 @@ export const MessageRow = memo(function MessageRow({
           <Text style={{ fontSize: 12, color: colors.tertiaryLabel }}>{time}</Text>
           {message.editedAt ? <Text style={{ fontSize: 12, color: colors.tertiaryLabel }}>(edited)</Text> : null}
         </View>
-        <ChatMarkdown extraRules={imageRule}>{body}</ChatMarkdown>
-        <MessageLinkPreviews body={message.body} />
+        {message.poll ? (
+          <PollCard
+            message={message}
+            poll={message.poll}
+            me={me}
+            onVote={onVote ?? (() => {})}
+            onRemoveVote={onRemoveVote ?? (() => {})}
+            onEndPoll={onEndPoll}
+          />
+        ) : (
+          <>
+            <ChatMarkdown extraRules={imageRule}>{body}</ChatMarkdown>
+            <MessageLinkPreviews body={message.body} />
+          </>
+        )}
         {message.reactions.length > 0 || alwaysShowReactionBar ? (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
             {message.reactions.map((g) => {

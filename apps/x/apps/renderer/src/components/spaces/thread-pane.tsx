@@ -1,11 +1,14 @@
+import { MESSAGE_PROSE } from '@/components/spaces/message-prose'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Anchor, Archive, ArchiveRestore, ArrowLeft, ArrowUp, Bot, Loader2, MessageSquareOff, MoreHorizontal, Pencil, ShieldAlert, Square, Tag, X } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { Anchor, Archive, ArchiveRestore, ArrowLeft, ArrowUp, Bell, BellOff, Bot, FileText, Loader2, MessageSquareOff, MoreHorizontal, Maximize2, Minimize2, Paperclip, Pencil, ShieldAlert, Square, Tag, Unlink, X } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { ArtifactsSummary } from '@/components/spaces/artifacts'
+import { AttachDocumentDialog } from '@/components/spaces/attach-document-dialog'
 import { MemberAvatar, MemberProfilePopover } from '@/components/spaces/atoms'
 import { Composer, type AgentOptions } from '@/components/spaces/composer'
 import { ForwardDialog } from '@/components/spaces/forward-dialog'
@@ -24,7 +27,7 @@ import { PollDialogHost } from '@/components/spaces/poll-dialog'
 import { applyPollVote, myPollVotes, postPoll } from '@/lib/spaces-poll'
 import { attributionLabel, formatFeedTime, resolveMentions, shortId } from '@/lib/spaces-presentation'
 import { formatScheduleTime, parseRemindArgs } from '@/lib/spaces-schedule'
-import { getTopicLastReadAt, markTopicRead } from '@/lib/spaces-read-state'
+import { getThreadReadState, markThreadRead, noteThread, useReadStateVersion } from '@/lib/spaces-read-state'
 import { toggleSaved, useSaved } from '@/lib/spaces-saved'
 import { maybeInvokeRowboat } from '@/lib/spaces-rowboat'
 import { openResponseChat } from '@/lib/spaces-response-chat'
@@ -45,7 +48,7 @@ const NEW_FADE_MS = 800
 
 export function ThreadPane({
     org, space, rootMessageId, rootFromStream, topicFromStream, changeSets, entries, presence, members, memberNames, refreshTick,
-    showBack, onBack, onCloseColumn, onOpenFile, onOpenSession, artifactsRailOpen, onToggleArtifactsRail, onFolding, visible = true,
+    showBack, onBack, expanded = false, onToggleExpanded, onCloseColumn, onOpenFile, onOpenSession, artifactsRailOpen, onToggleArtifactsRail, onFolding, visible = true,
 }: {
     org: OrgWithSpaces
     space: spaces.Space
@@ -62,6 +65,8 @@ export function ThreadPane({
     refreshTick: number
     showBack: boolean
     onBack: () => void
+    expanded?: boolean
+    onToggleExpanded?: () => void
     /** Set while a doc column sits beside the chat: closes the chat column, the doc takes the width. */
     onCloseColumn?: () => void
     onOpenFile: (path: string) => void
@@ -91,8 +96,11 @@ export function ThreadPane({
     // Starts at the cache's depth: hasMore above describes exactly that.
     const oldestLoadedRef = useRef<number | null>(seeded?.messages[0]?.offset ?? null)
     const [folding, setFolding] = useState(false)
-    const bottomRef = useRef<HTMLDivElement | null>(null)
     const scrollRef = useRef<HTMLDivElement | null>(null)
+    /** The list's one measurable child — the tail pin observes its size. */
+    const contentRef = useRef<HTMLDivElement | null>(null)
+    /** null = following the tail; a number = where the reader parked (kept across hide/show). */
+    const parkedTopRef = useRef<number | null>(null)
     /** Composer prefill (quote-reply, mention-from-profile); a new nonce re-applies it. */
     const [seed, setSeed] = useState<{ text: string; nonce: number; append?: boolean } | null>(null)
     const { onType } = usePresenceSender(org.id, space.id, rootMessageId, visible)
@@ -121,7 +129,14 @@ export function ThreadPane({
         return () => window.removeEventListener('keydown', onKey)
     }, [visible, onBack])
 
-    const [newSince, setNewSince] = useState<string | null>(() => getTopicLastReadAt(org.id, space.id, rootMessageId))
+    // Marks are offsets now (org-owned); only a followed thread has one, and 0 = no line.
+    const armedMark = (): number | null => {
+        const t = getThreadReadState(org.id, space.id, rootMessageId)
+        return t?.following && t.readOffset > 0 ? t.readOffset : null
+    }
+    const newestOffset = (list: ChatMessage[], fallback: number): number =>
+        list.reduce((max, m) => (!m.pending && !m.failed && m.offset > max ? m.offset : max), fallback)
+    const [newSince, setNewSince] = useState<number | null>(armedMark)
     const [newFading, setNewFading] = useState(false)
     // Each return to the thread re-arms the line at the catch-up point: the
     // read mark as it stood while hidden. Declared BEFORE the visible
@@ -132,7 +147,8 @@ export function ThreadPane({
         newArmedVisibleRef.current = visible
         if (!visible || was) return
         setNewFading(false)
-        setNewSince(getTopicLastReadAt(org.id, space.id, rootMessageId))
+        setNewSince(armedMark())
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [visible, org.id, space.id, rootMessageId])
 
     useEffect(() => {
@@ -161,7 +177,15 @@ export function ThreadPane({
                 // Keep the stream's copy of the chip data current too.
                 updateStreamMessage(org.id, space.id, res.root)
                 if (res.topic) ingestTopic(org.id, space.id, res.topic)
-                if (visibleRef.current) markTopicRead(org.id, space.id, rootMessageId)
+                // The org's word on this thread for us: following + mark. It
+                // arms the New line when nothing did yet, then reading starts.
+                setNewSince((current) => current ?? (res.following && res.readOffset ? res.readOffset : null))
+                noteThread(org.id, space.id, rootMessageId, {
+                    following: res.following,
+                    readOffset: res.readOffset,
+                    ...(res.root.lastReplyOffset !== undefined ? { lastReplyOffset: res.root.lastReplyOffset } : {}),
+                })
+                if (visibleRef.current) markThreadRead(org.id, space.id, rootMessageId, newestOffset(res.messages, res.root.offset))
             })
             .catch(() => {})
         return () => {
@@ -182,8 +206,9 @@ export function ThreadPane({
     // Refetches that landed while hidden left the thread unread on purpose —
     // becoming visible again is the moment the reader actually sees them.
     useEffect(() => {
-        if (visible && loaded) markTopicRead(org.id, space.id, rootMessageId)
-    }, [visible, loaded, org.id, space.id, rootMessageId])
+        if (visible && loaded && root) markThreadRead(org.id, space.id, rootMessageId, newestOffset(messages, root.offset))
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [visible, loaded, org.id, space.id, rootMessageId, messages.length])
 
     const loadOlderReplies = async () => {
         const oldest = messages.find((m) => !m.pending && !m.failed)
@@ -232,7 +257,10 @@ export function ThreadPane({
         if (!mid) return
         const el = scrollRef.current
         if (!el) return
-        if (scrollToMessage(el, mid) || loaded) {
+        const landed = scrollToMessage(el, mid)
+        // The landing spot is the reader's own now — the tail pin lets go.
+        if (landed) parkedTopRef.current = el.scrollTop
+        if (landed || loaded) {
             // Landed — or the window is loaded and the row just isn't in it.
             setTimeout(() => {
                 pendingJumpRef.current = null
@@ -240,10 +268,57 @@ export function ThreadPane({
         }
     }, [jumpNonce, loaded, messages.length])
 
+    // Opening lands on the newest replies: the bottom, pinned before paint (a
+    // layout effect — no flash of the top). The pin is not one-shot: bodies
+    // keep growing after first layout (lazy images, code highlighting, the
+    // code-block chunk), and each late growth above the viewport would
+    // strand a one-time scroll mid-thread. While the reader is following
+    // the tail, any content-size change re-pins it; the moment they scroll
+    // away the pin lets go and their spot is kept — across a hide/show too
+    // (display:none drops the scroll geometry; the flip back restores it).
+    // Only a scroll the READER made may unpin: the browser fires scroll
+    // events of its own (anchoring compensates for a late layout above the
+    // viewport), indistinguishable by position alone — so track intent: a
+    // wheel/touch stamps a time, a pointer held down (the scrollbar, a
+    // selection drag) counts for as long as it's down.
+    const userScrollAtRef = useRef(0)
+    const pointerDownRef = useRef(false)
     useEffect(() => {
-        if (pendingJumpRef.current) return
-        bottomRef.current?.scrollIntoView({ block: 'end' })
-    }, [messages.length, workingAgents.length, permissionWait.length])
+        const up = () => {
+            pointerDownRef.current = false
+        }
+        window.addEventListener('pointerup', up)
+        window.addEventListener('pointercancel', up)
+        return () => {
+            window.removeEventListener('pointerup', up)
+            window.removeEventListener('pointercancel', up)
+        }
+    }, [])
+    const pinBottom = () => {
+        const el = scrollRef.current
+        if (el && parkedTopRef.current === null && !pendingJumpRef.current) el.scrollTop = el.scrollHeight
+    }
+    const typingCount = presence.typing.get(rootMessageId)?.length ?? 0
+    useLayoutEffect(pinBottom, [loaded, root?.id, messages.length, spinningAgents.length, permissionWait.length, typingCount])
+    useEffect(() => {
+        const el = scrollRef.current
+        const content = contentRef.current
+        if (!el || !content) return
+        const ro = new ResizeObserver(pinBottom)
+        // The content's growth, and the viewport's own (the column resized,
+        // the composer growing under it).
+        ro.observe(content)
+        ro.observe(el)
+        return () => ro.disconnect()
+    }, [])
+    const wasVisibleRef = useRef(visible)
+    useLayoutEffect(() => {
+        const was = wasVisibleRef.current
+        wasVisibleRef.current = visible
+        const el = scrollRef.current
+        if (!el || !visible || was) return
+        el.scrollTop = parkedTopRef.current ?? el.scrollHeight
+    }, [visible])
 
     const groups = useMemo(() => artifactsForThread(changeSets, rootMessageId), [changeSets, rootMessageId])
 
@@ -251,12 +326,12 @@ export function ThreadPane({
 
     // Once the reader has caught up (this pane pins to the bottom, so visible
     // = with the new messages) the line lingers a beat, fades, drops.
-    const hasNewLine = !!newSince && replies.some((m) => !m.deletedAt && m.postedAt > newSince && m.author.memberId !== org.memberId)
+    const hasNewLine = !!newSince && replies.some((m) => !m.deletedAt && m.offset > newSince && m.author.memberId !== org.memberId)
     // Jump-to-unread: the pane opens at the bottom; when the New line sits
     // above the fold a pill scrolls to it. Dismissed by use; re-arms with the
     // divider (adjust-on-change).
     const newCount = newSince
-        ? replies.filter((m) => !m.deletedAt && m.postedAt > newSince && m.author.memberId !== org.memberId).length
+        ? replies.filter((m) => !m.deletedAt && m.offset > newSince && m.author.memberId !== org.memberId).length
         : 0
     const [newJumped, setNewJumped] = useState(false)
     const [lastNewSince, setLastNewSince] = useState(newSince)
@@ -266,7 +341,10 @@ export function ThreadPane({
     }
     const jumpToNew = () => {
         setNewJumped(true)
-        scrollRef.current?.querySelector<HTMLElement>('[data-new-divider]')?.scrollIntoView({ block: 'center' })
+        const el = scrollRef.current
+        el?.querySelector<HTMLElement>('[data-new-divider]')?.scrollIntoView({ block: 'center' })
+        // The reader's own spot now — the tail pin lets go.
+        if (el) parkedTopRef.current = el.scrollTop
     }
     useEffect(() => {
         if (!visible || !loaded || !hasNewLine || newFading) return
@@ -292,13 +370,33 @@ export function ThreadPane({
     /** What @rowboat and sessions call this conversation. */
     const threadLabel = topic?.title ?? threadLabelOf(root?.body ?? '')
 
+    // Following (org-owned read state): only a followed thread badges you.
+    // The org follows you in when you reply, when someone replies to your
+    // root, or when you are mentioned; this is the manual override.
+    useReadStateVersion()
+    const following = getThreadReadState(org.id, space.id, rootMessageId)?.following ?? false
+    const toggleFollow = async () => {
+        const next = !following
+        const current = getThreadReadState(org.id, space.id, rootMessageId)
+        noteThread(org.id, space.id, rootMessageId, {
+            following: next,
+            readOffset: current?.readOffset ?? null,
+            ...(root?.lastReplyOffset !== undefined ? { lastReplyOffset: root.lastReplyOffset } : {}),
+        })
+        try {
+            const res = await window.ipc.invoke('spaces:followThread', { orgId: org.id, spaceId: space.id, rootMessageId, following: next })
+            noteThread(org.id, space.id, rootMessageId, { following: res.following, readOffset: res.readOffset })
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not update following', 'error')
+        }
+    }
+
     // Optimistic send, same shape as the stream's: render now (dimmed as
     // pending), confirm — or fail into a retry/discard row — in the
     // background. The composer never waits on the round trip.
     const post = async (body: string, agent?: AgentOptions) => {
         const pending = buildPendingMessage(space.id, org.memberId, body, rootMessageId)
         setMessages((prev) => [...prev, pending])
-        markTopicRead(org.id, space.id, rootMessageId)
         void window.ipc
             .invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body })
             .then((result) => {
@@ -306,7 +404,8 @@ export function ThreadPane({
                     const rest = prev.filter((m) => m.id !== pending.id)
                     return rest.some((m) => m.id === result.message.id) ? rest : [...rest, result.message].sort((a, b) => a.offset - b.offset)
                 })
-                markTopicRead(org.id, space.id, rootMessageId)
+                // Replying follows the thread and reads it up to our reply (the org's rule); mirror it.
+                noteThread(org.id, space.id, rootMessageId, { following: true, readOffset: result.message.offset, lastReplyOffset: result.message.offset })
                 analytics.spacesMessagePosted({ kind: 'topic', mentionsRowboat: containsRowboatAddress(body) })
                 maybeInvokeRowboat(org, space, { rootMessageId, label: threadLabel }, result.message.id, body, agent)
             })
@@ -326,10 +425,10 @@ export function ThreadPane({
         setFolding(true)
         onFolding?.(true)
         try {
-            const body = `@rowboat fold this thread’s decision into \`${path}\` — keep the file’s structure and put it under the right section. End your change reason with “· thread:${rootMessageId}”.`
+            const body = `[@rowboat](#rowboat) fold this thread’s decision into \`${path}\` — keep the file’s structure and put it under the right section. End your change reason with “· thread:${rootMessageId}”.`
             const result = await window.ipc.invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body })
             echo(result.message)
-            markTopicRead(org.id, space.id, rootMessageId)
+            noteThread(org.id, space.id, rootMessageId, { following: true, readOffset: result.message.offset, lastReplyOffset: result.message.offset })
             analytics.spacesFoldRequested()
             maybeInvokeRowboat(org, space, { rootMessageId, label: threadLabel }, result.message.id, body)
         } catch (err) {
@@ -389,7 +488,7 @@ export function ThreadPane({
         try {
             const { message: posted } = await postPoll({ orgId: org.id, spaceId: space.id, rootMessageId, input })
             echo(posted)
-            markTopicRead(org.id, space.id, rootMessageId)
+            noteThread(org.id, space.id, rootMessageId, { following: true, readOffset: posted.offset, lastReplyOffset: posted.offset })
             analytics.spacesMessagePosted({ kind: 'topic', mentionsRowboat: false })
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not post the poll', 'error')
@@ -519,6 +618,10 @@ export function ThreadPane({
         }
     }
 
+    // The one file this discussion is about: picked from the space's live
+    // files; the org keeps the link by asset id, so it survives renames.
+    const [attaching, setAttaching] = useState(false)
+
     // Inline title editing (window.prompt is a no-op in Electron). null = not
     // editing; the same field serves rename AND first-time goal setting.
     const [editingTitle, setEditingTitle] = useState<string | null>(null)
@@ -593,7 +696,7 @@ export function ThreadPane({
     let prev: spaces.Message | undefined
     let newShown = false
     for (const message of visibleReplies) {
-        if (!newShown && newSince && message.postedAt > newSince && message.author.memberId !== org.memberId) {
+        if (!newShown && newSince && message.offset > newSince && message.author.memberId !== org.memberId) {
             rows.push(<NewDivider key="new" fading={newFading} />)
             newShown = true
             prev = undefined
@@ -632,7 +735,7 @@ export function ThreadPane({
 
     return (
         <div className="flex h-full min-h-0 flex-col bg-background">
-            <div className="flex h-9 shrink-0 items-center gap-1.5 border-b border-border pl-2 pr-2">
+            <div className="spaces-pane-header flex shrink-0 items-center gap-1.5 border-b border-border">
                 {showBack && (
                     <>
                         <Button variant="ghost" size="xs" className="gap-1 bg-primary/10 px-2 font-semibold text-primary hover:bg-primary/15 hover:text-primary" onClick={onBack} title="Back to Messages (Esc)" aria-label="Back to messages">
@@ -641,8 +744,8 @@ export function ThreadPane({
                         <span className="h-4 w-px shrink-0 bg-border" />
                     </>
                 )}
-                <span className="pl-1 text-[13px] text-muted-foreground">{topic ? 'Discussion' : 'Thread'}</span>
-                <span className="truncate text-xs text-muted-foreground">
+                <span className="pl-1 text-[15px] font-semibold">{topic ? 'Discussion' : 'Thread'}</span>
+                <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
                     {editingTitle !== null ? (
                         <input
                             autoFocus
@@ -654,7 +757,7 @@ export function ThreadPane({
                             }}
                             onBlur={() => setEditingTitle(null)}
                             placeholder={topic ? 'Discussion goal' : 'What needs to get resolved?'}
-                            className="w-64 rounded-md border border-foreground/30 bg-background px-1.5 py-0.5 text-xs text-foreground outline-none"
+                            className="w-full min-w-0 rounded-md border border-foreground/30 bg-background px-1.5 py-0.5 text-xs text-foreground outline-none"
                         />
                     ) : (
                         <>
@@ -663,6 +766,17 @@ export function ThreadPane({
                         </>
                     )}
                 </span>
+                {topic?.documentPath && (
+                    <button
+                        type="button"
+                        onClick={() => onOpenFile(topic.documentPath!)}
+                        title={`Open ${topic.documentPath} beside this discussion`}
+                        className="inline-flex h-6 max-w-[12rem] shrink-0 items-center gap-1 rounded-md border border-border bg-background px-1.5 text-[11px] text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                    >
+                        <FileText className="size-3 shrink-0" />
+                        <span className="truncate font-mono">{topic.documentPath.split('/').pop()}</span>
+                    </button>
+                )}
                 <span className="flex-1" />
                 {hasSession && onOpenSession && (
                     // Persistent, unlike the working chip: the conversation the
@@ -672,10 +786,21 @@ export function ThreadPane({
                         <Bot className="size-3.5" /> Chat
                     </Button>
                 )}
+                {root && (
+                    <Button
+                        variant="ghost"
+                        size="xs"
+                        className={cn('gap-1 px-2', following ? 'text-foreground' : 'text-muted-foreground')}
+                        onClick={() => void toggleFollow()}
+                        title={following ? 'Following — new replies here badge you. Click to stop.' : 'Follow — new replies here will badge you.'}
+                    >
+                        {following ? <BellOff className="size-3.5" /> : <Bell className="size-3.5" />} {following ? 'Following' : 'Follow'}
+                    </Button>
+                )}
                 {topic?.archived && <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10.5px] text-muted-foreground">archived</span>}
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="size-7 text-muted-foreground"><MoreHorizontal className="size-4" /></Button>
+                        <Button variant="ghost" size="icon" aria-label="Thread options" className="size-8 shrink-0 text-muted-foreground"><MoreHorizontal className="size-4" /></Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                         {topic ? (
@@ -683,6 +808,14 @@ export function ThreadPane({
                                 <DropdownMenuItem onClick={() => setEditingTitle(topic.title)}>
                                     <Pencil className="size-3.5 mr-2" /> Rename
                                 </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => setAttaching(true)}>
+                                    <Paperclip className="size-3.5 mr-2" /> {topic.documentPath ? 'Change linked file…' : 'Link a file…'}
+                                </DropdownMenuItem>
+                                {topic.documentPath && (
+                                    <DropdownMenuItem onClick={() => void manage({ action: 'detach_document' })}>
+                                        <Unlink className="size-3.5 mr-2" /> Unlink file
+                                    </DropdownMenuItem>
+                                )}
                                 {topic.archived ? (
                                     <DropdownMenuItem onClick={() => void manage({ action: 'unarchive' })}><ArchiveRestore className="size-3.5 mr-2" /> Unarchive</DropdownMenuItem>
                                 ) : (
@@ -705,6 +838,18 @@ export function ThreadPane({
                         )}
                     </DropdownMenuContent>
                 </DropdownMenu>
+                {onToggleExpanded && (
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-8 shrink-0 text-muted-foreground"
+                        onClick={onToggleExpanded}
+                        aria-label={expanded ? 'Show alongside Messages' : 'Expand thread'}
+                        title={expanded ? 'Show alongside Messages' : 'Expand thread'}
+                    >
+                        {expanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+                    </Button>
+                )}
                 {!showBack && (
                     <Button variant="ghost" size="icon" className="size-7 text-muted-foreground" onClick={onBack} aria-label="Close thread">
                         <X className="size-4" />
@@ -718,7 +863,35 @@ export function ThreadPane({
             </div>
 
             <div className="relative flex-1 min-h-0 flex flex-col">
-            <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-2 py-2">
+            <div
+                ref={scrollRef}
+                className="flex-1 min-h-0 spaces-message-list overflow-y-auto py-2"
+                onWheel={() => {
+                    userScrollAtRef.current = performance.now()
+                }}
+                onTouchMove={() => {
+                    userScrollAtRef.current = performance.now()
+                }}
+                onPointerDown={() => {
+                    pointerDownRef.current = true
+                }}
+                onScroll={(e) => {
+                    const el = e.currentTarget
+                    const fromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+                    const userScroll = pointerDownRef.current || performance.now() - userScrollAtRef.current < 250
+                    if (fromBottom < 8) {
+                        // At the bottom = following the tail.
+                        parkedTopRef.current = null
+                    } else if (userScroll || parkedTopRef.current !== null) {
+                        parkedTopRef.current = el.scrollTop
+                    } else if (!pendingJumpRef.current) {
+                        // A scroll the reader didn't make, while following —
+                        // anchoring's compensation for a late layout. Re-pin.
+                        el.scrollTop = el.scrollHeight
+                    }
+                }}
+            >
+                <div ref={contentRef}>
                 {!loaded && !root && <div className="px-2 py-2 text-sm text-muted-foreground">Loading…</div>}
 
                 {/* Reply-to-activity-row provenance: the change this root answers. */}
@@ -741,23 +914,23 @@ export function ThreadPane({
                     </button>
                 )}
                 {root && (
-                    <div className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/30 px-3 py-2">
+                    <div className="spaces-thread-root flex items-start gap-3">
                         <MemberProfilePopover id={root.author.memberId}>
                             <button type="button" aria-label={`${parentName}’s profile`} className="mt-0.5 shrink-0 cursor-pointer rounded-full">
-                                <MemberAvatar id={root.author.memberId} name={parentName} size="md" />
+                                <MemberAvatar id={root.author.memberId} name={parentName} size="xl" />
                             </button>
                         </MemberProfilePopover>
                         <div className="min-w-0 flex-1">
                             <div className="flex items-baseline gap-1.5 text-xs">
                                 <MemberProfilePopover id={root.author.memberId}>
-                                    <button type="button" className="cursor-pointer font-semibold hover:underline">{parentName}</button>
+                                    <button type="button" className="cursor-pointer text-[15px] font-bold hover:underline">{parentName}</button>
                                 </MemberProfilePopover>
                                 {root.author.actingMode !== 'direct' && (
                                     <span className="text-muted-foreground">via {root.author.agentName ?? 'agent'}</span>
                                 )}
                                 <span className="text-muted-foreground">{formatFeedTime(root.postedAt)} · in Messages</span>
                             </div>
-                            <div className="text-sm leading-relaxed [&_p]:my-0.5">
+                            <div className={MESSAGE_PROSE}>
                                 {root.deletedAt ? (
                                     <span className="italic text-muted-foreground">This message was deleted</span>
                                 ) : (
@@ -778,7 +951,7 @@ export function ThreadPane({
                     folding={folding}
                 />
 
-                <div className="flex items-center gap-2 px-1 pb-1 pt-3">
+                <div className="mx-5 flex items-center gap-2 pb-2 pt-4">
                     <span className="text-[11px] font-medium text-muted-foreground">
                         {replyCountLabel} {replyCountLabel === 1 ? 'reply' : 'replies'}
                     </span>
@@ -839,7 +1012,7 @@ export function ThreadPane({
                     </div>
                 )}
                 <TypingIndicator names={typingNames} />
-                <div ref={bottomRef} />
+                </div>
             </div>
             {hasNewLine && newCount > 0 && !newJumped && (
                 <button
@@ -853,6 +1026,17 @@ export function ThreadPane({
             )}
             </div>
 
+            {attaching && topic && (
+                <AttachDocumentDialog
+                    entries={entries}
+                    current={topic.documentPath}
+                    onClose={() => setAttaching(false)}
+                    onPick={(path) => {
+                        setAttaching(false)
+                        if (path !== topic.documentPath) void manage({ action: 'attach_document', path })
+                    }}
+                />
+            )}
             {forwarding && (
                 <ForwardDialog org={org} space={space} message={forwarding} memberNames={memberNames} onClose={() => setForwarding(null)} />
             )}

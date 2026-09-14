@@ -100,6 +100,40 @@ describe('PgStore through the service', () => {
     expect(thread.messages.map((m) => m.body)).toEqual(['A follow-up']);
   });
 
+  it('a topic\'s document is stored by asset id and projected as the live path (migration 019)', async () => {
+    await service.proposeChange(ram, spaceId, { assetPath: 'brief.md', baseVersion: 0, newContent: '# Brief\n', actingMode: 'direct' });
+    const b = await service.postMessage(ram, spaceId, { body: 'Root B', actingMode: 'direct' });
+    const { topic } = await service.createTopic(ram, spaceId, {
+      rootMessageId: b.message.id,
+      title: 'Review: the brief',
+      documentPath: 'brief.md',
+      actingMode: 'direct',
+    });
+    expect(topic.documentPath).toBe('brief.md');
+    // The row keeps the internal id; putTopic (a retitle) must not disturb it.
+    const asset = await store.getLiveAssetByPath(spaceId, 'brief.md');
+    expect(await store.getTopicDocument(spaceId, topic.id)).toBe(asset!.id);
+    const retitled = await service.manageTopic(ram, spaceId, topic.id, { action: 'retitle', title: 'Review: the brief (v2)', actingMode: 'direct' });
+    expect(retitled.documentPath).toBe('brief.md');
+
+    // Rename → new path on every read; the getTopicByRoot and thread paths project too.
+    await service.moveAsset(ram, spaceId, { fromPath: 'brief.md', toPath: 'journal.md', baseVersion: 1, actingMode: 'direct' });
+    expect((await store.getTopicByRoot(spaceId, b.message.id))?.documentPath).toBe('journal.md');
+    expect((await service.listThread(ram, spaceId, b.message.id)).topic?.documentPath).toBe('journal.md');
+
+    // Trash → projected away, link kept; detach is still a real change then.
+    await service.deleteAsset(ram, spaceId, { path: 'journal.md', baseVersion: 1, actingMode: 'direct' });
+    expect((await store.getTopic(spaceId, topic.id))?.documentPath).toBeUndefined();
+    expect(await store.getTopicDocument(spaceId, topic.id)).toBe(asset!.id);
+    const detached = await service.manageTopic(ram, spaceId, topic.id, { action: 'detach_document', actingMode: 'direct' });
+    expect(detached.documentPath).toBeUndefined();
+    expect(await store.getTopicDocument(spaceId, topic.id)).toBeUndefined();
+    const events = await store.listEventsAfter(spaceId, 0);
+    expect(events.filter((e) => e.event.type === 'topic' && e.event.topic.id === topic.id).map((e) => (e.event as { action: string }).action))
+      .toEqual(['created', 'retitled', 'document_detached']);
+    await service.restoreAsset(ram, spaceId, { path: 'journal.md', actingMode: 'direct' });
+  });
+
   it('search finds topic-title and body matches across jsonb-backed rows', async () => {
     const posted = await service.postMessage(ram, spaceId, { body: 'exponential backoff, capped', actingMode: 'direct' });
     await service.createTopic(ram, spaceId, {

@@ -21,6 +21,10 @@ function formatUserMessageContextForLlm(userMessageContext: z.infer<typeof UserM
         );
     }
 
+    if (userMessageContext.spaceMentions && userMessageContext.spaceMentions.length > 0) {
+        sections.push(formatSpaceMentions(userMessageContext.spaceMentions));
+    }
+
     if (userMessageContext.middlePane) {
         if (userMessageContext.middlePane.kind === 'empty') {
             sections.push(`Middle pane:\nState: empty`);
@@ -28,6 +32,12 @@ function formatUserMessageContextForLlm(userMessageContext: z.infer<typeof UserM
             sections.push(`Middle pane:\nState: note\nPath: ${userMessageContext.middlePane.path}\n\nContent:\n\`\`\`\n${userMessageContext.middlePane.content}\n\`\`\``);
         } else if (userMessageContext.middlePane.kind === 'deck') {
             sections.push(`Middle pane:\nState: deck\nPath: ${userMessageContext.middlePane.path}\nSlide: ${userMessageContext.middlePane.slideNumber} of ${userMessageContext.middlePane.slideCount}`);
+        } else if (userMessageContext.middlePane.kind === 'whiteboard') {
+            const wb = userMessageContext.middlePane;
+            sections.push(
+                `Middle pane:\nState: whiteboard\nBoard: ${wb.path} in space "${wb.spaceName}" on org "${wb.orgName}" (spaceId: ${wb.spaceId}; pass org: "${wb.orgName}")\n` +
+                    'The user is looking at this shared board. "the board" / "here" / "add a box" means this one: whiteboard-read it (spaceId + board path above), then whiteboard-draw.',
+            );
         } else {
             sections.push(`Middle pane:\nState: browser\nURL: ${userMessageContext.middlePane.url}\nTitle: ${userMessageContext.middlePane.title}`);
         }
@@ -42,6 +52,46 @@ ${sections.join('\n\n')}
 
 # User Message
 `;
+}
+
+/**
+ * The Spaces objects the user picked from the composer's @ menu, one line
+ * each, keyed by the exact "@Name" that appears in their text. The ids are
+ * authoritative — the picker resolved them — so the model is told to skip
+ * the name lookups the spaces skill otherwise mandates. Rendered in the
+ * order picked, deduped by id, so the block is byte-stable per message.
+ */
+function formatSpaceMentions(mentions: NonNullable<z.infer<typeof UserMessageContext>["spaceMentions"]>): string {
+    const lines: string[] = [];
+    const seen = new Set<string>();
+    for (const m of mentions) {
+        const key =
+            m.kind === 'space'
+                ? `space:${m.orgId}/${m.spaceId}`
+                : m.kind === 'member'
+                  ? `member:${m.orgId}/${m.memberId}`
+                  : `board:${m.orgId}/${m.spaceId}/${m.path}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        if (m.kind === 'space') {
+            lines.push(`- @${m.name} = space "${m.name}" on org "${m.orgName}" (spaceId: ${m.spaceId})`);
+        } else if (m.kind === 'member') {
+            lines.push(
+                `- @${m.displayName} = person "${m.displayName}" on org "${m.orgName}" (memberId: ${m.memberId}; ` +
+                    'open_direct with this memberId to DM them, or address them with a mention token)',
+            );
+        } else {
+            lines.push(
+                `- @${m.name} = whiteboard "${m.name}" (board: ${m.path}) in space "${m.spaceName}" on org "${m.orgName}" (spaceId: ${m.spaceId}; ` +
+                    'whiteboard-read / whiteboard-draw with this spaceId and board)',
+            );
+        }
+    }
+    return [
+        'Spaces mentioned (picked from the @ menu — these ids are exact; use them directly instead of ' +
+            'resolving names with list_spaces / list_members, and pass the org name as `org` on every spaces tool call):',
+        ...lines,
+    ].join('\n');
 }
 
 function formatBytes(bytes: number): string {

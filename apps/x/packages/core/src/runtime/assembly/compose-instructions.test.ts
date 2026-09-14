@@ -27,6 +27,7 @@ function input(
         videoMode: false,
         coachMode: false,
         commandCenter: false,
+        spaceThread: null,
         ...overrides,
     };
 }
@@ -44,6 +45,17 @@ const MATRIX: Array<[name: string, overrides: Partial<ComposeSystemInstructionsI
     ["code mode claude with cwd", { codeMode: "claude", codeCwd: "/tmp/project" }],
     ["code mode codex without cwd", { codeMode: "codex" }],
     ["command center", { commandCenter: true }],
+    [
+        "space thread",
+        {
+            spaceThread: {
+                org: "org-1",
+                spaceName: "Roadboard",
+                spaceId: "01M07B68G1BQFP70TX5RPHJX89",
+                threadRootId: "01M07ROOTAAAAAAAAAAAAAAAA1",
+            },
+        },
+    ],
     [
         "everything on",
         {

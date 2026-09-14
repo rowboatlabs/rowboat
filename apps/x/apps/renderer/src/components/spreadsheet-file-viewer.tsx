@@ -1,3 +1,4 @@
+import { useFileViewerSource } from './file-viewer-source'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   CheckIcon,
@@ -68,6 +69,7 @@ function formatCell(value: string | number | boolean | null): string {
 }
 
 export function SpreadsheetFileViewer({ path }: SpreadsheetFileViewerProps) {
+  const source = useFileViewerSource()
   const [data, setData] = useState<SpreadsheetLoadResult | null>(null)
   const [activeSheet, setActiveSheet] = useState<string | null>(() => viewStateByPath.get(path)?.sheet ?? null)
   const [page, setPage] = useState(() => viewStateByPath.get(path)?.page ?? 0)
@@ -105,7 +107,7 @@ export function SpreadsheetFileViewer({ path }: SpreadsheetFileViewerProps) {
     setFindQuery('')
     setFindResult(null)
     setError(null)
-  }, [path])
+  }, [path, source])
 
   useEffect(() => {
     const requestId = ++requestIdRef.current
@@ -113,7 +115,7 @@ export function SpreadsheetFileViewer({ path }: SpreadsheetFileViewerProps) {
     setLoading(true)
     void (async () => {
       try {
-        const result = await window.ipc.invoke('spreadsheet:load', {
+        const result = await source.loadSheet({
           path,
           sheet: activeSheet ?? undefined,
           offset: headerRows + page * PAGE_SIZE,
@@ -143,7 +145,7 @@ export function SpreadsheetFileViewer({ path }: SpreadsheetFileViewerProps) {
     return () => {
       cancelled = true
     }
-  }, [path, activeSheet, page, headerRows, version])
+  }, [path, activeSheet, page, headerRows, version, source])
 
   // Remember where the user is so reopening this file restores the position.
   useEffect(() => {
@@ -208,7 +210,7 @@ export function SpreadsheetFileViewer({ path }: SpreadsheetFileViewerProps) {
     const timer = setTimeout(() => {
       void (async () => {
         try {
-          const res = await window.ipc.invoke('spreadsheet:find', { path, sheet, query })
+          const res = await source.findCells({ path, sheet, query })
           if (cancelled) return
           setFindResult({ sheet: res.activeSheet, matches: res.matches, total: res.total })
           setFindIndex(0)
@@ -330,7 +332,7 @@ export function SpreadsheetFileViewer({ path }: SpreadsheetFileViewerProps) {
         <button
           type="button"
           onClick={() => {
-            void window.ipc.invoke('shell:openPath', { path })
+            void source.open({ path })
           }}
           className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
         >
@@ -503,7 +505,7 @@ export function SpreadsheetFileViewer({ path }: SpreadsheetFileViewerProps) {
         <button
           type="button"
           onClick={() => {
-            void window.ipc.invoke('shell:openPath', { path })
+            void source.open({ path })
           }}
           className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-accent"
         >

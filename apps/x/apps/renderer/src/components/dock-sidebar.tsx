@@ -1,8 +1,11 @@
+import { SidebarChatContextMenu } from "./sidebar-chat-context-menu"
 "use client"
+
+import { readLastSpace, resolveSpacesLocation } from '@/lib/spaces-navigation'
 
 import * as React from "react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import {
+import { Bell,
   AppWindow,
   ArrowUpRight,
   Bot,
@@ -12,8 +15,8 @@ import {
   Folder,
   Globe,
   History,
-  Home,
   LayoutGrid,
+  ListTodo,
   LogIn,
   Mail,
   MessageSquare,
@@ -71,7 +74,9 @@ import { SidebarCreditRewards } from "@/components/sidebar-credit-rewards"
 import { SPACES_ENABLED } from "@/lib/feature-flags"
 import { AddOrgDialog, OrgMonogram, type SpaceSelection } from "@/components/spaces-view"
 import { openSelfDirect, useSpacesOrgs, type OrgWithSpaces } from "@/hooks/use-spaces"
-import { prefetchStream, spaceLastActivityAt, useSpacesUnreadCounts } from "@/hooks/use-space-chat"
+import { prefetchStream, spaceLastActivityAt, useSpacesUnreadCounts, type SpaceBadge } from "@/hooks/use-space-chat"
+import { NO_BADGE } from "@/lib/spaces-read-state"
+import { UnreadBadge } from "@/components/spaces/unread-badge"
 import { MemberAvatar } from "@/components/spaces/atoms"
 import { NewDirectDialog } from "@/components/spaces/new-direct-dialog"
 import { directAvatarId, isSelfDirect, isSelfDirectUnsupported, markSelfDirectUnsupported, selfDirectFailureMessage, selfDirectRefused, spaceDisplayName } from "@/lib/spaces-direct"
@@ -101,7 +106,7 @@ const RAIL_ICON_PX = 18
 
 /** The most recently opened space — App writes it on every space navigation;
     the ⌥Tab switcher lands there instead of opening the flyout. */
-export const LAST_SPACE_STORAGE_KEY = 'x:last-space'
+export { LAST_SPACE_STORAGE_KEY } from '@/lib/spaces-navigation'
 
 /** Where flyout panels (Chats / Spaces) sit, just right of the rail. */
 const DOCK_FLYOUT_LEFT_PX = DOCK_GUTTER_PX + 8
@@ -147,6 +152,9 @@ export type DockSidebarProps = {
   onOpenApp?: (folder: string) => void
   /** Open one space (org + space) in the Spaces view. */
   onOpenSpace?: (orgId: string, spaceId: string) => void
+  /** The org's Activity surface (layer 3). */
+  onOpenActivity?: (orgId: string) => void
+  onOpenSpaces?: () => void
   /** The space currently open, for highlighting its flyout row. */
   activeSpace?: SpaceSelection
   recentRuns?: { id: string; title?: string; createdAt: string; modifiedAt?: string }[]
@@ -546,6 +554,8 @@ export function DockSidebar({
   onOpenApps,
   onOpenApp,
   onOpenSpace,
+  onOpenActivity,
+  onOpenSpaces,
   activeSpace = null,
   recentRuns = [],
   onOpenRun,
@@ -876,7 +886,7 @@ export function DockSidebar({
   const spacesUnread = useSpacesUnreadCounts()
   const totalSpacesUnread = useMemo(() => {
     let sum = 0
-    for (const count of spacesUnread.values()) sum += count
+    for (const badge of spacesUnread.values()) sum += badge.forYou
     return sum
   }, [spacesUnread])
   const totalSpaces = useMemo(() => orgs.reduce((n, o) => n + o.spaces.length + o.directs.length, 0), [orgs])
@@ -888,22 +898,12 @@ export function DockSidebar({
   // (persisted by App), falling back to the first space anywhere; only when
   // there is none at all does it fall back to the flyout.
   const openLastSpace = useCallback((): boolean => {
-    let last: { orgId: string; spaceId: string } | null = null
-    try {
-      last = JSON.parse(window.localStorage.getItem(LAST_SPACE_STORAGE_KEY) ?? 'null') as { orgId: string; spaceId: string } | null
-    } catch { /* ignore */ }
-    const isValid = last != null
-      && orgs.some((o) => o.id === last.orgId && (o.spaces.some((s) => s.id === last.spaceId) || o.directs.some((s) => s.id === last.spaceId)))
-    const target = isValid && last
-      ? last
-      : (() => {
-        const org = orgs.find((o) => o.spaces.length > 0)
-        return org ? { orgId: org.id, spaceId: org.spaces[0].id } : null
-      })()
+    if (onOpenSpaces) { onOpenSpaces(); return true }
+    const target = resolveSpacesLocation(orgs, readLastSpace())
     if (!target) return false
     onOpenSpace?.(target.orgId, target.spaceId)
     return true
-  }, [orgs, onOpenSpace])
+  }, [orgs, onOpenSpace, onOpenSpaces])
 
   // ----- derived: meetings sublabel -----
   const previewEmail = emailThreads[0]
@@ -966,7 +966,7 @@ export function DockSidebar({
           key: 'spaces', label: 'Spaces', icon: MessagesSquare, tourId: 'nav-spaces',
           badge: totalSpacesUnread > 0 ? (totalSpacesUnread > 99 ? '99+' : String(totalSpacesUnread)) : undefined,
           status: totalSpacesUnread > 0
-            ? `${totalSpacesUnread} unread`
+            ? `${totalSpacesUnread} for you`
             : totalSpaces > 0 ? `${totalSpaces} space${totalSpaces === 1 ? '' : 's'}` : undefined,
           running: activeNav === 'spaces' || spacesOpen,
           onClick: () => {
@@ -986,13 +986,6 @@ export function DockSidebar({
       { sep: true as const },
       {
         item: {
-          key: 'home', label: 'Home', icon: Home, tourId: 'nav-home',
-          running: activeNav === 'home',
-          onClick: () => { closeFlyouts(); onOpenHome?.() },
-        },
-      },
-      {
-        item: {
           key: 'email', label: 'Email', icon: Mail, tourId: 'nav-email',
           badge: unreadEmailCount > 0 ? (unreadEmailCount > 99 ? '99+' : String(unreadEmailCount)) : undefined,
           status: previewEmail ? `${formatEmailFrom(previewEmail.from)} · ${previewEmail.subject}` : undefined,
@@ -1000,13 +993,6 @@ export function DockSidebar({
           onClick: () => { closeFlyouts(); onOpenEmail?.() },
         },
       },
-      ...(codeModeEnabled ? [{
-        item: {
-          key: 'code', label: 'Code', icon: Code2, tourId: 'nav-code',
-          running: activeNav === 'code',
-          onClick: () => { closeFlyouts(); onOpenCode?.() },
-        },
-      }] : []),
       {
         item: {
           key: 'meetings', label: 'Meetings', icon: Mic, tourId: 'nav-meetings',
@@ -1018,6 +1004,13 @@ export function DockSidebar({
           onClick: () => { closeFlyouts(); onOpenMeetings?.() },
         },
       },
+      ...(codeModeEnabled ? [{
+        item: {
+          key: 'code', label: 'Code', icon: Code2, tourId: 'nav-code',
+          running: activeNav === 'code',
+          onClick: () => { closeFlyouts(); onOpenCode?.() },
+        },
+      }] : []),
       {
         item: {
           key: 'brain', label: 'Brain', icon: FileText, tourId: 'nav-knowledge',
@@ -1026,6 +1019,39 @@ export function DockSidebar({
           onClick: () => { closeFlyouts(); knowledgeActions.openKnowledgeView() },
         },
       },
+      {
+        item: {
+          key: 'home', label: 'Todo', icon: ListTodo, tourId: 'nav-home',
+          running: activeNav === 'home',
+          onClick: () => { closeFlyouts(); onOpenHome?.() },
+        },
+      },
+      { sep: true },
+      {
+        item: {
+          key: 'workspaces', label: 'Projects', icon: Folder, tourId: 'nav-workspaces',
+          status: workspaceCount === 0 ? 'No projects' : `${workspaceCount} project${workspaceCount === 1 ? '' : 's'}`,
+          running: activeNav === 'workspaces',
+          onClick: () => { closeFlyouts(); knowledgeActions.openWorkspaceAt() },
+        },
+      },
+      {
+        item: {
+          key: 'agents', label: 'Background agents', switcherLabel: 'Agents', icon: Bot, tourId: 'nav-agents',
+          badge: bgAgentsFailed ? '!' : undefined,
+          status: bgAgentsLabel ?? undefined,
+          statusAlert: bgAgentsFailed,
+          running: activeNav === 'agents',
+          onClick: () => { closeFlyouts(); onOpenBgTasks?.() },
+        },
+      },
+      ...(onToggleBrowser ? [{
+        item: {
+          key: 'browser', label: 'Browser', icon: Globe,
+          running: browserOpen,
+          onClick: () => { closeFlyouts(); onToggleBrowser() },
+        },
+      }] : []),
       {
         item: {
           key: 'apps', label: 'Apps', icon: LayoutGrid, tourId: 'nav-apps',
@@ -1041,31 +1067,6 @@ export function DockSidebar({
           onClick: () => { closeFlyouts(); onOpenApp?.(folder) },
         },
       })),
-      {
-        item: {
-          key: 'agents', label: 'Background agents', switcherLabel: 'Agents', icon: Bot, tourId: 'nav-agents',
-          badge: bgAgentsFailed ? '!' : undefined,
-          status: bgAgentsLabel ?? undefined,
-          statusAlert: bgAgentsFailed,
-          running: activeNav === 'agents',
-          onClick: () => { closeFlyouts(); onOpenBgTasks?.() },
-        },
-      },
-      {
-        item: {
-          key: 'workspaces', label: 'Workspaces', icon: Folder, tourId: 'nav-workspaces',
-          status: workspaceCount === 0 ? 'No workspaces' : `${workspaceCount} workspace${workspaceCount === 1 ? '' : 's'}`,
-          running: activeNav === 'workspaces',
-          onClick: () => { closeFlyouts(); knowledgeActions.openWorkspaceAt() },
-        },
-      },
-      ...(onToggleBrowser ? [{
-        item: {
-          key: 'browser', label: 'Browser', icon: Globe,
-          running: browserOpen,
-          onClick: () => { closeFlyouts(); onToggleBrowser() },
-        },
-      }] : []),
       { sep: true },
       {
         item: {
@@ -1427,6 +1428,7 @@ export function DockSidebar({
           unread={spacesUnread}
           activeSpace={activeSpace}
           onOpenSpace={(orgId, spaceId) => { closeFlyouts(); onOpenSpace?.(orgId, spaceId) }}
+          onOpenActivity={onOpenActivity ? (orgId) => { closeFlyouts(); onOpenActivity(orgId) } : undefined}
           onAddOrg={() => setAddOrgOpen(true)}
           onChanged={() => void refreshSpaces()}
           onRequestRemoveOrg={(id, name) => setRemoveOrgTarget({ id, name })}
@@ -1628,17 +1630,25 @@ function ChatsFlyout({
               </div>
             ) : (
               <>
-                <button
-                  type="button"
-                  onClick={() => onOpenRun?.(chat.id)}
-                  className="flex w-full items-center gap-2.5 rounded-[9px] px-2.5 py-2 text-left text-[13.5px] text-foreground/90 hover:bg-accent"
+                <SidebarChatContextMenu
+                  pinned={pinnedChatIds.includes(chat.id)}
+                  onOpen={onOpenRun ? () => onOpenRun(chat.id) : undefined}
+                  onTogglePin={() => onTogglePin(chat.id)}
+                  onRename={onRenameRun ? () => { setRenameDraft(chat.title || ''); setRenamingChatId(chat.id) } : undefined}
+                  onRequestDelete={onRequestDelete ? () => onRequestDelete(chat.id, chat.title || '(Untitled chat)') : undefined}
                 >
-                  <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
-                  <span className="min-w-0 flex-1 truncate pr-5">{chat.title || '(Untitled chat)'}</span>
-                  {pinnedChatIds.includes(chat.id) && (
-                    <Pin className="size-3 shrink-0 text-muted-foreground/70 transition-opacity group-hover/chat-row:opacity-0" />
-                  )}
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => onOpenRun?.(chat.id)}
+                    className="flex w-full items-center gap-2.5 rounded-[9px] px-2.5 py-2 text-left text-[13.5px] text-foreground/90 hover:bg-accent"
+                  >
+                    <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1 truncate pr-5">{chat.title || '(Untitled chat)'}</span>
+                    {pinnedChatIds.includes(chat.id) && (
+                      <Pin className="size-3 shrink-0 text-muted-foreground/70 transition-opacity group-hover/chat-row:opacity-0" />
+                    )}
+                  </button>
+                </SidebarChatContextMenu>
                 {onRenameRun && (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -1706,15 +1716,17 @@ function SpacesFlyout({
   unread,
   activeSpace,
   onOpenSpace,
+  onOpenActivity,
   onAddOrg,
   onChanged,
   onRequestRemoveOrg,
 }: {
   orgs: OrgWithSpaces[]
   loading: boolean
-  unread: Map<string, number>
+  unread: Map<string, SpaceBadge>
   activeSpace: SpaceSelection
   onOpenSpace: (orgId: string, spaceId: string) => void
+  onOpenActivity?: (orgId: string) => void
   onAddOrg: () => void
   onChanged: () => void
   onRequestRemoveOrg: (orgId: string, name: string) => void
@@ -1749,6 +1761,7 @@ function SpacesFlyout({
             activeSpace={activeSpace}
             unread={unread}
             onOpenSpace={onOpenSpace}
+            onOpenActivity={onOpenActivity}
             onChanged={onChanged}
             onRequestRemoveOrg={onRequestRemoveOrg}
           />
@@ -1758,11 +1771,12 @@ function SpacesFlyout({
   )
 }
 
-function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, onRequestRemoveOrg }: {
+function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onChanged, onRequestRemoveOrg }: {
   org: OrgWithSpaces
   activeSpace: SpaceSelection
-  unread: Map<string, number>
+  unread: Map<string, SpaceBadge>
   onOpenSpace: (orgId: string, spaceId: string) => void
+  onOpenActivity?: (orgId: string) => void
   onChanged: () => void
   onRequestRemoveOrg: (orgId: string, name: string) => void
 }) {
@@ -1897,9 +1911,29 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, onReq
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+      {onOpenActivity && (() => {
+        // Everything for me across the org's spaces — the space rows' "for you", summed.
+        let forYou = 0
+        for (const [key, badge] of unread) if (key.startsWith(`${org.id}/`)) forYou += badge.forYou
+        const active = activeSpace?.orgId === org.id && activeSpace.view === 'activity'
+        return (
+          <button
+            type="button"
+            onClick={() => onOpenActivity(org.id)}
+            className={cn(
+              'flex w-full items-center gap-2.5 rounded-[9px] py-2 pl-5 pr-2.5 text-left text-[13.5px] text-foreground/90 hover:bg-accent',
+              active && 'bg-[var(--sidebar-accent)]',
+            )}
+          >
+            <Bell className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className={cn('min-w-0 flex-1 truncate', forYou > 0 && !active && 'font-medium text-foreground')}>Activity</span>
+            {!active && <UnreadBadge badge={{ unread: forYou, forYou }} />}
+          </button>
+        )
+      })()}
       {org.spaces.map((space) => {
         const active = activeSpace?.orgId === org.id && activeSpace.spaceId === space.id
-        const count = unread.get(`${org.id}/${space.id}`) ?? 0
+        const badge = unread.get(`${org.id}/${space.id}`) ?? NO_BADGE
         if (renamingId === space.id) {
           return (
             <div key={space.id} className="flex items-center gap-1 py-0.5 pl-5 pr-2">
@@ -1931,10 +1965,8 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, onReq
                   active && 'bg-[var(--sidebar-accent)]',
                 )}
               >
-                <span className={cn('min-w-0 flex-1 truncate', count > 0 && !active && 'font-medium text-foreground')}>{space.name}</span>
-                {count > 0 && (
-                  <span className="shrink-0 text-[11px] font-semibold tabular-nums text-foreground/80">{count}</span>
-                )}
+                <span className={cn('min-w-0 flex-1 truncate', badge.unread > 0 && !active && 'font-medium text-foreground')}>{space.name}</span>
+                {!active && <UnreadBadge badge={badge} />}
               </button>
             </ContextMenuTrigger>
             <ContextMenuContent>
@@ -1968,7 +2000,7 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, onReq
       )}
       {!org.error && directs.map((dm) => {
         const active = activeSpace?.orgId === org.id && activeSpace.spaceId === dm.id
-        const count = unread.get(`${org.id}/${dm.id}`) ?? 0
+        const badge = unread.get(`${org.id}/${dm.id}`) ?? NO_BADGE
         const self = isSelfDirect(dm, org.memberId)
         const label = self ? selfName : spaceDisplayName(org, dm)
         return (
@@ -1983,13 +2015,11 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, onReq
             )}
           >
             <MemberAvatar id={directAvatarId(dm, org.memberId)} name={label} size="sm" className="size-4 rounded-[3px] text-[8px]" />
-            <span className={cn('min-w-0 flex-1 truncate', count > 0 && !active && 'font-medium text-foreground')}>
+            <span className={cn('min-w-0 flex-1 truncate', badge.unread > 0 && !active && 'font-medium text-foreground')}>
               {label}
               {self && <span className="ml-1.5 font-normal text-muted-foreground">you</span>}
             </span>
-            {count > 0 && (
-              <span className="shrink-0 text-[11px] font-semibold tabular-nums text-foreground/80">{count}</span>
-            )}
+            {!active && <UnreadBadge badge={badge} direct />}
           </button>
         )
       })}

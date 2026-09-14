@@ -1,3 +1,4 @@
+import { useProjects } from '@/hooks/use-projects'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ExternalLink, MessagesSquare, MoreVertical, Pencil, SearchIcon, SquarePen, Trash2 } from 'lucide-react'
 import type { SessionOrigin, SpaceThreadOrigin } from '@x/shared/src/origins.js'
@@ -232,6 +233,7 @@ export function ChatHistoryView({
   // Mentions only: narrow to one space (its facet key); null = every space.
   const [spaceFilter, setSpaceFilter] = useState<string | null>(null)
   const { orgs } = useSpacesOrgs()
+  const { projects } = useProjects()
 
   useEffect(() => {
     try {
@@ -448,6 +450,7 @@ export function ChatHistoryView({
                               <span className="min-w-0 flex-1 truncate font-medium text-foreground">
                                 {run.title || (threadOrigin ? '(Untitled thread)' : '(Untitled chat)')}
                               </span>
+                              {projects.find((p) => p.chats.some((chat) => chat.id === run.id)) && <span className="rounded bg-accent px-2 py-0.5 text-xs text-muted-foreground">{projects.find((p) => p.chats.some((chat) => chat.id === run.id))?.name}</span>}
                               {facet && <SpaceChip facet={facet} />}
                               <span className="w-28 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
                                 {formatRelativeTime(run.modifiedAt)}

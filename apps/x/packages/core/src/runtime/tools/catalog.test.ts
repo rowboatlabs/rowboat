@@ -219,8 +219,42 @@ const HISTORICAL_KEY_ORDER = [
     "spreadsheet-create",
     "spreadsheet-edit",
     "generate-image",
+    "whoami",
+    "list_members",
+    "list_spaces",
+    "open_direct",
+    "create_space",
+    "rename_space",
+    "leave_space",
+    "create_invite",
+    "read_stream",
+    "read_thread",
+    "read_activity",
+    "mark_all_read",
+    "search_space",
+    "post_message",
+    "edit_message",
+    "delete_message",
+    "react",
+    "vote_poll",
+    "end_poll",
+    "list_topics",
+    "create_topic",
+    "manage_topic",
+    "read_asset",
+    "propose_change",
+    "move_asset",
+    "delete_asset",
+    "restore_asset",
+    "asset_history",
+    "diff",
     "spaces-upload-blob",
     "spaces-download-blob",
+    "schedule_message",
+    "list_scheduled",
+    "cancel_scheduled",
+    "whiteboard-read",
+    "whiteboard-draw",
     "spawn-agent",
 ];
 
@@ -308,7 +342,33 @@ describe("BuiltinTools permission audit", () => {
             // team-visible org, so it's gated (the auto judge decides);
             // download is deliberately "none" — a member-readable fetch into
             // the app-owned cache.
+            // The projected agent face: every org write is gated; reads
+            // (whoami, list_*, read_*, search, history, diff) are "none".
+            open_direct: "prompt",
+            create_space: "prompt",
+            rename_space: "prompt",
+            leave_space: "prompt",
+            create_invite: "prompt",
+            post_message: "prompt",
+            edit_message: "prompt",
+            delete_message: "prompt",
+            react: "prompt",
+            vote_poll: "prompt",
+            end_poll: "prompt",
+            create_topic: "prompt",
+            manage_topic: "prompt",
+            // Personal state, but irreversible (marks only advance) — gated like a write.
+            mark_all_read: "prompt",
+            propose_change: "prompt",
+            move_asset: "prompt",
+            delete_asset: "prompt",
+            restore_asset: "prompt",
             "spaces-upload-blob": "prompt",
+            // Local: a scheduled send still lands in front of the team.
+            schedule_message: "prompt",
+            // Whiteboards: a draw is a propose_change on a shared board;
+            // the read is a member-readable snapshot summary.
+            "whiteboard-draw": "prompt",
         });
     });
 });

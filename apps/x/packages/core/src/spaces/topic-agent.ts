@@ -100,21 +100,13 @@ export function topicSessionId(orgId: string, spaceId: string, threadRootId: str
 export function buildInvocationMessage(input: InvokeTopicAgentInput, mcpServerName: string | null): string {
   // Deliberately carries NO thread content: the agent reads the discussion on
   // demand via read_thread — always fresh, paid for only when the task needs
-  // it (read-before-act as procedure, same as the asset tools).
+  // it. And no procedure: the session is pinned to this thread (sessions.ts
+  // spaceThreadPins), so the receipt contract, the provenance suffix, and the
+  // spaces tools are already in the system prompt from token zero. The ids
+  // ride the message too — a few tokens that survive context compaction.
+  void mcpServerName; // the org rides the session pin (`org`), not the message
   return [
-    '[Invoked from a space thread]',
-    `Space: "${input.spaceName}" (spaceId: ${input.spaceId})`,
-    `Thread: "${input.threadLabel}" (rootMessageId: ${input.threadRootId})`,
-    ...(mcpServerName ? [`Org MCP server: ${mcpServerName}`] : []),
-    `Invoked by feed message: ${input.messageId}`,
-    '',
-    'Load the "spaces" skill if not loaded and follow its "When invoked from a space thread" procedure. ' +
-      `If the task concerns the conversation itself (summarising it, answering questions about it, catching up), ` +
-      `call read_thread on this rootMessageId FIRST. ` +
-      `Any propose_change you make must end its reason with " · thread:${input.threadRootId}" (provenance — it lists the change under this thread's artifacts). ` +
-      `Do the work, then end with exactly ONE post_message receipt with threadRoot ${input.threadRootId}.`,
-    '',
-    '--- message from your person ---',
+    `[@rowboat in "${input.spaceName}" · spaceId ${input.spaceId} · thread ${input.threadRootId} · message ${input.messageId}]`,
     input.body,
   ].join('\n');
 }

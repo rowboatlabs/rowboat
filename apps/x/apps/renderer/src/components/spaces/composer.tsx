@@ -15,7 +15,7 @@ import { VoiceWaveform } from '@/components/chat-input-with-mentions'
 import { useVoiceMode } from '@/hooks/useVoiceMode'
 import { useVoiceInputAvailable } from '@/hooks/use-voice-available'
 import { CALL_VOICE_HOLDER, acquireVoice, releaseVoice, voiceOwnerId } from '@/lib/voice-ownership'
-import { caretContext, composerExtensions, composerMarkdown, type CaretContext } from '@/components/spaces/composer-editor'
+import { caretContext, closeFenceLine, composerExtensions, composerMarkdown, openFenceLine, type CaretContext } from '@/components/spaces/composer-editor'
 import { RichFormattingToolbar } from '@/components/spaces/composer-toolbar'
 import { MentionMenu, useMentionAutocomplete } from '@/components/spaces/mention-autocomplete'
 import { isDirectImageUrl, useSpaceRefs } from '@/components/spaces/space-markdown'
@@ -23,7 +23,7 @@ import '@/styles/space-composer.css'
 import { noteEmojiUsed, replaceShortcodes, searchEmoji, type EmojiEntry } from '@/lib/emoji-data'
 import { containsRowboatAddress } from '@/lib/spaces-mentions'
 import { schedulePresets } from '@/lib/spaces-schedule'
-import { blobAppUrl, blobWireUrl, encodeMentions, formatBytes, isImageMime, mentionEndingAtCaret } from '@/lib/spaces-presentation'
+import { blobAppUrl, blobWireUrl, formatBytes, isImageMime } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
 
 // The space composer. A plain message box — Enter sends, Shift+Enter breaks a
@@ -370,7 +370,15 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         const { $from, empty } = editor.state.selection
         const before = empty && $from.parent.isTextblock ? $from.parent.textBetween(0, $from.parentOffset, ' ', ' ') : ''
         const needsSpace = before.length > 0 && !/\s$/.test(before)
-        editor.chain().focus().insertContent({ type: 'text', text: `${needsSpace ? ' ' : ''}@rowboat ` }).run()
+        editor
+            .chain()
+            .focus()
+            .insertContent([
+                ...(needsSpace ? [{ type: 'text', text: ' ' }] : []),
+                { type: 'mention', attrs: { kind: 'rowboat', id: null, label: 'rowboat' } },
+                { type: 'text', text: ' ' },
+            ])
+            .run()
     }
 
     // --- send ----------------------------------------------------------------
@@ -390,7 +398,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     /** The one body builder — send and send-later produce identical wire text. */
     const buildBody = (raw: string): string => {
         const ready = attachments.filter((a) => a.status === 'done' && a.hash)
-        const text = encodeMentions(replaceShortcodes(raw), members)
+        const text = replaceShortcodes(raw)
         const attachmentLines = refs
             ? ready.map((a) => {
                   const dims = a.width && a.height ? { width: a.width, height: a.height } : undefined
@@ -440,7 +448,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                     return
                 }
                 // Built-in /ask: rewrite and send through the normal path.
-                await send(`@rowboat ${args}`)
+                await send(`[@rowboat](#rowboat) ${args}`)
                 return
             }
         }
@@ -556,7 +564,8 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     const sendRecording = async () => {
         const text = await finishRecording('send')
         if (!text) return
-        const body = encodeMentions(replaceShortcodes(text), members)
+        // A transcript has no pills: whatever it says is prose, never an address.
+        const body = replaceShortcodes(text)
         if (body) await onSend(body, agentOptionsFor(text))
     }
 
@@ -632,18 +641,6 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                 return true
             }
         }
-        if (e.key === 'Backspace' && editor) {
-            // A mention deletes as one unit (the Discord behavior): with the
-            // caret right at the end of "@Name", the whole token goes, not
-            // the last letter. caretContext bows out for range selections and
-            // code — a cited @Name still edits character by character.
-            const ctx = caretContext(editor)
-            const start = ctx ? mentionEndingAtCaret(ctx.text, members.map((m) => m.displayName)) : null
-            if (ctx && start !== null) {
-                return editor.chain().focus().deleteRange({ from: ctx.from - (ctx.text.length - start), to: ctx.from }).run()
-            }
-            return false
-        }
         if (e.key !== 'Enter') return false
         // ⌘Enter always sends — even from inside a code fence.
         if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
@@ -652,17 +649,20 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         }
         if (e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && editor) {
             // Shift+Enter continues a list — next item, or out of the list
-            // from an empty one; elsewhere the default hard break applies.
+            // from an empty one; a typed fence line (```) opens a code
+            // block; elsewhere the default hard break applies.
             if (editor.isActive('listItem')) {
                 const { $from } = editor.state.selection
                 if ($from.parent.textContent === '') return editor.chain().focus().liftListItem('listItem').run()
                 return editor.chain().focus().splitListItem('listItem').run()
             }
-            return false
+            return openFenceLine(editor)
         }
         if (!e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && !view.composing) {
-            // Inside a code fence Enter breaks the line (the Slack posture);
-            // everywhere else it sends.
+            // A typed fence line opens a code block (or, inside one, closes
+            // it) rather than sending; inside a code fence Enter breaks the
+            // line (the editor behavior); everywhere else it sends.
+            if (editor && (openFenceLine(editor) || closeFenceLine(editor))) return true
             if (view.state.selection.$from.parent.type.name === 'codeBlock') return false
             void send()
             return true
@@ -685,10 +685,10 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     })
 
     return (
-        <div className="px-3 pb-3 pt-1 shrink-0">
+        <div className="spaces-composer-dock shrink-0">
             <div
                 ref={setBox}
-                className="relative rounded-2xl border border-border bg-background shadow-[0_8px_24px_rgb(0_0_0_/_0.04)]"
+                className="spaces-composer-frame relative border bg-background"
                 onDragEnter={onDragEnter}
                 onDragOver={(e) => { if (refs && dragHasFiles(e)) e.preventDefault() }}
                 onDragLeave={onDragLeave}
@@ -807,8 +807,8 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                     {!recording && mention.show && (
                         <MentionMenu anchor={box} candidates={mention.candidates} index={mention.index} onPick={mention.pick} />
                     )}
-                    {/* The formatting bar rides the top edge, Slack-style. */}
-                    <RichFormattingToolbar editor={editor} className="px-2 pt-1.5" />
+                    {/* The formatting bar rides the top edge. */}
+                    <RichFormattingToolbar editor={editor} className="spaces-formatting px-2 py-1" />
                     {attachments.length > 0 && (
                         <div className="flex flex-wrap items-center gap-1.5 px-2.5 pt-2">
                             {attachments.map((a) => (
@@ -844,7 +844,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                     {/* The rich input. What you see is what sends — the doc
                         serializes back to wire markdown on every update. */}
                     <EditorContent editor={editor} className="space-composer" />
-                    <div className="flex flex-wrap items-center gap-1.5 px-2 pb-2">
+                    <div className="spaces-compose-actions flex flex-wrap items-center gap-1.5 px-2 pb-2">
                         {refs && (
                             <>
                                 <input
@@ -861,7 +861,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                                     type="button"
                                     onClick={() => fileInputRef.current?.click()}
                                     title="Attach files (or paste / drop them)"
-                                    className="inline-flex size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                                    className="inline-flex size-8 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
                                 >
                                     <Paperclip className="size-4" />
                                 </button>
@@ -872,7 +872,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                                 type="button"
                                 onClick={onCreatePoll}
                                 title="Create a poll"
-                                className="inline-flex size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                                className="inline-flex size-8 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
                             >
                                 <BarChart3 className="size-4" />
                             </button>
@@ -945,7 +945,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                                         type="button"
                                         title="Send later"
                                         disabled={busy || uploading}
-                                        className="inline-flex size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30"
+                                        className="inline-flex size-8 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30"
                                     >
                                         <Clock className="size-4" />
                                     </button>
@@ -965,7 +965,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                                 onClick={startRecording}
                                 aria-label="Voice input"
                                 title="Voice input"
-                                className="inline-flex size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                                className="inline-flex size-8 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
                             >
                                 <Mic className="size-4" />
                             </button>
@@ -976,7 +976,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                             disabled={busy || uploading || (!draft.trim() && !attachments.some((a) => a.status === 'done'))}
                             aria-label="Send"
                             title={uploading ? 'Waiting for uploads…' : 'Send (↵ · Shift+↵ for a new line)'}
-                            className="inline-flex size-8 items-center justify-center rounded-full bg-foreground text-background disabled:opacity-30 transition-opacity"
+                            className="inline-flex spaces-send size-8 items-center justify-center rounded bg-foreground text-background disabled:opacity-30 transition-opacity"
                         >
                             {busy ? <Loader2 className="size-3.5 animate-spin" /> : <ArrowUp className="size-3.5" />}
                         </button>

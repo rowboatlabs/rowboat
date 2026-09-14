@@ -18,13 +18,15 @@
   position: relative;
 }
 
-/* Notion-like base typography */
+/* Notion-like base typography. The line-height is a variable so the task
+   checkbox can size itself to exactly one text line (see Task Lists). */
 .tiptap-editor .ProseMirror {
+  --editor-line-height: 1.45;
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
     "Segoe UI", Helvetica, "Apple Color Emoji", Arial, sans-serif,
     "Segoe UI Emoji", "Segoe UI Symbol";
   font-size: 16px;
-  line-height: 1.5;
+  line-height: var(--editor-line-height);
   color: rgb(55, 53, 47);
   max-width: 720px;
   margin: 0 auto;
@@ -79,6 +81,29 @@
   padding: 3px 2px;
 }
 
+/* Split pane: the document shares the window with 15px chat prose, so
+   headings step down to compact sizes instead of dwarfing the conversation.
+   The host marks the pane with data-split-pane while a chat sits beside it.
+   Kept above the :first-child reset so that reset still wins at equal
+   specificity. */
+[data-split-pane] .tiptap-editor .ProseMirror h1 {
+  font-size: 21px;
+  line-height: 1.25;
+  margin-top: 1.5em;
+}
+
+[data-split-pane] .tiptap-editor .ProseMirror h2 {
+  font-size: 17px;
+  line-height: 1.3;
+  margin-top: 1.25em;
+}
+
+[data-split-pane] .tiptap-editor .ProseMirror h3 {
+  font-size: 16px;
+  line-height: 1.3;
+  margin-top: 1.1em;
+}
+
 .tiptap-editor .ProseMirror h1:first-child,
 .tiptap-editor .ProseMirror h2:first-child,
 .tiptap-editor .ProseMirror h3:first-child {
@@ -100,12 +125,22 @@
   list-style-type: decimal;
 }
 
+/* 2px per item (4px between neighbours); the paragraph inside drops its own
+   vertical padding so the item, not the paragraph, owns the rhythm. */
 .tiptap-editor .ProseMirror li {
-  padding: 3px 0;
+  padding: 2px 0;
 }
 
 .tiptap-editor .ProseMirror li p {
   margin: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+/* Nested lists hang a short step (~18px) in from the parent item's text. */
+.tiptap-editor .ProseMirror li ul,
+.tiptap-editor .ProseMirror li ol {
+  padding-left: 1.125em;
 }
 
 /* Blockquote */
@@ -236,15 +271,23 @@
   gap: 0.5em;
 }
 
+/* The label is exactly one text line tall and centers the box inside it, so
+   the box sits on the cap-height band of the item's first line no matter how
+   the text wraps. */
 .tiptap-editor .ProseMirror ul[data-type="taskList"] li > label {
+  display: flex;
+  align-items: center;
   flex-shrink: 0;
-  margin-top: 0.25em;
+  height: calc(var(--editor-line-height) * 1em);
+  margin: 0;
   cursor: pointer;
 }
 
 .tiptap-editor .ProseMirror ul[data-type="taskList"] li > label input[type="checkbox"] {
-  width: 1em;
-  height: 1em;
+  display: block;
+  width: 16px;
+  height: 16px;
+  margin: 0;
   cursor: pointer;
   accent-color: var(--primary);
 }
@@ -253,14 +296,16 @@
   flex: 1;
 }
 
-.tiptap-editor .ProseMirror ul[data-type="taskList"] li[data-checked="true"] > div {
+/* Only the item's own text is struck: nested tasks inside the same content
+   block keep their own checked state. */
+.tiptap-editor .ProseMirror ul[data-type="taskList"] li[data-checked="true"] > div > p {
   text-decoration: line-through;
   opacity: 0.6;
 }
 
-/* Nested task lists */
+/* Nested task lists: same short step as nested bullets. */
 .tiptap-editor .ProseMirror ul[data-type="taskList"] ul[data-type="taskList"] {
-  margin-left: 1.5em;
+  margin-left: 1.125em;
 }
 
 /* Selection */

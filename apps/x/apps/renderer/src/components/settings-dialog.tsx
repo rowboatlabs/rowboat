@@ -1470,7 +1470,7 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
           <div className="text-sm font-medium">Default repo</div>
           <div className="text-xs text-muted-foreground">
             Where coding work lands when you don&apos;t name a folder — say &quot;fix the login bug&quot; anywhere
-            (Home, chat, voice) and it runs here on its own isolated branch. Repos are registered in the Code section.
+            (Todo, chat, voice) and it runs here on its own isolated branch. Repos are registered in the Code section.
           </div>
           <Select
             value={defaultProjectId ?? 'auto'}
@@ -1549,7 +1549,7 @@ const ALL_NOTIFICATION_CATEGORIES: { key: NotificationCategoryKey; label: string
   {
     key: "todo",
     label: "To-do list",
-    description: "When a to-do you delegated finishes or has something ready for review. Click to open Home.",
+    description: "When a to-do you delegated finishes or has something ready for review. Click to open Todo.",
   },
   {
     key: "meeting_detection",
@@ -1563,13 +1563,13 @@ const ALL_NOTIFICATION_CATEGORIES: { key: NotificationCategoryKey; label: string
   },
   {
     key: "space_mention",
-    label: "Space mentions",
-    description: "When a teammate @mentions you in a space. Click to open the conversation. Only shown while the app is in the background.",
+    label: "Space mentions & DMs",
+    description: "When someone mentions you, uses @here, messages you directly, or replies in a thread you follow. Also reminders you set in a space. Click to open the conversation. Only shown while the app is in the background.",
   },
 ]
 
 // With Spaces dark, its notification category stays out of the settings UI
-// (the mention watcher that emits it is gated on the same flag in main).
+// (the scheduler that emits it is gated on the same flag where core runs).
 const NOTIFICATION_CATEGORIES = ALL_NOTIFICATION_CATEGORIES.filter((cat) => SPACES_ENABLED || cat.key !== "space_mention")
 
 function NotificationSettings({ dialogOpen }: { dialogOpen: boolean }) {

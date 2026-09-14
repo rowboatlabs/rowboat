@@ -1,3 +1,4 @@
+import { listProjects, createProjectChat } from '@x/core/dist/projects/projects.js';
 import { ipcMain, BrowserWindow, shell, dialog, systemPreferences, desktopCapturer, app, powerSaveBlocker } from 'electron';
 import { ipc } from '@x/shared';
 import path from 'node:path';
@@ -1409,6 +1410,11 @@ export function setupIpcHandlers() {
     // turnId immediately; the turn advances in the background and the
     // renderer reconciles via the sessions:events feed. Input-routing calls
     // settle with that advance's outcome (the renderer fire-and-forgets).
+    'projects:list': async () => {
+      await sessionsIndexReady;
+      return { projects: await listProjects(container.resolve<ISessions>('sessions')) };
+    },
+    'projects:createChat': async (_event, args) => ({ sessionId: await createProjectChat(container.resolve<ISessions>('sessions'), args.projectId) }),
     'sessions:create': async (_event, args) => {
       const sessionId = await container.resolve<ISessions>('sessions').createSession(args);
       return { sessionId };
@@ -1748,6 +1754,25 @@ export function setupIpcHandlers() {
           git: await codeGit.repoInfo(project.path),
         }))),
       };
+    },
+    'codeProject:branches': async (_event, args) => {
+      const repo = container.resolve<ICodeProjectsRepo>('codeProjectsRepo');
+      const project = await repo.get(args.projectId);
+      if (!project) throw new Error('Project no longer exists.');
+      return codeGit.listBranches(project.path);
+    },
+    'codeProject:switchBranch': async (_event, args) => {
+      const repo = container.resolve<ICodeProjectsRepo>('codeProjectsRepo');
+      const project = await repo.get(args.projectId);
+      if (!project) throw new Error('Project no longer exists.');
+      return { git: await codeGit.switchBranch(project.path, args.branch) };
+    },
+    'codeSession:baseBranchStatus': async (_event, args) => {
+      return container.resolve<CodeSessionService>('codeSessionService').baseBranchStatus(args.sessionId);
+    },
+    'codeSession:changeBaseBranch': async (_event, args) => {
+      await container.resolve<CodeSessionService>('codeSessionService').changeBaseBranch(args.sessionId, args.baseBranch);
+      return { success: true };
     },
     'codeSession:create': async (_event, args) => {
       const service = container.resolve<CodeSessionService>('codeSessionService');
@@ -2367,7 +2392,12 @@ export function setupIpcHandlers() {
     },
     'spreadsheet:load': async (_event, args) => {
       const { loadSheetWindow } = await import('@x/core/dist/spreadsheet/spreadsheet.js');
-      const result = await loadSheetWindow(args.path, args.sheet, args.offset, args.limit);
+      const inputPath = args.attachment
+        ? await (await import('@x/core/dist/spaces/document-file.js')).materializeAttachment(args.attachment.orgId, args.attachment.spaceId, args.attachment.hash, args.path)
+        : args.space
+        ? await (await import('@x/core/dist/spaces/document-file.js')).materializeDocument(args.space.orgId, args.space.spaceId, args.path, args.space.version)
+        : args.path;
+      const result = await loadSheetWindow(inputPath, args.sheet, args.offset, args.limit);
       return {
         format: result.meta.format,
         sheets: result.meta.sheets,
@@ -2384,7 +2414,12 @@ export function setupIpcHandlers() {
     },
     'spreadsheet:find': async (_event, args) => {
       const { findInSheet } = await import('@x/core/dist/spreadsheet/spreadsheet.js');
-      return await findInSheet(args.path, args.sheet, args.query, args.maxMatches);
+      const inputPath = args.attachment
+        ? await (await import('@x/core/dist/spaces/document-file.js')).materializeAttachment(args.attachment.orgId, args.attachment.spaceId, args.attachment.hash, args.path)
+        : args.space
+        ? await (await import('@x/core/dist/spaces/document-file.js')).materializeDocument(args.space.orgId, args.space.spaceId, args.path, args.space.version)
+        : args.path;
+      return await findInSheet(inputPath, args.sheet, args.query, args.maxMatches);
     },
     'dialog:openDirectory': async (event, args) => {
       const win = BrowserWindow.fromWebContents(event.sender);

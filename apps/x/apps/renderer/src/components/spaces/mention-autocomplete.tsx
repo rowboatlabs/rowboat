@@ -100,9 +100,9 @@ export function useMentionAutocomplete(editor: Editor | null, { members = [], en
     }
     const show = open && !!match && candidates.length > 0
 
-    // The draft shows the person's name; send/save encodes it back to the
-    // wire address @<memberId> (what notifications and agent invocation scan
-    // for). A file becomes a live link to the space path — standard markdown
+    // A person, @rowboat, or @here becomes ONE mention node (composer-editor
+    // MentionNode): a pill holding the id, serialized to the wire's token on
+    // send. A file becomes a live link to the space path — standard markdown
     // on the wire. Inserted as literal nodes, never re-parsed as markdown.
     const pick = (c: MentionCandidate) => {
         if (!match || !editor) return
@@ -112,8 +112,10 @@ export function useMentionAutocomplete(editor: Editor | null, { members = [], en
                 { type: 'text', text: c.filePath, marks: [{ type: 'link', attrs: { href: encodeSpaceLinkTarget(c.filePath) } }] },
                 { type: 'text', text: ' ' },
             ]).run()
+        } else if (c.isAgent || c.isBroadcast) {
+            chain.insertContent([{ type: 'mention', attrs: { kind: c.id, id: null, label: c.id } }, { type: 'text', text: ' ' }]).run()
         } else {
-            chain.insertContent({ type: 'text', text: `@${c.label} ` }).run()
+            chain.insertContent([{ type: 'mention', attrs: { kind: 'member', id: c.id, label: c.label } }, { type: 'text', text: ' ' }]).run()
         }
         setOpen(false)
     }

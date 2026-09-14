@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
@@ -6,7 +6,7 @@ import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } 
 
 import { useSpacesAccount, type SpacesOrg } from '@/lib/spaces/account';
 import { SpacesClient } from '@/lib/spaces/client';
-import type { Member, Space } from '@rowboat/spaces-protocol';
+import type { Member, Space, UnreadSnapshot } from '@rowboat/spaces-protocol';
 import { useColors } from '@/theme/colors';
 
 // Spaces home: signed out → one sign-in button; signed in → the user's orgs as
@@ -185,7 +185,9 @@ function OrgCard({ org }: { org: SpacesOrg }) {
   const colors = useColors();
   const dark = colors.background === '#000000';
   const [spaces, setSpaces] = useState<Space[] | null>(null);
+  const [directs, setDirects] = useState<Space[]>([]);
   const [members, setMembers] = useState<Map<string, Member[]>>(new Map());
+  const [unread, setUnread] = useState<UnreadSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const client = useMemo(
@@ -193,19 +195,51 @@ function OrgCard({ org }: { org: SpacesOrg }) {
     [org.address, account],
   );
 
-  useEffect(() => {
-    client
-      .listSpaces()
-      .then(async (list) => {
-        setSpaces(list);
-        // Member stacks per row — best-effort, rows render without them first.
-        const loaded = await Promise.all(
-          list.map(async (s) => [s.id, await client.listMembers(s.id).catch(() => [])] as const),
-        );
-        setMembers(new Map(loaded));
-      })
-      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+  const load = useCallback(async () => {
+    try {
+      const all = await client.listSpaces({ includeDirect: true });
+      setSpaces(all.filter((s) => s.kind !== 'direct'));
+      setDirects(all.filter((s) => s.kind === 'direct'));
+      // Badges: the org's unread snapshot (read state is org-owned).
+      client.unread().then(setUnread).catch(() => {});
+      // Rosters per space — best-effort, rows render without them first.
+      const loaded = await Promise.all(all.map(async (s) => [s.id, await client.listMembers(s.id).catch(() => [])] as const));
+      setMembers(new Map(loaded));
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   }, [client]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  // Coming back from a chat: the marks moved, so the badges must too.
+  useFocusEffect(
+    useCallback(() => {
+      if (spaces !== null) client.unread().then(setUnread).catch(() => {});
+    }, [client, spaces !== null]),
+  );
+
+  // The dot-and-count rule (desktop unread-badge.tsx): grey dot + unread count
+  // when nothing is for you; red dot + for-you count when something is —
+  // mentions, or every message in a DM.
+  const badgeFor = useCallback(
+    (spaceId: string, direct: boolean): { unread: number; forYou: number } => {
+      const u = unread?.spaces.find((x) => x.spaceId === spaceId);
+      if (!u) return { unread: 0, forYou: 0 };
+      const total = u.unreadRoots + u.threads.reduce((n, t) => n + t.unreadReplies, 0);
+      const mentions = u.unreadMentions + u.threads.reduce((n, t) => n + t.unreadMentions, 0);
+      return { unread: total, forYou: direct ? total : mentions };
+    },
+    [unread],
+  );
+  /** The DM space with this member, if one exists yet. */
+  const dmWith = useCallback(
+    (memberId: string) => directs.find((d) => d.participants?.includes(memberId) && d.participants?.includes(org.memberId)),
+    [directs, org.memberId],
+  );
 
   const [openingDm, setOpeningDm] = useState<string | null>(null);
 
@@ -267,7 +301,8 @@ function OrgCard({ org }: { org: SpacesOrg }) {
           <View style={{ width: 28, alignItems: 'center' }}>
             <Image source="sf:number" style={{ width: 17, height: 17 }} tintColor={colors.secondaryLabel} />
           </View>
-          <Text numberOfLines={1} style={{ flex: 1, fontSize: 16, color: colors.label }}>{space.name}</Text>
+          <Text numberOfLines={1} style={{ flex: 1, fontSize: 16, fontWeight: badgeFor(space.id, false).unread > 0 ? '600' : '400', color: colors.label }}>{space.name}</Text>
+          <UnreadBadge badge={badgeFor(space.id, false)} />
         </Row>
       ))}
       {spaces?.length === 0 ? (
@@ -296,8 +331,8 @@ function OrgCard({ org }: { org: SpacesOrg }) {
                   </Text>
                 </View>
               </View>
-              <Text numberOfLines={1} style={{ flex: 1, fontSize: 16, color: colors.label }}>{m.displayName}</Text>
-              {openingDm === m.id ? <ActivityIndicator size="small" /> : null}
+              <Text numberOfLines={1} style={{ flex: 1, fontSize: 16, fontWeight: (dmWith(m.id) && badgeFor(dmWith(m.id)!.id, true).unread > 0) ? '600' : '400', color: colors.label }}>{m.displayName}</Text>
+              {openingDm === m.id ? <ActivityIndicator size="small" /> : dmWith(m.id) ? <UnreadBadge badge={badgeFor(dmWith(m.id)!.id, true)} /> : null}
             </Row>
           ))}
         </>
@@ -337,5 +372,21 @@ function Row({ children, onPress, disabled, dimmed }: {
     >
       {children}
     </Pressable>
+  );
+}
+
+/** Dot-and-count: grey dot + unread, or red dot + for-you (desktop unread-badge.tsx). */
+function UnreadBadge({ badge }: { badge: { unread: number; forYou: number } }) {
+  const colors = useColors();
+  if (badge.unread <= 0) return null;
+  const forYou = badge.forYou > 0;
+  const figure = forYou ? badge.forYou : badge.unread;
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: forYou ? '#ff453a' : colors.tertiaryLabel }} />
+      <Text style={{ fontSize: 12, fontWeight: forYou ? '600' : '500', color: forYou ? colors.label : colors.secondaryLabel, fontVariant: ['tabular-nums'] }}>
+        {figure > 999 ? '999+' : figure}
+      </Text>
+    </View>
   );
 }

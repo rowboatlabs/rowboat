@@ -43,10 +43,27 @@ function harness() {
     });
   const result = (turnId: string, toolCallId: string, output: unknown, isError = false) =>
     turn(turnId, { type: 'tool_result', toolCallId, toolName: 'executeMcpTool', source: 'sync', result: { output, isError } });
-  return { indexer, turn, post, result, mcpOutput, links: () => file.links, writes: () => writes };
+  // The projected builtin form (the spaces skill since 2026-09-09).
+  const builtinPost = (turnId: string, toolCallId: string, args: Record<string, unknown>) =>
+    turn(turnId, {
+      type: 'tool_invocation_requested',
+      toolCallId,
+      toolId: 'builtin:post_message',
+      toolName: 'post_message',
+      execution: 'sync',
+      input: args,
+    });
+  const builtinResult = (turnId: string, toolCallId: string, output: unknown, isError = false) =>
+    turn(turnId, { type: 'tool_result', toolCallId, toolName: 'post_message', source: 'sync', result: { output, isError } });
+  return { indexer, turn, post, result, mcpOutput, builtinPost, builtinResult, links: () => file.links, writes: () => writes };
 }
 
 describe('postedMessageId', () => {
+  it('reads the projected builtin output directly (the unwrapped structured result)', () => {
+    expect(postedMessageId({ messageId: 'm0', threadRoot: 'r' })).toBe('m0');
+    expect(postedMessageId({ success: false, error: { code: 'not_found' } })).toBeNull();
+  });
+
   it('prefers structuredContent, falls back to the JSON text block', () => {
     expect(postedMessageId({ success: true, result: { structuredContent: { messageId: 'm1' } } })).toBe('m1');
     expect(postedMessageId({ success: true, result: { content: [{ type: 'text', text: '{"messageId":"m2"}' }] } })).toBe('m2');
@@ -147,5 +164,39 @@ describe('SpaceResponseIndexer', () => {
     expect(keys).toHaveLength(MAX_LINKS);
     expect(keys[0]).toBe(linkKey('org-1', 'space-1', 'm3'));
     expect(keys[keys.length - 1]).toBe(linkKey('org-1', 'space-1', `m${MAX_LINKS + 2}`));
+  });
+});
+
+
+describe('the projected builtin post_message', () => {
+  const mentionTurn = (h: ReturnType<typeof harness>, turnId: string, orgId = 'org-1') =>
+    h.indexer.handleTurnEvent(h.turn(turnId, { type: 'turn_created', origin: origin('root-1', orgId) }));
+
+  it('links a builtin post with no org argument to the turn\'s one mention org', () => {
+    const h = harness();
+    mentionTurn(h, 't1');
+    h.indexer.handleTurnEvent(h.builtinPost('t1', 'c1', { spaceId: 'space-1', threadRoot: 'root-1', body: 'done' }));
+    h.indexer.handleTurnEvent(h.builtinResult('t1', 'c1', { messageId: 'm-builtin', threadRoot: 'root-1' }));
+    expect(h.links()[linkKey('org-1', 'space-1', 'm-builtin')]).toMatchObject({ sessionId: 'sess-1', turnId: 't1' });
+  });
+
+  it('matches an explicit org argument by id or by server name', () => {
+    for (const org of ['org-1', 'spaces-org-1', 'Org 1']) {
+      const h = harness();
+      mentionTurn(h, 't1');
+      h.indexer.handleTurnEvent(h.builtinPost('t1', 'c1', { org, spaceId: 'space-1', body: 'x' }));
+      h.indexer.handleTurnEvent(h.builtinResult('t1', 'c1', { messageId: 'm1' }));
+      expect(h.links()[linkKey('org-1', 'space-1', 'm1')], org).toBeDefined();
+    }
+  });
+
+  it('ignores a builtin post naming an org no mention in the turn came from, and error results', () => {
+    const h = harness();
+    mentionTurn(h, 't1');
+    h.indexer.handleTurnEvent(h.builtinPost('t1', 'c1', { org: 'elsewhere', spaceId: 'space-1', body: 'x' }));
+    h.indexer.handleTurnEvent(h.builtinResult('t1', 'c1', { messageId: 'm1' }));
+    h.indexer.handleTurnEvent(h.builtinPost('t1', 'c2', { spaceId: 'space-1', body: 'x' }));
+    h.indexer.handleTurnEvent(h.builtinResult('t1', 'c2', { success: false, error: 'boom' }, true));
+    expect(Object.keys(h.links())).toHaveLength(0);
   });
 });

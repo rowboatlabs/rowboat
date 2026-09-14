@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Code2, Plus } from 'lucide-react'
-import type { CodeSession, CodeSessionStatus } from '@x/shared/src/code-sessions.js'
+import { codeWorkspaceKey, type CodeSession, type CodeSessionStatus } from '@x/shared/src/code-sessions.js'
 import type { CodingAgent } from '@x/shared/src/code-mode.js'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -14,8 +14,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { useCodeSessions, projectLabel } from './use-code-sessions'
+import { useCodeSessions, projectLabel, type ProjectRow } from './use-code-sessions'
 import { SessionRail } from './session-rail'
+import { BranchDialog } from './branch-dialog'
 import { AGENT_LABEL, fetchCodeAgentsStatus, isAgentReady, type CodeAgentsStatus } from './code-agent-status'
 
 // Remember which session was open so leaving the Code section (which unmounts
@@ -61,6 +62,7 @@ export function CodeView({
     setSelectedSessionId(focusSessionId)
     onFocusConsumed?.()
   }, [focusSessionId, onFocusConsumed])
+  const [branchDialog, setBranchDialog] = useState<{ projectId: string; mode: 'switch' } | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<CodeSession | null>(null)
 
   // Warm the agent probe so a quick-create doesn't pay for it on the click.
@@ -79,6 +81,10 @@ export function CodeView({
   const selectedSession = sessions.find((s) => s.id === selectedSessionId) ?? null
   const selectedStatus = selectedSession ? statusOf(selectedSession.id) : 'idle'
 
+  useEffect(() => {
+    if (selectedSession) window.localStorage.setItem(`x:code-workspace-session:${codeWorkspaceKey(selectedSession)}`, selectedSession.id)
+  }, [selectedSession])
+
   // Tell App which session (and status) owns the chat.
   useEffect(() => {
     onSessionSelected?.(selectedSession ? { session: selectedSession, status: selectedStatus } : null)
@@ -92,14 +98,11 @@ export function CodeView({
 
   const creatingRef = useRef(false)
 
-  // Quick create — no form. An isolated worktree whenever the repo allows
-  // one, the agent the user last worked with (whichever is ready), and
-  // everything else at its default; all of it stays editable from the chat
-  // header once the session is open. The chat is created untitled so the
-  // runtime names it from the first message.
-  const handleNewSession = useCallback(async (projectId: string, agentOverride?: CodingAgent) => {
+  // Create immediately from the live parent checkout. The base can be changed
+  // from the worktree controls until its first session starts.
+  const handleNewSession = useCallback(async (projectId: string, agentOverride?: CodingAgent, projectRow?: ProjectRow) => {
     if (creatingRef.current) return
-    const row = projects.find((p) => p.project.id === projectId)
+    const row = projectRow ?? projects.find((p) => p.project.id === projectId)
     if (!row) return
     creatingRef.current = true
     try {
@@ -111,8 +114,7 @@ export function CodeView({
       let agent: CodingAgent
       if (agentOverride) {
         if (status && !ready(agentOverride)) {
-          toast.error(`${AGENT_LABEL[agentOverride]} isn't ready — sign in or enable it in Settings.`)
-          return
+          throw new Error(`${AGENT_LABEL[agentOverride]} isn't ready — sign in or enable it in Settings.`)
         }
         agent = agentOverride
       } else if (!status) {
@@ -123,8 +125,7 @@ export function CodeView({
       } else if (ready('claude') || ready('codex')) {
         agent = ready('claude') ? 'claude' : 'codex'
       } else {
-        toast.error('No coding agent is ready — sign in to Claude Code or Codex in Settings.')
-        return
+        throw new Error('No coding agent is ready — sign in to Claude Code or Codex in Settings.')
       }
       const isolation = row.git.isGitRepo && row.git.hasCommits ? 'worktree' : 'in-repo'
       const res = await window.ipc.invoke('codeSession:create', { projectId, agent, isolation })
@@ -144,8 +145,9 @@ export function CodeView({
     try {
       const added = await window.ipc.invoke('codeProject:add', { path: dir })
       await refresh()
-      // A fresh project goes straight into its first session.
-      void handleNewSession(added.project.id)
+      // Use the returned row directly: the refreshed React snapshot may not
+      // have rendered yet when a project is first added.
+      await handleNewSession(added.project.id, undefined, added)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to add project')
     }
@@ -156,16 +158,18 @@ export function CodeView({
     await refresh()
   }, [refresh])
 
-  // Done is a flag: nothing on disk changes, and the session stays selected
-  // if it was — the row just moves piles.
+  // The rail acts on the whole workspace; the chat header can still mark
+  // an individual session done. Files and conversations remain on disk.
   const handleSetDone = useCallback(async (session: CodeSession, done: boolean) => {
     try {
-      await window.ipc.invoke('codeSession:setDone', { sessionId: session.id, done })
+      for (const member of sessions.filter((s) => codeWorkspaceKey(s) === codeWorkspaceKey(session))) {
+        await window.ipc.invoke('codeSession:setDone', { sessionId: member.id, done })
+      }
       await refresh()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to update session')
     }
-  }, [refresh])
+  }, [refresh, sessions])
 
   const handleDeleteSession = useCallback(async (session: CodeSession, removeWorktree: boolean) => {
     try {
@@ -174,12 +178,12 @@ export function CodeView({
         removeWorktree,
         deleteBranch: removeWorktree,
       })
-      if (selectedSessionId === session.id) setSelectedSessionId(null)
+      if (selectedSessionId === session.id) setSelectedSessionId(sessions.find((s) => s.id !== session.id && codeWorkspaceKey(s) === codeWorkspaceKey(session))?.id ?? null)
       await refresh()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to delete session')
     }
-  }, [refresh, selectedSessionId])
+  }, [refresh, selectedSessionId, sessions])
 
   return (
     <div className="flex h-full min-h-0">
@@ -193,7 +197,10 @@ export function CodeView({
         statusOf={statusOf}
         agentsStatus={agentsStatus}
         selectedSessionId={selectedSessionId}
-        onSelectSession={(id) => {
+        onSelectSession={(clickedId) => {
+          const clicked = sessions.find((s) => s.id === clickedId)
+          const remembered = clicked && window.localStorage.getItem(`x:code-workspace-session:${codeWorkspaceKey(clicked)}`)
+          const id = clicked && sessions.some((s) => s.id === remembered && codeWorkspaceKey(s) === codeWorkspaceKey(clicked)) ? remembered! : clickedId
           setSelectedSessionId(id)
           // Re-clicking the already-selected session is a no-op for React
           // state, but the user means "show me this session's chat" — the
@@ -204,6 +211,7 @@ export function CodeView({
             if (session) onSessionSelected?.({ session, status: statusOf(session.id) })
           }
         }}
+        onSwitchBranch={(projectId) => setBranchDialog({ projectId, mode: 'switch' })}
         onAddProject={() => void handleAddProject()}
         onRemoveProject={(id) => void handleRemoveProject(id)}
         onNewSession={(projectId, agent) => void handleNewSession(projectId, agent)}
@@ -228,7 +236,7 @@ export function CodeView({
           ) : projects.length === 1 ? (
             <Button size="sm" onClick={() => void handleNewSession(projects[0].project.id)}>
               <Plus className="size-3.5" />
-              New session in {projectLabel(projects[0])}
+              New worktree in {projectLabel(projects[0])}
             </Button>
           ) : (
             <p className="text-xs text-muted-foreground">Pick a session on the left, or start one from a project's + button.</p>
@@ -236,15 +244,20 @@ export function CodeView({
         </div>
       )}
 
+      {branchDialog && <BranchDialog key={`${branchDialog.projectId}:${branchDialog.mode}`} projectId={branchDialog.projectId} mode={branchDialog.mode}
+        onClose={() => setBranchDialog(null)} onConfirm={async (branch) => {
+          await window.ipc.invoke('codeProject:switchBranch', { projectId: branchDialog.projectId, branch })
+          await refresh()
+        }} />}
       <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete this session?</AlertDialogTitle>
             <AlertDialogDescription>
               The conversation history will be deleted.
-              {deleteTarget?.worktree && !deleteTarget.worktree.removedAt
+              {deleteTarget?.worktree && !deleteTarget.worktree.removedAt && sessions.filter((s) => codeWorkspaceKey(s) === codeWorkspaceKey(deleteTarget)).length === 1
                 ? ' Its worktree and branch will be removed too — merge back first if you want to keep the changes.'
-                : ''}
+                : ' Other sessions and their workspace will be kept.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

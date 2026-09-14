@@ -176,6 +176,25 @@ describe('SpacesLive recovery', () => {
     live.close();
   });
 
+  it('a quiet live-only subscription resumes from the head the server announced', async () => {
+    const live = makeLive();
+    live.subscribe(SPACE_ULID, () => {}); // no afterOffset: live-only
+    await settle();
+    const first = FakeWebSocket.instances[0];
+    first.open();
+    expect(JSON.parse(first.sent[0])).toEqual({ kind: 'subscribe', spaceId: SPACE_ULID });
+    first.emit('message', { data: JSON.stringify({ kind: 'subscribed', spaceId: SPACE_ULID, fromOffset: 41 }) });
+    // Nothing happens in the space; then the socket drops.
+    first.close();
+    await vi.advanceTimersByTimeAsync(1_100);
+    const second = FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
+    expect(second).not.toBe(first);
+    second.open();
+    // Replay from the head we went live at — the gap comes back.
+    expect(JSON.parse(second.sent[0])).toEqual({ kind: 'subscribe', spaceId: SPACE_ULID, afterOffset: 41 });
+    live.close();
+  });
+
   it('reconnect resubscribes with the last seen offset', async () => {
     const live = makeLive();
     const frames: unknown[] = [];

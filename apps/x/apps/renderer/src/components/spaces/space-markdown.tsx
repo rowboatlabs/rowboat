@@ -1,35 +1,42 @@
-import { createContext, memo, useContext, useMemo, useState, type ComponentProps, type CSSProperties, type ReactNode } from 'react'
+import { FileConflictNotice, useSpaceFileSave } from './file-conflict'
+import { createContext, memo, useContext, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode } from 'react'
+import { BlobPreview } from '@/components/spaces/blob-preview'
 import { Streamdown } from 'streamdown'
-import { Eye, FileDown, FilePlus2, FileText, Loader2 } from 'lucide-react'
+import { Eye, FileDown, FilePlus2, FileText, Loader2, X } from 'lucide-react'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
-import { ZoomableImage } from '@/components/image-lightbox'
+import { ImageLightbox as SharedImageLightbox } from '@/components/image-lightbox'
 import { isTrustedDomain, linkDomain, trustDomain } from '@/lib/trusted-domains'
+import { userMessageRemarkPlugins } from '@/lib/markdown-render'
 import { toast } from '@/lib/toast'
 import { MemberProfilePopover } from '@/components/spaces/atoms'
 import { useMemberNames, useSpaceProfiles } from '@/components/spaces/member-text'
 import {
-    decorateMentions,
     imageDimsFromUrl,
     parseAssetWireUrl,
     parseBlobAppUrl,
     parseSpaceFileAppUrl,
+    parseSpaceMemberAppUrl,
     resolveSpaceLink,
     rewriteBlobLinks,
     rewriteFileLinks,
+    rewriteMentionLinks,
     separateImageParagraphs,
+    HERE_APP_URL,
+    ROWBOAT_APP_URL,
     type SpaceRefs,
 } from '@/lib/spaces-presentation'
 
 // The one markdown renderer for space bodies (messages, thread parents).
 // Three responsibilities layered over Streamdown, all space-specific:
-//   1. mentions — decorateMentions via the members context (the mapMentions
-//      walker; fix-it-once rule from the mention sweep),
+//   1. mentions — the wire's link tokens (protocol mentions.ts) rewrite to
+//      app://space-member/<id> pre-parse and render as chips keyed on the ID,
+//      the name coming from the members context (never from the label),
 //   2. blobs — the org's canonical https blob links rewrite to app://space-blob
 //      (served by main through the content-addressed cache), images render
-//      inline, non-image blob links render as a download card, and
+//      inline, non-image blob links render as a preview card, and
 //   3. file links — a relative link in a message points at a space file
 //      (resolved from the root; plain markdown on the wire), as does the
 //      contract's canonical …/f/<path> form; both open in the file pane.
@@ -46,16 +53,20 @@ export function useSpaceRefs(): SpaceRefs | null {
     return useContext(SpaceRefsContext)
 }
 
+const AttachmentNavContext = createContext<((src: string, name: string) => void) | null>(null)
+
 const SpaceNavContext = createContext<((path: string) => void) | null>(null)
 
 /** Mounted beside SpaceRefsProvider — lets any rendered file link open the file pane. */
-export function SpaceNavProvider({ onOpenFile, children }: { onOpenFile: (path: string) => void; children: ReactNode }) {
-    return <SpaceNavContext.Provider value={onOpenFile}>{children}</SpaceNavContext.Provider>
+export function SpaceNavProvider({ onOpenFile, onOpenAttachment, children }: { onOpenFile: (path: string) => void; onOpenAttachment?: (src: string, name: string) => void; children: ReactNode }) {
+    return <SpaceNavContext.Provider value={onOpenFile}><AttachmentNavContext.Provider value={onOpenAttachment ?? null}>{children}</AttachmentNavContext.Provider></SpaceNavContext.Provider>
 }
 
-/** An attached non-image file inside a message: name + download on tap. */
+/** Attachments preview on tap; saving to space files keeps the original link intact. */
 function BlobLinkCard({ href, children }: { href: string; children?: ReactNode }) {
     const parsed = parseBlobAppUrl(href)
+    const openAttachment = useContext(AttachmentNavContext)
+    const [saveOpen, setSaveOpen] = useState(false)
     const [saving, setSaving] = useState(false)
     if (!parsed) return null
     const suggestedName = (() => {
@@ -85,24 +96,96 @@ function BlobLinkCard({ href, children }: { href: string; children?: ReactNode }
         }
     }
     return (
-        <button
-            type="button"
-            onClick={() => void save()}
-            title="Download"
-            className="my-0.5 inline-flex max-w-full items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground/90 hover:border-foreground/30"
-        >
-            {saving ? <Loader2 className="size-3.5 shrink-0 animate-spin" /> : <FileDown className="size-3.5 shrink-0 text-muted-foreground" />}
-            <span className="truncate">{children}</span>
-        </button>
+        <>
+            <span className="my-0.5 inline-flex max-w-full items-center rounded-lg border border-border bg-background text-xs font-medium text-foreground/90">
+                <button type="button" onClick={() => openAttachment?.(href, suggestedName || 'Attachment')} title="Preview file" className="inline-flex min-w-0 items-center gap-1.5 px-2.5 py-1.5 hover:bg-accent">
+                    <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+                    <span className="truncate">{children}</span>
+                </button>
+                <button type="button" onClick={() => setSaveOpen(true)} title="Save to space files" aria-label="Save to space files" className="shrink-0 p-2 hover:bg-accent"><FilePlus2 className="size-3.5" /></button>
+                <button type="button" disabled={saving} onClick={() => void save()} title="Download" aria-label="Download" className="shrink-0 p-2 hover:bg-accent">
+                    {saving ? <Loader2 className="size-3.5 animate-spin" /> : <FileDown className="size-3.5" />}
+                </button>
+            </span>
+            {saveOpen && <SaveToSpaceDialog src={href} suggestedName={suggestedName} onClose={() => setSaveOpen(false)} />}
+        </>
     )
 }
 
-/**
- * Discord-style viewer: the image large on a dimmed backdrop. Esc or a click
- * outside closes; scroll zooms, click toggles fit ⇄ zoomed, drag pans. The
- * row under the image carries the source-specific action (download for
- * blobs, open-original for external links).
- */
+/** One gallery per message, using rendered tile order (including pasted image URLs). */
+const MessageImageGalleryContext = createContext<((image: HTMLImageElement) => void) | null>(null)
+
+function MessageImageGallery({ children }: { children: ReactNode }) {
+    const container = useRef<HTMLDivElement>(null)
+    const [gallery, setGallery] = useState<{ images: { src: string; alt: string }[]; index: number } | null>(null)
+    const openImage = (image: HTMLImageElement) => {
+        const tiles = Array.from(container.current?.querySelectorAll<HTMLImageElement>('img[data-message-image]') ?? [])
+        const index = tiles.indexOf(image)
+        if (index < 0) return
+        setGallery({ images: tiles.map((tile) => ({ src: tile.src, alt: tile.alt })), index })
+    }
+    const selected = gallery?.images[gallery.index]
+    return (
+        <MessageImageGalleryContext.Provider value={openImage}>
+            <div ref={container}>{children}</div>
+            <SharedImageLightbox
+                open={Boolean(selected)}
+                onOpenChange={(open) => { if (!open) setGallery(null) }}
+                src={selected?.src ?? ''}
+                name={selected?.alt || 'Image'}
+                actions={selected && <SpaceImageActions key={selected.src} src={selected.src} />}
+                navigation={gallery ? {
+                    index: gallery.index,
+                    count: gallery.images.length,
+                    onPrevious: () => setGallery((current) => current && ({ ...current, index: Math.max(0, current.index - 1) })),
+                    onNext: () => setGallery((current) => current && ({ ...current, index: Math.min(current.images.length - 1, current.index + 1) })),
+                } : undefined}
+            />
+        </MessageImageGalleryContext.Provider>
+    )
+}
+
+/** Source-specific actions always follow the currently selected image. */
+function SpaceImageActions({ src }: { src: string }) {
+    const [saving, setSaving] = useState(false)
+    const [error, setError] = useState<string | null>(null)
+    const [saveOpen, setSaveOpen] = useState(false)
+    const parsed = parseBlobAppUrl(src)
+    const save = async () => {
+        if (saving) return
+        setSaving(true)
+        setError(null)
+        try {
+            const res = parsed
+                ? await window.ipc.invoke('spaces:saveBlob', {
+                    ...parsed,
+                    suggestedName: new URL(src).searchParams.get('name') ?? undefined,
+                })
+                : await window.ipc.invoke('spaces:saveImageUrl', { url: src })
+            if (res.saved) toast('Saved', 'success')
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Could not download')
+        } finally {
+            setSaving(false)
+        }
+    }
+    return (
+        <>
+            <button type="button" disabled={saving} onClick={() => void save()} className="text-white/80 hover:text-white hover:underline">
+                {saving ? 'Saving…' : 'Download'}
+            </button>
+            {parsed ? (
+                <button type="button" onClick={() => setSaveOpen(true)} className="text-white/80 hover:text-white hover:underline">Save to space files</button>
+            ) : (
+                <a href={src} target="_blank" rel="noreferrer" className="text-white/80 hover:text-white hover:underline">Open original</a>
+            )}
+            {error && <p role="alert" className="absolute right-0 top-full mt-2 w-72 rounded-md bg-background p-3 text-xs text-destructive shadow-lg">{error}</p>}
+            {saveOpen && <SaveToSpaceDialog src={src} onClose={() => setSaveOpen(false)} />}
+        </>
+    )
+}
+
+/** Standalone tiles outside a message retain a single-image viewer. */
 function ImageLightbox({ src, alt, open, onOpenChange, children }: {
     src: string
     alt: string
@@ -110,18 +193,7 @@ function ImageLightbox({ src, alt, open, onOpenChange, children }: {
     onOpenChange: (open: boolean) => void
     children?: ReactNode
 }) {
-    return (
-        <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent
-                showCloseButton={false}
-                className="flex w-auto max-w-[92vw] flex-col items-center border-none bg-transparent p-0 shadow-none outline-none sm:max-w-[92vw]"
-            >
-                <DialogTitle className="sr-only">{alt || 'Image'}</DialogTitle>
-                <ZoomableImage src={src} alt={alt} className="max-h-[82vh] max-w-[92vw] rounded-lg object-contain" />
-                {children && <div className="flex items-center gap-3 self-start text-xs">{children}</div>}
-            </DialogContent>
-        </Dialog>
-    )
+    return <SharedImageLightbox src={src} name={alt || 'Image'} open={open} onOpenChange={onOpenChange} actions={children} />
 }
 
 /** An uploaded image in a message: inline preview, click to view, download from the viewer. */
@@ -144,12 +216,11 @@ function tileStyle(dims: { width: number; height: number } | null): CSSPropertie
 }
 
 /**
- * Promote a chat image into the space's files — the record. The bytes are
+ * Promote a chat attachment into the space's files. The bytes are
  * already in the org's blob store; saving is one proposeChange referencing
- * the hash. baseVersion 0 = create: an occupied path fails with the server's
- * conflict error rather than silently overwriting someone's file.
+ * the hash. Duplicate names use the same explicit choices as direct uploads.
  */
-function SaveToSpaceDialog({ src, onClose }: { src: string; onClose: () => void }) {
+function SaveToSpaceDialog({ src, suggestedName, onSaved, onClose }: { src: string; suggestedName?: string; onSaved?: (path: string) => void; onClose: () => void }) {
     const parsed = parseBlobAppUrl(src)
     const suggested = (() => {
         try {
@@ -158,56 +229,68 @@ function SaveToSpaceDialog({ src, onClose }: { src: string; onClose: () => void 
             return ''
         }
     })()
-    const [path, setPath] = useState(suggested || (parsed ? `image-${parsed.hash.slice(0, 8)}.png` : ''))
+    const [path, setPath] = useState(suggested || suggestedName || (parsed ? `attachment-${parsed.hash.slice(0, 8)}` : ''))
     const [saving, setSaving] = useState(false)
+    const [error, setError] = useState<string | null>(null)
+    const fileSave = useSpaceFileSave(parsed?.orgId ?? '', parsed?.spaceId ?? '')
     if (!parsed) return null
     const save = async () => {
         const cleaned = path.split('/').filter((s) => s && s !== '.' && s !== '..').join('/')
-        if (!cleaned || saving) return
+        if (saving) return
+        if (!cleaned) { setError('Enter a file name.'); return }
         setSaving(true)
+        setError(null)
         try {
-            await window.ipc.invoke('spaces:proposeChange', {
-                orgId: parsed.orgId,
-                spaceId: parsed.spaceId,
-                input: { assetPath: cleaned, baseVersion: 0, blob: parsed.hash, reason: 'saved from chat' },
-            })
+            const savedPath = await fileSave.save({ path: cleaned, getBlob: async () => parsed.hash, reason: 'saved from chat' })
+            if (!savedPath) { onClose(); return }
             toast('Saved to space files', 'success')
+            onSaved?.(savedPath)
             onClose()
         } catch (err) {
-            toast(err instanceof Error ? err.message : 'Could not save to space files', 'error')
+            setError(err instanceof Error ? err.message : 'Could not save to space files')
         } finally {
             setSaving(false)
         }
     }
     return (
-        <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
+        <Dialog open onOpenChange={(o) => { if (!o && !saving) onClose() }}>
             <DialogContent className="sm:max-w-md">
                 <DialogTitle>Save to space files</DialogTitle>
                 <div className="text-sm text-muted-foreground">
-                    The image becomes a file in this space — in the file tree for everyone, versioned like any other file.
+                    Save this attachment in Files for everyone in the space. It will still be available in this message.
                 </div>
                 <input
                     autoFocus
                     value={path}
-                    onChange={(e) => setPath(e.target.value)}
+                    onChange={(e) => { setPath(e.target.value); setError(null) }}
                     onKeyDown={(e) => {
                         if (e.key === 'Enter') void save()
                     }}
-                    placeholder="folder/name.png"
+                    aria-label="File name"
+                    disabled={saving}
+                    placeholder="File name"
                     className="w-full rounded-md border border-border bg-background px-2 py-1.5 font-mono text-xs outline-none focus:border-foreground/30"
                 />
-                <div className="flex justify-end gap-2">
-                    <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
+                {error && <p role="alert" className="text-xs text-red-500">{error}</p>}
+                {fileSave.conflict && <FileConflictNotice conflict={fileSave.conflict} onChoose={fileSave.choose} />}
+                {!fileSave.conflict && <div className="flex justify-end gap-2">
+                    <Button variant="ghost" size="sm" disabled={saving} onClick={onClose}>Cancel</Button>
                     <Button size="sm" disabled={saving} onClick={() => void save()}>
                         {saving ? <Loader2 className="mr-1 size-3.5 animate-spin" /> : null} Save
                     </Button>
-                </div>
+                </div>}
             </DialogContent>
         </Dialog>
     )
 }
 
 export function BlobImage({ src, alt }: { src: string; alt: string }) {
+    const imageRef = useRef<HTMLImageElement>(null)
+    const openGallery = useContext(MessageImageGalleryContext)
+    const preview = () => {
+        if (openGallery && imageRef.current) openGallery(imageRef.current)
+        else setOpen(true)
+    }
     const [open, setOpen] = useState(false)
     const [saveOpen, setSaveOpen] = useState(false)
     const [saving, setSaving] = useState(false)
@@ -245,13 +328,22 @@ export function BlobImage({ src, alt }: { src: string; alt: string }) {
     }
     return (
         <>
+            <span className="relative inline-block align-top">
             <ContextMenu>
                 <ContextMenuTrigger asChild>
                     <img
                         src={src}
+                        ref={imageRef}
+                        data-message-image
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Preview ${alt || 'image'}`}
+                        onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); preview() }
+                        }}
                         alt={alt}
                         loading="lazy"
-                        onClick={() => setOpen(true)}
+                        onClick={preview}
                         // The row has its own context menu — the image's wins here.
                         onContextMenu={(e) => e.stopPropagation()}
                         onLoad={() => setLoaded(true)}
@@ -260,7 +352,7 @@ export function BlobImage({ src, alt }: { src: string; alt: string }) {
                     />
                 </ContextMenuTrigger>
                 <ContextMenuContent>
-                    <ContextMenuItem onSelect={() => setOpen(true)}>
+                    <ContextMenuItem onSelect={preview}>
                         <Eye className="size-3.5 mr-2" /> View
                     </ContextMenuItem>
                     {parsed && (
@@ -275,17 +367,10 @@ export function BlobImage({ src, alt }: { src: string; alt: string }) {
                     )}
                 </ContextMenuContent>
             </ContextMenu>
+            {parsed && <button type="button" title="Save to space files" aria-label={`Save ${alt || 'image'} to space files`} onClick={() => setSaveOpen(true)} className="absolute bottom-3 right-3 rounded-md border border-border bg-background p-1.5 text-foreground shadow-sm hover:bg-accent"><FilePlus2 className="size-3.5" /></button>}
+            </span>
             <ImageLightbox src={src} alt={alt} open={open} onOpenChange={setOpen}>
-                {parsed && (
-                    <>
-                        <button type="button" onClick={() => void save()} className="text-white/80 hover:text-white hover:underline">
-                            {saving ? 'Saving…' : 'Download'}
-                        </button>
-                        <button type="button" onClick={() => setSaveOpen(true)} className="text-white/80 hover:text-white hover:underline">
-                            Save to space files
-                        </button>
-                    </>
-                )}
+                <SpaceImageActions src={src} />
             </ImageLightbox>
             {saveOpen && <SaveToSpaceDialog src={src} onClose={() => setSaveOpen(false)} />}
         </>
@@ -314,6 +399,12 @@ function plainLabel(children: ReactNode): string | null {
  * images; a URL that never loads falls back to the plain link it came from.
  */
 function ExternalImage({ src, alt }: { src: string; alt: string }) {
+    const imageRef = useRef<HTMLImageElement>(null)
+    const openGallery = useContext(MessageImageGalleryContext)
+    const preview = () => {
+        if (openGallery && imageRef.current) openGallery(imageRef.current)
+        else setOpen(true)
+    }
     const [failed, setFailed] = useState(false)
     const [open, setOpen] = useState(false)
     const [saving, setSaving] = useState(false)
@@ -336,10 +427,18 @@ function ExternalImage({ src, alt }: { src: string; alt: string }) {
         <>
             <img
                 src={src}
+                ref={imageRef}
+                data-message-image
+                role="button"
+                tabIndex={0}
+                aria-label={`Preview ${alt || 'image'}`}
+                onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); preview() }
+                }}
                 alt={alt}
                 title={src}
                 loading="lazy"
-                onClick={() => setOpen(true)}
+                onClick={preview}
                 onError={() => setFailed(true)}
                 className={cn(TILE_CLASS, 'h-60 max-w-[360px]')}
             />
@@ -356,12 +455,23 @@ function ExternalImage({ src, alt }: { src: string; alt: string }) {
 }
 
 /**
+ * A hostname short enough to label a button with. Tunnel and preview hosts
+ * (ngrok, vercel, codespaces) carry a long random head, so it is the head that
+ * goes: the registrable domain at the tail is the part the trust decision
+ * actually turns on, and the dialog shows the full URL above regardless.
+ */
+function shortDomain(domain: string): string {
+    return domain.length <= 28 ? domain : `…${domain.slice(-27)}`
+}
+
+/**
  * An external link: blue, clickable — and gated. The first click on a domain
  * shows the full destination and offers to trust the domain (stored locally);
  * links to trusted domains open straight in the system browser.
  */
 function ExternalLink({ href, children }: { href: string; children?: ReactNode }) {
     const [confirming, setConfirming] = useState(false)
+    const cancelRef = useRef<HTMLButtonElement>(null)
     const domain = linkDomain(href)
     // Only http(s) leaves the app; anything else renders inert.
     if (!domain) return <span>{children}</span>
@@ -383,18 +493,41 @@ function ExternalLink({ href, children }: { href: string; children?: ReactNode }
             </a>
             {confirming && (
                 <Dialog open onOpenChange={(o) => { if (!o) setConfirming(false) }}>
-                    <DialogContent className="sm:max-w-md">
+                    <DialogContent
+                        className="sm:max-w-md"
+                        // The trust control leads the row, so the opening focus
+                        // is pinned past it: Enter on a gate like this one must
+                        // not mean "trust this domain forever".
+                        onOpenAutoFocus={(e) => { e.preventDefault(); cancelRef.current?.focus() }}
+                    >
                         <DialogTitle>Leaving Rowboat</DialogTitle>
-                        <div className="text-sm text-muted-foreground">
+                        {/* min-w-0 throughout: these are grid children, which
+                            size to their content by default and would push a
+                            long hostname straight through the card's edge. */}
+                        <div className="min-w-0 text-sm text-muted-foreground">
                             This link opens in your browser:
                             <div className="mt-2 max-h-24 overflow-y-auto break-all rounded-md bg-muted px-2 py-1.5 font-mono text-xs text-foreground">{href}</div>
                         </div>
-                        <div className="flex flex-wrap justify-end gap-2">
-                            <Button variant="ghost" size="sm" onClick={() => setConfirming(false)}>Cancel</Button>
-                            <Button variant="outline" size="sm" onClick={() => { trustDomain(domain); setConfirming(false); open() }}>
-                                Trust {domain}
+                        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+                            {/* The one control the message gets to size, so it
+                                leads the row and takes the whole line when it
+                                wraps — shrinking and eliding, never growing. */}
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                className="mr-auto min-w-0 max-w-full"
+                                title={domain}
+                                aria-label={`Trust ${domain}`}
+                                onClick={() => { trustDomain(domain); setConfirming(false); open() }}
+                            >
+                                <span className="min-w-0 truncate">Trust {shortDomain(domain)}</span>
                             </Button>
-                            <Button size="sm" onClick={() => { setConfirming(false); open() }}>Open link</Button>
+                            {/* Grouped so the answer to the dialog never splits
+                                across lines when the trust control wraps. */}
+                            <div className="flex shrink-0 items-center gap-2">
+                                <Button ref={cancelRef} variant="ghost" size="sm" onClick={() => setConfirming(false)}>Cancel</Button>
+                                <Button size="sm" onClick={() => { setConfirming(false); open() }}>Open link</Button>
+                            </div>
                         </div>
                     </DialogContent>
                 </Dialog>
@@ -414,58 +547,33 @@ const spaceComponents: StreamdownComponents = {
         return <ExternalImage src={url} alt={alt ?? ''} />
     },
     a: SpaceAnchor,
-    // decorateMentions renders "@name" as **bold**; the stream dialect shows
-    // those as tinted mention chips. Slack treatment: only the chip is
-    // tinted, never the row — amber when it addresses you (@you, @here),
-    // blue for anyone else. A chip naming a real member opens their profile.
-    strong: MentionStrong,
 }
 
-function MentionStrong({ children, ...props }: ComponentProps<'strong'>) {
+/**
+ * A mention chip, keyed on the ID the token carries — the name is the roster's
+ * current one, never the label (two members with the same name can no longer
+ * collide). Only the chip is tinted, never the row: amber when it addresses
+ * you (@you, @here), blue for anyone else. A member chip opens their profile.
+ */
+function MentionChip({ memberId, broadcast, fallback }: { memberId?: string; broadcast?: 'here' | 'rowboat'; fallback: string }) {
     const names = useMemberNames()
     const { selfId } = useSpaceProfiles()
-    const label = plainLabel(children)
-    if (!label?.startsWith('@')) return <strong {...props}>{children}</strong>
-
-    const broadcast = /^@(here|channel|everyone)$/i.test(label)
-    // The label carries the display name (decorateMentions), so the id comes
-    // from a reverse lookup; an unmatched name still renders as a chip.
-    const name = label.slice(1)
-    let memberId: string | null = null
-    if (!broadcast) {
-        for (const [id, display] of names) {
-            if (display === name) {
-                memberId = id
-                break
-            }
-        }
-    }
-    const addressesMe = broadcast || (!!selfId && memberId === selfId)
+    const label = broadcast ? `@${broadcast}` : `@${(memberId !== undefined ? names.get(memberId) : undefined) ?? fallback.replace(/^@/, '')}`
+    const addressesMe = broadcast === 'here' || (!!selfId && memberId === selfId)
     const chip = cn(
         'rounded-[4px] px-[3px] py-px font-medium',
         addressesMe
             ? 'bg-[var(--stream-you-wash)] text-[var(--stream-you-ink)]'
             : 'bg-[var(--stream-mention-wash)] text-[var(--stream-link)]',
     )
-    // @here/@channel address the room, not a person — no profile to open.
-    if (broadcast) {
-        return (
-            <strong className={chip} {...props}>
-                {children}
-            </strong>
-        )
-    }
-    if (!memberId) {
-        return (
-            <strong className={chip} {...props}>
-                {children}
-            </strong>
-        )
+    // @here and @rowboat address the room and your agent — no profile to open.
+    if (broadcast || memberId === undefined || !names.has(memberId)) {
+        return <strong className={chip}>{label}</strong>
     }
     return (
         <MemberProfilePopover id={memberId}>
             <button type="button" className={cn(chip, 'cursor-pointer hover:brightness-95 dark:hover:brightness-110')}>
-                {children}
+                {label}
             </button>
         </MemberProfilePopover>
     )
@@ -475,6 +583,11 @@ function SpaceAnchor({ href, children }: ComponentProps<'a'>) {
     const refs = useContext(SpaceRefsContext)
     const openFile = useContext(SpaceNavContext)
     const url = typeof href === 'string' ? href : ''
+    // Mention tokens arrive here as app links (rewriteMentionLinks) — chips, by id.
+    const mentionId = parseSpaceMemberAppUrl(url)
+    if (mentionId !== null) return <MentionChip memberId={mentionId} fallback={plainLabel(children) ?? mentionId} />
+    if (url === HERE_APP_URL) return <MentionChip broadcast="here" fallback="@here" />
+    if (url === ROWBOAT_APP_URL) return <MentionChip broadcast="rowboat" fallback="@rowboat" />
     if (url.startsWith('app://space-blob/')) {
         return <BlobLinkCard href={url}>{children}</BlobLinkCard>
     }
@@ -508,21 +621,57 @@ function SpaceAnchor({ href, children }: ComponentProps<'a'>) {
 }
 
 // Memoized: a stream re-renders on every presence/typing frame, and markdown
-// is by far the heaviest thing in a row — same body, same refs, same names
-// (both contexts still cut through the memo) means the row's markdown stands.
+// is by far the heaviest thing in a row — same body, same refs means the row's
+// markdown stands (the chips read the members context themselves).
 export const SpaceMarkdown = memo(function SpaceMarkdown({ body, className }: { body: string; className?: string }) {
     const refs = useContext(SpaceRefsContext)
-    const memberNames = useMemberNames()
     const text = useMemo(() => {
         const withBlobs = refs ? rewriteBlobLinks(body, refs) : body
         const withFiles = refs ? rewriteFileLinks(withBlobs, refs) : withBlobs
         // Pre-separator messages joined text and images in one paragraph —
         // normalize so every message gets text above, a clean tile row below.
-        return decorateMentions(separateImageParagraphs(withFiles), memberNames)
-    }, [body, refs, memberNames])
+        // Mentions last: their app links must never look like file links.
+        return rewriteMentionLinks(separateImageParagraphs(withFiles))
+    }, [body, refs])
     return (
         <div className={cn(className)}>
-            <Streamdown components={spaceComponents}>{text}</Streamdown>
+            <MessageImageGallery key={text}>
+                {/* Chat line breaks are newlines on the wire (both composers
+                    write them that way), so a single newline inside a
+                    paragraph has to render as one — remarkBreaks, same as
+                    every other typed-message surface. */}
+                <Streamdown components={spaceComponents} remarkPlugins={userMessageRemarkPlugins}>{text}</Streamdown>
+            </MessageImageGallery>
         </div>
     )
 })
+
+
+/** Attachment content occupies the same document column as saved space files. */
+export function AttachmentColumn({ src, onDismiss, onSaved }: { src: string; onDismiss: () => void; onSaved: (path: string) => void }) {
+    const name = new URL(src).searchParams.get('name') || 'Attachment'
+    const [saveOpen, setSaveOpen] = useState(false)
+    const [downloading, setDownloading] = useState(false)
+    const download = async () => {
+        const parsed = parseBlobAppUrl(src)
+        if (!parsed || downloading) return
+        setDownloading(true)
+        try {
+            await window.ipc.invoke('spaces:saveBlob', { ...parsed, suggestedName: name })
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not download', 'error')
+        } finally { setDownloading(false) }
+    }
+    return (
+        <section aria-label="Attachment preview" className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2 text-xs text-muted-foreground">
+                <span className="min-w-0 flex-1 truncate font-mono text-foreground/80" title={name}>{name}</span>
+                <button type="button" onClick={() => setSaveOpen(true)} className="flex shrink-0 items-center gap-1 hover:text-foreground"><FilePlus2 className="size-3" /> Save to space files</button>
+                <button type="button" disabled={downloading} onClick={() => void download()} className="flex shrink-0 items-center gap-1 hover:text-foreground"><FileDown className="size-3" /> Download</button>
+                <button type="button" aria-label="Close attachment preview" onClick={onDismiss} className="rounded p-1 hover:bg-accent hover:text-foreground"><X className="size-3.5" /></button>
+            </div>
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto"><BlobPreview src={src} name={name} /></div>
+            {saveOpen && <SaveToSpaceDialog src={src} suggestedName={name} onSaved={onSaved} onClose={() => setSaveOpen(false)} />}
+        </section>
+    )
+}

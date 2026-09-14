@@ -102,8 +102,12 @@ interface PendingPost {
  * and as a JSON text block; either is accepted (pure; tested).
  */
 export function postedMessageId(output: unknown): string | null {
-  const o = output as { success?: boolean; result?: unknown } | null;
+  const o = output as { success?: boolean; messageId?: unknown; result?: unknown } | null;
   if (!o || o.success === false) return null;
+  // The projected builtin (tools/domains/spaces.ts) unwraps the MCP envelope:
+  // its output IS the tool's structured result, { messageId, threadRoot? }.
+  if (typeof o.messageId === 'string' && o.messageId) return o.messageId;
+  // The generic executeMcpTool envelope: { success, result: <MCP CallToolResult> }.
   const result = o.result as
     | { isError?: boolean; structuredContent?: { messageId?: unknown }; content?: Array<{ type?: string; text?: string }> }
     | null
@@ -121,6 +125,44 @@ export function postedMessageId(output: unknown): string | null {
     }
   }
   return null;
+}
+
+/**
+ * A post_message call as the turn log records it, in either of its two
+ * shapes: the projected builtin `post_message` (input: {org?, spaceId,
+ * threadRoot?, body}) — what the spaces skill attaches since 2026-09-09 —
+ * or the generic `executeMcpTool` envelope ({serverName, toolName:
+ * 'post_message', arguments}) an older session or a foreign agent path uses.
+ */
+export function postMessageCall(
+  toolName: string,
+  input: unknown,
+): { spaceId: string; threadRoot: string | null; org: { kind: 'server'; name: string } | { kind: 'arg'; value: string | null } } | null {
+  const args = (input ?? null) as Record<string, unknown> | null;
+  if (!args) return null;
+  if (toolName === 'post_message') {
+    if (typeof args.spaceId !== 'string') return null;
+    return {
+      spaceId: args.spaceId,
+      threadRoot: typeof args.threadRoot === 'string' ? args.threadRoot : null,
+      org: { kind: 'arg', value: typeof args.org === 'string' && args.org ? args.org : null },
+    };
+  }
+  if (toolName === 'executeMcpTool') {
+    if (args.toolName !== 'post_message' || typeof args.serverName !== 'string') return null;
+    const a = (args.arguments ?? null) as Record<string, unknown> | null;
+    if (!a || typeof a.spaceId !== 'string') return null;
+    return {
+      spaceId: a.spaceId,
+      threadRoot: typeof a.threadRoot === 'string' ? a.threadRoot : null,
+      org: { kind: 'server', name: args.serverName },
+    };
+  }
+  return null;
+}
+
+function slug(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
 /**
@@ -156,18 +198,28 @@ export class SpaceResponseIndexer {
         const turn = this.running.get(busEvent.turnId);
         if (!turn) return;
         const e = event as { toolCallId: string; toolName: string; input?: unknown };
-        if (e.toolName !== 'executeMcpTool') return;
-        const input = e.input as { serverName?: unknown; toolName?: unknown; arguments?: { spaceId?: unknown; threadRoot?: unknown } } | null;
-        if (!input || input.toolName !== 'post_message' || typeof input.serverName !== 'string') return;
-        const spaceId = input.arguments?.spaceId;
-        if (typeof spaceId !== 'string') return;
-        // The org whose MCP server this call targets — one of the mention
-        // origins' orgs (a turn steered from two orgs is theoretical, but
-        // matching by server name keeps the attribution honest either way).
-        const orgId = [...new Set(turn.inputs.map((i) => i.origin.orgId))].find((id) => this.serverNameFor(id) === input.serverName);
+        const call = postMessageCall(e.toolName, e.input);
+        if (!call) return;
+        // The org this post targets — one of the mention origins' orgs (a
+        // turn steered from two orgs is theoretical, but matching keeps the
+        // attribution honest either way). The builtin's `org` argument is
+        // omitted when one org is registered, so a lone candidate wins.
+        const candidates = [...new Set(turn.inputs.map((i) => i.origin.orgId))];
+        const org = call.org;
+        let orgId: string | undefined;
+        if (org.kind === 'server') {
+          orgId = candidates.find((id) => this.serverNameFor(id) === org.name);
+        } else if (org.value === null) {
+          orgId = candidates.length === 1 ? candidates[0] : undefined;
+        } else {
+          const wanted = org.value;
+          orgId = candidates.find((id) => {
+            const server = this.serverNameFor(id);
+            return id === wanted || server === wanted || server === `spaces-${slug(wanted)}`;
+          });
+        }
         if (!orgId) return;
-        const threadRoot = typeof input.arguments?.threadRoot === 'string' ? input.arguments.threadRoot : null;
-        this.pendingPosts.set(e.toolCallId, { turnId: busEvent.turnId, orgId, spaceId, threadRoot });
+        this.pendingPosts.set(e.toolCallId, { turnId: busEvent.turnId, orgId, spaceId: call.spaceId, threadRoot: call.threadRoot });
         return;
       }
       case 'tool_result': {

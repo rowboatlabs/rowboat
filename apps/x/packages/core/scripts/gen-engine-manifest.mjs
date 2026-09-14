@@ -34,13 +34,17 @@ const CODEX_PLATFORMS = [
     'win32-x64', 'win32-arm64',
 ];
 
-// Read a pinned dependency version from an adapter's package.json, stripping any range
-// prefix (^, ~). createRequire resolves the adapter from the installed node_modules.
+// Read exact pins directly. For ranges, use the installed dependency version so the
+// provisioned engine matches the lockfile rather than the range's minimum version.
 function pinnedDep(adapterPkg, depName) {
     const pj = require(`${adapterPkg}/package.json`);
     const spec = (pj.dependencies || {})[depName] || (pj.optionalDependencies || {})[depName];
     if (!spec) throw new Error(`${adapterPkg} has no dependency on ${depName}`);
-    return spec.replace(/^[\^~]/, '');
+    if (/^[\^~]/.test(spec)) {
+        const adapterRequire = createRequire(require.resolve(`${adapterPkg}/package.json`));
+        return adapterRequire(`${depName}/package.json`).version;
+    }
+    return spec;
 }
 
 // Fetch a single version's manifest from the registry and return its dist coordinates.

@@ -1,3 +1,4 @@
+import { useFileViewerSource } from './file-viewer-source'
 import { useEffect, useState } from 'react'
 import { ExternalLinkIcon, FileAudioIcon } from 'lucide-react'
 
@@ -13,13 +14,14 @@ function basename(path: string): string {
 }
 
 export function AudioFileViewer({ path }: AudioFileViewerProps) {
+  const source = useFileViewerSource()
   const [state, setState] = useState<State>('loading')
 
   useEffect(() => {
     setState('loading')
   }, [path])
 
-  const src = `app://workspace/${path.split('/').map(encodeURIComponent).join('/')}`
+  const src = source.url(path)
 
   if (state === 'error') {
     return (
@@ -30,7 +32,7 @@ export function AudioFileViewer({ path }: AudioFileViewerProps) {
         <button
           type="button"
           onClick={() => {
-            void window.ipc.invoke('shell:openPath', { path })
+            void source.open({ path })
           }}
           className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent"
         >

@@ -58,6 +58,8 @@ export interface SessionsDependencies {
     // turn's composition SERVER-side so prompt assembly never depends on
     // which client surface sent the message. Injected by DI; the session
     // layer knows nothing about what the pins mean.
+    // Awaited under the session lock before accepting its first turn.
+    beforeSessionStart?: (sessionId: string) => Promise<void>;
     sessionCompositionPins?: (sessionId: string) => Promise<Record<string, JsonValue> | null>;
 }
 
@@ -101,6 +103,7 @@ export class SessionsImpl implements ISessions {
     private readonly idGenerator: IMonotonicallyIncreasingIdGenerator;
     private readonly clock: IClock;
     private readonly sessionBus: ISessionBus;
+    private readonly beforeSessionStart?: (sessionId: string) => Promise<void>;
     private readonly sessionCompositionPins?: (
         sessionId: string,
     ) => Promise<Record<string, JsonValue> | null>;
@@ -125,6 +128,7 @@ export class SessionsImpl implements ISessions {
         clock,
         sessionBus,
         sessionCompositionPins,
+        beforeSessionStart,
     }: SessionsDependencies) {
         this.sessionRepo = sessionRepo;
         this.turnRuntime = turnRuntime;
@@ -132,6 +136,7 @@ export class SessionsImpl implements ISessions {
         this.clock = clock;
         this.sessionBus = sessionBus;
         this.sessionCompositionPins = sessionCompositionPins;
+        this.beforeSessionStart = beforeSessionStart;
     }
 
     // §8.2: scan session files, read each session's latest turn for status.
@@ -357,6 +362,7 @@ export class SessionsImpl implements ISessions {
         input: z.infer<typeof UserMessage>,
         config: SendMessageConfig,
     ): Promise<{ turnId: string }> {
+        if (state.turns.length === 0) await this.beforeSessionStart?.(sessionId);
         let agentRequest = latestTurnState
             ? withActiveSkills(config.agent, deriveActiveSkills(latestTurnState))
             : config.agent;
@@ -366,9 +372,15 @@ export class SessionsImpl implements ISessions {
         // messages promoted after settle), the session's pinned composition
         // is the same — the client's copy is at most a cosmetic hint, and
         // the pins win on conflict.
-        if (this.sessionCompositionPins && !isInlineAgentRequest(agentRequest)) {
-            const pins = await this.sessionCompositionPins(sessionId).catch(() => null);
-            if (pins && Object.keys(pins).length > 0) {
+        if (!isInlineAgentRequest(agentRequest)) {
+            const pins: Record<string, JsonValue> = {
+                ...(this.sessionCompositionPins
+                    ? ((await this.sessionCompositionPins(sessionId).catch(() => null)) ?? {})
+                    : {}),
+                ...spaceThreadPins(state.origin),
+                ...spaceMentionPins(input),
+            };
+            if (Object.keys(pins).length > 0) {
                 const provided = agentRequest.overrides?.composition;
                 const base: { [key: string]: JsonValue } =
                     provided !== undefined &&
@@ -377,11 +389,22 @@ export class SessionsImpl implements ISessions {
                     !Array.isArray(provided)
                         ? (provided as { [key: string]: JsonValue })
                         : {};
+                // activeSkills is the one pin that MERGES (a pinned skill
+                // joins whatever the session already loaded) — every other
+                // pin overrides, the session's identity winning on conflict.
+                const merged: { [key: string]: JsonValue } = { ...base, ...pins };
+                if (Array.isArray(pins.activeSkills)) {
+                    const carried = parseActiveSkills(base);
+                    merged.activeSkills = [
+                        ...carried,
+                        ...parseActiveSkills(pins).filter((id) => !carried.includes(id)),
+                    ];
+                }
                 agentRequest = {
                     ...agentRequest,
                     overrides: {
                         ...agentRequest.overrides,
-                        composition: { ...base, ...pins },
+                        composition: merged,
                     },
                 };
             }
@@ -915,6 +938,39 @@ function parseActiveSkills(composition: JsonValue | undefined): string[] {
     return Array.isArray(value)
         ? value.filter((item): item is string => typeof item === "string")
         : [];
+}
+
+// A session born from an @rowboat mention (origin kind 'space_thread') is
+// pinned to its thread on every turn — whoever sends into it (the mention
+// path, the person chatting in the thread pane, a queued steer): the thread
+// procedure composes from token zero and the spaces tools attach at assembly.
+function spaceThreadPins(origin: SessionState["origin"]): Record<string, JsonValue> {
+    if (!origin || origin.kind !== "space_thread") return {};
+    return {
+        spaceThread: {
+            org: origin.orgId,
+            spaceName: origin.spaceName,
+            spaceId: origin.spaceId,
+            threadRootId: origin.threadRootId,
+        },
+        activeSkills: ["spaces"],
+    };
+}
+
+// A message that @-names a space, a person or a board (the composer's @ menu,
+// carried as userMessageContext.spaceMentions), or typed while a board is
+// open in Spaces (middlePane 'whiteboard'), is a spaces ask by construction:
+// the spaces skill — and the whiteboard skill when a board is in play — joins
+// this turn so the tools attach at assembly, instead of the model spending
+// its first call on loadSkill. activeSkills merges, and skills carry forward,
+// so the session stays capable afterwards — the same outcome loadSkill would
+// have produced.
+function spaceMentionPins(input: z.infer<typeof UserMessage>): Record<string, JsonValue> {
+    const mentions = input.userMessageContext?.spaceMentions ?? [];
+    const boardOpen = input.userMessageContext?.middlePane?.kind === "whiteboard";
+    const boardMentioned = mentions.some((m) => m.kind === "board");
+    if (mentions.length === 0 && !boardOpen) return {};
+    return { activeSkills: boardOpen || boardMentioned ? ["spaces", "whiteboard"] : ["spaces"] };
 }
 
 function deriveActiveSkills(turnState: TurnState): string[] {

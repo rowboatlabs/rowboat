@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { BrowserWindow, WebContentsView, desktopCapturer, session, shell, type Session, type WebContents } from 'electron';
+import { BrowserWindow, Menu, WebContentsView, clipboard, desktopCapturer, session, shell, type Session, type WebContents } from 'electron';
 import type {
   BrowserPageElement,
   BrowserPageSnapshot,
@@ -10,6 +10,7 @@ import type {
   HttpAuthRequest,
 } from '@x/shared/dist/browser-control.js';
 import { normalizeNavigationTarget } from './navigation.js';
+import { buildBrowserContextMenu } from './context-menu.js';
 import {
   buildClickScript,
   buildFocusScript,
@@ -419,6 +420,15 @@ export class BrowserViewManager extends EventEmitter {
   private wireEvents(tab: BrowserTab): void {
     const { id: tabId, view } = tab;
     const wc = view.webContents;
+
+    wc.on('context-menu', (_event, params) => {
+      const window = this.window;
+      if (!window || window.isDestroyed() || wc.isDestroyed() || !this.visible || this.attachedTabId !== tabId) return;
+      Menu.buildFromTemplate(buildBrowserContextMenu(wc, params, {
+        openTab: (url) => { void this.newTab(url); },
+        copyText: (text) => clipboard.writeText(text),
+      })).popup({ window });
+    });
 
     // The app's ⌥/⌃+Tab section switcher must keep working while this tab
     // holds keyboard focus — guest keystrokes never reach the app renderer's
@@ -975,8 +985,8 @@ export class BrowserViewManager extends EventEmitter {
     return { ok: true };
   }
 
-  reload(): void {
-    const activeTab = this.getActiveTab();
+  reload(tabId?: string): void {
+    const activeTab = tabId ? this.tabs.get(tabId) : this.getActiveTab();
     if (!activeTab) return;
     this.invalidateSnapshot(activeTab.id);
     activeTab.view.webContents.reload();

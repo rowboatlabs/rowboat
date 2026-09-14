@@ -8,6 +8,7 @@ import { SpaceHub } from './hub.js';
 import { handleMcpRequest } from './mcp.js';
 import { MemoryStore } from './memory-store.js';
 import { HarborService } from './service.js';
+import { Notifier } from './notify.js';
 import { PushSender } from './push.js';
 import type { Store } from './store.js';
 import { attachLive } from './ws.js';
@@ -48,6 +49,8 @@ export interface HarborOptions {
   maxBlobBytes?: number;
   /** Live-face heartbeat cadence (default 25s). A test knob; production keeps the default. */
   liveHeartbeatMs?: number;
+  /** Test knob: unsent-bytes ceiling before a stalled socket is terminated (ws.ts). */
+  liveMaxBufferedBytes?: number;
   /** Auth driver; defaults to dev tokens (never expose publicly). Pass an OidcAuthDriver for real deployments. */
   auth?: AuthDriver;
   /**
@@ -85,7 +88,7 @@ export async function startHarbor(options: HarborOptions = {}): Promise<RunningH
       ...(options.allowedEmailDomains ? { allowedEmailDomains: options.allowedEmailDomains } : {}),
     },
     blobs,
-    options.pushSender ?? new PushSender(store, options.orgName ?? 'dev'),
+    new Notifier(store, hub, options.pushSender ?? new PushSender(store, options.orgName ?? 'dev')),
   );
 
   for (const m of options.seedMembers ?? []) {
@@ -117,6 +120,9 @@ export async function startHarbor(options: HarborOptions = {}): Promise<RunningH
     }
   }
 
+  // The mentions backfill (service.migrateMentions): idempotent, runs before the faces serve.
+  await service.migrateMentions();
+
   const issuer = auth.metadata?.()?.authorizationServers[0];
   const app = buildHttpApp({
     service,
@@ -136,7 +142,10 @@ export async function startHarbor(options: HarborOptions = {}): Promise<RunningH
   const closeLive = attachLive(
     server,
     () => ({ service, hub, store, auth }),
-    options.liveHeartbeatMs !== undefined ? { heartbeatMs: options.liveHeartbeatMs } : {},
+    {
+      ...(options.liveHeartbeatMs !== undefined ? { heartbeatMs: options.liveHeartbeatMs } : {}),
+      ...(options.liveMaxBufferedBytes !== undefined ? { maxBufferedBytes: options.liveMaxBufferedBytes } : {}),
+    },
   );
 
   await new Promise<void>((resolve) => server.listen(options.port ?? 0, resolve));

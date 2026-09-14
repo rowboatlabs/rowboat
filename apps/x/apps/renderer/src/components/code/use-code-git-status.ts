@@ -13,20 +13,20 @@ export interface CodeGitStatus {
 // closed. Refreshes on turn end and polls lightly while the agent is working —
 // the session cwd lives outside the workspace watcher, so there are no change
 // events to react to.
-export function useCodeGitStatus(sessionId: string | null, status: CodeSessionStatus) {
+export function useCodeGitStatus(sessionId: string | null, status: CodeSessionStatus, baseCommit?: string) {
   // Tagged with the session it belongs to, so a switch reads as "unknown"
   // until the new session's status lands — no reset step needed.
-  const [git, setGit] = useState<{ sessionId: string; status: CodeGitStatus | null } | null>(null)
+  const [git, setGit] = useState<{ sessionId: string; baseCommit?: string; status: CodeGitStatus | null } | null>(null)
 
   const refresh = useCallback(async () => {
     if (!sessionId) return
     try {
       const res = await window.ipc.invoke('codeSession:gitStatus', { sessionId })
-      setGit({ sessionId, status: res })
+      setGit({ sessionId, baseCommit, status: res })
     } catch {
-      setGit({ sessionId, status: null })
+      setGit({ sessionId, baseCommit, status: null })
     }
-  }, [sessionId])
+  }, [sessionId, baseCommit])
 
   useEffect(() => {
     if (!sessionId) return
@@ -42,7 +42,7 @@ export function useCodeGitStatus(sessionId: string | null, status: CodeSessionSt
   }, [sessionId, status, refresh])
 
   return {
-    gitStatus: sessionId && git?.sessionId === sessionId ? git.status : null,
+    gitStatus: sessionId && git?.sessionId === sessionId && git.baseCommit === baseCommit ? git.status : null,
     refresh,
   }
 }

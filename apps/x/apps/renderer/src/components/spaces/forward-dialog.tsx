@@ -9,7 +9,7 @@ import { getSpaceFeed, getSpacesOrgs } from '@/hooks/use-spaces'
 import { resolveMentions } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
 
-// Forward (Discord) / share (Slack) a message: pick a destination — a topic
+// Forward (Discord) / share a message: pick a destination — a topic
 // in this space, or another space's stream — add an optional note, send. The
 // forwarded copy is a quoted block with attribution, plain markdown on the
 // wire. Blob attachments are space-scoped, so cross-space forwards strip

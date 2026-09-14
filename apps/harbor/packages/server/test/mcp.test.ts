@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { mcpTools } from '@rowboat/spaces-protocol';
 import { startHarbor, type RunningHarbor } from '../src/server.js';
 
 // Agent-face tests through a real MCP client: the exact path any agent
@@ -38,23 +39,41 @@ async function mcpClient(token: string, headers: Record<string, string> = {}): P
 }
 
 describe('agent face (MCP)', () => {
-  it('lists exactly the twelve protocol tools, with JSON schemas', async () => {
+  it('lists exactly the twenty-eight protocol tools, with JSON schemas', async () => {
     const client = await mcpClient('dev-harsh');
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
+      'asset_history',
+      'create_invite',
+      'create_space',
       'create_topic',
       'delete_asset',
+      'delete_message',
+      'diff',
+      'edit_message',
+      'end_poll',
+      'leave_space',
+      'list_members',
       'list_spaces',
       'list_topics',
       'manage_topic',
+      'mark_all_read',
       'move_asset',
+      'open_direct',
       'post_message',
       'propose_change',
+      'react',
+      'read_activity',
       'read_asset',
       'read_stream',
       'read_thread',
+      'rename_space',
+      'restore_asset',
       'search_space',
+      'vote_poll',
+      'whoami',
     ]);
+    expect(tools.map((t) => t.name).sort()).toEqual([...mcpTools].map((t) => t.name).sort());
     const propose = tools.find((t) => t.name === 'propose_change')!;
     expect(propose.inputSchema.required).toContain('reason'); // required on this face only
     await client.close();
@@ -305,6 +324,29 @@ describe('agent face (MCP)', () => {
       })
     ).structuredContent as { topic: { title: string } };
     expect(managed.topic.title).toBe('Decide: webhook retry policy (v2)');
+
+    // The discussion can be about one file: attach needs a path, read_thread shows it.
+    const proposed = await client.callTool({
+      name: 'propose_change',
+      arguments: { spaceId, path: 'retries.md', baseVersion: 0, newContent: '# Retry policy\n', reason: 'the policy doc' },
+    });
+    expect(proposed.isError, JSON.stringify(proposed.content)).toBeFalsy();
+    const noPath = await client.callTool({
+      name: 'manage_topic',
+      arguments: { spaceId, topicId: annotated.topic.id, action: 'attach_document' },
+    });
+    expect(noPath.isError).toBe(true);
+    const attachedResult = await client.callTool({
+      name: 'manage_topic',
+      arguments: { spaceId, topicId: annotated.topic.id, action: 'attach_document', path: 'retries.md' },
+    });
+    expect(attachedResult.isError, JSON.stringify(attachedResult.content)).toBeFalsy();
+    const attached = attachedResult.structuredContent as { topic: { documentPath?: string } };
+    expect(attached.topic.documentPath).toBe('retries.md');
+    const withDoc = (
+      await client.callTool({ name: 'read_thread', arguments: { spaceId, rootMessageId: started.messageId } })
+    ).structuredContent as { topic: { documentPath?: string } | null };
+    expect(withDoc.topic?.documentPath).toBe('retries.md');
 
     // remove converts back to a thread — the messages stay readable.
     await client.callTool({

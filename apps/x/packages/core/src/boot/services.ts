@@ -30,7 +30,6 @@ import { startModelsDevRefresh } from '../models/models-dev.js';
 import { init as initAppsServer } from '../apps/server.js';
 import { registerAppsHostApi } from '../apps/host-api.js';
 import { cleanInstallTmp } from '../apps/installer.js';
-import { startSpaceMentionWatch } from '../spaces/mention-watch.js';
 import { startSpacesScheduler } from '../spaces/scheduler.js';
 import { flags } from '@x/shared';
 
@@ -119,13 +118,11 @@ export async function initCoreServices(): Promise<void> {
     console.error('[Apps] Failed to start:', error);
   });
 
-  // Space mentions: watch every space of every org and notify on @<me> (over
-  // the notification service seam — OS notifications in-process, the WS
-  // reverse call from the standalone server). Gated with the Spaces UI flag.
+  // Scheduled sends + reminders: a persisted queue against the workdir,
+  // exactly this file's kind of service. Gated with the Spaces UI flag.
+  // (The client-side mention watcher that used to start here was removed
+  // 2026-09-09 — notification policy is moving to the org.)
   if (flags.spacesEnabled(process.env)) {
-    startSpaceMentionWatch();
-    // Scheduled sends + reminders ride the same gate — a persisted queue
-    // against the workdir, exactly this file's kind of service.
     startSpacesScheduler();
   }
 

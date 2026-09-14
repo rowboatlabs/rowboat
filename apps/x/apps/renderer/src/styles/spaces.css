@@ -1,0 +1,103 @@
+/* Spaces conversation language. Geometry lives here; colors follow the theme. */
+.spaces-surface {
+  --spaces-unit: 4px;
+  --spaces-gutter: 20px;
+  --spaces-avatar: 36px;
+  --spaces-control: 32px;
+  --spaces-reaction: 28px;
+  --spaces-header: 56px;
+  --spaces-pane-header: 48px;
+  --spaces-radius: 8px;
+  --spaces-hover: color-mix(in srgb, var(--foreground) 4%, var(--background));
+  background: var(--background);
+}
+
+.spaces-header {
+  min-height: var(--spaces-header);
+  padding-inline: var(--spaces-gutter);
+}
+
+.spaces-pane-header {
+  min-height: var(--spaces-pane-header);
+  padding-inline: 16px;
+}
+
+.spaces-pane-header > button,
+.spaces-header > button {
+  min-height: var(--spaces-control);
+}
+
+.spaces-navigation { background: var(--rowboat-panel-soft); }
+.spaces-message-list { scroll-padding-block: 24px; }
+.spaces-message {
+  gap: 12px;
+  padding-inline: var(--spaces-gutter);
+  padding-block: 8px 4px;
+  outline-offset: -2px;
+}
+.spaces-message--continuation { padding-block: 2px; }
+.spaces-message:hover,
+.spaces-message:focus-within { background: var(--spaces-hover); }
+.spaces-message-actions {
+  top: -16px;
+  z-index: 10;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 100ms ease;
+}
+.spaces-message:hover .spaces-message-actions,
+.spaces-message:focus-within .spaces-message-actions,
+.spaces-message-actions--open {
+  visibility: visible;
+  opacity: 1;
+}
+.spaces-message-actions svg { width: 18px; height: 18px; }
+.spaces-reaction {
+  min-height: var(--spaces-reaction);
+  min-width: 40px;
+  padding: 3px 8px;
+}
+.spaces-reaction-add { min-width: var(--spaces-reaction); padding-inline: 5px; }
+.spaces-reply-link { min-height: 28px; }
+.spaces-day-divider { padding: 16px var(--spaces-gutter) 8px; }
+.spaces-thread-root { padding: 8px var(--spaces-gutter); }
+.spaces-thread-root > div > div:first-child { flex-wrap: wrap; }
+.spaces-composer-dock { padding: 12px 16px 16px; }
+.spaces-composer-frame {
+  border-color: color-mix(in srgb, var(--foreground) 24%, var(--background));
+  border-radius: var(--spaces-radius);
+  transition: border-color 120ms ease;
+}
+.spaces-composer-frame:focus-within {
+  border-color: color-mix(in srgb, var(--foreground) 65%, var(--background));
+}
+.spaces-formatting {
+  background: var(--spaces-hover);
+  border-radius: 7px 7px 0 0;
+}
+.spaces-formatting button { min-width: 28px; min-height: 28px; }
+.spaces-compose-actions { min-height: 40px; }
+.spaces-surface :is(button, [role="button"]):focus-visible {
+  outline: 2px solid var(--stream-link);
+  outline-offset: 2px;
+}
+.spaces-surface .spaces-message:focus-visible {
+  outline: 2px solid var(--stream-link);
+  outline-offset: -2px;
+}
+
+@media (pointer: coarse) {
+  .spaces-message { padding-bottom: 44px; }
+  .spaces-message-actions { top: auto; bottom: 0; visibility: visible; opacity: 1; }
+  .spaces-message-actions button,
+  .spaces-compose-actions button { min-height: 36px; min-width: 36px; }
+  .spaces-reaction { min-height: 32px; }
+}
+@media (max-width: 640px) {
+  .spaces-surface { --spaces-gutter: 12px; }
+  .spaces-composer-dock { padding: 8px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spaces-message-actions,
+  .spaces-composer-frame { transition: none; }
+}

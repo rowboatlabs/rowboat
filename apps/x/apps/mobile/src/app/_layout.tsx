@@ -7,12 +7,15 @@ import { Image } from 'expo-image';
 
 import { GlassHamburger } from '@/components/glass-hamburger';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
+import * as Notifications from 'expo-notifications';
+import { router } from 'expo-router';
 
 import { DrawerContent } from '@/components/drawer-content';
 import { registerWithMac } from '@/lib/push';
 import { useConnection } from '@/lib/connection';
 import { ConnectionProvider } from '@/lib/connection';
-import { SpacesAccountProvider } from '@/lib/spaces/account';
+import { SpacesAccountProvider, useSpacesAccount } from '@/lib/spaces/account';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -29,10 +32,12 @@ export default function RootLayout() {
   }, []);
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
+      <KeyboardProvider>
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <ConnectionProvider>
           <SpacesAccountProvider>
           <PushRegistrar />
+          <PushNavigator />
           <Drawer
             drawerContent={(props) => <DrawerContent {...props} />}
             screenOptions={{
@@ -85,6 +90,7 @@ export default function RootLayout() {
           </SpacesAccountProvider>
         </ConnectionProvider>
       </ThemeProvider>
+      </KeyboardProvider>
     </GestureHandlerRootView>
   );
 }
@@ -96,5 +102,28 @@ function PushRegistrar() {
   useEffect(() => {
     if (status === 'connected' && rpc) void registerWithMac(rpc).catch(() => {});
   }, [status, rpc]);
+  return null;
+}
+
+// A tapped push lands on its conversation: the payload carries orgId /
+// spaceId / threadRootId (push.ts on the org); the org list maps id → address.
+function PushNavigator() {
+  const account = useSpacesAccount();
+  useEffect(() => {
+    const open = (data: Record<string, unknown> | undefined) => {
+      const orgId = typeof data?.orgId === 'string' ? data.orgId : null;
+      const spaceId = typeof data?.spaceId === 'string' ? data.spaceId : null;
+      const threadRootId = typeof data?.threadRootId === 'string' ? data.threadRootId : null;
+      const org = account.orgs?.find((o) => o.id === orgId);
+      if (!org || !spaceId) return;
+      const base = { org: org.address, space: spaceId, me: org.memberId };
+      router.push({ pathname: '/spaces/chat', params: base });
+      if (threadRootId) router.push({ pathname: '/spaces/thread', params: { ...base, root: threadRootId, title: 'Thread' } });
+    };
+    const sub = Notifications.addNotificationResponseReceivedListener((r) => open(r.notification.request.content.data as Record<string, unknown>));
+    // Cold start from a notification.
+    void Notifications.getLastNotificationResponseAsync().then((r) => r && open(r.notification.request.content.data as Record<string, unknown>));
+    return () => sub.remove();
+  }, [account.orgs]);
   return null;
 }

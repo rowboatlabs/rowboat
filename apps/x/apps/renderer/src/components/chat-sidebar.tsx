@@ -7,9 +7,9 @@ import { readAssistantPreference, writeAssistantPreference } from '@/lib/assista
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { ChatHeader } from '@/components/chat-header'
 import { CodeSessionHeader, type CodeSessionHeaderProps } from '@/components/code/code-session-header'
-import { type PromptInputMessage, type FileMention } from '@/components/ai-elements/prompt-input'
+import { type PromptInputMessage, type Mention } from '@/components/ai-elements/prompt-input'
 import { FileCardProvider } from '@/contexts/file-card-context'
-import { type ChatTab } from '@/components/tab-bar'
+import { TabBar, type ChatTab } from '@/components/tab-bar'
 import { type CallPreset, type PermissionMode, type StagedAttachment, type ModelSelection } from '@/components/chat-input-with-mentions'
 import { ChatSessionPane, ChatSessionComposer } from '@/components/chat-session'
 import type { QueuedSessionMessage } from '@x/shared/src/sessions.js'
@@ -64,7 +64,10 @@ interface ChatSidebarProps {
   placement?: 'middle' | 'right'
   paneSize?: ChatPaneSize
   className?: string
+  codeSessionTabs?: React.ReactNode
   chatTabs: ChatTab[]
+  onSwitchChatTab: (tabId: string) => void
+  onCloseChatTabs: (tabIds: string[]) => void
   activeChatTabId: string
   getChatTabTitle: (tab: ChatTab) => string
   onNewChatTab: () => void
@@ -89,7 +92,7 @@ interface ChatSidebarProps {
   isWaitingOnHuman?: boolean
   isStopping?: boolean
   onStop?: () => void
-  onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => void
+  onSubmit: (message: PromptInputMessage, mentions?: Mention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => void
   /** Pending-queue mirror for the ACTIVE tab's session (single store — see App). */
   queuedForActive?: QueuedSessionMessage[]
   onRemoveQueued?: (queueId: string) => void
@@ -158,7 +161,10 @@ export function ChatSidebar({
   placement = 'right',
   paneSize = 'chat-smaller',
   className,
+  codeSessionTabs,
   chatTabs,
+  onSwitchChatTab,
+  onCloseChatTabs,
   activeChatTabId,
   getChatTabTitle,
   onNewChatTab,
@@ -523,6 +529,12 @@ export function ChatSidebar({
             {onCloseTab && <Button variant="ghost" size="icon" onClick={onCloseTab} className="titlebar-no-drag my-1 mr-1 size-8 shrink-0" aria-label="Close chat tab" title="Close tab — conversation stays in history"><X className="size-4" /></Button>}
           </header>
 
+          {codeSessionTabs ?? <div className="flex h-9 shrink-0 border-b border-border">
+            <TabBar tabs={chatTabs} activeTabId={activeChatTabId} getTabId={(tab) => tab.id}
+              getTabTitle={getChatTabTitle} onSwitchTab={onSwitchChatTab}
+              onCloseTab={(id) => onCloseChatTabs([id])} onCloseTabs={onCloseChatTabs} layout="scroll" />
+          </div>}
+
           <FileCardProvider onOpenKnowledgeFile={onOpenKnowledgeFile ?? (() => {})} onOpenFile={onOpenFile}>
             <div className="flex min-h-0 flex-1 flex-col">
               {/* Pane padding lives here, on the container — the shared chat pane renders identically on every surface. */}
@@ -554,7 +566,10 @@ export function ChatSidebar({
                 })}
               </div>
 
-              <div className={cn('sticky bottom-0 z-10 bg-background pt-0 shadow-lg', floating ? 'pb-3' : 'pb-12')}>
+              {/* rowboat-composer-dock drops the utility shadow (same as the
+                  full-screen dock): the gradient below does the scroll fade,
+                  so the docked pane carries no container drop shadow. */}
+              <div className={cn('rowboat-composer-dock sticky bottom-0 z-10 bg-background pt-0 shadow-lg', floating ? 'pb-3' : 'pb-12')}>
                 <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t from-background to-transparent" />
                 <div className="mx-auto w-full max-w-4xl px-3">
                   {chatTabs.map((tab) => {

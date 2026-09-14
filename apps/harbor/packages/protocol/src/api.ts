@@ -9,7 +9,7 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { ActingMode, Member, Message, ReactionEmoji, Space, Topic } from './core.js';
+import { ActingMode, Attribution, Member, Message, ReactionEmoji, Space, SpaceKind, Topic } from './core.js';
 import { AssetPath, AssetVersion, BlobHash, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 import {
   AcceptInvite,
@@ -34,7 +34,7 @@ import { SearchKind, SearchResults } from './search.js';
  * rendering of the poll (question + numbered options) so poll-blind clients
  * still show it; poll-aware clients render the card instead.
  */
-const NewPoll = z.object({
+export const NewPoll = z.object({
   question: z.string().trim().min(1).max(300),
   answers: z
     .array(z.object({ text: z.string().trim().min(1).max(55), emoji: ReactionEmoji.optional() }))
@@ -75,6 +75,92 @@ export const TopicListing = Topic.extend({
 });
 export type TopicListing = z.infer<typeof TopicListing>;
 
+/**
+ * One space in the unread snapshot (read state, 2026-09-09). Counts exclude
+ * the member's own messages and tombstones; `threads` lists only FOLLOWED
+ * threads with live replies past the member's mark.
+ */
+export const UnreadSpace = z.object({
+  spaceId: SpaceId,
+  /** The space's current head offset. */
+  head: StreamOffset,
+  /** The member's stream mark (0 = never marked). */
+  readOffset: StreamOffset,
+  /** Roots after readOffset, not the member's, not deleted. */
+  unreadRoots: z.number().int().nonnegative(),
+  /**
+   * Messages addressed to the member (a mention token naming them, or @here)
+   * past the mark: unread roots plus the unread replies in followed threads.
+   * The sidebar's number; `unreadRoots` is its bold.
+   */
+  unreadMentions: z.number().int().nonnegative(),
+  threads: z.array(
+    z.object({
+      rootMessageId: MessageId,
+      readOffset: StreamOffset,
+      lastReplyOffset: StreamOffset,
+      /** Live replies after readOffset, not the member's own. */
+      unreadReplies: z.number().int().positive(),
+      /** Of those, the ones addressed to the member. */
+      unreadMentions: z.number().int().nonnegative(),
+    }),
+  ),
+});
+export type UnreadSpace = z.infer<typeof UnreadSpace>;
+
+export const UnreadSnapshot = z.object({ spaces: z.array(UnreadSpace) });
+export type UnreadSnapshot = z.infer<typeof UnreadSnapshot>;
+
+/**
+ * Activity (2026-09-10, the unread arc's layer 3): everything that involves
+ * the member, across every space and DM they are in, newest first. Not a
+ * table fanned out on write (Slack, Discord, GitHub) but a query over facts
+ * the org already keeps — the stamped mentions, the follow rows, the DM
+ * kind, the reactions (Zulip's Mentions/Inbox views work this way) — so
+ * edits, deletes and the backfill stay consistent for free and there is no
+ * second source of truth beside the read marks. Kinds, in the priority a
+ * single message resolves to: `mention` (a token named you) > `here` >
+ * `dm` (a message in your DM) > `reply` (in a thread you follow); plus
+ * `reaction` (on a message of yours, folded per message and emoji).
+ */
+export const ActivityKind = z.enum(['mention', 'here', 'dm', 'reply', 'reaction']);
+export type ActivityKind = z.infer<typeof ActivityKind>;
+
+export const ActivityItem = z.object({
+  /** Stable identity: `m:<messageId>` for message kinds, `r:<messageId>:<emoji>` for a reaction. */
+  id: z.string(),
+  kind: ActivityKind,
+  spaceId: SpaceId,
+  spaceKind: SpaceKind,
+  spaceName: z.string(),
+  /** The thread the message lives in (absent = a stream root). */
+  threadRootId: MessageId.optional(),
+  /** The message the item is about: theirs for message kinds, yours for a reaction. */
+  message: Message,
+  /** Who did it: the author for message kinds; every reactor, newest first, for a reaction. */
+  actors: z.array(Attribution),
+  emoji: z.string().optional(),
+  at: z.iso.datetime(),
+  /**
+   * Message kinds: the message is past your stream mark (a root) or your
+   * thread mark (a reply) — reading in place clears it, one read-state
+   * truth. Reactions: after your activity-seen mark (`markActivitySeen`).
+   */
+  unread: z.boolean(),
+});
+export type ActivityItem = z.infer<typeof ActivityItem>;
+
+export const ActivityPage = z.object({
+  items: z.array(ActivityItem),
+  /** Present when older items exist: pass it back as `cursor`. */
+  nextCursor: z.string().optional(),
+  /** Your activity-seen mark (reactions before it are read); null = never marked. */
+  seenAt: z.iso.datetime().nullable(),
+  /** Display names for every member on the page (actors and mention tokens), from the org roster the caller may see. */
+  names: z.record(MemberId, z.string()),
+});
+export type ActivityPage = z.infer<typeof ActivityPage>;
+
 export const routes = {
   // --- identity ------------------------------------------------------------
   /** Who am I on this org — the client's only source of its own memberId under OAuth. */
@@ -104,7 +190,8 @@ export const routes = {
    * made it. No invite and no acceptance — the org is the trust boundary,
    * as inside one Slack workspace. The other participant learns of the space
    * by a `space_added` live frame (events.ts) and on their next listing.
-   * Refuses yourself (no self-DM in v1) and unknown members.
+   * Your own id opens your self-DM (2026-09-08: one participant, one
+   * membership, notes to self); unknown members refuse (`not_found`).
    */
   openDirect: {
     method: 'POST',
@@ -159,6 +246,20 @@ export const routes = {
     method: 'GET',
     path: '/v1/spaces/:spaceId/members',
     params: z.object({ spaceId: SpaceId }),
+    response: z.object({ members: z.array(Member) }),
+  },
+  /**
+   * The org roster as THIS member may see it (2026-09-09): the union of the
+   * rosters of every space (DMs included) the caller belongs to, deduped,
+   * sorted by display name. Discovery is bounded by shared membership on
+   * purpose — you can only find people you already share a space with — so
+   * no admin-only directory and no privacy surface beyond what listMembers
+   * already exposes per space. Both faces use it: the app's "New message"
+   * picker and the agent's `list_members` resolve a name to a memberId here.
+   */
+  listOrgMembers: {
+    method: 'GET',
+    path: '/v1/members',
     response: z.object({ members: z.array(Member) }),
   },
   leaveSpace: {
@@ -364,7 +465,13 @@ export const routes = {
       beforeOffset: z.coerce.number().int().positive().optional(),
       limit: z.coerce.number().int().positive().max(200).optional(),
     }),
-    response: z.object({ messages: z.array(Message), topics: z.array(Topic), hasMore: z.boolean() }),
+    response: z.object({
+      messages: z.array(Message),
+      topics: z.array(Topic),
+      hasMore: z.boolean(),
+      /** The caller's stream mark (0 = never marked) — the New divider's anchor. */
+      readOffset: StreamOffset,
+    }),
   },
   /**
    * One flat thread: the root, its topic row (null = a plain thread), and the
@@ -385,6 +492,9 @@ export const routes = {
       topic: Topic.nullable(),
       messages: z.array(Message),
       hasMore: z.boolean(),
+      /** The caller's mark in this thread, followed or not; null = never read nor followed. */
+      readOffset: StreamOffset.nullable(),
+      following: z.boolean(),
     }),
   },
   /**
@@ -460,8 +570,9 @@ export const routes = {
    * idempotent no-op on re-add/re-remove). Single-select polls MOVE a vote —
    * adding while another answer holds yours removes that one atomically (a
    * `removed` then an `added` event under one lock). Closed polls (`endedAt`
-   * set or `expiresAt` passed) and tombstones refuse; agents cannot vote
-   * (actingMode must be 'direct' — the Discord posture: apps don't vote).
+   * set or `expiresAt` passed) and tombstones refuse. Any acting mode may
+   * vote (parity, 2026-09-09): a vote cast by a member's agent IS that
+   * member's vote — attribution says how it happened, never who else.
    * Returns the message with the poll's votes (and reactions) folded.
    */
   votePoll: {
@@ -478,7 +589,8 @@ export const routes = {
   },
   /**
    * End a poll early — author-only, like deletion (the content plane stays
-   * role-flat). Sets `endedAt` and emits `poll_ended`. Ending a poll that is
+   * role-flat); the author's agent counts as the author (parity,
+   * 2026-09-09). Sets `endedAt` and emits `poll_ended`. Ending a poll that is
    * already closed (early-ended or naturally expired) is a 200 no-op with no
    * event. Natural expiry needs no call — clients compute it from `expiresAt`.
    */
@@ -509,6 +621,8 @@ export const routes = {
         rootMessageId: MessageId.optional(),
         title: z.string().min(1).max(256),
         body: z.string().min(1).max(65_536).optional(),
+        /** Attach a space file at birth (a live asset path; moved paths resolve). */
+        documentPath: AssetPath.optional(),
         actingMode: ActingMode,
         agentName: z.string().max(64).optional(),
       })
@@ -523,6 +637,9 @@ export const routes = {
    * One-row lifecycle ops on the annotation — none can touch a message.
    * `remove` deletes the row ("convert back to thread"); the conversation
    * stays in the stream untouched, and re-promoting later is lossless.
+   * `attach_document` links one live space file (Topic.documentPath) —
+   * replacing any earlier link; `detach_document` clears it. Both are
+   * idempotent (no event when nothing changes).
    */
   manageTopic: {
     method: 'POST',
@@ -533,8 +650,120 @@ export const routes = {
       z.object({ action: z.literal('archive'), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
       z.object({ action: z.literal('unarchive'), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
       z.object({ action: z.literal('remove'), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+      z.object({ action: z.literal('attach_document'), path: AssetPath, actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+      z.object({ action: z.literal('detach_document'), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
     ]),
     response: z.object({ topic: Topic }),
+  },
+
+  // --- read state ----------------------------------------------------------
+  /**
+   * Read marks (2026-09-09): per-member cursors the org owns, so every device
+   * agrees. Two scopes: the space's STREAM (no threadRootId) and one FOLLOWED
+   * thread (threadRootId; a reply's id resolves to its root). The unit is the
+   * space's event offset — the same integer that pages and replays — never a
+   * timestamp. Marks only advance: a lower offset is a 200 no-op returning
+   * the stored mark; an offset past the space's head is refused. Posting
+   * directly advances the author's own mark (Slack/Mattermost posture; an
+   * agent's post does not). A thread takes a mark whether or not the member
+   * follows it (2026-09-11 — until then an unfollowed thread refused marks,
+   * which left @here-in-thread, DM-thread and unfollowed-thread Activity rows
+   * unread forever): following governs badges, counts and notifications, the
+   * mark governs what is read. Every accepted mark is echoed to the member's
+   * other connections as a `read_mark` frame (events.ts).
+   */
+  markRead: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/read',
+    params: z.object({ spaceId: SpaceId }),
+    request: z.object({
+      /** Absent = the stream; present = a thread (a reply's id resolves to its root). */
+      threadRootId: MessageId.optional(),
+      offset: StreamOffset,
+    }),
+    /** The stored mark after the call (never lower than before). */
+    response: z.object({ readOffset: StreamOffset }),
+  },
+  /**
+   * Follow or unfollow a thread. Only followed threads count toward unread
+   * and badge (v1 tracks followed threads only); a mark can sit on any thread. Which acts follow
+   * automatically is org behaviour, not client convention — provisional rules
+   * today: replying follows, and a root's author follows from the first reply
+   * on. Unfollowing keeps the mark, so re-following never floods.
+   */
+  followThread: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/threads/:rootMessageId/follow',
+    params: z.object({ spaceId: SpaceId, rootMessageId: MessageId }),
+    request: z.object({ following: z.boolean() }),
+    response: z.object({ following: z.boolean(), readOffset: StreamOffset }),
+  },
+  /**
+   * The unread snapshot: one call at boot and on reconnect, every space the
+   * member is in (DMs included) with its cursor, unread roots, and the
+   * followed threads that currently have unread replies. Clients fold live
+   * frames on top between snapshots.
+   */
+  unread: {
+    method: 'GET',
+    path: '/v1/unread',
+    response: UnreadSnapshot,
+  },
+  /**
+   * Activity: everything that involves the member, newest first, cursor
+   * paged (the first time-ordered cross-space pager — `cursor` is opaque,
+   * from the previous page's `nextCursor`). `kinds` narrows to a
+   * comma-separated subset; `spaceId` to one space; `unread=true` to what
+   * the read marks (and the activity-seen mark, for reactions) say is unread.
+   */
+  activity: {
+    method: 'GET',
+    path: '/v1/activity',
+    query: z.object({
+      kinds: z
+        .string()
+        .transform((s) => s.split(',').filter(Boolean))
+        .pipe(z.array(ActivityKind))
+        .optional(),
+      spaceId: SpaceId.optional(),
+      unread: z
+        .enum(['true', 'false'])
+        .transform((v) => v === 'true')
+        .optional(),
+      cursor: z.string().optional(),
+      limit: z.coerce.number().int().positive().max(100).optional(),
+    }),
+    response: ActivityPage,
+  },
+  /**
+   * The member has looked at Activity through `at`: reactions at or before
+   * it read as seen. Monotone — an older `at` is a no-op returning the mark.
+   * Message kinds are never marked here; their read state is the space's.
+   */
+  markActivitySeen: {
+    method: 'POST',
+    path: '/v1/activity/seen',
+    request: z.object({ at: z.iso.datetime() }),
+    response: z.object({ seenAt: z.iso.datetime() }),
+  },
+  /**
+   * Mark everything read (2026-09-11): every space the member is in — or the
+   * one named — reads through its head, every thread holding an Activity row
+   * for them (a mention, an @here, a reply in a DM, a reply in a thread they
+   * follow) reads through its newest reply, and reactions read as seen. The
+   * same marks single reads move, all at once, so Activity, the badges and
+   * every device agree afterwards. Marks only advance: idempotent, and each
+   * mark that moved echoes as a `read_mark` frame. `threads` = marks moved.
+   */
+  readAll: {
+    method: 'POST',
+    path: '/v1/activity/read-all',
+    request: z.object({ spaceId: SpaceId.optional() }),
+    response: z.object({
+      spaces: z.array(z.object({ spaceId: SpaceId, readOffset: StreamOffset })),
+      threads: z.number().int().nonnegative(),
+      seenAt: z.iso.datetime(),
+    }),
   },
 
   // --- search ---------------------------------------------------------------

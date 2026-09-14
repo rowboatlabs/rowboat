@@ -168,6 +168,10 @@ export function buildHttpApp(deps: {
     return reply(c, routes.listMembers.response, { members: await service.listMembers(actor(c), spaceId) });
   });
 
+  app.get(routes.listOrgMembers.path, async (c) => {
+    return reply(c, routes.listOrgMembers.response, { members: await service.listOrgMembers(actor(c)) });
+  });
+
   app.post('/v1/spaces/:spaceId/leave', async (c) => {
     const { spaceId } = parseWith(routes.leaveSpace.params, c.req.param());
     await service.leaveSpace(actor(c), spaceId);
@@ -424,6 +428,45 @@ export function buildHttpApp(deps: {
     const input = await body(c, routes.manageTopic.request);
     const topic = await service.manageTopic(actor(c), spaceId, topicId, input);
     return reply(c, routes.manageTopic.response, { topic });
+  });
+
+  // --- read state ------------------------------------------------------------
+
+  app.post('/v1/spaces/:spaceId/read', async (c) => {
+    const { spaceId } = parseWith(routes.markRead.params, c.req.param());
+    const input = await body(c, routes.markRead.request);
+    return reply(c, routes.markRead.response, await service.markRead(actor(c), spaceId, input));
+  });
+
+  app.post('/v1/spaces/:spaceId/threads/:rootMessageId/follow', async (c) => {
+    const { spaceId, rootMessageId } = parseWith(routes.followThread.params, c.req.param());
+    const input = await body(c, routes.followThread.request);
+    return reply(
+      c,
+      routes.followThread.response,
+      await service.followThread(actor(c), spaceId, rootMessageId, input.following),
+    );
+  });
+
+  app.get(routes.unread.path, async (c) => reply(c, routes.unread.response, await service.unread(actor(c))));
+
+  app.get(routes.activity.path, async (c) => {
+    const q = parseWith(routes.activity.query, {
+      ...(c.req.query('kinds') !== undefined ? { kinds: c.req.query('kinds') } : {}),
+      ...(c.req.query('spaceId') !== undefined ? { spaceId: c.req.query('spaceId') } : {}),
+      ...(c.req.query('unread') !== undefined ? { unread: c.req.query('unread') } : {}),
+      ...(c.req.query('cursor') !== undefined ? { cursor: c.req.query('cursor') } : {}),
+      ...(c.req.query('limit') !== undefined ? { limit: c.req.query('limit') } : {}),
+    });
+    return reply(c, routes.activity.response, await service.activity(actor(c), q));
+  });
+  app.post(routes.markActivitySeen.path, async (c) => {
+    const body = parseWith(routes.markActivitySeen.request, await c.req.json());
+    return reply(c, routes.markActivitySeen.response, await service.markActivitySeen(actor(c), body.at));
+  });
+  app.post(routes.readAll.path, async (c) => {
+    const body = parseWith(routes.readAll.request, await c.req.json());
+    return reply(c, routes.readAll.response, await service.readAll(actor(c), body));
   });
 
   return app;

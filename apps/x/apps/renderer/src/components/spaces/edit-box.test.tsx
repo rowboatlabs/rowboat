@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { spaces } from '@x/shared'
 import { MessageEditBox } from './edit-box'
@@ -48,5 +48,20 @@ describe('MessageEditBox', () => {
     it('renders an empty body without crashing (an image-only message)', () => {
         mount('')
         expect(document.querySelector('.ProseMirror')?.textContent).toBe('')
+    })
+
+    it('Enter on a typed fence line opens a code block instead of saving', () => {
+        const onSave = vi.fn()
+        // The escaped form is how a literal ``` line is stored — a paragraph, not a fence.
+        render(
+            <SpaceProfilesProvider members={[]} here={new Set()} selfId="01HAAA">
+                <MessageEditBox initial={'\\`\\`\\`'} onChange={vi.fn()} onSave={onSave} onCancel={vi.fn()} />
+            </SpaceProfilesProvider>,
+        )
+        const pm = document.querySelector('.ProseMirror')!
+        expect(pm.querySelector('pre')).toBeNull()
+        fireEvent.keyDown(pm, { key: 'Enter' })
+        expect(onSave).not.toHaveBeenCalled()
+        expect(pm.querySelector('pre')).toBeTruthy()
     })
 })

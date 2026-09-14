@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatSidebar } from './chat-sidebar'
 
 vi.mock('@/components/ui/sidebar', () => ({ useSidebar: () => ({ state: 'collapsed' }) }))
-vi.mock('@/lib/tab-meta', () => ({ useTabMeta: () => ({}) }))
+vi.mock('@/lib/tab-meta', () => ({ useTabMeta: () => ({}), useAllTabMeta: () => new Map() }))
 vi.mock('@/components/chat-header', () => ({ ChatHeader: () => <div>Chat header</div> }))
 vi.mock('@/components/code/code-session-header', () => ({ CodeSessionHeader: () => null }))
 vi.mock('@/contexts/file-card-context', () => ({ FileCardProvider: ({ children }: { children: ReactNode }) => children }))
@@ -25,6 +25,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 const props = {
   chatTabs: [{ id: 'first', chatId: 'first', runId: null }, { id: 'second', chatId: 'second', runId: null }],
   activeChatTabId: 'first', getChatTabTitle: () => 'Chat', onNewChatTab: vi.fn(),
+  onSwitchChatTab: vi.fn(), onCloseChatTabs: vi.fn(),
   conversation: [], currentAssistantMessage: '', isProcessing: false, onSubmit: vi.fn(),
   keepMounted: true, floating: true,
 }

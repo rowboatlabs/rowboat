@@ -22,6 +22,8 @@ declare module 'react' {
 import type { DisplayMediaRequest, DisplayMediaSource, HttpAuthRequest } from '@x/shared/dist/browser-control.js'
 
 import { BrowserTabRail } from '@/components/browser-pane/browser-tab-rail'
+import { closeOtherBrowserTabs } from '@/components/browser-pane/browser-tab-actions'
+import { toast } from '@/lib/toast'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -595,6 +597,22 @@ export function BrowserPane({ onClose, forceHidden = false }: BrowserPaneProps) 
     void window.ipc.invoke('browser:closeTab', { tabId })
   }, [])
 
+  const handleCloseOtherTabs = useCallback((tabId: string) => {
+    void closeOtherBrowserTabs(tabId).catch((error) => {
+      toast(error instanceof Error ? error.message : 'Could not close browser tabs', 'error')
+    })
+  }, [])
+
+  const handleReloadTab = useCallback((tabId: string) => {
+    void window.ipc.invoke('browser:reload', { tabId }).catch(() => toast('Could not reload tab', 'error'))
+  }, [])
+
+  const handleDuplicateTab = useCallback((url: string) => {
+    void window.ipc.invoke('browser:newTab', { url }).then((result) => {
+      if (!result.ok) toast(result.error ?? 'Could not duplicate tab', 'error')
+    }).catch(() => toast('Could not duplicate tab', 'error'))
+  }, [])
+
   const toggleRail = useCallback(() => {
     const next = !railOpen
     localStorage.setItem('browser:railOpen', next ? '1' : '0')
@@ -634,6 +652,9 @@ export function BrowserPane({ onClose, forceHidden = false }: BrowserPaneProps) 
         onTogglePin={toggleRail}
         onSwitchTab={handleSwitchTab}
         onCloseTab={handleCloseTab}
+        onCloseOtherTabs={handleCloseOtherTabs}
+        onReloadTab={handleReloadTab}
+        onDuplicateTab={handleDuplicateTab}
         onNewTab={handleNewTab}
       />
 

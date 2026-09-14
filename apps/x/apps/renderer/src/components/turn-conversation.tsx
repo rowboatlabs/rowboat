@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { cn } from '@/lib/utils'
+import { MessageContextMenu } from '@/components/message-context-menu'
 import {
   Message,
   MessageContent,
@@ -176,14 +177,16 @@ export function TurnConversation({
               </MessageContent>
               {item.content && (
                 <div className="flex flex-col items-end">
-                  <MessageContent>
-                    <MessageResponse
-                      components={streamdownComponents}
-                      remarkPlugins={userMessageRemarkPlugins}
-                    >
-                      {item.content}
-                    </MessageResponse>
-                  </MessageContent>
+                  <MessageContextMenu text={item.content}>
+                    <MessageContent>
+                      <MessageResponse
+                        components={streamdownComponents}
+                        remarkPlugins={userMessageRemarkPlugins}
+                      >
+                        {item.content}
+                      </MessageResponse>
+                    </MessageContent>
+                  </MessageContextMenu>
                   <MessageCopyButton text={item.content} className="mt-0.5" />
                 </div>
               )}
@@ -194,26 +197,28 @@ export function TurnConversation({
         return (
           <Message key={item.id} from={item.role} data-message-id={item.id}>
             <div className="flex flex-col items-end">
-              <MessageContent>
-                {files.length > 0 && (
-                  <div className="mb-2 flex flex-wrap gap-1.5">
-                    {files.map((filePath, index) => (
-                      <span
-                        key={index}
-                        className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary"
-                      >
-                        @{wikiLabel(filePath)}
-                      </span>
-                    ))}
-                  </div>
-                )}
-                <MessageResponse
-                  components={streamdownComponents}
-                  remarkPlugins={userMessageRemarkPlugins}
-                >
-                  {message}
-                </MessageResponse>
-              </MessageContent>
+              <MessageContextMenu text={message}>
+                <MessageContent>
+                  {files.length > 0 && (
+                    <div className="mb-2 flex flex-wrap gap-1.5">
+                      {files.map((filePath, index) => (
+                        <span
+                          key={index}
+                          className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary"
+                        >
+                          @{wikiLabel(filePath)}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <MessageResponse
+                    components={streamdownComponents}
+                    remarkPlugins={userMessageRemarkPlugins}
+                  >
+                    {message}
+                  </MessageResponse>
+                </MessageContent>
+              </MessageContextMenu>
               <MessageCopyButton text={message} className="mt-0.5" />
             </div>
           </Message>
@@ -221,9 +226,11 @@ export function TurnConversation({
       }
       return (
         <Message key={item.id} from={item.role} data-message-id={item.id}>
-          <MessageContent>
-            <AssistantMessageBody text={item.content} streaming={item.streaming === true} />
-          </MessageContent>
+          <MessageContextMenu text={item.content}>
+            <MessageContent>
+              <AssistantMessageBody text={item.content} streaming={item.streaming === true} />
+            </MessageContent>
+          </MessageContextMenu>
         </Message>
       )
     }

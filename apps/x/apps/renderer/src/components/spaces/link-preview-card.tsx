@@ -3,7 +3,7 @@ import { Globe, X } from 'lucide-react'
 import { useLinkPreview } from '@/hooks/use-link-preview'
 import { previewUrls } from '@/lib/spaces-unfurl'
 
-// Slack-style unfurls under a message: a gray accent bar, favicon + site
+// conversation unfurls under a message: a gray accent bar, favicon + site
 // name, the title as a link, the description, the og:image below. Which
 // links qualify is lib/spaces-unfurl.ts; the × hides a card for this
 // install.
@@ -66,7 +66,7 @@ function LinkPreviewCard({ url, onHide }: { url: string; onHide?: () => void }) 
     const open = () => window.open(preview.url)
     return (
         <div className="group/unfurl relative mt-1 max-w-md">
-            {/* Slack's anatomy: the rounded accent bar down the left, content beside it. */}
+            {/* the conversation anatomy: the rounded accent bar down the left, content beside it. */}
             <span aria-hidden className="absolute bottom-0.5 left-0 top-0.5 w-1 rounded-full bg-border" />
             <div className="min-w-0 py-0.5 pl-4 pr-6">
                 <div className="flex items-center gap-1.5">

@@ -5,6 +5,8 @@ import { synthesizeDeckFromOutline } from '@x/shared/dist/pptx/generate.js'
 import { DECK_PALETTES } from '@x/shared/dist/pptx/new-deck.js'
 import { UserMessageContext } from '@x/shared/dist/message.js'
 import { getViewerType } from '@/lib/file-types'
+import { FileViewerSourceContext } from './file-viewer-source'
+import { createSpaceAttachmentSource } from '@/lib/space-attachment-source'
 import { PptxEditor } from './pptx-editor'
 
 // The editor announces failures through sonner; the conflict paths must NOT
@@ -530,5 +532,23 @@ describe('deck context reported to the host', () => {
 
   it('is inert for a non-pptx path', () => {
     expect(getViewerType('knowledge/A.md')).not.toBe('pptx')
+  })
+})
+
+
+describe('PowerPoint message attachment preview', () => {
+  it('navigates slides without exposing editing controls or writing the attachment', async () => {
+    const bytes = Uint8Array.from(atob(await deckBase64('Beta')), (c) => c.charCodeAt(0))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, arrayBuffer: async () => bytes.buffer }))
+    try {
+      const source = createSpaceAttachmentSource(`app://space-blob/org/space/${'a'.repeat(64)}`, 'slides.pptx')
+      const write = vi.spyOn(source, 'write')
+      render(<FileViewerSourceContext.Provider value={source}><PptxEditor path="slides.pptx" /></FileViewerSourceContext.Provider>)
+      expect(await screen.findByText('1 of 3')).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: 'Next slide' }))
+      expect(screen.getByText('2 of 3')).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Add slide' })).not.toBeInTheDocument()
+      expect(write).not.toHaveBeenCalled()
+    } finally { cleanup(); vi.unstubAllGlobals() }
   })
 })

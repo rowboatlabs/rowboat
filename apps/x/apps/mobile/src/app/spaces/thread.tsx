@@ -2,7 +2,8 @@ import { Stack, useLocalSearchParams } from 'expo-router';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Keyboard, ActivityIndicator, KeyboardAvoidingView, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useKeyboardVisible } from '@/lib/use-keyboard-visible';
 import type { Member, Message } from '@rowboat/spaces-protocol';
@@ -13,6 +14,9 @@ import { ChatMarkdown } from '@/components/markdown';
 import { MessageLinkPreviews } from '@/components/link-preview-card';
 import { SpaceBlobImage } from '@/components/space-blob-image';
 import { MessageActionSheet, MessageRow, applyReaction } from '@/components/space-message';
+import { SpaceComposer, type SpaceComposerHandle } from '@/components/space-composer';
+import { PollCard, applyPollVote } from '@/components/poll-card';
+import { setActiveSpace } from '@/lib/push';
 import { useSpacesAccount } from '@/lib/spaces/account';
 import { SpacesClient } from '@/lib/spaces/client';
 import { SpacesLive } from '@/lib/spaces/live';
@@ -38,12 +42,11 @@ export default function SpaceThreadScreen() {
   const [members, setMembers] = useState<Map<string, Member>>(new Map());
   const memberNames = useMemo(() => new Map([...members].map(([id, m]) => [id, m.displayName])), [members]);
   const [error, setError] = useState<string | null>(null);
-  const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [actionMessage, setActionMessage] = useState<Message | null>(null);
   const [reactionsOnly, setReactionsOnly] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<SpaceComposerHandle>(null);
   const lastOffset = useRef<number | undefined>(undefined);
 
   useEffect(() => {
@@ -84,6 +87,14 @@ export default function SpaceThreadScreen() {
           const patch = (m: Message) => (m.id === event.reaction.messageId ? applyReaction(m, event.reaction.emoji, event.reaction.by.memberId, event.action) : m);
           setRootMessage((prev) => (prev ? patch(prev) : prev));
           setReplies((prev) => prev?.map(patch) ?? null);
+        } else if (event.type === 'poll_vote') {
+          const patch = (m: Message) => (m.id === event.vote.messageId && m.poll ? { ...m, poll: applyPollVote(m.poll, { answerId: event.vote.answerId, memberId: event.vote.by.memberId, action: event.action }) } : m);
+          setRootMessage((prev) => (prev ? patch(prev) : prev));
+          setReplies((prev) => prev?.map(patch) ?? null);
+        } else if (event.type === 'poll_ended') {
+          const patch = (m: Message) => (m.id === event.end.messageId && m.poll ? { ...m, poll: { ...m.poll, endedAt: event.end.at } } : m);
+          setRootMessage((prev) => (prev ? patch(prev) : prev));
+          setReplies((prev) => prev?.map(patch) ?? null);
         }
       },
       lastOffset.current,
@@ -106,23 +117,68 @@ export default function SpaceThreadScreen() {
     seenReplies.current = n;
   }, [replies?.length]);
 
-  const send = async () => {
-    const body = draft.trim();
-    if (!body || sending) return;
-    if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
-    Keyboard.dismiss();
+  const send = async (body: string) => {
+    if (sending) return;
     setSending(true);
-    setDraft('');
     try {
       const { message } = await client.postMessage(space, { body, threadRoot: root, actingMode: 'direct' });
       setReplies((prev) => (prev && !prev.some((m) => m.id === message.id) ? [...prev, message] : prev));
     } catch (err) {
-      setDraft(body);
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSending(false);
     }
   };
+
+  // Thread read mark: the newest reply on screen (a thread takes a mark
+  // whether or not we follow it — CONTRACT.md amendment 2026-09-11).
+  const newestReply = replies?.at(-1)?.offset;
+  useEffect(() => {
+    if (newestReply === undefined) return;
+    const t = setTimeout(() => void client.markRead(space, { threadRootId: root, offset: newestReply }).catch(() => {}), 800);
+    return () => clearTimeout(t);
+  }, [client, space, root, newestReply]);
+
+  useEffect(() => {
+    setActiveSpace(space);
+    return () => setActiveSpace(null);
+  }, [space]);
+
+  const patchBoth = useCallback((folded: Message) => {
+    setRootMessage((prev) => (prev && prev.id === folded.id ? folded : prev));
+    setReplies((prev) => prev?.map((m) => (m.id === folded.id ? folded : m)) ?? null);
+  }, []);
+  const vote = useCallback(
+    (message: Message, answerIds: number[]) => {
+      void (async () => {
+        try {
+          let latest = message;
+          for (const answerId of answerIds) latest = await client.votePoll(space, message.id, { answerId, action: 'add', actingMode: 'direct' });
+          patchBoth(latest);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      })();
+    },
+    [client, space, patchBoth],
+  );
+  const removeVote = useCallback(
+    (message: Message) => {
+      const mine = message.poll?.votes.filter((g) => g.memberIds.includes(me)).map((g) => g.answerId) ?? [];
+      void (async () => {
+        let latest = message;
+        for (const answerId of mine) latest = await client.votePoll(space, message.id, { answerId, action: 'remove', actingMode: 'direct' }).catch(() => latest);
+        patchBoth(latest);
+      })();
+    },
+    [client, space, me, patchBoth],
+  );
+  const endPoll = useCallback(
+    (message: Message) => {
+      client.endPoll(space, message.id, { actingMode: 'direct' }).then(patchBoth).catch((err) => setError(err instanceof Error ? err.message : String(err)));
+    },
+    [client, space, patchBoth],
+  );
 
   const toggleReaction = useCallback(
     (message: Message, emoji: string) => {
@@ -173,6 +229,9 @@ export default function SpaceThreadScreen() {
               onToggleReaction={toggleReaction}
               onLongPress={(m) => { setReactionsOnly(false); setActionMessage(m); }}
               onAddReaction={(m) => { setReactionsOnly(true); setActionMessage(m); }}
+              onVote={vote}
+              onRemoveVote={removeVote}
+              onEndPoll={endPoll}
             />
           ) : null}
           {rootMessage && replies !== null ? (
@@ -198,35 +257,21 @@ export default function SpaceThreadScreen() {
           ) : null}
           {replies?.map((m) => (
             <MessageRow key={m.id} message={m} member={members.get(m.author.memberId)} memberNames={memberNames} me={me} onToggleReaction={toggleReaction} onLongPress={(m) => { setReactionsOnly(false); setActionMessage(m); }}
-              onAddReaction={(m) => { setReactionsOnly(true); setActionMessage(m); }} />
+              onAddReaction={(m) => { setReactionsOnly(true); setActionMessage(m); }} onVote={vote} onRemoveVote={removeVote} onEndPoll={endPoll} />
           ))}
         </ScrollView>
       )}
 
-      {/* Composer — Slack's single rounded field; send arrow appears with a draft */}
-      <View style={{ paddingHorizontal: 12, paddingTop: 8, paddingBottom: (keyboardVisible ? 0 : insets.bottom) + 8 }}>
-        <View
-          style={{
-            flexDirection: 'row', alignItems: 'flex-end',
-            backgroundColor: colors.secondaryBackground, borderRadius: 24, borderCurve: 'continuous',
-            paddingLeft: 16, paddingRight: 6, minHeight: 46,
-          }}
-        >
-          <TextInput
-            ref={inputRef}
-            style={{ flex: 1, maxHeight: 120, fontSize: 16, color: colors.label, paddingVertical: 12 }}
-            placeholder="Add a reply"
-            placeholderTextColor={colors.tertiaryLabel}
-            value={draft}
-            onChangeText={setDraft}
-            multiline
-          />
-          {draft.trim() ? (
-            <Pressable onPress={() => void send()} disabled={sending} style={{ padding: 6, opacity: sending ? 0.4 : 1 }}>
-              <Image source="sf:arrow.up.circle.fill" style={{ width: 30, height: 30 }} tintColor={colors.label} />
-            </Pressable>
-          ) : null}
-        </View>
+      {/* Composer */}
+      <View style={{ paddingTop: 8, paddingBottom: (keyboardVisible ? 0 : insets.bottom) + 8 }}>
+        <SpaceComposer
+          ref={inputRef}
+          placeholder="Add a reply"
+          members={[...members.values()]}
+          me={me}
+          sending={sending}
+          onSend={(body) => void send(body)}
+        />
       </View>
 
       <MessageActionSheet
@@ -242,7 +287,7 @@ export default function SpaceThreadScreen() {
 
 // The root, Slack-style: 40pt avatar, bold name with the timestamp UNDER it,
 // full-size body, then reaction pills + the always-on emoji+ pill.
-function RootMessage({ message, member, memberNames, me, onToggleReaction, onLongPress, onAddReaction }: {
+function RootMessage({ message, member, memberNames, me, onToggleReaction, onLongPress, onAddReaction, onVote, onRemoveVote, onEndPoll }: {
   message: Message;
   member?: Member;
   memberNames: ReadonlyMap<string, string>;
@@ -250,6 +295,9 @@ function RootMessage({ message, member, memberNames, me, onToggleReaction, onLon
   onToggleReaction: (message: Message, emoji: string) => void;
   onLongPress: (message: Message) => void;
   onAddReaction: (message: Message) => void;
+  onVote: (message: Message, answerIds: number[]) => void;
+  onRemoveVote: (message: Message) => void;
+  onEndPoll: (message: Message) => void;
 }) {
   const colors = useColors();
   const name = member?.displayName ?? message.author.memberId;
@@ -290,8 +338,14 @@ function RootMessage({ message, member, memberNames, me, onToggleReaction, onLon
           <Text style={{ fontSize: 13, color: colors.tertiaryLabel }}>{stamp}</Text>
         </View>
       </View>
-      <ChatMarkdown extraRules={imageRule}>{body}</ChatMarkdown>
-      <MessageLinkPreviews body={message.body} />
+      {message.poll ? (
+        <PollCard message={message} poll={message.poll} me={me} onVote={onVote} onRemoveVote={onRemoveVote} onEndPoll={onEndPoll} />
+      ) : (
+        <>
+          <ChatMarkdown extraRules={imageRule}>{body}</ChatMarkdown>
+          <MessageLinkPreviews body={message.body} />
+        </>
+      )}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 2 }}>
         {message.reactions.map((g) => {
           const mine = g.memberIds.includes(me);

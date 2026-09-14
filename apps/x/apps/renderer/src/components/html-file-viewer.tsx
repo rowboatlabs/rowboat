@@ -1,3 +1,4 @@
+import { useFileViewerSource } from './file-viewer-source'
 import { useEffect, useMemo, useState } from 'react'
 import { AlertCircleIcon, ExternalLinkIcon, FileTextIcon, Loader2Icon } from 'lucide-react'
 
@@ -14,15 +15,11 @@ interface HtmlFileViewerProps {
   path: string
 }
 
-function toAppWorkspaceUrl(path: string): string {
-  const segments = path.split('/').filter(Boolean).map((seg) => encodeURIComponent(seg))
-  return `app://workspace/${segments.join('/')}`
-}
-
 export function HtmlFileViewer({ path }: HtmlFileViewerProps) {
+  const source = useFileViewerSource()
   const [state, setState] = useState<ViewerState>({ kind: 'loading' })
   const [iframeLoaded, setIframeLoaded] = useState(false)
-  const iframeSrc = useMemo(() => toAppWorkspaceUrl(path), [path])
+  const iframeSrc = useMemo(() => source.url(path), [path, source])
 
   useEffect(() => {
     let cancelled = false
@@ -31,7 +28,7 @@ export function HtmlFileViewer({ path }: HtmlFileViewerProps) {
 
     ;(async () => {
       try {
-        const stat = await window.ipc.invoke('workspace:stat', { path })
+        const stat = await source.stat({ path })
         if (cancelled) return
         if (stat.kind !== 'file') {
           setState({ kind: 'error', message: 'Selected path is not a file.' })
@@ -56,7 +53,7 @@ export function HtmlFileViewer({ path }: HtmlFileViewerProps) {
     return () => {
       cancelled = true
     }
-  }, [path])
+  }, [path, source])
 
   if (state.kind === 'error') {
     return (
@@ -89,7 +86,7 @@ export function HtmlFileViewer({ path }: HtmlFileViewerProps) {
         <button
           type="button"
           onClick={() => {
-            void window.ipc.invoke('shell:openPath', { path })
+            void source.open({ path })
           }}
           className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent"
         >

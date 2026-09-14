@@ -1,16 +1,20 @@
+import type { ActivityKind, Attribution } from '@rowboat/spaces-protocol';
+import type { ActivityQuery, ActivityRow } from './store.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type {
   BlobInfo,
   ChangeSet,
   Member,
   Membership,
+  MentionStamps,
   Message,
   Poll,
   Space,
   Topic,
 } from '@rowboat/spaces-protocol';
 import { migrate } from './migrations.js';
-import { extractSearchText, matchesAllTerms, snippetAround, toPathPatterns, toTsQueryString, type SearchQuery } from './search.js';
+import { sortActivity } from './activity-sort.js';
+import { extractSearchText, matchesAllTerms, searchTextFor, snippetAround, toPathPatterns, toTsQueryString, type SearchQuery } from './search.js';
 import type { SqlDb, SqlExecutor } from './sql.js';
 import { type PushLevel,
   directKeyFor,
@@ -24,6 +28,8 @@ import { type PushLevel,
   type StoredPollVote,
   type StoredReaction,
   type StoredSpaceBlob,
+  type ThreadReadMark,
+  type UnreadThreadRow,
 } from './store.js';
 
 // The real Harbor's storage: mergeable text lives inline in Postgres (≤1MB,
@@ -115,7 +121,18 @@ interface TopicRow {
   created_by: Topic['createdBy'];
   created_at: string;
   archived: boolean;
+  /** Projected by TOPIC_SELECT: the linked asset's current path, null unless it is live. */
+  document_path: string | null;
 }
+
+/**
+ * Every topic read goes through this projection: the row plus the linked
+ * document's CURRENT live path (migration 019). A trashed file projects
+ * null — the link is kept on the row and comes back on restore.
+ */
+const TOPIC_SELECT = `select t.*, a.path as document_path
+  from topics t
+  left join assets a on a.space_id = t.space_id and a.id = t.document_asset_id and a.state = 'live'`;
 
 function rowToTopic(r: TopicRow): Topic {
   return {
@@ -126,6 +143,7 @@ function rowToTopic(r: TopicRow): Topic {
     createdBy: r.created_by,
     createdAt: r.created_at,
     archived: r.archived,
+    ...(r.document_path !== null && r.document_path !== undefined ? { documentPath: r.document_path } : {}),
   };
 }
 
@@ -138,11 +156,15 @@ interface MessageRow {
   posted_at: string;
   reply_count: number;
   last_reply_at: string | null;
+  last_reply_offset: number | null;
   anchor_change_set_id: string | null;
   deleted_at: string | null;
   edited_at: string | null;
   poll: Poll | null;
   stream_offset: number;
+  mentions: string[] | null;
+  mentions_here: boolean | null;
+  mentions_rowboat: boolean | null;
 }
 
 function rowToMessage(r: MessageRow): Message {
@@ -156,6 +178,7 @@ function rowToMessage(r: MessageRow): Message {
     offset: r.stream_offset,
     replyCount: r.reply_count,
     ...(r.last_reply_at !== null ? { lastReplyAt: r.last_reply_at } : {}),
+    ...(r.last_reply_offset !== null && r.last_reply_offset !== undefined ? { lastReplyOffset: r.last_reply_offset } : {}),
     ...(r.anchor_change_set_id !== null ? { anchorChangeSetId: r.anchor_change_set_id } : {}),
     ...(r.deleted_at !== null ? { deletedAt: r.deleted_at } : {}),
     ...(r.edited_at !== null ? { editedAt: r.edited_at } : {}),
@@ -163,6 +186,9 @@ function rowToMessage(r: MessageRow): Message {
     reactions: [],
     // The poll definition rides the row; live votes fold in on reads too.
     ...(r.poll !== null && r.poll !== undefined ? { poll: r.poll } : {}),
+    mentions: r.mentions ?? [],
+    mentionsHere: r.mentions_here ?? false,
+    mentionsRowboat: r.mentions_rowboat ?? false,
   };
 }
 
@@ -290,6 +316,14 @@ export class PgStore implements Store {
     return rows[0] ? rowToMember(rows[0]) : undefined;
   }
 
+  async listAllMembers(): Promise<Member[]> {
+    const rows = await this.sql.query<MemberRow>(
+      'select id, display_name, avatar_url, role from members where org_id = $1 order by id',
+      [this.orgId],
+    );
+    return rows.map(rowToMember);
+  }
+
   async putMember(member: Member): Promise<void> {
     await this.sql.query(
       `insert into members (org_id, id, display_name, avatar_url, role) values ($1, $2, $3, $4, $5)
@@ -353,6 +387,14 @@ export class PgStore implements Store {
        where s.org_id = $1 and m.member_id = $2 and ($3::boolean or s.kind <> 'direct')
        order by s.created_at, s.id`,
       [this.orgId, memberId, opts.includeDirect === true],
+    );
+    return rows.map(rowToSpace);
+  }
+
+  async listAllSpaces(): Promise<Space[]> {
+    const rows = await this.sql.query<SpaceRow>(
+      'select id, name, created_at, kind, direct_key from spaces where org_id = $1 order by created_at, id',
+      [this.orgId],
     );
     return rows.map(rowToSpace);
   }
@@ -656,16 +698,28 @@ export class PgStore implements Store {
   // --- topics & messages -----------------------------------------------------
 
   async getTopic(spaceId: string, topicId: string): Promise<Topic | undefined> {
-    const rows = await this.sql.query<TopicRow>('select * from topics where space_id = $1 and id = $2', [spaceId, topicId]);
+    const rows = await this.sql.query<TopicRow>(`${TOPIC_SELECT} where t.space_id = $1 and t.id = $2`, [spaceId, topicId]);
     return rows[0] ? rowToTopic(rows[0]) : undefined;
+  }
+
+  async setTopicDocument(spaceId: string, topicId: string, assetId: string | null): Promise<void> {
+    await this.sql.query('update topics set document_asset_id = $3 where space_id = $1 and id = $2', [spaceId, topicId, assetId]);
+  }
+
+  async getTopicDocument(spaceId: string, topicId: string): Promise<string | undefined> {
+    const rows = await this.sql.query<{ document_asset_id: string | null }>(
+      'select document_asset_id from topics where space_id = $1 and id = $2',
+      [spaceId, topicId],
+    );
+    return rows[0]?.document_asset_id ?? undefined;
   }
 
   async putTopic(topic: Topic): Promise<void> {
     await this.sql.query(
-      `insert into topics (id, space_id, root_message_id, title, created_by, created_at, archived)
-       values ($1, $2, $3, $4, $5::jsonb, $6, $7)
+      `insert into topics (id, space_id, root_message_id, title, created_by, created_at, archived, search_text)
+       values ($1, $2, $3, $4, $5::jsonb, $6, $7, $8)
        on conflict (id) do update set
-         title = excluded.title, archived = excluded.archived`,
+         title = excluded.title, archived = excluded.archived, search_text = excluded.search_text`,
       [
         topic.id,
         topic.spaceId,
@@ -674,6 +728,7 @@ export class PgStore implements Store {
         JSON.stringify(topic.createdBy),
         topic.createdAt,
         topic.archived,
+        searchTextFor(topic.title),
       ],
     );
   }
@@ -684,7 +739,7 @@ export class PgStore implements Store {
 
   async getTopicByRoot(spaceId: string, rootMessageId: string): Promise<Topic | undefined> {
     const rows = await this.sql.query<TopicRow>(
-      'select * from topics where space_id = $1 and root_message_id = $2',
+      `${TOPIC_SELECT} where t.space_id = $1 and t.root_message_id = $2`,
       [spaceId, rootMessageId],
     );
     return rows[0] ? rowToTopic(rows[0]) : undefined;
@@ -692,8 +747,8 @@ export class PgStore implements Store {
 
   async listTopics(spaceId: string, includeArchived: boolean): Promise<Topic[]> {
     const rows = await this.sql.query<TopicRow>(
-      `select * from topics where space_id = $1 ${includeArchived ? '' : 'and archived = false'}
-       order by created_at desc, id desc`,
+      `${TOPIC_SELECT} where t.space_id = $1 ${includeArchived ? '' : 'and t.archived = false'}
+       order by t.created_at desc, t.id desc`,
       [spaceId],
     );
     return rows.map(rowToTopic);
@@ -757,8 +812,8 @@ export class PgStore implements Store {
   async searchTopics(spaceId: string, query: SearchQuery, limit: number): Promise<Topic[]> {
     if (query.terms.length === 0) return [];
     const rows = await this.sql.query<TopicRow>(
-      `select * from topics where space_id = $1 and title_tsv @@ to_tsquery('simple', $2)
-       order by ts_rank(title_tsv, to_tsquery('simple', $2)) desc, created_at desc, id desc limit $3`,
+      `${TOPIC_SELECT} where t.space_id = $1 and t.title_tsv @@ to_tsquery('simple', $2)
+       order by ts_rank(t.title_tsv, to_tsquery('simple', $2)) desc, t.created_at desc, t.id desc limit $3`,
       [spaceId, toTsQueryString(query), limit],
     );
     return rows.map(rowToTopic);
@@ -789,8 +844,8 @@ export class PgStore implements Store {
 
   async appendMessage(message: Message): Promise<void> {
     await this.sql.query(
-      `insert into messages (id, space_id, thread_root, author, body, posted_at, stream_offset, reply_count, last_reply_at, anchor_change_set_id, poll)
-       values ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::jsonb)`,
+      `insert into messages (id, space_id, thread_root, author, body, posted_at, stream_offset, reply_count, last_reply_at, anchor_change_set_id, poll, mentions, mentions_here, mentions_rowboat, search_text)
+       values ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14, $15)`,
       [
         message.id,
         message.spaceId,
@@ -803,6 +858,10 @@ export class PgStore implements Store {
         message.lastReplyAt ?? null,
         message.anchorChangeSetId ?? null,
         message.poll ? JSON.stringify(message.poll) : null,
+        JSON.stringify(message.mentions),
+        message.mentionsHere,
+        message.mentionsRowboat,
+        searchTextFor(message.body),
       ],
     );
   }
@@ -811,30 +870,49 @@ export class PgStore implements Store {
     await this.sql.query(
       `update messages r set
          reply_count = coalesce(s.cnt, 0),
-         last_reply_at = s.last_at
-       from (select count(*) filter (where deleted_at is null) as cnt, max(posted_at) as last_at
+         last_reply_at = s.last_at,
+         last_reply_offset = s.last_offset
+       from (select count(*) filter (where deleted_at is null) as cnt,
+                    max(posted_at) as last_at,
+                    max(stream_offset) filter (where deleted_at is null) as last_offset
              from messages where space_id = $1 and thread_root = $2) s
        where r.space_id = $1 and r.id = $2`,
       [spaceId, rootMessageId],
     );
   }
 
-  async markMessageEdited(spaceId: string, messageId: string, body: string, editedAt: string): Promise<void> {
+  async markMessageEdited(spaceId: string, messageId: string, body: string, editedAt: string, stamps: MentionStamps): Promise<void> {
     await this.sql.query(
-      `update messages set body = $3, edited_at = $4 where space_id = $1 and id = $2`,
-      [spaceId, messageId, body, editedAt],
+      `update messages set body = $3, edited_at = $4, mentions = $5::jsonb, mentions_here = $6, mentions_rowboat = $7, search_text = $8
+       where space_id = $1 and id = $2`,
+      [spaceId, messageId, body, editedAt, JSON.stringify(stamps.members), stamps.here, stamps.rowboat, searchTextFor(body)],
     );
-    // Rewrite the stored message event too — replay must serve the edit.
+    // Rewrite the stored message event too — replay must serve the edit, stamps included.
     await this.sql.query(
-      `update events set event = jsonb_set(jsonb_set(event, '{message,body}', to_jsonb($3::text)), '{message,editedAt}', to_jsonb($4::text))
+      `update events set event = jsonb_set(event, '{message}', (event->'message') || jsonb_build_object(
+         'body', $3::text, 'editedAt', $4::text, 'mentions', $5::jsonb, 'mentionsHere', $6::boolean, 'mentionsRowboat', $7::boolean))
        where space_id = $1 and event->>'type' = 'message' and event->'message'->>'id' = $2`,
-      [spaceId, messageId, body, editedAt],
+      [spaceId, messageId, body, editedAt, JSON.stringify(stamps.members), stamps.here, stamps.rowboat],
+    );
+  }
+
+  async restampMessage(spaceId: string, messageId: string, stamps: MentionStamps): Promise<void> {
+    await this.sql.query(
+      `update messages set mentions = $3::jsonb, mentions_here = $4, mentions_rowboat = $5 where space_id = $1 and id = $2`,
+      [spaceId, messageId, JSON.stringify(stamps.members), stamps.here, stamps.rowboat],
+    );
+    await this.sql.query(
+      `update events set event = jsonb_set(event, '{message}', (event->'message') || jsonb_build_object(
+         'mentions', $3::jsonb, 'mentionsHere', $4::boolean, 'mentionsRowboat', $5::boolean))
+       where space_id = $1 and event->>'type' = 'message' and event->'message'->>'id' = $2`,
+      [spaceId, messageId, JSON.stringify(stamps.members), stamps.here, stamps.rowboat],
     );
   }
 
   async markMessageDeleted(spaceId: string, messageId: string, deletedAt: string): Promise<void> {
     await this.sql.query(
-      `update messages set body = '', deleted_at = $3, poll = null where space_id = $1 and id = $2`,
+      `update messages set body = '', deleted_at = $3, poll = null, mentions = '[]'::jsonb, mentions_here = false, mentions_rowboat = false, search_text = ''
+       where space_id = $1 and id = $2`,
       [spaceId, messageId, deletedAt],
     );
     // Votes are content too: a member-attributed row must not outlive the poll it was cast on.
@@ -842,7 +920,8 @@ export class PgStore implements Store {
     // Redact the stored message event too — replay must never resurrect the
     // body (nor a poll, which is content the same way).
     await this.sql.query(
-      `update events set event = jsonb_set(jsonb_set(event, '{message,body}', '""'::jsonb), '{message,deletedAt}', to_jsonb($3::text)) #- '{message,poll}'
+      `update events set event = jsonb_set(event, '{message}', ((event->'message') #- '{poll}') || jsonb_build_object(
+         'body', '', 'deletedAt', $3::text, 'mentions', '[]'::jsonb, 'mentionsHere', false, 'mentionsRowboat', false))
        where space_id = $1 and event->>'type' = 'message' and event->'message'->>'id' = $2`,
       [spaceId, messageId, deletedAt],
     );
@@ -987,6 +1066,266 @@ export class PgStore implements Store {
   }
 
   // --- event log -------------------------------------------------------------
+
+  // --- read state ------------------------------------------------------------
+
+  async getStreamReadMark(spaceId: string, memberId: string): Promise<number> {
+    const rows = await this.sql.query<{ read_offset: number }>(
+      'select read_offset from space_read_marks where space_id = $1 and member_id = $2',
+      [spaceId, memberId],
+    );
+    return rows[0]?.read_offset ?? 0;
+  }
+
+  async advanceStreamReadMark(spaceId: string, memberId: string, offset: number, at: string): Promise<number> {
+    const rows = await this.sql.query<{ read_offset: number }>(
+      `insert into space_read_marks (space_id, member_id, read_offset, updated_at) values ($1, $2, $3, $4)
+       on conflict (space_id, member_id) do update set
+         read_offset = greatest(space_read_marks.read_offset, excluded.read_offset),
+         updated_at = case when excluded.read_offset > space_read_marks.read_offset
+                           then excluded.updated_at else space_read_marks.updated_at end
+       returning read_offset`,
+      [spaceId, memberId, offset, at],
+    );
+    return rows[0]!.read_offset;
+  }
+
+  async getThreadReadMark(spaceId: string, rootMessageId: string, memberId: string): Promise<ThreadReadMark | undefined> {
+    const rows = await this.sql.query<{ following: boolean; read_offset: number }>(
+      'select following, read_offset from thread_read_marks where space_id = $1 and root_message_id = $2 and member_id = $3',
+      [spaceId, rootMessageId, memberId],
+    );
+    const r = rows[0];
+    return r ? { following: r.following, readOffset: r.read_offset } : undefined;
+  }
+
+  async setThreadFollowing(
+    spaceId: string,
+    rootMessageId: string,
+    memberId: string,
+    following: boolean,
+    at: string,
+  ): Promise<ThreadReadMark> {
+    const rows = await this.sql.query<{ following: boolean; read_offset: number }>(
+      `insert into thread_read_marks (space_id, root_message_id, member_id, following, read_offset, updated_at)
+       values ($1, $2, $3, $4, 0, $5)
+       on conflict (space_id, root_message_id, member_id) do update set
+         following = excluded.following, updated_at = excluded.updated_at
+       returning following, read_offset`,
+      [spaceId, rootMessageId, memberId, following, at],
+    );
+    return { following: rows[0]!.following, readOffset: rows[0]!.read_offset };
+  }
+
+  async advanceThreadReadMark(
+    spaceId: string,
+    rootMessageId: string,
+    memberId: string,
+    offset: number,
+    at: string,
+  ): Promise<number> {
+    // An unfollowed thread takes a mark too (the row starts with following =
+    // false); `following` is never touched here — setThreadFollowing owns it.
+    const rows = await this.sql.query<{ read_offset: number }>(
+      `insert into thread_read_marks (space_id, root_message_id, member_id, following, read_offset, updated_at)
+       values ($1, $2, $3, false, $4, $5)
+       on conflict (space_id, root_message_id, member_id) do update set
+         read_offset = greatest(thread_read_marks.read_offset, excluded.read_offset),
+         updated_at = case when excluded.read_offset > thread_read_marks.read_offset
+                           then excluded.updated_at else thread_read_marks.updated_at end
+       returning read_offset`,
+      [spaceId, rootMessageId, memberId, offset, at],
+    );
+    return rows[0]!.read_offset;
+  }
+
+  async countUnreadRoots(spaceId: string, memberId: string, afterOffset: number): Promise<number> {
+    const rows = await this.sql.query<{ n: number }>(
+      `select count(*)::int as n from messages
+       where space_id = $1 and thread_root is null and deleted_at is null
+         and stream_offset > $2 and author->>'memberId' <> $3`,
+      [spaceId, afterOffset, memberId],
+    );
+    return rows[0]?.n ?? 0;
+  }
+
+  async countUnreadRootMentions(spaceId: string, memberId: string, afterOffset: number): Promise<number> {
+    const rows = await this.sql.query<{ n: number }>(
+      `select count(*)::int as n from messages
+       where space_id = $1 and thread_root is null and deleted_at is null
+         and stream_offset > $2 and author->>'memberId' <> $3
+         and (mentions_here or mentions @> $4::jsonb)`,
+      [spaceId, afterOffset, memberId, JSON.stringify([memberId])],
+    );
+    return rows[0]?.n ?? 0;
+  }
+
+  // --- activity (2026-09-10) -------------------------------------------------
+  // Two ordered queries — message kinds, then reactions — each cut to the
+  // page size, merged and cut again: each source's top N contains the merged
+  // top N. Kind and unread are computed in SQL so the filters page correctly.
+
+  async listActivity(memberId: string, q: ActivityQuery): Promise<ActivityRow[]> {
+    if (q.spaceIds.length === 0 || q.limit <= 0) return [];
+    const kinds = q.kinds ? [...q.kinds] : null;
+    const wantMessages = !kinds || kinds.some((k) => k !== 'reaction');
+    const wantReactions = !kinds || kinds.includes('reaction');
+    const out: ActivityRow[] = [];
+    if (wantMessages) {
+      const rows = await this.sql.query<MessageRow & { space_kind: string; kind: ActivityKind; unread: boolean }>(
+        `select * from (
+           select m.*, s.kind as space_kind,
+                  case when m.mentions @> $2::jsonb then 'mention'
+                       when m.mentions_here then 'here'
+                       when s.kind = 'direct' then 'dm'
+                       when m.thread_root is not null and t.following then 'reply'
+                  end as kind,
+                  case when m.thread_root is null then m.stream_offset > coalesce(r.read_offset, 0)
+                       else m.stream_offset > coalesce(t.read_offset, 0) end as unread
+             from messages m
+             join spaces s on s.id = m.space_id
+             left join space_read_marks r on r.space_id = m.space_id and r.member_id = $1
+             left join thread_read_marks t on t.space_id = m.space_id and t.root_message_id = m.thread_root and t.member_id = $1
+            where m.space_id = any($3::text[]) and m.deleted_at is null and m.author->>'memberId' <> $1
+         ) x
+         where x.kind is not null
+           and ($4::text[] is null or x.kind = any($4::text[]))
+           and (not $5::boolean or x.unread)
+           and ($6::text is null or x.posted_at < $6 or (x.posted_at = $6 and ('m:' || x.id) < $7))
+         order by x.posted_at desc, x.id desc
+         limit $8`,
+        [memberId, JSON.stringify([memberId]), q.spaceIds, kinds, q.unreadOnly, q.before?.at ?? null, q.before?.id ?? null, q.limit],
+      );
+      for (const r of rows) {
+        const message = rowToMessage(r);
+        out.push({ id: `m:${message.id}`, kind: r.kind, spaceId: message.spaceId, message, actors: [message.author], at: message.postedAt, unread: r.unread });
+      }
+    }
+    if (wantReactions) {
+      const rows = await this.sql.query<{ space_id: string; message_id: string; emoji: string; at: string; actors: Attribution[]; unread: boolean }>(
+        `select * from (
+           select r.space_id, r.message_id, r.emoji, max(r.at) as at,
+                  json_agg(r.attribution order by r.at desc) as actors,
+                  max(r.at) > coalesce((select seen_at from activity_seen where member_id = $1), '') as unread
+             from reactions r
+             join messages m on m.space_id = r.space_id and m.id = r.message_id
+            where r.space_id = any($2::text[]) and r.member_id <> $1 and m.deleted_at is null and m.author->>'memberId' = $1
+            group by r.space_id, r.message_id, r.emoji
+         ) x
+         where (not $3::boolean or x.unread)
+           and ($4::text is null or x.at < $4 or (x.at = $4 and ('r:' || x.message_id || ':' || x.emoji) < $5))
+         order by x.at desc, x.message_id desc, x.emoji desc
+         limit $6`,
+        [memberId, q.spaceIds, q.unreadOnly, q.before?.at ?? null, q.before?.id ?? null, q.limit],
+      );
+      for (const r of rows) {
+        const message = await this.getMessage(r.space_id, r.message_id);
+        if (!message) continue;
+        out.push({ id: `r:${r.message_id}:${r.emoji}`, kind: 'reaction', spaceId: r.space_id, message, actors: r.actors, emoji: r.emoji, at: r.at, unread: r.unread });
+      }
+    }
+    return sortActivity(out).slice(0, q.limit);
+  }
+
+  async readAllThreads(memberId: string, spaceIds: string[], at: string): Promise<Array<{ spaceId: string; rootMessageId: string; readOffset: number }>> {
+    if (spaceIds.length === 0) return [];
+    // One statement: the threads with an Activity row for the member (the
+    // same predicate listActivity uses, so the same indexes carry it), each
+    // marked at its newest live reply. `following` is never touched.
+    const rows = await this.sql.query<{ space_id: string; root_message_id: string; read_offset: number }>(
+      `insert into thread_read_marks (space_id, root_message_id, member_id, following, read_offset, updated_at)
+       select m.space_id, m.thread_root, $1, false, greatest(max(m.stream_offset), coalesce(r.last_reply_offset, 0)), $4
+         from messages m
+         join spaces s on s.id = m.space_id
+         join messages r on r.space_id = m.space_id and r.id = m.thread_root
+         left join thread_read_marks t on t.space_id = m.space_id and t.root_message_id = m.thread_root and t.member_id = $1
+        where m.space_id = any($2::text[]) and m.thread_root is not null and m.deleted_at is null
+          and m.author->>'memberId' <> $1
+          and (m.mentions @> $3::jsonb or m.mentions_here or s.kind = 'direct' or t.following)
+        group by m.space_id, m.thread_root, r.last_reply_offset
+       on conflict (space_id, root_message_id, member_id) do update set
+         read_offset = excluded.read_offset, updated_at = excluded.updated_at
+         where excluded.read_offset > thread_read_marks.read_offset
+       returning space_id, root_message_id, read_offset`,
+      [memberId, spaceIds, JSON.stringify([memberId]), at],
+    );
+    return rows.map((r) => ({ spaceId: r.space_id, rootMessageId: r.root_message_id, readOffset: r.read_offset }));
+  }
+
+  async getActivitySeenAt(memberId: string): Promise<string | undefined> {
+    const rows = await this.sql.query<{ seen_at: string }>('select seen_at from activity_seen where member_id = $1', [memberId]);
+    return rows[0]?.seen_at;
+  }
+
+  async advanceActivitySeenAt(memberId: string, at: string): Promise<string> {
+    const rows = await this.sql.query<{ seen_at: string }>(
+      `insert into activity_seen (member_id, seen_at) values ($1, $2)
+       on conflict (member_id) do update set seen_at = greatest(activity_seen.seen_at, excluded.seen_at)
+       returning seen_at`,
+      [memberId, at],
+    );
+    return rows[0]!.seen_at;
+  }
+
+  async listThreadFollowers(spaceId: string, rootMessageId: string): Promise<string[]> {
+    const rows = await this.sql.query<{ member_id: string }>(
+      'select member_id from thread_read_marks where space_id = $1 and root_message_id = $2 and following',
+      [spaceId, rootMessageId],
+    );
+    return rows.map((r) => r.member_id);
+  }
+
+  async listUnreadFollowedThreads(spaceId: string, memberId: string): Promise<UnreadThreadRow[]> {
+    const rows = await this.sql.query<{
+      root_message_id: string;
+      read_offset: number;
+      last_reply_offset: number;
+      unread_replies: number;
+      unread_mentions: number;
+    }>(
+      `select * from (
+         select t.root_message_id, t.read_offset, r.last_reply_offset,
+                (select count(*)::int from messages m
+                  where m.space_id = t.space_id and m.thread_root = t.root_message_id
+                    and m.deleted_at is null and m.stream_offset > t.read_offset
+                    and m.author->>'memberId' <> t.member_id) as unread_replies,
+                (select count(*)::int from messages m
+                  where m.space_id = t.space_id and m.thread_root = t.root_message_id
+                    and m.deleted_at is null and m.stream_offset > t.read_offset
+                    and m.author->>'memberId' <> t.member_id
+                    and (m.mentions_here or m.mentions @> jsonb_build_array(t.member_id))) as unread_mentions
+           from thread_read_marks t
+           join messages r on r.space_id = t.space_id and r.id = t.root_message_id
+          where t.space_id = $1 and t.member_id = $2 and t.following
+            and r.last_reply_offset is not null and r.last_reply_offset > t.read_offset
+       ) u where u.unread_replies > 0
+       order by u.last_reply_offset desc`,
+      [spaceId, memberId],
+    );
+    return rows.map((r) => ({
+      rootMessageId: r.root_message_id,
+      readOffset: r.read_offset,
+      lastReplyOffset: r.last_reply_offset,
+      unreadReplies: r.unread_replies,
+      unreadMentions: r.unread_mentions,
+    }));
+  }
+
+  async deleteReadMarks(spaceId: string, memberId: string): Promise<void> {
+    await this.sql.query('delete from space_read_marks where space_id = $1 and member_id = $2', [spaceId, memberId]);
+    await this.sql.query('delete from thread_read_marks where space_id = $1 and member_id = $2', [spaceId, memberId]);
+  }
+
+  // Backfill ledger: rides schema_migrations under a "backfill:" key, one row
+  // per org (the schema ledger itself is deployment-wide).
+  async backfillDone(id: string): Promise<boolean> {
+    const rows = await this.sql.query<{ id: string }>('select id from schema_migrations where id = $1', [`backfill:${id}:${this.orgId}`]);
+    return rows.length > 0;
+  }
+
+  async markBackfillDone(id: string, at: string): Promise<void> {
+    await this.sql.query('insert into schema_migrations (id, applied_at) values ($1, $2) on conflict (id) do nothing', [`backfill:${id}:${this.orgId}`, at]);
+  }
 
   async head(spaceId: string): Promise<number> {
     const rows = await this.sql.query<{ head: number }>(

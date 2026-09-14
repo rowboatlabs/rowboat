@@ -10,6 +10,22 @@ import { MeetingDetectedPopup } from '@/components/meeting-detected-popup'
 import { QuickAskBar } from '@/components/quick-ask-bar'
 import { ScreenPointerOverlay } from '@/components/screen-pointer-overlay'
 
+// React's development build records a performance.measure entry (with a
+// serialized `detail`) for every component render — its DevTools
+// "Components ⚛" track — and never clears them. Chromium keeps user-timing
+// entries until told otherwise, ~1 KB each, so a dev window left open for
+// hours accumulates millions of entries until Blink's allocator gives up and
+// the renderer dies (blank window, `render-process-gone` exitCode=5). Clear
+// the buffer periodically: the Performance panel still shows React's tracks,
+// since those are emitted as trace events at call time, not read back from
+// this buffer. Production React has no performance tracks, so this is dev-only.
+if (import.meta.env.DEV) {
+  setInterval(() => {
+    performance.clearMeasures()
+    performance.clearMarks()
+  }, 10_000)
+}
+
 // Fetch the stable installation ID from main so renderer + main share one
 // PostHog distinct_id. Falls back to PostHog's auto-generated anonymous ID
 // if the IPC call fails (rare — main is always up before renderer).

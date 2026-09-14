@@ -1,9 +1,11 @@
+import type { ActivityKind } from '@rowboat/spaces-protocol';
 import type {
   Attribution,
   BlobInfo,
   ChangeSet,
   Member,
   Membership,
+  MentionStamps,
   Message,
   Space,
   SpaceEvent,
@@ -129,10 +131,52 @@ export interface AssetSearchRow {
   snippet?: string;
 }
 
+/** A member's row for one thread: the follow flag and the cursor (read state, 2026-09-09). */
+export interface ActivityQuery {
+  spaceIds: string[];
+  /** Absent = every kind. */
+  kinds?: ReadonlySet<ActivityKind>;
+  /** Strictly older than this (at, then item id) — the page cursor. */
+  before?: { at: string; id: string };
+  limit: number;
+  unreadOnly: boolean;
+}
+
+export interface ActivityRow {
+  /** `m:<messageId>` or `r:<messageId>:<emoji>` — the sort tiebreak and the cursor. */
+  id: string;
+  kind: ActivityKind;
+  spaceId: string;
+  message: Message;
+  /** The author, or every reactor newest first. */
+  actors: Attribution[];
+  emoji?: string;
+  at: string;
+  unread: boolean;
+}
+
+export interface ThreadReadMark {
+  following: boolean;
+  readOffset: number;
+}
+
+/** One followed thread with unread replies — the unread snapshot's thread entry. */
+export interface UnreadThreadRow {
+  rootMessageId: string;
+  readOffset: number;
+  lastReplyOffset: number;
+  /** Live replies past readOffset, not the member's own. Always ≥ 1 in a listing. */
+  unreadReplies: number;
+  /** Of those, the ones addressed to the member (a token naming them, or @here). */
+  unreadMentions: number;
+}
+
 export interface Store {
   // members (org-level)
   getMember(id: string): Promise<Member | undefined>;
   putMember(member: Member): Promise<void>;
+  /** The whole org roster — operator-side reads only (the mentions backfill). */
+  listAllMembers(): Promise<Member[]>;
 
   // identity mapping — (issuer, subject) → member (spec §4: the token proves
   // WHO; this table says which member that is). Written only by the invite
@@ -147,6 +191,8 @@ export interface Store {
   getSpace(id: string): Promise<Space | undefined>;
   /** Shared spaces only unless `includeDirect` — the listing's compatibility posture (api.ts). */
   listSpacesFor(memberId: string, opts?: { includeDirect?: boolean }): Promise<Space[]>;
+  /** Every space on the org, DMs included — operator-side reads only (the mentions backfill). */
+  listAllSpaces(): Promise<Space[]>;
   /** The DM whose participants encode to `directKey` (directKeyFor), if it exists. */
   getDirectSpace(directKey: string): Promise<Space | undefined>;
 
@@ -206,8 +252,16 @@ export interface Store {
   getTopic(spaceId: string, topicId: string): Promise<Topic | undefined>;
   /** The topic annotating this thread, if one exists (rootMessageId is unique). */
   getTopicByRoot(spaceId: string, rootMessageId: string): Promise<Topic | undefined>;
-  /** Insert or update (retitle / archive flips) — the row is the whole object. */
+  /**
+   * Insert or update (retitle / archive flips) — the row is the whole object
+   * EXCEPT the document link, which only setTopicDocument writes (the wire
+   * shape carries a projected path, never the stored asset id).
+   */
   putTopic(topic: Topic): Promise<void>;
+  /** Point the topic at one asset (by internal id) or clear it (null). Reads project the live path. */
+  setTopicDocument(spaceId: string, topicId: string, assetId: string | null): Promise<void>;
+  /** The stored link itself (live or trashed asset alike) — what detach's idempotency reads. */
+  getTopicDocument(spaceId: string, topicId: string): Promise<string | undefined>;
   /** "Convert back to thread": the row goes, the messages never knew it existed. */
   deleteTopic(spaceId: string, topicId: string): Promise<void>;
   listTopics(spaceId: string, includeArchived: boolean): Promise<Topic[]>;
@@ -236,7 +290,10 @@ export interface Store {
    * included. The message_deleted event itself is appended by the service.
    */
   markMessageDeleted(spaceId: string, messageId: string, deletedAt: string): Promise<void>;
-  markMessageEdited(spaceId: string, messageId: string, body: string, editedAt: string): Promise<void>;
+  /** Body + the re-stamped addresses (mentions.ts), row and stored event alike; search text follows the body. */
+  markMessageEdited(spaceId: string, messageId: string, body: string, editedAt: string, stamps: MentionStamps): Promise<void>;
+  /** Stamps only (the backfill): derived data, no content change, no event. */
+  restampMessage(spaceId: string, messageId: string, stamps: MentionStamps): Promise<void>;
 
   // search — space-scoped, per kind (the contract categorizes; see
   // protocol search.ts for ordering semantics). Tombstones never match
@@ -276,11 +333,76 @@ export interface Store {
   putInvite(invite: StoredInvite): Promise<void>;
   getInvite(token: string): Promise<StoredInvite | undefined>;
 
+  // read state (2026-09-09) — per-member cursors in offsets, never on the log.
+  // Stream marks: one per (space, member). Thread marks: one per (space,
+  // root, member), existing only for threads the member follows (or once
+  // followed — `following` false keeps the cursor).
+  /** The member's stream mark; 0 = never marked. */
+  getStreamReadMark(spaceId: string, memberId: string): Promise<number>;
+  /** Monotone upsert — greatest(stored, offset). Returns the stored mark. */
+  advanceStreamReadMark(spaceId: string, memberId: string, offset: number, at: string): Promise<number>;
+  getThreadReadMark(spaceId: string, rootMessageId: string, memberId: string): Promise<ThreadReadMark | undefined>;
+  /** Create the row (mark 0) or flip `following` on the existing one; the mark survives an unfollow. */
+  setThreadFollowing(
+    spaceId: string,
+    rootMessageId: string,
+    memberId: string,
+    following: boolean,
+    at: string,
+  ): Promise<ThreadReadMark>;
+  /**
+   * Monotone upsert — greatest(stored, offset). A thread the member does not
+   * follow takes a mark too (the row is created with `following: false`):
+   * reading clears Activity there, while badges and counts stay followed-only.
+   */
+  advanceThreadReadMark(
+    spaceId: string,
+    rootMessageId: string,
+    memberId: string,
+    offset: number,
+    at: string,
+  ): Promise<number>;
+  /** Roots after `afterOffset` that are neither the member's nor tombstoned. */
+  countUnreadRoots(spaceId: string, memberId: string, afterOffset: number): Promise<number>;
+  /** Of those, the ones addressed to the member: a mention token naming them, or @here. */
+  countUnreadRootMentions(spaceId: string, memberId: string, afterOffset: number): Promise<number>;
+  /** Followed threads with ≥1 live reply past the member's mark by someone else, newest activity first. */
+  listUnreadFollowedThreads(spaceId: string, memberId: string): Promise<UnreadThreadRow[]>;
+  /** Members following a thread (notifications, 2026-09-10): who a reply in it is told about. */
+  listThreadFollowers(spaceId: string, rootMessageId: string): Promise<string[]>;
+
+  // activity (2026-09-10): the member's feed as a query over the facts above
+  /**
+   * Everything involving the member in the given spaces, newest first, at
+   * most `limit` rows, older than `before` when given. Message kinds resolve
+   * by priority (mention > here > dm > reply); reactions fold per (message,
+   * emoji). `unread` is decided here — marks for messages, the seen mark for
+   * reactions — so `unreadOnly` pages correctly.
+   */
+  listActivity(memberId: string, query: ActivityQuery): Promise<ActivityRow[]>;
+  /**
+   * "Mark everything read" for threads (2026-09-11): every thread in `spaceIds`
+   * holding an Activity row for the member — a mention, an @here, a reply in a
+   * DM, a reply in a thread they follow — takes a mark at its newest live reply
+   * (created unfollowed when no row exists). Returns only the marks that moved.
+   */
+  readAllThreads(memberId: string, spaceIds: string[], at: string): Promise<Array<{ spaceId: string; rootMessageId: string; readOffset: number }>>;
+  getActivitySeenAt(memberId: string): Promise<string | undefined>;
+  /** Monotone: an older `at` leaves the mark; returns the mark that stands. */
+  advanceActivitySeenAt(memberId: string, at: string): Promise<string>;
+  /** Every mark the member holds in the space (leave / removal). */
+  deleteReadMarks(spaceId: string, memberId: string): Promise<void>;
+
   // event log (one durable sequence per space, offsets start at 1)
   head(spaceId: string): Promise<number>;
   /** `offset` must be head+1 — the caller allocates inside the space lock. */
   appendEvent(spaceId: string, stored: StoredEvent): Promise<void>;
   listEventsAfter(spaceId: string, afterOffset: number): Promise<StoredEvent[]>;
+
+  // one-time passes (the mentions backfill): a ledger so a pass that rewrites
+  // content runs exactly once per org, not on every boot
+  backfillDone(id: string): Promise<boolean>;
+  markBackfillDone(id: string, at: string): Promise<void>;
 
   // atomicity
   withSpaceLock<T>(spaceId: string, fn: () => Promise<T>): Promise<T>;

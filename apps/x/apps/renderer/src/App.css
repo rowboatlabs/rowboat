@@ -1188,6 +1188,9 @@
   --stream-mention-wash: rgba(29, 155, 209, 0.13);
   --stream-you-wash: rgba(242, 199, 68, 0.3);
   --stream-you-ink: #97620f;
+  /* The unread badge's dot when something is for you (sidebar, rail). Red is
+     the one hue reserved for "someone wants you"; nothing else in Spaces uses it. */
+  --stream-alert: #d5382b;
 }
 
 .dark {
@@ -1245,6 +1248,7 @@
   --stream-mention-wash: rgba(29, 155, 209, 0.2);
   --stream-you-wash: rgba(242, 199, 68, 0.22);
   --stream-you-ink: #e8c25e;
+  --stream-alert: #f0665b;
 }
 
 @layer base {

@@ -313,6 +313,13 @@ export const ModelCallFailed = z.object({
     ts: z.string(),
     modelCallIndex: z.number().int().nonnegative(),
     error: z.string(),
+    // Transport diagnostics for a live call that died (turn-runtime-design.md,
+    // "Model call events"): how long the call had been running, and how long
+    // since the model last produced a stream event. A dropped stream shows a
+    // long idle gap; a slow but healthy one does not. Absent when the failure
+    // happened before streaming began.
+    elapsedMs: z.number().int().nonnegative().optional(),
+    idleMs: z.number().int().nonnegative().optional(),
 });
 
 export const ToolPermissionRequired = z.object({

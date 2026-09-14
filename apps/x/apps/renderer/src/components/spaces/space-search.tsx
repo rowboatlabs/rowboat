@@ -9,6 +9,7 @@ import { requestJump } from '@/lib/spaces-jump'
 import { chord } from '@/lib/shortcut'
 import { formatFeedTime, resolveMentions } from '@/lib/spaces-presentation'
 import type { RailSelection } from '@/lib/spaces-selection'
+import { highlight } from './highlight'
 import { useMemberNames } from './member-text'
 
 // The space's search bar (header, top right). ⌘⇧K focuses it while a space is
@@ -325,35 +326,4 @@ export function SpaceSearch({ orgId, spaceId, selfMemberId, onNavigate, classNam
             )}
         </div>
     )
-}
-
-/** Bold every query-word occurrence (case-insensitive) in already-resolved text. */
-function highlight(text: string, words: string[]): ReactNode {
-    if (words.length === 0) return text
-    const lower = text.toLowerCase()
-    const parts: ReactNode[] = []
-    let at = 0
-    while (at < text.length) {
-        let hit = -1
-        let hitLen = 0
-        for (const w of words) {
-            const idx = lower.indexOf(w, at)
-            if (idx !== -1 && (hit === -1 || idx < hit)) {
-                hit = idx
-                hitLen = w.length
-            }
-        }
-        if (hit === -1) {
-            parts.push(text.slice(at))
-            break
-        }
-        if (hit > at) parts.push(text.slice(at, hit))
-        parts.push(
-            <span key={`${hit}`} className="font-semibold text-foreground">
-                {text.slice(hit, hit + hitLen)}
-            </span>,
-        )
-        at = hit + hitLen
-    }
-    return <>{parts}</>
 }

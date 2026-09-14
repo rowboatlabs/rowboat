@@ -1,5 +1,6 @@
 "use client"
 
+import { SidebarChatContextMenu } from "./sidebar-chat-context-menu"
 import * as React from "react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
@@ -12,8 +13,8 @@ import {
   Folder,
   Globe,
   AlertTriangle,
-  Home,
   LayoutGrid,
+  ListTodo,
   Mic,
   MoreVertical,
   PanelLeftClose,
@@ -197,6 +198,7 @@ type SidebarContentPanelProps = {
   onOpenApp?: (folder: string) => void
   /** Open one space (org + space) in the Spaces view. */
   onOpenSpace?: (orgId: string, spaceId: string) => void
+  onOpenSpaces?: () => void
   /** The space currently open, for highlighting its sidebar row. */
   activeSpace?: SpaceSelection
   onOpenAgent?: (slug: string) => void
@@ -456,6 +458,7 @@ export function SidebarContentPanel({
   onOpenBgTasks,
   onOpenApps,
   onOpenApp,
+  onOpenSpaces,
   onOpenSpace,
   activeSpace = null,
   recentRuns = [],
@@ -671,8 +674,8 @@ export function SidebarContentPanel({
     onRenameRun?.(chatId, title)
   }, [renameDraft, recentChats, onRenameRun])
 
-  // Workspace count for the Workspaces sublabel — top-level dir children of
-  // knowledge/Workspace (matches WorkspaceView's root listing).
+  // Workspace count for the Projects sublabel — top-level dir children of
+  // knowledge/Workspace (matches the Projects rail).
   const workspaceCount = React.useMemo(() => {
     const find = (nodes: TreeNode[]): TreeNode | null => {
       for (const n of nodes) {
@@ -866,10 +869,10 @@ export function SidebarContentPanel({
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {/* Spaces — orgs and their spaces, with unread counts */}
+        {/* Spaces returns to the last active server and space. */}
         {SPACES_ENABLED && (
           <>
-            <SpacesSidebarSection activeSpace={activeSpace} onOpenSpace={(orgId, spaceId) => onOpenSpace?.(orgId, spaceId)} />
+            <SpacesSidebarSection active={activeNav === 'spaces'} activeSpace={activeSpace} onOpenSpaces={() => onOpenSpaces?.()} onOpenSpace={(orgId, spaceId) => onOpenSpace?.(orgId, spaceId)} />
             <div className="mx-3 my-2 border-t border-border" />
           </>
         )}
@@ -878,12 +881,6 @@ export function SidebarContentPanel({
         <SidebarGroup className="flex flex-col">
           <SidebarGroupContent>
             <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton data-tour-id="nav-home" isActive={activeNav === 'home'} onClick={onOpenHome}>
-                  <Home className="size-4 shrink-0" />
-                  <span className="flex-1 truncate">Home</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
                   data-tour-id="nav-email"
@@ -907,14 +904,6 @@ export function SidebarContentPanel({
                   )}
                 </SidebarMenuButton>
               </SidebarMenuItem>
-              {codeModeEnabled && (
-                <SidebarMenuItem>
-                  <SidebarMenuButton data-tour-id="nav-code" isActive={activeNav === 'code'} onClick={onOpenCode}>
-                    <Code2 className="size-4 shrink-0" />
-                    <span className="flex-1 truncate">Code</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              )}
               <SidebarMenuItem>
                 <SidebarMenuButton
                   data-tour-id="nav-meetings"
@@ -994,6 +983,14 @@ export function SidebarContentPanel({
                   </div>
                 ) : null}
               </SidebarMenuItem>
+              {codeModeEnabled && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton data-tour-id="nav-code" isActive={activeNav === 'code'} onClick={onOpenCode}>
+                    <Code2 className="size-4 shrink-0" />
+                    <span className="flex-1 truncate">Code</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
               <SidebarMenuItem>
                 <SidebarMenuButton
                   data-tour-id="nav-knowledge"
@@ -1010,11 +1007,62 @@ export function SidebarContentPanel({
                   </div>
                 </SidebarMenuButton>
               </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton data-tour-id="nav-home" isActive={activeNav === 'home'} onClick={onOpenHome}>
+                  <ListTodo className="size-4 shrink-0" />
+                  <span className="flex-1 truncate">Todo</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
             </SidebarMenu>
 
             <div className="mx-3 my-2 border-t border-border" />
 
             <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  data-tour-id="nav-workspaces"
+                  isActive={activeNav === 'workspaces'}
+                  onClick={() => knowledgeActions.openWorkspaceAt()}
+                  className="h-auto items-start py-1"
+                >
+                  <Folder className="mt-0.5 size-4 shrink-0" />
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate">Projects</span>
+                    <span className="truncate text-[11px] text-muted-foreground">
+                      {workspaceCount === 0 ? 'No projects' : `${workspaceCount} project${workspaceCount === 1 ? '' : 's'}`}
+                    </span>
+                  </div>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  data-tour-id="nav-agents"
+                  isActive={activeNav === 'agents'}
+                  onClick={onOpenBgTasks}
+                  className={bgAgentsLabel ? 'h-auto items-start py-1' : undefined}
+                >
+                  <Bot className={cn('size-4 shrink-0', bgAgentsLabel && 'mt-0.5')} />
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate">Background agents</span>
+                    {bgAgentsLabel && (
+                      <span className={cn(
+                        'truncate text-[11px]',
+                        bgTaskSummaries.some((t) => t.lastRunError) ? 'text-destructive' : 'text-muted-foreground',
+                      )}>
+                        {bgAgentsLabel}
+                      </span>
+                    )}
+                  </div>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              {onToggleBrowser && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton onClick={onToggleBrowser}>
+                    <Globe className="size-4 shrink-0" />
+                    <span className="flex-1 truncate">Browser</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
               <SidebarMenuItem>
                 <SidebarMenuButton
                   data-tour-id="nav-apps"
@@ -1043,51 +1091,6 @@ export function SidebarContentPanel({
                   </ContextMenu>
                 </SidebarMenuItem>
               ))}
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  data-tour-id="nav-agents"
-                  isActive={activeNav === 'agents'}
-                  onClick={onOpenBgTasks}
-                  className={bgAgentsLabel ? 'h-auto items-start py-1' : undefined}
-                >
-                  <Bot className={cn('size-4 shrink-0', bgAgentsLabel && 'mt-0.5')} />
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate">Background agents</span>
-                    {bgAgentsLabel && (
-                      <span className={cn(
-                        'truncate text-[11px]',
-                        bgTaskSummaries.some((t) => t.lastRunError) ? 'text-destructive' : 'text-muted-foreground',
-                      )}>
-                        {bgAgentsLabel}
-                      </span>
-                    )}
-                  </div>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  data-tour-id="nav-workspaces"
-                  isActive={activeNav === 'workspaces'}
-                  onClick={() => knowledgeActions.openWorkspaceAt()}
-                  className="h-auto items-start py-1"
-                >
-                  <Folder className="mt-0.5 size-4 shrink-0" />
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate">Workspaces</span>
-                    <span className="truncate text-[11px] text-muted-foreground">
-                      {workspaceCount === 0 ? 'No workspaces' : `${workspaceCount} workspace${workspaceCount === 1 ? '' : 's'}`}
-                    </span>
-                  </div>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              {onToggleBrowser && (
-                <SidebarMenuItem>
-                  <SidebarMenuButton onClick={onToggleBrowser}>
-                    <Globe className="size-4 shrink-0" />
-                    <span className="flex-1 truncate">Browser</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              )}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -1137,13 +1140,21 @@ export function SidebarContentPanel({
                         </div>
                       ) : (
                         <>
-                          <SidebarMenuButton onClick={() => onOpenRun?.(chat.id)} className={onRenameRun ? 'pr-7' : undefined}>
-                            <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
-                            <span className="flex-1 truncate">{chat.title || '(Untitled chat)'}</span>
-                            {pinnedChatIds.includes(chat.id) && (
-                              <Pin className="size-3 shrink-0 text-muted-foreground/70 transition-opacity group-hover/menu-item:opacity-0" />
-                            )}
-                          </SidebarMenuButton>
+                          <SidebarChatContextMenu
+                            pinned={pinnedChatIds.includes(chat.id)}
+                            onOpen={onOpenRun ? () => onOpenRun(chat.id) : undefined}
+                            onTogglePin={() => toggleChatPin(chat.id)}
+                            onRename={onRenameRun ? () => { setRenameDraft(chat.title || ''); setRenamingChatId(chat.id) } : undefined}
+                            onRequestDelete={onDeleteRun ? () => setDeleteChatTarget({ id: chat.id, title: chat.title || '(Untitled chat)' }) : undefined}
+                          >
+                            <SidebarMenuButton onClick={() => onOpenRun?.(chat.id)} className={onRenameRun ? 'pr-7' : undefined}>
+                              <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
+                              <span className="flex-1 truncate">{chat.title || '(Untitled chat)'}</span>
+                              {pinnedChatIds.includes(chat.id) && (
+                                <Pin className="size-3 shrink-0 text-muted-foreground/70 transition-opacity group-hover/menu-item:opacity-0" />
+                              )}
+                            </SidebarMenuButton>
+                          </SidebarChatContextMenu>
                           {onRenameRun && (
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>

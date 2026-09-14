@@ -1,17 +1,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { WorkDir } from '../config/config.js';
-import type { MentionHit } from './mention-watch.js';
 
-// Phone push relay (v1: the Mac is the sender). Paired phones register an
-// Expo push token + a notify level over RPC; mention-watch calls
-// sendPhonePush beside its desktop notification, and each registered phone
-// gets an Expo push if ITS level wants this hit. Hosted (org-side) sending
-// is the eventual home — this rides the same watcher the desktop trusts.
+// Phone push registration (the Mac side). Paired phones register an Expo
+// push token + a notify level over RPC. The Mac used to RELAY pushes from its
+// mention watcher as a stopgap; the watcher was removed 2026-09-09 (the
+// client-side notification-level module is gone — notification policy is
+// moving to the org, and Harbor already sends pushes itself, PUSH_PLAN.md),
+// so this file now only keeps the registrations the phone sends. Whether
+// they stay meaningful is a later-layer decision (push + phone).
 //
 // Levels (phone-side, global): 'off' nothing · 'mentions' @you/@here ·
-// 'dms' mentions + direct messages · 'all' everything the watcher surfaces
-// (kind 'message' hits exist only where the Mac's per-space level is 'all').
+// 'dms' mentions + direct messages · 'all' everything.
 
 export type PhonePushLevel = 'off' | 'mentions' | 'dms' | 'all';
 
@@ -23,7 +23,6 @@ interface PhoneRegistration {
 }
 
 const REG_FILE = path.join(WorkDir, 'config', 'phone_push.json');
-const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 
 function load(): Record<string, PhoneRegistration> {
   try {
@@ -45,47 +44,4 @@ export function registerPhonePush(input: { token: string; level: PhonePushLevel;
   const phones = load();
   phones[input.token] = { ...input, updatedAt: new Date().toISOString() };
   save(phones);
-}
-
-function wants(level: PhonePushLevel, hit: MentionHit): boolean {
-  if (level === 'off') return false;
-  const mention = hit.kind === 'you' || hit.kind === 'here';
-  if (level === 'mentions') return mention;
-  if (level === 'dms') return mention || Boolean(hit.direct);
-  return true; // 'all'
-}
-
-/** Fire-and-forget: push this hit to every registered phone whose level wants it. */
-export async function sendPhonePush(hit: MentionHit, text: { title: string; body: string }): Promise<void> {
-  const phones = load();
-  const targets = Object.values(phones).filter((p) => wants(p.level, hit));
-  if (targets.length === 0) return;
-  try {
-    const res = await fetch(EXPO_PUSH_URL, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(
-        targets.map((p) => ({
-          to: p.token,
-          title: text.title,
-          body: text.body,
-          sound: 'default',
-          data: { kind: 'space', orgId: hit.orgId, spaceId: hit.spaceId, threadRootId: hit.threadRootId },
-        })),
-      ),
-    });
-    const json = (await res.json().catch(() => null)) as { data?: { status: string; details?: { error?: string } }[] } | null;
-    // A token whose device uninstalled the app is dead — drop it.
-    const dead = new Set<string>();
-    json?.data?.forEach((ticket, i) => {
-      if (ticket.status === 'error' && ticket.details?.error === 'DeviceNotRegistered') dead.add(targets[i]!.token);
-    });
-    if (dead.size > 0) {
-      const next = load();
-      for (const t of dead) delete next[t];
-      save(next);
-    }
-  } catch (err) {
-    console.error('[phone-push] send failed:', err);
-  }
 }

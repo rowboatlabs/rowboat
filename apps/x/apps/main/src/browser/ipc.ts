@@ -60,8 +60,8 @@ export const browserIpcHandlers: BrowserHandlers = {
   'browser:forward': async () => {
     return browserViewManager.forward();
   },
-  'browser:reload': async () => {
-    browserViewManager.reload();
+  'browser:reload': async (_event, args) => {
+    browserViewManager.reload(args?.tabId);
     return { ok: true };
   },
   'browser:getState': async () => {

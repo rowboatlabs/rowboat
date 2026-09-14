@@ -1,3 +1,4 @@
+import { listProjects, createProjectChat } from '@x/core/dist/projects/projects.js';
 import container from '@x/core/dist/di/container.js';
 import { deliverLoopbackCallback } from './loopback-relay.js';
 import { spacesRpcHandlers, subscribeSpacesEvents } from './spaces-deps.js';
@@ -156,6 +157,11 @@ import type { EventSources } from './server.js';
 export function createCoreRpcHandlers(opts?: { sessionsIndexReady?: Promise<void> }): RpcHandlers {
   const sessions = () => container.resolve<ISessions>('sessions');
   return {
+    'projects:list': async () => {
+      await opts?.sessionsIndexReady;
+      return { projects: await listProjects(container.resolve<ISessions>('sessions')) };
+    },
+    'projects:createChat': async (args) => ({ sessionId: await createProjectChat(container.resolve<ISessions>('sessions'), args.projectId) }),
     'sessions:create': async (args) => {
       const sessionId = await sessions().createSession(args);
       return { sessionId };
@@ -1435,6 +1441,25 @@ export function createCoreRpcHandlers(opts?: { sessionsIndexReady?: Promise<void
           git: await codeGit.repoInfo(project.path),
         }))),
       };
+    },
+    'codeProject:branches': async (args) => {
+      const repo = container.resolve<ICodeProjectsRepo>('codeProjectsRepo');
+      const project = await repo.get(args.projectId);
+      if (!project) throw new Error('Project no longer exists.');
+      return codeGit.listBranches(project.path);
+    },
+    'codeProject:switchBranch': async (args) => {
+      const repo = container.resolve<ICodeProjectsRepo>('codeProjectsRepo');
+      const project = await repo.get(args.projectId);
+      if (!project) throw new Error('Project no longer exists.');
+      return { git: await codeGit.switchBranch(project.path, args.branch) };
+    },
+    'codeSession:baseBranchStatus': async (args) => {
+      return container.resolve<CodeSessionService>('codeSessionService').baseBranchStatus(args.sessionId);
+    },
+    'codeSession:changeBaseBranch': async (args) => {
+      await container.resolve<CodeSessionService>('codeSessionService').changeBaseBranch(args.sessionId, args.baseBranch);
+      return { success: true };
     },
     'codeSession:create': async (args) => {
       const service = container.resolve<CodeSessionService>('codeSessionService');

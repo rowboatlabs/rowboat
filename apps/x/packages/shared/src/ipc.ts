@@ -56,14 +56,46 @@ import type * as SpacesTypes from './spaces.js';
 // bar's model/effort picks are applied by the app window before submitting.
 const QuickAskSubmitPayload = z.object({
   text: z.string(),
+  // The composer's @ picks — knowledge files, plus the Spaces objects
+  // (shared spaces, people) the message names. Mirrors the renderer's
+  // Mention union (prompt-input.tsx).
   mentions: z
     .array(
-      z.object({
-        id: z.string(),
-        path: z.string(),
-        displayName: z.string(),
-        lineNumber: z.number().optional(),
-      }),
+      z.discriminatedUnion('kind', [
+        z.object({
+          kind: z.literal('file'),
+          id: z.string(),
+          path: z.string(),
+          displayName: z.string(),
+          lineNumber: z.number().optional(),
+        }),
+        z.object({
+          kind: z.literal('space'),
+          id: z.string(),
+          orgId: z.string(),
+          orgName: z.string(),
+          spaceId: z.string(),
+          displayName: z.string(),
+        }),
+        z.object({
+          kind: z.literal('board'),
+          id: z.string(),
+          orgId: z.string(),
+          orgName: z.string(),
+          spaceId: z.string(),
+          spaceName: z.string(),
+          path: z.string(),
+          displayName: z.string(),
+        }),
+        z.object({
+          kind: z.literal('member'),
+          id: z.string(),
+          orgId: z.string(),
+          orgName: z.string(),
+          memberId: z.string(),
+          displayName: z.string(),
+        }),
+      ]),
     )
     .optional(),
   attachments: z
@@ -647,6 +679,17 @@ export const ipcSchemas = {
   // ── New runtime: sessions + turns (session-design.md) ────────────────────
   // Turn-mutating calls return quickly; the renderer follows progress through
   // the turns:events feed and the shared reduceTurn reducer.
+  'projects:list': {
+    req: z.null(),
+    res: z.object({ projects: z.array(z.object({
+      id: z.string(), name: z.string(), path: z.string(),
+      chats: z.array(z.object({ id: z.string(), title: z.string().optional(), modifiedAt: z.string() })),
+    })) }),
+  },
+  'projects:createChat': {
+    req: z.object({ projectId: z.string() }),
+    res: z.object({ sessionId: z.string() }),
+  },
   'sessions:create': {
     req: z.object({ title: z.string().optional() }),
     res: z.object({ sessionId: z.string() }),
@@ -1789,6 +1832,22 @@ export const ipcSchemas = {
       })),
     }),
   },
+  'codeProject:branches': {
+    req: z.object({ projectId: z.string() }),
+    res: z.object({ branches: z.array(z.string()), currentBranch: z.string().nullable() }),
+  },
+  'codeProject:switchBranch': {
+    req: z.object({ projectId: z.string(), branch: z.string().min(1) }),
+    res: z.object({ git: GitRepoInfo }),
+  },
+  'codeSession:baseBranchStatus': {
+    req: z.object({ sessionId: z.string() }),
+    res: z.object({ canChange: z.boolean(), reason: z.string().nullable(), baseBranch: z.string().nullable() }),
+  },
+  'codeSession:changeBaseBranch': {
+    req: z.object({ sessionId: z.string(), baseBranch: z.string().min(1) }),
+    res: z.object({ success: z.literal(true) }),
+  },
   'codeSession:create': {
     req: z.object({
       projectId: z.string(),
@@ -1798,6 +1857,9 @@ export const ipcSchemas = {
       // follows the composer chip / global setting ("Auto").
       policy: ApprovalPolicy.optional(),
       isolation: z.enum(['in-repo', 'worktree']),
+      baseBranch: z.string().min(1).optional(),
+      // Reuse this session's workspace instead of creating a worktree.
+      workspaceSessionId: z.string().optional(),
       // The coding agent's own model + reasoning effort (ACP engine),
       // re-applied each turn so they stay editable. The copilot LLM is
       // whatever the chat composer picks — same as any other chat.
@@ -2456,6 +2518,8 @@ export const ipcSchemas = {
   'spreadsheet:load': {
     req: z.object({
       path: z.string(),
+      space: z.object({ orgId: z.string(), spaceId: z.string(), version: z.number().int().min(1) }).optional(),
+      attachment: z.object({ orgId: z.string(), spaceId: z.string(), hash: z.string().regex(/^[a-f0-9]{64}$/) }).optional(),
       sheet: z.string().optional(),
       offset: z.number().int().min(0),
       limit: z.number().int().min(1).max(1000),
@@ -2484,6 +2548,8 @@ export const ipcSchemas = {
   'spreadsheet:find': {
     req: z.object({
       path: z.string(),
+      space: z.object({ orgId: z.string(), spaceId: z.string(), version: z.number().int().min(1) }).optional(),
+      attachment: z.object({ orgId: z.string(), spaceId: z.string(), hash: z.string().regex(/^[a-f0-9]{64}$/) }).optional(),
       sheet: z.string().optional(),
       query: z.string(),
       maxMatches: z.number().int().min(1).max(5000).optional(),
@@ -3517,7 +3583,7 @@ export const ipcSchemas = {
     res: z.object({ ok: z.boolean() }),
   },
   'browser:reload': {
-    req: z.null(),
+    req: z.object({ tabId: z.string().min(1) }).nullable(),
     res: z.object({ ok: z.literal(true) }),
   },
   'browser:getState': {
@@ -3787,6 +3853,12 @@ export const ipcSchemas = {
   },
   'spaces:listMembers': {
     req: z.object({ orgId: z.string(), spaceId: z.string() }),
+    res: z.object({ members: z.array(z.custom<SpacesTypes.Member>()) }),
+  },
+  // The org roster as the caller sees it: everyone they share a space with
+  // (DMs included), deduped, A–Z — computed by the org (GET /v1/members).
+  'spaces:listOrgMembers': {
+    req: z.object({ orgId: z.string() }),
     res: z.object({ members: z.array(z.custom<SpacesTypes.Member>()) }),
   },
   'spaces:createInvite': {
@@ -4125,28 +4197,45 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), spaceId: z.string() }),
     res: z.object({ success: z.literal(true) }),
   },
-  // Notification levels for the mention watcher: a space-wide level plus
-  // per-thread overrides. null = inherit (thread → space → the 'mentions'
-  // default). Stored main-side (the watcher runs there, screen or no screen).
-  // `topicId` is the thread's ROOT MESSAGE id, never a Topic row id: the
-  // watcher resolves a message to `threadRoot ?? id` and looks up by that.
-  'spaces:getNotifyPrefs': {
-    req: z.object({ orgId: z.string(), spaceId: z.string() }),
-    res: z.object({
-      spaceLevel: z.enum(['all', 'mentions', 'mute']).nullable(),
-      topics: z.record(z.string(), z.enum(['all', 'mentions', 'mute'])),
-    }),
+  // Read state — org-owned cursors in OFFSETS (2026-09-09). markRead advances
+  // the stream mark (no threadRootId) or a thread's — followed or not, since
+  // 2026-09-11 — and the org answers with the stored mark. getUnread
+  // is the snapshot the renderer folds live frames onto; the org's read_mark
+  // member frames arrive on 'spaces:events' like every other frame.
+  'spaces:markRead': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), threadRootId: z.string().optional(), offset: z.number() }),
+    res: z.object({ readOffset: z.number() }),
   },
-  'spaces:setNotifyPref': {
+  'spaces:followThread': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), rootMessageId: z.string(), following: z.boolean() }),
+    res: z.object({ following: z.boolean(), readOffset: z.number() }),
+  },
+  'spaces:getUnread': {
+    req: z.object({ orgId: z.string() }),
+    res: z.custom<SpacesTypes.SpacesUnreadSnapshot>(),
+  },
+  // Activity (layer 3, 2026-09-10): the org's feed of everything involving the member.
+  'spaces:getActivity': {
     req: z.object({
       orgId: z.string(),
-      spaceId: z.string(),
-      /** Absent = set the space-wide level. */
-      topicId: z.string().optional(),
-      /** null clears the override back to inherit. */
-      level: z.enum(['all', 'mentions', 'mute']).nullable(),
+      kinds: z.array(z.custom<SpacesTypes.SpacesActivityKind>()).optional(),
+      spaceId: z.string().optional(),
+      unread: z.boolean().optional(),
+      cursor: z.string().optional(),
+      limit: z.number().optional(),
     }),
-    res: z.object({ success: z.literal(true) }),
+    res: z.custom<SpacesTypes.SpacesActivityPage>(),
+  },
+  'spaces:markActivitySeen': {
+    req: z.object({ orgId: z.string(), at: z.string() }),
+    res: z.object({ seenAt: z.string() }),
+  },
+  // Mark everything read (2026-09-11): every space (or one) to head, every
+  // involved thread to its newest reply, reactions seen — the org moves the
+  // marks, the renderer refetches its snapshot.
+  'spaces:readAll': {
+    req: z.object({ orgId: z.string(), spaceId: z.string().optional() }),
+    res: z.object({ spaces: z.array(z.object({ spaceId: z.string(), readOffset: z.number() })), threads: z.number(), seenAt: z.string() }),
   },
   // Scheduled sends and reminders — the main-side queue (core scheduler).
   // 'message' posts to the topic at `at`; 'reminder' notifies the member.
@@ -4183,15 +4272,6 @@ export const ipcSchemas = {
   },
   'spaces:cancelScheduled': {
     req: z.object({ id: z.string() }),
-    res: z.object({ success: z.literal(true) }),
-  },
-  // Do-not-disturb: one global until-instant gating the mention watcher.
-  'spaces:getDnd': {
-    req: z.null(),
-    res: z.object({ until: z.string().nullable() }),
-  },
-  'spaces:setDnd': {
-    req: z.object({ until: z.string().nullable() }),
     res: z.object({ success: z.literal(true) }),
   },
   // Ephemeral presence from the human surface (viewing / typing / idle), scoped

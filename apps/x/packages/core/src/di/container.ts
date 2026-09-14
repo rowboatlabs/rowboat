@@ -1,3 +1,4 @@
+import { markWorkspaceStarted } from '../code-mode/sessions/workspace-started.js';
 import path from "node:path";
 import { asClass, asFunction, asValue, createContainer, InjectionMode } from "awilix";
 import { WorkDir } from "../config/config.js";
@@ -163,6 +164,12 @@ container.register({
     //   that one conversation are operations on Home (to-dos, dispatch,
     //   status), never "just chat".
     // Null for ordinary chats.
+    beforeSessionStart: asFunction(
+        ({ codeSessionsRepo }: { codeSessionsRepo: ICodeSessionsRepo }) => async (sessionId: string) => {
+            const meta = await codeSessionsRepo.get(sessionId);
+            if (meta) await markWorkspaceStarted(meta);
+        },
+    ).singleton(),
     sessionCompositionPins: asFunction(
         ({ codeSessionsRepo }: { codeSessionsRepo: ICodeSessionsRepo }) =>
             async (sessionId: string): Promise<Record<string, JsonValue> | null> => {

@@ -56,12 +56,13 @@ import {
 import { getExtension, getFileDisplayName, getMimeFromExtension, isImageMime } from '@/lib/file-utils'
 import { cn } from '@/lib/utils'
 import {
-  type FileMention,
+  type Mention,
   type PromptInputMessage,
   PromptInputProvider,
   PromptInputTextarea,
   usePromptInputController,
 } from '@/components/ai-elements/prompt-input'
+import { useSpacesMentionTargets } from '@/hooks/use-spaces-mention-targets'
 import { toast } from 'sonner'
 import * as quickAskShortcut from '@x/shared/src/quick-ask-shortcut.js'
 import { useQuickAskShortcut } from '@/hooks/use-quick-ask-shortcut'
@@ -212,7 +213,7 @@ const CALL_PRESET_MENU: Array<{ preset: CallPreset; label: string; description: 
 
 interface ChatInputInnerProps {
   draftKey?: string
-  onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => void
+  onSubmit: (message: PromptInputMessage, mentions?: Mention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => void
   onStop?: () => void
   isProcessing: boolean
   /**
@@ -768,6 +769,8 @@ function ChatInputInner({
   return (
     <div
       data-tour-id="chat-composer"
+      // The @ menu opens above this box, at its width (see MentionPopover).
+      data-mention-anchor=""
       className={cn(
         // Composer: radius 24, raised surface; the ring is folded into
         // the shadow (see .rowboat-chat-input in App.css).
@@ -1508,7 +1511,8 @@ export interface ChatInputWithMentionsProps {
   knowledgeFiles: string[]
   recentFiles: string[]
   visibleFiles: string[]
-  onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => void
+  /** The @ menu's picks ride along: files (attachments), spaces and people (userMessageContext.spaceMentions). */
+  onSubmit: (message: PromptInputMessage, mentions?: Mention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => void
   onStop?: () => void
   isProcessing: boolean
   /** Let Enter submit while processing (queue/steer) — see ChatInputInner. */
@@ -1592,8 +1596,16 @@ export function ChatInputWithMentions({
   placeholder,
   focusSignal,
 }: ChatInputWithMentionsProps) {
+  // The Spaces half of the @ menu — every host gets it, the hover bar
+  // included, without threading another prop through each of them.
+  const mentionTargets = useSpacesMentionTargets()
   return (
-    <PromptInputProvider knowledgeFiles={knowledgeFiles} recentFiles={recentFiles} visibleFiles={visibleFiles}>
+    <PromptInputProvider
+      knowledgeFiles={knowledgeFiles}
+      recentFiles={recentFiles}
+      visibleFiles={visibleFiles}
+      mentionTargets={mentionTargets}
+    >
       <ChatInputInner
         draftKey={draftKey}
         onSubmit={onSubmit}

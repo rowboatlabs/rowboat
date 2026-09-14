@@ -1,5 +1,5 @@
 // Markdown formatting as pure text transforms on (value, selection) — the
-// grammar behind the composer's Slack-style toolbar and its keyboard chords.
+// grammar behind the composer's conversation toolbar and its keyboard chords.
 // The wire format is plain markdown, so there is no document model: every
 // action rewrites the string and says where the selection lands.
 
@@ -43,7 +43,7 @@ function hasPrefix(line: string, kind: LinePrefixKind): boolean {
 /**
  * Toggle a line prefix (- / 1. / >) across every line the selection touches.
  * All lines already carrying THIS prefix → strip it; otherwise set it,
- * replacing any other list/quote prefix (the Slack behavior). Ordered lists
+ * replacing any other list/quote prefix (the editor behavior). Ordered lists
  * renumber 1..n. Blank lines pass through untouched.
  */
 export function toggleLinePrefix(value: string, start: number, end: number, kind: LinePrefixKind): FormatResult {

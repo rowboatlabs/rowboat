@@ -2,12 +2,16 @@ import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Keyboard, ActivityIndicator, KeyboardAvoidingView, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useKeyboardVisible } from '@/lib/use-keyboard-visible';
 import type { Member, Message } from '@rowboat/spaces-protocol';
 
 import { MessageActionSheet, MessageRow, applyReaction } from '@/components/space-message';
+import { SpaceComposer } from '@/components/space-composer';
+import { applyPollVote } from '@/components/poll-card';
+import { setActiveSpace } from '@/lib/push';
 import { useSpacesAccount } from '@/lib/spaces/account';
 import { SpacesClient } from '@/lib/spaces/client';
 import { SpacesLive } from '@/lib/spaces/live';
@@ -33,7 +37,6 @@ export default function SpaceChatScreen() {
   const [members, setMembers] = useState<Map<string, Member>>(new Map());
   const memberNames = useMemo(() => new Map([...members].map(([id, m]) => [id, m.displayName])), [members]);
   const [error, setError] = useState<string | null>(null);
-  const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [actionMessage, setActionMessage] = useState<Message | null>(null);
   const [reactionsOnly, setReactionsOnly] = useState(false);
@@ -91,6 +94,10 @@ export default function SpaceChatScreen() {
           // Reactions fold server-side on reads; refetch the one message set is
           // overkill — apply the toggle locally.
           setMessages((prev) => prev?.map((m) => (m.id === event.reaction.messageId ? applyReaction(m, event.reaction.emoji, event.reaction.by.memberId, event.action) : m)) ?? null);
+        } else if (event.type === 'poll_vote') {
+          setMessages((prev) => prev?.map((m) => (m.id === event.vote.messageId && m.poll ? { ...m, poll: applyPollVote(m.poll, { answerId: event.vote.answerId, memberId: event.vote.by.memberId, action: event.action }) } : m)) ?? null);
+        } else if (event.type === 'poll_ended') {
+          setMessages((prev) => prev?.map((m) => (m.id === event.end.messageId && m.poll ? { ...m, poll: { ...m.poll, endedAt: event.end.at } } : m)) ?? null);
         }
       },
       lastOffset.current,
@@ -107,23 +114,68 @@ export default function SpaceChatScreen() {
     return () => clearTimeout(t);
   }, [messages?.length]);
 
-  const send = async () => {
-    const body = draft.trim();
-    if (!body || sending) return;
-    if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
-    Keyboard.dismiss();
+  const send = async (body: string) => {
+    if (sending) return;
     setSending(true);
-    setDraft('');
     try {
       const { message } = await client.postMessage(space, { body, actingMode: 'direct' });
       foldMessage(message);
     } catch (err) {
-      setDraft(body);
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSending(false);
     }
   };
+
+  // Read state (org-owned, CONTRACT.md): the newest offset on screen is our
+  // stream mark. Debounced — Slack's advice, don't mark on every tick.
+  const newest = messages?.at(-1)?.offset;
+  useEffect(() => {
+    if (newest === undefined) return;
+    const t = setTimeout(() => void client.markRead(space, { offset: newest }).catch(() => {}), 800);
+    return () => clearTimeout(t);
+  }, [client, space, newest]);
+
+  // No push banner for the space on screen.
+  useEffect(() => {
+    setActiveSpace(space);
+    return () => setActiveSpace(null);
+  }, [space]);
+
+  const replaceMessage = useCallback((folded: Message) => {
+    setMessages((prev) => prev?.map((m) => (m.id === folded.id ? folded : m)) ?? null);
+  }, []);
+  const vote = useCallback(
+    (message: Message, answerIds: number[]) => {
+      void (async () => {
+        try {
+          let latest = message;
+          for (const answerId of answerIds) latest = await client.votePoll(space, message.id, { answerId, action: 'add', actingMode: 'direct' });
+          replaceMessage(latest);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      })();
+    },
+    [client, space, replaceMessage],
+  );
+  const removeVote = useCallback(
+    (message: Message) => {
+      const mine = message.poll?.votes.filter((g) => g.memberIds.includes(me)).map((g) => g.answerId) ?? [];
+      void (async () => {
+        let latest = message;
+        for (const answerId of mine) latest = await client.votePoll(space, message.id, { answerId, action: 'remove', actingMode: 'direct' }).catch(() => latest);
+        replaceMessage(latest);
+      })();
+    },
+    [client, space, me, replaceMessage],
+  );
+  const endPoll = useCallback(
+    (message: Message) => {
+      client.endPoll(space, message.id, { actingMode: 'direct' }).then(replaceMessage).catch((err) => setError(err instanceof Error ? err.message : String(err)));
+    },
+    [client, space, replaceMessage],
+  );
 
   // Optimistic toggle; the server's folded message (and the live echo — both
   // idempotent) settle the final state.
@@ -189,6 +241,9 @@ export default function SpaceChatScreen() {
               onOpenThread={openThread}
               onLongPress={(m) => { setReactionsOnly(false); setActionMessage(m); }}
               onAddReaction={(m) => { setReactionsOnly(true); setActionMessage(m); }}
+              onVote={vote}
+              onRemoveVote={removeVote}
+              onEndPoll={endPoll}
             />
           ))}
           {messages?.length === 0 ? (
@@ -200,26 +255,14 @@ export default function SpaceChatScreen() {
       )}
 
       {/* Composer */}
-      <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8, paddingHorizontal: 12, paddingTop: 8, paddingBottom: (keyboardVisible ? 0 : insets.bottom) + 8 }}>
-        <TextInput
-          style={{
-            flex: 1, minHeight: 40, maxHeight: 120, paddingHorizontal: 14, paddingVertical: 10,
-            fontSize: 16, color: colors.label, backgroundColor: colors.secondaryBackground,
-            borderRadius: 20, borderCurve: 'continuous',
-          }}
+      <View style={{ paddingTop: 8, paddingBottom: (keyboardVisible ? 0 : insets.bottom) + 8 }}>
+        <SpaceComposer
           placeholder={`Message #${title ?? ''}`}
-          placeholderTextColor={colors.tertiaryLabel}
-          value={draft}
-          onChangeText={setDraft}
-          multiline
+          members={[...members.values()]}
+          me={me}
+          sending={sending}
+          onSend={(body) => void send(body)}
         />
-        <Pressable
-          onPress={() => void send()}
-          disabled={!draft.trim() || sending}
-          style={{ opacity: draft.trim() && !sending ? 1 : 0.35, paddingBottom: 4 }}
-        >
-          <Image source="sf:arrow.up.circle.fill" style={{ width: 32, height: 32 }} tintColor={colors.label} />
-        </Pressable>
       </View>
 
       <MessageActionSheet

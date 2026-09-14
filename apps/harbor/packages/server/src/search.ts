@@ -1,4 +1,4 @@
-import type { Member } from '@rowboat/spaces-protocol';
+import { mapMentionTokens, type Member } from '@rowboat/spaces-protocol';
 
 // Space search internals: query parsing (with query-time mention expansion),
 // asset text extraction, and snippet windows. The INDEX stores only immutable
@@ -6,6 +6,19 @@ import type { Member } from '@rowboat/spaces-protocol';
 // extracted asset text. Everything mutable (display names, paths, topic
 // titles' relation to threads) is resolved at query time, so renames and
 // reorganizations never stale it.
+
+/**
+ * What the index holds for a body or a title (messages.search_text,
+ * topics.search_text — migration 017): every mention token collapses to its
+ * bare key (the member id, or "here" / "rowboat"), everything else stays
+ * verbatim. So neither a token's label nor the word "member" is ever indexed,
+ * and a name query reaches a mention only through the rename-safe id
+ * expansion below. App-computed, written in the same transaction as the
+ * text, never a fallback: a write path that forgets it fails the NOT NULL.
+ */
+export function searchTextFor(text: string): string {
+  return mapMentionTokens(text, (ref) => (ref.kind === 'member' ? ref.id : ref.kind));
+}
 
 /**
  * One parsed query term: the typed word plus its alternatives — the ids of
@@ -40,9 +53,9 @@ function tokenize(raw: string): string[] {
 /**
  * Query-time mention expansion: a term that matches a word of a member's
  * display name (prefix match, case-insensitive) gains that member's id as an
- * alternative. Bodies store mentions as "@<memberId>" and the simple
- * tokenizer keeps the id as one lexeme, so the id is already in the index —
- * this is purely a read-side rewrite. Names resolve fresh on every query:
+ * alternative. The index text collapses every mention token to its member id
+ * (searchTextFor) and the simple tokenizer keeps the id as one lexeme, so the
+ * id is already in the index — this is purely a read-side rewrite. Names resolve fresh on every query:
  * renames are correct instantly, and a name shared by two members ORs in both.
  */
 export function parseSearchQuery(raw: string, members: readonly Member[]): SearchQuery {

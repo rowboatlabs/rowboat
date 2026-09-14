@@ -1,7 +1,7 @@
 // Feature flags, sourced from environment variables.
 //
 // Spaces ships dark: the whole UI (sidebar section, view, notification
-// category, mention watcher) is gated on ROWBOAT_SPACES so the branch can
+// category, scheduler) is gated on ROWBOAT_SPACES so the branch can
 // merge and release while the feature stays internal. The backend surface
 // (spaces IPC, core client, org credentials) stays live and tested — only
 // the doors are locked. Because the packaged app merges the login shell's

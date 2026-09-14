@@ -1,4 +1,5 @@
 import type { CapabilityContext, EagerCapability } from "./types.js";
+import { PRIVACY_RULES, threadProcedure } from "../skills/spaces/procedures.js";
 
 // The app-activated capabilities: the modes the app (not the model) toggles —
 // facts about the world like "the camera is on" whose guidance must be in the
@@ -62,7 +63,24 @@ export const MODE_CAPABILITIES: readonly EagerCapability[] = [
         promptFragment: (ctx: CapabilityContext) =>
             ctx.commandCenter ? COMMAND_CENTER : null,
     },
+    {
+        // A space-thread session (sessions.ts pins it from the session's
+        // origin): the receipt contract and privacy rules, ids filled in.
+        // The spaces tools themselves attach through the pinned activeSkills.
+        id: "space-thread",
+        activation: "app",
+        promptFragment: (ctx: CapabilityContext) =>
+            ctx.spaceThread ? SPACE_THREAD_TEMPLATE(ctx.spaceThread) : null,
+    },
 ];
+
+const SPACE_THREAD_TEMPLATE = (thread: NonNullable<CapabilityContext["spaceThread"]>): string =>
+    `# Space thread session\n\n${threadProcedure({
+        spaceName: thread.spaceName,
+        spaceId: thread.spaceId,
+        threadRootId: thread.threadRootId,
+        org: thread.org,
+    })}\n\n${PRIVACY_RULES}`;
 
 const VOICE_INPUT = `# Voice Input\nThe user's message was transcribed from speech. Be aware that:\n- There may be transcription errors. Silently correct obvious ones (e.g. homophones, misheard words). If an error is genuinely ambiguous, briefly mention your interpretation (e.g. "I'm assuming you meant X").\n- Spoken messages are often long-winded. The user may ramble, repeat themselves, or correct something they said earlier in the same message. Focus on their final intent, not every word verbatim.`;
 

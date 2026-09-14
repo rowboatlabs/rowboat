@@ -316,7 +316,7 @@ describe('feed: the stream, threads, and topic annotations', () => {
   it('a new space has an empty stream and no topics — the stream is not an object', async () => {
     const r = await ramnique.post('/v1/spaces', { name: 'Born empty' });
     const stream = await ramnique.get(`/v1/spaces/${r.body.space.id}/stream`);
-    expect(stream.body).toEqual({ messages: [], topics: [], hasMore: false });
+    expect(stream.body).toEqual({ messages: [], topics: [], hasMore: false, readOffset: 0 });
     const topics = await ramnique.get(`/v1/spaces/${r.body.space.id}/topics`);
     expect(topics.body.topics).toEqual([]);
   });
@@ -567,6 +567,86 @@ describe('feed: the stream, threads, and topic annotations', () => {
     const removedEvent = topicEvents[2]!.event as Extract<typeof topicEvents[0]['event'], { type: 'topic_removed' }>;
     expect(removedEvent.removal).toMatchObject({ topicId: made.body.topic.id, rootMessageId: made.body.rootMessage.id, by: { memberId: 'ramnique' } });
     live.close();
+  });
+
+  it('a discussion can be about one file: the link follows renames, hides in the trash, returns on restore', async () => {
+    const live = await liveClient(harbor, 'dev-ramnique');
+    live.send({ kind: 'subscribe', spaceId });
+    await live.until((frames) => frames.some((f) => f.kind === 'subscribed'), 'subscribed');
+
+    const file = await ramnique.post(`/v1/spaces/${spaceId}/changes`, {
+      assetPath: 'briefs/launch.md', baseVersion: 0, newContent: '# Launch brief\n', actingMode: 'direct',
+    });
+    expect(file.body.outcome).toBe('applied');
+
+    // Born with its file — the path is validated before anything is written.
+    const missing = await gagan.post(`/v1/spaces/${spaceId}/topics`, {
+      title: 'Review: launch brief', body: 'Thoughts on the brief?', documentPath: 'briefs/nope.md', actingMode: 'direct',
+    });
+    expect(missing.status).toBe(404);
+    const made = await gagan.post(`/v1/spaces/${spaceId}/topics`, {
+      title: 'Review: launch brief', body: 'Thoughts on the brief?', documentPath: 'briefs/launch.md', actingMode: 'direct',
+    });
+    expect(made.status).toBe(200);
+    expect(made.body.topic.documentPath).toBe('briefs/launch.md');
+    const topicId = made.body.topic.id;
+
+    // Every read surface projects it: the rail, the thread, the stream page.
+    const thread = await ramnique.get(`/v1/spaces/${spaceId}/threads/${made.body.rootMessage.id}`);
+    expect(thread.body.topic.documentPath).toBe('briefs/launch.md');
+    const rail = await ramnique.get(`/v1/spaces/${spaceId}/topics`);
+    expect(rail.body.topics.find((t: any) => t.id === topicId).documentPath).toBe('briefs/launch.md');
+
+    // Re-attaching the same file is a no-op; attaching another replaces.
+    const same = await ramnique.post(`/v1/spaces/${spaceId}/topics/${topicId}`, { action: 'attach_document', path: 'briefs/launch.md', actingMode: 'direct' });
+    expect(same.body.topic.documentPath).toBe('briefs/launch.md');
+    await ramnique.post(`/v1/spaces/${spaceId}/changes`, { assetPath: 'briefs/faq.md', baseVersion: 0, newContent: '# FAQ\n', actingMode: 'direct' });
+    const swapped = await ramnique.post(`/v1/spaces/${spaceId}/topics/${topicId}`, { action: 'attach_document', path: 'briefs/faq.md', actingMode: 'direct' });
+    expect(swapped.body.topic.documentPath).toBe('briefs/faq.md');
+    // An old path still reaches its file through the redirect; a missing one refuses.
+    const bad = await ramnique.post(`/v1/spaces/${spaceId}/topics/${topicId}`, { action: 'attach_document', path: 'briefs/nope.md', actingMode: 'direct' });
+    expect(bad.status).toBe(404);
+    const back = await ramnique.post(`/v1/spaces/${spaceId}/topics/${topicId}`, { action: 'attach_document', path: 'briefs/launch.md', actingMode: 'direct' });
+    expect(back.body.topic.documentPath).toBe('briefs/launch.md');
+
+    // The link is to the FILE, not the path: a rename shows the new path.
+    const moved = await gagan.post(`/v1/spaces/${spaceId}/assets/move`, {
+      fromPath: 'briefs/launch.md', toPath: 'briefs/launch-v2.md', baseVersion: 1, actingMode: 'direct',
+    });
+    expect(moved.body.outcome).toBe('moved');
+    expect((await ramnique.get(`/v1/spaces/${spaceId}/topics`)).body.topics.find((t: any) => t.id === topicId).documentPath).toBe('briefs/launch-v2.md');
+
+    // Trash hides it (no cleanup anywhere); restore brings it straight back.
+    const deleted = await gagan.post(`/v1/spaces/${spaceId}/assets/delete`, { path: 'briefs/launch-v2.md', baseVersion: 1, actingMode: 'direct' });
+    expect(deleted.body.outcome).toBe('deleted');
+    expect((await ramnique.get(`/v1/spaces/${spaceId}/topics`)).body.topics.find((t: any) => t.id === topicId).documentPath).toBeUndefined();
+    await gagan.post(`/v1/spaces/${spaceId}/assets/restore`, { path: 'briefs/launch-v2.md', actingMode: 'direct' });
+    expect((await ramnique.get(`/v1/spaces/${spaceId}/topics`)).body.topics.find((t: any) => t.id === topicId).documentPath).toBe('briefs/launch-v2.md');
+
+    // Detach clears it; detaching again is silent.
+    const detached = await ramnique.post(`/v1/spaces/${spaceId}/topics/${topicId}`, { action: 'detach_document', actingMode: 'direct' });
+    expect(detached.status).toBe(200);
+    expect(detached.body.topic.documentPath).toBeUndefined();
+    await ramnique.post(`/v1/spaces/${spaceId}/topics/${topicId}`, { action: 'detach_document', actingMode: 'direct' });
+
+    await live.until(
+      (frames) => frames.some((f) => f.kind === 'event' && f.event.type === 'topic' && f.event.action === 'document_detached'),
+      'document lifecycle events',
+    );
+    const actions = live
+      .events()
+      .filter((f) => f.event.type === 'topic' && f.event.topic.id === topicId)
+      .map((f) => (f.event.type === 'topic' ? f.event.action : ''));
+    // created (with the file), the swap, the swap back, the detach — no-ops emit nothing.
+    expect(actions).toEqual(['created', 'document_attached', 'document_attached', 'document_detached']);
+    const createdEvent = live.events().find((f) => f.event.type === 'topic' && f.event.topic.id === topicId)!.event as Extract<
+      ReturnType<typeof live.events>[number]['event'],
+      { type: 'topic' }
+    >;
+    expect(createdEvent.topic.documentPath).toBe('briefs/launch.md');
+    live.close();
+
+    await ramnique.post(`/v1/spaces/${spaceId}/topics/${topicId}`, { action: 'remove', actingMode: 'direct' });
   });
 });
 
@@ -938,10 +1018,16 @@ describe('polls', () => {
     expect(removed.body.message.poll.votes).toEqual([{ answerId: 2, memberIds: ['gagan'] }]);
   });
 
-  it('agents cannot vote; unknown answers and non-poll messages refuse', async () => {
+  it('an agent votes as its member (parity 2026-09-09); unknown answers and non-poll messages refuse', async () => {
     const posted = await postPoll(ramnique, { question: 'q', answers: [{ text: 'A' }, { text: 'B' }] });
     const messageId = posted.body.message.id;
-    expect((await vote(gagan, messageId, 1, 'add', 'agent')).status).toBe(400);
+    const byAgent = await vote(gagan, messageId, 1, 'add', 'agent');
+    expect(byAgent.status).toBe(200);
+    expect(byAgent.body.message.poll.votes).toEqual([{ answerId: 1, memberIds: ['gagan'] }]);
+    // The stored vote is the member's, attributed by mode.
+    expect((await harbor.store.listPollVotesByMessage(spaceId, messageId)).map((v) => v.by)).toEqual([
+      { memberId: 'gagan', actingMode: 'agent' },
+    ]);
     expect((await vote(gagan, messageId, 9, 'add')).status).toBe(400);
     const plain = await ramnique.post(`/v1/spaces/${spaceId}/messages`, { body: 'no poll here', actingMode: 'direct' });
     expect((await vote(gagan, plain.body.message.id, 1, 'add')).status).toBe(400);
@@ -1016,13 +1102,19 @@ describe('polls', () => {
     expect(row.rootMessage.poll.votes).toEqual([{ answerId: 1, memberIds: ['gagan'] }]);
   });
 
-  it('agents cannot end polls, even acting as the author', async () => {
+  it("the author's agent ends the poll as the author (parity 2026-09-09); another member's agent may not", async () => {
     const posted = await postPoll(ramnique, { question: 'q', answers: [{ text: 'A' }, { text: 'B' }] });
     const messageId = posted.body.message.id as string;
+    const notAuthor = await gagan.post(`/v1/spaces/${spaceId}/messages/${messageId}/poll/end`, { actingMode: 'agent', agentName: 'bot' });
+    expect(notAuthor.status).toBe(403);
     const asAgent = await ramnique.post(`/v1/spaces/${spaceId}/messages/${messageId}/poll/end`, { actingMode: 'agent', agentName: 'bot' });
-    expect(asAgent.status).toBe(400);
+    expect(asAgent.status).toBe(200);
+    expect(asAgent.body.message.poll.endedAt).toBeTruthy();
     const still = await gagan.get(`/v1/spaces/${spaceId}/stream`);
-    expect((still.body.messages as any[]).find((m) => m.id === messageId).poll.endedAt).toBeUndefined();
+    expect((still.body.messages as any[]).find((m) => m.id === messageId).poll.endedAt).toBe(asAgent.body.message.poll.endedAt);
+    const events = await harbor.service.eventsAfter(spaceId, 0);
+    const end = events.filter((e) => e.event.type === 'poll_ended').at(-1)!;
+    expect((end.event as any).end.by).toEqual({ memberId: 'ramnique', actingMode: 'agent', agentName: 'bot' });
   });
 
   it('ending early is author-only and idempotent; closed polls refuse votes', async () => {

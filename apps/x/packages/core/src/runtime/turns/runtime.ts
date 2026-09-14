@@ -1275,10 +1275,11 @@ class TurnAdvance {
             parameters:
                 reasoningEffort === undefined ? {} : { reasoningEffort },
         };
+        const requestedAt = this.now();
         await this.append({
             type: "model_call_requested",
             turnId: this.turnId,
-            ts: this.now(),
+            ts: requestedAt,
             modelCallIndex: index,
             request,
         });
@@ -1293,6 +1294,10 @@ class TurnAdvance {
 
         let completion: Extract<LlmStreamEvent, { type: "completed" }> | null =
             null;
+        // Last time the provider produced anything; a failure's idle gap is
+        // measured from here (deltas are not persisted, so this is the only
+        // record of when the stream went quiet).
+        let lastEventAt = requestedAt;
         try {
             for await (const event of this.model.stream({
                 systemPrompt: composed.systemPrompt,
@@ -1301,6 +1306,7 @@ class TurnAdvance {
                 parameters: composed.parameters,
                 signal: this.signal,
             })) {
+                lastEventAt = this.now();
                 switch (event.type) {
                     case "text_delta":
                         this.pushDelta({
@@ -1336,20 +1342,23 @@ class TurnAdvance {
                 throw new Error("model stream ended without a completed response");
             }
         } catch (error) {
+            const failedAt = this.now();
+            const timing = callTiming(requestedAt, lastEventAt, failedAt);
             if (this.signal.aborted) {
                 await this.append(
                     modelCallFailedEvent(
                         this.turnId,
-                        this.now(),
+                        failedAt,
                         index,
                         "model call was cancelled",
+                        timing,
                     ),
                 );
                 return this.cancel();
             }
             const message = errorMessage(error);
             await this.append(
-                modelCallFailedEvent(this.turnId, this.now(), index, message),
+                modelCallFailedEvent(this.turnId, failedAt, index, message, timing),
             );
             await this.append({
                 type: "turn_failed",
@@ -1487,7 +1496,33 @@ function errorMessage(error: unknown): string {
     if (typeof responseBody === "string" && responseBody.trim().length > 0) {
         details.push(responseBody.slice(0, 2000));
     }
+    // Transport failures carry nothing but a generic message ("terminated",
+    // "fetch failed"); the socket-level reason (read ETIMEDOUT, other side
+    // closed, body timeout) lives only on the cause chain.
+    const cause = describeCause(source);
+    if (cause !== undefined) {
+        details.push(cause);
+    }
     return details.length > 0 ? `${message} [${details.join(" — ")}]` : message;
+}
+
+function describeCause(error: unknown): string | undefined {
+    const parts: string[] = [];
+    let cursor = (error as { cause?: unknown } | null)?.cause;
+    for (let depth = 0; cursor !== undefined && cursor !== null && depth < 3; depth++) {
+        const link = cursor as { message?: unknown; code?: unknown; name?: unknown; cause?: unknown };
+        const message = typeof link.message === "string" && link.message.length > 0
+            ? link.message
+            : String(cursor);
+        const code = typeof link.code === "string"
+            ? link.code
+            : typeof link.name === "string" && link.name !== "Error"
+                ? link.name
+                : undefined;
+        parts.push(code !== undefined && !message.includes(code) ? `${message} (${code})` : message);
+        cursor = link.cause;
+    }
+    return parts.length > 0 ? `cause: ${parts.join(" <- ")}` : undefined;
 }
 
 function outcomeFromTerminal(state: TurnState): TurnOutcome {
@@ -1546,8 +1581,31 @@ function modelCallFailedEvent(
     ts: string,
     modelCallIndex: number,
     error: string,
+    timing?: ModelCallTiming,
 ): z.infer<typeof ModelCallFailed> {
-    return { type: "model_call_failed", turnId, ts, modelCallIndex, error };
+    return { type: "model_call_failed", turnId, ts, modelCallIndex, error, ...timing };
+}
+
+type ModelCallTiming = { elapsedMs: number; idleMs: number };
+
+// Durations for a failed model call from the runtime clock's ISO timestamps:
+// since the request was issued, and since the provider last produced a
+// stream event. Undefined when a timestamp is unparsable (a custom clock).
+function callTiming(
+    requestedAt: string,
+    lastEventAt: string,
+    failedAt: string,
+): ModelCallTiming | undefined {
+    const requested = Date.parse(requestedAt);
+    const last = Date.parse(lastEventAt);
+    const failed = Date.parse(failedAt);
+    if (![requested, last, failed].every(Number.isFinite)) {
+        return undefined;
+    }
+    return {
+        elapsedMs: Math.max(0, failed - requested),
+        idleMs: Math.max(0, failed - last),
+    };
 }
 
 function runtimeResultEvent(

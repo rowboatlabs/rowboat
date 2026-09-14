@@ -37,10 +37,10 @@ export type CodeSessionStatus = z.infer<typeof CodeSessionStatus>;
 export const CodeWorktree = z.object({
     path: z.string(),
     branch: z.string(),
-    // Branch the original checkout was on when the worktree was created;
-    // merge-back targets whatever the checkout is on at merge time, this is
-    // informational.
+    // Selected base branch when this shared worktree was created.
     baseBranch: z.string().nullable(),
+    // Exact starting commit; absent on legacy worktrees, which cannot switch base.
+    baseCommit: z.string().optional(),
     mergedAt: z.iso.datetime().optional(),
     removedAt: z.iso.datetime().optional(),
 });
@@ -103,3 +103,10 @@ export const GitStatusFile = z.object({
     deletions: z.number().nullable(),
 });
 export type GitStatusFile = z.infer<typeof GitStatusFile>;
+
+// The absolute worktree path is its stable shared identity. Existing session
+// files already contain it, so older conversations join their workspace without
+// rewriting history or moving directories. In-repo sessions share their cwd.
+export function codeWorkspaceKey(session: CodeSession): string {
+    return JSON.stringify([session.projectId, session.worktree?.path ?? session.cwd]);
+}

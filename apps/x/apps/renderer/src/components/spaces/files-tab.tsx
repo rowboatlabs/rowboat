@@ -1,3 +1,8 @@
+import { FileConflictNotice, useSpaceFileSave } from './file-conflict'
+import { splitFrontmatter, joinFrontmatter } from '@/lib/frontmatter'
+import { MarkdownEditor } from '@/components/markdown-editor'
+import { SpaceDocumentViewer } from './document-viewer'
+import { getViewerType } from '@/lib/file-types'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowLeft, Check, Clock, Download, Eye, FileText, Folder, FolderOpen, History, Image as ImageIcon, Loader2, MoreHorizontal, Pencil, PenTool, Plus, RotateCcw, Trash2, Upload, X } from 'lucide-react'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu'
@@ -14,8 +19,9 @@ import { RichMarkdownViewer } from '@/components/rich-markdown-viewer'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { MemberText } from '@/components/spaces/member-text'
 import {
-    attributionLabel, blobAppUrl, buildFileTree, formatBytes, formatFeedTime, isImageMime,
-    parseAssetWireUrl, parseBlobAppUrl, resolveSpaceLink, rewriteBlobLinks, rewriteRelativeImages, toggleTaskAt,
+    attributionLabel, blobAppUrl, blobWireUrl, buildFileTree, formatBytes, formatFeedTime, isImageMime,
+    isRestorableChangeSet, parseAssetWireUrl, parseBlobAppUrl, resolveSpaceLink, rewriteBlobLinks,
+    rewriteRelativeImages, toggleTaskAt,
     type FileTreeNode,
 } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
@@ -24,9 +30,9 @@ import { uploadInputFor } from '@/lib/spaces-upload'
 
 // Files: the tree (README first) and the file column — rendered file
 // with one-tap checkboxes, Edit → draft→apply (merged / conflict handled),
-// History with diffs. Binary files (uploads, spec §6) render a preview or a
-// download card instead of the editor; Replace is the binary "edit" (a new
-// upload proposed at the same path against the current version).
+// History with diffs and restore-to-version. Supported documents reuse the
+// workspace viewers/editors; other binary files retain the download card and
+// versioned Replace action.
 
 // ---------------------------------------------------------------------------
 // Files rail — the space's tree, README first, unread dots on moved files
@@ -99,7 +105,7 @@ export function FileTree({ orgId, spaceId, entries, draftFolders = [], selectedP
 
     // Row actions. Rename/move edits the FULL path inline (folders are key
     // prefixes — typing a new prefix moves the file); the server's change
-    // event refreshes every pane. Delete asks for an optional reason.
+    // event refreshes every pane. Deleting confirms the move to Trash.
     const [renaming, setRenaming] = useState<{ path: string; value: string } | null>(null)
     const [deleting, setDeleting] = useState<spaces.SpacesAssetEntry | null>(null)
     const commitMove = async (entry: spaces.SpacesAssetEntry, toPath: string) => {
@@ -405,7 +411,9 @@ export function FileColumn({ org, space, path, entries = [], memberNames, refres
     const [draft, setDraft] = useState<DraftState | null>(null)
     const [applying, setApplying] = useState(false)
     const [historyOpen, setHistoryOpen] = useState(false)
-    const [diffView, setDiffView] = useState<{ title: string; unified: string } | null>(null)
+    const [diffView, setDiffView] = useState<{ title: string; unified: string; restorable: number | null } | null>(null)
+    /** The older version the reader asked to bring back (confirmed in a dialog). */
+    const [restoreTarget, setRestoreTarget] = useState<number | null>(null)
 
     const load = useCallback(async () => {
         try {
@@ -484,10 +492,13 @@ export function FileColumn({ org, space, path, entries = [], memberNames, refres
         }
     }
 
-    const showDiff = async (from: number, to: number) => {
+    // `restorable` is the version the diff's change-set produced, when going
+    // back to it is offered — the history row decides that, so the dialog and
+    // the row can never disagree.
+    const showDiff = async (from: number, to: number, restorable: number | null) => {
         try {
             const res = await window.ipc.invoke('spaces:diff', { orgId: org.id, spaceId: space.id, path, from, to })
-            setDiffView({ title: `${path} · v${from} → v${to}`, unified: res.unified })
+            setDiffView({ title: `${path} · v${from} → v${to}`, unified: res.unified, restorable })
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not load the diff', 'error')
         }
@@ -804,12 +815,42 @@ export function FileColumn({ org, space, path, entries = [], memberNames, refres
             )}
             <div className="flex-1 min-h-0 flex">
                 <div className="flex-1 min-w-0 min-h-0 overflow-y-auto">
-                    {draft ? (
+                    {draft && /\.md$/i.test(path) ? (
+                        <MarkdownEditor
+                            content={splitFrontmatter(draft.text).body}
+                            frontmatter={splitFrontmatter(draft.text).raw}
+                            onFrontmatterChange={(raw) => setDraft({ ...draft, text: joinFrontmatter(raw, splitFrontmatter(draft.text).body), conflict: null })}
+                            onChange={(text) => setDraft({ ...draft, text: joinFrontmatter(splitFrontmatter(draft.text).raw, text), conflict: null })}
+                            onExport={async (format) => {
+                                try {
+                                    await window.ipc.invoke('export:note', { markdown: draft.text, format, title: fileName })
+                                } catch (err) {
+                                    toast(err instanceof Error ? err.message : 'Could not export', 'error')
+                                }
+                            }}
+                            onImageUpload={async (file) => {
+                                const uploaded = await window.ipc.invoke('spaces:uploadBlob', {
+                                    orgId: org.id, spaceId: space.id, name: file.name,
+                                    ...(await uploadInputFor(file)),
+                                    ...(file.type ? { mime: file.type } : {}),
+                                })
+                                return blobWireUrl(wireRefs, uploaded.blob.hash, file.name)
+                            }}
+                        />
+                    ) : draft ? (
                         <Textarea
                             value={draft.text}
                             spellCheck={false}
                             className="w-full h-full min-h-full rounded-none border-0 font-mono text-sm resize-none focus-visible:ring-0 px-5 py-4"
                             onChange={(e) => setDraft({ ...draft, text: e.target.value, conflict: null })}
+                        />
+                    ) : asset && getViewerType(path) ? (
+                        <SpaceDocumentViewer
+                            key={`${org.id}:${space.id}:${path}:${['docx', 'pptx'].includes(getViewerType(path)!) ? 'editor' : asset.version}`}
+                            orgId={org.id}
+                            spaceId={space.id}
+                            asset={asset}
+                            onChanged={onChanged}
                         />
                     ) : blob ? (
                         <div className="p-5">
@@ -857,8 +898,10 @@ export function FileColumn({ org, space, path, entries = [], memberNames, refres
                         path={path}
                         memberNames={memberNames}
                         refreshTick={refreshTick}
+                        currentVersion={asset.version}
                         onClose={() => setHistoryOpen(false)}
-                        onShowDiff={(from, to) => void showDiff(from, to)}
+                        onShowDiff={(from, to, restorable) => void showDiff(from, to, restorable)}
+                        onRestore={setRestoreTarget}
                     />
                 )}
             </div>
@@ -870,8 +913,39 @@ export function FileColumn({ org, space, path, entries = [], memberNames, refres
                     <pre className="max-h-[60vh] overflow-auto text-xs bg-muted/50 rounded p-3 whitespace-pre-wrap">
                         {diffView?.unified}
                     </pre>
+                    {/* Inspecting a diff is usually how someone decides to go back,
+                        so the action sits right where that decision is made. */}
+                    {diffView?.restorable != null && (
+                        <div className="flex justify-end">
+                            <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-xs"
+                                onClick={() => {
+                                    setRestoreTarget(diffView.restorable)
+                                    setDiffView(null)
+                                }}
+                            >
+                                <RotateCcw className="size-3 mr-1" /> Restore to v{diffView.restorable}
+                            </Button>
+                        </div>
+                    )}
                 </DialogContent>
             </Dialog>
+            {restoreTarget !== null && asset && (
+                <RestoreVersionDialog
+                    orgId={org.id}
+                    spaceId={space.id}
+                    path={path}
+                    version={restoreTarget}
+                    currentVersion={asset.version}
+                    onClose={() => setRestoreTarget(null)}
+                    onRestored={async () => {
+                        await load()
+                        onChanged()
+                    }}
+                />
+            )}
         </section>
     )
 }
@@ -912,14 +986,17 @@ function ConflictNotice({ conflict, memberNames, onUseCurrent, onRebase }: {
     )
 }
 
-function HistoryPanel({ org, space, path, memberNames, refreshTick, onClose, onShowDiff }: {
+function HistoryPanel({ org, space, path, memberNames, refreshTick, currentVersion, onClose, onShowDiff, onRestore }: {
     org: OrgWithSpaces
     space: spaces.Space
     path: string
     memberNames: Map<string, string>
     refreshTick: number
+    /** The head — rows at or above it have nothing to restore. */
+    currentVersion: number
     onClose: () => void
-    onShowDiff: (from: number, to: number) => void
+    onShowDiff: (from: number, to: number, restorable: number | null) => void
+    onRestore: (version: number) => void
 }) {
     const [changeSets, setChangeSets] = useState<spaces.ChangeSet[]>([])
 
@@ -946,29 +1023,129 @@ function HistoryPanel({ org, space, path, memberNames, refreshTick, onClose, onS
             </div>
             <div className="flex-1 overflow-y-auto">
                 {changeSets.map((cs) => (
-                    <button
-                        key={cs.id}
-                        className="w-full text-left px-3 py-2 border-b border-border/50 hover:bg-accent/40"
-                        onClick={() => onShowDiff(cs.baseVersion, cs.resultVersion)}
-                    >
-                        <div className="flex items-center gap-2">
-                            <MemberAvatar id={cs.attribution.memberId} name={memberNames.get(cs.attribution.memberId) ?? cs.attribution.memberId} size="sm" />
-                            <div className="text-xs font-medium truncate">{attributionLabel(cs.attribution, memberNames)}</div>
-                        </div>
-                        {cs.op && (
-                            <div className="mt-1 pl-7 text-[12px] text-muted-foreground">
-                                {cs.op === 'move' ? `moved from ${cs.movedFrom ?? '…'}` : cs.op === 'delete' ? 'deleted' : 'restored'}
+                    <div key={cs.id} className="group/histrow relative border-b border-border/50">
+                        <button
+                            className="w-full text-left px-3 py-2 hover:bg-accent/40"
+                            onClick={() => onShowDiff(cs.baseVersion, cs.resultVersion, isRestorableChangeSet(cs, currentVersion) ? cs.resultVersion : null)}
+                        >
+                            <div className="flex items-center gap-2 pr-14">
+                                <MemberAvatar id={cs.attribution.memberId} name={memberNames.get(cs.attribution.memberId) ?? cs.attribution.memberId} size="sm" />
+                                <div className="text-xs font-medium truncate">{attributionLabel(cs.attribution, memberNames)}</div>
                             </div>
+                            {cs.op && (
+                                <div className="mt-1 pl-7 text-[12px] text-muted-foreground">
+                                    {cs.op === 'move' ? `moved from ${cs.movedFrom ?? '…'}` : cs.op === 'delete' ? 'deleted' : 'restored'}
+                                </div>
+                            )}
+                            {cs.reason && <div className="text-xs text-muted-foreground mt-1 pl-7">&ldquo;<MemberText text={cs.reason} />&rdquo;</div>}
+                            <div className="text-[10.5px] text-muted-foreground mt-1 pl-7 flex items-center gap-1">
+                                <Clock className="size-2.5" /> {formatFeedTime(cs.committedAt)} · v{cs.resultVersion}
+                            </div>
+                        </button>
+                        {isRestorableChangeSet(cs, currentVersion) && (
+                            <button
+                                type="button"
+                                aria-label={`Restore to v${cs.resultVersion}`}
+                                title={`Bring this file back to v${cs.resultVersion}`}
+                                onClick={() => onRestore(cs.resultVersion)}
+                                className="absolute right-1.5 top-1.5 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] text-muted-foreground opacity-0 hover:bg-background hover:text-foreground focus-visible:opacity-100 group-hover/histrow:opacity-100"
+                            >
+                                <RotateCcw className="size-2.5" /> Restore
+                            </button>
                         )}
-                        {cs.reason && <div className="text-xs text-muted-foreground mt-1 pl-7">&ldquo;<MemberText text={cs.reason} />&rdquo;</div>}
-                        <div className="text-[10.5px] text-muted-foreground mt-1 pl-7 flex items-center gap-1">
-                            <Clock className="size-2.5" /> {formatFeedTime(cs.committedAt)} · v{cs.resultVersion}
-                        </div>
-                    </button>
+                    </div>
                 ))}
                 {changeSets.length === 0 && <div className="px-3 py-2 text-xs text-muted-foreground">No history yet.</div>}
             </div>
         </aside>
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Restore to a previous version. Going back is an ordinary change-set, not a
+// rewind: the old bytes are re-proposed against the head, so every version in
+// between survives in history (and the restore itself is restorable).
+// ---------------------------------------------------------------------------
+
+export function RestoreVersionDialog({ orgId, spaceId, path, version, currentVersion, onClose, onRestored }: {
+    orgId: string
+    spaceId: string
+    path: string
+    /** The older version whose content becomes the new head. */
+    version: number
+    /** The head as the reader last saw it — re-read at confirm time. */
+    currentVersion: number
+    onClose: () => void
+    onRestored: () => void
+}) {
+    const [busy, setBusy] = useState(false)
+    const [head, setHead] = useState(currentVersion)
+    const fileName = path.split('/').pop() ?? path
+
+    const confirm = async () => {
+        setBusy(true)
+        try {
+            // Read the head immediately before proposing so the base is as
+            // fresh as possible: a restore that three-way-merges someone's
+            // concurrent edit isn't the verbatim restore that was asked for.
+            const current = await window.ipc.invoke('spaces:readAsset', { orgId, spaceId, path })
+            setHead(current.version)
+            const snapshot = await window.ipc.invoke('spaces:readAsset', { orgId, spaceId, path, version })
+            const result = await window.ipc.invoke('spaces:proposeChange', {
+                orgId,
+                spaceId,
+                input: {
+                    assetPath: path,
+                    baseVersion: current.version,
+                    // Binary versions re-reference the blob they already point
+                    // at — the bytes never travel, and nothing is re-uploaded.
+                    ...(snapshot.blob ? { blob: snapshot.blob.hash } : { newContent: snapshot.content }),
+                    reason: `restore to v${version}`,
+                },
+            })
+            onRestored()
+            if (result.outcome === 'conflict') {
+                // Someone committed inside that window. Nothing was written;
+                // the dialog stays open so confirming again retries on the new head.
+                setHead(result.currentVersion)
+                toast(`${fileName} changed while restoring - it's now v${result.currentVersion}, try again`, 'error')
+                return
+            }
+            toast(
+                result.outcome === 'merged'
+                    ? `Restored v${version} with concurrent changes folded in - now v${result.version}`
+                    : `Restored v${version} - now v${result.version}`,
+                'success',
+            )
+            onClose()
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not restore', 'error')
+        } finally {
+            setBusy(false)
+        }
+    }
+
+    return (
+        <Dialog open onOpenChange={(open) => !open && !busy && onClose()}>
+            <DialogContent className="max-w-sm">
+                <DialogHeader>
+                    <DialogTitle className="break-words text-sm">Restore “{fileName}” to v{version}?</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-3">
+                    <p className="text-xs text-muted-foreground">
+                        This saves v{version}&rsquo;s content as v{head + 1} for everyone in the space. Nothing is lost -
+                        v{head} stays in history, so you can come back to it the same way.
+                    </p>
+                    <div className="flex justify-end gap-2">
+                        <Button variant="ghost" size="sm" className="h-7 text-xs" disabled={busy} onClick={onClose}>Cancel</Button>
+                        <Button size="sm" className="h-7 text-xs" disabled={busy} onClick={() => void confirm()}>
+                            {busy ? <Loader2 className="size-3 mr-1 animate-spin" /> : <RotateCcw className="size-3 mr-1" />}
+                            Restore v{version}
+                        </Button>
+                    </div>
+                </div>
+            </DialogContent>
+        </Dialog>
     )
 }
 
@@ -984,14 +1161,12 @@ export function DeleteAssetDialog({ orgId, spaceId, entry, onClose, onDeleted }:
     onClose: () => void
     onDeleted?: () => void
 }) {
-    const [reason, setReason] = useState('')
     const [busy, setBusy] = useState(false)
     const confirm = async () => {
         setBusy(true)
         try {
             const res = await window.ipc.invoke('spaces:deleteAsset', {
                 orgId, spaceId, path: entry.path, baseVersion: entry.version,
-                ...(reason.trim() ? { reason: reason.trim() } : {}),
             })
             if (res.outcome === 'conflict') {
                 toast(`${entry.path} changed meanwhile — review and try again`, 'error')
@@ -1010,24 +1185,16 @@ export function DeleteAssetDialog({ orgId, spaceId, entry, onClose, onDeleted }:
         <Dialog open onOpenChange={(open) => !open && !busy && onClose()}>
             <DialogContent className="max-w-sm">
                 <DialogHeader>
-                    <DialogTitle className="text-sm">Delete <code className="font-mono text-[12px]">{entry.path}</code>?</DialogTitle>
+                    <DialogTitle className="break-words text-sm">Move “{entry.path}” to Trash?</DialogTitle>
                 </DialogHeader>
                 <div className="space-y-3">
                     <p className="text-xs text-muted-foreground">
-                        It moves to Trash — history stays, and anyone can restore it. The feed will show who deleted it and why.
+                        This removes the file from Space files for everyone. You can restore it from Trash.
                     </p>
-                    <Input
-                        value={reason}
-                        placeholder="Why? (optional — shows in the feed and history)"
-                        className="h-7 text-xs"
-                        disabled={busy}
-                        onChange={(e) => setReason(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') void confirm() }}
-                    />
                     <div className="flex justify-end gap-2">
                         <Button variant="ghost" size="sm" className="h-7 text-xs" disabled={busy} onClick={onClose}>Cancel</Button>
                         <Button variant="destructive" size="sm" className="h-7 text-xs" disabled={busy} onClick={() => void confirm()}>
-                            {busy ? <Loader2 className="size-3 mr-1 animate-spin" /> : <Trash2 className="size-3 mr-1" />} Delete
+                            {busy ? <Loader2 className="size-3 mr-1 animate-spin" /> : <Trash2 className="size-3 mr-1" />} Move to Trash
                         </Button>
                     </div>
                 </div>
@@ -1119,7 +1286,8 @@ export function TrashDialog({ org, space, onClose }: {
 interface UploadRow {
     file: File
     name: string
-    status: 'pending' | 'uploading' | 'done' | 'error'
+    status: 'pending' | 'uploading' | 'done' | 'error' | 'cancelled'
+    savedPath?: string
     error?: string
 }
 
@@ -1134,43 +1302,39 @@ export function UploadFilesDialog({ org, space, files, entries, defaultFolder, o
     onDone: () => void
 }) {
     const [folder, setFolder] = useState(defaultFolder ?? '')
+    const [choosingFolder, setChoosingFolder] = useState(false)
     const [rows, setRows] = useState<UploadRow[]>(files.map((file) => ({ file, name: file.name, status: 'pending' })))
     const [running, setRunning] = useState(false)
+    const fileSave = useSpaceFileSave(org.id, space.id)
+    const uploadedHashes = useRef(new Map<File, string>())
 
     const cleanFolder = folder.trim().replace(/^\/+|\/+$/g, '')
     const destFor = (name: string) => (cleanFolder ? `${cleanFolder}/${name}` : name)
-    const existing = useMemo(() => new Map(entries.map((e) => [e.path, e.version])), [entries])
 
     const upload = async () => {
         setRunning(true)
         let failed = 0
         for (const [i, row] of rows.entries()) {
-            if (row.status === 'done') continue
-            setRows((prev) => prev.map((r, j) => (j === i ? { ...r, status: 'uploading' } : r)))
+            if (row.status === 'done' || row.status === 'cancelled') continue
+            setRows((prev) => prev.map((r, j) => (j === i ? { ...r, status: 'uploading', error: undefined } : r)))
             try {
-                const uploaded = await window.ipc.invoke('spaces:uploadBlob', {
-                    orgId: org.id,
-                    spaceId: space.id,
-                    ...(await uploadInputFor(row.file)),
-                    name: row.name,
-                    ...(row.file.type ? { mime: row.file.type } : {}),
-                })
-                const dest = destFor(row.name)
-                const result = await window.ipc.invoke('spaces:proposeChange', {
-                    orgId: org.id,
-                    spaceId: space.id,
-                    input: {
-                        assetPath: dest,
-                        // Existing path = replace against its current head; new = create.
-                        baseVersion: existing.get(dest) ?? 0,
-                        blob: uploaded.blob.hash,
-                        reason: `upload ${row.name}`,
+                const savedPath = await fileSave.save({
+                    path: destFor(row.name),
+                    reason: `upload ${row.name}`,
+                    getBlob: async () => {
+                        const cached = uploadedHashes.current.get(row.file)
+                        if (cached) return cached
+                        const uploaded = await window.ipc.invoke('spaces:uploadBlob', {
+                            orgId: org.id, spaceId: space.id,
+                            ...(await uploadInputFor(row.file)), name: row.name,
+                            ...(row.file.type ? { mime: row.file.type } : {}),
+                        })
+                        uploadedHashes.current.set(row.file, uploaded.blob.hash)
+                        return uploaded.blob.hash
                     },
                 })
-                if (result.outcome === 'conflict') {
-                    throw new Error(`someone changed ${dest} meanwhile — try again`)
-                }
-                setRows((prev) => prev.map((r, j) => (j === i ? { ...r, status: 'done' } : r)))
+                setRows((prev) => prev.map((r, j) => (j === i ? { ...r, status: savedPath ? 'done' : 'cancelled', savedPath: savedPath ?? undefined, error: undefined } : r)))
+                if (savedPath) onDone()
             } catch (err) {
                 failed += 1
                 const message = err instanceof Error ? err.message : 'upload failed'
@@ -1179,8 +1343,6 @@ export function UploadFilesDialog({ org, space, files, entries, defaultFolder, o
         }
         setRunning(false)
         if (failed === 0) {
-            toast(rows.length === 1 ? `Uploaded ${destFor(rows[0]!.name)}` : `Uploaded ${rows.length} files`, 'success')
-            onDone()
             onClose()
         }
     }
@@ -1192,16 +1354,23 @@ export function UploadFilesDialog({ org, space, files, entries, defaultFolder, o
                     <DialogTitle className="text-sm">Upload to {space.name}</DialogTitle>
                 </DialogHeader>
                 <div className="space-y-3">
-                    <label className="block text-xs text-muted-foreground">
-                        Folder <span className="text-muted-foreground/70">(optional — e.g. design/screens; created by the upload)</span>
-                        <Input
-                            value={folder}
-                            placeholder="(space root)"
-                            className="mt-1 h-7 text-xs font-mono"
-                            disabled={running}
-                            onChange={(e) => setFolder(e.target.value)}
-                        />
-                    </label>
+                    <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                        <span>Upload to: {cleanFolder || 'Space files'}</span>
+                        <button type="button" disabled={running || rows.some((row) => row.status === 'done')} onClick={() => setChoosingFolder((value) => !value)} className="shrink-0 underline">Change folder</button>
+                    </div>
+                    {choosingFolder && (
+                        <label className="block text-xs text-muted-foreground">
+                            Folder (optional)
+                            <Input value={folder} placeholder="Leave blank for Space files" className="mt-1 h-7 text-xs" disabled={running || rows.some((row) => row.status === 'done')} onChange={(e) => setFolder(e.target.value)} list="space-upload-folders" />
+                            <datalist id="space-upload-folders">
+                                {[...new Set(entries.flatMap((entry) => {
+                                    const parts = entry.path.split('/')
+                                    return parts.slice(0, -1).map((_, index) => parts.slice(0, index + 1).join('/'))
+                                }))].sort().map((path) => <option key={path} value={path} />)}
+                            </datalist>
+                            <span className="mt-1 block">Choose an existing folder or type a new folder name.</span>
+                        </label>
+                    )}
                     <div className="max-h-56 space-y-1 overflow-y-auto">
                         {rows.map((row, i) => (
                             <div key={i} className="flex items-center gap-2 rounded-md border border-border px-2 py-1.5 text-xs">
@@ -1215,23 +1384,21 @@ export function UploadFilesDialog({ org, space, files, entries, defaultFolder, o
                                     <FileText className="size-3.5 shrink-0 text-muted-foreground" />
                                 )}
                                 <span className="min-w-0 flex-1">
-                                    <span className="block truncate font-mono">{destFor(row.name)}</span>
-                                    {row.error && <span className="block truncate text-red-500">{row.error}</span>}
+                                    <span className="block truncate font-mono">{row.savedPath ?? destFor(row.name)}{row.status === 'cancelled' ? ' — cancelled' : ''}</span>
+                                    {row.error && <span role="alert" className="block break-words text-red-500">{row.error}</span>}
                                 </span>
                                 <span className="shrink-0 text-muted-foreground">{formatBytes(row.file.size)}</span>
-                                {existing.has(destFor(row.name)) && row.status === 'pending' && (
-                                    <span className="shrink-0 rounded bg-amber-100 px-1 text-[10px] text-amber-700 dark:bg-amber-950 dark:text-amber-400">replaces v{existing.get(destFor(row.name))}</span>
-                                )}
                             </div>
                         ))}
                     </div>
-                    <div className="flex justify-end gap-2">
+                    {fileSave.conflict && <FileConflictNotice conflict={fileSave.conflict} onChoose={fileSave.choose} />}
+                    {!fileSave.conflict && <div className="flex justify-end gap-2">
                         <Button variant="ghost" size="sm" className="h-7 text-xs" disabled={running} onClick={onClose}>Cancel</Button>
                         <Button size="sm" className="h-7 text-xs" disabled={running || rows.length === 0} onClick={() => void upload()}>
                             {running ? <Loader2 className="size-3 mr-1 animate-spin" /> : <Upload className="size-3 mr-1" />}
                             Upload {rows.length === 1 ? '' : `${rows.length} files`}
                         </Button>
-                    </div>
+                    </div>}
                 </div>
             </DialogContent>
         </Dialog>
