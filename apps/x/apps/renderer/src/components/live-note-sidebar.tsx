@@ -272,7 +272,7 @@ export function LiveNoteSidebar({ filePath, onClose }: LiveNoteSidebarProps) {
   if (!loading && !live) {
     return (
       <aside className="flex w-[440px] max-w-[40vw] shrink-0 flex-col overflow-hidden border-l border-border bg-background">
-        <div className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border px-4">
+        <div className="rowboat-header flex shrink-0 items-center gap-2.5 border-b border-border px-4">
           <Radio className="size-4 shrink-0 text-muted-foreground" />
           <span className="truncate text-sm font-semibold">{noteTitle}</span>
           <span className="ml-auto" />
@@ -308,7 +308,7 @@ export function LiveNoteSidebar({ filePath, onClose }: LiveNoteSidebarProps) {
   return (
     <aside className="flex w-[440px] max-w-[40vw] shrink-0 flex-col overflow-hidden border-l border-border bg-background">
       {/* Header */}
-      <div className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border px-4">
+      <div className="rowboat-header flex shrink-0 items-center gap-2.5 border-b border-border px-4">
         <Radio
           className={`size-4 shrink-0 ${paused ? 'text-muted-foreground' : 'text-[var(--rowboat-success)]'}`}
         />

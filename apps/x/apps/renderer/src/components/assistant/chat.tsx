@@ -53,11 +53,11 @@ export function Chat({ tab, location, visible, focused, services: p, onMove, onN
   const reportError = (error: unknown) => toast.error(error instanceof Error ? error.message : String(error))
   const action = (fn: () => Promise<unknown>) => { void fn().catch(reportError) }
   return <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-[inherit] bg-background" data-canonical-chat={tab.chatId}>
-    <header data-chat-header className="titlebar-no-drag flex h-10 shrink-0 items-stretch border-b border-border px-1">
+    <header data-chat-header className="rowboat-header titlebar-no-drag flex shrink-0 items-center border-b border-border px-1">
       <ChatHeader activeTitle={title} activeRunId={tab.runId} sessionUsage={state.sessionUsage}
         onNewChatTab={onNew} recentRuns={p.recentRuns} onSelectRun={onSelect} onOpenChatHistory={p.onOpenChatHistory} />
       {destinations.filter((destination) => destination.location !== location).map(({ location, label, Icon }) => <Tooltip key={location}>
-        <TooltipTrigger asChild><button type="button" aria-label={label} onClick={() => onMove(location)} className="my-1 flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><Icon className="size-4" /></button></TooltipTrigger>
+        <TooltipTrigger asChild><button type="button" aria-label={label} onClick={() => onMove(location)} className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><Icon className="size-4" /></button></TooltipTrigger>
         <TooltipContent side="bottom">{label}</TooltipContent>
       </Tooltip>)}
       {controls}

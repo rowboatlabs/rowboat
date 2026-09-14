@@ -126,7 +126,7 @@ export function BrowserTabRail({
       ) : (
         // Inner content is fixed at the open width so rows don't reflow mid-slide.
         <div className="flex h-full w-[240px] flex-col">
-          <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border pl-3 pr-1.5">
+          <div className="rowboat-header flex shrink-0 items-center gap-1 border-b border-border pl-3 pr-1.5">
             <span className="min-w-0 flex-1 truncate text-[13px] text-muted-foreground">Tabs</span>
             <button
               type="button"

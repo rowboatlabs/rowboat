@@ -179,7 +179,7 @@ export function AssistantWorkspace(p: AssistantWorkspaceProps) {
       // button into the chat's header row rather than stacking a strip above it.
       const controls = location === 'sidebar'
         ? <button type="button" aria-label="Close sidebar" title="Close - conversation stays in history" onClick={() => close(tab.id)}
-          className="my-1 flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><X className="size-4" /></button>
+          className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><X className="size-4" /></button>
         : undefined
       return [<MountedChat key={tab.chatId} host={host ?? null}>
         <Chat tab={tab} location={location} visible={visible} focused={layout.focused === tab.id} services={p} controls={controls}

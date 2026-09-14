@@ -28,7 +28,7 @@ export function WorkspaceSessionTabs({ session, onSelect }: { session: CodeSessi
     } catch (err) { toast.error(err instanceof Error ? err.message : 'Failed to create session') }
     finally { creatingRef.current = false; setCreating(false) }
   }
-  return <div className="flex h-9 min-w-0 shrink-0 border-b border-border">
+  return <div className="rowboat-header flex min-w-0 shrink-0 border-b border-border">
     <div role="tablist" aria-label="Worktree sessions" className="flex min-w-0 flex-1 overflow-x-auto">
       {members.map((member) => <button key={member.id} type="button" role="tab" aria-selected={member.id === session.id}
         onClick={() => onSelect(member.id)} title={`${member.title} · ${statusOf(member.id)}${member.doneAt ? ' · Done' : ''}`}
@@ -37,7 +37,7 @@ export function WorkspaceSessionTabs({ session, onSelect }: { session: CodeSessi
         <span className="truncate">{member.title}</span>
       </button>)}
     </div>
-    <Button variant="ghost" size="icon" className="size-9 shrink-0 rounded-none" disabled={creating || !!session.worktree?.removedAt}
+    <Button variant="ghost" size="icon" className="size-9 shrink-0 self-center rounded-none" disabled={creating || !!session.worktree?.removedAt}
       aria-label="New session in this worktree" title="New session in this worktree" onClick={() => void create()}><Plus className="size-4" /></Button>
   </div>
 }

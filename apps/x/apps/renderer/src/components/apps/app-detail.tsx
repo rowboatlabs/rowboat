@@ -147,7 +147,7 @@ export function AppDetail({ folder, onClose }: { folder: string; onClose: () => 
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
+      <div className="rowboat-header flex shrink-0 items-center gap-2 border-b border-border px-4">
         <span className="flex-1 truncate text-sm font-semibold">{manifest?.name ?? folder}</span>
         <button type="button" onClick={onClose} className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground">
           <X className="size-4" />

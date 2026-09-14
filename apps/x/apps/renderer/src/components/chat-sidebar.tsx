@@ -529,7 +529,7 @@ export function ChatSidebar({
             {onCloseTab && <Button variant="ghost" size="icon" onClick={onCloseTab} className="titlebar-no-drag my-1 mr-1 size-8 shrink-0" aria-label="Close chat tab" title="Close tab — conversation stays in history"><X className="size-4" /></Button>}
           </header>
 
-          {codeSessionTabs ?? <div className="flex h-9 shrink-0 border-b border-border">
+          {codeSessionTabs ?? <div className="rowboat-header flex shrink-0 border-b border-border">
             <TabBar tabs={chatTabs} activeTabId={activeChatTabId} getTabId={(tab) => tab.id}
               getTabTitle={getChatTabTitle} onSwitchTab={onSwitchChatTab}
               onCloseTab={(id) => onCloseChatTabs([id])} onCloseTabs={onCloseChatTabs} layout="scroll" />

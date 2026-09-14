@@ -573,7 +573,7 @@ export function EditorHeader({
   themeBusy,
 }: EditorHeaderProps) {
   return (
-    <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-1.5">
+    <header className="rowboat-header flex shrink-0 items-center gap-2 border-b border-border px-3">
       <PresentationIcon className="size-4 shrink-0 text-muted-foreground" />
       <span className="truncate text-sm font-medium text-foreground" title={filePath}>
         {fileName}
