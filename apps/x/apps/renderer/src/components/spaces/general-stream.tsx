@@ -493,9 +493,13 @@ export function GeneralStream({
         }
     }, [stream.messages, stream.loadingOlder])
 
-    // Jump-to-message (search, pinned, saved): consume the pending jump once
-    // visible, lift the render cap so the row is in the DOM, then scroll +
-    // flash. The landing position counts as a reader scroll (tail pin lets go).
+    // Jump-to-message (search, pinned, saved, Activity): consume the pending
+    // jump once visible, render the WHOLE loaded window, then scroll + flash.
+    // The landing position counts as a reader scroll (tail pin lets go).
+    // The full window first, even when the row is already in the short
+    // first-paint tail: the deferred lift above would otherwise prepend the
+    // rest a frame after the landing, and with the tail pin released nothing
+    // compensates — the viewport is left near the top of the window.
     const [jumpMid, setJumpMid] = useState<string | null>(null)
     useEffect(() => {
         if (!visible) return
@@ -510,16 +514,19 @@ export function GeneralStream({
         if (!jumpMid) return
         const el = scrollRef.current
         if (!el) return
+        // Rows still hidden by the cap: lift it and retry on the next commit.
+        if (streamMessages.length > renderCap) {
+            setRenderCap(streamMessages.length + 10)
+            return
+        }
         if (scrollToMessage(el, jumpMid)) {
             lastScrollTopRef.current = el.scrollTop
             setJumpMid(null)
             return
         }
-        // Row not in the DOM: a cap hiding settled rows lifts and retries on
-        // the next commit; a fully-rendered window without the row is a real
-        // miss (the corpus only holds loaded pages) — give up, don't spin.
-        if (streamMessages.length > renderCap) setRenderCap(streamMessages.length + 10)
-        else if (stream.ready) setJumpMid(null)
+        // A fully-rendered window without the row is a real miss (the corpus
+        // only holds loaded pages) — give up, don't spin.
+        if (stream.ready) setJumpMid(null)
     }, [jumpMid, renderCap, stream.ready, streamMessages.length])
 
     // Jump-to-unread: the stream always opens at the bottom, so when the New
