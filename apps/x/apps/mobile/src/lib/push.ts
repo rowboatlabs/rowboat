@@ -23,14 +23,26 @@ export const PUSH_LEVELS: { key: PushLevel; label: string; detail: string }[] = 
 const LEVEL_KEY = 'rowboat.push.level.v1';
 const DEFAULT_LEVEL: PushLevel = 'dms';
 
-// Foreground presentation: show banners while the app is open too.
+// The space the user is looking at right now — a push about it is noise
+// (Slack: no banner for the open conversation). Screens set/clear it.
+let activeSpaceId: string | null = null;
+export function setActiveSpace(spaceId: string | null): void {
+  activeSpaceId = spaceId;
+}
+
+// Foreground presentation: banners while the app is open, except for the
+// space on screen.
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: false,
-    shouldSetBadge: false,
-  }),
+  handleNotification: async (notification) => {
+    const data = notification.request.content.data as { spaceId?: string } | undefined;
+    const suppress = Boolean(activeSpaceId && data?.spaceId === activeSpaceId);
+    return {
+      shouldShowBanner: !suppress,
+      shouldShowList: !suppress,
+      shouldPlaySound: false,
+      shouldSetBadge: false,
+    };
+  },
 });
 
 export async function getPushLevel(): Promise<PushLevel> {
@@ -86,16 +98,32 @@ export async function registerWithMac(rpc: RpcClient): Promise<'registered' | 'n
 export async function registerWithHarbor(
   orgs: SpacesOrg[],
   getAccessToken: (opts?: { forceRefresh?: boolean }) => Promise<string>,
-): Promise<'registered' | 'no-permission' | 'unavailable'> {
+): Promise<'registered' | 'no-permission' | 'unavailable' | 'error'> {
   const level = await getPushLevel();
   const token = await getPushToken();
   if (!token) return Device.isDevice ? 'no-permission' : 'unavailable';
-  await Promise.all(
+  const results = await Promise.all(
     orgs.map((org) =>
       new SpacesClient({ baseUrl: `https://${org.address}`, token: getAccessToken })
         .registerPush({ token, level })
-        .catch(() => {}),
+        .then(() => true)
+        .catch(() => false),
     ),
   );
-  return 'registered';
+  // Every org refused/failed = the registration did NOT land — say so.
+  return results.some(Boolean) ? 'registered' : 'error';
+}
+
+/** Sign-out: forget this device on every org (the member's level stays). Best-effort. */
+export async function unregisterFromHarbor(
+  orgs: SpacesOrg[],
+  getAccessToken: (opts?: { forceRefresh?: boolean }) => Promise<string>,
+): Promise<void> {
+  const token = await getPushToken().catch(() => null);
+  if (!token) return;
+  await Promise.all(
+    orgs.map((org) =>
+      new SpacesClient({ baseUrl: `https://${org.address}`, token: getAccessToken }).unregisterPush(token).catch(() => {}),
+    ),
+  );
 }

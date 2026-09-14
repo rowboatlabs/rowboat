@@ -3,7 +3,7 @@ import * as SecureStore from 'expo-secure-store';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import { danceForTokens, discoverIssuer, refreshTokens, type SpacesTokens } from './oauth';
-import { registerWithHarbor } from '@/lib/push';
+import { registerWithHarbor, unregisterFromHarbor } from '@/lib/push';
 
 // Spaces account state: ONE sign-in against the deployment's AS (discovered
 // from the apex), tokens in the keychain, orgs from apex GET /v1/orgs.
@@ -116,12 +116,15 @@ export function SpacesAccountProvider({ children }: { children: ReactNode }) {
   }, [persist]);
 
   const signOut = useCallback(async () => {
+    // Forget this device's push token on every org BEFORE the tokens go —
+    // otherwise the phone keeps buzzing for an account it no longer shows.
+    if (orgs?.length) await unregisterFromHarbor(orgs, getAccessToken).catch(() => {});
     await persist(null);
     void AsyncStorage.removeItem(ORGS_CACHE_KEY).catch(() => {});
     setOrgs(null);
     setOrgsError(null);
     setStatus('signedOut');
-  }, [persist]);
+  }, [persist, orgs, getAccessToken]);
 
   const value = useMemo(
     () => ({ status, orgs, orgsError, signIn, signOut, refreshOrgs, getAccessToken }),

@@ -2,7 +2,7 @@
   "expo": {
     "name": "Rowboat",
     "slug": "rowboat-mobile",
-    "version": "0.1.0",
+    "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "rowboat",
@@ -46,7 +46,13 @@
       ],
       "expo-secure-store",
       "expo-font",
-      "expo-image"
+      "expo-image",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Rowboat uses your photos to share them in a space."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
