@@ -274,7 +274,7 @@ function rebuildMenu(): void {
         click: () => sendCommand({ command: "toggle-browser" }),
       },
       {
-        label: "Full-Screen Chat",
+        label: "Toggle Chat Sidebar",
         accelerator: "CmdOrCtrl+L",
         registerAccelerator: false,
         click: () => sendCommand({ command: "toggle-full-screen-chat" }),

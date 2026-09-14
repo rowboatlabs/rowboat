@@ -9,17 +9,16 @@ import { RunEvent } from '@x/shared/src/runs.js';
 import type { ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
-import { CheckIcon, LoaderIcon, PanelLeftIcon, ArrowLeft, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon, SquarePen, FolderOpen, X } from 'lucide-react';
+import { CheckIcon, LoaderIcon, PanelLeftIcon, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon, SquarePen, FolderOpen, X } from 'lucide-react';
 import { cn, compactPath, parentPath } from '@/lib/utils';
 import { SPACES_ENABLED } from '@/lib/feature-flags';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
-import { ChatSidebar } from './components/chat-sidebar';
-import { AssistantChatDock } from './components/assistant-chat-dock';
-import { ASSISTANT_TABS_KEY, createAssistantTab, readAssistantPreference, restoreAssistantTabs, tabsAfterClose, writeAssistantPreference } from './lib/assistant-dock';
+import { AssistantWorkspace } from './components/assistant/assistant-workspace';
+import { ASSISTANT_LAYOUT_KEY, chatLocation, defaultWindowSize, restoreAssistantLayout, useAssistantLayout, type ChatLocation } from './lib/assistant-layout';
+import { ASSISTANT_TABS_KEY, createAssistantTab, readAssistantPreference, restoreAssistantTabs, writeAssistantPreference } from './lib/assistant-dock';
 import { useSessionChat } from '@/hooks/useSessionChat';
 import { subscribeSessionFeed } from '@/lib/session-chat/feed';
-import { ChatHeader } from './components/chat-header';
-import { ChatSessionPane, ChatSessionComposer, queuedMessageText } from './components/chat-session';
+import { queuedMessageText } from './components/chat-session';
 // Value import: the Home to-do surface mounts a standalone composer directly
 // (not tab-bound); chat tabs render theirs through ChatSessionComposer.
 import { ChatInputWithMentions, type CallPreset, type PermissionMode, type StagedAttachment, type ModelSelection } from './components/chat-input-with-mentions';
@@ -98,7 +97,6 @@ import { LiveNoteSidebar } from '@/components/live-note-sidebar'
 import { BackgroundTaskDetail } from '@/components/background-task-detail'
 import { BrowserPane } from '@/components/browser-pane/BrowserPane'
 import { VersionHistoryPanel } from '@/components/version-history-panel'
-import { FileCardProvider } from '@/contexts/file-card-context'
 import { TabBar, type ChatTab } from '@/components/tab-bar'
 import { closeTabs } from '@/lib/close-tabs'
 import { CaffeinateToggle } from '@/components/caffeinate-toggle'
@@ -896,8 +894,7 @@ function ContentHeader({
 }
 
 function App() {
-  const { chatPanePlacement, chatPaneSize, assistantPresentation } = useTheme()
-  const useBottomTabs = assistantPresentation === 'bottom-tabs'
+  const { chatPanePlacement, chatPaneSize } = useTheme()
   const isChatPaneInMiddle = chatPanePlacement === 'middle'
 
   type ShortcutPane = 'left' | 'right'
@@ -989,10 +986,6 @@ function App() {
   // read-view email query), so threads outside the synced inbox get real rows.
   const [emailInitialSearchQuery, setEmailInitialSearchQuery] = useState<string | null>(null)
   const [emailSearchQueryVersion, setEmailSearchQueryVersion] = useState(0)
-  // The view full-screen chat was expanded from, restored on close. A plain
-  // ViewState snapshot, so ANY section restores — the old per-flag record
-  // silently dropped Home/Code and left the close button doing nothing.
-  const [expandedFrom, setExpandedFrom] = useState<ViewState | null>(null)
   const [baseConfigByPath, setBaseConfigByPath] = useState<Record<string, BaseConfig>>({})
   const [graphData, setGraphData] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] }>({
     nodes: [],
@@ -1000,7 +993,6 @@ function App() {
   })
   const [graphStatus, setGraphStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [graphError, setGraphError] = useState<string | null>(null)
-  const [isChatSidebarOpen, setIsChatSidebarOpen] = useState(true)
   const [isRightPaneMaximized, setIsRightPaneMaximized] = useState(false)
   // Middle-pane collapse animation. Animating its max-width from 100% is janky:
   // 100% is relative to the parent (far wider than the pane's real width), so the
@@ -1169,7 +1161,6 @@ function App() {
   const activeIsProcessing = sessionChat.chatState?.isProcessing ?? isProcessing
   const activeIsReasoning = sessionChat.chatState?.isReasoning ?? false
   const activeIsWaitingOnHuman = sessionChat.chatState?.isWaitingOnHuman ?? false
-  const activeIsWorking = activeIsProcessing && !activeIsWaitingOnHuman
   // (The in-flight-reply mirrors — pill response panel, fallback speech,
   // quick-ask state — read the HOVER session's store, declared above.)
   // A failed session load must be visible, not a blank chat.
@@ -1589,6 +1580,8 @@ function App() {
   // Late-bound handle to bindChatToRun (declared with the chat plumbing far
   // below) for early-declared effects like quick-ask open-chat.
   const bindChatToRunRef = useRef<((rid: string) => void) | null>(null)
+  const openRunInSidebarRef = useRef<((rid: string) => void) | null>(null)
+  const showChatInSidebarRef = useRef<((tabId: string) => void) | null>(null)
   const loadRunRef = useRef<((id: string) => Promise<void>) | null>(null)
   // A call was started from a FRESH (unbound) chat: when the hover session
   // materializes on the first utterance, bind that chat to it too — the
@@ -2388,10 +2381,9 @@ function App() {
   useEffect(() => {
     return window.ipc.on('quick-ask:open-chat', () => {
       const hoverId = hoverRunIdRef.current
-      if (hoverId) bindChatToRunRef.current?.(hoverId)
       // Side pane, not the maximized full view — the user keeps whatever
       // they were working on in the middle.
-      setIsChatSidebarOpen(true)
+      if (hoverId) openRunInSidebarRef.current?.(hoverId)
       setIsRightPaneMaximized(false)
     })
   }, [])
@@ -2684,10 +2676,17 @@ function App() {
 
   // Chat tab state
   const [chatTabs, setChatTabs] = useState<ChatTab[]>(() => {
-    const restored = useBottomTabs ? restoreAssistantTabs(readAssistantPreference(ASSISTANT_TABS_KEY)) : []
-    if (restored.length) return restored
+    // Only chats that were showing somewhere come back; a chat has no
+    // identity of its own until its first message, and a hidden sent one is
+    // reachable from history.
+    const restored = restoreAssistantTabs(readAssistantPreference(ASSISTANT_TABS_KEY))
+    const layout = restoreAssistantLayout(readAssistantPreference(ASSISTANT_LAYOUT_KEY), restored.map((tab) => tab.id))
+    const placed = restored.filter((tab) => chatLocation(layout, tab.id))
+    if (placed.length) return placed
     return [{ id: 'default-chat-tab', runId: null, chatId: crypto.randomUUID() }]
   })
+  const { layout: assistantLayout, dispatch: dispatchAssistantLayout, place: placeAssistantChat } = useAssistantLayout(chatTabs.map((tab) => tab.id))
+  const [assistantPageHost, setAssistantPageHost] = useState<HTMLDivElement | null>(null)
   const chatTabsRef = useRef(chatTabs)
   chatTabsRef.current = chatTabs
   // A tab's current chat identity (see ChatTab.chatId). Session-scoped maps
@@ -2698,14 +2697,13 @@ function App() {
   ), [])
   const [activeChatTabId, setActiveChatTabId] = useState(() => {
     const saved = readAssistantPreference('rowboat-assistant-active-tab')
-    if (useBottomTabs && saved && chatTabs.some((tab) => tab.id === saved)) return saved
-    return chatTabs[0].id
+    if (saved && chatTabs.some((tab) => tab.id === saved)) return saved
+    return assistantLayout.focused ?? assistantLayout.assistant ?? chatTabs[0].id
   })
   useEffect(() => {
-    if (!useBottomTabs) return
     writeAssistantPreference(ASSISTANT_TABS_KEY, JSON.stringify(chatTabs))
     writeAssistantPreference('rowboat-assistant-active-tab', activeChatTabId)
-  }, [chatTabs, useBottomTabs, activeChatTabId])
+  }, [chatTabs, activeChatTabId])
   const [chatViewStateByTab, setChatViewStateByTab] = useState<Record<string, ChatTabViewState>>({
     'default-chat-tab': createEmptyChatTabViewState(),
   })
@@ -2739,10 +2737,8 @@ function App() {
     } else {
       chatDraftsRef.current.delete(chatId)
     }
-    if (useBottomTabs) {
-      writeAssistantPreference(`rowboat-assistant-draft:${chatId}`, text || null)
-    }
-  }, [chatIdForTab, useBottomTabs])
+    writeAssistantPreference(`rowboat-assistant-draft:${chatId}`, text || null)
+  }, [chatIdForTab])
   // Persist a run's work directory to its per-run sidecar config file. The agent
   // runtime reads this same file (config/workdir-<runId>.json) on each turn.
   const persistRunWorkDir = useCallback(async (runId: string, value: string | null) => {
@@ -4241,15 +4237,17 @@ function App() {
     searchEnabled?: boolean,
     codeMode?: 'claude' | 'codex',
     permissionMode?: PermissionMode,
+    targetTabId?: string,
   ) => {
-    const submitTabId = activeChatTabIdRef.current
+    const submitTabId = targetTabId ?? activeChatTabIdRef.current
     const submitTab = chatTabsRef.current.find((tab) => tab.id === submitTabId)
     if (!submitTab) return
+    const submitInCall = inCallRef.current && submitTab.runId === hoverRunIdRef.current
     const isSubmitTabActive = () => activeChatTabIdRef.current === submitTabId
       && chatTabsRef.current.find((tab) => tab.id === submitTabId)?.chatId === submitTab.chatId
     const submittedSelection = selectionByTabRef.current.get(submitTab.chatId)
     const submittedContext = buildMiddlePaneContext()
-    if (activeIsProcessing && inCallRef.current) {
+    if (activeIsProcessing && submitInCall) {
       // In-call input arrives at arbitrary moments — a hard
       // drop here silently ate utterances submitted while the previous turn
       // was still stopping (the PTT interrupt is async). Finish the stop and
@@ -4268,7 +4266,7 @@ function App() {
     // Video chat mode: drain the webcam frames buffered since the last send
     // so they ride along with this message as inline image parts.
     const marks = callTurnMarksRef.current
-    if (inCallRef.current && marks && marks.submit === undefined) {
+    if (submitInCall && marks && marks.submit === undefined) {
       marks.submit = performance.now()
     }
 
@@ -4277,9 +4275,9 @@ function App() {
     // utterance — pendingVoiceInputRef is set just before submit) is spoken
     // even with the text panel open. Stamped per-turn so tucking or typing
     // mid-reply never flips an in-flight answer.
-    suppressSpeechTurnRef.current = inCallRef.current && !pendingVoiceInputRef.current
+    suppressSpeechTurnRef.current = submitInCall && !pendingVoiceInputRef.current
 
-    if (inCallRef.current) {
+    if (submitInCall) {
       // A new question supersedes whatever of the previous reply was still
       // unspoken — silence it and drop the frozen backlog so it never plays
       // over the new turn. (The overlay resets its segment list when the
@@ -4301,7 +4299,7 @@ function App() {
     // Frames ride along whenever screen capture is live — during calls, and
     // for quick-ask questions with the share toggle on.
     const videoFrames =
-      inCallRef.current || video.screenState === 'live' ? video.collectFrames() : []
+      submitInCall || video.screenState === 'live' ? video.collectFrames() : []
 
     const userMessageId = `user-${Date.now()}`
     const displayAttachments: ChatMessage['attachments'] = hasAttachments || videoFrames.length > 0
@@ -4376,7 +4374,7 @@ function App() {
       // is dead air.
       const reasoningEffort =
         selected?.effort ??
-        (inCallRef.current && companionVoiceRef.current ? ('low' as const) : undefined)
+        (submitInCall && companionVoiceRef.current ? ('low' as const) : undefined)
       // The runtime defaults omitted maxModelCalls to the global limit; the
       // chat-specific override is the UI's job to pass explicitly. A failed
       // settings read just falls back to the global limit.
@@ -4396,7 +4394,7 @@ function App() {
             composition: {
               workDirId: currentRunId,
               ...(pendingVoiceInputRef.current ? { voiceInput: true } : {}),
-              ...(ttsEnabledRef.current ? { voiceOutput: ttsModeRef.current } : {}),
+              ...((submitInCall && ttsEnabledRef.current) ? { voiceOutput: ttsModeRef.current } : {}),
               ...(searchEnabled ? { searchEnabled: true } : {}),
               // Code-session pins: a bound chat always carries the session's
               // agent + cwd, so voice/quick-ask submits (which don't thread
@@ -4408,7 +4406,7 @@ function App() {
                     codeCwd: codeSessionLocksRef.current[currentRunId].cwd,
                   }
                 : (codeMode ? { codeMode } : {})),
-              ...((inCallRef.current && video.cameraOn) || video.screenState === 'live'
+              ...((submitInCall && video.cameraOn) || video.screenState === 'live'
                 ? { videoMode: true }
                 : {}),
               ...(practiceModeRef.current ? { coachMode: true } : {}),
@@ -4531,7 +4529,7 @@ function App() {
         })
         analytics.chatMessageSent({
           voiceInput: pendingVoiceInputRef.current || undefined,
-          voiceOutput: ttsEnabledRef.current ? ttsModeRef.current : undefined,
+          voiceOutput: (submitInCall && ttsEnabledRef.current) ? ttsModeRef.current : undefined,
           searchEnabled: searchEnabled || undefined,
         })
       } else {
@@ -4547,7 +4545,7 @@ function App() {
         })
         analytics.chatMessageSent({
           voiceInput: pendingVoiceInputRef.current || undefined,
-          voiceOutput: ttsEnabledRef.current ? ttsModeRef.current : undefined,
+          voiceOutput: (submitInCall && ttsEnabledRef.current) ? ttsModeRef.current : undefined,
           searchEnabled: searchEnabled || undefined,
         })
       }
@@ -4710,35 +4708,6 @@ function App() {
     setIsBrowserOpen(false)
   }, [])
 
-  const handleNewChat = useCallback((preserveDraft = false) => {
-    // Invalidate any in-flight run loads (rapid switching can otherwise "pop" old conversations back in)
-    loadRunRequestIdRef.current += 1
-    setConversation([])
-    setCurrentAssistantMessage('')
-    setRunId(null)
-    setMessage('')
-    setModelUsage(null)
-    setIsProcessing(false)
-    setPendingPermissionRequests(new Map())
-    setPendingAskHumanRequests(new Map())
-    setAllPermissionRequests(new Map())
-    setPermissionResponses(new Map())
-    setAutoPermissionDecisions(new Map())
-    setSelectedBackgroundTask(null)
-    setChatViewportAnchor(activeChatTabIdRef.current, null)
-    setChatViewStateByTab(prev => ({
-      ...prev,
-      [activeChatTabIdRef.current]: createEmptyChatTabViewState(),
-    }))
-    // A brand-new chat starts with no work directory and restarts its
-    // selection from the settings pair (the composer re-seeds when its
-    // runId prop drops to null; clearing here keeps the map in lockstep).
-    if (!preserveDraft) {
-      setWorkDirByTab(prev => ({ ...prev, [activeChatTabIdRef.current]: null }))
-      selectionByTabRef.current.delete(chatIdForTab(activeChatTabIdRef.current))
-    }
-  }, [setChatViewportAnchor])
-
   const activateAssistantTab = useCallback((tab: ChatTab) => {
     cancelRecordingIfActive()
     setPresetMessage(chatDraftsRef.current.get(tab.chatId))
@@ -4764,27 +4733,13 @@ function App() {
     if (initialTab?.runId) activateAssistantTab(initialTab)
   }, [activateAssistantTab])
 
-  const addAssistantTab = useCallback((initialSelection?: ModelSelection | null) => {
+  const addAssistantTab = useCallback((initialSelection?: ModelSelection | null, activate = true) => {
     const tab = createAssistantTab()
     if (initialSelection) selectionByTabRef.current.set(tab.chatId, initialSelection)
-    setChatTabs((previous) => [...previous, tab])
-    activateAssistantTab(tab)
-    setIsChatSidebarOpen(true)
-  }, [activateAssistantTab])
-
-  const closeAssistantTab = useCallback((tabId: string) => {
-    const next = tabsAfterClose(chatTabsRef.current, tabId, activeChatTabIdRef.current)
-    if (!next.tabs.length) {
-      const blank = createAssistantTab()
-      setChatTabs([blank])
-      activateAssistantTab(blank)
-      setIsChatSidebarOpen(false)
-    } else {
-      setChatTabs(next.tabs)
-      if (tabId === activeChatTabIdRef.current) {
-        activateAssistantTab(next.tabs.find((tab) => tab.id === next.activeId)!)
-      }
-    }
+    chatTabsRef.current = [...chatTabsRef.current, tab]
+    setChatTabs(chatTabsRef.current)
+    if (activate) activateAssistantTab(tab)
+    return tab
   }, [activateAssistantTab])
 
   const switchChatTab = useCallback((tabId: string) => {
@@ -4794,24 +4749,21 @@ function App() {
   }, [activateAssistantTab])
 
   const closeChatTabs = useCallback((ids: string[]) => {
+    for (const id of ids) dispatchAssistantLayout({ type: 'close', id })
     const next = closeTabs(chatTabsRef.current, activeChatTabIdRef.current, ids, (tab) => tab.id)
     if (!next.activeId) return // Keep one chat, matching the tab strip's close rules.
     switchChatTab(next.activeId)
     chatTabsRef.current = next.tabs
     setChatTabs(next.tabs)
-  }, [switchChatTab])
+  }, [switchChatTab, dispatchAssistantLayout])
 
-  const createChatTab = useCallback(() => {
-    cancelRecordingIfActive()
-    const id = crypto.randomUUID()
-    const tab: ChatTab = { id, runId: null, chatId: id }
-    chatTabsRef.current = [...chatTabsRef.current, tab]
-    setChatTabs(chatTabsRef.current)
-    activeChatTabIdRef.current = id
-    setActiveChatTabId(id)
-    handleNewChat()
-    return tab
-  }, [cancelRecordingIfActive, handleNewChat])
+  // Closing a chat from a container drops its tab: a sent conversation lives
+  // on in history; an unsent one had no identity to keep.
+  const closeAssistantChat = useCallback((id: string) => {
+    const tab = chatTabsRef.current.find((entry) => entry.id === id)
+    if (tab && !tab.runId) setChatDraftForTab(tab.id, '')
+    closeChatTabs([id])
+  }, [closeChatTabs, setChatDraftForTab])
 
   // Reuse an existing session tab, or open a new one without replacing a draft.
   const bindChatToRun = useCallback((rid: string) => {
@@ -4819,25 +4771,11 @@ function App() {
     if (existing) { switchChatTab(existing.id); return }
     const active = chatTabsRef.current.find((t) => t.id === activeChatTabIdRef.current)
     if (active?.runId === rid) return
-    if (useBottomTabs || chatTabsRef.current.length > 1) {
-      const existing = chatTabsRef.current.find((tab) => tab.runId === rid)
-      const tab = existing ?? createAssistantTab(rid)
-      if (!existing) setChatTabs((previous) => [...previous, tab])
-      activateAssistantTab(tab)
-      return
-    }
-    // Cancel any active dictation — its transcript belongs to the old chat.
-    cancelRecordingIfActive()
-    if (active?.runId || (active && chatDraftsRef.current.get(active.chatId))) createChatTab()
-    const targetTabId = activeChatTabIdRef.current
-    setChatTabs((prev) => prev.map((t) => (
-      // Rebinding to a different session = a different chat identity — but a
-      // DETERMINISTIC one (the session id), so switching A→B→A restores A's
-      // draft/selection instead of silently dropping half-typed input.
-      t.id === targetTabId ? { ...t, runId: rid, chatId: rid } : t
-    )))
-    void loadRun(rid)
-  }, [cancelRecordingIfActive, loadRun, switchChatTab, createChatTab, useBottomTabs, activateAssistantTab])
+    const tab = createAssistantTab(rid)
+    chatTabsRef.current = [...chatTabsRef.current, tab]
+    setChatTabs(chatTabsRef.current)
+    activateAssistantTab(tab)
+  }, [switchChatTab, activateAssistantTab])
   bindChatToRunRef.current = bindChatToRun
 
   // A code session was selected in the Code view: bind the chat to it — the
@@ -4858,8 +4796,6 @@ function App() {
     const sessionId = active?.session.id ?? null
     if (!sessionId) return
     bindChatToRun(sessionId)
-    // The conversation lives in the dock — selecting a session must show it.
-    setIsChatSidebarOpen(true)
   }, [bindChatToRun])
 
   // Chat-header doors to the workspace drawer: clicking the open one closes it.
@@ -4876,6 +4812,9 @@ function App() {
   // Reading-position persistence across pane remounts (view toggles,
   // dock/full-screen switches, run rebinds) lives inside the conversation
   // scroll controller now — see lib/chat-scroll.ts (keyed by tab.chatId).
+
+  // No section, file, or task open: the Assistant page.
+  const isFullScreenChat = !selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isMeetingsOpen && !isLiveNotesOpen && !isBgTasksOpen && !isAppsOpen && !isSpacesOpen && !isEmailOpen && !isWorkspaceOpen && !isKnowledgeViewOpen && !isChatHistoryOpen && !isHomeOpen && !isCodeOpen && !selectedBackgroundTask && !isBrowserOpen
 
   const currentViewState = React.useMemo<ViewState>(() => {
     if (selectedBackgroundTask) return { type: 'task', name: selectedBackgroundTask }
@@ -4965,42 +4904,30 @@ function App() {
     setIsHomeOpen(false)
     setIsCodeOpen(false)
     setSelectedBackgroundTask(null)
-    setExpandedFrom(null)
     setIsRightPaneMaximized(false)
   }, [])
 
-  const handleNewChatTab = useCallback(() => {
-    if (useBottomTabs || chatTabsRef.current.length > 1) {
-      addAssistantTab()
-      if (isCodeOpen) {
-        closeAllSections()
-        setExpandedFrom(currentViewState)
-      }
-      return
-    }
-    // A fresh tab keeps the other conversations and drafts available.
-    createChatTab()
-    dismissBrowserOverlay()
-    // "New chat" opens the full-screen chat; remember where we came from so
-    // closing it can restore the section.
-    const from = currentViewState.type === 'chat' ? null : currentViewState
-    closeAllSections()
-    setExpandedFrom(from)
-  }, [dismissBrowserOverlay, closeAllSections, currentViewState, createChatTab, useBottomTabs, addAssistantTab, isCodeOpen])
+  const newChatAt = useCallback((location: ChatLocation, replacing?: string, selection?: ModelSelection | null, activate = true) => {
+    const tab = addAssistantTab(selection, activate)
+    dispatchAssistantLayout({ type: 'place', id: tab.id, location, replacing, size: defaultWindowSize() })
+    return tab
+  }, [addAssistantTab, dispatchAssistantLayout])
 
-  // Sidebar variant: add a chat without leaving file/graph context.
-  // A caller with a selection already chosen for the fresh chat (the Home
-  // composer handoff) passes it here so the map entry exists BEFORE the
-  // rebind commit — the remounted composer's initialSelection then shows the
-  // same pair the sends will use, instead of racing the settings seed.
-  const handleNewChatTabInSidebar = useCallback((initialSelection?: ModelSelection | null) => {
-    if (useBottomTabs || chatTabsRef.current.length > 1) {
-      addAssistantTab(initialSelection)
-      return
-    }
-    const { chatId } = createChatTab()
-    if (initialSelection) selectionByTabRef.current.set(chatId, initialSelection)
-  }, [createChatTab, useBottomTabs, addAssistantTab])
+  // The Assistant page always holds a conversation — a fresh one when its
+  // chat was moved out before the last quit.
+  useEffect(() => {
+    if (!assistantLayout.assistant) newChatAt('assistant', undefined, undefined, false)
+  }, [assistantLayout.assistant, newChatAt])
+
+  const handleNewChatTab = useCallback(() => {
+    newChatAt('assistant')
+    dismissBrowserOverlay()
+    closeAllSections()
+  }, [newChatAt, dismissBrowserOverlay, closeAllSections])
+
+  const handleNewChatTabInSidebar = useCallback((selection?: ModelSelection | null) => {
+    newChatAt('sidebar', undefined, selection)
+  }, [newChatAt])
 
   // A chat was deleted (sessions:delete succeeded): drop it from the recents
   // list, and if it was the one on screen, reset the chat surface in place to
@@ -5014,13 +4941,12 @@ function App() {
     }
     const openTab = chatTabs.find((t) => t.runId === rid)
     if (!openTab) return
-    if (useBottomTabs || chatTabs.length > 1) {
-      closeAssistantTab(openTab.id)
-      return
-    }
-    if (chatTabs.length === 1) createChatTab()
+    // The Assistant page always shows a conversation, so a fresh one takes the
+    // dead transcript's place there — and anywhere when it was the last chat.
+    const location = chatLocation(assistantLayout, openTab.id)
+    if (location === 'assistant' || chatTabs.length === 1) newChatAt(location ?? 'assistant', openTab.id)
     closeChatTabs([openTab.id])
-  }, [chatTabs, createChatTab, closeChatTabs, useBottomTabs, closeAssistantTab])
+  }, [chatTabs, assistantLayout, newChatAt, closeChatTabs])
 
   // The companion's "+": a fresh COMPANION conversation for its next
   // question. The app window's chat is untouched.
@@ -5066,17 +4992,15 @@ function App() {
   // queues the message; the pending-submit effect (below) flushes it once state has settled
   // so handlePromptSubmit sees the new tab's null runId.
   const submitFromPalette = useCallback((text: string, mention: CommandPaletteMention | null) => {
-    if (!isChatSidebarOpen) setIsChatSidebarOpen(true)
     handleNewChatTabInSidebar()
     setPendingPaletteSubmit({ text, mention })
-  }, [isChatSidebarOpen, handleNewChatTabInSidebar])
+  }, [handleNewChatTabInSidebar])
 
   // Open the chat sidebar on a fresh tab and pre-fill (not send) a builder prompt.
   const prefillChat = useCallback((text: string) => {
-    if (!isChatSidebarOpen) setIsChatSidebarOpen(true)
     handleNewChatTabInSidebar()
     setPresetMessage(text)
-  }, [isChatSidebarOpen, handleNewChatTabInSidebar])
+  }, [handleNewChatTabInSidebar])
 
   useEffect(() => {
     if (!pendingPaletteSubmit) return
@@ -5207,7 +5131,6 @@ function App() {
     }
     // Chat mode has NO routing rules: mentions here just address the
     // assistant. Tasks are born via the chip, the list, or by asking.
-    setIsChatSidebarOpen(true)
     handleNewChatTabInSidebar(homeSelectionRef.current)
     setPendingHomeSubmit({ message, mentions, attachments: stagedAttachments, searchEnabled, codeMode, permissionMode })
   }, [handleNewChatTabInSidebar])
@@ -5289,22 +5212,12 @@ function App() {
     return () => window.removeEventListener('rowboat:open-copilot-prompt', handler as EventListener)
   }, [submitFromPalette])
 
-  // Reveal the chat in the right side pane (from the middle-panel chat icon).
-  const openChatSidePane = useCallback(() => {
-    setIsRightPaneMaximized(false)
-    setIsChatSidebarOpen(true)
-  }, [])
-
   // Browser is an overlay on the middle pane: opening it forces the chat
   // sidebar to be visible on the right; closing it restores whatever the
   // middle pane was showing previously (file/graph/task/chat).
   const handleToggleBrowser = useCallback(() => {
     setIsBrowserOpen(prev => {
       const next = !prev
-      if (next) {
-        setIsChatSidebarOpen(true)
-        setIsRightPaneMaximized(false)
-      }
       return next
     })
   }, [])
@@ -5314,7 +5227,6 @@ function App() {
   }, [])
 
   const toggleRightPaneMaximize = useCallback(() => {
-    setIsChatSidebarOpen(true)
     setIsRightPaneMaximized(prev => {
       if (!prev) {
         // About to collapse the middle pane: capture its real width now, while it's
@@ -5325,22 +5237,6 @@ function App() {
       return !prev
     })
   }, [])
-
-  const handleOpenFullScreenChat = useCallback(() => {
-    // Remember where we came from so the close button can return.
-    const from = currentViewState.type === 'chat' ? null : currentViewState
-    dismissBrowserOverlay()
-    closeAllSections()
-    setExpandedFrom(from)
-  }, [closeAllSections, currentViewState, dismissBrowserOverlay])
-
-  const handleCloseFullScreenChat = useCallback((): boolean => {
-    if (!expandedFrom) return false
-    const target = expandedFrom
-    setExpandedFrom(null)
-    void applyViewStateRef.current?.(target)
-    return true
-  }, [expandedFrom])
 
   // Feature-importance funnel: one event per view the user lands on. Keyed on
   // the view *type* so switching files/threads inside a view doesn't re-fire.
@@ -5373,7 +5269,6 @@ function App() {
   const applyViewState = useCallback(async (view: ViewState) => {
     // Whether this navigation ENTERS Spaces (vs a click within it) — read
     // before closeAllSections resets the flag.
-    const wasSpacesOpen = isSpacesOpen
     closeAllSections()
     switch (view.type) {
       case 'file':
@@ -5417,7 +5312,6 @@ function App() {
         setWorkspaceInitialPath(view.path ?? null)
         setProjectChatId(view.runId ?? null)
         setSelectedPath(view.filePath ?? null)
-        setIsChatSidebarOpen(!!view.runId)
         if (view.runId) bindChatToRun(view.runId)
         return
       case 'knowledge-view':
@@ -5457,21 +5351,26 @@ function App() {
         // Spaces carries its own conversation surface, so entering it
         // collapses the assistant chat pane by default; in-space navigation
         // (topics, files, history within Spaces) leaves it as the user set it.
-        if (!wasSpacesOpen) setIsChatSidebarOpen(false)
         setIsSpacesOpen(true)
         return
-      case 'chat':
+      case 'chat': {
+        dismissBrowserOverlay()
         if (view.runId) {
+          // A specific conversation: it becomes the Assistant page's chat.
           bindChatToRun(view.runId)
-        } else if (useBottomTabs || chatTabsRef.current.length > 1) {
-          const current = chatTabsRef.current.find((tab) => tab.id === activeChatTabIdRef.current)
-          if (current?.runId) addAssistantTab()
+          const tab = chatTabsRef.current.find((entry) => entry.runId === view.runId)
+          if (tab) placeAssistantChat(tab.id, 'assistant')
         } else {
-          handleNewChat()
+          // The Assistant page resumes its own chat; only an empty page
+          // starts a fresh one.
+          const tab = chatTabsRef.current.find((entry) => entry.id === assistantLayout.assistant)
+          if (tab) { activateAssistantTab(tab); dispatchAssistantLayout({ type: 'focus', id: tab.id }) }
+          else newChatAt('assistant')
         }
         return
+      }
     }
-  }, [closeAllSections, bindChatToRun, handleNewChat, isSpacesOpen, useBottomTabs, addAssistantTab])
+  }, [closeAllSections, dismissBrowserOverlay, bindChatToRun, placeAssistantChat, assistantLayout.assistant, activateAssistantTab, newChatAt, dispatchAssistantLayout])
   applyViewStateRef.current = applyViewState
 
   const navigateToView = useCallback(async (nextView: ViewState) => {
@@ -5501,13 +5400,59 @@ function App() {
       void navigateToView({ type: 'workspace', path: project.path, runId: sessionId })
       return
     }
-    if (useBottomTabs && !isCodeOpen && !isWorkspaceOpen) {
-      bindChatToRun(sessionId)
-      setIsChatSidebarOpen(true)
-    } else {
-      void navigateToView({ type: 'chat', runId: sessionId })
+    void navigateToView({ type: 'chat', runId: sessionId })
+  }, [navigateToView, projects])
+
+  // The sidebar item / tour stop: the Assistant page, resuming its chat. Goes
+  // through navigation so Back returns to the section the user came from.
+  const openAssistant = useCallback(() => {
+    void navigateToView({ type: 'chat', runId: null })
+  }, [navigateToView])
+
+  const moveAssistantChat = useCallback((id: string, location: ChatLocation) => {
+    const tab = chatTabsRef.current.find((entry) => entry.id === id)
+    if (!tab) return
+    // Moving the Assistant page's chat out leaves a fresh one behind (placed
+    // first so the moved chat keeps focus).
+    if (assistantLayout.assistant === id && location !== 'assistant') newChatAt('assistant', undefined, undefined, false)
+    dispatchAssistantLayout({ type: 'place', id, location, size: defaultWindowSize() })
+    if (location === 'assistant') { dismissBrowserOverlay(); closeAllSections() }
+    activateAssistantTab(tab)
+  }, [assistantLayout.assistant, newChatAt, activateAssistantTab, dismissBrowserOverlay, closeAllSections, dispatchAssistantLayout])
+
+  // Surfaces that hand a conversation to the sidebar (quick-ask, email
+  // drafts, Home items). Code and Projects keep their own session-bound pane,
+  // so the request is a no-op there.
+  const showChatInSidebar = useCallback((tabId: string) => {
+    if (isCodeOpen || isWorkspaceOpen) return
+    placeAssistantChat(tabId, 'sidebar')
+  }, [isCodeOpen, isWorkspaceOpen, placeAssistantChat])
+  showChatInSidebarRef.current = showChatInSidebar
+  const openRunInSidebar = useCallback((rid: string) => {
+    bindChatToRun(rid)
+    const tab = chatTabsRef.current.find((entry) => entry.runId === rid)
+    if (tab) showChatInSidebar(tab.id)
+  }, [bindChatToRun, showChatInSidebar])
+  openRunInSidebarRef.current = openRunInSidebar
+
+  // Cmd+L: the sidebar container. Occupied → its chat goes away (history
+  // keeps it); on the Assistant page → that chat moves over; else a fresh one.
+  const toggleChatSidebar = useCallback(() => {
+    if (assistantLayout.sidebar) closeAssistantChat(assistantLayout.sidebar)
+    else if (isFullScreenChat && assistantLayout.assistant) moveAssistantChat(assistantLayout.assistant, 'sidebar')
+    else newChatAt('sidebar')
+  }, [assistantLayout.sidebar, assistantLayout.assistant, isFullScreenChat, closeAssistantChat, moveAssistantChat, newChatAt])
+
+  const selectChatAt = useCallback((id: string, location: ChatLocation, replacing?: string) => {
+    let tab = chatTabsRef.current.find((entry) => entry.id === id || entry.runId === id)
+    if (!tab) {
+      tab = createAssistantTab(id)
+      chatTabsRef.current = [...chatTabsRef.current, tab]
+      setChatTabs(chatTabsRef.current)
     }
-  }, [useBottomTabs, isCodeOpen, bindChatToRun, navigateToView, projects, isWorkspaceOpen])
+    placeAssistantChat(tab.id, location, replacing)
+    activateAssistantTab(tab)
+  }, [placeAssistantChat, activateAssistantTab])
 
   const openProjectChat = useCallback((project: Project, sessionId: string) => {
     void navigateToView({ type: 'workspace', path: project.path, runId: sessionId })
@@ -5522,19 +5467,6 @@ function App() {
     const location = path ? { path } : resolveProjectsLocation(projects, lastProjectLocationRef.current)
     void navigateToView({ type: 'workspace', ...location })
   }, [navigateToView, projects])
-
-  // Move the maximized/full-screen chat into the right side pane: restore the
-  // view we expanded from (or fall back to Home) and dock the chat on the right.
-  const pushChatToSidePane = useCallback(() => {
-    setIsRightPaneMaximized(false)
-    setIsChatSidebarOpen(true)
-    // Restore the view we expanded from; if there was nothing to restore
-    // (e.g. the chat was started fresh from Home), fall back to Home so a
-    // single click always docks the chat instead of needing two.
-    if (!handleCloseFullScreenChat()) {
-      void navigateToView({ type: 'home' })
-    }
-  }, [handleCloseFullScreenChat, navigateToView])
 
   // Section entry points (sidebar items, deep links, the tour). Thin wrappers
   // over navigateToView so every entry records history — the old direct
@@ -6153,19 +6085,6 @@ function App() {
     }
   }, [sessionChat.chatState?.conversation, runId, navigateToView])
 
-  const navigateToFullScreenChat = useCallback(() => {
-    const current = currentViewStateRef.current
-    // Only treat this as navigation when coming from another view
-    if (current.type !== 'chat') {
-      const nextHistory = {
-        back: appendUnique(historyRef.current.back, current),
-        forward: [] as ViewState[],
-      }
-      setHistory(nextHistory)
-    }
-    handleOpenFullScreenChat()
-  }, [appendUnique, handleOpenFullScreenChat, setHistory])
-
   // Handle image upload for the markdown editor
   const handleImageUpload = useCallback(async (file: File): Promise<string | null> => {
     try {
@@ -6213,26 +6132,16 @@ function App() {
     && hoverRunId != null
     && chatTabs.find((t) => t.id === activeChatTabId)?.runId === hoverRunId
 
-  const isFullScreenChat = !selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isMeetingsOpen && !isLiveNotesOpen && !isBgTasksOpen && !isAppsOpen && !isSpacesOpen && !isEmailOpen && !isWorkspaceOpen && !isKnowledgeViewOpen && !isChatHistoryOpen && !isHomeOpen && !isCodeOpen && !selectedBackgroundTask && !isBrowserOpen
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'l') {
         e.preventDefault()
-        if (useBottomTabs && !isCodeOpen && !isFullScreenChat) {
-          setIsChatSidebarOpen((open) => !open)
-          setIsRightPaneMaximized(false)
-          return
-        }
-        if (isFullScreenChat && expandedFrom) {
-          handleCloseFullScreenChat()
-        } else {
-          navigateToFullScreenChat()
-        }
+        toggleChatSidebar()
       }
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [handleCloseFullScreenChat, isFullScreenChat, expandedFrom, navigateToFullScreenChat, useBottomTabs, isCodeOpen])
+  }, [toggleChatSidebar])
 
   // Keyboard shortcut: Cmd+K / Ctrl+K toggles the palette (navigation and
   // search, Spotlight-style). Plain K only — ⌘⇧K belongs to the open space's
@@ -6324,10 +6233,7 @@ function App() {
           }),
         },
       }))
-      if (isFullScreenChat) {
-        setIsChatSidebarOpen(false)
-        setIsRightPaneMaximized(false)
-      }
+      if (isFullScreenChat) setIsRightPaneMaximized(false)
       void navigateToView({ type: 'file', path: BASES_DEFAULT_TAB_PATH })
       return
     }
@@ -6482,24 +6388,15 @@ function App() {
     },
     openGraph: () => {
       // From chat-only landing state, open graph directly in full knowledge view.
-      if (isFullScreenChat) {
-        setIsChatSidebarOpen(false)
-        setIsRightPaneMaximized(false)
-      }
+      if (isFullScreenChat) setIsRightPaneMaximized(false)
       void navigateToView({ type: 'graph' })
     },
     openBases: () => {
-      if (isFullScreenChat) {
-        setIsChatSidebarOpen(false)
-        setIsRightPaneMaximized(false)
-      }
+      if (isFullScreenChat) setIsRightPaneMaximized(false)
       void navigateToView({ type: 'file', path: BASES_DEFAULT_TAB_PATH })
     },
     openWorkspaceAt: (path?: string) => {
-      if (isFullScreenChat) {
-        setIsChatSidebarOpen(false)
-        setIsRightPaneMaximized(false)
-      }
+      if (isFullScreenChat) setIsRightPaneMaximized(false)
       openProjects(path)
     },
     openKnowledgeView: () => {
@@ -6661,11 +6558,7 @@ function App() {
           handleToggleBrowser()
           break
         case 'toggle-full-screen-chat':
-          if (isFullScreenChat && expandedFrom) {
-            handleCloseFullScreenChat()
-          } else {
-            navigateToFullScreenChat()
-          }
+          toggleChatSidebar()
           break
         case 'go-back':
           void navigateBack()
@@ -6768,19 +6661,7 @@ function App() {
   // Drives the mascot product tour through the app's main sections
   const handleTourNavigate = useCallback((target: TourNavTarget) => {
     switch (target) {
-      case 'assistant': {
-        // Same as the sidebar's Assistant item: resume the most recently
-        // touched chat, else start a fresh one. Either way the composer the
-        // final stop anchors on is laid out (Spaces closes the chat pane).
-        const recency = (r: { createdAt: string; modifiedAt?: string }) => {
-          const ms = new Date(r.modifiedAt ?? r.createdAt).getTime()
-          return Number.isFinite(ms) ? ms : 0
-        }
-        const lastChat = [...chatRuns].sort((a, b) => recency(b) - recency(a))[0]
-        if (lastChat) openAssistantRun(lastChat.id)
-        else handleNewChatTab()
-        break
-      }
+      case 'assistant': { openAssistant(); break }
       case 'spaces':
         void openSpaces()
         break
@@ -6809,7 +6690,7 @@ function App() {
         knowledgeActions.openWorkspaceAt()
         break
     }
-  }, [chatRuns, openAssistantRun, handleNewChatTab, openSpaces, navigateToView, openEmailView, openMeetingsView, openCodeView, knowledgeActions, openBgTasksView, openAppsGrid])
+  }, [openAssistant, openSpaces, navigateToView, openEmailView, openMeetingsView, openCodeView, knowledgeActions, openBgTasksView, openAppsGrid])
 
   // Handler for when a voice note is created/updated
   const handleVoiceNoteCreated = useCallback(async (notePath: string) => {
@@ -6987,7 +6868,7 @@ function App() {
       const pending = window.__pendingEmailDraft
       if (pending) {
         setPresetMessage(pending.prompt)
-        setIsChatSidebarOpen(true)
+        showChatInSidebarRef.current?.(activeChatTabIdRef.current)
         window.__pendingEmailDraft = undefined
       }
     }
@@ -7001,7 +6882,7 @@ function App() {
       const pending = window.__pendingMeetingPrepCreate
       if (pending) {
         setPresetMessage(pending.prompt)
-        setIsChatSidebarOpen(true)
+        showChatInSidebarRef.current?.(activeChatTabIdRef.current)
         window.__pendingMeetingPrepCreate = undefined
       }
     }
@@ -7218,11 +7099,6 @@ function App() {
     permissionResponses,
     autoPermissionDecisions,
   ])
-  const emptyChatTabState = React.useMemo<ChatTabViewState>(() => createEmptyChatTabViewState(), [])
-  const getChatTabStateForRender = useCallback((tabId: string): ChatTabViewState => {
-    if (tabId === activeChatTabId) return activeChatTabState
-    return chatViewStateByTab[tabId] ?? emptyChatTabState
-  }, [activeChatTabId, activeChatTabState, chatViewStateByTab, emptyChatTabState])
   const chatTabStatesForRender = React.useMemo(() => ({
     ...chatViewStateByTab,
     [activeChatTabId]: activeChatTabState,
@@ -7251,23 +7127,19 @@ function App() {
     return () => observer.disconnect()
   }, [projectViewActive])
   const projectDocumentOnly = projectViewActive && !!selectedPath && projectContentWidth < 840
-  const floatingAssistant = useBottomTabs && !isFullScreenChat && !isCodeOpen && !isBrowserOpen && !projectViewActive
-  const dockFullScreen = useBottomTabs && isFullScreenChat
-  const showAssistantDock = useBottomTabs && !isCodeOpen && !projectViewActive
-  const chatPaneOpen = projectViewActive ? !!projectChatId && !projectDocumentOnly : isCodeOpen ? codeChatMain : isChatSidebarOpen
+  const chatPaneOpen = projectViewActive ? !!projectChatId && !projectDocumentOnly : isCodeOpen ? codeChatMain : !!assistantLayout.sidebar
   // The document pane shares the window with a docked chat (not maximized
   // over it, not floating above it). The editor reads this to step its
   // headings down so they sit level with chat prose.
-  const isSplitPane = chatPaneOpen && !dockFullScreen && !floatingAssistant && (projectViewActive ? !!selectedPath : !isRightPaneMaximized)
-  const isRightPaneOnlyMode = (isRightPaneContext || floatingAssistant) && chatPaneOpen && isRightPaneMaximized
+  const isSplitPane = chatPaneOpen && (projectViewActive ? !!selectedPath : !isRightPaneMaximized)
+  const isRightPaneOnlyMode = isRightPaneContext && chatPaneOpen && isRightPaneMaximized
   const shouldCollapseLeftPane = isRightPaneOnlyMode && !projectViewActive
   const nonChatPaneStyle = React.useMemo<React.CSSProperties>(() => {
     const style: React.CSSProperties = { maxWidth: insetMaxWidth }
     // A rail-only pane must size to the rail, overriding SidebarInset's w-full.
     if (projectViewActive && projectChatId && !selectedPath) return { ...style, width: 'auto', flex: '0 0 auto' }
     if (projectViewActive && selectedPath) return { ...style, width: 0, flex: '1 1 0' }
-    if (dockFullScreen) return { display: 'none' }
-    if (floatingAssistant && !isRightPaneMaximized) return style
+    if (!projectViewActive && !isCodeOpen) return style
     if (!isRightPaneContext || !chatPaneOpen || isRightPaneMaximized) return style
     if (codeChatMain) {
       return { ...style, width: codeRailWidth, flex: '0 0 auto' }
@@ -7279,7 +7151,7 @@ function App() {
       return { ...style, width: DEFAULT_CHAT_PANE_WIDTH, flex: '0 0 auto' }
     }
     return style
-  }, [projectViewActive, projectChatId, selectedPath, chatPaneSize, codeChatMain, codeRailWidth, chatPaneOpen, insetMaxWidth, isRightPaneContext, isRightPaneMaximized, floatingAssistant, dockFullScreen])
+  }, [projectViewActive, projectChatId, selectedPath, chatPaneSize, codeChatMain, codeRailWidth, chatPaneOpen, insetMaxWidth, isRightPaneContext, isRightPaneMaximized, isCodeOpen])
   // Collapsing: pin max-width to the snapshot px (no transition) for one frame so it's
   // binding immediately (no flex jump), then animate to 0. Expanding goes back to 100%
   // — its non-binding range lands at the end of the range, where it isn't visible.
@@ -7372,6 +7244,7 @@ function App() {
     activeSpace: spaceSelection,
     recentRuns: chatRuns,
     onOpenRun: openAssistantRun,
+    onOpenAssistant: openAssistant,
     onRenameRun: (rid: string, title: string) => {
       void window.ipc.invoke('sessions:setTitle', { sessionId: rid, title })
         .then(() => setRuns((prev) => prev.map((r) => (r.id === rid ? { ...r, title } : r))))
@@ -7431,7 +7304,7 @@ function App() {
                 "min-h-0 min-w-0",
                 projectViewActive ? "overflow-visible!" : "overflow-hidden!",
                 // Projects keeps the document and its navigation before the chat, like Workspaces.
-                projectViewActive ? "order-2" : (isRightPaneContext && isChatPaneInMiddle && !(useBottomTabs && isBrowserOpen)) && "order-3",
+                projectViewActive ? "order-2" : (isCodeOpen && isChatPaneInMiddle) && "order-3",
                 insetAnimateMaxWidth && "transition-[max-width] duration-200 ease-linear",
                 shouldCollapseLeftPane && "pointer-events-none select-none"
               )}
@@ -7451,18 +7324,7 @@ function App() {
                 collapsedLeftPaddingPx={collapsedLeftPaddingPx}
               >
                 {isFullScreenChat ? (
-                  <ChatHeader
-                    activeTitle={(() => {
-                      const activeTab = chatTabs.find((t) => t.id === activeChatTabId)
-                      return activeTab ? getChatTabTitle(activeTab) : 'New chat'
-                    })()}
-                    onNewChatTab={handleNewChatTab}
-                    recentRuns={chatRuns}
-                    activeRunId={runId}
-                    sessionUsage={activeChatTabState.sessionUsage}
-                    onSelectRun={openAssistantRun}
-                    onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
-                  />
+                  <span className="self-center px-3 text-sm font-medium">Assistant</span>
                 ) : currentViewState.type === 'file' && selectedPath ? (
                   <TabBar
                     tabs={openFilePaths.includes(selectedPath) ? openFilePaths : [...openFilePaths, selectedPath]}
@@ -7538,47 +7400,6 @@ function App() {
                   </Tooltip>
                 )}
                 {isWorkspaceOpen && selectedPath && <button aria-label="Close document" title="Close document" className="titlebar-no-drag rounded p-2 hover:bg-accent" onClick={() => { void navigateToView({ type: 'workspace', path: workspaceInitialPath ?? undefined, runId: projectChatId ?? undefined }) }}><X className="size-4" /></button>}
-                {/* Trailing layout control. Always mounted (just toggled invisible
-                    when inactive) so its -webkit-app-region:no-drag rect is stable —
-                    a freshly-mounted no-drag button inside the drag-region header
-                    otherwise has its first click swallowed by the window drag. */}
-                {(() => {
-                  // Any section view (including Code — it was omitted here
-                  // once, which left the dock unreopenable from Code).
-                  const viewOpen = !isFullScreenChat
-                  const action = projectViewActive ? null : isFullScreenChat
-                    ? { onClick: pushChatToSidePane, icon: <ArrowRight className="size-5" />, label: 'Dock chat to side pane' }
-                    : (viewOpen && !chatPaneOpen && !isCodeOpen)
-                      ? { onClick: openChatSidePane, icon: <MessageSquare className="size-5" />, label: 'Open chat' }
-                      // In Code mode the chat IS the section — nothing to expand into.
-                      : (viewOpen && chatPaneOpen && !isRightPaneMaximized && !codeChatMain)
-                        ? {
-                            onClick: () => setIsChatSidebarOpen(false),
-                            icon: isChatPaneInMiddle ? <ArrowLeft className="size-5" /> : <ArrowRight className="size-5" />,
-                            label: 'Expand pane'
-                          }
-                        : null
-                  return (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          onClick={action ? action.onClick : undefined}
-                          disabled={!action}
-                          aria-hidden={!action}
-                          aria-label={action?.label}
-                          className={cn(
-                            'titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors -mr-1 self-center shrink-0',
-                            action ? 'hover:bg-accent hover:text-foreground' : 'invisible pointer-events-none',
-                          )}
-                        >
-                          {action?.icon}
-                        </button>
-                      </TooltipTrigger>
-                      {action && <TooltipContent side="bottom">{action.label}</TooltipContent>}
-                    </Tooltip>
-                  )
-                })()}
               </ContentHeader>
 
               {/* Secondary rails belong below the titlebar, as in Spaces and Email. */}
@@ -7712,12 +7533,8 @@ function App() {
                       getRunModel={() => homeSelectionRef.current ?? undefined}
                       onFocusComposer={() => setHomeComposerFocusSignal((n) => n + 1)}
                       onOpenNote={(path) => navigateToFile(path)}
-                      onOpenInChat={(sessionId) => {
-                        // Bind the dock (not the full-screen chat) to the
-                        // item's session.
-                        bindChatToRun(sessionId)
-                        setIsChatSidebarOpen(true)
-                      }}
+                      // The item's session in the sidebar, not the full page.
+                      onOpenInChat={openRunInSidebar}
                       onOpenCodeSession={(sessionId) => {
                         // A code strip's door: the Code section (diffs,
                         // terminal, worktree), focused on this session.
@@ -8112,148 +7929,30 @@ function App() {
                   />
                 </div>
               )}
-              {activeMiddle === 'chat' && !useBottomTabs && (
-              <FileCardProvider onOpenKnowledgeFile={(path) => { navigateToFile(path) }} onOpenFile={(path) => { navigateToFile(path) }}>
-              <div className="flex min-h-0 flex-1 flex-col">
-                <div className="flex h-9 shrink-0 border-b border-border">
-                  <TabBar tabs={chatTabs} activeTabId={activeChatTabId} getTabId={(tab) => tab.id}
-                    getTabTitle={getChatTabTitle} onSwitchTab={switchChatTab}
-                    onCloseTab={(id) => closeChatTabs([id])} onCloseTabs={closeChatTabs} layout="scroll" />
-                </div>
-                <div className="relative min-h-0 flex-1">
-                  {chatTabs.map((tab) => {
-                    const isActive = tab.id === activeChatTabId
-                    return (
-                      <ChatSessionPane
-                        // Keyed by CHAT identity: rebinding this tab to a
-                        // different session remounts the panel (fresh
-                        // scroll/DOM state); first-send runId binding does not.
-                        key={tab.chatId}
-                        tab={tab}
-                        isActive={isActive}
-                        tabState={getChatTabStateForRender(tab.id)}
-                        viewportAnchor={chatViewportAnchorByTab[tab.id]}
-                        onPickPrompt={setPresetMessage}
-                        isToolOpenForTab={isToolOpenForTab}
-                        setToolOpenForTab={setToolOpenForTab}
-                        onPermissionResponse={handlePermissionResponse}
-                        onAskHumanResponse={handleAskHumanResponse}
-                        onCodePermissionResponse={handleCodePermissionResponse}
-                        onComposioConnected={(slug) => handleComposioConnected(slug, tab.id)}
-                        activeIsWorking={activeIsWorking}
-                        activeIsProcessing={activeIsProcessing}
-                        activeIsReasoning={activeIsReasoning}
-                        isCodeSession={!!(tab.runId && codeSessionLocks[tab.runId])}
-                      />
-                    )
-                  })}
-                </div>
-
-                <div className="rowboat-composer-dock sticky bottom-0 z-10 bg-background pb-12 pt-2 shadow-lg">
-                  <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t from-background to-transparent" />
-                  <div className="mx-auto w-full max-w-4xl px-4">
-                    {chatTabs.map((tab) => {
-                      const isActive = tab.id === activeChatTabId
-                      return (
-                        <ChatSessionComposer
-                          // Composer instance per CHAT (see chat panel key
-                          // above): a rebound tab gets a fresh composer, so
-                          // attachments/toggles/selection can't leak across
-                          // sessions; first-send binding keeps the instance.
-                          key={tab.chatId}
-                          tab={tab}
-                          isActive={isActive}
-                          tabState={getChatTabStateForRender(tab.id)}
-                          knowledgeFiles={mentionableFiles}
-                          recentFiles={recentWikiFiles}
-                          visibleFiles={visibleKnowledgeFiles}
-                          onSubmit={handlePromptSubmit}
-                          onStop={handleStop}
-                          activeIsProcessing={activeIsProcessing}
-                          isStopping={isStopping}
-                          // The single session store follows the ACTIVE tab's
-                          // run — only that tab's composer shows its queue.
-                          queued={
-                            isActive && tab.runId && sessionChat.sessionId === tab.runId
-                              ? sessionChat.queued
-                              : undefined
-                          }
-                          onRemoveQueued={handleRemoveQueued}
-                          onPullQueued={handlePullQueued}
-                          presetMessage={presetMessage}
-                          onPresetMessageConsumed={() => setPresetMessage(undefined)}
-                          codeSessionLocks={codeSessionLocks}
-                          initialDraft={chatDraftsRef.current.get(tab.chatId)}
-                          onDraftChange={setChatDraftForTab}
-                          onSelectionChange={(t, selection) => {
-                            if (selection) {
-                              selectionByTabRef.current.set(t.chatId, selection)
-                            } else {
-                              selectionByTabRef.current.delete(t.chatId)
-                            }
-                          }}
-                          initialSelection={selectionByTabRef.current.get(tab.chatId) ?? null}
-                          // Last-turn restore: the single session store is
-                          // bound to the ACTIVE tab's run, so only that tab
-                          // gets a resolved value; others stay undefined
-                          // (loading) until activated. lastSelection is null
-                          // for a session with no turns (settings seed).
-                          restoredSelection={
-                            isActive && tab.runId
-                              && sessionChat.sessionId === tab.runId
-                              && sessionChat.chatState
-                              ? sessionChat.chatState.lastSelection
-                              : undefined
-                          }
-                          workDirByTab={workDirByTab}
-                          onWorkDirChange={setTabWorkDir}
-                          isRecording={isRecording}
-                          voiceOwner={voiceOwner}
-                          voice={voice}
-                          onStartRecording={handleStartRecording}
-                          onSubmitRecording={handleSubmitRecording}
-                          onCancelRecording={handleCancelRecording}
-                          voiceAvailable={voiceAvailable}
-                          inCall={inCall}
-                          callOnThisChat={callOnActiveChat}
-                          onStartCall={handleStartCall}
-                          onEndCall={endCall}
-                          ttsAvailable={ttsAvailable}
-                        />
-                      )
-                    })}
-                  </div>
-                </div>
-              </div>
-              </FileCardProvider>
-              )}
+              <div ref={setAssistantPageHost} hidden={activeMiddle !== 'chat' || !assistantLayout.assistant} className={cn('min-h-0 flex-1', activeMiddle === 'chat' && assistantLayout.assistant ? 'flex flex-col' : 'hidden')}
+                onFocusCapture={() => { if (assistantLayout.assistant) { dispatchAssistantLayout({ type: 'focus', id: assistantLayout.assistant }); switchChatTab(assistantLayout.assistant) } }}
+                onPointerDownCapture={() => { if (assistantLayout.assistant) { dispatchAssistantLayout({ type: 'focus', id: assistantLayout.assistant }); switchChatTab(assistantLayout.assistant) } }} />
               </div>
               </div>
             </SidebarInset>
 
-            {/* Chat pane - shown when viewing files/graph/code. Code sessions
-                bind this same assistant chat (a code session IS a chat
-                session) — there is no separate code chat surface. */}
-            {(isRightPaneContext || useBottomTabs) && (
-              <CodeDiffOpenerProvider onOpenDiff={codeChatMain ? openCodeDiff : null}>
-              <ChatSidebar
-                floating={floatingAssistant && !isRightPaneMaximized}
-                keepMounted={projectViewActive || useBottomTabs || chatTabs.length > 1}
-                onMinimize={showAssistantDock && !dockFullScreen ? () => {
-                  setIsChatSidebarOpen(false)
-                  setIsRightPaneMaximized(false)
-                  requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(`[data-assistant-tab="${CSS.escape(activeChatTabId)}"]`)?.focus())
-                } : undefined}
-                onCloseTab={showAssistantDock ? () => closeAssistantTab(activeChatTabId) : undefined}
-                placement={projectViewActive || (useBottomTabs && isBrowserOpen) ? 'right' : chatPanePlacement}
-                // Code mode: the chat fills whatever the rail and drawer leave.
+            <CodeDiffOpenerProvider onOpenDiff={codeChatMain ? openCodeDiff : null}>
+              <AssistantWorkspace
+                layout={assistantLayout} dispatch={dispatchAssistantLayout} pageHost={assistantPageHost} pageVisible={activeMiddle === 'chat'}
+                legacyPane={projectViewActive || isCodeOpen} workspaceSessionId={projectViewActive ? projectChatId : activeCodeSession?.session.id ?? null}
+                onMoveChat={moveAssistantChat} onNewChatAt={newChatAt} onSelectChatAt={selectChatAt} onFocusChat={switchChatTab} onCloseChat={closeAssistantChat}
+                onSubmitForTab={(id, message, mentions, attachments, search, mode, permission) => handlePromptSubmit(message, mentions, attachments, search, mode, permission, id)}
+                voiceOwner={voiceOwner} callChatId={hoverRunId}
+                onStartRecordingForTab={(id) => { switchChatTab(id); handleStartRecording(chatIdForTab(id)) }}
+                onStartCallForTab={(id, preset) => { switchChatTab(id); handleStartCall(preset) }}
+                keepMounted placement={projectViewActive ? 'right' : chatPanePlacement}
                 paneSize={projectViewActive ? (selectedPath ? 'chat-smaller' : 'chat-bigger') : codeChatMain ? 'chat-bigger' : chatPaneSize}
-                className={cn(projectViewActive ? "order-3" : (isChatPaneInMiddle && !(useBottomTabs && isBrowserOpen)) && "order-2", showAssistantDock && !(floatingAssistant && !isRightPaneMaximized) && 'mb-11')}
+                className="order-3"
                 defaultWidth={DEFAULT_CHAT_PANE_WIDTH}
-                isOpen={dockFullScreen || chatPaneOpen}
-                isMaximized={projectViewActive ? !selectedPath : dockFullScreen || isRightPaneMaximized}
+                isOpen={chatPaneOpen}
+                isMaximized={projectViewActive ? !selectedPath : isRightPaneMaximized}
                 codeSessionTabs={codeChatMain && activeCodeSession ? <WorkspaceSessionTabs session={activeCodeSession.session} onSelect={setCodeFocusSessionId} /> : undefined}
-                chatTabs={isCodeOpen ? chatTabs.filter((tab) => tab.runId === activeCodeSession?.session.id) : chatTabs}
+                chatTabs={chatTabs}
                 onSwitchChatTab={switchChatTab}
                 onCloseChatTabs={closeChatTabs}
                 activeChatTabId={activeChatTabId}
@@ -8262,7 +7961,7 @@ function App() {
                 recentRuns={chatRuns}
                 onSelectRun={projectViewActive ? openAssistantRun : bindChatToRun}
                 onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
-                onOpenFullScreen={projectViewActive ? (selectedPath ? () => { void navigateToView({ type: 'workspace', path: workspaceInitialPath ?? undefined, runId: projectChatId ?? undefined }) } : undefined) : dockFullScreen ? undefined : toggleRightPaneMaximize}
+                onOpenFullScreen={projectViewActive ? (selectedPath ? () => { void navigateToView({ type: 'workspace', path: workspaceInitialPath ?? undefined, runId: projectChatId ?? undefined }) } : undefined) : toggleRightPaneMaximize}
                 onNavigateBack={() => { void navigateBack() }}
                 onNavigateForward={() => { void navigateForward() }}
                 canNavigateBack={canNavigateBack}
@@ -8309,9 +8008,6 @@ function App() {
                 pinnedToCodeSession={
                   codeChatMain
                     && activeCodeSession
-                    // Only while the pane is actually bound to the session — a
-                    // palette-initiated fresh chat, for example, unbinds it.
-                    && chatTabs.find((t) => t.id === activeChatTabId)?.runId === activeCodeSession.session.id
                     ? {
                         session: activeCodeSession.session,
                         status: activeCodeSession.status,
@@ -8338,8 +8034,8 @@ function App() {
                 collapsedLeftPaddingPx={collapsedLeftPaddingPx}
                 // Gated on mic ownership: when another composer (Home, a
                 // call) owns the mic, the dock must not mirror the recording.
-                isRecording={isRecording && voiceOwner === chatIdForTab(activeChatTabId)}
-                recordingText={voiceOwner === chatIdForTab(activeChatTabId) ? voice.interimText : undefined}
+                isRecording={isRecording}
+                recordingText={voice.interimText}
                 recordingState={voice.state === 'submitting' ? 'stopping' : voice.state === 'connecting' ? 'connecting' : 'listening'}
                 audioLevelsRef={voice.audioLevelsRef}
                 onStartRecording={() => handleStartRecording(chatIdForTab(activeChatTabIdRef.current))}
@@ -8353,28 +8049,7 @@ function App() {
                 callAvailable={voiceAvailable && ttsAvailable}
                 onComposioConnected={handleComposioConnected}
               />
-              </CodeDiffOpenerProvider>
-            )}
-            {useBottomTabs && (
-              <AssistantChatDock
-                hidden={!showAssistantDock}
-                tabs={chatTabs}
-                activeId={activeChatTabId}
-                expanded={dockFullScreen || chatPaneOpen}
-                getTitle={getChatTabTitle}
-                onNew={addAssistantTab}
-                onClose={closeAssistantTab}
-                onSelect={(tab) => {
-                  if (tab.id === activeChatTabId && chatPaneOpen && !dockFullScreen) {
-                    setIsChatSidebarOpen(false)
-                    setIsRightPaneMaximized(false)
-                  } else {
-                    if (tab.id !== activeChatTabId) activateAssistantTab(tab)
-                    setIsChatSidebarOpen(true)
-                  }
-                }}
-              />
-            )}
+            </CodeDiffOpenerProvider>
             {/* Workspace drawer beside the code chat: changes, files or a
                 terminal — one of the chat header's buttons opens it. */}
             {codeChatMain && activeCodeSession && codePanel && (

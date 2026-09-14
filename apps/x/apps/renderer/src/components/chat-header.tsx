@@ -93,7 +93,7 @@ export function ChatHeader({
               <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-72">
+          <DropdownMenuContent align="start" className="max-h-96 w-72 overflow-y-auto">
             {recentRuns.length > 0 && (
               <DropdownMenuLabel className="text-[13px] font-normal text-muted-foreground">
                 Recent

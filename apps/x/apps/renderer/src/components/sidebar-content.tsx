@@ -203,6 +203,7 @@ type SidebarContentPanelProps = {
   activeSpace?: SpaceSelection
   onOpenAgent?: (slug: string) => void
   recentRuns?: { id: string; title?: string; createdAt: string; modifiedAt?: string }[]
+  onOpenAssistant?: () => void
   onOpenRun?: (runId: string) => void
   /** Persist a custom chat title (sessions:setTitle) and refresh the runs list. */
   onRenameRun?: (runId: string, title: string) => void
@@ -463,6 +464,7 @@ export function SidebarContentPanel({
   activeSpace = null,
   recentRuns = [],
   onOpenRun,
+  onOpenAssistant,
   onRenameRun,
   onDeleteRun,
   onOpenChatHistory,
@@ -857,7 +859,8 @@ export function SidebarContentPanel({
                 <SidebarMenuButton
                   isActive={activeNav === 'assistant'}
                   onClick={() => {
-                    if (lastChat && onOpenRun) onOpenRun(lastChat.id)
+                    if (onOpenAssistant) onOpenAssistant()
+                    else if (lastChat && onOpenRun) onOpenRun(lastChat.id)
                     else onNewChat?.()
                   }}
                 >
