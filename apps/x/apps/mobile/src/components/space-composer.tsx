@@ -76,6 +76,9 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
   const [cursor, setCursor] = useState(0);
   const [picked, setPicked] = useState<Map<string, MentionPick>>(new Map());
   const [uploading, setUploading] = useState(false);
+  // Picked media rides as thumbnails above the field (iMessage/Slack); the
+  // wire markdown joins the body only on send.
+  const [attachments, setAttachments] = useState<{ key: string; uri: string; md: string; video: boolean }[]>([]);
 
   const pickMedia = async () => {
     if (!onPickMedia || uploading) return;
@@ -84,12 +87,13 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
     if (result.canceled || !asset) return;
     setUploading(true);
     try {
+      const video = asset.type === 'video';
       const md = await onPickMedia({
         uri: asset.uri,
-        mime: asset.mimeType ?? (asset.type === 'video' ? 'video/mp4' : 'image/jpeg'),
-        name: asset.fileName ?? `${asset.type === 'video' ? 'video' : 'photo'}-${Date.now()}`,
+        mime: asset.mimeType ?? (video ? 'video/mp4' : 'image/jpeg'),
+        name: asset.fileName ?? `${video ? 'video' : 'photo'}-${Date.now()}`,
       });
-      setText((prev) => (prev.trim() ? `${prev.replace(/\s+$/, '')}\n${md}\n` : `${md}\n`));
+      setAttachments((prev) => [...prev, { key: `${Date.now()}`, uri: asset.uri, md, video }]);
     } finally {
       setUploading(false);
     }
@@ -122,13 +126,16 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
     [active, text, cursor],
   );
 
+  const canSend = (text.trim().length > 0 || attachments.length > 0) && !sending && !uploading;
   const send = () => {
-    const body = tokenizeMentions(text.trim(), picked);
-    if (!body || sending) return;
+    if (!canSend) return;
+    const words = tokenizeMentions(text.trim(), picked);
+    const body = [words, ...attachments.map((a) => a.md)].filter(Boolean).join('\n');
     if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
     Keyboard.dismiss();
     setText('');
     setPicked(new Map());
+    setAttachments([]);
     onSend(body);
   };
 
@@ -188,6 +195,30 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
           paddingHorizontal: 14, paddingTop: 4, paddingBottom: 6,
         }}
       >
+        {attachments.length > 0 ? (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingTop: 10, paddingBottom: 2 }}>
+            {attachments.map((a) => (
+              <View key={a.key} style={{ width: 64, height: 64 }}>
+                <Image source={{ uri: a.uri }} style={{ width: 64, height: 64, borderRadius: 10 }} contentFit="cover" />
+                {a.video ? (
+                  <View style={{ position: 'absolute', inset: 0, alignItems: 'center', justifyContent: 'center' }}>
+                    <Image source="sf:play.circle.fill" style={{ width: 22, height: 22 }} tintColor="#ffffff" />
+                  </View>
+                ) : null}
+                <Pressable
+                  hitSlop={6}
+                  onPress={() => setAttachments((prev) => prev.filter((x) => x.key !== a.key))}
+                  style={{
+                    position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: 10,
+                    alignItems: 'center', justifyContent: 'center', backgroundColor: colors.label,
+                  }}
+                >
+                  <Image source="sf:xmark" style={{ width: 9, height: 9 }} tintColor={colors.background} />
+                </Pressable>
+              </View>
+            ))}
+          </ScrollView>
+        ) : null}
         <TextInput
           ref={inputRef}
           style={{ minHeight: 40, maxHeight: 140, fontSize: 16, lineHeight: 22, color: colors.label, paddingVertical: 8 }}
@@ -232,8 +263,8 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
           <Pressable
             hitSlop={8}
             onPress={send}
-            disabled={!text.trim() || sending}
-            style={{ opacity: text.trim() && !sending ? 1 : 0.3 }}
+            disabled={!canSend}
+            style={{ opacity: canSend ? 1 : 0.3 }}
           >
             <Image source="sf:paperplane.fill" style={{ width: 22, height: 22 }} tintColor={colors.label} />
           </Pressable>
