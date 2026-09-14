@@ -47,10 +47,11 @@ export function tokenizeMentions(text: string, picked: ReadonlyMap<string, Menti
       pick.id === 'here' || pick.id === 'rowboat'
         ? mentionToken({ kind: pick.id })
         : mentionToken({ kind: 'member', id: pick.id, label: pick.label });
-    out = out.replace(new RegExp(`(^|[\\s([{])@${escapeRe(label)}(?![\\w])`, 'g'), `$1${token}`);
+    out = out.replace(new RegExp(`(^|[\\s([{])@${escapeRe(label)}(?![\\w])(?!\\]\\(#)`, 'g'), `$1${token}`);
   }
-  // Fixed addresses typed by hand still count — they are deliberate.
-  out = out.replace(/(^|[\s([{])@(here|rowboat)(?![\w])/g, (_m, pre: string, kind: 'here' | 'rowboat') => `${pre}${mentionToken({ kind })}`);
+  // Fixed addresses typed by hand still count — they are deliberate. The
+  // lookahead skips an "@here" that is already a token's label.
+  out = out.replace(/(^|[\s([{])@(here|rowboat)(?![\w])(?!\]\(#)/g, (_m, pre: string, kind: 'here' | 'rowboat') => `${pre}${mentionToken({ kind })}`);
   return out;
 }
 
