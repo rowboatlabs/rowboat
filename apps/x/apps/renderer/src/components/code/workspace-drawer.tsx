@@ -223,9 +223,13 @@ export function CodeWorkspaceDrawer({
       />
 
       {/* Header: segmented panel switch + panel actions. Part of the
-          titlebar drag region like the chat header beside it. */}
-      <div className="titlebar-drag-region flex h-10 shrink-0 items-center gap-1 border-b border-border bg-sidebar pl-2 pr-1">
-        <div className="titlebar-no-drag flex items-center gap-0.5">
+          titlebar drag region like the chat header beside it. The close
+          button must survive every width: the trailing actions never shrink,
+          and below the container-query thresholds the switch and the
+          Worktree menu drop their text so Changes (refresh + worktree) still
+          fits at the drawer's minimum width. */}
+      <div className="titlebar-drag-region flex h-10 shrink-0 items-center gap-1 border-b border-border bg-sidebar pl-2 pr-1 @container">
+        <div className="titlebar-no-drag flex min-w-0 items-center gap-0.5">
           {CODE_PANELS.map(({ id, label, icon: Icon }) => {
             const active = panel === id
             return (
@@ -233,13 +237,15 @@ export function CodeWorkspaceDrawer({
                 key={id}
                 type="button"
                 onClick={() => onPanelChange(id)}
+                aria-label={label}
+                title={label}
                 className={cn(
-                  'flex h-7 items-center gap-1.5 rounded-[7px] px-2 text-xs transition-colors',
+                  'flex h-7 shrink-0 items-center gap-1.5 rounded-[7px] px-2 text-xs transition-colors',
                   active ? 'bg-accent font-medium text-foreground' : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
                 )}
               >
                 <Icon className="size-3.5" />
-                {label}
+                <span className="hidden @[400px]:inline">{label}</span>
                 {id === 'changes' && dirtyCount > 0 && (
                   <span className="tabular-nums text-muted-foreground">{dirtyCount}</span>
                 )}
@@ -247,7 +253,7 @@ export function CodeWorkspaceDrawer({
             )
           })}
         </div>
-        <span className="flex-1" />
+        <span className="min-w-0 flex-1" />
         {panel === 'changes' && (
           <>
             <Tooltip>
@@ -255,7 +261,7 @@ export function CodeWorkspaceDrawer({
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="titlebar-no-drag h-7 w-7 p-0 text-muted-foreground"
+                  className="titlebar-no-drag h-7 w-7 shrink-0 p-0 text-muted-foreground"
                   onClick={onRefreshGit}
                 >
                   <RefreshCw className="size-3.5" />
@@ -266,9 +272,9 @@ export function CodeWorkspaceDrawer({
             {worktreeActive && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="sm" className="titlebar-no-drag h-7 gap-1.5 px-2 text-xs text-muted-foreground">
+                  <Button variant="ghost" size="sm" className="titlebar-no-drag h-7 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground" aria-label="Worktree" title="Worktree">
                     <GitMerge className="size-3.5" />
-                    Worktree
+                    <span className="hidden @[460px]:inline">Worktree</span>
                     <MoreHorizontal className="size-3" />
                   </Button>
                 </DropdownMenuTrigger>
@@ -295,7 +301,7 @@ export function CodeWorkspaceDrawer({
             <Button
               variant="ghost"
               size="sm"
-              className="titlebar-no-drag h-7 w-7 p-0 text-muted-foreground"
+              className="titlebar-no-drag h-7 w-7 shrink-0 p-0 text-muted-foreground"
               onClick={onClose}
               aria-label="Close panel"
             >
