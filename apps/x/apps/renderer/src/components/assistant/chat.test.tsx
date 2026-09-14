@@ -44,3 +44,21 @@ it('routes actions to their originating conversation even when another chat is a
   expect(second.queryByLabelText('Move to floating window')).not.toBeInTheDocument()
   expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
 })
+
+it('seats the container controls at the end of its header row', () => {
+  const tab = { id: 'a', chatId: 'a', runId: 'a' }
+  actions.set('a', { stop: vi.fn().mockResolvedValue([]), permission: vi.fn(), answer: vi.fn(), remove: vi.fn() })
+  const services: ChatServices = {
+    chatTabs: [tab], activeChatTabId: 'a', getChatTabTitle: (entry) => entry.id,
+    onSwitchChatTab: vi.fn(), onCloseChatTabs: vi.fn(), onNewChatTab: vi.fn(),
+    conversation: [], currentAssistantMessage: '', isProcessing: false, onSubmit: vi.fn(),
+    onSubmitForTab: vi.fn(), voiceOwner: null, callChatId: null, onStartRecordingForTab: vi.fn(), onStartCallForTab: vi.fn(),
+    chatTabStates: { a: createEmptyChatTabViewState() },
+  }
+  render(<TooltipProvider><Chat tab={tab} location="sidebar" visible focused services={services} onMove={vi.fn()} onNew={vi.fn()} onSelect={vi.fn()}
+    controls={<button aria-label="Close sidebar" />} /></TooltipProvider>)
+  const header = document.querySelector('[data-chat-header]') as HTMLElement
+  const close = within(header).getByLabelText('Close sidebar')
+  expect(header.lastElementChild).toBe(close)
+  expect(within(header).getByLabelText('Move to floating window').compareDocumentPosition(close) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+})

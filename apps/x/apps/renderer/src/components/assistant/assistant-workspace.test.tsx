@@ -8,11 +8,12 @@ import { assistantLayoutReducer, fitWindow, initialAssistantLayout, type ChatLoc
 vi.mock('@/components/chat-sidebar', () => ({ ChatSidebar: () => null }))
 vi.mock('@/hooks/useSessionChat', () => ({ useSessionChat: () => ({ chatState: null }) }))
 vi.mock('@/lib/session-title', () => ({ useSessionTitle: () => undefined }))
-vi.mock('./chat', () => ({ Chat: ({ tab, location, onMove }: { tab: { id: string }; location: ChatLocation; onMove: (location: ChatLocation) => void }) => {
+vi.mock('./chat', () => ({ Chat: ({ tab, location, onMove, controls }: { tab: { id: string }; location: ChatLocation; onMove: (location: ChatLocation) => void; controls?: React.ReactNode }) => {
   const [draft, setDraft] = useState('')
   return <section aria-label={`Chat ${tab.id}`}><header data-chat-header>
     <span>{tab.id}</span>
     {(['assistant', 'sidebar', 'floating'] as const).filter((entry) => entry !== location).map((entry) => <button key={entry} onClick={() => onMove(entry)}>Move to {entry}</button>)}
+    {controls}
     </header><input aria-label="Draft" value={draft} onChange={(event) => setDraft(event.target.value)} /></section>
 } }))
 
@@ -46,8 +47,23 @@ describe('assistant workspace containers', () => {
     const input = screen.getByLabelText('Draft')
     fireEvent.change(input, { target: { value: 'Keep my unsent draft' } })
     fireEvent.click(screen.getByText('Move to sidebar'))
-    expect(within(screen.getByLabelText('Chat sidebar')).getByLabelText('Draft')).toBe(input)
-    expect(within(screen.getByLabelText('Chat sidebar')).getByLabelText('Close sidebar')).toBeVisible()
+    const sidebar = screen.getByLabelText('Chat sidebar')
+    expect(within(sidebar).getByLabelText('Draft')).toBe(input)
+    // The sidebar's divider runs its full height, title bar included. Its top
+    // row continues the title bar (40px, same bottom rule) under the name
+    // "Assistant"; the pane proper, with the resize handle, starts below it.
+    // The sidebar's close button rides in the chat's own header row inside
+    // that pane.
+    const [titleBar, pane] = Array.from(sidebar.children) as HTMLElement[]
+    expect(sidebar.children).toHaveLength(2)
+    expect(sidebar.className).toContain('border-l')
+    expect(titleBar.className).toContain('h-10')
+    expect(titleBar.className).toContain('border-b')
+    expect(titleBar).toHaveTextContent('Assistant')
+    expect(within(pane).getByRole('separator', { name: 'Resize chat sidebar' })).toBeInTheDocument()
+    const closeSidebar = within(pane).getByLabelText('Close sidebar')
+    expect(closeSidebar).toBeVisible()
+    expect(closeSidebar.closest('[data-chat-header]')).not.toBeNull()
     expect(screen.queryByLabelText('Close chat')).not.toBeInTheDocument()
     fireEvent.click(screen.getByText('Move to floating'))
     expect(screen.queryByLabelText('Chat sidebar')).not.toBeInTheDocument()

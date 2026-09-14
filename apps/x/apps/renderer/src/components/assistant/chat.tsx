@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { ArrowDownRight, ArrowUpLeft, ArrowRightToLine } from 'lucide-react'
 import { toast } from 'sonner'
 import { ChatHeader } from '@/components/chat-header'
@@ -28,10 +28,12 @@ const destinations = [
 
 /** One stable conversation instance. Its parent changes its host, never its
  *  identity. The chat can ask to be moved; minimizing and closing belong to
- *  the container it sits in. */
-export function Chat({ tab, location, visible, focused, services: p, onMove, onNew, onSelect }: {
+ *  the container it sits in. A container whose controls share the header row
+ *  (the sidebar's close button) passes them as `controls` rather than stacking
+ *  a strip of its own above the chat. */
+export function Chat({ tab, location, visible, focused, services: p, onMove, onNew, onSelect, controls }: {
   tab: ChatTab; location: ChatLocation; visible: boolean; focused: boolean; services: ChatServices
-  onMove: (location: ChatLocation) => void; onNew: () => void; onSelect: (id: string) => void
+  onMove: (location: ChatLocation) => void; onNew: () => void; onSelect: (id: string) => void; controls?: ReactNode
 }) {
   const session = useSessionChat(tab.runId)
   const title = useSessionTitle(tab.runId) ?? p.getChatTabTitle(tab)
@@ -58,6 +60,7 @@ export function Chat({ tab, location, visible, focused, services: p, onMove, onN
         <TooltipTrigger asChild><button type="button" aria-label={label} onClick={() => onMove(location)} className="my-1 flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><Icon className="size-4" /></button></TooltipTrigger>
         <TooltipContent side="bottom">{label}</TooltipContent>
       </Tooltip>)}
+      {controls}
     </header>
     <FileCardProvider onOpenKnowledgeFile={p.onOpenKnowledgeFile ?? (() => {})} onOpenFile={p.onOpenFile}>
       {session.error && <div role="alert" className="px-4 py-2 text-sm text-destructive">{session.error}</div>}
