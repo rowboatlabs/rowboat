@@ -27,6 +27,19 @@ import type { SearchQuery } from './search.js';
  * product identity and a mutable property, unique among the living. Nothing
  * relocates on move/delete/restore; only these fields change.
  */
+/**
+ * One page of a message list, always returned oldest first. `beforeOffset`
+ * = the newest `limit` rows below it (paging back); `afterOffset` = the
+ * oldest `limit` rows above it (paging forward); neither = the newest
+ * `limit` rows. Both exclusive. The service composes an "around" window
+ * from one of each.
+ */
+export interface MessageWindow {
+  beforeOffset?: number;
+  afterOffset?: number;
+  limit?: number;
+}
+
 export interface AssetRecord {
   id: string;
   path: string;
@@ -262,9 +275,9 @@ export interface Store {
    * opts: the NEWEST `limit` roots whose offset is below `beforeOffset`
    * (when given) — still returned oldest first.
    */
-  listStream(spaceId: string, opts?: { beforeOffset?: number; limit?: number }): Promise<Message[]>;
+  listStream(spaceId: string, opts?: MessageWindow): Promise<Message[]>;
   /** One flat thread's replies (threadRoot = rootMessageId), same window semantics as listStream. */
-  listThread(spaceId: string, rootMessageId: string, opts?: { beforeOffset?: number; limit?: number }): Promise<Message[]>;
+  listThread(spaceId: string, rootMessageId: string, opts?: MessageWindow): Promise<Message[]>;
   listMessagesBySpace(spaceId: string): Promise<Message[]>;
   appendMessage(message: Message): Promise<void>;
   /**

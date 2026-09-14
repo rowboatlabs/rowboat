@@ -105,6 +105,14 @@ type EditMessageInput = z.infer<Routes['editMessage']['request']>;
 type VotePollInput = z.infer<Routes['votePoll']['request']>;
 type EndPollInput = z.infer<Routes['endPoll']['request']>;
 
+/** One page of a message list (protocol listStream / listThread query): at most one of the three offsets. */
+export interface MessageWindowOpts {
+  beforeOffset?: number;
+  afterOffset?: number;
+  aroundOffset?: number;
+  limit?: number;
+}
+
 export class SpacesClient {
   private readonly baseUrl: string;
   private readonly token: string | SpacesTokenProvider;
@@ -404,9 +412,12 @@ export class SpacesClient {
     return this.request('GET', this.space(spaceId, `/search?${qs.toString()}`), routes.search.response);
   }
 
-  private windowQuery(opts?: { beforeOffset?: number; limit?: number }): string {
+  /** A page request: newest by default, back from `beforeOffset`, forward from `afterOffset`, or landing around `aroundOffset` (at most one). */
+  private windowQuery(opts?: MessageWindowOpts): string {
     const q = new URLSearchParams();
     if (opts?.beforeOffset !== undefined) q.set('beforeOffset', String(opts.beforeOffset));
+    if (opts?.afterOffset !== undefined) q.set('afterOffset', String(opts.afterOffset));
+    if (opts?.aroundOffset !== undefined) q.set('aroundOffset', String(opts.aroundOffset));
     if (opts?.limit !== undefined) q.set('limit', String(opts.limit));
     return q.size > 0 ? `?${q.toString()}` : '';
   }
@@ -414,8 +425,8 @@ export class SpacesClient {
   /** The stream (roots only), windowed newest-first: without beforeOffset the LATEST page — never the full history. */
   async listStream(
     spaceId: string,
-    opts?: { beforeOffset?: number; limit?: number },
-  ): Promise<{ messages: Message[]; topics: Topic[]; hasMore: boolean; readOffset: number }> {
+    opts?: MessageWindowOpts,
+  ): Promise<{ messages: Message[]; topics: Topic[]; hasMore: boolean; hasMoreAfter?: boolean; readOffset: number }> {
     return this.request('GET', this.space(spaceId, `/stream${this.windowQuery(opts)}`), routes.listStream.response);
   }
 
@@ -430,12 +441,13 @@ export class SpacesClient {
   async listThread(
     spaceId: string,
     rootMessageId: string,
-    opts?: { beforeOffset?: number; limit?: number },
+    opts?: MessageWindowOpts,
   ): Promise<{
     root: Message;
     topic: Topic | null;
     messages: Message[];
     hasMore: boolean;
+    hasMoreAfter?: boolean;
     readOffset: number | null;
     following: boolean;
   }> {

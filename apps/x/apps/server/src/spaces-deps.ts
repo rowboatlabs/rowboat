@@ -262,6 +262,8 @@ export const spacesRpcHandlers: SpacesHandlers = {
   'spaces:listStream': async (args) =>
     orgs.getClient(args.orgId).listStream(args.spaceId, {
       ...(args.beforeOffset !== undefined ? { beforeOffset: args.beforeOffset } : {}),
+      ...(args.afterOffset !== undefined ? { afterOffset: args.afterOffset } : {}),
+      ...(args.aroundOffset !== undefined ? { aroundOffset: args.aroundOffset } : {}),
       ...(args.limit !== undefined ? { limit: args.limit } : {}),
     }),
 
@@ -272,6 +274,8 @@ export const spacesRpcHandlers: SpacesHandlers = {
   'spaces:listThread': async (args) =>
     orgs.getClient(args.orgId).listThread(args.spaceId, args.rootMessageId, {
       ...(args.beforeOffset !== undefined ? { beforeOffset: args.beforeOffset } : {}),
+      ...(args.afterOffset !== undefined ? { afterOffset: args.afterOffset } : {}),
+      ...(args.aroundOffset !== undefined ? { aroundOffset: args.aroundOffset } : {}),
       ...(args.limit !== undefined ? { limit: args.limit } : {}),
     }),
 

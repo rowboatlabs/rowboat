@@ -11,7 +11,8 @@ import type {
   Topic,
 } from '@rowboat/spaces-protocol';
 import { extractSearchText, matchesAllTerms, searchTextFor, snippetAround, type SearchQuery } from './search.js';
-import { type PushLevel, directKeyFor } from './store.js';
+import {
+  type MessageWindow, type PushLevel, directKeyFor } from './store.js';
 import type {
   AssetRecord,
   AssetSearchRow,
@@ -324,17 +325,19 @@ export class MemoryStore implements Store {
     return this.must(spaceId).messagesById.get(messageId);
   }
 
-  private window(list: Message[], opts?: { beforeOffset?: number; limit?: number }): Message[] {
+  private window(list: Message[], opts?: MessageWindow): Message[] {
     if (opts?.beforeOffset !== undefined) list = list.filter((m) => m.offset < opts.beforeOffset!);
-    if (opts?.limit !== undefined) list = list.slice(-opts.limit);
+    if (opts?.afterOffset !== undefined) list = list.filter((m) => m.offset > opts.afterOffset!);
+    // Paging forward takes the OLDEST rows above the edge; every other page the newest below it.
+    if (opts?.limit !== undefined) list = opts.afterOffset !== undefined ? list.slice(0, opts.limit) : list.slice(-opts.limit);
     return [...list];
   }
 
-  async listStream(spaceId: string, opts?: { beforeOffset?: number; limit?: number }): Promise<Message[]> {
+  async listStream(spaceId: string, opts?: MessageWindow): Promise<Message[]> {
     return this.window(this.must(spaceId).messages.filter((m) => m.threadRoot === undefined), opts);
   }
 
-  async listThread(spaceId: string, rootMessageId: string, opts?: { beforeOffset?: number; limit?: number }): Promise<Message[]> {
+  async listThread(spaceId: string, rootMessageId: string, opts?: MessageWindow): Promise<Message[]> {
     return this.window(this.must(spaceId).messages.filter((m) => m.threadRoot === rootMessageId), opts);
   }
 

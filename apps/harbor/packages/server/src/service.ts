@@ -66,6 +66,7 @@ import { type PushLevel,
   directKeyFor,
   type AssetRecord,
   type AssetVersionData,
+  type MessageWindow,
   type Store,
   type StoredEvent,
   type StoredPollVote,
@@ -98,6 +99,8 @@ function seedDisplayName(identity: BindIdentity): string {
 type NewMessage = z.infer<Routes['postMessage']['request']>;
 type RenameSpaceInput = z.infer<Routes['renameSpace']['request']>;
 type CreateTopicInput = z.infer<Routes['createTopic']['request']>;
+/** A page request (protocol listStream / listThread query): at most one of the three offsets. */
+type PageOpts = { beforeOffset?: number; afterOffset?: number; aroundOffset?: number; limit?: number };
 type ManageTopicAction = z.infer<Routes['manageTopic']['request']>;
 type ReactInput = z.infer<Routes['reactToMessage']['request']>;
 type DeleteMessageInput = z.infer<Routes['deleteMessage']['request']>;
@@ -1056,24 +1059,68 @@ export class HarborService {
       const root = folded.get(t.rootMessageId) ?? null;
       return { ...t, rootMessage: root, lastActivityAt: HarborService.activityOf(root ?? undefined, t) };
     });
-    return listings.sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt) || b.id.localeCompare(a.id));
+    // Newest activity first. Two activities in the same millisecond (a reply
+    // and a root posted back to back) tie on the stamp — the event offset,
+    // which is the order they actually happened in, breaks it.
+    const activityOffset = (l: TopicListing) => l.rootMessage?.lastReplyOffset ?? l.rootMessage?.offset ?? 0;
+    return listings.sort(
+      (a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt) || activityOffset(b) - activityOffset(a) || b.id.localeCompare(a.id),
+    );
+  }
+
+  /**
+   * One page of a message list (protocol listStream / listThread windows):
+   * the newest `limit` rows, the rows below `beforeOffset`, the rows above
+   * `afterOffset`, or — `aroundOffset` — half the limit on each side of one
+   * row, the row itself included. One extra row on each fetched side answers
+   * hasMore / hasMoreAfter without a count query.
+   */
+  private async pageOf(
+    fetch: (window: MessageWindow) => Promise<Message[]>,
+    opts?: PageOpts,
+  ): Promise<{ rows: Message[]; hasMore: boolean; hasMoreAfter: boolean }> {
+    const given = [opts?.beforeOffset, opts?.afterOffset, opts?.aroundOffset].filter((v) => v !== undefined).length;
+    if (given > 1) throw new HarborError('invalid_request', 'pass at most one of beforeOffset, afterOffset, aroundOffset');
+    const limit = this.pageLimit(opts?.limit);
+    if (opts?.aroundOffset !== undefined) {
+      // Half the window below the anchor (exclusive); the rest from the anchor
+      // up (inclusive: an exclusive edge one below it) — each side fetched one
+      // row over its share to answer whether more lies beyond it.
+      const belowShare = Math.floor(limit / 2);
+      const aboveShare = limit - belowShare;
+      const below = await fetch({ beforeOffset: opts.aroundOffset, limit: belowShare + 1 });
+      const above = await fetch({ afterOffset: opts.aroundOffset - 1, limit: aboveShare + 1 });
+      const hasMore = below.length > belowShare;
+      const hasMoreAfter = above.length > aboveShare;
+      return {
+        rows: [...(hasMore ? below.slice(1) : below), ...(hasMoreAfter ? above.slice(0, aboveShare) : above)],
+        hasMore,
+        hasMoreAfter,
+      };
+    }
+    if (opts?.afterOffset !== undefined) {
+      const above = await fetch({ afterOffset: opts.afterOffset, limit: limit + 1 });
+      const hasMoreAfter = above.length > limit;
+      // Paging forward says nothing about what lies below the edge the
+      // caller already holds; that side is theirs to track.
+      return { rows: hasMoreAfter ? above.slice(0, limit) : above, hasMore: false, hasMoreAfter };
+    }
+    const window = await fetch({
+      ...(opts?.beforeOffset !== undefined ? { beforeOffset: opts.beforeOffset } : {}),
+      limit: limit + 1,
+    });
+    const hasMore = window.length > limit;
+    return { rows: hasMore ? window.slice(1) : window, hasMore, hasMoreAfter: false };
   }
 
   async listStream(
     ctx: ActorCtx,
     spaceId: string,
-    opts?: { beforeOffset?: number; limit?: number },
-  ): Promise<{ messages: Message[]; topics: Topic[]; hasMore: boolean; readOffset: number }> {
+    opts?: PageOpts,
+  ): Promise<{ messages: Message[]; topics: Topic[]; hasMore: boolean; hasMoreAfter: boolean; readOffset: number }> {
     await this.requireMember(ctx, spaceId);
-    // Newest page by default — never the full history. One extra row answers
-    // hasMore without a count query.
-    const limit = this.pageLimit(opts?.limit);
-    const window = await this.store.listStream(spaceId, {
-      ...(opts?.beforeOffset !== undefined ? { beforeOffset: opts.beforeOffset } : {}),
-      limit: limit + 1,
-    });
-    const hasMore = window.length > limit;
-    const roots = hasMore ? window.slice(1) : window;
+    // Newest page by default — never the full history.
+    const { rows: roots, hasMore, hasMoreAfter } = await this.pageOf((w) => this.store.listStream(spaceId, w), opts);
     // The page's topic badges, one batched decoration.
     const topics: Topic[] = [];
     for (const m of roots) {
@@ -1084,6 +1131,7 @@ export class HarborService {
       messages: await this.foldPage(spaceId, roots),
       topics,
       hasMore,
+      hasMoreAfter,
       readOffset: await this.store.getStreamReadMark(spaceId, ctx.memberId),
     };
   }
@@ -1102,24 +1150,19 @@ export class HarborService {
     ctx: ActorCtx,
     spaceId: string,
     rootMessageId: string,
-    opts?: { beforeOffset?: number; limit?: number },
+    opts?: PageOpts,
   ): Promise<{
     root: Message;
     topic: Topic | null;
     messages: Message[];
     hasMore: boolean;
+    hasMoreAfter: boolean;
     readOffset: number | null;
     following: boolean;
   }> {
     await this.requireMember(ctx, spaceId);
     const root = await this.resolveRoot(spaceId, rootMessageId);
-    const limit = this.pageLimit(opts?.limit);
-    const window = await this.store.listThread(spaceId, root.id, {
-      ...(opts?.beforeOffset !== undefined ? { beforeOffset: opts.beforeOffset } : {}),
-      limit: limit + 1,
-    });
-    const hasMore = window.length > limit;
-    const replies = hasMore ? window.slice(1) : window;
+    const { rows: replies, hasMore, hasMoreAfter } = await this.pageOf((w) => this.store.listThread(spaceId, root.id, w), opts);
     const [foldedRoot] = await this.foldPage(spaceId, [root]);
     const mark = await this.store.getThreadReadMark(spaceId, root.id, ctx.memberId);
     return {
@@ -1127,6 +1170,7 @@ export class HarborService {
       topic: (await this.store.getTopicByRoot(spaceId, root.id)) ?? null,
       messages: await this.foldPage(spaceId, replies),
       hasMore,
+      hasMoreAfter,
       // The mark, followed or not (null = the member never read or followed it).
       readOffset: mark?.readOffset ?? null,
       following: mark?.following ?? false,

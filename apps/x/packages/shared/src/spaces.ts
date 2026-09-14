@@ -135,6 +135,8 @@ export interface SpacesStreamPage {
   topics: Topic[];
   /** Older roots exist below the returned window (listStream is windowed, newest-first). */
   hasMore: boolean;
+  /** Newer roots exist above it — only after an around / after page; absent on an older org. */
+  hasMoreAfter?: boolean;
   /** The caller's stream mark (0 = never marked) — the New divider's anchor. */
   readOffset: number;
 }
@@ -145,6 +147,7 @@ export interface SpacesThreadPage {
   topic: Topic | null;
   messages: Message[];
   hasMore: boolean;
+  hasMoreAfter?: boolean;
   /** The caller's mark in this thread; null = not following (no mark is kept). */
   readOffset: number | null;
   following: boolean;

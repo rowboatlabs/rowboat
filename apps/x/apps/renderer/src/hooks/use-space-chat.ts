@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { spaces } from '@x/shared'
+import { toast } from '@/lib/toast'
 import { subscribeSpacesFeed } from '@/lib/spaces-feed'
 import { useSpaceAgentActivity } from '@/lib/spaces-agent-activity'
 import { applyReaction, mergeMessages } from '@/lib/spaces-conventions'
@@ -54,7 +55,11 @@ export function buildPendingMessage(spaceId: string, memberId: string, body: str
 }
 
 export interface StreamState {
-    /** The loaded window of ROOTS (newest page first; older pages prepend on demand) plus optimistic rows. */
+    /**
+     * The loaded window of ROOTS plus optimistic rows. Normally the tail
+     * (newest page first; older pages prepend on demand); after a jump to an
+     * old row, a window around that row — see hasMoreAfter.
+     */
     messages: ChatMessage[]
     /** Topic annotations for loaded roots, by rootMessageId. */
     topicsByRoot: ReadonlyMap<string, spaces.Topic>
@@ -62,13 +67,23 @@ export interface StreamState {
     hasMore: boolean
     /** An older page is on its way. */
     loadingOlder: boolean
+    /**
+     * Newer roots exist above the window — the reader landed on an old row
+     * and the window is DETACHED from the tail: scroll down to page forward,
+     * or jump to latest. Live roots stay out of the window meanwhile.
+     */
+    hasMoreAfter: boolean
+    /** Roots that arrived live while detached (the pill's count); null = unknown, after a reconnect resync. */
+    newerSince: number | null
     /** True once the first page landed (or the cached tail painted). */
     ready: boolean
     /** Set when the load failed (org unreachable, not a member …). */
     error?: string
 }
 
-const EMPTY_STREAM: StreamState = { messages: [], topicsByRoot: new Map(), hasMore: false, loadingOlder: false, ready: false }
+const EMPTY_STREAM: StreamState = {
+    messages: [], topicsByRoot: new Map(), hasMore: false, loadingOlder: false, hasMoreAfter: false, newerSince: 0, ready: false,
+}
 
 let streamState: ReadonlyMap<string, StreamState> = new Map()
 const streamListeners = new Set<() => void>()
@@ -118,7 +133,8 @@ interface StreamCache {
 
 function persistStream(k: string): void {
     const state = streamState.get(k)
-    if (!state?.ready || state.error) return
+    // A detached window is not the tail — the cold-open paint must stay one.
+    if (!state?.ready || state.error || state.hasMoreAfter) return
     const settled = state.messages.filter((m) => !m.pending && !m.failed)
     if (settled.length === 0) return
     const tail = settled.slice(-CACHE_TAIL)
@@ -190,15 +206,23 @@ async function loadStream(orgId: string, spaceId: string): Promise<void> {
         // doesn't already contain are carried over.
         const res = await window.ipc.invoke('spaces:listStream', { orgId, spaceId })
         const prev = streamState.get(k)
+        streamCacheOnly.delete(k)
+        // The page carries our stream mark — the earliest word on it when a
+        // space opens before the org's snapshot landed.
+        noteStreamReadOffset(orgId, spaceId, res.readOffset)
+        if (prev?.hasMoreAfter) {
+            // A resync while detached: the head page cannot merge into a
+            // window that floats below it (a gap would separate them). The
+            // window stays; what arrived meanwhile is unknown until the
+            // reader pages forward or jumps.
+            setStream(k, { newerSince: null, ready: true, error: undefined })
+            return
+        }
         const settled = (prev?.messages ?? []).filter((m) => !m.pending && !m.failed)
         const carried = (prev?.messages ?? []).filter(
             (m) => (m.pending || m.failed) && !res.messages.some((r) => r.author.memberId === m.author.memberId && r.body === m.body),
         )
         const reachesDeeper = (settled[0]?.offset ?? Infinity) < (res.messages[0]?.offset ?? Infinity)
-        streamCacheOnly.delete(k)
-        // The page carries our stream mark — the earliest word on it when a
-        // space opens before the org's snapshot landed.
-        noteStreamReadOffset(orgId, spaceId, res.readOffset)
         setStream(k, {
             messages: [...mergeMessages(settled, res.messages), ...carried],
             topicsByRoot: withTopics(prev?.topicsByRoot ?? new Map(), res.topics),
@@ -230,9 +254,14 @@ export async function loadOlderStreamMessages(orgId: string, spaceId: string): P
     try {
         const res = await window.ipc.invoke('spaces:listStream', { orgId, spaceId, beforeOffset: oldest.offset })
         const cur = streamState.get(k)
+        // A jump swapped the window meanwhile: this page continues the one that left.
+        if (!cur?.messages.some((m) => m.id === oldest.id)) {
+            setStream(k, { loadingOlder: false })
+            return
+        }
         setStream(k, {
-            messages: mergeMessages(cur?.messages ?? [], res.messages),
-            topicsByRoot: withTopics(cur?.topicsByRoot ?? new Map(), res.topics),
+            messages: mergeMessages(cur.messages, res.messages),
+            topicsByRoot: withTopics(cur.topicsByRoot, res.topics),
             hasMore: res.hasMore,
             loadingOlder: false,
         })
@@ -241,6 +270,83 @@ export async function loadOlderStreamMessages(orgId: string, spaceId: string): P
     } finally {
         olderLoading.delete(k)
     }
+}
+
+/** The newest settled row of a window (optimistic rows sort past every real offset). */
+function newestSettled(messages: readonly ChatMessage[] | undefined): ChatMessage | undefined {
+    if (!messages) return undefined
+    for (let i = messages.length - 1; i >= 0; i--) {
+        const m = messages[i]!
+        if (!m.pending && !m.failed) return m
+    }
+    return undefined
+}
+
+/**
+ * Land on a row the window does not hold (a link, search, Activity): the
+ * window becomes the page around that offset, detached from the tail when
+ * newer roots exist above it. Optimistic rows go — they belong to the tail
+ * and come back with it. Throws when the org refuses (the caller toasts).
+ */
+export async function loadStreamAround(orgId: string, spaceId: string, offset: number): Promise<void> {
+    const k = key(orgId, spaceId)
+    const res = await window.ipc.invoke('spaces:listStream', { orgId, spaceId, aroundOffset: offset })
+    const prev = streamState.get(k)
+    streamCacheOnly.delete(k)
+    noteStreamReadOffset(orgId, spaceId, res.readOffset)
+    setStream(k, {
+        messages: res.messages,
+        topicsByRoot: withTopics(prev?.topicsByRoot ?? new Map(), res.topics),
+        hasMore: res.hasMore,
+        loadingOlder: false,
+        hasMoreAfter: res.hasMoreAfter ?? false,
+        newerSince: 0,
+        ready: true,
+        error: undefined,
+    })
+}
+
+const newerLoading = new Set<string>()
+
+/** Scroll-down pagination while detached: fetch the page above the window and append it; reaching the head re-attaches. */
+export async function loadNewerStreamMessages(orgId: string, spaceId: string): Promise<void> {
+    const k = key(orgId, spaceId)
+    const state = streamState.get(k)
+    const newest = newestSettled(state?.messages)
+    if (!newest || !state?.hasMoreAfter || newerLoading.has(k)) return
+    newerLoading.add(k)
+    try {
+        const res = await window.ipc.invoke('spaces:listStream', { orgId, spaceId, afterOffset: newest.offset })
+        const cur = streamState.get(k)
+        // A jump swapped the window meanwhile (to latest, or around another row): this page continues the one that left.
+        if (!cur?.hasMoreAfter || !cur.messages.some((m) => m.id === newest.id)) return
+        const hasMoreAfter = res.hasMoreAfter ?? false
+        setStream(k, {
+            messages: mergeMessages(cur.messages, res.messages),
+            topicsByRoot: withTopics(cur.topicsByRoot, res.topics),
+            hasMoreAfter,
+            // The head reached: everything counted while detached is in the window now.
+            ...(hasMoreAfter ? {} : { newerSince: 0 }),
+        })
+    } catch {
+        // The next scroll to the edge retries.
+    } finally {
+        newerLoading.delete(k)
+    }
+}
+
+/**
+ * Back to the tail from a detached window: the corpus is cleared and the
+ * head page fetched. Clearing first, not after: a resync landing mid-flight
+ * must merge into the head, never into the window being left.
+ */
+export async function jumpToLatest(orgId: string, spaceId: string): Promise<void> {
+    const k = key(orgId, spaceId)
+    if (!streamState.get(k)?.hasMoreAfter) return
+    // Not ready until the head page lands: an empty, ready window would paint
+    // the space's empty-state copy for a round trip.
+    setStream(k, { messages: [], hasMore: false, loadingOlder: false, hasMoreAfter: false, newerSince: 0, ready: false })
+    await loadStream(orgId, spaceId)
 }
 
 /** Replace one stream message in place (e.g. the folded result of a reaction toggle). */
@@ -263,6 +369,12 @@ export function ingestStreamMessage(orgId: string, spaceId: string, message: spa
     const state = streamState.get(k)
     if (!state) return
     if (state.messages.some((m) => m.id === message.id)) return
+    if (state.hasMoreAfter) {
+        // The row lands at the tail, above a detached window: count it for
+        // the pill and leave the window alone (paging forward fetches it).
+        if (state.newerSince !== null && !(message as ChatMessage).pending) setStream(k, { newerSince: state.newerSince + 1 })
+        return
+    }
     // The live frame can beat our own HTTP response: an arriving copy of an
     // optimistic send replaces its pending row instead of doubling it. (A
     // pending row being ADDED never matches — sending the same text twice is
@@ -295,6 +407,9 @@ export function resolvePendingStreamMessage(orgId: string, spaceId: string, pend
     const k = key(orgId, spaceId)
     const state = streamState.get(k)
     if (!state) return
+    // A jump landed mid-send: the pending row went with the tail, and the
+    // message stays there (its live frame counts it for the pill).
+    if (state.hasMoreAfter) return
     const rest = state.messages.filter((m) => m.id !== pendingId)
     setStream(k, {
         messages: rest.some((m) => m.id === message.id) ? rest : [...rest, message].sort((a, b) => a.offset - b.offset),
@@ -302,11 +417,24 @@ export function resolvePendingStreamMessage(orgId: string, spaceId: string, pend
 }
 
 /** The write failed: the row stays, marked, with retry/discard in the stream. */
-export function failPendingStreamMessage(orgId: string, spaceId: string, pendingId: string): void {
+/**
+ * A send that failed: its optimistic row becomes the retry/discard row. When
+ * a jump swapped the window while the send was in flight the row is gone,
+ * so the sender is told instead of losing the words silently.
+ */
+export function failPendingStreamMessage(orgId: string, spaceId: string, pendingId: string, body?: string): void {
     const k = key(orgId, spaceId)
     const state = streamState.get(k)
-    if (!state?.messages.some((m) => m.id === pendingId)) return
+    if (!state?.messages.some((m) => m.id === pendingId)) {
+        if (body !== undefined) toast(`Could not send: “${excerptOf(body)}”`, 'error')
+        return
+    }
     setStream(k, { messages: state.messages.map((m) => (m.id === pendingId ? { ...m, pending: false, failed: true } : m)) })
+}
+
+function excerptOf(body: string): string {
+    const flat = body.replace(/\s+/g, ' ').trim()
+    return flat.length > 60 ? `${flat.slice(0, 59)}…` : flat
 }
 
 /** Drop a message row outright (discarding a failed send, or re-sending it). */
@@ -341,7 +469,10 @@ async function ensureStream(orgId: string, spaceId: string): Promise<void> {
     // network round-trips.
     hydrateStream(k)
     const current = streamState.get(k)
-    if (!current?.ready || streamCacheOnly.has(k)) await loadStream(orgId, spaceId)
+    // Opening a space lands on the newest messages, always: a window the
+    // last visit left detached goes back to the tail.
+    if (current?.hasMoreAfter) await jumpToLatest(orgId, spaceId)
+    else if (!current?.ready || streamCacheOnly.has(k)) await loadStream(orgId, spaceId)
 }
 
 let busWired = false
