@@ -217,11 +217,13 @@ describe("UserMessageContext schema", () => {
                 spaceMentions: [{ kind: "board", orgId: "o", orgName: "rowboat", assetId: "b", path: "whiteboards/board.excalidraw", name: "board" }],
             }).success,
         ).toBe(false);
+        // A board ref without assetId is what turns logged before 2026-09-14
+        // carry — still parseable, so those sessions keep replaying.
         expect(
             UserMessageContext.safeParse({
                 spaceMentions: [{ kind: "board", orgId: "o", orgName: "rowboat", spaceId: "s", spaceName: "Design", path: "whiteboards/board.excalidraw", name: "board" }],
             }).success,
-        ).toBe(false);
+        ).toBe(true);
         expect(
             UserMessageContext.safeParse({
                 spaceMentions: [{ kind: "file", path: "knowledge/a.md" }],
