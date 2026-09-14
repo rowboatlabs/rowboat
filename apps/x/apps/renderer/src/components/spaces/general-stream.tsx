@@ -241,7 +241,7 @@ export function GeneralStream({
                 maybeInvokeRowboat(org, space, { rootMessageId: result.message.id, label: threadLabelOf(body) }, result.message.id, body, agent)
             })
             .catch(() => {
-                failPendingStreamMessage(org.id, space.id, pending.id)
+                failPendingStreamMessage(org.id, space.id, pending.id, body)
             })
     }
 

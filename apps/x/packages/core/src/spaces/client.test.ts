@@ -174,6 +174,18 @@ describe('SpacesClient', () => {
     expect(older.hasMore).toBe(true);
   });
 
+  it('pages around and forward: the params reach the org and the window lands on the row', async () => {
+    const all = await ramnique.listStream(spaceId, { limit: 200 });
+    expect(all.messages.length).toBeGreaterThanOrEqual(3);
+    const target = all.messages[1]!;
+    const around = await ramnique.listStream(spaceId, { aroundOffset: target.offset, limit: 2 });
+    expect(around.messages.map((m) => m.id)).toEqual([all.messages[0]!.id, target.id]);
+    expect(around.hasMoreAfter).toBe(all.messages.length > 2);
+    const after = await ramnique.listStream(spaceId, { afterOffset: target.offset, limit: 200 });
+    expect(after.messages.map((m) => m.id)).toEqual(all.messages.slice(2).map((m) => m.id));
+    expect(after.hasMoreAfter).toBe(false);
+  });
+
   it('reactions toggle and fold into message reads', async () => {
     const started = await ramnique.postMessage(spaceId, { body: 'Reaction target', actingMode: 'direct' });
     const messageId = started.message.id;

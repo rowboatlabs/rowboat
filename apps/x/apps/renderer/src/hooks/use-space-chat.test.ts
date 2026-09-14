@@ -32,6 +32,7 @@ vi.mock('@/lib/spaces-read-state', () => ({
     spaceBadge: () => ({ unread: 0, forMe: 0 }),
     subscribeReadState: () => () => {},
 }))
+vi.mock('@/lib/toast', () => ({ toast: vi.fn() }))
 vi.mock('@/lib/spaces-agent-activity', () => ({ useSpaceAgentActivity: () => new Map() }))
 
 const emit = (event: unknown) => {
@@ -140,6 +141,43 @@ describe('stream store — detached window', () => {
         expect(state.hasMoreAfter).toBe(false)
         expect(state.newerSince).toBe(0)
         expect(state.hasMore).toBe(true)
+    })
+
+    it('jumpToLatest is not ready until the head page lands — no flash of the empty-space copy', async () => {
+        const { mod, hook } = await open()
+        await act(() => mod.loadStreamAround('org', 'space', 50))
+        let release: (() => void) | null = null
+        const prior = invoke.getMockImplementation()!
+        invoke.mockImplementation((channel: string, args: never) =>
+            channel === 'spaces:listStream' && !(args as { aroundOffset?: number }).aroundOffset
+                ? new Promise((resolve) => { release = () => resolve(prior(channel, args)) })
+                : prior(channel, args),
+        )
+        let jump: Promise<void> = Promise.resolve()
+        await act(async () => {
+            jump = mod.jumpToLatest('org', 'space')
+            await Promise.resolve()
+        })
+        expect(hook.result.current.ready).toBe(false)
+        expect(hook.result.current.messages).toEqual([])
+        await act(async () => {
+            release!()
+            await jump
+        })
+        expect(hook.result.current.ready).toBe(true)
+        expect(ids(hook.result.current.messages)).toEqual(ids(range(91, 100)))
+    })
+
+    it('a send that fails after a jump swept its row away tells the sender instead of vanishing', async () => {
+        const { mod, hook } = await open()
+        const pending = mod.buildPendingMessage('space', 'me', 'the words I typed')
+        act(() => mod.ingestStreamMessage('org', 'space', pending))
+        expect(ids(hook.result.current.messages)).toContain(pending.id)
+        await act(() => mod.loadStreamAround('org', 'space', 50))
+        expect(ids(hook.result.current.messages)).not.toContain(pending.id)
+        act(() => mod.failPendingStreamMessage('org', 'space', pending.id, 'the words I typed'))
+        const { toast } = await import('@/lib/toast')
+        expect(toast).toHaveBeenCalledWith(expect.stringContaining('the words I typed'), 'error')
     })
 
     it('a reconnect resync while detached leaves the window and makes the count unknown', async () => {

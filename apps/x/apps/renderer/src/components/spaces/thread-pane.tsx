@@ -203,13 +203,14 @@ export function ThreadPane({
             })
             .then((res) => {
                 if (cancelled) return
+                // A jump landed while this page was in flight: not this window's —
+                // neither its rows nor its count.
+                if (gen !== windowGenRef.current) return
                 noteNewestPage(res)
                 if (detachedAt !== null) {
                     setNewerCount(res.hasMoreAfter ? null : res.messages.length)
                     return
                 }
-                // A jump landed while this newest page was in flight: not this window's.
-                if (gen !== windowGenRef.current) return
                 // A refetch merges (older loaded pages stay put) and must not
                 // eat optimistic sends: pending/failed rows the response
                 // doesn't already contain are carried over.
@@ -524,7 +525,11 @@ export function ThreadPane({
     // pending), confirm — or fail into a retry/discard row — in the
     // background. The composer never waits on the round trip.
     const post = async (body: string, agent?: AgentOptions) => {
-        if (hasMoreAfterRef.current) await snapToLatest()
+        if (hasMoreAfterRef.current) {
+            await snapToLatest()
+            // The snap toasts its own failure; a reply must not land in an old window.
+            if (hasMoreAfterRef.current) return
+        }
         const pending = buildPendingMessage(space.id, org.memberId, body, rootMessageId)
         setMessages((prev) => [...prev, pending])
         void window.ipc
@@ -532,6 +537,9 @@ export function ThreadPane({
             .then((result) => {
                 setMessages((prev) => {
                     const rest = prev.filter((m) => m.id !== pending.id)
+                    // A jump landed while the send was in flight: the reply lives
+                    // above the detached window, where the pill's count finds it.
+                    if (hasMoreAfterRef.current) return rest
                     return rest.some((m) => m.id === result.message.id) ? rest : [...rest, result.message].sort((a, b) => a.offset - b.offset)
                 })
                 // Replying follows the thread and reads it up to our reply (the org's rule); mirror it.
@@ -540,7 +548,15 @@ export function ThreadPane({
                 maybeInvokeRowboat(org, space, { rootMessageId, label: threadLabel }, result.message.id, body, agent)
             })
             .catch(() => {
-                setMessages((prev) => prev.map((m) => (m.id === pending.id ? { ...m, pending: false, failed: true } : m)))
+                setMessages((prev) => {
+                    // A jump swept the row away meanwhile: say so rather than lose the words.
+                    if (!prev.some((m) => m.id === pending.id)) {
+                        const flat = body.replace(/\s+/g, ' ').trim()
+                        toast(`Could not send: “${flat.length > 60 ? `${flat.slice(0, 59)}…` : flat}”`, 'error')
+                        return prev
+                    }
+                    return prev.map((m) => (m.id === pending.id ? { ...m, pending: false, failed: true } : m))
+                })
             })
     }
 

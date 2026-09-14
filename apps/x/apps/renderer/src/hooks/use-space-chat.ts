@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { spaces } from '@x/shared'
+import { toast } from '@/lib/toast'
 import { subscribeSpacesFeed } from '@/lib/spaces-feed'
 import { useSpaceAgentActivity } from '@/lib/spaces-agent-activity'
 import { applyReaction, mergeMessages } from '@/lib/spaces-conventions'
@@ -342,7 +343,9 @@ export async function loadNewerStreamMessages(orgId: string, spaceId: string): P
 export async function jumpToLatest(orgId: string, spaceId: string): Promise<void> {
     const k = key(orgId, spaceId)
     if (!streamState.get(k)?.hasMoreAfter) return
-    setStream(k, { messages: [], hasMore: false, loadingOlder: false, hasMoreAfter: false, newerSince: 0 })
+    // Not ready until the head page lands: an empty, ready window would paint
+    // the space's empty-state copy for a round trip.
+    setStream(k, { messages: [], hasMore: false, loadingOlder: false, hasMoreAfter: false, newerSince: 0, ready: false })
     await loadStream(orgId, spaceId)
 }
 
@@ -414,11 +417,24 @@ export function resolvePendingStreamMessage(orgId: string, spaceId: string, pend
 }
 
 /** The write failed: the row stays, marked, with retry/discard in the stream. */
-export function failPendingStreamMessage(orgId: string, spaceId: string, pendingId: string): void {
+/**
+ * A send that failed: its optimistic row becomes the retry/discard row. When
+ * a jump swapped the window while the send was in flight the row is gone,
+ * so the sender is told instead of losing the words silently.
+ */
+export function failPendingStreamMessage(orgId: string, spaceId: string, pendingId: string, body?: string): void {
     const k = key(orgId, spaceId)
     const state = streamState.get(k)
-    if (!state?.messages.some((m) => m.id === pendingId)) return
+    if (!state?.messages.some((m) => m.id === pendingId)) {
+        if (body !== undefined) toast(`Could not send: “${excerptOf(body)}”`, 'error')
+        return
+    }
     setStream(k, { messages: state.messages.map((m) => (m.id === pendingId ? { ...m, pending: false, failed: true } : m)) })
+}
+
+function excerptOf(body: string): string {
+    const flat = body.replace(/\s+/g, ' ').trim()
+    return flat.length > 60 ? `${flat.slice(0, 59)}…` : flat
 }
 
 /** Drop a message row outright (discarding a failed send, or re-sending it). */
