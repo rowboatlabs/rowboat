@@ -109,6 +109,11 @@ async function loadBoard(org: OrgRecord, spaceId: string, boardId: string): Prom
         throw new Error(errorText(res));
     }
     const asset = res as ReadAssetOk;
+    // Only a board is drawable: any other file would be overwritten with a
+    // scene the moment a model passed its id here.
+    if (!isWhiteboardPath(asset.path)) {
+        throw new Error(`${asset.path} (${boardId}) is not a board — boards live under whiteboards/. Read it with read_asset instead.`);
+    }
     const elements = await snapshotElements(org, spaceId, asset.content ?? "", asset.blob, asset.path);
     const last = asset.recentHistory?.[0];
     return {
@@ -122,8 +127,10 @@ async function loadBoard(org: OrgRecord, spaceId: string, boardId: string): Prom
 
 /** The boards a space has (list_spaces assets under whiteboards/): ids for the model, paths for display. */
 async function listBoards(org: OrgRecord, spaceId: string): Promise<BoardEntry[]> {
-    const res = await callOrgTool(org, "list_spaces", {});
-    if (isFailure(res)) return [];
+    // DMs have boards too (the header button is not gated on space kind), so
+    // the listing includes them; a failed listing is an error, not "no boards".
+    const res = await callOrgTool(org, "list_spaces", { includeDirect: true });
+    if (isFailure(res)) throw new Error(errorText(res));
     const spaces = (res as { spaces?: Array<{ id: string; assets?: Array<{ id: string; path: string; version: number }> }> }).spaces ?? [];
     const space = spaces.find((s) => s.id === spaceId);
     return (space?.assets ?? [])
@@ -303,24 +310,36 @@ export const whiteboardTools: Record<string, BuiltinTool> = {
                         boardId = existing.id;
                         ({ elements, version: baseVersion } = loaded);
                     } else {
-                        // Birth: the first snapshot IS the create.
+                        // Birth: the first snapshot IS the create. A board born
+                        // meanwhile (a human's "+ board", another agent) refuses
+                        // the create; that is the conflict case in disguise, so
+                        // the draw re-applies over the occupant below.
                         const applied = applyWhiteboardOps([], input.ops);
-                        const asset = await createSnapshot(org, input.spaceId, path, serializeWhiteboardSnapshot(applied.elements), input.reason);
-                        const summary = summarizeWhiteboard(applied.elements);
-                        return {
-                            success: true,
-                            boardId: asset.id,
-                            path: asset.path,
-                            name: whiteboardDisplayName(asset.path),
-                            version: asset.version,
-                            created: true,
-                            added: applied.added,
-                            updated: applied.updated,
-                            deleted: applied.deleted,
-                            ...(applied.warnings.length > 0 ? { warnings: applied.warnings } : {}),
-                            bounds: summary.bounds,
-                            counts: summary.counts,
-                        };
+                        try {
+                            const asset = await createSnapshot(org, input.spaceId, path, serializeWhiteboardSnapshot(applied.elements), input.reason);
+                            const summary = summarizeWhiteboard(applied.elements);
+                            return {
+                                success: true,
+                                boardId: asset.id,
+                                path: asset.path,
+                                name: whiteboardDisplayName(asset.path),
+                                version: asset.version,
+                                created: true,
+                                added: applied.added,
+                                updated: applied.updated,
+                                deleted: applied.deleted,
+                                ...(applied.warnings.length > 0 ? { warnings: applied.warnings } : {}),
+                                bounds: summary.bounds,
+                                counts: summary.counts,
+                            };
+                        } catch (e) {
+                            const raced = (await listBoards(org, input.spaceId)).find((b) => b.path === path);
+                            if (!raced) throw e;
+                            const loaded = await loadBoard(org, input.spaceId, raced.id);
+                            if (!loaded.found) throw e;
+                            boardId = raced.id;
+                            ({ elements, version: baseVersion } = loaded);
+                        }
                     }
                 }
 

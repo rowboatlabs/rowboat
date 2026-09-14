@@ -30,7 +30,7 @@ function versionLabel(g: ArtifactGroup): string {
 
 export function FoldIntoFileButton({ entries, onPick, busy }: {
     entries: spaces.SpacesAssetEntry[]
-    onPick: (path: string) => void
+    onPick: (file: { assetId: string; path: string }) => void
     busy?: boolean
 }) {
     return (
@@ -50,7 +50,7 @@ export function FoldIntoFileButton({ entries, onPick, busy }: {
                 <DropdownMenuSeparator />
                 {entries.length === 0 && <DropdownMenuItem disabled>No files in this space yet</DropdownMenuItem>}
                 {entries.map((e) => (
-                    <DropdownMenuItem key={e.id} onClick={() => onPick(e.path)}>
+                    <DropdownMenuItem key={e.id} onClick={() => onPick({ assetId: e.id, path: e.path })}>
                         <FileText className="size-3.5 mr-2 text-muted-foreground" /> <code className="text-xs">{e.path}</code>
                     </DropdownMenuItem>
                 ))}
@@ -67,7 +67,7 @@ export function ArtifactsRail({ org, space, groups, memberNames, working, entrie
     memberNames: Map<string, string>
     working: boolean
     entries: spaces.SpacesAssetEntry[]
-    onFold: (path: string) => void
+    onFold: (file: { assetId: string; path: string }) => void
     folding: boolean
     /** Opens a changed file by its asset id. */
     onOpenFile: (assetId: string) => void
@@ -152,7 +152,7 @@ export function ArtifactsSummary({ groups, working, railOpen, onToggleRail, entr
     railOpen: boolean
     onToggleRail: () => void
     entries: spaces.SpacesAssetEntry[]
-    onFold: (path: string) => void
+    onFold: (file: { assetId: string; path: string }) => void
     folding: boolean
 }) {
     return (

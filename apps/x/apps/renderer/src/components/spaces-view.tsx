@@ -95,7 +95,7 @@ type ColumnAnim = { column: 'chat' | 'doc'; phase: 'enter' | 'exit'; width: numb
  * back, and the doc column (and whether the chat sat beside it) is as you
  * left it. Not persisted — a relaunch lands on the chat, clean.
  */
-const columnMemory = new Map<string, { docKey: DocKey; chatOpen: boolean }>()
+const columnMemory = new Map<string, { docKey: DocKey; docIsBoard: boolean; chatOpen: boolean }>()
 
 const isAttachmentKey = (key: string) => key.startsWith('app://space-blob/')
 
@@ -367,9 +367,12 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         if (selection.kind === 'attachment') return selection.src
         return columnMemory.get(memoryKey)?.docKey ?? null
     })
+    // Whether the remembered key is a board — known synchronously, so a
+    // remembered board never mounts as a file column while the listing loads.
+    const [docIsBoard, setDocIsBoard] = useState<boolean>(() => selection.kind === 'whiteboard' || (columnMemory.get(memoryKey)?.docIsBoard ?? false))
     const [chatOpen, setChatOpen] = useState(() => selection.kind === 'attachment' || (columnMemory.get(memoryKey)?.chatOpen ?? true))
     useEffect(() => {
-        columnMemory.set(memoryKey, { docKey, chatOpen })
+        columnMemory.set(memoryKey, { docKey, docIsBoard, chatOpen })
     }, [memoryKey, docKey, chatOpen])
     // The chat/files rail: docked by default (persisted), or a sliver at the
     // edge that peeks the rail as a drawer on hover — see SpaceRail. (The
@@ -524,6 +527,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     const placeSelection = (next: RailSelection) => {
         if (next.kind === 'file' || next.kind === 'whiteboard') {
             setDocKey(next.assetId)
+            setDocIsBoard(next.kind === 'whiteboard' || spaces.isWhiteboardPath(entryById.get(next.assetId)?.path ?? ''))
         } else if (next.kind === 'attachment') {
             setChatOpen(true)
             setDocKey(next.src)
@@ -555,11 +559,13 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // when none exists yet), an artifact link, a deep link, or history. It
     // must never render as raw JSON in the document pane.
     // ------------------------------------------------------------------
+    const spaceRefs = useMemo(() => ({ orgId: org.id, orgAddress: org.address, spaceId: space.id }), [org.id, org.address, space.id])
     const isBoardKey = (key: string | null): key is string => {
         if (!key || isAttachmentKey(key)) return false
         const entry = entryById.get(key)
-        // A just-created board can beat the listing: the selection says what it is.
-        return entry ? spaces.isWhiteboardPath(entry.path) : selection.kind === 'whiteboard' && selection.assetId === key
+        // A just-created or remembered board can beat the listing: the
+        // selection, or the column memory, says what it is.
+        return entry ? spaces.isWhiteboardPath(entry.path) : (selection.kind === 'whiteboard' && selection.assetId === key) || (key === docKey && docIsBoard)
     }
     const boardId = isBoardKey(docRender) ? docRender : null
     const isWhiteboard = isBoardKey(docKey)
@@ -732,7 +738,8 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // the header chip can bring it back. Closing the left column just hides
     // it; the doc takes the width.
     function closeDoc() {
-        if (selection.kind === 'file') {
+        // A board reached as a file (an artifact link) is still a board: no "Reopen" chip.
+        if (selection.kind === 'file' && !isBoardKey(selection.assetId)) {
             setLastDoc({ assetId: selection.assetId, fromThreadRootId: selection.fromThreadRootId })
         }
         // Closing beside a discussion is a choice: its linked file stays
@@ -765,7 +772,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     return (
         <SpaceMembersProvider members={memberNames}>
         <SpaceProfilesProvider members={members} here={hereSet} selfId={org.memberId}>
-        <SpaceRefsProvider refs={{ orgId: org.id, orgAddress: org.address, spaceId: space.id }}>
+        <SpaceRefsProvider refs={spaceRefs}>
         <SpaceAssetsProvider entries={entries}>
         <SpaceNavProvider onOpenFile={openFile} onOpenSpaceFile={openSpaceFile} resolveSpace={resolveSpace} onOpenAttachment={(src, name) => {
             const url = new URL(src)

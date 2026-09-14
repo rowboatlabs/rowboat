@@ -287,6 +287,7 @@ export const spacesRpcHandlers: SpacesHandlers = {
       ...(args.rootMessageId ? { rootMessageId: args.rootMessageId } : {}),
       title: args.title,
       ...(args.body ? { body: args.body } : {}),
+      ...(args.documentAssetId ? { documentAssetId: args.documentAssetId } : {}),
       actingMode: 'direct',
     }),
 

@@ -199,6 +199,21 @@ console.log("rendererPath", rendererPath);
 //     This is how <img> tags in space messages render: the renderer holds no
 //     org tokens, so blob bytes must resolve in main.
 //   app://<anything-else>/...   → renderer SPA (existing behavior)
+/**
+ * One space listing per (org, space) for a few seconds: an HTML document's
+ * every relative reference re-enters the space-document route, and each
+ * needs the path → id map — one fetch per page load, not one per <img>.
+ */
+const listingCache = new Map<string, { at: number; entries: Array<{ id: string; path: string }> }>();
+async function listSpaceAssets(orgId: string, spaceId: string): Promise<Array<{ id: string; path: string }>> {
+  const key = `${orgId}/${spaceId}`;
+  const hit = listingCache.get(key);
+  if (hit && Date.now() - hit.at < 5_000) return hit.entries;
+  const entries = await getSpaceClient(orgId).listAssets(spaceId);
+  listingCache.set(key, { at: Date.now(), entries });
+  return entries;
+}
+
 function registerAppProtocol() {
   protocol.handle("app", async (request) => {
     const url = new URL(request.url);
@@ -246,20 +261,17 @@ function registerAppProtocol() {
           return new Response("Not Found", { status: 404 });
         }
         const client = getSpaceClient(orgId);
-        let targetId = assetId;
-        if (rest.length > 0) {
-          const listing = await client.listAssets(spaceId);
-          const doc = listing.find((a) => a.id === assetId);
-          if (!doc) return new Response("Not Found", { status: 404 });
-          const sub = rest.join('/');
-          const inFolder = path.posix.normalize(path.posix.join(path.posix.dirname(doc.path), sub));
-          const fromRoot = path.posix.normalize(sub);
-          const candidates = [inFolder, fromRoot].filter((p) => p !== '.' && !p.startsWith('../') && p !== '..');
-          const hit = candidates.map((p) => listing.find((a) => a.path === p)).find((a) => a !== undefined);
+        // The document's own URL is <assetId>/<its path>, so the browser has
+        // already resolved a page's relative references against its folder:
+        // what arrives after the id is the referenced file's space-root path.
+        let asset = await client.readAsset(spaceId, assetId);
+        const sub = path.posix.normalize(rest.join('/'));
+        if (rest.length > 0 && sub !== asset.path) {
+          if (sub === '.' || sub === '..' || sub.startsWith('../')) return new Response("Not Found", { status: 404 });
+          const hit = (await listSpaceAssets(orgId, spaceId)).find((a) => a.path === sub);
           if (!hit) return new Response("Not Found", { status: 404 });
-          targetId = hit.id;
+          asset = await client.readAsset(spaceId, hit.id);
         }
-        const asset = await client.readAsset(spaceId, targetId);
         const blob = asset.blob ? await spaceBlobCache.getBlob(orgId, spaceId, asset.blob.hash) : null;
         const ext = path.extname(asset.path).toLowerCase();
         const textTypes: Record<string, string> = {

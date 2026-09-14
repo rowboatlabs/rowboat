@@ -92,7 +92,7 @@ export const SpaceMentionRef = z.discriminatedUnion("kind", [
         orgName: z.string(),
         spaceId: z.string(),
         spaceName: z.string(),
-        assetId: z.string(),                 // the board's asset id (what whiteboard-read/draw take)
+        assetId: z.string().optional(),      // the board's asset id (what whiteboard-read/draw take); absent on turns logged before 2026-09-14
         path: z.string(),                    // whiteboards/<name>.excalidraw
         name: z.string(),                    // the board's display name as inserted after "@"
     }),
@@ -141,7 +141,7 @@ export const UserMessageContext = z.object({
             orgName: z.string(),
             spaceId: z.string(),
             spaceName: z.string(),
-            assetId: z.string(),             // the board's asset id (boardId for the whiteboard tools)
+            assetId: z.string().optional(),  // the board's asset id (boardId for the whiteboard tools); absent on turns logged before 2026-09-14
             path: z.string(),                // display path, whiteboards/<name>.excalidraw
         }),
     ]).optional(),

@@ -422,11 +422,11 @@ export function ThreadPane({
     const discardFailed = (message: spaces.Message) => setMessages((prev) => prev.filter((m) => m.id !== message.id))
 
     // Fold = a visible ask to your own agent, posted in the thread, then invoked.
-    const fold = async (path: string) => {
+    const fold = async (file: { assetId: string; path: string }) => {
         setFolding(true)
         onFolding?.(true)
         try {
-            const body = `[@rowboat](#rowboat) fold this thread’s decision into \`${path}\` — keep the file’s structure and put it under the right section. End your change reason with “· thread:${rootMessageId}”.`
+            const body = `[@rowboat](#rowboat) fold this thread’s decision into \`${file.path}\` (assetId ${file.assetId}) — keep the file’s structure and put it under the right section. End your change reason with “· thread:${rootMessageId}”.`
             const result = await window.ipc.invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body })
             echo(result.message)
             noteThread(org.id, space.id, rootMessageId, { following: true, readOffset: result.message.offset, lastReplyOffset: result.message.offset })
@@ -954,7 +954,7 @@ export function ThreadPane({
                     railOpen={artifactsRailOpen}
                     onToggleRail={onToggleArtifactsRail}
                     entries={entries}
-                    onFold={(path) => void fold(path)}
+                    onFold={(file) => void fold(file)}
                     folding={folding}
                 />
 
@@ -1071,7 +1071,15 @@ export function ThreadPane({
                         name: 'fold',
                         args: '<file>',
                         hint: 'Ask your Rowboat to fold this thread into a file',
-                        run: (args) => void fold(args),
+                        run: (args) => {
+                            const name = args.trim()
+                            const file = entries.find((e) => e.state !== 'deleted' && (e.path === name || e.path.endsWith(`/${name}`)))
+                            if (!file) {
+                                toast(`No file named ${name} in this space`, 'error')
+                                return
+                            }
+                            void fold({ assetId: file.id, path: file.path })
+                        },
                     },
                     topic
                         ? {

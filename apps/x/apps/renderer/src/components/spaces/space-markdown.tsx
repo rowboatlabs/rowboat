@@ -68,10 +68,16 @@ const SpaceAssetsContext = createContext<SpaceAssetsIndex>(EMPTY_ASSETS)
 
 /** Mounted beside SpaceRefsProvider with the pane's listing — so anchors resolve synchronously, at render time. */
 export function SpaceAssetsProvider({ entries, children }: { entries: readonly spaces.SpacesAssetEntry[]; children: ReactNode }) {
+    // The pane refetches the listing on every live event, usually landing an
+    // equal array; every message body memoizes on this index, so it must only
+    // change when an id, path, or trash state actually did.
+    const signature = entries.map((e) => `${e.id}\u0000${e.path}\u0000${e.state ?? ''}`).join('\n')
+    const latest = useRef(entries)
+    latest.current = entries
     const index = useMemo<SpaceAssetsIndex>(() => {
-        const live = entries.filter((e) => e.state !== 'deleted')
+        const live = latest.current.filter((e) => e.state !== 'deleted')
         return { byPath: new Map(live.map((e) => [e.path, e])), byId: new Map(live.map((e) => [e.id, e])) }
-    }, [entries])
+    }, [signature])
     return <SpaceAssetsContext.Provider value={index}>{children}</SpaceAssetsContext.Provider>
 }
 

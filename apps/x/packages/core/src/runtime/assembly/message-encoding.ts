@@ -35,7 +35,7 @@ function formatUserMessageContextForLlm(userMessageContext: z.infer<typeof UserM
         } else if (userMessageContext.middlePane.kind === 'whiteboard') {
             const wb = userMessageContext.middlePane;
             sections.push(
-                `Middle pane:\nState: whiteboard\nBoard: ${wb.path} (boardId: ${wb.assetId}) in space "${wb.spaceName}" on org "${wb.orgName}" (spaceId: ${wb.spaceId}; pass org: "${wb.orgName}")\n` +
+                `Middle pane:\nState: whiteboard\nBoard: ${wb.path} (boardId: ${wb.assetId ?? 'unknown — find it in list_spaces by path'}) in space "${wb.spaceName}" on org "${wb.orgName}" (spaceId: ${wb.spaceId}; pass org: "${wb.orgName}")\n` +
                     'The user is looking at this shared board. "the board" / "here" / "add a box" means this one: whiteboard-read it (spaceId + boardId above), then whiteboard-draw.',
             );
         } else {
@@ -82,7 +82,7 @@ function formatSpaceMentions(mentions: NonNullable<z.infer<typeof UserMessageCon
             );
         } else {
             lines.push(
-                `- @${m.name} = whiteboard "${m.name}" (${m.path}; boardId: ${m.assetId}) in space "${m.spaceName}" on org "${m.orgName}" (spaceId: ${m.spaceId}; ` +
+                `- @${m.name} = whiteboard "${m.name}" (${m.path}; boardId: ${m.assetId ?? 'unknown — find it in list_spaces by path'}) in space "${m.spaceName}" on org "${m.orgName}" (spaceId: ${m.spaceId}; ` +
                     'whiteboard-read / whiteboard-draw with this spaceId and boardId)',
             );
         }
