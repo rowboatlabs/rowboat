@@ -144,6 +144,23 @@ export default function SpaceThreadScreen() {
     return () => setActiveSpace(null);
   }, [space]);
 
+  // "+" media: upload the bytes to the space's blob store and hand the
+  // composer the canonical wire link (space-blob-image.tsx renders it).
+  const uploadMedia = useCallback(
+    async (file: { uri: string; mime: string; name: string }) => {
+      const bytes = new Uint8Array(await (await fetch(file.uri)).arrayBuffer());
+      const blob = await client.uploadBlob(space, bytes, { declaredMime: file.mime });
+      const qs = new URLSearchParams({ name: file.name });
+      if (blob.width && blob.height) {
+        qs.set('w', String(blob.width));
+        qs.set('h', String(blob.height));
+      }
+      const link = `https://${org}/s/${space}/b/${blob.hash}?${qs.toString()}`;
+      return blob.mime.startsWith('image/') ? `![${file.name}](${link})` : `[${file.name}](${link})`;
+    },
+    [client, org, space],
+  );
+
   const patchBoth = useCallback((folded: Message) => {
     setRootMessage((prev) => (prev && prev.id === folded.id ? folded : prev));
     setReplies((prev) => prev?.map((m) => (m.id === folded.id ? folded : m)) ?? null);
@@ -271,6 +288,7 @@ export default function SpaceThreadScreen() {
           me={me}
           sending={sending}
           onSend={(body) => void send(body)}
+          onPickMedia={uploadMedia}
         />
       </View>
 

@@ -195,6 +195,23 @@ export default function SpaceChatScreen() {
     [client, space, me],
   );
 
+  // "+" media: upload the bytes to the space's blob store and hand the
+  // composer the canonical wire link (space-blob-image.tsx renders it).
+  const uploadMedia = useCallback(
+    async (file: { uri: string; mime: string; name: string }) => {
+      const bytes = new Uint8Array(await (await fetch(file.uri)).arrayBuffer());
+      const blob = await client.uploadBlob(space, bytes, { declaredMime: file.mime });
+      const qs = new URLSearchParams({ name: file.name });
+      if (blob.width && blob.height) {
+        qs.set('w', String(blob.width));
+        qs.set('h', String(blob.height));
+      }
+      const link = `https://${org}/s/${space}/b/${blob.hash}?${qs.toString()}`;
+      return blob.mime.startsWith('image/') ? `![${file.name}](${link})` : `[${file.name}](${link})`;
+    },
+    [client, org, space],
+  );
+
   const openThread = useCallback(
     (message: Message) => {
       router.push({ pathname: '/spaces/thread', params: { org, space, root: message.id, title: title ?? 'Thread', me } });
@@ -262,6 +279,7 @@ export default function SpaceChatScreen() {
           me={me}
           sending={sending}
           onSend={(body) => void send(body)}
+          onPickMedia={uploadMedia}
         />
       </View>
 

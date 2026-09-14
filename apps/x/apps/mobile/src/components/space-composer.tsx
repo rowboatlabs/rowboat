@@ -1,7 +1,8 @@
 import { Image } from 'expo-image';
+import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
 import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { Keyboard, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Keyboard, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import type { Member } from '@rowboat/spaces-protocol';
 import { mentionToken } from '@rowboat/spaces-protocol';
 
@@ -66,12 +67,33 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
   me: string;
   sending: boolean;
   onSend: (body: string) => void;
-}>(function SpaceComposer({ placeholder, members, me, sending, onSend }, ref) {
+  /** Upload a picked photo/video and return the markdown to insert (absent = no + button). */
+  onPickMedia?: (file: { uri: string; mime: string; name: string }) => Promise<string>;
+}>(function SpaceComposer({ placeholder, members, me, sending, onSend, onPickMedia }, ref) {
   const colors = useColors();
   const inputRef = useRef<TextInput>(null);
   const [text, setText] = useState('');
   const [cursor, setCursor] = useState(0);
   const [picked, setPicked] = useState<Map<string, MentionPick>>(new Map());
+  const [uploading, setUploading] = useState(false);
+
+  const pickMedia = async () => {
+    if (!onPickMedia || uploading) return;
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images', 'videos'], quality: 0.85 });
+    const asset = result.assets?.[0];
+    if (result.canceled || !asset) return;
+    setUploading(true);
+    try {
+      const md = await onPickMedia({
+        uri: asset.uri,
+        mime: asset.mimeType ?? (asset.type === 'video' ? 'video/mp4' : 'image/jpeg'),
+        name: asset.fileName ?? `${asset.type === 'video' ? 'video' : 'photo'}-${Date.now()}`,
+      });
+      setText((prev) => (prev.trim() ? `${prev.replace(/\s+$/, '')}\n${md}\n` : `${md}\n`));
+    } finally {
+      setUploading(false);
+    }
+  };
 
   useImperativeHandle(ref, () => ({ focus: () => inputRef.current?.focus() }), []);
 
@@ -178,6 +200,19 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
           {styled}
         </TextInput>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 18, paddingTop: 2 }}>
+          {onPickMedia ? (
+            <Pressable
+              hitSlop={8}
+              disabled={uploading}
+              onPress={() => void pickMedia()}
+              style={{
+                width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center',
+                backgroundColor: colors.separator, opacity: uploading ? 0.5 : 1,
+              }}
+            >
+              {uploading ? <ActivityIndicator size="small" /> : <Image source="sf:plus" style={{ width: 16, height: 16 }} tintColor={colors.label} />}
+            </Pressable>
+          ) : null}
           <Pressable
             hitSlop={8}
             onPress={() => {
