@@ -2,8 +2,10 @@ import { z } from 'zod';
 import { addressesRowboat, mapMentionTokens, mentionsAsText } from '@rowboat/spaces-protocol';
 import type {
   AcceptInviteResult,
+  Asset,
   BlobInfo,
   ChangeSet,
+  CreateAssetResult,
   DeleteAssetResult,
   MoveAssetResult,
   RestoreAssetResult,
@@ -46,8 +48,10 @@ import type {
 
 export type {
   AcceptInviteResult,
+  Asset,
   BlobInfo,
   ChangeSet,
+  CreateAssetResult,
   DeleteAssetResult,
   MoveAssetResult,
   RestoreAssetResult,
@@ -113,7 +117,9 @@ export const SpacesOrgSummary = z.object({
 });
 export type SpacesOrgSummary = z.infer<typeof SpacesOrgSummary>;
 
+/** A space file as listings describe it: the id is what every operation takes; the path is its display name (tree label). */
 export interface SpacesAssetEntry {
+  id: string;
   path: string;
   version: number;
   updatedAt: string;
@@ -160,8 +166,8 @@ export type SpacesManageTopicAction =
   | { action: 'archive' }
   | { action: 'unarchive' }
   | { action: 'remove' }
-  /** Link one live space file as what the discussion is about (replaces any earlier link). */
-  | { action: 'attach_document'; path: string }
+  /** Link one live space file (by id) as what the discussion is about (replaces any earlier link). */
+  | { action: 'attach_document'; assetId: string }
   | { action: 'detach_document' };
 
 /**
@@ -170,11 +176,19 @@ export type SpacesManageTopicAction =
  * org's MCP face, never through this IPC surface.
  */
 export interface SpacesProposeInput {
-  assetPath: string;
+  assetId: string;
   baseVersion: number;
   /** Text variant. Exactly one of newContent / blob (contract decision 1, amended). */
   newContent?: string;
   /** Binary variant: the hash of bytes already uploaded via spaces:uploadBlob. */
+  blob?: string;
+  reason?: string;
+}
+
+/** Birth: the one call that names a file by path (it has no id yet). Exactly one of newContent / blob. */
+export interface SpacesCreateInput {
+  path: string;
+  newContent?: string;
   blob?: string;
   reason?: string;
 }

@@ -40,7 +40,8 @@ import {
     type SpacesBusEvent,
     type SpacesManageTopicAction,
     type SpacesPostResult,
-    type SpacesProposeInput,
+  SpacesCreateInput,
+  SpacesProposeInput,
     type SpacesStreamPage,
     type SpacesThreadPage,
 } from './spaces.js';
@@ -3879,13 +3880,18 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), spaceId: z.string(), includeDeleted: z.boolean().optional() }),
     res: z.object({ entries: z.array(z.custom<SpacesAssetEntry>()) }),
   },
-  // Namespace ops (inode model server-side): move/rename, delete-to-trash,
-  // restore. Conflict outcomes return as values, same as proposeChange.
+  // Birth: the one file call that takes a path (occupied path = error).
+  'spaces:createAsset': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), input: z.custom<SpacesCreateInput>() }),
+    res: z.custom<SpacesTypes.CreateAssetResult>(),
+  },
+  // Namespace ops by asset id: move/rename, delete-to-trash, restore.
+  // Conflict outcomes return as values, same as proposeChange.
   'spaces:moveAsset': {
     req: z.object({
       orgId: z.string(),
       spaceId: z.string(),
-      fromPath: z.string(),
+      assetId: z.string(),
       toPath: z.string(),
       baseVersion: z.number(),
       reason: z.string().optional(),
@@ -3896,21 +3902,21 @@ export const ipcSchemas = {
     req: z.object({
       orgId: z.string(),
       spaceId: z.string(),
-      path: z.string(),
+      assetId: z.string(),
       baseVersion: z.number(),
       reason: z.string().optional(),
     }),
     res: z.custom<SpacesTypes.DeleteAssetResult>(),
   },
   'spaces:restoreAsset': {
-    req: z.object({ orgId: z.string(), spaceId: z.string(), path: z.string() }),
+    req: z.object({ orgId: z.string(), spaceId: z.string(), assetId: z.string() }),
     res: z.custom<SpacesTypes.RestoreAssetResult>(),
   },
   'spaces:readAsset': {
     req: z.object({
       orgId: z.string(),
       spaceId: z.string(),
-      path: z.string(),
+      assetId: z.string(),
       version: z.number().optional(),
     }),
     res: z.custom<SpacesTypes.ReadAssetResult>(),
@@ -3925,7 +3931,7 @@ export const ipcSchemas = {
     req: z.object({
       orgId: z.string(),
       spaceId: z.string(),
-      path: z.string().optional(),
+      assetId: z.string().optional(),
       beforeOffset: z.number().optional(),
       limit: z.number().optional(),
     }),
@@ -3935,7 +3941,7 @@ export const ipcSchemas = {
     req: z.object({
       orgId: z.string(),
       spaceId: z.string(),
-      path: z.string(),
+      assetId: z.string(),
       from: z.number(),
       to: z.number(),
     }),
@@ -4301,7 +4307,7 @@ export const ipcSchemas = {
     req: z.object({
       orgId: z.string(),
       spaceId: z.string(),
-      /** The board's asset path — a board IS an asset (whiteboards/<name>.excalidraw). */
+      /** The board's asset id — a board IS an asset (whiteboards/<name>.excalidraw is its display path). */
       boardId: z.string(),
       payload: z.custom<SpacesTypes.SpacesWhiteboardPayload>(),
     }),

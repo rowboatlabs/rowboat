@@ -236,13 +236,27 @@ async function dispatch(
       return service.readAll(ctx, a.spaceId !== undefined ? { spaceId: a.spaceId } : {});
     }
     case 'read_asset': {
-      const a = args as { spaceId: string; path: string; version?: number };
-      return service.readAsset(ctx, a.spaceId, a.path, a.version);
+      const a = args as { spaceId: string; assetId: string; version?: number };
+      return service.readAsset(ctx, a.spaceId, a.assetId, a.version);
+    }
+    case 'create_asset': {
+      const a = args as { spaceId: string; path: string; newContent?: string; blob?: string; reason: string };
+      // One-of lives here rather than in the JSON schema (kept plain on purpose).
+      if ((a.newContent === undefined) === (a.blob === undefined)) {
+        throw new HarborError('invalid_request', 'provide exactly one of newContent (text) or blob (an uploaded sha256)');
+      }
+      return service.createAsset(ctx, a.spaceId, {
+        path: a.path,
+        ...(a.blob !== undefined ? { blob: a.blob } : { newContent: a.newContent! }),
+        reason: a.reason, // required on this face (CONTRACT.md decision 5)
+        actingMode: actor.actingMode,
+        ...(actor.agentName ? { agentName: actor.agentName } : {}),
+      });
     }
     case 'propose_change': {
       const a = args as {
         spaceId: string;
-        path: string;
+        assetId: string;
         baseVersion: number;
         newContent?: string;
         blob?: string;
@@ -253,7 +267,7 @@ async function dispatch(
         throw new HarborError('invalid_request', 'provide exactly one of newContent (text) or blob (an uploaded sha256)');
       }
       return service.proposeChange(ctx, a.spaceId, {
-        assetPath: a.path,
+        assetId: a.assetId,
         baseVersion: a.baseVersion,
         ...(a.blob !== undefined ? { blob: a.blob } : { newContent: a.newContent! }),
         reason: a.reason, // required on this face (CONTRACT.md decision 5)
@@ -262,9 +276,9 @@ async function dispatch(
       });
     }
     case 'move_asset': {
-      const a = args as { spaceId: string; fromPath: string; toPath: string; baseVersion: number; reason: string };
+      const a = args as { spaceId: string; assetId: string; toPath: string; baseVersion: number; reason: string };
       return service.moveAsset(ctx, a.spaceId, {
-        fromPath: a.fromPath,
+        assetId: a.assetId,
         toPath: a.toPath,
         baseVersion: a.baseVersion,
         reason: a.reason, // required on this face (CONTRACT.md decision 5)
@@ -273,9 +287,9 @@ async function dispatch(
       });
     }
     case 'delete_asset': {
-      const a = args as { spaceId: string; path: string; baseVersion: number; reason: string };
+      const a = args as { spaceId: string; assetId: string; baseVersion: number; reason: string };
       return service.deleteAsset(ctx, a.spaceId, {
-        path: a.path,
+        assetId: a.assetId,
         baseVersion: a.baseVersion,
         reason: a.reason, // required on this face (CONTRACT.md decision 5)
         actingMode: actor.actingMode,
@@ -326,32 +340,32 @@ async function dispatch(
       return { message: await service.endPoll(ctx, a.spaceId, a.messageId, attribution) };
     }
     case 'restore_asset': {
-      const a = args as { spaceId: string; path: string; reason: string };
+      const a = args as { spaceId: string; assetId: string; reason: string };
       return service.restoreAsset(ctx, a.spaceId, {
-        path: a.path,
+        assetId: a.assetId,
         reason: a.reason, // required on this face (CONTRACT.md decision 5)
         ...attribution,
       });
     }
     case 'asset_history': {
-      const a = args as { spaceId: string; path?: string; beforeOffset?: number; limit?: number };
+      const a = args as { spaceId: string; assetId?: string; beforeOffset?: number; limit?: number };
       const changeSets = await service.assetHistory(ctx, a.spaceId, {
-        ...(a.path !== undefined ? { path: a.path } : {}),
+        ...(a.assetId !== undefined ? { assetId: a.assetId } : {}),
         ...(a.beforeOffset !== undefined ? { beforeOffset: a.beforeOffset } : {}),
         ...(a.limit !== undefined ? { limit: a.limit } : {}),
       });
       return { changeSets };
     }
     case 'diff': {
-      const a = args as { spaceId: string; path: string; from: number; to: number };
-      return { unified: await service.diff(ctx, a.spaceId, a.path, a.from, a.to) };
+      const a = args as { spaceId: string; assetId: string; from: number; to: number };
+      return { unified: await service.diff(ctx, a.spaceId, a.assetId, a.from, a.to) };
     }
     case 'list_topics': {
       const a = args as { spaceId: string; includeArchived?: boolean };
       return { topics: await service.listTopics(ctx, a.spaceId, a.includeArchived ?? false) };
     }
     case 'create_topic': {
-      const a = args as { spaceId: string; rootMessageId?: string; title: string; body?: string; documentPath?: string };
+      const a = args as { spaceId: string; rootMessageId?: string; title: string; body?: string; documentAssetId?: string };
       // One-of lives here rather than in the JSON schema (kept plain on purpose).
       if ((a.rootMessageId === undefined) === (a.body === undefined)) {
         throw new HarborError('invalid_request', 'provide exactly one of rootMessageId (promote a thread) or body (post + annotate)');
@@ -360,7 +374,7 @@ async function dispatch(
         ...(a.rootMessageId !== undefined ? { rootMessageId: a.rootMessageId } : {}),
         title: a.title,
         ...(a.body !== undefined ? { body: a.body } : {}),
-        ...(a.documentPath !== undefined ? { documentPath: a.documentPath } : {}),
+        ...(a.documentAssetId !== undefined ? { documentAssetId: a.documentAssetId } : {}),
         actingMode: actor.actingMode,
         ...(actor.agentName ? { agentName: actor.agentName } : {}),
       });
@@ -372,7 +386,7 @@ async function dispatch(
         topicId: string;
         action: 'retitle' | 'archive' | 'unarchive' | 'remove' | 'attach_document' | 'detach_document';
         title?: string;
-        path?: string;
+        assetId?: string;
       };
       const attribution = {
         actingMode: actor.actingMode,
@@ -383,8 +397,8 @@ async function dispatch(
         if (!a.title) throw new HarborError('invalid_request', 'retitle needs a title');
         action = { action: 'retitle', title: a.title, ...attribution };
       } else if (a.action === 'attach_document') {
-        if (!a.path) throw new HarborError('invalid_request', 'attach_document needs a path');
-        action = { action: 'attach_document', path: a.path, ...attribution };
+        if (!a.assetId) throw new HarborError('invalid_request', 'attach_document needs an assetId');
+        action = { action: 'attach_document', assetId: a.assetId, ...attribution };
       } else {
         action = { action: a.action, ...attribution };
       }

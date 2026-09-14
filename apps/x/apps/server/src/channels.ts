@@ -292,6 +292,7 @@ export const RPC_CHANNELS = [
   'spaces:resolveInvite',
   'spaces:acceptInvite',
   'spaces:listAssets',
+  'spaces:createAsset',
   'spaces:moveAsset',
   'spaces:deleteAsset',
   'spaces:restoreAsset',

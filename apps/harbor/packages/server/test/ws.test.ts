@@ -7,6 +7,7 @@ import { startHarbor, type RunningHarbor } from '../src/server.js';
 
 let harbor: RunningHarbor;
 let spaceId: string;
+let readmeId: string;
 
 beforeAll(async () => {
   harbor = await startHarbor({
@@ -18,6 +19,8 @@ beforeAll(async () => {
   });
   const spaces = await harbor.service.listSpaces({ memberId: 'ramnique' });
   spaceId = spaces[0]!.id;
+  const assets = await harbor.service.listAssets({ memberId: 'ramnique' }, spaceId);
+  readmeId = assets.find((a) => a.path === 'README.md')!.id;
 });
 
 afterAll(async () => {
@@ -98,7 +101,7 @@ describe('live face', () => {
     expect(eventFrames(client.frames)).toHaveLength(0);
 
     await harbor.service.proposeChange({ memberId: 'ramnique' }, spaceId, {
-      assetPath: 'README.md',
+      assetId: readmeId,
       baseVersion: 1,
       newContent: '# Live\nupdated\n',
       actingMode: 'direct',
@@ -166,6 +169,11 @@ describe('live face', () => {
   });
 
   it('whiteboard frames relay the payload verbatim to space subscribers, stamped with the sender', async () => {
+    // A board is a space file; the frame names it by its asset id, never its path.
+    const board = await harbor.service.createAsset({ memberId: 'gagan' }, spaceId, {
+      path: 'whiteboards/roadmap.excalidraw', newContent: '{}', actingMode: 'direct',
+    });
+    const boardId = board.asset.id;
     const watcher = await connect('dev-ramnique');
     watcher.send({ kind: 'subscribe', spaceId });
     await watcher.until((fs) => fs.some((f) => f.kind === 'subscribed'), 'watcher subscribed');
@@ -174,10 +182,10 @@ describe('live face', () => {
     // The payload is opaque to the org — this shape is app-side vocabulary the
     // server must relay untouched, unknown keys and all.
     const payload = { t: 'SCENE_UPDATE', clientId: 'pane-1', elements: [{ id: 'rect-1', version: 3 }] };
-    drawer.send({ kind: 'whiteboard', spaceId, boardId: 'whiteboards/roadmap.excalidraw', payload });
+    drawer.send({ kind: 'whiteboard', spaceId, boardId, payload });
     await watcher.until((fs) => fs.some((f) => f.kind === 'whiteboard'), 'whiteboard frame');
     const frame = watcher.frames.find((f) => f.kind === 'whiteboard') as Extract<ServerFrame, { kind: 'whiteboard' }>;
-    expect(frame).toMatchObject({ spaceId, boardId: 'whiteboards/roadmap.excalidraw', memberId: 'gagan' });
+    expect(frame).toMatchObject({ spaceId, boardId, memberId: 'gagan' });
     expect(frame.payload).toEqual(payload);
     expect('offset' in frame).toBe(false); // ephemeral: no offset, never replayed
     watcher.close();
@@ -186,8 +194,11 @@ describe('live face', () => {
 
   it('whiteboard frames to a space you are not in yield a forbidden error', async () => {
     const other = await harbor.service.createSpace({ memberId: 'ramnique' }, 'Private board');
+    const board = await harbor.service.createAsset({ memberId: 'ramnique' }, other.id, {
+      path: 'whiteboards/x.excalidraw', newContent: '{}', actingMode: 'direct',
+    });
     const client = await connect('dev-gagan');
-    client.send({ kind: 'whiteboard', spaceId: other.id, boardId: 'whiteboards/x.excalidraw', payload: {} });
+    client.send({ kind: 'whiteboard', spaceId: other.id, boardId: board.asset.id, payload: {} });
     await client.until((fs) => fs.some((f) => f.kind === 'error'), 'error frame');
     const err = client.frames.find((f) => f.kind === 'error') as Extract<ServerFrame, { kind: 'error' }>;
     expect(err.code).toBe('forbidden');

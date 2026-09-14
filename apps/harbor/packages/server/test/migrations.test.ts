@@ -66,6 +66,11 @@ describe('schema migrations', () => {
     await message('msg-r1', 't-renamed', 'original opener text', 6);
     await message('reply-r1', 't-renamed', 'renamed reply', 7);
     await message('msg-g2', 't-gen', 'hello world', 8);
+    // The file those change-sets belong to: 007 backfills change_sets.asset_id
+    // by path join, and 020 then binds it NOT NULL — an orphan row would refuse
+    // the ladder, so the legacy world must be self-consistent.
+    await db.query(`insert into assets (space_id, path, version, updated_at) values ('s1', 'roadmap.md', 1, '2026-08-20T11:00:00Z')`);
+    await db.query(`insert into asset_versions (space_id, path, version, content) values ('s1', 'roadmap.md', 1, '# Roadmap')`);
     const changeSet = (id: string, reason: string | null, offset: number) =>
       db.query(
         `insert into change_sets (id, space_id, asset_path, base_version, result_version, attribution, reason, committed_at, stream_offset)
@@ -94,6 +99,14 @@ describe('schema migrations', () => {
     // Provenance: the topic id became the thread's root (via 004's suffix parse).
     expect((await store.getChangeSet('s1', 'cs-suffixed'))?.threadRootId).toBe('msg-parent');
     expect((await store.getChangeSet('s1', 'cs-plain'))?.threadRootId).toBeUndefined();
+    // 007 minted the file's id; 020 made it the change-set's wire lineage key
+    // and stamped it into the stored `change` events (none here — the legacy
+    // world predates the event log; the column binding is the assertion).
+    const asset = await store.getLiveAssetByPath('s1', 'roadmap.md');
+    expect(asset?.id).toBeTruthy();
+    expect((await store.getChangeSet('s1', 'cs-plain'))?.assetId).toBe(asset!.id);
+    const tables = await db.query<{ table_name: string }>(`select table_name from information_schema.tables where table_name = 'asset_redirects'`);
+    expect(tables).toEqual([]);
     // The container key is gone from messages.
     const cols = await db.query<{ column_name: string }>(
       `select column_name from information_schema.columns where table_name = 'messages'`,

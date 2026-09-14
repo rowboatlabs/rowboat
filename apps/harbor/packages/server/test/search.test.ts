@@ -112,21 +112,22 @@ describe('message search', () => {
 
 describe('asset search', () => {
   it('matches extracted content with a snippet, and filenames without one', async () => {
-    await service.proposeChange(ram, spaceId, {
-      assetPath: 'notes/roadmap.md',
-      baseVersion: 0,
+    const { asset } = await service.createAsset(ram, spaceId, {
+      path: 'notes/roadmap.md',
       newContent: '# Roadmap\nGardening agents ship in October.',
       reason: 'seed',
       actingMode: 'direct',
     });
 
+    // Hits carry the id (what the agent acts on) next to the path (what it shows).
     const byContent = await service.search(ram, spaceId, 'gardening');
     expect(byContent.assets.length).toBe(1);
-    expect(byContent.assets[0]!.path).toBe('notes/roadmap.md');
+    expect(byContent.assets[0]).toMatchObject({ id: asset.id, path: 'notes/roadmap.md', version: 1 });
     expect(byContent.assets[0]!.snippet).toContain('Gardening');
 
     const byName = await service.search(ram, spaceId, 'roadmap');
-    expect(byName.assets.map((a) => a.path)).toContain('notes/roadmap.md');
+    expect(byName.assets.map((a) => a.id)).toContain(asset.id);
+    expect(byName.assets.find((a) => a.id === asset.id)?.path).toBe('notes/roadmap.md');
   });
 
   it('indexes whiteboard text elements, never Excalidraw geometry JSON', async () => {
@@ -138,9 +139,8 @@ describe('asset search', () => {
         { type: 'frame', name: 'Login screens' },
       ],
     });
-    await service.proposeChange(ram, spaceId, {
-      assetPath: 'boards/auth.excalidraw',
-      baseVersion: 0,
+    await service.createAsset(ram, spaceId, {
+      path: 'boards/auth.excalidraw',
       newContent: board,
       reason: 'board',
       actingMode: 'direct',
@@ -154,24 +154,23 @@ describe('asset search', () => {
   });
 
   it('follows renames and drops deleted files at query time — the index never moves', async () => {
-    await service.proposeChange(ram, spaceId, {
-      assetPath: 'scratch.md',
-      baseVersion: 0,
+    const { asset } = await service.createAsset(ram, spaceId, {
+      path: 'scratch.md',
       newContent: 'contains a very findable xylophone',
       reason: 'seed',
       actingMode: 'direct',
     });
     await service.moveAsset(ram, spaceId, {
-      fromPath: 'scratch.md',
+      assetId: asset.id,
       toPath: 'archive/keep.md',
       baseVersion: 1,
       reason: 'tidy',
       actingMode: 'direct',
     });
     const moved = await service.search(ram, spaceId, 'xylophone');
-    expect(moved.assets.map((a) => a.path)).toEqual(['archive/keep.md']);
+    expect(moved.assets.map((a) => ({ id: a.id, path: a.path }))).toEqual([{ id: asset.id, path: 'archive/keep.md' }]);
 
-    await service.deleteAsset(ram, spaceId, { path: 'archive/keep.md', baseVersion: 1, reason: 'done', actingMode: 'direct' });
+    await service.deleteAsset(ram, spaceId, { assetId: asset.id, baseVersion: 1, reason: 'done', actingMode: 'direct' });
     expect((await service.search(ram, spaceId, 'xylophone')).assets.length).toBe(0);
   });
 

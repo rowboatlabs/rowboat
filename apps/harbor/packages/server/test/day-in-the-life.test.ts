@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import type { ChangeSet, ProposeChangeResult, ReadAssetResult } from '@rowboat/spaces-protocol';
+import type { ChangeSet, CreateAssetResult, ProposeChangeResult, ReadAssetResult } from '@rowboat/spaces-protocol';
 import { PgStore } from '../src/pg-store.js';
 import { startHarbor, type HarborOptions, type RunningHarbor } from '../src/server.js';
 import type { SqlDb } from '../src/sql.js';
@@ -17,6 +17,7 @@ import { agentClient, callStructured, liveClient, restClient, type LiveClient } 
 
 let harbor: RunningHarbor;
 let spaceId: string;
+let roadmapId: string; // roadmap.md's asset id — born in beat 1, named by id ever after
 let sqlDb: SqlDb | undefined;
 
 // The five, as REST clients (humans at the app)...
@@ -85,6 +86,7 @@ async function stopHarbor(): Promise<void> {
   await sqlDb?.close();
   sqlDb = undefined;
   arjunLastSeen = 0;
+  roadmapId = '';
 }
 
 describe.each([['memory'], ['postgres']] as const)('§11 — a day in the life of Roadboard (%s store)', (storeKind) => {
@@ -100,20 +102,16 @@ describe.each([['memory'], ['postgres']] as const)('§11 — a day in the life o
     spaceId = created.body.space.id;
 
     // "asking their agent to draft it — already a private→shared push"
-    const seeded = await callStructured<Extract<ProposeChangeResult, { outcome: 'applied' }>>(
-      ramniqueAgent,
-      'propose_change',
-      {
-        spaceId,
-        path: 'roadmap.md',
-        baseVersion: 0,
-        newContent: ROADMAP_V1,
-        reason: 'draft the roadmap from our planning notes',
-      },
-    );
-    expect(seeded.outcome).toBe('applied');
-    expect(seeded.version).toBe(1);
+    const seeded = await callStructured<CreateAssetResult>(ramniqueAgent, 'create_asset', {
+      spaceId,
+      path: 'roadmap.md',
+      newContent: ROADMAP_V1,
+      reason: 'draft the roadmap from our planning notes',
+    });
+    expect(seeded.asset).toMatchObject({ path: 'roadmap.md', version: 1 });
+    expect(seeded.changeSet.assetId).toBe(seeded.asset.id);
     expect(seeded.changeSet.attribution).toEqual({ memberId: 'ramnique', actingMode: 'agent', agentName: 'Rowboat' });
+    roadmapId = seeded.asset.id;
 
     const invite = await ramnique.post('/v1/invites', { spaceId });
     for (const member of [arjun, harsh, gagan, prakhar]) {
@@ -130,8 +128,9 @@ describe.each([['memory'], ['postgres']] as const)('§11 — a day in the life o
   });
 
   it('beat 3 — first push: Gagan\'s agent reads (history bundled), applies one change-set with reasoning', async () => {
-    const read = await callStructured<ReadAssetResult>(gaganAgent, 'read_asset', { spaceId, path: 'roadmap.md' });
+    const read = await callStructured<ReadAssetResult>(gaganAgent, 'read_asset', { spaceId, assetId: roadmapId });
     expect(read.version).toBe(1);
+    expect(read.path).toBe('roadmap.md');
     expect(read.recentHistory.length).toBeGreaterThan(0); // read-before-write is mechanical fact
 
     const push = await callStructured<Extract<ProposeChangeResult, { outcome: 'applied' }>>(
@@ -139,7 +138,7 @@ describe.each([['memory'], ['postgres']] as const)('§11 — a day in the life o
       'propose_change',
       {
         spaceId,
-        path: 'roadmap.md',
+        assetId: roadmapId,
         baseVersion: read.version,
         newContent: `${read.content}${GAGAN_LINE}\n`,
         reason: 'standup 10:35 — push action items',
@@ -163,7 +162,7 @@ describe.each([['memory'], ['postgres']] as const)('§11 — a day in the life o
     // conflict (golden fixture 04), not silently interleave.
     const stale = await callStructured<ProposeChangeResult>(prakharAgent, 'propose_change', {
       spaceId,
-      path: 'roadmap.md',
+      assetId: roadmapId,
       baseVersion: 1,
       newContent: `${ROADMAP_V1}${PRAKHAR_LINE}\n`,
       reason: 'standup 10:41 — push action items',
@@ -180,7 +179,7 @@ describe.each([['memory'], ['postgres']] as const)('§11 — a day in the life o
       'propose_change',
       {
         spaceId,
-        path: 'roadmap.md',
+        assetId: roadmapId,
         baseVersion: stale.currentVersion,
         newContent: `${stale.currentContent}${PRAKHAR_LINE}\n`,
         reason: 'standup 10:41 — gagan already pushed the shared items; adding only mine',
@@ -194,7 +193,7 @@ describe.each([['memory'], ['postgres']] as const)('§11 — a day in the life o
     // Ramnique's agent last read at v2; meanwhile v3 landed (Prakhar's standup
     // line, end of file). The SSO note edits the P2 section — distant regions,
     // the everyday case, must auto-merge (golden fixture 01/03).
-    const v2 = await ramnique.get(`/v1/spaces/${spaceId}/asset?path=roadmap.md&version=2`);
+    const v2 = await ramnique.get(`/v1/spaces/${spaceId}/assets/${roadmapId}?version=2`);
     const proposed = (v2.body.content as string).replace(
       '- [ ] SSO — scope SAML vs OIDC',
       '- [ ] SSO — scope SAML vs OIDC\n  - Customer X requesting SSO (via Ramnique, from email)',
@@ -204,7 +203,7 @@ describe.each([['memory'], ['postgres']] as const)('§11 — a day in the life o
       'propose_change',
       {
         spaceId,
-        path: 'roadmap.md',
+        assetId: roadmapId,
         baseVersion: 2,
         newContent: proposed,
         reason: 'Customer X requesting SSO (via Ramnique, from email)',
@@ -223,10 +222,10 @@ describe.each([['memory'], ['postgres']] as const)('§11 — a day in the life o
     arjunOpenDoc.send({ kind: 'subscribe', spaceId, afterOffset: head });
     await arjunOpenDoc.until((fs) => fs.some((f) => f.kind === 'subscribed'), 'arjun subscribed');
 
-    const read = await harsh.get(`/v1/spaces/${spaceId}/asset?path=roadmap.md`);
+    const read = await harsh.get(`/v1/spaces/${spaceId}/assets/${roadmapId}`);
     const ticked = (read.body.content as string).replace('- [ ] CSV importer crash (Harsh)', '- [x] CSV importer crash (Harsh)');
     const apply = await harsh.post(`/v1/spaces/${spaceId}/changes`, {
-      assetPath: 'roadmap.md',
+      assetId: roadmapId,
       baseVersion: read.body.version,
       newContent: ticked,
       actingMode: 'direct', // tiny change-set, no reason required on this face
@@ -269,7 +268,7 @@ describe.each([['memory'], ['postgres']] as const)('§11 — a day in the life o
     }
 
     // @rowboat resolves to RAMNIQUE's own agent, runs on their machine, lands attributed.
-    const read = await callStructured<ReadAssetResult>(ramniqueAgent, 'read_asset', { spaceId, path: 'roadmap.md' });
+    const read = await callStructured<ReadAssetResult>(ramniqueAgent, 'read_asset', { spaceId, assetId: roadmapId });
     const moved = read.content
       .replace('\n- [ ] SSO — scope SAML vs OIDC\n  - Customer X requesting SSO (via Ramnique, from email)', '')
       .replace(
@@ -279,7 +278,7 @@ describe.each([['memory'], ['postgres']] as const)('§11 — a day in the life o
     const change = await callStructured<Extract<ProposeChangeResult, { outcome: 'applied' }>>(
       ramniqueAgent,
       'propose_change',
-      { spaceId, path: 'roadmap.md', baseVersion: read.version, newContent: moved, reason: 'move SSO to P1 (asked in Roadboard thread)' },
+      { spaceId, assetId: roadmapId, baseVersion: read.version, newContent: moved, reason: 'move SSO to P1 (asked in Roadboard thread)' },
     );
     expect(change.outcome).toBe('applied');
     expect(change.version).toBe(6);
@@ -300,12 +299,12 @@ describe.each([['memory'], ['postgres']] as const)('§11 — a day in the life o
   });
 
   it('beat 8 — housekeeping: the DRI\'s local cron tidies, attributed "(via Rowboat, scheduled)"', async () => {
-    const read = await callStructured<ReadAssetResult>(ramniqueCron, 'read_asset', { spaceId, path: 'roadmap.md' });
+    const read = await callStructured<ReadAssetResult>(ramniqueCron, 'read_asset', { spaceId, assetId: roadmapId });
     const tidied = read.content.replace('## Standups\n', '## Standups — week of Aug 11\n');
     const tidy = await callStructured<Extract<ProposeChangeResult, { outcome: 'applied' }>>(
       ramniqueCron,
       'propose_change',
-      { spaceId, path: 'roadmap.md', baseVersion: read.version, newContent: tidied, reason: 'nightly tidy: date the standup section' },
+      { spaceId, assetId: roadmapId, baseVersion: read.version, newContent: tidied, reason: 'nightly tidy: date the standup section' },
     );
     expect(tidy.outcome).toBe('applied');
     expect(tidy.version).toBe(7);
@@ -330,10 +329,13 @@ describe.each([['memory'], ['postgres']] as const)('§11 — a day in the life o
     catchUp.close();
 
     // The doc's history answers any "why" — with the full attribution spectrum.
-    const history = await arjun.get(`/v1/spaces/${spaceId}/history?path=roadmap.md`);
+    const history = await arjun.get(`/v1/spaces/${spaceId}/history?assetId=${roadmapId}`);
     const changeSets = history.body.changeSets as ChangeSet[];
     expect(changeSets).toHaveLength(7);
     expect(changeSets.map((cs) => cs.resultVersion)).toEqual([7, 6, 5, 4, 3, 2, 1]);
+    // One lineage, one id; the path is the record of where it lived at each commit.
+    expect(new Set(changeSets.map((cs) => cs.assetId))).toEqual(new Set([roadmapId]));
+    expect(new Set(changeSets.map((cs) => cs.assetPath))).toEqual(new Set(['roadmap.md']));
     const reasons = changeSets.map((cs) => cs.reason);
     expect(reasons).toContain('Customer X requesting SSO (via Ramnique, from email)');
     expect(reasons).toContain('move SSO to P1 (asked in Roadboard thread)');
@@ -341,7 +343,7 @@ describe.each([['memory'], ['postgres']] as const)('§11 — a day in the life o
     expect(new Set(changeSets.map((cs) => cs.attribution.actingMode))).toEqual(new Set(['direct', 'agent', 'scheduled']));
 
     // And the day's diff reads like the day.
-    const diff = await arjun.get(`/v1/spaces/${spaceId}/diff?path=roadmap.md&from=1&to=7`);
+    const diff = await arjun.get(`/v1/spaces/${spaceId}/diff?assetId=${roadmapId}&from=1&to=7`);
     expect(diff.body.unified).toContain('+- [x] CSV importer crash (Harsh)');
     expect(diff.body.unified).toContain('+- [ ] SSO — scope SAML vs OIDC');
     expect(diff.body.unified).toContain(`+${GAGAN_LINE}`);

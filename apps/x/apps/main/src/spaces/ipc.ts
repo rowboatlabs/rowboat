@@ -228,9 +228,18 @@ export const spacesIpcHandlers: SpacesHandlers = {
 
   // Namespace ops — the renderer is the human surface, so everything here is
   // 'direct' (agents move/delete through the org's MCP face, attributed there).
+  'spaces:createAsset': async (_event, args) =>
+    orgs.getClient(args.orgId).createAsset(args.spaceId, {
+      path: args.input.path,
+      // Exactly one of the two variants (contract decision 1, amended).
+      ...(args.input.blob !== undefined ? { blob: args.input.blob } : { newContent: args.input.newContent ?? '' }),
+      ...(args.input.reason ? { reason: args.input.reason } : {}),
+      actingMode: 'direct',
+    }),
+
   'spaces:moveAsset': async (_event, args) =>
     orgs.getClient(args.orgId).moveAsset(args.spaceId, {
-      fromPath: args.fromPath,
+      assetId: args.assetId,
       toPath: args.toPath,
       baseVersion: args.baseVersion,
       ...(args.reason ? { reason: args.reason } : {}),
@@ -239,14 +248,14 @@ export const spacesIpcHandlers: SpacesHandlers = {
 
   'spaces:deleteAsset': async (_event, args) =>
     orgs.getClient(args.orgId).deleteAsset(args.spaceId, {
-      path: args.path,
+      assetId: args.assetId,
       baseVersion: args.baseVersion,
       ...(args.reason ? { reason: args.reason } : {}),
       actingMode: 'direct',
     }),
 
   'spaces:restoreAsset': async (_event, args) =>
-    orgs.getClient(args.orgId).restoreAsset(args.spaceId, { path: args.path, actingMode: 'direct' }),
+    orgs.getClient(args.orgId).restoreAsset(args.spaceId, { assetId: args.assetId, actingMode: 'direct' }),
 
   // Upload phase 1. Pastes arrive as bytes; drag-drop / picker sends the
   // absolute path (via electronUtils.getPathForFile) so big files never cross
@@ -288,11 +297,11 @@ export const spacesIpcHandlers: SpacesHandlers = {
   'spaces:linkPreview': async (_event, args) => ({ preview: await fetchLinkPreview(args.url) }),
 
   'spaces:readAsset': async (_event, args) =>
-    orgs.getClient(args.orgId).readAsset(args.spaceId, args.path, args.version),
+    orgs.getClient(args.orgId).readAsset(args.spaceId, args.assetId, args.version),
 
   'spaces:proposeChange': async (_event, args) =>
     orgs.getClient(args.orgId).proposeChange(args.spaceId, {
-      assetPath: args.input.assetPath,
+      assetId: args.input.assetId,
       baseVersion: args.input.baseVersion,
       // Exactly one of the two variants (contract decision 1, amended).
       ...(args.input.blob !== undefined ? { blob: args.input.blob } : { newContent: args.input.newContent ?? '' }),
@@ -302,14 +311,14 @@ export const spacesIpcHandlers: SpacesHandlers = {
 
   'spaces:assetHistory': async (_event, args) => ({
     changeSets: await orgs.getClient(args.orgId).assetHistory(args.spaceId, {
-      ...(args.path !== undefined ? { path: args.path } : {}),
+      ...(args.assetId !== undefined ? { assetId: args.assetId } : {}),
       ...(args.beforeOffset !== undefined ? { beforeOffset: args.beforeOffset } : {}),
       ...(args.limit !== undefined ? { limit: args.limit } : {}),
     }),
   }),
 
   'spaces:diff': async (_event, args) => ({
-    unified: await orgs.getClient(args.orgId).diff(args.spaceId, args.path, args.from, args.to),
+    unified: await orgs.getClient(args.orgId).diff(args.spaceId, args.assetId, args.from, args.to),
   }),
 
   'spaces:listTopics': async (_event, args) => ({

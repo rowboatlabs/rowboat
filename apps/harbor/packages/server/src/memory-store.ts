@@ -32,13 +32,11 @@ interface SpaceState {
   memberships: Map<string, Membership>;
   assets: Map<string, AssetRecord>; // assetId → record (inode model; path is a property)
   assetVersions: Map<string, AssetVersionData>; // `${assetId}@${version}`
-  redirects: Map<string, { assetId: string; movedAt: string }>; // old path → asset
-  changeSetAsset: Map<string, string>; // changeSetId → assetId (internal lineage key)
   blobs: Map<string, StoredSpaceBlob>; // hash → registration (first write wins)
   changeSets: ChangeSet[]; // append order == offset order
   changeSetsById: Map<string, ChangeSet>;
-  topics: Map<string, Topic>; // annotation rows (id → row, never carrying documentPath); messages never reference them
-  topicDocuments: Map<string, string>; // topicId → linked assetId (migration 019); reads project the live path
+  topics: Map<string, Topic>; // annotation rows (id → row, never carrying documentAssetId); messages never reference them
+  topicDocuments: Map<string, string>; // topicId → linked assetId (migration 019)
   messages: Message[]; // the one stream, roots and replies interleaved, oldest first
   messagesById: Map<string, Message>;
   reactions: Map<string, StoredReaction[]>; // messageId → oldest first
@@ -110,8 +108,6 @@ export class MemoryStore implements Store {
       memberships: new Map(),
       assets: new Map(),
       assetVersions: new Map(),
-      redirects: new Map(),
-      changeSetAsset: new Map(),
       blobs: new Map(),
       changeSets: [],
       changeSetsById: new Map(),
@@ -199,13 +195,6 @@ export class MemoryStore implements Store {
     return found ? { ...found } : undefined;
   }
 
-  async getLatestDeletedByPath(spaceId: string, path: string): Promise<AssetRecord | undefined> {
-    const dead = [...this.must(spaceId).assets.values()]
-      .filter((a) => a.state === 'deleted' && a.path === path)
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-    return dead[0] ? { ...dead[0] } : undefined;
-  }
-
   async getAssetById(spaceId: string, assetId: string): Promise<AssetRecord | undefined> {
     const found = this.state(spaceId)?.assets.get(assetId);
     return found ? { ...found } : undefined;
@@ -253,18 +242,6 @@ export class MemoryStore implements Store {
     s.assets.set(assetId, { ...asset, state, updatedAt });
   }
 
-  async putRedirect(spaceId: string, path: string, assetId: string, movedAt: string): Promise<void> {
-    this.must(spaceId).redirects.set(path, { assetId, movedAt });
-  }
-
-  async getRedirect(spaceId: string, path: string): Promise<string | undefined> {
-    return this.state(spaceId)?.redirects.get(path)?.assetId;
-  }
-
-  async deleteRedirect(spaceId: string, path: string): Promise<void> {
-    this.must(spaceId).redirects.delete(path);
-  }
-
   async putSpaceBlob(blob: StoredSpaceBlob): Promise<void> {
     const s = this.must(blob.spaceId);
     if (!s.blobs.has(blob.hash)) s.blobs.set(blob.hash, blob);
@@ -274,11 +251,10 @@ export class MemoryStore implements Store {
     return this.state(spaceId)?.blobs.get(hash);
   }
 
-  async appendChangeSet(changeSet: ChangeSet, assetId: string): Promise<void> {
+  async appendChangeSet(changeSet: ChangeSet): Promise<void> {
     const s = this.must(changeSet.spaceId);
     s.changeSets.push(changeSet);
     s.changeSetsById.set(changeSet.id, changeSet);
-    s.changeSetAsset.set(changeSet.id, assetId);
   }
 
   async getChangeSet(spaceId: string, id: string): Promise<ChangeSet | undefined> {
@@ -293,19 +269,18 @@ export class MemoryStore implements Store {
     const s = this.must(spaceId);
     for (let i = s.changeSets.length - 1; i >= 0 && out.length < opts.limit; i--) {
       const cs = s.changeSets[i]!;
-      if (opts.assetId !== undefined && s.changeSetAsset.get(cs.id) !== opts.assetId) continue;
+      if (opts.assetId !== undefined && cs.assetId !== opts.assetId) continue;
       if (opts.beforeOffset !== undefined && cs.offset >= opts.beforeOffset) continue;
       out.push(cs);
     }
     return out;
   }
 
-  /** The wire shape: the row plus the linked document's CURRENT live path (mirrors pg TOPIC_SELECT). */
+  /** The wire shape: the row plus its document link (mirrors pg's document_asset_id column). */
   private projectTopic(s: SpaceState, topic: Topic): Topic {
     const assetId = s.topicDocuments.get(topic.id);
-    const asset = assetId ? s.assets.get(assetId) : undefined;
-    const { documentPath: _drop, ...row } = topic;
-    return asset && asset.state === 'live' ? { ...row, documentPath: asset.path } : row;
+    const { documentAssetId: _drop, ...row } = topic;
+    return assetId !== undefined ? { ...row, documentAssetId: assetId } : row;
   }
 
   private topicsOf(spaceId: string): Topic[] {
@@ -320,8 +295,8 @@ export class MemoryStore implements Store {
   }
 
   async putTopic(topic: Topic): Promise<void> {
-    // The projected path never lands in the row — the link lives in topicDocuments.
-    const { documentPath: _drop, ...row } = topic;
+    // The link never lands in the row — it lives in topicDocuments (setTopicDocument).
+    const { documentAssetId: _drop, ...row } = topic;
     this.must(topic.spaceId).topics.set(topic.id, row);
   }
 
@@ -329,10 +304,6 @@ export class MemoryStore implements Store {
     const s = this.must(spaceId);
     if (assetId === null) s.topicDocuments.delete(topicId);
     else s.topicDocuments.set(topicId, assetId);
-  }
-
-  async getTopicDocument(spaceId: string, topicId: string): Promise<string | undefined> {
-    return this.state(spaceId)?.topicDocuments.get(topicId);
   }
 
   async deleteTopic(spaceId: string, topicId: string): Promise<void> {

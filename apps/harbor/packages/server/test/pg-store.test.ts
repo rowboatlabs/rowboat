@@ -15,6 +15,8 @@ let db: SqlDb;
 let store: PgStore;
 let service: HarborService;
 let spaceId: string;
+/** log.md's id — files are addressed by id (2026-09-14); the path is a display property. */
+let logId: string;
 
 const ram = { memberId: 'ramnique' };
 const gagan = { memberId: 'gagan' };
@@ -38,10 +40,18 @@ afterAll(async () => {
 
 describe('PgStore through the service', () => {
   it('history pagination pages backwards without gaps or repeats', async () => {
-    for (let i = 0; i < 7; i++) {
-      const head = i === 0 ? 0 : (await service.readAsset(ram, spaceId, 'log.md')).version;
+    const born = await service.createAsset(ram, spaceId, {
+      path: 'log.md',
+      newContent: 'line\n',
+      reason: 'edit 1',
+      actingMode: 'direct',
+    });
+    logId = born.asset.id;
+    expect(born.changeSet).toMatchObject({ assetId: logId, assetPath: 'log.md', baseVersion: 0, resultVersion: 1 });
+    for (let i = 1; i < 7; i++) {
+      const head = (await service.readAsset(ram, spaceId, logId)).version;
       const r = await service.proposeChange(ram, spaceId, {
-        assetPath: 'log.md',
+        assetId: logId,
         baseVersion: head,
         newContent: `line\n`.repeat(i + 1),
         reason: `edit ${i + 1}`,
@@ -49,24 +59,27 @@ describe('PgStore through the service', () => {
       });
       expect(r.outcome).toBe('applied');
     }
-    const page1 = await service.assetHistory(ram, spaceId, { path: 'log.md', limit: 3 });
+    const page1 = await service.assetHistory(ram, spaceId, { assetId: logId, limit: 3 });
     expect(page1.map((cs) => cs.resultVersion)).toEqual([7, 6, 5]);
     const page2 = await service.assetHistory(ram, spaceId, {
-      path: 'log.md',
+      assetId: logId,
       beforeOffset: page1.at(-1)!.offset,
       limit: 3,
     });
     expect(page2.map((cs) => cs.resultVersion)).toEqual([4, 3, 2]);
     const page3 = await service.assetHistory(ram, spaceId, {
-      path: 'log.md',
+      assetId: logId,
       beforeOffset: page2.at(-1)!.offset,
       limit: 3,
     });
     expect(page3.map((cs) => cs.resultVersion)).toEqual([1]);
+    // An unknown id is an empty lineage, not an error.
+    expect(await service.assetHistory(ram, spaceId, { assetId: 'no-such-asset', limit: 3 })).toEqual([]);
   });
 
   it('time-travel reads reconstruct any version with history filtered to it', async () => {
-    const v3 = await service.readAsset(ram, spaceId, 'log.md', 3);
+    const v3 = await service.readAsset(ram, spaceId, logId, 3);
+    expect(v3).toMatchObject({ id: logId, path: 'log.md', version: 3 });
     expect(v3.content).toBe('line\n'.repeat(3));
     expect(v3.recentHistory.every((cs) => cs.resultVersion <= 3)).toBe(true);
   });
@@ -100,38 +113,47 @@ describe('PgStore through the service', () => {
     expect(thread.messages.map((m) => m.body)).toEqual(['A follow-up']);
   });
 
-  it('a topic\'s document is stored by asset id and projected as the live path (migration 019)', async () => {
-    await service.proposeChange(ram, spaceId, { assetPath: 'brief.md', baseVersion: 0, newContent: '# Brief\n', actingMode: 'direct' });
+  it('a topic\'s document is the asset id on the row, carried through rename and trash (migrations 019/020)', async () => {
+    const { asset } = await service.createAsset(ram, spaceId, { path: 'brief.md', newContent: '# Brief\n', actingMode: 'direct' });
     const b = await service.postMessage(ram, spaceId, { body: 'Root B', actingMode: 'direct' });
     const { topic } = await service.createTopic(ram, spaceId, {
       rootMessageId: b.message.id,
       title: 'Review: the brief',
-      documentPath: 'brief.md',
+      documentAssetId: asset.id,
       actingMode: 'direct',
     });
-    expect(topic.documentPath).toBe('brief.md');
-    // The row keeps the internal id; putTopic (a retitle) must not disturb it.
-    const asset = await store.getLiveAssetByPath(spaceId, 'brief.md');
-    expect(await store.getTopicDocument(spaceId, topic.id)).toBe(asset!.id);
+    expect(topic.documentAssetId).toBe(asset.id);
+    // The row carries the id; putTopic (a retitle) must not disturb it.
+    expect((await store.getTopic(spaceId, topic.id))?.documentAssetId).toBe(asset.id);
     const retitled = await service.manageTopic(ram, spaceId, topic.id, { action: 'retitle', title: 'Review: the brief (v2)', actingMode: 'direct' });
-    expect(retitled.documentPath).toBe('brief.md');
+    expect(retitled.documentAssetId).toBe(asset.id);
 
-    // Rename → new path on every read; the getTopicByRoot and thread paths project too.
-    await service.moveAsset(ram, spaceId, { fromPath: 'brief.md', toPath: 'journal.md', baseVersion: 1, actingMode: 'direct' });
-    expect((await store.getTopicByRoot(spaceId, b.message.id))?.documentPath).toBe('journal.md');
-    expect((await service.listThread(ram, spaceId, b.message.id)).topic?.documentPath).toBe('journal.md');
+    // Rename → the link is by id, so nothing on the topic changes; the
+    // getTopicByRoot and thread paths carry the same id.
+    await service.moveAsset(ram, spaceId, { assetId: asset.id, toPath: 'journal.md', baseVersion: 1, actingMode: 'direct' });
+    expect((await store.getTopicByRoot(spaceId, b.message.id))?.documentAssetId).toBe(asset.id);
+    expect((await service.listThread(ram, spaceId, b.message.id)).topic?.documentAssetId).toBe(asset.id);
+    expect((await service.readAsset(ram, spaceId, asset.id)).path).toBe('journal.md');
 
-    // Trash → projected away, link kept; detach is still a real change then.
-    await service.deleteAsset(ram, spaceId, { path: 'journal.md', baseVersion: 1, actingMode: 'direct' });
-    expect((await store.getTopic(spaceId, topic.id))?.documentPath).toBeUndefined();
-    expect(await store.getTopicDocument(spaceId, topic.id)).toBe(asset!.id);
+    // Trash → the id is still projected (the client decides what to show);
+    // detach is a real change, and a second detach is a no-op.
+    await service.deleteAsset(ram, spaceId, { assetId: asset.id, baseVersion: 1, actingMode: 'direct' });
+    expect((await store.getTopic(spaceId, topic.id))?.documentAssetId).toBe(asset.id);
     const detached = await service.manageTopic(ram, spaceId, topic.id, { action: 'detach_document', actingMode: 'direct' });
-    expect(detached.documentPath).toBeUndefined();
-    expect(await store.getTopicDocument(spaceId, topic.id)).toBeUndefined();
+    expect(detached.documentAssetId).toBeUndefined();
+    expect((await store.getTopic(spaceId, topic.id))?.documentAssetId).toBeUndefined();
+    await service.manageTopic(ram, spaceId, topic.id, { action: 'detach_document', actingMode: 'direct' });
+    // A trashed file cannot be attached; restore it, attach, and attaching the same id again is a no-op.
+    await expect(
+      service.manageTopic(ram, spaceId, topic.id, { action: 'attach_document', assetId: asset.id, actingMode: 'direct' }),
+    ).rejects.toMatchObject({ code: 'not_found' });
+    await service.restoreAsset(ram, spaceId, { assetId: asset.id, actingMode: 'direct' });
+    const attached = await service.manageTopic(ram, spaceId, topic.id, { action: 'attach_document', assetId: asset.id, actingMode: 'direct' });
+    expect(attached.documentAssetId).toBe(asset.id);
+    await service.manageTopic(ram, spaceId, topic.id, { action: 'attach_document', assetId: asset.id, actingMode: 'direct' });
     const events = await store.listEventsAfter(spaceId, 0);
     expect(events.filter((e) => e.event.type === 'topic' && e.event.topic.id === topic.id).map((e) => (e.event as { action: string }).action))
-      .toEqual(['created', 'retitled', 'document_detached']);
-    await service.restoreAsset(ram, spaceId, { path: 'journal.md', actingMode: 'direct' });
+      .toEqual(['created', 'retitled', 'document_detached', 'document_attached']);
   });
 
   it('search finds topic-title and body matches across jsonb-backed rows', async () => {
@@ -160,8 +182,8 @@ describe('PgStore through the service', () => {
 
   it('attribution jsonb survives storage byte-for-byte', async () => {
     const r = await service.proposeChange(gagan, spaceId, {
-      assetPath: 'log.md',
-      baseVersion: (await service.readAsset(gagan, spaceId, 'log.md')).version,
+      assetId: logId,
+      baseVersion: (await service.readAsset(gagan, spaceId, logId)).version,
       newContent: 'rewritten\n',
       reason: 'agent push',
       actingMode: 'agent',

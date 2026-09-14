@@ -225,6 +225,12 @@ export function buildHttpApp(deps: {
     return reply(c, routes.listAssets.response, { entries });
   });
 
+  app.post('/v1/spaces/:spaceId/assets', async (c) => {
+    const { spaceId } = parseWith(routes.createAsset.params, c.req.param());
+    const input = await body(c, routes.createAsset.request);
+    return reply(c, routes.createAsset.response, await service.createAsset(actor(c), spaceId, input));
+  });
+
   app.post('/v1/spaces/:spaceId/assets/move', async (c) => {
     const { spaceId } = parseWith(routes.moveAsset.params, c.req.param());
     const input = await body(c, routes.moveAsset.request);
@@ -244,13 +250,12 @@ export function buildHttpApp(deps: {
     return reply(c, routes.restoreAsset.response, await service.restoreAsset(actor(c), spaceId, input));
   });
 
-  app.get('/v1/spaces/:spaceId/asset', async (c) => {
-    const { spaceId } = parseWith(routes.readAsset.params, c.req.param());
+  app.get('/v1/spaces/:spaceId/assets/:assetId', async (c) => {
+    const { spaceId, assetId } = parseWith(routes.readAsset.params, c.req.param());
     const q = parseWith(routes.readAsset.query, {
-      path: c.req.query('path'),
       ...(c.req.query('version') !== undefined ? { version: c.req.query('version') } : {}),
     });
-    return reply(c, routes.readAsset.response, await service.readAsset(actor(c), spaceId, q.path, q.version));
+    return reply(c, routes.readAsset.response, await service.readAsset(actor(c), spaceId, assetId, q.version));
   });
 
   app.post('/v1/spaces/:spaceId/changes', async (c) => {
@@ -263,7 +268,7 @@ export function buildHttpApp(deps: {
   app.get('/v1/spaces/:spaceId/history', async (c) => {
     const { spaceId } = parseWith(routes.assetHistory.params, c.req.param());
     const q = parseWith(routes.assetHistory.query, {
-      ...(c.req.query('path') !== undefined ? { path: c.req.query('path') } : {}),
+      ...(c.req.query('assetId') !== undefined ? { assetId: c.req.query('assetId') } : {}),
       ...(c.req.query('beforeOffset') !== undefined ? { beforeOffset: c.req.query('beforeOffset') } : {}),
       ...(c.req.query('limit') !== undefined ? { limit: c.req.query('limit') } : {}),
     });
@@ -274,11 +279,11 @@ export function buildHttpApp(deps: {
   app.get('/v1/spaces/:spaceId/diff', async (c) => {
     const { spaceId } = parseWith(routes.diff.params, c.req.param());
     const q = parseWith(routes.diff.query, {
-      path: c.req.query('path'),
+      assetId: c.req.query('assetId'),
       from: c.req.query('from'),
       to: c.req.query('to'),
     });
-    const unified = await service.diff(actor(c), spaceId, q.path, q.from, q.to);
+    const unified = await service.diff(actor(c), spaceId, q.assetId, q.from, q.to);
     return reply(c, routes.diff.response, { unified });
   });
 

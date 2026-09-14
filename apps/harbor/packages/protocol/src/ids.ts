@@ -26,6 +26,17 @@ export type MemberId = z.infer<typeof MemberId>;
  * Asset path: relative, forward slashes, no empty/`.`/`..` segments.
  * V1 assets are text files; the org rejects paths outside its policy.
  */
+/**
+ * The asset's identity (2026-09-14): what every file operation addresses —
+ * read, propose, move, delete, restore, history, diff, links, topic document
+ * links, whiteboard frames. Opaque like MemberId: ULIDs for files born after
+ * migration 007, UUIDs for the ones that predate it. The path is a display
+ * property of the record (the file tree's label, the name a rename changes),
+ * fetched by id, never an address.
+ */
+export const AssetId = z.string().min(1).max(64);
+export type AssetId = z.infer<typeof AssetId>;
+
 export const AssetPath = z
   .string()
   .min(1)
@@ -53,7 +64,7 @@ export type StreamOffset = z.infer<typeof StreamOffset>;
  * Anything a member can see has a link; one grammar everywhere (spec §5 Addressability).
  *
  *   space       https://<org>/s/<spaceId>
- *   asset       https://<org>/s/<spaceId>/f/<assetPath>
+ *   asset       https://<org>/s/<spaceId>/a/<assetId>
  *   message     https://<org>/s/<spaceId>/m/<messageId>   (a thread's link is its root message's)
  *   change-set  https://<org>/s/<spaceId>/c/<changeSetId>
  *   blob        https://<org>/s/<spaceId>/b/<blobHash>[?name=<filename>]
@@ -66,8 +77,8 @@ export type StreamOffset = z.infer<typeof StreamOffset>;
 export function spaceUrl(orgAddress: string, spaceId: SpaceId): string {
   return `https://${orgAddress}/s/${spaceId}`;
 }
-export function assetUrl(orgAddress: string, spaceId: SpaceId, path: AssetPath): string {
-  return `${spaceUrl(orgAddress, spaceId)}/f/${path.split('/').map(encodeURIComponent).join('/')}`;
+export function assetUrl(orgAddress: string, spaceId: SpaceId, assetId: AssetId): string {
+  return `${spaceUrl(orgAddress, spaceId)}/a/${encodeURIComponent(assetId)}`;
 }
 export function messageUrl(orgAddress: string, spaceId: SpaceId, messageId: MessageId): string {
   return `${spaceUrl(orgAddress, spaceId)}/m/${messageId}`;

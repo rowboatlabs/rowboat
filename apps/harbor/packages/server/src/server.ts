@@ -108,9 +108,8 @@ export async function startHarbor(options: HarborOptions = {}): Promise<RunningH
       await service.acceptInvite({ memberId: m.id }, invite.token);
     }
     for (const asset of seed.assets ?? []) {
-      await service.proposeChange({ memberId: seed.creator }, space.id, {
-        assetPath: asset.path,
-        baseVersion: 0,
+      await service.createAsset({ memberId: seed.creator }, space.id, {
+        path: asset.path,
         newContent: asset.content,
         ...(asset.reason ? { reason: asset.reason } : {}),
         actingMode: 'direct',

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { ChangeSet } from './changeset.js';
 import { Attribution, Membership, Message, MessageDeletion, MessageEdit, PollEnd, PollVote, Reaction, Space, SpaceKind, Topic, TopicRemoval } from './core.js';
-import { AssetPath, MemberId, MessageId, SpaceId, StreamOffset } from './ids.js';
+import { AssetId, MemberId, MessageId, SpaceId, StreamOffset } from './ids.js';
 
 // Decision 2 (CONTRACT.md): one WebSocket per org, per-space subscriptions,
 // offset-based catch-up. Subscribing with `afterOffset` replays durable events
@@ -225,8 +225,8 @@ export const ServerFrame = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('whiteboard'),
     spaceId: SpaceId,
-    /** The board's asset path (its identity — a board IS an asset). */
-    boardId: AssetPath,
+    /** The board's asset id (a board IS an asset; a rename never splits a session). */
+    boardId: AssetId,
     memberId: MemberId,
     at: z.iso.datetime(),
     payload: z.unknown(),
@@ -253,7 +253,7 @@ export const ClientFrame = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('whiteboard'),
     spaceId: SpaceId,
-    boardId: AssetPath,
+    boardId: AssetId,
     payload: z.unknown(),
   }),
 ]);
