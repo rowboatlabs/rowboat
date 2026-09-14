@@ -1,4 +1,4 @@
-import { useRef, useState, type PointerEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react'
 import { GripHorizontal, Minus, X } from 'lucide-react'
 import { fitWindow, type FloatingChat, type WindowSize } from '@/lib/assistant-layout'
 
@@ -17,13 +17,15 @@ export function RowGrip({ className, ...handlers }: { className?: string } & Pic
     {...handlers}><GripHorizontal className="size-4" /></div>
 }
 
-export function FloatingChatWindow({ entry, viewport, grip, children, onFocus, onSize, onMinimize, onClose }: {
+export function FloatingChatWindow({ entry, viewport, grip, children, onFocus, onSize, onResizePreview, onMinimize, onClose }: {
   entry: FloatingChat; viewport: WindowSize; grip: ReactNode; children: ReactNode
   onFocus: () => void; onSize: (size: WindowSize) => void; onMinimize: () => void; onClose: () => void
+  onResizePreview: (id: string, size: WindowSize | null) => void
 }) {
   const [dragSize, setDragSize] = useState<WindowSize | null>(null)
   const gesture = useRef<{ x: number; y: number; size: WindowSize; direction: string } | null>(null)
   const size = fitWindow(dragSize ?? entry, viewport.width, viewport.height)
+  useEffect(() => () => onResizePreview(entry.id, null), [entry.id, onResizePreview])
   function start(event: PointerEvent<HTMLDivElement>, direction: string) {
     if (event.button !== 0) return
     event.preventDefault()
@@ -38,13 +40,16 @@ export function FloatingChatWindow({ entry, viewport, grip, children, onFocus, o
     const next = { ...from.size }
     if (from.direction.includes('w')) next.width += from.x - event.clientX
     if (from.direction.includes('n')) next.height += from.y - event.clientY
-    setDragSize(fitWindow(next, viewport.width, viewport.height))
+    const preview = fitWindow(next, viewport.width, viewport.height)
+    setDragSize(preview)
+    onResizePreview(entry.id, preview)
   }
   function finish() {
     if (!gesture.current) return
     onSize(size)
     gesture.current = null
     setDragSize(null)
+    onResizePreview(entry.id, null)
   }
   return <div
     role="region" aria-label="Floating chat" hidden={entry.minimized} data-floating-chat={entry.id} data-row-item={entry.id}

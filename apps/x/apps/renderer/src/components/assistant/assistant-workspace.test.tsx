@@ -3,9 +3,10 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AssistantWorkspace } from './assistant-workspace'
 import type { ChatServices } from './chat'
-import { assistantLayoutReducer, fitWindow, initialAssistantLayout, type ChatLocation } from '@/lib/assistant-layout'
+import { assistantLayoutReducer, fitWindow, initialAssistantLayout, type ChatLocation, type WindowSize } from '@/lib/assistant-layout'
 
 vi.mock('@/components/chat-sidebar', () => ({ ChatSidebar: () => null }))
+vi.mock('./workspace-chat-adapter', () => ({ WorkspaceChatAdapter: () => null }))
 vi.mock('@/hooks/useSessionChat', () => ({ useSessionChat: () => ({ chatState: null }) }))
 vi.mock('@/lib/session-title', () => ({ useSessionTitle: () => undefined }))
 vi.mock('./chat', () => ({ Chat: ({ tab, location, onMove, controls }: { tab: { id: string }; location: ChatLocation; onMove: (location: ChatLocation) => void; controls?: React.ReactNode }) => {
@@ -25,13 +26,16 @@ const services: ChatServices = {
   onSubmitForTab: vi.fn(), voiceOwner: null, callChatId: null, onStartRecordingForTab: vi.fn(), onStartCallForTab: vi.fn(),
 }
 const size = { width: 460, height: 500 }
-function Harness() {
+function Harness({ onResize }: { onResize?: (size: WindowSize) => void } = {}) {
   const [layout, dispatch] = useReducer(assistantLayoutReducer, 'a', initialAssistantLayout)
   const [host, setHost] = useState<HTMLDivElement | null>(null)
   return <>
     <div ref={setHost} aria-label="Assistant page" />
     {['b', 'c'].map((id) => <button key={id} onClick={() => dispatch({ type: 'place', id, location: 'floating', size })}>Float {id}</button>)}
-    <AssistantWorkspace {...services} layout={layout} dispatch={dispatch} pageHost={host} pageVisible legacyPane={false}
+    <AssistantWorkspace {...services} layout={layout} dispatch={(action) => {
+      if (action.type === 'resize') onResize?.(action.size)
+      dispatch(action)
+    }} pageHost={host} pageVisible legacyPane={false}
       onMoveChat={(id, location) => dispatch({ type: 'place', id, location, size })} onCloseChat={(id) => dispatch({ type: 'close', id })}
       onNewChatAt={vi.fn()} onSelectChatAt={vi.fn()} onFocusChat={vi.fn()} />
   </>
@@ -133,5 +137,59 @@ describe('assistant workspace containers', () => {
 
   it('keeps windows reachable after the viewport shrinks', () => {
     expect(fitWindow({ width: 1000, height: 800 }, 800, 600)).toEqual({ width: 776, height: 500 })
+  })
+
+  it.each(['pointerup', 'pointercancel'])('grows the overflowing row during resize before committing on %s', (finishEvent) => {
+    const onResize = vi.fn()
+    render(<Harness onResize={onResize} />)
+    fireEvent.click(screen.getByText('Move to floating'))
+    fireEvent.click(screen.getByText('Float b'))
+    fireEvent.click(screen.getByText('Float c'))
+    const row = screen.getByLabelText('Floating chats')
+    const windows = screen.getAllByRole('region', { name: /^Floating chat$/ })
+    const handle = within(windows[0]).getByLabelText('Resize chat nw')
+    handle.setPointerCapture = vi.fn()
+    const pointer = (type: string, x: number, y: number) => fireEvent(handle, new MouseEvent(type, { bubbles: true, button: 0, clientX: x, clientY: y }))
+
+    expect(row).toHaveClass('overflow-y-hidden')
+    expect(row.style.height).toBe('524px')
+    pointer('pointerdown', 500, 300)
+    pointer('pointermove', 460, 180)
+    expect(windows[0].style.height).toBe('620px')
+    expect(windows[0].style.width).toBe('500px')
+    expect(windows[1].style.height).toBe('500px')
+    expect(row.style.height).toBe('644px')
+    expect(onResize).not.toHaveBeenCalled()
+
+    pointer(finishEvent, 460, 180)
+    expect(onResize).toHaveBeenCalledExactlyOnceWith({ width: 500, height: 620 })
+    expect(row.style.height).toBe('644px')
+    minimize('a')
+    expect(row.style.height).toBe('524px')
+    fireEvent.click(within(row).getByRole('button', { name: /^a$/ }))
+    expect(row.style.height).toBe('644px')
+
+    // A subsequent committed resize must not retain the old drag preview.
+    fireEvent.keyDown(handle, { key: 'ArrowDown' })
+    expect(row.style.height).toBe('624px')
+  })
+
+  it('updates horizontal overflow as a drag crosses the viewport width', () => {
+    render(<Harness />)
+    fireEvent.click(screen.getByText('Move to floating'))
+    fireEvent.click(screen.getByText('Float b'))
+    const row = screen.getByLabelText('Floating chats')
+    const handle = within(screen.getAllByRole('region', { name: /^Floating chat$/ })[0]).getByLabelText('Resize chat w')
+    handle.setPointerCapture = vi.fn()
+    const pointer = (type: string, x: number) => fireEvent(handle, new MouseEvent(type, { bubbles: true, button: 0, clientX: x }))
+
+    expect(row).toHaveClass('overflow-visible')
+    pointer('pointerdown', 500)
+    pointer('pointermove', 300)
+    expect(row).toHaveClass('overflow-x-auto')
+    pointer('pointermove', 500)
+    expect(row).toHaveClass('overflow-visible')
+    pointer('pointerup', 500)
+    expect(row).toHaveClass('overflow-visible')
   })
 })

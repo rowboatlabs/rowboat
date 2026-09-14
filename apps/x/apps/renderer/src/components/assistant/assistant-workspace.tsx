@@ -5,7 +5,7 @@ import { WorkspaceChatAdapter } from './workspace-chat-adapter'
 import type { ChatTab } from '@/components/tab-bar'
 import { Chat, type ChatServices } from './chat'
 import { FloatingChatWindow, RowGrip } from './floating-chat-window'
-import { chatLocation, fitWindow, type AssistantLayout, type ChatLocation, type LayoutAction } from '@/lib/assistant-layout'
+import { chatLocation, fitWindow, type AssistantLayout, type ChatLocation, type LayoutAction, type WindowSize } from '@/lib/assistant-layout'
 import { useSessionChat } from '@/hooks/useSessionChat'
 import { useSessionTitle } from '@/lib/session-title'
 import { cn } from '@/lib/utils'
@@ -71,6 +71,16 @@ export function AssistantWorkspace(p: AssistantWorkspaceProps) {
   const { layout, dispatch } = p
   const [hosts, setHosts] = useState<Record<string, HTMLElement | null>>({})
   const [sidebarWidth, setSidebarWidth] = useState(460)
+  const [resizePreviews, setResizePreviews] = useState<Record<string, WindowSize>>({})
+  const previewResize = useCallback((id: string, size: WindowSize | null) => {
+    setResizePreviews((previous) => {
+      if (size) return { ...previous, [id]: size }
+      if (!(id in previous)) return previous
+      const next = { ...previous }
+      delete next[id]
+      return next
+    })
+  }, [])
   const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }))
   useEffect(() => {
     const resize = () => setViewport({ width: window.innerWidth, height: window.innerHeight })
@@ -81,7 +91,9 @@ export function AssistantWorkspace(p: AssistantWorkspaceProps) {
   // floating chat is either an open window pegged to the bottom edge or a
   // minimized tab in the same row. The row hugs the right edge while it fits
   // and scrolls sideways once it doesn't.
-  const fitted = layout.floating.map((entry) => entry.minimized ? { width: TAB_WIDTH, height: TAB_HEIGHT } : fitWindow(entry, viewport.width, viewport.height))
+  // Include live sizes so the scroll row never clips a growing window while
+  // its persisted layout size is still waiting for pointer release.
+  const fitted = layout.floating.map((entry) => entry.minimized ? { width: TAB_WIDTH, height: TAB_HEIGHT } : fitWindow(resizePreviews[entry.id] ?? entry, viewport.width, viewport.height))
   const rowWidth = fitted.reduce((total, size) => total + size.width + WINDOW_GAP, WINDOW_GAP)
   const rowHeight = Math.max(TAB_HEIGHT, ...fitted.map((size) => size.height)) + ROW_HEADROOM
   const overflowing = rowWidth > viewport.width
@@ -156,6 +168,7 @@ export function AssistantWorkspace(p: AssistantWorkspaceProps) {
           return <Fragment key={entry.id}>
             <FloatingChatWindow entry={entry} viewport={viewport} grip={<RowGrip {...gripFor(entry.id)} />}
               onFocus={() => focus(entry.id)} onSize={(size) => dispatch({ type: 'resize', id: entry.id, size })}
+              onResizePreview={previewResize}
               onMinimize={() => dispatch({ type: 'minimize', id: entry.id })} onClose={() => close(entry.id)}>
               <div className="flex h-full min-h-0 flex-col rounded-[inherit]" onFocusCapture={() => focus(entry.id)}>
                 <ChatHost id={entry.id} register={register} />
