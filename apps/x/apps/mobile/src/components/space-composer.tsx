@@ -156,30 +156,51 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
           ))}
         </ScrollView>
       ) : null}
-      <View style={{ paddingHorizontal: 12 }}>
-        <View
-          style={{
-            flexDirection: 'row', alignItems: 'flex-end',
-            backgroundColor: colors.secondaryBackground, borderRadius: 24, borderCurve: 'continuous',
-            paddingLeft: 16, paddingRight: 6, minHeight: 46,
-          }}
+      {/* Slack's composer card: field on top, toolbar below (@ · send). */}
+      <View
+        style={{
+          marginHorizontal: 12,
+          borderRadius: 18, borderCurve: 'continuous',
+          borderWidth: 0.5, borderColor: colors.separator,
+          backgroundColor: colors.secondaryBackground,
+          paddingHorizontal: 14, paddingTop: 4, paddingBottom: 6,
+        }}
+      >
+        <TextInput
+          ref={inputRef}
+          style={{ minHeight: 40, maxHeight: 140, fontSize: 16, lineHeight: 22, color: colors.label, paddingVertical: 8 }}
+          placeholder={placeholder}
+          placeholderTextColor={colors.tertiaryLabel}
+          onChangeText={setText}
+          onSelectionChange={(e) => setCursor(e.nativeEvent.selection.end)}
+          multiline
         >
-          <TextInput
-            ref={inputRef}
-            style={{ flex: 1, maxHeight: 120, fontSize: 16, color: colors.label, paddingVertical: 12 }}
-            placeholder={placeholder}
-            placeholderTextColor={colors.tertiaryLabel}
-            onChangeText={setText}
-            onSelectionChange={(e) => setCursor(e.nativeEvent.selection.end)}
-            multiline
+          {styled}
+        </TextInput>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 18, paddingTop: 2 }}>
+          <Pressable
+            hitSlop={8}
+            onPress={() => {
+              // Insert "@" at the cursor and open the picker.
+              const at = cursor;
+              const needsSpace = at > 0 && !/[\s([{]/.test(text[at - 1] ?? '');
+              const insert = `${needsSpace ? ' ' : ''}@`;
+              setText(text.slice(0, at) + insert + text.slice(at));
+              setCursor(at + insert.length);
+              inputRef.current?.focus();
+            }}
           >
-            {styled}
-          </TextInput>
-          {text.trim() ? (
-            <Pressable onPress={send} disabled={sending} style={{ padding: 6, opacity: sending ? 0.4 : 1 }}>
-              <Image source="sf:arrow.up.circle.fill" style={{ width: 30, height: 30 }} tintColor={colors.label} />
-            </Pressable>
-          ) : null}
+            <Image source="sf:at" style={{ width: 22, height: 22 }} tintColor={colors.secondaryLabel} />
+          </Pressable>
+          <View style={{ flex: 1 }} />
+          <Pressable
+            hitSlop={8}
+            onPress={send}
+            disabled={!text.trim() || sending}
+            style={{ opacity: text.trim() && !sending ? 1 : 0.3 }}
+          >
+            <Image source="sf:paperplane.fill" style={{ width: 22, height: 22 }} tintColor={colors.label} />
+          </Pressable>
         </View>
       </View>
     </View>
