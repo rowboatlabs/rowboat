@@ -28,6 +28,14 @@ describe('previewUrls', () => {
         expect(previewUrls(body)).toEqual(['https://a.com', 'https://b.com', 'https://c.com'])
     })
 
+    it('previews ordinary homepages while skipping known org roots', () => {
+        const body = 'https://example.com/ https://acme.rowboat.space https://custom.example:8443/?from=chat#top https://acme.rowboat.space.example/'
+        expect(previewUrls(body, ['acme.rowboat.space', 'custom.example:8443'])).toEqual([
+            'https://example.com/',
+            'https://acme.rowboat.space.example/',
+        ])
+    })
+
     it('ignores plain-http and non-links', () => {
         expect(previewUrls('http://insecure.example.com and nothing else')).toEqual([])
     })

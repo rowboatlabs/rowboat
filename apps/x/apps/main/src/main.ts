@@ -511,7 +511,7 @@ function createWindow(options: { startHidden?: boolean } = {}) {
     const link = parseOrgUrl(url);
     if (!link || !listSpaceOrgs().some((o) => o.address === link.orgAddress)) return false;
     const target = new URLSearchParams({ type: "spaces", org: link.orgAddress });
-    if (link.kind !== "member") target.set("spaceId", link.spaceId);
+    if ('spaceId' in link) target.set("spaceId", link.spaceId);
     if (link.kind === "asset") target.set("assetId", link.assetId);
     if (link.kind === "message") target.set("messageId", link.messageId);
     if (link.kind === "member") target.set("memberId", link.memberId);

@@ -23,7 +23,7 @@ const entries: spaces.SpacesAssetEntry[] = [
 ]
 function mount(direct = false, spaceId = 'space') {
     const onSelect = vi.fn()
-    render(<SpaceContentTabs orgId="org" spaceId={spaceId} direct={direct} topics={topics} entries={entries}
+    render(<SpaceContentTabs orgId="org" orgAddress="spaces.example.com" spaceId={spaceId} direct={direct} topics={topics} entries={entries}
         unreadAssetIds={new Set(['new', 'deleted'])} selection={{ kind: 'general' }} memberNames={new Map()} spaceNames={new Map()}
         onSelect={onSelect} topicsLoaded filesLoaded filesError={null} />)
     return onSelect
@@ -72,7 +72,7 @@ describe('space content menus', () => {
         const menu = screen.getByRole('dialog')
         fireEvent.pointerEnter(menu, { pointerType: 'mouse' })
         act(() => { vi.advanceTimersByTime(300) })
-        fireEvent.click(within(menu).getByRole('button', { name: /Recent discussion/ }))
+        fireEvent.click(within(menu).getByRole('button', { name: /^Recent discussion/ }))
         expect(onSelect).toHaveBeenCalledExactlyOnceWith({ kind: 'thread', rootMessageId: 'root-new' })
     })
 

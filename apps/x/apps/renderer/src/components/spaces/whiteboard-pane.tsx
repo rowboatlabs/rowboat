@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, ChevronDown, Loader2, PenTool, X } from 'lucide-react'
+import { Check, ChevronDown, Link as LinkIcon, Loader2, PenTool, X } from 'lucide-react'
 import {
     CaptureUpdateAction,
     Excalidraw,
@@ -21,6 +21,7 @@ import type { OrderedExcalidrawElement } from '@excalidraw/excalidraw/element/ty
 import type { RemoteExcalidrawElement } from '@excalidraw/excalidraw/data/reconcile'
 import { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
+import { copySpacesLink } from '@/lib/spaces-copy-link'
 import { createBoardSaver, type BoardSaver } from '@/lib/whiteboard-saver'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useTheme } from '@/contexts/theme-context'
@@ -559,6 +560,15 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
                 // person's cursor.
                 renderTopRightUI={() => (
                     <div className="flex items-center gap-2">
+                        <button
+                            type="button"
+                            title="Copy board link"
+                            aria-label="Copy board link"
+                            onClick={() => void copySpacesLink(spaces.assetUrl(org.address, space.id, boardId))}
+                            className="flex size-9 items-center justify-center rounded-lg border border-border bg-popover text-muted-foreground shadow-sm hover:bg-accent/50 hover:text-foreground"
+                        >
+                            <LinkIcon className="size-4" />
+                        </button>
                         <button
                             type="button"
                             title="Close the board"

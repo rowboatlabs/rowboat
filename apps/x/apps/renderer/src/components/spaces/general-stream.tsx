@@ -1,6 +1,8 @@
 import { startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowDown, ArrowUp, Loader2, X } from 'lucide-react'
 import type { spaces } from '@x/shared'
+import { messageUrl } from '@x/shared/dist/spaces.js'
+import { copySpacesLink } from '@/lib/spaces-copy-link'
 import { Composer, type AgentOptions } from '@/components/spaces/composer'
 import { ForwardDialog } from '@/components/spaces/forward-dialog'
 import { DayDivider, MessageRow, NewDivider, TypingIndicator, type ThreadRowData } from '@/components/spaces/message-row'
@@ -419,15 +421,6 @@ export function GeneralStream({
         }
     }
 
-    const copyLink = async (message: spaces.Message) => {
-        try {
-            await navigator.clipboard.writeText(`https://${org.address}/s/${space.id}/m/${message.id}`)
-            toast('Link copied', 'success')
-        } catch {
-            toast('Could not copy the link', 'error')
-        }
-    }
-
     // Optimistic rewrite, same shape as reactions: the new body renders on
     // save; the org's answer (or a failure revert) reconciles right behind.
     const editMessage = async (message: spaces.Message, body: string) => {
@@ -695,7 +688,7 @@ export function GeneralStream({
                 onStopAgent={(id) => void stopAgent(id)}
                 onReplyInThread={replyInThread}
                 onAskRowboat={askRowboat}
-                onCopyLink={(m) => void copyLink(m)}
+                onCopyLink={(m) => void copySpacesLink(messageUrl(org.address, space.id, m.id))}
                 onReact={(m, emoji) => void toggleReaction(m, emoji)}
                 onDelete={(m) => void deleteMessage(m)}
                 onEdit={(m, body) => void editMessage(m, body)}

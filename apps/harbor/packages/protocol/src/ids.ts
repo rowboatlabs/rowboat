@@ -63,6 +63,7 @@ export type StreamOffset = z.infer<typeof StreamOffset>;
  * Link grammar (v0). Plain https URLs on the org address; the app intercepts them.
  * Anything a member can see has a link; one grammar everywhere (spec §5 Addressability).
  *
+ *   org         https://<org>/
  *   space       https://<org>/s/<spaceId>
  *   asset       https://<org>/s/<spaceId>/a/<assetId>
  *   message     https://<org>/s/<spaceId>/m/<messageId>   (a reply's link lands in its thread)
@@ -79,6 +80,9 @@ export type StreamOffset = z.infer<typeof StreamOffset>;
  * never learns filenames. Every link opened in a browser lands on the org's
  * hand-off page, which sends it into the app (http.ts, the landings).
  */
+export function orgUrl(orgAddress: string): string {
+  return `https://${orgAddress}/`;
+}
 export function spaceUrl(orgAddress: string, spaceId: SpaceId): string {
   return `https://${orgAddress}/s/${spaceId}`;
 }
@@ -104,6 +108,7 @@ export function inviteUrl(orgAddress: string, token: string): string {
 
 /** What an org link points at — the grammar above, read back. */
 export type OrgLink =
+  | { kind: 'org'; orgAddress: string }
   | { kind: 'space'; orgAddress: string; spaceId: string }
   | { kind: 'asset'; orgAddress: string; spaceId: string; assetId: string }
   | { kind: 'message'; orgAddress: string; spaceId: string; messageId: string }
@@ -113,7 +118,7 @@ const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 
 /**
  * The one parser for org links (every client, and the org's own landings).
- * Returns null for anything that is not one of the four kinds above — blob
+ * Returns null for anything that is not one of the kinds above — blob
  * and change-set links, invites, other hosts, or a trailing path. Query and
  * fragment are ignored.
  */
@@ -127,6 +132,7 @@ export function parseOrgUrl(url: string): OrgLink | null {
   if (u.protocol !== 'https:') return null;
   const orgAddress = u.host;
   const parts = u.pathname.split('/').filter(Boolean);
+  if (u.pathname === '/') return { kind: 'org', orgAddress };
   const dec = (s: string): string | null => {
     try {
       return decodeURIComponent(s);

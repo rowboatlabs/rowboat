@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ChevronDown, FileText, FolderOpen, MessageSquare, MessagesSquare } from 'lucide-react'
+import { ChevronDown, FileText, FolderOpen, Link as LinkIcon, MessageSquare, MessagesSquare } from 'lucide-react'
 import { spaces } from '@x/shared'
+import { copySpacesLink } from '@/lib/spaces-copy-link'
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import { UnreadBadge } from '@/components/spaces/unread-badge'
 import { prefetchThread } from '@/hooks/use-space-chat'
@@ -83,10 +84,11 @@ function ContentMenu({ label, icon, selected, badge, direct = false, onNavigate,
     </Popover>
 }
 
-export function SpaceContentTabs({ orgId, spaceId, direct, topics, entries, unreadAssetIds, selection,
+export function SpaceContentTabs({ orgId, orgAddress, spaceId, direct, topics, entries, unreadAssetIds, selection,
     memberNames, spaceNames, onSelect, topicsLoaded, filesLoaded, filesError,
 }: {
     orgId: string
+    orgAddress: string
     spaceId: string
     direct: boolean
     topics: spaces.TopicListing[]
@@ -121,7 +123,8 @@ export function SpaceContentTabs({ orgId, spaceId, direct, topics, entries, unre
             badge={discussionBadge} direct={direct} onNavigate={() => onSelect({ kind: 'discussions' })}>
             {(close) => <>
                 <div className="px-2 py-1.5 text-xs text-muted-foreground">Recently active</div>
-                {recentTopics.slice(0, RECENT_LIMIT).map((topic) => <button key={topic.id} type="button" className="spaces-content-menu-row"
+                {recentTopics.slice(0, RECENT_LIMIT).map((topic) => <div key={topic.id} className="flex items-center gap-1">
+                    <button type="button" className="spaces-content-menu-row min-w-0 flex-1"
                     title={resolveMentions(topic.title, memberNames, spaceNames)}
                     onMouseEnter={() => prefetchThread(orgId, spaceId, topic.rootMessageId)}
                     onClick={() => { close(); onSelect({ kind: 'thread', rootMessageId: topic.rootMessageId }) }}>
@@ -129,7 +132,13 @@ export function SpaceContentTabs({ orgId, spaceId, direct, topics, entries, unre
                     <span className="min-w-0 flex-1"><span className="block truncate">{resolveMentions(topic.title, memberNames, spaceNames)}</span>
                         <span className="mt-0.5 block text-[11px] text-muted-foreground">{topic.rootMessage?.replyCount ?? 0} replies · {formatFeedTime(topic.lastActivityAt)}</span></span>
                     <UnreadBadge badge={threadBadge(orgId, spaceId, topic.rootMessageId, direct)} direct={direct} />
-                </button>)}
+                    </button>
+                    <button type="button" title="Copy discussion link" aria-label={`Copy link to ${resolveMentions(topic.title, memberNames, spaceNames)}`}
+                        className="shrink-0 rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                        onClick={() => void copySpacesLink(spaces.messageUrl(orgAddress, spaceId, topic.rootMessageId))}>
+                        <LinkIcon className="size-3.5" />
+                    </button>
+                </div>)}
                 {recentTopics.length === 0 && <p className="px-2 py-3 text-xs text-muted-foreground">{topicsLoaded ? 'No active discussions yet.' : 'Loading discussions…'}</p>}
                 <button type="button" className="spaces-content-menu-all" onClick={() => { close(); onSelect({ kind: 'discussions' }) }}>All discussions</button>
             </>}

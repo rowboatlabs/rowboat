@@ -18,7 +18,7 @@ const topics = [
 ] as spaces.TopicListing[]
 function mount() {
     const onOpen = vi.fn()
-    render(<SpaceDiscussionsView orgId="org" spaceId="dm" direct topics={topics} loaded memberNames={new Map()} spaceNames={new Map()}
+    render(<SpaceDiscussionsView orgId="org" orgAddress="spaces.example.com" spaceId="dm" direct topics={topics} loaded memberNames={new Map()} spaceNames={new Map()}
         presence={{ working: new Map(), typing: new Map(), here: [] }} onOpen={onOpen} />)
     return onOpen
 }
