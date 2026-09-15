@@ -1,6 +1,7 @@
 import * as React from "react"
 import * as PopoverPrimitive from "@radix-ui/react-popover"
 
+import { useSectionVisible } from "@/lib/section-visibility"
 import { cn } from "@/lib/utils"
 
 function Popover({
@@ -21,6 +22,9 @@ function PopoverContent({
   sideOffset = 8,
   ...props
 }: React.ComponentProps<typeof PopoverPrimitive.Content>) {
+  // Nothing portalled while the section is off-screen — see lib/section-visibility.
+  const sectionVisible = useSectionVisible()
+  if (!sectionVisible) return null
   return (
     <PopoverPrimitive.Portal>
       <PopoverPrimitive.Content

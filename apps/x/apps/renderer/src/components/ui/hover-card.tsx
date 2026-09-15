@@ -1,6 +1,7 @@
 import * as React from "react"
 import * as HoverCardPrimitive from "@radix-ui/react-hover-card"
 
+import { useSectionVisible } from "@/lib/section-visibility"
 import { cn } from "@/lib/utils"
 
 function HoverCard({
@@ -23,6 +24,9 @@ function HoverCardContent({
   sideOffset = 8,
   ...props
 }: React.ComponentProps<typeof HoverCardPrimitive.Content>) {
+  // Nothing portalled while the section is off-screen — see lib/section-visibility.
+  const sectionVisible = useSectionVisible()
+  if (!sectionVisible) return null
   return (
     <HoverCardPrimitive.Portal data-slot="hover-card-portal">
       <HoverCardPrimitive.Content

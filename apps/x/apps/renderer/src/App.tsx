@@ -3,7 +3,7 @@ import { DocumentFileViewer } from '@/components/document-file-viewer'
 import { readLastSpace, resolveSpacesLocation } from '@/lib/spaces-navigation'
 import { noteSpaceVisit } from '@/lib/spaces-visits'
 import * as React from 'react'
-import { Activity, useCallback, useEffect, useLayoutEffect, useMemo, useState, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useRef } from 'react'
 import { workspace, quickAskShortcut, pttKey, type ipc } from '@x/shared';
 import { RunEvent } from '@x/shared/src/runs.js';
 import type { ToolUIPart } from 'ai';
@@ -38,6 +38,7 @@ import { LiveNotesView } from '@/components/live-notes-view';
 import { BgTasksView } from '@/components/bg-tasks-view';
 import { AppsView } from '@/components/apps/apps-view';
 import { SpacesView, type SpaceSelection } from '@/components/spaces-view';
+import { KeepAliveSection } from '@/components/keep-alive-section';
 import { railKey, readRailSelection, type RailSelection } from '@/lib/spaces-selection';
 import { boardPathById } from '@/hooks/use-space-boards';
 import { STREAM_READ_KEY } from '@/hooks/use-space-chat';
@@ -195,10 +196,10 @@ function toSpeakableText(markdown: string): string {
 }
 
 // Everything the middle pane can show, in the precedence order of the old
-// view ternary. Section views in KEEP_ALIVE_SECTIONS stay mounted inside an
-// <Activity> once visited — hidden ones keep state and DOM (instant switches,
-// scroll preserved) while React pauses their effects. The rest (overlays,
-// file editors, the full-screen chat) mount and unmount as before.
+// view ternary. Section views in KEEP_ALIVE_SECTIONS stay mounted inside a
+// <KeepAliveSection> once visited — hidden ones keep state and DOM (instant
+// switches, scroll preserved) while React pauses their effects. The rest
+// (overlays, file editors, the full-screen chat) mount and unmount as before.
 type MiddleView =
   | 'browser' | 'home' | 'suggested-topics' | 'meetings' | 'code' | 'live-notes'
   | 'bg-tasks' | 'apps' | 'spaces' | 'email' | 'workspace' | 'knowledge'
@@ -7411,7 +7412,7 @@ function App() {
               {/* Secondary rails belong below the titlebar, as in Spaces and Email. */}
               <div className={projectViewActive ? "flex min-h-0 min-w-0 flex-1" : "contents"}>
                 {/* Keep the shared rail mounted across section visits, like the Spaces view. */}
-                {(isWorkspaceOpen || sectionMounted('workspace')) && <Activity mode={projectViewActive ? 'visible' : 'hidden'}><ProjectsRail
+                {(isWorkspaceOpen || sectionMounted('workspace')) && <KeepAliveSection visible={projectViewActive}><ProjectsRail
                   tree={tree}
                   selectedPath={workspaceInitialPath}
                   selectedFile={selectedPath}
@@ -7423,7 +7424,7 @@ function App() {
                   onNewChat={newProjectChat}
                   onOpenFile={navigateToFile}
                   onCreateProject={knowledgeActions.createWorkspace}
-                /></Activity>}
+                /></KeepAliveSection>}
               <div
                 data-project-document-pane
                 className={projectViewActive ? "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" : "contents"}
@@ -7441,7 +7442,7 @@ function App() {
                 />
               )}
               {sectionMounted('home') && (
-                <Activity mode={activeMiddle === 'home' ? 'visible' : 'hidden'}>
+                <KeepAliveSection visible={activeMiddle === 'home'}>
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                     <TodoView
                       composer={
@@ -7550,7 +7551,7 @@ function App() {
                       attendedSessionId={inCall ? hoverRunId : null}
                     />
                 </div>
-                </Activity>
+                </KeepAliveSection>
               )}
               {activeMiddle === 'suggested-topics' && (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
@@ -7563,7 +7564,7 @@ function App() {
                 </div>
               )}
               {sectionMounted('meetings') && (
-                <Activity mode={activeMiddle === 'meetings' ? 'visible' : 'hidden'}>
+                <KeepAliveSection visible={activeMiddle === 'meetings'}>
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <MeetingsView
                     onOpenNote={(path) => navigateToFile(path)}
@@ -7572,10 +7573,10 @@ function App() {
                     meetingSummarizing={meetingSummarizing}
                   />
                 </div>
-                </Activity>
+                </KeepAliveSection>
               )}
               {sectionMounted('code') && (
-                <Activity mode={activeMiddle === 'code' ? 'visible' : 'hidden'}>
+                <KeepAliveSection visible={activeMiddle === 'code'}>
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <CodeView
                     onSessionSelected={handleCodeSessionSelected}
@@ -7584,7 +7585,7 @@ function App() {
                     onRailWidthChange={setCodeRailWidth}
                   />
                 </div>
-                </Activity>
+                </KeepAliveSection>
               )}
               {activeMiddle === 'live-notes' && (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
@@ -7597,7 +7598,7 @@ function App() {
                 </div>
               )}
               {sectionMounted('bg-tasks') && (
-                <Activity mode={activeMiddle === 'bg-tasks' ? 'visible' : 'hidden'}>
+                <KeepAliveSection visible={activeMiddle === 'bg-tasks'}>
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <BgTasksView
                     initialSlug={bgTaskInitialSlug}
@@ -7610,10 +7611,10 @@ function App() {
                     }}
                   />
                 </div>
-                </Activity>
+                </KeepAliveSection>
               )}
               {sectionMounted('apps') && (
-                <Activity mode={activeMiddle === 'apps' ? 'visible' : 'hidden'}>
+                <KeepAliveSection visible={activeMiddle === 'apps'}>
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <AppsView
                     initialAppFolder={appInitialId}
@@ -7621,10 +7622,10 @@ function App() {
                     onNewApp={() => prefillChat('Build me an app that ')}
                   />
                 </div>
-                </Activity>
+                </KeepAliveSection>
               )}
               {sectionMounted('spaces') && (
-                <Activity mode={activeMiddle === 'spaces' ? 'visible' : 'hidden'}>
+                <KeepAliveSection visible={activeMiddle === 'spaces'}>
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <SpacesView
                     active={activeMiddle === 'spaces'}
@@ -7645,17 +7646,17 @@ function App() {
                     onOpenSession={openAssistantRun}
                   />
                 </div>
-                </Activity>
+                </KeepAliveSection>
               )}
               {sectionMounted('email') && (
-                <Activity mode={activeMiddle === 'email' ? 'visible' : 'hidden'}>
+                <KeepAliveSection visible={activeMiddle === 'email'}>
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <EmailView initialThreadId={emailInitialThreadId} threadIdVersion={emailThreadIdVersion} initialSearchQuery={emailInitialSearchQuery} searchQueryVersion={emailSearchQueryVersion} onOpenNote={openNoteFromEmail} />
                 </div>
-                </Activity>
+                </KeepAliveSection>
               )}
               {sectionMounted('workspace') && (
-                <Activity mode={activeMiddle === 'workspace' ? 'visible' : 'hidden'}>
+                <KeepAliveSection visible={activeMiddle === 'workspace'}>
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
                     <FolderOpen className="size-9 text-muted-foreground" />
@@ -7664,10 +7665,10 @@ function App() {
                     {selectedProject && <Button onClick={() => void newProjectChat(selectedProject).catch((e) => toast.error(String(e)))}><Plus className="mr-2 size-4" />New chat</Button>}
                   </div>
                 </div>
-                </Activity>
+                </KeepAliveSection>
               )}
               {sectionMounted('knowledge') && (
-                <Activity mode={activeMiddle === 'knowledge' ? 'visible' : 'hidden'}>
+                <KeepAliveSection visible={activeMiddle === 'knowledge'}>
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <KnowledgeView
                     tree={tree}
@@ -7721,7 +7722,7 @@ function App() {
                     onVoiceNoteCreated={handleVoiceNoteCreated}
                   />
                 </div>
-                </Activity>
+                </KeepAliveSection>
               )}
               {activeMiddle === 'chat-history' && (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">

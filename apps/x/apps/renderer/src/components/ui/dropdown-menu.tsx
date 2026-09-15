@@ -2,6 +2,7 @@ import * as React from "react"
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu"
 import { CheckIcon, ChevronRightIcon, CircleIcon } from "lucide-react"
 
+import { useSectionVisible } from "@/lib/section-visibility"
 import { cn } from "@/lib/utils"
 
 function DropdownMenu({
@@ -34,6 +35,9 @@ function DropdownMenuContent({
   sideOffset = 8,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
+  // Nothing portalled while the section is off-screen — see lib/section-visibility.
+  const sectionVisible = useSectionVisible()
+  if (!sectionVisible) return null
   return (
     <DropdownMenuPrimitive.Portal>
       <DropdownMenuPrimitive.Content
