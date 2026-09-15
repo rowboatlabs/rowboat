@@ -11,7 +11,7 @@ import { RunEvent } from '@x/shared/src/runs.js';
 import type { ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
-import { CheckIcon, LoaderIcon, PanelLeftIcon, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon, SquarePen, FolderOpen, X } from 'lucide-react';
+import { CheckIcon, LoaderIcon, PanelLeftIcon, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon, SquarePen, FolderOpen, MessageSquare, X } from 'lucide-react';
 import { cn, compactPath, parentPath } from '@/lib/utils';
 import { SPACES_ENABLED } from '@/lib/feature-flags';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
@@ -7491,6 +7491,21 @@ function App() {
                   </Tooltip>
                 )}
                 {isWorkspaceOpen && selectedPath && <button aria-label="Close document" title="Close document" className="titlebar-no-drag rounded p-2 hover:bg-accent" onClick={() => { void navigateToView({ type: 'workspace', path: workspaceInitialPath ?? undefined, runId: projectChatId ?? undefined }) }}><X className="size-4" /></button>}
+                {!assistantLayout.sidebar && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={toggleChatSidebar}
+                        className="titlebar-no-drag ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                        aria-label="Open chat sidebar"
+                      >
+                        <MessageSquare className="size-4" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">Open chat sidebar</TooltipContent>
+                  </Tooltip>
+                )}
               </ContentHeader>
 
               {/* Secondary rails belong below the titlebar, as in Spaces and Email. */}

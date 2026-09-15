@@ -56,7 +56,7 @@ export function SpacesSidebarSection({ active, onOpenSpaces, onOpenMessage }: {
                         <ChevronDown className={cn('transition-transform', !expanded && '-rotate-90')} />
                     </SidebarMenuAction>
                     {expanded && <div id={contentId} role="region" aria-label="Activity across organizations" className="mt-1">
-                        <ul className="flex flex-col gap-0.5">
+                        <ul className="flex flex-col gap-1 px-1">
                             {activity.items.map(({ orgId, item, names }) => {
                                 const org = orgById.get(orgId)!
                                 const who = actorLabel(item.actors, names)
@@ -66,17 +66,19 @@ export function SpacesSidebarSection({ active, onOpenSpaces, onOpenMessage }: {
                                 return <li key={`${orgId}/${item.id}`}>
                                     <button type="button" onClick={() => onOpenMessage(targetOf(orgId, item))}
                                         title={`${org.name} · ${who} ${reason}\n${excerpt}\n${new Date(item.at).toLocaleString()}`}
-                                        className={cn('w-full min-w-0 rounded-md px-2 py-1.5 text-left hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring', item.unread && 'bg-sidebar-accent/40')}>
+                                        className={cn(
+                                            'w-full min-w-0 rounded-lg bg-black/20 px-2 py-1.5 text-left shadow-sm ring-1 ring-white/[0.035] transition-colors hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring dark:bg-black/25',
+                                            item.unread && 'bg-sidebar-accent/60 ring-sidebar-border/60 dark:bg-sidebar-accent/50',
+                                        )}>
                                         <span className="flex items-baseline gap-2 text-[11px] text-muted-foreground">
                                             <span className="min-w-0 flex-1 truncate">{org.name}</span>
                                             <span className="shrink-0 tabular-nums">{formatFeedTime(item.at)}</span>
                                         </span>
                                         <span className="mt-0.5 flex items-center gap-1.5 text-xs">
                                             <span className="min-w-0 flex-1 truncate"><span className={cn(item.unread ? 'font-semibold text-sidebar-foreground' : 'font-medium')}>{who}</span>{' '}
-                                                <span className="text-muted-foreground">{reason}</span></span>
+                                                <span className="text-muted-foreground">{reason}</span>{excerpt && <span className="text-muted-foreground"> · {item.kind === 'reaction' ? 'You: ' : ''}<span>{excerpt}</span></span>}</span>
                                             {item.unread && <span aria-label="unread" className="size-1.5 shrink-0 rounded-full bg-[var(--stream-alert)]" />}
                                         </span>
-                                        <span className="mt-0.5 block truncate text-xs text-muted-foreground">{item.kind === 'reaction' ? 'You: ' : ''}{excerpt || '(no text)'}</span>
                                     </button>
                                 </li>
                             })}
