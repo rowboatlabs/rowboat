@@ -64,6 +64,8 @@ describe('org link landings → app deep links', () => {
     it('reads the org address and whichever target the landing named', () => {
         expect(parseSpacesLink('rowboat://open?type=spaces&spaceId=S1&org=acme.rowboat.space')).toEqual({ orgAddress: 'acme.rowboat.space', spaceId: 'S1' })
         expect(parseSpacesLink('rowboat://open?type=spaces&spaceId=S1&messageId=M1&org=acme.rowboat.space')).toEqual({ orgAddress: 'acme.rowboat.space', spaceId: 'S1', messageId: 'M1' })
+        // The /join landing: an invite to join, not a place to go.
+        expect(parseSpacesLink('rowboat://open?type=spaces&org=acme.rowboat.space&invite=t0k3n')).toEqual({ orgAddress: 'acme.rowboat.space', inviteToken: 't0k3n' })
         expect(parseSpacesLink('rowboat://open?type=spaces&spaceId=S1&assetId=A%2Fx&org=acme.rowboat.space')).toEqual({ orgAddress: 'acme.rowboat.space', spaceId: 'S1', assetId: 'A/x' })
         expect(parseSpacesLink('rowboat://open?type=spaces&memberId=google%7C1&org=acme.rowboat.space')).toEqual({ orgAddress: 'acme.rowboat.space', memberId: 'google|1' })
         // The trailing-slash authority form some OS handlers hand over.

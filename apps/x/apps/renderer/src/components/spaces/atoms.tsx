@@ -209,11 +209,13 @@ export function Segmented<T extends string>({ value, options, onChange, size = '
 }
 
 
-export function AddOrgDialog({ open, onOpenChange, onAdded, initialAction }: {
+export function AddOrgDialog({ open, onOpenChange, onAdded, initialAction, initialInviteUrl }: {
     open: boolean
     onOpenChange: (open: boolean) => void
     onAdded: (orgId: string, spaceId?: string) => void
     initialAction?: 'create' | 'join'
+    /** An invite link that arrived by deep link or an in-message click: pre-filled and resolved, one click from Join. */
+    initialInviteUrl?: string
 }) {
     // One dialog. With no Rowboat session the first door is "Sign in with
     // Rowboat" — one browser trip, then every managed org the person belongs
@@ -301,6 +303,12 @@ export function AddOrgDialog({ open, onOpenChange, onAdded, initialAction }: {
             setWaiting(null)
         }
     }
+
+    useEffect(() => {
+        if (open && initialInviteUrl) void resolvePreview(initialInviteUrl)
+        // resolvePreview is recreated per render; the trigger is the pair below.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open, initialInviteUrl])
 
     // Pre-auth resolve as soon as the pasted text parses — show what's being joined.
     const resolvePreview = async (url: string) => {

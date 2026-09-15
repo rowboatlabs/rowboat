@@ -81,6 +81,8 @@ export interface SpacesLinkTarget {
   assetId?: string
   messageId?: string
   memberId?: string
+  /** An invite (the /join landing): the token, to be joined — not something to navigate to. */
+  inviteToken?: string
 }
 
 export function parseSpacesLink(input: string): SpacesLinkTarget | null {
@@ -94,10 +96,12 @@ export function parseSpacesLink(input: string): SpacesLinkTarget | null {
   const pick = (k: string) => params.get(k) || undefined
   const target: SpacesLinkTarget = { orgAddress }
   const spaceId = pick('spaceId'), assetId = pick('assetId'), messageId = pick('messageId'), memberId = pick('memberId')
+  const inviteToken = pick('invite')
   if (spaceId) target.spaceId = spaceId
   if (assetId) target.assetId = assetId
   if (messageId) target.messageId = messageId
   if (memberId) target.memberId = memberId
+  if (inviteToken) target.inviteToken = inviteToken
   return target
 }
 

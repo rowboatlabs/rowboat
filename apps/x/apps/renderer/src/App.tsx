@@ -1,6 +1,8 @@
 import { WorkspaceSessionTabs } from './components/code/workspace-session-tabs'
 import { DocumentFileViewer } from '@/components/document-file-viewer'
 import { parseSpacesLink, readLastSpace, resolveSpacesLocation, type SpacesLinkTarget } from '@/lib/spaces-navigation'
+import { requestJoinInvite } from '@/lib/spaces-invite'
+import { InviteJoinDialog } from '@/components/spaces/invite-join-dialog'
 import { noteSpaceVisit } from '@/lib/spaces-visits'
 import * as React from 'react'
 import { Activity, useCallback, useEffect, useLayoutEffect, useMemo, useState, useRef } from 'react'
@@ -5665,6 +5667,15 @@ function App() {
   const openSpacesLink = useCallback(async (target: SpacesLinkTarget) => {
     if (getSpacesOrgs().length === 0) await refreshSpacesOrgs()
     const org = getSpacesOrgs().find((o) => o.address === target.orgAddress)
+    if (target.inviteToken) {
+      // An invite is joined, not navigated to: rebuild the https link (a
+      // signed-in org's own base URL, else https on the address) and hand it
+      // to the join dialog, which resolves it pre-auth and shows the card.
+      const base = org?.baseUrl ?? `https://${target.orgAddress}`
+      requestJoinInvite(`${base}/join/${target.inviteToken}`)
+      void navigateToViewRef.current({ type: 'spaces' })
+      return
+    }
     if (!org) {
       toast.error(`Sign in to ${target.orgAddress} to open this link`)
       void navigateToViewRef.current({ type: 'spaces' })
@@ -8270,6 +8281,11 @@ function App() {
         defaultTab="advanced"
       />
       <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} />
+      <InviteJoinDialog
+        onJoined={(orgId, spaceId) => {
+          void navigateToViewRef.current(spaceId ? { type: 'spaces', orgId, spaceId, rail: { kind: 'general' } } : { type: 'spaces' })
+        }}
+      />
       <SettingsDialog
         open={shortcutSettingsOpen}
         onOpenChange={setShortcutSettingsOpen}

@@ -201,16 +201,18 @@ export function buildHttpApp(deps: {
     return reply(c, routes.acceptInvite.response, result);
   });
 
-  // Human-shareable invite link target. The app intercepts these URLs; anyone
-  // else gets a plain page naming the space (resolution is pre-auth by design).
+  // The invite link's landing (2026-09-15): a browser-opened /join/<token>
+  // hands the invite into the app as rowboat://open?type=spaces&org=…&invite=…
+  // — the same deep-link grammar as the org link landings below, the org
+  // named by its address — and shows what is being joined meanwhile (invite
+  // resolution is pre-auth by design, spec §4). A dead invite says so and
+  // launches nothing.
   app.get('/join/:token', async (c) => {
-    const resolved = await service.resolveInvite(c.req.param('token'));
-    if (resolved.state !== 'ok') return c.text(`This invite is ${resolved.state}.`, 410);
-    const by = resolved.invitedBy ? ` by ${resolved.invitedBy}` : '';
-    return c.text(
-      `You're invited${by} to the space "${resolved.space.name}" on ${resolved.org.name}.\n` +
-        `Open this link in Rowboat to join.\n`,
-    );
+    const token = c.req.param('token');
+    const resolved = await service.resolveInvite(token);
+    if (resolved.state !== 'ok') return c.html(invitePage({ state: resolved.state }), 410);
+    const deep = `rowboat://open?type=spaces&org=${encodeURIComponent(service.org.address)}&invite=${encodeURIComponent(token)}`;
+    return c.html(invitePage({ state: 'ok', space: resolved.space.name, org: resolved.org.name, invitedBy: resolved.invitedBy, deep }));
   });
 
   // --- link landings ---------------------------------------------------------
@@ -508,4 +510,36 @@ export function buildHttpApp(deps: {
   });
 
   return app;
+}
+
+const DOWNLOAD_URL = 'https://github.com/rowboatlabs/rowboat/releases/latest';
+
+function escapeHtml(text: string): string {
+  return text.replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!);
+}
+
+type InvitePage =
+  | { state: 'ok'; space: string; org: string; invitedBy?: string; deep: string }
+  | { state: 'expired' | 'revoked' };
+
+/** The /join landing: launch the app with the invite, or say why not. */
+function invitePage(page: InvitePage): string {
+  const style =
+    `<style>body{font:15px/1.5 system-ui,sans-serif;margin:0;display:grid;place-items:center;min-height:100vh;color:#222;background:#fafafa}` +
+    `main{text-align:center;padding:2rem;max-width:26rem}h1{font-size:1.25rem;margin:0 0 .25rem}p{margin:.25rem 0}.m{color:#666}` +
+    `a.b{display:inline-block;margin-top:1rem;padding:.6rem 1.1rem;border-radius:8px;background:#111;color:#fff;text-decoration:none}` +
+    `.s{margin-top:1.25rem;font-size:13px;color:#666}.s a{color:inherit}</style>`;
+  const head = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">`;
+  if (page.state !== 'ok') {
+    const why = page.state === 'expired' ? 'This invite has expired.' : 'This invite was revoked.';
+    return `${head}<title>Invite ${page.state}</title>${style}<main><h1>${why}</h1><p class="m">Ask whoever sent it for a new link.</p></main>`;
+  }
+  const by = page.invitedBy ? `<p class="m">Invited by ${escapeHtml(page.invitedBy)}</p>` : '';
+  return (
+    `${head}<title>Join ${escapeHtml(page.space)} on ${escapeHtml(page.org)}</title>${style}<main>` +
+    `<h1>You're invited to ${escapeHtml(page.space)}</h1><p class="m">on ${escapeHtml(page.org)}</p>${by}` +
+    `<a class="b" href="${page.deep}">Open in Rowboat</a>` +
+    `<p class="s">Don't have Rowboat? <a href="${DOWNLOAD_URL}">Download it</a>, then open this link again.</p></main>` +
+    `<script>location.replace(${JSON.stringify(page.deep)})</script>`
+  );
 }
