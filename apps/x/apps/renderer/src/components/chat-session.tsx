@@ -423,7 +423,7 @@ export function ChatSessionComposer({
         presetMessage={isActive ? presetMessage : undefined}
         onPresetMessageConsumed={isActive ? onPresetMessageConsumed : undefined}
         runId={tabState.runId}
-        codeSessionLock={tabState.runId ? codeSessionLocks[tabState.runId] ?? null : null}
+        codeSessionLock={codeSessionLocks[tabState.runId ?? tab.id] ?? null}
         initialDraft={initialDraft}
         onDraftChange={(text) => onDraftChange(tab.id, text)}
         onSelectionChange={(selection) => onSelectionChange?.(tab, selection)}

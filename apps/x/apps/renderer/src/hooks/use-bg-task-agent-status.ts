@@ -40,7 +40,7 @@ function ensureSubscription() {
             }));
             // Auto-clear after 5 seconds
             setTimeout(() => {
-                updateStore(s => s.delete(key));
+                updateStore(s => { if (s.get(key)?.runId === event.runId && s.get(key)?.status !== 'running') s.delete(key); });
             }, 5000);
         }
     }) as (event: z.infer<typeof BackgroundTaskAgentEvent>) => void);

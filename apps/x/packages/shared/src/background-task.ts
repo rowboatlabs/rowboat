@@ -52,6 +52,7 @@ export type BackgroundTask = {
 
 export type BackgroundTaskSummary = {
     slug: string;
+    running?: boolean; // Live runtime state, never persisted in task.yaml.
     name: string;
     instructions: string;
     active: boolean;
@@ -88,6 +89,7 @@ export const BackgroundTaskSchema = z.object({
 
 export const BackgroundTaskSummarySchema = z.object({
     slug: z.string(),
+    running: z.boolean().optional(),
     name: z.string(),
     instructions: z.string(),
     active: z.boolean(),

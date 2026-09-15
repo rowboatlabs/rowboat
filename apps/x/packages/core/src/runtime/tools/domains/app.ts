@@ -156,6 +156,10 @@ export const appNavigationTools: z.infer<typeof BuiltinToolsSchema> = {
                                 // surface the app (open-app). Generic: apps are matched by
                                 // their own name/description, nothing app-specific here.
                                 const summaries = await listApps();
+                                // Authoring must work before the Apps UI has ever
+                                // mounted: materialize bundled tasks on this path too.
+                                const { syncAppAgents } = await import('../../../apps/agents.js');
+                                for (const app of summaries) await syncAppAgents(app);
                                 const apps = await Promise.all(summaries.slice(0, limit).map(async (a) => {
                                     let dataFiles: string[] = [];
                                     try {
@@ -167,6 +171,8 @@ export const appNavigationTools: z.infer<typeof BuiltinToolsSchema> = {
                                         name: a.manifest?.name ?? a.folder,
                                         description: a.manifest?.description ?? '',
                                         kind: a.kind,
+                                        readiness: a.readiness,
+                                        readinessMessage: a.readinessMessage,
                                         dataFiles,
                                         agentSlugs: a.agentSlugs,
                                     };
