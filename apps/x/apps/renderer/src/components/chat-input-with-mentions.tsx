@@ -3,7 +3,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import {
   ArrowUp,
   AudioLines,
-  ChevronDown,
   FileArchive,
   FileCode2,
   FileIcon,
@@ -21,12 +20,9 @@ import {
   MessageCircle,
   Lock,
   Mic,
-  MonitorUp,
   MoreHorizontal,
-  Phone,
-  PhoneOff,
+  PictureInPicture2,
   Plus,
-  Presentation,
   ShieldCheck,
   Square,
   Terminal,
@@ -199,17 +195,9 @@ function compactWorkDirPath(path: string) {
   return path.replace(/^\/Users\/[^/]+/, '~')
 }
 
-// Call presets: front doors into the same call engine, differing only in
-// starting devices. 'share' is the call button's main click — the "work
-// together" default (the hover companion — same surface the summon chord
-// opens). The
-// chevron menu holds the deviations.
+// Call presets select the starting devices for the shared call engine.
+// The composer opens the hover companion with the voice preset.
 export type CallPreset = 'voice' | 'video' | 'share' | 'practice'
-
-const CALL_PRESET_MENU: Array<{ preset: CallPreset; label: string; description: string; Icon: typeof Phone }> = [
-  { preset: 'share', label: 'Share screen', description: 'Hover mode with your screen shared from the start', Icon: MonitorUp },
-  { preset: 'practice', label: 'Practice session', description: 'Rehearse a pitch or interview with live coaching', Icon: Presentation },
-]
 
 interface ChatInputInnerProps {
   draftKey?: string
@@ -241,9 +229,7 @@ interface ChatInputInnerProps {
   voiceAvailable?: boolean
   /** A call is live (hands-free voice loop + spoken responses). */
   inCall?: boolean
-  /** While a call is live: does it belong to THIS composer's chat? True →
-   *  the button is End call; false → it re-points the call here. Defaults
-   *  true so unwired hosts keep the plain end-call behavior. */
+  /** Whether the live hover session belongs to this composer's chat. */
   callOnThisChat?: boolean
   /** Start a call with the given preset's device defaults. */
   onStartCall?: (preset: CallPreset) => void
@@ -308,7 +294,6 @@ function ChatInputInner({
   inCall,
   callOnThisChat = true,
   onStartCall,
-  onEndCall,
   callAvailable,
   onSelectionChange,
   showModelSelector = true,
@@ -1295,74 +1280,32 @@ function ChatInputInner({
           />
         )}
         {onStartCall && (
-          <div className="flex shrink-0 items-center">
-            <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (inCall && callOnThisChat) {
-                      onEndCall?.()
-                    } else if (callAvailable) {
-                      // Voice hover companion — the same surface the summon
-                      // chord opens. During a live call on ANOTHER chat this
-                      // re-points the call at this one (same devices).
-                      onStartCall('voice')
-                    }
-                  }}
-                  className={cn(
-                    'flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors',
-                    inCall && callOnThisChat
-                      ? 'bg-red-600 text-white hover:bg-red-500'
-                      : callAvailable
-                        ? 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                        : 'cursor-default text-muted-foreground/40'
-                  )}
-                  aria-label={inCall ? (callOnThisChat ? 'End call' : 'Bring this chat into the call') : 'Start a call'}
-                >
-                  {inCall && callOnThisChat ? <PhoneOff className="h-4 w-4" /> : <Phone className="h-4 w-4" />}
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="top">
-                {inCall
-                  ? (callOnThisChat
-                      ? 'End call'
-                      : 'On a call about another chat — click to bring THIS chat into it')
-                  : callAvailable
-                    ? `Talk it through — summons your hover companion (${summonShortcutLabel})`
-                    : 'Calls need voice input and output configured'}
-              </TooltipContent>
-            </Tooltip>
-            {!inCall && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    type="button"
-                    className="flex h-7 w-4 shrink-0 items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
-                    aria-label="Call options"
-                  >
-                    <ChevronDown className="h-3 w-3" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-72">
-                  {CALL_PRESET_MENU.map(({ preset, label, description, Icon }) => (
-                    <DropdownMenuItem
-                      key={preset}
-                      disabled={!callAvailable}
-                      onSelect={() => onStartCall(preset)}
-                      className="items-start gap-3 py-2"
-                    >
-                      <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-                      <span className="min-w-0">
-                        <span className="block text-sm font-medium leading-tight">{label}</span>
-                        <span className="block pt-0.5 text-xs leading-tight text-muted-foreground">{description}</span>
-                      </span>
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-          </div>
+          <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => {
+                  if (inCall || callAvailable) onStartCall('voice')
+                }}
+                className={cn(
+                  'flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors',
+                  inCall && callOnThisChat
+                    ? 'bg-muted text-foreground hover:bg-muted/80'
+                    : inCall || callAvailable
+                      ? 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                      : 'cursor-default text-muted-foreground/40'
+                )}
+                aria-label="Open hover mode"
+              >
+                <PictureInPicture2 className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {inCall || callAvailable
+                ? `Open hover mode (${summonShortcutLabel})`
+                : 'Hover mode needs voice input and output configured'}
+            </TooltipContent>
+          </Tooltip>
         )}
         {voiceAvailable && onStartRecording && (
           <button
@@ -1538,9 +1481,7 @@ export interface ChatInputWithMentionsProps {
   onCancelRecording?: () => void
   voiceAvailable?: boolean
   inCall?: boolean
-  /** While a call is live: does it belong to THIS composer's chat? True →
-   *  the button is End call; false → it re-points the call here. Defaults
-   *  true so unwired hosts keep the plain end-call behavior. */
+  /** Whether the live hover session belongs to this composer's chat. */
   callOnThisChat?: boolean
   onStartCall?: (preset: CallPreset) => void
   onEndCall?: () => void
