@@ -6,9 +6,8 @@ import { ServerOptionsMenu } from './spaces/server-options-menu'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import { isSpaceExpanded, setSpacesExpanded, useSpaceExpansionVersion } from '@/lib/spaces-expansion'
 import { forgetOrg, loadUnread, markStreamRead } from '@/lib/spaces-read-state'
-import { useCrossOrgActivity } from '@/hooks/use-cross-org-activity'
-import type { spaces } from '@x/shared'
 import { useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
+import { openServerDialog } from '@/lib/server-dialog'
 
 const { org, other, topics } = vi.hoisted(() => ({
     org: {
@@ -43,15 +42,15 @@ vi.mock('@/hooks/use-space-chat', async () => {
 })
 vi.mock('@/hooks/use-space-members', () => ({ prefetchMembers: vi.fn(), useSelfDisplayName: () => 'Me' }))
 vi.mock('@/components/spaces-view', () => ({ OrgMonogram: () => null }))
-vi.mock('@/components/spaces/atoms', () => ({ MemberAvatar: () => null }))
+vi.mock('@/components/spaces/atoms', () => ({ MemberAvatar: () => null, OrgMonogram: () => null }))
 vi.mock('@/components/spaces/new-direct-dialog', () => ({ NewDirectDialog: () => null }))
 vi.mock('@/lib/spaces-direct', () => ({
     directAvatarId: () => '', isSelfDirect: () => false, isSelfDirectUnsupported: () => false,
     markSelfDirectUnsupported: vi.fn(), selfDirectFailureMessage: () => '', selfDirectRefused: () => false,
     spaceDisplayName: (_org: unknown, dm: { name: string }) => dm.name,
 }))
-vi.mock('@/hooks/use-cross-org-activity', () => ({ useCrossOrgActivity: vi.fn(() => ({ items: [], loading: false, failedOrgIds: [], retry: vi.fn() })) }))
-beforeEach(() => { vi.mocked(useCrossOrgActivity).mockReturnValue({ items: [], loading: false, failedOrgIds: [], retry: vi.fn() }); vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))) })
+vi.mock('@/lib/server-dialog', () => ({ openServerDialog: vi.fn() }))
+beforeEach(() => { vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))) })
 afterEach(() => {
     cleanup()
     sessionStorage.clear()
@@ -62,49 +61,55 @@ afterEach(() => {
     vi.unstubAllGlobals()
 })
 
-describe('the sidebar activity section', () => {
-    const entry = (orgId: string, id: string) => ({ orgId, names: new Map([['author', 'Teammate']]), item: {
-        id, kind: 'reply', spaceId: 'main', spaceName: 'main', spaceKind: 'shared', threadRootId: 'discussion',
-        actors: [{ memberId: 'author', actingMode: 'direct' }], at: '2026-09-15T10:00:00Z', unread: true,
-        message: { id, body: `Activity ${id}` },
-    } as spaces.SpacesActivityItem })
-    it('starts expanded, labels each activity with its organization, and opens its exact message', () => {
+describe('the sidebar server list', () => {
+    it('lists only servers and opens each server using the shared landing destination', () => {
         vi.mocked(useSpacesOrgs).mockReturnValue({ orgs: [org, other] as unknown as OrgWithSpaces[], loading: false, refresh: vi.fn() })
-        vi.mocked(useCrossOrgActivity).mockReturnValue({ items: [entry(other.id, 'a'), entry(org.id, 'b')], loading: false, failedOrgIds: [], retry: vi.fn() })
         const open = vi.fn()
-        render(<SidebarProvider><SpacesSidebarSection active onOpenSpaces={vi.fn()} onOpenMessage={open} /></SidebarProvider>)
-        expect(screen.getByRole('button', { name: 'Collapse Spaces activity' })).toHaveAttribute('aria-expanded', 'true')
-        const region = screen.getByRole('region', { name: 'Activity across organizations' })
-        expect(within(region).getAllByRole('listitem')[0]).toHaveTextContent('Other server')
-        expect(within(region).getAllByRole('listitem')[1]).toHaveTextContent('Our server')
-        fireEvent.click(screen.getByText('Activity a'))
-        expect(open).toHaveBeenCalledWith({ orgId: 'other', spaceId: 'main', rail: { kind: 'thread', rootMessageId: 'discussion' }, messageId: 'a' })
-    })
-    it('persists collapse and keeps the primary navigation action independent', () => {
-        const open = vi.fn()
-        const view = render(<SidebarProvider><SpacesSidebarSection active={false} onOpenSpaces={open} onOpenMessage={vi.fn()} /></SidebarProvider>)
-        fireEvent.click(screen.getByRole('button', { name: 'Collapse Spaces activity' }))
+        render(<SidebarProvider><SpacesSidebarSection active activeSpace={{ orgId: org.id, spaceId: 'main' }}
+            onOpenSpace={open} /></SidebarProvider>)
+        expect(screen.getByRole('button', { name: 'Our server' })).toHaveAttribute('data-active', 'true')
+        expect(screen.getByRole('button', { name: 'Other server' })).toHaveAttribute('data-active', 'false')
+        expect(screen.queryByText('founders')).toBeNull()
+        expect(screen.queryByText('Person 0')).toBeNull()
+        expect(screen.queryByRole('button', { name: /Spaces activity/ })).toBeNull()
         expect(screen.queryByRole('region', { name: 'Activity across organizations' })).toBeNull()
-        expect(open).not.toHaveBeenCalled()
-        fireEvent.click(screen.getByRole('button', { name: 'Spaces' }))
-        expect(open).toHaveBeenCalledTimes(1)
-        view.unmount()
-        render(<SidebarProvider><SpacesSidebarSection active={false} onOpenSpaces={open} onOpenMessage={vi.fn()} /></SidebarProvider>)
-        expect(screen.getByRole('button', { name: 'Expand Spaces activity' })).toHaveAttribute('aria-expanded', 'false')
+        fireEvent.click(screen.getByRole('button', { name: 'Other server' }))
+        expect(open).toHaveBeenCalledWith(other.id, 'welcome')
+        expect(screen.queryByRole('button', { name: 'Spaces' })).toBeNull()
+        expect(screen.getByRole('heading', { name: 'Spaces' })).toBeVisible()
     })
-    it('sums every org’s spaces and DMs even with no preview rows and while collapsed', async () => {
+    it('can open an empty server and add a server when none are connected', () => {
+        vi.mocked(useSpacesOrgs).mockReturnValue({ orgs: [{ ...org, spaces: [], directs: [] }] as unknown as OrgWithSpaces[], loading: false, refresh: vi.fn() })
+        const open = vi.fn()
+        const view = render(<SidebarProvider><SpacesSidebarSection active={false} onOpenSpace={open} /></SidebarProvider>)
+        fireEvent.click(screen.getByRole('button', { name: 'Our server' }))
+        expect(open).toHaveBeenCalledWith(org.id, '')
+        vi.mocked(useSpacesOrgs).mockReturnValue({ orgs: [], loading: false, refresh: vi.fn() })
+        view.rerender(<SidebarProvider><SpacesSidebarSection active={false} onOpenSpace={open} /></SidebarProvider>)
+        expect(screen.queryByText('Our server')).toBeNull()
+        fireEvent.click(screen.getByRole('button', { name: 'Add server' }))
+        expect(screen.getByRole('dialog', { name: 'Add a server' })).toBeVisible()
+        fireEvent.click(screen.getByRole('button', { name: /Create a free server/ }))
+        expect(openServerDialog).toHaveBeenLastCalledWith({ kind: 'create' })
+        expect(screen.queryByRole('dialog')).toBeNull()
+        fireEvent.click(screen.getByRole('button', { name: 'Add server' }))
+        fireEvent.click(screen.getByRole('button', { name: /Join a server/ }))
+        expect(openServerDialog).toHaveBeenLastCalledWith({ kind: 'join' })
+    })
+    it('aggregates space and DM unread counts per server and updates after reading', async () => {
         vi.mocked(useSpacesOrgs).mockReturnValue({ orgs: [org, other] as unknown as OrgWithSpaces[], loading: false, refresh: vi.fn() })
         vi.stubGlobal('ipc', { on: vi.fn(() => () => {}), invoke: vi.fn(async (_channel, args) => ({
-            spaces: [{ spaceId: args.orgId === org.id ? 'founders' : 'welcome', head: 3, readOffset: 0, unreadRoots: 3, unreadMentions: 1, threads: [] },
+            spaces: [{ spaceId: args.orgId === org.id ? 'founders' : 'welcome', head: 3, readOffset: 0, unreadRoots: 3, unreadMentions: args.orgId === org.id ? 1 : 0, threads: [] },
                 ...(args.orgId === org.id ? [{ spaceId: 'dm0', head: 2, readOffset: 0, unreadRoots: 2, unreadMentions: 0, threads: [] }] : [])],
         })) })
         await act(async () => { await loadUnread(org.id, 'me'); await loadUnread(other.id, 'me') })
-        render(<SidebarProvider><SpacesSidebarSection active onOpenSpaces={vi.fn()} onOpenMessage={vi.fn()} /></SidebarProvider>)
-        expect(screen.getByLabelText('8 unread · 4 for you')).toBeVisible()
-        fireEvent.click(screen.getByRole('button', { name: 'Collapse Spaces activity' }))
-        expect(screen.getByLabelText('8 unread · 4 for you')).toBeVisible()
+        render(<SidebarProvider><SpacesSidebarSection active onOpenSpace={vi.fn()} /></SidebarProvider>)
+        const ourServer = screen.getByText('Our server').closest('button')!
+        const otherServer = screen.getByText('Other server').closest('button')!
+        expect(within(ourServer).getByLabelText('5 unread · 3 for you')).toBeVisible()
+        expect(within(otherServer).getByLabelText('3 unread · none for you')).toBeVisible()
         act(() => markStreamRead(org.id, 'founders', 3, { sync: false }))
-        expect(screen.getByLabelText('5 unread · 3 for you')).toBeVisible()
+        expect(within(ourServer).getByLabelText('2 unread · 2 for you')).toBeVisible()
     })
 })
 
