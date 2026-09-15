@@ -159,6 +159,9 @@ These four events contain no server/space names, invite URLs, or message content
 - `spaces_reaction_toggled` — `{ action: 'add' | 'remove' }` — a human toggled an emoji reaction on a message
 - `spaces_message_deleted` — a human deleted (tombstoned) their own message
 - `spaces_topic_started` — replying to a general message created a new topic from it
+- `spaces_rowboat_invoked` — `{ queued: boolean }` **(core)** — a mention-driven agent request was accepted by the existing send/queue operation, including Fold requests. `queued` means it was queued behind an active turn; this does not indicate completion.
+- `spaces_rowboat_invoke_failed` — **(renderer)** — the invocation IPC request rejected; excludes failures later during agent execution. No error text or message content is captured.
+- `spaces_rowboat_message_posted` — **(core)** — the existing response indexer recognized a successful agent `post_message` tool result during mention-driven work. Counts individual posts, including progress messages; it does not indicate task completion or one reply per invocation.
 - `spaces_fold_requested` — "Fold into file…" asked the person's agent to fold a topic's decision into a file (the agent's resulting change is an `llm_usage` + a change-set on the org, not a renderer event)
 - `spaces_tab_viewed` — `{ tab: 'general' | 'topics' | 'files' | 'whiteboard' }` — the segmented control inside a space (plus the whiteboard surface)
 

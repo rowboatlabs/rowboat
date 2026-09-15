@@ -224,6 +224,10 @@ export function spacesSpaceJoined(method: 'invite_link' | 'server_address' | 'de
   posthog.capture('spaces_space_joined', { method })
 }
 
+export function spacesRowboatInvokeFailed() {
+  posthog.capture('spaces_rowboat_invoke_failed')
+}
+
 export function spacesMessagePosted(props: { kind: 'general' | 'topic'; mentionsRowboat: boolean }) {
   posthog.capture('spaces_message_posted', { kind: props.kind, mentions_rowboat: props.mentionsRowboat })
 }

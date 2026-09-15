@@ -3,6 +3,7 @@ import path from 'path';
 import type { TurnBusEvent } from '@x/shared/dist/turns.js';
 import type { SpaceMentionOrigin } from '@x/shared/dist/origins.js';
 import { WorkDir } from '../config/config.js';
+import { capture } from '../analytics/posthog.js';
 import { spacesMcpServerNameFor } from './orgs.js';
 
 // "Which run wrote this reply?" — the per-response half of the space ↔ agent
@@ -236,6 +237,7 @@ export class SpaceResponseIndexer {
         // the turn's first mention (a root post, or a thread the agent chose).
         const input =
           turn.inputs.find((i) => i.origin.spaceId === post.spaceId && i.origin.threadRootId === post.threadRoot) ?? turn.inputs[0];
+        capture('spaces_rowboat_message_posted');
         this.record(linkKey(post.orgId, post.spaceId, messageId), {
           sessionId: turn.sessionId,
           turnId: post.turnId,
