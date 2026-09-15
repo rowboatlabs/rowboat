@@ -1,3 +1,4 @@
+import { HEALTH_BOOTSTRAP } from './health.js';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
@@ -221,7 +222,12 @@ const BOOTSTRAP = String.raw`<script>
 })();
 </script>`;
 
-function injectBootstrap(htmlContent: string): string {
+export function injectBootstrap(htmlContent: string): string {
+    // Put the health observer before page scripts. Keep the reload bootstrap at
+    // the end, where the document exists for its observers.
+    const head = /<head(?:\s[^>]*)?>/i.exec(htmlContent);
+    const start = head ? head.index + head[0].length : (/<!doctype[^>]*>/i.exec(htmlContent)?.[0].length ?? 0);
+    htmlContent = htmlContent.slice(0, start) + HEALTH_BOOTSTRAP + htmlContent.slice(start);
     // Inject before the LAST </body>, not the first. An app whose markup
     // contains a literal "</body>" earlier — a template inside a <textarea>,
     // an HTML string inside a <script> — got the bootstrap spliced into that

@@ -35,6 +35,7 @@ Minimal manifest (write it pretty-printed):
   "schemaVersion": 1,
   "name": "pr-dashboard",
   "version": "0.1.0",
+  "buildStatus": "building",
   "description": "Open PRs across my repos",
   "capabilities": ["github"],
   "dataContracts": [
@@ -159,8 +160,7 @@ window.addEventListener('rowboat:data-change', (e) => {
 
 ## 5. Background agents (self-updating data)
 
-When the user wants data refreshed on a schedule, create a background task
-(\`create-background-task\`) whose instructions fetch the data (Composio tools,
+When the user wants data refreshed on a schedule, bundle a background task whose instructions fetch the data (Composio tools,
 or the \`fetch-url\` builtin for plain HTTP — **the bg-task agent has NO
 shell**; never generate a refresh script) and store it via the
 **\`app-set-data\`** builtin: \`{ appFolder, file: "data.json", data: <object> }\`
@@ -175,7 +175,7 @@ them) and list the filename in \`manifest.agents\`. The app package ships only
 what's inside the app folder: without this mirror, a published copy of the app
 is dead on arrival — installers get a UI whose data never refreshes. The
 bundled copy materializes as a disabled bg-task for installers (they opt in);
-the \`create-background-task\` task you made stays the author's live agent.
+authors should enable and use the same app-owned task, not a duplicate schedule.
 
 ## 6. Prohibitions
 
@@ -218,7 +218,30 @@ fabricates output or hallucinates tool names. Call \`list-models\` and set the
 task's \`model\` to a strong ID from that list (its \`defaultModel\` is a safe
 choice); never guess model IDs.
 
-## 11. Verification loop
+## 11. Authoring and verification
+
+Keep the manifest's buildStatus as "building" while creating a new app. The
+Apps view shows a build state until this is "ready". If a new build fails, set it
+to "failed" and explain the actionable problem. Resume existing scaffolds in
+place; do not create duplicate apps. For an existing working app, preserve its
+last good data and do not replace its live frontend until your edit is ready.
+
+Give short progress updates: connecting data, building the page, checking the
+first run. For background updates, use the app-owned materialized agents listed
+by app-navigation read-view apps; do not leave a separate duplicate scheduled
+agent outside the app lifecycle. When authoring a new bundled definition,
+write agents/<slug>.yaml and add it to manifest.agents first, then use the
+materialized app--<folder>--<slug> task for enabling and running.
+
+After the first run, read the app data and check its contract. Verify the actual
+page in the browser if browser tools are available, including visible content,
+core interactions, and both themes. Report any verification you cannot perform.
+Only mark buildStatus "ready" after the entry and required real data exist.
+If data is missing, keep the app in setup and explain why rather than claiming
+it is ready. Generated apps must show loading, empty, failure and retry states;
+show data freshness and re-fetch in place on rowboat:data-change.
+
+## 12. Open the result
 
 After writing files: tell the user the app URL
 (\`http://<folder>.apps.localhost:3210/\`), note that edits hot-reload, and for

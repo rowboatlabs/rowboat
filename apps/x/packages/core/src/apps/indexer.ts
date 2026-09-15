@@ -9,6 +9,7 @@ import {
     type AppSummary,
 } from '@x/shared/dist/rowboat-app.js';
 import { APPS_DIR, FOLDER_SLUG_RE, appOrigin } from './constants.js';
+import { inspectReadiness } from './readiness.js';
 
 // Local app management (spec §5). Scan-on-demand; correctness never depends
 // on caching.
@@ -85,6 +86,7 @@ async function summarizeApp(folder: string): Promise<AppSummary | null> {
         ...(install?.success ? { install: install.data } : {}),
         ...(publish?.success ? { publish: publish.data } : {}),
         hasDist,
+        ...await inspectReadiness(dir, manifest),
         agentSlugs: (manifest?.agents ?? []).map((f) => agentTaskSlug(folder, f)),
     };
 }
@@ -170,6 +172,7 @@ export async function createApp(input: { folder: string; name: string; descripti
         schemaVersion: 1,
         name,
         version: '0.1.0',
+        buildStatus: 'building',
         description,
     });
     await fs.mkdir(path.join(dir, 'dist'), { recursive: true });

@@ -117,7 +117,7 @@ import { search } from '@x/core/dist/search/search.js';
 import { classifySchedule, processRowboatInstruction } from '@x/core/dist/knowledge/inline_tasks.js';
 import { summarizeMeeting } from '@x/core/dist/knowledge/summarize_meeting.js';
 import { runLiveNoteAgent } from '@x/core/dist/knowledge/live-note/runner.js';
-import { runBackgroundTask } from '@x/core/dist/background-tasks/runner.js';
+import { runBackgroundTask, isBackgroundTaskRunning } from '@x/core/dist/background-tasks/runner.js';
 import type { ICodeModeConfigRepo } from '@x/core/dist/code-mode/repo.js';
 import type { CodePermissionRegistry } from '@x/core/dist/code-mode/acp/permission-registry.js';
 import { checkCodeModeAgentStatus } from '@x/core/dist/code-mode/status.js';
@@ -323,7 +323,10 @@ export function createCoreRpcHandlers(opts?: { sessionsIndexReady?: Promise<void
         return { success: false, error: err instanceof Error ? err.message : String(err) };
       }
     },
-    'bg-task:list': async (args) => listTasks(args),
+    'bg-task:list': async (args) => {
+      const result = await listTasks(args);
+      return { ...result, items: result.items.map(task => ({ ...task, running: isBackgroundTaskRunning(task.slug) })) };
+    },
     'bg-task:listRunIds': async (args) => {
       const runIds = await readTaskRunIds(args.slug, args.limit);
       return { runIds };
