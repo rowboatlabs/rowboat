@@ -9,6 +9,8 @@ export interface FloatingChat extends WindowSize { id: string; minimized: boolea
 export interface AssistantLayout {
   assistant: string | null
   sidebar: string | null
+  /** The sidebar can be hidden while retaining the conversation it owns. */
+  sidebarVisible: boolean
   floating: FloatingChat[]
   focused: string | null
 }
@@ -16,12 +18,14 @@ export type LayoutAction =
   | { type: 'place'; id: string; location: ChatLocation; replacing?: string; size: WindowSize }
   | { type: 'close'; id: string }
   | { type: 'focus'; id: string }
+  | { type: 'hide-sidebar' }
+  | { type: 'show-sidebar' }
   | { type: 'minimize'; id: string }
   | { type: 'resize'; id: string; size: WindowSize }
   | { type: 'reorder'; id: string; index: number }
 
 export function initialAssistantLayout(id: string): AssistantLayout {
-  return { assistant: id, sidebar: null, floating: [], focused: id }
+  return { assistant: id, sidebar: null, sidebarVisible: false, floating: [], focused: id }
 }
 
 export function chatLocation(layout: AssistantLayout, id: string): ChatLocation | null {
@@ -39,6 +43,7 @@ export function assistantLayoutReducer(state: AssistantLayout, action: LayoutAct
         ...state,
         assistant: state.assistant === action.id ? null : state.assistant,
         sidebar: state.sidebar === action.id ? null : state.sidebar,
+        sidebarVisible: state.sidebar === action.id ? false : state.sidebarVisible,
         floating: state.floating.filter((entry) => entry.id !== action.id && entry.id !== action.replacing),
         focused: action.id,
       }
@@ -47,17 +52,23 @@ export function assistantLayoutReducer(state: AssistantLayout, action: LayoutAct
         const entry = { id: action.id, width, height, minimized: false, layer }
         const index = previous ? state.floating.indexOf(previous) : next.floating.length
         next.floating.splice(Math.min(index, next.floating.length), 0, entry)
-      } else next[action.location] = action.id
+      } else {
+        next[action.location] = action.id
+        if (action.location === 'sidebar') next.sidebarVisible = true
+      }
       return next
     }
     case 'close': return {
       ...state,
       assistant: state.assistant === action.id ? null : state.assistant,
       sidebar: state.sidebar === action.id ? null : state.sidebar,
+      sidebarVisible: state.sidebar === action.id ? false : state.sidebarVisible,
       floating: state.floating.filter((entry) => entry.id !== action.id),
       focused: state.focused === action.id ? null : state.focused,
     }
     case 'focus': return { ...state, focused: action.id, floating: state.floating.map((entry) => entry.id === action.id ? { ...entry, minimized: false, layer } : entry) }
+    case 'hide-sidebar': return { ...state, sidebarVisible: false }
+    case 'show-sidebar': return state.sidebar ? { ...state, sidebarVisible: true, focused: state.sidebar } : state
     case 'minimize': return { ...state, focused: state.focused === action.id ? null : state.focused, floating: state.floating.map((entry) => entry.id === action.id ? { ...entry, minimized: true } : entry) }
     case 'resize': return { ...state, floating: state.floating.map((entry) => entry.id === action.id ? { ...entry, ...action.size } : entry) }
     case 'reorder': {
@@ -104,7 +115,9 @@ export function restoreAssistantLayout(raw: string | null, ids: string[]): Assis
       if (id) floating.push({ id, width: entry.width, height: entry.height, layer: entry.layer, minimized: !!entry.minimized })
     }
     const focused = [assistant, sidebar, ...floating.filter((entry) => !entry.minimized).map((entry) => entry.id)].includes(saved.focused) ? saved.focused : assistant
-    return { assistant, sidebar, floating, focused }
+    // The sidebar starts hidden on every app launch. Its remembered chat stays
+    // assigned so an explicit open can restore that same conversation.
+    return { assistant, sidebar, sidebarVisible: false, floating, focused }
   } catch { return fallback }
 }
 

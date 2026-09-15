@@ -21,6 +21,7 @@ interface AssistantWorkspaceProps extends ChatServices {
   onNewChatAt: (location: ChatLocation, replacing?: string) => void
   onSelectChatAt: (id: string, location: ChatLocation, replacing?: string) => void
   onFocusChat: (id: string) => void
+  onHideSidebar: () => void
   onCloseChat: (id: string) => void
 }
 
@@ -141,7 +142,7 @@ export function AssistantWorkspace(p: AssistantWorkspaceProps) {
   const close = p.onCloseChat
   return <>
     {p.legacyPane && <WorkspaceChatAdapter services={p} sessionId={p.workspaceSessionId ?? null} onFocus={p.onFocusChat} />}
-    {layout.sidebar && <aside aria-label="Chat sidebar" className="order-4 flex min-h-0 shrink-0 flex-col border-l border-border bg-background" style={{ width: sidebarWidth, maxWidth: '65vw' }}>
+    {layout.sidebar && layout.sidebarVisible && <aside aria-label="Chat sidebar" className="order-4 flex min-h-0 shrink-0 flex-col border-l border-border bg-background" style={{ width: sidebarWidth, maxWidth: '65vw' }}>
       {/* The pane is its own container, so its divider runs the full height,
           title bar included. Its top row is the title bar's continuation: the
           same 40px and bottom rule as the main content header, titled like the
@@ -186,12 +187,12 @@ export function AssistantWorkspace(p: AssistantWorkspaceProps) {
       const location = chatLocation(layout, tab.id)
       if (!location) return []
       const floating = layout.floating.find((entry) => entry.id === tab.id)
-      const visible = location === 'assistant' ? p.pageVisible : location === 'sidebar' || !floating?.minimized
+      const visible = location === 'assistant' ? p.pageVisible : location === 'sidebar' ? layout.sidebarVisible : !floating?.minimized
       const host = location === 'assistant' ? p.pageHost : location === 'sidebar' ? hosts.sidebar : hosts[tab.id]
       // Closing is the sidebar's job, not the chat's: the container hands its
       // button into the chat's header row rather than stacking a strip above it.
       const controls = location === 'sidebar'
-        ? <button type="button" aria-label="Close sidebar" title="Close - conversation stays in history" onClick={() => close(tab.id)}
+        ? <button type="button" aria-label="Close sidebar" title="Close" onClick={p.onHideSidebar}
           className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><X className="size-4" /></button>
         : undefined
       return [<MountedChat key={tab.chatId} host={host ?? null}>
