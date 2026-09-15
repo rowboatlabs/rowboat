@@ -2,6 +2,7 @@ import type { spaces } from '@x/shared'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { containsRowboatAddress } from '@/lib/spaces-mentions'
 import { toast } from '@/lib/toast'
+import * as analytics from '@/lib/analytics'
 
 // ---------------------------------------------------------------------------
 // @rowboat trigger (spec §8): a posted message that genuinely addresses
@@ -39,6 +40,7 @@ export function maybeInvokeRowboat(
             ...(options ? { options } : {}),
         })
         .catch((err) => {
+            analytics.spacesRowboatInvokeFailed()
             toast(err instanceof Error ? err.message : 'Rowboat could not be invoked', 'error')
         })
 }

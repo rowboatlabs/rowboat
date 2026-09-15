@@ -380,6 +380,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         try {
             const result = await window.ipc.invoke('spaces:createInvite', { orgId: org.id, spaceId: space.id })
             await navigator.clipboard.writeText(result.link)
+            analytics.spacesInviteLinkCopied()
             toast('Invite link copied to clipboard', 'success')
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not create an invite', 'error')
@@ -1339,6 +1340,7 @@ function InviteLinkPanel({ orgId, spaceId, spaceName }: { orgId: string; spaceId
     const copyLink = (link: string) =>
         navigator.clipboard.writeText(link).then(
             () => {
+                analytics.spacesInviteLinkCopied()
                 setCopy('copied')
                 if (timer.current) clearTimeout(timer.current)
                 timer.current = setTimeout(() => setCopy('idle'), 1000)

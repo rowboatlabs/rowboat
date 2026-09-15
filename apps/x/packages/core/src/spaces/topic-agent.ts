@@ -4,6 +4,7 @@ import type { ISessions } from '../runtime/sessions/api.js';
 import type { SpaceMentionOrigin, SpaceThreadOrigin } from '@x/shared/dist/origins.js';
 import { deriveTurnStatus, reduceTurn } from '@x/shared/dist/turns.js';
 import { WorkDir } from '../config/config.js';
+import { capture } from '../analytics/posthog.js';
 import { spacesMcpServerNameFor } from './orgs.js';
 
 // @rowboat in a space (spec §8 grammar, §11 beat 7): an addressed message
@@ -202,6 +203,7 @@ export async function invokeTopicAgent(input: InvokeTopicAgentInput): Promise<In
     },
   );
 
+  capture('spaces_rowboat_invoked', { queued: outcome.queued });
   return { sessionId, queued: outcome.queued };
 }
 

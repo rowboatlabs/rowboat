@@ -146,12 +146,22 @@ All renderer events live in `apps/renderer/src/lib/analytics.ts` (typed wrappers
 - `email_instructions_saved` — standing email-agent instructions saved
 - `email_sync_triggered` — manual refresh button
 
-**Spaces** (`components/spaces/*`, `components/spaces-view.tsx`):
+**Spaces** (`components/spaces/*`, `components/spaces-view.tsx`, both space sidebars, and onboarding):
+
+- `spaces_server_created` — server creation succeeded, from the create-server dialog or onboarding
+- `spaces_space_created` — explicit space creation succeeded from either sidebar; excludes automatically created default spaces and DMs
+- `spaces_invite_link_copied` — clipboard write succeeded from the invite popover, space menu, or either `/invite` command; generating/displaying a link alone does not emit it
+- `spaces_space_joined` — `{ method: 'invite_link' | 'server_address' | 'dev_server' }` — a join/connect action succeeded. Address and dev flows can reconnect existing members, so this is not a count of new memberships. `dev_server` identifies the explicit dev sign-in flow, not hostname detection. Automatic server discovery on sign-in does not emit it.
+
+These four events contain no server/space names, invite URLs, or message contents.
 
 - `spaces_message_posted` — `{ kind: 'general' | 'topic', mentions_rowboat }` — a human posted in a space: to general, or into a topic
 - `spaces_reaction_toggled` — `{ action: 'add' | 'remove' }` — a human toggled an emoji reaction on a message
 - `spaces_message_deleted` — a human deleted (tombstoned) their own message
 - `spaces_topic_started` — replying to a general message created a new topic from it
+- `spaces_rowboat_invoked` — `{ queued: boolean }` **(core)** — a mention-driven agent request was accepted by the existing send/queue operation, including Fold requests. `queued` means it was queued behind an active turn; this does not indicate completion.
+- `spaces_rowboat_invoke_failed` — **(renderer)** — the invocation IPC request rejected; excludes failures later during agent execution. No error text or message content is captured.
+- `spaces_rowboat_message_posted` — **(core)** — the existing response indexer recognized a successful agent `post_message` tool result during mention-driven work. Counts individual posts, including progress messages; it does not indicate task completion or one reply per invocation.
 - `spaces_fold_requested` — "Fold into file…" asked the person's agent to fold a topic's decision into a file (the agent's resulting change is an `llm_usage` + a change-set on the org, not a renderer event)
 - `spaces_tab_viewed` — `{ tab: 'general' | 'topics' | 'files' | 'whiteboard' }` — the segmented control inside a space (plus the whiteboard surface)
 

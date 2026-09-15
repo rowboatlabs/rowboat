@@ -50,6 +50,7 @@ vi.mock('@/lib/spaces-rowboat', () => ({ maybeInvokeRowboat: vi.fn() }))
 vi.mock('@/lib/spaces-response-chat', () => ({ openResponseChat: vi.fn() }))
 vi.mock('@/lib/toast', () => ({ toast: vi.fn() }))
 vi.mock('@/lib/analytics', () => ({
+    spacesInviteLinkCopied: vi.fn(),
     spacesMessagePosted: vi.fn(),
     spacesReactionToggled: vi.fn(),
     spacesMessageDeleted: vi.fn(),

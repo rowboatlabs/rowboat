@@ -857,6 +857,7 @@ export function GeneralStream({
                             try {
                                 const result = await window.ipc.invoke('spaces:createInvite', { orgId: org.id, spaceId: space.id })
                                 await navigator.clipboard.writeText(result.link)
+                                analytics.spacesInviteLinkCopied()
                                 toast('Invite link copied to clipboard', 'success')
                             } catch (err) {
                                 toast(err instanceof Error ? err.message : 'Could not create an invite', 'error')
