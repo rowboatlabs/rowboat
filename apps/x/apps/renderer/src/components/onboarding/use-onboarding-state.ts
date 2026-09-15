@@ -297,6 +297,8 @@ export function useOnboardingState(open: boolean, onComplete: (opts?: { startTou
       setCurrentStep(1)
     } else if (currentStep === 3) {
       setCurrentStep(2)
+    } else if (currentStep === 4) {
+      setCurrentStep(3)
     }
   }, [currentStep, onboardingPath])
 

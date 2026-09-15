@@ -37,7 +37,7 @@ export function WelcomeStep({ state }: WelcomeStepProps) {
         className="inline-flex items-center gap-2 rounded-full border bg-muted/50 px-3.5 py-1.5 text-xs font-medium text-muted-foreground mb-10"
       >
         <span className="size-1.5 rounded-full bg-[var(--rowboat-success)] animate-pulse" />
-        Your AI coworker, with memory
+        The multiplayer personal assistant for work
       </motion.div>
       <motion.p
         initial={{ opacity: 0 }}
@@ -45,7 +45,7 @@ export function WelcomeStep({ state }: WelcomeStepProps) {
         transition={{ delay: 0.3 }}
         className="text-base text-muted-foreground leading-relaxed max-w-sm mb-10"
       >
-        Rowboat connects to your work, builds a knowledge graph, and uses that context to help you get things done. Private and on your machine.
+        Rowboat connects to your work, builds a knowledge graph, and works alongside your team and their assistants. Private and on your machine.
       </motion.p>
 
       {/* Sign in / connected state */}
