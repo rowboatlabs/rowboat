@@ -37,7 +37,7 @@ import {
     ROWBOAT_APP_URL,
     type SpaceRefs,
 } from '@/lib/spaces-presentation'
-import { isInviteUrl, requestJoinInvite } from '@/lib/spaces-invite'
+import { isInviteUrl, openServerDialog } from '@/lib/server-dialog'
 
 // The one markdown renderer for space bodies (messages, thread parents).
 // Three responsibilities layered over Streamdown, all space-specific:
@@ -753,7 +753,7 @@ function SpaceAnchor({ href, children }: ComponentProps<'a'>) {
     // round trip through the org's landing page.
     if (isInviteUrl(url)) {
         return (
-            <button type="button" onClick={() => requestJoinInvite(url)} title="Join with this invite" className="inline-flex max-w-full items-baseline gap-1 align-baseline text-primary underline underline-offset-2 hover:opacity-80">
+            <button type="button" onClick={() => openServerDialog({ kind: 'join', inviteUrl: url })} title="Join with this invite" className="inline-flex max-w-full items-baseline gap-1 align-baseline text-primary underline underline-offset-2 hover:opacity-80">
                 <span className="truncate">{children}</span>
             </button>
         )

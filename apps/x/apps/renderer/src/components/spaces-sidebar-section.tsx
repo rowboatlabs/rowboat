@@ -11,7 +11,8 @@ import { openSelfDirect, useSpaceFeed, useSpacesOrgs, type OrgWithSpaces } from 
 import { prefetchStream, spaceLastActivityAt, useSpacesUnreadCounts } from '@/hooks/use-space-chat'
 import { NO_BADGE, streamBadge, threadBadge, useReadStateVersion, type SpaceBadge } from '@/lib/spaces-read-state'
 import { UnreadBadge } from '@/components/spaces/unread-badge'
-import { AddOrgDialog, MemberAvatar } from '@/components/spaces/atoms'
+import { MemberAvatar } from '@/components/spaces/atoms'
+import { openServerDialog } from '@/lib/server-dialog'
 import { NewDirectDialog } from '@/components/spaces/new-direct-dialog'
 import { directAvatarId, isSelfDirect, isSelfDirectUnsupported, markSelfDirectUnsupported, selfDirectFailureMessage, selfDirectRefused, spaceDisplayName } from '@/lib/spaces-direct'
 import { prefetchMembers, useSelfDisplayName } from '@/hooks/use-space-members'
@@ -37,11 +38,10 @@ export function SpacesSidebarSection({ active, activeSpace, onOpenSpaces, onOpen
     onOpenSpaces: () => void
     onOpenSpace: (orgId: string, spaceId: string) => void
 }) {
-    const { orgs, refresh } = useSpacesOrgs()
+    const { orgs } = useSpacesOrgs()
     // The siderail's own counts, from the org-owned read state: one store, so
     // reading a space anywhere clears it everywhere.
     const unread = useSpacesUnreadCounts()
-    const [addOrgOpen, setAddOrgOpen] = useState(false)
     const current = resolveSpacesLocation(orgs, activeSpace ?? readLastSpace())
     return <SidebarGroup className="pt-0">
         <SidebarGroupContent>
@@ -53,7 +53,7 @@ export function SpacesSidebarSection({ active, activeSpace, onOpenSpaces, onOpen
                         <span>Spaces</span>
                     </SidebarMenuButton>
                     <SidebarMenuAction type="button" showOnHover aria-label="Add a server" title="Add a server"
-                        onClick={() => setAddOrgOpen(true)}>
+                        onClick={() => openServerDialog({ kind: 'create' })}>
                         <Plus />
                     </SidebarMenuAction>
                     {orgs.length > 0 && <SidebarMenu className="ml-4 w-auto gap-0 border-l border-sidebar-border pl-2">
@@ -65,7 +65,6 @@ export function SpacesSidebarSection({ active, activeSpace, onOpenSpaces, onOpen
                 </SidebarMenuItem>
             </SidebarMenu>
         </SidebarGroupContent>
-        <AddOrgDialog open={addOrgOpen} onOpenChange={setAddOrgOpen} onAdded={() => void refresh()} />
     </SidebarGroup>
 }
 

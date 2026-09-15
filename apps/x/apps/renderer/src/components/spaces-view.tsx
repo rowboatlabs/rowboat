@@ -10,7 +10,8 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { AddOrgDialog, MemberAvatar, MemberProfilePopover, OrgMonogram } from '@/components/spaces/atoms'
+import { MemberAvatar, MemberProfilePopover, OrgMonogram } from '@/components/spaces/atoms'
+import { openServerDialog } from '@/lib/server-dialog'
 import { BookmarksPopover } from '@/components/spaces/bookmarks'
 import { FileColumn, TrashDialog, UploadFilesDialog } from '@/components/spaces/files-tab'
 import { GeneralStream } from '@/components/spaces/general-stream'
@@ -40,7 +41,7 @@ import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 import * as analytics from '@/lib/analytics'
 
-export { AddOrgDialog, OrgMonogram } from '@/components/spaces/atoms'
+export { OrgMonogram } from '@/components/spaces/atoms'
 
 // Spaces — two columns, derived from what is open. A space lands on the
 // chat (the stream, or a thread) full width. Opening a file or board from
@@ -128,8 +129,7 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
      */
     active?: boolean
 }) {
-    const { orgs, loading, refresh } = useSpacesOrgs()
-    const [addOrgOpen, setAddOrgOpen] = useState(false)
+    const { orgs, loading } = useSpacesOrgs()
     // No Rowboat session → the empty state offers the sign-in first (one
     // session, two uses): one browser trip lists every managed org.
     const account = useSpacesAccountState()
@@ -235,12 +235,12 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
                                 <Button size="sm" onClick={() => void signInRowboat()} disabled={signingIn}>
                                     {signingIn ? <Loader2 className="size-4 mr-1 animate-spin" /> : null} Sign in with Rowboat
                                 </Button>
-                                <button type="button" className="text-xs text-muted-foreground hover:underline" onClick={() => setAddOrgOpen(true)}>
+                                <button type="button" className="text-xs text-muted-foreground hover:underline" onClick={() => openServerDialog({ kind: 'join' })}>
                                     Have an invite link or a server address?
                                 </button>
                             </div>
                         ) : (
-                            <Button size="sm" className="mt-4" onClick={() => setAddOrgOpen(true)}>
+                            <Button size="sm" className="mt-4" onClick={() => openServerDialog({ kind: 'create' })}>
                                 <Plus className="size-4 mr-1" /> Add a server
                             </Button>
                         )}
@@ -256,7 +256,6 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
                     </>
                 )}
             </div>
-            <AddOrgDialog open={addOrgOpen} onOpenChange={setAddOrgOpen} onAdded={() => void refresh()} />
         </div>
     )
 }
