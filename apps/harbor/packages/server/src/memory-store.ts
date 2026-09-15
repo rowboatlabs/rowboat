@@ -691,7 +691,9 @@ export class MemoryStore implements Store {
         for (const [emoji, rs] of byEmoji) {
           const newestFirst = [...rs].sort((a, b) => b.at.localeCompare(a.at) || b.by.memberId.localeCompare(a.by.memberId));
           const at = newestFirst[0]!.at;
-          const unread = at > seenAt;
+          const readOffset = message.threadRoot === undefined ? streamMark
+            : s.threadMarks.get(this.threadMarkKey(message.threadRoot, memberId))?.readOffset ?? 0;
+          const unread = rs.some((r) => r.offset > readOffset && r.at > seenAt);
           if (q.unreadOnly && !unread) continue;
           const row = { id: `r:${messageId}:${emoji}`, kind: 'reaction' as const, spaceId, message, actors: newestFirst.map((r) => r.by), emoji, at, unread };
           if (olderThan(row, q.before)) out.push(row);

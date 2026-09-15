@@ -189,6 +189,7 @@ function rowToMessage(r: MessageRow): Message {
 }
 
 interface ReactionRow {
+  stream_offset: number | string;
   space_id: string;
   message_id: string;
   emoji: string;
@@ -198,6 +199,7 @@ interface ReactionRow {
 
 function rowToReaction(r: ReactionRow): StoredReaction {
   return {
+    offset: Number(r.stream_offset),
     spaceId: r.space_id,
     messageId: r.message_id,
     emoji: r.emoji,
@@ -909,10 +911,10 @@ export class PgStore implements Store {
 
   async putReaction(reaction: StoredReaction): Promise<void> {
     await this.sql.query(
-      `insert into reactions (space_id, message_id, emoji, member_id, attribution, at)
-       values ($1, $2, $3, $4, $5::jsonb, $6)
-       on conflict (space_id, message_id, emoji, member_id) do update set attribution = excluded.attribution, at = excluded.at`,
-      [reaction.spaceId, reaction.messageId, reaction.emoji, reaction.by.memberId, JSON.stringify(reaction.by), reaction.at],
+      `insert into reactions (space_id, message_id, emoji, member_id, attribution, at, stream_offset)
+       values ($1, $2, $3, $4, $5::jsonb, $6, $7)
+       on conflict (space_id, message_id, emoji, member_id) do update set attribution = excluded.attribution, at = excluded.at, stream_offset = excluded.stream_offset`,
+      [reaction.spaceId, reaction.messageId, reaction.emoji, reaction.by.memberId, JSON.stringify(reaction.by), reaction.at, reaction.offset],
     );
   }
 
@@ -1171,7 +1173,10 @@ export class PgStore implements Store {
         `select * from (
            select r.space_id, r.message_id, r.emoji, max(r.at) as at,
                   json_agg(r.attribution order by r.at desc) as actors,
-                  max(r.at) > coalesce((select seen_at from activity_seen where member_id = $1), '') as unread
+                  bool_or(r.stream_offset > coalesce(case when m.thread_root is null
+                    then (select read_offset from space_read_marks where space_id = r.space_id and member_id = $1)
+                    else (select read_offset from thread_read_marks where space_id = r.space_id and root_message_id = m.thread_root and member_id = $1)
+                  end, 0) and r.at > coalesce((select seen_at from activity_seen where member_id = $1), '')) as unread
              from reactions r
              join messages m on m.space_id = r.space_id and m.id = r.message_id
             where r.space_id = any($2::text[]) and r.member_id <> $1 and m.deleted_at is null and m.author->>'memberId' = $1

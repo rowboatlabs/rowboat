@@ -42,7 +42,7 @@ const NEW_LINGER_MS = 5_000
 const NEW_FADE_MS = 800
 
 export function GeneralStream({
-    org, space, stream, presence, memberNames, onOpenThread, onOpenSession, onClose, visible = true, composeActive = true,
+    org, space, stream, presence, memberNames, onOpenThread, onOpenSession, onClose, visible = true, composeActive = true, showHeader = true,
 }: {
     org: OrgWithSpaces
     space: spaces.Space
@@ -63,6 +63,8 @@ export function GeneralStream({
     visible?: boolean
     /** Only the active conversation receives global profile-mention inserts. */
     composeActive?: boolean
+    /** The content strip already labels a lone stream; split panes retain their headings. */
+    showHeader?: boolean
 }) {
     const [seed, setSeed] = useState<{ text: string; nonce: number; append?: boolean } | null>(null)
     const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -677,6 +679,8 @@ export function GeneralStream({
         }
         rows.push(
             <MessageRow
+                orgId={org.id}
+                visible={visible}
                 key={message.id}
                 message={message}
                 memberNames={memberNames}
@@ -713,7 +717,7 @@ export function GeneralStream({
 
     return (
         <section className="flex-1 min-w-0 min-h-0 flex flex-col">
-            <div className="spaces-pane-header flex items-center gap-2.5 shrink-0 border-b border-border">
+            {showHeader && <div className="spaces-pane-header flex items-center gap-2.5 shrink-0 border-b border-border">
                 <span className="text-[15px] font-semibold">Messages</span>
                 <span className="flex-1" />
                 {stream.error && <span className="text-xs text-destructive truncate" title={stream.error}>messages unavailable</span>}
@@ -728,7 +732,7 @@ export function GeneralStream({
                         <X className="size-3.5" />
                     </button>
                 )}
-            </div>
+            </div>}
             <div className="relative flex-1 min-h-0 flex flex-col">
             <div
                 ref={scrollRef}

@@ -39,6 +39,72 @@
 }
 
 .spaces-navigation { background: var(--rowboat-panel-soft); }
+
+/* Content navigation is a thin strip; previews overlay rather than resize it. */
+.spaces-content-tabs {
+  display: flex;
+  flex-shrink: 0;
+  align-items: stretch;
+  gap: 16px;
+  min-height: 36px;
+  padding-inline: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.spaces-content-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 2px;
+  border-bottom: 2px solid transparent;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.spaces-content-tab:hover { color: var(--foreground); }
+.spaces-content-tab.is-selected { color: var(--foreground); border-bottom-color: var(--foreground); }
+.spaces-content-tab:focus-visible,
+.spaces-content-menu button:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.spaces-content-menu-row {
+  display: flex;
+  width: 100%;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 4px;
+  text-align: left;
+  font-size: 13px;
+  cursor: pointer;
+}
+.spaces-content-menu-row:hover, .spaces-content-menu-all:hover { background: var(--accent); }
+.spaces-content-menu-all {
+  width: 100%;
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+  padding: 9px 8px 5px;
+  text-align: left;
+  font-size: 12px;
+  cursor: pointer;
+}
+.spaces-content-menu[data-state="open"] { animation: spaces-menu-reveal 100ms ease-out; }
+.spaces-content-menu[data-state="closed"] { animation: none; }
+@keyframes spaces-menu-reveal {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.spaces-collection-filter { padding: 4px 8px; border-radius: 4px; font-size: 12px; color: var(--muted-foreground); cursor: pointer; }
+.spaces-collection-filter[aria-pressed="true"], .spaces-collection-filter:hover { color: var(--foreground); background: var(--accent); }
+.spaces-files-view { --spaces-pane-header: 40px; }
+@media (max-width: 520px) {
+  .spaces-content-tabs { gap: 8px; padding-inline: 8px; }
+  .spaces-content-tab { gap: 4px; }
+  .spaces-content-tab > svg:first-child { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spaces-content-menu[data-state="open"] { animation: none; }
+}
 .spaces-message-list { scroll-padding-block: 24px; }
 .spaces-message {
   gap: 12px;

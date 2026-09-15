@@ -529,7 +529,7 @@ function wireBus(): void {
                 setStream(k, {
                     messages: state.messages.map((m) =>
                         m.id === reaction.messageId
-                            ? { ...m, reactions: applyReaction(m.reactions, { emoji: reaction.emoji, memberId: reaction.by.memberId, action }) }
+                            ? { ...m, reactions: applyReaction(m.reactions, { emoji: reaction.emoji, memberId: reaction.by.memberId, action, offset: frame.offset }) }
                             : m,
                     ),
                 })

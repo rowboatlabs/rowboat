@@ -112,6 +112,7 @@ export interface StoredEvent {
  * per member+emoji, Slack semantics.
  */
 export interface StoredReaction {
+  offset: number;
   spaceId: string;
   messageId: string;
   emoji: string;

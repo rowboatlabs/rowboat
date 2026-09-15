@@ -11,6 +11,8 @@
 
 export type RailSelection =
     | { kind: 'general' }
+    | { kind: 'discussions' }
+    | { kind: 'files' }
     | { kind: 'thread'; rootMessageId: string }
     /** `fromThreadRootId` = opened from a thread (an artifact link) — the file view shows a crumb back to it. */
     | { kind: 'file'; assetId: string; fromThreadRootId?: string }
@@ -22,6 +24,7 @@ export type RailSelection =
 /** Stable key for history comparisons. */
 export function railKey(sel: RailSelection | undefined): string {
     if (!sel || sel.kind === 'general') return 'general'
+    if (sel.kind === 'discussions' || sel.kind === 'files') return sel.kind
     if (sel.kind === 'thread') return `thread:${sel.rootMessageId}`
     if (sel.kind === 'attachment') return `attachment:${sel.src}`
     if (sel.kind === 'whiteboard') return `whiteboard:${sel.assetId}`
@@ -40,6 +43,10 @@ export function readRailSelection(raw: unknown): RailSelection {
     const sel = raw as Record<string, unknown>
     const from = typeof sel.fromThreadRootId === 'string' ? { fromThreadRootId: sel.fromThreadRootId } : {}
     switch (sel.kind) {
+        case 'discussions':
+            return { kind: 'discussions' }
+        case 'files':
+            return { kind: 'files' }
         case 'general':
             return { kind: 'general' }
         case 'thread':

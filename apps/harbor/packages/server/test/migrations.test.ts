@@ -23,6 +23,25 @@ describe('schema migrations', () => {
     await db.close();
   });
 
+  it('backfills the latest add offset for existing reactions', async () => {
+    const db = await pgliteDb();
+    try {
+      await migrate(db);
+      await db.query(`alter table reactions drop column stream_offset`);
+      await db.query(`delete from schema_migrations where id = '021-reaction-read-offsets'`);
+      const by = { memberId: 'reader', actingMode: 'direct' };
+      await db.query(`insert into reactions (space_id, message_id, emoji, member_id, attribution, at)
+        values ('space', 'message', '✅', 'reader', $1::jsonb, '2026-09-15T10:00:00Z')`, [JSON.stringify(by)]);
+      for (const [offset, action] of [[11, 'added'], [12, 'removed'], [13, 'added']] as const) {
+        await db.query(`insert into events (space_id, stream_offset, at, event) values ('space', $1, '2026-09-15T10:00:00Z', $2::jsonb)`,
+          [offset, JSON.stringify({ type: 'reaction', action, reaction: { messageId: 'message', emoji: '✅', by } })]);
+      }
+      await migrate(db);
+      const rows = await db.query<{ stream_offset: string | number }>('select stream_offset from reactions');
+      expect(Number(rows[0]!.stream_offset)).toBe(13);
+    } finally { await db.close(); }
+  });
+
   it('is idempotent — a second run applies nothing and changes nothing', async () => {
     const db = await pgliteDb();
     await migrate(db);

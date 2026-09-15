@@ -123,7 +123,7 @@ describe.each([['memory'], ['postgres']] as const)('windowed reads (%s store)', 
     await ramnique.post(`/v1/spaces/${spaceId}/messages/${target.id}/reactions`, { emoji: '👍', action: 'add', actingMode: 'direct' });
     const res = await ramnique.get(`/v1/spaces/${spaceId}/threads/${rootId}?limit=2`);
     const hit = (res.body.messages as Message[]).find((m) => m.id === target.id);
-    expect(hit?.reactions).toEqual([{ emoji: '👍', memberIds: ['ramnique'] }]);
+    expect(hit?.reactions).toEqual([{ emoji: '👍', memberIds: ['ramnique'], lastOffset: expect.any(Number) }]);
   });
 
   it('listTopics always carries each topic rootMessage with its live reply denorm', async () => {

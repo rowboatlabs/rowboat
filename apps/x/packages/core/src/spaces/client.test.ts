@@ -191,15 +191,15 @@ describe('SpacesClient', () => {
     const messageId = started.message.id;
 
     const one = await gagan.reactToMessage(spaceId, messageId, { emoji: '👍', action: 'add', actingMode: 'direct' });
-    expect(one.reactions).toEqual([{ emoji: '👍', memberIds: ['gagan'] }]);
+    expect(one.reactions).toEqual([{ emoji: '👍', memberIds: ['gagan'], lastOffset: expect.any(Number) }]);
     const two = await ramnique.reactToMessage(spaceId, messageId, { emoji: '👍', action: 'add', actingMode: 'direct' });
-    expect(two.reactions).toEqual([{ emoji: '👍', memberIds: ['gagan', 'ramnique'] }]);
+    expect(two.reactions).toEqual([{ emoji: '👍', memberIds: ['gagan', 'ramnique'], lastOffset: expect.any(Number) }]);
 
     const { messages } = await gagan.listStream(spaceId);
     expect(messages.find((m) => m.id === messageId)?.reactions).toEqual(two.reactions);
 
     const removed = await gagan.reactToMessage(spaceId, messageId, { emoji: '👍', action: 'remove', actingMode: 'direct' });
-    expect(removed.reactions).toEqual([{ emoji: '👍', memberIds: ['ramnique'] }]);
+    expect(removed.reactions).toEqual([{ emoji: '👍', memberIds: ['ramnique'], lastOffset: expect.any(Number) }]);
   });
 
   it('deletion tombstones the message: author-only, body gone from reads', async () => {

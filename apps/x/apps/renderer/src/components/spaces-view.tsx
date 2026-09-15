@@ -18,10 +18,13 @@ import { GeneralStream } from '@/components/spaces/general-stream'
 import { ScheduledDialog } from '@/components/spaces/scheduled-dialog'
 import { SelectionCopy } from '@/components/spaces/selection-copy'
 import { ServerSwitcher } from '@/components/spaces/server-switcher'
-import { ServerOptionsMenu } from '@/components/spaces/server-options-menu'
 import { ServerSpaceNavigation } from '@/components/spaces-sidebar-section'
 import { ActivityView, type ActivityTarget } from '@/components/spaces/activity-view'
+import { SpaceRailSections } from '@/components/spaces/space-rail-sections'
 import { SpaceRail } from '@/components/spaces/space-rail'
+import { SpaceContentTabs } from '@/components/spaces/space-content-tabs'
+import { SpaceDiscussionsView } from '@/components/spaces/space-discussions-view'
+import { SpaceFilesView } from '@/components/spaces/space-files-view'
 import { SpaceSearch } from '@/components/spaces/space-search'
 import { railKey, type RailSelection } from '@/lib/spaces-selection'
 import { ThreadPane } from '@/components/spaces/thread-pane'
@@ -147,7 +150,6 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
             setSigningIn(false)
         }
     }
-    const [emptyShowArchived, setEmptyShowArchived] = useState(false)
 
     const selectedOrg = selection ? (orgs.find((o) => o.id === selection.orgId) ?? null) : null
     const selectedSpace = selection && selectedOrg ? (findSpace(selectedOrg, selection.spaceId) ?? null) : null
@@ -186,6 +188,7 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
                 onSwitchSpace={onSwitchSpace}
                 onOpenSession={onOpenSession}
                 onOpenActivity={onOpenActivity}
+                onOpenMessage={onOpenMessage}
                 active={active}
             />
         )
@@ -197,14 +200,16 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
                 <ServerSwitcher org={selectedOrg} onOpenSpace={onSwitchSpace} />
             </header>
             <div className="flex min-h-0 flex-1">
-            <aside className="w-64 shrink-0 overflow-y-auto border-r border-border bg-[var(--rowboat-panel-soft)] p-2">
-                <div className="flex h-8 items-center">
+            <aside className="w-64 shrink-0 border-r border-border bg-[var(--rowboat-panel-soft)]">
+                <SpaceRailSections orgId={selectedOrg.id} active={active} activityActive={selection?.view === 'activity'}
+                    onOpenMessage={onOpenMessage} onOpenActivity={onOpenActivity}>
+                <div className="flex h-8 shrink-0 items-center px-2">
                     <span className="flex-1 px-1 text-[13px] font-semibold text-muted-foreground">Spaces</span>
-                    <ServerOptionsMenu org={selectedOrg} showArchived={emptyShowArchived} onToggleArchived={() => setEmptyShowArchived((value) => !value)} onMenuOpenChange={() => {}} />
                 </div>
-                <ServerSpaceNavigation org={selectedOrg} spaceId="" onOpenSpace={onSwitchSpace} onOpenActivity={onOpenActivity}
-                    activityActive={selection?.view === 'activity'}
-                    onOpenDiscussion={() => {}} activeDiscussionCount={0} renderActiveDiscussions={() => null} />
+                <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+                    <ServerSpaceNavigation org={selectedOrg} spaceId="" onOpenSpace={onSwitchSpace} showDiscussions={false} />
+                </div>
+                </SpaceRailSections>
             </aside>
             {selection?.view === 'activity' && onOpenMessage ? (
                 <ActivityView org={selectedOrg} active={active} onOpenMessage={onOpenMessage} />
@@ -264,7 +269,7 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
 // One space: header across the top, then the space rail | the selected thing
 // ---------------------------------------------------------------------------
 
-function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSession, onOpenActivity, active = true }: {
+function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSession, onOpenActivity, onOpenMessage, active = true }: {
     org: OrgWithSpaces
     space: spaces.Space
     selection: RailSelection
@@ -272,11 +277,15 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     /** The quick switcher can land on another space entirely. */
     onSwitchSpace: (orgId: string, spaceId: string, selection?: RailSelection) => void
     onOpenActivity?: (orgId: string) => void
+    onOpenMessage?: (target: ActivityTarget) => void
     onOpenSession?: (sessionId: string) => void
     /** False while the Spaces view is kept mounted but hidden. */
     active?: boolean
 }) {
     const [entries, setEntries] = useState<spaces.SpacesAssetEntry[]>([])
+    const [filesLoaded, setFilesLoaded] = useState(false)
+    const [filesError, setFilesError] = useState<string | null>(null)
+    const collectionOpen = selection.kind === 'discussions' || selection.kind === 'files'
     const entryById = useMemo(() => new Map(entries.map((e) => [e.id, e])), [entries])
     // The org listing (module store): resolves a canonical link's org address
     // + space to an org this install is in.
@@ -328,11 +337,15 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
             .then((assetsRes) => {
                 if (cancelled) return
                 setEntries(assetsRes.entries)
+                setFilesLoaded(true)
+                setFilesError(null)
                 // The listing store (the @ menus, open-board context) reads this listing too.
                 noteListingFromEntries(org.id, space.id, assetsRes.entries)
             })
-            .catch(() => {
-                // org unreachable; panes show their own error states
+            .catch((error) => {
+                if (cancelled) return
+                setFilesLoaded(true)
+                setFilesError(error instanceof Error ? error.message : 'Could not load files')
             })
         return () => {
             cancelled = true
@@ -564,6 +577,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // right; anything from Chat reopens the left — and, narrow, closes the
     // doc so the chat actually shows.
     const placeSelection = (next: RailSelection) => {
+        if (next.kind === 'discussions' || next.kind === 'files') return
         if (next.kind === 'file' || next.kind === 'whiteboard') {
             setDocKey(next.assetId)
             setDocIsBoard(next.kind === 'whiteboard' || spaces.isWhiteboardPath(entryById.get(next.assetId)?.path ?? ''))
@@ -654,7 +668,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // rail stays where it is — it is a sidebar, not a flyout.
     const select = (next: RailSelection) => {
         onSelect(next)
-        analytics.spacesTabViewed(next.kind === 'general' ? 'general' : (next.kind === 'file' || next.kind === 'attachment') ? 'files' : next.kind === 'whiteboard' ? 'whiteboard' : 'topics')
+        analytics.spacesTabViewed(next.kind === 'general' ? 'general' : (next.kind === 'file' || next.kind === 'files' || next.kind === 'attachment') ? 'files' : next.kind === 'whiteboard' ? 'whiteboard' : 'topics')
         placeSelection(next)
     }
     const openFile = (assetId: string) => select({ kind: 'file', assetId })
@@ -1036,37 +1050,35 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
 
             <div ref={paneRef} className="flex-1 min-h-0 flex">
                 <SpaceRail
+                    onOpenMessage={onOpenMessage}
+                    active={active}
                     onOpenActivity={onOpenActivity}
                     org={org}
                     onOpenSpace={(orgId, spaceId) => {
                         if (orgId === org.id && spaceId === space.id) select({ kind: 'general' })
                         else onSwitchSpace(orgId, spaceId)
                     }}
-                    onOpenDiscussion={(spaceId, next) => {
-                        if (spaceId === space.id) select(next)
-                        else onSwitchSpace(org.id, spaceId, next)
-                    }}
-                    orgId={org.id}
                     spaceId={space.id}
-                    selfMemberId={org.memberId}
-                    stream={stream}
-                    topics={feed.topics}
-                    changeSets={feed.changeSets}
-                    entries={entries}
-                    draftFolders={draftFolders}
-                    presence={presence}
-                    unreadAssetIds={unreadAssetIds}
-                    selection={selection}
-                    onSelect={select}
-                    onCreateFile={createNamedFile}
-                    onCreateBoard={createBoard}
-                    onUploadFiles={setUploadFiles}
-                    onOpenTrash={() => setTrashOpen(true)}
-                    onAddFolder={addFolder}
-                    onRemoveFolder={removeFolder}
                     open={railOpen}
                     onTogglePin={toggleRailPin}
                 />
+                <div className="flex min-w-0 min-h-0 flex-1 flex-col">
+                    <SpaceContentTabs orgId={org.id} spaceId={space.id} direct={isDirect} topics={feed.topics}
+                        entries={entries} unreadAssetIds={unreadAssetIds} selection={selection} memberNames={memberNames}
+                        spaceNames={spaceNames} onSelect={select} topicsLoaded={feed.loaded} filesLoaded={filesLoaded} filesError={filesError} />
+                    {selection.kind === 'discussions' && <SpaceDiscussionsView orgId={org.id} spaceId={space.id}
+                        topics={feed.topics} direct={isDirect} loaded={feed.loaded} memberNames={memberNames} spaceNames={spaceNames}
+                        presence={presence} onOpen={(rootMessageId) => select({ kind: 'thread', rootMessageId })} />}
+                    {selection.kind === 'files' && <>
+                        {filesError && <div role="alert" className="flex items-center gap-3 px-5 py-2 text-xs text-destructive">
+                            Could not refresh files. <button type="button" className="underline" onClick={() => setRefreshTick((tick) => tick + 1)}>Retry</button>
+                        </div>}
+                        {!filesLoaded && <p className="px-5 py-2 text-xs text-muted-foreground">Loading files…</p>}
+                        <SpaceFilesView orgId={org.id} spaceId={space.id} entries={entries} draftFolders={draftFolders}
+                            unreadAssetIds={unreadAssetIds} selection={selection} onSelect={select} onCreateFile={createNamedFile}
+                            onCreateBoard={createBoard} onUploadFiles={setUploadFiles} onOpenTrash={() => setTrashOpen(true)}
+                            onAddFolder={addFolder} onRemoveFolder={removeFolder} />
+                    </>}
                 {/* The columns. Chat on the left — the stream, or an open
                     thread beside it when there is room. The stream never
                     unmounts while the space is open — a thread, or a doc
@@ -1074,7 +1086,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                     the right holds a file or a board. Both keep fixed tree
                     positions (the divider slot stays in the array) so going
                     one ⇄ two columns never remounts either surface. */}
-                <div ref={columnsRef} className="flex flex-1 min-w-0 min-h-0">
+                <div ref={columnsRef} className={cn('flex-1 min-w-0 min-h-0', collectionOpen ? 'hidden' : 'flex')}>
                 <div
                     ref={chatRef}
                     style={chatAnim ? columnStyle(chatAnim) : undefined}
@@ -1093,8 +1105,9 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                             onOpenThread={(id) => select({ kind: 'thread', rootMessageId: id })}
                             onOpenSession={onOpenSession}
                             onClose={split ? closeChat : undefined}
-                            visible={active && showChat && (!chatRootId || threadBesideStream)}
+                            visible={active && !collectionOpen && showChat && (!chatRootId || threadBesideStream)}
                             composeActive={!chatRootId}
+                            showHeader={threadBesideStream || split || !!stream.error}
                         />
                     </div>
                     {threadBesideStream && (
@@ -1129,7 +1142,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                 artifactsRailOpen={artifactsRailOpen}
                                 onToggleArtifactsRail={toggleArtifactsRail}
                                 onFolding={setFolding}
-                                visible={active && showChat}
+                                visible={active && !collectionOpen && showChat}
                             />
                         </section>
                     ) : null}
@@ -1174,7 +1187,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                     space={space}
                                     boardId={boardId}
                                     memberNames={memberNames}
-                                    active={active}
+                                    active={active && !collectionOpen}
                                     boards={boards.map((b) => ({ id: b.id, path: b.path }))}
                                     onSelectBoard={(assetId) => select({ kind: 'whiteboard', assetId })}
                                     onCreateBoard={createBoard}
@@ -1216,6 +1229,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                     </div>
                     </aside>
                 ) : null}
+                </div>
                 </div>
             </div>
             {scheduledOpen && <ScheduledDialog orgId={org.id} spaceId={space.id} onClose={() => setScheduledOpen(false)} />}

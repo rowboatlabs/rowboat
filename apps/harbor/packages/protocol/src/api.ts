@@ -147,7 +147,8 @@ export const ActivityItem = z.object({
   /**
    * Message kinds: the message is past your stream mark (a root) or your
    * thread mark (a reply) — reading in place clears it, one read-state
-   * truth. Reactions: after your activity-seen mark (`markActivitySeen`).
+   * truth. Reactions use their event offsets against that same mark.
+   * Legacy activity-seen timestamps remain honored for older clients.
    */
   unread: z.boolean(),
 });
@@ -740,7 +741,7 @@ export const routes = {
    * paged (the first time-ordered cross-space pager — `cursor` is opaque,
    * from the previous page's `nextCursor`). `kinds` narrows to a
    * comma-separated subset; `spaceId` to one space; `unread=true` to what
-   * the read marks (and the activity-seen mark, for reactions) say is unread.
+   * the conversation read marks say is unread (legacy reaction seen marks are also honored).
    */
   activity: {
     method: 'GET',

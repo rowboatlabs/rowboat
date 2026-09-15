@@ -156,3 +156,13 @@ describe('mergeMessages — windowed pages, echoes, and resyncs share one merge'
         expect(mergeMessages(win, [msg({ id: 'a', offset: 1 })])).toEqual(win)
     })
 })
+
+
+it('carries live reaction offsets without regressing on replay', () => {
+    const first = applyReaction([], { emoji: '✅', memberId: 'other', action: 'added', offset: 102 })
+    expect(first[0]?.lastOffset).toBe(102)
+    const replay = applyReaction(first, { emoji: '✅', memberId: 'other', action: 'added', offset: 99 })
+    expect(replay[0]?.lastOffset).toBe(102)
+    const next = applyReaction(first, { emoji: '✅', memberId: 'another', action: 'added', offset: 105 })
+    expect(next[0]?.lastOffset).toBe(105)
+})

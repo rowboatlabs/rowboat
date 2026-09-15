@@ -7376,6 +7376,7 @@ function App() {
             }}
           >
             <SidebarContentPanel
+              onOpenSpaceMessage={(target) => void navigateToView({ type: 'spaces', ...target })}
               {...sidebarNavProps}
               onSelectFile={toggleExpand}
               onOpenAgent={(slug) => { setBgTaskInitialSlug(slug); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}

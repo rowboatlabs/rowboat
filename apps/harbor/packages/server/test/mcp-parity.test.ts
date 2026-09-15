@@ -219,7 +219,7 @@ describe.each([['memory'], ['postgres']] as const)('agent face parity (%s store)
     const posted = await call<{ messageId: string }>(harshAgent, 'post_message', { spaceId, body: 'shipped SSO' });
     const messageId = posted.messageId;
     const added = await call<{ message: Message }>(ramAgent, 'react', { spaceId, messageId, emoji: '🎉', action: 'add' });
-    expect(added.message.reactions).toEqual([{ emoji: '🎉', memberIds: ['ramnique'] }]);
+    expect(added.message.reactions).toEqual([{ emoji: '🎉', memberIds: ['ramnique'], lastOffset: expect.any(Number) }]);
     const events = await harbor.service.eventsAfter(spaceId, 0);
     const reaction = events.filter((e) => e.event.type === 'reaction').at(-1)!;
     expect((reaction.event as any).reaction.by).toEqual({ memberId: 'ramnique', actingMode: 'agent', agentName: 'Rowboat' });

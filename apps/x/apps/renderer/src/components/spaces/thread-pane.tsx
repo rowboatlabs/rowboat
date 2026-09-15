@@ -850,6 +850,8 @@ export function ThreadPane({
         }
         rows.push(
             <MessageRow
+                orgId={org.id}
+                visible={visible}
                 key={message.id}
                 message={message}
                 memberNames={memberNames}

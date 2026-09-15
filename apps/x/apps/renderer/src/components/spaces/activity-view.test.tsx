@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { spaces } from '@x/shared'
 
@@ -14,7 +14,9 @@ vi.mock('@/components/spaces/atoms', () => ({
 }))
 vi.mock('@/components/spaces/message-row', () => ({ DayDivider: ({ label }: { label: string }) => <div>{label}</div> }))
 
-import { ActivityView, actorLabel, excerptOf, reasonLabel } from './activity-view'
+import { RecentActivity } from './recent-activity'
+import { ActivityView } from './activity-view'
+import { actorLabel, excerptOf, reasonLabel } from '@/lib/spaces-activity'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 
 const org = { id: 'org-1', name: 'Rowboat Labs', memberId: 'ramnique', spaces: [], directs: [] } as unknown as OrgWithSpaces
@@ -32,6 +34,9 @@ const page: spaces.SpacesActivityPage = {
     seenAt: null,
     names: { ramnique: 'Ramnique', harsh: 'Harsh', arjun: 'Arjun' },
 }
+
+const feed = vi.hoisted(() => ({ listener: null as ((event: spaces.SpacesBusEvent) => void) | null }))
+vi.mock('@/lib/spaces-feed', () => ({ subscribeSpacesFeed: (listener: (event: spaces.SpacesBusEvent) => void) => { feed.listener = listener; return () => { feed.listener = null } } }))
 
 const invoke = vi.fn()
 beforeEach(() => {
@@ -77,8 +82,8 @@ describe('ActivityView', () => {
         expect(onOpenMessage).toHaveBeenCalledWith({ orgId: 'org-1', spaceId: 'road', rail: { kind: 'thread', rootMessageId: 'root' }, messageId: '2' })
         fireEvent.click(screen.getByText('got a minute?'))
         expect(onOpenMessage).toHaveBeenLastCalledWith({ orgId: 'org-1', spaceId: 'dm-harsh', rail: { kind: 'general' }, messageId: '4' })
-        // Looking here reads the reactions: the seen mark moves to the newest unread one.
-        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:markActivitySeen', { orgId: 'org-1', at: now }))
+        // Listing Activity isn't viewing the original message's reactions.
+        expect(invoke).not.toHaveBeenCalledWith('spaces:markActivitySeen', expect.anything())
     })
 
     it('tabs narrow the kinds; unread-only narrows further', async () => {
@@ -94,5 +99,65 @@ describe('ActivityView', () => {
         render(<ActivityView org={org} active={false} onOpenMessage={vi.fn()} />)
         await screen.findByText('hey @Ramnique look')
         expect(invoke).not.toHaveBeenCalledWith('spaces:markActivitySeen', expect.anything())
+    })
+})
+
+
+describe('RecentActivity', () => {
+    it('shows the same events, opens DM and discussion messages, and leaves seen state alone', async () => {
+        const onOpenMessage = vi.fn()
+        const onOpenActivity = vi.fn()
+        render(<RecentActivity orgId={org.id} onOpenMessage={onOpenMessage} onOpenActivity={onOpenActivity} />)
+        await screen.findByText('hey @Ramnique look')
+        expect(invoke).toHaveBeenCalledWith('spaces:getActivity', { orgId: org.id, limit: 45 })
+        fireEvent.click(screen.getByText('done'))
+        expect(onOpenMessage).toHaveBeenCalledWith({ orgId: org.id, spaceId: 'road', rail: { kind: 'thread', rootMessageId: 'root' }, messageId: '2' })
+        fireEvent.click(screen.getByText('got a minute?'))
+        expect(onOpenMessage).toHaveBeenLastCalledWith({ orgId: org.id, spaceId: 'dm-harsh', rail: { kind: 'general' }, messageId: '4' })
+        fireEvent.click(screen.getByRole('button', { name: 'View all activity' }))
+        expect(onOpenActivity).toHaveBeenCalledWith(org.id)
+        expect(invoke.mock.calls.every(([channel]) => channel === 'spaces:getActivity')).toBe(true)
+    })
+
+    it('keeps the newest 45 events in server order', async () => {
+        invoke.mockResolvedValue({ ...page, items: Array.from({ length: 50 }, (_, i) => ({
+            ...page.items[0], id: `event-${i}`, message: msg(`msg-${i}`, `Event ${i}`),
+        })) })
+        render(<RecentActivity orgId={org.id} onOpenMessage={vi.fn()} />)
+        await screen.findByText('Event 0')
+        expect(screen.getAllByRole('listitem')).toHaveLength(45)
+        expect(screen.getAllByRole('listitem')[44].textContent).toContain('Event 44')
+        expect(screen.queryByText('Event 45')).toBeNull()
+    })
+
+    it('ignores stale requests after switching orgs or hiding the view', async () => {
+        let resolveOld!: (value: spaces.SpacesActivityPage) => void
+        invoke.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve }))
+        const view = render(<RecentActivity orgId={org.id} onOpenMessage={vi.fn()} />)
+        view.rerender(<RecentActivity orgId="other" onOpenMessage={vi.fn()} />)
+        await screen.findByText('done')
+        await act(async () => resolveOld({ ...page, items: [] }))
+        expect(screen.getByText('done')).toBeTruthy()
+        view.rerender(<RecentActivity orgId="other" active={false} onOpenMessage={vi.fn()} />)
+        expect(feed.listener).toBeNull()
+        expect(invoke).toHaveBeenCalledTimes(2)
+    })
+
+    it('coalesces live events for this org and cleans up pending refreshes', async () => {
+        vi.useFakeTimers()
+        try {
+            const view = render(<RecentActivity orgId={org.id} onOpenMessage={vi.fn()} />)
+            await act(async () => {})
+            const notify = (orgId: string) => feed.listener?.({ orgId, frame: { kind: 'notify' } } as spaces.SpacesBusEvent)
+            act(() => { notify('other'); vi.advanceTimersByTime(1000) })
+            expect(invoke).toHaveBeenCalledTimes(1)
+            act(() => { notify(org.id); notify(org.id) })
+            await act(async () => { vi.advanceTimersByTime(1000) })
+            expect(invoke).toHaveBeenCalledTimes(2)
+            act(() => notify(org.id))
+            view.unmount()
+            await act(async () => { vi.advanceTimersByTime(1000) })
+            expect(invoke).toHaveBeenCalledTimes(2)
+        } finally { vi.useRealTimers() }
     })
 })
