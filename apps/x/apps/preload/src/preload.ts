@@ -70,7 +70,7 @@ contextBridge.exposeInMainWorld('ipc', ipc);
 // polyfilled process.env carries the main process's environment (including the
 // login-shell merge), so flags resolve synchronously before any renderer code.
 contextBridge.exposeInMainWorld('featureFlags', {
-  spaces: flags.spacesEnabled(process.env),
+  spaces: flags.spacesEnabled(),
 });
 
 contextBridge.exposeInMainWorld('electronUtils', {
