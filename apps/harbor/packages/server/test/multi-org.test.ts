@@ -224,9 +224,9 @@ describe('apex face (self-serve org creation)', () => {
     expect(me.body.member.role).toBe('admin');
     expect(me.body.member.id).toBe(created.body.member.id);
 
-    // Landing area: a Main space with a welcome README, attributed to the founder.
+    // Landing area: a general space with a welcome README, attributed to the founder.
     const spaces = (await http('roadboard.spaces.test', token).get('/v1/spaces')).body.spaces;
-    expect(spaces.map((s: any) => s.name)).toEqual(['Main']);
+    expect(spaces.map((s: any) => s.name)).toEqual(['general']);
     const entries = (await http('roadboard.spaces.test', token).get(`/v1/spaces/${spaces[0].id}/assets`)).body.entries;
     expect(entries.map((e: any) => e.path)).toEqual(['README.md']);
     const readme = await http('roadboard.spaces.test', token).get(
