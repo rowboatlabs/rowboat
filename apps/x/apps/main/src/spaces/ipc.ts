@@ -3,6 +3,7 @@ import path from 'node:path';
 import { BrowserWindow, dialog, shell } from 'electron';
 import { ipc, spaces as spacesShared } from '@x/shared';
 import * as orgs from '@x/core/dist/spaces/orgs.js';
+import { SpaceSubscriptions } from '@x/core/dist/spaces/subscriptions.js';
 import * as blobCache from './blob-cache.js';
 import * as spacesOAuth from '@x/core/dist/spaces/oauth.js';
 import { oauthConnectBus } from '@x/core/dist/auth/connector-events.js';
@@ -135,10 +136,10 @@ function broadcastSpacesEvent(event: spacesShared.SpacesBusEvent): void {
 }
 
 // One core-level live subscription per (org, space), fanned out to all windows.
-// The renderer's afterOffset drives replay on first subscribe; core's
-// SpacesLive owns reconnect + resume from the last seen offset after that.
-// Each entry remembers WHICH live client it subscribed on (see subscribeSpace).
-const liveSubscriptions = new Map<string, { live: unknown; unsubscribe: () => void }>();
+// The renderer's afterOffset drives replay on first subscribe; after that the
+// registry tracks each entry's resume point and re-subscribes on a fresh
+// client whenever core replaces an org's socket (core/spaces/subscriptions).
+const subscriptions = new SpaceSubscriptions({ getLive: orgs.getLive, onRuntimeReset: orgs.onRuntimeReset });
 
 /**
  * Spaces IPC handlers, exported as a plain object and spread into the main
@@ -201,12 +202,7 @@ export const spacesIpcHandlers: SpacesHandlers = {
   },
 
   'spaces:removeOrg': async (_event, args) => {
-    for (const [key, entry] of liveSubscriptions) {
-      if (key.startsWith(`${args.orgId}/`)) {
-        entry.unsubscribe();
-        liveSubscriptions.delete(key);
-      }
-    }
+    subscriptions.dropOrg(args.orgId);
     await orgs.removeOrg(args.orgId);
     return { success: true };
   },
@@ -481,27 +477,12 @@ export const spacesIpcHandlers: SpacesHandlers = {
   },
 
   'spaces:subscribeSpace': async (_event, args) => {
-    const key = `${args.orgId}/${args.spaceId}`;
-    const live = orgs.getLive(args.orgId);
-    const cached = liveSubscriptions.get(key);
-    // Instance check: a re-auth (upsertOAuthOrg) replaces the org's live
-    // client; a subscription cached on the dead one would eat frames forever.
-    if (!cached || cached.live !== live) {
-      cached?.unsubscribe();
-      const unsubscribe = live.subscribe(
-        args.spaceId,
-        (frame) => broadcastSpacesEvent({ orgId: args.orgId, frame }),
-        args.afterOffset,
-      );
-      liveSubscriptions.set(key, { live, unsubscribe });
-    }
+    subscriptions.subscribe(args.orgId, args.spaceId, (frame) => broadcastSpacesEvent({ orgId: args.orgId, frame }), args.afterOffset);
     return { success: true };
   },
 
   'spaces:unsubscribeSpace': async (_event, args) => {
-    const key = `${args.orgId}/${args.spaceId}`;
-    liveSubscriptions.get(key)?.unsubscribe();
-    liveSubscriptions.delete(key);
+    subscriptions.unsubscribe(args.orgId, args.spaceId);
     return { success: true };
   },
 

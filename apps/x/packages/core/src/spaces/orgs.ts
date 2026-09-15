@@ -301,7 +301,7 @@ export function orgForSpacesMcpServerName(serverName: string): OrgRecord | null 
   return null;
 }
 
-interface OrgRuntime {
+export interface OrgRuntime {
   client: SpacesClient;
   live: SpacesLive;
 }
@@ -472,12 +472,34 @@ export interface ManagedOrgListing {
   memberId: string;
 }
 
+type RuntimeResetListener = (orgId: string) => void;
+const runtimeResetListeners = new Set<RuntimeResetListener>();
+
+/**
+ * An org's live client was closed and discarded — a re-auth, a removal, a
+ * record whose address or identity changed — and the next getLive builds a
+ * fresh one. Hosts that hold per-space subscriptions re-subscribe on it: a
+ * subscription left on the dead client swallows live frames forever while
+ * member frames keep arriving on the new one (the 2026-09-15 silent stream).
+ */
+export function onRuntimeReset(listener: RuntimeResetListener): () => void {
+  runtimeResetListeners.add(listener);
+  return () => {
+    runtimeResetListeners.delete(listener);
+  };
+}
+
 function resetRuntime(orgId: string): void {
   const runtime = runtimes.get(orgId);
-  if (runtime) {
-    runtime.live.close();
-    runtimes.delete(orgId);
-  }
+  if (!runtime) return;
+  runtime.live.close();
+  runtimes.delete(orgId);
+  for (const listener of runtimeResetListeners) listener(orgId);
+}
+
+/** Test seam: install a runtime without a socket, so reset behaviour is observable offline. */
+export function setRuntimeForTests(orgId: string, runtime: OrgRuntime): void {
+  runtimes.set(orgId, runtime);
 }
 
 /**
@@ -501,6 +523,15 @@ export function upsertSessionOrg(input: {
       o.auth.kind !== 'dev' &&
       ((input.serverOrgId && o.serverOrgId === input.serverOrgId) || o.baseUrl === baseUrl),
   );
+  // The live socket turns over only when something it depends on changed.
+  // The apex lists us again on every refresh (listOrgs, at most every 30s),
+  // and an unchanged record must not close a socket carrying subscriptions.
+  const changed =
+    existing !== undefined &&
+    (existing.baseUrl !== baseUrl ||
+      existing.auth.kind !== 'session' ||
+      existing.auth.issuer !== input.issuer ||
+      existing.auth.memberId !== input.memberId);
   const record: OrgRecord = existing ?? {
     id: `org-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
     name: input.name,
@@ -515,7 +546,7 @@ export function upsertSessionOrg(input: {
   if (input.serverOrgId) record.serverOrgId = input.serverOrgId;
   if (!existing) config.orgs.push(record);
   writeConfig(config);
-  resetRuntime(record.id);
+  if (changed) resetRuntime(record.id);
   return record;
 }
 
