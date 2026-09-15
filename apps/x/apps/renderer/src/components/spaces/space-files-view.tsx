@@ -7,10 +7,11 @@ import { FileTree } from '@/components/spaces/files-tab'
 import type { RailSelection } from '@/lib/spaces-selection'
 
 /** Full-space file browser. Retains the tree's creation, move, rename and trash actions. */
-export function SpaceFilesView({ orgId, spaceId, entries, draftFolders, unreadAssetIds, selection, onSelect,
+export function SpaceFilesView({ orgId, orgAddress, spaceId, entries, draftFolders, unreadAssetIds, selection, onSelect,
     onCreateFile, onCreateBoard, onUploadFiles, onOpenTrash, onAddFolder, onRemoveFolder,
 }: {
     orgId: string
+    orgAddress: string
     spaceId: string
     entries: spaces.SpacesAssetEntry[]
     draftFolders: readonly string[]
@@ -108,6 +109,7 @@ export function SpaceFilesView({ orgId, spaceId, entries, draftFolders, unreadAs
                     <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3">
                         <FileTree
                             orgId={orgId}
+                            orgAddress={orgAddress}
                             spaceId={spaceId}
                             entries={entries}
                             draftFolders={draftFolders}

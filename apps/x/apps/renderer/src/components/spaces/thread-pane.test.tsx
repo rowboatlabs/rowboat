@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { spaces } from '@x/shared'
@@ -14,7 +14,12 @@ import type { SpacePresence } from '@/hooks/use-space-chat'
 
 vi.mock('@/components/spaces/composer', () => ({ Composer: () => null }))
 vi.mock('@/components/spaces/message-row', () => ({
-    MessageRow: ({ message }: { message: { id: string; body: string } }) => <div data-mid={message.id}>{message.body}</div>,
+    MessageRow: ({ message, onCopyLink }: { message: spaces.Message; onCopyLink?: (message: spaces.Message) => void }) => (
+        <div data-mid={message.id}>
+            {message.body}
+            {onCopyLink && <button onClick={() => onCopyLink(message)}>Copy link to {message.id}</button>}
+        </div>
+    ),
     NewDivider: () => null,
     TypingIndicator: () => null,
 }))
@@ -150,6 +155,21 @@ function grow(box: { scrollHeight: number }, by: number) {
         for (const cb of resizeCallbacks) cb()
     })
 }
+
+it('wires a copy action for each reply that links to the reply, not its thread root', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    const previous = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    try {
+        mount()
+        fireEvent.click(await screen.findByRole('button', { name: 'Copy link to r2' }))
+        await waitFor(() => expect(writeText).toHaveBeenCalledWith('https://org.example/s/space/m/r2'))
+        expect(toast).toHaveBeenCalledWith('Link copied', 'success')
+    } finally {
+        if (previous) Object.defineProperty(navigator, 'clipboard', previous)
+        else Reflect.deleteProperty(navigator, 'clipboard')
+    }
+})
 
 describe('ThreadPane scroll position', () => {
     it('opens on the newest replies and stays pinned there while the content keeps growing', async () => {

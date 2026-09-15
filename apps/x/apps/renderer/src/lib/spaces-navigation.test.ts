@@ -62,6 +62,7 @@ describe('returning to Spaces', () => {
 
 describe('org link landings → app deep links', () => {
     it('reads the org address and whichever target the landing named', () => {
+        expect(parseSpacesLink('rowboat://open?type=spaces&org=acme.rowboat.space')).toEqual({ orgAddress: 'acme.rowboat.space' })
         expect(parseSpacesLink('rowboat://open?type=spaces&spaceId=S1&org=acme.rowboat.space')).toEqual({ orgAddress: 'acme.rowboat.space', spaceId: 'S1' })
         expect(parseSpacesLink('rowboat://open?type=spaces&spaceId=S1&messageId=M1&org=acme.rowboat.space')).toEqual({ orgAddress: 'acme.rowboat.space', spaceId: 'S1', messageId: 'M1' })
         // The /join landing: an invite to join, not a place to go.

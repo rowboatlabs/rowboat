@@ -1,5 +1,7 @@
 import { useState } from 'react'
-import { Check, ChevronsUpDown, LogIn, Plus, Trash2 } from 'lucide-react'
+import { orgUrl } from '@x/shared/dist/spaces.js'
+import { copySpacesLink } from '@/lib/spaces-copy-link'
+import { Check, ChevronsUpDown, Link as LinkIcon, LogIn, Plus, Trash2 } from 'lucide-react'
 import { OrgMonogram } from '@/components/spaces/atoms'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
@@ -42,6 +44,8 @@ export function ServerSwitcher({ org, onOpenSpace, onMenuOpenChange }: {
                     <span className="min-w-0 flex-1 truncate">{server.name}</span>
                     {server.id === org.id && <Check className="size-4 shrink-0" aria-label="Active server" />}
                 </DropdownMenuItem>)}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => void copySpacesLink(orgUrl(org.address))}><LinkIcon className="size-4" /> Copy server link</DropdownMenuItem>
                 <DropdownMenuSeparator />
                 {/* The dialogs are hosted once in App (lib/server-dialog.ts); a finished one lands in the new server itself. */}
                 <DropdownMenuItem onSelect={() => openServerDialog({ kind: 'create' })}><Plus className="size-4" /> Create a server</DropdownMenuItem>

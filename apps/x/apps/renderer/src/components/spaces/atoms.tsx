@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react'
-import { AtSign, Copy, Mail, MessageSquare } from 'lucide-react'
+import { AtSign, Copy, Link as LinkIcon, Mail, MessageSquare } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -7,9 +7,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useMemberNames, useSpaceProfiles } from '@/components/spaces/member-text'
 import { useSpaceNav, useSpaceRefs } from '@/components/spaces/space-nav'
 import { requestComposeInsert } from '@/lib/spaces-compose'
-import { mentionToken } from '@x/shared/dist/spaces.js'
+import { memberUrl, mentionToken } from '@x/shared/dist/spaces.js'
 import { avatarColorClass, initials, orgMonogram } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
+import { copySpacesLink } from '@/lib/spaces-copy-link'
 
 // Shared atoms for the Spaces surfaces: identity visuals, the segmented
 // control, and the @rowboat trigger. The server dialogs live in server-dialogs.tsx.
@@ -120,6 +121,15 @@ export function MemberProfilePopover({ id, children }: { id: string; children: R
                         >
                             <AtSign className="size-3 shrink-0" />
                             <span className="truncate">Mention</span>
+                        </button>
+                    )}
+                    {refs && (
+                        <button
+                            type="button"
+                            onClick={() => void copySpacesLink(memberUrl(refs.orgAddress, id))}
+                            className="flex items-center gap-2 rounded-md px-1 py-0.5 text-left hover:bg-accent hover:text-foreground"
+                        >
+                            <LinkIcon className="size-3 shrink-0" /> Copy member link
                         </button>
                     )}
                     <button

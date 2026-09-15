@@ -318,6 +318,7 @@ export {
   relabelMentions,
   MENTION_TOKEN_RE,
   // The org link grammar (protocol ids.ts): builders and the one parser.
+  orgUrl,
   spaceUrl,
   assetUrl,
   messageUrl,

@@ -230,6 +230,7 @@ export function buildHttpApp(deps: {
       `<main><p>This link opens in Rowboat.</p><a class="b" href="${deep}">Open in Rowboat</a></main>` +
       `<script>location.replace(${JSON.stringify(deep)})</script>`;
   };
+  app.get('/', (c) => c.html(landing(new URLSearchParams())));
   app.get('/s/:spaceId', (c) => c.html(landing(new URLSearchParams({ spaceId: c.req.param('spaceId') }))));
   app.get('/s/:spaceId/m/:messageId', (c) =>
     c.html(landing(new URLSearchParams({ spaceId: c.req.param('spaceId'), messageId: c.req.param('messageId') }))),

@@ -1,8 +1,10 @@
 import { MESSAGE_PROSE } from '@/components/spaces/message-prose'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
-import { Anchor, Archive, ArchiveRestore, ArrowDown, ArrowLeft, ArrowUp, Bell, BellOff, Bot, FileText, Loader2, MessageSquareOff, MoreHorizontal, Maximize2, Minimize2, Paperclip, Pencil, ShieldAlert, Square, Tag, Unlink, X } from 'lucide-react'
+import { Anchor, Archive, ArchiveRestore, ArrowDown, ArrowLeft, ArrowUp, Bell, BellOff, Bot, FileText, Link as LinkIcon, Loader2, MessageSquareOff, MoreHorizontal, Maximize2, Minimize2, Paperclip, Pencil, ShieldAlert, Square, Tag, Unlink, X } from 'lucide-react'
 import type { spaces } from '@x/shared'
+import { messageUrl } from '@x/shared/dist/spaces.js'
+import { copySpacesLink } from '@/lib/spaces-copy-link'
 import { Button } from '@/components/ui/button'
 import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
@@ -858,6 +860,7 @@ export function ThreadPane({
                 spaceNames={spaceNames}
                 continuation={isContinuation(prev, message)}
                 selfMemberId={org.memberId}
+                onCopyLink={(m) => void copySpacesLink(messageUrl(org.address, space.id, m.id))}
                 onReact={(m, emoji) => void toggleReaction(m, emoji)}
                 onDelete={(m) => void deleteMessage(m)}
                 onEdit={(m, body) => void editMessage(m, body)}
@@ -959,6 +962,10 @@ export function ThreadPane({
                         <Button variant="ghost" size="icon" aria-label="Thread options" className="size-8 shrink-0 text-muted-foreground"><MoreHorizontal className="size-4" /></Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
+                        <DropdownMenuItem onSelect={() => void copySpacesLink(messageUrl(org.address, space.id, rootMessageId))}>
+                            <LinkIcon className="size-3.5 mr-2" /> Copy link
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
                         {topic ? (
                             <>
                                 <DropdownMenuItem onClick={() => setEditingTitle(topic.title)}>

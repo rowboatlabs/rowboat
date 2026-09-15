@@ -8,7 +8,6 @@ import { Button } from '@/components/ui/button'
 import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { MemberAvatar, MemberProfilePopover, OrgMonogram } from '@/components/spaces/atoms'
 import { openServerDialog } from '@/lib/server-dialog'
@@ -41,6 +40,7 @@ import { artifactsForThread, threadLabelOf } from '@/lib/spaces-conventions'
 import { isUnreadChange, resolveMentions } from '@/lib/spaces-presentation'
 import { getSpaceReadState, markStreamRead, markThreadRead, useStreamReadOffset } from '@/lib/spaces-read-state'
 import { toast } from '@/lib/toast'
+import { copySpacesLink } from '@/lib/spaces-copy-link'
 import { cn } from '@/lib/utils'
 import * as analytics from '@/lib/analytics'
 
@@ -867,11 +867,12 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
             <header className="spaces-header flex shrink-0 items-center gap-2 border-b border-border">
                 <ServerSwitcher org={org} onOpenSpace={onSwitchSpace} />
                 <span aria-hidden="true" className="shrink-0 text-muted-foreground/50">/</span>
-                {/* The space breadcrumb retains its identity hover card. */}
-                <HoverCard openDelay={200} closeDelay={150}>
-                    <HoverCardTrigger asChild>
+                {/* Click to keep the identity card and its copy actions open. */}
+                <Popover>
+                    <PopoverTrigger asChild>
                         <button
                             type="button"
+                            aria-label={isDirect ? 'Conversation details' : 'Space details'}
                             className="flex h-9 min-w-0 max-w-[320px] shrink items-center gap-2 rounded-md pl-1 pr-2 hover:bg-accent/60 data-[state=open]:bg-accent/60"
                         >
                             <span className={cn('flex min-w-0 items-center', isDirect ? 'gap-1.5' : 'gap-0.5')}>
@@ -881,8 +882,8 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                 <h1 className="truncate text-[15px] font-semibold">{spaceTitle}</h1>
                             </span>
                         </button>
-                    </HoverCardTrigger>
-                    <HoverCardContent align="start" sideOffset={4} className="w-80 px-5 pb-5 pt-6">
+                    </PopoverTrigger>
+                    <PopoverContent align="start" sideOffset={4} className="w-80 px-5 pb-5 pt-6">
                         {/* "About this space", in the shape of About This Mac: the
                             org's mark as the hero, the space as the title, then a
                             label/value table — what you're looking at, who it
@@ -915,8 +916,21 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                             <dt className="text-right font-medium">Member id</dt>
                             <dd className="min-w-0"><CopyLine text={org.memberId} title="Copy your member id" className="font-mono text-xs" /></dd>
                         </dl>
-                    </HoverCardContent>
-                </HoverCard>
+                        <div className="mt-4 flex flex-col gap-1 border-t border-border pt-3">
+                            <Button variant="ghost" size="sm" className="justify-start" onClick={() => void copySpacesLink(spaces.spaceUrl(org.address, space.id))}>
+                                <LinkIcon className="size-3.5" /> {isDirect ? 'Copy conversation link' : 'Copy space link'}
+                            </Button>
+                            {isDirect && (
+                                <Button variant="ghost" size="sm" className="justify-start" onClick={() => void copySpacesLink(spaces.memberUrl(org.address, directOtherId))}>
+                                    <LinkIcon className="size-3.5" /> Copy member link
+                                </Button>
+                            )}
+                            <Button variant="ghost" size="sm" className="justify-start" onClick={() => void copySpacesLink(spaces.orgUrl(org.address))}>
+                                <LinkIcon className="size-3.5" /> Copy server link
+                            </Button>
+                        </div>
+                    </PopoverContent>
+                </Popover>
 
                 {/* Centre: search gets the room. */}
                 <div className="flex min-w-0 flex-1 justify-center px-2">
@@ -1063,10 +1077,10 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                     onTogglePin={toggleRailPin}
                 />
                 <div className="flex min-w-0 min-h-0 flex-1 flex-col">
-                    <SpaceContentTabs orgId={org.id} spaceId={space.id} direct={isDirect} topics={feed.topics}
+                    <SpaceContentTabs orgId={org.id} orgAddress={org.address} spaceId={space.id} direct={isDirect} topics={feed.topics}
                         entries={entries} unreadAssetIds={unreadAssetIds} selection={selection} memberNames={memberNames}
                         spaceNames={spaceNames} onSelect={select} topicsLoaded={feed.loaded} filesLoaded={filesLoaded} filesError={filesError} />
-                    {selection.kind === 'discussions' && <SpaceDiscussionsView orgId={org.id} spaceId={space.id}
+                    {selection.kind === 'discussions' && <SpaceDiscussionsView orgId={org.id} orgAddress={org.address} spaceId={space.id}
                         topics={feed.topics} direct={isDirect} loaded={feed.loaded} memberNames={memberNames} spaceNames={spaceNames}
                         presence={presence} onOpen={(rootMessageId) => select({ kind: 'thread', rootMessageId })} />}
                     {selection.kind === 'files' && <>
@@ -1074,7 +1088,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                             Could not refresh files. <button type="button" className="underline" onClick={() => setRefreshTick((tick) => tick + 1)}>Retry</button>
                         </div>}
                         {!filesLoaded && <p className="px-5 py-2 text-xs text-muted-foreground">Loading files…</p>}
-                        <SpaceFilesView orgId={org.id} spaceId={space.id} entries={entries} draftFolders={draftFolders}
+                        <SpaceFilesView orgId={org.id} orgAddress={org.address} spaceId={space.id} entries={entries} draftFolders={draftFolders}
                             unreadAssetIds={unreadAssetIds} selection={selection} onSelect={select} onCreateFile={createNamedFile}
                             onCreateBoard={createBoard} onUploadFiles={setUploadFiles} onOpenTrash={() => setTrashOpen(true)}
                             onAddFolder={addFolder} onRemoveFolder={removeFolder} />

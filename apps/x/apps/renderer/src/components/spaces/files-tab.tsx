@@ -4,7 +4,7 @@ import { MarkdownEditor } from '@/components/markdown-editor'
 import { SpaceDocumentViewer } from './document-viewer'
 import { getViewerType } from '@/lib/file-types'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowLeft, Check, Clock, Download, Eye, FileText, Folder, FolderOpen, History, Image as ImageIcon, Loader2, MoreHorizontal, Pencil, PenTool, Plus, RotateCcw, Trash2, Upload, X } from 'lucide-react'
+import { ArrowLeft, Check, Clock, Download, Eye, FileText, Folder, FolderOpen, History, Image as ImageIcon, Link as LinkIcon, Loader2, MoreHorizontal, Pencil, PenTool, Plus, RotateCcw, Trash2, Upload, X } from 'lucide-react'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
@@ -25,6 +25,7 @@ import {
     type FileTreeNode,
 } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
+import { copySpacesLink } from '@/lib/spaces-copy-link'
 import { ClippedText, MemberAvatar } from '@/components/spaces/atoms'
 import { uploadInputFor } from '@/lib/spaces-upload'
 
@@ -42,8 +43,9 @@ import { uploadInputFor } from '@/lib/spaces-upload'
 const ASSET_DRAG_MIME = 'application/x-rowboat-asset-id'
 
 /** The space's file tree (README first, folders collapsible) — rendered inside the space rail. Rows are files by id; paths are their labels. */
-export function FileTree({ orgId, spaceId, entries, draftFolders = [], selectedAssetId, unreadAssetIds, onOpenFile, creating, onCreateFile, onCancelCreate, onStartCreate, creatingFolder = false, onCreateFolder, onCancelCreateFolder, onRemoveFolder }: {
+export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [], selectedAssetId, unreadAssetIds, onOpenFile, creating, onCreateFile, onCancelCreate, onStartCreate, creatingFolder = false, onCreateFolder, onCancelCreateFolder, onRemoveFolder }: {
     orgId: string
+    orgAddress: string
     spaceId: string
     entries: spaces.SpacesAssetEntry[]
     /** Local-only empty folders (they become real when their first file lands). */
@@ -275,6 +277,9 @@ export function FileTree({ orgId, spaceId, entries, draftFolders = [], selectedA
                         <ContextMenuItem onSelect={() => onOpenFile(entry.id)}>
                             <Eye className="size-3.5 mr-2" /> Open
                         </ContextMenuItem>
+                        <ContextMenuItem onSelect={() => void copySpacesLink(spaces.assetUrl(orgAddress, spaceId, entry.id))}>
+                            <LinkIcon className="size-3.5 mr-2" /> Copy link
+                        </ContextMenuItem>
                         <ContextMenuItem onSelect={() => setRenaming({ assetId: entry.id, value: entry.path })}>
                             <Pencil className="size-3.5 mr-2" /> Rename / move
                         </ContextMenuItem>
@@ -295,6 +300,9 @@ export function FileTree({ orgId, spaceId, entries, draftFolders = [], selectedA
                         </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => void copySpacesLink(spaces.assetUrl(orgAddress, spaceId, entry.id))}>
+                            <LinkIcon className="size-3.5 mr-2" /> Copy link
+                        </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => setRenaming({ assetId: entry.id, value: entry.path })}>
                             <Pencil className="size-3.5 mr-2" /> Rename / move
                         </DropdownMenuItem>
@@ -756,6 +764,9 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
                                 </button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => void copySpacesLink(spaces.assetUrl(org.address, space.id, assetId))}>
+                                    <LinkIcon className="size-3.5 mr-2" /> Copy link
+                                </DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => setEditingPath(path)}>
                                     <Pencil className="size-3.5 mr-2" /> Rename / move
                                 </DropdownMenuItem>

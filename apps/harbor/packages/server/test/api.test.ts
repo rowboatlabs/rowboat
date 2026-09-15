@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { memberUrl, messageUrl, parseOrgUrl, spaceUrl, assetUrl, type ProposeChangeResult } from '@rowboat/spaces-protocol';
+import { memberUrl, messageUrl, orgUrl, parseOrgUrl, spaceUrl, assetUrl, type ProposeChangeResult } from '@rowboat/spaces-protocol';
 import { startHarbor, type RunningHarbor } from '../src/server.js';
 import { liveClient } from './helpers.js';
 
@@ -376,6 +376,7 @@ describe('feed: the stream, threads, and topic annotations', () => {
   it('every org link opened in a browser lands on a hand-off page that deep-links into the app, without looking anything up', async () => {
     const address = harbor.service.org.address;
     const cases: Array<[string, string]> = [
+      [orgUrl(address), `type=spaces&org=`],
       [spaceUrl(address, spaceId), `spaceId=${spaceId}&org=`],
       [messageUrl(address, spaceId, '01JZZZZZZZZZZZZZZZZZZZZZZZ'), `messageId=01JZZZZZZZZZZZZZZZZZZZZZZZ&org=`],
       [assetUrl(address, spaceId, 'A%2Fx'), 'assetId=A%252Fx&org='],
@@ -392,6 +393,8 @@ describe('feed: the stream, threads, and topic annotations', () => {
       expect(html).not.toContain('Feed'); // never the space's name — nothing is looked up
     }
     // The one parser reads every one of them back.
+    expect(parseOrgUrl(orgUrl(address))).toEqual({ kind: 'org', orgAddress: address });
+    expect(parseOrgUrl(`https://${address}`)).toEqual({ kind: 'org', orgAddress: address });
     expect(parseOrgUrl(spaceUrl(address, spaceId))).toEqual({ kind: 'space', orgAddress: address, spaceId });
     expect(parseOrgUrl(messageUrl(address, spaceId, '01JZZZZZZZZZZZZZZZZZZZZZZZ'))).toEqual({ kind: 'message', orgAddress: address, spaceId, messageId: '01JZZZZZZZZZZZZZZZZZZZZZZZ' });
     expect(parseOrgUrl(assetUrl(address, spaceId, 'A/x'))).toEqual({ kind: 'asset', orgAddress: address, spaceId, assetId: 'A/x' });
