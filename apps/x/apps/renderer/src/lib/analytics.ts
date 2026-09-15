@@ -204,7 +204,25 @@ export function emailSyncTriggered() {
 
 // --- Meetings ---
 
-// --- Spaces (chat-first, push-1 spike) --------------------------------------
+// --- Spaces ---------------------------------------------------------------
+
+export function spacesServerCreated() {
+  posthog.capture('spaces_server_created')
+}
+
+export function spacesSpaceCreated() {
+  posthog.capture('spaces_space_created')
+}
+
+export function spacesInviteLinkCopied() {
+  posthog.capture('spaces_invite_link_copied')
+}
+
+// Counts successful join/connect actions; address and dev flows can reconnect
+// existing members. The method identifies the UI flow, not the server's host.
+export function spacesSpaceJoined(method: 'invite_link' | 'server_address' | 'dev_server') {
+  posthog.capture('spaces_space_joined', { method })
+}
 
 export function spacesMessagePosted(props: { kind: 'general' | 'topic'; mentionsRowboat: boolean }) {
   posthog.capture('spaces_message_posted', { kind: props.kind, mentions_rowboat: props.mentionsRowboat })

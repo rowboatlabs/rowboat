@@ -3,6 +3,7 @@ import { Check, Pencil } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { refreshSpacesOrgs } from '@/hooks/use-spaces'
+import * as analytics from '@/lib/analytics'
 
 export function suggestedSpaceName(token: string | null): string {
   try {
@@ -58,7 +59,10 @@ export function useCompletionSpace(enabled: boolean) {
       if (needed && !created.current) {
         // Recheck in case an invite was accepted while onboarding was open.
         const { orgs } = await window.ipc.invoke('spaces:listOrgs', null)
-        if (orgs.length === 0) await window.ipc.invoke('spaces:createOrg', { name: name.trim() })
+        if (orgs.length === 0) {
+          await window.ipc.invoke('spaces:createOrg', { name: name.trim() })
+          analytics.spacesServerCreated()
+        }
         created.current = true
         await refreshSpacesOrgs()
       }

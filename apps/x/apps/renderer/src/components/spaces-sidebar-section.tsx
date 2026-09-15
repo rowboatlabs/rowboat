@@ -18,6 +18,7 @@ import { prefetchMembers, useSelfDisplayName } from '@/hooks/use-space-members'
 import { isSpaceExpanded, setSpaceExpanded, useSpaceExpansionVersion } from '@/lib/spaces-expansion'
 import type { RailSelection } from '@/lib/spaces-selection'
 import { toast } from '@/lib/toast'
+import * as analytics from '@/lib/analytics'
 import { useCrossOrgActivity } from '@/hooks/use-cross-org-activity'
 import { actorLabel, excerptOf, reasonLabel, targetOf, type ActivityTarget } from '@/lib/spaces-activity'
 import { formatFeedTime } from '@/lib/spaces-presentation'
@@ -145,6 +146,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, activi
         if (!name) return
         try {
             const { space } = await window.ipc.invoke('spaces:createSpace', { orgId: org.id, name })
+            analytics.spacesSpaceCreated()
             setCreating(false)
             setNewName('')
             onChanged()

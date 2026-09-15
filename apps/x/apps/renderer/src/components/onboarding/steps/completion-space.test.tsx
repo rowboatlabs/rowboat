@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { suggestedSpaceName, useCompletionSpace } from './completion-space'
 
+vi.mock('@/lib/analytics', () => ({ spacesServerCreated: vi.fn() }))
 vi.mock('@/hooks/use-spaces', () => ({ refreshSpacesOrgs: vi.fn(async () => {}) }))
 const invoke = vi.fn()
 const token = (claims: object) => `header.${btoa(JSON.stringify(claims))}.signature`
