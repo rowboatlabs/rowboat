@@ -4203,6 +4203,11 @@ export const ipcSchemas = {
     }),
     res: z.object({ saved: z.boolean(), path: z.string().optional() }),
   },
+  // Save the current file by identity, including documents stored as inline text.
+  'spaces:saveAsset': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), assetId: z.string() }),
+    res: z.object({ saved: z.boolean(), path: z.string().optional() }),
+  },
   // Save an external image (a pasted GIF/image link) to disk. Main fetches
   // the URL — the renderer can't (CORS) — after the save dialog, so a
   // cancel never downloads. https only. saved:false = the person cancelled.

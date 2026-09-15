@@ -4,7 +4,7 @@ import { MarkdownEditor } from '@/components/markdown-editor'
 import { SpaceDocumentViewer } from './document-viewer'
 import { getViewerType } from '@/lib/file-types'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowLeft, Check, Clock, Download, Eye, FileText, Folder, FolderOpen, History, Image as ImageIcon, Link as LinkIcon, Loader2, MoreHorizontal, Pencil, PenTool, Plus, RotateCcw, Trash2, Upload, X } from 'lucide-react'
+import { ArrowLeft, Check, Clock, Copy, Download, Eye, FileText, Folder, FolderOpen, History, Image as ImageIcon, Link as LinkIcon, Loader2, MoreHorizontal, Pencil, PenTool, Plus, RotateCcw, Trash2, Upload, X } from 'lucide-react'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
@@ -26,6 +26,7 @@ import {
 } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
 import { copySpacesLink } from '@/lib/spaces-copy-link'
+import { copySpaceFile, downloadSpaceFile, spaceFileCopyLabel } from '@/lib/space-file-actions'
 import { ClippedText, MemberAvatar } from '@/components/spaces/atoms'
 import { uploadInputFor } from '@/lib/spaces-upload'
 
@@ -220,6 +221,8 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
         const active = entry.id === selectedAssetId
         const unread = unreadAssetIds.has(entry.id)
         const blob = entry.blob
+        const fileRef = { orgId, spaceId, assetId: entry.id }
+        const copyLabel = spaceFileCopyLabel(entry)
         // A board is a file at whiteboards/<name>.excalidraw — same tree,
         // pen icon, extension dropped from the label.
         const board = spaces.isWhiteboardPath(node.path)
@@ -277,6 +280,12 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                         <ContextMenuItem onSelect={() => onOpenFile(entry.id)}>
                             <Eye className="size-3.5 mr-2" /> Open
                         </ContextMenuItem>
+                        <ContextMenuItem onSelect={() => void downloadSpaceFile(fileRef)}>
+                            <Download className="size-3.5 mr-2" /> Download
+                        </ContextMenuItem>
+                        {copyLabel && <ContextMenuItem onSelect={() => void copySpaceFile(fileRef)}>
+                            <Copy className="size-3.5 mr-2" /> {copyLabel}
+                        </ContextMenuItem>}
                         <ContextMenuItem onSelect={() => void copySpacesLink(spaces.assetUrl(orgAddress, spaceId, entry.id))}>
                             <LinkIcon className="size-3.5 mr-2" /> Copy link
                         </ContextMenuItem>
@@ -300,6 +309,12 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                         </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => void downloadSpaceFile(fileRef)}>
+                            <Download className="size-3.5 mr-2" /> Download
+                        </DropdownMenuItem>
+                        {copyLabel && <DropdownMenuItem onClick={() => void copySpaceFile(fileRef)}>
+                            <Copy className="size-3.5 mr-2" /> {copyLabel}
+                        </DropdownMenuItem>}
                         <DropdownMenuItem onClick={() => void copySpacesLink(spaces.assetUrl(orgAddress, spaceId, entry.id))}>
                             <LinkIcon className="size-3.5 mr-2" /> Copy link
                         </DropdownMenuItem>
@@ -628,20 +643,9 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
         }
     }
 
-    const download = async () => {
-        if (!blob) return
-        try {
-            const res = await window.ipc.invoke('spaces:saveBlob', {
-                orgId: org.id,
-                spaceId: space.id,
-                hash: blob.hash,
-                suggestedName: fileName,
-            })
-            if (res.saved) toast('Saved', 'success')
-        } catch (err) {
-            toast(err instanceof Error ? err.message : 'Could not download', 'error')
-        }
-    }
+    const fileRef = { orgId: org.id, spaceId: space.id, assetId }
+    const copyLabel = asset ? spaceFileCopyLabel(asset) : null
+    const download = () => downloadSpaceFile(fileRef)
 
     // Rename/move edits the full path inline where the filename sits. The
     // file keeps its id: the column stays on it, the name refreshes from the
@@ -764,6 +768,12 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
                                 </button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => void download()}>
+                                    <Download className="size-3.5 mr-2" /> Download
+                                </DropdownMenuItem>
+                                {copyLabel && <DropdownMenuItem onClick={() => void copySpaceFile(fileRef)}>
+                                    <Copy className="size-3.5 mr-2" /> {copyLabel}
+                                </DropdownMenuItem>}
                                 <DropdownMenuItem onClick={() => void copySpacesLink(spaces.assetUrl(org.address, space.id, assetId))}>
                                     <LinkIcon className="size-3.5 mr-2" /> Copy link
                                 </DropdownMenuItem>
