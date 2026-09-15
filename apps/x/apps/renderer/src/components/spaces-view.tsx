@@ -2,9 +2,10 @@ import '@/styles/spaces.css'
 import { ThreadResizeHandle, THREAD_DEFAULT_WIDTH, THREAD_MIN_WIDTH, THREAD_DIVIDER_WIDTH, STREAM_MIN_WIDTH } from '@/components/spaces/thread-resize-handle'
 import { getViewerType } from '@/lib/file-types'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Link as LinkIcon, Loader2, MoreHorizontal, PenTool, Plus, Users } from 'lucide-react'
+import { Check, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Link as LinkIcon, Loader2, MoreHorizontal, PenTool, Plus, UserPlus, Users } from 'lucide-react'
 import { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
@@ -910,8 +911,26 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                     <SpaceSearch orgId={org.id} spaceId={space.id} selfMemberId={org.memberId} onNavigate={select} className="w-full max-w-[480px]" />
                 </div>
 
-                {/* Right: members as one pill (a dot when anyone is here — the
-                    roster says who), then the tools. */}
+                {/* Right: Invite (a DM's membership is fixed — nobody to
+                    invite), members as one pill (a dot when anyone is here —
+                    the roster says who), then the tools. */}
+                {!isDirect && (
+                    <Popover>
+                        <PopoverTrigger asChild>
+                            <button
+                                type="button"
+                                title={`Invite someone to #${space.name}`}
+                                className="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-border px-2 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground data-[state=open]:bg-accent/60 data-[state=open]:text-foreground"
+                            >
+                                <UserPlus className="size-3.5" />
+                                <span>Invite</span>
+                            </button>
+                        </PopoverTrigger>
+                        <PopoverContent align="end" className="w-80 p-3">
+                            <InviteLinkPanel orgId={org.id} spaceId={space.id} spaceName={space.name} />
+                        </PopoverContent>
+                    </Popover>
+                )}
                 <Popover>
                     <PopoverTrigger asChild>
                         <button
@@ -1221,6 +1240,79 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         </SpaceRefsProvider>
         </SpaceProfilesProvider>
         </SpaceMembersProvider>
+    )
+}
+
+type InviteLinkState =
+    | { kind: 'loading' }
+    | { kind: 'ready'; link: string }
+    | { kind: 'error'; message: string }
+
+/**
+ * The header's Invite popover: the link in a field you can read and select,
+ * a Copy button that says "Copied" for a beat, and one line on who the link
+ * admits. A link is minted each time the popover opens (its content mounts
+ * fresh), so there is nothing stale to hand out.
+ */
+function InviteLinkPanel({ orgId, spaceId, spaceName }: { orgId: string; spaceId: string; spaceName: string }) {
+    const [state, setState] = useState<InviteLinkState>({ kind: 'loading' })
+    const [copy, setCopy] = useState<'idle' | 'copied' | 'failed'>('idle')
+    const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+    useEffect(() => () => { if (timer.current) clearTimeout(timer.current) }, [])
+
+    useEffect(() => {
+        let cancelled = false
+        window.ipc.invoke('spaces:createInvite', { orgId, spaceId }).then(
+            (result) => { if (!cancelled) setState({ kind: 'ready', link: result.link }) },
+            (err: unknown) => {
+                if (cancelled) return
+                setState({ kind: 'error', message: err instanceof Error ? err.message : 'Could not create an invite' })
+            },
+        )
+        return () => { cancelled = true }
+    }, [orgId, spaceId])
+
+    const copyLink = (link: string) =>
+        navigator.clipboard.writeText(link).then(
+            () => {
+                setCopy('copied')
+                if (timer.current) clearTimeout(timer.current)
+                timer.current = setTimeout(() => setCopy('idle'), 1000)
+            },
+            () => setCopy('failed'),
+        )
+
+    const link = state.kind === 'ready' ? state.link : ''
+    return (
+        <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-1.5">
+                <Input
+                    readOnly
+                    aria-label="Invite link"
+                    value={link}
+                    placeholder={state.kind === 'loading' ? 'Creating link…' : 'No link'}
+                    onFocus={(e) => e.currentTarget.select()}
+                    className="h-7 min-w-0 flex-1 rounded-md font-mono text-xs md:text-xs"
+                />
+                <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={state.kind !== 'ready'}
+                    onClick={() => void copyLink(link)}
+                    className="min-w-24 rounded-md"
+                >
+                    {copy === 'copied'
+                        ? <><Check className="size-3.5 text-[var(--rowboat-success)]" /> Copied</>
+                        : 'Copy link'}
+                </Button>
+            </div>
+            {state.kind === 'error'
+                ? <p className="text-xs text-destructive">{state.message}</p>
+                : copy === 'failed'
+                    ? <p className="text-xs text-destructive">Could not copy. Select the link above and copy it instead.</p>
+                    : <p className="text-xs text-muted-foreground">Anyone with it can join #{spaceName} on Rowboat.</p>}
+        </div>
     )
 }
 
