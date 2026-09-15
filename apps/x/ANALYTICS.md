@@ -1,18 +1,18 @@
 # Analytics
 
-> PostHog instrumentation for `apps/x`. We capture LLM token usage (broken down by feature) and identity/auth events. Renderer (`posthog-js`) and main (`posthog-node`) share one stable distinct_id and one identified user, so events from either process resolve to the same person.
+> PostHog instrumentation for `apps/x`. We capture LLM token usage (broken down by feature) and identity/auth events. Renderer (`posthog-js`), main, and the local child server (`posthog-node`) share the installation identity. Each Node process has its own PostHog client; the process hosting core identifies the user for agent events.
 
 ## Identity model
 
 - **Anonymous distinct_id** = `installationId` from `~/.rowboat/config/installation.json` (auto-generated on first run; see `packages/core/src/analytics/installation.ts`).
 - Renderer fetches it from main on startup via the `analytics:bootstrap` IPC channel and passes it as PostHog's `bootstrap.distinctID`. Main uses it directly in `posthog-node`.
-- **On rowboat sign-in**: `posthog.identify(rowboatUserId)` runs in **both** processes.
-  - Main does it from `apps/main/src/oauth-handler.ts:285` (after `getBillingInfo()` resolves) — this is the load-bearing call, since main always runs.
+- **On rowboat sign-in**: core identifies the user in the process hosting agent work (the child server by default).
+  - `packages/core/src/auth/oauth-flows.ts` calls `identify` after `getBillingInfo()` resolves.
   - Renderer mirrors via `apps/renderer/src/hooks/useAnalyticsIdentity.ts` listening on the `oauth:didConnect` IPC event.
-  - Main also calls `alias()` so events emitted under the anonymous installation_id are linked to the identified user retroactively.
-- **On every app startup**: main re-identifies if rowboat tokens exist (`packages/core/src/analytics/identify.ts`, called from `apps/main/src/main.ts` whenReady). Idempotent — PostHog merges person properties on duplicate identifies. This catches users who installed before analytics existed, and refreshes person properties (plan/status) on every launch.
-- **On rowboat sign-out**: `posthog.reset()` in both processes; future events resolve to the installation_id again.
-- **`email`** is set on `identify` from main only (sourced from `/v1/me`). Person properties are server-side, so the renderer's events resolve to the same record without redundantly setting it.
+  - The core PostHog client also calls `alias()` so events emitted under the anonymous installation_id are linked to the identified user retroactively.
+- **On every app startup**: main and the child server each call `identifyIfSignedIn()` from `packages/core/src/analytics/identify.ts`. The child calls it after config initialization without blocking boot. Idempotent — PostHog merges person properties on duplicate identifies. This catches users who installed before analytics existed, and refreshes person properties (plan/status) on every launch.
+- **On rowboat sign-out**: the renderer resets identity and core OAuth resets its local PostHog identity; future core events resolve to the installation_id again.
+- **`email`** is set on `identify` by the Node PostHog client (sourced from `/v1/me`). Person properties are server-side, so the renderer's events resolve to the same record without redundantly setting it.
 
 ## Event catalog
 
@@ -289,11 +289,14 @@ PostHog credentials live in two env vars (also baked into the binary at packagin
 
 Where they're consumed:
 - **Renderer** (Vite): `import.meta.env.VITE_PUBLIC_POSTHOG_*` — inlined at build time.
-- **Main** (esbuild via `apps/main/bundle.mjs`): inlined into `main.cjs` at packaging time using esbuild `define`. In dev (`npm run dev`), main reads them from `process.env` at runtime.
+- **Main and child server** (esbuild via `apps/main/bundle.mjs` and `bundle-config.mjs`): the same key, host, and app version are inlined into both `main.cjs` and `rowboat-server.cjs`. Setting build-time values only for main does not configure the child process. Unbundled dev servers read credentials from `process.env`.
+- **Standalone/headless builds**: continue to use runtime environment variables; the desktop packaging defaults do not change their configuration.
+
+The child server flushes its PostHog queue before exiting on SIGINT/SIGTERM or parent loss, within its existing five-second shutdown deadline.
 
 For GitHub Actions / packaged builds: set both as workflow env vars (from secrets) on the step that runs `npm run package` or `npm run make`. They'll be baked in.
 
-If unset, analytics no-op silently — you'll see `[Analytics] POSTHOG_KEY not set; analytics disabled` in main-process logs.
+If unset, analytics no-op silently — you'll see `[Analytics] POSTHOG_KEY not set; analytics disabled` in the process hosting core.
 
 `installationId`: stored in `~/.rowboat/config/installation.json`, generated on first run.
 
@@ -308,8 +311,9 @@ If unset, analytics no-op silently — you'll see `[Analytics] POSTHOG_KEY not s
 | `packages/shared/src/analytics.ts` | Shared use-case taxonomy and durable turn analytics schema |
 | `apps/renderer/src/lib/analytics.ts` | Renderer event wrappers |
 | `apps/renderer/src/hooks/useAnalyticsIdentity.ts` | Renderer identify/reset on OAuth events |
-| `apps/main/src/oauth-handler.ts` | Main-side identify/reset/sign-in/sign-out events |
+| `packages/core/src/auth/oauth-flows.ts` | Core identify/reset/sign-in/sign-out events |
+| `apps/server/src/standalone.ts` | Child startup identity and shutdown flush |
 | `apps/main/src/main.ts` | `before-quit` hook flushes queued events |
 | `packages/shared/src/ipc.ts` | `analytics:bootstrap` IPC channel definition |
 | `apps/main/src/ipc.ts` | `analytics:bootstrap` handler + forwards `userId` on `oauth:didConnect` |
-| `apps/main/bundle.mjs` | Bakes `POSTHOG_KEY`/`POSTHOG_HOST` into packaged `main.cjs` |
+| `apps/main/bundle-config.mjs` | Shared PostHog build settings for packaged main and child server |

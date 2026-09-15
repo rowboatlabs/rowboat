@@ -10,6 +10,7 @@
  */
 
 import * as esbuild from 'esbuild';
+import { desktopBundleDefines, childServerBundleOptions } from './bundle-config.mjs';
 import { readFile } from 'node:fs/promises';
 import { execSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -42,12 +43,7 @@ await esbuild.build({
   // Replace import.meta.url directly with our polyfill variable
   define: {
     'import.meta.url': '__import_meta_url',
-    // Inject PostHog credentials at build time. Reuse the renderer's
-    // VITE_PUBLIC_* envs so packaging only needs one set of values.
-    // Empty strings disable analytics gracefully.
-    'process.env.POSTHOG_KEY': JSON.stringify(process.env.VITE_PUBLIC_POSTHOG_KEY ?? ''),
-    'process.env.POSTHOG_HOST': JSON.stringify(process.env.VITE_PUBLIC_POSTHOG_HOST ?? 'https://us.i.posthog.com'),
-    'process.env.ROWBOAT_APP_VERSION': JSON.stringify(pkg.version ?? ''),
+    ...desktopBundleDefines(pkg.version),
   },
 });
 
@@ -162,20 +158,7 @@ if (process.platform === 'darwin') {
 // Bundle the standalone rowboat-server (spawned as a child with
 // ELECTRON_RUN_AS_NODE in child-server mode). node-pty stays external like
 // in the main bundle and ships from .package/node_modules.
-await esbuild.build({
-  entryPoints: ['../server/dist/standalone.js'],
-  bundle: true,
-  platform: 'node',
-  target: 'node20',
-  format: 'cjs',
-  outfile: './.package/dist/rowboat-server.cjs',
-  // Same import.meta.url polyfill as main.cjs — core modules resolve asset
-  // paths through it at module init; without the define the CJS bundle sees
-  // undefined and crashes before the server can boot.
-  banner: { js: cjsBanner },
-  define: { 'import.meta.url': '__import_meta_url' },
-  external: ['electron', 'node-pty', 'uiohook-napi', 'bun:sqlite'],
-});
+await esbuild.build(childServerBundleOptions(pkg.version));
 console.log('✅ rowboat-server bundled to .package/dist/rowboat-server.cjs');
 
 // Bundle the vendored agent-slack CLI into a single self-contained script next
