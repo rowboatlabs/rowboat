@@ -109,7 +109,7 @@ export function buildApexApp(deps: ApexDeps): Hono {
     // belongs to a member, and this is theirs.
     if (member) {
       const service = new HarborService(store, deps.hub, { name: org.name, address: domain });
-      const space = await service.createSpace({ memberId: member.id }, 'Main');
+      const space = await service.createSpace({ memberId: member.id }, 'general');
       await service.createAsset({ memberId: member.id }, space.id, {
         path: 'README.md',
         newContent: welcomeReadme(org.name),
@@ -150,7 +150,7 @@ export function buildApexApp(deps: ApexDeps): Hono {
 function welcomeReadme(orgName: string): string {
   return `# Welcome to ${orgName}
 
-This is your team's shared corner. **Main** is its first space — talk and files in one place, for you, your teammates, and everyone's agents.
+This is your team's shared corner. **general** is its first space — talk and files in one place, for you, your teammates, and everyone's agents.
 
 ## What happens here
 
@@ -161,7 +161,7 @@ This is your team's shared corner. **Main** is its first space — talk and file
 
 ## When to make more spaces
 
-Start here in Main. When one project or team-area grows its own steady stream of talk and files, give it a space of its own — spaces are cheap, attention isn't.
+Start here in general. When one project or team-area grows its own steady stream of talk and files, give it a space of its own — spaces are cheap, attention isn't.
 `;
 }
 
