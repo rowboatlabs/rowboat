@@ -897,6 +897,15 @@ export function DockSidebar({
     }
     return { unread, forYou }
   }, [spacesUnread])
+  useEffect(() => {
+    void window.ipc.invoke('app:setSpacesDockBadge', {
+      unread: spacesNotification.unread,
+      forYou: spacesNotification.forYou,
+    }).catch((error: unknown) => {
+      console.warn('[dock-badge] Failed to sync unread counts:', error)
+    })
+    // No cleanup: retain the last badge when the main window closes.
+  }, [spacesNotification.unread, spacesNotification.forYou])
   const totalSpaces = useMemo(() => orgs.reduce((n, o) => n + o.spaces.length + o.directs.length, 0), [orgs])
 
   // ----- data: sync status (for the Settings tooltip + activity popover) -----

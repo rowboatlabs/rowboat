@@ -123,6 +123,7 @@ import * as appsAgents from '@x/core/dist/apps/agents.js';
 import { capture } from '@x/core/dist/analytics/posthog.js';
 import { recordAppVersion, isVersionUpgrade } from '@x/core/dist/config/app_version.js';
 import { getUpdaterStatus, checkForUpdates, quitAndInstallUpdate } from './updater.js';
+import { setSpacesDockBadge } from './dock-badge.js';
 import * as githubAuth from '@x/core/dist/apps/github-auth.js';
 import * as appsStars from '@x/core/dist/apps/stars.js';
 import * as appsInstaller from '@x/core/dist/apps/installer.js';
@@ -867,6 +868,10 @@ export function setupIpcHandlers() {
       // 'app_updated' is taken by the in-app apps feature; this is the client itself.
       if (updatedFrom) capture('client_updated', { from: updatedFrom, to: version });
       return { version, updatedFrom };
+    },
+    'app:setSpacesDockBadge': async (_event, args) => {
+      setSpacesDockBadge(args);
+      return {};
     },
     'updater:getStatus': async () => {
       return getUpdaterStatus();
