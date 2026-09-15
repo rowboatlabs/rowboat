@@ -19,6 +19,21 @@ function handlers(result: unknown) {
   })
 }
 describe('space document storage', () => {
+  it.each(['notes.md', 'report.pdf'])('exports %s by identity without requiring a blob in the open snapshot', async (path) => {
+    invoke.mockResolvedValue({ saved: true, path: '/downloads/renamed-file' })
+    const initial = { ...asset(path), blob: undefined, content: '# Notes' }
+    const source = createSpaceFileSource('org', 'space', initial, vi.fn())
+    expect(await source.exportCopy({ path })).toEqual({ saved: true, dest: '/downloads/renamed-file' })
+    expect(invoke).toHaveBeenCalledExactlyOnceWith('spaces:saveAsset', { orgId: 'org', spaceId: 'space', assetId: initial.id })
+  })
+
+  it('does not open a file when its save dialog is cancelled', async () => {
+    invoke.mockResolvedValue({ saved: false })
+    const source = createSpaceFileSource('org', 'space', asset(), vi.fn())
+    await source.open({ path: 'report.docx' })
+    expect(invoke).toHaveBeenCalledExactlyOnceWith('spaces:saveAsset', { orgId: 'org', spaceId: 'space', assetId: 'A-doc' })
+  })
+
   it('reads binary bytes and advances the Word edit base after successful saves', async () => {
     handlers({ outcome: 'applied', version: 4 })
     const changed = vi.fn()

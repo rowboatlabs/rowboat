@@ -50,6 +50,7 @@ type SpacesHandlers = {
   'spaces:restoreAsset': InvokeHandler<'spaces:restoreAsset'>;
   'spaces:uploadBlob': InvokeHandler<'spaces:uploadBlob'>;
   'spaces:saveBlob': InvokeHandler<'spaces:saveBlob'>;
+  'spaces:saveAsset': InvokeHandler<'spaces:saveAsset'>;
   'spaces:saveImageUrl': InvokeHandler<'spaces:saveImageUrl'>;
   'spaces:linkPreview': InvokeHandler<'spaces:linkPreview'>;
   'spaces:readAsset': InvokeHandler<'spaces:readAsset'>;
@@ -299,6 +300,19 @@ export const spacesIpcHandlers: SpacesHandlers = {
     const options = { defaultPath: path.basename(args.suggestedName ?? args.hash.slice(0, 12)) };
     const result = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options);
     if (result.canceled || !result.filePath) return { saved: false };
+    await fs.writeFile(result.filePath, bytes);
+    return { saved: true, path: result.filePath };
+  },
+
+  'spaces:saveAsset': async (event, args) => {
+    const asset = await orgs.getClient(args.orgId).readAsset(args.spaceId, args.assetId);
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const options = { defaultPath: path.basename(asset.path) };
+    const result = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options);
+    if (result.canceled || !result.filePath) return { saved: false };
+    const bytes = asset.blob
+      ? (await blobCache.getBlob(args.orgId, args.spaceId, asset.blob.hash)).bytes
+      : Buffer.from(asset.content, 'utf8');
     await fs.writeFile(result.filePath, bytes);
     return { saved: true, path: result.filePath };
   },

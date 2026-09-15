@@ -34,11 +34,7 @@ export function createSpaceFileSource(
     mtimeMs: asset.version,
     ctimeMs: 0,
   })
-  const download = async () => {
-    const asset = await readAsset()
-    if (!asset.blob) throw new Error('This document has no downloadable blob')
-    return window.ipc.invoke('spaces:saveBlob', { orgId, spaceId, hash: asset.blob.hash, suggestedName: name })
-  }
+  const download = () => window.ipc.invoke('spaces:saveAsset', { orgId, spaceId, assetId })
   return {
     workspace: false,
     subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener) } },
