@@ -77,9 +77,7 @@ export function CodeModeStep({ state }: CodeModeStepProps) {
         Set Up Code Mode
       </h2>
       <p className="text-base text-muted-foreground text-center leading-relaxed mb-6 max-w-md mx-auto">
-        Use your existing Claude Code or Codex subscription inside Rowboat to tackle coding
-        tasks and unlock far more workflows, all without leaving the app. Make sure Claude Code
-        and Codex are signed in locally with{" "}
+        Use Claude Code or Codex in Rowboat. Sign in with{" "}
         <code className="rounded bg-muted px-1 py-0.5 font-mono text-[13px] text-foreground">claude&nbsp;login</code> or{" "}
         <code className="rounded bg-muted px-1 py-0.5 font-mono text-[13px] text-foreground">codex&nbsp;login</code> in your terminal.
       </p>
