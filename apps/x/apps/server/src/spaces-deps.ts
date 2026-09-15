@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import { ipc, spaces as spacesShared } from '@x/shared';
 import * as orgs from '@x/core/dist/spaces/orgs.js';
+import { SpaceSubscriptions } from '@x/core/dist/spaces/subscriptions.js';
 import * as spacesOAuth from '@x/core/dist/spaces/oauth.js';
 import { oauthConnectBus } from '@x/core/dist/auth/connector-events.js';
 import { cancelScheduled, listScheduled, scheduleItem } from '@x/core/dist/spaces/scheduler.js';
@@ -51,11 +52,11 @@ startSpaceNotifications();
 // consumer — see core/spaces/response-index.
 void startSpaceResponseIndex().catch((err) => console.error('[spaces] response index failed to start:', err));
 
-// Keyed by org/space; each entry remembers WHICH live client it subscribed
-// on. A re-auth (orgs.upsertOAuthOrg) closes and replaces the org's client —
-// a cached subscription on the dead instance would swallow live frames
-// forever while every later subscribeSpace call no-ops against the cache.
-const liveSubscriptions = new Map<string, { live: unknown; unsubscribe: () => void }>();
+// One core-level live subscription per (org, space), fanned out to every
+// client. The registry tracks each entry's resume point and re-subscribes
+// on a fresh client whenever core replaces an org's socket (core/spaces/
+// subscriptions) — a subscription left on the dead one would swallow frames.
+const subscriptions = new SpaceSubscriptions({ getLive: orgs.getLive, onRuntimeReset: orgs.onRuntimeReset });
 
 // Member-addressed frames (space_added) ride no space subscription — relay
 // them to every client as they arrive.
@@ -159,12 +160,7 @@ export const spacesRpcHandlers: SpacesHandlers = {
   },
 
   'spaces:removeOrg': async (args) => {
-    for (const [key, entry] of liveSubscriptions) {
-      if (key.startsWith(`${args.orgId}/`)) {
-        entry.unsubscribe();
-        liveSubscriptions.delete(key);
-      }
-    }
+    subscriptions.dropOrg(args.orgId);
     await orgs.removeOrg(args.orgId);
     return { success: true };
   },
@@ -373,25 +369,12 @@ export const spacesRpcHandlers: SpacesHandlers = {
   'spaces:stopRowboat': async (args) => stopTopicAgent(args),
 
   'spaces:subscribeSpace': async (args) => {
-    const key = `${args.orgId}/${args.spaceId}`;
-    const live = orgs.getLive(args.orgId);
-    const cached = liveSubscriptions.get(key);
-    if (!cached || cached.live !== live) {
-      cached?.unsubscribe();
-      const unsubscribe = live.subscribe(
-        args.spaceId,
-        (frame) => emitSpacesEvent({ orgId: args.orgId, frame }),
-        args.afterOffset,
-      );
-      liveSubscriptions.set(key, { live, unsubscribe });
-    }
+    subscriptions.subscribe(args.orgId, args.spaceId, (frame) => emitSpacesEvent({ orgId: args.orgId, frame }), args.afterOffset);
     return { success: true };
   },
 
   'spaces:unsubscribeSpace': async (args) => {
-    const key = `${args.orgId}/${args.spaceId}`;
-    liveSubscriptions.get(key)?.unsubscribe();
-    liveSubscriptions.delete(key);
+    subscriptions.unsubscribe(args.orgId, args.spaceId);
     return { success: true };
   },
 
