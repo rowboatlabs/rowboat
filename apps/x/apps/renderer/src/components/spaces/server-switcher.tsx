@@ -1,18 +1,20 @@
 import { useState } from 'react'
-import { Check, ChevronsUpDown, LogIn, Plus } from 'lucide-react'
+import { Check, ChevronsUpDown, LogIn, Plus, Trash2 } from 'lucide-react'
 import { OrgMonogram } from '@/components/spaces/atoms'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { serverLandingSpaceId } from '@/lib/spaces-navigation'
 import { openServerDialog } from '@/lib/server-dialog'
+import { RemoveServerDialog } from './remove-server-dialog'
 
 export function ServerSwitcher({ org, onOpenSpace, onMenuOpenChange }: {
     org: OrgWithSpaces
     onOpenSpace: (orgId: string, spaceId: string) => void
     onMenuOpenChange?: (open: boolean) => void
 }) {
-    const { orgs } = useSpacesOrgs()
+    const { orgs, refresh } = useSpacesOrgs()
     const [menuOpen, setMenuOpen] = useState(false)
+    const [confirmRemove, setConfirmRemove] = useState(false)
     const openServer = (server: OrgWithSpaces, spaceId?: string) => {
         onOpenSpace(server.id, spaceId ?? serverLandingSpaceId(server))
     }
@@ -33,7 +35,7 @@ export function ServerSwitcher({ org, onOpenSpace, onMenuOpenChange }: {
                     <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" />
                 </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" sideOffset={4} className="w-64">
+            <DropdownMenuContent align="start" sideOffset={4} className="w-64" onCloseAutoFocus={(event) => { if (confirmRemove) event.preventDefault() }}>
                 {orgs.map((server) => <DropdownMenuItem key={server.id}
                     onSelect={() => { if (server.id !== org.id) openServer(server) }}>
                     <OrgMonogram org={server} />
@@ -44,7 +46,15 @@ export function ServerSwitcher({ org, onOpenSpace, onMenuOpenChange }: {
                 {/* The dialogs are hosted once in App (lib/server-dialog.ts); a finished one lands in the new server itself. */}
                 <DropdownMenuItem onSelect={() => openServerDialog({ kind: 'create' })}><Plus className="size-4" /> Create a server</DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => openServerDialog({ kind: 'join' })}><LogIn className="size-4" /> Join a server</DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={(event) => {
+                    event.preventDefault()
+                    setMenuOpen(false)
+                    setConfirmRemove(true)
+                    onMenuOpenChange?.(true)
+                }}><Trash2 className="size-4" />Remove server</DropdownMenuItem>
             </DropdownMenuContent>
         </DropdownMenu>
+        <RemoveServerDialog org={org} open={confirmRemove} onOpenChange={(open) => { setConfirmRemove(open); onMenuOpenChange?.(open) }} onRemoved={() => void refresh()} />
     </>
 }

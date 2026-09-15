@@ -1603,8 +1603,8 @@ export class HarborService {
         at,
       };
       if (input.action === 'add' && !existing) {
-        await this.store.putReaction({ spaceId, messageId, emoji: input.emoji, by, at });
         const offset = (await this.store.head(spaceId)) + 1;
+        await this.store.putReaction({ spaceId, messageId, emoji: input.emoji, by, at, offset });
         await this.append(spaceId, offset, at, { type: 'reaction', reaction, action: 'added' });
       } else if (input.action === 'remove' && existing) {
         await this.store.deleteReaction(spaceId, messageId, input.emoji, ctx.memberId);
@@ -2100,13 +2100,14 @@ function foldPollVotes(poll: Poll, votes: StoredPollVote[]): Poll {
 
 /** Stored rows (oldest first) → display groups: emojis in first-reacted order, members likewise. */
 function foldReactions(reactions: StoredReaction[]): ReactionGroup[] {
-  const groups = new Map<string, string[]>();
+  const groups = new Map<string, ReactionGroup>();
   for (const r of reactions) {
-    const members = groups.get(r.emoji) ?? [];
-    if (!members.includes(r.by.memberId)) members.push(r.by.memberId);
-    groups.set(r.emoji, members);
+    const group = groups.get(r.emoji) ?? { emoji: r.emoji, memberIds: [], lastOffset: 0 };
+    if (!group.memberIds.includes(r.by.memberId)) group.memberIds.push(r.by.memberId);
+    group.lastOffset = Math.max(group.lastOffset ?? 0, r.offset);
+    groups.set(r.emoji, group);
   }
-  return [...groups.entries()].map(([emoji, memberIds]) => ({ emoji, memberIds }));
+  return [...groups.values()];
 }
 
 export type { ActingMode };

@@ -25,6 +25,16 @@ function setup() {
     return onOpenSpace
 }
 describe('ServerSwitcher', () => {
+    it('hosts removal in the org menu and allows cancelling', () => {
+        setup()
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Remove server' }))
+        expect(screen.getByRole('alertdialog')).toBeVisible()
+        expect(screen.getByText('Remove Rowboat?')).toBeVisible()
+        fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+        expect(screen.queryByRole('alertdialog')).toBeNull()
+        fireEvent.keyDown(screen.getByRole('button', { name: 'Switch server: Rowboat' }), { key: 'Enter' })
+        expect(screen.getByRole('menuitem', { name: 'Remove server' })).toBeVisible()
+    })
     it('switches servers even when their space IDs match', () => {
         const onOpenSpace = setup()
         fireEvent.click(screen.getByRole('menuitem', { name: /Founders/ }))

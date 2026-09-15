@@ -96,18 +96,19 @@ export function artifactsForThread(changeSets: spaces.ChangeSet[], threadRootId:
 
 export function applyReaction(
     groups: spaces.ReactionGroup[] | undefined,
-    event: { emoji: string; memberId: string; action: 'added' | 'removed' },
+    event: { emoji: string; memberId: string; action: 'added' | 'removed'; offset?: number },
 ): spaces.ReactionGroup[] {
     const current = groups ?? []
     const existing = current.find((g) => g.emoji === event.emoji)
+    const position = event.offset === undefined ? {} : { lastOffset: Math.max(existing?.lastOffset ?? 0, event.offset) }
     if (event.action === 'added') {
-        if (existing?.memberIds.includes(event.memberId)) return current
-        if (!existing) return [...current, { emoji: event.emoji, memberIds: [event.memberId] }]
-        return current.map((g) => (g.emoji === event.emoji ? { ...g, memberIds: [...g.memberIds, event.memberId] } : g))
+        if (existing?.memberIds.includes(event.memberId)) return current.map((g) => g.emoji === event.emoji ? { ...g, ...position } : g)
+        if (!existing) return [...current, { emoji: event.emoji, memberIds: [event.memberId], ...position }]
+        return current.map((g) => (g.emoji === event.emoji ? { ...g, ...position, memberIds: [...g.memberIds, event.memberId] } : g))
     }
     if (!existing?.memberIds.includes(event.memberId)) return current
     return current
-        .map((g) => (g.emoji === event.emoji ? { ...g, memberIds: g.memberIds.filter((id) => id !== event.memberId) } : g))
+        .map((g) => (g.emoji === event.emoji ? { ...g, ...position, memberIds: g.memberIds.filter((id) => id !== event.memberId) } : g))
         .filter((g) => g.memberIds.length > 0)
 }
 

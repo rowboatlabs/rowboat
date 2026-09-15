@@ -6,8 +6,8 @@ import { ServerOptionsMenu } from './spaces/server-options-menu'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import { isSpaceExpanded, setSpacesExpanded, useSpaceExpansionVersion } from '@/lib/spaces-expansion'
 import { forgetOrg, loadUnread, markStreamRead } from '@/lib/spaces-read-state'
-import { resetServerFoldForTest } from '@/lib/spaces-sidebar-fold'
-import { noteSpaceVisit, resetSpaceVisitsForTest } from '@/lib/spaces-visits'
+import { useCrossOrgActivity } from '@/hooks/use-cross-org-activity'
+import type { spaces } from '@x/shared'
 import { useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
 
 const { org, other, topics } = vi.hoisted(() => ({
@@ -50,145 +50,66 @@ vi.mock('@/lib/spaces-direct', () => ({
     markSelfDirectUnsupported: vi.fn(), selfDirectFailureMessage: () => '', selfDirectRefused: () => false,
     spaceDisplayName: (_org: unknown, dm: { name: string }) => dm.name,
 }))
-beforeEach(() => { vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))) })
+vi.mock('@/hooks/use-cross-org-activity', () => ({ useCrossOrgActivity: vi.fn(() => ({ items: [], loading: false, failedOrgIds: [], retry: vi.fn() })) }))
+beforeEach(() => { vi.mocked(useCrossOrgActivity).mockReturnValue({ items: [], loading: false, failedOrgIds: [], retry: vi.fn() }); vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))) })
 afterEach(() => {
     cleanup()
     sessionStorage.clear()
     localStorage.clear()
-    resetServerFoldForTest()
-    resetSpaceVisitsForTest()
     forgetOrg(org.id)
     forgetOrg(other.id)
     vi.mocked(useSpacesOrgs).mockImplementation(() => ({ orgs: [org] as unknown as OrgWithSpaces[], loading: false, refresh: vi.fn() }))
     vi.unstubAllGlobals()
 })
 
-// --- the sidebar's working set ---------------------------------------------
-// A short, fixed list per server: the open space, then what is waiting, then
-// what the reader keeps coming back to, then a deterministic backfill.
-
-describe('the sidebar working set', () => {
-    const bothServers = () => vi.mocked(useSpacesOrgs).mockImplementation(
-        () => ({ orgs: [org, other] as unknown as OrgWithSpaces[], loading: false, refresh: vi.fn() }))
-    const sidebar = (props: Partial<Parameters<typeof SpacesSidebarSection>[0]> = {}) => render(
-        <SidebarProvider>
-            <SpacesSidebarSection active activeSpace={{ orgId: org.id, spaceId: 'founders' }}
-                onOpenSpaces={vi.fn()} onOpenSpace={vi.fn()} {...props} />
-        </SidebarProvider>)
-    /** The header's two targets: the chevron that folds, and the name that opens the server. */
-    const fold = (name: string) => screen.getByRole('button', { name: new RegExp(`^(Collapse|Expand) ${name}$`) })
-    const header = (name: string) => screen.getByText(name).closest('button')!
-    /** Put unread roots on spaces, the way the org's snapshot does. */
-    const seedUnread = async (orgId: string, spaces: Array<{ spaceId: string; unreadRoots: number; unreadMentions?: number }>) => {
-        vi.stubGlobal('ipc', {
-            on: vi.fn(() => () => {}),
-            invoke: vi.fn(async (channel: string) => channel === 'spaces:getUnread'
-                ? { spaces: spaces.map((s) => ({ head: s.unreadRoots, readOffset: 0, unreadMentions: 0, threads: [], ...s })) }
-                : {}),
-        })
-        await act(async () => { await loadUnread(orgId, 'me') })
-    }
-
-    it('shows the open space pinned, then backfills to exactly three rows', () => {
-        sidebar()
-        const rows = ['founders', 'main', 'Person 0']
-        for (const name of rows) expect(screen.getByText(name)).toBeTruthy()
-        // The fourth candidate stays out, and a discussion is never a row.
-        expect(screen.queryByText('Person 1')).toBeNull()
-        expect(screen.queryByText('Discussion 0')).toBeNull()
-        expect(screen.getByText('founders').closest('button')).toHaveAttribute('data-active', 'true')
+describe('the sidebar activity section', () => {
+    const entry = (orgId: string, id: string) => ({ orgId, names: new Map([['author', 'Teammate']]), item: {
+        id, kind: 'reply', spaceId: 'main', spaceName: 'main', spaceKind: 'shared', threadRootId: 'discussion',
+        actors: [{ memberId: 'author', actingMode: 'direct' }], at: '2026-09-15T10:00:00Z', unread: true,
+        message: { id, body: `Activity ${id}` },
+    } as spaces.SpacesActivityItem })
+    it('starts expanded, labels each activity with its organization, and opens its exact message', () => {
+        vi.mocked(useSpacesOrgs).mockReturnValue({ orgs: [org, other] as unknown as OrgWithSpaces[], loading: false, refresh: vi.fn() })
+        vi.mocked(useCrossOrgActivity).mockReturnValue({ items: [entry(other.id, 'a'), entry(org.id, 'b')], loading: false, failedOrgIds: [], retry: vi.fn() })
+        const open = vi.fn()
+        render(<SidebarProvider><SpacesSidebarSection active onOpenSpaces={vi.fn()} onOpenMessage={open} /></SidebarProvider>)
+        expect(screen.getByRole('button', { name: 'Collapse Spaces activity' })).toHaveAttribute('aria-expanded', 'true')
+        const region = screen.getByRole('region', { name: 'Activity across organizations' })
+        expect(within(region).getAllByRole('listitem')[0]).toHaveTextContent('Other server')
+        expect(within(region).getAllByRole('listitem')[1]).toHaveTextContent('Our server')
+        fireEvent.click(screen.getByText('Activity a'))
+        expect(open).toHaveBeenCalledWith({ orgId: 'other', spaceId: 'main', rail: { kind: 'thread', rootMessageId: 'discussion' }, messageId: 'a' })
     })
-
-    it('opens a server holding the open space or anything unread, and leaves the rest closed', async () => {
-        bothServers()
-        sidebar()
-        expect(fold('Our server')).toHaveAttribute('aria-expanded', 'true')
-        expect(fold('Other server')).toHaveAttribute('aria-expanded', 'false')
-        expect(screen.queryByText('welcome')).toBeNull()
-        await seedUnread(other.id, [{ spaceId: 'welcome', unreadRoots: 2 }])
-        expect(fold('Other server')).toHaveAttribute('aria-expanded', 'true')
-        expect(screen.getByText('welcome')).toHaveClass('font-medium')
-    })
-
-    it('shows a closed server the sum of its items\' badges, and opens on a click', async () => {
-        bothServers()
-        await seedUnread(org.id, [{ spaceId: 'main', unreadRoots: 3, unreadMentions: 1 }, { spaceId: 'dm1', unreadRoots: 4 }])
-        sidebar({ activeSpace: null })
-        // Both servers are open (one holds the restored location, one has unread),
-        // so close ours by hand to read its rolled-up badge.
-        fireEvent.click(fold('Our server'))
-        expect(fold('Our server')).toHaveAttribute('aria-expanded', 'false')
-        // 3 roots + 4 in a DM, of which 1 mention + the DM's 4 are for me.
-        expect(within(header('Our server')).getByLabelText('7 unread · 5 for you')).toBeTruthy()
-        expect(screen.queryByText('main')).toBeNull()
-        fireEvent.click(fold('Our server'))
-        expect(screen.getByText('main')).toBeTruthy()
-    })
-
-    // --- the header's two targets ------------------------------------------
-    it('opens the server from its name, and folds only from the chevron', () => {
-        const onOpenSpace = vi.fn()
-        sidebar({ onOpenSpace })
-        // The name navigates to the server's landing channel; the list stays as it was.
-        fireEvent.click(header('Our server'))
-        expect(onOpenSpace).toHaveBeenCalledExactlyOnceWith('server', 'main')
-        expect(fold('Our server')).toHaveAttribute('aria-expanded', 'true')
-        expect(screen.getByText('founders')).toBeTruthy()
-        // The chevron folds, and navigates nowhere.
-        fireEvent.click(fold('Our server'))
-        expect(fold('Our server')).toHaveAttribute('aria-expanded', 'false')
-        expect(screen.queryByText('founders')).toBeNull()
-        expect(onOpenSpace).toHaveBeenCalledTimes(1)
-        // A collapsed server still opens from its name, and stays collapsed.
-        fireEvent.click(header('Our server'))
-        expect(onOpenSpace).toHaveBeenLastCalledWith('server', 'main')
-        expect(fold('Our server')).toHaveAttribute('aria-expanded', 'false')
-    })
-
-    it('keeps the reader\'s own toggle over the automatic rule, across relaunches', () => {
-        const view = sidebar()
-        expect(fold('Our server')).toHaveAttribute('aria-expanded', 'true')
-        fireEvent.click(fold('Our server'))
-        expect(screen.queryByText('founders')).toBeNull()
+    it('persists collapse and keeps the primary navigation action independent', () => {
+        const open = vi.fn()
+        const view = render(<SidebarProvider><SpacesSidebarSection active={false} onOpenSpaces={open} onOpenMessage={vi.fn()} /></SidebarProvider>)
+        fireEvent.click(screen.getByRole('button', { name: 'Collapse Spaces activity' }))
+        expect(screen.queryByRole('region', { name: 'Activity across organizations' })).toBeNull()
+        expect(open).not.toHaveBeenCalled()
+        fireEvent.click(screen.getByRole('button', { name: 'Spaces' }))
+        expect(open).toHaveBeenCalledTimes(1)
         view.unmount()
-        // A relaunch: the in-memory mirror is gone, the answer is not.
-        resetServerFoldForTest()
-        sidebar()
-        expect(fold('Our server')).toHaveAttribute('aria-expanded', 'false')
-        expect(screen.queryByText('founders')).toBeNull()
+        render(<SidebarProvider><SpacesSidebarSection active={false} onOpenSpaces={open} onOpenMessage={vi.fn()} /></SidebarProvider>)
+        expect(screen.getByRole('button', { name: 'Expand Spaces activity' })).toHaveAttribute('aria-expanded', 'false')
     })
-
-    it('holds a row in place once it is showing, and gives an entering one its rank', async () => {
-        const view = sidebar()
-        // Each row is titled with its name; the server header's title is its own sentence.
-        const shown = () => screen.getAllByRole('button').map((b) => b.getAttribute('title'))
-            .filter((t) => ['founders', 'main', 'Person 0', 'Person 3'].includes(t ?? ''))
-        expect(shown()).toEqual(['founders', 'main', 'Person 0'])
-        // Visiting one already showing must not move it.
-        act(() => noteSpaceVisit(org.id, 'main', 9_000))
-        expect(shown()).toEqual(['founders', 'main', 'Person 0'])
-        // A DM goes unread: it enters behind the open space, ahead of the backfill,
-        // and the row it displaced leaves.
-        await seedUnread(org.id, [{ spaceId: 'dm3', unreadRoots: 1 }])
-        expect(shown()).toEqual(['founders', 'Person 3', 'main'])
-        view.unmount()
-    })
-
-    it('reaches the siderail and the sidebar from one read state', async () => {
-        render(<SidebarProvider>
-            <SpacesSidebarSection active activeSpace={{ orgId: org.id, spaceId: 'main' }} onOpenSpaces={vi.fn()} onOpenSpace={vi.fn()} />
-            <ServerSpaceNavigation org={org as unknown as OrgWithSpaces} spaceId="main" onOpenSpace={vi.fn()}
-                onOpenDiscussion={vi.fn()} activeDiscussionCount={0} renderActiveDiscussions={() => null} />
-        </SidebarProvider>)
-        await seedUnread(org.id, [{ spaceId: 'founders', unreadRoots: 2 }])
-        expect(screen.getAllByLabelText('2 unread · none for you')).toHaveLength(2)
-        act(() => markStreamRead(org.id, 'founders', 2, { sync: false }))
-        expect(screen.queryByLabelText('2 unread · none for you')).toBeNull()
+    it('sums every org’s spaces and DMs even with no preview rows and while collapsed', async () => {
+        vi.mocked(useSpacesOrgs).mockReturnValue({ orgs: [org, other] as unknown as OrgWithSpaces[], loading: false, refresh: vi.fn() })
+        vi.stubGlobal('ipc', { on: vi.fn(() => () => {}), invoke: vi.fn(async (_channel, args) => ({
+            spaces: [{ spaceId: args.orgId === org.id ? 'founders' : 'welcome', head: 3, readOffset: 0, unreadRoots: 3, unreadMentions: 1, threads: [] },
+                ...(args.orgId === org.id ? [{ spaceId: 'dm0', head: 2, readOffset: 0, unreadRoots: 2, unreadMentions: 0, threads: [] }] : [])],
+        })) })
+        await act(async () => { await loadUnread(org.id, 'me'); await loadUnread(other.id, 'me') })
+        render(<SidebarProvider><SpacesSidebarSection active onOpenSpaces={vi.fn()} onOpenMessage={vi.fn()} /></SidebarProvider>)
+        expect(screen.getByLabelText('8 unread · 4 for you')).toBeVisible()
+        fireEvent.click(screen.getByRole('button', { name: 'Collapse Spaces activity' }))
+        expect(screen.getByLabelText('8 unread · 4 for you')).toBeVisible()
+        act(() => markStreamRead(org.id, 'founders', 3, { sync: false }))
+        expect(screen.getByLabelText('5 unread · 3 for you')).toBeVisible()
     })
 })
 
 describe('server and space navigation', () => {
-    it('nests three recent discussions, expands and collapses them, and folds DMs', () => {
+    it('nests and expands legacy discussions while keeping every DM visible', () => {
         const onOpenDiscussion = vi.fn()
         render(<SidebarProvider><ServerSpaceNavigation org={org as unknown as OrgWithSpaces} spaceId="main" onOpenSpace={vi.fn()}
             onOpenDiscussion={onOpenDiscussion} activeDiscussionCount={0} renderActiveDiscussions={() => null} /></SidebarProvider>)
@@ -203,11 +124,22 @@ describe('server and space navigation', () => {
         expect(onOpenDiscussion).toHaveBeenCalledWith('founders', { kind: 'thread', rootMessageId: 'root0' })
         fireEvent.click(screen.getByLabelText('Collapse #founders'))
         expect(within(founders).queryByText('Discussion 3')).toBeNull()
-        expect(screen.queryByText('Person 0')).toBeNull()
-        fireEvent.click(screen.getByText('View all'))
         expect(screen.getByText('Person 0')).toBeTruthy()
-        fireEvent.click(screen.getByText('Direct messages'))
-        expect(screen.queryByText('Person 0')).toBeNull()
+        expect(screen.getByRole('heading', { name: 'DMs' })).toBeTruthy()
+    })
+    it('shows every space and DM without list expansion controls in the content-tab rail', () => {
+        sessionStorage.setItem(`spaces:directsExpanded:${org.id}`, 'false')
+        render(<SidebarProvider><ServerSpaceNavigation org={org as unknown as OrgWithSpaces} spaceId="main"
+            onOpenSpace={vi.fn()} showDiscussions={false} /></SidebarProvider>)
+        for (let i = 0; i < 5; i++) expect(screen.getByText(`Person ${i}`)).toBeTruthy()
+        for (const space of org.spaces) expect(screen.getByText(space.name)).toBeTruthy()
+        expect(screen.queryByText('View all')).toBeNull()
+        expect(screen.queryByText('Show less')).toBeNull()
+        const newSpace = screen.getByRole('button', { name: 'New space' })
+        expect(screen.getByText('founders').compareDocumentPosition(newSpace) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+        expect(newSpace.compareDocumentPosition(screen.getByRole('heading', { name: 'DMs' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+        fireEvent.click(newSpace)
+        expect(screen.getByPlaceholderText('Space name').compareDocumentPosition(screen.getByRole('heading', { name: 'DMs' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     })
     it('moves every space from the rail\'s one expand-all / collapse-all control', () => {
         // The rail header's control, standing in for space-rail.tsx: the space

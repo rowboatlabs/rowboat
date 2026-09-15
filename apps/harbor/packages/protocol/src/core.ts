@@ -142,6 +142,8 @@ export type Reaction = z.infer<typeof Reaction>;
 export const ReactionGroup = z.object({
   emoji: ReactionEmoji,
   memberIds: z.array(MemberId).min(1),
+  /** Latest reaction event represented by this group; absent on older servers. */
+  lastOffset: StreamOffset.optional(),
 });
 export type ReactionGroup = z.infer<typeof ReactionGroup>;
 

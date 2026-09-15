@@ -84,6 +84,7 @@ import { isOutOfCredits, CREDIT_EXHAUSTED_EVENT, CREDIT_REPLENISHED_EVENT } from
 import { SettingsDialog } from "@/components/settings-dialog"
 import { SidebarCreditRewards } from "@/components/sidebar-credit-rewards"
 import { SpacesSidebarSection } from "@/components/spaces-sidebar-section"
+import type { ActivityTarget } from "@/lib/spaces-activity"
 import { SPACES_ENABLED } from "@/lib/feature-flags"
 import type { SpaceSelection } from "@/components/spaces-view"
 import { MascotFaceIcon } from "@/components/talking-head"
@@ -198,6 +199,7 @@ type SidebarContentPanelProps = {
   onOpenApp?: (folder: string) => void
   /** Open one space (org + space) in the Spaces view. */
   onOpenSpace?: (orgId: string, spaceId: string) => void
+  onOpenSpaceMessage: (target: ActivityTarget) => void
   onOpenSpaces?: () => void
   /** The space currently open, for highlighting its sidebar row. */
   activeSpace?: SpaceSelection
@@ -460,8 +462,9 @@ export function SidebarContentPanel({
   onOpenApps,
   onOpenApp,
   onOpenSpaces,
-  onOpenSpace,
-  activeSpace = null,
+  onOpenSpaceMessage,
+  onOpenSpace: _onOpenSpace,
+  activeSpace: _activeSpace,
   recentRuns = [],
   onOpenRun,
   onOpenAssistant,
@@ -872,10 +875,10 @@ export function SidebarContentPanel({
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {/* Spaces returns to the last active server and space. */}
+        {/* Cross-organization activity; the Spaces label returns to the last open conversation. */}
         {SPACES_ENABLED && (
           <>
-            <SpacesSidebarSection active={activeNav === 'spaces'} activeSpace={activeSpace} onOpenSpaces={() => onOpenSpaces?.()} onOpenSpace={(orgId, spaceId) => onOpenSpace?.(orgId, spaceId)} />
+            <SpacesSidebarSection active={activeNav === 'spaces'} onOpenSpaces={() => onOpenSpaces?.()} onOpenMessage={onOpenSpaceMessage} />
             <div className="mx-3 my-2 border-t border-border" />
           </>
         )}

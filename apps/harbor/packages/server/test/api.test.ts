@@ -366,7 +366,7 @@ describe('feed: the stream, threads, and topic annotations', () => {
     await ramnique.post(`/v1/spaces/${links}/messages/${reply.id}/reactions`, { emoji: '👀', action: 'add', actingMode: 'direct' });
     const r = await gagan.get(`/v1/spaces/${links}/messages/${reply.id}`);
     expect(r.status).toBe(200);
-    expect(r.body.message).toMatchObject({ id: reply.id, threadRoot: root.id, reactions: [{ emoji: '👀', memberIds: ['ramnique'] }] });
+    expect(r.body.message).toMatchObject({ id: reply.id, threadRoot: root.id, reactions: [{ emoji: '👀', memberIds: ['ramnique'], lastOffset: expect.any(Number) }] });
     expect((await ramnique.get(`/v1/spaces/${links}/messages/${root.id}`)).body.message.threadRoot).toBeUndefined();
     expect((await ramnique.get(`/v1/spaces/${links}/messages/01JZZZZZZZZZZZZZZZZZZZZZZZ`)).status).toBe(404);
     const outsider = api('dev-arjun');
@@ -768,13 +768,13 @@ describe('reactions', () => {
   it('any member reacts to any message; groups fold in first-reacted order', async () => {
     const first = await react(gagan, '👍', 'add');
     expect(first.status).toBe(200);
-    expect(first.body.message.reactions).toEqual([{ emoji: '👍', memberIds: ['gagan'] }]);
+    expect(first.body.message.reactions).toEqual([{ emoji: '👍', memberIds: ['gagan'], lastOffset: expect.any(Number) }]);
 
     await react(ramnique, '👍', 'add'); // second member joins the group
     const second = await react(ramnique, '🚀', 'add'); // new emoji appends a group
     expect(second.body.message.reactions).toEqual([
-      { emoji: '👍', memberIds: ['gagan', 'ramnique'] },
-      { emoji: '🚀', memberIds: ['ramnique'] },
+      { emoji: '👍', memberIds: ['gagan', 'ramnique'], lastOffset: expect.any(Number) },
+      { emoji: '🚀', memberIds: ['ramnique'], lastOffset: expect.any(Number) },
     ]);
 
     // Reads fold the same state in.

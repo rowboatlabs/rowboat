@@ -642,6 +642,20 @@ export const MIGRATIONS: Migration[] = [
           and e.event->'changeSet'->>'assetId' is null`,
     ],
   },
+  {
+    id: '021-reaction-read-offsets',
+    statements: [
+      `alter table reactions add column if not exists stream_offset int not null default 0`,
+      // Recover existing reactions' positions from their durable add events.
+      `update reactions r set stream_offset = e.last_offset from (
+        select space_id, event->'reaction'->>'messageId' as message_id,
+          event->'reaction'->>'emoji' as emoji, event->'reaction'->'by'->>'memberId' as member_id,
+          max(stream_offset) as last_offset
+        from events where event->>'type' = 'reaction' and event->>'action' = 'added'
+        group by space_id, event->'reaction'->>'messageId', event->'reaction'->>'emoji', event->'reaction'->'by'->>'memberId'
+      ) e where r.space_id = e.space_id and r.message_id = e.message_id and r.emoji = e.emoji and r.member_id = e.member_id`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

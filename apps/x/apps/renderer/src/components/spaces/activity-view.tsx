@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CheckCheck, Loader2, RefreshCw } from 'lucide-react'
 import type { spaces } from '@x/shared'
-import { MemberAvatar, Segmented } from '@/components/spaces/atoms'
+import { Segmented } from '@/components/spaces/atoms'
 import { DayDivider } from '@/components/spaces/message-row'
 import { useSpaceNames, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { dayKey, formatDayLabel } from '@/lib/spaces-conventions'
 import { subscribeSpacesFeed } from '@/lib/spaces-feed'
 import { loadUnread } from '@/lib/spaces-read-state'
 import { toast } from '@/lib/toast'
-import { formatFeedTime, resolveMentions } from '@/lib/spaces-presentation'
-import type { RailSelection } from '@/lib/spaces-selection'
+import { targetOf, type ActivityTarget } from '@/lib/spaces-activity'
+import { ActivityRow } from '@/components/spaces/activity-row'
+export type { ActivityTarget } from '@/lib/spaces-activity'
 import { cn } from '@/lib/utils'
 
 // Activity (layer 3, 2026-09-10): everything that involves you in this org,
@@ -17,7 +18,7 @@ import { cn } from '@/lib/utils'
 // fold. Slack's Activity tab, cut to what the org can decide today: mentions,
 // @here, DMs, replies in threads you follow, reactions on your messages.
 // Unread is the read marks' answer (reading in place clears it); reactions
-// clear when you look here. Every row opens the message it is about.
+// clear with their conversation’s read mark. Every row opens its message.
 
 type Tab = 'all' | 'mentions' | 'dms' | 'replies' | 'reactions'
 const TABS: Array<{ value: Tab; label: string }> = [
@@ -36,14 +37,6 @@ const TAB_KINDS: Record<Tab, spaces.SpacesActivityKind[] | undefined> = {
 }
 const PAGE = 40
 const RELOAD_DEBOUNCE_MS = 1_000
-
-/** Where a row leads: the space (or its thread), landing on the message. */
-export interface ActivityTarget {
-    orgId: string
-    spaceId: string
-    rail: RailSelection
-    messageId: string
-}
 
 type Page = spaces.SpacesActivityPage
 type Item = spaces.SpacesActivityItem
@@ -86,17 +79,6 @@ export function ActivityView({ org, active = true, onOpenMessage }: {
     useEffect(() => {
         void load()
     }, [load])
-
-    // Looking here is what reads a reaction (message kinds read where they
-    // live). The rows you are looking at keep their unread mark for this visit.
-    const seenFor = useRef<string | null>(null)
-    useEffect(() => {
-        if (!active || !page) return
-        const newest = page.items.find((i) => i.kind === 'reaction' && i.unread)
-        if (!newest || seenFor.current === newest.at) return
-        seenFor.current = newest.at
-        void window.ipc.invoke('spaces:markActivitySeen', { orgId: org.id, at: newest.at }).catch(() => {})
-    }, [active, page, org.id])
 
     // Live: the org's notify frames, our own read marks moving, and reactions
     // or deletions in any space the app is subscribed to — coalesced into one
@@ -212,15 +194,6 @@ export function ActivityView({ org, active = true, onOpenMessage }: {
     )
 }
 
-function targetOf(orgId: string, item: Item): ActivityTarget {
-    return {
-        orgId,
-        spaceId: item.spaceId,
-        rail: item.threadRootId ? { kind: 'thread', rootMessageId: item.threadRootId } : { kind: 'general' },
-        messageId: item.message.id,
-    }
-}
-
 function groupByDay(items: Item[]): Array<{ day: string; items: Item[] }> {
     const out: Array<{ day: string; items: Item[] }> = []
     for (const item of items) {
@@ -230,70 +203,4 @@ function groupByDay(items: Item[]): Array<{ day: string; items: Item[] }> {
         else out.push({ day, items: [item] })
     }
     return out
-}
-
-/** "Harsh", "Harsh's Rowboat", "Arjun and Harsh", "Arjun, Harsh and 2 others". */
-export function actorLabel(actors: Item['actors'], names: ReadonlyMap<string, string>): string {
-    const one = (a: Item['actors'][number]) => {
-        const name = names.get(a.memberId) ?? a.memberId
-        return a.actingMode === 'agent' ? `${name}'s ${a.agentName ?? 'Rowboat'}` : name
-    }
-    const labels = actors.map(one)
-    if (labels.length <= 1) return labels[0] ?? 'Someone'
-    if (labels.length === 2) return `${labels[0]} and ${labels[1]}`
-    if (labels.length === 3) return `${labels[0]}, ${labels[1]} and ${labels[2]}`
-    return `${labels[0]}, ${labels[1]} and ${labels.length - 2} others`
-}
-
-/** The reason line after the actor: what they did, and where. */
-export function reasonLabel(item: Item): string {
-    const where = item.spaceKind === 'direct' ? '' : item.threadRootId ? ` in a thread in #${item.spaceName}` : ` in #${item.spaceName}`
-    switch (item.kind) {
-        case 'mention': return `mentioned you${where}`
-        case 'here': return `notified everyone${where}`
-        case 'dm': return item.threadRootId ? 'replied in a thread' : 'messaged you'
-        case 'reply': return `replied${where}`
-        case 'reaction': return `reacted ${item.emoji ?? ''} to your message${where}`
-    }
-}
-
-/** One line of the message, mention tokens as names (people and spaces), markdown scaffolding dropped. */
-export function excerptOf(body: string, names: ReadonlyMap<string, string>, spaceNames?: ReadonlyMap<string, string>, max = 160): string {
-    const flat = resolveMentions(body, names, spaceNames)
-        .replace(/```[\s\S]*?```/g, ' ')
-        .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
-        .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-        .replace(/[`*_#>]/g, '')
-        .replace(/\s+/g, ' ')
-        .trim()
-    return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat
-}
-
-function ActivityRow({ item, names, spaceNames, onOpen }: { item: Item; names: ReadonlyMap<string, string>; spaceNames: ReadonlyMap<string, string>; onOpen: () => void }) {
-    const lead = item.actors[0]
-    const who = actorLabel(item.actors, names)
-    const excerpt = excerptOf(item.message.body, names, spaceNames)
-    return (
-        <button type="button" onClick={onOpen}
-            className={cn('group flex w-full items-start gap-3 rounded-lg px-2 py-2 text-left hover:bg-accent/60', item.unread && 'bg-accent/30')}
-            title={new Date(item.at).toLocaleString()}>
-            <span className="mt-[9px] flex w-1.5 shrink-0 justify-center">
-                {item.unread && <span className="size-1.5 rounded-full bg-[var(--stream-alert)]" aria-label="unread" />}
-            </span>
-            <MemberAvatar id={lead?.memberId ?? ''} name={names.get(lead?.memberId ?? '') ?? who} size="sm" className="mt-0.5 size-6 rounded-[5px] text-[9px]" />
-            <span className="min-w-0 flex-1">
-                <span className="flex items-baseline gap-2">
-                    <span className="min-w-0 truncate text-[13px]">
-                        <span className={cn('font-semibold', !item.unread && 'font-medium')}>{who}</span>
-                        <span className="text-muted-foreground"> {reasonLabel(item)}</span>
-                    </span>
-                    <span className="ml-auto shrink-0 text-[11px] tabular-nums text-muted-foreground">{formatFeedTime(item.at)}</span>
-                </span>
-                <span className={cn('mt-0.5 line-clamp-2 block text-[13px]', item.unread ? 'text-foreground' : 'text-muted-foreground')}>
-                    {item.kind === 'reaction' && <span className="text-muted-foreground">You: </span>}
-                    {excerpt || <span className="italic text-muted-foreground">(no text)</span>}
-                </span>
-            </span>
-        </button>
-    )
 }
