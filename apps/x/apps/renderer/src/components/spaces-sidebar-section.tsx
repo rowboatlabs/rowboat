@@ -67,8 +67,10 @@ export function SpacesSidebarSection({ active, onOpenSpaces, onOpenMessage }: {
                                     <button type="button" onClick={() => onOpenMessage(targetOf(orgId, item))}
                                         title={`${org.name} · ${who} ${reason}\n${excerpt}\n${new Date(item.at).toLocaleString()}`}
                                         className={cn(
-                                            'w-full min-w-0 rounded-lg bg-black/20 px-2 py-1.5 text-left shadow-sm ring-1 ring-white/[0.035] transition-colors hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring dark:bg-black/25',
-                                            item.unread && 'bg-sidebar-accent/60 ring-sidebar-border/60 dark:bg-sidebar-accent/50',
+                                            'w-full min-w-0 rounded-lg px-2 py-1.5 text-left ring-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring',
+                                            item.unread
+                                                ? 'bg-sidebar-accent/65 ring-sidebar-border/50 hover:bg-sidebar-accent dark:bg-sidebar-accent/50'
+                                                : 'bg-sidebar-accent/30 ring-sidebar-border/30 hover:bg-sidebar-accent/60 dark:bg-black/20 dark:ring-white/[0.035]',
                                         )}>
                                         <span className="flex items-baseline gap-2 text-[11px] text-muted-foreground">
                                             <span className="min-w-0 flex-1 truncate">{org.name}</span>
