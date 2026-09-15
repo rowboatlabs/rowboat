@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Globe, X } from 'lucide-react'
 import { useLinkPreview } from '@/hooks/use-link-preview'
+import { useSpacesOrgs } from '@/hooks/use-spaces'
 import { previewUrls } from '@/lib/spaces-unfurl'
 
 // conversation unfurls under a message: a gray accent bar, favicon + site
@@ -35,7 +36,8 @@ function hidePreview(messageId: string, url: string): void {
 }
 
 export function MessageLinkPreview({ body, messageId }: { body: string; messageId?: string }) {
-    const urls = useMemo(() => previewUrls(body), [body])
+    const { orgs } = useSpacesOrgs()
+    const urls = useMemo(() => previewUrls(body, orgs.map((org) => org.address)), [body, orgs])
     // Bumping re-reads the hidden list; the localStorage write is the store.
     const [, setHiddenTick] = useState(0)
     if (urls.length === 0) return null
