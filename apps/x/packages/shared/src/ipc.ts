@@ -1265,6 +1265,14 @@ export const ipcSchemas = {
       updatedFrom: z.string().nullable(),
     }),
   },
+  // Main-window unread totals; macOS retains the last badge while it is closed.
+  'app:setSpacesDockBadge': {
+    req: z.object({
+      unread: z.number().int().nonnegative(),
+      forYou: z.number().int().nonnegative(),
+    }),
+    res: z.object({}),
+  },
   // --- Client auto-update (apps/main/src/updater.ts) ---
   // Pushed to all windows whenever the updater state changes.
   'updater:status': {
