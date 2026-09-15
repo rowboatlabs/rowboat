@@ -1,8 +1,8 @@
 import { WorkspaceSessionTabs } from './components/code/workspace-session-tabs'
 import { DocumentFileViewer } from '@/components/document-file-viewer'
-import { parseSpacesLink, readLastSpace, resolveSpacesLocation, type SpacesLinkTarget } from '@/lib/spaces-navigation'
-import { requestJoinInvite } from '@/lib/spaces-invite'
-import { InviteJoinDialog } from '@/components/spaces/invite-join-dialog'
+import { parseSpacesLink, readLastSpace, resolveSpacesLocation, serverLandingSpaceId, type SpacesLinkTarget } from '@/lib/spaces-navigation'
+import { openServerDialog } from '@/lib/server-dialog'
+import { ServerDialogs } from '@/components/spaces/server-dialogs'
 import { noteSpaceVisit } from '@/lib/spaces-visits'
 import * as React from 'react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useRef } from 'react'
@@ -5673,7 +5673,7 @@ function App() {
       // signed-in org's own base URL, else https on the address) and hand it
       // to the join dialog, which resolves it pre-auth and shows the card.
       const base = org?.baseUrl ?? `https://${target.orgAddress}`
-      requestJoinInvite(`${base}/join/${target.inviteToken}`)
+      openServerDialog({ kind: 'join', inviteUrl: `${base}/join/${target.inviteToken}` })
       void navigateToViewRef.current({ type: 'spaces' })
       return
     }
@@ -8282,9 +8282,14 @@ function App() {
         defaultTab="advanced"
       />
       <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} />
-      <InviteJoinDialog
-        onJoined={(orgId, spaceId) => {
-          void navigateToViewRef.current(spaceId ? { type: 'spaces', orgId, spaceId, rail: { kind: 'general' } } : { type: 'spaces' })
+      {/* The one host for Create / Join a server (lib/server-dialog.ts): whatever
+          opened it, a finished dialog lands in the org — the joined space, or
+          the server's landing space. */}
+      <ServerDialogs
+        onDone={(orgId, spaceId) => {
+          const org = getSpacesOrgs().find((o) => o.id === orgId)
+          const landing = spaceId ?? (org ? serverLandingSpaceId(org) : '')
+          void navigateToViewRef.current(landing ? { type: 'spaces', orgId, spaceId: landing, rail: { kind: 'general' } } : { type: 'spaces' })
         }}
       />
       <SettingsDialog

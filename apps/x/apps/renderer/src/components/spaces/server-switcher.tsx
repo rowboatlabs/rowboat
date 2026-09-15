@@ -1,24 +1,24 @@
 import { useState } from 'react'
 import { Check, ChevronsUpDown, LogIn, Plus } from 'lucide-react'
-import { AddOrgDialog, OrgMonogram } from '@/components/spaces/atoms'
+import { OrgMonogram } from '@/components/spaces/atoms'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { getSpacesOrgs, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
+import { useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { serverLandingSpaceId } from '@/lib/spaces-navigation'
+import { openServerDialog } from '@/lib/server-dialog'
 
 export function ServerSwitcher({ org, onOpenSpace, onMenuOpenChange }: {
     org: OrgWithSpaces
     onOpenSpace: (orgId: string, spaceId: string) => void
     onMenuOpenChange?: (open: boolean) => void
 }) {
-    const { orgs, refresh } = useSpacesOrgs()
+    const { orgs } = useSpacesOrgs()
     const [menuOpen, setMenuOpen] = useState(false)
-    const [action, setAction] = useState<'create' | 'join' | null>(null)
     const openServer = (server: OrgWithSpaces, spaceId?: string) => {
         onOpenSpace(server.id, spaceId ?? serverLandingSpaceId(server))
     }
 
     return <>
-        <DropdownMenu open={menuOpen} onOpenChange={(open) => { setMenuOpen(open); onMenuOpenChange?.(open || action !== null) }}>
+        <DropdownMenu open={menuOpen} onOpenChange={(open) => { setMenuOpen(open); onMenuOpenChange?.(open) }}>
             <DropdownMenuTrigger asChild>
                 <button type="button" aria-label={`Switch server: ${org.name}`} title={orgs.length > 1 ? 'Switch server · more servers available' : 'Switch server'}
                     className="flex h-9 min-w-0 max-w-64 shrink items-center gap-2 rounded-md px-1.5 text-left hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
@@ -41,17 +41,10 @@ export function ServerSwitcher({ org, onOpenSpace, onMenuOpenChange }: {
                     {server.id === org.id && <Check className="size-4 shrink-0" aria-label="Active server" />}
                 </DropdownMenuItem>)}
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={(event) => { event.preventDefault(); setMenuOpen(false); setAction('create'); onMenuOpenChange?.(true) }}><Plus className="size-4" /> Create a server</DropdownMenuItem>
-                <DropdownMenuItem onSelect={(event) => { event.preventDefault(); setMenuOpen(false); setAction('join'); onMenuOpenChange?.(true) }}><LogIn className="size-4" /> Join a server</DropdownMenuItem>
+                {/* The dialogs are hosted once in App (lib/server-dialog.ts); a finished one lands in the new server itself. */}
+                <DropdownMenuItem onSelect={() => openServerDialog({ kind: 'create' })}><Plus className="size-4" /> Create a server</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => openServerDialog({ kind: 'join' })}><LogIn className="size-4" /> Join a server</DropdownMenuItem>
             </DropdownMenuContent>
         </DropdownMenu>
-        <AddOrgDialog key={action ?? 'closed'} open={action !== null} initialAction={action ?? undefined}
-            onOpenChange={(open) => { if (!open) { setAction(null); onMenuOpenChange?.(false) } }}
-            onAdded={(orgId, spaceId) => {
-                void refresh().then(() => {
-                    const added = getSpacesOrgs().find((server) => server.id === orgId)
-                    if (added) openServer(added, spaceId)
-                })
-            }} />
     </>
 }

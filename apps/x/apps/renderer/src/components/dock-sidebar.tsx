@@ -72,7 +72,8 @@ import { isOutOfCredits, CREDIT_EXHAUSTED_EVENT, CREDIT_REPLENISHED_EVENT } from
 import { SettingsDialog } from "@/components/settings-dialog"
 import { SidebarCreditRewards } from "@/components/sidebar-credit-rewards"
 import { SPACES_ENABLED } from "@/lib/feature-flags"
-import { AddOrgDialog, OrgMonogram, type SpaceSelection } from "@/components/spaces-view"
+import { OrgMonogram, type SpaceSelection } from "@/components/spaces-view"
+import { openServerDialog } from "@/lib/server-dialog"
 import { openSelfDirect, useSpacesOrgs, type OrgWithSpaces } from "@/hooks/use-spaces"
 import { prefetchStream, spaceLastActivityAt, useSpacesUnreadCounts, type SpaceBadge } from "@/hooks/use-space-chat"
 import { NO_BADGE } from "@/lib/spaces-read-state"
@@ -587,7 +588,6 @@ export function DockSidebar({
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [connectionsSettingsOpen, setConnectionsSettingsOpen] = useState(false)
   const [syncLogOpen, setSyncLogOpen] = useState(false)
-  const [addOrgOpen, setAddOrgOpen] = useState(false)
 
   const closeFlyouts = useCallback(() => {
     setChatsOpen(false)
@@ -1432,7 +1432,7 @@ export function DockSidebar({
           activeSpace={activeSpace}
           onOpenSpace={(orgId, spaceId) => { closeFlyouts(); onOpenSpace?.(orgId, spaceId) }}
           onOpenActivity={onOpenActivity ? (orgId) => { closeFlyouts(); onOpenActivity(orgId) } : undefined}
-          onAddOrg={() => setAddOrgOpen(true)}
+          onAddOrg={() => openServerDialog({ kind: 'create' })}
           onChanged={() => void refreshSpaces()}
           onRequestRemoveOrg={(id, name) => setRemoveOrgTarget({ id, name })}
         />
@@ -1548,10 +1548,6 @@ export function DockSidebar({
         onOpenChange={setConnectionsSettingsOpen}
       />
 
-      {/* Add-org dialog lives at the root so closing the flyout can't unmount it */}
-      {SPACES_ENABLED && (
-        <AddOrgDialog open={addOrgOpen} onOpenChange={setAddOrgOpen} onAdded={() => void refreshSpaces()} />
-      )}
     </>
   )
 }

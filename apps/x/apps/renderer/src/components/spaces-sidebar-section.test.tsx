@@ -42,8 +42,8 @@ vi.mock('@/hooks/use-space-chat', async () => {
     }
 })
 vi.mock('@/hooks/use-space-members', () => ({ prefetchMembers: vi.fn(), useSelfDisplayName: () => 'Me' }))
-vi.mock('@/components/spaces-view', () => ({ AddOrgDialog: () => null, OrgMonogram: () => null }))
-vi.mock('@/components/spaces/atoms', () => ({ MemberAvatar: () => null, AddOrgDialog: () => null }))
+vi.mock('@/components/spaces-view', () => ({ OrgMonogram: () => null }))
+vi.mock('@/components/spaces/atoms', () => ({ MemberAvatar: () => null }))
 vi.mock('@/components/spaces/new-direct-dialog', () => ({ NewDirectDialog: () => null }))
 vi.mock('@/lib/spaces-direct', () => ({
     directAvatarId: () => '', isSelfDirect: () => false, isSelfDirectUnsupported: () => false,
