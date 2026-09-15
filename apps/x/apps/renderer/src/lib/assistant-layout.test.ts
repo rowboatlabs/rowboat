@@ -6,7 +6,16 @@ const place = (state: AssistantLayout, id: string, location: ChatLocation, repla
 
 describe('assistant container ownership', () => {
   it('starts with one Assistant conversation and a hidden sidebar', () => {
-    expect(initialAssistantLayout('draft')).toEqual({ assistant: 'draft', sidebar: null, floating: [], focused: 'draft' })
+    expect(initialAssistantLayout('draft')).toEqual({ assistant: 'draft', sidebar: null, sidebarVisible: false, floating: [], focused: 'draft' })
+  })
+
+  it('hides and reopens the sidebar without releasing its conversation', () => {
+    let state = place(initialAssistantLayout('a'), 'b', 'sidebar')
+    state = reduce(state, { type: 'hide-sidebar' })
+    expect(state).toMatchObject({ sidebar: 'b', sidebarVisible: false })
+    expect(chatLocation(state, 'b')).toBe('sidebar')
+    state = reduce(state, { type: 'show-sidebar' })
+    expect(state).toMatchObject({ sidebar: 'b', sidebarVisible: true, focused: 'b' })
   })
 
   it('moves the same identity through every pair of locations without duplicates', () => {
@@ -73,5 +82,10 @@ describe('assistant container ownership', () => {
     expect(result.floating).toHaveLength(1)
     expect(result.floating[0]).toMatchObject({ id: 'b', minimized: true })
     expect(restoreAssistantLayout('{', ['a'])).toEqual(initialAssistantLayout('a'))
+  })
+
+  it('starts with a remembered sidebar chat hidden after relaunch', () => {
+    const saved = { assistant: 'a', sidebar: 'b', sidebarVisible: true, floating: [], focused: 'b' }
+    expect(restoreAssistantLayout(JSON.stringify(saved), ['a', 'b'])).toMatchObject({ sidebar: 'b', sidebarVisible: false })
   })
 })

@@ -32,12 +32,14 @@ function Harness({ onResize }: { onResize?: (size: WindowSize) => void } = {}) {
   return <>
     <div ref={setHost} aria-label="Assistant page" />
     {['b', 'c'].map((id) => <button key={id} onClick={() => dispatch({ type: 'place', id, location: 'floating', size })}>Float {id}</button>)}
+    <button onClick={() => dispatch({ type: 'show-sidebar' })}>Show sidebar</button>
     <AssistantWorkspace {...services} layout={layout} dispatch={(action) => {
       if (action.type === 'resize') onResize?.(action.size)
       dispatch(action)
     }} pageHost={host} pageVisible legacyPane={false}
-      onMoveChat={(id, location) => dispatch({ type: 'place', id, location, size })} onCloseChat={(id) => dispatch({ type: 'close', id })}
-      onNewChatAt={vi.fn()} onSelectChatAt={vi.fn()} onFocusChat={vi.fn()} />
+    onMoveChat={(id, location) => dispatch({ type: 'place', id, location, size })} onCloseChat={(id) => dispatch({ type: 'close', id })}
+    onHideSidebar={() => dispatch({ type: 'hide-sidebar' })}
+    onNewChatAt={vi.fn()} onSelectChatAt={vi.fn()} onFocusChat={vi.fn()} />
   </>
 }
 afterEach(cleanup)
@@ -69,6 +71,12 @@ describe('assistant workspace containers', () => {
     expect(closeSidebar).toBeVisible()
     expect(closeSidebar.closest('[data-chat-header]')).not.toBeNull()
     expect(screen.queryByLabelText('Close chat')).not.toBeInTheDocument()
+    fireEvent.click(closeSidebar)
+    expect(screen.queryByLabelText('Chat sidebar')).not.toBeInTheDocument()
+    // Restoring the container retains the portal and its local draft state.
+    fireEvent.click(screen.getByText('Show sidebar'))
+    expect(screen.getByLabelText('Draft')).toBe(input)
+    expect(screen.getByLabelText('Draft')).toHaveValue('Keep my unsent draft')
     fireEvent.click(screen.getByText('Move to floating'))
     expect(screen.queryByLabelText('Chat sidebar')).not.toBeInTheDocument()
     expect(screen.getByLabelText('Draft')).toBe(input)

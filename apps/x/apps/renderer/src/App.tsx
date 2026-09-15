@@ -5463,13 +5463,17 @@ function App() {
   }, [bindChatToRun, showChatInSidebar])
   openRunInSidebarRef.current = openRunInSidebar
 
-  // Cmd+L: the sidebar container. Occupied → its chat goes away (history
-  // keeps it); on the Assistant page → that chat moves over; else a fresh one.
+  // Cmd+L hides the sidebar without closing its chat. The same tab and session
+  // return when it is reopened, just as the Assistant page does after navigation.
   const toggleChatSidebar = useCallback(() => {
-    if (assistantLayout.sidebar) closeAssistantChat(assistantLayout.sidebar)
+    if (assistantLayout.sidebar && assistantLayout.sidebarVisible) dispatchAssistantLayout({ type: 'hide-sidebar' })
+    else if (assistantLayout.sidebar) {
+      dispatchAssistantLayout({ type: 'show-sidebar' })
+      switchChatTab(assistantLayout.sidebar)
+    }
     else if (isFullScreenChat && assistantLayout.assistant) moveAssistantChat(assistantLayout.assistant, 'sidebar')
     else newChatAt('sidebar')
-  }, [assistantLayout.sidebar, assistantLayout.assistant, isFullScreenChat, closeAssistantChat, moveAssistantChat, newChatAt])
+  }, [assistantLayout.sidebar, assistantLayout.sidebarVisible, assistantLayout.assistant, isFullScreenChat, switchChatTab, moveAssistantChat, newChatAt, dispatchAssistantLayout])
 
   const selectChatAt = useCallback((id: string, location: ChatLocation, replacing?: string) => {
     let tab = chatTabsRef.current.find((entry) => entry.id === id || entry.runId === id)
@@ -7217,7 +7221,7 @@ function App() {
     return () => observer.disconnect()
   }, [projectViewActive])
   const projectDocumentOnly = projectViewActive && !!selectedPath && projectContentWidth < 840
-  const chatPaneOpen = projectViewActive ? !!projectChatId && !projectDocumentOnly : isCodeOpen ? codeChatMain : !!assistantLayout.sidebar
+  const chatPaneOpen = projectViewActive ? !!projectChatId && !projectDocumentOnly : isCodeOpen ? codeChatMain : !!assistantLayout.sidebar && assistantLayout.sidebarVisible
   // The document pane shares the window with a docked chat (not maximized
   // over it, not floating above it). The editor reads this to step its
   // headings down so they sit level with chat prose.
@@ -7490,7 +7494,7 @@ function App() {
                   </Tooltip>
                 )}
                 {isWorkspaceOpen && selectedPath && <button aria-label="Close document" title="Close document" className="titlebar-no-drag rounded p-2 hover:bg-accent" onClick={() => { void navigateToView({ type: 'workspace', path: workspaceInitialPath ?? undefined, runId: projectChatId ?? undefined }) }}><X className="size-4" /></button>}
-                {!assistantLayout.sidebar && (
+                {!assistantLayout.sidebarVisible && (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
@@ -8045,7 +8049,8 @@ function App() {
               <AssistantWorkspace
                 layout={assistantLayout} dispatch={dispatchAssistantLayout} pageHost={assistantPageHost} pageVisible={activeMiddle === 'chat'}
                 legacyPane={projectViewActive || isCodeOpen} workspaceSessionId={projectViewActive ? projectChatId : activeCodeSession?.session.id ?? null}
-                onMoveChat={moveAssistantChat} onNewChatAt={newChatAt} onSelectChatAt={selectChatAt} onFocusChat={switchChatTab} onCloseChat={closeAssistantChat}
+                onMoveChat={moveAssistantChat} onNewChatAt={newChatAt} onSelectChatAt={selectChatAt} onFocusChat={switchChatTab}
+                onHideSidebar={() => dispatchAssistantLayout({ type: 'hide-sidebar' })} onCloseChat={closeAssistantChat}
                 onSubmitForTab={(id, message, mentions, attachments, search, mode, permission) => handlePromptSubmit(message, mentions, attachments, search, mode, permission, id)}
                 voiceOwner={voiceOwner} callChatId={hoverRunId}
                 onStartRecordingForTab={(id) => { switchChatTab(id); handleStartRecording(chatIdForTab(id)) }}
