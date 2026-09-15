@@ -1,7 +1,7 @@
-import { useEffect, useId, useMemo, useState, type ReactNode } from 'react'
-import { Bell, ChevronDown, ChevronRight, CornerDownRight, Hash, MessagesSquare, Pencil, Plus } from 'lucide-react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Bell, ChevronRight, CornerDownRight, Hash, MessagesSquare, Pencil, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { SidebarGroup, SidebarGroupContent, SidebarMenu, SidebarMenuAction, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar'
+import { SidebarGroup, SidebarGroupContent, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar'
 import {
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
 } from '@/components/ui/context-menu'
@@ -11,7 +11,7 @@ import { openSelfDirect, useSpaceFeed, useSpacesOrgs, type OrgWithSpaces } from 
 import { prefetchStream, spaceLastActivityAt, useSpacesUnreadCounts } from '@/hooks/use-space-chat'
 import { NO_BADGE, streamBadge, threadBadge, useReadStateVersion, type SpaceBadge } from '@/lib/spaces-read-state'
 import { UnreadBadge } from '@/components/spaces/unread-badge'
-import { MemberAvatar } from '@/components/spaces/atoms'
+import { MemberAvatar, OrgMonogram } from '@/components/spaces/atoms'
 import { NewDirectDialog } from '@/components/spaces/new-direct-dialog'
 import { directAvatarId, isSelfDirect, isSelfDirectUnsupported, markSelfDirectUnsupported, selfDirectFailureMessage, selfDirectRefused, spaceDisplayName } from '@/lib/spaces-direct'
 import { prefetchMembers, useSelfDisplayName } from '@/hooks/use-space-members'
@@ -19,84 +19,54 @@ import { isSpaceExpanded, setSpaceExpanded, useSpaceExpansionVersion } from '@/l
 import type { RailSelection } from '@/lib/spaces-selection'
 import { toast } from '@/lib/toast'
 import * as analytics from '@/lib/analytics'
-import { useCrossOrgActivity } from '@/hooks/use-cross-org-activity'
-import { actorLabel, excerptOf, reasonLabel, targetOf, type ActivityTarget } from '@/lib/spaces-activity'
-import { formatFeedTime } from '@/lib/spaces-presentation'
+import { openServerDialog } from '@/lib/server-dialog'
+import { serverLandingSpaceId } from '@/lib/spaces-navigation'
+import { AddServerDialog } from '@/components/spaces/add-server-dialog'
 
-
-/** Cross-organization attention feed; the space rail owns conversation navigation. */
-export function SpacesSidebarSection({ active, onOpenSpaces, onOpenMessage }: {
+/** Server shortcuts; conversation navigation lives inside each server. */
+export function SpacesSidebarSection({ active, activeSpace, onOpenSpace }: {
     active: boolean
-    onOpenSpaces: () => void
-    onOpenMessage: (target: ActivityTarget) => void
+    activeSpace?: SpaceSelection
+    onOpenSpace: (orgId: string, spaceId: string) => void
 }) {
-    const { orgs, loading: orgsLoading } = useSpacesOrgs()
-    const [expanded, setExpanded] = useState(() => localStorage.getItem('spaces:sidebarActivityCollapsed') !== 'true')
-    const contentId = useId()
-    const activity = useCrossOrgActivity(orgs.map((org) => org.id), expanded)
+    const { orgs } = useSpacesOrgs()
+    const [addingServer, setAddingServer] = useState(false)
     const unread = useSpacesUnreadCounts()
-    const badge = { unread: 0, forYou: 0 }
-    for (const org of orgs) for (const space of [...org.spaces, ...org.directs]) {
-        const count = unread.get(`${org.id}/${space.id}`)
-        badge.unread += count?.unread ?? 0
-        badge.forYou += count?.forYou ?? 0
+    const serverBadges = new Map<string, SpaceBadge>()
+    for (const org of orgs) {
+        const badge = { unread: 0, forYou: 0 }
+        for (const space of [...org.spaces, ...org.directs]) {
+            const count = unread.get(`${org.id}/${space.id}`)
+            badge.unread += count?.unread ?? 0
+            badge.forYou += count?.forYou ?? 0
+        }
+        serverBadges.set(org.id, badge)
     }
-    const orgById = new Map(orgs.map((org) => [org.id, org]))
     return <SidebarGroup className="pt-0">
         <SidebarGroupContent>
+            <div data-tour-id="nav-spaces" className="flex h-8 items-center gap-2.5 px-2.5">
+                <MessagesSquare className="size-4 shrink-0 text-muted-foreground" />
+                <h2 className="flex-1 text-sm font-medium text-muted-foreground">Spaces</h2>
+                <button type="button" aria-label="Add server" title="Add server"
+                    className="flex size-5 shrink-0 items-center justify-center text-muted-foreground transition-colors hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+                    onClick={() => setAddingServer(true)}>
+                    <Plus className="size-4" />
+                </button>
+            </div>
             <SidebarMenu>
-                <SidebarMenuItem>
-                    <SidebarMenuButton data-tour-id="nav-spaces" isActive={active} onClick={onOpenSpaces}>
-                        <MessagesSquare className="size-4 shrink-0" />
-                        <span className="flex-1">Spaces</span>
-                        <UnreadBadge badge={badge} />
+                {orgs.map((org) => <SidebarMenuItem key={org.id}>
+                    <SidebarMenuButton className="pl-6" isActive={active && activeSpace?.orgId === org.id}
+                        title={org.name} onClick={() => onOpenSpace(org.id, serverLandingSpaceId(org))}>
+                        <OrgMonogram org={org} size="sm" />
+                        <span className="min-w-0 flex-1 truncate">{org.name}</span>
+                        <UnreadBadge badge={serverBadges.get(org.id)!} />
                     </SidebarMenuButton>
-                    <SidebarMenuAction type="button" aria-label={expanded ? 'Collapse Spaces activity' : 'Expand Spaces activity'}
-                        title={expanded ? 'Collapse Spaces activity' : 'Expand Spaces activity'} aria-expanded={expanded} aria-controls={contentId}
-                        onClick={() => setExpanded((value) => { localStorage.setItem('spaces:sidebarActivityCollapsed', String(value)); return !value })}>
-                        <ChevronDown className={cn('transition-transform', !expanded && '-rotate-90')} />
-                    </SidebarMenuAction>
-                    {expanded && <div id={contentId} role="region" aria-label="Activity across organizations" className="mt-1">
-                        <ul className="flex flex-col gap-1 px-1">
-                            {activity.items.map(({ orgId, item, names }) => {
-                                const org = orgById.get(orgId)!
-                                const who = actorLabel(item.actors, names)
-                                const reason = reasonLabel(item)
-                                const spaceNames = new Map([...org.spaces, ...org.directs].map((space) => [space.id, space.name]))
-                                const excerpt = excerptOf(item.message.body, names, spaceNames)
-                                return <li key={`${orgId}/${item.id}`}>
-                                    <button type="button" onClick={() => onOpenMessage(targetOf(orgId, item))}
-                                        title={`${org.name} · ${who} ${reason}\n${excerpt}\n${new Date(item.at).toLocaleString()}`}
-                                        className={cn(
-                                            'w-full min-w-0 rounded-lg px-2 py-1.5 text-left ring-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring',
-                                            item.unread
-                                                ? 'bg-sidebar-accent/65 ring-sidebar-border/50 hover:bg-sidebar-accent dark:bg-sidebar-accent/50'
-                                                : 'bg-sidebar-accent/30 ring-sidebar-border/30 hover:bg-sidebar-accent/60 dark:bg-black/20 dark:ring-white/[0.035]',
-                                        )}>
-                                        <span className="flex items-baseline gap-2 text-[11px] text-muted-foreground">
-                                            <span className="min-w-0 flex-1 truncate">{org.name}</span>
-                                            <span className="shrink-0 tabular-nums">{formatFeedTime(item.at)}</span>
-                                        </span>
-                                        <span className="mt-0.5 flex items-center gap-1.5 text-xs">
-                                            <span className="min-w-0 flex-1 truncate"><span className={cn(item.unread ? 'font-semibold text-sidebar-foreground' : 'font-medium')}>{who}</span>{' '}
-                                                <span className="text-muted-foreground">{reason}</span>{excerpt && <span className="text-muted-foreground"> · {item.kind === 'reaction' ? 'You: ' : ''}<span>{excerpt}</span></span>}</span>
-                                            {item.unread && <span aria-label="unread" className="size-1.5 shrink-0 rounded-full bg-[var(--stream-alert)]" />}
-                                        </span>
-                                    </button>
-                                </li>
-                            })}
-                        </ul>
-                        {activity.items.length === 0 && <p className="px-2 py-3 text-xs text-muted-foreground">
-                            {orgsLoading || activity.loading ? 'Loading activity…' : orgs.length === 0 ? 'Connect a server to see activity.' : activity.failedOrgIds.length ? 'Activity is unavailable.' : 'No activity yet.'}
-                        </p>}
-                        {activity.failedOrgIds.length > 0 && <button type="button" onClick={activity.retry}
-                            title={activity.failedOrgIds.map((id) => orgById.get(id)?.name).join(', ')}
-                            className="px-2 py-1 text-xs text-muted-foreground hover:text-sidebar-foreground">
-                            {activity.failedOrgIds.length} {activity.failedOrgIds.length === 1 ? 'organization' : 'organizations'} unavailable · Retry
-                        </button>}
-                    </div>}
-                </SidebarMenuItem>
+                </SidebarMenuItem>)}
             </SidebarMenu>
+            {addingServer && <AddServerDialog onClose={() => setAddingServer(false)} onChoose={(kind) => {
+                setAddingServer(false)
+                openServerDialog({ kind })
+            }} />}
         </SidebarGroupContent>
     </SidebarGroup>
 }
