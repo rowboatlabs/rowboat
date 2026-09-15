@@ -528,6 +528,8 @@ type DockItemDef = {
   badge?: string
   badgeAmber?: boolean
   badgePulse?: boolean
+  /** A compact unread marker for the icon rail. */
+  notification?: 'muted' | 'alert'
   status?: string
   statusAlert?: boolean
   running?: boolean
@@ -886,10 +888,14 @@ export function DockSidebar({
   // ----- data: spaces (safe when the flag is off — the store stays empty) -----
   const { orgs, loading: spacesLoading, refresh: refreshSpaces } = useSpacesOrgs()
   const spacesUnread = useSpacesUnreadCounts()
-  const totalSpacesUnread = useMemo(() => {
-    let sum = 0
-    for (const badge of spacesUnread.values()) sum += badge.forYou
-    return sum
+  const spacesNotification = useMemo(() => {
+    let unread = 0
+    let forYou = 0
+    for (const badge of spacesUnread.values()) {
+      unread += badge.unread
+      forYou += badge.forYou
+    }
+    return { unread, forYou }
   }, [spacesUnread])
   const totalSpaces = useMemo(() => orgs.reduce((n, o) => n + o.spaces.length + o.directs.length, 0), [orgs])
 
@@ -967,9 +973,11 @@ export function DockSidebar({
       ...(SPACES_ENABLED && (!switcherOnly || totalSpaces > 0) ? [{
         item: {
           key: 'spaces', label: 'Spaces', icon: MessagesSquare, tourId: 'nav-spaces',
-          badge: totalSpacesUnread > 0 ? (totalSpacesUnread > 99 ? '99+' : String(totalSpacesUnread)) : undefined,
-          status: totalSpacesUnread > 0
-            ? `${totalSpacesUnread} for you`
+          notification: spacesNotification.unread > 0
+            ? (spacesNotification.forYou > 0 ? 'alert' as const : 'muted' as const)
+            : undefined,
+          status: spacesNotification.unread > 0
+            ? `${spacesNotification.unread} unread${spacesNotification.forYou > 0 ? ` · ${spacesNotification.forYou} for you` : ''}`
             : totalSpaces > 0 ? `${totalSpaces} space${totalSpaces === 1 ? '' : 's'}` : undefined,
           running: activeNav === 'spaces' || spacesOpen,
           onClick: () => {
@@ -1099,7 +1107,7 @@ export function DockSidebar({
     bgAgentsFailed, bgAgentsLabel, onToggleBrowser, browserOpen,
     switcherOnly, openLastSpace, onOpenChatHistory,
     onNewChat, lastChat, onOpenRun, onOpenAssistant,
-    onOpenBgTasks, workspaceCount, totalSpacesUnread, totalSpaces, spacesOpen, chatsOpen,
+    onOpenBgTasks, workspaceCount, spacesNotification, totalSpaces, spacesOpen, chatsOpen,
     outOfCredits, hasOauthError, settingsStatus, settingsAlert,
   ])
 
@@ -1353,6 +1361,12 @@ export function DockSidebar({
                 <span className={cn('rowboat-dock-badge', item.badgeAmber && 'rowboat-dock-badge-amber', item.badgePulse && 'animate-pulse')}>
                   {item.badge}
                 </span>
+              )}
+              {item.notification && (
+                <span
+                  className={cn('rowboat-dock-notification', item.notification === 'alert' ? 'rowboat-dock-notification-alert' : 'rowboat-dock-notification-muted')}
+                  aria-label={item.notification === 'alert' ? 'Unread Spaces activity for you' : 'Unread Spaces activity'}
+                />
               )}
             </button>
           )

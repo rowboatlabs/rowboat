@@ -1335,6 +1335,26 @@
   background: #d97706;
 }
 
+.rowboat-dock-notification {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 6px;
+  height: 6px;
+  border: 1px solid var(--sidebar);
+  border-radius: 999px;
+  box-sizing: content-box;
+  z-index: 2;
+}
+
+.rowboat-dock-notification-muted {
+  background: var(--muted-foreground);
+}
+
+.rowboat-dock-notification-alert {
+  background: var(--stream-alert);
+}
+
 .rowboat-dock-tip {
   position: fixed;
   transform: translateY(-50%);
