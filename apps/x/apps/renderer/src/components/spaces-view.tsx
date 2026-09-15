@@ -5,7 +5,6 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Link as LinkIcon, Loader2, MoreHorizontal, PenTool, Plus, UserPlus, Users } from 'lucide-react'
 import { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
@@ -926,7 +925,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                 <span>Invite</span>
                             </button>
                         </PopoverTrigger>
-                        <PopoverContent align="end" className="w-80 p-3">
+                        <PopoverContent align="end" className="w-96 p-3">
                             <InviteLinkPanel orgId={org.id} spaceId={space.id} spaceName={space.name} />
                         </PopoverContent>
                     </Popover>
@@ -1248,11 +1247,49 @@ type InviteLinkState =
     | { kind: 'ready'; link: string }
     | { kind: 'error'; message: string }
 
+/** How much of the link's end stays visible when it is too long: enough of the token to recognise. */
+const INVITE_LINK_TAIL = 10
+
 /**
- * The header's Invite popover: the link in a field you can read and select,
- * a Copy button that says "Copied" for a beat, and one line on who the link
- * admits. A link is minted each time the popover opens (its content mounts
- * fresh), so there is nothing stale to hand out.
+ * The link as plain monospace text, no box — a box says "type here". Too
+ * long for the line, it truncates in the MIDDLE: the head gives way (an
+ * ellipsis at its end) while the last characters stay put, so the token's
+ * end is always there to recognise. The DOM holds the whole URL, so a click,
+ * a drag or a copy carries all of it, not just what happens to be visible.
+ */
+function InviteLinkText({ link }: { link: string }) {
+    const head = link.slice(0, -INVITE_LINK_TAIL)
+    const tail = link.slice(-INVITE_LINK_TAIL)
+    const selectAll = (el: HTMLElement) => {
+        const selection = window.getSelection()
+        if (!selection) return
+        const range = document.createRange()
+        range.selectNodeContents(el)
+        selection.removeAllRanges()
+        selection.addRange(range)
+    }
+    return (
+        <span
+            title={link}
+            onClick={(e) => selectAll(e.currentTarget)}
+            className="block w-full cursor-text select-text whitespace-nowrap font-mono text-xs leading-6"
+        >
+            {/* The head is an inline block (not a flex item) on purpose: block-level
+                pieces would put a line break between them in copied text. Its
+                width comes from spaces.css (.spaces-invite-link-head). */}
+            <span
+                className="spaces-invite-link-head inline-block overflow-hidden text-ellipsis align-bottom"
+                style={{ '--tail': `${INVITE_LINK_TAIL}ch` } as React.CSSProperties}
+            >{head}</span><span>{tail}</span>
+        </span>
+    )
+}
+
+/**
+ * The header's Invite popover: the link as selectable text, a Copy button
+ * that says "Copied" for a beat, and one line on who the link admits. A link
+ * is minted each time the popover opens (its content mounts fresh), so there
+ * is nothing stale to hand out.
  */
 function InviteLinkPanel({ orgId, spaceId, spaceName }: { orgId: string; spaceId: string; spaceName: string }) {
     const [state, setState] = useState<InviteLinkState>({ kind: 'loading' })
@@ -1285,15 +1322,15 @@ function InviteLinkPanel({ orgId, spaceId, spaceName }: { orgId: string; spaceId
     const link = state.kind === 'ready' ? state.link : ''
     return (
         <div className="flex flex-col gap-2">
-            <div className="flex items-center gap-1.5">
-                <Input
-                    readOnly
-                    aria-label="Invite link"
-                    value={link}
-                    placeholder={state.kind === 'loading' ? 'Creating link…' : 'No link'}
-                    onFocus={(e) => e.currentTarget.select()}
-                    className="h-7 min-w-0 flex-1 rounded-md font-mono text-xs md:text-xs"
-                />
+            {state.kind === 'ready'
+                ? <InviteLinkText link={state.link} />
+                : <span className="block font-mono text-xs leading-6 text-muted-foreground">{state.kind === 'loading' ? 'Creating link…' : 'No link'}</span>}
+            <div className="flex items-center justify-between gap-3">
+                {state.kind === 'error'
+                    ? <p className="text-xs text-destructive">{state.message}</p>
+                    : copy === 'failed'
+                        ? <p className="text-xs text-destructive">Could not copy. Select the link above and copy it instead.</p>
+                        : <p className="text-xs text-muted-foreground">Anyone with it can join #{spaceName} on Rowboat.</p>}
                 <Button
                     type="button"
                     size="sm"
@@ -1307,11 +1344,6 @@ function InviteLinkPanel({ orgId, spaceId, spaceName }: { orgId: string; spaceId
                         : 'Copy link'}
                 </Button>
             </div>
-            {state.kind === 'error'
-                ? <p className="text-xs text-destructive">{state.message}</p>
-                : copy === 'failed'
-                    ? <p className="text-xs text-destructive">Could not copy. Select the link above and copy it instead.</p>
-                    : <p className="text-xs text-muted-foreground">Anyone with it can join #{spaceName} on Rowboat.</p>}
         </div>
     )
 }

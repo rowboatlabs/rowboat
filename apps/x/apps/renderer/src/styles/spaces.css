@@ -28,6 +28,16 @@
   min-height: var(--spaces-control);
 }
 
+/* The invite link's head: everything but the tail (--tail, set inline), cut
+   with an ellipsis. Rounded DOWN to whole characters so the ellipsis lands
+   flush against the tail — text-overflow stops at the last glyph that fits
+   and would otherwise leave a sub-character gap. Monospace, so 1ch = 1 glyph;
+   the half pixel keeps sub-pixel rounding from failing the last glyph's fit. */
+.spaces-invite-link-head {
+  max-width: calc(100% - var(--tail));
+  max-width: calc(round(down, calc(100% - var(--tail)), 1ch) + 0.5px);
+}
+
 .spaces-navigation { background: var(--rowboat-panel-soft); }
 .spaces-message-list { scroll-padding-block: 24px; }
 .spaces-message {
