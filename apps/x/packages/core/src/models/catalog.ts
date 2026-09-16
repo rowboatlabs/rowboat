@@ -61,6 +61,7 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
     google: "Gemini",
     openrouter: "OpenRouter",
     aigateway: "AI Gateway",
+    atlascloud: "Atlas Cloud",
     ollama: "Ollama",
     "openai-compatible": "OpenAI-Compatible",
 };
