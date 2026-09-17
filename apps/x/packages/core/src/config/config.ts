@@ -1,11 +1,19 @@
 import path from "path";
 import fs from "fs";
 import { homedir } from "os";
+import { ProfileId, isDefaultProfile } from "./profile.js";
+
+export { ProfileId };
 
 function resolveWorkDir(): string {
     const configured = process.env.ROWBOAT_WORKDIR;
     if (!configured) {
-        return path.join(homedir(), ".rowboat");
+        // First-party profiles: `default` keeps the historic ~/.rowboat,
+        // named profiles live under ~/.rowboat-profiles/<id>.
+        if (isDefaultProfile(ProfileId)) {
+            return path.join(homedir(), ".rowboat");
+        }
+        return path.join(homedir(), ".rowboat-profiles", ProfileId);
     }
 
     const expanded = configured === "~"
