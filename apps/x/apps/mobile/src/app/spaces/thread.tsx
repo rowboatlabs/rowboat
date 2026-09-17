@@ -45,6 +45,7 @@ export default function SpaceThreadScreen() {
   const [sending, setSending] = useState(false);
   const [actionMessage, setActionMessage] = useState<Message | null>(null);
   const [reactionsOnly, setReactionsOnly] = useState(false);
+  const [following, setFollowing] = useState<boolean | null>(null);
   const scrollRef = useRef<ScrollView>(null);
   const composerRef = useRef<SpaceComposerHandle>(null);
   const lastOffset = useRef<number | undefined>(undefined);
@@ -57,6 +58,7 @@ export default function SpaceThreadScreen() {
         setMembers(new Map(memberList.map((m) => [m.id, m])));
         setRootMessage(thread.root);
         setReplies(thread.messages);
+        setFollowing(thread.following);
         lastOffset.current = thread.messages.at(-1)?.offset ?? thread.root.offset;
       })
       .catch((err) => !cancelled && setError(err instanceof Error ? err.message : String(err)));
@@ -248,6 +250,21 @@ export default function SpaceThreadScreen() {
               {params.title ? <Text style={{ fontSize: 12, color: colors.tertiaryLabel }}>#{params.title}</Text> : null}
             </View>
           ),
+          // Follow = replies land in Activity + notifications (Slack's bell).
+          headerRight: () =>
+            following === null ? null : (
+              <Pressable
+                hitSlop={10}
+                onPress={() => {
+                  if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
+                  const next = !following;
+                  setFollowing(next);
+                  client.followThread(space, root, next).catch(() => setFollowing(!next));
+                }}
+              >
+                <Image source={following ? 'sf:bell.fill' : 'sf:bell'} style={{ width: 20, height: 20 }} tintColor={colors.label} />
+              </Pressable>
+            ),
         }}
       />
       {rootMessage === null && !error ? (

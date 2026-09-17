@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { Stack, router } from 'expo-router';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -38,6 +38,7 @@ export default function ActivityScreen() {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<Filter>('all');
+  const [clearing, setClearing] = useState(false);
   const visible = useMemo(() => rows?.filter((r) => FILTERS.find((f) => f.key === filter)!.kinds?.includes(r.item.kind) ?? true) ?? null, [rows, filter]);
 
   const load = useCallback(async () => {
@@ -60,6 +61,23 @@ export default function ActivityScreen() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // readAll on every org, then repaint — the server owns read state.
+  const markAllRead = async () => {
+    if (process.env.EXPO_OS === 'ios') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setClearing(true);
+    try {
+      await Promise.all(
+        (account.orgs ?? []).map((org) => new SpacesClient({ baseUrl: `https://${org.address}`, token: account.getAccessToken }).readAll()),
+      );
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setClearing(false);
+    }
+  };
+  const anyUnread = rows?.some((r) => r.item.unread) ?? false;
 
   const open = (row: Row) => {
     if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
@@ -88,6 +106,16 @@ export default function ActivityScreen() {
         />
       }
     >
+      <Stack.Screen
+        options={{
+          headerRight: () =>
+            anyUnread ? (
+              <Pressable hitSlop={10} disabled={clearing} onPress={() => void markAllRead()} style={{ opacity: clearing ? 0.5 : 1 }}>
+                <Text style={{ fontSize: 15, color: colors.label }}>Mark all read</Text>
+              </Pressable>
+            ) : null,
+        }}
+      />
       {/* Slack's filter chips */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 8, paddingBottom: 8 }}>
         {FILTERS.map((f) => {
