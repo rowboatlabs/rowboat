@@ -118,7 +118,7 @@ export function isEngineProvisioned(agent: CodingAgent): boolean {
     return locateExecutable(agent, versionDir) !== null && fs.existsSync(metaPath);
 }
 
-const AGENT_LABEL: Record<CodingAgent, string> = { claude: 'Claude Code', codex: 'Codex' };
+const AGENT_LABEL: Record<CodingAgent, string> = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode' };
 
 // Return the provisioned engine's executable path, or throw a clear, user-facing error.
 // The chat/run path uses this — we deliberately do NOT download here: the engine must be
@@ -126,6 +126,9 @@ const AGENT_LABEL: Record<CodingAgent, string> = { claude: 'Claude Code', codex:
 // download mid-conversation. ensureEngine() (the downloading path) is driven only by the
 // Settings "Enable" action.
 export function getProvisionedEnginePath(agent: CodingAgent): string {
+    if (agent === 'opencode') {
+        return 'opencode';
+    }
     const version = ENGINE_MANIFEST[agent].version;
     const exe = locateExecutable(agent, path.join(ENGINES_ROOT, agent, version));
     if (!exe) {

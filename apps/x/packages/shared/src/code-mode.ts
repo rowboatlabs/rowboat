@@ -4,7 +4,7 @@ import z from "zod";
 // core engine re-exports the inferred TS types, and runs.ts builds the RunEvent
 // variants that carry these to the renderer.
 
-export const CodingAgent = z.enum(["claude", "codex"]);
+export const CodingAgent = z.enum(["claude", "codex", "opencode"]);
 export type CodingAgent = z.infer<typeof CodingAgent>;
 
 // How the permission broker answers the agent's requests before any per-tool

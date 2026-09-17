@@ -8,7 +8,7 @@ import { loginShellPath } from './shell-env.js';
 const require = createRequire(import.meta.url);
 
 // The ACP adapter npm package that exposes each coding agent as an ACP server.
-const ADAPTER_PACKAGE: Record<CodingAgent, string> = {
+const ADAPTER_PACKAGE: Partial<Record<CodingAgent, string>> = {
     claude: '@agentclientprotocol/claude-agent-acp',
     codex: '@agentclientprotocol/codex-acp',
 };
@@ -61,7 +61,6 @@ function resolveAdapterEntry(pkg: string): string {
 }
 
 export function getAgentLaunchSpec(agent: CodingAgent): AgentLaunchSpec {
-    const entry = resolveAdapterEntry(ADAPTER_PACKAGE[agent]);
     const env: NodeJS.ProcessEnv = { ...process.env };
 
     // Graft the user's login-shell PATH onto the engine's env. GUI (Finder) launches
@@ -73,6 +72,22 @@ export function getAgentLaunchSpec(agent: CodingAgent): AgentLaunchSpec {
         const dirs = [...shellPath.split(path.delimiter), ...(env.PATH ?? '').split(path.delimiter)];
         env.PATH = [...new Set(dirs.filter(Boolean))].join(path.delimiter);
     }
+
+    // OpenCode has a native built-in ACP server (`opencode acp`), so it does not
+    // need a third-party npm adapter package.
+    if (agent === 'opencode') {
+        return {
+            command: 'opencode',
+            args: ['acp'],
+            env,
+        };
+    }
+
+    const adapterPkg = ADAPTER_PACKAGE[agent];
+    if (!adapterPkg) {
+        throw new Error(`No ACP adapter registered for agent '${agent}'`);
+    }
+    const entry = resolveAdapterEntry(adapterPkg);
 
     // Point the adapter at the engine the user already enabled in Settings. We do NOT
     // download here — getProvisionedEnginePath throws a clear "enable it in Settings"
