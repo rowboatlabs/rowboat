@@ -10,6 +10,7 @@ import {
 } from '@x/core/dist/auth/oauth-flows.js';
 import { watcher as watcherCore, workspace } from '@x/core';
 import { WorkDir } from '@x/core/dist/config/config.js';
+import { profileDeepLink } from '@x/core/dist/config/profile.js';
 import { workspace as workspaceShared } from '@x/shared';
 import * as mcpCore from '@x/core/dist/mcp/mcp.js';
 import * as runsCore from '@x/core/dist/runtime/legacy/runs.js';
@@ -1133,7 +1134,7 @@ export function setupIpcHandlers() {
       void notifyIfEnabled('meeting_notes_ready', {
         title: 'Meeting notes ready',
         message: `Your notes for "${args.title}" are ready.`,
-        link: `rowboat://open?type=file&path=${encodeURIComponent(args.notePath)}`,
+        link: profileDeepLink(`open?type=file&path=${encodeURIComponent(args.notePath)}`),
         actionLabel: 'Open notes',
         onlyWhenBackground: true,
       });

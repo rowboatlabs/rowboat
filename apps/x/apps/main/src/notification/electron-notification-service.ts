@@ -5,7 +5,7 @@ import { dispatchUrl } from "../deeplink.js";
 import { findMainAppWindow } from "../ipc.js";
 
 const HTTP_URL = /^https?:\/\//i;
-const ROWBOAT_URL = /^rowboat:\/\//i;
+const ROWBOAT_URL = /^rowboat(-[a-z0-9-]+)?:\/\//i;
 
 export class ElectronNotificationService implements INotificationService {
     // Holds strong references to active Notification instances so the GC can't

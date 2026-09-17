@@ -78,4 +78,18 @@ describe('org link landings → app deep links', () => {
         expect(parseSpacesLink('rowboat://open?type=file&path=knowledge/a.md')).toBeNull()
         expect(parseSpacesLink('https://acme.rowboat.space/s/S1')).toBeNull()
     })
+
+    it('accepts per-profile schemes the same as the legacy one', () => {
+        expect(parseSpacesLink('rowboat-work://open?type=spaces&org=acme.rowboat.space')).toEqual({ orgAddress: 'acme.rowboat.space' })
+        expect(parseSpacesLink('rowboat-personal://open/?type=spaces&spaceId=S1&org=acme.rowboat.space')).toEqual({ orgAddress: 'acme.rowboat.space', spaceId: 'S1' })
+    })
+
+    it('accepts any rowboat profile scheme — the OS gates delivery to registered ones', () => {
+        expect(parseSpacesLink('rowboat-evil://open?type=spaces&org=acme.rowboat.space')).toEqual({ orgAddress: 'acme.rowboat.space' })
+    })
+
+    it('still rejects non-rowboat schemes', () => {
+        expect(parseSpacesLink('notrowboat://open?type=spaces&org=acme.rowboat.space')).toBeNull()
+        expect(parseSpacesLink('https://acme.rowboat.space/s/S1')).toBeNull()
+    })
 })

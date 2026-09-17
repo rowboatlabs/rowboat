@@ -4,6 +4,7 @@ import {
     composioAuthConfigName,
     composioUserId,
     deepLinkScheme,
+    defaultAppsPort,
     isValidProfileId,
     profileDeepLink,
     profileWorkDir,
@@ -72,5 +73,24 @@ describe("per-profile derived identity", () => {
     it("composio ids never collide across profiles", () => {
         const ids = new Set(["default", "work", "personal"].map((p) => composioUserId(p)));
         expect(ids.size).toBe(3);
+    });
+});
+
+describe("defaultAppsPort", () => {
+    it("keeps the historic port for the default profile", () => {
+        expect(defaultAppsPort("default")).toBe(3210);
+    });
+
+    it("derives stable in-range ports for named profiles", () => {
+        for (const id of ["work", "personal", "work-2"]) {
+            const port = defaultAppsPort(id);
+            expect(port).toBeGreaterThanOrEqual(3211);
+            expect(port).toBeLessThanOrEqual(3409);
+            expect(defaultAppsPort(id)).toBe(port);
+        }
+    });
+
+    it("separates work from personal", () => {
+        expect(defaultAppsPort("work")).not.toBe(defaultAppsPort("personal"));
     });
 });

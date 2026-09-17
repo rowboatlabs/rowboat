@@ -65,7 +65,7 @@ import {
   extractDeepLinkFromArgv,
   setMainWindowForDeepLinks,
 } from "./deeplink.js";
-import { ProfileId, deepLinkScheme, isDefaultProfile } from "@x/core/dist/config/profile.js";
+import { ProfileId, deepLinkScheme, isDefaultProfile, profileDeepLink } from "@x/core/dist/config/profile.js";
 import { registerUrlOpener } from "@x/core/dist/auth/url-opener.js";
 import { startModelsDevRefresh } from "@x/core/dist/models/models-dev.js";
 import { ensureLoginItemRegistration } from "./login_item.js";
@@ -525,7 +525,7 @@ function createWindow(options: { startHidden?: boolean } = {}) {
     if (link.kind === "asset") target.set("assetId", link.assetId);
     if (link.kind === "message") target.set("messageId", link.messageId);
     if (link.kind === "member") target.set("memberId", link.memberId);
-    dispatchUrl(`rowboat://open?${target.toString()}`);
+    dispatchUrl(profileDeepLink(`open?${target.toString()}`));
     return true;
   };
 

@@ -87,8 +87,10 @@ export interface SpacesLinkTarget {
 
 export function parseSpacesLink(input: string): SpacesLinkTarget | null {
   // Some OS handlers normalise the authority form to rowboat://open/?… — the
-  // same tolerance every other rowboat:// parser has.
-  const m = /^rowboat:\/\/open\/?\?(.*)$/.exec(input)
+  // same tolerance every other rowboat:// parser has. Per-profile schemes
+  // (rowboat-<id>://) are accepted identically; the OS only delivers
+  // schemes the running instance registered.
+  const m = /^rowboat(?:-[a-z0-9-]+)?:\/\/open\/?\?(.*)$/.exec(input)
   if (!m) return null
   const params = new URLSearchParams(m[1]!)
   const orgAddress = params.get('org')

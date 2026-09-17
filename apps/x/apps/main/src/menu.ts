@@ -1,5 +1,6 @@
 import { app, Menu, shell, type BrowserWindow, type MenuItemConstructorOptions } from "electron";
 import { WorkDir } from "@x/core/dist/config/config.js";
+import { profileDeepLink } from "@x/core/dist/config/profile.js";
 import type { ipc } from "@x/shared";
 import { dispatchDeepLink } from "./deeplink.js";
 import {
@@ -96,7 +97,7 @@ function sendCommand(payload: MenuCommand): void {
  */
 function navigate(type: string): void {
   actions?.openApp();
-  dispatchDeepLink(`rowboat://open?type=${type}`);
+  dispatchDeepLink(profileDeepLink(`open?type=${type}`));
 }
 
 function withMainWindow(fn: (win: BrowserWindow) => void): void {

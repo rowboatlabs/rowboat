@@ -16,6 +16,7 @@ import { loadWorkspaceContext } from "../assembly/workspace-context.js";
 import { extractCommandNames } from "../../application/lib/command-executor.js";
 import { type FileAccessGrant } from "../../config/security.js";
 import { notifyIfEnabled } from "../../application/notification/notifier.js";
+import { profileDeepLink } from "../../config/profile.js";
 import { IModelConfigRepo } from "../../models/repo.js";
 import { createLanguageModel } from "../../models/models.js";
 import { chatActivity } from "../../application/lib/chat-activity.js";
@@ -218,7 +219,7 @@ export class AgentRuntime implements IAgentRuntime {
                         void notifyIfEnabled("chat_completion", {
                             title: "Response ready",
                             message: "Your agent finished responding.",
-                            link: `rowboat://open?type=chat&runId=${runId}`,
+                            link: profileDeepLink(`open?type=chat&runId=${runId}`),
                             actionLabel: "Open",
                             onlyWhenBackground: true,
                         });
@@ -1036,7 +1037,7 @@ export async function* streamAgent({
                     void notifyIfEnabled("agent_permission", {
                         title: "Permission needed",
                         message: `${agent.name} wants to run "${toolCall.toolName}". Review to continue.`,
-                        link: `rowboat://open?type=chat&runId=${runId}`,
+                        link: profileDeepLink(`open?type=chat&runId=${runId}`),
                         actionLabel: "Review",
                     });
                 };

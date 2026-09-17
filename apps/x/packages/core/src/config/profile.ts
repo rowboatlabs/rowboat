@@ -71,3 +71,25 @@ export function profileDeepLink(path: string, id: string = ProfileId): string {
     const clean = path.startsWith("/") ? path.slice(1) : path;
     return `${deepLinkScheme(id)}://${clean}`;
 }
+
+/** Stable 32-bit FNV-1a hash for deterministic per-profile port derivation. */
+function fnv1a32(input: string): number {
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < input.length; i++) {
+        hash ^= input.charCodeAt(i);
+        hash = Math.imul(hash, 0x01000193);
+    }
+    return hash >>> 0;
+}
+
+export const DEFAULT_APPS_PORT = 3210;
+
+/**
+ * Default Apps-server port for a profile: the historic 3210 for `default`,
+ * otherwise a stable derived port in 3211–3409 so two concurrent instances
+ * never collide on bind. An explicit ROWBOAT_APPS_PORT still wins.
+ */
+export function defaultAppsPort(id: string = ProfileId): number {
+    if (isDefaultProfile(id)) return DEFAULT_APPS_PORT;
+    return DEFAULT_APPS_PORT + 1 + (fnv1a32(id) % 199);
+}

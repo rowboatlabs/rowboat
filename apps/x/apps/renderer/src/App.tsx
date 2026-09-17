@@ -711,8 +711,16 @@ function viewStatesEqual(a: ViewState, b: ViewState): boolean {
  */
 function parseDeepLink(input: string): ViewState | null {
   const SCHEME = 'rowboat://'
-  if (!input.startsWith(SCHEME)) return null
-  const rest = input.slice(SCHEME.length)
+  // Per-profile schemes (rowboat-<id>://) parse identically; the OS only
+  // delivers schemes the running instance registered.
+  const PROFILE_SCHEME = /^rowboat-[a-z0-9-]+:\/\//
+  let rest: string | null = null
+  if (input.startsWith(SCHEME)) rest = input.slice(SCHEME.length)
+  else {
+    const m = PROFILE_SCHEME.exec(input)
+    if (m) rest = input.slice(m[0].length)
+  }
+  if (rest === null) return null
   const queryIdx = rest.indexOf('?')
   const host = (queryIdx >= 0 ? rest.slice(0, queryIdx) : rest).replace(/\/$/, '')
   if (host !== 'open') return null
