@@ -1,5 +1,5 @@
 import * as Haptics from 'expo-haptics';
-import { memo, useMemo } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { Modal, Pressable, Text, View } from 'react-native';
 import type { Member, Message } from '@rowboat/spaces-protocol';
 
@@ -11,6 +11,7 @@ import { ChatMarkdown } from '@/components/markdown';
 import { MessageLinkPreviews } from '@/components/link-preview-card';
 import { PollCard } from '@/components/poll-card';
 import { SpaceBlobImage } from '@/components/space-blob-image';
+import { EmojiPicker } from '@/components/emoji-picker';
 import { useColors } from '@/theme/colors';
 
 // Shared message presentation for the stream and thread screens: row, reaction
@@ -232,6 +233,7 @@ export function MessageActionSheet({
   reactionsOnly?: boolean;
 }) {
   const colors = useColors();
+  const [more, setMore] = useState(false);
   if (!message) return null;
   const mine = new Set(message.reactions.filter((g) => g.memberIds.includes(me)).map((g) => g.emoji));
   const isAuthor = message.author.memberId === me;
@@ -272,7 +274,21 @@ export function MessageActionSheet({
                 <Text style={{ fontSize: 26 }}>{emoji}</Text>
               </Pressable>
             ))}
+            <Pressable
+              onPress={() => setMore(true)}
+              style={{ width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.secondaryBackground }}
+            >
+              <Image source="sf:plus" style={{ width: 18, height: 18 }} tintColor={colors.secondaryLabel} />
+            </Pressable>
           </View>
+          <EmojiPicker
+            visible={more}
+            onClose={() => setMore(false)}
+            onPick={(emoji) => {
+              onToggleReaction(message, emoji);
+              onClose();
+            }}
+          />
           {!reactionsOnly
             ? actions.map((a) => (
                 <Pressable
