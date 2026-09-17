@@ -16,14 +16,17 @@ const log = new PrefixLogger('Todo:PlannerMemory');
 //   hand; the machine NEVER edits it) outranks "## Learned" (distilled from
 //   signals; regenerated; delete a line and it stays gone until re-earned).
 // - `todo/planner_feedback.json` — the raw signal ledger (losable): what was
-//   proposed and what the user did with it. Sticky verdicts and few-shot
-//   examples derive from here.
+//   proposed and what the user did with it. Few-shot examples derive from here.
+// - `todo/sticky_dismissed.json` — uncapped negative verdicts. The recent
+//   ledger may roll over; sticky dismissals must not.
 // ---------------------------------------------------------------------------
 
 const PREFS_PATH = path.join(WorkDir, 'todo', 'preferences.md');
 export const PREFS_REL_PATH = 'todo/preferences.md';
 const FEEDBACK_PATH = path.join(WorkDir, 'todo', 'planner_feedback.json');
 export const FEEDBACK_REL_PATH = 'todo/planner_feedback.json';
+const STICKY_PATH = path.join(WorkDir, 'todo', 'sticky_dismissed.json');
+export const STICKY_REL_PATH = 'todo/sticky_dismissed.json';
 
 const MAX_SIGNALS = 200;
 
@@ -56,6 +59,16 @@ interface PlannerFeedback {
     signals: PlannerSignal[];
 }
 
+type StickyKind = Extract<PlannerSignalKind, 'dismissed' | 'taught'>;
+
+interface StickyDismissedEntry {
+    itemText: string;
+    kind: StickyKind;
+    at: string;
+}
+
+type StickyDismissedStore = Record<string, StickyDismissedEntry>;
+
 async function readFeedback(): Promise<PlannerFeedback> {
     try {
         const parsed: unknown = JSON.parse(await fs.readFile(FEEDBACK_PATH, 'utf-8'));
@@ -68,10 +81,42 @@ async function readFeedback(): Promise<PlannerFeedback> {
     return { signals: [] };
 }
 
+async function readStickyDismissed(): Promise<StickyDismissedStore> {
+    try {
+        const parsed: unknown = JSON.parse(await fs.readFile(STICKY_PATH, 'utf-8'));
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            const out: StickyDismissedStore = {};
+            for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+                if (!key || !value || typeof value !== 'object') continue;
+                const entry = value as Partial<StickyDismissedEntry>;
+                if (
+                    typeof entry.itemText === 'string'
+                    && (entry.kind === 'dismissed' || entry.kind === 'taught')
+                    && typeof entry.at === 'string'
+                ) {
+                    out[key] = { itemText: entry.itemText, kind: entry.kind, at: entry.at };
+                }
+            }
+            return out;
+        }
+    } catch {
+        // missing/corrupt — fresh sticky store
+    }
+    return {};
+}
+
+async function writeStickyDismissed(store: StickyDismissedStore): Promise<void> {
+    const dir = path.dirname(STICKY_PATH);
+    if (!fsSync.existsSync(dir)) fsSync.mkdirSync(dir, { recursive: true });
+    await fs.writeFile(STICKY_PATH, JSON.stringify(store, null, 2), 'utf-8');
+}
+
 export async function recordPlannerSignal(kind: PlannerSignalKind, itemText: string): Promise<void> {
+    const key = normalizeKey(itemText);
+    const at = new Date().toISOString();
     await withFileLock(FEEDBACK_PATH, async () => {
         const feedback = await readFeedback();
-        feedback.signals.push({ kind, itemText, key: normalizeKey(itemText), at: new Date().toISOString() });
+        feedback.signals.push({ kind, itemText, key, at });
         if (feedback.signals.length > MAX_SIGNALS) {
             feedback.signals = feedback.signals.slice(-MAX_SIGNALS);
         }
@@ -79,20 +124,24 @@ export async function recordPlannerSignal(kind: PlannerSignalKind, itemText: str
         if (!fsSync.existsSync(dir)) fsSync.mkdirSync(dir, { recursive: true });
         await fs.writeFile(FEEDBACK_PATH, JSON.stringify(feedback, null, 2), 'utf-8');
     });
+    if (kind === 'dismissed' || kind === 'taught' || kind === 'ran' || kind === 'kept') {
+        await withFileLock(STICKY_PATH, async () => {
+            const sticky = await readStickyDismissed();
+            if (kind === 'dismissed' || kind === 'taught') {
+                sticky[key] = { itemText, kind, at };
+            } else {
+                delete sticky[key];
+            }
+            await writeStickyDismissed(sticky);
+        });
+    }
     log.log(`signal: ${kind} — "${itemText.slice(0, 60)}"`);
 }
 
 /** Sticky negative verdicts: keys the user dismissed and never later ran.
  * The propose tool refuses to re-propose these. */
 export async function stickyDismissedKeys(): Promise<Set<string>> {
-    const { signals } = await readFeedback();
-    const verdict = new Map<string, PlannerSignalKind>();
-    for (const s of signals) verdict.set(s.key, s.kind);
-    const out = new Set<string>();
-    for (const [key, kind] of verdict) {
-        if (kind === 'dismissed' || kind === 'taught') out.add(key);
-    }
-    return out;
+    return new Set(Object.keys(await readStickyDismissed()));
 }
 
 // ---------------------------------------------------------------------------
