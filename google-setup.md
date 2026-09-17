@@ -4,6 +4,8 @@ Rowboat requires Google OAuth credentials (Client ID and Client Secret) to conne
 
 ---
 
+<!-- Test pull request from the fork. -->
+
 ## 1️⃣ Open Google Cloud Console
 
 Go to:
