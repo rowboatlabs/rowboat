@@ -91,6 +91,11 @@ function SignIn() {
             ? <ActivityIndicator color={colors.background} />
             : <Text style={{ fontSize: 16, fontWeight: '600', color: colors.background }}>Sign in with Rowboat</Text>}
         </Pressable>
+        <Pressable onPress={() => router.push('/spaces/join')} style={{ alignItems: 'center', padding: 4 }}>
+          <Text style={{ fontSize: 14, color: colors.secondaryLabel }}>
+            Have an invite link? <Text style={{ fontWeight: '600', color: colors.label }}>Join a space</Text>
+          </Text>
+        </Pressable>
         <Pressable onPress={() => router.push('/pairing')} style={{ alignItems: 'center', padding: 4 }}>
           <Text style={{ fontSize: 14, color: colors.secondaryLabel }}>
             Use Rowboat on your Mac? <Text style={{ fontWeight: '600', color: colors.label }}>Connect your Mac</Text>
@@ -144,7 +149,13 @@ function OrgList() {
         <View style={{ alignItems: 'center', marginTop: 64, gap: 8 }}>
           <Image source="sf:person.2" style={{ width: 36, height: 36 }} tintColor={colors.tertiaryLabel} />
           <Text style={{ fontSize: 15, fontWeight: '600', color: colors.secondaryLabel }}>No orgs yet</Text>
-          <Text style={{ fontSize: 13, color: colors.tertiaryLabel }}>Open an invite link to join one.</Text>
+          <Text style={{ fontSize: 13, color: colors.tertiaryLabel }}>Ask a teammate for an invite link.</Text>
+          <Pressable
+            onPress={() => router.push('/spaces/join')}
+            style={({ pressed }) => ({ marginTop: 8, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 12, borderCurve: 'continuous', backgroundColor: colors.label, opacity: pressed ? 0.7 : 1 })}
+          >
+            <Text style={{ fontSize: 15, fontWeight: '600', color: colors.background }}>Join with a link</Text>
+          </Pressable>
         </View>
       ) : null}
 
@@ -157,6 +168,17 @@ function OrgList() {
           </View>
         ) : null}
         {who ? <View style={{ height: 1, marginLeft: 44, backgroundColor: colors.separator }} /> : null}
+        <Pressable
+          onPress={() => router.push('/spaces/join')}
+          style={({ pressed }) => ({
+            flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 12,
+            opacity: pressed ? 0.6 : 1,
+          })}
+        >
+          <Image source="sf:link" style={{ width: 18, height: 18 }} tintColor={colors.secondaryLabel} />
+          <Text style={{ fontSize: 15, color: colors.label }}>Join with an invite link</Text>
+        </Pressable>
+        <View style={{ height: 1, marginLeft: 44, backgroundColor: colors.separator }} />
         <Pressable
           onPress={() => void account.signOut()}
           style={({ pressed }) => ({
