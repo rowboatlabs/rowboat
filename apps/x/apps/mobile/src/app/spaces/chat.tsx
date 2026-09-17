@@ -252,12 +252,14 @@ export default function SpaceChatScreen() {
         options={{
           title: title ?? 'Space',
           headerRight: () => (
-            <Pressable
-              hitSlop={10}
-              onPress={() => router.push({ pathname: '/spaces/files', params: { org, space, title } })}
-            >
-              <Image source="sf:folder" style={{ width: 20, height: 20 }} tintColor={colors.label} />
-            </Pressable>
+            <View style={{ flexDirection: 'row', gap: 18 }}>
+              <Pressable hitSlop={10} onPress={() => router.push({ pathname: '/spaces/search', params: { org, space, title, me } })}>
+                <Image source="sf:magnifyingglass" style={{ width: 20, height: 20 }} tintColor={colors.label} />
+              </Pressable>
+              <Pressable hitSlop={10} onPress={() => router.push({ pathname: '/spaces/files', params: { org, space, title } })}>
+                <Image source="sf:folder" style={{ width: 20, height: 20 }} tintColor={colors.label} />
+              </Pressable>
+            </View>
           ),
         }}
       />
