@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
 import { toast } from "sonner"
 import * as analytics from "@/lib/analytics"
 import { ArrowLeft, CheckCircle2, Loader2, Plus, RefreshCw } from "lucide-react"
@@ -28,6 +28,33 @@ import {
 // models / used-by), and disconnect with its consequences spelled out.
 // Providers manage CREDENTIALS only — model choices live in
 // ModelSelectionSection above this section.
+
+const URL_PATTERN = /https?:\/\/[^\s]+/g
+
+// Error messages from providers (e.g. OpenRouter) often embed a raw URL the
+// user needs to visit; render it as a clickable link instead of inert text.
+function linkifyMessage(message: string) {
+  const parts = message.split(URL_PATTERN)
+  const urls = message.match(URL_PATTERN) ?? []
+  const nodes: ReactNode[] = []
+  parts.forEach((part, i) => {
+    if (part) nodes.push(<span key={`t${i}`}>{part}</span>)
+    if (urls[i]) {
+      nodes.push(
+        <a
+          key={`u${i}`}
+          href={urls[i]}
+          target="_blank"
+          rel="noreferrer"
+          className="text-foreground underline underline-offset-2 break-all hover:text-foreground/80"
+        >
+          {urls[i]}
+        </a>
+      )
+    }
+  })
+  return nodes
+}
 
 type ByokFlavor = "openai" | "anthropic" | "google" | "openrouter" | "aigateway" | "ollama" | "openai-compatible"
 
@@ -564,7 +591,7 @@ function AddProviderDialog({ open, onOpenChange, connectedIds, isRowboatConnecte
         {step.kind === "error" && credsMeta && (
           <div className="space-y-3">
             <div className="text-sm font-medium text-destructive">Couldn&apos;t connect</div>
-            <p className="text-xs text-muted-foreground break-words">{step.message}</p>
+            <p className="text-xs text-muted-foreground break-words">{linkifyMessage(step.message)}</p>
             {credsMeta.manualModel && (
               <div className="space-y-1.5">
                 <span className="text-[13px] text-muted-foreground">Model id</span>
