@@ -229,7 +229,7 @@ export function CodeView({
           <Code2 className="size-10 text-muted-foreground/40" />
           <div className="text-sm font-medium">Code with agents</div>
           <p className="max-w-sm px-6 text-xs text-muted-foreground">
-            Rowboat runs Claude Code or Codex on your projects. Each session is a conversation —
+            Rowboat runs Claude Code, Codex, or OpenCode on your projects. Each session is a conversation —
             changes, files and a terminal are one click away beside it.
           </p>
           {projects.length === 0 ? (

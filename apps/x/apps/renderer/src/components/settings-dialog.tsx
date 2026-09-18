@@ -101,7 +101,7 @@ const tabs: TabConfig[] = [
     id: "code-mode",
     label: "Code Mode",
     icon: Terminal,
-    description: "Delegate coding tasks to Claude Code or Codex",
+    description: "Delegate coding tasks to Claude Code, Codex, or OpenCode",
   },
   {
     id: "appearance",
