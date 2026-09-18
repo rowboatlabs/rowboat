@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Code2, Plus } from 'lucide-react'
 import { codeWorkspaceKey, type CodeSession, type CodeSessionStatus } from '@x/shared/src/code-sessions.js'
 import type { CodingAgent } from '@x/shared/src/code-mode.js'
+import { KNOWN_AGENTS } from '@x/shared/src/agent-catalog.js'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import {
@@ -122,10 +123,10 @@ export function CodeView({
         agent = lastUsed ?? 'claude'
       } else if (lastUsed && ready(lastUsed)) {
         agent = lastUsed
-      } else if (ready('claude') || ready('codex')) {
-        agent = ready('claude') ? 'claude' : 'codex'
+      } else if (KNOWN_AGENTS.some(ready)) {
+        agent = KNOWN_AGENTS.find(ready)!
       } else {
-        throw new Error('No coding agent is ready — sign in to Claude Code or Codex in Settings.')
+        throw new Error('No coding agent is ready — install or sign in to one in Settings → Code Mode.')
       }
       const isolation = row.git.isGitRepo && row.git.hasCommits ? 'worktree' : 'in-repo'
       const res = await window.ipc.invoke('codeSession:create', { projectId, agent, isolation })

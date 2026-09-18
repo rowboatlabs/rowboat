@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
+import type { CodingAgent } from '@x/shared/src/code-mode.js'
+import { KNOWN_AGENTS, agentLabel } from '@x/shared/src/agent-catalog.js'
 import {
   AlertCircle,
   CheckCircle2,
@@ -265,8 +267,6 @@ export function CodeRunPermissionRequest({
 
 // ── Block wrapper (rendered in the chat for a code_agent_run tool call) ──
 
-const AGENT_LABEL: Record<string, string> = { claude: 'Claude Code', codex: 'Codex' }
-
 export function CodingRunBlock({
   item,
   open,
@@ -284,7 +284,7 @@ export function CodingRunBlock({
   const agent =
     (item.result as { agent?: string } | undefined)?.agent ??
     (item.input as { agent?: string } | undefined)?.agent
-  const title = AGENT_LABEL[agent ?? ''] ?? 'Coding agent'
+  const title = agent && (KNOWN_AGENTS as readonly string[]).includes(agent) ? agentLabel(agent as CodingAgent) : 'Coding agent'
   const task = (item.input as { task?: string; prompt?: string } | undefined)
   const taskText = (task?.task ?? task?.prompt ?? '').trim()
   const error = getToolErrorText(item)

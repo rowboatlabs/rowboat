@@ -3,6 +3,7 @@ import { notifyIfEnabled } from '../application/notification/notifier.js';
 import { profileDeepLink } from '../config/profile.js';
 import { PrefixLogger } from '@x/shared/dist/prefix-logger.js';
 import type { TurnStreamEvent } from '@x/shared/dist/turns.js';
+import type { CodingAgent } from '@x/shared/dist/code-mode.js';
 import type { ISessions } from '../runtime/sessions/api.js';
 import { TurnNotSettledError } from '../runtime/sessions/api.js';
 import type { ITurnEventBus } from '../runtime/turns/event-hub.js';
@@ -425,7 +426,7 @@ export async function runTodoItem(
         // item's thread before the first turn — worktree lane by default,
         // visible in the Code section, status-tracked. code_agent_run then
         // resolves the pin server-side like any Code-section session.
-        code?: { projectId: string; agent?: 'claude' | 'codex'; isolation?: 'in-repo' | 'worktree' };
+        code?: { projectId: string; agent?: CodingAgent; isolation?: 'in-repo' | 'worktree' };
     },
 ): Promise<TodoRunResult> {
     const norm = normalizeKey(key);

@@ -1,3 +1,4 @@
+import type { CodingAgent } from '@x/shared/src/code-mode.js'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowUpRight,
@@ -382,7 +383,7 @@ export function QuickAskBar() {
       mentions?: Mention[],
       attachments?: StagedAttachment[],
       searchEnabled?: boolean,
-      codeMode?: 'claude' | 'codex',
+      codeMode?: CodingAgent,
       permissionMode?: PermissionMode,
     ) => {
       const text = message.text.trim()

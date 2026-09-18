@@ -7,6 +7,7 @@ import { LlmStepStreamEvent } from "@x/shared/dist/llm-step-events.js";
 import { execTool } from "../tools/exec-tool.js";
 import { TOOL_ADDITIONS_KEY } from "../tools/tool-additions.js";
 import { AskHumanRequestEvent, RunEvent, ToolPermissionRequestEvent } from "@x/shared/dist/runs.js";
+import type { CodingAgent } from "@x/shared/dist/code-mode.js";
 import { BuiltinTools } from "../tools/catalog.js";
 import { hasWorkspaceContext, loadAgent } from "../assembly/registry.js";
 import { composeSystemInstructions } from "../assembly/compose-instructions.js";
@@ -686,7 +687,7 @@ export async function* streamAgent({
     let voiceInput = false;
     let voiceOutput: 'summary' | 'full' | null = null;
     let searchEnabled = false;
-    let codeMode: 'claude' | 'codex' | null = null;
+    let codeMode: CodingAgent | null = null;
     let codeCwd: string | null = null;
     let codePolicy: 'ask' | 'auto-approve-reads' | 'yolo' | null = null;
     let middlePaneContext:

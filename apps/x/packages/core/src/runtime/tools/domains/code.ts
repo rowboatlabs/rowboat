@@ -13,7 +13,7 @@ import type { CodeSessionService } from "../../../code-mode/sessions/service.js"
 import { readStoredSession } from "../../../code-mode/acp/session-store.js";
 import * as codeGitService from "../../../code-mode/git/service.js";
 import { ICodeModeConfigRepo } from "../../../code-mode/repo.js";
-import type { ApprovalPolicy, CodeRunEvent as CodeRunEventType } from "@x/shared/dist/code-mode.js";
+import { CodingAgent, type ApprovalPolicy, type CodeRunEvent as CodeRunEventType } from "@x/shared/dist/code-mode.js";
 import type { CodeRunFeed } from "../../../code-mode/feed.js";
 import type { ToolContext } from "../exec-tool.js";
 import { expandHomePath } from "../../../filesystem/files.js";
@@ -47,13 +47,13 @@ export function coalesceCodeRunEvents(events: CodeRunEventType[]): CodeRunEventT
 export const codeAgentRunTools: z.infer<typeof BuiltinToolsSchema> = {
     code_agent_run: {
         permission: "none",
-        description: 'Run a coding/software task with the selected on-device coding agent (Claude Code or Codex) inside a project folder. Streams the agent\'s tool calls, file diffs, and plan into the chat and surfaces permission requests inline. Use this for ALL code-mode work (writing/editing/reading code, running tests, debugging, exploring a repo). Reuses one persistent session per chat, so follow-up requests keep context. The agent\'s entire output is directly visible to the user in the run card, so after the run reply with a ~2-line confirmation only — never re-summarize the agent\'s output.',
+        description: 'Run a coding/software task with the selected on-device coding agent (Claude Code, Codex, or OpenCode) inside a project folder. Streams the agent\'s tool calls, file diffs, and plan into the chat and surfaces permission requests inline. Use this for ALL code-mode work (writing/editing/reading code, running tests, debugging, exploring a repo). Reuses one persistent session per chat, so follow-up requests keep context. The agent\'s entire output is directly visible to the user in the run card, so after the run reply with a ~2-line confirmation only — never re-summarize the agent\'s output.',
         inputSchema: z.object({
-            agent: z.enum(['claude', 'codex']).describe('Which coding agent to use: "claude" (Claude Code) or "codex". Set this to the active code-mode chip agent. Note: when the chip is set, the backend uses the chip agent regardless of this value — this only takes effect in the ask-human flow where no chip is set.'),
+            agent: CodingAgent.describe('Which coding agent to use: "claude" (Claude Code), "codex", or "opencode". Set this to the active code-mode chip agent. Note: when the chip is set, the backend uses the chip agent regardless of this value — this only takes effect in the ask-human flow where no chip is set.'),
             cwd: z.string().optional().describe('Absolute path to the working directory / project folder the agent should operate in. OMIT this when the user has not named a path — the run then uses their default code repo (the single registered project, or the one picked in Settings → Code). Only pass a path the user actually named or that prior context established.'),
             prompt: z.string().describe("The user's coding request, forwarded almost verbatim — fix only transcription artifacts, typos, and minor grammar; do NOT expand, rephrase, or add details the user never stated. Append extra context (clearly labeled) only when the user explicitly asked you to gather it first."),
         }),
-        execute: async ({ agent, cwd, prompt }: { agent: 'claude' | 'codex', cwd?: string, prompt: string }, ctx?: ToolContext) => {
+        execute: async ({ agent, cwd, prompt }: { agent: CodingAgent, cwd?: string, prompt: string }, ctx?: ToolContext) => {
             if (!ctx) {
                 throw new Error('code_agent_run requires run context (runId / streaming).');
             }

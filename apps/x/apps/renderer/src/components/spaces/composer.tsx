@@ -1,3 +1,4 @@
+import type { CodingAgent } from '@x/shared/src/code-mode.js'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import type { EditorView } from '@tiptap/pm/view'
@@ -58,7 +59,7 @@ export interface AgentOptions {
     model?: { provider: string; model: string; effort?: 'low' | 'medium' | 'high' }
     permissionMode?: 'auto' | 'manual'
     searchEnabled?: boolean
-    codeMode?: 'claude' | 'codex'
+    codeMode?: CodingAgent
 }
 
 /** A pane-provided slash command; `args` absent = picking it runs immediately. */
@@ -268,7 +269,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     const [model, setModel] = useState<ModelSelection | null>(null)
     const [permissionMode, setPermissionMode] = useState<'auto' | 'manual'>('auto')
     const [searchEnabled, setSearchEnabled] = useState(false)
-    const [codeMode, setCodeMode] = useState<'claude' | 'codex' | null>(null)
+    const [codeMode, setCodeMode] = useState<CodingAgent | null>(null)
     const [codeModeAvailable, setCodeModeAvailable] = useState(false)
     useEffect(() => {
         const load = () => {

@@ -18,6 +18,7 @@ const session: CodeSession = {
 const ready: CodeAgentsStatus = {
   claude: { installed: true, signedIn: true },
   codex: { installed: true, signedIn: true },
+  opencode: { installed: true, signedIn: true },
 }
 
 function setup(done = false, agentsStatus: CodeAgentsStatus | null = ready) {
@@ -79,9 +80,10 @@ describe('code rail context menus', () => {
     const { onNewSession } = setup(false, {
       claude: { installed: false, signedIn: false },
       codex: { installed: true, signedIn: false },
+      opencode: { installed: false, signedIn: true },
     })
     openProjectMenu()
-    for (const name of ['New Claude Code worktree', 'New Codex worktree']) {
+    for (const name of ['New Claude Code worktree', 'New Codex worktree', 'New OpenCode worktree']) {
       const item = screen.getByRole('menuitem', { name })
       expect(item).toHaveAttribute('aria-disabled', 'true')
       fireEvent.click(item)

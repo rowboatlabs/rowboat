@@ -1,3 +1,4 @@
+import type { CodingAgent } from '@x/shared/src/code-mode.js'
 import type { spaces } from '@x/shared'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { containsRowboatAddress } from '@/lib/spaces-mentions'
@@ -16,7 +17,7 @@ export interface RowboatTurnOptions {
     model?: { provider: string; model: string; effort?: 'low' | 'medium' | 'high' }
     permissionMode?: 'auto' | 'manual'
     searchEnabled?: boolean
-    codeMode?: 'claude' | 'codex'
+    codeMode?: CodingAgent
 }
 
 export function maybeInvokeRowboat(

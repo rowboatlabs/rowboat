@@ -3,8 +3,9 @@ import { promisify } from 'util';
 import os from 'os';
 import path from 'path';
 import fs from 'fs/promises';
-import { AgentAccount, CodeModeAgentStatus } from './types.js';
+import { AgentAccount, AgentStatus, CodeModeAgentStatus } from './types.js';
 import { isEngineProvisioned, getProvisionedEnginePath } from './acp/engine-provisioner.js';
+import { resolveExternalAgent } from './acp/external-agent.js';
 import { decodeJwtPayload } from '../auth/jwt.js';
 
 const execAsync = promisify(exec);
@@ -286,15 +287,29 @@ async function resolveAgentAuth(
 }
 
 export async function checkCodeModeAgentStatus(): Promise<CodeModeAgentStatus> {
-    const [claude, codex] = await Promise.all([
+    const [claude, codex, opencode] = await Promise.all([
         resolveAgentAuth(checkClaudeSignedInViaEngine(), checkClaudeSignedInHeuristic, readClaudeAccountFromConfig),
         resolveAgentAuth(checkCodexSignedInViaEngine(), checkCodexSignedInHeuristic, readCodexAccountFromAuthJson),
+        checkExternalAgentStatus(),
     ]);
     // `installed` means the engine is provisioned (downloaded) locally — the user has
     // clicked Enable in Settings → Code Mode. We no longer look for a global claude/codex
     // CLI on PATH; code mode runs our own pinned engine from ~/.rowboat/engines.
+    // External agents (OpenCode) are the opposite: `installed` means resolvable on PATH,
+    // and readiness does not depend on a sign-in probe.
     return {
         claude: { installed: isEngineProvisioned('claude'), signedIn: claude.signedIn, account: claude.account },
         codex: { installed: isEngineProvisioned('codex'), signedIn: codex.signedIn, account: codex.account },
+        opencode,
     };
+}
+
+// Externally-installed agents have no managed engine and no reliable auth-status
+// command, so `installed` is PATH resolution and `signedIn` is best-effort: an
+// indeterminate answer is reported as signed-in so a detectable binary stays
+// selectable (readiness for external agents is `installed` alone).
+async function checkExternalAgentStatus(): Promise<AgentStatus> {
+    const resolved = await resolveExternalAgent('opencode').catch(() => null);
+    if (!resolved) return { installed: false, signedIn: false };
+    return { installed: true, signedIn: true, version: resolved.version };
 }

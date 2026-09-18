@@ -26,11 +26,14 @@ export const AgentStatus = z.object({
     installed: z.boolean(),
     signedIn: z.boolean(),
     account: AgentAccount.optional(),
+    // Present for externally-installed agents (detected CLI version).
+    version: z.string().optional(),
 });
 export type AgentStatus = z.infer<typeof AgentStatus>;
 
 export const CodeModeAgentStatus = z.object({
     claude: AgentStatus,
     codex: AgentStatus,
+    opencode: AgentStatus,
 });
 export type CodeModeAgentStatus = z.infer<typeof CodeModeAgentStatus>;

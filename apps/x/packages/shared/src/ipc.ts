@@ -114,7 +114,7 @@ const QuickAskSubmitPayload = z.object({
     )
     .optional(),
   searchEnabled: z.boolean().optional(),
-  codeMode: z.enum(['claude', 'codex']).optional(),
+  codeMode: CodingAgent.optional(),
   permissionMode: z.enum(['manual', 'auto']).optional(),
   model: ModelRef.nullable().optional(),
   reasoningEffort: ReasoningEffort.nullable().optional(),
@@ -584,7 +584,7 @@ export const ipcSchemas = {
       voiceInput: z.boolean().optional(),
       voiceOutput: z.enum(['summary', 'full']).optional(),
       searchEnabled: z.boolean().optional(),
-      codeMode: z.enum(['claude', 'codex']).optional(),
+      codeMode: CodingAgent.optional(),
       // Code-section sessions pin the coding agent's working directory and
       // approval policy for the whole turn (see code_agent_run overrides).
       codeCwd: z.string().optional(),
@@ -1794,6 +1794,14 @@ export const ipcSchemas = {
         installed: z.boolean(),
         signedIn: z.boolean(),
         account: z.object({ email: z.string().optional(), plan: z.string().optional() }).optional(),
+      }),
+      // Externally-installed agent: `installed` = resolvable on PATH; `version`
+      // is the detected CLI version. No download/provision action applies.
+      opencode: z.object({
+        installed: z.boolean(),
+        signedIn: z.boolean(),
+        account: z.object({ email: z.string().optional(), plan: z.string().optional() }).optional(),
+        version: z.string().optional(),
       }),
     }),
   },
@@ -3176,7 +3184,7 @@ export const ipcSchemas = {
       // resolves the pin server-side.
       code: z.object({
         projectId: z.string(),
-        agent: z.enum(['claude', 'codex']).optional(),
+        agent: CodingAgent.optional(),
         isolation: z.enum(['in-repo', 'worktree']).optional(),
       }).optional(),
     }),
@@ -4148,7 +4156,7 @@ export const ipcSchemas = {
           model: z.object({ provider: z.string(), model: z.string(), effort: z.enum(['low', 'medium', 'high']).optional() }).optional(),
           permissionMode: z.enum(['auto', 'manual']).optional(),
           searchEnabled: z.boolean().optional(),
-          codeMode: z.enum(['claude', 'codex']).optional(),
+          codeMode: CodingAgent.optional(),
         })
         .optional(),
     }),

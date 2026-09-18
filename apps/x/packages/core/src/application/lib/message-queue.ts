@@ -1,5 +1,6 @@
 import { IMonotonicallyIncreasingIdGenerator } from "./id-gen.js";
 import { UserMessageContent } from "@x/shared/dist/message.js";
+import type { CodingAgent } from "@x/shared/dist/code-mode.js";
 import z from "zod";
 
 export type UserMessageContentType = z.infer<typeof UserMessageContent>;
@@ -8,7 +9,7 @@ export type MiddlePaneContext =
     | { kind: 'note'; path: string; content: string }
     | { kind: 'browser'; url: string; title: string };
 
-export type CodeMode = 'claude' | 'codex';
+export type CodeMode = CodingAgent;
 export type CodePolicy = 'ask' | 'auto-approve-reads' | 'yolo';
 
 type EnqueuedMessage = {

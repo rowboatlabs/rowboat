@@ -31,7 +31,7 @@ import { ConnectedAccountsSettings } from "@/components/settings/connected-accou
 import { MobileChannelsSettings } from "@/components/settings/mobile-channels-settings"
 import { PhonePairingSettings } from "@/components/settings/phone-pairing-settings"
 import { RemoteServerSettings } from "@/components/settings/remote-server-settings"
-import type { ApprovalPolicy } from "@x/shared/src/code-mode.js"
+import type { ApprovalPolicy, CodingAgent } from "@x/shared/src/code-mode.js"
 import { DEFAULT_TURN_LIMITS_SETTINGS } from "@x/shared/src/turn-limits.js"
 import type { ipc as ipcShared } from "@x/shared"
 import { startProvisioning, useProvisioning, enabledOptimistic, type AgentStatus, type CodeModeAgentStatus } from "@/lib/code-mode-provisioning"
@@ -1168,7 +1168,7 @@ function NoteTaggingSettings({ dialogOpen }: { dialogOpen: boolean }) {
 
 // Human label for the raw subscription tier the engine reports
 // (claude: "max" / "pro" / "enterprise"; codex: ChatGPT plan types like "go" / "plus").
-function formatPlan(agent: 'claude' | 'codex', plan: string | undefined): string | null {
+function formatPlan(agent: CodingAgent, plan: string | undefined): string | null {
   if (!plan) return null
   const cap = plan.charAt(0).toUpperCase() + plan.slice(1)
   return agent === 'codex' ? `ChatGPT ${cap}` : cap
@@ -1251,6 +1251,35 @@ function AgentStatusRow({
           Enable
         </Button>
       ) : null}
+    </div>
+  )
+}
+
+// Externally-installed agent (OpenCode): detected on PATH, no download step and
+// no reliable sign-in probe, so status is detected/not-detected plus version.
+function ExternalAgentRow({ name, status }: { name: string; status: AgentStatus | null }) {
+  const installed = status?.installed ?? false
+  return (
+    <div className="flex items-center gap-3 rounded-md border px-3 py-2.5">
+      <Terminal className="size-5 shrink-0" />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium">{name}</span>
+          {installed && status?.version && (
+            <span className="rounded-full border px-1.5 py-px text-[10px] font-medium leading-4 text-muted-foreground shrink-0">
+              v{status.version}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-0.5">
+          <span className={cn("size-2 rounded-full shrink-0", installed ? "bg-[var(--rowboat-success)]" : "bg-muted-foreground/30")} />
+          <span className="truncate">
+            {installed
+              ? 'Detected on your PATH'
+              : 'Not detected — install OpenCode and put it on your PATH'}
+          </span>
+        </div>
+      </div>
     </div>
   )
 }
@@ -1353,8 +1382,9 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
     }
   }, [enabled, approvalPolicy, defaultProjectId])
 
-  const anyReady = status?.claude.installed && status?.claude.signedIn
-    || status?.codex.installed && status?.codex.signedIn
+  const anyReady = (status?.claude.installed && status?.claude.signedIn)
+    || (status?.codex.installed && status?.codex.signedIn)
+    || status?.opencode.installed
 
   if (loading) {
     return (
@@ -1370,17 +1400,20 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
       <div className="space-y-2 text-sm text-muted-foreground leading-relaxed">
         <p>
           <strong className="text-foreground">Code mode</strong> lets the assistant hand coding tasks
-          to <strong className="text-foreground">Claude Code</strong> or <strong className="text-foreground">Codex</strong> on
+          to <strong className="text-foreground">Claude Code</strong>, <strong className="text-foreground">Codex</strong>, or{' '}
+          <strong className="text-foreground">OpenCode</strong> on
           your machine. Pick the agent in the composer, and everything it does — commands, file
           changes, approvals — shows up in the chat.
         </p>
         <p>
-          To set up an agent, click <strong className="text-foreground">Enable</strong> below to download
+          To set up a managed agent, click <strong className="text-foreground">Enable</strong> below to download
           it, then sign in by running{' '}
           <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">claude login</code>{' '}
           or <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">codex login</code>{' '}
           in your terminal. You need a <strong className="text-foreground">Claude</strong> or{' '}
           <strong className="text-foreground">ChatGPT</strong> subscription — either one works, or both.
+          <strong className="text-foreground"> OpenCode</strong> is installed by you — put it on your PATH
+          and it is detected automatically.
         </p>
       </div>
 
@@ -1411,6 +1444,7 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
             status={status?.codex ?? null}
             onProvisioned={loadStatus}
           />
+          <ExternalAgentRow name="OpenCode" status={status?.opencode ?? null} />
         </div>
       </div>
 

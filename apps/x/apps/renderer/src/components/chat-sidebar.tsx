@@ -16,7 +16,7 @@ import type { QueuedSessionMessage } from '@x/shared/src/sessions.js'
 import { useTabMeta } from '@/lib/tab-meta'
 import { useSidebar } from '@/components/ui/sidebar'
 import type { ChatPaneSize } from '@/contexts/theme-context'
-import type { PermissionDecision } from '@x/shared/src/code-mode.js'
+import type { PermissionDecision, CodingAgent } from '@x/shared/src/code-mode.js'
 import {
   type ChatViewportAnchorState,
   type ChatTabViewState,
@@ -92,7 +92,7 @@ export interface ChatSidebarProps {
   isWaitingOnHuman?: boolean
   isStopping?: boolean
   onStop?: () => void
-  onSubmit: (message: PromptInputMessage, mentions?: Mention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => void
+  onSubmit: (message: PromptInputMessage, mentions?: Mention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: CodingAgent, permissionMode?: PermissionMode) => void
   /** Pending-queue mirror for the ACTIVE tab's session (single store — see App). */
   queuedForActive?: QueuedSessionMessage[]
   onRemoveQueued?: (queueId: string) => void
@@ -111,7 +111,7 @@ export interface ChatSidebarProps {
   restoredSelectionForActive?: ModelSelection | null
   workDirByTab?: Record<string, string | null>
   /** Composer locks for runs bound to Code-section sessions (cwd + agent frozen). */
-  codeSessionLocks?: Record<string, { cwd: string; agent: 'claude' | 'codex' }>
+  codeSessionLocks?: Record<string, { cwd: string; agent: CodingAgent }>
   /**
    * Set while a Rowboat-mode code session owns this pane: the chat is pinned to
    * the session, so the chat switcher / new-chat / history affordances hide.

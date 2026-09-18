@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { codeWorkspaceKey, type CodeSession, type CodeSessionStatus } from '@x/shared/src/code-sessions.js'
 import type { CodingAgent } from '@x/shared/src/code-mode.js'
+import { KNOWN_AGENTS } from '@x/shared/src/agent-catalog.js'
 import { cn, compactPath, parentPath } from '@/lib/utils'
 import { formatRelativeTime } from '@/lib/relative-time'
 import { SecondaryRail } from '@/components/secondary-rail'
@@ -84,7 +85,7 @@ function ProjectMenuItems({ context = false, projectId, agentsStatus, onNewSessi
       <Item onSelect={() => onNewSession(projectId)}>
         <Plus className="size-4" /> New worktree
       </Item>
-      {(['claude', 'codex'] as CodingAgent[]).map((agent) => (
+      {KNOWN_AGENTS.map((agent) => (
         <Item
           key={agent}
           disabled={agentsStatus !== null && !isAgentReady(agentsStatus, agent)}

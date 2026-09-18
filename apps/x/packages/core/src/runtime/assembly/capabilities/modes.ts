@@ -1,5 +1,6 @@
 import type { CapabilityContext, EagerCapability } from "./types.js";
 import { PRIVACY_RULES, threadProcedure } from "../skills/spaces/procedures.js";
+import { agentLabel, type CodingAgent } from "../../../code-mode/agent-registry.js";
 
 // The app-activated capabilities: the modes the app (not the model) toggles —
 // facts about the world like "the camera is on" whose guidance must be in the
@@ -53,7 +54,7 @@ export const MODE_CAPABILITIES: readonly EagerCapability[] = [
         promptFragment: (ctx: CapabilityContext) => {
             const { codeMode, codeCwd } = ctx;
             if (!codeMode) return null;
-            const agentDisplay = codeMode === "claude" ? "Claude Code" : "Codex";
+            const agentDisplay = agentLabel(codeMode);
             return CODE_MODE_TEMPLATE(agentDisplay, codeMode, codeCwd);
         },
     },
@@ -141,7 +142,7 @@ Confirmations name the work, not the mechanics: "Dispatched — taking down the 
 
 const CODE_MODE_TEMPLATE = (
     agentDisplay: string,
-    codeMode: "claude" | "codex",
+    codeMode: CodingAgent,
     codeCwd: string | null,
 ): string => `# Code Mode (Active) — Agent: ${agentDisplay}
 The user has turned on **code mode** and the composer chip is set to **${agentDisplay}** (\`${codeMode}\`). For EVERY task and question this turn — writing and editing code, but ALSO design, product, architecture, and infra questions about the project — use **${agentDisplay}**, and narrate that agent ("Using ${agentDisplay} to …").
@@ -159,7 +160,7 @@ That selection is the single source of truth for which agent runs:
 **Writing \`prompt\` — forward, don't rewrite.** Pass the user's coding request through nearly verbatim:
 - Fix only speech-to-text / transcription artifacts, obvious typos, and minor grammar; light formatting (e.g. breaking a run-on spoken sentence into lines) is fine.
 - Do NOT expand, rephrase, or reinterpret the request, and do NOT add speculative implementation details, file guesses, or constraints the user never stated — the coding agent explores the repo itself and is better placed to interpret the request in context.
-- ONE exception: when the user explicitly asks you to gather outside context first ("fetch the error from my email and send it to Claude Code", "pull the spec from my knowledge base for Codex"), collect that context, then send their verbatim request followed by the gathered material under a clearly labeled section (e.g. "Context the user asked me to include:").
+- ONE exception: when the user explicitly asks you to gather outside context first ("fetch the error from my email and send it to Claude Code", "pull the spec from my knowledge base for Codex", "grab the log for OpenCode"), collect that context, then send their verbatim request followed by the gathered material under a clearly labeled section (e.g. "Context the user asked me to include:").
 
 The tool runs the agent on-device and streams its tool calls, file diffs, and plan into the chat; any action needing approval surfaces as an inline permission card, so you do NOT pre-confirm with an in-chat "reply yes". This chat keeps ONE persistent agent session, so follow-up coding requests automatically resume with full context — just call \`code_agent_run\` again. Do NOT shell out to \`acpx\` or \`executeCommand\` for coding, and do NOT fall back to your own file tools.
 

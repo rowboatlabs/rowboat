@@ -74,10 +74,12 @@ export function getAgentLaunchSpec(agent: CodingAgent): AgentLaunchSpec {
     }
 
     // OpenCode has a native built-in ACP server (`opencode acp`), so it does not
-    // need a third-party npm adapter package.
+    // need a third-party npm adapter package. Resolve it to an absolute path via
+    // the same resolver the status probe uses, so GUI-launch PATH stripping can't
+    // make detection and spawn disagree.
     if (agent === 'opencode') {
         return {
-            command: 'opencode',
+            command: getProvisionedEnginePath('opencode'),
             args: ['acp'],
             env,
         };

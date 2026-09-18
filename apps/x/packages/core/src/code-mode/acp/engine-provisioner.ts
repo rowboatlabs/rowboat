@@ -19,7 +19,20 @@ import { spawnSync } from 'child_process';
 import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { ENGINE_MANIFEST } from './engine-manifest.js';
+import { agentLabel, getAgentDescriptor, isExternalAgent } from '../agent-registry.js';
+import { meetsMinimumVersion, probeExternalVersionSync, resolveExternalAgentPathSync } from './external-agent.js';
 import type { CodingAgent } from './types.js';
+
+// External agents (OpenCode) have no ENGINE_MANIFEST entry. Every manifest read
+// goes through here so an external agent fails with a clear error instead of a
+// TypeError from indexing the generated manifest.
+type ManagedCodingAgent = Exclude<CodingAgent, 'opencode'>;
+function manifestFor(agent: CodingAgent) {
+    if (isExternalAgent(agent)) {
+        throw new Error(`Code mode: ${agent} is externally installed and has no engine manifest entry.`);
+    }
+    return ENGINE_MANIFEST[agent as ManagedCodingAgent];
+}
 
 export const ENGINES_ROOT = path.join(os.homedir(), '.rowboat', 'engines');
 
@@ -51,9 +64,10 @@ export interface ProvisionedEngine {
 // Map this process's platform/arch (+ libc on linux) to a manifest platform key for the
 // given agent. Returns null when no engine is published for this platform.
 function platformKey(agent: CodingAgent): string | null {
+    if (isExternalAgent(agent)) return null;
     const arch = process.arch === 'arm64' ? 'arm64' : process.arch === 'x64' ? 'x64' : null;
     if (!arch) return null;
-    const plats = ENGINE_MANIFEST[agent].platforms as Record<string, PlatformEntry>;
+    const plats = manifestFor(agent).platforms as Record<string, PlatformEntry>;
     const candidates: string[] = [];
     if (process.platform === 'darwin') {
         candidates.push(`darwin-${arch}`);
@@ -107,18 +121,19 @@ function locateExecutable(agent: CodingAgent, root: string): string | null {
 // True when this OS/arch has a published engine for `agent` — i.e. we can provision it.
 // (Used for status: code mode no longer requires a user-installed CLI.)
 export function isEngineSupported(agent: CodingAgent): boolean {
+    if (isExternalAgent(agent)) return true;
     return platformKey(agent) !== null;
 }
 
 // True when the pinned engine for `agent` is already downloaded and intact locally.
+// External agents have no provisioned engine; use resolveExternalAgent for them.
 export function isEngineProvisioned(agent: CodingAgent): boolean {
-    const version = ENGINE_MANIFEST[agent].version;
+    if (isExternalAgent(agent)) return false;
+    const version = manifestFor(agent).version;
     const versionDir = path.join(ENGINES_ROOT, agent, version);
     const metaPath = path.join(ENGINES_ROOT, agent, '.meta', `${agent}-${version}.json`);
     return locateExecutable(agent, versionDir) !== null && fs.existsSync(metaPath);
 }
-
-const AGENT_LABEL: Record<CodingAgent, string> = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode' };
 
 // Return the provisioned engine's executable path, or throw a clear, user-facing error.
 // The chat/run path uses this — we deliberately do NOT download here: the engine must be
@@ -126,14 +141,30 @@ const AGENT_LABEL: Record<CodingAgent, string> = { claude: 'Claude Code', codex:
 // download mid-conversation. ensureEngine() (the downloading path) is driven only by the
 // Settings "Enable" action.
 export function getProvisionedEnginePath(agent: CodingAgent): string {
-    if (agent === 'opencode') {
-        return 'opencode';
+    if (isExternalAgent(agent)) {
+        const resolvedPath = resolveExternalAgentPathSync(agent);
+        if (!resolvedPath) {
+            throw new Error(
+                `${agentLabel(agent)} isn't installed. Install it and ensure it is on your PATH, then reopen Settings → Code Mode.`,
+            );
+        }
+        // Only pay for a version probe when a minimum is actually declared.
+        const descriptor = getAgentDescriptor(agent);
+        if (descriptor.strategy === 'external' && descriptor.minVersion) {
+            const version = probeExternalVersionSync(resolvedPath);
+            if (!meetsMinimumVersion(agent, version)) {
+                throw new Error(
+                    `${agentLabel(agent)} ${version} is too old for the ACP protocol — upgrade it and try again.`,
+                );
+            }
+        }
+        return resolvedPath;
     }
-    const version = ENGINE_MANIFEST[agent].version;
+    const version = manifestFor(agent).version;
     const exe = locateExecutable(agent, path.join(ENGINES_ROOT, agent, version));
     if (!exe) {
         throw new Error(
-            `${AGENT_LABEL[agent]} isn't enabled yet. Open Settings → Code Mode and click Enable to download it.`,
+            `${agentLabel(agent)} isn't enabled yet. Open Settings → Code Mode and click Enable to download it.`,
         );
     }
     return exe;
@@ -244,7 +275,12 @@ function makeExecutable(agent: CodingAgent, root: string, exe: string): void {
  * use. Returns the absolute path to the engine executable. Idempotent and cached.
  */
 export async function ensureEngine(agent: CodingAgent, opts: EnsureEngineOptions = {}): Promise<ProvisionedEngine> {
-    const entry = ENGINE_MANIFEST[agent];
+    if (isExternalAgent(agent)) {
+        throw new Error(
+            `Code mode: ${agentLabel(agent)} is installed by the user, not downloaded by Rowboat. No engine provisioning is available.`,
+        );
+    }
+    const entry = manifestFor(agent);
     const version = entry.version;
     const key = platformKey(agent);
     if (!key) {
