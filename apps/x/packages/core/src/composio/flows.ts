@@ -91,16 +91,31 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
         } while (!authConfigId && cursor);
 
         if (!authConfigId) {
-            // Create new managed auth config (per-profile name so two
-            // profiles never share one)
-            const created = await composioClient.createAuthConfig({
-                toolkit: { slug: toolkitSlug },
-                auth_config: {
-                    type: 'use_composio_managed_auth',
-                    name: composioAuthConfigName(toolkitSlug),
-                },
-            });
-            authConfigId = created.auth_config.id;
+            // No managed config exists for this toolkit at all — create one.
+            // Composio allows only one per toolkit per project, so a concurrent
+            // create (another profile/flow) surfaces as "already exists"; recover
+            // by re-listing and reusing the winner rather than failing.
+            try {
+                const created = await composioClient.createAuthConfig({
+                    toolkit: { slug: toolkitSlug },
+                    auth_config: {
+                        type: 'use_composio_managed_auth',
+                        name: composioAuthConfigName(toolkitSlug),
+                    },
+                });
+                authConfigId = created.auth_config.id;
+            } catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                if (!/already exists/i.test(message)) throw err;
+                console.log(`[Composio] Managed auth already exists for ${toolkitSlug}; reusing it`);
+                let retryCursor: string | null = null;
+                do {
+                    const page = await composioClient.listAuthConfigs(toolkitSlug, retryCursor, true);
+                    authConfigId = selectManagedAuthConfig(page.items, toolkitSlug);
+                    retryCursor = page.next_cursor;
+                } while (!authConfigId && retryCursor);
+                if (!authConfigId) throw err;
+            }
         }
 
         // Abort any existing flow for this toolkit before starting a new one

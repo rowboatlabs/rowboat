@@ -9,21 +9,26 @@ export interface ManagedAuthConfigLike {
 }
 
 /**
- * Pick this profile's managed OAUTH2 auth config, or null when it must be
- * created. Never returns a foreign profile's config: exact per-profile name
- * match only.
+ * Pick this profile's managed OAUTH2 auth config. Prefers the exact
+ * per-profile config; otherwise reuses any managed OAUTH2 config for the
+ * toolkit.
+ *
+ * Composio permits only ONE managed auth config per toolkit per project, so a
+ * second profile cannot create its own — creating one returns
+ * `400 Managed auth already exists`. Reusing the project-wide config is correct:
+ * per-profile separation lives in the connected account's `user_id`
+ * (composioUserId), not in the shared OAuth app config.
  */
 export function selectManagedAuthConfig(
     items: ManagedAuthConfigLike[],
     toolkitSlug: string,
     profileId: string = ProfileId,
 ): string | null {
-    const expected = composioAuthConfigName(toolkitSlug, profileId);
-    const hit = items.find(
-        (cfg) =>
-            cfg.auth_scheme === "OAUTH2" &&
-            cfg.is_composio_managed === true &&
-            cfg.name === expected,
+    const managed = items.filter(
+        (cfg) => cfg.auth_scheme === "OAUTH2" && cfg.is_composio_managed === true,
     );
-    return hit ? hit.id : null;
+    const expected = composioAuthConfigName(toolkitSlug, profileId);
+    const own = managed.find((cfg) => cfg.name === expected);
+    if (own) return own.id;
+    return managed[0]?.id ?? null;
 }

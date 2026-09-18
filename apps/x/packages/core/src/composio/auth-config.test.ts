@@ -9,7 +9,7 @@ const managed = (id: string, name?: string, scheme = "OAUTH2") => ({
 });
 
 describe("selectManagedAuthConfig", () => {
-    it("selects the exact per-profile config", () => {
+    it("prefers the exact per-profile config", () => {
         const items = [managed("other", "rowboat-work-gmail"), managed("mine", "rowboat-personal-gmail")];
         expect(selectManagedAuthConfig(items, "gmail", "personal")).toBe("mine");
     });
@@ -19,9 +19,12 @@ describe("selectManagedAuthConfig", () => {
         expect(selectManagedAuthConfig(items, "gmail", "default")).toBe("legacy");
     });
 
-    it("never falls back to a foreign-named managed config", () => {
+    it("reuses the project-wide managed config when this profile has none", () => {
+        // Composio allows only one managed auth per toolkit per project, so a
+        // second profile must reuse the existing one instead of creating a
+        // duplicate (which 400s "Managed auth already exists").
         const items = [managed("theirs", "rowboat-work-gmail")];
-        expect(selectManagedAuthConfig(items, "gmail", "personal")).toBeNull();
+        expect(selectManagedAuthConfig(items, "gmail", "personal")).toBe("theirs");
     });
 
     it("returns null when nothing is listed", () => {
@@ -36,8 +39,8 @@ describe("selectManagedAuthConfig", () => {
         expect(selectManagedAuthConfig(items, "gmail", "personal")).toBeNull();
     });
 
-    it("ignores entries without a name", () => {
+    it("reuses a managed config even when its name is unset", () => {
         const items = [managed("noname")];
-        expect(selectManagedAuthConfig(items, "gmail", "personal")).toBeNull();
+        expect(selectManagedAuthConfig(items, "gmail", "personal")).toBe("noname");
     });
 });
