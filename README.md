@@ -5,8 +5,7 @@
 <h5 align="center">
 
 <h1 align="center">Rowboat</h1>
-<p align="center"><b>The multiplayer personal assistant for work.</b></p>
-<p align="center">Every teammate. Their own agent. One Space.</p>
+<p align="center"><b>AI coworker with memory and collaboration</b></p>
 
 <p align="center" style="display: flex; justify-content: center; gap: 20px; align-items: center;">
   <a href="https://trendshift.io/repositories/13609" target="blank">
