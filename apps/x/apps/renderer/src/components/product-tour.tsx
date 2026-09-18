@@ -90,7 +90,7 @@ const TOUR_STEPS: TourStep[] = [
     navigate: 'code',
     hat: 'hardhat',
     title: 'Code',
-    text: 'Code runs coding agents like Claude Code, Codex, and OpenCode on your repos. Every session is a chat on its own worktree, with the diff, files, and a terminal one click away.',
+    text: 'Code runs coding agents like OpenCode, Cursor, and Hermes on your repos. Every session is a chat on its own worktree, with the diff, files, and a terminal one click away.',
   },
   {
     id: 'knowledge',

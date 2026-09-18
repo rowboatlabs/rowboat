@@ -1782,39 +1782,25 @@ export const ipcSchemas = {
   },
   'codeMode:checkAgentStatus': {
     req: z.null(),
-    res: z.object({
-      claude: z.object({
-        installed: z.boolean(),
-        signedIn: z.boolean(),
-        // Who is signed in, when detectable: email plus the subscription tier
-        // ("max", "pro", "enterprise" for Claude; "plus", "go", … for Codex).
-        account: z.object({ email: z.string().optional(), plan: z.string().optional() }).optional(),
-      }),
-      codex: z.object({
-        installed: z.boolean(),
-        signedIn: z.boolean(),
-        account: z.object({ email: z.string().optional(), plan: z.string().optional() }).optional(),
-      }),
-      // Externally-installed agent: `installed` = resolvable on PATH; `version`
-      // is the detected CLI version. No download/provision action applies.
-      opencode: z.object({
-        installed: z.boolean(),
-        signedIn: z.boolean(),
-        account: z.object({ email: z.string().optional(), plan: z.string().optional() }).optional(),
-        version: z.string().optional(),
-      }),
-    }),
+    // Registry-keyed: one entry per known agent. `installed` = resolvable on
+    // PATH; `version` is the detected CLI version.
+    res: z.record(CodingAgent, z.object({
+      installed: z.boolean(),
+      signedIn: z.boolean(),
+      account: z.object({ email: z.string().optional(), plan: z.string().optional() }).optional(),
+      version: z.string().optional(),
+    })),
   },
   // Download + install an agent's native engine (the Settings "Enable" action).
   // Streams progress over the 'codeMode:engineProgress' push channel while it runs.
   'codeMode:provisionEngine': {
-    req: z.object({ agent: z.enum(['claude', 'codex']) }),
+    req: z.object({ agent: CodingAgent }),
     res: z.object({ success: z.boolean(), error: z.string().optional() }),
   },
   // Push (main -> renderer): engine provisioning progress for the Settings UI.
   'codeMode:engineProgress': {
     req: z.object({
-      agent: z.enum(['claude', 'codex']),
+      agent: CodingAgent,
       phase: z.enum(['download', 'verify', 'extract', 'done']),
       receivedBytes: z.number().optional(),
       totalBytes: z.number().optional(),

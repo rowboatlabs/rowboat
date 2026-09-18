@@ -920,9 +920,9 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                                 {codeModeAvailable && (
                                     <button
                                         type="button"
-                                        onClick={() => setCodeMode((m) => (m ? null : 'claude'))}
+                                        onClick={() => setCodeMode((m) => (m ? null : 'opencode'))}
                                         aria-pressed={!!codeMode}
-                                        title={codeMode ? 'Terminal on (Claude Code) — click to turn off' : 'Let it use the terminal / code tools'}
+                                        title={codeMode ? 'Terminal on (coding agent) — click to turn off' : 'Let it use the terminal / code tools'}
                                         className={cn(
                                             'flex h-7 shrink-0 items-center rounded-full border px-1.5 transition-colors',
                                             codeMode ? 'bg-secondary text-foreground border-transparent hover:bg-secondary/70' : 'border-transparent text-muted-foreground hover:bg-muted hover:text-foreground',

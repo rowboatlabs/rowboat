@@ -27,19 +27,22 @@ describe('external agent version parsing', () => {
 
 describe('external agent version gate', () => {
     it('passes when no minimum is declared or the version is unknown', () => {
-        // opencode declares no minVersion today; the ACP handshake is the gate.
+        // No minVersion is declared today; the ACP handshake is the real gate.
         expect(meetsMinimumVersion('opencode', '0.0.1')).toBe(true);
-        expect(meetsMinimumVersion('opencode', undefined)).toBe(true);
-    });
-
-    it('never gates managed agents through this helper', () => {
-        expect(meetsMinimumVersion('claude', '0.0.1')).toBe(true);
+        expect(meetsMinimumVersion('cursor', undefined)).toBe(true);
+        expect(meetsMinimumVersion('hermes', '0.0.1')).toBe(true);
     });
 });
 
-describe('external agent resolution classification', () => {
-    it('returns null for managed agents', () => {
-        expect(resolveExternalAgentPathSync('claude')).toBeNull();
-        expect(resolveExternalAgentPathSync('codex')).toBeNull();
+describe('external agent resolution', () => {
+    it('returns a path or null for a known agent (never throws)', () => {
+        for (const agent of ['opencode', 'cursor', 'hermes'] as const) {
+            const result = resolveExternalAgentPathSync(agent);
+            expect(result === null || typeof result === 'string').toBe(true);
+        }
+    });
+
+    it('throws for an unknown agent id', () => {
+        expect(() => resolveExternalAgentPathSync('nope' as never)).toThrow(/Unknown coding agent/);
     });
 });

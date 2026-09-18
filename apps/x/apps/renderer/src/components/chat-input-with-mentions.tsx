@@ -338,7 +338,7 @@ function ChatInputInner({
   const [lockedModel, setLockedModel] = useState<SelectedModel | null>(null)
   const [searchEnabled, setSearchEnabled] = useState(false)
   const [searchAvailable, setSearchAvailable] = useState(false)
-  const [codingAgent, setCodingAgent] = useState<CodingAgent>('claude')
+  const [codingAgent, setCodingAgent] = useState<CodingAgent>('opencode')
   const [codeModeEnabled, setCodeModeEnabled] = useState(false)
   const [codeModeFeatureEnabled, setCodeModeFeatureEnabled] = useState(false)
   const [agentsStatus, setAgentsStatus] = useState<CodeAgentsStatus | null>(null)
@@ -472,7 +472,7 @@ function ChatInputInner({
   // Load coding-agent preference for a given workdir.
   // Storage: config/coding-agents.json — { [workDirPath]: CodingAgent }
   const loadCodingAgentFor = useCallback(async (dir: string | null): Promise<CodingAgent> => {
-    if (!dir) return 'claude'
+    if (!dir) return 'opencode'
     try {
       const result = await window.ipc.invoke('workspace:readFile', { path: 'config/coding-agents.json' })
       const parsed = JSON.parse(result.data) as Record<string, unknown>
@@ -481,7 +481,7 @@ function ChatInputInner({
     } catch {
       /* file missing or invalid — fall through to default */
     }
-    return 'claude'
+    return 'opencode'
   }, [])
 
   const persistCodingAgent = useCallback(async (dir: string, agent: CodingAgent) => {
@@ -576,7 +576,7 @@ function ChatInputInner({
     if (isCodeLocked) return
     onWorkDirChange?.(null)
     const firstReady = agentsStatus && KNOWN_AGENTS.find((a) => isAgentReady(agentsStatus, a))
-    setCodingAgent(firstReady ?? 'claude')
+    setCodingAgent(firstReady ?? 'opencode')
     toast.success('Work directory cleared')
   }, [onWorkDirChange, isCodeLocked, agentsStatus])
 

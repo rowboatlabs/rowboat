@@ -6,7 +6,7 @@ import z from "zod";
 
 // The canonical agent id list. Adding a known CLI coding agent starts here and
 // in agent-catalog.ts (identity) plus core's agent-registry.ts (launch/probes).
-export const CODING_AGENT_IDS = ["claude", "codex", "opencode"] as const;
+export const CODING_AGENT_IDS = ["opencode", "cursor", "hermes"] as const;
 
 export const CodingAgent = z.enum(CODING_AGENT_IDS);
 export type CodingAgent = z.infer<typeof CodingAgent>;

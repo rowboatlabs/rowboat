@@ -5,28 +5,25 @@ import {
     isEngineSupported,
 } from './engine-provisioner.js';
 
-// Regression guard: before the registry split, every managed-only helper indexed
-// ENGINE_MANIFEST[agent] directly, so calling one for an externally-installed
-// agent (OpenCode) threw `TypeError: Cannot read properties of undefined`.
-describe('engine provisioner guards for external agents', () => {
-    it('does not throw for opencode on the status helpers', () => {
-        expect(() => isEngineProvisioned('opencode')).not.toThrow();
-        expect(() => isEngineSupported('opencode')).not.toThrow();
+// Regression guard: every agent is externally installed, so the provisioner must
+// never try to download one, and must never throw a TypeError for any known agent.
+describe('engine provisioner (external-only)', () => {
+    it('supports every known agent and reports none as provisioned', () => {
+        for (const agent of ['opencode', 'cursor', 'hermes'] as const) {
+            expect(isEngineSupported(agent)).toBe(true);
+            expect(isEngineProvisioned(agent)).toBe(false);
+        }
     });
 
-    it('reports opencode as supported but never provisioned', () => {
-        // External agents are supported on every platform and have no managed engine.
-        expect(isEngineSupported('opencode')).toBe(true);
-        expect(isEngineProvisioned('opencode')).toBe(false);
-    });
-
-    it('resolves opencode without a TypeError (path present or a clear error)', () => {
-        try {
-            const p = getProvisionedEnginePath('opencode');
-            expect(typeof p).toBe('string');
-            expect(p.length).toBeGreaterThan(0);
-        } catch (e) {
-            expect((e as Error).message).toMatch(/OpenCode isn't installed/);
+    it('resolves a path or throws a clear install error (never a TypeError)', () => {
+        for (const agent of ['opencode', 'cursor', 'hermes'] as const) {
+            try {
+                const p = getProvisionedEnginePath(agent);
+                expect(typeof p).toBe('string');
+                expect(p.length).toBeGreaterThan(0);
+            } catch (e) {
+                expect((e as Error).message).toMatch(/isn't installed/);
+            }
         }
     });
 });

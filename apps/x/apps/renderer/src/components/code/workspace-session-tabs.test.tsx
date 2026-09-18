@@ -6,7 +6,7 @@ import { WorkspaceSessionTabs } from './workspace-session-tabs'
 const { refresh, invoke, sessions } = vi.hoisted(() => ({ refresh: vi.fn(), invoke: vi.fn(), sessions: [] as CodeSession[] }))
 vi.mock('./use-code-sessions', () => ({ useCodeSessions: () => ({ sessions, refresh, statusOf: () => 'idle' }) }))
 afterEach(() => { cleanup(); vi.clearAllMocks(); sessions.length = 0 })
-const session: CodeSession = { id: 's1', projectId: 'p', title: 'First conversation', agent: 'codex', cwd: '/wt',
+const session: CodeSession = { id: 's1', projectId: 'p', title: 'First conversation', agent: 'cursor', cwd: '/wt',
   createdAt: '2026-09-01T00:00:00Z', worktree: { path: '/wt', branch: 'rowboat/one', baseBranch: 'main' } }
 
 describe('workspace session tabs', () => {

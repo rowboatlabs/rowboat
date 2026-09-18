@@ -1,25 +1,12 @@
-import { exec, execFile } from 'child_process';
-import { promisify } from 'util';
 import os from 'os';
 import path from 'path';
-import fs from 'fs/promises';
-import { AgentAccount, AgentStatus, CodeModeAgentStatus } from './types.js';
-import { isEngineProvisioned, getProvisionedEnginePath } from './acp/engine-provisioner.js';
+import type { CodingAgent } from '@x/shared/dist/code-mode.js';
+import { KNOWN_AGENTS } from '@x/shared/dist/agent-catalog.js';
+import { AgentStatus, CodeModeAgentStatus } from './types.js';
 import { resolveExternalAgent } from './acp/external-agent.js';
-import { decodeJwtPayload } from '../auth/jwt.js';
 
-const execAsync = promisify(exec);
-const execFileAsync = promisify(execFile);
-
-// Generous ceiling for the engine's auth-status probe: the engine is a bundled
-// node runtime with a noticeable cold start, and on macOS its first credential
-// read can block on a one-time Keychain authorization dialog.
-const ENGINE_PROBE_TIMEOUT_MS = 15_000;
-
-// Where claude.cmd / codex.cmd typically live when installed via npm/pnpm/yarn.
-// We scan these directly because Electron's spawned shell sometimes doesn't
-// inherit the user's full PATH (especially on macOS GUI launches, and even on
-// Windows when global npm prefix isn't propagated to system PATH).
+// Where a CLI is typically installed when not on the (GUI-stripped) PATH.
+// Kept for the legacy claude-exec helper; the agent resolver owns detection now.
 export function commonInstallPaths(binary: string): string[] {
     const home = os.homedir();
     if (process.platform === 'win32') {
@@ -38,278 +25,28 @@ export function commonInstallPaths(binary: string): string[] {
     }
     return [
         '/usr/local/bin',
-        '/opt/homebrew/bin',          // Apple Silicon Homebrew
+        '/opt/homebrew/bin',
         '/usr/bin',
         path.join(home, '.npm-global', 'bin'),
         path.join(home, '.local', 'bin'),
         path.join(home, '.volta', 'bin'),
-        path.join(home, '.nvm', 'versions', 'node'),  // partial; nvm has versioned subdirs
         path.join(home, 'bin'),
-    ].map(dir => path.join(dir, binary));
+    ].map((dir) => path.join(dir, binary));
 }
 
-// Given the raw credentials JSON (from a file or the macOS Keychain), decide
-// whether it represents a usable signed-in state: a valid API key, an unexpired
-// access token, or a refresh token (which can mint a new access token).
-function isClaudeCredentialSignedIn(raw: string): boolean {
-    try {
-        const parsed = JSON.parse(raw) as Record<string, unknown>;
-
-        const oauth = parsed.claudeAiOauth as Record<string, unknown> | undefined;
-        if (oauth) {
-            const access = typeof oauth.accessToken === 'string' ? oauth.accessToken : '';
-            const refresh = typeof oauth.refreshToken === 'string' ? oauth.refreshToken : '';
-            if (refresh.length > 0) return true;
-            if (access.length > 0) {
-                if (typeof oauth.expiresAt === 'number' && oauth.expiresAt > 0 && oauth.expiresAt < Date.now()) {
-                    return false;
-                }
-                return true;
-            }
-        }
-
-        if (typeof parsed.apiKey === 'string' && parsed.apiKey.length > 10) return true;
-        if (typeof parsed.accessToken === 'string' && parsed.accessToken.length > 10) return true;
-    } catch {
-        // malformed JSON
-    }
-    return false;
-}
-
-// Reads Claude Code's credentials from the macOS login Keychain, where the
-// CLI stores them on macOS (service "Claude Code-credentials"). On Linux/Windows
-// it uses the ~/.claude/.credentials.json file instead, so this is a no-op there.
-//
-// Caveats:
-//  - The first read by this app (a different binary than the `claude` CLI that
-//    created the item) triggers a one-time macOS authorization dialog; the user
-//    must "Always Allow". Headless/SSH sessions can't show it and will fail.
-//  - If CLAUDE_CONFIG_DIR is set, Claude appends a SHA-256 suffix to the service
-//    name, which this lookup won't match — such setups usually keep the file too.
-async function readClaudeKeychainCredential(): Promise<string | null> {
-    if (process.platform !== 'darwin') return null;
-    try {
-        const { stdout } = await execAsync(
-            `security find-generic-password -s "Claude Code-credentials" -w`,
-            { timeout: 5000 },
-        );
-        const out = stdout.trim();
-        return out.length > 0 ? out : null;
-    } catch {
-        // not present in keychain
-        return null;
-    }
-}
-
-// On exec failure, promisified execFile rejects with the process's captured
-// stdout/stderr and exit info attached to the error — pull those back out.
-function execFailureDetails(err: unknown): { exitCode: number | null; killed: boolean; stdout: string; stderr: string } {
-    const e = err as { code?: unknown; killed?: boolean; stdout?: unknown; stderr?: unknown };
-    return {
-        // `code` is the numeric exit code when the process ran, or a string
-        // errno (e.g. 'ENOENT') when the spawn itself failed.
-        exitCode: typeof e.code === 'number' ? e.code : null,
-        killed: e.killed === true,
-        stdout: typeof e.stdout === 'string' ? e.stdout : '',
-        stderr: typeof e.stderr === 'string' ? e.stderr : '',
-    };
-}
-
-interface AgentAuthState {
-    signedIn: boolean;
-    account?: AgentAccount;
-}
-
-// Parse `claude auth status` output: a JSON object with a boolean `loggedIn`
-// plus, when logged in, identity fields (email, subscriptionType, authMethod).
-// Returns null if the output doesn't contain that shape.
-function parseClaudeAuthStatus(stdout: string): AgentAuthState | null {
-    const start = stdout.indexOf('{');
-    const end = stdout.lastIndexOf('}');
-    if (start < 0 || end <= start) return null;
-    try {
-        const parsed = JSON.parse(stdout.slice(start, end + 1)) as Record<string, unknown>;
-        if (typeof parsed.loggedIn !== 'boolean') return null;
-        if (!parsed.loggedIn) return { signedIn: false };
-        const email = typeof parsed.email === 'string' ? parsed.email : undefined;
-        const plan = typeof parsed.subscriptionType === 'string' ? parsed.subscriptionType : undefined;
-        return { signedIn: true, account: email || plan ? { email, plan } : undefined };
-    } catch {
-        return null;
-    }
-}
-
-// Ask the provisioned Claude engine itself whether it is signed in
-// (`claude auth status` prints a JSON blob with `loggedIn`). This is ground
-// truth: the engine resolves credentials exactly the way a real code-mode
-// session will — macOS Keychain, CLAUDE_CONFIG_DIR, managed/enterprise auth —
-// so we don't have to guess where they live. Returns null when the engine
-// isn't provisioned or the probe itself failed to run (spawn error, timeout);
-// the caller then falls back to the credential-file heuristic.
-async function checkClaudeSignedInViaEngine(): Promise<AgentAuthState | null> {
-    if (!isEngineProvisioned('claude')) return null;
-    const engine = getProvisionedEnginePath('claude');
-    try {
-        const { stdout } = await execFileAsync(engine, ['auth', 'status'], { timeout: ENGINE_PROBE_TIMEOUT_MS });
-        return parseClaudeAuthStatus(stdout);
-    } catch (err) {
-        // A logged-out engine may exit non-zero but still print the status JSON.
-        const { exitCode, stdout } = execFailureDetails(err);
-        const parsed = parseClaudeAuthStatus(stdout);
-        if (parsed !== null) return parsed;
-        // Ran to completion without status output — engine says it can't auth.
-        if (exitCode !== null) return { signedIn: false };
-        return null;
-    }
-}
-
-// Best-effort account identity for the fallback path: Claude Code caches the
-// signed-in account (emailAddress etc.) in ~/.claude.json under `oauthAccount`.
-// The same approach OSS account switchers (claude-swap, CCSwitcher) use.
-async function readClaudeAccountFromConfig(): Promise<AgentAccount | undefined> {
-    try {
-        const raw = await fs.readFile(path.join(os.homedir(), '.claude.json'), 'utf-8');
-        const parsed = JSON.parse(raw) as Record<string, unknown>;
-        const acct = parsed.oauthAccount as Record<string, unknown> | undefined;
-        const email = typeof acct?.emailAddress === 'string' ? acct.emailAddress : undefined;
-        return email ? { email } : undefined;
-    } catch {
-        return undefined;
-    }
-}
-
-// Account identity for Codex: the id_token in ~/.codex/auth.json is a JWT whose
-// claims carry the email and the ChatGPT plan type ("plus", "go", "pro", …).
-// Decoded locally without verification — display only, never an auth decision.
-async function readCodexAccountFromAuthJson(): Promise<AgentAccount | undefined> {
-    try {
-        const raw = await fs.readFile(path.join(os.homedir(), '.codex', 'auth.json'), 'utf-8');
-        const parsed = JSON.parse(raw) as Record<string, unknown>;
-        const tokens = parsed.tokens as Record<string, unknown> | undefined;
-        const idToken = typeof tokens?.id_token === 'string' ? tokens.id_token : '';
-        const claims = idToken ? decodeJwtPayload(idToken) : null;
-        if (!claims) return undefined;
-        const email = typeof claims.email === 'string' ? claims.email : undefined;
-        const auth = claims['https://api.openai.com/auth'] as Record<string, unknown> | undefined;
-        const plan = typeof auth?.chatgpt_plan_type === 'string' ? auth.chatgpt_plan_type : undefined;
-        return email || plan ? { email, plan } : undefined;
-    } catch {
-        return undefined;
-    }
-}
-
-// Ask the provisioned Codex engine whether it is signed in. `codex login status`
-// exits 0 when logged in and non-zero ("Not logged in") when not. Returns null
-// when the engine isn't provisioned or the probe didn't run. The status output
-// has no identity, so a signed-in result is enriched from auth.json separately.
-async function checkCodexSignedInViaEngine(): Promise<AgentAuthState | null> {
-    if (!isEngineProvisioned('codex')) return null;
-    const engine = getProvisionedEnginePath('codex');
-    try {
-        await execFileAsync(engine, ['login', 'status'], { timeout: ENGINE_PROBE_TIMEOUT_MS });
-        return { signedIn: true };
-    } catch (err) {
-        const { exitCode, killed } = execFailureDetails(err);
-        if (killed) return null;                        // timed out — engine state unknown
-        if (exitCode !== null) return { signedIn: false }; // ran and reported logged-out
-        return null;                                    // spawn failure — fall back
-    }
-}
-
-// Fallback heuristic when the engine isn't available to ask: look for Claude
-// Code's credentials on disk. On macOS they live in the login Keychain; on
-// Linux/Windows in ~/.claude/.credentials.json (or ~/.config fallback). This
-// can false-negative (Keychain-only installs, CLAUDE_CONFIG_DIR, enterprise
-// apiKeyHelper setups) — the engine probe above is authoritative.
-async function checkClaudeSignedInHeuristic(): Promise<boolean> {
-    const home = os.homedir();
-    const candidates = [
-        path.join(home, '.claude', '.credentials.json'),
-        path.join(home, '.config', 'claude', '.credentials.json'),
-    ];
-    for (const full of candidates) {
-        try {
-            const raw = await fs.readFile(full, 'utf-8');
-            if (isClaudeCredentialSignedIn(raw)) return true;
-        } catch {
-            // try next candidate
-        }
-    }
-
-    // macOS: credentials are stored in the Keychain rather than on disk.
-    const keychainRaw = await readClaudeKeychainCredential();
-    if (keychainRaw && isClaudeCredentialSignedIn(keychainRaw)) return true;
-
-    return false;
-}
-
-// Fallback heuristic when the engine isn't available to ask: Codex auth at
-// ~/.codex/auth.json on all platforms. Considered signed in if API key set,
-// or a refresh_token / access_token exists. id_token expiry is intentionally
-// NOT used as a rejection signal — id_tokens are short-lived (~1h) but
-// refresh_tokens persist for weeks.
-async function checkCodexSignedInHeuristic(): Promise<boolean> {
-    const home = os.homedir();
-    const full = path.join(home, '.codex', 'auth.json');
-    try {
-        const raw = await fs.readFile(full, 'utf-8');
-        const parsed = JSON.parse(raw) as Record<string, unknown>;
-
-        if (typeof parsed.OPENAI_API_KEY === 'string' && parsed.OPENAI_API_KEY.length > 10) return true;
-
-        const tokens = parsed.tokens as Record<string, unknown> | undefined;
-        if (tokens) {
-            const refresh = typeof tokens.refresh_token === 'string' ? tokens.refresh_token : '';
-            const access = typeof tokens.access_token === 'string' ? tokens.access_token : '';
-            const id = typeof tokens.id_token === 'string' ? tokens.id_token : '';
-            if (refresh.length > 0 || access.length > 0 || id.length > 0) return true;
-        }
-    } catch {
-        // file missing or unreadable
-    }
-    return false;
-}
-
-// Resolve one agent's auth state: the engine probe is authoritative when it
-// ran; otherwise fall back to the credential-file heuristic. A signed-in state
-// missing identity (heuristic path; codex always) is enriched best-effort from
-// the local account metadata.
-async function resolveAgentAuth(
-    viaEngine: Promise<AgentAuthState | null>,
-    heuristic: () => Promise<boolean>,
-    readAccount: () => Promise<AgentAccount | undefined>,
-): Promise<AgentAuthState> {
-    const state = (await viaEngine) ?? { signedIn: await heuristic() };
-    if (state.signedIn && !state.account) {
-        return { signedIn: true, account: await readAccount() };
-    }
-    return state;
+// Every coding agent is externally installed, so `installed` is PATH resolution
+// and `signedIn` is best-effort: an indeterminate answer is reported as
+// signed-in so a detectable binary stays selectable (readiness for external
+// agents is `installed` alone).
+async function checkExternalAgentStatus(agent: CodingAgent): Promise<AgentStatus> {
+    const resolved = await resolveExternalAgent(agent).catch(() => null);
+    if (!resolved) return { installed: false, signedIn: false };
+    return { installed: true, signedIn: true, version: resolved.version };
 }
 
 export async function checkCodeModeAgentStatus(): Promise<CodeModeAgentStatus> {
-    const [claude, codex, opencode] = await Promise.all([
-        resolveAgentAuth(checkClaudeSignedInViaEngine(), checkClaudeSignedInHeuristic, readClaudeAccountFromConfig),
-        resolveAgentAuth(checkCodexSignedInViaEngine(), checkCodexSignedInHeuristic, readCodexAccountFromAuthJson),
-        checkExternalAgentStatus(),
-    ]);
-    // `installed` means the engine is provisioned (downloaded) locally — the user has
-    // clicked Enable in Settings → Code Mode. We no longer look for a global claude/codex
-    // CLI on PATH; code mode runs our own pinned engine from ~/.rowboat/engines.
-    // External agents (OpenCode) are the opposite: `installed` means resolvable on PATH,
-    // and readiness does not depend on a sign-in probe.
-    return {
-        claude: { installed: isEngineProvisioned('claude'), signedIn: claude.signedIn, account: claude.account },
-        codex: { installed: isEngineProvisioned('codex'), signedIn: codex.signedIn, account: codex.account },
-        opencode,
-    };
-}
-
-// Externally-installed agents have no managed engine and no reliable auth-status
-// command, so `installed` is PATH resolution and `signedIn` is best-effort: an
-// indeterminate answer is reported as signed-in so a detectable binary stays
-// selectable (readiness for external agents is `installed` alone).
-async function checkExternalAgentStatus(): Promise<AgentStatus> {
-    const resolved = await resolveExternalAgent('opencode').catch(() => null);
-    if (!resolved) return { installed: false, signedIn: false };
-    return { installed: true, signedIn: true, version: resolved.version };
+    const entries = await Promise.all(
+        KNOWN_AGENTS.map(async (agent) => [agent, await checkExternalAgentStatus(agent)] as const),
+    );
+    return Object.fromEntries(entries) as CodeModeAgentStatus;
 }
