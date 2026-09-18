@@ -1,6 +1,6 @@
 import * as Haptics from 'expo-haptics';
 import { memo, useMemo, useState } from 'react';
-import { Modal, Pressable, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import type { Member, Message } from '@rowboat/spaces-protocol';
 
 import { Image } from 'expo-image';
@@ -88,6 +88,9 @@ export const MessageRow = memo(function MessageRow({
     [message.body, memberNames],
   );
 
+  // Long-press a reaction chip → who reacted (opens on that emoji's tab).
+  const [reactorsFor, setReactorsFor] = useState<string | null>(null);
+
   const imageRule = useMemo(
     () => ({
       image: (node: { key: string; attributes: { src?: string } }) =>
@@ -105,6 +108,7 @@ export const MessageRow = memo(function MessageRow({
   }
 
   return (
+    <>
     <Pressable
       // Tap opens the thread (Slack); long-press keeps the action sheet.
       onPress={onOpenThread ? () => onOpenThread(message) : undefined}
@@ -163,6 +167,11 @@ export const MessageRow = memo(function MessageRow({
                     if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
                     onToggleReaction(message, g.emoji);
                   }}
+                  onLongPress={() => {
+                    if (process.env.EXPO_OS === 'ios') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                    setReactorsFor(g.emoji);
+                  }}
+                  delayLongPress={250}
                   style={{
                     flexDirection: 'row', gap: 4, paddingHorizontal: 8, paddingVertical: 3,
                     borderRadius: 12, backgroundColor: colors.secondaryBackground,
@@ -201,8 +210,99 @@ export const MessageRow = memo(function MessageRow({
         ) : null}
       </View>
     </Pressable>
+    {reactorsFor !== null ? (
+      <ReactorsSheet
+        message={message}
+        initial={reactorsFor}
+        me={me}
+        memberNames={memberNames}
+        onClose={() => setReactorsFor(null)}
+      />
+    ) : null}
+    </>
   );
 });
+
+/**
+ * Who reacted (Slack's reactions sheet): an "All" tab plus one tab per emoji,
+ * each listing the people behind it. Names come from the space roster; you
+ * show as "You".
+ */
+function ReactorsSheet({
+  message,
+  initial,
+  me,
+  memberNames,
+  onClose,
+}: {
+  message: Message;
+  initial: string;
+  me: string;
+  memberNames?: ReadonlyMap<string, string>;
+  onClose: () => void;
+}) {
+  const colors = useColors();
+  const dark = colors.background === '#000000';
+  const [tab, setTab] = useState<string>(initial);
+  const nameOf = (id: string) => (id === me ? 'You' : memberNames?.get(id) ?? 'Unknown member');
+  const total = message.reactions.reduce((n, g) => n + g.memberIds.length, 0);
+  const rows =
+    tab === 'all'
+      ? message.reactions.flatMap((g) => g.memberIds.map((id) => ({ id, emoji: g.emoji })))
+      : (message.reactions.find((g) => g.emoji === tab)?.memberIds ?? []).map((id) => ({ id, emoji: tab }));
+
+  const tabs = [{ key: 'all', label: `All ${total}` }, ...message.reactions.map((g) => ({ key: g.emoji, label: `${g.emoji} ${g.memberIds.length}` }))];
+
+  return (
+    <Modal transparent visible animationType="slide" onRequestClose={onClose}>
+      <Pressable style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.35)' }} onPress={onClose}>
+        <Pressable
+          onPress={(e) => e.stopPropagation()}
+          style={{ maxHeight: '60%', paddingTop: 10, paddingBottom: 34, borderTopLeftRadius: 20, borderTopRightRadius: 20, backgroundColor: colors.background }}
+        >
+          <View style={{ alignSelf: 'center', width: 36, height: 5, borderRadius: 3, backgroundColor: colors.separator, marginBottom: 12 }} />
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={{ paddingHorizontal: 16, gap: 8, paddingBottom: 10 }}>
+            {tabs.map((t) => {
+              const on = t.key === tab;
+              return (
+                <Pressable
+                  key={t.key}
+                  onPress={() => {
+                    if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
+                    setTab(t.key);
+                  }}
+                  style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: on ? colors.label : colors.secondaryBackground }}
+                >
+                  <Text style={{ fontSize: 14, fontWeight: '600', color: on ? colors.background : colors.label }}>{t.label}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+          <View style={{ height: 0.5, backgroundColor: colors.separator }} />
+          <ScrollView contentContainerStyle={{ paddingVertical: 6 }}>
+            {rows.map(({ id, emoji }) => {
+              const name = nameOf(id);
+              return (
+                <View key={`${emoji}:${id}`} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 9 }}>
+                  <View
+                    style={{
+                      width: 32, height: 32, borderRadius: 8, borderCurve: 'continuous',
+                      alignItems: 'center', justifyContent: 'center', backgroundColor: avatarColor(id, dark),
+                    }}
+                  >
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: colors.label }}>{(name[0] ?? '?').toUpperCase()}</Text>
+                  </View>
+                  <Text numberOfLines={1} style={{ flex: 1, fontSize: 16, color: colors.label }}>{name}</Text>
+                  {tab === 'all' ? <Text style={{ fontSize: 20 }}>{emoji}</Text> : null}
+                </View>
+              );
+            })}
+          </ScrollView>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
 
 /** Long-press sheet: quick reactions + reply. Kept dependency-free (RN Modal). */
 export function MessageActionSheet({
