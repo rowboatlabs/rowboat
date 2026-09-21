@@ -17,7 +17,12 @@ The server. One process = one org (`startHarbor`) or one deployment of many
 and a Roadboard space (`src/main.ts`) — on PGlite in-memory (restart = clean
 slate), or on durable Postgres with `DATABASE_URL`.
 
-- **One core, three doors.** `service.ts` is the single implementation; `http.ts`
+- **One core, three doors.** `service.ts` is the single implementation — since
+  2026-09-21 a facade over `core/`: one aggregate per file (`spaces`, `assets`,
+  `feed`, `read-state`) on a shared `kernel` (the space lock with its
+  publish-after-commit outbox, the log and its offsets, the access gate, the
+  write guard, attribution), every public method delegating to one of them;
+  `http.ts`
   (every route in `api.ts`), `ws.ts` (`/v1/live`, subscribe/replay/live frames),
   and `mcp.ts` (`/mcp`, the thirty tools over streamable HTTP) are thin
   projections. Rowboat's agent gets no privileged path — enforced by there being
