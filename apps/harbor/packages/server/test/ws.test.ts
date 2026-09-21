@@ -114,7 +114,7 @@ describe('live face', () => {
   });
 
   it('resume from a mid-stream offset replays only the tail; offsets stay contiguous across replay→live', async () => {
-    const head = await harbor.service.headOffset(spaceId);
+    const head = await harbor.store.head(spaceId);
     const client = await connect('dev-gagan'); // gagan seeded into the space
     client.send({ kind: 'subscribe', spaceId, afterOffset: head - 1 });
     await client.until((fs) => eventFrames(fs).length >= 1, 'tail replay');
@@ -138,6 +138,12 @@ describe('live face', () => {
     const err = client.frames.find((f) => f.kind === 'error') as Extract<ServerFrame, { kind: 'error' }>;
     expect(err.code).toBe('forbidden');
     client.close();
+  });
+
+  it('the catch-up read is gated at the service: a non-member cannot read the log', async () => {
+    const other = await harbor.service.createSpace({ memberId: 'ramnique' }, 'Private log');
+    await expect(harbor.service.replay({ memberId: 'gagan' }, other.id, 0)).rejects.toMatchObject({ code: 'forbidden' });
+    expect((await harbor.service.replay({ memberId: 'ramnique' }, other.id, 0)).events.map((e) => e.event.type)).toEqual(['membership']);
   });
 
   it('presence fans out to space subscribers as ephemeral frames', async () => {

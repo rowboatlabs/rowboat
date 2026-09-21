@@ -20,7 +20,13 @@ team and a Roadboard space (`src/main.ts`).
   (every route in `api.ts`), `ws.ts` (`/v1/live`, subscribe/replay/live frames),
   and `mcp.ts` (`/mcp`, the thirty tools over streamable HTTP) are thin
   projections. Rowboat's agent gets no privileged path — enforced by there being
-  no other door.
+  no other door: the faces hold the service and a store-bound auth handle
+  (`auth.ts` `OrgAuth`), never the store. **Who may do what is `policy.ts`**:
+  pure decisions over facts the service loads — the membership gate, the
+  read-only rule (over its limit an org cannot grow; leaving and read marks
+  pass), DM fixed membership, author-only acts, the bind-time domain rule —
+  and `enforce` throws the refusal. Object-state preconditions (tombstones,
+  closed polls, stale bases) stay with the operation.
 - **Merge engine** (`merge.ts`): line-level three-way, passes the six golden
   fixtures (`test/merge.test.ts` is the conformance harness — it loads the
   fixture files directly). This exact engine ships in the real Harbor.

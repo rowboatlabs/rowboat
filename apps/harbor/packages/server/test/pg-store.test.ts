@@ -239,7 +239,7 @@ describe('PgStore through the service', () => {
 
     // The stored message event was redacted in place — replay carries no body —
     // and the message_deleted event narrates with full attribution.
-    const events = await service.eventsAfter(spaceId, 0);
+    const events = await store.listEventsAfter(spaceId, 0);
     const messageEvent = events.find((e) => e.event.type === 'message' && e.event.message.id === messageId)!;
     expect(messageEvent.event).toMatchObject({ message: { body: '', deletedAt: deleted.deletedAt } });
     const deletion = events.find((e) => e.event.type === 'message_deleted')!;
@@ -248,9 +248,9 @@ describe('PgStore through the service', () => {
     });
 
     // Idempotent: re-deleting writes nothing new.
-    const head = await service.headOffset(spaceId);
+    const head = await store.head(spaceId);
     await service.deleteMessage(ram, spaceId, messageId, { actingMode: 'direct' });
-    expect(await service.headOffset(spaceId)).toBe(head);
+    expect(await store.head(spaceId)).toBe(head);
   });
 
   it('polls round-trip through jsonb: definition on the row, votes fold, single-select move, early end', async () => {
@@ -276,7 +276,7 @@ describe('PgStore through the service', () => {
     const ended = await service.endPoll(ram, spaceId, messageId, { actingMode: 'direct' });
     expect(ended.poll?.endedAt).toBeTruthy();
     expect((await store.getMessage(spaceId, messageId))?.poll?.endedAt).toBe(ended.poll?.endedAt);
-    const events = await service.eventsAfter(spaceId, 0);
+    const events = await store.listEventsAfter(spaceId, 0);
     const messageEvent = events.find((e) => e.event.type === 'message' && e.event.message.id === messageId)!;
     expect((messageEvent.event as { message: { poll?: { endedAt?: string } } }).message.poll?.endedAt).toBeUndefined();
     expect(events.some((e) => e.event.type === 'poll_ended')).toBe(true);
@@ -287,7 +287,7 @@ describe('PgStore through the service', () => {
     const deleted = await service.deleteMessage(ram, spaceId, messageId, { actingMode: 'direct' });
     expect(deleted.poll).toBeUndefined();
     expect(await store.listPollVotesForMessages(spaceId, [messageId])).toEqual([]);
-    const redacted = (await service.eventsAfter(spaceId, 0)).find(
+    const redacted = (await store.listEventsAfter(spaceId, 0)).find(
       (e) => e.event.type === 'message' && e.event.message.id === messageId,
     )!;
     expect((redacted.event as { message: { poll?: unknown } }).message.poll).toBeUndefined();

@@ -1211,7 +1211,7 @@ describe('polls', () => {
     expect(asAgent.body.message.poll.endedAt).toBeTruthy();
     const still = await gagan.get(`/v1/spaces/${spaceId}/stream`);
     expect((still.body.messages as any[]).find((m) => m.id === messageId).poll.endedAt).toBe(asAgent.body.message.poll.endedAt);
-    const events = await harbor.service.eventsAfter(spaceId, 0);
+    const events = await harbor.store.listEventsAfter(spaceId, 0);
     const end = events.filter((e) => e.event.type === 'poll_ended').at(-1)!;
     expect((end.event as any).end.by).toEqual({ memberId: 'ramnique', actingMode: 'agent', agentName: 'bot' });
   });

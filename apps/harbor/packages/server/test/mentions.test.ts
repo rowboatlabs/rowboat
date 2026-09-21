@@ -179,7 +179,7 @@ describe.each([['memory'], ['postgres']] as const)('mentions (%s store)', (store
     expect(edited.body.message).toMatchObject({ mentions: ['arjun'], editedAt: expect.any(String) });
     expect((await arjun.get(`/v1/spaces/${main}/threads/${m.id}`)).body.following).toBe(true);
     expect((await unreadOf(arjun))!.unreadMentions).toBeGreaterThan(0);
-    const events = await harbor.service.eventsAfter(main, 0);
+    const events = await harbor.store.listEventsAfter(main, 0);
     const edit = events.map((e) => e.event).find((e) => e.type === 'message_edited' && e.edit.messageId === m.id);
     expect(edit).toMatchObject({ edit: { mentions: ['arjun'] } });
 
@@ -213,7 +213,7 @@ describe.each([['memory'], ['postgres']] as const)('mentions (%s store)', (store
   });
 
   it('the backfill rewrites the pre-token spelling through the edit path as the author, once', async () => {
-    const head = await harbor.service.headOffset(main);
+    const head = await harbor.store.head(main);
     const legacy: Message = {
       id: '01J8ZZZZZZZZZZZZZZZZZZZZZA',
       spaceId: main,
@@ -240,16 +240,16 @@ describe.each([['memory'], ['postgres']] as const)('mentions (%s store)', (store
     expect(after).toMatchObject({ mentions: ['ramnique'], mentionsHere: true, editedAt: expect.any(String) });
     expect((await harbor.store.getTopic(main, topic.body.topic.id))!.title).toBe(`ask ${tok('ramnique', 'Ramnique')}`);
     // The log says the author edited it, and replay serves the new spelling.
-    const events = await harbor.service.eventsAfter(main, head + 1);
+    const events = await harbor.store.listEventsAfter(main, head + 1);
     expect(events.map((e) => e.event.type)).toEqual(['topic', 'message_edited', 'topic']);
     const edit = events.find((e) => e.event.type === 'message_edited')!.event as Extract<(typeof events)[number]['event'], { type: 'message_edited' }>;
     expect(edit.edit.by).toEqual({ memberId: 'harsh', actingMode: 'direct' });
-    const stored = (await harbor.service.eventsAfter(main, head)).find((e) => e.offset === head + 1)!.event as Extract<(typeof events)[number]['event'], { type: 'message' }>;
+    const stored = (await harbor.store.listEventsAfter(main, head)).find((e) => e.offset === head + 1)!.event as Extract<(typeof events)[number]['event'], { type: 'message' }>;
     expect(stored.message.body).toBe(after.body);
     expect(stored.message.mentions).toEqual(['ramnique']);
 
     expect(await harbor.service.migrateMentions({ force: true })).toEqual({ messages: 0, titles: 0, restamped: 0 });
     expect(await harbor.service.migrateMentions()).toEqual({ messages: 0, titles: 0, restamped: 0 }); // the ledger: never again
-    expect((await harbor.service.eventsAfter(main, head + 1)).length).toBe(3);
+    expect((await harbor.store.listEventsAfter(main, head + 1)).length).toBe(3);
   });
 });

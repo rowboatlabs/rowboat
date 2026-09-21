@@ -172,6 +172,10 @@ export class MemoryStore implements Store {
     this.pushTokens.delete(token);
   }
 
+  async deleteMemberPushToken(memberId: string, token: string): Promise<void> {
+    if (this.pushTokens.get(token)?.memberId === memberId) this.pushTokens.delete(token);
+  }
+
   async listPushTokens(memberId: string): Promise<string[]> {
     return [...this.pushTokens.entries()].filter(([, v]) => v.memberId === memberId).map(([t]) => t);
   }

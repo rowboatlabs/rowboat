@@ -219,7 +219,10 @@ export interface Store {
   // push (PUSH_PLAN.md): per-device Expo tokens, per-member notify level.
   // A token is org-scoped and unique; re-registering moves it to its member.
   putPushToken(memberId: string, token: string, updatedAt: string): Promise<void>;
+  /** Operator-side prune (push.ts): Expo names a dead device by token alone. */
   deletePushToken(token: string): Promise<void>;
+  /** A member forgetting one of THEIR devices — a token registered to someone else is left alone. */
+  deleteMemberPushToken(memberId: string, token: string): Promise<void>;
   listPushTokens(memberId: string): Promise<string[]>;
   setPushLevel(memberId: string, level: PushLevel): Promise<void>;
   /** Absent = the member never registered — treat as the default ('dms'). */

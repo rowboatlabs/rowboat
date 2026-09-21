@@ -39,6 +39,26 @@ export interface AuthDriver {
   metadata?(): { authorizationServers: string[] } | undefined;
 }
 
+/**
+ * A driver bound to one org's store — what the faces receive. They
+ * authenticate and resolve; the store never reaches them, so the service is
+ * the only door to data by construction (CONTRACT.md "one core, three doors").
+ */
+export interface OrgAuth {
+  authenticate(authorization: string | undefined, queryToken?: string | null): Promise<AuthIdentity>;
+  resolveMember(identity: AuthIdentity): Promise<Member>;
+  /** RFC 9728 metadata; undefined under the dev driver (no AS). */
+  metadata(): { authorizationServers: string[] } | undefined;
+}
+
+export function bindAuth(driver: AuthDriver, store: Store): OrgAuth {
+  return {
+    authenticate: (authorization, queryToken) => driver.authenticate(authorization, queryToken),
+    resolveMember: (identity) => driver.resolveMember(store, identity),
+    metadata: () => driver.metadata?.(),
+  };
+}
+
 // --- dev driver --------------------------------------------------------------
 
 export const DEV_ISSUER = 'dev';
