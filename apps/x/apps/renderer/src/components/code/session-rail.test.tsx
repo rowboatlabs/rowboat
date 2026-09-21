@@ -66,7 +66,7 @@ describe('code rail context menus', () => {
   })
 
   it.each([
-    ['New worktree', undefined], ['New Claude Code worktree', 'claude'], ['New Codex worktree', 'codex'],
+    ['New thread', undefined], ['New Claude Code thread', 'claude'], ['New Codex thread', 'codex'],
   ] as const)('creates %s in the clicked project without collapsing it', (name, agent) => {
     const { onNewSession } = setup()
     openProjectMenu()
@@ -81,7 +81,7 @@ describe('code rail context menus', () => {
       codex: { installed: true, signedIn: false },
     })
     openProjectMenu()
-    for (const name of ['New Claude Code worktree', 'New Codex worktree']) {
+    for (const name of ['New Claude Code thread', 'New Codex thread']) {
       const item = screen.getByRole('menuitem', { name })
       expect(item).toHaveAttribute('aria-disabled', 'true')
       fireEvent.click(item)
@@ -92,7 +92,7 @@ describe('code rail context menus', () => {
   it('keeps explicit agent choices enabled while status is loading', () => {
     setup(false, null)
     openProjectMenu()
-    expect(screen.getByRole('menuitem', { name: 'New Codex worktree' })).not.toHaveAttribute('aria-disabled')
+    expect(screen.getByRole('menuitem', { name: 'New Codex thread' })).not.toHaveAttribute('aria-disabled')
   })
 
   it('removes the clicked project through its existing handler', () => {

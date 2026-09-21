@@ -143,20 +143,22 @@ const CODE_MODE_TEMPLATE = (
     agentDisplay: string,
     codeMode: "claude" | "codex",
     codeCwd: string | null,
-): string => `# Code Mode (Active) — Agent: ${agentDisplay}
-The user has turned on **code mode** and the composer chip is set to **${agentDisplay}** (\`${codeMode}\`). For EVERY task and question this turn — writing and editing code, but ALSO design, product, architecture, and infra questions about the project — use **${agentDisplay}**, and narrate that agent ("Using ${agentDisplay} to …").
+): string => `# Harness (Active) — Agent: ${agentDisplay}
+The user has turned on **Harness** and the composer chip is set to **${agentDisplay}** (\`${codeMode}\`). For EVERY task and question this turn — including writing, research, planning, document work, questions, and coding — use **${agentDisplay}**, and narrate that agent ("Using ${agentDisplay} to …").
+
+Harness works for non-coding tasks and in non-git directories too. Do not require a Git repository or switch directories just because Harness is enabled.
 
 That selection is the single source of truth for which agent runs:
 - Do NOT carry over a different agent from earlier in this thread — even if a previous run used the other agent, use **${agentDisplay}** now.
 - A message that names **${agentDisplay}** ("use ${codeMode}", "have ${agentDisplay} do it") is NOT a switch request — it names the agent already selected. Just do the work with it.
-- Only a request for the OTHER agent is a switch request, and you cannot switch from chat: do the work with **${agentDisplay}**, and mention that the agent is changed ${codeCwd ? "from the Agent setting in the session's header menu" : "with the composer chip"}.
+- Only a request for the OTHER agent is a switch request, and you cannot switch from chat: do the work with **${agentDisplay}**, and mention that the agent is changed ${codeCwd ? "from the Harness agent setting beside the chat input" : "with the composer chip"}.
 
-**How to run coding work — call the \`code_agent_run\` tool DIRECTLY, as your FIRST action.** Do NOT call \`loadSkill('code-with-agents')\` first — this section already contains everything that skill would tell you, and the extra hop only adds latency. Arguments:
+**How to run the requested work — call the \`code_agent_run\` tool DIRECTLY, as your FIRST action.** Do NOT call \`loadSkill('code-with-agents')\` first — this section already contains everything that skill would tell you, and the extra hop only adds latency. Arguments:
 - \`agent\`: \`${codeMode}\` (always — match the chip).
 - \`cwd\`: ${codeCwd ? `\`${codeCwd}\` (always — this coding session is pinned to that directory; never use another path)` : `the absolute project/working directory when the user named one (or the "# User Work Directory" block); otherwise OMIT it — the run lands in the user's default code repo. Never ask "which folder?"`}.
 - \`prompt\`: the user's request, forwarded almost verbatim (see below).
 
-**Writing \`prompt\` — forward, don't rewrite.** Pass the user's coding request through nearly verbatim:
+**Writing \`prompt\` — forward, don't rewrite.** Pass the user's request through nearly verbatim:
 - Fix only speech-to-text / transcription artifacts, obvious typos, and minor grammar; light formatting (e.g. breaking a run-on spoken sentence into lines) is fine.
 - Do NOT expand, rephrase, or reinterpret the request, and do NOT add speculative implementation details, file guesses, or constraints the user never stated — the coding agent explores the repo itself and is better placed to interpret the request in context.
 - ONE exception: when the user explicitly asks you to gather outside context first ("fetch the error from my email and send it to Claude Code", "pull the spec from my knowledge base for Codex"), collect that context, then send their verbatim request followed by the gathered material under a clearly labeled section (e.g. "Context the user asked me to include:").

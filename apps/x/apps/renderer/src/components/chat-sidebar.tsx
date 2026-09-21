@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils'
 import { readAssistantPreference, writeAssistantPreference } from '@/lib/assistant-dock'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { ChatHeader } from '@/components/chat-header'
-import { CodeSessionHeader, type CodeSessionHeaderProps } from '@/components/code/code-session-header'
+import { CodeSessionControls, CodeSessionHeader, type CodeSessionHeaderProps } from '@/components/code/code-session-header'
 import { type PromptInputMessage, type Mention } from '@/components/ai-elements/prompt-input'
 import { FileCardProvider } from '@/contexts/file-card-context'
 import { TabBar, type ChatTab } from '@/components/tab-bar'
@@ -111,7 +111,7 @@ export interface ChatSidebarProps {
   restoredSelectionForActive?: ModelSelection | null
   workDirByTab?: Record<string, string | null>
   /** Composer locks for runs bound to Code-section sessions (cwd + agent frozen). */
-  codeSessionLocks?: Record<string, { cwd: string; agent: 'claude' | 'codex' }>
+  codeSessionLocks?: Record<string, { cwd: string; agent: 'claude' | 'codex'; codeModeEnabled?: boolean }>
   /**
    * Set while a Rowboat-mode code session owns this pane: the chat is pinned to
    * the session, so the chat switcher / new-chat / history affordances hide.
@@ -559,7 +559,7 @@ export function ChatSidebar({
                       activeIsReasoning={isReasoning}
                       onCodePermissionResponse={onCodePermissionResponse}
                       onComposioConnected={(slug) => onComposioConnected?.(slug, tab.id)}
-                      emptyStateVariant={pinnedToCodeSession ? 'code' : 'default'}
+                      emptyStateVariant={pinnedToCodeSession && pinnedToCodeSession.session.codeModeEnabled !== false ? 'code' : 'default'}
                       isCodeSession={!!(tab.runId && codeSessionLocks[tab.runId])}
                     />
                   )
@@ -572,6 +572,7 @@ export function ChatSidebar({
               <div className={cn('rowboat-composer-dock sticky bottom-0 z-10 bg-background pt-0 shadow-lg', floating ? 'pb-3' : 'pb-12')}>
                 <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t from-background to-transparent" />
                 <div className="mx-auto w-full max-w-4xl px-3">
+                  {pinnedToCodeSession && <CodeSessionControls {...pinnedToCodeSession} />}
                   {chatTabs.map((tab) => {
                     const isActive = tab.id === activeChatTabId && isOpen
                     return (

@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { withFileLock } from '../../knowledge/file-lock.js';
 import { CodeSessionService } from './service.js';
-import type { CodeSession } from '@x/shared/dist/code-sessions.js';
+import { codeWorkspaceKey, type CodeSession } from '@x/shared/dist/code-sessions.js';
 
 const mocks = vi.hoisted(() => ({
-    worktreeAdd: vi.fn(), worktreeRemove: vi.fn(), repoInfo: vi.fn(), mergeBack: vi.fn(),
+    excludeWorktrees: vi.fn(), worktreeAddUnborn: vi.fn(), worktreeAdd: vi.fn(), worktreeRemove: vi.fn(), repoInfo: vi.fn(), mergeBack: vi.fn(),
     disposeTerminal: vi.fn(), clearStoredSession: vi.fn(),
     workspaceHasStarted: vi.fn(), markWorkspaceStarted: vi.fn(), worktreeBaseChangeReason: vi.fn(), changeWorktreeBase: vi.fn(),
 }));
@@ -20,7 +20,7 @@ const initial: CodeSession = {
 };
 function setup(members: CodeSession[] = [initial]) {
     const records = new Map(members.map((s) => [s.id, structuredClone(s)]));
-    let next = 2;
+    let next = Math.max(1, ...members.map((s) => Number(s.id.slice(1)) || 0)) + 1;
     const sessions = { createSession: vi.fn(async () => `s${next++}`), deleteSession: vi.fn().mockResolvedValue(undefined),
         getSession: vi.fn().mockResolvedValue({ turns: [] }), cancel: vi.fn().mockResolvedValue(undefined) };
     const service = new CodeSessionService({
@@ -134,4 +134,60 @@ describe('shared worktree sessions', () => {
         expect(records.get('s1')?.worktree?.baseBranch).toBe('main');
     });
 
+});
+
+describe('unified project directories', () => {
+    it('creates a default git worktree underneath the opened project', async () => {
+        const { service } = setup();
+        const created = await service.create({ projectId: 'p1', agent: 'codex', isolation: 'worktree' });
+        expect(created.codeModeEnabled).toBe(true);
+        expect(created.cwd).toBe('/tmp/project/.rowboat/worktrees/s2');
+        expect(mocks.excludeWorktrees).toHaveBeenCalledWith('/tmp/project');
+        expect(mocks.worktreeAdd).toHaveBeenCalledWith('/tmp/project', created.cwd, 'rowboat/s2', 'main');
+    });
+    it('works directly in a non-git folder and keeps distinct threads with multiple sessions', async () => {
+        mocks.repoInfo.mockResolvedValue({ isGitRepo: false, hasCommits: false });
+        const { service } = setup([]);
+        const first = await service.create({ projectId: 'p1', agent: 'claude', isolation: 'in-repo' });
+        const second = await service.create({ projectId: 'p1', agent: 'claude', isolation: 'in-repo' });
+        const child = await service.create({ projectId: 'p1', agent: 'codex', isolation: 'in-repo', workspaceSessionId: first.id });
+        for (const session of [first, second, child]) {
+            expect(session.cwd).toBe('/tmp/project');
+            expect(session.worktree).toBeUndefined();
+            expect(session.codeModeEnabled).toBe(false);
+        }
+        expect(codeWorkspaceKey(first)).not.toBe(codeWorkspaceKey(second));
+        expect(codeWorkspaceKey(first)).toBe(codeWorkspaceKey(child));
+        expect(mocks.worktreeAdd).not.toHaveBeenCalled();
+        expect(mocks.excludeWorktrees).not.toHaveBeenCalled();
+    });
+    it('persists disabling coding without changing the shared workspace or other sessions', async () => {
+        const { service, records } = setup([initial, { ...initial, id: 's2' }]);
+        const updated = await service.update('s1', { codeModeEnabled: false });
+        expect(updated.cwd).toBe(initial.cwd);
+        expect(updated.worktree).toEqual(initial.worktree);
+        expect(records.get('s1')?.codeModeEnabled).toBe(false);
+        expect(records.get('s2')?.codeModeEnabled).toBeUndefined();
+        const child = await service.create({ projectId: 'p1', agent: 'claude', isolation: 'worktree', workspaceSessionId: 's1' });
+        expect(child.codeModeEnabled).toBe(false);
+        expect(child.cwd).toBe(initial.cwd);
+    });
+    it('creates an orphan worktree for an unborn git repository', async () => {
+        mocks.repoInfo.mockResolvedValue({ isGitRepo: true, hasCommits: false, branch: 'main' });
+        const { service } = setup();
+        const session = await service.create({ projectId: 'p1', agent: 'codex', isolation: 'worktree' });
+        expect(session.codeModeEnabled).toBe(true);
+        expect(mocks.worktreeAddUnborn).toHaveBeenCalledWith('/tmp/project', session.cwd, 'rowboat/s2');
+        expect(mocks.worktreeAdd).not.toHaveBeenCalled();
+    });
+});
+
+it('keeps non-git folders in place even when a caller requests default worktree isolation', async () => {
+    mocks.repoInfo.mockResolvedValue({ isGitRepo: false, hasCommits: false });
+    const { service } = setup([]);
+    const created = await service.create({ projectId: 'p1', agent: 'claude', isolation: 'worktree' });
+    expect(created.cwd).toBe('/tmp/project');
+    expect(created.worktree).toBeUndefined();
+    expect(mocks.worktreeAdd).not.toHaveBeenCalled();
+    expect(mocks.worktreeAddUnborn).not.toHaveBeenCalled();
 });

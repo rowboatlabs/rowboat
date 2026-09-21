@@ -1,4 +1,5 @@
-import { listProjects, createProjectChat } from '@x/core/dist/projects/projects.js';
+import { createFilePreview, releaseFilePreview, releaseFilePreviews } from './file-previews.js';
+import { listProjects } from '@x/core/dist/projects/projects.js';
 import { ipcMain, BrowserWindow, shell, dialog, systemPreferences, desktopCapturer, app, powerSaveBlocker } from 'electron';
 import { ipc } from '@x/shared';
 import path from 'node:path';
@@ -317,6 +318,8 @@ function markdownToHtml(markdown: string, title: string): string {
   a { color: #0066cc; }
 </style></head><body>${html}</body></html>`
 }
+
+const previewOwners = new Set<number>();
 
 function resolveShellPath(filePath: string): string {
   if (filePath.startsWith('~')) {
@@ -1415,11 +1418,35 @@ export function setupIpcHandlers() {
     // turnId immediately; the turn advances in the background and the
     // renderer reconciles via the sessions:events feed. Input-routing calls
     // settle with that advance's outcome (the renderer fire-and-forgets).
+    // Both old Projects callers and coding callers now use the same registry.
     'projects:list': async () => {
       await sessionsIndexReady;
-      return { projects: await listProjects(container.resolve<ISessions>('sessions')) };
+      await container.resolve<CodeSessionService>('codeSessionService').migrateLegacyProjects();
+      const projects = await container.resolve<ICodeProjectsRepo>('codeProjectsRepo').list();
+      const sessions = await container.resolve<ICodeSessionsRepo>('codeSessionsRepo').list();
+      return { projects: projects.map((project) => ({
+        id: project.id, name: project.name, path: project.path,
+        chats: sessions.filter((session) => session.projectId === project.id)
+          .map((session) => ({ id: session.id, title: session.title, modifiedAt: session.lastActivityAt ?? session.createdAt }))
+          .sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt)),
+      })) };
     },
-    'projects:createChat': async (_event, args) => ({ sessionId: await createProjectChat(container.resolve<ISessions>('sessions'), args.projectId) }),
+    'projects:createChat': async (_event, args) => {
+      await sessionsIndexReady;
+      const service = container.resolve<CodeSessionService>('codeSessionService');
+      await service.migrateLegacyProjects();
+      const repo = container.resolve<ICodeProjectsRepo>('codeProjectsRepo');
+      let project = await repo.get(args.projectId);
+      if (!project) {
+        // Old saved links can still carry the pre-unification project id.
+        const legacy = (await listProjects(container.resolve<ISessions>('sessions'))).find((p) => p.id === args.projectId);
+        if (legacy) project = await repo.add(path.join(WorkDir, legacy.path));
+      }
+      if (!project) throw new Error('Project folder is no longer available');
+      const git = await codeGit.repoInfo(project.path);
+      const session = await service.create({ projectId: project.id, agent: 'claude', isolation: git.isGitRepo ? 'worktree' : 'in-repo', codeModeEnabled: git.isGitRepo });
+      return { sessionId: session.id };
+    },
     'sessions:create': async (_event, args) => {
       const sessionId = await container.resolve<ISessions>('sessions').createSession(args);
       return { sessionId };
@@ -1741,7 +1768,7 @@ export function setupIpcHandlers() {
     },
     'codeProject:add': async (_event, args) => {
       const repo = container.resolve<ICodeProjectsRepo>('codeProjectsRepo');
-      const project = await repo.add(args.path);
+      const project = await repo.add(path.isAbsolute(args.path) ? args.path : path.join(WorkDir, args.path));
       const git = await codeGit.repoInfo(project.path);
       return { project, git };
     },
@@ -1751,6 +1778,8 @@ export function setupIpcHandlers() {
       return { success: true };
     },
     'codeProject:list': async () => {
+      await sessionsIndexReady;
+      await container.resolve<CodeSessionService>('codeSessionService').migrateLegacyProjects();
       const repo = container.resolve<ICodeProjectsRepo>('codeProjectsRepo');
       const projects = await repo.list();
       return {
@@ -1786,6 +1815,8 @@ export function setupIpcHandlers() {
       return { session };
     },
     'codeSession:list': async () => {
+      await sessionsIndexReady;
+      await container.resolve<CodeSessionService>('codeSessionService').migrateLegacyProjects();
       const repo = container.resolve<ICodeSessionsRepo>('codeSessionsRepo');
       const tracker = container.resolve<CodeSessionStatusTracker>('codeSessionStatusTracker');
       return { sessions: await repo.list(), statuses: tracker.getStatuses() };
@@ -2365,6 +2396,21 @@ export function setupIpcHandlers() {
       return { success: true };
     },
     // Shell integration handlers
+    'shell:previewFile': async (event, args) => {
+      const sender = event.sender;
+      const owner = sender.id;
+      if (!previewOwners.has(owner)) {
+        previewOwners.add(owner);
+        sender.once('destroyed', () => { releaseFilePreviews(owner); previewOwners.delete(owner); });
+      }
+      const preview = await createFilePreview(owner, resolveShellPath(args.path));
+      if (sender.isDestroyed()) releaseFilePreview(owner, preview.url);
+      return preview;
+    },
+    'shell:releaseFilePreview': async (event, args) => {
+      releaseFilePreview(event.sender.id, args.url);
+      return { success: true };
+    },
     'shell:openPath': async (_event, args) => {
       const filePath = resolveShellPath(args.path);
       const error = await shell.openPath(filePath);

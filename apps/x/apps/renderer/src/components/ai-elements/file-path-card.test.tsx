@@ -9,6 +9,8 @@ import { FilePathCard } from './file-path-card'
 // assistant-created deck opens in the slide editor, not Keynote — while
 // anything the app can't show stays with the OS opener.
 
+vi.mock('@/components/local-file-preview', () => ({ LocalFilePreview: ({ path, onClose }: { path: string; onClose: () => void }) => <section aria-label="File preview"><span>{path}</span><button onClick={onClose}>Close file preview</button></section> }))
+
 const ROOT = '/Users/test/rowboat'
 
 let openedPaths: string[]
@@ -26,6 +28,7 @@ function installIpc(opts?: { imageReadFails?: boolean }) {
         shellOpened.push((args as { path: string }).path)
         return { success: true }
       }
+      if (channel === 'shell:showItemInFolder') return { success: true }
       if (channel === 'shell:readFileBase64') {
         if (opts?.imageReadFails) throw new Error('unreadable')
         return { mimeType: 'image/png', data: '' }
@@ -77,27 +80,30 @@ describe('file card open routing', () => {
     expect(shellOpened).toEqual([])
   })
 
-  it('leaves a file outside the workspace to the OS opener', async () => {
+  it('previews a file outside the workspace inside Rowboat', async () => {
     renderCard('/Users/test/Desktop/board.pptx')
     clickCard()
 
-    await waitFor(() => expect(shellOpened).toEqual(['/Users/test/Desktop/board.pptx']))
+    expect(await screen.findByRole('region', { name: 'File preview' })).toHaveTextContent('/Users/test/Desktop/board.pptx')
+    expect(shellOpened).toEqual([])
     expect(openedPaths).toEqual([])
   })
 
-  it('leaves a workspace file with no in-app viewer to the OS opener', async () => {
+  it('keeps unsupported files inside the preview surface', async () => {
     renderCard('archives/data.zip')
     clickCard()
 
-    await waitFor(() => expect(shellOpened).toEqual(['archives/data.zip']))
+    expect(await screen.findByRole('region', { name: 'File preview' })).toHaveTextContent('archives/data.zip')
+    expect(shellOpened).toEqual([])
     expect(openedPaths).toEqual([])
   })
 
-  it('falls back to the OS opener on a surface with no in-app route', async () => {
+  it('previews on a chat surface with no workspace route', async () => {
     renderCard('presentations/Q3 review.pptx', { inApp: false })
     clickCard()
 
-    await waitFor(() => expect(shellOpened).toEqual(['presentations/Q3 review.pptx']))
+    expect(await screen.findByRole('region', { name: 'File preview' })).toHaveTextContent('presentations/Q3 review.pptx')
+    expect(shellOpened).toEqual([])
     expect(openedPaths).toEqual([])
   })
 
@@ -165,4 +171,24 @@ describe('file card open routing', () => {
     expect(screen.getByText('Document · PPTX')).toBeInTheDocument()
     expect(screen.getByText('Open')).toBeInTheDocument()
   })
+})
+
+it('opens the chevron menu without opening the card and reveals the file in Finder', async () => {
+  renderCard('/tmp/report.pdf')
+  fireEvent.pointerDown(screen.getByRole('button', { name: 'File open options' }), { button: 0, ctrlKey: false, pointerType: 'mouse' })
+  const item = await screen.findByRole('menuitem', { name: 'Open in Finder' })
+  fireEvent.click(item)
+  await waitFor(() => expect(window.ipc.invoke).toHaveBeenCalledWith('shell:showItemInFolder', { path: '/tmp/report.pdf' }))
+  expect(shellOpened).toEqual([])
+  expect(openedPaths).toEqual([])
+  expect(screen.queryByRole('region', { name: 'File preview' })).toBeNull()
+})
+it('the Open button previews an external PDF and closing restores the conversation', async () => {
+  renderCard('/tmp/report.pdf')
+  fireEvent.click(screen.getByRole('button', { name: 'Open' }))
+  expect(await screen.findByRole('region', { name: 'File preview' })).toHaveTextContent('/tmp/report.pdf')
+  fireEvent.click(screen.getByRole('button', { name: 'Close file preview' }))
+  expect(screen.queryByRole('region', { name: 'File preview' })).toBeNull()
+  expect(screen.getByText('Document · PDF')).toBeInTheDocument()
+  expect(shellOpened).toEqual([])
 })

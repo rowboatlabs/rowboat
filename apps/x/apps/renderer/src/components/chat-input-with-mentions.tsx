@@ -262,7 +262,7 @@ interface ChatInputInnerProps {
    * and coding agent come from the session and are FROZEN — the backend pins
    * them server-side regardless, so the composer must not pretend otherwise.
    */
-  codeSessionLock?: { cwd: string; agent: 'claude' | 'codex' } | null
+  codeSessionLock?: { cwd: string; agent: 'claude' | 'codex'; codeModeEnabled?: boolean } | null
   contextChip?: { label: string; icon?: 'todo' | 'reply'; quote?: string; onDismiss: () => void }
   placeholder?: string
   focusSignal?: number
@@ -337,7 +337,6 @@ function ChatInputInner({
   const [searchAvailable, setSearchAvailable] = useState(false)
   const [codingAgent, setCodingAgent] = useState<'claude' | 'codex'>('claude')
   const [codeModeEnabled, setCodeModeEnabled] = useState(false)
-  const [codeModeFeatureEnabled, setCodeModeFeatureEnabled] = useState(false)
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('auto')
   const [recentWorkDirs, setRecentWorkDirs] = useState<RecentWorkDir[]>([])
 
@@ -374,7 +373,7 @@ function ChatInputInner({
   // no-dep effect below still re-collapses if any toggle happens to widen the row.
   useLayoutEffect(() => {
     setCollapseLevel(0)
-  }, [workDir, searchAvailable, codeModeFeatureEnabled, lockedModel, selection])
+  }, [workDir, searchAvailable, lockedModel, selection])
 
   // After each render, if the left group still overflows, collapse one more step.
   // Runs before paint, so the intermediate (overflowing) state is never visible.
@@ -418,25 +417,8 @@ function ChatInputInner({
     refreshModels()
   }, [isActive, refreshModels])
 
-  // Load the global code-mode feature flag (from settings) and stay in sync.
-  useEffect(() => {
-    const load = () => {
-      window.ipc.invoke('codeMode:getConfig', null)
-        .then((r) => setCodeModeFeatureEnabled(r.enabled))
-        .catch(() => setCodeModeFeatureEnabled(false))
-    }
-    load()
-    window.addEventListener('code-mode-config-changed', load)
-    return () => window.removeEventListener('code-mode-config-changed', load)
-  }, [])
-
-  // If the feature is turned off in settings, also turn off any per-conversation chip.
-  useEffect(() => {
-    if (!codeModeFeatureEnabled && codeModeEnabled) {
-      setCodeModeEnabled(false)
-    }
-  }, [codeModeFeatureEnabled, codeModeEnabled])
-
+  // Harness is a per-conversation choice, available in ordinary chats and
+  // non-git folders independently of the legacy Code Mode setting.
 
   // Cross-platform basename — handles both / and \ separators.
   const basename = useCallback((p: string): string => {
@@ -696,8 +678,8 @@ function ChatInputInner({
   const handleSubmit = useCallback(() => {
     if (!canSubmit) return
     // codeMode is sticky per conversation — don't reset after send. A code
-    // session forces it (the backend pins the agent anyway).
-    const effectiveCodeMode = codeSessionLock ? codeSessionLock.agent : (codeModeEnabled ? codingAgent : undefined)
+    // project session supplies its persisted preference and selected agent.
+    const effectiveCodeMode = codeSessionLock ? (codeSessionLock.codeModeEnabled === false ? undefined : codeSessionLock.agent) : (codeModeEnabled ? codingAgent : undefined)
     onSubmit({ text: message.trim(), files: [] }, controller.mentions.mentions, attachments, searchEnabled || undefined, effectiveCodeMode, permissionMode)
     controller.textInput.clear()
     controller.mentions.clearMentions()
@@ -1123,7 +1105,7 @@ function ChatInputInner({
           </TooltipContent>
         </Tooltip>
         )}
-        {codeModeFeatureEnabled && collapseLevel < 5 && ((isCodeLocked || codeModeEnabled) ? (
+        {!codeSessionLock && collapseLevel < 5 && ((isCodeLocked || codeModeEnabled) ? (
           collapseLevel >= 1 ? (
             /* Level 1: collapse the pill to a single icon */
             <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
@@ -1143,7 +1125,7 @@ function ChatInputInner({
               <TooltipContent side="top">
                 {isCodeLocked
                   ? `Coding session — ${codingAgent === 'claude' ? 'Claude Code' : 'Codex'}`
-                  : `Code mode on (${codingAgent === 'claude' ? 'Claude Code' : 'Codex'}) — click to disable`}
+                  : `Harness on (${codingAgent === 'claude' ? 'Claude Code' : 'Codex'}) — click to disable`}
               </TooltipContent>
             </Tooltip>
           ) : (
@@ -1160,11 +1142,11 @@ function ChatInputInner({
                     )}
                   >
                     {isCodeLocked ? <Lock className="h-3 w-3" /> : <Terminal className="h-3.5 w-3.5" />}
-                    <span>Code</span>
+                    <span>Harness</span>
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="top">
-                  {isCodeLocked ? 'Pinned by the coding session' : 'Code mode on — click to disable'}
+                  {isCodeLocked ? 'Pinned by the coding session' : 'Harness on — click to disable'}
                 </TooltipContent>
               </Tooltip>
               <span className="text-foreground/30">·</span>
@@ -1185,7 +1167,7 @@ function ChatInputInner({
                 <TooltipContent side="top">
                   {isCodeLocked
                     ? `Coding agent fixed by the session: ${codingAgent === 'claude' ? 'Claude Code' : 'Codex'}`
-                    : `Coding agent: ${codingAgent === 'claude' ? 'Claude Code' : 'Codex'} — click to swap`}
+                    : `Harness agent: ${codingAgent === 'claude' ? 'Claude Code' : 'Codex'} — click to swap`}
                 </TooltipContent>
               </Tooltip>
             </div>
@@ -1196,13 +1178,15 @@ function ChatInputInner({
               <button
                 type="button"
                 onClick={() => setCodeModeEnabled(true)}
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                aria-label="Code mode"
+                className={cn("flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-full text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground", collapseLevel === 0 ? "px-2.5" : "w-7")}
+                aria-label="Harness"
+                aria-pressed={false}
               >
                 <Terminal className="h-4 w-4" />
+                {collapseLevel === 0 && <span>Harness</span>}
               </button>
             </TooltipTrigger>
-            <TooltipContent side="top">Use a coding agent (Claude Code or Codex)</TooltipContent>
+            <TooltipContent side="top">Use Claude Code or Codex for this conversation</TooltipContent>
           </Tooltip>
         ))}
         </div>
@@ -1248,7 +1232,7 @@ function ChatInputInner({
                   Auto-approve actions
                 </DropdownMenuCheckboxItem>
               )}
-              {codeModeFeatureEnabled && collapseLevel >= 5 && (
+              {!codeSessionLock && collapseLevel >= 5 && (
                 <>
                   <DropdownMenuCheckboxItem
                     checked={isCodeLocked || codeModeEnabled}
@@ -1256,7 +1240,7 @@ function ChatInputInner({
                     onSelect={(e) => e.preventDefault()}
                     onCheckedChange={(c) => setCodeModeEnabled(Boolean(c))}
                   >
-                    Code mode
+                    Harness
                   </DropdownMenuCheckboxItem>
                   {(isCodeLocked || codeModeEnabled) && (
                     <DropdownMenuItem disabled={isCodeLocked} onSelect={(e) => { e.preventDefault(); handleToggleCodingAgent() }}>
@@ -1494,7 +1478,7 @@ export interface ChatInputWithMentionsProps {
   workDir?: string | null
   onWorkDirChange?: (value: string | null) => void
   /** Set when this chat is bound to a Code-section session — freezes workdir + agent. */
-  codeSessionLock?: { cwd: string; agent: 'claude' | 'codex' } | null
+  codeSessionLock?: { cwd: string; agent: 'claude' | 'codex'; codeModeEnabled?: boolean } | null
   /** Destination chip: the composer is visibly writing somewhere other than
    * the chat (e.g. "To-do"). Rendered above the input with a dismiss ✕;
    * Escape also dismisses. */

@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { WorkDir } from '../../config/config.js';
 import z from 'zod';
+import { withFileLock } from '../../knowledge/file-lock.js';
 import { CodeProject } from '@x/shared/dist/code-sessions.js';
 
 const ProjectsFile = z.object({
@@ -24,14 +25,17 @@ export class FSCodeProjectsRepo implements ICodeProjectsRepo {
         try {
             const raw = await fs.readFile(this.configPath, 'utf8');
             return ProjectsFile.parse(JSON.parse(raw)).projects;
-        } catch {
-            return [];
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+            throw error;
         }
     }
 
     private async write(projects: CodeProject[]): Promise<void> {
         await fs.mkdir(path.dirname(this.configPath), { recursive: true });
-        await fs.writeFile(this.configPath, JSON.stringify({ projects }, null, 2));
+        const temp = `${this.configPath}.tmp`;
+        await fs.writeFile(temp, JSON.stringify({ projects }, null, 2));
+        await fs.rename(temp, this.configPath);
     }
 
     async list(): Promise<CodeProject[]> {
@@ -44,7 +48,11 @@ export class FSCodeProjectsRepo implements ICodeProjectsRepo {
     }
 
     async add(dirPath: string): Promise<CodeProject> {
-        const resolved = path.resolve(dirPath);
+        return withFileLock('project-registry', () => this.addUnlocked(dirPath));
+    }
+
+    private async addUnlocked(dirPath: string): Promise<CodeProject> {
+        const resolved = await fs.realpath(path.resolve(dirPath));
         const stat = await fs.stat(resolved);
         if (!stat.isDirectory()) {
             throw new Error(`Not a directory: ${resolved}`);
@@ -63,7 +71,9 @@ export class FSCodeProjectsRepo implements ICodeProjectsRepo {
     }
 
     async remove(projectId: string): Promise<void> {
-        const projects = await this.read();
-        await this.write(projects.filter((p) => p.id !== projectId));
+        await withFileLock('project-registry', async () => {
+            const projects = await this.read();
+            await this.write(projects.filter((p) => p.id !== projectId));
+        });
     }
 }

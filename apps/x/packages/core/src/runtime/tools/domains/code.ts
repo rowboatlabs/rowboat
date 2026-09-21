@@ -136,6 +136,7 @@ export const codeAgentRunTools: z.infer<typeof BuiltinToolsSchema> = {
                         pinned = await adoptionService.createForSession(ctx.sessionId, {
                             projectId: project.id,
                             agent: ctx.codeMode ?? agent,
+                            codeModeEnabled: true,
                             // NO policy: adoption must not freeze this turn's
                             // transient posture into permanent meta — every
                             // run keeps resolving chip → settings → ask

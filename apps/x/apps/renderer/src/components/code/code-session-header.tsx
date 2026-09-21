@@ -1,3 +1,4 @@
+import { WorktreeActions } from './worktree-actions'
 import { useEffect, useState } from 'react'
 import { Check, ChevronDown, Copy, GitBranch, RotateCcw, SlidersHorizontal } from 'lucide-react'
 import type { CodeSession, CodeSessionStatus, CodeAgentModelOptions } from '@x/shared/src/code-sessions.js'
@@ -33,13 +34,11 @@ const POLICY_LABEL: Record<ApprovalPolicy, string> = {
 export interface CodeSessionHeaderProps {
   session: CodeSession
   status: CodeSessionStatus
-  // Uncommitted files in the session's working tree; null while unknown.
-  changedCount: number | null
   panel: CodePanel | null
   onTogglePanel: (panel: CodePanel) => void
 }
 
-type SessionPatch = { agent?: CodingAgent; policy?: ApprovalPolicy; agentModel?: string; agentEffort?: string }
+type SessionPatch = { codeModeEnabled?: boolean; agent?: CodingAgent; policy?: ApprovalPolicy; agentModel?: string; agentEffort?: string }
 
 function StatusPill({ status }: { status: CodeSessionStatus }) {
   if (status === 'idle') return null
@@ -100,17 +99,16 @@ function WorktreeChip({ branch, path }: { branch: string; path: string }) {
   )
 }
 
-// Header of the chat while it is bound to a coding session — the chat is the
-// main surface, so this is where the session lives: its title and branch,
-// the agent's model / effort / approvals in one menu, and the doors to the
-// workspace drawer (changes, files, terminal).
-export function CodeSessionHeader({ session, status, changedCount, panel, onTogglePanel }: CodeSessionHeaderProps) {
+// Project session controls live beside the composer; session identity remains
+// in the header below. Turning Harness off leaves the thread and workspace intact.
+export function CodeSessionControls({ session, panel, onTogglePanel }: CodeSessionHeaderProps) {
   const [modelOpts, setModelOpts] = useState<CodeAgentModelOptions>({ models: [], efforts: [] })
   useEffect(() => {
+    if (session.codeModeEnabled === false) return
     let cancelled = false
     void fetchCodeAgentOptions(session.agent).then((opts) => { if (!cancelled) setModelOpts(opts) })
     return () => { cancelled = true }
-  }, [session.agent])
+  }, [session.agent, session.codeModeEnabled])
   // Which agents can be switched to (cached probe; null until known).
   const [agentsStatus, setAgentsStatus] = useState<CodeAgentsStatus | null>(null)
   useEffect(() => {
@@ -128,7 +126,6 @@ export function CodeSessionHeader({ session, status, changedCount, panel, onTogg
     }
   }
 
-  const worktreeActive = session.worktree && !session.worktree.removedAt
   const setDone = async (done: boolean) => {
     try {
       await window.ipc.invoke('codeSession:setDone', { sessionId: session.id, done })
@@ -141,21 +138,19 @@ export function CodeSessionHeader({ session, status, changedCount, panel, onTogg
   const efforts = withDefault(modelOpts.efforts)
 
   return (
-    <div className="titlebar-no-drag flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden pl-3 pr-1 @container">
-      <div className="flex min-w-0 flex-1 items-center gap-2">
-        <span className="min-w-0 truncate text-sm font-medium" title={session.title}>{session.title}</span>
-        <StatusPill status={status} />
-        {worktreeActive && session.worktree && (
-          <WorktreeChip branch={session.worktree.branch} path={session.worktree.path} />
-        )}
-      </div>
-
+    <div className="flex min-w-0 flex-wrap items-center gap-1.5 py-2 @container">
+      <Button variant={session.codeModeEnabled === false ? 'ghost' : 'secondary'} size="sm"
+        className="h-7 rounded-full text-xs" aria-pressed={session.codeModeEnabled !== false}
+        onClick={() => void update({ codeModeEnabled: session.codeModeEnabled === false })}>
+        Harness
+      </Button>
+      {session.codeModeEnabled !== false && <>
       {/* Session settings: one menu, three choices. */}
       <DropdownMenu>
         <Tooltip>
           <TooltipTrigger asChild>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-7 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground">
+              <Button variant="ghost" size="sm" aria-label="Harness agent settings" className="h-7 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground">
                 <SlidersHorizontal className="size-3.5" />
                 <span className="hidden @[400px]:inline">{AGENT_LABEL[session.agent] ?? session.agent}</span>
                 <ChevronDown className="size-3" />
@@ -276,7 +271,6 @@ export function CodeSessionHeader({ session, status, changedCount, panel, onTogg
       {/* Doors to the workspace drawer. Clicking the open one closes it. */}
       {CODE_PANELS.map(({ id, label, icon: Icon }) => {
         const active = panel === id
-        const badge = id === 'changes' && changedCount ? changedCount : null
         return (
           <Tooltip key={id}>
             <TooltipTrigger asChild>
@@ -291,13 +285,23 @@ export function CodeSessionHeader({ session, status, changedCount, panel, onTogg
                 )}
               >
                 <Icon className="size-4" />
-                {badge !== null && <span className="text-[11px] tabular-nums">{badge}</span>}
               </button>
             </TooltipTrigger>
             <TooltipContent side="bottom">{active ? `Hide ${label.toLowerCase()}` : label}</TooltipContent>
           </Tooltip>
         )
       })}
+      </>}
+      <WorktreeActions session={session} />
     </div>
   )
+}
+
+// The header keeps identity only; agent controls live beside the composer.
+export function CodeSessionHeader({ session, status }: CodeSessionHeaderProps) {
+  return <div className="flex min-w-0 flex-1 items-center gap-2 px-3">
+    <span className="min-w-0 truncate text-sm font-medium">{session.title}</span>
+    <StatusPill status={status} />
+    {session.worktree && !session.worktree.removedAt && <WorktreeChip branch={session.worktree.branch} path={session.cwd} />}
+  </div>
 }

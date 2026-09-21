@@ -309,6 +309,25 @@ export async function switchBranch(cwd: string, branch: string): Promise<GitRepo
     return repoInfo(cwd);
 }
 
+// Keep nested worktrees out of the parent checkout without editing tracked files.
+export async function excludeWorktrees(repoPath: string): Promise<void> {
+    const excludePath = path.resolve(repoPath, (await git(repoPath, ['rev-parse', '--git-path', 'info/exclude'])).trim());
+    const root = await fs.realpath(await repoToplevel(repoPath));
+    const relative = path.relative(root, path.join(await fs.realpath(repoPath), '.rowboat', 'worktrees')).split(path.sep).join('/');
+    const pattern = '/' + relative.replace(/[\\*?\[\] #!]/g, '\\$&') + '/';
+    await fs.mkdir(path.dirname(excludePath), { recursive: true });
+    const existing = await fs.readFile(excludePath, 'utf8').catch((error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') return '';
+        throw error;
+    });
+    if (!existing.split('\n').includes(pattern)) await fs.appendFile(excludePath, `\n${pattern}\n`);
+}
+
+export async function worktreeAddUnborn(repoPath: string, worktreePath: string, branch: string): Promise<undefined> {
+    await fs.mkdir(path.dirname(worktreePath), { recursive: true });
+    await git(repoPath, ['worktree', 'add', '--orphan', '-b', branch, worktreePath]);
+}
+
 export async function worktreeAdd(repoPath: string, worktreePath: string, branch: string, baseBranch = 'HEAD'): Promise<string> {
     // Resolve first so an explicit branch cannot be interpreted as a CLI option,
     // and checkout changes cannot race the creation's chosen starting commit.

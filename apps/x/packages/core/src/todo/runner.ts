@@ -462,6 +462,7 @@ export async function runTodoItem(
                 const meta = await service.createForSession(sessionId, {
                     projectId: opts.code.projectId,
                     agent: opts.code.agent ?? 'claude',
+                    codeModeEnabled: true,
                     // NO policy: the composer's permission toggle is a
                     // per-dispatch posture, not a chosen session setting —
                     // freezing it would silently outlive the toggle. Runs

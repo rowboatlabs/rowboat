@@ -85,14 +85,6 @@ const TOUR_STEPS: TourStep[] = [
     text: 'Record or join meetings and get transcripts and notes automatically. Prep briefs show up before your calls, too.',
   },
   {
-    id: 'code',
-    targetId: 'nav-code',
-    navigate: 'code',
-    hat: 'hardhat',
-    title: 'Code',
-    text: 'Code runs coding agents like Claude Code and Codex on your repos. Every session is a chat on its own worktree, with the diff, files, and a terminal one click away.',
-  },
-  {
     id: 'knowledge',
     targetId: 'nav-knowledge',
     navigate: 'knowledge',
@@ -108,7 +100,7 @@ const TOUR_STEPS: TourStep[] = [
     navigate: 'workspaces',
     hat: 'explorer',
     title: 'Projects',
-    text: 'Projects keep local files and related chats together. Pick a chat in the rail to work with Rowboat, or open a file alongside it.',
+    text: 'Open a folder in Projects and organize conversations into threads. Git projects start in a worktree with Harness enabled. Switch agents, models, and reasoning effort beside the chat input, or turn Harness off to chat with Rowboat.',
   },
   {
     id: 'agents',

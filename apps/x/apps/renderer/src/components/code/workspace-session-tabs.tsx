@@ -18,7 +18,7 @@ export function WorkspaceSessionTabs({ session, onSelect }: { session: CodeSessi
     setCreating(true)
     try {
       const result = await window.ipc.invoke('codeSession:create', {
-        projectId: session.projectId, agent: session.agent,
+        projectId: session.projectId, agent: session.agent, codeModeEnabled: session.codeModeEnabled,
         isolation: session.worktree ? 'worktree' : 'in-repo', workspaceSessionId: session.id,
         ...(session.agentModel ? { agentModel: session.agentModel } : {}),
         ...(session.agentEffort ? { agentEffort: session.agentEffort } : {}),
@@ -29,7 +29,7 @@ export function WorkspaceSessionTabs({ session, onSelect }: { session: CodeSessi
     finally { creatingRef.current = false; setCreating(false) }
   }
   return <div className="rowboat-header flex min-w-0 shrink-0 border-b border-border">
-    <div role="tablist" aria-label="Worktree sessions" className="flex min-w-0 flex-1 overflow-x-auto">
+    <div role="tablist" aria-label="Thread sessions" className="flex min-w-0 flex-1 overflow-x-auto">
       {members.map((member) => <button key={member.id} type="button" role="tab" aria-selected={member.id === session.id}
         onClick={() => onSelect(member.id)} title={`${member.title} · ${statusOf(member.id)}${member.doneAt ? ' · Done' : ''}`}
         className={cn('flex max-w-60 shrink-0 items-center gap-2 border-r px-3 text-xs hover:bg-accent/50', member.id === session.id ? 'bg-accent text-foreground' : 'text-muted-foreground')}>
@@ -38,6 +38,6 @@ export function WorkspaceSessionTabs({ session, onSelect }: { session: CodeSessi
       </button>)}
     </div>
     <Button variant="ghost" size="icon" className="size-9 shrink-0 self-center rounded-none" disabled={creating || !!session.worktree?.removedAt}
-      aria-label="New session in this worktree" title="New session in this worktree" onClick={() => void create()}><Plus className="size-4" /></Button>
+      aria-label="New session in this thread" title="New session in this thread" onClick={() => void create()}><Plus className="size-4" /></Button>
   </div>
 }

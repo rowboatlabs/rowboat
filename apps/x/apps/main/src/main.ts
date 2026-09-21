@@ -1,4 +1,5 @@
 import "./node-guard.js";
+import { resolveFilePreview } from './file-previews.js';
 import { app, BrowserWindow, desktopCapturer, dialog, powerMonitor, protocol, net, shell, session, safeStorage, type Session } from "electron";
 import path from "node:path";
 import fsPromises from "node:fs/promises";
@@ -218,6 +219,16 @@ async function listSpaceAssets(orgId: string, spaceId: string): Promise<Array<{ 
 function registerAppProtocol() {
   protocol.handle("app", async (request) => {
     const url = new URL(request.url);
+
+    if (url.host === 'file-preview') {
+      const file = resolveFilePreview(request.url);
+      if (!file) return new Response('Preview expired', { status: 404 });
+      try {
+        return await net.fetch(pathToFileURL(file).toString(), { headers: request.headers });
+      } catch {
+        return new Response('File unavailable', { status: 404 });
+      }
+    }
 
     // Workspace files: app://workspace/<rel-path>
     if (url.host === "workspace") {
