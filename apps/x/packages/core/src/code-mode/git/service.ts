@@ -314,7 +314,7 @@ export async function excludeWorktrees(repoPath: string): Promise<void> {
     const excludePath = path.resolve(repoPath, (await git(repoPath, ['rev-parse', '--git-path', 'info/exclude'])).trim());
     const root = await fs.realpath(await repoToplevel(repoPath));
     const relative = path.relative(root, path.join(await fs.realpath(repoPath), '.rowboat', 'worktrees')).split(path.sep).join('/');
-    const pattern = '/' + relative.replace(/[\\*?\[\] #!]/g, '\\$&') + '/';
+    const pattern = '/' + relative.replace(/[\\*?[\] #!]/g, '\\$&') + '/';
     await fs.mkdir(path.dirname(excludePath), { recursive: true });
     const existing = await fs.readFile(excludePath, 'utf8').catch((error: NodeJS.ErrnoException) => {
         if (error.code === 'ENOENT') return '';
