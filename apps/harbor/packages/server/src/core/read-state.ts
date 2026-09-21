@@ -147,9 +147,13 @@ export class ReadState {
     };
   }
 
-  /** Reactions through `at` read as seen. Monotone. */
+  /**
+   * Reactions through `at` read as seen. Monotone. The one instant a client
+   * supplies is re-serialized first: marks are compared as text, which is
+   * chronological only in the 24-character form the org itself writes.
+   */
   async markActivitySeen(ctx: ActorCtx, at: string): Promise<{ seenAt: string }> {
-    return { seenAt: await this.k.store.advanceActivitySeenAt(ctx.memberId, at) };
+    return { seenAt: await this.k.store.advanceActivitySeenAt(ctx.memberId, new Date(at).toISOString()) };
   }
 
   /**

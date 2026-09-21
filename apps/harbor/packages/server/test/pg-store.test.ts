@@ -304,3 +304,32 @@ describe('PgStore through the service', () => {
     expect((await store.getMemberByIdentity(iss, 'sub-1'))?.id).toBe('gagan');
   });
 });
+
+describe('migration 022 — hygiene', () => {
+  it('the enum-shaped columns refuse values the code never writes', async () => {
+    await expect(
+      db.query(`insert into spaces (org_id, id, name, created_at, kind) values ('org-default', '01HZCHECK00000000000000000', 'x', '2026-01-01T00:00:00.000Z', 'weird')`),
+    ).rejects.toThrow(/spaces_kind_check/);
+    await expect(db.query(`insert into push_prefs (org_id, member_id, level) values ('org-default', 'x', 'loud')`)).rejects.toThrow(/push_prefs_level_check/);
+    await expect(db.query(`update members set role = 'owner' where id = 'ramnique'`)).rejects.toThrow(/members_role_check/);
+  });
+
+  it('author_member_id is the author, computed by the database on every row', async () => {
+    const rows = await db.query<{ n: number; drift: number }>(
+      `select count(*)::int as n, count(*) filter (where author_member_id <> author->>'memberId')::int as drift from messages`,
+    );
+    expect(rows[0]!.n).toBeGreaterThan(0);
+    expect(rows[0]!.drift).toBe(0);
+    // Nothing may write it — the column is the expression, not a field.
+    await expect(db.query(`update messages set author_member_id = 'someone-else'`)).rejects.toThrow(/can only be updated to DEFAULT/);
+  });
+
+  it('activity seen marks are org-scoped: the same member id in two orgs keeps two marks', async () => {
+    const alpha = new PgStore(db, 'org-alpha');
+    const beta = new PgStore(db, 'org-beta');
+    expect(await alpha.advanceActivitySeenAt('shared-id', '2026-09-21T10:00:00.000Z')).toBe('2026-09-21T10:00:00.000Z');
+    expect(await beta.getActivitySeenAt('shared-id')).toBeUndefined();
+    expect(await beta.advanceActivitySeenAt('shared-id', '2026-09-21T09:00:00.000Z')).toBe('2026-09-21T09:00:00.000Z');
+    expect(await alpha.getActivitySeenAt('shared-id')).toBe('2026-09-21T10:00:00.000Z');
+  });
+});

@@ -290,4 +290,13 @@ describe('activity', () => {
   });
 
 
+
+  it('a seen mark without milliseconds is stored in the canonical form, so a later one still advances it', async () => {
+    // Text comparison would have put '…00Z' AFTER '…00.500Z' (the 'Z' sorts above the '.'); normalized, time wins.
+    const first = await arjun.post('/v1/activity/seen', { at: '2030-01-01T00:00:00Z' });
+    expect(first.body.seenAt).toBe('2030-01-01T00:00:00.000Z');
+    const later = await arjun.post('/v1/activity/seen', { at: '2030-01-01T00:00:00.500Z' });
+    expect(later.body.seenAt).toBe('2030-01-01T00:00:00.500Z');
+  });
+
 });

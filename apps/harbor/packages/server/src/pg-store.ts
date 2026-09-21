@@ -1118,7 +1118,7 @@ export class PgStore implements Store {
     const rows = await this.sql.query<{ n: number }>(
       `select count(*)::int as n from messages
        where space_id = $1 and thread_root is null and deleted_at is null
-         and stream_offset > $2 and author->>'memberId' <> $3`,
+         and stream_offset > $2 and author_member_id <> $3`,
       [spaceId, afterOffset, memberId],
     );
     return rows[0]?.n ?? 0;
@@ -1128,7 +1128,7 @@ export class PgStore implements Store {
     const rows = await this.sql.query<{ n: number }>(
       `select count(*)::int as n from messages
        where space_id = $1 and thread_root is null and deleted_at is null
-         and stream_offset > $2 and author->>'memberId' <> $3
+         and stream_offset > $2 and author_member_id <> $3
          and (mentions_here or mentions @> $4::jsonb)`,
       [spaceId, afterOffset, memberId, JSON.stringify([memberId])],
     );
@@ -1161,7 +1161,7 @@ export class PgStore implements Store {
              join spaces s on s.id = m.space_id
              left join space_read_marks r on r.space_id = m.space_id and r.member_id = $1
              left join thread_read_marks t on t.space_id = m.space_id and t.root_message_id = m.thread_root and t.member_id = $1
-            where m.space_id = any($3::text[]) and m.deleted_at is null and m.author->>'memberId' <> $1
+            where m.space_id = any($3::text[]) and m.deleted_at is null and m.author_member_id <> $1
          ) x
          where x.kind is not null
            and ($4::text[] is null or x.kind = any($4::text[]))
@@ -1184,17 +1184,17 @@ export class PgStore implements Store {
                   bool_or(r.stream_offset > coalesce(case when m.thread_root is null
                     then (select read_offset from space_read_marks where space_id = r.space_id and member_id = $1)
                     else (select read_offset from thread_read_marks where space_id = r.space_id and root_message_id = m.thread_root and member_id = $1)
-                  end, 0) and r.at > coalesce((select seen_at from activity_seen where member_id = $1), '')) as unread
+                  end, 0) and r.at > coalesce((select seen_at from activity_seen where org_id = $7 and member_id = $1), '')) as unread
              from reactions r
              join messages m on m.space_id = r.space_id and m.id = r.message_id
-            where r.space_id = any($2::text[]) and r.member_id <> $1 and m.deleted_at is null and m.author->>'memberId' = $1
+            where r.space_id = any($2::text[]) and r.member_id <> $1 and m.deleted_at is null and m.author_member_id = $1
             group by r.space_id, r.message_id, r.emoji
          ) x
          where (not $3::boolean or x.unread)
            and ($4::text is null or x.at < $4 or (x.at = $4 and ('r:' || x.message_id || ':' || x.emoji) < $5))
          order by x.at desc, x.message_id desc, x.emoji desc
          limit $6`,
-        [memberId, q.spaceIds, q.unreadOnly, q.before?.at ?? null, q.before?.id ?? null, q.limit],
+        [memberId, q.spaceIds, q.unreadOnly, q.before?.at ?? null, q.before?.id ?? null, q.limit, this.orgId],
       );
       for (const r of rows) {
         const message = await this.getMessage(r.space_id, r.message_id);
@@ -1218,7 +1218,7 @@ export class PgStore implements Store {
          join messages r on r.space_id = m.space_id and r.id = m.thread_root
          left join thread_read_marks t on t.space_id = m.space_id and t.root_message_id = m.thread_root and t.member_id = $1
         where m.space_id = any($2::text[]) and m.thread_root is not null and m.deleted_at is null
-          and m.author->>'memberId' <> $1
+          and m.author_member_id <> $1
           and (m.mentions @> $3::jsonb or m.mentions_here or s.kind = 'direct' or t.following)
         group by m.space_id, m.thread_root, r.last_reply_offset
        on conflict (space_id, root_message_id, member_id) do update set
@@ -1231,16 +1231,19 @@ export class PgStore implements Store {
   }
 
   async getActivitySeenAt(memberId: string): Promise<string | undefined> {
-    const rows = await this.sql.query<{ seen_at: string }>('select seen_at from activity_seen where member_id = $1', [memberId]);
+    const rows = await this.sql.query<{ seen_at: string }>(
+      'select seen_at from activity_seen where org_id = $1 and member_id = $2',
+      [this.orgId, memberId],
+    );
     return rows[0]?.seen_at;
   }
 
   async advanceActivitySeenAt(memberId: string, at: string): Promise<string> {
     const rows = await this.sql.query<{ seen_at: string }>(
-      `insert into activity_seen (member_id, seen_at) values ($1, $2)
-       on conflict (member_id) do update set seen_at = greatest(activity_seen.seen_at, excluded.seen_at)
+      `insert into activity_seen (org_id, member_id, seen_at) values ($1, $2, $3)
+       on conflict (org_id, member_id) do update set seen_at = greatest(activity_seen.seen_at, excluded.seen_at)
        returning seen_at`,
-      [memberId, at],
+      [this.orgId, memberId, at],
     );
     return rows[0]!.seen_at;
   }
@@ -1266,11 +1269,11 @@ export class PgStore implements Store {
                 (select count(*)::int from messages m
                   where m.space_id = t.space_id and m.thread_root = t.root_message_id
                     and m.deleted_at is null and m.stream_offset > t.read_offset
-                    and m.author->>'memberId' <> t.member_id) as unread_replies,
+                    and m.author_member_id <> t.member_id) as unread_replies,
                 (select count(*)::int from messages m
                   where m.space_id = t.space_id and m.thread_root = t.root_message_id
                     and m.deleted_at is null and m.stream_offset > t.read_offset
-                    and m.author->>'memberId' <> t.member_id
+                    and m.author_member_id <> t.member_id
                     and (m.mentions_here or m.mentions @> jsonb_build_array(t.member_id))) as unread_mentions
            from thread_read_marks t
            join messages r on r.space_id = t.space_id and r.id = t.root_message_id
