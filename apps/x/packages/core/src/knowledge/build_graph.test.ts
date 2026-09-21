@@ -1,5 +1,6 @@
+import path from "path";
 import { describe, expect, it } from "vitest";
-import { emailAdmission } from "./build_graph.js";
+import { emailAdmission, meetingAttendeesBanner } from "./build_graph.js";
 
 const email = (frontmatter: string | null, body = "# Subject\n\n**Thread ID:** t1\n") =>
     frontmatter === null ? body : `---\n${frontmatter}\n---\n\n${body}`;
@@ -48,5 +49,35 @@ describe("emailAdmission", () => {
 
     it("does not mistake a message-body '---' separator for frontmatter", () => {
         expect(emailAdmission("# Subject\n\n---\n\nknowledge: skip\n")).toBe("wait");
+    });
+});
+
+describe("meetingAttendeesBanner", () => {
+    const rowboatNote = (frontmatter: string) =>
+        `---\ntype: meeting\nsource: rowboat\ntitle: Sync\n${frontmatter}---\n\n# Sync\n\n\`\`\`transcript\n{"transcript":"**You:** hi"}\n\`\`\``;
+    const rowboatPath = path.join("knowledge", "Meetings", "rowboat", "2026-07-23", "Sync.md");
+
+    it("ignores non-rowboat meeting notes (platform attendee lists are trusted)", () => {
+        const granolaPath = path.join("knowledge", "Meetings", "granola", "abc_Sync.md");
+        expect(meetingAttendeesBanner(granolaPath, rowboatNote(""))).toBeNull();
+        expect(meetingAttendeesBanner(path.join("gmail_sync", "t1.md"), "### From: a@b.c")).toBeNull();
+    });
+
+    it("lists stamped frontmatter attendees as the only allowed People notes", () => {
+        const calEvent = JSON.stringify({
+            summary: "Sync",
+            start: "2026-07-23T17:00:00+05:30",
+            attendees: ["Shubham <shubham@rowboatlabs.com>", "Arjun <arjun@rowboatlabs.com>"],
+        });
+        const banner = meetingAttendeesBanner(rowboatPath, rowboatNote(`calendar_event: '${calEvent}'\n`));
+        expect(banner).toContain("ATTENDEES-GATE");
+        expect(banner).toContain("Shubham <shubham@rowboatlabs.com>");
+        expect(banner).toContain("ONLY for people on this list");
+    });
+
+    it("falls back to the no-attendee-list banner for ad-hoc recordings", () => {
+        const banner = meetingAttendeesBanner(rowboatPath, rowboatNote(""));
+        expect(banner).toContain("NO trusted attendee list");
+        expect(banner).toContain("MUST NOT create a new People note");
     });
 });
