@@ -4,8 +4,9 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { mcpTools, NewPoll, type ActingMode, type ActivityItem, type ActivityKind, type SearchKind, relabelMentions, type Message } from '@rowboat/spaces-protocol';
 import { z } from 'zod';
-import type { OrgAuth } from './auth.js';
+import { authenticateRequest, wwwAuthenticate, type OrgAuth } from './auth.js';
 import { HarborError } from './errors.js';
+import { publicOriginOf } from './origin.js';
 import type { ActorCtx, HarborService } from './service.js';
 
 // The agent face (CONTRACT.md decision 5): the protocol tools served over
@@ -34,8 +35,7 @@ interface McpActor {
 export async function handleMcpRequest(req: IncomingMessage, res: ServerResponse, deps: Deps): Promise<void> {
   let actor: McpActor;
   try {
-    const identity = await deps.auth.authenticate(req.headers.authorization);
-    const member = await deps.auth.resolveMember(identity);
+    const { member } = await authenticateRequest(deps.auth, { authorization: req.headers.authorization });
     actor = {
       memberId: member.id,
       actingMode: req.headers['x-acting-mode'] === 'scheduled' ? 'scheduled' : 'agent',
@@ -45,11 +45,7 @@ export async function handleMcpRequest(req: IncomingMessage, res: ServerResponse
     const e = err instanceof HarborError ? err : new HarborError('unauthorized', 'unauthorized');
     const headers: Record<string, string> = { 'content-type': 'application/json' };
     // RFC 9728: MCP clients discover the OAuth dance from this header.
-    if (e.code === 'unauthorized' && deps.auth.metadata()) {
-      const proto = typeof req.headers['x-forwarded-proto'] === 'string' ? req.headers['x-forwarded-proto'] : 'http';
-      headers['WWW-Authenticate'] =
-        `Bearer resource_metadata="${proto}://${req.headers.host}/.well-known/oauth-protected-resource"`;
-    }
+    if (e.code === 'unauthorized' && deps.auth.metadata()) headers['WWW-Authenticate'] = wwwAuthenticate(publicOriginOf(req));
     res.writeHead(e.status, headers).end(
       JSON.stringify({ jsonrpc: '2.0', error: { code: -32001, message: e.message }, id: null }),
     );

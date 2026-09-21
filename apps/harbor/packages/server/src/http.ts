@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono';
 import { routes } from '@rowboat/spaces-protocol';
 import type { z } from 'zod';
-import type { AuthIdentity, OrgAuth } from './auth.js';
+import { authenticateRequest, protectedResourceMetadata, wwwAuthenticate, type AuthIdentity, type OrgAuth } from './auth.js';
 import { consentPageHtml } from './consent.js';
 import { HarborError } from './errors.js';
 import { publicOrigin } from './origin.js';
@@ -65,10 +65,7 @@ export function buildHttpApp(deps: {
     if (!(err instanceof HarborError)) console.error('[harbor] internal error:', err);
     // RFC 9728: 401s point clients at the resource metadata so any MCP-style
     // client can find the OAuth dance mechanically.
-    if (e.code === 'unauthorized' && auth.metadata()) {
-      const origin = publicOrigin(c);
-      c.header('WWW-Authenticate', `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource"`);
-    }
+    if (e.code === 'unauthorized' && auth.metadata()) c.header('WWW-Authenticate', wwwAuthenticate(publicOrigin(c)));
     return c.json(e.toBody(), e.status as 400);
   });
 
@@ -78,12 +75,7 @@ export function buildHttpApp(deps: {
   app.get('/.well-known/oauth-protected-resource', (c) => {
     const meta = auth.metadata();
     if (!meta) throw new HarborError('not_found', 'no authorization server configured (dev auth)');
-    const origin = publicOrigin(c);
-    return c.json({
-      resource: origin,
-      authorization_servers: meta.authorizationServers,
-      bearer_methods_supported: ['header'],
-    });
+    return c.json(protectedResourceMetadata(publicOrigin(c), meta.authorizationServers));
   });
 
   // The human moment of the OAuth dance (pre-auth by nature — the person is
@@ -101,18 +93,14 @@ export function buildHttpApp(deps: {
   // the handler runs the bind ceremony instead.
   app.use('/v1/*', async (c, next) => {
     if (c.req.path === routes.resolveInvite.path || c.req.path === '/v1/health') return next();
-    const identity = await auth.authenticate(c.req.header('authorization'), new URL(c.req.url).searchParams.get('token'));
+    const credentials = { authorization: c.req.header('authorization'), queryToken: new URL(c.req.url).searchParams.get('token') };
     if (c.req.path === routes.acceptInvite.path) {
+      const { identity, member } = await authenticateRequest(auth, credentials, { allowUnmapped: true });
       c.set('identity', identity);
-      try {
-        c.set('memberId', (await auth.resolveMember(identity)).id);
-      } catch (err) {
-        if (!(err instanceof HarborError) || err.code !== 'not_a_member') throw err;
-      }
+      if (member) c.set('memberId', member.id);
       return next();
     }
-    const member = await auth.resolveMember(identity);
-    c.set('memberId', member.id);
+    c.set('memberId', (await authenticateRequest(auth, credentials)).member.id);
     return next();
   });
 

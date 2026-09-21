@@ -1,12 +1,11 @@
 import { Hono } from 'hono';
-import type { AuthDriver } from './auth.js';
+import { protectedResourceMetadata, wwwAuthenticate, type AuthDriver } from './auth.js';
 import { consentPageHtml } from './consent.js';
-import type { OrgDirectory } from './directory.js';
+import type { OrgConfig, OrgDirectory } from './directory.js';
 import { HarborError } from './errors.js';
 import { publicOrigin } from './origin.js';
-import type { SpaceHub } from './hub.js';
 import { PgStore } from './pg-store.js';
-import { HarborService } from './service.js';
+import type { HarborService } from './service.js';
 import type { SqlDb } from './sql.js';
 
 // The deployment face, served on the APEX domain (spaces.rowboatlabs.com) —
@@ -31,8 +30,12 @@ export interface ApexDeps {
   db: SqlDb;
   directory: OrgDirectory;
   auth: AuthDriver;
-  /** Shared event hub — the seeded space's events flow like any other. */
-  hub: SpaceHub;
+  /**
+   * The org's assembled service (runtime.ts, through the deployment's
+   * per-org cache): a new org's landing space is seeded on the exact wiring
+   * that will serve it, and its runtime is warm before its first request.
+   */
+  serviceFor(org: OrgConfig): Promise<HarborService>;
   /** e.g. spaces.rowboatlabs.com — org domains are `<slug>.<apexDomain>`. */
   apexDomain: string;
   /** The deployment's AS — every created org pins this issuer. */
@@ -52,10 +55,7 @@ export function buildApexApp(deps: ApexDeps): Hono {
   app.onError((err, c) => {
     const e = err instanceof HarborError ? err : new HarborError('internal', 'unexpected error');
     if (!(err instanceof HarborError)) console.error('[harbor] apex error:', err);
-    if (e.code === 'unauthorized') {
-      const origin = publicOrigin(c);
-      c.header('WWW-Authenticate', `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource"`);
-    }
+    if (e.code === 'unauthorized') c.header('WWW-Authenticate', wwwAuthenticate(publicOrigin(c)));
     return c.json(e.toBody(), e.status as 400);
   });
 
@@ -71,8 +71,7 @@ export function buildApexApp(deps: ApexDeps): Hono {
   // Same discovery shape as an org, so the app's existing OAuth dance works
   // against the apex unchanged.
   app.get('/.well-known/oauth-protected-resource', (c) => {
-    const origin = publicOrigin(c);
-    return c.json({ resource: origin, authorization_servers: [deps.issuer], bearer_methods_supported: ['header'] });
+    return c.json(protectedResourceMetadata(publicOrigin(c), [deps.issuer]));
   });
 
   /** Create an org: {name, slug} → org at slug.<apexDomain>, caller = first admin. */
@@ -108,7 +107,7 @@ export function buildApexApp(deps: ApexDeps): Hono {
     // place rather than an empty list. Attributed to the founder — every act
     // belongs to a member, and this is theirs.
     if (member) {
-      const service = new HarborService(store, deps.hub, { name: org.name, address: domain });
+      const service = await deps.serviceFor(org);
       const space = await service.createSpace({ memberId: member.id }, 'general');
       await service.createAsset({ memberId: member.id }, space.id, {
         path: 'README.md',

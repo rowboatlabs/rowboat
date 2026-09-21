@@ -1,14 +1,12 @@
 import { createServer, type Server as HttpServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { getRequestListener } from '@hono/node-server';
-import { bindAuth, DevAuthDriver, ensureMember, type AuthDriver } from './auth.js';
+import { DevAuthDriver, ensureMember, type AuthDriver } from './auth.js';
 import { MemoryBlobStore, type BlobStore } from './blobs.js';
-import { buildHttpApp } from './http.js';
 import { SpaceHub } from './hub.js';
-import { handleMcpRequest } from './mcp.js';
-import { HarborService } from './service.js';
-import { Notifier } from './notify.js';
-import { PushSender } from './push.js';
+import { DEFAULT_ORG_ID } from './pg-store.js';
+import type { PushSender } from './push.js';
+import { buildOrgRuntime } from './runtime.js';
+import type { HarborService } from './service.js';
 import type { Store } from './store.js';
 import { attachLive } from './ws.js';
 
@@ -75,31 +73,69 @@ export interface RunningHarbor {
 
 export async function startHarbor(options: HarborOptions): Promise<RunningHarbor> {
   const { store } = options;
-  const blobs = options.blobs ?? new MemoryBlobStore();
-  const auth: AuthDriver = options.auth ?? new DevAuthDriver();
   const hub = new SpaceHub();
-  const service = new HarborService(
+  // The same assembly the deployment builds per org (runtime.ts), for the one org here.
+  const runtime = await buildOrgRuntime({
     store,
     hub,
-    {
+    org: {
       name: options.orgName ?? 'Harbor (dev)',
       address: options.address ?? 'localhost',
       ...(options.allowedEmailDomains ? { allowedEmailDomains: options.allowedEmailDomains } : {}),
     },
-    blobs,
-    new Notifier(store, hub, options.pushSender ?? new PushSender(store, options.orgName ?? 'dev')),
-  );
+    orgId: DEFAULT_ORG_ID,
+    auth: options.auth ?? new DevAuthDriver(),
+    blobs: options.blobs ?? new MemoryBlobStore(),
+    ...(options.pushSender ? { pushSender: options.pushSender } : {}),
+    ...(options.consent ? { consentPublishableKey: options.consent.publishableKey } : {}),
+    ...(options.maxBlobBytes !== undefined ? { maxBlobBytes: options.maxBlobBytes } : {}),
+  });
+  await seedOrg(runtime.service, store, options);
 
+  const server = createServer((req, res) => runtime.handle(req, res));
+  const closeLive = attachLive(server, () => runtime.live, {
+    ...(options.liveHeartbeatMs !== undefined ? { heartbeatMs: options.liveHeartbeatMs } : {}),
+    ...(options.liveMaxBufferedBytes !== undefined ? { maxBufferedBytes: options.liveMaxBufferedBytes } : {}),
+  });
+
+  await new Promise<void>((resolve) => server.listen(options.port ?? 0, resolve));
+  const port = (server.address() as AddressInfo).port;
+  if (!options.address) runtime.service.org.address = `localhost:${port}`;
+
+  return {
+    url: `http://localhost:${port}`,
+    mcpUrl: `http://localhost:${port}/mcp`,
+    address: runtime.service.org.address,
+    port,
+    service: runtime.service,
+    store,
+    hub,
+    server,
+    close: async () => {
+      closeLive();
+      await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+    },
+  };
+}
+
+/**
+ * The dev/test seed (main.ts's Roadboard, the suites' fixtures): members,
+ * then each seed space — made by its creator (the provisioned first admin,
+ * spec §4), joined by every seed member, filled with its files. Idempotent
+ * on durable stores: a creator's existing space of the same name is left alone.
+ */
+async function seedOrg(
+  service: HarborService,
+  store: Store,
+  options: Pick<HarborOptions, 'seedMembers' | 'seedSpaces'>,
+): Promise<void> {
   for (const m of options.seedMembers ?? []) {
     const existing = await store.getMember(m.id);
     await store.putMember({ id: m.id, displayName: m.displayName, role: existing?.role ?? 'member' });
   }
   for (const seed of options.seedSpaces ?? []) {
-    // The seed creator is the provisioned first admin (spec §4, roles).
     const creator = await ensureMember(store, seed.creator);
     if (creator.role !== 'admin') await store.putMember({ ...creator, role: 'admin' });
-    // Idempotent across restarts on durable stores: the seed space is only
-    // created if the creator doesn't already have one by this name.
     const existing = await service.listSpaces({ memberId: seed.creator });
     if (existing.some((s) => s.name === seed.name)) continue;
     const space = await service.createSpace({ memberId: seed.creator }, seed.name);
@@ -117,54 +153,4 @@ export async function startHarbor(options: HarborOptions): Promise<RunningHarbor
       });
     }
   }
-
-  // The mentions backfill (service.migrateMentions): idempotent, runs before the faces serve.
-  await service.migrateMentions();
-
-  // The faces get the service and a store-bound auth handle, never the store.
-  const orgAuth = bindAuth(auth, store);
-  const issuer = auth.metadata?.()?.authorizationServers[0];
-  const app = buildHttpApp({
-    service,
-    auth: orgAuth,
-    ...(options.consent && issuer ? { consent: { issuer, publishableKey: options.consent.publishableKey } } : {}),
-    ...(options.maxBlobBytes !== undefined ? { maxBlobBytes: options.maxBlobBytes } : {}),
-  });
-  const honoListener = getRequestListener(app.fetch);
-  const server = createServer((req, res) => {
-    if (req.url === '/mcp' || req.url?.startsWith('/mcp?')) {
-      void handleMcpRequest(req, res, { service, auth: orgAuth });
-      return;
-    }
-    honoListener(req, res);
-  });
-  const closeLive = attachLive(
-    server,
-    () => ({ service, hub, auth: orgAuth }),
-    {
-      ...(options.liveHeartbeatMs !== undefined ? { heartbeatMs: options.liveHeartbeatMs } : {}),
-      ...(options.liveMaxBufferedBytes !== undefined ? { maxBufferedBytes: options.liveMaxBufferedBytes } : {}),
-    },
-  );
-
-  await new Promise<void>((resolve) => server.listen(options.port ?? 0, resolve));
-  const port = (server.address() as AddressInfo).port;
-  if (!options.address) service.org.address = `localhost:${port}`;
-
-  return {
-    url: `http://localhost:${port}`,
-    mcpUrl: `http://localhost:${port}/mcp`,
-    address: service.org.address,
-    port,
-    service,
-    store,
-    hub,
-    server,
-    close: async () => {
-      closeLive();
-      await new Promise<void>((resolve, reject) =>
-        server.close((err) => (err ? reject(err) : resolve())),
-      );
-    },
-  };
 }
