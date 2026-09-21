@@ -1,7 +1,7 @@
 import { createServer, type Server as HttpServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { getRequestListener } from '@hono/node-server';
-import { DevAuthDriver, ensureMember, type AuthDriver } from './auth.js';
+import { bindAuth, DevAuthDriver, ensureMember, type AuthDriver } from './auth.js';
 import { MemoryBlobStore, type BlobStore } from './blobs.js';
 import { buildHttpApp } from './http.js';
 import { SpaceHub } from './hub.js';
@@ -122,25 +122,26 @@ export async function startHarbor(options: HarborOptions = {}): Promise<RunningH
   // The mentions backfill (service.migrateMentions): idempotent, runs before the faces serve.
   await service.migrateMentions();
 
+  // The faces get the service and a store-bound auth handle, never the store.
+  const orgAuth = bindAuth(auth, store);
   const issuer = auth.metadata?.()?.authorizationServers[0];
   const app = buildHttpApp({
     service,
-    store,
-    auth,
+    auth: orgAuth,
     ...(options.consent && issuer ? { consent: { issuer, publishableKey: options.consent.publishableKey } } : {}),
     ...(options.maxBlobBytes !== undefined ? { maxBlobBytes: options.maxBlobBytes } : {}),
   });
   const honoListener = getRequestListener(app.fetch);
   const server = createServer((req, res) => {
     if (req.url === '/mcp' || req.url?.startsWith('/mcp?')) {
-      void handleMcpRequest(req, res, { service, store, auth });
+      void handleMcpRequest(req, res, { service, auth: orgAuth });
       return;
     }
     honoListener(req, res);
   });
   const closeLive = attachLive(
     server,
-    () => ({ service, hub, store, auth }),
+    () => ({ service, hub, auth: orgAuth }),
     {
       ...(options.liveHeartbeatMs !== undefined ? { heartbeatMs: options.liveHeartbeatMs } : {}),
       ...(options.liveMaxBufferedBytes !== undefined ? { maxBufferedBytes: options.liveMaxBufferedBytes } : {}),

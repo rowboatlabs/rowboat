@@ -77,7 +77,7 @@ describe.each([['memory'], ['postgres']] as const)('direct messages (%s store)',
   it('both participants are ordinary members; their membership history is two joined events', async () => {
     const members = await ramnique.get(`/v1/spaces/${dm.id}/members`);
     expect(members.body.members.map((m: any) => m.id).sort()).toEqual(['harsh', 'ramnique']);
-    const events = await harbor.service.eventsAfter(dm.id, 0);
+    const events = await harbor.store.listEventsAfter(dm.id, 0);
     expect(events.map((e) => e.event.type)).toEqual(['membership', 'membership']);
     expect(events.map((e) => e.offset)).toEqual([1, 2]);
   });
@@ -121,7 +121,7 @@ describe.each([['memory'], ['postgres']] as const)('direct messages (%s store)',
     const again = await ramnique.post('/v1/direct', { memberId: 'ramnique' });
     expect(again.body).toMatchObject({ created: false, space: { id } });
     expect((await ramnique.get(`/v1/spaces/${id}/members`)).body.members.map((m: any) => m.id)).toEqual(['ramnique']);
-    expect((await harbor.service.eventsAfter(id, 0)).map((e) => e.event.type)).toEqual(['membership']);
+    expect((await harbor.store.listEventsAfter(id, 0)).map((e) => e.event.type)).toEqual(['membership']);
     // Private to one: nobody else can read it or see it listed, and it cannot grow.
     expect((await harsh.get(`/v1/spaces/${id}/stream`)).status).toBe(403);
     expect((await harsh.get('/v1/spaces?includeDirect=1')).body.spaces.map((s: Space) => s.id)).not.toContain(id);

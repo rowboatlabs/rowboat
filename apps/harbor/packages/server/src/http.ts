@@ -1,12 +1,11 @@
 import { Hono, type Context } from 'hono';
 import { routes } from '@rowboat/spaces-protocol';
 import type { z } from 'zod';
-import type { AuthDriver, AuthIdentity } from './auth.js';
+import type { AuthIdentity, OrgAuth } from './auth.js';
 import { consentPageHtml } from './consent.js';
 import { HarborError } from './errors.js';
 import { publicOrigin } from './origin.js';
 import type { HarborService } from './service.js';
-import type { Store } from './store.js';
 
 // The render face: every route in the protocol's api.ts, nothing more. Bodies
 // and queries are validated with the contract schemas; responses are validated
@@ -51,14 +50,13 @@ function actor(c: Context<Env>): { memberId: string } {
 
 export function buildHttpApp(deps: {
   service: HarborService;
-  store: Store;
-  auth: AuthDriver;
+  auth: OrgAuth;
   /** Mounts the login/consent page (Supabase-flagship glue; consent.ts). */
   consent?: { issuer: string; publishableKey: string };
   /** Upload cap for the raw-bytes blob route (default 100MB). */
   maxBlobBytes?: number;
 }): Hono<Env> {
-  const { service, store, auth, consent } = deps;
+  const { service, auth, consent } = deps;
   const maxBlobBytes = deps.maxBlobBytes ?? DEFAULT_MAX_BLOB_BYTES;
   const app = new Hono<Env>();
 
@@ -67,7 +65,7 @@ export function buildHttpApp(deps: {
     if (!(err instanceof HarborError)) console.error('[harbor] internal error:', err);
     // RFC 9728: 401s point clients at the resource metadata so any MCP-style
     // client can find the OAuth dance mechanically.
-    if (e.code === 'unauthorized' && auth.metadata?.()) {
+    if (e.code === 'unauthorized' && auth.metadata()) {
       const origin = publicOrigin(c);
       c.header('WWW-Authenticate', `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource"`);
     }
@@ -78,7 +76,7 @@ export function buildHttpApp(deps: {
   // server here (the org is only ever a resource server — spec §4). 404 under
   // the dev driver, which has no AS.
   app.get('/.well-known/oauth-protected-resource', (c) => {
-    const meta = auth.metadata?.();
+    const meta = auth.metadata();
     if (!meta) throw new HarborError('not_found', 'no authorization server configured (dev auth)');
     const origin = publicOrigin(c);
     return c.json({
@@ -107,24 +105,20 @@ export function buildHttpApp(deps: {
     if (c.req.path === routes.acceptInvite.path) {
       c.set('identity', identity);
       try {
-        c.set('memberId', (await auth.resolveMember(store, identity)).id);
+        c.set('memberId', (await auth.resolveMember(identity)).id);
       } catch (err) {
         if (!(err instanceof HarborError) || err.code !== 'not_a_member') throw err;
       }
       return next();
     }
-    const member = await auth.resolveMember(store, identity);
+    const member = await auth.resolveMember(identity);
     c.set('memberId', member.id);
     return next();
   });
 
   app.get('/v1/health', (c) => c.json({ ok: true, org: { name: service.org.name, address: service.org.address } }));
 
-  app.get(routes.me.path, async (c) => {
-    const member = await store.getMember(c.get('memberId'));
-    if (!member) throw new HarborError('not_found', 'member not found');
-    return reply(c, routes.me.response, { member });
-  });
+  app.get(routes.me.path, async (c) => reply(c, routes.me.response, { member: await service.me(actor(c)) }));
 
   // --- spaces & membership ---------------------------------------------------
 

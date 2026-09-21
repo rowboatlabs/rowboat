@@ -128,4 +128,14 @@ describe('wire registration', () => {
     const bad = await gagan.post('/v1/push/register', { token: '', level: 'all' });
     expect(bad.status).toBe(400);
   });
+
+  it("unregistering a token you do not own is a no-op — only the device's member can forget it", async () => {
+    const gagan = restClient(harbor, 'dev-gagan');
+    const harsh = restClient(harbor, 'dev-harsh');
+    await gagan.post('/v1/push/register', { token: 'ExponentPushToken[g]', level: 'all' });
+    expect((await harsh.post('/v1/push/unregister', { token: 'ExponentPushToken[g]' })).body).toEqual({ ok: true });
+    expect(await harbor.store.listPushTokens('gagan')).toEqual(['ExponentPushToken[g]']);
+    await gagan.post('/v1/push/unregister', { token: 'ExponentPushToken[g]' });
+    expect(await harbor.store.listPushTokens('gagan')).toEqual([]);
+  });
 });

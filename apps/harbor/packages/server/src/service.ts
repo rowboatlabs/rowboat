@@ -55,6 +55,7 @@ const MESSAGES_PAGE_MAX = 200;
 import type { z } from 'zod';
 import { blobHash, type BlobStore } from './blobs.js';
 import { HarborError } from './errors.js';
+import { canAccessSpace, canBind, canChangeMembership, canRenameSpace, canWrite, enforce, isAuthor } from './policy.js';
 import type { Notifier } from './notify.js';
 import { SpaceHub } from './hub.js';
 import { legacyToTokens } from './mentions-backfill.js';
@@ -173,9 +174,7 @@ export class HarborService {
   }
 
   private guardWrite(): void {
-    if (this.readOnly) {
-      throw new HarborError('read_only_limit', 'org is over its plan limit: writes are paused, reads still work');
-    }
+    enforce(canWrite(this));
   }
 
   private async requireSpace(spaceId: string): Promise<Space> {
@@ -184,17 +183,11 @@ export class HarborService {
     return space;
   }
 
-  /**
-   * THE access gate: a membership row, nothing else. Direct spaces pass
-   * through it unchanged — their two participants are ordinary members. If
-   * this ever grows a non-membership path (open spaces: browse/self-join for
-   * any org member), that path MUST require `space.kind === 'shared'`; a DM
-   * is private forever (SpaceKind, core.ts).
-   */
+  /** The access gate: load the facts, let policy decide — THE rule is policy.ts canAccessSpace. */
   async requireMember(ctx: ActorCtx, spaceId: string): Promise<Space> {
     const space = await this.requireSpace(spaceId);
     const membership = await this.store.getMembership(spaceId, ctx.memberId);
-    if (!membership) throw new HarborError('forbidden', 'you are not a member of this space');
+    enforce(canAccessSpace(space, membership));
     return space;
   }
 
@@ -250,6 +243,15 @@ export class HarborService {
     else this.hub.publish(spaceId, frame);
   }
 
+  // --- identity --------------------------------------------------------------
+
+  /** The caller's own row — what /v1/me and whoami serve. */
+  async me(ctx: ActorCtx): Promise<Member> {
+    const member = await this.store.getMember(ctx.memberId);
+    if (!member) throw new HarborError('not_found', 'member not found');
+    return member;
+  }
+
   // --- spaces & membership ---------------------------------------------------
 
   async listSpaces(ctx: ActorCtx, opts: { includeDirect?: boolean } = {}): Promise<Space[]> {
@@ -281,9 +283,7 @@ export class HarborService {
    */
   async renameSpace(ctx: ActorCtx, spaceId: string, input: RenameSpaceInput): Promise<Space> {
     const space = await this.requireMember(ctx, spaceId);
-    if (space.kind === 'direct') {
-      throw new HarborError('invalid_request', 'a direct message cannot be renamed — its name is the other person');
-    }
+    enforce(canRenameSpace(space));
     this.guardWrite();
     const by: Attribution = {
       memberId: ctx.memberId,
@@ -394,9 +394,8 @@ export class HarborService {
 
   async leaveSpace(ctx: ActorCtx, spaceId: string): Promise<void> {
     const space = await this.requireMember(ctx, spaceId);
-    if (space.kind === 'direct') {
-      throw new HarborError('invalid_request', 'a direct message has a fixed membership — it cannot be left');
-    }
+    enforce(canChangeMembership(space, 'leave'));
+    // No write guard on purpose: over its limit an org cannot grow, but anyone may leave (policy.ts canWrite).
     await this.locked(spaceId, async () => {
       const membership = await this.store.getMembership(spaceId, ctx.memberId);
       if (!membership) return;
@@ -411,9 +410,7 @@ export class HarborService {
 
   async createInvite(ctx: ActorCtx, spaceId: string, expiresInHours?: number): Promise<CreateInviteResult> {
     const space = await this.requireMember(ctx, spaceId);
-    if (space.kind === 'direct') {
-      throw new HarborError('invalid_request', 'a direct message has a fixed membership — nobody can be invited');
-    }
+    enforce(canChangeMembership(space, 'invite'));
     this.guardWrite();
     const token = randomBytes(24).toString('base64url');
     const now = this.now();
@@ -442,8 +439,8 @@ export class HarborService {
    * The invite-binding ceremony (spec §4, amended 2026-08-19): an
    * authenticated identity + an open bearer invite → member (created on
    * first bind, displayName seeded from IdP profile claims) + membership.
-   * Every bind-time condition is org policy, checked HERE and nowhere else —
-   * v1 is the email-domain rule. The (iss, sub) → member row written here is
+   * Every bind-time condition is org policy, checked in policy.ts canBind and
+   * nowhere else — v1 is the email-domain rule. The (iss, sub) → member row written here is
    * what the oidc auth driver resolves on every later request.
    */
   async bindInvite(identity: BindIdentity, token: string): Promise<AcceptInviteResult> {
@@ -452,7 +449,7 @@ export class HarborService {
       throw new HarborError('forbidden', `invite is ${resolved.state}`);
     }
     this.guardWrite();
-    this.checkBindPolicy(identity);
+    enforce(canBind(identity, this.org));
     let member = await this.store.getMemberByIdentity(identity.iss, identity.sub);
     if (!member) {
       // Minted id, NOT the raw sub: issuer subjects live only in the mapping
@@ -462,18 +459,6 @@ export class HarborService {
       await this.store.putIdentity(identity.iss, identity.sub, member.id);
     }
     return this.acceptInvite({ memberId: member.id }, token);
-  }
-
-  private checkBindPolicy(identity: BindIdentity): void {
-    const domains = this.org.allowedEmailDomains;
-    if (!domains || domains.length === 0) return;
-    const domain = identity.email?.toLowerCase().split('@')[1];
-    if (!domain || !domains.some((d) => d.toLowerCase() === domain)) {
-      throw new HarborError(
-        'policy_refused',
-        `this org admits only ${domains.map((d) => `@${d}`).join(', ')} accounts`,
-      );
-    }
   }
 
   async acceptInvite(ctx: ActorCtx, token: string): Promise<AcceptInviteResult> {
@@ -1309,9 +1294,9 @@ export class HarborService {
     return { ok: true };
   }
 
-  /** Sign-out: forget one device. The member's level stays. */
-  async unregisterPush(_ctx: ActorCtx, input: { token: string }): Promise<{ ok: true }> {
-    await this.store.deletePushToken(input.token);
+  /** Sign-out: forget one of YOUR devices — a token registered to someone else is untouched. The member's level stays. */
+  async unregisterPush(ctx: ActorCtx, input: { token: string }): Promise<{ ok: true }> {
+    await this.store.deleteMemberPushToken(ctx.memberId, input.token);
     return { ok: true };
   }
 
@@ -1497,9 +1482,7 @@ export class HarborService {
     return this.locked(spaceId, async () => {
       const message = await this.store.getMessage(spaceId, messageId);
       if (!message) throw new HarborError('not_found', 'no such message');
-      if (message.author.memberId !== ctx.memberId) {
-        throw new HarborError('forbidden', 'only the author can delete a message');
-      }
+      enforce(isAuthor(ctx, message, 'delete a message'));
       if (message.deletedAt) return this.foldLive(spaceId, message);
 
       const at = this.now();
@@ -1552,9 +1535,7 @@ export class HarborService {
     return this.locked(spaceId, async () => {
       const message = await this.store.getMessage(spaceId, messageId);
       if (!message) throw new HarborError('not_found', 'no such message');
-      if (message.author.memberId !== ctx.memberId) {
-        throw new HarborError('forbidden', 'only the author can edit a message');
-      }
+      enforce(isAuthor(ctx, message, 'edit a message'));
       if (message.deletedAt) throw new HarborError('invalid_request', 'cannot edit a deleted message');
       // The Discord posture: a poll message is immutable once posted — its
       // body is the poll's fallback rendering, and votes were cast on it.
@@ -1704,9 +1685,7 @@ export class HarborService {
       if (!message) throw new HarborError('not_found', 'no such message');
       const poll = message.poll;
       if (!poll || message.deletedAt) throw new HarborError('invalid_request', 'no poll on this message');
-      if (message.author.memberId !== ctx.memberId) {
-        throw new HarborError('forbidden', 'only the poll author can end it');
-      }
+      enforce(isAuthor(ctx, message, 'end a poll'));
       const at = this.now();
       if (poll.endedAt || poll.expiresAt <= at) return this.foldLive(spaceId, message);
 
@@ -2073,12 +2052,16 @@ export class HarborService {
     });
   }
 
-  async eventsAfter(spaceId: string, afterOffset: number): Promise<StoredEvent[]> {
-    return this.store.listEventsAfter(spaceId, afterOffset);
-  }
-
-  async headOffset(spaceId: string): Promise<number> {
-    return this.store.head(spaceId);
+  /**
+   * The live face's catch-up read (ws.ts subscribe): the space's head and,
+   * with `afterOffset`, every durable event past it. Gated like every other
+   * read of a space — the log has no ungated door.
+   */
+  async replay(ctx: ActorCtx, spaceId: string, afterOffset?: number): Promise<{ head: number; events: StoredEvent[] }> {
+    await this.requireMember(ctx, spaceId);
+    const head = await this.store.head(spaceId);
+    const events = afterOffset === undefined ? [] : await this.store.listEventsAfter(spaceId, afterOffset);
+    return { head, events };
   }
 }
 

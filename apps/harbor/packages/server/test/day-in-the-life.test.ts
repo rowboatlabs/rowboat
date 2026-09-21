@@ -122,9 +122,9 @@ describe.each([['memory'], ['postgres']] as const)('§11 — a day in the life o
   });
 
   it('beat 2 — standup: everyone captures privately; nothing shared happens', async () => {
-    const head = await harbor.service.headOffset(spaceId);
+    const head = await harbor.store.head(spaceId);
     // (five private notes are taken, none of them here)
-    expect(await harbor.service.headOffset(spaceId)).toBe(head);
+    expect(await harbor.store.head(spaceId)).toBe(head);
   });
 
   it('beat 3 — first push: Gagan\'s agent reads (history bundled), applies one change-set with reasoning', async () => {
@@ -148,7 +148,7 @@ describe.each([['memory'], ['postgres']] as const)('§11 — a day in the life o
     expect(push.version).toBe(2);
 
     // The feed shows the activity row: the change is a durable event on the log.
-    const events = await harbor.service.eventsAfter(spaceId, 0);
+    const events = await harbor.store.listEventsAfter(spaceId, 0);
     const changes = events.filter((e) => e.event.type === 'change');
     expect(changes.at(-1)!.event).toMatchObject({
       type: 'change',
@@ -218,7 +218,7 @@ describe.each([['memory'], ['postgres']] as const)('§11 — a day in the life o
 
   it('beat 6 — direct manipulation: Harsh ticks the checkbox; Arjun, doc open, sees it live', async () => {
     arjunOpenDoc = await liveClient(harbor, 'dev-arjun');
-    const head = await harbor.service.headOffset(spaceId);
+    const head = await harbor.store.head(spaceId);
     arjunOpenDoc.send({ kind: 'subscribe', spaceId, afterOffset: head });
     await arjunOpenDoc.until((fs) => fs.some((f) => f.kind === 'subscribed'), 'arjun subscribed');
 
@@ -244,7 +244,7 @@ describe.each([['memory'], ['postgres']] as const)('§11 — a day in the life o
   });
 
   it('beat 7 — chat grammar: a thread starts flat in the stream, agents stay silent, @rowboat runs only for its own person', async () => {
-    const headBefore = await harbor.service.headOffset(spaceId);
+    const headBefore = await harbor.store.head(spaceId);
 
     const started = await arjun.post(`/v1/spaces/${spaceId}/messages`, {
       body: 'should SSO jump the migration work?',
@@ -261,7 +261,7 @@ describe.each([['memory'], ['postgres']] as const)('§11 — a day in the life o
     expect(replied.body.message.threadRoot).toBe(rootId);
 
     // Agents were silent so far: everything since the topic started is direct.
-    const midEvents = await harbor.service.eventsAfter(spaceId, headBefore);
+    const midEvents = await harbor.store.listEventsAfter(spaceId, headBefore);
     for (const e of midEvents) {
       if (e.event.type === 'message') expect(e.event.message.author.actingMode).toBe('direct');
       expect(e.event.type).not.toBe('change');
@@ -314,7 +314,7 @@ describe.each([['memory'], ['postgres']] as const)('§11 — a day in the life o
   it('beat 9 — catch-up: resume-from-offset replays exactly what Arjun missed; history answers "why"', async () => {
     const catchUp = await liveClient(harbor, 'dev-arjun');
     catchUp.send({ kind: 'subscribe', spaceId, afterOffset: arjunLastSeen });
-    const head = await harbor.service.headOffset(spaceId);
+    const head = await harbor.store.head(spaceId);
     await catchUp.until((fs) => fs.filter((f) => f.kind === 'event').length >= head - arjunLastSeen, 'overnight replay');
 
     const replay = catchUp.events();

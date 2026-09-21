@@ -451,6 +451,14 @@ export class PgStore implements Store {
     await this.sql.query('delete from push_tokens where org_id = $1 and token = $2', [this.orgId, token]);
   }
 
+  async deleteMemberPushToken(memberId: string, token: string): Promise<void> {
+    await this.sql.query('delete from push_tokens where org_id = $1 and member_id = $2 and token = $3', [
+      this.orgId,
+      memberId,
+      token,
+    ]);
+  }
+
   async listPushTokens(memberId: string): Promise<string[]> {
     const rows = await this.sql.query<{ token: string }>(
       'select token from push_tokens where org_id = $1 and member_id = $2 order by updated_at',

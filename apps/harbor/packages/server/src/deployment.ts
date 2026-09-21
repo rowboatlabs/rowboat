@@ -4,7 +4,7 @@ import { createServer, type IncomingMessage, type Server as HttpServer, type Ser
 import type { AddressInfo } from 'node:net';
 import { getRequestListener } from '@hono/node-server';
 import { buildApexApp } from './apex.js';
-import { DevAuthDriver, type AuthDriver } from './auth.js';
+import { bindAuth, DevAuthDriver, type AuthDriver, type OrgAuth } from './auth.js';
 import { OidcAuthDriver } from './auth-oidc.js';
 import type { BlobStore } from './blobs.js';
 import { OrgDirectory, normalizeDomain, type CreateOrgInput, type OrgConfig } from './directory.js';
@@ -68,8 +68,7 @@ export interface RunningDeployment {
 
 interface OrgRuntime {
   service: HarborService;
-  store: PgStore;
-  auth: AuthDriver;
+  auth: OrgAuth;
   hono: (req: IncomingMessage, res: ServerResponse) => void;
 }
 
@@ -114,17 +113,17 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
       options.blobs?.(org.id),
       new Notifier(store, hub, new PushSender(store, org.id)),
     );
-    const auth: AuthDriver = org.issuer ? new OidcAuthDriver({ issuer: org.issuer }) : new DevAuthDriver();
+    const driver: AuthDriver = org.issuer ? new OidcAuthDriver({ issuer: org.issuer }) : new DevAuthDriver();
+    const auth = bindAuth(driver, store);
     const app = buildHttpApp({
       service,
-      store,
       auth,
       ...(org.issuer && options.consentPublishableKey
         ? { consent: { issuer: org.issuer, publishableKey: options.consentPublishableKey } }
         : {}),
       ...(options.maxBlobBytes !== undefined ? { maxBlobBytes: options.maxBlobBytes } : {}),
     });
-    return { service, store, auth, hono: getRequestListener(app.fetch) };
+    return { service, auth, hono: getRequestListener(app.fetch) };
   }
 
   async function runtimeFor(host: string | undefined): Promise<OrgRuntime | undefined> {
@@ -169,7 +168,7 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
         return;
       }
       if (req.url === '/mcp' || req.url?.startsWith('/mcp?')) {
-        await handleMcpRequest(req, res, { service: runtime.service, store: runtime.store, auth: runtime.auth });
+        await handleMcpRequest(req, res, { service: runtime.service, auth: runtime.auth });
         return;
       }
       runtime.hono(req, res);
@@ -181,7 +180,7 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
 
   const closeLive = attachLive(server, async (host) => {
     const runtime = await runtimeFor(host);
-    return runtime ? { service: runtime.service, hub, store: runtime.store, auth: runtime.auth } : undefined;
+    return runtime ? { service: runtime.service, hub, auth: runtime.auth } : undefined;
   });
 
   await new Promise<void>((resolve) => server.listen(options.port ?? 0, resolve));
