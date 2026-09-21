@@ -1,3 +1,4 @@
+import { HarnessSettings } from "@x/shared/dist/code-mode.js";
 import type { ChildProcess } from "child_process";
 import type { z } from "zod";
 import type { ToolAttachment } from "@x/shared/dist/agent.js";
@@ -168,11 +169,14 @@ export class RealToolRegistry implements IToolRegistry {
                 const onAbort = () => abortRegistry.abort(ctx.turnId);
                 ctx.signal.addEventListener("abort", onAbort, { once: true });
                 try {
+                    const parsedHarness = HarnessSettings.safeParse(ctx.composition && typeof ctx.composition === 'object' && 'harness' in ctx.composition ? ctx.composition.harness : undefined);
+                    const harness = parsedHarness.success && parsedHarness.data.enabled ? parsedHarness.data : undefined;
                     const value = await this.execToolImpl(
                         attachment,
                         asArgs(input),
                         {
                             runId: ctx.turnId,
+                            ...(harness ? { codeMode: harness.agent, codeModel: harness.model, codeEffort: harness.effort, codePolicy: harness.policy } : {}),
                             sessionId: ctx.sessionId,
                             toolCallId: ctx.toolCallId,
                             signal: ctx.signal,

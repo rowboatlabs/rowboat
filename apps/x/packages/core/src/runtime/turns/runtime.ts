@@ -1022,6 +1022,7 @@ class TurnAdvance {
         let settled: z.infer<typeof ToolResultData>;
         try {
             const result = await syncTool.execute(tc.input, {
+                composition: 'agentId' in this.definition.agent.requested ? this.definition.agent.requested.overrides?.composition : undefined,
                 turnId: this.turnId,
                 sessionId: this.definition.sessionId,
                 toolCallId: tc.toolCallId,

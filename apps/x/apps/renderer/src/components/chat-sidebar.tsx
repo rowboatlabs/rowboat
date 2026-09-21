@@ -1,3 +1,4 @@
+import type { HarnessSettings } from '@x/shared/src/code-mode'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, Minus, X } from 'lucide-react'
 
@@ -92,7 +93,7 @@ export interface ChatSidebarProps {
   isWaitingOnHuman?: boolean
   isStopping?: boolean
   onStop?: () => void
-  onSubmit: (message: PromptInputMessage, mentions?: Mention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => void
+  onSubmit: (message: PromptInputMessage, mentions?: Mention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode, harness?: HarnessSettings) => void
   /** Pending-queue mirror for the ACTIVE tab's session (single store — see App). */
   queuedForActive?: QueuedSessionMessage[]
   onRemoveQueued?: (queueId: string) => void

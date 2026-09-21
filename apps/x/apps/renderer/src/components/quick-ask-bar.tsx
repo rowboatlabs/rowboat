@@ -1,3 +1,4 @@
+import type { HarnessSettings } from '@x/shared/src/code-mode'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowUpRight,
@@ -384,6 +385,7 @@ export function QuickAskBar() {
       searchEnabled?: boolean,
       codeMode?: 'claude' | 'codex',
       permissionMode?: PermissionMode,
+      harness?: HarnessSettings,
     ) => {
       const text = message.text.trim()
       if (!text && !attachments?.length) return
@@ -395,6 +397,7 @@ export function QuickAskBar() {
           searchEnabled,
           codeMode,
           permissionMode,
+          harness,
           model: selectionRef.current
             ? { provider: selectionRef.current.provider, model: selectionRef.current.model }
             : null,

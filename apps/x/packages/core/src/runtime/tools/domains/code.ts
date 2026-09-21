@@ -137,6 +137,8 @@ export const codeAgentRunTools: z.infer<typeof BuiltinToolsSchema> = {
                             projectId: project.id,
                             agent: ctx.codeMode ?? agent,
                             codeModeEnabled: true,
+                            agentModel: ctx.codeModel,
+                            agentEffort: ctx.codeEffort,
                             // NO policy: adoption must not freeze this turn's
                             // transient posture into permanent meta — every
                             // run keeps resolving chip → settings → ask
@@ -211,8 +213,8 @@ export const codeAgentRunTools: z.infer<typeof BuiltinToolsSchema> = {
                     cwd: effectiveCwd,
                     prompt,
                     policy,
-                    ...(pinned?.agentModel ? { model: pinned.agentModel } : {}),
-                    ...(pinned?.agentEffort ? { effort: pinned.agentEffort } : {}),
+                    ...((pinned?.agentModel ?? ctx.codeModel) ? { model: pinned?.agentModel ?? ctx.codeModel } : {}),
+                    ...((pinned?.agentEffort ?? ctx.codeEffort) ? { effort: pinned?.agentEffort ?? ctx.codeEffort } : {}),
                     signal: ctx.signal,
                     onEvent: (event) => {
                         if (event.type === 'message' && event.role === 'agent') finalText += event.text;

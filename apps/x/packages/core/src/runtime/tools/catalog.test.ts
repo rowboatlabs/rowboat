@@ -42,6 +42,16 @@ function mockCodeServices(
 describe("code_agent_run", () => {
     afterEach(() => vi.restoreAllMocks());
 
+    it("uses the Assistant Harness model, effort, agent and approvals", async () => {
+        const runPrompt = vi.fn(async () => ({ stopReason: "end_turn", sessionId: "s1" }));
+        mockCodeServices(runPrompt);
+        await BuiltinTools.code_agent_run.execute(
+            { agent: "claude", cwd: CWD, prompt: "Plan the week" },
+            { ...context(new AbortController().signal), codeMode: "codex", codeModel: "chosen-model", codeEffort: "high", codePolicy: "auto-approve-reads" },
+        );
+        expect(runPrompt).toHaveBeenCalledWith(expect.objectContaining({ agent: "codex", model: "chosen-model", effort: "high", policy: "auto-approve-reads" }));
+    });
+
     it("throws genuine coding-agent failures for the runtime to mark as errors", async () => {
         mockCodeServices(async () => {
             throw new Error("spawn Electron ENOENT");

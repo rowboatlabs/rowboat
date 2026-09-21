@@ -163,6 +163,10 @@ describe('unified project directories', () => {
     });
     it('persists disabling coding without changing the shared workspace or other sessions', async () => {
         const { service, records } = setup([initial, { ...initial, id: 's2' }]);
+        await service.update('s1', { policy: 'yolo' });
+        const reset = await service.update('s1', { clearPolicy: true });
+        expect(reset.policy).toBeUndefined();
+        expect(reset).not.toHaveProperty('clearPolicy');
         const updated = await service.update('s1', { codeModeEnabled: false });
         expect(updated.cwd).toBe(initial.cwd);
         expect(updated.worktree).toEqual(initial.worktree);

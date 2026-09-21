@@ -13,6 +13,16 @@ export type CodingAgent = z.infer<typeof CodingAgent>;
 export const ApprovalPolicy = z.enum(["ask", "auto-approve-reads", "yolo"]);
 export type ApprovalPolicy = z.infer<typeof ApprovalPolicy>;
 
+// A per-conversation choice, independent of the Assistant's own model.
+export const HarnessSettings = z.object({
+    enabled: z.boolean(),
+    agent: CodingAgent,
+    model: z.string().optional(),
+    effort: z.string().optional(),
+    policy: ApprovalPolicy.optional(),
+});
+export type HarnessSettings = z.infer<typeof HarnessSettings>;
+
 export const PermissionDecision = z.enum(["allow_once", "allow_always", "reject"]);
 export type PermissionDecision = z.infer<typeof PermissionDecision>;
 

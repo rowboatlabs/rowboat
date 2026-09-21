@@ -357,10 +357,12 @@ export class CodeSessionService {
         return best;
     }
 
-    async update(sessionId: string, patch: Partial<Pick<CodeSession, 'title' | 'policy' | 'agent' | 'agentModel' | 'agentEffort' | 'codeModeEnabled'>>): Promise<CodeSession> {
+    async update(sessionId: string, patch: Partial<Pick<CodeSession, 'title' | 'policy' | 'agent' | 'agentModel' | 'agentEffort' | 'codeModeEnabled'>> & { clearPolicy?: boolean }): Promise<CodeSession> {
         const session = await this.codeSessionsRepo.get(sessionId);
         if (!session) throw new Error(`Unknown session: ${sessionId}`);
-        const updated: CodeSession = { ...session, ...patch };
+        const { clearPolicy, ...values } = patch;
+        const updated: CodeSession = { ...session, ...values };
+        if (clearPolicy) delete updated.policy;
         // Model and effort are ids of ONE engine's catalog — a Codex model on
         // a Claude Code session is nonsense. Switching agents drops them back
         // to the engine default unless the same patch chooses new ones.

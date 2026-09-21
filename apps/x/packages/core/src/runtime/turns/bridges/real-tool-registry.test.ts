@@ -164,6 +164,17 @@ describe("RealToolRegistry", () => {
         ]);
     });
 
+    it("forwards the submitted Harness configuration to agent execution", async () => {
+        const { registry, calls } = makeRegistry(async () => "ok");
+        const tool = (await registry.resolve(descriptor())) as SyncRuntimeTool;
+        await tool.execute({}, { ...makeCtx(), composition: { harness: {
+            enabled: true, agent: "codex", model: "chosen-model", effort: "high", policy: "auto-approve-reads",
+        } } });
+        expect(calls[0].ctx).toMatchObject({ codeMode: "codex", codeModel: "chosen-model", codeEffort: "high", codePolicy: "auto-approve-reads" });
+        await tool.execute({}, { ...makeCtx(), composition: { harness: { enabled: false, agent: "claude", policy: "yolo" } } });
+        expect(calls[1].ctx.codePolicy).toBeUndefined();
+    });
+
     it("re-keys registry calls a tool makes with ctx.runId to the call scope", async () => {
         // Builtins address the abort registry with ctx.runId (the turn id).
         // The scoped wrapper must pin those to the per-call key, or a

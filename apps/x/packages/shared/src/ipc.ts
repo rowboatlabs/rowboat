@@ -28,7 +28,7 @@ import { BrowserStateSchema, DisplayMediaRequestSchema, HttpAuthRequestSchema } 
 import { BillingInfoSchema } from './billing.js';
 import { CreditActivatedEventSchema, CreditsStateSchema, ReferralClaimResultSchema } from './credits.js';
 import { GmailThreadSchema } from './blocks.js';
-import { PermissionDecision, ApprovalPolicy, CodingAgent, type CodeRunFeedEvent } from './code-mode.js';
+import { PermissionDecision, ApprovalPolicy, CodingAgent, HarnessSettings, type CodeRunFeedEvent } from './code-mode.js';
 import { NotificationSettingsSchema } from './notification-settings.js';
 import { TurnLimitsSettingsSchema } from './turn-limits.js';
 import { RetentionSettingsSchema, RetentionSettingsUpdateSchema } from './retention.js';
@@ -115,6 +115,7 @@ const QuickAskSubmitPayload = z.object({
     .optional(),
   searchEnabled: z.boolean().optional(),
   codeMode: z.enum(['claude', 'codex']).optional(),
+  harness: HarnessSettings.optional(),
   permissionMode: z.enum(['manual', 'auto']).optional(),
   model: ModelRef.nullable().optional(),
   reasoningEffort: ReasoningEffort.nullable().optional(),
@@ -1891,7 +1892,7 @@ export const ipcSchemas = {
   'codeSession:update': {
     req: z.object({
       sessionId: z.string(),
-      patch: CodeSession.pick({ title: true, policy: true, agent: true, agentModel: true, agentEffort: true, codeModeEnabled: true }).partial(),
+      patch: CodeSession.pick({ title: true, policy: true, agent: true, agentModel: true, agentEffort: true, codeModeEnabled: true }).partial().extend({ clearPolicy: z.boolean().optional() }),
     }),
     res: z.object({
       session: CodeSession,
