@@ -5,7 +5,34 @@ import WebSocket from 'ws';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { ServerFrame } from '@rowboat/spaces-protocol';
-import type { RunningHarbor } from '../src/server.js';
+import { PgStore } from '../src/pg-store.js';
+import { startHarbor, type HarborOptions, type RunningHarbor } from '../src/server.js';
+import { pgliteDb } from '../src/sql-pglite.js';
+import type { SqlDb } from '../src/sql.js';
+
+// --- the store every test runs on --------------------------------------------
+// Postgres in-process (sql-pglite.ts), schema applied: the production SQL, a
+// fresh database per harbor, closed with it.
+
+export async function freshStore(): Promise<{ db: SqlDb; store: PgStore }> {
+  const db = await pgliteDb();
+  const store = new PgStore(db);
+  await store.init();
+  return { db, store };
+}
+
+/** startHarbor over a fresh store; close() takes the database down with the server. */
+export async function startTestHarbor(options: Omit<HarborOptions, 'store'> = {}): Promise<RunningHarbor> {
+  const { db, store } = await freshStore();
+  const harbor = await startHarbor({ ...options, store });
+  return {
+    ...harbor,
+    close: async () => {
+      await harbor.close();
+      await db.close();
+    },
+  };
+}
 
 // --- fake authorization server ----------------------------------------------
 // RFC 8414 discovery + JWKS + JWTs minted in-test — CI never needs a real IdP.

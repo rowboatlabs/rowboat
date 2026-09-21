@@ -8,12 +8,12 @@ import { S3BlobStore } from './blobs-s3.js';
 import { PgStore } from './pg-store.js';
 import { startHarbor } from './server.js';
 import { postgresDb } from './sql.js';
-import type { Store } from './store.js';
 
 // Dev entry: a seeded single-org Harbor for dogfooding. The seed is the
 // Roadboard slice from spec §11 — the team, the space, the roadmap.
-// In-memory by default (restart = clean slate); set DATABASE_URL for durable
-// Postgres storage (seeding is idempotent across restarts). Set AUTH_ISSUER
+// PGlite in-memory by default — the Postgres store, in-process; restart =
+// clean slate — or durable Postgres with DATABASE_URL (seeding is idempotent
+// across restarts). Set AUTH_ISSUER
 // to a pinned AS issuer URL for real OAuth (dev tokens otherwise — never
 // expose those publicly). Until the invite ceremony lands, oidc members are
 // seeded by inserting (iss, sub) rows into member_identities directly.
@@ -57,7 +57,7 @@ const port = Number(process.env.PORT ?? 4272);
 //   BLOBS_S3_BUCKET (+ BLOBS_S3_ENDPOINT/REGION/FORCE_PATH_STYLE,
 //     credentials via the AWS provider chain or BLOBS_S3_ACCESS_KEY_ID/SECRET)
 //   BLOBS_DIR — disk driver (self-hosted single-node)
-// Neither set: dev mode falls back to in-memory (restart = clean slate);
+// Neither set: dev mode keeps blob bytes in memory (restart = clean slate);
 // deployment mode leaves uploads unconfigured and the routes refuse loudly.
 function blobStoreFactory(): ((orgId: string) => BlobStore) | undefined {
   const bucket = process.env.BLOBS_S3_BUCKET;
@@ -127,12 +127,14 @@ if (process.env.HARBOR_MODE === 'deployment') {
 }
 
 async function startDevHarbor(): Promise<void> {
-let store: Store | undefined;
-if (process.env.DATABASE_URL) {
-  const pgStore = new PgStore(postgresDb(process.env.DATABASE_URL, poolOpts));
-  await pgStore.init();
-  store = pgStore;
-}
+// Durable Postgres via DATABASE_URL; otherwise the same store in-process on
+// PGlite (restart = clean slate). The WASM engine is loaded here and only
+// here — deployment mode never imports it.
+const db = process.env.DATABASE_URL
+  ? postgresDb(process.env.DATABASE_URL, poolOpts)
+  : await (await import('./sql-pglite.js')).pgliteDb();
+const store = new PgStore(db);
+await store.init();
 
 let auth: AuthDriver | undefined;
 if (process.env.AUTH_ISSUER) {
@@ -146,7 +148,7 @@ const blobFactory = blobStoreFactory();
 
 const harbor = await startHarbor({
   port,
-  ...(store ? { store } : {}),
+  store,
   ...(blobFactory ? { blobs: blobFactory('org-default') } : {}),
   ...(maxBlobBytes !== undefined ? { maxBlobBytes } : {}),
   ...(auth ? { auth } : {}),
@@ -172,7 +174,7 @@ const harbor = await startHarbor({
 
 const spaces = await harbor.service.listSpaces({ memberId: 'ramnique' });
 
-console.log(`Harbor (single org, ${store ? 'Postgres via DATABASE_URL' : 'in-memory — restart = clean slate'})`);
+console.log(`Harbor (single org, ${process.env.DATABASE_URL ? 'Postgres via DATABASE_URL' : 'PGlite in-memory — restart = clean slate'})`);
 console.log(
   `  blobs      ${process.env.BLOBS_S3_BUCKET ? `s3 bucket ${process.env.BLOBS_S3_BUCKET}` : process.env.BLOBS_DIR ? `disk ${process.env.BLOBS_DIR}` : 'in-memory (set BLOBS_DIR or BLOBS_S3_BUCKET for durable uploads)'}`,
 );

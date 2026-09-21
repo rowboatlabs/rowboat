@@ -14,7 +14,7 @@ import type {
 } from '@rowboat/spaces-protocol';
 import { migrate } from './migrations.js';
 import { sortActivity } from './activity-sort.js';
-import { extractSearchText, matchesAllTerms, searchTextFor, snippetAround, toPathPatterns, toTsQueryString, type SearchQuery } from './search.js';
+import { extractSearchText, searchTextFor, snippetAround, toPathPatterns, toTsQueryString, type SearchQuery } from './search.js';
 import type { SqlDb, SqlExecutor } from './sql.js';
 import {
   type MessageWindow, type PushLevel,

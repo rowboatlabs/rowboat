@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import type { ServerFrame } from '@rowboat/spaces-protocol';
-import { startHarbor, type RunningHarbor } from '../src/server.js';
+import type { RunningHarbor } from '../src/server.js';
+import { startTestHarbor } from './helpers.js';
 
 // Live-face tests: subscribe/replay/live/presence over a real socket.
 
@@ -10,7 +11,7 @@ let spaceId: string;
 let readmeId: string;
 
 beforeAll(async () => {
-  harbor = await startHarbor({
+  harbor = await startTestHarbor({
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
       { id: 'gagan', displayName: 'Gagan' },
@@ -222,7 +223,7 @@ describe('live face', () => {
 
   it('backpressure: a peer that stops draining is terminated instead of buffered onto', async () => {
     // Own instance: a tiny ceiling so a few large whiteboard frames trip it.
-    const capped = await startHarbor({
+    const capped = await startTestHarbor({
       seedMembers: [
         { id: 'ramnique', displayName: 'Ramnique' },
         { id: 'gagan', displayName: 'Gagan' },
@@ -269,7 +270,7 @@ describe('live face', () => {
 
   it('heartbeat: ping beacons reach every connection, subscribed or not', async () => {
     // Separate instance so the fast cadence doesn't spam the shared harbor.
-    const beating = await startHarbor({
+    const beating = await startTestHarbor({
       seedMembers: [{ id: 'ramnique', displayName: 'Ramnique' }],
       liveHeartbeatMs: 60,
     });

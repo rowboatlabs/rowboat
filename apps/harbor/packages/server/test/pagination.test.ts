@@ -1,19 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Message, Topic, TopicListing } from '@rowboat/spaces-protocol';
-import { PgStore } from '../src/pg-store.js';
-import { startHarbor, type HarborOptions, type RunningHarbor } from '../src/server.js';
-import type { SqlDb } from '../src/sql.js';
-import { pgliteDb } from './pglite.js';
-import { agentClient, callStructured } from './helpers.js';
+import type { RunningHarbor } from '../src/server.js';
+import { agentClient, callStructured, startTestHarbor } from './helpers.js';
 
 // Windowed reads under the annotation model: the stream (roots only) and each
 // flat thread page the same way — NEWEST window by default, never the full
 // history; beforeOffset pages back on the space's one offset sequence.
-// listTopics always folds each topic's root message in. Runs on both stores,
-// the §11 dual gate.
+// listTopics always folds each topic's root message in.
 
 let harbor: RunningHarbor;
-let sqlDb: SqlDb | undefined;
 let spaceId: string;
 let rootId: string;
 let replies: Message[];
@@ -38,19 +33,12 @@ function api(token: string) {
 
 let ramnique: ReturnType<typeof api>;
 
-describe.each([['memory'], ['postgres']] as const)('windowed reads (%s store)', (storeKind) => {
+describe('windowed reads', () => {
   beforeAll(async () => {
-    const options: HarborOptions = {
+    harbor = await startTestHarbor({
       orgName: 'Page Test Org',
       seedMembers: [{ id: 'ramnique', displayName: 'Ramnique' }],
-    };
-    if (storeKind === 'postgres') {
-      sqlDb = await pgliteDb();
-      const store = new PgStore(sqlDb);
-      await store.init();
-      options.store = store;
-    }
-    harbor = await startHarbor(options);
+    });
     ramnique = api('dev-ramnique');
     const created = await ramnique.post('/v1/spaces', { name: 'Paging' });
     spaceId = created.body.space.id;
@@ -74,8 +62,6 @@ describe.each([['memory'], ['postgres']] as const)('windowed reads (%s store)', 
 
   afterAll(async () => {
     await harbor.close();
-    await sqlDb?.close();
-    sqlDb = undefined;
   });
 
   it('the stream returns the latest page of ROOTS by default, oldest first within the window', async () => {

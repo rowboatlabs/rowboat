@@ -12,9 +12,10 @@
 
 ## The stub Harbor (`packages/server`)
 
-The in-memory reference implementation that unblocks client work. One process =
-one org; restart = clean slate. `pnpm dev` boots it on port 4272 seeded with the
-team and a Roadboard space (`src/main.ts`).
+The server. One process = one org (`startHarbor`) or one deployment of many
+(`deployment.ts`). `pnpm dev` boots a single seeded org on port 4272 — the team
+and a Roadboard space (`src/main.ts`) — on PGlite in-memory (restart = clean
+slate), or on durable Postgres with `DATABASE_URL`.
 
 - **One core, three doors.** `service.ts` is the single implementation; `http.ts`
   (every route in `api.ts`), `ws.ts` (`/v1/live`, subscribe/replay/live frames),
@@ -81,12 +82,16 @@ team and a Roadboard space (`src/main.ts`).
   at the org address (consent redirect target = site_url +
   authorization_url_path). Live-verified: a real DCR + PKCE authorize 302s
   onto this route, and the page's exact fetch sequence completes the dance.
-- **Storage**: `store.ts` is the data-access boundary, `memory-store.ts` the
-  stub driver. The real Harbor lands a **Postgres-only** driver — no S3 in v1:
-  contents are ≤1MB text riding in the change-set log rows; current state,
-  history, feed, and the event stream are all projections of that log.
-  `withSpaceLock` becomes a transaction; the hub becomes LISTEN/NOTIFY when we
-  ever scale past one node (deferred).
+- **Storage**: `store.ts` is the data-access boundary and `pg-store.ts` its
+  one driver — Postgres, no S3 for text in v1: contents are ≤1MB text riding in
+  the change-set log rows; current state, history, feed, and the event stream
+  are all projections of that log. `withSpaceLock` is a transaction holding a
+  per-space advisory lock. The same driver runs in-process on PGlite
+  (`sql-pglite.ts`) for `pnpm dev` and for every test — real migrations, real
+  SQL, real transactions. The memory driver was retired 2026-09-21: two
+  implementations of an 80-method interface meant every store change written
+  twice, and the broadest tests proving the driver that never shipped. The hub
+  becomes LISTEN/NOTIFY when we ever scale past one node (deferred).
 - **Blob store primitive** (`blobs.ts` + `blobs-disk.ts` + `blobs-s3.ts`):
   the spec §6 storage shape for binary/large assets, built ahead of the
   feature. Content-addressed (sha256), four-method interface, two drivers —
@@ -303,6 +308,6 @@ Amended 2026-09-07 (push notifications, PUSH_PLAN.md): phones register an **Expo
 
 1. ~~`packages/server`: the **in-memory stub Harbor**~~ — done: every route in `api.ts`, the WS frames in `events.ts`, the MCP tools, a merge engine passing the fixtures, fake single-org auth, and spec §11 running as an automated acceptance test.
 2. ~~`apps/x`: the client chain against the stub~~ — done: `packages/core/src/spaces/` (SpacesClient + SpacesLive + org registry, tested against the real stub), `spaces:*` IPC, functional renderer surfaces (design pass pending), and org-add auto-registering the MCP face in `mcp.json` so the user's own agent gets the spaces tools. Note: consumption ended up as `link:` (not `file:`) — pnpm copies `file:` deps at install time, which goes stale during active co-development. **zod must stay version-identical across apps/x and apps/harbor** (pinned 4.2.1) or type identity breaks across the link.
-3. ~~Postgres storage~~ — done: `pg-store.ts` implements the Store boundary over a minimal SQL adapter (`sql.ts`; node-postgres for deployments, in-process PGlite for hermetic tests). `withSpaceLock` = one transaction holding a per-space advisory lock, with every store call inside riding that transaction (AsyncLocalStorage). **The §11 day-in-the-life suite runs twice — memory and Postgres — with identical assertions**; that dual run is the storage-swap gate, permanently. `DATABASE_URL` flips `pnpm dev` to durable storage (seeding is restart-idempotent). Postgres-only on purpose: no S3 in v1 — ≤1MB text contents ride in the log rows; state/history/feed/stream are projections.
+3. ~~Postgres storage~~ — done: `pg-store.ts` implements the Store boundary over a minimal SQL adapter (`sql.ts`; node-postgres for deployments, in-process PGlite for hermetic tests). `withSpaceLock` = one transaction holding a per-space advisory lock, with every store call inside riding that transaction (AsyncLocalStorage). The §11 day-in-the-life suite ran twice — memory and Postgres — as the storage-swap gate until 2026-09-21, when the memory driver was retired and every test moved to PGlite (Storage, above). `DATABASE_URL` flips `pnpm dev` to durable storage (seeding is restart-idempotent). Postgres-only on purpose: no S3 in v1 — ≤1MB text contents ride in the log rows; state/history/feed/stream are projections.
 4. ~~Real OAuth~~ — **DONE end to end, live-verified against Supabase Auth**: the `oidc` auth driver, the login/consent page (buttons derived from the AS's /settings), the invite-binding ceremony, and the app side — `core/spaces/oauth.ts` (discovery → DCR → PKCE via system browser + one-shot loopback) with rotating-refresh token lifecycle in the org registry (`freshTokenFor`: single-flight, persist-rotated-refresh-before-use, needs-relogin marking) and the paste-invite-link join UI. Amended 2026-09-14 (app-only, no wire change): that per-org token lifecycle now applies to FOREIGN orgs only — a managed org (one on the deployment's own AS) borrows the Rowboat account session, the app lists its managed orgs from the apex's `GET /v1/orgs`, and an invite to a managed org needs no browser when a session exists (one session, two uses: `core/auth/tokens.ts`). The one unautomatable step: a real Google/Microsoft click-through, pending provider creds on a Supabase project.
 5. ~~Multi-org routing~~ — done (`deployment.ts`, see the stub notes above), plus the **apex face** (`apex.ts`): self-serve org creation on the deployment's apex domain, identity-level auth, caller = provisioned first admin, realm-generic tokens work at the new org immediately. Decision 2026-08-20: creation is free-for-now and Harbor-native; `/internal` + limit knobs are PARKED until the knob discussion lands (billing later gates these calls, it doesn't replace them). `HARBOR_MODE=deployment` + the Dockerfile make the container real (live-verified against Postgres). Next: the actual Render deployment (wildcard-cert verification, billing-Supabase OAuth wiring), then the design pass over the functional surfaces (SPACES_DESIGN_BRIEF, private repo).

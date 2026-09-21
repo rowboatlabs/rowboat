@@ -5,7 +5,7 @@ import { PgStore } from '../src/pg-store.js';
 import { extractSearchText } from '../src/search.js';
 import { HarborService } from '../src/service.js';
 import type { SqlDb } from '../src/sql.js';
-import { pgliteDb } from './pglite.js';
+import { pgliteDb } from '../src/sql-pglite.js';
 
 // Space search on real Postgres (migration 012): the GIN-backed queries, the
 // generated-column invariants (tombstone/edit reindex with zero code), query-

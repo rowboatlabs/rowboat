@@ -1,19 +1,15 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { parseMentions, type Message, type ServerFrame, type Space } from '@rowboat/spaces-protocol';
 import { SpaceHub } from '../src/hub.js';
-import { MemoryStore } from '../src/memory-store.js';
 import { Notifier, buildNotifyText, classifyFor, decideNotifications, type Notification } from '../src/notify.js';
-import { PgStore } from '../src/pg-store.js';
-import { startHarbor, type HarborOptions, type RunningHarbor } from '../src/server.js';
-import type { SqlDb } from '../src/sql.js';
-import { liveClient, restClient } from './helpers.js';
-import { pgliteDb } from './pglite.js';
+import type { RunningHarbor } from '../src/server.js';
+import { freshStore, liveClient, restClient, startTestHarbor } from './helpers.js';
 
 // Notifications (2026-09-10): the org decides once who a message reaches and
 // why — off the stamp and the thread's followers, never the text — and the
 // decision rides the member channel as a `notify` frame (and push.ts to
-// phones). Unit half over MemoryStore; wire half on both stores, watching
-// the frames land on the right sockets and nobody else's.
+// phones). Unit half straight over the store; wire half over the faces,
+// watching the frames land on the right sockets and nobody else's.
 
 const SPACE = '01HZZZZZZZZZZZZZZZZZZZZZZZ';
 const ROOT = '01HXXXXXXXXXXXXXXXXXXXXXXX';
@@ -68,9 +64,9 @@ describe('classification', () => {
   });
 });
 
-describe('decideNotifications + Notifier (memory store)', () => {
+describe('decideNotifications + Notifier', () => {
   async function setup() {
-    const store = new MemoryStore();
+    const store = (await freshStore()).store;
     const s = space('shared');
     await store.putSpace(s);
     for (const id of ['harsh', 'gagan', 'arjun']) {
@@ -129,7 +125,8 @@ describe('decideNotifications + Notifier (memory store)', () => {
       title: 'Harsh · general',
       body: '@here standup in 5',
     });
-    expect(pushed).toEqual([[expect.objectContaining({ memberId: 'gagan', kind: 'here' }), expect.objectContaining({ memberId: 'arjun', kind: 'here' })]]);
+    // Every row, whatever order the roster came back in (memberships tie on joinedAt here).
+    expect(pushed.map((rows) => rows.map((r) => [r.memberId, r.kind]).sort())).toEqual([[['arjun', 'here'], ['gagan', 'here']]]);
 
     // A plain root: nobody hears a frame, push still sees the rows (its `all` level).
     await notifier.onMessage(s, msg('plain root', 'harsh'));
@@ -149,14 +146,13 @@ describe('decideNotifications + Notifier (memory store)', () => {
 // --- wire ---------------------------------------------------------------------
 
 let harbor: RunningHarbor;
-let sqlDb: SqlDb | undefined;
 let ramnique: ReturnType<typeof restClient>;
 let harsh: ReturnType<typeof restClient>;
 let arjun: ReturnType<typeof restClient>;
 let main: string;
 
-async function startForStore(kind: 'memory' | 'postgres'): Promise<void> {
-  const options: HarborOptions = {
+async function start(): Promise<void> {
+  harbor = await startTestHarbor({
     orgName: 'Rowboat Labs',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
@@ -164,14 +160,7 @@ async function startForStore(kind: 'memory' | 'postgres'): Promise<void> {
       { id: 'arjun', displayName: 'Arjun' },
     ],
     seedSpaces: [{ name: 'Main', creator: 'ramnique' }],
-  };
-  if (kind === 'postgres') {
-    sqlDb = await pgliteDb();
-    const store = new PgStore(sqlDb);
-    await store.init();
-    options.store = store;
-  }
-  harbor = await startHarbor(options);
+  });
   ramnique = restClient(harbor, 'dev-ramnique');
   harsh = restClient(harbor, 'dev-harsh');
   arjun = restClient(harbor, 'dev-arjun');
@@ -191,13 +180,13 @@ async function post(client: ReturnType<typeof restClient>, spaceId: string, body
   return r.body.message as Message;
 }
 
-describe.each([['memory'], ['postgres']] as const)('notify frames on the wire (%s store)', (storeKind) => {
+describe('notify frames on the wire', () => {
   let liveR: Awaited<ReturnType<typeof liveClient>>;
   let liveH: Awaited<ReturnType<typeof liveClient>>;
   let liveA: Awaited<ReturnType<typeof liveClient>>;
 
   beforeAll(async () => {
-    await startForStore(storeKind);
+    await start();
     liveR = await liveClient(harbor, 'dev-ramnique');
     liveH = await liveClient(harbor, 'dev-harsh');
     liveA = await liveClient(harbor, 'dev-arjun');
@@ -207,7 +196,6 @@ describe.each([['memory'], ['postgres']] as const)('notify frames on the wire (%
     liveH.close();
     liveA.close();
     await harbor.close();
-    await sqlDb?.close();
   });
 
   it('a mention reaches the named member on their member channel, nobody else', async () => {

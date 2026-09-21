@@ -9,12 +9,9 @@ import {
   type Message,
 } from '@rowboat/spaces-protocol';
 import { legacyToTokens } from '../src/mentions-backfill.js';
-import { PgStore } from '../src/pg-store.js';
 import { searchTextFor } from '../src/search.js';
-import { startHarbor, type HarborOptions, type RunningHarbor } from '../src/server.js';
-import type { SqlDb } from '../src/sql.js';
-import { agentClient, callStructured, restClient } from './helpers.js';
-import { pgliteDb } from './pglite.js';
+import type { RunningHarbor } from '../src/server.js';
+import { agentClient, callStructured, restClient, startTestHarbor } from './helpers.js';
 
 // Mentions (2026-09-10, protocol mentions.ts): one grammar — link tokens with
 // the id in the href — and one parser. The org STAMPS who a message addresses
@@ -78,14 +75,13 @@ describe('the grammar', () => {
 });
 
 let harbor: RunningHarbor;
-let sqlDb: SqlDb | undefined;
 let ramnique: ReturnType<typeof restClient>;
 let harsh: ReturnType<typeof restClient>;
 let arjun: ReturnType<typeof restClient>;
 let main: string;
 
-async function startForStore(kind: 'memory' | 'postgres'): Promise<void> {
-  const options: HarborOptions = {
+async function start(): Promise<void> {
+  harbor = await startTestHarbor({
     orgName: 'Rowboat Labs',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
@@ -94,14 +90,7 @@ async function startForStore(kind: 'memory' | 'postgres'): Promise<void> {
       { id: 'gagan', displayName: 'Gagan' },
     ],
     seedSpaces: [{ name: 'Main', creator: 'ramnique' }],
-  };
-  if (kind === 'postgres') {
-    sqlDb = await pgliteDb();
-    const store = new PgStore(sqlDb);
-    await store.init();
-    options.store = store;
-  }
-  harbor = await startHarbor(options);
+  });
   ramnique = restClient(harbor, 'dev-ramnique');
   harsh = restClient(harbor, 'dev-harsh');
   arjun = restClient(harbor, 'dev-arjun');
@@ -127,17 +116,15 @@ async function unreadOf(client: ReturnType<typeof restClient>) {
     | undefined;
 }
 
-describe.each([['memory'], ['postgres']] as const)('mentions (%s store)', (storeKind) => {
+describe('mentions', () => {
   let root: Message;
 
   beforeAll(async () => {
-    await startForStore(storeKind);
+    await start();
   });
 
   afterAll(async () => {
     await harbor.close();
-    await sqlDb?.close();
-    sqlDb = undefined;
   });
 
   it('stamps only tokens naming space members; a bare name or a non-member id is prose', async () => {

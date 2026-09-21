@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startHarborDeployment, type RunningDeployment } from '../src/deployment.js';
 import type { SqlDb } from '../src/sql.js';
 import { startFakeAs, type FakeAs } from './helpers.js';
-import { pgliteDb } from './pglite.js';
+import { pgliteDb } from '../src/sql-pglite.js';
 
 // Spec §4 "Deployment and tenancy" as tests: one deployment, many orgs,
 // resolved by host, with NOTHING crossing the org boundary — spaces, members,

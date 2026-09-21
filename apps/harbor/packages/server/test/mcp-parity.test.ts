@@ -1,20 +1,16 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { mcpTools, type Member, type Message, type Space } from '@rowboat/spaces-protocol';
-import { PgStore } from '../src/pg-store.js';
-import { startHarbor, type HarborOptions, type RunningHarbor } from '../src/server.js';
-import type { SqlDb } from '../src/sql.js';
-import { agentClient, restClient } from './helpers.js';
-import { pgliteDb } from './pglite.js';
+import type { RunningHarbor } from '../src/server.js';
+import { agentClient, restClient, startTestHarbor } from './helpers.js';
 
 // Agent-face parity (2026-09-09): every member operation the render face has
 // is projected as an MCP tool, and an agent's act IS the member's act,
-// attributed by mode. Through a real MCP client, on both stores. Every
+// attributed by mode. Through a real MCP client. Every
 // structured output is checked against the tool's own output schema so the
 // projection cannot drift from the protocol contract.
 
 let harbor: RunningHarbor;
-let sqlDb: SqlDb | undefined;
 let spaceId: string;
 let dmWithGagan: string;
 let ramnique: ReturnType<typeof restClient>;
@@ -40,8 +36,8 @@ async function refused(client: Client, name: string, args: Record<string, unknow
   return JSON.parse((result.content as Array<{ text: string }>)[0]!.text) as { code: string; message: string };
 }
 
-async function startForStore(kind: 'memory' | 'postgres'): Promise<void> {
-  const options: HarborOptions = {
+async function start(): Promise<void> {
+  harbor = await startTestHarbor({
     orgName: 'Rowboat Labs',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
@@ -49,14 +45,7 @@ async function startForStore(kind: 'memory' | 'postgres'): Promise<void> {
       { id: 'gagan', displayName: 'Gagan' },
       { id: 'loner', displayName: 'Loner' }, // shares no space with anyone
     ],
-  };
-  if (kind === 'postgres') {
-    sqlDb = await pgliteDb();
-    const store = new PgStore(sqlDb);
-    await store.init();
-    options.store = store;
-  }
-  harbor = await startHarbor(options);
+  });
   ramnique = restClient(harbor, 'dev-ramnique');
   gagan = restClient(harbor, 'dev-gagan');
   const harsh = restClient(harbor, 'dev-harsh');
@@ -70,17 +59,15 @@ async function startForStore(kind: 'memory' | 'postgres'): Promise<void> {
   harshAgent = await agentClient(harbor, 'dev-harsh', { agentName: 'Claude' });
 }
 
-describe.each([['memory'], ['postgres']] as const)('agent face parity (%s store)', (storeKind) => {
+describe('agent face parity', () => {
   beforeAll(async () => {
-    await startForStore(storeKind);
+    await start();
   });
 
   afterAll(async () => {
     await ramAgent.close();
     await harshAgent.close();
     await harbor.close();
-    await sqlDb?.close();
-    sqlDb = undefined;
   });
 
   it("whoami is the token's member — the same row /v1/me serves — plus the org's name and address", async () => {

@@ -1,14 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ChangeSet, CreateAssetResult, ReadAssetResult } from '@rowboat/spaces-protocol';
 import { blobHash } from '../src/blobs.js';
-import { PgStore } from '../src/pg-store.js';
-import { startHarbor, type HarborOptions, type RunningHarbor } from '../src/server.js';
-import type { SqlDb } from '../src/sql.js';
-import { pgliteDb } from './pglite.js';
+import type { RunningHarbor } from '../src/server.js';
+import { startTestHarbor } from './helpers.js';
 
 // The upload feature end to end over the render face: phase 1 (uploadBlob) +
-// phase 2 (binary propose / serving), on both stores — the same dual gate as
-// §11. The blob-store drivers have their own conformance suite (blobs.test.ts);
+// phase 2 (binary propose / serving). The blob-store drivers have their own
+// conformance suite (blobs.test.ts);
 // here the memory driver stands in for "no presign" (stream path). The presign
 // redirect is covered in blobs.test.ts's S3 rows and a URL-shape unit below.
 
@@ -20,7 +18,6 @@ const PNG_1PX = Buffer.from(
 const CSV_BYTES = new TextEncoder().encode('week,signups\n1,40\n2,55\n');
 
 let harbor: RunningHarbor;
-let sqlDb: SqlDb | undefined;
 let spaceId: string;
 let homePngId: string; // design/screens/home.png, born in phase 2 — every later call names it by id
 
@@ -61,22 +58,15 @@ function api(token: string) {
 let ramnique: ReturnType<typeof api>;
 let gagan: ReturnType<typeof api>;
 
-describe.each([['memory'], ['postgres']] as const)('blob uploads over the render face (%s store)', (storeKind) => {
+describe('blob uploads over the render face', () => {
   beforeAll(async () => {
-    const options: HarborOptions = {
+    harbor = await startTestHarbor({
       orgName: 'Blob Test Org',
       seedMembers: [
         { id: 'ramnique', displayName: 'Ramnique' },
         { id: 'gagan', displayName: 'Gagan' },
       ],
-    };
-    if (storeKind === 'postgres') {
-      sqlDb = await pgliteDb();
-      const store = new PgStore(sqlDb);
-      await store.init();
-      options.store = store;
-    }
-    harbor = await startHarbor(options);
+    });
     ramnique = api('dev-ramnique');
     gagan = api('dev-gagan');
     // Ramnique-only space: gagan is an org member but NOT a space member.
@@ -86,8 +76,6 @@ describe.each([['memory'], ['postgres']] as const)('blob uploads over the render
 
   afterAll(async () => {
     await harbor.close();
-    await sqlDb?.close();
-    sqlDb = undefined;
   });
 
   // --- phase 1: uploadBlob ---------------------------------------------------
@@ -348,7 +336,7 @@ describe.each([['memory'], ['postgres']] as const)('blob uploads over the render
 
 describe('upload size cap', () => {
   it('refuses a body over maxBlobBytes with payload_too_large', async () => {
-    const small = await startHarbor({
+    const small = await startTestHarbor({
       orgName: 'Tiny Cap Org',
       seedMembers: [{ id: 'ramnique', displayName: 'Ramnique' }],
       maxBlobBytes: 16,

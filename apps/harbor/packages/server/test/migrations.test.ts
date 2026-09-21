@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { migrate, MIGRATIONS } from '../src/migrations.js';
 import { PgStore } from '../src/pg-store.js';
-import { pgliteDb } from './pglite.js';
+import { pgliteDb } from '../src/sql-pglite.js';
 
 // The migration ladder: fresh databases climb it from the bottom; databases
 // from the pre-migration era (bootstrap-style schema, no schema_migrations
