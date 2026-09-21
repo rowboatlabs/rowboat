@@ -656,6 +656,34 @@ export const MIGRATIONS: Migration[] = [
       ) e where r.space_id = e.space_id and r.message_id = e.message_id and r.emoji = e.emoji and r.member_id = e.member_id`,
     ],
   },
+  {
+    id: '022-hygiene',
+    statements: [
+      // The five enum-shaped text columns get the database's own guard. Zod
+      // covers the wire, but migrations and backfills write SQL straight past
+      // it. Existing rows are validated as each constraint lands — a bad
+      // legacy row fails the deploy loudly instead of surfacing later as a
+      // row nothing knows how to render.
+      `alter table members add constraint members_role_check check (role in ('admin', 'member'))`,
+      `alter table spaces add constraint spaces_kind_check check (kind in ('shared', 'direct'))`,
+      `alter table assets add constraint assets_state_check check (state in ('live', 'deleted'))`,
+      `alter table change_sets add constraint change_sets_op_check check (op is null or op in ('move', 'delete', 'restore'))`,
+      `alter table push_prefs add constraint push_prefs_level_check check (level in ('off', 'mentions', 'dms', 'all'))`,
+      // The author as a column. Seven hot queries filtered on
+      // author->>'memberId' — a per-row jsonb extraction with no index and no
+      // statistics. A stored generated column (the body_tsv technique) is
+      // computed by Postgres for every existing row right here and on every
+      // later write, so no code path can forget it, and it indexes.
+      // Attribution.memberId is required, so NOT NULL holds.
+      `alter table messages add column if not exists author_member_id text generated always as (author->>'memberId') stored not null`,
+      `create index if not exists messages_space_author on messages (space_id, author_member_id)`,
+      // The one member-keyed table without an org (015 gave push its own):
+      // member ids are org-scoped, and the schema now says so.
+      `alter table activity_seen add column if not exists org_id text not null default 'org-default'`,
+      `alter table activity_seen drop constraint activity_seen_pkey`,
+      `alter table activity_seen add primary key (org_id, member_id)`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {
