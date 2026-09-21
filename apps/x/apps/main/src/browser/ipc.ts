@@ -1,5 +1,7 @@
-import { BrowserWindow } from 'electron';
+import { app, BrowserWindow } from 'electron';
+import path from 'node:path';
 import { ipc } from '@x/shared';
+import { BrowserMetadataStore } from './metadata-store.js';
 import { browserViewManager, type BrowserState, type DisplayMediaRequest, type HttpAuthRequest } from './view.js';
 
 type IPCChannels = ipc.IPCChannels;
@@ -20,9 +22,17 @@ type BrowserHandlers = {
   'browser:forward': InvokeHandler<'browser:forward'>;
   'browser:reload': InvokeHandler<'browser:reload'>;
   'browser:getState': InvokeHandler<'browser:getState'>;
+  'browser:getSettings': InvokeHandler<'browser:getSettings'>;
+  'browser:updateSettings': InvokeHandler<'browser:updateSettings'>;
   'browser:httpAuthResponse': InvokeHandler<'browser:httpAuthResponse'>;
   'browser:displayMediaResponse': InvokeHandler<'browser:displayMediaResponse'>;
 };
+
+// Lazy initialization respects app.setPath('userData') at startup and test profiles.
+let metadataStore: BrowserMetadataStore | undefined;
+function getMetadataStore(): BrowserMetadataStore {
+  return metadataStore ??= new BrowserMetadataStore(path.join(app.getPath('userData'), 'browser', 'metadata.json'));
+}
 
 /**
  * Browser-specific IPC handlers, exported as a plain object so they can be
@@ -52,17 +62,30 @@ export const browserIpcHandlers: BrowserHandlers = {
     return browserViewManager.closeTab(args.tabId);
   },
   'browser:navigate': async (_event, args) => {
-    return browserViewManager.navigate(args.url);
+    return browserViewManager.navigate(args.url, args.tabId);
   },
-  'browser:back': async () => {
-    return browserViewManager.back();
+  'browser:back': async (_event, args) => {
+    return browserViewManager.back(args?.tabId);
   },
-  'browser:forward': async () => {
-    return browserViewManager.forward();
+  'browser:forward': async (_event, args) => {
+    return browserViewManager.forward(args?.tabId);
   },
   'browser:reload': async (_event, args) => {
-    browserViewManager.reload(args?.tabId);
-    return { ok: true };
+    return browserViewManager.reload(args?.tabId);
+  },
+  'browser:getSettings': async (_event, args) => {
+    try {
+      return { ok: true, settings: await getMetadataStore().getSettings(args?.legacyTabRailOpen) };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : 'Could not load browser settings.' };
+    }
+  },
+  'browser:updateSettings': async (_event, args) => {
+    try {
+      return { ok: true, settings: await getMetadataStore().updateSettings(args) };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : 'Could not save browser settings.' };
+    }
   },
   'browser:getState': async () => {
     return browserViewManager.getState();

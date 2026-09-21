@@ -1,7 +1,7 @@
 import type { IBrowserControlService } from '@x/core/dist/application/browser-control/service.js';
-import type { BrowserControlAction, BrowserControlInput, BrowserControlResult, SuggestedBrowserSkill } from '@x/shared/dist/browser-control.js';
+import type { BrowserControlInput, BrowserControlResult, SuggestedBrowserSkill } from '@x/shared/dist/browser-control.js';
 import { ensureLoaded, matchSkillsForUrl } from '@x/core/dist/application/browser-skills/index.js';
-import { browserViewManager } from './view.js';
+import { browserViewManager, type BrowserViewManager } from './view.js';
 import { normalizeNavigationTarget } from './navigation.js';
 
 async function getSuggestedSkills(url: string | undefined): Promise<SuggestedBrowserSkill[] | undefined> {
@@ -19,247 +19,132 @@ async function getSuggestedSkills(url: string | undefined): Promise<SuggestedBro
   return undefined;
 }
 
-function buildSuccessResult(
-  action: BrowserControlAction,
-  message: string,
-  page?: BrowserControlResult['page'],
-): BrowserControlResult {
-  return {
-    success: true,
-    action,
-    message,
-    browser: browserViewManager.getState(),
-    ...(page ? { page } : {}),
-  };
-}
-
-function buildErrorResult(action: BrowserControlAction, error: string): BrowserControlResult {
-  return {
-    success: false,
-    action,
-    error,
-    browser: browserViewManager.getState(),
-  };
-}
-
 export class ElectronBrowserControlService implements IBrowserControlService {
+  private readonly manager: BrowserViewManager;
+  private readonly suggestSkills: typeof getSuggestedSkills;
+
+  constructor(
+    manager: BrowserViewManager = browserViewManager,
+    suggestSkills = getSuggestedSkills,
+  ) {
+    this.manager = manager;
+    this.suggestSkills = suggestSkills;
+  }
+
   async execute(
     input: BrowserControlInput,
     ctx?: { signal?: AbortSignal },
   ): Promise<BrowserControlResult> {
     const signal = ctx?.signal;
+    const action = input.action;
+    const success = (message: string, page?: BrowserControlResult['page']): BrowserControlResult => ({
+      success: true, action, message, browser: this.manager.getState(), ...(page ? { page } : {}),
+    });
+    const requireOk = (result: { ok: boolean; error?: string }, fallback: string) => {
+      if (!result.ok) throw new Error(result.error ?? fallback);
+    };
+    // Post-action observation must use the same tab, even if another becomes active.
+    const summary = async (tabId: string) => {
+      await this.manager.ensureActiveTabReady(signal, tabId);
+      const result = await this.manager.readPage({ tabId, maxElements: 25, maxTextLength: 4000, waitForReady: false }, signal);
+      requireOk(result, 'Could not read the target browser tab.');
+      return result.page;
+    };
+    const withSkills = async (message: string, page?: BrowserControlResult['page']) => {
+      const suggestedSkills = await this.suggestSkills(page?.url);
+      return { ...success(message, page), ...(suggestedSkills ? { suggestedSkills } : {}) };
+    };
 
     try {
-      switch (input.action) {
-        case 'open': {
-          await browserViewManager.ensureActiveTabReady(signal);
-          const page = await browserViewManager.readPageSummary(signal, { waitForReady: false }) ?? undefined;
-          return buildSuccessResult('open', 'Opened a browser session.', page);
-        }
-
-        case 'get-state':
-          return buildSuccessResult('get-state', 'Read the current browser state.');
-
-        case 'new-tab': {
-          const target = input.target ? normalizeNavigationTarget(input.target) : undefined;
-          const result = await browserViewManager.newTab(target);
-          if (!result.ok) {
-            return buildErrorResult('new-tab', result.error ?? 'Failed to open a new tab.');
-          }
-          await browserViewManager.ensureActiveTabReady(signal);
-          const page = await browserViewManager.readPageSummary(signal, { waitForReady: false }) ?? undefined;
-          const suggestedSkills = await getSuggestedSkills(page?.url);
-          const success = buildSuccessResult(
-            'new-tab',
-            target ? `Opened a new tab for ${target}.` : 'Opened a new tab.',
-            page,
-          );
-          return suggestedSkills ? { ...success, suggestedSkills } : success;
-        }
-
-        case 'switch-tab': {
-          const tabId = input.tabId;
-          if (!tabId) {
-            return buildErrorResult('switch-tab', 'tabId is required for switch-tab.');
-          }
-          const result = browserViewManager.switchTab(tabId);
-          if (!result.ok) {
-            return buildErrorResult('switch-tab', `No browser tab exists with id ${tabId}.`);
-          }
-          await browserViewManager.ensureActiveTabReady(signal);
-          const page = await browserViewManager.readPageSummary(signal, { waitForReady: false }) ?? undefined;
-          return buildSuccessResult('switch-tab', `Switched to tab ${tabId}.`, page);
-        }
-
-        case 'close-tab': {
-          const tabId = input.tabId;
-          if (!tabId) {
-            return buildErrorResult('close-tab', 'tabId is required for close-tab.');
-          }
-          const result = browserViewManager.closeTab(tabId);
-          if (!result.ok) {
-            return buildErrorResult('close-tab', `Could not close tab ${tabId}.`);
-          }
-          await browserViewManager.ensureActiveTabReady(signal);
-          const page = await browserViewManager.readPageSummary(signal, { waitForReady: false }) ?? undefined;
-          return buildSuccessResult('close-tab', `Closed tab ${tabId}.`, page);
-        }
-
-        case 'navigate': {
-          const rawTarget = input.target;
-          if (!rawTarget) {
-            return buildErrorResult('navigate', 'target is required for navigate.');
-          }
-          const target = normalizeNavigationTarget(rawTarget);
-          const result = await browserViewManager.navigate(target);
-          if (!result.ok) {
-            return buildErrorResult('navigate', result.error ?? `Failed to navigate to ${target}.`);
-          }
-          await browserViewManager.ensureActiveTabReady(signal);
-          const page = await browserViewManager.readPageSummary(signal, { waitForReady: false }) ?? undefined;
-          const suggestedSkills = await getSuggestedSkills(page?.url);
-          const success = buildSuccessResult('navigate', `Navigated to ${target}.`, page);
-          return suggestedSkills ? { ...success, suggestedSkills } : success;
-        }
-
-        case 'back': {
-          const result = browserViewManager.back();
-          if (!result.ok) {
-            return buildErrorResult('back', 'The active tab cannot go back.');
-          }
-          await browserViewManager.ensureActiveTabReady(signal);
-          const page = await browserViewManager.readPageSummary(signal, { waitForReady: false }) ?? undefined;
-          return buildSuccessResult('back', 'Went back in the active tab.', page);
-        }
-
-        case 'forward': {
-          const result = browserViewManager.forward();
-          if (!result.ok) {
-            return buildErrorResult('forward', 'The active tab cannot go forward.');
-          }
-          await browserViewManager.ensureActiveTabReady(signal);
-          const page = await browserViewManager.readPageSummary(signal, { waitForReady: false }) ?? undefined;
-          return buildSuccessResult('forward', 'Went forward in the active tab.', page);
-        }
-
-        case 'reload': {
-          browserViewManager.reload();
-          await browserViewManager.ensureActiveTabReady(signal);
-          const page = await browserViewManager.readPageSummary(signal, { waitForReady: false }) ?? undefined;
-          return buildSuccessResult('reload', 'Reloaded the active tab.', page);
-        }
-
-        case 'read-page': {
-          const result = await browserViewManager.readPage(
-            {
-              maxElements: input.maxElements,
-              maxTextLength: input.maxTextLength,
-            },
-            signal,
-          );
-          if (!result.ok || !result.page) {
-            return buildErrorResult('read-page', result.error ?? 'Failed to read the current page.');
-          }
-          const suggestedSkills = await getSuggestedSkills(result.page.url);
-          const success = buildSuccessResult('read-page', 'Read the current page.', result.page);
-          return suggestedSkills ? { ...success, suggestedSkills } : success;
-        }
-
-        case 'click': {
-          const result = await browserViewManager.click(
-            {
-              index: input.index,
-              selector: input.selector,
-              snapshotId: input.snapshotId,
-            },
-            signal,
-          );
-          if (!result.ok) {
-            return buildErrorResult('click', result.error ?? 'Failed to click the requested element.');
-          }
-          const page = await browserViewManager.readPageSummary(signal, { waitForReady: false }) ?? undefined;
-          return buildSuccessResult(
-            'click',
-            result.description ? `Clicked ${result.description}.` : 'Clicked the requested element.',
-            page,
-          );
-        }
-
-        case 'type': {
-          const text = input.text;
-          if (text === undefined) {
-            return buildErrorResult('type', 'text is required for type.');
-          }
-          const result = await browserViewManager.type(
-            {
-              index: input.index,
-              selector: input.selector,
-              snapshotId: input.snapshotId,
-            },
-            text,
-            signal,
-          );
-          if (!result.ok) {
-            return buildErrorResult('type', result.error ?? 'Failed to type into the requested element.');
-          }
-          const page = await browserViewManager.readPageSummary(signal, { waitForReady: false }) ?? undefined;
-          return buildSuccessResult(
-            'type',
-            result.description ? `Typed into ${result.description}.` : 'Typed into the requested element.',
-            page,
-          );
-        }
-
-        case 'press': {
-          const key = input.key;
-          if (!key) {
-            return buildErrorResult('press', 'key is required for press.');
-          }
-          const result = await browserViewManager.press(
-            key,
-            {
-              index: input.index,
-              selector: input.selector,
-              snapshotId: input.snapshotId,
-            },
-            signal,
-          );
-          if (!result.ok) {
-            return buildErrorResult('press', result.error ?? `Failed to press ${key}.`);
-          }
-          const page = await browserViewManager.readPageSummary(signal, { waitForReady: false }) ?? undefined;
-          return buildSuccessResult(
-            'press',
-            result.description ? `Pressed ${result.description}.` : `Pressed ${key}.`,
-            page,
-          );
-        }
-
-        case 'scroll': {
-          const result = await browserViewManager.scroll(
-            input.direction ?? 'down',
-            input.amount ?? 700,
-            signal,
-          );
-          if (!result.ok) {
-            return buildErrorResult('scroll', result.error ?? 'Failed to scroll the page.');
-          }
-          const page = await browserViewManager.readPageSummary(signal, { waitForReady: false }) ?? undefined;
-          return buildSuccessResult('scroll', `Scrolled ${input.direction ?? 'down'}.`, page);
-        }
-
-        case 'wait': {
-          const duration = input.ms ?? 1000;
-          await browserViewManager.wait(duration, signal);
-          const page = await browserViewManager.readPageSummary(signal, { waitForReady: false }) ?? undefined;
-          return buildSuccessResult('wait', `Waited ${duration}ms for the page to settle.`, page);
-        }
+      if (signal?.aborted) throw signal.reason ?? new Error('Browser action aborted.');
+      if (action === 'get-state') return success('Read the current browser state.');
+      if (action === 'new-tab') {
+        const target = input.target ? normalizeNavigationTarget(input.target) : undefined;
+        const result = await this.manager.newTab(target);
+        requireOk(result, 'Failed to open a new tab.');
+        if (!result.tabId) throw new Error('New browser tab did not return an id.');
+        return await withSkills(target ? `Opened a new tab for ${target}.` : 'Opened a new tab.', await summary(result.tabId));
       }
+      if (action === 'switch-tab' || action === 'close-tab') {
+        if (!input.tabId) throw new Error(`tabId is required for ${action}.`);
+        const tabId = this.manager.resolveTabId(input.tabId);
+        if (action === 'switch-tab') {
+          requireOk(this.manager.switchTab(tabId), `Could not switch to browser tab ${tabId}.`);
+          return success(`Switched to tab ${tabId}.`, await summary(tabId));
+        }
+        requireOk(this.manager.closeTab(tabId), `Could not close browser tab ${tabId}.`);
+        // Closing observes the surviving tab captured immediately after closure.
+        const survivorId = this.manager.getState().activeTabId;
+        return success(`Closed tab ${tabId}.`, survivorId ? await summary(survivorId) : undefined);
+      }
+
+      // Legacy callers may omit tabId: resolve once now, never after an await.
+      const tabId = this.manager.resolveTabId(input.tabId,
+        action === 'open' || action === 'navigate' || action === 'read-page');
+      const target = { index: input.index, selector: input.selector, snapshotId: input.snapshotId };
+      let message: string;
+      switch (action) {
+        case 'open':
+          return success('Opened a browser session.', await summary(tabId));
+        case 'navigate': {
+          if (!input.target) throw new Error('target is required for navigate.');
+          const url = normalizeNavigationTarget(input.target);
+          requireOk(await this.manager.navigate(url, tabId), `Failed to navigate to ${url}.`);
+          return await withSkills(`Navigated to ${url}.`, await summary(tabId));
+        }
+        case 'back':
+          requireOk(this.manager.back(tabId), 'The target tab cannot go back.');
+          message = 'Went back in the target tab.';
+          break;
+        case 'forward':
+          requireOk(this.manager.forward(tabId), 'The target tab cannot go forward.');
+          message = 'Went forward in the target tab.';
+          break;
+        case 'reload':
+          requireOk(this.manager.reload(tabId), 'Could not reload the target tab.');
+          message = 'Reloaded the target tab.';
+          break;
+        case 'read-page': {
+          const result = await this.manager.readPage({ tabId, maxElements: input.maxElements, maxTextLength: input.maxTextLength }, signal);
+          requireOk(result, 'Failed to read the target tab.');
+          return await withSkills('Read the current page.', result.page);
+        }
+        case 'click': {
+          const result = await this.manager.click(target, signal, tabId);
+          requireOk(result, 'Failed to click the requested element.');
+          message = result.description ? `Clicked ${result.description}.` : 'Clicked the requested element.';
+          break;
+        }
+        case 'type': {
+          if (input.text === undefined) throw new Error('text is required for type.');
+          const result = await this.manager.type(target, input.text, signal, tabId);
+          requireOk(result, 'Failed to type into the requested element.');
+          message = result.description ? `Typed into ${result.description}.` : 'Typed into the requested element.';
+          break;
+        }
+        case 'press': {
+          if (!input.key) throw new Error('key is required for press.');
+          const result = await this.manager.press(input.key, target, signal, tabId);
+          requireOk(result, `Failed to press ${input.key}.`);
+          message = result.description ? `Pressed ${result.description}.` : `Pressed ${input.key}.`;
+          break;
+        }
+        case 'scroll':
+          requireOk(await this.manager.scroll(input.direction ?? 'down', input.amount ?? 700, signal, tabId), 'Failed to scroll the page.');
+          message = `Scrolled ${input.direction ?? 'down'}.`;
+          break;
+        case 'wait':
+          await this.manager.wait(input.ms ?? 1000, signal, tabId);
+          message = `Waited ${input.ms ?? 1000}ms for the page to settle.`;
+          break;
+      }
+      return success(message, await summary(tabId));
     } catch (error) {
-      return buildErrorResult(
-        input.action,
-        error instanceof Error ? error.message : 'Browser control failed unexpectedly.',
-      );
+      return {
+        success: false, action,
+        error: error instanceof Error ? error.message : 'Browser control failed unexpectedly.',
+        browser: this.manager.getState(),
+      };
     }
   }
 }

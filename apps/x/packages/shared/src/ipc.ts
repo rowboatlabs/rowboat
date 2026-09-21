@@ -24,7 +24,7 @@ import { RowboatApiConfig } from './rowboat-account.js';
 import { RecommendationRowSchema, RecommendationSlot } from './recommendation-update.js';
 import { ZListToolkitsResponse } from './composio.js';
 import { AppSummarySchema, RegistryRecordSchema, RowboatAppManifestSchema } from './rowboat-app.js';
-import { BrowserStateSchema, DisplayMediaRequestSchema, HttpAuthRequestSchema } from './browser-control.js';
+import { BrowserStateSchema, BrowserSettingsPatchSchema, BrowserSettingsResultSchema, DisplayMediaRequestSchema, HttpAuthRequestSchema } from './browser-control.js';
 import { BillingInfoSchema } from './billing.js';
 import { CreditActivatedEventSchema, CreditsStateSchema, ReferralClaimResultSchema } from './credits.js';
 import { GmailThreadSchema } from './blocks.js';
@@ -3569,6 +3569,7 @@ export const ipcSchemas = {
   },
   'browser:navigate': {
     req: z.object({
+      tabId: z.string().min(1).optional(),
       url: z.string().min(1).refine(
         (u) => {
           const lower = u.trim().toLowerCase();
@@ -3587,16 +3588,24 @@ export const ipcSchemas = {
     }),
   },
   'browser:back': {
-    req: z.null(),
-    res: z.object({ ok: z.boolean() }),
+    req: z.object({ tabId: z.string().min(1) }).nullable(),
+    res: z.object({ ok: z.boolean(), error: z.string().optional() }),
   },
   'browser:forward': {
-    req: z.null(),
-    res: z.object({ ok: z.boolean() }),
+    req: z.object({ tabId: z.string().min(1) }).nullable(),
+    res: z.object({ ok: z.boolean(), error: z.string().optional() }),
   },
   'browser:reload': {
     req: z.object({ tabId: z.string().min(1) }).nullable(),
-    res: z.object({ ok: z.literal(true) }),
+    res: z.object({ ok: z.boolean(), error: z.string().optional() }),
+  },
+  'browser:getSettings': {
+    req: z.object({ legacyTabRailOpen: z.boolean().optional() }).nullable(),
+    res: BrowserSettingsResultSchema,
+  },
+  'browser:updateSettings': {
+    req: BrowserSettingsPatchSchema,
+    res: BrowserSettingsResultSchema,
   },
   'browser:getState': {
     req: z.null(),

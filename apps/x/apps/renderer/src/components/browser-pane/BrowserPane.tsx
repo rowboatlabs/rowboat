@@ -19,8 +19,9 @@ declare module 'react' {
   }
 }
 
-import type { DisplayMediaRequest, DisplayMediaSource, HttpAuthRequest } from '@x/shared/dist/browser-control.js'
+import { DEFAULT_BROWSER_PARTITION, type BrowserState, type DisplayMediaRequest, type DisplayMediaSource, type HttpAuthRequest } from '@x/shared/dist/browser-control.js'
 
+import { useBrowserSettings } from './use-browser-settings'
 import { BrowserTabRail } from '@/components/browser-pane/browser-tab-rail'
 import { closeOtherBrowserTabs } from '@/components/browser-pane/browser-tab-actions'
 import { toast } from '@/lib/toast'
@@ -45,21 +46,6 @@ import { cn } from '@/lib/utils'
  * process — this component only owns the chrome (tabs, address bar, nav
  * buttons) and the sizing/visibility lifecycle.
  */
-
-interface BrowserTabState {
-  id: string
-  url: string
-  title: string
-  favicon: string | null
-  canGoBack: boolean
-  canGoForward: boolean
-  loading: boolean
-}
-
-interface BrowserState {
-  activeTabId: string | null
-  tabs: BrowserTabState[]
-}
 
 const EMPTY_STATE: BrowserState = {
   activeTabId: null,
@@ -299,10 +285,7 @@ export function BrowserPane({ onClose, forceHidden = false }: BrowserPaneProps) 
   const [addressValue, setAddressValue] = useState('')
   const [authQueue, setAuthQueue] = useState<HttpAuthRequest[]>([])
   const [displayMediaQueue, setDisplayMediaQueue] = useState<DisplayMediaRequest[]>([])
-  // The vertical-tabs rail: starts collapsed, opens on an explicit click on
-  // the edge strip, and the choice sticks per machine — the same persisted
-  // pattern as the Spaces rail (see spaces-view.tsx).
-  const [railOpen, setRailOpen] = useState(() => localStorage.getItem('browser:railOpen') === '1')
+  const { railOpen, toggleRail } = useBrowserSettings()
 
   const activeTabIdRef = useRef<string | null>(null)
   const addressFocusedRef = useRef(false)
@@ -325,11 +308,11 @@ export function BrowserPane({ onClose, forceHidden = false }: BrowserPaneProps) 
 
   useEffect(() => {
     const cleanup = window.ipc.on('browser:didUpdateState', (incoming) => {
-      applyState(incoming as BrowserState)
+      applyState(incoming)
     })
 
     void window.ipc.invoke('browser:getState', null).then((initial) => {
-      applyState(initial as BrowserState)
+      applyState(initial)
     })
 
     return cleanup
@@ -603,7 +586,9 @@ export function BrowserPane({ onClose, forceHidden = false }: BrowserPaneProps) 
   }, [])
 
   const handleReloadTab = useCallback((tabId: string) => {
-    void window.ipc.invoke('browser:reload', { tabId }).catch(() => toast('Could not reload tab', 'error'))
+    void window.ipc.invoke('browser:reload', { tabId }).then((result) => {
+      if (!result.ok) toast(result.error ?? 'Could not reload tab', 'error')
+    }).catch(() => toast('Could not reload tab', 'error'))
   }, [])
 
   const handleDuplicateTab = useCallback((url: string) => {
@@ -612,35 +597,35 @@ export function BrowserPane({ onClose, forceHidden = false }: BrowserPaneProps) 
     }).catch(() => toast('Could not duplicate tab', 'error'))
   }, [])
 
-  const toggleRail = useCallback(() => {
-    const next = !railOpen
-    localStorage.setItem('browser:railOpen', next ? '1' : '0')
-    setRailOpen(next)
-  }, [railOpen])
-
   const handleSubmitAddress = useCallback((e: React.FormEvent) => {
     e.preventDefault()
     const trimmed = addressValue.trim()
     if (!trimmed) return
-    void window.ipc.invoke('browser:navigate', { url: trimmed }).then((res) => {
-      const result = res as { ok: boolean; error?: string }
-      if (!result.ok && result.error) {
-        console.error('browser:navigate failed', result.error)
-      }
-    })
+    const tabId = activeTabIdRef.current
+    if (!tabId) return
+    void window.ipc.invoke('browser:navigate', { url: trimmed, tabId }).then((result) => {
+      if (!result.ok) toast(result.error ?? 'Could not navigate', 'error')
+    }).catch(() => toast('Could not navigate', 'error'))
   }, [addressValue])
 
   const handleBack = useCallback(() => {
-    void window.ipc.invoke('browser:back', null)
+    const tabId = activeTabIdRef.current
+    if (tabId) void window.ipc.invoke('browser:back', { tabId }).then((result) => {
+      if (!result.ok) toast(result.error ?? 'Could not go back', 'error')
+    }).catch(() => toast('Could not go back', 'error'))
   }, [])
 
   const handleForward = useCallback(() => {
-    void window.ipc.invoke('browser:forward', null)
+    const tabId = activeTabIdRef.current
+    if (tabId) void window.ipc.invoke('browser:forward', { tabId }).then((result) => {
+      if (!result.ok) toast(result.error ?? 'Could not go forward', 'error')
+    }).catch(() => toast('Could not go forward', 'error'))
   }, [])
 
   const handleReload = useCallback(() => {
-    void window.ipc.invoke('browser:reload', null)
-  }, [])
+    const tabId = activeTabIdRef.current
+    if (tabId) handleReloadTab(tabId)
+  }, [handleReloadTab])
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
@@ -724,7 +709,7 @@ export function BrowserPane({ onClose, forceHidden = false }: BrowserPaneProps) 
             />
           </form>
           <browser-action-list
-            partition="persist:rowboat-browser"
+            partition={DEFAULT_BROWSER_PARTITION}
             alignment="bottom right"
             className="ml-1 flex shrink-0 items-center"
           />
