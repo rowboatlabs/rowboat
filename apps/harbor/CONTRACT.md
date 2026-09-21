@@ -32,7 +32,9 @@ slate), or on durable Postgres with `DATABASE_URL`.
   fixtures (`test/merge.test.ts` is the conformance harness — it loads the
   fixture files directly). This exact engine ships in the real Harbor.
 - **Auth is a driver boundary** (`auth.ts`): `authenticate(token) → identity
-  (iss, sub)` then `resolveMember(identity) → member`. Two drivers: `dev`
+  (iss, sub)` then `resolveMember(identity) → member` — one function,
+  `authenticateRequest`, that every face runs, with the RFC 9728 header and
+  metadata document spelled once beside it (2026-09-21). Two drivers: `dev`
   (bearer `dev-<memberId>`; first sight creates the member — local dev and
   tests only) and `oidc` (`auth-oidc.ts`: pinned issuer, RFC 8414 discovery,
   JWKS-verified JWTs via jose, and an (iss, sub) → member lookup that NEVER
@@ -63,7 +65,10 @@ slate), or on durable Postgres with `DATABASE_URL`.
 - **Multi-org deployment** (`deployment.ts` + `directory.ts`, spec §4
   tenancy): `startHarborDeployment` serves 1..N orgs from one process over
   one Postgres — Host (X-Forwarded-Host wins) → org → a cached per-org
-  runtime (service + faces + per-org issuer/policy). `HarborService` stayed
+  runtime — assembled by `buildOrgRuntime` (`runtime.ts`), the one wiring
+  `startHarbor` uses too (2026-09-21); the apex seeds a new org's landing
+  space through it, and orgs on one issuer share one token verifier.
+  `HarborService` stayed
   single-org by design; migration 003 org-scopes members/spaces/identities
   (`member_identities` keys `(org_id, iss, sub)` — the same identity is a
   different member per org); space-scoped tables are untouched (globally

@@ -1,29 +1,27 @@
-import { Notifier } from './notify.js';
-import { PushSender } from './push.js';
-import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http';
+import { createServer, type IncomingMessage, type Server as HttpServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { getRequestListener } from '@hono/node-server';
 import { buildApexApp } from './apex.js';
-import { bindAuth, DevAuthDriver, type AuthDriver, type OrgAuth } from './auth.js';
+import { DevAuthDriver, type AuthDriver } from './auth.js';
 import { OidcAuthDriver } from './auth-oidc.js';
 import type { BlobStore } from './blobs.js';
 import { OrgDirectory, normalizeDomain, type CreateOrgInput, type OrgConfig } from './directory.js';
-import { buildHttpApp } from './http.js';
+import { HarborError } from './errors.js';
 import { SpaceHub } from './hub.js';
-import { handleMcpRequest } from './mcp.js';
 import { migrate } from './migrations.js';
 import { PgStore } from './pg-store.js';
-import { HarborService } from './service.js';
+import { buildOrgRuntime, type OrgRuntime } from './runtime.js';
 import type { SqlDb } from './sql.js';
 import { attachLive } from './ws.js';
 
 // The multi-org deployment (spec §4 "Deployment and tenancy"): one process,
 // 1..N orgs, resolved from the Host header (X-Forwarded-Host wins — every
 // supported platform proxies). HarborService stays single-org; this layer
-// holds one cached runtime (service + faces + auth) per org over one shared
-// SqlDb and one shared hub (space ids are globally unique, so a shared hub
-// cannot cross-deliver). startHarbor (server.ts) remains the single-org
-// self-host/dev path — one org, one config, no directory.
+// maps Host → org and caches one runtime per org — assembled by
+// buildOrgRuntime (runtime.ts), the same wiring startHarbor (server.ts) uses
+// for its one org — over one shared SqlDb and one shared hub (space ids are
+// globally unique, so a shared hub cannot cross-deliver). One token verifier
+// per issuer: every org on the deployment's AS shares one JWKS cache.
 
 export interface DeploymentOptions {
   db: SqlDb;
@@ -66,12 +64,6 @@ export interface RunningDeployment {
   close(): Promise<void>;
 }
 
-interface OrgRuntime {
-  service: HarborService;
-  auth: OrgAuth;
-  hono: (req: IncomingMessage, res: ServerResponse) => void;
-}
-
 export async function startHarborDeployment(options: DeploymentOptions): Promise<RunningDeployment> {
   await migrate(options.db);
   // Derived-index repair rides boot on BOTH boot paths (this one and the
@@ -81,7 +73,61 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
   await new PgStore(options.db).backfillAssetSearch();
   const directory = new OrgDirectory(options.db);
   const hub = new SpaceHub();
-  const runtimes = new Map<string, OrgRuntime>();
+  // One runtime per org, built on first sight — a Promise, so concurrent first
+  // requests share the build — and one token verifier per issuer.
+  const runtimes = new Map<string, Promise<OrgRuntime | undefined>>();
+  const orgByDomain = new Map<string, OrgConfig>();
+  const drivers = new Map<string, AuthDriver>();
+  const driverFor = (issuer: string | undefined): AuthDriver => {
+    if (!issuer) return new DevAuthDriver();
+    let driver = drivers.get(issuer);
+    if (!driver) {
+      driver = new OidcAuthDriver({ issuer });
+      drivers.set(issuer, driver);
+    }
+    return driver;
+  };
+
+  function runtimeForOrg(org: OrgConfig): Promise<OrgRuntime | undefined> {
+    let pending = runtimes.get(org.id);
+    if (!pending) {
+      // An issuer-less org runs dev auth only where the deployment allows it:
+      // on a public deployment that is a misconfiguration, not a fallback.
+      pending =
+        !org.issuer && !options.allowDevOrgs
+          ? Promise.resolve(undefined)
+          : buildOrgRuntime({
+              store: new PgStore(options.db, org.id),
+              hub,
+              org: {
+                name: org.name,
+                address: org.domains[0] ?? org.id,
+                ...(org.allowedEmailDomains ? { allowedEmailDomains: org.allowedEmailDomains } : {}),
+              },
+              orgId: org.id,
+              auth: driverFor(org.issuer),
+              ...(options.blobs ? { blobs: options.blobs(org.id) } : {}),
+              ...(org.issuer && options.consentPublishableKey ? { consentPublishableKey: options.consentPublishableKey } : {}),
+              ...(options.maxBlobBytes !== undefined ? { maxBlobBytes: options.maxBlobBytes } : {}),
+            });
+      runtimes.set(org.id, pending);
+      // A failed build is not cached — the next request tries again.
+      pending.catch(() => runtimes.delete(org.id));
+    }
+    return pending;
+  }
+
+  async function runtimeFor(host: string | undefined): Promise<OrgRuntime | undefined> {
+    if (!host) return undefined;
+    const domain = normalizeDomain(host);
+    let org = orgByDomain.get(domain);
+    if (!org) {
+      org = await directory.getByDomain(domain);
+      if (!org) return undefined;
+      orgByDomain.set(domain, org);
+    }
+    return runtimeForOrg(org);
+  }
 
   const apexDomain = options.apexDomain ? normalizeDomain(options.apexDomain) : undefined;
   const apex =
@@ -90,57 +136,18 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
           buildApexApp({
             db: options.db,
             directory,
-            auth: new OidcAuthDriver({ issuer: options.issuer }),
-            hub,
+            auth: driverFor(options.issuer),
             apexDomain,
             issuer: options.issuer,
             ...(options.consentPublishableKey ? { consentPublishableKey: options.consentPublishableKey } : {}),
+            serviceFor: async (org) => {
+              const runtime = await runtimeForOrg(org);
+              if (!runtime) throw new HarborError('internal', 'the new org has no runtime on this deployment');
+              return runtime.service;
+            },
           }).fetch,
         )
       : undefined;
-
-  function buildRuntime(org: OrgConfig): OrgRuntime | undefined {
-    if (!org.issuer && !options.allowDevOrgs) return undefined;
-    const store = new PgStore(options.db, org.id);
-    const service = new HarborService(
-      store,
-      hub,
-      {
-        name: org.name,
-        address: org.domains[0] ?? org.id,
-        ...(org.allowedEmailDomains ? { allowedEmailDomains: org.allowedEmailDomains } : {}),
-      },
-      options.blobs?.(org.id),
-      new Notifier(store, hub, new PushSender(store, org.id)),
-    );
-    const driver: AuthDriver = org.issuer ? new OidcAuthDriver({ issuer: org.issuer }) : new DevAuthDriver();
-    const auth = bindAuth(driver, store);
-    const app = buildHttpApp({
-      service,
-      auth,
-      ...(org.issuer && options.consentPublishableKey
-        ? { consent: { issuer: org.issuer, publishableKey: options.consentPublishableKey } }
-        : {}),
-      ...(options.maxBlobBytes !== undefined ? { maxBlobBytes: options.maxBlobBytes } : {}),
-    });
-    return { service, auth, hono: getRequestListener(app.fetch) };
-  }
-
-  async function runtimeFor(host: string | undefined): Promise<OrgRuntime | undefined> {
-    if (!host) return undefined;
-    const domain = normalizeDomain(host);
-    const cached = runtimes.get(domain);
-    if (cached) return cached;
-    const org = await directory.getByDomain(domain);
-    if (!org) return undefined;
-    const runtime = buildRuntime(org);
-    if (runtime) {
-      // The mentions backfill (service.migrateMentions): idempotent, once per org runtime, before it serves.
-      await runtime.service.migrateMentions();
-      runtimes.set(domain, runtime);
-    }
-    return runtime;
-  }
 
   const hostOf = (req: IncomingMessage): string | undefined => {
     const forwarded = req.headers['x-forwarded-host'];
@@ -167,21 +174,14 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
         );
         return;
       }
-      if (req.url === '/mcp' || req.url?.startsWith('/mcp?')) {
-        await handleMcpRequest(req, res, { service: runtime.service, auth: runtime.auth });
-        return;
-      }
-      runtime.hono(req, res);
+      runtime.handle(req, res);
     })().catch((err) => {
       console.error('[harbor] deployment request error:', err);
       if (!res.headersSent) res.writeHead(500).end();
     });
   });
 
-  const closeLive = attachLive(server, async (host) => {
-    const runtime = await runtimeFor(host);
-    return runtime ? { service: runtime.service, hub, auth: runtime.auth } : undefined;
-  });
+  const closeLive = attachLive(server, async (host) => (await runtimeFor(host))?.live);
 
   await new Promise<void>((resolve) => server.listen(options.port ?? 0, resolve));
   const port = (server.address() as AddressInfo).port;

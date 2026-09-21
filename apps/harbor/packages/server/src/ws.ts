@@ -1,7 +1,7 @@
 import type { Server } from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { ClientFrame, type ServerFrame } from '@rowboat/spaces-protocol';
-import type { OrgAuth } from './auth.js';
+import { authenticateRequest, type OrgAuth } from './auth.js';
 import { HarborError } from './errors.js';
 import type { SpaceHub } from './hub.js';
 import type { HarborService } from './service.js';
@@ -25,7 +25,7 @@ import type { HarborService } from './service.js';
 // replays durable events from its last offset; ephemeral frames were never
 // promised (the board self-heals on its next full sync).
 
-interface Deps {
+export interface LiveDeps {
   service: HarborService;
   hub: SpaceHub;
   auth: OrgAuth;
@@ -44,7 +44,7 @@ interface LiveSocket extends WebSocket {
  * Host (spec §4 tenancy); the single-org server ignores the host. Undefined =
  * no org on that domain.
  */
-export type LiveDepsResolver = (host: string | undefined) => Deps | undefined | Promise<Deps | undefined>;
+export type LiveDepsResolver = (host: string | undefined) => LiveDeps | undefined | Promise<LiveDeps | undefined>;
 
 export function attachLive(
   server: Server,
@@ -80,7 +80,7 @@ export function attachLive(
     // impossible. Nobody reads the socket during the await; bytes just buffer.
     socket.on('error', () => {});
     void (async () => {
-      let deps: Deps | undefined;
+      let deps: LiveDeps | undefined;
       let memberId: string;
       try {
         const forwarded = req.headers['x-forwarded-host'];
@@ -90,8 +90,8 @@ export function attachLive(
           socket.destroy();
           return;
         }
-        const identity = await deps.auth.authenticate(req.headers.authorization, url.searchParams.get('token'));
-        memberId = (await deps.auth.resolveMember(identity)).id;
+        const credentials = { authorization: req.headers.authorization, queryToken: url.searchParams.get('token') };
+        memberId = (await authenticateRequest(deps.auth, credentials)).member.id;
       } catch (err) {
         const status = err instanceof HarborError && err.status === 403 ? '403 Forbidden' : '401 Unauthorized';
         socket.write(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`);
@@ -112,7 +112,7 @@ export function attachLive(
   };
 }
 
-function handleConnection(ws: LiveSocket, memberId: string, deps: Deps, maxBufferedBytes: number): void {
+function handleConnection(ws: LiveSocket, memberId: string, deps: LiveDeps, maxBufferedBytes: number): void {
   const subscriptions = new Map<string, () => void>();
 
   ws.sawLifeSinceLastBeat = true;
