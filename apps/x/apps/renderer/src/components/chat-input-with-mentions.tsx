@@ -685,6 +685,8 @@ function ChatInputInner({
   const currentWorkDirPath = effectiveWorkDir ? compactWorkDirPath(effectiveWorkDir) : ''
 
   return (
+    <>
+      {!codeSessionLock && <div className="flex min-w-0 flex-wrap items-center gap-1.5 py-2"><HarnessControls value={harness} onChange={updateHarness} /></div>}
     <div
       data-tour-id="chat-composer"
       // The @ menu opens above this box, at its width (see MentionPopover).
@@ -833,7 +835,6 @@ function ChatInputInner({
           className="min-h-6 rounded-none border-0 py-0 shadow-none focus-visible:ring-0"
         />
       </div>
-      {!codeSessionLock && <div className="px-4 pb-2"><HarnessControls value={harness} onChange={updateHarness} /></div>}
       <div ref={toolbarRef} className="flex items-center gap-2 px-4 pb-3">
         <div ref={leftGroupRef} className="flex min-w-0 items-center gap-2 overflow-hidden">
         <DropdownMenu>
@@ -1193,6 +1194,7 @@ function ChatInputInner({
         </>
       )}
     </div>
+    </>
   )
 }
 
