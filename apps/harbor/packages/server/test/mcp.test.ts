@@ -3,7 +3,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { mcpTools } from '@rowboat/spaces-protocol';
-import { startHarbor, type RunningHarbor } from '../src/server.js';
+import type { RunningHarbor } from '../src/server.js';
+import { startTestHarbor } from './helpers.js';
 
 // Agent-face tests through a real MCP client: the exact path any agent
 // (Rowboat's included — no privileged path) uses.
@@ -13,7 +14,7 @@ let spaceId: string;
 let roadmapId: string; // the seeded roadmap.md's asset id — every later call names it by id
 
 beforeAll(async () => {
-  harbor = await startHarbor({
+  harbor = await startTestHarbor({
     seedMembers: [
       { id: 'harsh', displayName: 'Harsh' },
       { id: 'ramnique', displayName: 'Ramnique' },

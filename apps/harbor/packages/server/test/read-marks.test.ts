@@ -1,10 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Message, ServerFrame } from '@rowboat/spaces-protocol';
-import { PgStore } from '../src/pg-store.js';
-import { startHarbor, type HarborOptions, type RunningHarbor } from '../src/server.js';
-import type { SqlDb } from '../src/sql.js';
-import { liveClient, restClient } from './helpers.js';
-import { pgliteDb } from './pglite.js';
+import type { RunningHarbor } from '../src/server.js';
+import { liveClient, restClient, startTestHarbor } from './helpers.js';
 
 // Read state (2026-09-09): per-member cursors the org owns, in OFFSETS —
 // a stream mark per space plus a mark per FOLLOWED thread. Runs on both
@@ -12,14 +9,13 @@ import { pgliteDb } from './pglite.js';
 // and the counts must agree.
 
 let harbor: RunningHarbor;
-let sqlDb: SqlDb | undefined;
 let ramnique: ReturnType<typeof restClient>;
 let harsh: ReturnType<typeof restClient>;
 let arjun: ReturnType<typeof restClient>;
 let main: string;
 
-async function startForStore(kind: 'memory' | 'postgres'): Promise<void> {
-  const options: HarborOptions = {
+async function start(): Promise<void> {
+  harbor = await startTestHarbor({
     orgName: 'Rowboat Labs',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
@@ -27,14 +23,7 @@ async function startForStore(kind: 'memory' | 'postgres'): Promise<void> {
       { id: 'arjun', displayName: 'Arjun' },
     ],
     seedSpaces: [{ name: 'Main', creator: 'ramnique' }],
-  };
-  if (kind === 'postgres') {
-    sqlDb = await pgliteDb();
-    const store = new PgStore(sqlDb);
-    await store.init();
-    options.store = store;
-  }
-  harbor = await startHarbor(options);
+  });
   ramnique = restClient(harbor, 'dev-ramnique');
   harsh = restClient(harbor, 'dev-harsh');
   arjun = restClient(harbor, 'dev-arjun');
@@ -62,18 +51,16 @@ async function unreadOf(client: ReturnType<typeof restClient>) {
   return space as { head: number; readOffset: number; unreadRoots: number; threads: Array<{ rootMessageId: string; readOffset: number; lastReplyOffset: number; unreadReplies: number }> } | undefined;
 }
 
-describe.each([['memory'], ['postgres']] as const)('read marks (%s store)', (storeKind) => {
+describe('read marks', () => {
   let r4: Message;
   let arjunReply: Message;
 
   beforeAll(async () => {
-    await startForStore(storeKind);
+    await start();
   });
 
   afterAll(async () => {
     await harbor.close();
-    await sqlDb?.close();
-    sqlDb = undefined;
   });
 
   it('a fresh member has a zero mark and nothing unread', async () => {

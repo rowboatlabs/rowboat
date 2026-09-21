@@ -4,7 +4,7 @@ import { SpaceHub } from '../src/hub.js';
 import { PgStore } from '../src/pg-store.js';
 import { HarborService } from '../src/service.js';
 import type { SqlDb } from '../src/sql.js';
-import { pgliteDb } from './pglite.js';
+import { pgliteDb } from '../src/sql-pglite.js';
 
 // Store-level paths the §11 day doesn't walk, exercised on real Postgres
 // through the real service (no HTTP — this is the storage contract, not the

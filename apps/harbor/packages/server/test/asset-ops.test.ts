@@ -1,18 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ChangeSet, CreateAssetResult, MoveAssetResult, ReadAssetResult } from '@rowboat/spaces-protocol';
-import { PgStore } from '../src/pg-store.js';
-import { startHarbor, type HarborOptions, type RunningHarbor } from '../src/server.js';
-import type { SqlDb } from '../src/sql.js';
-import { pgliteDb } from './pglite.js';
-import { agentClient, callStructured } from './helpers.js';
+import type { RunningHarbor } from '../src/server.js';
+import { agentClient, callStructured, startTestHarbor } from './helpers.js';
 
 // Namespace ops (move/delete/restore) with ids as the wire identity
 // (2026-09-14): the path is a display property of the record, so a move is a
 // property update — history and bytes never relocate, and nothing addressed
-// by id notices. Runs on both stores, the §11 dual gate.
+// by id notices.
 
 let harbor: RunningHarbor;
-let sqlDb: SqlDb | undefined;
 let spaceId: string;
 /** The traveller: created in setup, moved/trashed/restored through the suite. */
 let ssoId: string;
@@ -36,19 +32,12 @@ function api(token: string) {
 
 let ramnique: ReturnType<typeof api>;
 
-describe.each([['memory'], ['postgres']] as const)('asset move/delete/restore (%s store)', (storeKind) => {
+describe('asset move/delete/restore', () => {
   beforeAll(async () => {
-    const options: HarborOptions = {
+    harbor = await startTestHarbor({
       orgName: 'Ops Test Org',
       seedMembers: [{ id: 'ramnique', displayName: 'Ramnique' }],
-    };
-    if (storeKind === 'postgres') {
-      sqlDb = await pgliteDb();
-      const store = new PgStore(sqlDb);
-      await store.init();
-      options.store = store;
-    }
-    harbor = await startHarbor(options);
+    });
     ramnique = api('dev-ramnique');
     const created = await ramnique.post('/v1/spaces', { name: 'Ops' });
     spaceId = created.body.space.id;
@@ -69,8 +58,6 @@ describe.each([['memory'], ['postgres']] as const)('asset move/delete/restore (%
 
   afterAll(async () => {
     await harbor.close();
-    await sqlDb?.close();
-    sqlDb = undefined;
   });
 
   it('moves a file into a new folder: same id at the new path, history travels, the version does not bump', async () => {

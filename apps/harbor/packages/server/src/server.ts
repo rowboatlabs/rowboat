@@ -6,7 +6,6 @@ import { MemoryBlobStore, type BlobStore } from './blobs.js';
 import { buildHttpApp } from './http.js';
 import { SpaceHub } from './hub.js';
 import { handleMcpRequest } from './mcp.js';
-import { MemoryStore } from './memory-store.js';
 import { HarborService } from './service.js';
 import { Notifier } from './notify.js';
 import { PushSender } from './push.js';
@@ -17,7 +16,7 @@ import { attachLive } from './ws.js';
 //   REST render face     /v1/*  (+ /join/<token>)
 //   live face            /v1/live (WebSocket upgrade)
 //   MCP agent face       /mcp
-// One in-memory org per process; multi-org routing arrives with the real Harbor.
+// One org per process; deployment.ts serves many from one process.
 
 export interface SeedMember {
   id: string;
@@ -41,9 +40,9 @@ export interface HarborOptions {
   address?: string;
   /** Org policy v1: restrict invite binds to these email domains (spec §4). */
   allowedEmailDomains?: string[];
-  /** Storage; defaults to in-memory. Pass a PgStore (init() run) for durable deployments. */
-  store?: Store;
-  /** Blob bytes; defaults to in-memory (matching the store default). Pass Disk/S3 for durable deployments. */
+  /** Storage: a PgStore with init() run — durable Postgres, or PGlite in-process for dev and tests (sql-pglite.ts). */
+  store: Store;
+  /** Blob bytes; defaults to in-memory. Pass Disk/S3 for durable deployments. */
   blobs?: BlobStore;
   /** Upload cap for the raw-bytes blob route (default 100MB). */
   maxBlobBytes?: number;
@@ -74,8 +73,8 @@ export interface RunningHarbor {
   close(): Promise<void>;
 }
 
-export async function startHarbor(options: HarborOptions = {}): Promise<RunningHarbor> {
-  const store = options.store ?? new MemoryStore();
+export async function startHarbor(options: HarborOptions): Promise<RunningHarbor> {
+  const { store } = options;
   const blobs = options.blobs ?? new MemoryBlobStore();
   const auth: AuthDriver = options.auth ?? new DevAuthDriver();
   const hub = new SpaceHub();

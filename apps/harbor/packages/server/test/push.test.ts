@@ -1,15 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { MemoryStore } from '../src/memory-store.js';
 import type { Notification } from '../src/notify.js';
 import { PushSender, levelAllows } from '../src/push.js';
-import { startHarbor, type RunningHarbor } from '../src/server.js';
-import { restClient } from './helpers.js';
+import type { RunningHarbor } from '../src/server.js';
+import { freshStore, restClient, startTestHarbor } from './helpers.js';
 import type { Message, Space } from '@rowboat/spaces-protocol';
 
 // Push notifications (PUSH_PLAN.md): the phone half of delivery. The
 // decision is notify.ts's (notify.test.ts); this pins the level gate, the
 // author-free fan-out to Expo tokens, dead-token pruning and wire-level
-// registration — against MemoryStore with a mocked Expo endpoint.
+// registration — against the store with a mocked Expo endpoint.
 
 const space = (kind: 'shared' | 'direct'): Space =>
   ({ id: '01HZZZZZZZZZZZZZZZZZZZZZZZ', name: 'general', createdAt: new Date().toISOString(), kind }) as Space;
@@ -47,7 +46,7 @@ describe('levels', () => {
 
 describe('PushSender.send', () => {
   async function setup(level: 'off' | 'mentions' | 'dms' | 'all' | null) {
-    const store = new MemoryStore();
+    const store = (await freshStore()).store;
     const s = space('shared');
     await store.putSpace(s);
     for (const id of ['harsh', 'gagan']) {
@@ -88,7 +87,7 @@ describe('PushSender.send', () => {
   });
 
   it('prunes DeviceNotRegistered tokens from tickets', async () => {
-    const store = new MemoryStore();
+    const store = (await freshStore()).store;
     const s = space('shared');
     await store.putSpace(s);
     await store.putMember({ id: 'gagan', displayName: 'Gagan', role: 'member' });
@@ -106,7 +105,7 @@ describe('PushSender.send', () => {
 describe('wire registration', () => {
   let harbor: RunningHarbor;
   beforeAll(async () => {
-    harbor = await startHarbor({
+    harbor = await startTestHarbor({
       orgName: 'Rowboat Labs',
       seedMembers: [{ id: 'gagan', displayName: 'Gagan' }],
     });

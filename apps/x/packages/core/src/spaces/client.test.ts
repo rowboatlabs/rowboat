@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { startHarbor, type RunningHarbor } from '@rowboat/harbor';
+import { PgStore, pgliteDb, startHarbor, type RunningHarbor } from '@rowboat/harbor';
 import { SpacesClient, SpacesRequestError } from './client.js';
 import { SpacesLive } from './live.js';
 
@@ -11,8 +11,23 @@ let harbor: RunningHarbor;
 let ramnique: SpacesClient;
 let gagan: SpacesClient;
 
+/** A harbor over its own in-process Postgres (PGlite) — the store the server's own tests run on; close() takes it down too. */
+async function startTestHarbor(options: Omit<Parameters<typeof startHarbor>[0], 'store'>): Promise<RunningHarbor> {
+  const db = await pgliteDb();
+  const store = new PgStore(db);
+  await store.init();
+  const started = await startHarbor({ ...options, store });
+  return {
+    ...started,
+    close: async () => {
+      await started.close();
+      await db.close();
+    },
+  };
+}
+
 beforeAll(async () => {
-  harbor = await startHarbor({
+  harbor = await startTestHarbor({
     orgName: 'Client Test Org',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
@@ -462,7 +477,7 @@ describe('SpacesLive liveness', () => {
   it('the watchdog bounces a silent socket and the stream resumes; new events still arrive', async () => {
     // A harbor whose heartbeat effectively never fires is the client's-eye
     // view of a half-open socket after sleep: OPEN, silent, no close coming.
-    const silent = await startHarbor({
+    const silent = await startTestHarbor({
       orgName: 'Silent Org',
       seedMembers: [{ id: 'ramnique', displayName: 'Ramnique' }],
       liveHeartbeatMs: 3_600_000,

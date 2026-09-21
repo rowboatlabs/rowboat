@@ -1,11 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ActivityItem, ActivityPage, Message, Space } from '@rowboat/spaces-protocol';
 import { readActivity } from '@rowboat/spaces-protocol';
-import { PgStore } from '../src/pg-store.js';
-import { startHarbor, type HarborOptions, type RunningHarbor } from '../src/server.js';
-import type { SqlDb } from '../src/sql.js';
-import { agentClient, callStructured, liveClient, restClient } from './helpers.js';
-import { pgliteDb } from './pglite.js';
+import type { RunningHarbor } from '../src/server.js';
+import { agentClient, callStructured, liveClient, restClient, startTestHarbor } from './helpers.js';
 
 // Activity (2026-09-10, layer 3): everything that involves the member, as a
 // query over the facts the org already keeps — stamps, follow rows, the DM
@@ -14,14 +11,13 @@ import { pgliteDb } from './pglite.js';
 // unread, and the cursor. The agent face gets names resolved.
 
 let harbor: RunningHarbor;
-let sqlDb: SqlDb | undefined;
 let ramnique: ReturnType<typeof restClient>;
 let harsh: ReturnType<typeof restClient>;
 let arjun: ReturnType<typeof restClient>;
 let main: string;
 
-async function startForStore(kind: 'memory' | 'postgres'): Promise<void> {
-  const options: HarborOptions = {
+async function start(): Promise<void> {
+  harbor = await startTestHarbor({
     orgName: 'Rowboat Labs',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
@@ -29,14 +25,7 @@ async function startForStore(kind: 'memory' | 'postgres'): Promise<void> {
       { id: 'arjun', displayName: 'Arjun' },
     ],
     seedSpaces: [{ name: 'Main', creator: 'ramnique' }],
-  };
-  if (kind === 'postgres') {
-    sqlDb = await pgliteDb();
-    const store = new PgStore(sqlDb);
-    await store.init();
-    options.store = store;
-  }
-  harbor = await startHarbor(options);
+  });
   ramnique = restClient(harbor, 'dev-ramnique');
   harsh = restClient(harbor, 'dev-harsh');
   arjun = restClient(harbor, 'dev-arjun');
@@ -67,13 +56,13 @@ async function activity(client: ReturnType<typeof restClient>, qs = ''): Promise
 const kinds = (page: ActivityPage) => page.items.map((i) => i.kind);
 const tick = () => new Promise((resolve) => setTimeout(resolve, 2)); // distinct instants, the order under test
 
-describe.each([['memory'], ['postgres']] as const)('activity (%s store)', (storeKind) => {
+describe('activity', () => {
   let r1: Message;
   let h1: Message;
   let dm: Space;
 
   beforeAll(async () => {
-    await startForStore(storeKind);
+    await start();
     r1 = await post(ramnique, main, 'kickoff: what should we ship first?');
     await tick();
     h1 = await post(harsh, main, 'hey [@Ramnique](#member:ramnique) look at this');
@@ -99,8 +88,6 @@ describe.each([['memory'], ['postgres']] as const)('activity (%s store)', (store
   });
   afterAll(async () => {
     await harbor.close();
-    await sqlDb?.close();
-    sqlDb = undefined;
   });
 
   it('lists everything that involves me, newest first, one kind per message by priority', async () => {

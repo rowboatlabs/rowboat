@@ -44,7 +44,7 @@ export interface BlobStore {
   ): Promise<string>;
 }
 
-/** In-memory driver — tests and the dev stub (restart = clean slate, matching MemoryStore). */
+/** In-memory driver — tests and `pnpm dev` (restart = clean slate). */
 export class MemoryBlobStore implements BlobStore {
   private blobs = new Map<string, Uint8Array>();
 
