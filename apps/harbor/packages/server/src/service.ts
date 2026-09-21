@@ -123,6 +123,11 @@ function stampsOf(message: Message): MentionStamps {
   return { members: message.mentions, here: message.mentionsHere, rowboat: message.mentionsRowboat };
 }
 
+/** A message's thread pointer as an optional field — mirrored onto every event about the message so live clients route it without a lookup. */
+function threadRootOf(message: Pick<Message, 'threadRoot'>): { threadRoot?: string } {
+  return message.threadRoot !== undefined ? { threadRoot: message.threadRoot } : {};
+}
+
 export interface OrgInfo {
   name: string;
   /** host[:port] — the org address links are minted on. Set once the listener knows its port. */
@@ -243,6 +248,23 @@ export class HarborService {
     else this.hub.publish(spaceId, frame);
   }
 
+  /** The next offset on the space's log — for a write that needs it before its event exists (message and change-set rows carry it). Inside the space lock only. */
+  private async nextOffset(spaceId: string): Promise<number> {
+    return (await this.store.head(spaceId)) + 1;
+  }
+
+  /** Allocate and append in one step, for events nothing else needs the offset of first. Inside the space lock only. */
+  private async appendNext(spaceId: string, at: string, event: SpaceEvent): Promise<number> {
+    const offset = await this.nextOffset(spaceId);
+    await this.append(spaceId, offset, at, event);
+    return offset;
+  }
+
+  /** Who did it and how (core.ts Attribution): the caller, in the mode the request declares, under its display label. */
+  private attributionOf(ctx: ActorCtx, input: { actingMode: ActingMode; agentName?: string }): Attribution {
+    return { memberId: ctx.memberId, actingMode: input.actingMode, ...(input.agentName ? { agentName: input.agentName } : {}) };
+  }
+
   // --- identity --------------------------------------------------------------
 
   /** The caller's own row — what /v1/me and whoami serve. */
@@ -266,8 +288,7 @@ export class HarborService {
     return this.locked(space.id, async () => {
       const membership: Membership = { spaceId: space.id, memberId: ctx.memberId, joinedAt: now };
       await this.store.putMembership(membership);
-      const offset = (await this.store.head(space.id)) + 1;
-      await this.append(space.id, offset, now, { type: 'membership', membership, action: 'joined' });
+      await this.appendNext(space.id, now, { type: 'membership', membership, action: 'joined' });
       // The stream needs no object (annotation model): it is simply the
       // space's root messages, born empty.
       return space;
@@ -285,18 +306,13 @@ export class HarborService {
     const space = await this.requireMember(ctx, spaceId);
     enforce(canRenameSpace(space));
     this.guardWrite();
-    const by: Attribution = {
-      memberId: ctx.memberId,
-      actingMode: input.actingMode,
-      ...(input.agentName ? { agentName: input.agentName } : {}),
-    };
+    const by = this.attributionOf(ctx, input);
     return this.locked(spaceId, async () => {
       const current = (await this.store.getSpace(spaceId)) ?? space;
       if (current.name === input.name) return current; // idempotent, no event
       const updated: Space = { ...current, name: input.name };
       await this.store.putSpace(updated);
-      const offset = (await this.store.head(spaceId)) + 1;
-      await this.append(spaceId, offset, this.now(), { type: 'space_renamed', space: updated, by });
+      await this.appendNext(spaceId, this.now(), { type: 'space_renamed', space: updated, by });
       return updated;
     });
   }
@@ -401,8 +417,7 @@ export class HarborService {
       if (!membership) return;
       await this.store.deleteMembership(spaceId, ctx.memberId);
       await this.store.deleteReadMarks(spaceId, ctx.memberId);
-      const offset = (await this.store.head(spaceId)) + 1;
-      await this.append(spaceId, offset, this.now(), { type: 'membership', membership, action: 'left' });
+      await this.appendNext(spaceId, this.now(), { type: 'membership', membership, action: 'left' });
     });
   }
 
@@ -474,8 +489,7 @@ export class HarborService {
       if (existing) return { membership: existing, space }; // idempotent join
       const membership: Membership = { spaceId, memberId: ctx.memberId, joinedAt: this.now() };
       await this.store.putMembership(membership);
-      const offset = (await this.store.head(spaceId)) + 1;
-      await this.append(spaceId, offset, membership.joinedAt, { type: 'membership', membership, action: 'joined' });
+      await this.appendNext(spaceId, membership.joinedAt, { type: 'membership', membership, action: 'joined' });
       return { membership, space };
     });
   }
@@ -584,11 +598,7 @@ export class HarborService {
       throw new HarborError('invalid_request', 'threadRootId does not exist in this space');
     }
     const data = await this.proposalData(spaceId, input);
-    const attribution: Attribution = {
-      memberId: ctx.memberId,
-      actingMode: input.actingMode,
-      ...(input.agentName ? { agentName: input.agentName } : {}),
-    };
+    const attribution = this.attributionOf(ctx, input);
     return this.locked(spaceId, async () => {
       const occupant = await this.store.getLiveAssetByPath(spaceId, input.path);
       if (occupant) {
@@ -612,11 +622,7 @@ export class HarborService {
     if (input.threadRootId && !(await this.store.getMessage(spaceId, input.threadRootId))) {
       throw new HarborError('invalid_request', 'threadRootId does not exist in this space');
     }
-    const attribution: Attribution = {
-      memberId: ctx.memberId,
-      actingMode: input.actingMode,
-      ...(input.agentName ? { agentName: input.agentName } : {}),
-    };
+    const attribution = this.attributionOf(ctx, input);
     return this.locked(spaceId, async () => {
       const asset = await this.requireLiveAsset(spaceId, input.assetId);
       if (input.toPath === asset.path) {
@@ -655,11 +661,7 @@ export class HarborService {
     if (input.threadRootId && !(await this.store.getMessage(spaceId, input.threadRootId))) {
       throw new HarborError('invalid_request', 'threadRootId does not exist in this space');
     }
-    const attribution: Attribution = {
-      memberId: ctx.memberId,
-      actingMode: input.actingMode,
-      ...(input.agentName ? { agentName: input.agentName } : {}),
-    };
+    const attribution = this.attributionOf(ctx, input);
     return this.locked(spaceId, async () => {
       const asset = await this.requireLiveAsset(spaceId, input.assetId);
       if (input.baseVersion > asset.version) {
@@ -690,11 +692,7 @@ export class HarborService {
   ): Promise<RestoreAssetResult> {
     await this.requireMember(ctx, spaceId);
     this.guardWrite();
-    const attribution: Attribution = {
-      memberId: ctx.memberId,
-      actingMode: input.actingMode,
-      ...(input.agentName ? { agentName: input.agentName } : {}),
-    };
+    const attribution = this.attributionOf(ctx, input);
     return this.locked(spaceId, async () => {
       const dead = await this.requireAsset(spaceId, input.assetId);
       if (dead.state !== 'deleted') throw new HarborError('invalid_request', 'this file is not in the trash');
@@ -730,7 +728,7 @@ export class HarborService {
       at: string;
     },
   ): Promise<ChangeSet> {
-    const offset = (await this.store.head(spaceId)) + 1;
+    const offset = await this.nextOffset(spaceId);
     const threadRootId = input.threadRootId ?? threadRootFromReason(input.reason);
     const changeSet: ChangeSet = {
       id: this.ulid(),
@@ -845,11 +843,7 @@ export class HarborService {
       throw new HarborError('invalid_request', 'threadRootId does not exist in this space');
     }
     const proposal = await this.proposalData(spaceId, input);
-    const attribution: Attribution = {
-      memberId: ctx.memberId,
-      actingMode: input.actingMode,
-      ...(input.agentName ? { agentName: input.agentName } : {}),
-    };
+    const attribution = this.attributionOf(ctx, input);
 
     return this.locked(spaceId, async () => {
       const asset = await this.requireLiveAsset(spaceId, input.assetId);
@@ -916,7 +910,7 @@ export class HarborService {
     data: AssetVersionData,
   ): Promise<ChangeSet> {
     const at = this.now();
-    const offset = (await this.store.head(spaceId)) + 1;
+    const offset = await this.nextOffset(spaceId);
     // Provenance: an explicit threadRootId wins; otherwise the "· thread:<id>"
     // reason suffix that prompt-driven agents write (best effort — the suffix
     // is a claim, not validated).
@@ -1185,11 +1179,7 @@ export class HarborService {
   async postMessage(ctx: ActorCtx, spaceId: string, input: NewMessage): Promise<{ message: Message }> {
     const space = await this.requireMember(ctx, spaceId);
     this.guardWrite();
-    const author: Attribution = {
-      memberId: ctx.memberId,
-      actingMode: input.actingMode,
-      ...(input.agentName ? { agentName: input.agentName } : {}),
-    };
+    const author = this.attributionOf(ctx, input);
 
     const stamps = await this.stampsFor(spaceId, input.body);
     const result = await this.locked(spaceId, async () => {
@@ -1210,7 +1200,7 @@ export class HarborService {
         // A reply. Normalize to the root (Slack-style: replying to a reply is
         // replying to its thread) — threads stay flat by construction.
         const root = await this.resolveRoot(spaceId, input.threadRoot);
-        const offset = (await this.store.head(spaceId)) + 1;
+        const offset = await this.nextOffset(spaceId);
         const message: Message = {
           id: this.ulid(),
           spaceId,
@@ -1257,7 +1247,7 @@ export class HarborService {
         const anchor = await this.store.getChangeSet(spaceId, input.anchorChangeSetId);
         if (!anchor) throw new HarborError('invalid_request', 'anchorChangeSetId does not exist in this space');
       }
-      const offset = (await this.store.head(spaceId)) + 1;
+      const offset = await this.nextOffset(spaceId);
       const message: Message = {
         id: this.ulid(),
         spaceId,
@@ -1312,17 +1302,13 @@ export class HarborService {
   ): Promise<{ topic: Topic; rootMessage: Message }> {
     await this.requireMember(ctx, spaceId);
     this.guardWrite();
-    const by: Attribution = {
-      memberId: ctx.memberId,
-      actingMode: input.actingMode,
-      ...(input.agentName ? { agentName: input.agentName } : {}),
-    };
+    const by = this.attributionOf(ctx, input);
 
     return this.locked(spaceId, async () => {
       const at = this.now();
 
       let root: Message;
-      let offset = (await this.store.head(spaceId)) + 1;
+      let offset = await this.nextOffset(spaceId);
       if (input.rootMessageId) {
         const message = await this.store.getMessage(spaceId, input.rootMessageId);
         if (!message) throw new HarborError('not_found', 'no such message');
@@ -1390,13 +1376,12 @@ export class HarborService {
     at: string,
   ): Promise<Message> {
     await this.store.markMessageEdited(spaceId, message.id, body, at, stamps);
-    const offset = (await this.store.head(spaceId)) + 1;
-    await this.append(spaceId, offset, at, {
+    await this.appendNext(spaceId, at, {
       type: 'message_edited',
       edit: {
         spaceId,
         messageId: message.id,
-        ...(message.threadRoot !== undefined ? { threadRoot: message.threadRoot } : {}),
+        ...threadRootOf(message),
         body,
         by,
         at,
@@ -1444,8 +1429,7 @@ export class HarborService {
           const updated: Topic = { ...t, title };
           await this.store.putTopic(updated);
           const at = this.now();
-          const offset = (await this.store.head(space.id)) + 1;
-          await this.append(space.id, offset, at, { type: 'topic', topic: updated, action: 'retitled', by: t.createdBy });
+          await this.appendNext(space.id, at, { type: 'topic', topic: updated, action: 'retitled', by: t.createdBy });
           out.titles += 1;
         }
       });
@@ -1473,11 +1457,7 @@ export class HarborService {
   ): Promise<Message> {
     await this.requireMember(ctx, spaceId);
     this.guardWrite();
-    const by: Attribution = {
-      memberId: ctx.memberId,
-      actingMode: input.actingMode,
-      ...(input.agentName ? { agentName: input.agentName } : {}),
-    };
+    const by = this.attributionOf(ctx, input);
 
     return this.locked(spaceId, async () => {
       const message = await this.store.getMessage(spaceId, messageId);
@@ -1493,13 +1473,12 @@ export class HarborService {
       if (message.threadRoot !== undefined) {
         await this.store.refreshReplyStats(spaceId, message.threadRoot);
       }
-      const offset = (await this.store.head(spaceId)) + 1;
-      await this.append(spaceId, offset, at, {
+      await this.appendNext(spaceId, at, {
         type: 'message_deleted',
         deletion: {
           spaceId,
           messageId,
-          ...(message.threadRoot !== undefined ? { threadRoot: message.threadRoot } : {}),
+          ...threadRootOf(message),
           by,
           at,
         },
@@ -1525,11 +1504,7 @@ export class HarborService {
   ): Promise<Message> {
     await this.requireMember(ctx, spaceId);
     this.guardWrite();
-    const by: Attribution = {
-      memberId: ctx.memberId,
-      actingMode: input.actingMode,
-      ...(input.agentName ? { agentName: input.agentName } : {}),
-    };
+    const by = this.attributionOf(ctx, input);
 
     const stamps = await this.stampsFor(spaceId, input.body);
     return this.locked(spaceId, async () => {
@@ -1559,11 +1534,7 @@ export class HarborService {
   async reactToMessage(ctx: ActorCtx, spaceId: string, messageId: string, input: ReactInput): Promise<Message> {
     await this.requireMember(ctx, spaceId);
     this.guardWrite();
-    const by: Attribution = {
-      memberId: ctx.memberId,
-      actingMode: input.actingMode,
-      ...(input.agentName ? { agentName: input.agentName } : {}),
-    };
+    const by = this.attributionOf(ctx, input);
 
     return this.locked(spaceId, async () => {
       const message = await this.store.getMessage(spaceId, messageId);
@@ -1578,19 +1549,18 @@ export class HarborService {
       const reaction = {
         spaceId,
         messageId,
-        ...(message.threadRoot !== undefined ? { threadRoot: message.threadRoot } : {}),
+        ...threadRootOf(message),
         emoji: input.emoji,
         by,
         at,
       };
       if (input.action === 'add' && !existing) {
-        const offset = (await this.store.head(spaceId)) + 1;
+        const offset = await this.nextOffset(spaceId);
         await this.store.putReaction({ spaceId, messageId, emoji: input.emoji, by, at, offset });
         await this.append(spaceId, offset, at, { type: 'reaction', reaction, action: 'added' });
       } else if (input.action === 'remove' && existing) {
         await this.store.deleteReaction(spaceId, messageId, input.emoji, ctx.memberId);
-        const offset = (await this.store.head(spaceId)) + 1;
-        await this.append(spaceId, offset, at, { type: 'reaction', reaction, action: 'removed' });
+        await this.appendNext(spaceId, at, { type: 'reaction', reaction, action: 'removed' });
       }
 
       return this.foldLive(spaceId, message);
@@ -1608,11 +1578,7 @@ export class HarborService {
   async votePoll(ctx: ActorCtx, spaceId: string, messageId: string, input: VotePollInput): Promise<Message> {
     await this.requireMember(ctx, spaceId);
     this.guardWrite();
-    const by: Attribution = {
-      memberId: ctx.memberId,
-      actingMode: input.actingMode,
-      ...(input.agentName ? { agentName: input.agentName } : {}),
-    };
+    const by = this.attributionOf(ctx, input);
 
     return this.locked(spaceId, async () => {
       const message = await this.store.getMessage(spaceId, messageId);
@@ -1634,27 +1600,26 @@ export class HarborService {
           );
           for (const v of mine) {
             await this.store.deletePollVote(spaceId, messageId, v.answerId, ctx.memberId);
-            const offset = (await this.store.head(spaceId)) + 1;
+            const offset = await this.nextOffset(spaceId);
             await this.append(spaceId, offset, at, {
               type: 'poll_vote',
-              vote: { spaceId, ...(message.threadRoot !== undefined ? { threadRoot: message.threadRoot } : {}), messageId, answerId: v.answerId, by, at },
+              vote: { spaceId, ...threadRootOf(message), messageId, answerId: v.answerId, by, at },
               action: 'removed',
             });
           }
         }
         await this.store.putPollVote({ spaceId, messageId, answerId: input.answerId, by, at });
-        const offset = (await this.store.head(spaceId)) + 1;
+        const offset = await this.nextOffset(spaceId);
         await this.append(spaceId, offset, at, {
           type: 'poll_vote',
-          vote: { spaceId, ...(message.threadRoot !== undefined ? { threadRoot: message.threadRoot } : {}), messageId, answerId: input.answerId, by, at },
+          vote: { spaceId, ...threadRootOf(message), messageId, answerId: input.answerId, by, at },
           action: 'added',
         });
       } else if (input.action === 'remove' && existing) {
         await this.store.deletePollVote(spaceId, messageId, input.answerId, ctx.memberId);
-        const offset = (await this.store.head(spaceId)) + 1;
-        await this.append(spaceId, offset, at, {
+        await this.appendNext(spaceId, at, {
           type: 'poll_vote',
-          vote: { spaceId, ...(message.threadRoot !== undefined ? { threadRoot: message.threadRoot } : {}), messageId, answerId: input.answerId, by, at },
+          vote: { spaceId, ...threadRootOf(message), messageId, answerId: input.answerId, by, at },
           action: 'removed',
         });
       }
@@ -1674,11 +1639,7 @@ export class HarborService {
     this.guardWrite();
     // Same line as voting (parity, 2026-09-09): the author's agent counts as
     // the author — the author-only check below is on memberId, not mode.
-    const by: Attribution = {
-      memberId: ctx.memberId,
-      actingMode: input.actingMode,
-      ...(input.agentName ? { agentName: input.agentName } : {}),
-    };
+    const by = this.attributionOf(ctx, input);
 
     return this.locked(spaceId, async () => {
       const message = await this.store.getMessage(spaceId, messageId);
@@ -1690,10 +1651,9 @@ export class HarborService {
       if (poll.endedAt || poll.expiresAt <= at) return this.foldLive(spaceId, message);
 
       await this.store.markPollEnded(spaceId, messageId, at);
-      const offset = (await this.store.head(spaceId)) + 1;
-      await this.append(spaceId, offset, at, {
+      await this.appendNext(spaceId, at, {
         type: 'poll_ended',
-        end: { spaceId, ...(message.threadRoot !== undefined ? { threadRoot: message.threadRoot } : {}), messageId, by, at },
+        end: { spaceId, ...threadRootOf(message), messageId, by, at },
       });
       return this.foldLive(spaceId, { ...message, poll: { ...poll, endedAt: at } });
     });
@@ -1708,11 +1668,7 @@ export class HarborService {
   async manageTopic(ctx: ActorCtx, spaceId: string, topicId: string, action: ManageTopicAction): Promise<Topic> {
     await this.requireMember(ctx, spaceId);
     this.guardWrite();
-    const by: Attribution = {
-      memberId: ctx.memberId,
-      actingMode: action.actingMode,
-      ...(action.agentName ? { agentName: action.agentName } : {}),
-    };
+    const by = this.attributionOf(ctx, action);
 
     return this.locked(spaceId, async () => {
       const topic = await this.store.getTopic(spaceId, topicId);
@@ -1724,7 +1680,7 @@ export class HarborService {
           if (topic.title === action.title) return topic; // idempotent, no event
           const updated: Topic = { ...topic, title: action.title };
           await this.store.putTopic(updated);
-          const offset = (await this.store.head(spaceId)) + 1;
+          const offset = await this.nextOffset(spaceId);
           await this.append(spaceId, offset, at, { type: 'topic', topic: updated, action: 'retitled', by });
           return updated;
         }
@@ -1734,14 +1690,14 @@ export class HarborService {
           if (topic.archived === archived) return topic; // idempotent, no event
           const updated: Topic = { ...topic, archived };
           await this.store.putTopic(updated);
-          const offset = (await this.store.head(spaceId)) + 1;
+          const offset = await this.nextOffset(spaceId);
           await this.append(spaceId, offset, at, { type: 'topic', topic: updated, action: action.action === 'archive' ? 'archived' : 'unarchived', by });
           return updated;
         }
         case 'remove': {
           await this.store.deleteTopic(spaceId, topicId);
           const removal: TopicRemoval = { spaceId, topicId, rootMessageId: topic.rootMessageId, by, at };
-          const offset = (await this.store.head(spaceId)) + 1;
+          const offset = await this.nextOffset(spaceId);
           await this.append(spaceId, offset, at, { type: 'topic_removed', removal });
           return topic;
         }
@@ -1750,7 +1706,7 @@ export class HarborService {
           if (topic.documentAssetId === asset.id) return topic; // idempotent, no event
           await this.store.setTopicDocument(spaceId, topicId, asset.id);
           const updated: Topic = { ...topic, documentAssetId: asset.id };
-          const offset = (await this.store.head(spaceId)) + 1;
+          const offset = await this.nextOffset(spaceId);
           await this.append(spaceId, offset, at, { type: 'topic', topic: updated, action: 'document_attached', by });
           return updated;
         }
@@ -1759,8 +1715,7 @@ export class HarborService {
           await this.store.setTopicDocument(spaceId, topicId, null);
           const { documentAssetId: _gone, ...rest } = topic;
           const updated: Topic = rest;
-          const offset = (await this.store.head(spaceId)) + 1;
-          await this.append(spaceId, offset, at, { type: 'topic', topic: updated, action: 'document_detached', by });
+          await this.appendNext(spaceId, at, { type: 'topic', topic: updated, action: 'document_detached', by });
           return updated;
         }
       }
