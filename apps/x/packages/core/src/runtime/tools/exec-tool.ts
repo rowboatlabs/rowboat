@@ -27,8 +27,6 @@ export interface ToolContext {
     // policy. code_agent_run honors these over the model's cwd argument and the
     // global approval policy.
     codeCwd?: string | null;
-    codeModel?: string;
-    codeEffort?: string;
     codePolicy?: 'ask' | 'auto-approve-reads' | 'yolo' | null;
 }
 

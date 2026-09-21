@@ -1,5 +1,3 @@
-import { saveHarnessSettings, harnessComposition } from '@/lib/harness-settings'
-import type { HarnessSettings } from '@x/shared/src/code-mode'
 import { WorkspaceSessionTabs } from './components/code/workspace-session-tabs'
 import { DocumentFileViewer } from '@/components/document-file-viewer'
 import { parseSpacesLink, readLastSpace, resolveSpacesLocation, serverLandingSpaceId, type SpacesLinkTarget } from '@/lib/spaces-navigation'
@@ -1582,11 +1580,11 @@ function App() {
     })
   }, [voice, cancelPttForSteal])
 
-  const handlePromptSubmitRef = useRef<((message: PromptInputMessage, mentions?: Mention[], stagedAttachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode, harness?: HarnessSettings) => Promise<void>) | null>(null)
+  const handlePromptSubmitRef = useRef<((message: PromptInputMessage, mentions?: Mention[], stagedAttachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => Promise<void>) | null>(null)
   // Companion sends (bar submits, call utterances) — filled once
   // handleHoverSubmit exists; early callers (startCall's PTT callback) fire
   // at event time, long after render.
-  const handleHoverSubmitRef = useRef<((message: PromptInputMessage, mentions?: Mention[], stagedAttachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode, harness?: HarnessSettings) => Promise<void>) | null>(null)
+  const handleHoverSubmitRef = useRef<((message: PromptInputMessage, mentions?: Mention[], stagedAttachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => Promise<void>) | null>(null)
   // Late-bound handle to bindChatToRun (declared with the chat plumbing far
   // below) for early-declared effects like quick-ask open-chat.
   const bindChatToRunRef = useRef<((rid: string) => void) | null>(null)
@@ -2429,7 +2427,6 @@ function App() {
     searchEnabled?: boolean,
     codeMode?: 'claude' | 'codex',
     permissionMode?: PermissionMode,
-    harness?: HarnessSettings,
   ) => {
     const userMessage = message.text.trim()
     const hasAttachments = stagedAttachments.length > 0
@@ -2513,7 +2510,7 @@ function App() {
               ...(pendingVoiceInputRef.current ? { voiceInput: true } : {}),
               ...(ttsEnabledRef.current ? { voiceOutput: ttsModeRef.current } : {}),
               ...(searchEnabled ? { searchEnabled: true } : {}),
-              ...(codeMode ? { codeMode, ...harnessComposition(harness) } : {}),
+              ...(codeMode ? { codeMode } : {}),
               ...((inCallRef.current && video.cameraOn) || video.screenState === 'live'
                 ? { videoMode: true }
                 : {}),
@@ -2625,7 +2622,6 @@ function App() {
         payload.searchEnabled,
         payload.codeMode,
         payload.permissionMode,
-        payload.harness,
       )
     })
   }, [])
@@ -4247,7 +4243,6 @@ function App() {
     searchEnabled?: boolean,
     codeMode?: 'claude' | 'codex',
     permissionMode?: PermissionMode,
-    harness?: HarnessSettings,
     targetTabId?: string,
   ) => {
     const submitTabId = targetTabId ?? activeChatTabIdRef.current
@@ -4416,7 +4411,7 @@ function App() {
                     codeMode: codeSessionLocksRef.current[currentRunId].codeModeEnabled === false ? null : codeSessionLocksRef.current[currentRunId].agent,
                     codeCwd: codeSessionLocksRef.current[currentRunId].cwd,
                   }
-                : (codeMode ? { codeMode, ...harnessComposition(harness) } : {})),
+                : (codeMode ? { codeMode } : {})),
               ...((submitInCall && video.cameraOn) || video.screenState === 'live'
                 ? { videoMode: true }
                 : {}),
@@ -5088,7 +5083,6 @@ function App() {
     searchEnabled?: boolean
     codeMode?: 'claude' | 'codex'
     permissionMode?: PermissionMode
-    harness?: HarnessSettings
   } | null>(null)
 
   const handleHomeComposerSubmit = useCallback((
@@ -5098,7 +5092,6 @@ function App() {
     searchEnabled?: boolean,
     codeMode?: 'claude' | 'codex',
     permissionMode?: PermissionMode,
-    harness?: HarnessSettings,
   ) => {
     const text = message.text?.trim() ?? ''
     if (!text && stagedAttachments.length === 0) return
@@ -5137,7 +5130,7 @@ function App() {
     // Chat mode has NO routing rules: mentions here just address the
     // assistant. Tasks are born via the chip, the list, or by asking.
     handleNewChatTabInSidebar(homeSelectionRef.current)
-    setPendingHomeSubmit({ message, mentions, attachments: stagedAttachments, searchEnabled, codeMode, permissionMode, harness })
+    setPendingHomeSubmit({ message, mentions, attachments: stagedAttachments, searchEnabled, codeMode, permissionMode })
   }, [handleNewChatTabInSidebar])
   handleHomeComposerSubmitRef.current = handleHomeComposerSubmit
   const homeComposeTargetRef = useRef(homeComposeTarget)
@@ -5146,7 +5139,6 @@ function App() {
   useEffect(() => {
     if (!pendingHomeSubmit) return
     const tabId = activeChatTabIdRef.current
-    if (pendingHomeSubmit.harness) saveHarnessSettings(chatIdForTab(tabId), pendingHomeSubmit.harness)
     if (homeSelectionRef.current) selectionByTabRef.current.set(chatIdForTab(tabId), homeSelectionRef.current)
     void handlePromptSubmitRef.current?.(
       pendingHomeSubmit.message,
@@ -5155,7 +5147,6 @@ function App() {
       pendingHomeSubmit.searchEnabled,
       pendingHomeSubmit.codeMode,
       pendingHomeSubmit.permissionMode,
-      pendingHomeSubmit.harness,
     )
     setPendingHomeSubmit(null)
   }, [pendingHomeSubmit])
@@ -7970,7 +7961,7 @@ function App() {
                 legacyPane={isCodeOpen} workspaceSessionId={activeCodeSession?.session.id ?? null}
                 onMoveChat={moveAssistantChat} onNewChatAt={newChatAt} onSelectChatAt={selectChatAt} onFocusChat={switchChatTab}
                 onHideSidebar={() => dispatchAssistantLayout({ type: 'hide-sidebar' })} onCloseChat={closeAssistantChat}
-                onSubmitForTab={(id, message, mentions, attachments, search, mode, permission, harness) => handlePromptSubmit(message, mentions, attachments, search, mode, permission, harness, id)}
+                onSubmitForTab={(id, message, mentions, attachments, search, mode, permission) => handlePromptSubmit(message, mentions, attachments, search, mode, permission, id)}
                 voiceOwner={voiceOwner} callChatId={hoverRunId}
                 onStartRecordingForTab={(id) => { switchChatTab(id); handleStartRecording(chatIdForTab(id)) }}
                 onStartCallForTab={(id, preset) => { switchChatTab(id); handleStartCall(preset) }}

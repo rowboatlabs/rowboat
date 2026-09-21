@@ -13,7 +13,7 @@ export type CodingAgent = z.infer<typeof CodingAgent>;
 export const ApprovalPolicy = z.enum(["ask", "auto-approve-reads", "yolo"]);
 export type ApprovalPolicy = z.infer<typeof ApprovalPolicy>;
 
-// A per-conversation choice, independent of the Assistant's own model.
+// Project Harness controls, independent of the Assistant's own model.
 export const HarnessSettings = z.object({
     enabled: z.boolean(),
     agent: CodingAgent,

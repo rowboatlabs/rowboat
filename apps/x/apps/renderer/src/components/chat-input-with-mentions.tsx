@@ -1,6 +1,3 @@
-import { HarnessControls } from './harness-controls'
-import { readHarnessSettings, saveHarnessSettings } from '@/lib/harness-settings'
-import type { HarnessSettings } from '@x/shared/src/code-mode'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
@@ -203,7 +200,7 @@ export type CallPreset = 'voice' | 'video' | 'share' | 'practice'
 
 interface ChatInputInnerProps {
   draftKey?: string
-  onSubmit: (message: PromptInputMessage, mentions?: Mention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode, harness?: HarnessSettings) => void
+  onSubmit: (message: PromptInputMessage, mentions?: Mention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => void
   onStop?: () => void
   isProcessing: boolean
   /**
@@ -337,18 +334,6 @@ function ChatInputInner({
   const [lockedModel, setLockedModel] = useState<SelectedModel | null>(null)
   const [searchEnabled, setSearchEnabled] = useState(false)
   const [searchAvailable, setSearchAvailable] = useState(false)
-  const [harness, setHarness] = useState<HarnessSettings>(() => readHarnessSettings(draftKey))
-  useEffect(() => {
-    const restore = () => setHarness(readHarnessSettings(draftKey))
-    restore()
-    const changed = (event: Event) => { if ((event as CustomEvent).detail === draftKey) restore() }
-    window.addEventListener('harness-settings-changed', changed)
-    return () => window.removeEventListener('harness-settings-changed', changed)
-  }, [draftKey])
-  const codingAgent = harness.agent
-  const codeModeEnabled = harness.enabled
-  const updateHarness = (value: HarnessSettings) => { setHarness(value); saveHarnessSettings(draftKey, value) }
-
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('auto')
   const [recentWorkDirs, setRecentWorkDirs] = useState<RecentWorkDir[]>([])
 
@@ -356,7 +341,6 @@ function ChatInputInner({
   // right→left until everything fits. Stages:
   //   2 perm→icon · 3 search label hidden · 4 workDir→icon
   //   6 perm→menu · 7 search→menu · 8 workDir→menu
-  // Harness has its own row and remains visible at every width.
   // Once items move into the "⋯" overflow menu (≥5) no icon is ever hidden.
   // overflow-hidden on the left group is the hard guarantee against any overlap.
   const toolbarRef = useRef<HTMLDivElement>(null)
@@ -381,7 +365,7 @@ function ChatInputInner({
 
   // …or when the *set* of items changes (an item appears/disappears, or the model
   // name width changes). Deliberately excludes the in-place toggles (searchEnabled,
-  // permissionMode, codeModeEnabled, codingAgent): those fire from the overflow menu
+  // permissionMode): those fire from the overflow menu
   // for items already inside it, so resetting here would unmount the open menu. The
   // no-dep effect below still re-collapses if any toggle happens to widen the row.
   useLayoutEffect(() => {
@@ -430,8 +414,6 @@ function ChatInputInner({
     refreshModels()
   }, [isActive, refreshModels])
 
-  // Harness is a per-conversation choice, available in ordinary chats and
-  // non-git folders independently of the legacy Code Mode setting.
 
   // Cross-platform basename — handles both / and \ separators.
   const basename = useCallback((p: string): string => {
@@ -625,16 +607,15 @@ function ChatInputInner({
 
   const handleSubmit = useCallback(() => {
     if (!canSubmit) return
-    // codeMode is sticky per conversation — don't reset after send. A code
-    // project session supplies its persisted preference and selected agent.
-    const effectiveCodeMode = codeSessionLock ? (codeSessionLock.codeModeEnabled === false ? undefined : codeSessionLock.agent) : (codeModeEnabled ? codingAgent : undefined)
-    onSubmit({ text: message.trim(), files: [] }, controller.mentions.mentions, attachments, searchEnabled || undefined, effectiveCodeMode, permissionMode, harness)
+    // Only a Project session supplies a Harness preference and selected agent.
+    const effectiveCodeMode = codeSessionLock ? (codeSessionLock.codeModeEnabled === false ? undefined : codeSessionLock.agent) : undefined
+    onSubmit({ text: message.trim(), files: [] }, controller.mentions.mentions, attachments, searchEnabled || undefined, effectiveCodeMode, permissionMode)
     controller.textInput.clear()
     controller.mentions.clearMentions()
     setAttachments([])
     // Web search toggle stays on for the rest of the chat session; the user
     // turns it off explicitly. (Not persisted across app restarts.)
-  }, [attachments, canSubmit, controller, message, onSubmit, searchEnabled, codeModeEnabled, codingAgent, permissionMode, workDir, codeSessionLock, harness])
+  }, [attachments, canSubmit, controller, message, onSubmit, searchEnabled, permissionMode, workDir, codeSessionLock])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -685,8 +666,6 @@ function ChatInputInner({
   const currentWorkDirPath = effectiveWorkDir ? compactWorkDirPath(effectiveWorkDir) : ''
 
   return (
-    <>
-      {!codeSessionLock && <div className="flex min-w-0 flex-wrap items-center gap-1.5 py-2"><HarnessControls value={harness} onChange={updateHarness} /></div>}
     <div
       data-tour-id="chat-composer"
       // The @ menu opens above this box, at its width (see MentionPopover).
@@ -1194,7 +1173,6 @@ function ChatInputInner({
         </>
       )}
     </div>
-    </>
   )
 }
 
@@ -1294,7 +1272,7 @@ export interface ChatInputWithMentionsProps {
   recentFiles: string[]
   visibleFiles: string[]
   /** The @ menu's picks ride along: files (attachments), spaces and people (userMessageContext.spaceMentions). */
-  onSubmit: (message: PromptInputMessage, mentions?: Mention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode, harness?: HarnessSettings) => void
+  onSubmit: (message: PromptInputMessage, mentions?: Mention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => void
   onStop?: () => void
   isProcessing: boolean
   /** Let Enter submit while processing (queue/steer) — see ChatInputInner. */

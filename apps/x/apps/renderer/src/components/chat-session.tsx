@@ -1,4 +1,3 @@
-import type { HarnessSettings } from '@x/shared/src/code-mode'
 import * as React from 'react'
 import { Clock, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -271,7 +270,6 @@ export interface ChatSessionComposerProps {
     searchEnabled?: boolean,
     codeMode?: 'claude' | 'codex',
     permissionMode?: PermissionMode,
-    harness?: HarnessSettings,
   ) => void | Promise<void>
   onStop?: () => void | Promise<void>
   activeIsProcessing: boolean
