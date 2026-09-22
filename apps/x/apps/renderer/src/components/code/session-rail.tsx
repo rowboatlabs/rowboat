@@ -204,17 +204,15 @@ function SessionRow({
                 {workspaceTitle}
               </span>
               <UnreadBadge badge={{ unread: unreadCount, forYou: unreadCount }} direct />
-              {/* The time's slot is exactly as wide as the hover actions, so the
-                  actions replace the time — never the title beside it. */}
-              <span className="w-12 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground/70 transition-opacity group-hover:opacity-0 group-has-[[data-state=open]]:opacity-0">
-                {when}
-              </span>
             </div>
-            <div className="truncate text-[11px] leading-4 text-muted-foreground/70">{detail}</div>
+            <div className="flex items-baseline gap-1 truncate text-[11px] leading-4 text-muted-foreground/70">
+              <span className="truncate">{detail}</span>
+              <span className="shrink-0 tabular-nums">· {when}</span>
+            </div>
           </div>
-          {/* Hover actions sit in the time's reserved slot so the card never
-              reflows and nothing overlaps the text. */}
-          <div className="absolute right-1.5 top-1 flex items-center opacity-0 transition-opacity group-hover:opacity-100 has-[[data-state=open]]:opacity-100">
+          {/* 2026-09-22: float the actions like Spaces so titles can use the
+              full row width without reserving a permanent button slot. */}
+          <div className="pointer-events-none absolute right-1 -top-2 z-10 flex items-center rounded-md border border-border bg-[var(--rowboat-raised)] p-0.5 opacity-0 shadow-sm transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 has-[[data-state=open]]:pointer-events-auto has-[[data-state=open]]:opacity-100">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
