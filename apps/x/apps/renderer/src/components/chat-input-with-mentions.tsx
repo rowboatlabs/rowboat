@@ -3,6 +3,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import {
   ArrowUp,
   AudioLines,
+  Copy,
   FileArchive,
   FileCode2,
   FileIcon,
@@ -438,6 +439,15 @@ function ChatInputInner({
   // composer reflects that instead of offering controls that wouldn't apply.
   const isCodeLocked = Boolean(codeSessionLock)
   const effectiveWorkDir = codeSessionLock?.cwd ?? workDir
+  const copyWorkDir = async () => {
+    if (!effectiveWorkDir) return
+    try {
+      await navigator.clipboard.writeText(effectiveWorkDir)
+      toast.success('Directory path copied')
+    } catch {
+      toast.error('Could not copy directory path')
+    }
+  }
 
   useEffect(() => {
     if (isActive && workDir && !isCodeLocked) void rememberWorkDir(workDir)
@@ -944,11 +954,11 @@ function ChatInputInner({
         {effectiveWorkDir && collapseLevel < 8 && (
           <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
             <TooltipTrigger asChild>
-              {/* Level 4: collapse to a square icon */}
+              {/* Level 4: hide the name while keeping the copy action accessible. */}
               <div className={cn(
                 "group flex h-7 shrink-0 items-center rounded-full border border-border bg-muted/40 text-xs text-muted-foreground transition-colors",
                 !isCodeLocked && "hover:bg-muted hover:text-foreground",
-                collapseLevel >= 4 ? "w-7 justify-center" : "max-w-[180px] pl-2.5 pr-2"
+                collapseLevel >= 4 ? "px-2" : "max-w-[180px] pl-2.5 pr-2"
               )}>
                 <button
                   type="button"
@@ -960,6 +970,15 @@ function ChatInputInner({
                     ? <Lock className="h-3 w-3 shrink-0" />
                     : <FolderCog className="h-3.5 w-3.5 shrink-0" />}
                   {collapseLevel < 4 && <span className="truncate">{basename(effectiveWorkDir) || effectiveWorkDir}</span>}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void copyWorkDir()}
+                  aria-label="Copy directory path"
+                  title="Copy directory path"
+                  className="ml-1.5 flex h-5 w-5 shrink-0 items-center justify-center rounded hover:bg-accent hover:text-foreground"
+                >
+                  <Copy className="h-3 w-3" />
                 </button>
                 {collapseLevel < 4 && !isCodeLocked && (
                   <button
@@ -1057,6 +1076,11 @@ function ChatInputInner({
                 <DropdownMenuItem disabled={isCodeLocked} onSelect={() => { void handleSetWorkDir() }}>
                   {isCodeLocked ? <Lock className="size-4" /> : <FolderCog className="size-4" />}
                   <span className="min-w-0 flex-1 truncate">{basename(effectiveWorkDir) || effectiveWorkDir}</span>
+                </DropdownMenuItem>
+              )}
+              {effectiveWorkDir && collapseLevel >= 8 && (
+                <DropdownMenuItem onSelect={() => void copyWorkDir()}>
+                  <Copy className="size-4" />Copy directory path
                 </DropdownMenuItem>
               )}
               {searchAvailable && collapseLevel >= 7 && (
