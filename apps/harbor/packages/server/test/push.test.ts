@@ -5,7 +5,7 @@ import type { RunningHarbor } from '../src/server.js';
 import { freshStore, restClient, startTestHarbor } from './helpers.js';
 import type { Message, Space } from '@rowboat/spaces-protocol';
 
-// Push notifications (PUSH_PLAN.md): the phone half of delivery. The
+// Push notifications (CONTRACT.md, the push bullet): the phone half of delivery. The
 // decision is notify.ts's (notify.test.ts); this pins the level gate, the
 // author-free fan-out to Expo tokens, dead-token pruning and wire-level
 // registration — against the store with a mocked Expo endpoint.

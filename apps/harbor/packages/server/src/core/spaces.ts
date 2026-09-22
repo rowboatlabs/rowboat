@@ -265,7 +265,7 @@ export class Spaces {
     });
   }
 
-  // --- push (PUSH_PLAN.md) ---------------------------------------------------
+  // --- push (CONTRACT.md, the push bullet) -----------------------------------
 
   /** A member's device registers its token + the member's level. Idempotent. */
   async registerPush(ctx: ActorCtx, input: { token: string; level: PushLevel }): Promise<{ ok: true }> {

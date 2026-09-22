@@ -6,7 +6,7 @@ import { WorkDir } from '../config/config.js';
 // push token + a notify level over RPC. The Mac used to RELAY pushes from its
 // mention watcher as a stopgap; the watcher was removed 2026-09-09 (the
 // client-side notification-level module is gone — notification policy is
-// moving to the org, and Harbor already sends pushes itself, PUSH_PLAN.md),
+// moving to the org, and Harbor already sends pushes itself, apps/harbor/CONTRACT.md, the push bullet),
 // so this file now only keeps the registrations the phone sends. Whether
 // they stay meaningful is a later-layer decision (push + phone).
 //

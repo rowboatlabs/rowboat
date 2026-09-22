@@ -437,7 +437,7 @@ export class PgStore implements Store {
     await this.sql.query('delete from memberships where space_id = $1 and member_id = $2', [spaceId, memberId]);
   }
 
-  // --- push (PUSH_PLAN.md) ---------------------------------------------------
+  // --- push (CONTRACT.md, the push bullet) -----------------------------------
 
   async putPushToken(memberId: string, token: string, updatedAt: string): Promise<void> {
     await this.sql.query(

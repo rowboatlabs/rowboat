@@ -61,7 +61,7 @@ export interface AssetVersionData {
  * per-community sidecar): bytes dedup per org in the BlobStore underneath,
  * but a blob is referencable and servable only in spaces it was uploaded to.
  */
-/** Notify level (PUSH_PLAN.md): what a member wants pushed, org-wide. */
+/** Notify level (push.ts): what a member wants pushed, org-wide. */
 export type PushLevel = 'off' | 'mentions' | 'dms' | 'all';
 
 export interface StoredSpaceBlob {
@@ -216,7 +216,7 @@ export interface Store {
   putMembership(membership: Membership): Promise<void>;
   deleteMembership(spaceId: string, memberId: string): Promise<void>;
 
-  // push (PUSH_PLAN.md): per-device Expo tokens, per-member notify level.
+  // push (push.ts): per-device Expo tokens, per-member notify level.
   // A token is org-scoped and unique; re-registering moves it to its member.
   putPushToken(memberId: string, token: string, updatedAt: string): Promise<void>;
   /** Operator-side prune (push.ts): Expo names a dead device by token alone. */

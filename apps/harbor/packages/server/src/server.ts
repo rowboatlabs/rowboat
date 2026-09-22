@@ -29,7 +29,7 @@ export interface SeedSpace {
 }
 
 export interface HarborOptions {
-  /** Test injection: replaces the default PushSender (PUSH_PLAN.md). */
+  /** Test injection: replaces the default PushSender (push.ts). */
   pushSender?: PushSender;
   /** 0 (default) picks an ephemeral port — tests never collide. */
   port?: number;

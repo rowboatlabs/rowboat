@@ -2,7 +2,7 @@ import type { Message, Space } from '@rowboat/spaces-protocol';
 import type { Notification, NotifyKind } from './notify.js';
 import type { PushLevel, Store } from './store.js';
 
-// Push notifications (PUSH_PLAN.md): the phone half of delivery. The
+// Push notifications (CONTRACT.md, the push bullet): the phone half of delivery. The
 // DECISION lives in notify.ts (one per message, shared with the desktop's
 // `notify` frame); this module gates each decided row on the member's
 // per-member level, fans out to their Expo tokens in fire-and-forget batches,

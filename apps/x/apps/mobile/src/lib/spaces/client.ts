@@ -164,7 +164,7 @@ export class SpacesClient {
     return this.request('POST', routes.openDirect.path, routes.openDirect.response, { memberId });
   }
 
-  /** Register this device's push token + the member's level (PUSH_PLAN.md). */
+  /** Register this device's push token + the member's level (apps/harbor/CONTRACT.md, the push bullet). */
   async registerPush(input: { token: string; level: 'off' | 'mentions' | 'dms' | 'all' }): Promise<{ ok: true }> {
     return this.request('POST', routes.registerPush.path, routes.registerPush.response, input);
   }

@@ -204,7 +204,7 @@ export const routes = {
     response: z.object({ space: Space, created: z.boolean() }),
   },
   /**
-   * Push notifications (2026-09-07, PUSH_PLAN.md): a member's device
+   * Push notifications (2026-09-07; CONTRACT.md, the push bullet): a member's device
    * registers its Expo push token and the member's notify level in one
    * idempotent call — the phone re-registers on every start and on every
    * preference change. Level is per MEMBER (all their devices); tokens are
