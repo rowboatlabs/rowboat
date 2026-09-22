@@ -304,6 +304,17 @@ export class PgStore implements Store {
     });
   }
 
+  /**
+   * One transaction for an org-level write that spans this store and the
+   * caller's own statements (directory.ts createOrg, 2026-09-22): the
+   * store's executor is bound to it — withSpaceLock's trick without the
+   * space lock — and the same transaction is handed to the caller, so
+   * everything commits or nothing does.
+   */
+  async transaction<T>(fn: (tx: SqlExecutor) => Promise<T>): Promise<T> {
+    return this.db.withTransaction((tx) => this.als.run(tx, () => fn(tx)));
+  }
+
   // --- members ---------------------------------------------------------------
 
   async getMember(id: string): Promise<Member | undefined> {
