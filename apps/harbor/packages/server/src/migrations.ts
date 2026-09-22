@@ -497,7 +497,7 @@ export const MIGRATIONS: Migration[] = [
     ],
   },
   {
-    // Push notifications (PUSH_PLAN.md): device tokens + member levels.
+    // Push notifications (CONTRACT.md, the push bullet): device tokens + member levels.
     id: '015-push',
     statements: [
       `create table if not exists push_tokens (
