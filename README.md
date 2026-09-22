@@ -5,7 +5,7 @@
 <h5 align="center">
 
 <h1 align="center">Rowboat</h1>
-<p align="center"><b>The personal assistant with collaboration.</b></p>
+<p align="center"><b>Open-source personal AI assistant with built-in docs, whiteboard and email. Works solo or with your team.</b></p>
 
 <p align="center" style="display: flex; justify-content: center; gap: 20px; align-items: center;">
   <a href="https://trendshift.io/repositories/13609" target="blank">
