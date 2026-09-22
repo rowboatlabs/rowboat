@@ -253,7 +253,7 @@ Today every space is a Slack *private* channel: membership arrives only through 
 5. **Profiles.** `displayName` is editable by decision (§4); no route exists yet. An **avatar** is org-level, but blob readability is space-scoped by design (§6) — an avatar needs either an org-scoped blob registry with its own route, or external URLs only.
 6. **Admin scope.** Which acts are admin-only — adding or removing members of any space, removing from the org, changing visibility, invite policy — and whether a member's agent may perform them. Parity (§9) says an agent does whatever its member may; the role check is on the member, not the mode.
 
-Two mechanics the removal path needs, noted so nobody rediscovers them: membership is verified before the space lock, not inside it, so removal semantics must say whether an in-flight write by a removed member may land; and live subscriptions end only with the socket, so removal needs a member-addressed `space_removed` frame that the live face honours.
+Two mechanics the removal path needs are in place *(2026-09-22)*: a member's write re-verifies access inside the space lock, so a write that lost a race to a removal is refused rather than landing after the departure; and a member-addressed `space_removed` frame ends live delivery for the space on every connection the member holds — `leaveSpace` sends it today, removal will send it tomorrow. Removal itself is the delegated work.
 
 ---
 

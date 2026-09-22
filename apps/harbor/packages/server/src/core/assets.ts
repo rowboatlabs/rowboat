@@ -148,7 +148,7 @@ export class Assets {
     }
     const data = await this.proposalData(spaceId, input);
     const attribution = this.k.attributionOf(ctx, input);
-    return this.k.locked(spaceId, async () => {
+    return this.k.lockedAs(ctx, spaceId, async () => {
       const occupant = await this.k.store.getLiveAssetByPath(spaceId, input.path);
       if (occupant) {
         throw new HarborError('invalid_request', `a file already exists at ${input.path} (${occupant.id}) — read it and propose a change, or pick another name`);
@@ -172,7 +172,7 @@ export class Assets {
       throw new HarborError('invalid_request', 'threadRootId does not exist in this space');
     }
     const attribution = this.k.attributionOf(ctx, input);
-    return this.k.locked(spaceId, async () => {
+    return this.k.lockedAs(ctx, spaceId, async () => {
       const asset = await this.requireLiveAsset(spaceId, input.assetId);
       if (input.toPath === asset.path) {
         throw new HarborError('invalid_request', 'destination is the same path');
@@ -211,7 +211,7 @@ export class Assets {
       throw new HarborError('invalid_request', 'threadRootId does not exist in this space');
     }
     const attribution = this.k.attributionOf(ctx, input);
-    return this.k.locked(spaceId, async () => {
+    return this.k.lockedAs(ctx, spaceId, async () => {
       const asset = await this.requireLiveAsset(spaceId, input.assetId);
       if (input.baseVersion > asset.version) {
         throw new HarborError('invalid_request', `baseVersion ${input.baseVersion} is ahead of the asset (v${asset.version})`);
@@ -242,7 +242,7 @@ export class Assets {
     await this.k.requireMember(ctx, spaceId);
     this.k.guardWrite();
     const attribution = this.k.attributionOf(ctx, input);
-    return this.k.locked(spaceId, async () => {
+    return this.k.lockedAs(ctx, spaceId, async () => {
       const dead = await this.requireAsset(spaceId, input.assetId);
       if (dead.state !== 'deleted') throw new HarborError('invalid_request', 'this file is not in the trash');
       if (await this.k.store.getLiveAssetByPath(spaceId, dead.path)) {
@@ -394,7 +394,7 @@ export class Assets {
     const proposal = await this.proposalData(spaceId, input);
     const attribution = this.k.attributionOf(ctx, input);
 
-    return this.k.locked(spaceId, async () => {
+    return this.k.lockedAs(ctx, spaceId, async () => {
       const asset = await this.requireLiveAsset(spaceId, input.assetId);
 
       if (input.baseVersion > asset.version) {

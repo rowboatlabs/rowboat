@@ -1,4 +1,4 @@
-import type { ActingMode, Attribution, ServerFrame, Space, SpaceEvent } from '@rowboat/spaces-protocol';
+import type { ActingMode, Attribution, Membership, ServerFrame, Space, SpaceEvent } from '@rowboat/spaces-protocol';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { monotonicFactory } from 'ulid';
 import { HarborError } from '../errors.js';
@@ -94,6 +94,24 @@ export class Kernel {
     const result = await this.store.withSpaceLock(spaceId, () => this.outbox.run(pending, fn));
     for (const { spaceId: target, frame } of pending) this.hub.publish(target, frame);
     return result;
+  }
+
+  /**
+   * The space lock for a MEMBER'S act (2026-09-22): the access decision the
+   * gate ran outside runs again inside the transaction, against the
+   * membership as it stands now — so a write that passed the gate and then
+   * waited behind a removal is refused instead of landing after the `left`
+   * event. Same rule as the gate (policy.ts canAccessSpace), never a second
+   * one. Acts that create the membership themselves (createSpace, openDirect,
+   * acceptInvite) and operator passes use `locked`.
+   */
+  async lockedAs<T>(ctx: ActorCtx, spaceId: string, fn: (membership: Membership) => Promise<T>): Promise<T> {
+    return this.locked(spaceId, async () => {
+      const space = await this.requireSpace(spaceId);
+      const membership = await this.store.getMembership(spaceId, ctx.memberId);
+      enforce(canAccessSpace(space, membership));
+      return fn(membership!);
+    });
   }
 
   /** Append a durable event at `offset` (allocated by the caller inside the space lock) and fan it out after commit. */
