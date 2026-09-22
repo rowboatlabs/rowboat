@@ -169,6 +169,10 @@ function tryBindPort(
     // the app ever sees it. IPv4 is the primary bind (port availability is
     // judged on it); ::1 is best-effort, mirroring apps/server.ts.
     server.listen(port, '127.0.0.1', () => {
+      // With port 0 the OS picks a free port: report (and twin-bind) the
+      // actual one so per-flow dynamic callbacks route home.
+      const addr = server.address();
+      const boundPort = typeof addr === 'object' && addr !== null ? addr.port : port;
       const twin = createServer(handler);
       let twinListening = false;
       let closed = false;
@@ -177,9 +181,9 @@ function tryBindPort(
         if (closed) twin.close();
       });
       twin.on('error', (err: NodeJS.ErrnoException) => {
-        console.warn(`[OAuth] IPv6 loopback bind failed on port ${port} (${err.code}); continuing IPv4-only`);
+        console.warn(`[OAuth] IPv6 loopback bind failed on port ${boundPort} (${err.code}); continuing IPv4-only`);
       });
-      twin.listen(port, '::1');
+      twin.listen(boundPort, '::1');
 
       // Callers hold only the primary server; closing it must tear down the
       // twin too, or the port stays half-occupied for the next flow. Also
@@ -211,7 +215,7 @@ function tryBindPort(
         return result;
       }) as typeof server.close;
 
-      resolve({ server, port });
+      resolve({ server, port: boundPort });
     });
 
     server.on('error', (err: NodeJS.ErrnoException) => {

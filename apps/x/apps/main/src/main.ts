@@ -2,6 +2,7 @@ import "./node-guard.js";
 import { app, BrowserWindow, desktopCapturer, dialog, powerMonitor, protocol, net, shell, session, safeStorage, type Session } from "electron";
 import path from "node:path";
 import fsPromises from "node:fs/promises";
+import fs from "node:fs";
 import os from "node:os";
 import {
   setupIpcHandlers,
@@ -65,6 +66,7 @@ import {
   extractDeepLinkFromArgv,
   setMainWindowForDeepLinks,
 } from "./deeplink.js";
+import { ProfileId, deepLinkScheme, isDefaultProfile, profileDeepLink } from "@x/core/dist/config/profile.js";
 import { registerUrlOpener } from "@x/core/dist/auth/url-opener.js";
 import { startModelsDevRefresh } from "@x/core/dist/models/models-dev.js";
 import { ensureLoginItemRegistration } from "./login_item.js";
@@ -104,33 +106,42 @@ process.on('uncaughtException', (err) => {
 // run this as early in the main process as possible
 if (started) app.quit();
 
-// Single-instance lock: route a second launch (e.g. clicking a rowboat:// link)
-// back into the existing process via the 'second-instance' event.
+// First-party profiles: each profile gets its own Electron userData dir.
+// This MUST run before requestSingleInstanceLock — the lock is keyed on the
+// userData path, so this is what partitions it per profile. Default keeps
+// the historic location (no migration); sandboxed dev instances keep their
+// existing behavior. Must run before 'ready' — session state is created
+// lazily at app ready, so nothing has touched the default profile yet.
+if (process.env.ROWBOAT_WORKDIR || !isDefaultProfile(ProfileId)) {
+  app.setPath('userData', path.join(WorkDir, '.electron-data'));
+}
+
+// Single-instance lock, now per-profile via the userData dir above: route a
+// second launch (e.g. clicking a deep link) back into the existing process
+// of the SAME profile via the 'second-instance' event.
 if (app.isPackaged && !app.requestSingleInstanceLock()) {
-  console.error('[Main] Another Rowboat instance is already running; exiting this process.');
+  console.error(`[Main] Another Rowboat instance for this profile (${ProfileId}) is already running; exiting this process.`);
   app.quit();
   process.exit(0);
 }
 
-// Sandboxed dev instances (ROWBOAT_WORKDIR set, e.g. via `npm run dev:sandbox`)
-// get their own Electron profile too: concurrent instances sharing the default
-// userData dir fight over Chromium's LevelDB locks and each other's
-// localStorage. Must run before 'ready' — session state is created lazily at
-// app ready, so nothing has touched the default profile yet.
-if (!app.isPackaged && process.env.ROWBOAT_WORKDIR) {
-  app.setPath('userData', path.join(WorkDir, '.electron-data'));
-}
-
-// Register as the OS handler for rowboat:// URLs.
+// Register as the OS handler for deep links: the legacy rowboat:// scheme
+// plus this profile's own scheme (rowboat-<profile>://), so OAuth and
+// navigation URLs always come home to the instance that started them.
 // In dev, point at the right argv so the OS can re-invoke us correctly.
-if (process.defaultApp) {
-  if (process.argv.length >= 2) {
-    app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME, process.execPath, [
-      path.resolve(process.argv[1]),
-    ]);
+const deepLinkSchemes = isDefaultProfile(ProfileId)
+  ? [DEEP_LINK_SCHEME]
+  : [DEEP_LINK_SCHEME, deepLinkScheme(ProfileId)];
+for (const scheme of deepLinkSchemes) {
+  if (process.defaultApp) {
+    if (process.argv.length >= 2) {
+      app.setAsDefaultProtocolClient(scheme, process.execPath, [
+        path.resolve(process.argv[1]),
+      ]);
+    }
+  } else {
+    app.setAsDefaultProtocolClient(scheme);
   }
-} else {
-  app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME);
 }
 
 // First-launch URL on Windows/Linux comes through argv.
@@ -180,16 +191,35 @@ function initializeExecutionEnvironment(): void {
 }
 initializeExecutionEnvironment();
 
-// Path resolution differs between development and production:
-const preloadPath = app.isPackaged
-  ? path.join(__dirname, "../preload/dist/preload.js")
-  : path.join(__dirname, "../../../preload/dist/preload.js");
-console.log("preloadPath", preloadPath);
+// Renderer resolution. `app.isPackaged` is false when Electron is launched as a
+// default app (`electron <appDir>`), which is how the local two-profile launcher
+// runs the built bundle — so it is NOT a reliable "use the dev server" signal.
+// Dev mode is detected by the absence of a built renderer next to this bundle:
+// `npm run dev` runs .package/dist with no .package/renderer, while a built/local
+// bundle ships .package/renderer/dist/index.html.
+const builtRendererPath = path.join(__dirname, "../renderer/dist");
+const hasBuiltRenderer = fs.existsSync(path.join(builtRendererPath, "index.html"));
+const useDevServer = !app.isPackaged && !hasBuiltRenderer;
 
-const rendererPath = app.isPackaged
-  ? path.join(__dirname, "../renderer/dist") // Production
-  : path.join(__dirname, "../../../renderer/dist"); // Development
-console.log("rendererPath", rendererPath);
+const preloadPath = useDevServer
+  ? path.join(__dirname, "../../../preload/dist/preload.js")
+  : path.join(__dirname, "../preload/dist/preload.js");
+const rendererPath = useDevServer
+  ? path.join(__dirname, "../../../renderer/dist")
+  : builtRendererPath;
+
+// Full startup diagnostics: a blank window is the one failure that presents no
+// error, so log every input that decides which renderer is loaded.
+console.log("[startup] renderer resolution", {
+  isPackaged: app.isPackaged,
+  isDefaultApp: (process as unknown as { defaultApp?: boolean }).defaultApp ?? null,
+  dirname: __dirname,
+  hasBuiltRenderer,
+  useDevServer,
+  devServerUrl: DEV_SERVER_URL,
+  preloadPath,
+  rendererPath,
+});
 
 // Register custom protocol for serving built renderer files in production
 // AND for serving local workspace files to the renderer (images, PDFs, video).
@@ -515,7 +545,7 @@ function createWindow(options: { startHidden?: boolean } = {}) {
     if (link.kind === "asset") target.set("assetId", link.assetId);
     if (link.kind === "message") target.set("messageId", link.messageId);
     if (link.kind === "member") target.set("memberId", link.memberId);
-    dispatchUrl(`rowboat://open?${target.toString()}`);
+    dispatchUrl(profileDeepLink(`open?${target.toString()}`));
     return true;
   };
 
@@ -563,10 +593,35 @@ function createWindow(options: { startHidden?: boolean } = {}) {
   // Cmd/Ctrl + (+ / − / 0) zoom shortcuts for the renderer UI.
   setupZoomShortcuts(win);
 
-  if (app.isPackaged) {
-    win.loadURL("app://-/index.html");
-  } else {
+  // Renderer load diagnostics: a blank window otherwise gives no signal about
+  // why the UI failed to come up.
+  win.webContents.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
+    console.error('[startup] did-fail-load', { code, desc, url, isMainFrame });
+  });
+  win.webContents.on('did-finish-load', () => {
+    console.log('[startup] renderer did-finish-load', win.webContents.getURL());
+  });
+  win.webContents.on('preload-error', (_e, preloadScriptPath, error) => {
+    console.error('[startup] preload-error', preloadScriptPath, error);
+  });
+  // Forward the renderer's console to the main log. Electron 36+ passes a single
+  // event object; older versions pass (event, level, message, line, sourceId).
+  win.webContents.on('console-message', (...args: unknown[]) => {
+    const first = args[0] as { level?: unknown; message?: unknown; lineNumber?: unknown; sourceId?: unknown } | undefined;
+    if (first && typeof first === 'object' && 'message' in first) {
+      console.log(`[renderer:${String(first.level)}] ${String(first.message)} (${String(first.sourceId)}:${String(first.lineNumber)})`);
+    } else {
+      const [, level, message, line, sourceId] = args as [unknown, unknown, unknown, unknown, unknown];
+      console.log(`[renderer:${String(level)}] ${String(message)} (${String(sourceId)}:${String(line)})`);
+    }
+  });
+
+  if (useDevServer) {
+    console.log("[startup] loading dev server", DEV_SERVER_URL);
     win.loadURL(DEV_SERVER_URL);
+  } else {
+    console.log("[startup] loading built renderer app://-/index.html");
+    win.loadURL("app://-/index.html");
   }
 }
 

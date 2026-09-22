@@ -25,16 +25,18 @@ import { SPACES_ENABLED } from "@/lib/feature-flags"
 import * as analytics from "@/lib/analytics"
 import { useTheme } from "@/contexts/theme-context"
 import { toast } from "sonner"
-import { AnthropicIcon, DiscordIcon, GitHubIcon, OpenAIIcon } from "@/components/onboarding/provider-icons"
+import { DiscordIcon, GitHubIcon } from "@/components/onboarding/provider-icons"
 import { AccountSettings } from "@/components/settings/account-settings"
 import { ConnectedAccountsSettings } from "@/components/settings/connected-accounts-settings"
 import { MobileChannelsSettings } from "@/components/settings/mobile-channels-settings"
 import { PhonePairingSettings } from "@/components/settings/phone-pairing-settings"
 import { RemoteServerSettings } from "@/components/settings/remote-server-settings"
 import type { ApprovalPolicy } from "@x/shared/src/code-mode.js"
+import { KNOWN_AGENTS } from "@x/shared/src/agent-catalog.js"
+import { AGENT_LABEL } from "@/components/code/code-agent-status"
 import { DEFAULT_TURN_LIMITS_SETTINGS } from "@x/shared/src/turn-limits.js"
 import type { ipc as ipcShared } from "@x/shared"
-import { startProvisioning, useProvisioning, enabledOptimistic, type AgentStatus, type CodeModeAgentStatus } from "@/lib/code-mode-provisioning"
+import { type AgentStatus, type CodeModeAgentStatus } from "@/lib/code-mode-provisioning"
 import { ModelSelectionSection } from "@/components/settings/model-selection-section"
 import { PermissionsSettings } from "@/components/settings/permissions-settings"
 import { ShortcutSettings } from "@/components/settings/shortcut-settings"
@@ -101,7 +103,7 @@ const tabs: TabConfig[] = [
     id: "code-mode",
     label: "Code Mode",
     icon: Terminal,
-    description: "Delegate coding tasks to Claude Code or Codex",
+    description: "Delegate coding tasks to OpenCode, Cursor, or Hermes",
   },
   {
     id: "appearance",
@@ -1166,91 +1168,29 @@ function NoteTaggingSettings({ dialogOpen }: { dialogOpen: boolean }) {
 
 // --- Code Mode Settings ---
 
-// Human label for the raw subscription tier the engine reports
-// (claude: "max" / "pro" / "enterprise"; codex: ChatGPT plan types like "go" / "plus").
-function formatPlan(agent: 'claude' | 'codex', plan: string | undefined): string | null {
-  if (!plan) return null
-  const cap = plan.charAt(0).toUpperCase() + plan.slice(1)
-  return agent === 'codex' ? `ChatGPT ${cap}` : cap
-}
-
-function AgentStatusRow({
-  name,
-  agent,
-  signInCommand,
-  status,
-  onProvisioned,
-}: {
-  name: string
-  agent: 'claude' | 'codex'
-  signInCommand: string
-  status: AgentStatus | null
-  onProvisioned: () => void
-}) {
-  const prov = useProvisioning(agent)
-  const provisioning = prov !== undefined && prov.error === undefined
-  const error = prov?.error ?? null
-  const enable = useCallback(() => startProvisioning(agent, onProvisioned), [agent, onProvisioned])
-
-  // Treat a just-enabled engine as installed even before the status refresh lands.
-  const installed = (status?.installed ?? false) || enabledOptimistic.has(agent)
-  const signedIn = status?.signedIn ?? false
-  const email = status?.account?.email
-  const plan = formatPlan(agent, status?.account?.plan)
-  const active = installed && signedIn
+// Externally-installed coding agent: detected on PATH, no download step, so
+// status is detected/not-detected plus the CLI version.
+function ExternalAgentRow({ name, status }: { name: string; status: AgentStatus | null }) {
+  const installed = status?.installed ?? false
   return (
     <div className="flex items-center gap-3 rounded-md border px-3 py-2.5">
-      {agent === 'claude' ? (
-        <AnthropicIcon className="size-5 shrink-0" />
-      ) : (
-        <OpenAIIcon className="size-5 shrink-0" />
-      )}
+      <Terminal className="size-5 shrink-0" />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium">{name}</span>
-          {signedIn && plan && (
+          {installed && status?.version && (
             <span className="rounded-full border px-1.5 py-px text-[10px] font-medium leading-4 text-muted-foreground shrink-0">
-              {plan}
+              v{status.version}
             </span>
           )}
         </div>
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-0.5">
-          <span
-            className={cn(
-              "size-2 rounded-full shrink-0",
-              active ? "bg-[var(--rowboat-success)]" : installed ? "bg-amber-500" : "bg-muted-foreground/30",
-            )}
-          />
+          <span className={cn("size-2 rounded-full shrink-0", installed ? "bg-[var(--rowboat-success)]" : "bg-muted-foreground/30")} />
           <span className="truncate">
-            {provisioning ? (
-              'Downloading engine…'
-            ) : active ? (
-              <>Active{email ? ` · ${email}` : ''}</>
-            ) : installed ? (
-              <>
-                Run{' '}
-                <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">{signInCommand}</code>{' '}
-                in your terminal, then Re-check
-              </>
-            ) : email ? (
-              `${email} · engine not enabled`
-            ) : (
-              'Not enabled'
-            )}
+            {installed ? 'Detected on your PATH' : 'Not detected — install it and put it on your PATH'}
           </span>
         </div>
-        {error && <div className="text-xs text-destructive mt-1 break-words">{error}</div>}
       </div>
-      {provisioning ? (
-        <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground shrink-0 tabular-nums">
-          <Loader2 className="size-3 animate-spin" />
-          {prov?.pct != null ? `${prov.pct}%` : null}
-        </span>
-      ) : !installed ? (
-        <Button variant="outline" size="sm" onClick={enable} className="shrink-0">
-          Enable
-        </Button>
-      ) : null}
     </div>
   )
 }
@@ -1353,8 +1293,7 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
     }
   }, [enabled, approvalPolicy, defaultProjectId])
 
-  const anyReady = status?.claude.installed && status?.claude.signedIn
-    || status?.codex.installed && status?.codex.signedIn
+  const anyReady = Boolean(status && Object.values(status).some((s) => s.installed))
 
   if (loading) {
     return (
@@ -1370,17 +1309,14 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
       <div className="space-y-2 text-sm text-muted-foreground leading-relaxed">
         <p>
           <strong className="text-foreground">Code mode</strong> lets the assistant hand coding tasks
-          to <strong className="text-foreground">Claude Code</strong> or <strong className="text-foreground">Codex</strong> on
+          to <strong className="text-foreground">OpenCode</strong>, <strong className="text-foreground">Cursor</strong>, or{' '}
+          <strong className="text-foreground">Hermes</strong> on
           your machine. Pick the agent in the composer, and everything it does — commands, file
           changes, approvals — shows up in the chat.
         </p>
         <p>
-          To set up an agent, click <strong className="text-foreground">Enable</strong> below to download
-          it, then sign in by running{' '}
-          <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">claude login</code>{' '}
-          or <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">codex login</code>{' '}
-          in your terminal. You need a <strong className="text-foreground">Claude</strong> or{' '}
-          <strong className="text-foreground">ChatGPT</strong> subscription — either one works, or both.
+          These agents are installed by you — install the CLI and put it on your PATH, and Rowboat
+          detects it automatically. No download is needed.
         </p>
       </div>
 
@@ -1397,20 +1333,13 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
           </button>
         </div>
         <div className="space-y-2">
-          <AgentStatusRow
-            name="Claude Code"
-            agent="claude"
-            signInCommand="claude login"
-            status={status?.claude ?? null}
-            onProvisioned={loadStatus}
-          />
-          <AgentStatusRow
-            name="Codex"
-            agent="codex"
-            signInCommand="codex login"
-            status={status?.codex ?? null}
-            onProvisioned={loadStatus}
-          />
+          {KNOWN_AGENTS.map((agent) => (
+            <ExternalAgentRow
+              key={agent}
+              name={AGENT_LABEL[agent]}
+              status={status?.[agent] ?? null}
+            />
+          ))}
         </div>
       </div>
 
@@ -1504,8 +1433,8 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
         <div className="rounded-md border border-amber-500/40 bg-amber-50/60 dark:bg-amber-950/20 px-3 py-2.5 flex items-start gap-2 text-xs">
           <AlertTriangle className="size-4 text-amber-600 dark:text-amber-500 shrink-0 mt-0.5" />
           <div className="text-amber-900 dark:text-amber-200">
-            Neither Claude Code nor Codex is ready. Click Enable above to download an engine, sign in with a
-            subscription account, then click Re-check.
+            No coding agent is detected. Install OpenCode, Cursor, or Hermes and put it on your PATH,
+            then click Re-check.
           </div>
         </div>
       )}

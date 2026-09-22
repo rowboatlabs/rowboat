@@ -13,15 +13,13 @@ export class FSCodeModeConfigRepo implements ICodeModeConfigRepo {
     private readonly configPath = path.join(WorkDir, 'config', 'code-mode.json');
     private agentReadyPromise: Promise<boolean> | null = null;
 
-    // Reuse the existing agent check (Claude Code / Codex installed + signed in),
-    // cached for the process lifetime so we probe (shell + keychain) at most once
-    // per session rather than on every getConfig call.
+    // Reuse the existing agent check, cached for the process lifetime so we probe
+    // (shell) at most once per session rather than on every getConfig call. All
+    // agents are externally installed, so readiness is `installed` alone.
     private agentReady(): Promise<boolean> {
         if (!this.agentReadyPromise) {
             this.agentReadyPromise = checkCodeModeAgentStatus()
-                .then((s) =>
-                    (s.claude.installed && s.claude.signedIn)
-                    || (s.codex.installed && s.codex.signedIn))
+                .then((s) => Object.values(s).some((status) => status.installed))
                 .catch(() => false);
         }
         return this.agentReadyPromise;

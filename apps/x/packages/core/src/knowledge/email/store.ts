@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { NodeHtmlMarkdown } from 'node-html-markdown';
 import { WorkDir } from '../../config/config.js';
+import { profileDeepLink } from '../../config/profile.js';
 import { createEvent } from '../../events/producer.js';
 import { recordImportanceCorrection } from '../email_importance_feedback.js';
 import { recordCategoryCorrection } from '../email_category_feedback.js';
@@ -668,7 +669,7 @@ export function notifyNewEmailThreads(threadIds: string[]): void {
         void notifyIfEnabled('new_email', {
             title: from ? `New email from ${from}` : 'New email',
             message: subject,
-            link: `rowboat://open?type=email&threadId=${threadId}`,
+            link: profileDeepLink(`open?type=email&threadId=${threadId}`),
             actionLabel: 'Open',
             onlyWhenBackground: true,
         });

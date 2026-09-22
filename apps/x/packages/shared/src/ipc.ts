@@ -114,7 +114,7 @@ const QuickAskSubmitPayload = z.object({
     )
     .optional(),
   searchEnabled: z.boolean().optional(),
-  codeMode: z.enum(['claude', 'codex']).optional(),
+  codeMode: CodingAgent.optional(),
   permissionMode: z.enum(['manual', 'auto']).optional(),
   model: ModelRef.nullable().optional(),
   reasoningEffort: ReasoningEffort.nullable().optional(),
@@ -584,7 +584,7 @@ export const ipcSchemas = {
       voiceInput: z.boolean().optional(),
       voiceOutput: z.enum(['summary', 'full']).optional(),
       searchEnabled: z.boolean().optional(),
-      codeMode: z.enum(['claude', 'codex']).optional(),
+      codeMode: CodingAgent.optional(),
       // Code-section sessions pin the coding agent's working directory and
       // approval policy for the whole turn (see code_agent_run overrides).
       codeCwd: z.string().optional(),
@@ -1782,31 +1782,25 @@ export const ipcSchemas = {
   },
   'codeMode:checkAgentStatus': {
     req: z.null(),
-    res: z.object({
-      claude: z.object({
-        installed: z.boolean(),
-        signedIn: z.boolean(),
-        // Who is signed in, when detectable: email plus the subscription tier
-        // ("max", "pro", "enterprise" for Claude; "plus", "go", … for Codex).
-        account: z.object({ email: z.string().optional(), plan: z.string().optional() }).optional(),
-      }),
-      codex: z.object({
-        installed: z.boolean(),
-        signedIn: z.boolean(),
-        account: z.object({ email: z.string().optional(), plan: z.string().optional() }).optional(),
-      }),
-    }),
+    // Registry-keyed: one entry per known agent. `installed` = resolvable on
+    // PATH; `version` is the detected CLI version.
+    res: z.record(CodingAgent, z.object({
+      installed: z.boolean(),
+      signedIn: z.boolean(),
+      account: z.object({ email: z.string().optional(), plan: z.string().optional() }).optional(),
+      version: z.string().optional(),
+    })),
   },
   // Download + install an agent's native engine (the Settings "Enable" action).
   // Streams progress over the 'codeMode:engineProgress' push channel while it runs.
   'codeMode:provisionEngine': {
-    req: z.object({ agent: z.enum(['claude', 'codex']) }),
+    req: z.object({ agent: CodingAgent }),
     res: z.object({ success: z.boolean(), error: z.string().optional() }),
   },
   // Push (main -> renderer): engine provisioning progress for the Settings UI.
   'codeMode:engineProgress': {
     req: z.object({
-      agent: z.enum(['claude', 'codex']),
+      agent: CodingAgent,
       phase: z.enum(['download', 'verify', 'extract', 'done']),
       receivedBytes: z.number().optional(),
       totalBytes: z.number().optional(),
@@ -3176,7 +3170,7 @@ export const ipcSchemas = {
       // resolves the pin server-side.
       code: z.object({
         projectId: z.string(),
-        agent: z.enum(['claude', 'codex']).optional(),
+        agent: CodingAgent.optional(),
         isolation: z.enum(['in-repo', 'worktree']).optional(),
       }).optional(),
     }),
@@ -4148,7 +4142,7 @@ export const ipcSchemas = {
           model: z.object({ provider: z.string(), model: z.string(), effort: z.enum(['low', 'medium', 'high']).optional() }).optional(),
           permissionMode: z.enum(['auto', 'manual']).optional(),
           searchEnabled: z.boolean().optional(),
-          codeMode: z.enum(['claude', 'codex']).optional(),
+          codeMode: CodingAgent.optional(),
         })
         .optional(),
     }),

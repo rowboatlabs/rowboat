@@ -1,5 +1,5 @@
 import z from "zod";
-import { ApprovalPolicy } from "@x/shared/dist/code-mode.js";
+import { ApprovalPolicy, CodingAgent } from "@x/shared/dist/code-mode.js";
 
 export const CodeModeConfig = z.object({
     enabled: z.boolean(),
@@ -26,11 +26,10 @@ export const AgentStatus = z.object({
     installed: z.boolean(),
     signedIn: z.boolean(),
     account: AgentAccount.optional(),
+    // Present for externally-installed agents (detected CLI version).
+    version: z.string().optional(),
 });
 export type AgentStatus = z.infer<typeof AgentStatus>;
 
-export const CodeModeAgentStatus = z.object({
-    claude: AgentStatus,
-    codex: AgentStatus,
-});
+export const CodeModeAgentStatus = z.record(CodingAgent, AgentStatus);
 export type CodeModeAgentStatus = z.infer<typeof CodeModeAgentStatus>;

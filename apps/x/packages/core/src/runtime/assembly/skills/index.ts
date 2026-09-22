@@ -185,7 +185,7 @@ const definitions: SkillDefinition[] = [
     id: "code-with-agents",
     availability: isCodeModeAvailable,
     title: "Code with Agents",
-    summary: "Write code, build projects, create scripts, or fix bugs by delegating to Claude Code or Codex.",
+    summary: "Write code, build projects, create scripts, or fix bugs by delegating to OpenCode, Cursor, or Hermes.",
     content: codeWithAgentsSkill,
   },
   {

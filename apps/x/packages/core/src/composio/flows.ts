@@ -8,8 +8,13 @@ import { CURATED_TOOLKIT_SLUGS } from '@x/shared/dist/composio.js';
 import type { LocalConnectedAccount, Toolkit } from '../composio/types.js';
 import { triggerSync as triggerGmailSync } from '../knowledge/sync_gmail.js';
 import { triggerSync as triggerCalendarSync } from '../knowledge/sync_calendar.js';
+import { composioAuthConfigName, composioUserId } from '../config/profile.js';
+import { selectManagedAuthConfig } from './auth-config.js';
 
-const REDIRECT_URI = 'http://localhost:8081/oauth/callback';
+/** Build the per-flow loopback callback URL from the actually-bound port. */
+function composioCallbackUrl(port: number): string {
+    return `http://localhost:${port}/oauth/callback`;
+}
 
 // Store active OAuth flows (keyed by toolkitSlug to prevent concurrent flows for the same toolkit)
 const activeFlows = new Map<string, {
@@ -75,51 +80,42 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
             };
         }
 
-        // Find or create managed OAuth2 auth config
-        const authConfigs = await composioClient.listAuthConfigs(toolkitSlug, null, true);
-        let authConfigId: string;
+        // Find or create this profile's managed OAuth2 auth config,
+        // scanning every page: a foreign profile's config must never match.
+        let authConfigId: string | null = null;
+        let cursor: string | null = null;
+        do {
+            const page = await composioClient.listAuthConfigs(toolkitSlug, cursor, true);
+            authConfigId = selectManagedAuthConfig(page.items, toolkitSlug);
+            cursor = page.next_cursor;
+        } while (!authConfigId && cursor);
 
-        const managedOauth2 = authConfigs.items.find(
-            cfg => cfg.auth_scheme === 'OAUTH2' && cfg.is_composio_managed
-        );
-
-        if (managedOauth2) {
-            authConfigId = managedOauth2.id;
-        } else {
-            // Create new managed auth config
-            const created = await composioClient.createAuthConfig({
-                toolkit: { slug: toolkitSlug },
-                auth_config: {
-                    type: 'use_composio_managed_auth',
-                    name: `rowboat-${toolkitSlug}`,
-                },
-            });
-            authConfigId = created.auth_config.id;
-        }
-
-        // Create connected account with callback URL
-        const callbackUrl = REDIRECT_URI;
-        const response = await composioClient.createConnectedAccount({
-            auth_config: { id: authConfigId },
-            connection: {
-                user_id: 'rowboat-user',
-                callback_url: callbackUrl,
-            },
-        });
-
-        const connectedAccountId = response.id;
-
-        // Safely extract redirectUrl with type checking
-        const connectionVal = response.connectionData?.val;
-        const redirectUrl = typeof connectionVal === 'object' && connectionVal !== null && 'redirectUrl' in connectionVal
-            ? String((connectionVal as Record<string, unknown>).redirectUrl)
-            : undefined;
-
-        if (!redirectUrl) {
-            return {
-                success: false,
-                error: 'No redirect URL received from Composio',
-            };
+        if (!authConfigId) {
+            // No managed config exists for this toolkit at all — create one.
+            // Composio allows only one per toolkit per project, so a concurrent
+            // create (another profile/flow) surfaces as "already exists"; recover
+            // by re-listing and reusing the winner rather than failing.
+            try {
+                const created = await composioClient.createAuthConfig({
+                    toolkit: { slug: toolkitSlug },
+                    auth_config: {
+                        type: 'use_composio_managed_auth',
+                        name: composioAuthConfigName(toolkitSlug),
+                    },
+                });
+                authConfigId = created.auth_config.id;
+            } catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                if (!/already exists/i.test(message)) throw err;
+                console.log(`[Composio] Managed auth already exists for ${toolkitSlug}; reusing it`);
+                let retryCursor: string | null = null;
+                do {
+                    const page = await composioClient.listAuthConfigs(toolkitSlug, retryCursor, true);
+                    authConfigId = selectManagedAuthConfig(page.items, toolkitSlug);
+                    retryCursor = page.next_cursor;
+                } while (!authConfigId && retryCursor);
+                if (!authConfigId) throw err;
+            }
         }
 
         // Abort any existing flow for this toolkit before starting a new one
@@ -131,24 +127,23 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
             activeFlows.delete(toolkitSlug);
         }
 
-        // Save initial account state
-        const account: LocalConnectedAccount = {
-            id: connectedAccountId,
-            authConfigId,
-            status: 'INITIATED',
-            toolkitSlug,
-            createdAt: new Date().toISOString(),
-            lastUpdatedAt: new Date().toISOString(),
-        };
-        composioAccountsRepo.saveAccount(account);
-
-        // Set up callback server
+        // Bind the loopback callback server FIRST on a dynamic port, so two
+        // profiles (or two concurrent flows) never fight over one fixed port.
+        // The port itself identifies the flow; the connected account id is
+        // filled in below before any browser tab can redirect back.
         const timeoutRef: { current: NodeJS.Timeout | null } = { current: null };
         let callbackHandled = false;
-        const server = await openLoopback(8081, async () => {
+        let connectedAccountId = '';
+        const server = await openLoopback(0, async () => {
             // Guard against duplicate callbacks (browser may send multiple requests)
             if (callbackHandled) return;
             callbackHandled = true;
+            // A hit before the account exists (scanner, stale tab in the
+            // bind-to-create window) settles nothing: leave the flow running.
+            if (!connectedAccountId) {
+                callbackHandled = false;
+                return;
+            }
             // OAuth callback received - sync the account status
             try {
                 const accountStatus = await composioClient.getConnectedAccount(connectedAccountId);
@@ -184,6 +179,49 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
                 if (timeoutRef.current) clearTimeout(timeoutRef.current);
             }
         });
+
+        // Create the connected account against the actually-bound callback
+        // URL, namespaced to this profile so two profiles never share one.
+        const callbackUrl = composioCallbackUrl(server.port);
+        let createResponse;
+        try {
+            createResponse = await composioClient.createConnectedAccount({
+                auth_config: { id: authConfigId },
+                connection: {
+                    user_id: composioUserId(),
+                    callback_url: callbackUrl,
+                },
+            });
+        } catch (error) {
+            server.close();
+            throw error;
+        }
+        connectedAccountId = createResponse.id;
+
+        // Safely extract redirectUrl with type checking
+        const connectionVal = createResponse.connectionData?.val;
+        const redirectUrl = typeof connectionVal === 'object' && connectionVal !== null && 'redirectUrl' in connectionVal
+            ? String((connectionVal as Record<string, unknown>).redirectUrl)
+            : undefined;
+
+        if (!redirectUrl) {
+            server.close();
+            return {
+                success: false,
+                error: 'No redirect URL received from Composio',
+            };
+        }
+
+        // Save initial account state
+        const account: LocalConnectedAccount = {
+            id: connectedAccountId,
+            authConfigId,
+            status: 'INITIATED',
+            toolkitSlug,
+            createdAt: new Date().toISOString(),
+            lastUpdatedAt: new Date().toISOString(),
+        };
+        composioAccountsRepo.saveAccount(account);
 
         // Timeout for abandoned flows (5 minutes)
         const cleanupTimeout = setTimeout(() => {
@@ -325,7 +363,7 @@ export async function executeTool(
     try {
         const result = await composioClient.executeAction(toolSlug, {
             connected_account_id: account.id,
-            user_id: 'rowboat-user',
+            user_id: composioUserId(),
             version: 'latest',
             arguments: args ?? {},
         });

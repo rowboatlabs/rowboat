@@ -2,23 +2,22 @@ import { useState, useEffect, useCallback } from "react"
 import { Loader2, ArrowLeft, Terminal, CheckCircle2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
-import { startProvisioning, type CodeModeAgentStatus } from "@/lib/code-mode-provisioning"
+import { type CodeModeAgentStatus } from "@/lib/code-mode-provisioning"
+import { KNOWN_AGENTS, agentLabel } from "@x/shared/src/agent-catalog.js"
+import type { CodingAgent } from "@x/shared/src/code-mode.js"
 import type { OnboardingState } from "../use-onboarding-state"
 
 interface CodeModeStepProps {
   state: OnboardingState
 }
 
-const AGENTS = [
-  { key: "claude" as const, name: "Claude Code" },
-  { key: "codex" as const, name: "Codex" },
-]
+const AGENTS = KNOWN_AGENTS.map((key) => ({ key, name: agentLabel(key) }))
 
 export function CodeModeStep({ state }: CodeModeStepProps) {
   const { handleNext, handleBack } = state
 
   const [enabled, setEnabled] = useState(false)
-  const [selected, setSelected] = useState<Record<"claude" | "codex", boolean>>({ claude: false, codex: false })
+  const [selected, setSelected] = useState<Record<CodingAgent, boolean>>({ opencode: false, cursor: false, hermes: false })
   const [status, setStatus] = useState<CodeModeAgentStatus | null>(null)
   const [statusLoading, setStatusLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -33,11 +32,12 @@ export function CodeModeStep({ state }: CodeModeStepProps) {
         const result = await window.ipc.invoke("codeMode:checkAgentStatus", null)
         if (cancelled) return
         setStatus(result)
-        const claudeInstalled = result.claude.installed
-        const codexInstalled = result.codex.installed
-        if (claudeInstalled || codexInstalled) {
+        const installed = Object.fromEntries(
+          KNOWN_AGENTS.map((agent) => [agent, result[agent]?.installed ?? false]),
+        ) as Record<CodingAgent, boolean>
+        if (Object.values(installed).some(Boolean)) {
           setEnabled(true)
-          setSelected({ claude: claudeInstalled, codex: codexInstalled })
+          setSelected(installed)
         }
       } catch {
         if (!cancelled) setStatus(null)
@@ -58,14 +58,6 @@ export function CodeModeStep({ state }: CodeModeStepProps) {
         // Non-fatal — the user can still enable code mode later from Settings.
       }
       setSaving(false)
-      // Kick off engine downloads in the BACKGROUND for selected agents that aren't
-      // installed yet. We deliberately don't block onboarding on the ~200 MB download —
-      // it keeps running in the main process and its progress shows in Settings → Code Mode.
-      for (const a of AGENTS) {
-        if (selected[a.key] && !status?.[a.key].installed) {
-          startProvisioning(a.key, () => {})
-        }
-      }
     }
     handleNext()
   }, [enabled, selected, status, handleNext])
@@ -77,9 +69,8 @@ export function CodeModeStep({ state }: CodeModeStepProps) {
         Set Up Code Mode
       </h2>
       <p className="text-base text-muted-foreground text-center leading-relaxed mb-6 max-w-md mx-auto">
-        Use Claude Code or Codex in Rowboat. Sign in with{" "}
-        <code className="rounded bg-muted px-1 py-0.5 font-mono text-[13px] text-foreground">claude&nbsp;login</code> or{" "}
-        <code className="rounded bg-muted px-1 py-0.5 font-mono text-[13px] text-foreground">codex&nbsp;login</code> in your terminal.
+        Use OpenCode, Cursor, or Hermes in Rowboat. Install the CLI you want and put it on your PATH —
+        Rowboat detects it automatically.
       </p>
 
       {statusLoading ? (
@@ -107,7 +98,7 @@ export function CodeModeStep({ state }: CodeModeStepProps) {
               </span>
               {AGENTS.map((a) => {
                 const st = status?.[a.key]
-                const ready = (st?.installed ?? false) && (st?.signedIn ?? false)
+                const ready = st?.installed ?? false
                 return (
                   <div key={a.key} className="rounded-xl border px-4 py-3 flex items-center gap-3">
                     <Terminal className="size-4 text-muted-foreground shrink-0" />

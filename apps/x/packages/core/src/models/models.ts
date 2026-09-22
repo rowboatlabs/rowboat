@@ -76,7 +76,10 @@ export function createProvider(config: z.infer<typeof Provider>): ProviderV4 {
             });
         case "openrouter":
             return createOpenRouter({
-                apiKey,
+                // models.json usually carries no key (the profile launcher injects
+                // a per-profile key via OPENROUTER_API_KEY); a stored key still wins
+                // when present so existing configs keep working.
+                apiKey: apiKey || process.env.OPENROUTER_API_KEY,
                 baseURL,
                 headers,
             }) as unknown as ProviderV4;
@@ -241,7 +244,8 @@ export async function listModelsForProvider(
     providerConfig: z.infer<typeof Provider>,
     timeoutMs = 8000,
 ): Promise<string[]> {
-    const { flavor, apiKey, baseURL } = providerConfig;
+    const { flavor, baseURL } = providerConfig;
+    const apiKey = providerConfig.apiKey || (flavor === 'openrouter' ? process.env.OPENROUTER_API_KEY : undefined);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {

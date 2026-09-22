@@ -65,6 +65,8 @@ export const ZAuthConfig = z.object({
     id: z.string(),
     is_composio_managed: z.boolean(),
     auth_scheme: ZAuthScheme,
+    // Display name from the Composio API; per-profile matching (U3) needs it.
+    name: z.string().optional(),
 });
 
 /**

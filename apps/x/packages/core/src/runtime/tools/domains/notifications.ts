@@ -9,6 +9,7 @@ import { getCurrentUseCase } from "../../../analytics/use_case.js";
 import type { INotificationService } from "../../../application/notification/service.js";
 import type { ITurnRepo } from "../../turns/repo.js";
 import { notifyIfEnabled } from "../../../application/notification/notifier.js";
+import { profileDeepLink } from "../../../config/profile.js";
 import { BuiltinToolsSchema } from "../types.js";
 
 
@@ -69,7 +70,7 @@ export const notificationTools: z.infer<typeof BuiltinToolsSchema> = {
                     await notifyIfEnabled('background_task', {
                         title,
                         message,
-                        link: link ?? 'rowboat://open?type=bg-tasks',
+                        link: link ?? profileDeepLink('open?type=bg-tasks'),
                         actionLabel,
                         secondaryActions,
                         suppressDuringStartupGrace: true,

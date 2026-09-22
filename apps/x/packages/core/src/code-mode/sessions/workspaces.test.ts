@@ -15,7 +15,7 @@ vi.mock('../../terminal/terminal.js', () => ({ disposeTerminal: mocks.disposeTer
 vi.mock('fs/promises', () => ({ default: { access: vi.fn(), writeFile: vi.fn(), rm: vi.fn().mockResolvedValue(undefined) } }));
 
 const initial: CodeSession = {
-    id: 's1', projectId: 'p1', title: 'Original chat', agent: 'codex', cwd: '/tmp/wt',
+    id: 's1', projectId: 'p1', title: 'Original chat', agent: 'cursor', cwd: '/tmp/wt',
     worktree: { path: '/tmp/wt', branch: 'rowboat/s1', baseBranch: 'main', baseCommit: 'original' }, createdAt: '2026-09-01T00:00:00.000Z',
 };
 function setup(members: CodeSession[] = [initial]) {
@@ -38,11 +38,11 @@ beforeEach(() => { vi.clearAllMocks(); mocks.workspaceHasStarted.mockResolvedVal
 describe('shared worktree sessions', () => {
     it('creates independent chats in an existing legacy worktree without creating another branch', async () => {
         const { service, records } = setup();
-        const created = await service.create({ projectId: 'p1', agent: 'claude', isolation: 'worktree', workspaceSessionId: 's1' });
+        const created = await service.create({ projectId: 'p1', agent: 'opencode', isolation: 'worktree', workspaceSessionId: 's1' });
         expect(created.id).toBe('s2');
         expect(created.cwd).toBe(initial.cwd);
         expect(created.worktree).toEqual(initial.worktree);
-        expect(created.agent).toBe('claude');
+        expect(created.agent).toBe('opencode');
         expect(records.get('s1')?.title).toBe('Original chat');
         expect(mocks.worktreeAdd).not.toHaveBeenCalled();
     });
@@ -69,13 +69,13 @@ describe('shared worktree sessions', () => {
     });
     it('rejects removed or foreign workspaces and removes the failed empty chat', async () => {
         const { service, sessions } = setup([{ ...initial, worktree: { ...initial.worktree!, removedAt: '2026-09-02T00:00:00.000Z' } }]);
-        await expect(service.create({ projectId: 'p1', agent: 'codex', isolation: 'worktree', workspaceSessionId: 's1' })).rejects.toThrow('removed');
+        await expect(service.create({ projectId: 'p1', agent: 'cursor', isolation: 'worktree', workspaceSessionId: 's1' })).rejects.toThrow('removed');
         expect(sessions.deleteSession).toHaveBeenCalledWith('s2');
-        await expect(service.create({ projectId: 'p2', agent: 'codex', isolation: 'worktree', workspaceSessionId: 's1' })).rejects.toThrow();
+        await expect(service.create({ projectId: 'p2', agent: 'cursor', isolation: 'worktree', workspaceSessionId: 's1' })).rejects.toThrow();
     });
     it('records the selected base and passes it to git', async () => {
         const { service } = setup();
-        const created = await service.create({ projectId: 'p1', agent: 'codex', isolation: 'worktree', baseBranch: 'release' });
+        const created = await service.create({ projectId: 'p1', agent: 'cursor', isolation: 'worktree', baseBranch: 'release' });
         expect(created.worktree?.baseBranch).toBe('release');
         expect(mocks.worktreeAdd.mock.calls[0][3]).toBe('release');
     });

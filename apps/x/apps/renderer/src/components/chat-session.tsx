@@ -22,7 +22,7 @@ import { TurnConversation } from '@/components/turn-conversation'
 import { streamdownComponents } from '@/lib/markdown-render'
 import { useSmoothedText } from '@/hooks/useSmoothedText'
 import type { useVoiceMode } from '@/hooks/useVoiceMode'
-import type { PermissionDecision } from '@x/shared/src/code-mode.js'
+import type { PermissionDecision, CodingAgent } from '@x/shared/src/code-mode.js'
 import type { QueuedSessionMessage } from '@x/shared/src/sessions.js'
 import { ChatEmptyState } from './chat-empty-state'
 import { ChatInputWithMentions, type CallPreset, type PermissionMode, type StagedAttachment, type ModelSelection } from './chat-input-with-mentions'
@@ -268,7 +268,7 @@ export interface ChatSessionComposerProps {
     mentions?: Mention[],
     stagedAttachments?: StagedAttachment[],
     searchEnabled?: boolean,
-    codeMode?: 'claude' | 'codex',
+    codeMode?: CodingAgent,
     permissionMode?: PermissionMode,
   ) => void | Promise<void>
   onStop?: () => void | Promise<void>
@@ -286,7 +286,7 @@ export interface ChatSessionComposerProps {
   onPullQueued?: (queueId: string) => void
   presetMessage: string | undefined
   onPresetMessageConsumed: () => void
-  codeSessionLocks: Record<string, { cwd: string; agent: 'claude' | 'codex' }>
+  codeSessionLocks: Record<string, { cwd: string; agent: CodingAgent }>
   initialDraft: string | undefined
   onDraftChange: (tabId: string, text: string) => void
   /**

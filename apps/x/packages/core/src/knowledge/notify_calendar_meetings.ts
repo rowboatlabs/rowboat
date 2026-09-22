@@ -2,6 +2,7 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import { WorkDir } from "../config/config.js";
+import { profileDeepLink } from "../config/profile.js";
 import container from "../di/container.js";
 import type { INotificationService } from "../application/notification/service.js";
 
@@ -135,7 +136,7 @@ async function tick(state: NotificationState): Promise<{ state: NotificationStat
                 // Single labeled button — adding a secondary action would force
                 // macOS to bundle them into an "Options" dropdown, hiding the
                 // primary label.
-                link: `rowboat://action?type=join-and-take-meeting-notes&eventId=${eid}`,
+                link: profileDeepLink(`action?type=join-and-take-meeting-notes&eventId=${eid}`),
                 actionLabel: "Join & Notes",
             });
             console.log(`[CalendarNotify] notified for "${summary}" (${eventId})`);

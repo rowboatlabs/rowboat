@@ -4,6 +4,7 @@
 
 import { z } from "zod";
 import { composioAccountsRepo } from "../../../composio/repo.js";
+import { composioUserId } from "../../../config/profile.js";
 import { executeAction as executeComposioAction, isConfigured as isComposioConfigured, searchTools as searchComposioTools } from "../../../composio/client.js";
 import { CURATED_TOOLKITS, CURATED_TOOLKIT_SLUGS } from "@x/shared/dist/composio.js";
 import { BuiltinToolsSchema } from "../types.js";
@@ -105,7 +106,7 @@ export const composioTools: z.infer<typeof BuiltinToolsSchema> = {
             try {
                 return await executeComposioAction(toolSlug, {
                     connected_account_id: account.id,
-                    user_id: 'rowboat-user',
+                    user_id: composioUserId(),
                     version: 'latest',
                     arguments: toolArgs,
                 });

@@ -83,28 +83,6 @@ export function extractModelOptions(configOptions: unknown, models?: unknown): C
     };
 }
 
-// Claude's `availableModels` exposes its top model only as "Default
-// (recommended)" and omits an explicit "Opus" row (the interactive `/model`
-// lists it, the ACP adapter dedupes it). Surface the canonical aliases
-// explicitly for clarity — the adapter resolves "opus"/"sonnet"/"haiku" to the
-// concrete model. Deduped against what the engine already returned, so in
-// practice this only adds the missing "Opus" entry, placed right after Default.
-const CLAUDE_ALIAS_ROWS: CodeAgentOption[] = [
-    { value: 'opus', label: 'Opus' },
-    { value: 'sonnet', label: 'Sonnet' },
-    { value: 'haiku', label: 'Haiku' },
-];
-
-function withClaudeAliases(options: CodeAgentModelOptions): CodeAgentModelOptions {
-    const have = new Set(options.models.map((m) => m.value));
-    const extra = CLAUDE_ALIAS_ROWS.filter((r) => !have.has(r.value));
-    if (extra.length === 0) return options;
-    const at = options.models.findIndex((m) => m.value === 'default');
-    const models = [...options.models];
-    models.splice(at >= 0 ? at + 1 : 0, 0, ...extra);
-    return { ...options, models };
-}
-
 // Map a raw ACP session/update notification onto our small CodeRunEvent union.
 function toEvent(update: SessionUpdate): CodeRunEvent {
     switch (update.sessionUpdate) {
@@ -258,7 +236,7 @@ export class AcpClient {
             const res = await this.withStartupTimeout(this.conn().newSession({ cwd: this.cwd, mcpServers: [] }));
             const r = res as { configOptions?: unknown; models?: unknown };
             const options = extractModelOptions(r.configOptions, r.models);
-            return this.agent === 'claude' ? withClaudeAliases(options) : options;
+            return options;
         } catch (e) {
             throw this.enrich(e, 'describeModelOptions');
         }

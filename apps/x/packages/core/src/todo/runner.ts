@@ -1,7 +1,9 @@
 import { getDefaultModelAndProvider } from '../models/defaults.js';
 import { notifyIfEnabled } from '../application/notification/notifier.js';
+import { profileDeepLink } from '../config/profile.js';
 import { PrefixLogger } from '@x/shared/dist/prefix-logger.js';
 import type { TurnStreamEvent } from '@x/shared/dist/turns.js';
+import type { CodingAgent } from '@x/shared/dist/code-mode.js';
 import type { ISessions } from '../runtime/sessions/api.js';
 import { TurnNotSettledError } from '../runtime/sessions/api.js';
 import type { ITurnEventBus } from '../runtime/turns/event-hub.js';
@@ -281,7 +283,7 @@ async function landSettled(
             void notifyIfEnabled('todo', {
                 title: '✓ To-do finished',
                 message: settled.text ?? itemText,
-                link: 'rowboat://open?type=home',
+                link: profileDeepLink('open?type=home'),
                 // The receipt lands visibly on Home — no toast needed while
                 // the user is already looking at the app.
                 onlyWhenBackground: true,
@@ -395,7 +397,7 @@ async function driveTurn(
                 void notifyIfEnabled('agent_permission', {
                     title: 'Rowboat needs an approval',
                     message: itemText,
-                    link: 'rowboat://open?type=home',
+                    link: profileDeepLink('open?type=home'),
                 });
             }
         }
@@ -424,7 +426,7 @@ export async function runTodoItem(
         // item's thread before the first turn — worktree lane by default,
         // visible in the Code section, status-tracked. code_agent_run then
         // resolves the pin server-side like any Code-section session.
-        code?: { projectId: string; agent?: 'claude' | 'codex'; isolation?: 'in-repo' | 'worktree' };
+        code?: { projectId: string; agent?: CodingAgent; isolation?: 'in-repo' | 'worktree' };
     },
 ): Promise<TodoRunResult> {
     const norm = normalizeKey(key);
@@ -461,7 +463,7 @@ export async function runTodoItem(
                 const service = await lazyResolve<CodeSessionService>('codeSessionService');
                 const meta = await service.createForSession(sessionId, {
                     projectId: opts.code.projectId,
-                    agent: opts.code.agent ?? 'claude',
+                    agent: opts.code.agent ?? 'opencode',
                     // NO policy: the composer's permission toggle is a
                     // per-dispatch posture, not a chosen session setting —
                     // freezing it would silently outlive the toggle. Runs
@@ -558,7 +560,7 @@ async function driveChatTurn(
                     void notifyIfEnabled('agent_permission', {
                         title: 'Rowboat needs an approval',
                         message: truncate(message, 120),
-                        link: 'rowboat://open?type=home',
+                        link: profileDeepLink('open?type=home'),
                     });
                 }
                 continue;

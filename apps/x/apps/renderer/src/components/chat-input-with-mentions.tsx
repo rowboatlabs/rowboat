@@ -1,3 +1,6 @@
+import type { CodingAgent } from '@x/shared/src/code-mode.js'
+import { AGENT_CATALOG, KNOWN_AGENTS, agentLabel } from '@x/shared/src/agent-catalog.js'
+import { fetchCodeAgentsStatus, isAgentReady, type CodeAgentsStatus } from './code/code-agent-status'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
@@ -201,7 +204,7 @@ export type CallPreset = 'voice' | 'video' | 'share' | 'practice'
 
 interface ChatInputInnerProps {
   draftKey?: string
-  onSubmit: (message: PromptInputMessage, mentions?: Mention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => void
+  onSubmit: (message: PromptInputMessage, mentions?: Mention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: CodingAgent, permissionMode?: PermissionMode) => void
   onStop?: () => void
   isProcessing: boolean
   /**
@@ -262,7 +265,7 @@ interface ChatInputInnerProps {
    * and coding agent come from the session and are FROZEN — the backend pins
    * them server-side regardless, so the composer must not pretend otherwise.
    */
-  codeSessionLock?: { cwd: string; agent: 'claude' | 'codex' } | null
+  codeSessionLock?: { cwd: string; agent: CodingAgent } | null
   contextChip?: { label: string; icon?: 'todo' | 'reply'; quote?: string; onDismiss: () => void }
   placeholder?: string
   focusSignal?: number
@@ -335,9 +338,10 @@ function ChatInputInner({
   const [lockedModel, setLockedModel] = useState<SelectedModel | null>(null)
   const [searchEnabled, setSearchEnabled] = useState(false)
   const [searchAvailable, setSearchAvailable] = useState(false)
-  const [codingAgent, setCodingAgent] = useState<'claude' | 'codex'>('claude')
+  const [codingAgent, setCodingAgent] = useState<CodingAgent>('opencode')
   const [codeModeEnabled, setCodeModeEnabled] = useState(false)
   const [codeModeFeatureEnabled, setCodeModeFeatureEnabled] = useState(false)
+  const [agentsStatus, setAgentsStatus] = useState<CodeAgentsStatus | null>(null)
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('auto')
   const [recentWorkDirs, setRecentWorkDirs] = useState<RecentWorkDir[]>([])
 
@@ -437,6 +441,15 @@ function ChatInputInner({
     }
   }, [codeModeFeatureEnabled, codeModeEnabled])
 
+  // Readiness drives which agents the chip may land on: cycling into an agent
+  // that isn't installed would fail at run time.
+  useEffect(() => {
+    if (!codeModeEnabled) return
+    let cancelled = false
+    void fetchCodeAgentsStatus().then((s) => { if (!cancelled) setAgentsStatus(s) }).catch(() => {})
+    return () => { cancelled = true }
+  }, [codeModeEnabled])
+
 
   // Cross-platform basename — handles both / and \ separators.
   const basename = useCallback((p: string): string => {
@@ -457,27 +470,27 @@ function ChatInputInner({
   }, [])
 
   // Load coding-agent preference for a given workdir.
-  // Storage: config/coding-agents.json — { [workDirPath]: 'claude' | 'codex' }
-  const loadCodingAgentFor = useCallback(async (dir: string | null): Promise<'claude' | 'codex'> => {
-    if (!dir) return 'claude'
+  // Storage: config/coding-agents.json — { [workDirPath]: CodingAgent }
+  const loadCodingAgentFor = useCallback(async (dir: string | null): Promise<CodingAgent> => {
+    if (!dir) return 'opencode'
     try {
       const result = await window.ipc.invoke('workspace:readFile', { path: 'config/coding-agents.json' })
       const parsed = JSON.parse(result.data) as Record<string, unknown>
       const value = parsed?.[dir]
-      if (value === 'codex' || value === 'claude') return value
+      if (typeof value === 'string' && (KNOWN_AGENTS as readonly string[]).includes(value)) return value as CodingAgent
     } catch {
       /* file missing or invalid — fall through to default */
     }
-    return 'claude'
+    return 'opencode'
   }, [])
 
-  const persistCodingAgent = useCallback(async (dir: string, agent: 'claude' | 'codex') => {
-    const existing: Record<string, 'claude' | 'codex'> = {}
+  const persistCodingAgent = useCallback(async (dir: string, agent: CodingAgent) => {
+    const existing: Record<string, CodingAgent> = {}
     try {
       const result = await window.ipc.invoke('workspace:readFile', { path: 'config/coding-agents.json' })
       const parsed = JSON.parse(result.data) as Record<string, unknown>
       for (const [k, v] of Object.entries(parsed ?? {})) {
-        if (v === 'claude' || v === 'codex') existing[k] = v
+        if (typeof v === 'string' && (KNOWN_AGENTS as readonly string[]).includes(v)) existing[k] = v as CodingAgent
       }
     } catch { /* start fresh */ }
     existing[dir] = agent
@@ -492,6 +505,16 @@ function ChatInputInner({
   // composer reflects that instead of offering controls that wouldn't apply.
   const isCodeLocked = Boolean(codeSessionLock)
   const effectiveWorkDir = codeSessionLock?.cwd ?? workDir
+
+  // If the current/persisted selection isn't ready but another agent is, move to
+  // it. This is what makes "only OpenCode installed" work: the default is not
+  // hardcoded to Claude Code.
+  useEffect(() => {
+    if (!agentsStatus || isCodeLocked) return
+    if (isAgentReady(agentsStatus, codingAgent)) return
+    const firstReady = KNOWN_AGENTS.find((a) => isAgentReady(agentsStatus, a))
+    if (firstReady) setCodingAgent(firstReady)
+  }, [agentsStatus, codingAgent, isCodeLocked])
 
   // Work directory is owned per-chat by the parent (App). This component only
   // drives the picker dialog and reports changes up via onWorkDirChange. Whenever
@@ -552,13 +575,17 @@ function ChatInputInner({
   const handleClearWorkDir = useCallback(() => {
     if (isCodeLocked) return
     onWorkDirChange?.(null)
-    setCodingAgent('claude')
+    const firstReady = agentsStatus && KNOWN_AGENTS.find((a) => isAgentReady(agentsStatus, a))
+    setCodingAgent(firstReady ?? 'opencode')
     toast.success('Work directory cleared')
-  }, [onWorkDirChange, isCodeLocked])
+  }, [onWorkDirChange, isCodeLocked, agentsStatus])
 
   const handleToggleCodingAgent = useCallback(async () => {
     if (isCodeLocked) return
-    const next: 'claude' | 'codex' = codingAgent === 'claude' ? 'codex' : 'claude'
+    const ready = agentsStatus ? KNOWN_AGENTS.filter((a) => isAgentReady(agentsStatus, a)) : []
+    const list = ready.length > 0 ? ready : KNOWN_AGENTS
+    const idx = list.indexOf(codingAgent)
+    const next: CodingAgent = list[(idx + 1) % list.length]
     setCodingAgent(next)
     // Persist only when scoped to a workdir; without one there's nothing to key on.
     if (!workDir) return
@@ -570,7 +597,7 @@ function ChatInputInner({
       // revert on failure
       setCodingAgent(codingAgent)
     }
-  }, [workDir, codingAgent, persistCodingAgent, isCodeLocked])
+  }, [workDir, codingAgent, persistCodingAgent, isCodeLocked, agentsStatus])
 
   // Check search tool availability (exa or signed-in via gateway)
   useEffect(() => {
@@ -1142,8 +1169,8 @@ function ChatInputInner({
               </TooltipTrigger>
               <TooltipContent side="top">
                 {isCodeLocked
-                  ? `Coding session — ${codingAgent === 'claude' ? 'Claude Code' : 'Codex'}`
-                  : `Code mode on (${codingAgent === 'claude' ? 'Claude Code' : 'Codex'}) — click to disable`}
+                  ? `Coding session — ${agentLabel(codingAgent)}`
+                  : `Code mode on (${agentLabel(codingAgent)}) — click to disable`}
               </TooltipContent>
             </Tooltip>
           ) : (
@@ -1179,13 +1206,13 @@ function ChatInputInner({
                       isCodeLocked ? "cursor-default" : "hover:bg-secondary/70",
                     )}
                   >
-                    <span>{codingAgent === 'claude' ? 'Claude' : 'Codex'}</span>
+                    <span>{AGENT_CATALOG[codingAgent].shortLabel}</span>
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="top">
                   {isCodeLocked
-                    ? `Coding agent fixed by the session: ${codingAgent === 'claude' ? 'Claude Code' : 'Codex'}`
-                    : `Coding agent: ${codingAgent === 'claude' ? 'Claude Code' : 'Codex'} — click to swap`}
+                    ? `Coding agent fixed by the session: ${agentLabel(codingAgent)}`
+                    : `Coding agent: ${agentLabel(codingAgent)} — click to swap`}
                 </TooltipContent>
               </Tooltip>
             </div>
@@ -1202,7 +1229,7 @@ function ChatInputInner({
                 <Terminal className="h-4 w-4" />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="top">Use a coding agent (Claude Code or Codex)</TooltipContent>
+            <TooltipContent side="top">Use a coding agent</TooltipContent>
           </Tooltip>
         ))}
         </div>
@@ -1262,7 +1289,7 @@ function ChatInputInner({
                     <DropdownMenuItem disabled={isCodeLocked} onSelect={(e) => { e.preventDefault(); handleToggleCodingAgent() }}>
                       <Terminal className="size-4" />
                       <span className="min-w-0 flex-1">Coding agent</span>
-                      <span className="text-xs text-muted-foreground">{codingAgent === 'claude' ? 'Claude' : 'Codex'}</span>
+                      <span className="text-xs text-muted-foreground">{AGENT_CATALOG[codingAgent].shortLabel}</span>
                     </DropdownMenuItem>
                   )}
                 </>
@@ -1460,7 +1487,7 @@ export interface ChatInputWithMentionsProps {
   recentFiles: string[]
   visibleFiles: string[]
   /** The @ menu's picks ride along: files (attachments), spaces and people (userMessageContext.spaceMentions). */
-  onSubmit: (message: PromptInputMessage, mentions?: Mention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => void
+  onSubmit: (message: PromptInputMessage, mentions?: Mention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: CodingAgent, permissionMode?: PermissionMode) => void
   onStop?: () => void
   isProcessing: boolean
   /** Let Enter submit while processing (queue/steer) — see ChatInputInner. */
@@ -1494,7 +1521,7 @@ export interface ChatInputWithMentionsProps {
   workDir?: string | null
   onWorkDirChange?: (value: string | null) => void
   /** Set when this chat is bound to a Code-section session — freezes workdir + agent. */
-  codeSessionLock?: { cwd: string; agent: 'claude' | 'codex' } | null
+  codeSessionLock?: { cwd: string; agent: CodingAgent } | null
   /** Destination chip: the composer is visibly writing somewhere other than
    * the chat (e.g. "To-do"). Rendered above the input with a dismiss ✕;
    * Escape also dismisses. */

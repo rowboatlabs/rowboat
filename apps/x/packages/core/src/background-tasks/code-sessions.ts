@@ -281,7 +281,7 @@ export async function launchCodeTask(args: LaunchCodeTaskArgs): Promise<LaunchCo
         session = await codeSessionService.create({
             projectId: project.id,
             title,
-            agent: 'claude',
+            agent: 'opencode',
             policy: 'yolo',
             isolation: 'worktree',
         });

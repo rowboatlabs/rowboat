@@ -149,7 +149,7 @@ describe("RealAgentResolver", () => {
                 composition: {
                     workDirId: "sess-1",
                     searchEnabled: true,
-                    codeMode: "claude",
+                    codeMode: "opencode",
                 },
             },
         });
@@ -161,7 +161,7 @@ describe("RealAgentResolver", () => {
                 voiceInput: false,
                 voiceOutput: null,
                 searchEnabled: true,
-                codeMode: "claude",
+                codeMode: "opencode",
                 codeCwd: null,
                 videoMode: false,
                 coachMode: false,

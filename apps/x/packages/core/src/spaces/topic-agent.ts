@@ -6,6 +6,7 @@ import { deriveTurnStatus, reduceTurn } from '@x/shared/dist/turns.js';
 import { WorkDir } from '../config/config.js';
 import { capture } from '../analytics/posthog.js';
 import { spacesMcpServerNameFor } from './orgs.js';
+import type { CodingAgent } from '@x/shared/dist/code-mode.js';
 
 // @rowboat in a space (spec §8 grammar, §11 beat 7): an addressed message
 // routes into ONE session per thread — the anchor is the addressed message's
@@ -50,7 +51,7 @@ export interface InvokeTopicAgentInput {
     model?: { provider: string; model: string; effort?: 'low' | 'medium' | 'high' };
     permissionMode?: 'auto' | 'manual';
     searchEnabled?: boolean;
-    codeMode?: 'claude' | 'codex';
+    codeMode?: CodingAgent;
   };
 }
 

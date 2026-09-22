@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Check, ChevronDown, Copy, GitBranch, RotateCcw, SlidersHorizontal } from 'lucide-react'
 import type { CodeSession, CodeSessionStatus, CodeAgentModelOptions } from '@x/shared/src/code-sessions.js'
 import type { ApprovalPolicy, CodingAgent } from '@x/shared/src/code-mode.js'
+import { KNOWN_AGENTS } from '@x/shared/src/agent-catalog.js'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -185,7 +186,7 @@ export function CodeSessionHeader({ session, status, changedCount, panel, onTogg
                   value={session.agent}
                   onValueChange={(v) => void update({ agent: v as CodingAgent })}
                 >
-                  {(['claude', 'codex'] as CodingAgent[]).map((agent) => (
+                  {KNOWN_AGENTS.map((agent) => (
                     <DropdownMenuRadioItem
                       key={agent}
                       value={agent}

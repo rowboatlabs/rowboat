@@ -20,6 +20,7 @@ import {
 } from './constants.js';
 import { synthesizeSpeech, transcribeAudio } from '../voice/voice.js';
 import { composioAccountsRepo } from '../composio/repo.js';
+import { composioUserId } from '../config/profile.js';
 import {
     isConfigured as isComposioConfigured,
     searchTools as searchComposioTools,
@@ -127,7 +128,7 @@ async function handleToolsExecute(
     try {
         const result = await executeComposioAction(toolSlug, {
             connected_account_id: account.id,
-            user_id: 'rowboat-user',
+            user_id: composioUserId(),
             version: 'latest',
             arguments: args,
         });

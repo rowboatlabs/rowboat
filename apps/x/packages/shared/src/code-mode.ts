@@ -4,7 +4,11 @@ import z from "zod";
 // core engine re-exports the inferred TS types, and runs.ts builds the RunEvent
 // variants that carry these to the renderer.
 
-export const CodingAgent = z.enum(["claude", "codex"]);
+// The canonical agent id list. Adding a known CLI coding agent starts here and
+// in agent-catalog.ts (identity) plus core's agent-registry.ts (launch/probes).
+export const CODING_AGENT_IDS = ["opencode", "cursor", "hermes"] as const;
+
+export const CodingAgent = z.enum(CODING_AGENT_IDS);
 export type CodingAgent = z.infer<typeof CodingAgent>;
 
 // How the permission broker answers the agent's requests before any per-tool

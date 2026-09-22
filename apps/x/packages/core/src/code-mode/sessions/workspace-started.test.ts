@@ -6,7 +6,7 @@ vi.mock('../../config/config.js', () => ({ WorkDir: workDir }));
 import { markWorkspaceStarted, workspaceHasStarted } from './workspace-started.js';
 afterEach(async () => { await fs.rm(workDir, { recursive: true, force: true }); });
 it('persists workspace start independently of any individual session', async () => {
-    const session: CodeSession = { id: 'first', projectId: 'p', agent: 'codex', cwd: '/wt', title: 'First',
+    const session: CodeSession = { id: 'first', projectId: 'p', agent: 'cursor', cwd: '/wt', title: 'First',
         createdAt: '2026-09-01T00:00:00Z', worktree: { path: '/wt', branch: 'rowboat/test', baseBranch: 'main' } };
     expect(await workspaceHasStarted(session)).toBe(false);
     await markWorkspaceStarted(session);

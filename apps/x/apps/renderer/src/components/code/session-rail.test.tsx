@@ -12,12 +12,13 @@ const project: ProjectRow = {
   git: { isGitRepo: true, branch: 'main', hasCommits: true, dirtyCount: 0, root: '/Example', subpath: '' },
 }
 const session: CodeSession = {
-  id: 'session', projectId: 'project', title: 'Fix rendering', agent: 'codex',
+  id: 'session', projectId: 'project', title: 'Fix rendering', agent: 'cursor',
   cwd: '/Example', createdAt: '2026-09-08T00:00:00Z',
 }
 const ready: CodeAgentsStatus = {
-  claude: { installed: true, signedIn: true },
-  codex: { installed: true, signedIn: true },
+  opencode: { installed: true, signedIn: true },
+  cursor: { installed: true, signedIn: true },
+  hermes: { installed: true, signedIn: true },
 }
 
 function setup(done = false, agentsStatus: CodeAgentsStatus | null = ready) {
@@ -66,7 +67,7 @@ describe('code rail context menus', () => {
   })
 
   it.each([
-    ['New worktree', undefined], ['New Claude Code worktree', 'claude'], ['New Codex worktree', 'codex'],
+    ['New worktree', undefined], ['New OpenCode worktree', 'opencode'], ['New Cursor worktree', 'cursor'], ['New Hermes worktree', 'hermes'],
   ] as const)('creates %s in the clicked project without collapsing it', (name, agent) => {
     const { onNewSession } = setup()
     openProjectMenu()
@@ -77,11 +78,12 @@ describe('code rail context menus', () => {
 
   it('disables agents that are missing or signed out', () => {
     const { onNewSession } = setup(false, {
-      claude: { installed: false, signedIn: false },
-      codex: { installed: true, signedIn: false },
+      opencode: { installed: false, signedIn: false },
+      cursor: { installed: false, signedIn: false },
+      hermes: { installed: false, signedIn: false },
     })
     openProjectMenu()
-    for (const name of ['New Claude Code worktree', 'New Codex worktree']) {
+    for (const name of ['New OpenCode worktree', 'New Cursor worktree', 'New Hermes worktree']) {
       const item = screen.getByRole('menuitem', { name })
       expect(item).toHaveAttribute('aria-disabled', 'true')
       fireEvent.click(item)
