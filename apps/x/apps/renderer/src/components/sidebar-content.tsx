@@ -84,6 +84,8 @@ import { SettingsDialog } from "@/components/settings-dialog"
 import { SidebarCreditRewards } from "@/components/sidebar-credit-rewards"
 import { SpacesSidebarSection } from "@/components/spaces-sidebar-section"
 import { useCodeSessions } from "@/components/code/use-code-sessions"
+import { useUnreadCodeSessions } from "@/components/code/session-read-state"
+import { UnreadBadge } from "@/components/spaces/unread-badge"
 import { SPACES_ENABLED } from "@/lib/feature-flags"
 import type { SpaceSelection } from "@/components/spaces-view"
 import { MascotFaceIcon } from "@/components/talking-head"
@@ -480,6 +482,8 @@ export function SidebarContentPanel({
 }: SidebarContentPanelProps) {
   const { sessions: projectSessions, statusOf: projectSessionStatusOf } = useCodeSessions()
   const hasWorkingProjectSession = projectSessions.some((session) => projectSessionStatusOf(session.id) === 'working')
+  const unreadProjectSessions = useUnreadCodeSessions()
+  const unreadProjectCount = projectSessions.filter((session) => unreadProjectSessions.has(session.id)).length
   const [hasOauthError, setHasOauthError] = useState(false)
   const [showOauthAlert, setShowOauthAlert] = useState(true)
   const [connectionsSettingsOpen, setConnectionsSettingsOpen] = useState(false)
@@ -846,6 +850,7 @@ export function SidebarContentPanel({
                   {hasWorkingProjectSession && (
                     <span role="status" aria-label="Project session working" className="code-working-dot size-2 shrink-0 rounded-full bg-[var(--rowboat-git)]" />
                   )}
+                  <UnreadBadge badge={{ unread: unreadProjectCount, forYou: unreadProjectCount }} direct />
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
