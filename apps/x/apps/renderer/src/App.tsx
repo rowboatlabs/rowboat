@@ -5731,15 +5731,11 @@ function App() {
     })
   }, [])
 
-  // One-time storage-retention notice: a modal on the first launch with
-  // retention enabled; the actual sweep starts on the NEXT launch so months
-  // of history are never deleted before the user has seen this.
-  const [retentionNotice, setRetentionNotice] = useState<{ chatDays: number | null } | null>(null)
-  const [retentionSettingsOpen, setRetentionSettingsOpen] = useState(false)
+  // Keep the legacy retention gate initialized after removing the startup
+  // popup (2026-09-22, onboarding simplification); controls remain in Settings.
   useEffect(() => {
-    void window.ipc.invoke('retention:consumeFirstRunNotice', null).then(({ show, chatDays }) => {
-      if (show) setRetentionNotice({ chatDays })
-    }).catch(() => { /* settings unavailable — try again next launch */ })
+    void window.ipc.invoke('retention:consumeFirstRunNotice', null)
+      .catch(() => { /* settings unavailable — try again next launch */ })
   }, [])
 
   // The quick-ask chord failed to register at boot — another app owns it.
@@ -8177,37 +8173,6 @@ function App() {
         open={billingErrorOpen}
         match={billingErrorMatch}
         onOpenChange={setBillingErrorOpen}
-      />
-      {/* One-time storage-retention notice (see retention:consumeFirstRunNotice). */}
-      <Dialog open={retentionNotice !== null} onOpenChange={(open) => { if (!open) setRetentionNotice(null) }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Old chats are cleaned up automatically</DialogTitle>
-            <DialogDescription className="pt-1 leading-relaxed">
-              {retentionNotice?.chatDays != null
-                ? `To save disk space, Rowboat now deletes chats that have been inactive for ${retentionNotice.chatDays}+ days, along with old background-task transcripts.`
-                : 'To save disk space, Rowboat now deletes old background-task transcripts.'}
-              {' '}Notes and files created by agents are never touched. Cleanup starts from the next launch, and you can change or turn this off anytime.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setRetentionNotice(null)
-                setRetentionSettingsOpen(true)
-              }}
-            >
-              Open Settings
-            </Button>
-            <Button onClick={() => setRetentionNotice(null)}>Got it</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      <SettingsDialog
-        open={retentionSettingsOpen}
-        onOpenChange={setRetentionSettingsOpen}
-        defaultTab="advanced"
       />
       <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} />
       {/* The one host for Create / Join a server (lib/server-dialog.ts): whatever
