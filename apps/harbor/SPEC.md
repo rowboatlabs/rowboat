@@ -2,7 +2,7 @@
 
 > A space is a shared container — files, a threaded feed, and members — that lives in an **org**: any OAuth-speaking server implementing the spaces protocol. The org stores bytes; every act of intelligence happens on a member's own machine, as that member.
 
-**Status:** Draft v1 · 2026-08-13 · Normative for the v1 dogfood slice · amended through 2026-09-22.
+**Status:** v1 · live in production · first draft 2026-08-13 · amended through 2026-09-22.
 
 This spec lives beside the code it governs (moved here 2026-09-22 from the private `rowboatlabs/harbor` repo at `28ffe08f`, now retired). Three documents, one kind of fact each: **this file** owns the product model and its rules; [`CONTRACT.md`](./CONTRACT.md) owns the wire shape and its settled semantics; [`AGENTS.md`](./AGENTS.md) owns how the server is built. A fact appears in one of them and is linked from the others, never restated.
 
@@ -143,6 +143,8 @@ Three shapes, one protocol; the client cannot tell them apart:
 - **Join a space**: the protocol defines a standard **invite link** shape. Opening one triggers: resolve the org → OAuth if not yet signed in → membership per org policy → the space appears. The ceremony must be identical regardless of the IdP behind it; if every org joins differently, the product feels broken. In practice the invite link is the phrase people share — the tenant noun rarely needs to be spoken.
 - **Session expiry**: org sessions will lapse. The failure mode must be visible and gentle (an "org needs re-login" surface, mail-client style) — never silently failing automations.
 
+*Amended 2026-09-22 (open spaces, §5):* **you join the org.** An invite admits you to the org and to the spaces it lists, on top of the org's default spaces; every other open space you browse and join yourself; a private space you enter only when one of its members adds you or lists it on your invite. The ceremony above is unchanged — one link shape, one OAuth journey, one bind-time policy.
+
 ### Identity is namespaced per org — **Decided**
 
 You are whoever the org's IdP says you are, per org. Mentions, member lists, and attribution are org-scoped. There is deliberately no global Rowboat-wide identity. The UI must present this honestly (org badges, org-scoped people-pickers) so it reads as a feature — the same way git remotes do.
@@ -161,11 +163,20 @@ An invite is an **open bearer secret**. Possession plus a successful sign-in at 
 
 **Wire impact** (lands as a contract PR): the accept path gains one distinguishable policy-refused state. Everything else — single-use vs. standing, expiry defaults, revocation UI, policy shape itself — is latitude or org-side.
 
-### Member profile: names and handles — **Decided** (rules) / **Deferred** (handle implementation) *(added 2026-08-19)*
+*Amended 2026-09-22 (Slack parity — decided with §5 Open spaces):*
+- **An invite is to the org, with an optional list of spaces.** Accepting creates the member (if new), joins the org's default spaces, and joins the listed ones. Today's per-space link is the case of an invite that lists one space; there is no second shape.
+- **Any member may create an invite, by default** — Slack's default and the stance already above. The org knob is `members | admins`, admin-set. A "members request, admins approve" mode is Deferred (§12).
+- **Listing a space on an invite requires being a member of it.** For a private space that is the whole rule; for an open space it is harmless (the person could self-join) and keeps the rule free of a kind check. The same rule governs adding an existing org member to a space (`addMembers`, §5).
+- **Guests are Deferred with the shape settled:** a member flag that removes browsing, self-join, and the org-wide roster (a guest sees only people who share a space with them — the roster bound that was the default until 2026-09-22); only admins invite one. The browse gate is therefore "org member and not a guest", built with the flag's slot in mind and nothing reserved for it.
+
+### Member profile — **Decided** *(added 2026-08-19; amended 2026-09-22: v1 field set, avatars, handle retired)*
 
 - **`displayName`**: seeded from the IdP profile at first bind, editable by the member, org-scoped, **not unique, display-only**.
-- **`handle`** (for `@`-mentioning humans): unique per org, suggested from the email local-part at join, owned by the member; org policy MAY lock changes. Ships with the mention grammar for humans, not before — the field is specified now so the contract change is a decision already made.
-- **The invariant that matters**: attribution is keyed by member **id**, never by handle or name — renames can never re-brand or spoof history. (Mirror of the existing rule: `agentName` is display-only, never an identity.)
+- **The invariant that matters**: attribution is keyed by member **id**, never by name — renames can never re-brand or spoof history. (Mirror of the existing rule: `agentName` is display-only, never an identity.)
+- **Profile v1 = display name, title, avatar** *(2026-09-22)*. Title is the one Slack field a roster actually shows; pronouns and time zone are additive text columns whenever wanted (the cost is UI, not schema). One route to update your own profile and its agent-face twin. **Only you edit your profile in v1**; admin edits of others' profiles are Deferred (§12).
+- **The avatar is an org-level blob at a Harbor URL, or absent** *(2026-09-22)*. Same content-addressed driver as space uploads, a second registry keyed by org, one upload route and one read route any org member may hit; image only, mime sniffed from the bytes, capped small, no server-side resizing (the client crops square, as Slack's does). A free-text avatar URL was rejected: it points every teammate's client at an arbitrary host — a tracking pixel aimed at the whole org — and IdP pictures hotlink-block and expire. Seeding the avatar from the IdP picture at bind (fetch once, store as an org blob) is Deferred (§12): a server-side fetch of a claimed URL wants its own small review.
+- **No live frame for profile changes in v1.** The log is per space and a rename is an org fact; clients re-fetch the roster on listing sync, focus, and reconnect and label people by id from it, so a rename propagates within a session. Trigger for an org-wide signal: a stale name noticed in a live conversation.
+- ~~**`handle`**~~ — **retired 2026-09-22.** Mentions shipped as id tokens through the picker (§7 Mentions, 2026-09-10), and name → id resolution for agents goes through the org-wide roster (§5), so the unique-handle field never became necessary. Nobody should build it.
 
 ### Roles: one admin bit — **Decided** *(added 2026-08-19)*
 
@@ -179,6 +190,14 @@ One org-level role: a member is an **admin** or not. The first admin is named at
 **The content plane stays role-flat**: within a space, every member writes equally — admins get no editorial superpowers. This is principle-bearing, not an omission (§2: membership *is* the trust decision; small trusted teams). Per-space roles (viewer/editor) are **Deferred** with a named revisit trigger: dogfood producing a real "this person should only read" need. IdP-level revocation (banning the account at the AS) is an operator act on the control plane, distinct from org-level removal — removal is the protocol-visible act.
 
 *Added 2026-09-07:* **admins cannot read direct messages.** A DM is a space whose members are exactly its two participants; the content plane is role-flat and the access gate is membership, so there is no admin path into one — by construction, not by policy. Managed customers will ask; the answer is written here so nobody softens it in a support thread.
+
+*Amended 2026-09-22 — the concrete list (Slack's defaults, decided with §5 Open spaces):*
+
+**Admin-only, org level:** remove a member from the org; promote and demote admins (the org always keeps at least one); set invite policy, the domain rule, and the default-space flag; revoke any invite. **Admin-only, space level — membership acts, never content:** change a space's visibility; remove a member from any shared space (Slack's default; a member's own tool is *leave*, not *kick* — opening removal to all members is a Deferred knob, §12); archive, unarchive, and delete a space (§6, the deletion doctrine). **Never on a DM** — its membership is fixed and there is no admin path into one. **Any member:** create a space and choose its visibility at creation; rename (as today); invite under the org's policy; add existing members to spaces they are in; self-join open spaces; leave; everything on the content plane.
+
+- **Org removal keeps the member row** with state `removed`: every membership goes, with a `removed` event on each space's log and the `space_removed` frame; the identity binding is severed so their token maps to no member. Re-inviting the same identity **reactivates the same row**, so attribution stays continuous. Everything they wrote stays, attributed, exactly as Slack keeps a deactivated account's history. The roster (§5) lists `active` members only.
+- **Agents perform admin acts their member may.** Parity (§9): the role check is on the member, not the acting mode; every admin act is attributed with the mode, so the record shows it was the agent. Confirmation of a high-blast-radius act (org removal, delete) is the app's tool-approval step, not a Harbor carve-out that would make the agent face second-class.
+- **Org facts have no log in v1.** A role change or an invite-policy change is a state change visible through the roster and org settings; its space-level consequences land on the space logs as events, which is what Slack shows in-channel. An org-level audit log is Deferred (§12; trigger: a compliance ask).
 
 ### Deployment and tenancy — **Decided**
 
@@ -235,25 +254,25 @@ Spaces, assets, topics, and change-sets are all addressable by link. One link gr
 
 *Why now, against the September frame ("stop competing with Slack at chat"):* DMs are why Slack stays open; the sidebar cannot be the team's home without them, and the PR-review relay example (§1) was itself a DM relay. The follow-on this conversation also settled — **open spaces** (org membership as a first-class thing; a `visibility` flag so any org member can list, read, and self-join an open space) — is what makes spaces feel as light as channels: today every space is a Slack *private* channel, and the per-space invite, not the URL, is the heaviness. Independent of DMs, additive, sequenced after them by decision.
 
-### Open spaces and org membership — **Decided** (direction, 2026-09-07) / **Open** (shape) *(consolidated here 2026-09-22 from the retired STATUS log)*
+### Open spaces and org membership — **Decided** *(direction 2026-09-07; shape 2026-09-22 — Slack parity, irrespective of what shipped first)*
 
-Today every space is a Slack *private* channel: membership arrives only through a space-scoped invite, and the per-space invite — not the address — is what makes spaces feel heavy. The agreed direction:
+Until 2026-09-22 every space was a Slack *private* channel: membership arrived only through a space-scoped invite, and the per-space invite — not the address — was what made spaces feel heavy. The model now:
 
-- **Org membership becomes first-class.** An org invite creates the member without a space (the bind ceremony of §4, minus the membership row); space invites remain for private spaces.
+- **Org membership is first-class.** You join the org (§4 Adding an org, amended); spaces are where you go once inside.
 - **Spaces carry a visibility.** Any org member can list, read, and self-join an *open* space; joining puts it in the sidebar, the roster, and notifications (Discord's subscribe semantics, Slack's channel preview). Browse and self-join are routes on both faces.
-- **The access gate widens once, in policy** — "a member of the space, *or* an org member and the space is open" — **and that path MUST require kind `shared`**: a direct message is private forever (above).
+- **The access gate widens once, in policy** — "a member of the space, *or* an org member (not a guest) and the space is open" — **and that path requires kind `shared`**: a direct message is private forever (above).
 - **Additive on the wire**; then the client work that makes cross-pollination light: cross-space typeahead for people and files (shipped 2026-09-14 as tokens), in-app cards for links into other spaces, search across open spaces later.
 
-**Open — settle before this work is delegated; record each answer here as Decided:**
+**The six shape questions, answered 2026-09-22:**
 
-1. **Representation.** A third `SpaceKind`, or a `visibility` field on `shared` spaces? The DM invariant argues for the field: kind says what the container *is*, visibility says who may find it.
-2. **What browsing grants.** Read only until joined (Slack: you join to post), or read and post? Either way the agent face sees exactly what its member may.
-3. **Org invites.** A standing org invite under the domain rule is the safe public join link (§4). What are the default spaces on org join — Slack's `#general`? Does joining the org auto-join every open space, or none?
-4. **The roster.** `listOrgMembers` is bounded to shared membership by decision (2026-09-09: no admin directory, no privacy surface beyond what a space already exposes). An org-wide roster reverses that; it is the natural consequence of org membership and should be recorded as the reversal it is.
-5. **Profiles.** `displayName` is editable by decision (§4); no route exists yet. An **avatar** is org-level, but blob readability is space-scoped by design (§6) — an avatar needs either an org-scoped blob registry with its own route, or external URLs only.
-6. **Admin scope.** Which acts are admin-only — adding or removing members of any space, removing from the org, changing visibility, invite policy — and whether a member's agent may perform them. Parity (§9) says an agent does whatever its member may; the role check is on the member, not the mode.
+1. **Representation — a `visibility` field, not a third kind.** `Space.visibility: private | open`, default `private`, on the wire and in the table; a schema CHECK pins a `direct` space to `private`, so the DM invariant lives in the schema and not only in a comment. Kind says what the container *is*; visibility says who may *find* it — a DM's identity (the participant-pair index) keys on kind, and changing visibility later is an ordinary space update with its own event, the shape of rename. A third enum value was rejected on the wire: the app parses every live frame with the protocol schema and `space_added` carries the kind, so a new value would break every older build on that frame; a defaulted field is invisible to them. `public` was rejected as the name — it suggests outside the org.
+2. **Browsing grants read, everything readable; acting requires the membership row.** A browsing org member gets the stream, threads, topics, search, live delivery (subscribing is a read), the files with their history and diffs, and the roster. Every write refuses with `forbidden` and the message *join this space to post* (the client's cue for a Join button; no new error code on the wire). No per-member state until joined: no read cursor or unread badge, no follows, no notifications, no Activity rows — the notification decision already runs over the roster, so this falls out. **Self-join** (`joinSpace`, both faces) is allowed when the space is shared and open, creates the membership and appends the same `joined` event an accepted invite does, and is an idempotent no-op for a member. Read-and-post without joining was rejected: the roster becomes ambiguous (who is "in" the space for `@here`, the member list, replies), and auto-join-on-first-post is a hidden side effect where one click is not.
+3. **Org invites — one shape, defaults only.** An invite is to the org with an optional list of spaces (§4 Invites, amended). **Default spaces are a flag on open spaces**: org join adds a membership to every default space, one `joined` event each; `general` is marked default at provisioning; admins toggle the flag; only an open space may be default (an org invite must not be a back door into a private one). **Joining the org joins the defaults, not every open space** — open spaces are one click away, and auto-joining all of them makes "open" mean "mandatory". `general` stays leaveable: Slack's un-leavable `#general` was considered and skipped (a refusal in the leave path plus an at-least-one-default invariant for a rule nobody has asked for; trigger: someone leaves it and the team notices).
+4. **The roster is org-wide — a recorded reversal.** On 2026-09-09 `listOrgMembers` was bounded to shared membership so Spaces exposed no privacy surface beyond what a space already does. Org membership as a first-class thing reverses that, on the argument the DM decision already made: inside one org, the org is the trust boundary, as inside one Slack workspace. One list for everyone — id, display name, avatar, admin bit; no pagination in v1 (trigger: an org large enough to notice); admins see nothing members do not (admin powers are acts, not visibility). Anyone can DM anyone in the org. Mention pickers offer everyone, but **stamping stays space-scoped**: a mention of a non-member is dropped and does not notify, as today; the client shows *not in this space* on the token. The roster lists `active` members only; departed members stay resolvable for attribution (§4 Roles). The bounded query survives as the guest path (§4).
+5. **Profiles** — decided in §4 Member profile: display name, title, avatar in v1; the avatar is an org-level blob at a Harbor URL; only you edit; the handle is retired.
+6. **Admin scope** — decided in §4 Roles: the concrete list, member state `active | removed`, reactivation on re-bind, agents allowed, org audit log deferred; archive and delete in §6.
 
-Two mechanics the removal path needs are in place *(2026-09-22)*: a member's write re-verifies access inside the space lock, so a write that lost a race to a removal is refused rather than landing after the departure; and a member-addressed `space_removed` frame ends live delivery for the space on every connection the member holds — `leaveSpace` sends it today, removal will send it tomorrow. Removal itself is the delegated work.
+Two mechanics the removal path needs are in place *(2026-09-22)*: a member's write re-verifies access inside the space lock, so a write that lost a race to a removal is refused rather than landing after the departure; and a member-addressed `space_removed` frame ends live delivery for the space on every connection the member holds — `leaveSpace` sends it today, removal and delete will send it tomorrow. Removal itself is the delegated work.
 
 ---
 
@@ -265,7 +284,17 @@ The write substrate for all assets. This section is the heart of the spec. All *
 
 Each space carries an **append-only log of change-sets**. An asset's current content is the fold of its change-sets. The log is the single source of truth; the feed's activity strand (§7), each file's history view, and every diff are *projections of the same log* — nothing renders from a second source, nothing exists only in chat scrollback.
 
-*(Amendment pending, 2026-08-26 — to confirm with Harsh:)* message deletion (shipped 2026-08-25, author-only) redacts the deleted body **inside the stored message event** — the one sanctioned rewrite of the log, on the rule that *replay must never resurrect a deleted body*. The event keeps its offset and attribution; only the content blanks, and the tombstone (`deletedAt`) is what replays. Message editing (shipped 2026-08-26) is the second such rewrite, on the same rule — the superseded text must not resurface through replay. Once confirmed, this paragraph becomes the append-only doctrine's two named exceptions.
+### The deletion doctrine — **Decided** *(2026-09-22; supersedes the amendment pending since 2026-08-26)*
+
+**Append-only holds inside a living space, with two named exceptions.** Message deletion (shipped 2026-08-25, author-only) redacts the deleted body **inside the stored message event** — on the rule that *replay must never resurrect a deleted body*; the event keeps its offset and attribution, only the content blanks, and the tombstone (`deletedAt`) is what replays. Message editing (shipped 2026-08-26) is the second such rewrite, on the same rule — the superseded text must not resurface through replay. Nothing else edits a stored event. Files are never destroyed inside a living space: delete is a freeze (the inode model, below).
+
+**At the space grain there are two admin acts, as in Slack, and neither exists for a DM:**
+
+- **Archive is a space state.** An archived space refuses writes with a clear error, drops out of the sidebar, stays readable and searchable to its members, and — if open — still lists in the browser under archived. Unarchive flips it back. Two events on the space's own log. This is the act teams actually use, and the one to build first: it needs nothing new in storage.
+- **Delete drops the space whole.** The space row goes and every row that hangs off it goes with it — the log, messages, files and their versions, memberships, read state, search rows. Blob bytes are removed only where no other space or org registry still references the same content. Every member gets the `space_removed` frame; links into the space from elsewhere go dead, as a Slack link to a deleted channel does. No undo, no grace period — Google-style trash (archived for a window, then purged) was considered and rejected for v1 as a third state plus a purge job. The client confirms by name.
+- **Mechanism, decided with it:** every space-keyed table carries a **foreign key to `spaces` with cascade on delete**, so deletion is one statement rather than a hand-written sweep that a new table silently escapes. (This closes the foreign-keys question left open by the 2026-09-18 code review.)
+
+Why this is not a conflict with the log's rule: the rule is about *history inside a space that exists* — nobody rewrites it. Removing the whole space is a different act at a different grain; Slack shows both can be true at once. Deactivating a person keeps everything they wrote (§4 Roles). Erasing a real person's data on request is an operator act outside the protocol, Deferred (§12).
 
 ### A change-set carries
 
@@ -460,7 +489,8 @@ An agent holds no credentials of its own; both faces authenticate with the membe
 | Area | Capabilities |
 |---|---|
 | **Auth** | OAuth discovery metadata, DCR, PKCE authorization, token refresh. |
-| **Spaces** | List my spaces; create (per org policy); resolve an invite link; read membership; leave. |
+| **Spaces** | List my spaces; create (per org policy, choosing visibility); resolve an invite link; read membership; leave. *Amended 2026-09-22:* browse open spaces; join; add members; admin acts — change visibility, remove a member, archive/unarchive, delete. |
+| **Org** *(added 2026-09-22)* | The org-wide roster; my profile (name, title, avatar); invites to the org; org settings — invite policy, domain rule, default spaces, roles; remove a member from the org (admin). |
 | **Assets** | List directory; read asset (content + current version); **propose change-set** (base version, edits, optional reasoning, acting mode) → applied \| merged \| conflict; read history; read diff between versions; read version. |
 | **Feed** | List topics (with activity strand data); read a topic; post a message; create topic (implicitly, by posting); edit/retitle/archive/merge topics (the tidying operations). |
 | **Live** | An event stream per space (WebSocket or SSE): new change-sets, new messages, topic changes, presence. This is part of the protocol, not a deployment implementation detail — clients render live from it. |
@@ -506,6 +536,8 @@ Stabilization runs at **two speeds**. The agent face is small and stabilizes ear
 ---
 
 ## 11. V1 slice: the team roadmap dogfood
+
+*This section is the original v1 build list and acceptance scenario (August 2026). It shipped and the product is live; the narrative stays as the QA script and the designer's user journey.*
 
 ### Scope — the build list
 
@@ -556,14 +588,21 @@ Each absence below is a decision:
 | Code-mode / PR-review integration (scenario 1) | Falls out of spaces + sessions-as-objects; don't special-case it before the primitive settles. |
 | ~~Binary/non-text assets~~ | **Shipped 2026-08-24**, exactly on the pre-decided shape (§6 amendment) — and the predicted first itch (image paste during dogfood) is precisely what pulled it in. Row kept so the table's history stays honest. |
 | Cold-history compression/tiering | Full snapshots per version are cheap at team scale. If that ever changes, the named relief valve (§6) is MediaWiki/git-style packing of *old* versions — head stays materialized, read path untouched. |
-| Version retention policy | Default is history-forever until dogfood shows the shape. Precedent (Obsidian Sync) is asymmetric: text versions kept long, blob versions short. A per-org knob, later. |
-| Blob GC | Refcount sweep for unreferenced hashes (abandoned uploads, expired retention). The blob store shipped without it — still deferred until dogfood produces orphans that matter. |
-| Protocol stabilization (v1.0, third-party deployments and clients) | Deliberate act once the shape has survived dogfood. Two speeds (§9): the MCP agent face stabilizes first; render face and admin surface last. |
-| Group DMs | A group conversation is a named space (§5 Direct messages). The participant-pair key extends to N if dogfood produces a real "three of us, no name" need. |
+| Version retention policy | Default is history-forever until use shows the shape. Precedent (Obsidian Sync) is asymmetric: text versions kept long, blob versions short. A per-org knob, later. |
+| Blob GC | Refcount sweep for unreferenced hashes (abandoned uploads, expired retention). The blob store shipped without it — still deferred as a background job until use produces orphans that matter. Space delete (§6, 2026-09-22) applies the sweep's rule inline for the space it drops. |
+| Protocol stabilization (v1.0, third-party deployments and clients) | Deliberate act once the shape has survived real use. Two speeds (§9): the MCP agent face stabilizes first; render face and admin surface last. |
+| Group DMs | A group conversation is a named space (§5 Direct messages). The participant-pair key extends to N if use produces a real "three of us, no name" need. |
 | ~~Self-DM ("notes to self" on the org)~~ | **Shipped 2026-09-08** (§5 Direct messages) — the cross-device, agent-reachable use arrived with the mobile app the same week the deferral was written. Row kept so the table's history stays honest. |
-| Agent tool to open a DM by name | "Tell Harsh I'm late" needs name → member id resolution; the humans open DMs in v1, agents post into DMs they are pointed at. Arrives with handles (§4). |
+| Agent tool to open a DM by name | "Tell Harsh I'm late" needs name → member id resolution. Handles were retired 2026-09-22; the org-wide roster (§5) is the resolver, so the tool can ship with that work. |
 | Resolve-with-outcome on discussions | Archive is the whole v1 lifecycle (§7); the outcome line — ideally agent-drafted — is a stored-extensible enrichment. Deferred 2026-09-01. |
-| Quote-references (a `parentMessageId` beside `threadRoot`) | Display provenance without breaking flat threads; waits for a dogfood need. Deferred 2026-09-01. |
+| Quote-references (a `parentMessageId` beside `threadRoot`) | Display provenance without breaking flat threads; waits for a need from use. Deferred 2026-09-01. |
+| Guests (single- and multi-space) | Shape settled 2026-09-22 (§4 Invites): a member flag removing browse, self-join, and the org-wide roster; admin-invited. Built after teammates' invites work. |
+| Invite approval mode (members request, admins approve) | Slack's paid-plan option; needs a request queue nobody has asked for. Deferred 2026-09-22. |
+| Admin edits of another member's profile; IdP avatar seeding at bind | Slack has the first and rarely uses it; the second is a server-side fetch of a claimed URL that wants its own review. Deferred 2026-09-22 (§4 Member profile). |
+| Org-level audit log | Org facts (role and policy changes) have no log in v1; their space-level consequences land on space logs. Trigger: a compliance ask. Deferred 2026-09-22. |
+| Live frame for profile changes | Roster re-fetch on sync/focus/reconnect covers it. Trigger: a stale name noticed live. Deferred 2026-09-22. |
+| Removal from a space by any member (not only admins); un-leavable `general` | Slack's owner-set knob and its mandatory channel; both wait for someone to ask. Deferred 2026-09-22. |
+| Erasure of a person's data on request | An operator act outside the protocol; the deletion doctrine (§6) keeps history otherwise. Deferred 2026-09-22. |
 | The agent-as-gardener loop (digests, auto-filing on archive) | The strategic direction the annotation model lays rails for — goal at birth, archive events, the MCP verbs. Built once the punctuation has been used by hand. |
 
 ---
@@ -576,12 +615,12 @@ Held softly — none block v1, all should be answered by use, not by speculation
 2. **Conflict UX detail.** How a human's stale draft presents its conflict and re-apply; how an agent's conflict-and-retry is summarized in the turn view.
 3. **Presence granularity.** Who's here / who's typing / whose agent is working — how much, where, without making the space feel surveilled.
 4. **Notification policy.** What escalates beyond the unread badge (mentions? topic replies? nothing?), and per-space controls.
-5. **Digest thresholds.** Where the quiet/prominent line sits for activity rows (§7 Latitude) — tune by feel during dogfood.
+5. **Digest thresholds.** Where the quiet/prominent line sits for activity rows (§7 Latitude) — tune by feel in use.
 6. **Leaving and revocation semantics.** Removing a member stops future access; it cannot un-read what their agent already ingested into local context. Same as every human team ever — but the privacy story must say it out loud rather than imply otherwise.
-7. **Moderation surface.** Member removal, change-set revert conventions, and whether reverts are just ordinary change-sets (probably yes).
+7. **Moderation surface.** Member removal decided 2026-09-22 (§4 Roles). Still open: change-set revert conventions, and whether reverts are just ordinary change-sets (probably yes).
 8. **Multi-org daily UX.** How noisy the sidebar gets at 3+ orgs; whether spaces pin/order across orgs.
 9. **Managed pricing shape.** Per-seat vs storage vs flat per-org — the offering sells operations (uptime, backups, domains, support), not compute, so pricing should read as boring and predictable.
 10. **License stance and trademark.** AGPL deters closed-fork hosting competitors; permissive welcomes them — a strategy choice to make deliberately before the Harbor repo is public. Either way, hold the trademark so others sell "hosting for the spaces protocol," not "Rowboat Spaces" or "Rowboat Harbor."
 11. **Harbor repo timing.** When to extract Harbor from the monorepo into `rowboatlabs/harbor` with a one-command self-host path (likely: when third-party hosting is announced). The name is free: the private spec repo that held it was retired 2026-09-22.
 12. **Agent replies: in the stream or in the thread.** Deferred 2026-08-21 — agent replies stay in the stream for now. Revisit before the managed service opens; flipping later splits history into two eras.
-13. **Open spaces and org membership.** The six shape questions in §5, to be answered before that work is delegated.
+13. ~~**Open spaces and org membership.**~~ Answered 2026-09-22 — the six shape questions are Decided in §5, with the deletion doctrine in §6.
