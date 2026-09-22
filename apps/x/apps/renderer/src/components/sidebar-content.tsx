@@ -1,4 +1,3 @@
-import { useCodeSessions } from '@/components/code/use-code-sessions'
 "use client"
 
 import { SidebarChatContextMenu } from "./sidebar-chat-context-menu"
@@ -658,10 +657,6 @@ export function SidebarContentPanel({
     onRenameRun?.(chatId, title)
   }, [renameDraft, recentChats, onRenameRun])
 
-  // Count registered folders, including directories opened outside Rowboat.
-  const { projects } = useCodeSessions()
-  const workspaceCount = projects.length
-
   // "Updated 4m ago" sublabel under Knowledge, based on the most recently
   // modified note. Recomputed in an effect (not during render) and ticked so
   // the relative time stays fresh.
@@ -819,7 +814,7 @@ export function SidebarContentPanel({
         <div className="h-8" />
       </SidebarHeader>
       <SidebarContent className="gap-0">
-        {/* Ordered to mirror the dock: Assistant, Spaces, then the
+        {/* Ordered to mirror the dock: Assistant, Projects, Spaces, then the
             destinations, then Chats. Same glyphs as the dock tiles. */}
         <SidebarGroup className="flex flex-col pb-0">
           <SidebarGroupContent>
@@ -835,6 +830,16 @@ export function SidebarContentPanel({
                 >
                   <MascotFaceIcon className="size-4 shrink-0" />
                   <span className="flex-1 truncate">Assistant</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  data-tour-id="nav-workspaces"
+                  isActive={activeNav === 'workspaces' || activeNav === 'code'}
+                  onClick={() => knowledgeActions.openWorkspaceAt()}
+                >
+                  <Folder className="size-4 shrink-0" />
+                  <span className="flex-1 truncate">Projects</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
@@ -983,22 +988,6 @@ export function SidebarContentPanel({
             <div className="mx-3 my-2 border-t border-border" />
 
             <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  data-tour-id="nav-workspaces"
-                  isActive={activeNav === 'workspaces' || activeNav === 'code'}
-                  onClick={() => knowledgeActions.openWorkspaceAt()}
-                  className="h-auto items-start py-1"
-                >
-                  <Folder className="mt-0.5 size-4 shrink-0" />
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate">Projects</span>
-                    <span className="truncate text-[11px] text-muted-foreground">
-                      {workspaceCount === 0 ? 'No projects' : `${workspaceCount} project${workspaceCount === 1 ? '' : 's'}`}
-                    </span>
-                  </div>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
                   data-tour-id="nav-agents"

@@ -1,4 +1,3 @@
-import { useCodeSessions } from '@/components/code/use-code-sessions'
 import { SidebarChatContextMenu } from "./sidebar-chat-context-menu"
 "use client"
 
@@ -792,10 +791,6 @@ export function DockSidebar({
     return () => clearInterval(tick)
   }, [latestNoteMtime])
 
-  // ----- data: workspace count -----
-  const { projects } = useCodeSessions()
-  const workspaceCount = projects.length
-
   // ----- data: background agents label -----
   const [bgAgentsLabel, setBgAgentsLabel] = useState<string | null>(null)
   const bgAgentsFailed = bgTaskSummaries.some((t) => t.lastRunError)
@@ -937,7 +932,7 @@ export function DockSidebar({
   const rows = useMemo<DockRow[]>(() => {
     const items: DockRow[] = [
       // The top section: Assistant (resumes the most recent chat, falling
-      // back to a fresh one — white tile) with Spaces right under it, then a
+      // back to a fresh one — white tile), then Projects and Spaces, then a
       // divider before the destinations.
       ...(onOpenRun || onNewChat ? [
         {
@@ -954,6 +949,13 @@ export function DockSidebar({
           },
         },
       ] : []),
+      {
+        item: {
+          key: 'workspaces', label: 'Projects', icon: Folder, tourId: 'nav-workspaces',
+          running: activeNav === 'workspaces' || activeNav === 'code',
+          onClick: () => { closeFlyouts(); knowledgeActions.openWorkspaceAt() },
+        },
+      },
       ...(SPACES_ENABLED && (!switcherOnly || totalSpaces > 0) ? [{
         item: {
           key: 'spaces', label: 'Spaces', icon: MessagesSquare, tourId: 'nav-spaces',
@@ -1017,14 +1019,6 @@ export function DockSidebar({
       { sep: true },
       {
         item: {
-          key: 'workspaces', label: 'Projects', icon: Folder, tourId: 'nav-workspaces',
-          status: workspaceCount === 0 ? 'No projects' : `${workspaceCount} project${workspaceCount === 1 ? '' : 's'}`,
-          running: activeNav === 'workspaces' || activeNav === 'code',
-          onClick: () => { closeFlyouts(); knowledgeActions.openWorkspaceAt() },
-        },
-      },
-      {
-        item: {
           key: 'agents', label: 'Background agents', switcherLabel: 'Agents', icon: Bot, tourId: 'nav-agents',
           badge: bgAgentsFailed ? '!' : undefined,
           status: bgAgentsLabel ?? undefined,
@@ -1084,7 +1078,7 @@ export function DockSidebar({
     bgAgentsFailed, bgAgentsLabel, onToggleBrowser, browserOpen,
     switcherOnly, openLastSpace, onOpenChatHistory,
     onNewChat, lastChat, onOpenRun, onOpenAssistant,
-    onOpenBgTasks, workspaceCount, spacesNotification, totalSpaces, spacesOpen, chatsOpen,
+    onOpenBgTasks, spacesNotification, totalSpaces, spacesOpen, chatsOpen,
     outOfCredits, hasOauthError, settingsStatus, settingsAlert,
   ])
 
