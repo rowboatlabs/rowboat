@@ -32,6 +32,8 @@ export const providerDisplayNames: Record<string, string> = {
   // Matches what other subscription clients call this provider; the auth
   // itself is "Sign in with ChatGPT" (Plus/Pro subscription).
   codex: 'OpenAI Codex',
+  // Google Cloud Code gateway via "Sign in with Google".
+  antigravity: 'Antigravity',
 }
 
 // '' = auto (provider default). Ordered as shown in the picker.

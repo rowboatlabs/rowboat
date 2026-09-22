@@ -68,6 +68,8 @@ import type { IModelConfigRepo } from '@x/core/dist/models/repo.js';
 import type { IOAuthRepo } from '@x/core/dist/auth/repo.js';
 import { getChatGPTStatus, signOutChatGPT } from '@x/core/dist/auth/chatgpt-auth.js';
 import { signInWithChatGPT, cancelChatGPTSignIn } from '@x/core/dist/auth/chatgpt-signin.js';
+import { getAntigravityStatus, signOutAntigravity } from '@x/core/dist/auth/antigravity-auth.js';
+import { signInWithAntigravity, cancelAntigravitySignIn } from '@x/core/dist/auth/antigravity-signin.js';
 import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
 import { ICodeModeConfigRepo } from '@x/core/dist/code-mode/repo.js';
 import { CodePermissionRegistry } from '@x/core/dist/code-mode/acp/permission-registry.js';
@@ -114,7 +116,7 @@ function updateSelfCaptureState() {
   setSelfCaptureActive(meetingRecordingActive || voiceCallActive);
 }
 import * as composioHandler from '@x/core/dist/composio/flows.js';
-import { oauthConnectBus, composioConnectBus, chatgptStatusBus } from '@x/core/dist/auth/connector-events.js';
+import { oauthConnectBus, composioConnectBus, chatgptStatusBus, antigravityStatusBus } from '@x/core/dist/auth/connector-events.js';
 import { subscribeTtsChunks } from '@x/core/dist/voice/tts-bus.js';
 import { formatDictation } from '@x/core/dist/voice/format_dictation.js';
 import * as appsIndexer from '@x/core/dist/apps/indexer.js';
@@ -619,6 +621,7 @@ export function startConnectorEventsWatcher(): void {
   oauthConnectBus.subscribe((event) => broadcastToWindows('oauth:didConnect', event));
   composioConnectBus.subscribe((event) => broadcastToWindows('composio:didConnect', event));
   chatgptStatusBus.subscribe((event) => broadcastToWindows('chatgpt:statusChanged', event));
+  antigravityStatusBus.subscribe((event) => broadcastToWindows('antigravity:statusChanged', event));
   subscribeTtsChunks((event) => broadcastToWindows('voice:tts-chunk', event));
 }
 
@@ -1679,6 +1682,34 @@ export function setupIpcHandlers() {
         return { success: true };
       } catch (error) {
         console.error('[ChatGPTAuth] Sign-out failed:', error);
+        return { success: false };
+      }
+    },
+    'antigravity:getStatus': async () => {
+      return await getAntigravityStatus();
+    },
+    'antigravity:signIn': async () => {
+      const result = await signInWithAntigravity();
+      if (result.signedIn) {
+        // Model lists gate on sign-in state (composer picker, models:list) —
+        // push the change so they refresh without polling.
+        antigravityStatusBus.publish({ signedIn: true });
+        captureProviderConnected('antigravity');
+      }
+      return result;
+    },
+    'antigravity:cancelSignIn': async () => {
+      await cancelAntigravitySignIn();
+      return { success: true };
+    },
+    'antigravity:signOut': async () => {
+      try {
+        await signOutAntigravity();
+        antigravityStatusBus.publish({ signedIn: false });
+        captureProviderDisconnected('antigravity');
+        return { success: true };
+      } catch (error) {
+        console.error('[AntigravityAuth] Sign-out failed:', error);
         return { success: false };
       }
     },

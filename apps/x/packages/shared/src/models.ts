@@ -13,10 +13,11 @@ export const ReasoningEffort = z.enum(["low", "medium", "high"]);
 // fetched from the provider (core/models/catalog.ts), and model choices live
 // in assistantModel / taskModels.
 export const LlmProvider = z.object({
-  // "rowboat" (signed-in gateway) and "codex" (ChatGPT subscription via
-  // "Sign in with ChatGPT") are credential-less flavors: they never appear
-  // in models.json's providers map — auth lives in their own token stores.
-  flavor: z.enum(["openai", "anthropic", "google", "openrouter", "aigateway", "ollama", "openai-compatible", "rowboat", "codex"]),
+  // "rowboat" (signed-in gateway), "codex" (ChatGPT subscription via "Sign in
+  // with ChatGPT") and "antigravity" (Google Cloud Code gateway via "Sign in
+  // with Google") are credential-less flavors: they never appear in
+  // models.json's providers map — auth lives in their own token stores.
+  flavor: z.enum(["openai", "anthropic", "google", "openrouter", "aigateway", "ollama", "openai-compatible", "rowboat", "codex", "antigravity"]),
   apiKey: z.string().optional(),
   baseURL: z.string().optional(),
   headers: z.record(z.string(), z.string()).optional(),
@@ -34,8 +35,8 @@ export const LlmProvider = z.object({
 
 // A provider-qualified model reference. `provider` is a provider INSTANCE id
 // as understood by resolveProviderConfig — a key of the providers map, or
-// "rowboat" / "codex" for the credential-less providers. Today one instance
-// exists per flavor, so instance ids equal flavor keys.
+// "rowboat" / "codex" / "antigravity" for the credential-less providers.
+// Today one instance exists per flavor, so instance ids equal flavor keys.
 export const ModelRef = z.object({
   provider: z.string(),
   model: z.string(),
