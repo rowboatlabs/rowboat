@@ -3,6 +3,8 @@ import type { AddressInfo } from 'node:net';
 import { DevAuthDriver, ensureMember, type AuthDriver } from './auth.js';
 import { MemoryBlobStore, type BlobStore } from './blobs.js';
 import { SpaceHub } from './hub.js';
+import { internalHandler } from './internal.js';
+import { LiveStats } from './stats.js';
 import { DEFAULT_ORG_ID } from './pg-store.js';
 import type { PushSender } from './push.js';
 import { buildOrgRuntime } from './runtime.js';
@@ -48,6 +50,13 @@ export interface HarborOptions {
   liveHeartbeatMs?: number;
   /** Test knob: unsent-bytes ceiling before a stalled socket is terminated (ws.ts). */
   liveMaxBufferedBytes?: number;
+  /**
+   * The operator face (internal.ts). `key` enables GET /internal/stats; `log`
+   * prints the live-load line once a minute — independent of the key, the
+   * line is the passive record for whoever never polls. main.ts sets it;
+   * tests leave it off.
+   */
+  internal?: { key?: string; log?: boolean };
   /** Auth driver; defaults to dev tokens (never expose publicly). Pass an OidcAuthDriver for real deployments. */
   auth?: AuthDriver;
   /**
@@ -67,13 +76,15 @@ export interface RunningHarbor {
   service: HarborService;
   store: Store;
   hub: SpaceHub;
+  stats: LiveStats;
   server: HttpServer;
   close(): Promise<void>;
 }
 
 export async function startHarbor(options: HarborOptions): Promise<RunningHarbor> {
   const { store } = options;
-  const hub = new SpaceHub();
+  const stats = new LiveStats({ log: options.internal?.log === true });
+  const hub = new SpaceHub(stats);
   // The same assembly the deployment builds per org (runtime.ts), for the one org here.
   const runtime = await buildOrgRuntime({
     store,
@@ -92,8 +103,12 @@ export async function startHarbor(options: HarborOptions): Promise<RunningHarbor
   });
   await seedOrg(runtime.service, store, options);
 
-  const server = createServer((req, res) => runtime.handle(req, res));
+  const internal = internalHandler({ key: options.internal?.key, stats });
+  const server = createServer((req, res) => {
+    if (!internal(req, res)) runtime.handle(req, res);
+  });
   const closeLive = attachLive(server, () => runtime.live, {
+    stats,
     ...(options.liveHeartbeatMs !== undefined ? { heartbeatMs: options.liveHeartbeatMs } : {}),
     ...(options.liveMaxBufferedBytes !== undefined ? { maxBufferedBytes: options.liveMaxBufferedBytes } : {}),
   });
@@ -110,9 +125,11 @@ export async function startHarbor(options: HarborOptions): Promise<RunningHarbor
     service: runtime.service,
     store,
     hub,
+    stats,
     server,
     close: async () => {
       closeLive();
+      stats.close();
       await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
     },
   };

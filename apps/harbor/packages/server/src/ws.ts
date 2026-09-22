@@ -5,6 +5,7 @@ import { authenticateRequest, type OrgAuth } from './auth.js';
 import { HarborError } from './errors.js';
 import type { SpaceHub } from './hub.js';
 import type { HarborService } from './service.js';
+import type { LiveStats } from './stats.js';
 
 // The live face (CONTRACT.md decision 2): one WebSocket per org, per-space
 // subscriptions, offset-based resume. subscribe{afterOffset} replays durable
@@ -49,10 +50,11 @@ export type LiveDepsResolver = (host: string | undefined) => LiveDeps | undefine
 export function attachLive(
   server: Server,
   resolve: LiveDepsResolver,
-  opts: { heartbeatMs?: number; maxBufferedBytes?: number } = {},
+  opts: { heartbeatMs?: number; maxBufferedBytes?: number; stats?: LiveStats } = {},
 ): () => void {
   const wss = new WebSocketServer({ noServer: true });
   const maxBufferedBytes = opts.maxBufferedBytes ?? DEFAULT_MAX_BUFFERED_BYTES;
+  const stats = opts.stats;
 
   const heartbeat = setInterval(() => {
     const at = new Date().toISOString();
@@ -100,7 +102,7 @@ export function attachLive(
       }
       if (socket.destroyed) return;
       wss.handleUpgrade(req, socket, head, (ws) => {
-        handleConnection(ws, memberId, deps, maxBufferedBytes);
+        handleConnection(ws, memberId, deps, maxBufferedBytes, stats);
       });
     })();
   });
@@ -112,9 +114,24 @@ export function attachLive(
   };
 }
 
-function handleConnection(ws: LiveSocket, memberId: string, deps: LiveDeps, maxBufferedBytes: number): void {
+function handleConnection(
+  ws: LiveSocket,
+  memberId: string,
+  deps: LiveDeps,
+  maxBufferedBytes: number,
+  stats: LiveStats | undefined,
+): void {
   const subscriptions = new Map<string, () => void>();
+  /** The one way a subscription ends, so the count (stats.ts) cannot drift from the map. */
+  const drop = (spaceId: string): void => {
+    const unsubscribe = subscriptions.get(spaceId);
+    if (!unsubscribe) return;
+    unsubscribe();
+    subscriptions.delete(spaceId);
+    stats?.unsubscribed();
+  };
 
+  stats?.connectionOpened();
   ws.sawLifeSinceLastBeat = true;
   ws.on('pong', () => {
     ws.sawLifeSinceLastBeat = true;
@@ -139,10 +156,7 @@ function handleConnection(ws: LiveSocket, memberId: string, deps: LiveDeps, maxB
   // one you hold — dropped here, before the frame is forwarded, so nothing
   // from that space follows your departure (2026-09-22).
   const unsubscribeMember = deps.hub.subscribeMember(memberId, (frame) => {
-    if (frame.kind === 'space_removed') {
-      subscriptions.get(frame.spaceId)?.();
-      subscriptions.delete(frame.spaceId);
-    }
+    if (frame.kind === 'space_removed') drop(frame.spaceId);
     send(frame);
   });
 
@@ -167,8 +181,7 @@ function handleConnection(ws: LiveSocket, memberId: string, deps: LiveDeps, maxB
         switch (frame.kind) {
           case 'subscribe': {
             // Re-subscribing replaces the previous subscription (fresh resume point).
-            subscriptions.get(frame.spaceId)?.();
-            subscriptions.delete(frame.spaceId);
+            drop(frame.spaceId);
 
             // Register on the hub BEFORE the catch-up read so nothing published
             // during it is lost; buffer until it completes, dedupe by offset.
@@ -184,13 +197,13 @@ function handleConnection(ws: LiveSocket, memberId: string, deps: LiveDeps, maxB
               }
             });
             subscriptions.set(frame.spaceId, unsubscribe);
+            stats?.subscribed();
 
             let replay: Awaited<ReturnType<HarborService['replay']>>;
             try {
               replay = await deps.service.replay({ memberId }, frame.spaceId, frame.afterOffset);
             } catch (err) {
-              unsubscribe();
-              subscriptions.delete(frame.spaceId);
+              drop(frame.spaceId);
               throw err;
             }
             const fromOffset = frame.afterOffset ?? replay.head;
@@ -212,8 +225,7 @@ function handleConnection(ws: LiveSocket, memberId: string, deps: LiveDeps, maxB
             break;
           }
           case 'unsubscribe': {
-            subscriptions.get(frame.spaceId)?.();
-            subscriptions.delete(frame.spaceId);
+            drop(frame.spaceId);
             break;
           }
           case 'presence': {
@@ -234,7 +246,7 @@ function handleConnection(ws: LiveSocket, memberId: string, deps: LiveDeps, maxB
 
   ws.on('close', () => {
     unsubscribeMember();
-    for (const unsubscribe of subscriptions.values()) unsubscribe();
-    subscriptions.clear();
+    for (const spaceId of [...subscriptions.keys()]) drop(spaceId);
+    stats?.connectionClosed();
   });
 }

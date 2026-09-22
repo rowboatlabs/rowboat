@@ -88,6 +88,10 @@ const maxBlobBytes = process.env.HARBOR_MAX_BLOB_BYTES ? Number(process.env.HARB
 // Postgres pool ceiling (sql.ts): pg's default of 10 is shared by every org on
 // a deployment; set DATABASE_POOL_MAX below the plan's connection limit.
 const poolOpts = process.env.DATABASE_POOL_MAX ? { max: Number(process.env.DATABASE_POOL_MAX) } : {};
+// The operator face (internal.ts): the live-load line lands in the log once
+// a minute whenever the binary runs; HARBOR_INTERNAL_KEY additionally enables
+// GET /internal/stats. Unset = the route does not exist, the line still prints.
+const internal = { internal: { log: true, ...(process.env.HARBOR_INTERNAL_KEY ? { key: process.env.HARBOR_INTERNAL_KEY } : {}) } };
 
 // Deployment mode (the managed fleet / any multi-org host): HARBOR_MODE=deployment
 // + DATABASE_URL + APEX_DOMAIN + AUTH_ISSUER. No seeding, no dev tokens —
@@ -111,6 +115,7 @@ if (process.env.HARBOR_MODE === 'deployment') {
     ...(process.env.AUTH_PUBLISHABLE_KEY ? { consentPublishableKey: process.env.AUTH_PUBLISHABLE_KEY } : {}),
     ...(blobs ? { blobs } : {}),
     ...(maxBlobBytes !== undefined ? { maxBlobBytes } : {}),
+    ...internal,
   });
   console.log(`Harbor deployment (multi-org, Postgres)`);
   console.log(``);
@@ -120,6 +125,7 @@ if (process.env.HARBOR_MODE === 'deployment') {
   console.log(
     `  blobs      ${process.env.BLOBS_S3_BUCKET ? `s3 bucket ${process.env.BLOBS_S3_BUCKET}` : process.env.BLOBS_DIR ? `disk ${process.env.BLOBS_DIR}` : 'UNCONFIGURED — uploads will be refused (set BLOBS_S3_BUCKET or BLOBS_DIR)'}`,
   );
+  console.log(`  internal   ${process.env.HARBOR_INTERNAL_KEY ? 'GET /internal/stats (operator key set)' : 'off (set HARBOR_INTERNAL_KEY)'}`);
   console.log(`  listening  :${deployment.port}`);
   process.on('SIGTERM', () => void deployment.close().then(() => process.exit(0)));
 } else {
@@ -151,6 +157,7 @@ const harbor = await startHarbor({
   store,
   ...(blobFactory ? { blobs: blobFactory('org-default') } : {}),
   ...(maxBlobBytes !== undefined ? { maxBlobBytes } : {}),
+  ...internal,
   ...(auth ? { auth } : {}),
   ...(auth && process.env.AUTH_PUBLISHABLE_KEY
     ? { consent: { publishableKey: process.env.AUTH_PUBLISHABLE_KEY } }
