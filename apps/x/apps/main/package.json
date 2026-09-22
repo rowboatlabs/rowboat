@@ -8,6 +8,8 @@
     "license": "Apache-2.0",
     "scripts": {
         "start": "env -u ELECTRON_RUN_AS_NODE electron .",
+        "test:browser": "node tests/browser/run.mjs",
+        "typecheck:browser": "tsc --noEmit -p tests/browser/tsconfig.json",
         "build": "rm -rf dist && tsc && node bundle.mjs",
         "package": "electron-forge package",
         "make": "electron-forge make"
