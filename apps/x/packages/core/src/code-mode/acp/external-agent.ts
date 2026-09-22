@@ -18,9 +18,29 @@ export interface ResolvedExternalAgent {
 // PATH is stripped (macOS launchd) or whose profile scripts were not sourced.
 function installCandidates(bin: string): string[] {
     const home = os.homedir();
-    return [
+    const specific = [
         path.join(home, '.opencode', 'bin', bin),
+    ];
+    if (process.platform === 'win32') {
+        const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+        const localAppData = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+        const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
+        return [
+            ...specific,
+            path.join(appData, 'npm', `${bin}.cmd`),
+            path.join(appData, 'npm', `${bin}.exe`),
+            path.join(localAppData, 'npm', `${bin}.cmd`),
+            path.join(localAppData, 'pnpm', `${bin}.cmd`),
+            path.join(home, 'AppData', 'Roaming', 'pnpm', `${bin}.cmd`),
+            path.join(programFiles, 'nodejs', `${bin}.cmd`),
+            path.join(home, '.volta', 'bin', `${bin}.cmd`),
+        ];
+    }
+    return [
+        ...specific,
         path.join(home, '.local', 'bin', bin),
+        path.join(home, '.npm-global', 'bin', bin),
+        path.join(home, '.volta', 'bin', bin),
         path.join(home, 'bin', bin),
         '/usr/local/bin/' + bin,
         '/opt/homebrew/bin/' + bin,
@@ -53,6 +73,10 @@ export function compareSemver(a: string, b: string): number {
 
 async function whichInLoginShell(bin: string): Promise<string | undefined> {
     try {
+        if (process.platform === 'win32') {
+            const { stdout } = await execFileAsync('where', [bin], { timeout: 5000 });
+            return lastLine(String(stdout));
+        }
         const { stdout } = await execFileAsync('/bin/sh', ['-lc', `command -v ${bin}`], { timeout: 5000 });
         return lastLine(String(stdout));
     } catch {
@@ -62,6 +86,10 @@ async function whichInLoginShell(bin: string): Promise<string | undefined> {
 
 function whichInLoginShellSync(bin: string): string | undefined {
     try {
+        if (process.platform === 'win32') {
+            const out = execFileSync('where', [bin], { timeout: 5000, encoding: 'utf-8' });
+            return lastLine(out);
+        }
         const out = execFileSync('/bin/sh', ['-lc', `command -v ${bin}`], { timeout: 5000, encoding: 'utf-8' });
         return lastLine(out);
     } catch {
