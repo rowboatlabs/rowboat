@@ -26,7 +26,7 @@ describe('workspace session tabs', () => {
     invoke.mockResolvedValue({ session: { ...session, id: 's2' } })
     const onSelect = vi.fn()
     render(<WorkspaceSessionTabs session={session} onSelect={onSelect} />)
-    fireEvent.click(screen.getByRole('button', { name: 'New session in this worktree' }))
+    fireEvent.click(screen.getByRole('button', { name: 'New session in this thread' }))
     await waitFor(() => expect(onSelect).toHaveBeenCalledWith('s2'))
     expect(invoke).toHaveBeenCalledWith('codeSession:create', expect.objectContaining({ workspaceSessionId: 's1', projectId: 'p', isolation: 'worktree' }))
     expect(refresh).toHaveBeenCalled()

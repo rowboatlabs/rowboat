@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Code2, Plus } from 'lucide-react'
+import { FolderOpen, Plus } from 'lucide-react'
 import { codeWorkspaceKey, type CodeSession, type CodeSessionStatus } from '@x/shared/src/code-sessions.js'
 import type { CodingAgent } from '@x/shared/src/code-mode.js'
 import { toast } from 'sonner'
@@ -17,9 +17,9 @@ import {
 import { useCodeSessions, projectLabel, type ProjectRow } from './use-code-sessions'
 import { SessionRail } from './session-rail'
 import { BranchDialog } from './branch-dialog'
-import { AGENT_LABEL, fetchCodeAgentsStatus, isAgentReady, type CodeAgentsStatus } from './code-agent-status'
+import { fetchCodeAgentsStatus, isAgentReady, type CodeAgentsStatus } from './code-agent-status'
 
-// Remember which session was open so leaving the Code section (which unmounts
+// Remember which session was open so leaving Projects (which unmounts
 // this view) and coming back restores the selection — and with it the chat
 // bound to it — instead of dropping back to the empty state.
 const SELECTED_SESSION_STORAGE_KEY = 'x:code-selected-session'
@@ -34,16 +34,16 @@ export interface ActiveCodeSession {
   status: CodeSessionStatus
 }
 
-// The Code section's middle pane: the session rail. The conversation is the
-// main surface — the assistant chat bound to the selected session (a code
-// session IS a chat session) fills the rest of the window, and changes /
-// files / terminal open in a drawer beside it. App.tsx learns which session
-// owns the chat via onSessionSelected and does the binding.
+// Projects uses the existing session store (its Code names remain compatible
+// with saved sessions and routes). The rail selects a thread, its conversation
+// fills the main surface, and the terminal opens beside it.
 export function CodeView({
   onSessionSelected,
   focusSessionId,
   onFocusConsumed,
   onRailWidthChange,
+  focusProjectPath,
+  onProjectFocusConsumed,
 }: {
   onSessionSelected?: (active: ActiveCodeSession | null) => void
   // Deep-link from elsewhere (a Home Deck strip): select this session on
@@ -53,6 +53,8 @@ export function CodeView({
   // The rail's drag-resizable width, reported up so App can size the middle
   // pane to the rail while a session's chat is the main surface.
   onRailWidthChange?: (width: number) => void
+  focusProjectPath?: string | null
+  onProjectFocusConsumed?: () => void
 }) {
   const { projects, sessions, statusOf, refresh } = useCodeSessions()
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(readStoredSelectedSessionId)
@@ -90,7 +92,7 @@ export function CodeView({
     onSessionSelected?.(selectedSession ? { session: selectedSession, status: selectedStatus } : null)
   }, [selectedSession, selectedStatus, onSessionSelected])
 
-  // Leaving the Code section unmounts this view — release the chat.
+  // Leaving Projects unmounts this view — release the chat.
   useEffect(() => {
     return () => onSessionSelected?.(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -106,29 +108,11 @@ export function CodeView({
     if (!row) return
     creatingRef.current = true
     try {
-      const status = agentsStatus ?? (await fetchCodeAgentsStatus().catch(() => null))
-      if (status && !agentsStatus) setAgentsStatus(status)
-      const ready = (a: CodingAgent) => isAgentReady(status, a)
       const lastUsed = [...sessions]
         .sort((a, b) => (b.lastActivityAt ?? b.createdAt).localeCompare(a.lastActivityAt ?? a.createdAt))[0]?.agent
-      let agent: CodingAgent
-      if (agentOverride) {
-        if (status && !ready(agentOverride)) {
-          throw new Error(`${AGENT_LABEL[agentOverride]} isn't ready — sign in or enable it in Settings.`)
-        }
-        agent = agentOverride
-      } else if (!status) {
-        // The probe failed: trust the last choice rather than block the click.
-        agent = lastUsed ?? 'claude'
-      } else if (lastUsed && ready(lastUsed)) {
-        agent = lastUsed
-      } else if (ready('claude') || ready('codex')) {
-        agent = ready('claude') ? 'claude' : 'codex'
-      } else {
-        throw new Error('No coding agent is ready — sign in to Claude Code or Codex in Settings.')
-      }
-      const isolation = row.git.isGitRepo && row.git.hasCommits ? 'worktree' : 'in-repo'
-      const res = await window.ipc.invoke('codeSession:create', { projectId, agent, isolation })
+      const agent: CodingAgent = agentOverride ?? lastUsed ?? (isAgentReady(agentsStatus, 'claude') ? 'claude' : 'codex')
+      const isolation = row.git.isGitRepo ? 'worktree' : 'in-repo'
+      const res = await window.ipc.invoke('codeSession:create', { projectId, agent, isolation, codeModeEnabled: row.git.isGitRepo || !!agentOverride })
       await refresh()
       setSelectedSessionId(res.session.id)
     } catch (err) {
@@ -152,6 +136,29 @@ export function CodeView({
       toast.error(err instanceof Error ? err.message : 'Failed to add project')
     }
   }, [refresh, handleNewSession])
+
+  useEffect(() => {
+    if (!focusProjectPath) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const row = await window.ipc.invoke('codeProject:add', { path: focusProjectPath })
+        await refresh()
+        if (cancelled) return
+        const existing = await window.ipc.invoke('codeSession:list', null)
+        const session = existing.sessions.find((s) => s.projectId === row.project.id && !s.doneAt)
+        if (session) setSelectedSessionId(session.id)
+        else await handleNewSession(row.project.id, undefined, row)
+        onProjectFocusConsumed?.()
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Failed to open project')
+        onProjectFocusConsumed?.()
+      }
+    })()
+    return () => { cancelled = true }
+    // A directory request is consumed once, independently of store refreshes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusProjectPath])
 
   const handleRemoveProject = useCallback(async (projectId: string) => {
     await window.ipc.invoke('codeProject:remove', { projectId })
@@ -225,18 +232,17 @@ export function CodeView({
 
       {!selectedSession && (
         <div className="flex min-w-0 flex-1 flex-col items-center justify-center gap-3 text-center">
-          <Code2 className="size-10 text-muted-foreground/40" />
-          <div className="text-sm font-medium">Code with agents</div>
+          <FolderOpen className="size-10 text-muted-foreground/40" />
+          <div className="text-sm font-medium">Your projects</div>
           <p className="max-w-sm px-6 text-xs text-muted-foreground">
-            Rowboat runs Claude Code or Codex on your projects. Each session is a conversation —
-            changes, files and a terminal are one click away beside it.
+            Open a folder and start a conversation. Enable Harness to work with Claude Code or Codex.
           </p>
           {projects.length === 0 ? (
             <Button size="sm" onClick={() => void handleAddProject()}>Add a project to get started</Button>
           ) : projects.length === 1 ? (
             <Button size="sm" onClick={() => void handleNewSession(projects[0].project.id)}>
               <Plus className="size-3.5" />
-              New worktree in {projectLabel(projects[0])}
+              New thread in {projectLabel(projects[0])}
             </Button>
           ) : (
             <p className="text-xs text-muted-foreground">Pick a session on the left, or start one from a project's + button.</p>

@@ -82,7 +82,7 @@ function ProjectMenuItems({ context = false, projectId, agentsStatus, onNewSessi
   return (
     <>
       <Item onSelect={() => onNewSession(projectId)}>
-        <Plus className="size-4" /> New worktree
+        <Plus className="size-4" /> New thread
       </Item>
       {(['claude', 'codex'] as CodingAgent[]).map((agent) => (
         <Item
@@ -90,7 +90,7 @@ function ProjectMenuItems({ context = false, projectId, agentsStatus, onNewSessi
           disabled={agentsStatus !== null && !isAgentReady(agentsStatus, agent)}
           onSelect={() => onNewSession(projectId, agent)}
         >
-          <span className="size-4" /> New {AGENT_LABEL[agent]} worktree
+          <span className="size-4" /> New {AGENT_LABEL[agent]} thread
         </Item>
       ))}
       <Separator />
@@ -351,7 +351,7 @@ export function SessionRail({
           <div className="flex flex-col items-center gap-3 px-3 py-10 text-center">
             <FolderGit2 className="size-8 text-muted-foreground/50" />
             <p className="text-xs text-muted-foreground">
-              Add a project folder to start running coding agents on it.
+              Open a folder to start a project conversation.
             </p>
             <Button size="sm" variant="outline" onClick={onAddProject}>
               <FolderPlus className="size-3.5" />
@@ -419,7 +419,7 @@ export function SessionRail({
                       size="sm"
                       className="h-6 w-6 shrink-0 p-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
                       onClick={() => onNewSession(project.id)}
-                      title="New worktree"
+                      title="New thread"
                     >
                       <Plus className="size-3.5" />
                     </Button>
@@ -450,7 +450,7 @@ export function SessionRail({
                   className="ml-6 flex h-7 items-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground"
                 >
                   <Plus className="size-3" />
-                  New worktree
+                  New thread
                 </button>
               )}
               {visibleSessions.map((session) => (

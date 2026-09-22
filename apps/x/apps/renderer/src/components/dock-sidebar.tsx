@@ -1,3 +1,4 @@
+import { useCodeSessions } from '@/components/code/use-code-sessions'
 import { SidebarChatContextMenu } from "./sidebar-chat-context-menu"
 "use client"
 
@@ -9,7 +10,6 @@ import { Bell,
   AppWindow,
   ArrowUpRight,
   Bot,
-  Code2,
   FileText,
   FilePlus,
   Folder,
@@ -554,7 +554,6 @@ export function DockSidebar({
   knowledgeActions,
   bgTaskSummaries = [],
   onOpenMeetings,
-  onOpenCode,
   onOpenBgTasks,
   onOpenApps,
   onOpenApp,
@@ -751,19 +750,6 @@ export function DockSidebar({
     return () => { cancelled = true; clearInterval(tick); cleanup() }
   }, [])
 
-  // ----- data: code mode flag -----
-  const [codeModeEnabled, setCodeModeEnabled] = useState(false)
-  useEffect(() => {
-    const load = () => {
-      window.ipc.invoke('codeMode:getConfig', null)
-        .then((r) => setCodeModeEnabled(r.enabled))
-        .catch(() => setCodeModeEnabled(false))
-    }
-    load()
-    window.addEventListener('code-mode-config-changed', load)
-    return () => window.removeEventListener('code-mode-config-changed', load)
-  }, [])
-
   // ----- data: pinned apps (right-click an app card in the Apps view) -----
   const [pinnedAppFolders, setPinnedAppFolders] = useState<string[]>(() => getPinnedApps())
   const [pinnedAppNames, setPinnedAppNames] = useState<Map<string, string> | null>(null)
@@ -807,20 +793,8 @@ export function DockSidebar({
   }, [latestNoteMtime])
 
   // ----- data: workspace count -----
-  const workspaceCount = useMemo(() => {
-    const find = (nodes: TreeNode[]): TreeNode | null => {
-      for (const n of nodes) {
-        if (n.path === 'knowledge/Workspace') return n
-        if (n.kind === 'dir' && n.children?.length) {
-          const found = find(n.children)
-          if (found) return found
-        }
-      }
-      return null
-    }
-    const node = find(tree)
-    return node?.children?.filter((c) => c.kind === 'dir').length ?? 0
-  }, [tree])
+  const { projects } = useCodeSessions()
+  const workspaceCount = projects.length
 
   // ----- data: background agents label -----
   const [bgAgentsLabel, setBgAgentsLabel] = useState<string | null>(null)
@@ -1025,13 +999,6 @@ export function DockSidebar({
           onClick: () => { closeFlyouts(); onOpenMeetings?.() },
         },
       },
-      ...(codeModeEnabled ? [{
-        item: {
-          key: 'code', label: 'Code', icon: Code2, tourId: 'nav-code',
-          running: activeNav === 'code',
-          onClick: () => { closeFlyouts(); onOpenCode?.() },
-        },
-      }] : []),
       {
         item: {
           key: 'brain', label: 'Brain', icon: FileText, tourId: 'nav-knowledge',
@@ -1052,7 +1019,7 @@ export function DockSidebar({
         item: {
           key: 'workspaces', label: 'Projects', icon: Folder, tourId: 'nav-workspaces',
           status: workspaceCount === 0 ? 'No projects' : `${workspaceCount} project${workspaceCount === 1 ? '' : 's'}`,
-          running: activeNav === 'workspaces',
+          running: activeNav === 'workspaces' || activeNav === 'code',
           onClick: () => { closeFlyouts(); knowledgeActions.openWorkspaceAt() },
         },
       },
@@ -1112,7 +1079,7 @@ export function DockSidebar({
     return items
   }, [
     activeNav, closeFlyouts, onOpenHome, unreadEmailCount, previewEmail, onOpenEmail,
-    codeModeEnabled, onOpenCode, meetingIsRecording, meetingSublabel, onOpenMeetings,
+    meetingIsRecording, meetingSublabel, onOpenMeetings,
     knowledgeUpdatedLabel, knowledgeActions, onOpenApps, pinnedApps, onOpenApp,
     bgAgentsFailed, bgAgentsLabel, onToggleBrowser, browserOpen,
     switcherOnly, openLastSpace, onOpenChatHistory,

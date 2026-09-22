@@ -286,7 +286,7 @@ export interface ChatSessionComposerProps {
   onPullQueued?: (queueId: string) => void
   presetMessage: string | undefined
   onPresetMessageConsumed: () => void
-  codeSessionLocks: Record<string, { cwd: string; agent: 'claude' | 'codex' }>
+  codeSessionLocks: Record<string, { cwd: string; agent: 'claude' | 'codex'; codeModeEnabled?: boolean }>
   initialDraft: string | undefined
   onDraftChange: (tabId: string, text: string) => void
   /**

@@ -1,3 +1,4 @@
+import { projectSessionComposition } from '../../code-mode/sessions/composition.js';
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 import type { SessionBusEvent, SessionEvent } from "@x/shared/dist/sessions.js";
@@ -327,7 +328,7 @@ class FlakySessionRepo implements ISessionRepo {
     }
 }
 
-function makeSessions(opts: { repo?: ISessionRepo; fake?: FakeTurnRuntime; beforeSessionStart?: (id: string) => Promise<void> } = {}) {
+function makeSessions(opts: { sessionCompositionPins?: ConstructorParameters<typeof SessionsImpl>[0]['sessionCompositionPins']; repo?: ISessionRepo; fake?: FakeTurnRuntime; beforeSessionStart?: (id: string) => Promise<void> } = {}) {
     const repo = opts.repo ?? new InMemorySessionRepo();
     const fake = opts.fake ?? new FakeTurnRuntime();
     const bus = new RecordingBus();
@@ -338,6 +339,7 @@ function makeSessions(opts: { repo?: ISessionRepo; fake?: FakeTurnRuntime; befor
         clock: new FakeClock(),
         sessionBus: bus,
         beforeSessionStart: opts.beforeSessionStart,
+        sessionCompositionPins: opts.sessionCompositionPins,
     });
     return { sessions, repo, fake, bus };
 }
@@ -1684,5 +1686,22 @@ describe('before first session message', () => {
         const id = await sessions.createSession();
         await expect(sessions.sendOrQueueMessage(id, user('start'), { agent: { agentId: 'copilot' } })).rejects.toThrow('Cannot persist start');
         expect((await sessions.getSession(id)).turns).toHaveLength(0);
+    });
+});
+
+
+describe('project Code preference', () => {
+    it.each([false, true, undefined])('honors persisted Code=%s over stale caller settings without losing cwd', async (enabled) => {
+        const { sessions, fake } = makeSessions({ sessionCompositionPins: async () => projectSessionComposition({
+            id: 'project-session', projectId: 'p', title: 'Project', agent: 'codex', cwd: '/project/.rowboat/worktrees/thread',
+            codeModeEnabled: enabled, createdAt: TS,
+        }) });
+        const sessionId = await sessions.createSession({});
+        await sessions.sendMessage(sessionId, user('continue'), {
+            agent: { agentId: 'copilot', overrides: { composition: { codeMode: 'claude', codeCwd: '/stale/path', searchEnabled: true } } },
+        });
+        expect(fake.createTurnInputs[0].agent).toMatchObject({ overrides: { composition: {
+            codeMode: enabled === false ? null : 'codex', codeCwd: '/project/.rowboat/worktrees/thread', searchEnabled: true,
+        } } });
     });
 });

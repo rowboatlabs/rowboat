@@ -1,3 +1,4 @@
+import { useCodeSessions } from '@/components/code/use-code-sessions'
 "use client"
 
 import { SidebarChatContextMenu } from "./sidebar-chat-context-menu"
@@ -8,7 +9,6 @@ import {
   ArrowUpRight,
   Bot,
   ChevronRight,
-  Code2,
   FileText,
   Folder,
   Globe,
@@ -455,7 +455,6 @@ export function SidebarContentPanel({
   knowledgeActions,
   bgTaskSummaries = [],
   onOpenMeetings,
-  onOpenCode,
   onOpenBgTasks,
   onOpenApps,
   onOpenApp,
@@ -499,22 +498,6 @@ export function SidebarContentPanel({
   const [emailThreads, setEmailThreads] = useState<SidebarEmailThread[]>([])
   const [meetings, setMeetings] = useState<UpcomingMeeting[]>([])
   const [chatsExpanded, setChatsExpanded] = useState(true)
-  // The Code section only makes sense with a coding agent available — same
-  // flag the chat composer's code chip uses (auto-on when Claude Code or
-  // Codex is installed + signed in; explicit toggle in settings wins).
-  const [codeModeEnabled, setCodeModeEnabled] = useState(false)
-
-  useEffect(() => {
-    const load = () => {
-      window.ipc.invoke('codeMode:getConfig', null)
-        .then((r) => setCodeModeEnabled(r.enabled))
-        .catch(() => setCodeModeEnabled(false))
-    }
-    load()
-    window.addEventListener('code-mode-config-changed', load)
-    return () => window.removeEventListener('code-mode-config-changed', load)
-  }, [])
-
   useEffect(() => {
     let cancelled = false
     const loadEmail = async () => {
@@ -675,22 +658,9 @@ export function SidebarContentPanel({
     onRenameRun?.(chatId, title)
   }, [renameDraft, recentChats, onRenameRun])
 
-  // Workspace count for the Projects sublabel — top-level dir children of
-  // knowledge/Workspace (matches the Projects rail).
-  const workspaceCount = React.useMemo(() => {
-    const find = (nodes: TreeNode[]): TreeNode | null => {
-      for (const n of nodes) {
-        if (n.path === 'knowledge/Workspace') return n
-        if (n.kind === 'dir' && n.children?.length) {
-          const found = find(n.children)
-          if (found) return found
-        }
-      }
-      return null
-    }
-    const node = find(tree)
-    return node?.children?.filter((c) => c.kind === 'dir').length ?? 0
-  }, [tree])
+  // Count registered folders, including directories opened outside Rowboat.
+  const { projects } = useCodeSessions()
+  const workspaceCount = projects.length
 
   // "Updated 4m ago" sublabel under Knowledge, based on the most recently
   // modified note. Recomputed in an effect (not during render) and ticked so
@@ -986,14 +956,6 @@ export function SidebarContentPanel({
                   </div>
                 ) : null}
               </SidebarMenuItem>
-              {codeModeEnabled && (
-                <SidebarMenuItem>
-                  <SidebarMenuButton data-tour-id="nav-code" isActive={activeNav === 'code'} onClick={onOpenCode}>
-                    <Code2 className="size-4 shrink-0" />
-                    <span className="flex-1 truncate">Code</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              )}
               <SidebarMenuItem>
                 <SidebarMenuButton
                   data-tour-id="nav-knowledge"
@@ -1024,7 +986,7 @@ export function SidebarContentPanel({
               <SidebarMenuItem>
                 <SidebarMenuButton
                   data-tour-id="nav-workspaces"
-                  isActive={activeNav === 'workspaces'}
+                  isActive={activeNav === 'workspaces' || activeNav === 'code'}
                   onClick={() => knowledgeActions.openWorkspaceAt()}
                   className="h-auto items-start py-1"
                 >

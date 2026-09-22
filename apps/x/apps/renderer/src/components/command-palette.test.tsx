@@ -116,12 +116,12 @@ describe('CommandPalette', () => {
         const goTo = await screen.findByText('Go to')
         const group = goTo.closest('[cmdk-group]')!
         const labels = within(group as HTMLElement).getAllByRole('option').map((o) => o.textContent?.replace(/⌘\d|Ctrl\+\d/g, '').trim())
-        expect(labels.slice(0, 6)).toEqual(['Todo', 'Spaces', 'Email', 'Code', 'Meetings', 'Brain'])
+        expect(labels.slice(0, 6)).toEqual(['Todo', 'Spaces', 'Email', 'Meetings', 'Brain', 'Apps'])
         expect(labels).toContain('Settings')
         // Visited spaces and DMs, most recent first; never-opened ones stay out.
         expect(groupTitles('Recent spaces')).toEqual(['Main', 'Pat Lee'])
         expect(groupTitles('Recent chats')).toEqual(['Roadmap chat', 'Grocery list'])
-        expect(screen.getAllByRole('button', { pressed: false }).map((b) => b.textContent)).toEqual(['Spaces', 'Chats', 'Brain', 'Code'])
+        expect(screen.getAllByRole('button', { pressed: false }).map((b) => b.textContent)).toEqual(['Spaces', 'Chats', 'Brain', 'Projects'])
         // Nothing is searched until something is typed.
         expect(invoke).not.toHaveBeenCalledWith('search:query', expect.anything())
     })
@@ -137,13 +137,13 @@ describe('CommandPalette', () => {
         const { input, onNavigate } = open()
         // Once code mode is known (the flag is read over IPC), the recent
         // list and the Chats scope skip the code-mode chat.
-        await screen.findByRole('button', { name: 'Code' })
+        await screen.findByRole('button', { name: 'Projects' })
         expect(screen.queryByText('Fix the login bug')).toBeNull()
         fireEvent.click(screen.getByRole('button', { name: 'Chats' }))
         expect(optionTitles()).toEqual(['Roadmap chat', 'Grocery list'])
         // The Code scope lists it with its project, and opens it in Code.
-        fireEvent.click(screen.getByRole('button', { name: 'Code' }))
-        expect(screen.getByText('Recent code chats')).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Projects' }))
+        expect(screen.getByText('Recent project chats')).toBeInTheDocument()
         expect(optionTitles()).toEqual(['Fix the login bug'])
         expect(screen.getByText('rowboat')).toBeInTheDocument()
         fireEvent.click(screen.getByText('Fix the login bug'))
@@ -161,10 +161,10 @@ describe('CommandPalette', () => {
         fireEvent.change(input, { target: { value: 'roadmap' } })
         expect(await screen.findByText('Roadmap chat')).toBeInTheDocument()
         await waitFor(() => expect(invoke).toHaveBeenCalledWith('search:query', expect.objectContaining({ types: ['chat'] })))
-        expect(screen.queryByText('In code chats')).toBeNull()
+        expect(screen.queryByText('In project chats')).toBeNull()
         expect(screen.queryByText('Fix the login bug')).toBeNull()
-        fireEvent.click(screen.getByRole('button', { name: 'Code' }))
-        expect(await screen.findByText('In code chats')).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Projects' }))
+        expect(await screen.findByText('In project chats')).toBeInTheDocument()
         expect(screen.getByText('Fix the login bug')).toBeInTheDocument()
         expect(screen.queryByText('In chats')).toBeNull()
     })
@@ -248,7 +248,7 @@ describe('CommandPalette', () => {
         expect(screen.queryByText('In chats')).toBeNull()
         expect(screen.getAllByText('Roadmap chat')).toHaveLength(1)
         // The code-mode chat's transcript hit shows as a code chat here.
-        expect(screen.getByText('In code chats')).toBeInTheDocument()
+        expect(screen.getByText('In project chats')).toBeInTheDocument()
         // The author resolves through the org roster, not as a raw id, and
         // no roster is fetched for it.
         const author = await screen.findByText('Pat Lee')

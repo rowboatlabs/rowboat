@@ -1,5 +1,6 @@
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { BookOpen, Download, FileIcon, FileSpreadsheet, FileText, Image, Maximize2, Music, Pause, Play, Video } from 'lucide-react'
+import { BookOpen, ChevronDown, FolderOpen, Download, FileIcon, FileSpreadsheet, FileText, Image, Maximize2, Music, Pause, Play, Video } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { ImageLightbox, ImageOverlayButton } from '@/components/image-lightbox'
@@ -75,10 +76,10 @@ async function workspaceRelPath(filePath: string): Promise<string | null> {
  * the app can show goes to the in-app file view, so an assistant-written deck
  * lands in the slide editor rather than Keynote. Everything else — outside the
  * workspace, no in-app view, or a host surface that doesn't offer the in-app
- * route — goes to the OS opener.
+ * route — opens in the shared document preview column.
  */
 function useOpenFilePath(filePath: string): () => Promise<void> {
-  const { onOpenFile } = useFileCard()
+  const { onOpenFile, onPreviewFile } = useFileCard()
   return useCallback(async () => {
     if (onOpenFile && canOpenInApp(filePath)) {
       const rel = await workspaceRelPath(filePath)
@@ -87,8 +88,22 @@ function useOpenFilePath(filePath: string): () => Promise<void> {
         return
       }
     }
-    await window.ipc.invoke('shell:openPath', { path: filePath })
-  }, [filePath, onOpenFile])
+    onPreviewFile(filePath)
+  }, [filePath, onOpenFile, onPreviewFile])
+}
+
+function OpenFileActions({ filePath, onOpen }: { filePath: string; onOpen: () => void }) {
+  return <div className="flex shrink-0 items-center" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+    <Button variant="outline" size="sm" className="h-8 rounded-r-none border-r-0 text-xs" onClick={onOpen}>Open</Button>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild><Button variant="outline" size="sm" className="h-8 w-7 rounded-l-none px-0" aria-label="File open options"><ChevronDown className="size-3.5" /></Button></DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onSelect={() => { void window.ipc.invoke('shell:showItemInFolder', { path: filePath }).catch((error) => toast.error(error instanceof Error ? error.message : 'Could not open Finder')) }}>
+          <FolderOpen className="size-4" />Open in Finder
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  </div>
 }
 
 // Shared card shell used by all variants
@@ -110,7 +125,7 @@ function CardShell({
       role={onClick ? 'button' : undefined}
       tabIndex={onClick ? 0 : undefined}
       onClick={onClick}
-      onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } } : undefined}
+      onKeyDown={onClick ? (e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onClick() } } : undefined}
       className="flex items-center gap-3 rounded-xl border border-border bg-card p-3 pr-4 text-left transition-colors hover:bg-accent/50 cursor-pointer w-full my-2"
     >
       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted">
@@ -141,9 +156,7 @@ function KnowledgeFileCard({ filePath }: { filePath: string }) {
       subtitle={extLabel ? `Knowledge \u00b7 ${extLabel}` : 'Knowledge'}
       onClick={() => { setActiveSection('knowledge'); onOpenKnowledgeFile(filePath) }}
       action={
-        <Button variant="outline" size="sm" className="shrink-0 text-xs h-8 rounded-lg pointer-events-none">
-          Open
-        </Button>
+        <OpenFileActions filePath={filePath} onOpen={() => { setActiveSection('knowledge'); onOpenKnowledgeFile(filePath) }} />
       }
     />
   )
@@ -215,9 +228,7 @@ function AudioFileCard({ filePath }: { filePath: string }) {
       subtitle={`Audio \u00b7 ${extLabel}`}
       onClick={() => { void handleOpen() }}
       action={
-        <Button variant="outline" size="sm" className="shrink-0 text-xs h-8 rounded-lg pointer-events-none">
-          Open
-        </Button>
+        <OpenFileActions filePath={filePath} onOpen={() => { void handleOpen() }} />
       }
     />
   )
@@ -237,9 +248,7 @@ function SpreadsheetFileCard({ filePath }: { filePath: string }) {
       subtitle={`Spreadsheet · ${extLabel}`}
       onClick={() => { void handleOpen() }}
       action={
-        <Button variant="outline" size="sm" className="shrink-0 text-xs h-8 rounded-lg pointer-events-none">
-          Open
-        </Button>
+        <OpenFileActions filePath={filePath} onOpen={() => { void handleOpen() }} />
       }
     />
   )
@@ -280,9 +289,7 @@ function SystemFileCard({ filePath }: { filePath: string }) {
       subtitle={extLabel ? `${categoryLabel} \u00b7 ${extLabel}` : categoryLabel}
       onClick={() => { void handleOpen() }}
       action={
-        <Button variant="outline" size="sm" className="shrink-0 text-xs h-8 rounded-lg pointer-events-none">
-          Open
-        </Button>
+        <OpenFileActions filePath={filePath} onOpen={() => { void handleOpen() }} />
       }
     />
   )

@@ -4,7 +4,7 @@ import { promisify } from 'node:util';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { listBranches, switchBranch, worktreeAdd, worktreeRemove, changeWorktreeBase, worktreeBaseChangeReason } from './service.js';
+import { excludeWorktrees, worktreeAddUnborn, listBranches, switchBranch, worktreeAdd, worktreeRemove, changeWorktreeBase, worktreeBaseChangeReason } from './service.js';
 
 const exec = promisify(execFile);
 let root: string;
@@ -100,4 +100,30 @@ describe('project branches and worktree bases', () => {
         expect(await worktreeBaseChangeReason(repo, 'main')).toContain('no recorded starting commit');
     });
 
+});
+
+describe('worktrees inside projects', () => {
+    it('excludes nested worktrees locally without touching tracked ignore rules', async () => {
+        await excludeWorktrees(repo);
+        await excludeWorktrees(repo);
+        const wt = path.join(repo, '.rowboat', 'worktrees', 'session');
+        await worktreeAdd(repo, wt, 'rowboat/nested');
+        expect(await git('status', '--porcelain')).toBe('');
+        expect(await fs.readFile(path.join(wt, 'file.txt'), 'utf8')).toBe('main\n');
+        const exclude = await fs.readFile(path.join(repo, '.git', 'info', 'exclude'), 'utf8');
+        expect(exclude.split('/.rowboat/worktrees/')).toHaveLength(2);
+        await expect(fs.access(path.join(repo, '.gitignore'))).rejects.toThrow();
+    });
+    it('creates a worktree for a repository without commits without creating a parent commit', async () => {
+        const empty = path.join(root, 'empty');
+        await fs.mkdir(empty);
+        await exec('git', ['init', '-b', 'main'], { cwd: empty });
+        await fs.writeFile(path.join(empty, 'untracked.txt'), 'keep me');
+        const wt = path.join(empty, '.rowboat', 'worktrees', 'first');
+        await excludeWorktrees(empty);
+        await worktreeAddUnborn(empty, wt, 'rowboat/first');
+        expect((await exec('git', ['symbolic-ref', '--short', 'HEAD'], { cwd: wt })).stdout.trim()).toBe('rowboat/first');
+        await expect(exec('git', ['rev-parse', '--verify', 'HEAD'], { cwd: empty })).rejects.toThrow();
+        expect(await fs.readFile(path.join(empty, 'untracked.txt'), 'utf8')).toBe('keep me');
+    });
 });

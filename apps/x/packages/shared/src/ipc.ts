@@ -1866,6 +1866,7 @@ export const ipcSchemas = {
       // Only an explicit user choice; a quick-created session omits it and
       // follows the composer chip / global setting ("Auto").
       policy: ApprovalPolicy.optional(),
+      codeModeEnabled: z.boolean().optional(),
       isolation: z.enum(['in-repo', 'worktree']),
       baseBranch: z.string().min(1).optional(),
       // Reuse this session's workspace instead of creating a worktree.
@@ -1890,7 +1891,7 @@ export const ipcSchemas = {
   'codeSession:update': {
     req: z.object({
       sessionId: z.string(),
-      patch: CodeSession.pick({ title: true, policy: true, agent: true, agentModel: true, agentEffort: true }).partial(),
+      patch: CodeSession.pick({ title: true, policy: true, agent: true, agentModel: true, agentEffort: true, codeModeEnabled: true }).partial().extend({ clearPolicy: z.boolean().optional() }),
     }),
     res: z.object({
       session: CodeSession,
@@ -2512,6 +2513,14 @@ export const ipcSchemas = {
     }),
   },
   // Shell integration channels
+  'shell:previewFile': {
+    req: z.object({ path: z.string() }),
+    res: z.object({ url: z.string(), path: z.string(), name: z.string(), size: z.number(), mtimeMs: z.number() }),
+  },
+  'shell:releaseFilePreview': {
+    req: z.object({ url: z.string() }),
+    res: z.object({ success: z.literal(true) }),
+  },
   'shell:openPath': {
     req: z.object({ path: z.string() }),
     res: z.object({ error: z.string().optional() }),
