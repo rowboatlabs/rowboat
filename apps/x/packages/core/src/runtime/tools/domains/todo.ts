@@ -6,7 +6,7 @@ import { BuiltinToolsSchema } from "../types.js";
 export const todoTools: z.infer<typeof BuiltinToolsSchema> = {
     'todo-add': {
         permission: "none",
-        description: "Add items to the user's to-do list (the home surface, todo.md). Use when the user asks to add, track, or remember something as a to-do — e.g. 'add X to my list', 'track this as a to-do'. Items land at the end of the list. Include @rowboat in an item's text ONLY when the user wants it delegated — that starts a background run immediately. Never add items the user didn't ask for.",
+        description: "Add items to the user's to-do list (the home surface, todo.md). Use when the user asks to add, track, or remember something as a to-do — e.g. 'add X to my list', 'track this as a to-do'. Items land in Uncategorized, before named sections. Include @rowboat in an item's text ONLY when the user wants it delegated — that starts a background run immediately. Never add items the user didn't ask for.",
         inputSchema: z.object({
             items: z.array(z.object({
                 text: z.string().describe("The item's line text, phrased as the user would write it (e.g. 'chase the SOC2 vendor'). Include @rowboat only to delegate."),

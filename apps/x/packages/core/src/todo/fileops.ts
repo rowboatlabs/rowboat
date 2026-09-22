@@ -1,3 +1,4 @@
+import { TODO_DEFAULT_SECTION_PREFIX, todoSections, type TodoSectionRef, type TodoSectionAction } from '@x/shared/dist/todo.js';
 import fs from 'fs/promises';
 import fsSync from 'fs';
 import path from 'path';
@@ -301,14 +302,14 @@ export async function saveTodo(incoming: TodoList): Promise<TodoList> {
     });
 }
 
-/** Append one task line to the end of the list. */
-export async function addItem(text: string, opts?: { proposed?: boolean }): Promise<TodoItem> {
+/** Append a task to its selected section, defaulting to Uncategorized. */
+export async function addItem(text: string, opts?: { proposed?: boolean; section?: TodoSectionRef | null }): Promise<TodoItem> {
     const clean = text.replace(PROPOSED_RE, '').replace(/\s+/g, ' ').trim();
     const item = newItem(clean, false, normalizeKey(clean));
     if (opts?.proposed) item.proposed = true;
     await withTodoLock(async () => {
         const list = parseTodoFile(await readRaw());
-        list.blocks.push({ kind: 'item', item });
+        insertTodoItem(list, { kind: 'item', item }, opts?.section);
         await writeRaw(serializeTodoFile(list));
     });
     return item;
@@ -607,10 +608,74 @@ export async function restoreItem(month: string, blockIndex: number, key: string
             parent.item.children.push(restored);
         } else {
             restored.key = normalizeKey(restored.text);
-            list.blocks.push({ kind: 'item', item: restored });
+            insertTodoItem(list, { kind: 'item', item: restored });
         }
         await writeRaw(serializeTodoFile(list));
         log.log(`restored "${norm}" from ${month}`);
         return true;
+    });
+}
+
+function resolveSection(list: TodoList, ref?: TodoSectionRef | null) {
+    const section = todoSections(list.blocks).find(s => ref ? s.ref?.index === ref.index && s.ref.heading === ref.heading : s.ref === null);
+    if (!section) throw new Error('Section changed. Refresh and try again.');
+    return section;
+}
+
+export function insertTodoItem(list: TodoList, block: Extract<TodoBlock, { kind: 'item' }>, ref?: TodoSectionRef | null) {
+    list.blocks.splice(resolveSection(list, ref).end, 0, block);
+}
+
+/** Pure structural transform; callers apply it to the latest locked file. */
+export function applySectionAction(list: TodoList, action: TodoSectionAction): TodoList {
+    const sections = todoSections(list.blocks);
+    if (action.type === 'create' || action.type === 'rename') {
+        const name = action.name.trim();
+        if (!name || /[\r\n]/.test(action.name)) throw new Error('Enter a section name on one line.');
+        const source = action.type === 'rename' ? resolveSection(list, action.section) : null;
+        if (sections.some(s => !(source && s.ref?.index === source.ref?.index) && s.name.toLowerCase() === name.toLowerCase())) throw new Error('A section with this name already exists.');
+        const heading: TodoBlock = { kind: 'raw', text: `## ${name}` };
+        if (source && !source.ref) {
+            const label: TodoBlock = { kind: 'raw', text: `${TODO_DEFAULT_SECTION_PREFIX}${name}` };
+            const index = list.blocks.findIndex((b, i) => i < source.end && b.kind === 'raw' && b.text.startsWith(TODO_DEFAULT_SECTION_PREFIX));
+            if (index >= 0) list.blocks[index] = label;
+            else list.blocks.unshift(label);
+        } else if (source?.ref) list.blocks[source.ref.index] = heading;
+        else list.blocks.push(heading);
+    } else if (action.type === 'move') {
+        const target = resolveSection(list, action.section);
+        const matches = list.blocks.map((b, i) => b.kind === 'item' && b.item.key === action.key ? i : -1).filter(i => i >= 0);
+        if (matches.length !== 1) throw new Error('Task missing or ambiguous. Give identically named tasks distinct names before moving.');
+        const index = matches[0];
+        const [block] = list.blocks.splice(index, 1);
+        list.blocks.splice(target.end - (index < target.end ? 1 : 0), 0, block);
+    } else {
+        const section = resolveSection(list, action.section);
+        const start = section.ref!.index;
+        if (action.type === 'remove') {
+            const contents = list.blocks.splice(start, section.end - start).slice(1);
+            list.blocks.splice(todoSections(list.blocks)[0].end, 0, ...contents);
+        } else if (action.type === 'relocate') {
+            const target = action.before ? resolveSection(list, action.before).ref!.index : list.blocks.length;
+            if (target === start) return list;
+            const contents = list.blocks.splice(start, section.end - start);
+            list.blocks.splice(target > start ? target - contents.length : target, 0, ...contents);
+        } else {
+            const index = sections.findIndex(s => s.ref?.index === start);
+            const neighbor = sections[index + (action.direction === 'up' ? -1 : 1)];
+            if (!neighbor?.ref) return list;
+            const contents = list.blocks.splice(start, section.end - start);
+            const destination = action.direction === 'up' ? neighbor.ref.index : neighbor.end - contents.length;
+            list.blocks.splice(destination, 0, ...contents);
+        }
+    }
+    return list;
+}
+
+export async function changeTodoSection(action: TodoSectionAction): Promise<TodoList> {
+    return withTodoLock(async () => {
+        const list = applySectionAction(parseTodoFile(await readRaw()), action);
+        await writeRaw(serializeTodoFile(list));
+        return list;
     });
 }

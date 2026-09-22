@@ -151,3 +151,38 @@ export const TodoEvent = z.discriminatedUnion('type', [
     z.object({ type: z.literal('attention'), key: z.string(), message: z.string() }),
     z.object({ type: z.literal('list_changed') }),
 ]);
+
+/** A guarded reference into the current Markdown file. */
+export const TodoSectionRefSchema = z.object({ index: z.number().int().nonnegative(), heading: z.string() });
+export type TodoSectionRef = z.infer<typeof TodoSectionRefSchema>;
+export type TodoSection = { ref: TodoSectionRef | null; name: string; start: number; end: number };
+
+/** A visible Markdown label keeps the default group's name durable without task IDs. */
+export const TODO_DEFAULT_SECTION_PREFIX = 'Default section: ';
+
+export function todoSections(blocks: TodoBlock[]): TodoSection[] {
+    const sections: TodoSection[] = [{ ref: null, name: 'Uncategorized', start: 0, end: blocks.length }];
+    blocks.forEach((block, index) => {
+        if (block.kind !== 'raw') return;
+        const match = /^##[ \t]+(.+?)\s*$/.exec(block.text);
+        if (!match) {
+            if (sections.length === 1 && block.text.startsWith(TODO_DEFAULT_SECTION_PREFIX)) {
+                sections[0].name = block.text.slice(TODO_DEFAULT_SECTION_PREFIX.length).trim() || 'Uncategorized';
+            }
+            return;
+        }
+        sections[sections.length - 1].end = index;
+        sections.push({ ref: { index, heading: block.text }, name: match[1], start: index + 1, end: blocks.length });
+    });
+    return sections;
+}
+
+export const TodoSectionActionSchema = z.discriminatedUnion('type', [
+    z.object({ type: z.literal('create'), name: z.string() }),
+    z.object({ type: z.literal('rename'), section: TodoSectionRefSchema.nullable(), name: z.string() }),
+    z.object({ type: z.literal('reorder'), section: TodoSectionRefSchema, direction: z.enum(['up', 'down']) }),
+    z.object({ type: z.literal('remove'), section: TodoSectionRefSchema }),
+    z.object({ type: z.literal('relocate'), section: TodoSectionRefSchema, before: TodoSectionRefSchema.nullable() }),
+    z.object({ type: z.literal('move'), key: z.string(), section: TodoSectionRefSchema.nullable() }),
+]);
+export type TodoSectionAction = z.infer<typeof TodoSectionActionSchema>;

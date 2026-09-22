@@ -1,5 +1,8 @@
+import { useTodoDrag } from '@/hooks/use-todo-drag'
+import { TODO_DEFAULT_SECTION_PREFIX, todoSections, type TodoSectionRef, type TodoSectionAction } from '@x/shared/dist/todo.js'
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowUpRight, Bot, Check, ChevronDown, FileText, ListPlus, Loader2, MessageCircle, Plus, RotateCcw, Sparkles, Square, Trash2, X } from 'lucide-react'
+import { ArrowUpRight, Bot, Check, GripVertical, ChevronDown, FileText, ListPlus, Loader2, MessageCircle, Plus, RotateCcw, Sparkles, Square, Trash2, X } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { toast } from 'sonner'
 import type { TodoBlock, TodoChatBubble, TodoEventType, TodoItem, TodoLink, TodoList } from '@x/shared/dist/todo.js'
@@ -14,6 +17,7 @@ import type { HomeThread } from '@x/shared/dist/home-threads.js'
 // ---------------------------------------------------------------------------
 
 type TodoViewProps = {
+  onFlushEditsReady?: (flush: (() => Promise<boolean>) | null) => void
   onOpenNote: (path: string) => void
   /** Bind the chat dock to an item's session — the full thread view. */
   onOpenInChat: (sessionId: string) => void
@@ -41,7 +45,7 @@ type TodoViewProps = {
 }
 
 type ComposeTarget =
-  | { kind: 'todo'; prefill?: string }
+  | { kind: 'todo'; prefill?: string; section?: TodoSectionRef | null }
   | { kind: 'sub'; parentKey: string; parentText: string; prefill?: string }
   | { kind: 'comment'; key: string; itemText: string; quote?: string }
   | { kind: 'chatReply'; sessionId: string; title: string; quote?: string }
@@ -448,7 +452,7 @@ function ConversationView({ bubbles, sessionId, onOpenNote, onOpenInChat, onRetr
   )
 }
 
-function ItemRow({ item, isRunning, needsApproval = null, commentOpen, sessionId, bubbles, depth = 0, changed = false, dimmed = false, spotlight = false, collapsed = false, onToggleCollapsed, childRows, onAddSub, onToggle, onCommitText, onDismiss, onRun, onStop, onOpenNote, onToggleComment, onComment, onOpenInChat, onEnterNext }: {
+function ItemRow({ item, isRunning, needsApproval = null, commentOpen, sessionId, bubbles, depth = 0, changed = false, dimmed = false, spotlight = false, collapsed = false, onToggleCollapsed, childRows, onAddSub, dragHandle, sectionActions, onToggle, onCommitText, onDismiss, onRun, onStop, onOpenNote, onToggleComment, onComment, onOpenInChat, onEnterNext }: {
   item: TodoItem
   isRunning: boolean
   /** The live run is suspended on a permission prompt — approve from the chat. */
@@ -470,6 +474,8 @@ function ItemRow({ item, isRunning, needsApproval = null, commentOpen, sessionId
   /** Rendered sub-item rows (built by the parent view) + sub composer. */
   childRows?: React.ReactNode
   /** Top-level only: open the "add sub-task" input. */
+  dragHandle?: React.ReactNode
+  sectionActions?: React.ReactNode
   onAddSub?: () => void
   onToggle: (checked: boolean) => void
   onCommitText: (text: string) => void
@@ -538,6 +544,7 @@ function ItemRow({ item, isRunning, needsApproval = null, commentOpen, sessionId
           </button>
         </IconTip>
       )}
+      {dragHandle}
       <input
         type="checkbox"
         checked={item.checked}
@@ -697,6 +704,7 @@ function ItemRow({ item, isRunning, needsApproval = null, commentOpen, sessionId
             </button>
           </IconTip>
         )}
+        {sectionActions}
         {onAddSub && depth === 0 && (
           <IconTip label="Add a sub-task">
             <button
@@ -787,12 +795,13 @@ function Composer({ onSubmit }: { onSubmit: (text: string, kind: 'task' | 'chat'
 // the list. Enter appends the line — no model, no modes. The header's
 // "New to-do" button and the N shortcut land here via focusSignal.
 function AddItemRow({ onAdd, onHandoff, focusSignal }: {
-  onAdd: (text: string) => void
+  onAdd: (text: string) => Promise<void>
   onHandoff?: (text: string) => void
   focusSignal?: number
 }) {
   const [text, setText] = useState('')
   const mention = useMention(text, setText)
+  const [adding, setAdding] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   useEffect(() => {
     if (!focusSignal) return
@@ -818,12 +827,15 @@ function AddItemRow({ onAdd, onHandoff, focusSignal }: {
         ref={inputRef}
         value={text}
         onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
+        disabled={adding}
+        onKeyDown={async (e) => {
           if (e.key === 'Tab' && mention.show) { e.preventDefault(); mention.complete(); return }
           if (e.key === 'Enter' && text.trim()) {
             e.preventDefault()
-            onAdd(text.trim())
-            setText('')
+            if (adding) return
+            setAdding(true)
+            try { await onAdd(text.trim()); setText('') } catch { /* Keep draft for retry. */ }
+            finally { setAdding(false); inputRef.current?.focus() }
           }
           if (e.key === 'Escape') e.currentTarget.blur()
         }}
@@ -948,8 +960,29 @@ function ArchivedSection({ entries, onRestore, onDelete, onOpenNote }: {
   )
 }
 
-export function TodoView({ onOpenNote, onOpenInChat, onFocusComposer, composer, onComposeTodo, composeTarget, getRunModel, onOpenCodeSession, attendedSessionId }: TodoViewProps) {
+export function TodoView({ onFlushEditsReady, onOpenNote, onOpenInChat, onFocusComposer, composer, onComposeTodo, composeTarget, getRunModel, onOpenCodeSession, attendedSessionId }: TodoViewProps) {
   const [blocks, setBlocks] = useState<TodoBlock[] | null>(null)
+  const [sectionEditor, setSectionEditor] = useState<{ ref: TodoSectionRef | null; name: string; creating?: boolean } | null>(null)
+  const [sectionBusy, setSectionBusy] = useState(false)
+  const [addSectionKey, setAddSectionKey] = useState(() => localStorage.getItem('todo.addSection') ?? 'uncategorized')
+  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>(() => {
+    try { return JSON.parse(localStorage.getItem('todo.collapsedSections') ?? '{}') } catch { return {} }
+  })
+  const sections = todoSections(blocks ?? [])
+  const sectionStorageKey = (ref: TodoSectionRef | null) => ref ? `${ref.heading}:${sections.filter(s => s.ref?.heading === ref.heading && s.ref.index < ref.index).length}` : 'uncategorized'
+  // Resolve the destination from its heading, not its shifting block index.
+  const addSection = sections.find(s => sectionStorageKey(s.ref) === addSectionKey)?.ref ?? null
+  const rememberSection = (ref: TodoSectionRef | null) => {
+    const key = sectionStorageKey(ref)
+    setAddSectionKey(key)
+    localStorage.setItem('todo.addSection', key)
+  }
+  const toggleSection = (ref: TodoSectionRef | null) => {
+    const key = sectionStorageKey(ref)
+    const next = { ...collapsedSections, [key]: !collapsedSections[key] }
+    setCollapsedSections(next)
+    localStorage.setItem('todo.collapsedSections', JSON.stringify(next))
+  }
   const [running, setRunning] = useState<Set<string>>(new Set())
   // Live runs suspended on a permission prompt (manual mode): key → message.
   // Ephemeral overlay — cleared when the run settles or the user heads to
@@ -987,7 +1020,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onFocusComposer, composer, 
   // Bumped by the header's "New to-do" button and the N shortcut; the
   // add-row scrolls into view and takes focus.
   const [addFocusSignal, setAddFocusSignal] = useState(0)
-  const focusAddRow = useCallback(() => setAddFocusSignal((n) => n + 1), [])
+  const focusAddRow = useCallback(() => { setAddFocusSignal((n) => n + 1) }, [])
   // Attention: triage filter + changed-since-last-look baseline.
   const [sessionUpdatedAt, setSessionUpdatedAt] = useState<Record<string, string>>({})
   const [seenBaseline, setSeenBaseline] = useState<string>(() => localStorage.getItem('todo.seenBaseline') ?? new Date(0).toISOString())
@@ -1034,10 +1067,14 @@ export function TodoView({ onOpenNote, onOpenInChat, onFocusComposer, composer, 
     setBlocks(list.blocks)
   }
 
+  const savingRef = useRef<Promise<void> | null>(null)
+  const fetchVersion = useRef(0)
   const refetch = useCallback(async () => {
     // Local edits win — the save round-trip merges and re-adopts.
-    if (dirtyRef.current) return
+    if (dirtyRef.current || savingRef.current) return
+    const version = ++fetchVersion.current
     const res = await window.ipc.invoke('todo:get', null)
+    if (dirtyRef.current || savingRef.current || version !== fetchVersion.current) return
     adopt(res.list)
     setRunning(new Set(res.running))
     setSessions(res.sessions)
@@ -1063,18 +1100,32 @@ export function TodoView({ onOpenNote, onOpenInChat, onFocusComposer, composer, 
   }, [])
 
   const saveNow = useCallback(async () => {
+    if (savingRef.current) await savingRef.current
+
     if (!dirtyRef.current || !blocksRef.current) return
+    const pendingBlocks = blocksRef.current
     dirtyRef.current = false
-    try {
-      const res = await window.ipc.invoke('todo:save', { list: { blocks: blocksRef.current } })
-      if (res.success && res.list && !dirtyRef.current) adopt(res.list)
-    } catch (err) {
-      console.error('Todo: save failed', err)
-      dirtyRef.current = true
-    }
+    const save = (async () => {
+      try {
+        const res = await window.ipc.invoke('todo:save', { list: { blocks: pendingBlocks } })
+        if (!res.success) throw new Error(res.error ?? 'Could not save todos')
+        if (res.list && !dirtyRef.current) adopt(res.list)
+      } catch (err) {
+        console.error('Todo: save failed', err)
+        toast.error('Could not save todos. Your edits are still on this page.')
+        dirtyRef.current = true
+      }
+    })()
+    savingRef.current = save
+    await save
+    if (savingRef.current === save) savingRef.current = null
   }, [])
   const saveNowRef = useRef(saveNow)
   useEffect(() => { saveNowRef.current = saveNow }, [saveNow])
+  useEffect(() => {
+    onFlushEditsReady?.(async () => { await saveNowRef.current(); return !dirtyRef.current })
+    return () => onFlushEditsReady?.(null)
+  }, [onFlushEditsReady])
 
   const mutate = useCallback((next: TodoBlock[]) => {
     blocksRef.current = next
@@ -1305,22 +1356,63 @@ export function TodoView({ onOpenNote, onOpenInChat, onFocusComposer, composer, 
     if (res.success && res.sessionId) openInChat(res.sessionId)
   }, [openInChat])
 
+  const changeSection = async (action: TodoSectionAction) => {
+    if (sectionBusy) return false
+    setSectionBusy(true)
+    ++fetchVersion.current
+    try {
+      await saveNowRef.current()
+      if (dirtyRef.current) throw new Error('Save your pending edits before changing sections.')
+      const result = await window.ipc.invoke('todo:section', action)
+      if (!result.success) {
+        await refetch()
+        throw new Error(result.error ?? 'Could not update section')
+      }
+      ++fetchVersion.current
+      if (result.list) adopt(result.list)
+      if (action.type === 'rename' && action.section) {
+        const oldKey = sectionStorageKey(action.section)
+        const next = { ...collapsedSections, [`## ${action.name.trim()}:0`]: collapsedSections[oldKey] ?? false }
+        delete next[oldKey]
+        setCollapsedSections(next)
+        localStorage.setItem('todo.collapsedSections', JSON.stringify(next))
+      }
+      if (action.type === 'rename' && action.section && sectionStorageKey(action.section) === addSectionKey) {
+        const key = `## ${action.name.trim()}:0`
+        setAddSectionKey(key)
+        localStorage.setItem('todo.addSection', key)
+      }
+      if (action.type === 'remove' && sectionStorageKey(action.section) === addSectionKey) rememberSection(null)
+      return true
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not update section')
+      return false
+    } finally { setSectionBusy(false) }
+  }
+
   const addItem = useCallback(async (text: string) => {
-    // Flush edits first so the appended line lands on the saved file.
-    if (dirtyRef.current) await saveNowRef.current()
-    await window.ipc.invoke('todo:addItem', { text, run: mentionsRowboat(text) })
+    await saveNowRef.current()
+    if (dirtyRef.current) throw new Error('Could not save pending edits')
+    const result = await window.ipc.invoke('todo:addItem', { text, run: mentionsRowboat(text), section: addSection })
+    if (!result.success) { toast.error(result.error ?? 'Could not add task'); throw new Error(result.error) }
     await refetch()
-  }, [refetch])
+  }, [refetch, addSection])
+
+  const composeInSection = (section: TodoSectionRef | null) => {
+    rememberSection(section)
+    if (onComposeTodo) onComposeTodo({ kind: 'todo', section })
+    else { setAddFocusSignal(n => n + 1) }
+  }
 
   const clearCompleted = useCallback(async () => {
-    if (dirtyRef.current) await saveNowRef.current()
+    await saveNowRef.current()
     await window.ipc.invoke('todo:clearCompleted', null)
     await refetch()
   }, [refetch])
 
   const dismissKey = useCallback(async (key: string) => {
     // Flush edits so the archived copy matches the screen.
-    if (dirtyRef.current) await saveNowRef.current()
+    await saveNowRef.current()
     const itemText = (() => {
       for (const b of blocksRef.current ?? []) {
         if (b.kind !== 'item') continue
@@ -1351,7 +1443,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onFocusComposer, composer, 
   const addSub = useCallback(async (parentKey: string, text: string) => {
     // The composer stays open — Enter lands this step with the cursor
     // already on the next one (bullet-list muscle memory); Escape ends it.
-    if (dirtyRef.current) await saveNowRef.current()
+    await saveNowRef.current()
     await window.ipc.invoke('todo:addSubItem', { parentKey, text, run: mentionsRowboat(text) })
     await refetch()
   }, [refetch])
@@ -1368,6 +1460,68 @@ export function TodoView({ onOpenNote, onOpenInChat, onFocusComposer, composer, 
     next[index] = { kind: 'item', item: { ...blk.item, children } }
     mutate(next)
   }, [mutate])
+
+  const { dragged, dropHint, dragProps } = useTodoDrag((source, x, y) => {
+    const target = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-todo-section], [data-todo-bottom]')
+    if (!target) return null
+    if (target.hasAttribute('data-todo-bottom')) return source.kind === 'section'
+      ? { hint: 'bottom', action: { type: 'relocate', section: source.section, before: null } }
+      : null
+    const group = sections.find(s => (s.ref?.index ?? -1) === Number(target.dataset.todoSection))
+    if (!group) return null
+    if (source.kind === 'item') return { hint: `items:${sectionStorageKey(group.ref)}`, action: { type: 'move', key: source.key, section: group.ref } }
+    const rect = target.getBoundingClientRect()
+    const before = !group.ref ? sections[1]?.ref ?? null
+      : y < rect.top + rect.height / 2 ? group.ref : sections[sections.indexOf(group) + 1]?.ref ?? null
+    return { hint: `before:${before?.index ?? 'end'}`, action: { type: 'relocate', section: source.section, before } }
+  }, action => { void changeSection(action) }, sectionBusy || !!sectionEditor)
+  const sectionNameEditor = sectionEditor && (
+    <form className="flex min-w-0 flex-1 gap-2 px-2 py-1" onSubmit={async e => {
+      e.preventDefault()
+      const action: TodoSectionAction = sectionEditor.creating
+        ? { type: 'create', name: sectionEditor.name }
+        : { type: 'rename', section: sectionEditor.ref, name: sectionEditor.name }
+      if (await changeSection(action)) setSectionEditor(null)
+    }}>
+      <input autoFocus onFocus={e => e.target.select()} aria-label="Section name" className="min-w-0 flex-1 rounded border bg-background px-2 py-1 text-sm" value={sectionEditor.name} onChange={e => setSectionEditor({ ...sectionEditor, name: e.target.value })} onKeyDown={e => { if (e.key === 'Escape') setSectionEditor(null) }} />
+      <button type="submit" disabled={sectionBusy} className="text-sm">Save</button>
+      <button type="button" onClick={() => setSectionEditor(null)} className="text-sm">Cancel</button>
+    </form>
+  )
+  const renderSectionHeader = (group: ReturnType<typeof todoSections>[number]) => {
+    const section = group.ref
+    const collapsed = collapsedSections[sectionStorageKey(section)] ?? false
+    const editing = sectionEditor && !sectionEditor.creating && sectionEditor.ref?.index === section?.index
+    const next = sections[sections.indexOf(group) + 1]?.ref ?? null
+    const highlight = dropHint === `items:${sectionStorageKey(section)}` ? 'bg-primary/10' : ''
+    const border = dropHint === `before:${section?.index}` ? 'border-t-primary' : dropHint === `before:${next?.index ?? 'end'}` ? 'border-b-primary' : ''
+    return <div key={section?.index ?? 'default'} data-todo-section={section?.index ?? -1} className={`mt-3 flex items-center gap-2 border-y-2 border-transparent px-2 py-2 text-sm font-medium ${highlight} ${border}`}>
+      {section && <button type="button" aria-label={`Drag section ${group.name}`} {...dragProps({ kind: 'section', section })} title="Drag to reorder section" className="cursor-grab rounded p-1 text-muted-foreground hover:bg-accent active:cursor-grabbing"><GripVertical className="size-3.5" /></button>}
+      <button type="button" aria-label={`${collapsed ? 'Expand' : 'Collapse'} section ${group.name}`} aria-expanded={!collapsed} onClick={() => toggleSection(section)}><ChevronDown className={`size-3.5 ${collapsed ? '-rotate-90' : ''}`} /></button>
+      {editing ? sectionNameEditor : <button type="button" aria-label={`Rename section ${group.name}`} onClick={() => setSectionEditor({ ref: section, name: group.name })} className="min-w-0 truncate rounded px-1 text-left hover:bg-accent">{group.name}</button>}
+      <span className="mr-auto text-xs text-muted-foreground">{(blocks ?? []).slice(group.start, group.end).filter(b => b.kind === 'item' && !b.item.checked).length}</span>
+      <button type="button" aria-label={`Add task to ${group.name}`} onClick={() => composeInSection(section)}><Plus className="size-4" /></button>
+      <DropdownMenu><DropdownMenuTrigger asChild><button type="button" aria-label={`Manage ${group.name}`} disabled={sectionBusy} className="rounded px-2 hover:bg-accent">⋯</button></DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onSelect={() => setSectionEditor({ ref: section, name: group.name })}>Rename</DropdownMenuItem>
+          {section && <>
+            <DropdownMenuItem disabled={sections[1] === group} onSelect={() => void changeSection({ type: 'reorder', section, direction: 'up' })}>Move up</DropdownMenuItem>
+            <DropdownMenuItem disabled={sections[sections.length - 1] === group} onSelect={() => void changeSection({ type: 'reorder', section, direction: 'down' })}>Move down</DropdownMenuItem>
+            <DropdownMenuItem disabled={sections[sections.length - 1] === group} onSelect={() => void changeSection({ type: 'relocate', section, before: null })}>Move to bottom</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void changeSection({ type: 'remove', section })}>Remove section · keep tasks</DropdownMenuItem>
+          </>}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  }
+
+  const sectionPicker = composeTarget?.kind === 'todo' && onComposeTodo ? (
+    <label className="flex items-center gap-2 px-3 py-1 text-xs text-muted-foreground">Section
+      <select aria-label="Task section" className="rounded border bg-background px-2 py-1" value={composeTarget.section?.index ?? -1} onChange={e => { const section = sections.find(s => s.ref?.index === Number(e.target.value))?.ref ?? null; rememberSection(section); onComposeTodo({ ...composeTarget, prefill: undefined, section }) }}>
+        {sections.map(s => <option key={s.ref?.index ?? -1} value={s.ref?.index ?? -1}>{s.name}</option>)}
+      </select>
+    </label>
+  ) : null
 
   const itemBlocks = (blocks ?? []).map((b, i) => ({ block: b, index: i }))
   const hasCompleted = itemBlocks.some(({ block }) => block.kind === 'item' && block.item.checked)
@@ -1403,7 +1557,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onFocusComposer, composer, 
   }
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background">
-      <div className="flex-1 overflow-y-auto px-9 pb-8 pt-12">
+      <div data-todo-scroll className={`flex-1 overflow-y-auto px-9 pb-8 pt-12 ${dragged ? 'select-none cursor-grabbing' : ''}`}>
         {/* min-h-full lets the archive's mt-auto push it to the bottom edge
             on a short list; once the list outgrows the pane it just flows. */}
         <div className="mx-auto flex min-h-full max-w-[720px] flex-col gap-5">
@@ -1502,9 +1656,10 @@ export function TodoView({ onOpenNote, onOpenInChat, onFocusComposer, composer, 
           </div>
 
           {/* The list */}
-          <div className={`transition-opacity duration-200 ${spotSession ? 'opacity-60' : ''}`}>
+          <fieldset disabled={sectionBusy} inert={sectionBusy} className={`min-w-0 transition-opacity duration-200 ${spotSession ? 'opacity-60' : ''}`}>
             <div className="flex items-center justify-between px-1 pb-1">
               <div className={SECTION_LABEL}>Tasks</div>
+              <button type="button" className="ml-auto mr-2 rounded px-2 py-1 text-xs hover:bg-accent" disabled={sectionBusy} onClick={() => setSectionEditor({ ref: null, name: '', creating: true })}>+ New section</button>
               <IconTip label="New to-do — press N">
                 <button
                   type="button"
@@ -1516,10 +1671,17 @@ export function TodoView({ onOpenNote, onOpenInChat, onFocusComposer, composer, 
                 </button>
               </IconTip>
             </div>
+            {sectionEditor?.creating && sectionNameEditor}
+            {blocks !== null && renderSectionHeader(sections[0])}
             {blocks === null ? (
               <div className="px-2 py-6 text-center text-sm text-muted-foreground">Loading…</div>
             ) : (
               itemBlocks.map(({ block, index }) => {
+                const headingSection = sections.find(s => s.ref?.index === index)
+                if (headingSection?.ref) return renderSectionHeader(headingSection)
+                const owner = sections.find(s => index >= s.start && index < s.end)!
+                if (collapsedSections[sectionStorageKey(owner.ref)]) return null
+                if (!owner.ref && block.kind === 'raw' && block.text.startsWith(TODO_DEFAULT_SECTION_PREFIX)) return null
                 if (block.kind === 'raw') {
                   if (block.text.trim() === '') return <div key={index} className="h-2" />
                   return (
@@ -1530,10 +1692,16 @@ export function TodoView({ onOpenNote, onOpenInChat, onFocusComposer, composer, 
                 }
                 const item = block.item
                 return (
+                  <div key={`${index}:${item.key}`} data-todo-section={owner.ref?.index ?? -1} className={dropHint === `items:${sectionStorageKey(owner.ref)}` ? 'rounded bg-primary/10' : ''}>
                   <ItemRow
-                    key={`${index}:${item.key}`}
                     item={item}
                     depth={0}
+                    dragHandle={<button type="button" aria-label={`Drag ${item.text}`} title="Drag to another section" {...dragProps({ kind: 'item', key: item.key })} className="cursor-grab rounded p-0.5 text-muted-foreground hover:bg-accent active:cursor-grabbing"><GripVertical className="size-4" /></button>}
+                    sectionActions={
+                      <DropdownMenu>
+                      <DropdownMenuTrigger asChild><button type="button" aria-label={`Move ${item.text} to section`} disabled={sectionBusy} className="rounded px-1 text-xs hover:bg-accent">Move to section</button></DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">{sections.map(destination => <DropdownMenuItem key={destination.ref?.index ?? 'none'} disabled={destination === owner} onSelect={() => void changeSection({ type: 'move', key: item.key, section: destination.ref })}>{destination.name}</DropdownMenuItem>)}</DropdownMenuContent>
+                    </DropdownMenu>}
                     changed={isChanged(item.key)}
                     dimmed={spotKey !== null && !blockContainsSpot(item)}
                     spotlight={item.key === spotKey || item.key === flashKey}
@@ -1648,9 +1816,15 @@ export function TodoView({ onOpenNote, onOpenInChat, onFocusComposer, composer, 
                       </div>
                     )}
                   />
+                  </div>
                 )
               })
             )}
+            {dragged?.kind === 'section' && <div
+              aria-label="Move section to bottom"
+              data-todo-bottom
+              className={`my-2 rounded border border-dashed p-3 text-center text-xs text-muted-foreground ${dropHint === 'bottom' ? 'border-primary bg-primary/10' : ''}`}
+            >Move section to bottom</div>}
             {blocks !== null && !itemBlocks.some(({ block }) => block.kind === 'item') && (
               <div className="px-2 py-2 text-[13px] text-muted-foreground/70">
                 <TextWithMentions text="Nothing on the list — add your first to-do below, or mention @rowboat to hand one off." />
@@ -1660,13 +1834,20 @@ export function TodoView({ onOpenNote, onOpenInChat, onFocusComposer, composer, 
               // Plain to-dos are typed in place — no chat chrome. Typing
               // @rowboat hands the text off to the composer below, where
               // model and attachments apply to the delegated run.
+              <div>
+              {sections.length > 1 && <label className="flex items-center gap-2 px-2 pt-2 text-xs text-muted-foreground">Add to
+                <select aria-label="New task section" className="rounded border bg-background px-2 py-1" value={addSection?.index ?? -1} onChange={e => rememberSection(sections.find(s => s.ref?.index === Number(e.target.value))?.ref ?? null)}>
+                  {sections.map(s => <option key={s.ref?.index ?? -1} value={s.ref?.index ?? -1}>{s.name}</option>)}
+                </select>
+              </label>}
               <AddItemRow
-                onAdd={(text) => void addItem(text)}
-                onHandoff={onComposeTodo ? (text) => onComposeTodo({ kind: 'todo', prefill: text }) : undefined}
+                onAdd={addItem}
+                onHandoff={onComposeTodo ? (text) => onComposeTodo({ kind: 'todo', prefill: text, section: addSection }) : undefined}
                 focusSignal={addFocusSignal}
               />
+              </div>
             )}
-          </div>
+          </fieldset>
 
           {/* First-completion callout — shown once, ever */}
           {showCallout && (
@@ -1732,7 +1913,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onFocusComposer, composer, 
               onOpenNote={onOpenNote}
               onRestore={(entry) => {
                 void (async () => {
-                  if (dirtyRef.current) await saveNowRef.current()
+                  await saveNowRef.current()
                   await window.ipc.invoke('todo:restore', { month: entry.month, blockIndex: entry.blockIndex, key: entry.item.key })
                   await refetch()
                 })()
@@ -1759,6 +1940,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onFocusComposer, composer, 
       {composeTarget != null && (
         <div className="shrink-0 border-t border-foreground/[0.06] bg-background px-9 pb-5 pt-3">
           <div className="mx-auto max-w-[720px]">
+            {sectionPicker}
             {composer ?? <Composer onSubmit={(text, kind) => void (kind === 'task' ? addItem(text) : startChat(text))} />}
           </div>
         </div>

@@ -1,3 +1,4 @@
+import { changeTodoSection } from '@x/core/dist/todo/fileops.js';
 import { listProjects, createProjectChat } from '@x/core/dist/projects/projects.js';
 import container from '@x/core/dist/di/container.js';
 import { deliverLoopbackCallback } from './loopback-relay.js';
@@ -422,11 +423,20 @@ export function createCoreRpcHandlers(opts?: { sessionsIndexReady?: Promise<void
         return { success: false, error: err instanceof Error ? err.message : String(err) };
       }
     },
+    'todo:section': async (args) => {
+      try {
+        const list = await changeTodoSection(args);
+        todoBus.publish({ type: 'list_changed' });
+        return { success: true, list };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
     'todo:addItem': async (args) => {
       try {
         const links = await importTodoAttachments(args.attachments ?? []);
         const text = links.length > 0 ? `${args.text} ${todoLinksToText(links)}` : args.text;
-        const item = await addTodoItem(text);
+        const item = await addTodoItem(text, { section: args.section });
         if (args.run || item.delegated) {
           void runTodoItem(item.key, undefined, { model: args.model, autoPermission: args.permissionMode !== 'manual', code: args.code }).catch(() => {});
         }
