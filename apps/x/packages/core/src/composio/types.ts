@@ -138,6 +138,16 @@ export const ZCreateConnectedAccountResponse = z.object({
 });
 
 /**
+ * Response returned by Composio's managed OAuth link endpoint.
+ */
+export const ZCreateConnectedAccountLinkResponse = z.object({
+    link_token: z.string(),
+    redirect_url: z.string(),
+    connected_account_id: z.string(),
+    expires_at: z.string(),
+});
+
+/**
  * Connected account schema
  */
 export const ZConnectedAccount = z.object({
