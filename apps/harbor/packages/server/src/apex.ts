@@ -125,22 +125,8 @@ export function buildApexApp(deps: ApexDeps): Hono {
   /** The caller's orgs on this deployment — what the app lists after sign-in. */
   app.get('/v1/orgs', async (c) => {
     const identity = await deps.auth.authenticate(c.req.header('authorization'));
-    const orgs = await deps.directory.listOrgs();
-    const mine = [];
-    for (const org of orgs) {
-      const member = await new PgStore(deps.db, org.id).getMemberByIdentity(identity.iss, identity.sub);
-      if (member) {
-        mine.push({
-          id: org.id,
-          name: org.name,
-          address: org.domains[0] ?? '',
-          memberId: member.id,
-          displayName: member.displayName,
-          role: member.role,
-        });
-      }
-    }
-    return c.json({ orgs: mine });
+    // One statement over the identity table, whatever the number of orgs on the deployment (2026-09-22).
+    return c.json({ orgs: await deps.directory.listOrgsForIdentity(identity.iss, identity.sub) });
   });
 
   return app;

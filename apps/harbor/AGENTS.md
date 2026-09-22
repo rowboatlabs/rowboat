@@ -18,7 +18,7 @@ Two pnpm workspace packages under `packages/`:
 | `core/read-state.ts` | read marks, follows, unread, Activity, read-all |
 | `service.ts` | `HarborService`, the facade: one delegate per public method, `org` / `readOnly` accessors |
 | `policy.ts` | who may do what — pure decisions over facts the core loads; `enforce` throws |
-| `store.ts`, `pg-store.ts` | the data boundary and its one driver; `sql.ts` (node-postgres), `sql-pglite.ts` (Postgres in-process) |
+| `store.ts`, `pg-store.ts` | the data boundary and its one driver; `PgStore.transaction(fn)` for an org-level all-or-nothing write the caller shares (`directory.ts`); `sql.ts` (node-postgres), `sql-pglite.ts` (Postgres in-process) |
 | `migrations.ts` | the append-only schema ladder |
 | `http.ts`, `ws.ts`, `mcp.ts` | the three faces; `origin.ts` (the public origin behind the proxy) |
 | `auth.ts`, `auth-oidc.ts` | the drivers, `bindAuth` / `OrgAuth`, `authenticateRequest`, the RFC 9728 helpers; `consent.ts` (the login page) |

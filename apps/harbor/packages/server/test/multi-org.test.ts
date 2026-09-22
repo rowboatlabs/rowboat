@@ -1,6 +1,7 @@
 import WebSocket from 'ws';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startHarborDeployment, type RunningDeployment } from '../src/deployment.js';
+import { OrgDirectory } from '../src/directory.js';
 import type { SqlDb } from '../src/sql.js';
 import { startFakeAs, type FakeAs } from './helpers.js';
 import { pgliteDb } from '../src/sql-pglite.js';
@@ -202,6 +203,40 @@ describe('multi-org deployment', () => {
 
   it('domains are unique across the deployment', async () => {
     await expect(dep.createOrg({ name: 'Squatter', domains: ['acme.test'] })).rejects.toThrow(/already routes/);
+  });
+
+  it('a refused create leaves nothing behind — org, founder and identity roll back together', async () => {
+    const tables = ['orgs', 'org_domains', 'members', 'member_identities'];
+    const count = async (table: string) => (await db.query<{ n: number }>(`select count(*)::int as n from ${table}`))[0]!.n;
+    const before = await Promise.all(tables.map(count));
+    // The collision is on the SECOND domain — after the org row and its founder were written in the same transaction.
+    await expect(
+      dep.createOrg({
+        name: 'Half-made',
+        domains: ['fresh.test', 'acme.test'],
+        issuer: as.issuer,
+        firstAdmin: { iss: as.issuer, sub: 'sub-half', displayName: 'Half' },
+      }),
+    ).rejects.toMatchObject({ code: 'invalid_request', message: expect.stringMatching(/already routes/) });
+    expect(await Promise.all(tables.map(count))).toEqual(before);
+    expect(await dep.directory.getByDomain('fresh.test')).toBeUndefined();
+  });
+
+  it("listing an identity's orgs is one statement, whatever the number of orgs", async () => {
+    let statements = 0;
+    const counting: SqlDb = {
+      ...db,
+      async query<R>(text: string, params?: unknown[]): Promise<R[]> {
+        statements += 1;
+        return db.query<R>(text, params);
+      },
+    };
+    const rows = await new OrgDirectory(counting).listOrgsForIdentity(as.issuer, 'sub-ram');
+    expect(statements).toBe(1);
+    expect(rows.map((r) => [r.name, r.address, r.role]).sort()).toEqual([
+      ['Acme', 'acme.test', 'admin'],
+      ['Beta', 'beta.test', 'admin'],
+    ]);
   });
 });
 
