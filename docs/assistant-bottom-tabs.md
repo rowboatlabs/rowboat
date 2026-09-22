@@ -13,6 +13,8 @@ Enable **Settings → Appearance → Assistant presentation → Bottom tabs**. S
 
 Code keeps its primary chat layout. The dock is hidden there. The embedded browser is an Electron native view above renderer content: it uses a side-by-side chat and reserves room for the bottom tabs instead of hiding the page behind an overlay.
 
+Opening the browser from the globe menu or application menu always shows the assistant in side chat. From full-screen Assistant, the current conversation moves into side chat; from other views, the existing side chat reopens or a new one is created. Opening the browser also restores a split layout if chat was maximized, including when Code is underneath the browser.
+
 ## Verification
 
 Run the renderer tests for `assistant-dock`, `assistant-chat-dock`, `chat-sidebar`, `useSessionChat`, and `session-chat/store`.

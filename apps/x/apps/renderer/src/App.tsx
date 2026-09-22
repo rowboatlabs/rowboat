@@ -1,3 +1,4 @@
+import { OpenBrowserContext } from '@/contexts/browser-context';
 import { WorkspaceSessionTabs } from './components/code/workspace-session-tabs'
 import { DocumentFileViewer } from '@/components/document-file-viewer'
 import { parseSpacesLink, readLastSpace, resolveSpacesLocation, serverLandingSpaceId, type SpacesLinkTarget } from '@/lib/spaces-navigation'
@@ -5210,16 +5211,6 @@ function App() {
     return () => window.removeEventListener('rowboat:open-copilot-prompt', handler as EventListener)
   }, [submitFromPalette])
 
-  // Browser is an overlay on the middle pane: opening it forces the chat
-  // sidebar to be visible on the right; closing it restores whatever the
-  // middle pane was showing previously (file/graph/task/chat).
-  const handleToggleBrowser = useCallback(() => {
-    setIsBrowserOpen(prev => {
-      const next = !prev
-      return next
-    })
-  }, [])
-
   const handleCloseBrowser = useCallback(() => {
     setIsBrowserOpen(false)
   }, [])
@@ -5419,6 +5410,24 @@ function App() {
     if (location === 'assistant') { dismissBrowserOverlay(); closeAllSections() }
     activateAssistantTab(tab)
   }, [assistantLayout.assistant, newChatAt, activateAssistantTab, dismissBrowserOverlay, closeAllSections, dispatchAssistantLayout])
+
+  const handleOpenBrowser = useCallback(() => {
+    if (isFullScreenChat && assistantLayout.assistant) {
+      moveAssistantChat(assistantLayout.assistant, 'sidebar')
+    } else if (assistantLayout.sidebar) {
+      dispatchAssistantLayout({ type: 'show-sidebar' })
+      switchChatTab(assistantLayout.sidebar)
+    } else {
+      newChatAt('sidebar')
+    }
+    setIsRightPaneMaximized(false)
+    setIsBrowserOpen(true)
+  }, [isFullScreenChat, assistantLayout.assistant, assistantLayout.sidebar, moveAssistantChat, dispatchAssistantLayout, switchChatTab, newChatAt])
+
+  const handleToggleBrowser = useCallback(() => {
+    if (isBrowserOpen) handleCloseBrowser()
+    else handleOpenBrowser()
+  }, [isBrowserOpen, handleCloseBrowser, handleOpenBrowser])
 
   // Surfaces that hand a conversation to the sidebar (quick-ask, email
   // drafts, Home items). Projects keeps its own session-bound pane,
@@ -7168,8 +7177,9 @@ function App() {
   // middle pane is just the session rail and the chat fills the rest, with
   // the workspace drawer at its edge. Before a session is picked the empty
   // state owns the pane and the chat stays out of the way.
-  const codeChatMain = isCodeOpen && activeCodeSession !== null
-  const chatPaneOpen = isCodeOpen ? codeChatMain : !!assistantLayout.sidebar && assistantLayout.sidebarVisible
+  const isCodePaneActive = isCodeOpen && !isBrowserOpen
+  const codeChatMain = isCodePaneActive && activeCodeSession !== null
+  const chatPaneOpen = isCodePaneActive ? codeChatMain : !!assistantLayout.sidebar && assistantLayout.sidebarVisible
   // The document pane shares the window with a docked chat (not maximized
   // over it, not floating above it). The editor reads this to step its
   // headings down so they sit level with chat prose.
@@ -7179,7 +7189,7 @@ function App() {
   const nonChatPaneStyle = React.useMemo<React.CSSProperties>(() => {
     const style: React.CSSProperties = { maxWidth: insetMaxWidth }
     // A rail-only pane must size to the rail, overriding SidebarInset's w-full.
-    if (!isCodeOpen) return style
+    if (!isCodePaneActive) return style
     if (!isRightPaneContext || !chatPaneOpen || isRightPaneMaximized) return style
     if (codeChatMain) {
       return { ...style, width: codeRailWidth, flex: '0 0 auto' }
@@ -7191,7 +7201,7 @@ function App() {
       return { ...style, width: DEFAULT_CHAT_PANE_WIDTH, flex: '0 0 auto' }
     }
     return style
-  }, [ chatPaneSize, codeChatMain, codeRailWidth, chatPaneOpen, insetMaxWidth, isRightPaneContext, isRightPaneMaximized, isCodeOpen])
+  }, [ chatPaneSize, codeChatMain, codeRailWidth, chatPaneOpen, insetMaxWidth, isRightPaneContext, isRightPaneMaximized, isCodePaneActive])
   // Collapsing: pin max-width to the snapshot px (no transition) for one frame so it's
   // binding immediately (no flex jump), then animate to 0. Expanding goes back to 100%
   // — its non-binding range lands at the end of the range, where it isn't visible.
@@ -7254,9 +7264,6 @@ function App() {
     knowledgeActions,
     bgTaskSummaries,
     activeNav: (
-      // The browser overlay covers whatever section is open underneath — while
-      // it's up, only the Browser tile should read as active (its own
-      // browserOpen dot), not the hidden section.
       isBrowserOpen ? null
       : isHomeOpen ? 'home'
       : isEmailOpen ? 'email'
@@ -7297,13 +7304,13 @@ function App() {
     onOpenEmail: (threadId?: string) => openEmailView(threadId),
     onOpenHome: () => void navigateToView({ type: 'home' }),
     onNewChat: handleNewChatTab,
-    onToggleBrowser: handleToggleBrowser,
     onStartTour: () => setTourActive(true),
     meetingRecordingState: meetingTranscription.state,
     recordingMeetingSource,
     onToggleMeetingRecording: () => { void handleToggleMeeting() },
   }
   return (
+    <OpenBrowserContext.Provider value={handleOpenBrowser}>
     <TooltipProvider delayDuration={0}>
       <SidebarSectionProvider defaultSection="tasks" onSectionChange={(section) => {
         if (section === 'knowledge' && isFullScreenChat) {
@@ -7334,14 +7341,13 @@ function App() {
                 survives toggling between the two). */}
             <DockSidebar
               {...sidebarNavProps}
-              browserOpen={isBrowserOpen}
               switcherOnly={sidebarOpen}
             />
             <SidebarInset
               className={cn(
                 "min-h-0 min-w-0",
                 "overflow-hidden!",
-                (isCodeOpen && isChatPaneInMiddle) && "order-3",
+                (isCodePaneActive && isChatPaneInMiddle) && "order-3",
                 insetAnimateMaxWidth && "transition-[max-width] duration-200 ease-linear",
                 shouldCollapseLeftPane && "pointer-events-none select-none"
               )}
@@ -7958,7 +7964,7 @@ function App() {
 
               <AssistantWorkspace
                 layout={assistantLayout} dispatch={dispatchAssistantLayout} pageHost={assistantPageHost} pageVisible={activeMiddle === 'chat'}
-                legacyPane={isCodeOpen} workspaceSessionId={activeCodeSession?.session.id ?? null}
+                legacyPane={isCodePaneActive} workspaceSessionId={activeCodeSession?.session.id ?? null}
                 onMoveChat={moveAssistantChat} onNewChatAt={newChatAt} onSelectChatAt={selectChatAt} onFocusChat={switchChatTab}
                 onHideSidebar={() => dispatchAssistantLayout({ type: 'hide-sidebar' })} onCloseChat={closeAssistantChat}
                 onSubmitForTab={(id, message, mentions, attachments, search, mode, permission) => handlePromptSubmit(message, mentions, attachments, search, mode, permission, id)}
@@ -8299,6 +8305,7 @@ function App() {
         </DialogContent>
       </Dialog>
     </TooltipProvider>
+    </OpenBrowserContext.Provider>
   )
 }
 
