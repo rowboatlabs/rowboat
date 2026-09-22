@@ -134,100 +134,9 @@ Includes one-click integrations to most popular products.
 
 ---
 
-## Installation
-
-**Download latest for Mac/Windows/Linux:** [Download](https://www.rowboatlabs.com/downloads)
-
-**All release files:**   https://github.com/rowboatlabs/rowboat/releases/latest
-
-### Google setup
-To connect Google services (Gmail, Calendar, and Drive), follow [Google setup](https://github.com/rowboatlabs/rowboat/blob/main/google-setup.md).
-
-### Voice input
-To enable voice input and voice notes (optional), add a Deepgram API key in `~/.rowboat/config/deepgram.json`
-
-### Voice output
-
-To enable voice output (optional), add an ElevenLabs API key in `~/.rowboat/config/elevenlabs.json`
-
-### Web search
-
-To use Exa research search (optional), add the Exa API key in `~/.rowboat/config/exa-search.json`
-
-### External tools
-
-To enable external tools (optional), you can add any MCP server or use Composio tools by adding an API key in `~/.rowboat/config/composio.json`
-
-All API key files use the same format:
-```
-{
-  "apiKey": "<key>"
-}
-```
-
-
-## How it’s different
-
-Most AI tools reconstruct context on demand by searching transcripts or documents.
-
-Rowboat maintains **long-lived knowledge** instead:
-- context accumulates over time
-- relationships are explicit and inspectable
-- notes are editable by you, not hidden inside a model
-- everything lives on your machine as plain Markdown
-
-The result is memory that compounds, rather than retrieval that starts cold every time.
-
-## Bring your own model
-
-Rowboat works with the model setup you prefer:
-- **Local models** via Ollama or LM Studio
-- **Hosted models** (bring your own API key/provider)
-- Swap models anytime — your data stays in your local Markdown vault
-
-## Extend Rowboat with tools (MCP)
-
-Rowboat can connect to external tools and services via **Model Context Protocol (MCP)**.
-That means you can plug in (for example) search, databases, CRMs, support tools, and automations - or your own internal tools.
-
-Examples: Exa (web search), Twitter/X, ElevenLabs (voice), Slack, Linear/Jira, GitHub, and more.
-
-### Example: Parallel web search
-
-[Parallel Search MCP](https://docs.parallel.ai/integrations/mcp/search-mcp) provides `web_search` and `web_fetch` for public web search and page extraction without a Parallel account or API key. Free access is rate limited.
-
-Open **Settings → MCP Servers**, add the `parallel` entry to your existing `mcpServers` object, and click **Save**. Keep any other server entries. If no servers are configured, use:
-
-```json
-{
-  "mcpServers": {
-    "parallel": {
-      "url": "https://search.parallel.ai/mcp"
-    }
-  }
-}
-```
-
-This connects through Rowboat's existing Streamable HTTP client. Ask Rowboat to list the tools on the `parallel` server, then try: "Use Parallel to find the official MCP documentation."
-
-Once configured, Rowboat can invoke these tools during its work, subject to your MCP tool permissions. Queries, requested URLs, and any supplied objectives or context are sent to Parallel. This setup leaves Exa and other configured providers unchanged. To remove it, delete the `parallel` entry in **Settings → MCP Servers** and save.
-
-## Local-first by design
-
-- All personal data is stored locally as plain Markdown
-- No proprietary formats or hosted lock-in
-- You can inspect, edit, back up, or delete everything at any time
-
----
-
 ## Spaces: the multiplayer part
 
 Everyone on the team runs their own Rowboat on their own machine, with their own memory of their work and their own model keys. A **Space** is where you come together: a place to talk, share files and whiteboards, and get work done. Type `@rowboat` in a Space and your Rowboat works with your context on your machine, then brings the result back to the room as you.
-
-<p align="center">
-  <img width="1339" alt="Rowboat: every teammate, their own agent, one Space" src="assets/readme-spaces/spaces-hero.gif" />
-</p>
-
 
 <table>
 <tr>
@@ -320,6 +229,93 @@ Everything it posts lands in front of the team. Everything it reads might be pri
 
 You can belong to several servers at once, and a server can be just you: your notes to self live in a one-member DM.
 
+---
+
+## Installation
+
+**Download latest for Mac/Windows/Linux:** [Download](https://www.rowboatlabs.com/downloads)
+
+**All release files:**   https://github.com/rowboatlabs/rowboat/releases/latest
+
+### Google setup
+To connect Google services (Gmail, Calendar, and Drive), follow [Google setup](https://github.com/rowboatlabs/rowboat/blob/main/google-setup.md).
+
+### Voice input
+To enable voice input and voice notes (optional), add a Deepgram API key in `~/.rowboat/config/deepgram.json`
+
+### Voice output
+
+To enable voice output (optional), add an ElevenLabs API key in `~/.rowboat/config/elevenlabs.json`
+
+### Web search
+
+To use Exa research search (optional), add the Exa API key in `~/.rowboat/config/exa-search.json`
+
+### External tools
+
+To enable external tools (optional), you can add any MCP server or use Composio tools by adding an API key in `~/.rowboat/config/composio.json`
+
+All API key files use the same format:
+```
+{
+  "apiKey": "<key>"
+}
+```
+
+
+## How it’s different
+
+Most AI tools reconstruct context on demand by searching transcripts or documents.
+
+Rowboat maintains **long-lived knowledge** instead:
+- context accumulates over time
+- relationships are explicit and inspectable
+- notes are editable by you, not hidden inside a model
+- everything lives on your machine as plain Markdown
+
+The result is memory that compounds, rather than retrieval that starts cold every time.
+
+## Bring your own model
+
+Rowboat works with the model setup you prefer:
+- **Local models** via Ollama or LM Studio
+- **Hosted models** (bring your own API key/provider)
+- Swap models anytime — your data stays in your local Markdown vault
+
+## Extend Rowboat with tools (MCP)
+
+Rowboat can connect to external tools and services via **Model Context Protocol (MCP)**.
+That means you can plug in (for example) search, databases, CRMs, support tools, and automations - or your own internal tools.
+
+Examples: Exa (web search), Twitter/X, ElevenLabs (voice), Slack, Linear/Jira, GitHub, and more.
+
+### Example: Parallel web search
+
+[Parallel Search MCP](https://docs.parallel.ai/integrations/mcp/search-mcp) provides `web_search` and `web_fetch` for public web search and page extraction without a Parallel account or API key. Free access is rate limited.
+
+Open **Settings → MCP Servers**, add the `parallel` entry to your existing `mcpServers` object, and click **Save**. Keep any other server entries. If no servers are configured, use:
+
+```json
+{
+  "mcpServers": {
+    "parallel": {
+      "url": "https://search.parallel.ai/mcp"
+    }
+  }
+}
+```
+
+This connects through Rowboat's existing Streamable HTTP client. Ask Rowboat to list the tools on the `parallel` server, then try: "Use Parallel to find the official MCP documentation."
+
+Once configured, Rowboat can invoke these tools during its work, subject to your MCP tool permissions. Queries, requested URLs, and any supplied objectives or context are sent to Parallel. This setup leaves Exa and other configured providers unchanged. To remove it, delete the `parallel` entry in **Settings → MCP Servers** and save.
+
+## Local-first by design
+
+- All personal data is stored locally as plain Markdown
+- No proprietary formats or hosted lock-in
+- You can inspect, edit, back up, or delete everything at any time
+
+---
 
 ## Run your own Harbor
 
