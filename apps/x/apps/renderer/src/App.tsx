@@ -38,6 +38,9 @@ import { SidebarContentPanel } from '@/components/sidebar-content';
 import { SuggestedTopicsView } from '@/components/suggested-topics-view';
 import { LiveNotesView } from '@/components/live-notes-view';
 import { BgTasksView } from '@/components/bg-tasks-view';
+import { resolveAppChatTarget } from '@/lib/app-chat-target'
+import { getAppHistory, rememberApp } from '@/lib/app-history';
+import { AppChatDialog, type AppChatRequest } from '@/components/apps/app-chat-dialog'
 import { AppsView } from '@/components/apps/apps-view';
 import { SpacesView, type SpaceSelection } from '@/components/spaces-view';
 import { KeepAliveSection } from '@/components/keep-alive-section';
@@ -1167,6 +1170,8 @@ function App() {
       return
     }
   }, [billingWatchedConversation, sessionChat.chatState, sessionChat.sessionId])
+  const appChatByChatRef = useRef(new Map<string, { folder: string; codeMode?: 'claude' | 'codex'; cwd?: string }>())
+  const [appChatRequest, setAppChatRequest] = useState<AppChatRequest | null>(null)
   const runIdRef = useRef<string | null>(null)
   const loadRunRequestIdRef = useRef(0)
   const [isProcessing, setIsProcessing] = useState(false)
@@ -2857,6 +2862,16 @@ function App() {
   const [codeSessionLocks, setCodeSessionLocks] = useState<Record<string, { cwd: string; agent: 'claude' | 'codex' }>>({})
   const codeSessionLocksRef = useRef(codeSessionLocks)
   codeSessionLocksRef.current = codeSessionLocks
+  const visibleCodeSessionLocks = useMemo(() => {
+    const locks = { ...codeSessionLocks }
+    for (const tab of chatTabs) {
+      const appChat = appChatByChatRef.current.get(tab.chatId)
+      if (appChat?.codeMode && appChat.cwd) {
+        locks[tab.runId ?? tab.id] ??= { agent: appChat.codeMode, cwd: appChat.cwd }
+      }
+    }
+    return locks
+  }, [codeSessionLocks, chatTabs, appChatRequest])
   // Undo/redo handlers of the (single) mounted markdown editor.
   const fileHistoryHandlersRef = useRef<MarkdownHistoryHandlers | null>(null)
   // Bumped when a file's content is reloaded from disk behind the editor's
@@ -4265,6 +4280,8 @@ function App() {
     const submitTabId = targetTabId ?? activeChatTabIdRef.current
     const submitTab = chatTabsRef.current.find((tab) => tab.id === submitTabId)
     if (!submitTab) return
+    const appChat = appChatByChatRef.current.get(submitTab.chatId)
+    codeMode ??= appChat?.codeMode
     const submitInCall = inCallRef.current && submitTab.runId === hoverRunIdRef.current
     const isSubmitTabActive = () => activeChatTabIdRef.current === submitTabId
       && chatTabsRef.current.find((tab) => tab.id === submitTabId)?.chatId === submitTab.chatId
@@ -4382,6 +4399,7 @@ function App() {
         isNewRun = true
       }
 
+      if (appChat) rememberApp(appChat.folder, { conversationId: currentRunId, chatId: submitTab.chatId, codeMode: appChat.codeMode ?? null })
       let titleSource = userMessage
       // The @ menu's picks: files become attachment parts; spaces and
       // people ride userMessageContext with their ids (see splitMentions).
@@ -4428,7 +4446,7 @@ function App() {
                     codeMode: codeMode ?? codeSessionLocksRef.current[currentRunId].agent,
                     codeCwd: codeSessionLocksRef.current[currentRunId].cwd,
                   }
-                : (codeMode ? { codeMode } : {})),
+                : (codeMode ? { codeMode, ...(appChat?.cwd ? { codeCwd: appChat.cwd } : {}) } : {})),
               ...((submitInCall && video.cameraOn) || video.screenState === 'live'
                 ? { videoMode: true }
                 : {}),
@@ -5019,11 +5037,37 @@ function App() {
     setPendingPaletteSubmit({ text, mention })
   }, [handleNewChatTabInSidebar])
 
-  // Open the chat sidebar on a fresh tab and pre-fill (not send) a builder prompt.
-  const prefillChat = useCallback((text: string) => {
-    handleNewChatTabInSidebar()
-    setPresetMessage(text)
-  }, [handleNewChatTabInSidebar])
+  const requestAppChat = (request: AppChatRequest) => {
+    const tab = chatTabsRef.current.find(entry => entry.id === activeChatTabIdRef.current)
+    setAppChatRequest({ ...request, chatId: tab?.chatId, conversationId: tab?.runId ?? undefined })
+  }
+
+  const openAppChat = async (request: AppChatRequest, mode?: 'claude' | 'codex', startNew = false) => {
+    const { root } = await window.ipc.invoke('workspace:getRoot', null)
+    const target = resolveAppChatTarget(chatTabsRef.current, getAppHistory()[request.folder], request)
+    let tab = startNew ? newChatAt('sidebar') : target.tab
+    if (!startNew && !tab && target.conversationId) {
+      bindChatToRun(target.conversationId)
+      tab = chatTabsRef.current.find(entry => entry.runId === target.conversationId)
+    }
+    if (!tab) throw new Error('The original chat is no longer open. Choose Start a new chat to begin a separate conversation.')
+    // Also activate already-open targets; placing one in the sidebar alone
+    // does not bind the root composer to that conversation.
+    if (!startNew) activateAssistantTab(tab)
+    const lock = tab.runId ? codeSessionLocksRef.current[tab.runId] : undefined
+    const cwd = `${root.replace(/\/$/, '')}/apps/${request.folder}`
+    if (lock && (lock.cwd !== cwd || lock.agent !== mode)) {
+      throw new Error('This conversation is linked to another code project or agent. Choose Start a new chat to build this app separately.')
+    }
+    appChatByChatRef.current.set(tab.chatId, { folder: request.folder, codeMode: mode, cwd })
+    rememberApp(request.folder, { conversationId: tab.runId ?? undefined, chatId: tab.chatId, codeMode: mode ?? null })
+    placeAssistantChat(tab.id, 'sidebar')
+    if (request.send) {
+      await handlePromptSubmit({ text: request.prompt, files: [] }, [{ kind: 'file', id: `app-${request.folder}`, path: `apps/${request.folder}/rowboat-app.json`, displayName: 'App' }], [], undefined, mode, undefined, tab.id)
+    } else if (request.prompt) {
+      setPresetMessage(request.prompt)
+    }
+  }
 
   useEffect(() => {
     if (!pendingPaletteSubmit) return
@@ -5982,6 +6026,7 @@ function App() {
       }
       case 'open-app':
         if (result.appId) {
+          if (runIdRef.current && !getAppHistory()[result.appId as string]?.conversationId) rememberApp(result.appId as string, { conversationId: runIdRef.current })
           setAppInitialId(result.appId as string)
           setAppIdVersion((v) => v + 1)
           openAppsView()
@@ -6089,6 +6134,14 @@ function App() {
     const completed = conversation.filter(
       (item): item is ToolCall => isToolCall(item) && item.name === 'app-navigation' && item.status === 'completed'
     )
+    // Recover app/session links from older conversations too, without
+    // replaying their navigation or replacing a newer explicit association.
+    for (const tool of completed) {
+      const result = tool.result as Record<string, unknown> | undefined
+      if (runId && sessionChat.sessionId === runId && result?.success && result.action === 'open-app' && typeof result.appId === 'string' && !getAppHistory()[result.appId]?.conversationId) {
+        rememberApp(result.appId, { conversationId: runId })
+      }
+    }
     if (processedAppNavRef.current.key !== runId) {
       processedAppNavRef.current = { key: runId, ids: new Set(completed.map((t) => t.id)) }
       return
@@ -7721,7 +7774,9 @@ function App() {
                   <AppsView
                     initialAppFolder={appInitialId}
                     initialVersion={appIdVersion}
-                    onNewApp={() => prefillChat('Build me an app that ')}
+                    onBuildApp={(prompt, folder) => requestAppChat({ folder, prompt, send: true })}
+                    onEditApp={(app, problem) => requestAppChat({ folder: app.folder, prompt: `Help me ${problem ? 'fix' : 'edit'} my app in apps/${app.folder}. Keep my existing data.\n\n${problem ? `Please diagnose and fix: ${problem}` : 'The changes I want: '}` })}
+                    onContinueApp={(app) => requestAppChat({ folder: app.folder, prompt: '' })}
                   />
                 </div>
                 </KeepAliveSection>
@@ -8118,7 +8173,7 @@ function App() {
                 }
                 workDirByTab={workDirByTab}
                 onWorkDirChangeForTab={setTabWorkDir}
-                codeSessionLocks={codeSessionLocks}
+                codeSessionLocks={visibleCodeSessionLocks}
                 pinnedToCodeSession={
                   codeChatMain
                     && activeCodeSession
@@ -8296,6 +8351,7 @@ function App() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {appChatRequest && <AppChatDialog request={appChatRequest} onClose={() => setAppChatRequest(null)} onContinue={openAppChat} />}
       <SettingsDialog
         open={retentionSettingsOpen}
         onOpenChange={setRetentionSettingsOpen}

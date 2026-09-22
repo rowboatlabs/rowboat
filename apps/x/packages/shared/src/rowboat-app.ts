@@ -20,6 +20,8 @@ export const RowboatAppManifestSchema = z.object({
         .describe('Path relative to dist/. Same traversal rules as entry.'),
     entry: z.string().default('index.html')
         .describe('Path relative to dist/. Serves as app root and SPA fallback.'),
+    buildStatus: z.enum(['building', 'ready', 'failed']).optional()
+        .describe('Authoring state. Mark ready only after verifying the frontend and its first data load.'),
     agents: z.array(z.string().regex(/^[a-z0-9][a-z0-9-_]*\.yaml$/)).default([])
         .describe('Filenames under agents/. Each must exist in the package.'),
     capabilities: z.array(z.string()).default([])
@@ -91,6 +93,9 @@ export const AppSummarySchema = z.object({
     install: AppInstallRecordSchema.optional(), // §12.2
     publish: AppPublishRecordSchema.optional(), // §11.4
     hasDist: z.boolean(),
+    readiness: z.enum(['building', 'setup', 'ready', 'error']).optional(),
+    readinessMessage: z.string().optional(),
+    dataUpdatedAt: z.string().optional(),
     agentSlugs: z.array(z.string()), // materialized bg-task slugs (§8.3)
 });
 

@@ -170,7 +170,7 @@ import {
   deleteLiveNote,
   listLiveNotes,
 } from '@x/core/dist/knowledge/live-note/fileops.js';
-import { runBackgroundTask } from '@x/core/dist/background-tasks/runner.js';
+import { runBackgroundTask, isBackgroundTaskRunning } from '@x/core/dist/background-tasks/runner.js';
 import { runTodoItem, stopTodoRun, commentOnTodoItem, startHomeChat, replyHomeChat, runningItemKeys } from '@x/core/dist/todo/runner.js';
 import { getSessionIndex as getTodoSessionIndex } from '@x/core/dist/todo/session-index.js';
 import { getConversation as getTodoConversation, deriveConversation as deriveSessionConversation } from '@x/core/dist/todo/conversation.js';
@@ -3114,7 +3114,8 @@ export function setupIpcHandlers() {
       }
     },
     'bg-task:list': async (_event, args) => {
-      return listTasks(args);
+      const result = await listTasks(args);
+      return { ...result, items: result.items.map(task => ({ ...task, running: isBackgroundTaskRunning(task.slug) })) };
     },
     'bg-task:listRunIds': async (_event, args) => {
       const runIds = await readTaskRunIds(args.slug, args.limit);

@@ -92,6 +92,10 @@ Your task folder is \`${wsFolder}\`. The user-visible artifact is \`${wsFolder}i
 
 const runningTasks = new Set<string>();
 
+export function isBackgroundTaskRunning(slug: string): boolean {
+    return runningTasks.has(slug);
+}
+
 type RunAnalyticsOutcome =
     | { event: 'bg_agent_run_completed'; properties: { trigger: BackgroundTaskTriggerType } }
     | { event: 'bg_agent_run_failed'; properties: { trigger: BackgroundTaskTriggerType; error: string } };

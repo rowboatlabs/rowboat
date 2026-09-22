@@ -1,15 +1,27 @@
 import { useEffect, useState } from 'react'
-import { PanelLeft, PanelLeftClose, Plus, RefreshCw } from 'lucide-react'
+import { PanelLeft, PanelLeftClose, Plus, Search } from 'lucide-react'
 import type { rowboatApp } from '@x/shared'
+import { AppIcon, appTitle } from './app-icon'
+import { NewAppDialog } from '@/components/apps/new-app-dialog'
+import {
+  useAppActivity,
+  type AppActivity
+} from '@/components/apps/app-activity'
+import { getAppHistory, rememberApp } from '@/lib/app-history'
 import { AppFrame } from '@/components/apps/app-frame'
 import { CatalogTab } from '@/components/apps/catalog'
 import { themeForIndex, patternFor } from '@/components/apps/card-theme'
-import { getPinnedApps, onPinnedAppsChanged, pinApp, unpinApp } from '@/lib/pinned-apps'
+import {
+  getPinnedApps,
+  onPinnedAppsChanged,
+  pinApp,
+  unpinApp
+} from '@/lib/pinned-apps'
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
-  ContextMenuTrigger,
+  ContextMenuTrigger
 } from '@/components/ui/context-menu'
 
 // Apps home (spec §14): "My apps" grid + Catalog placeholder (M3). Cards are
@@ -103,8 +115,8 @@ const CARD_CSS = `
 .ma-top { display:flex; justify-content:flex-end; gap:6px; }
 .ma-badge {
   display:inline-flex; align-items:center; height:22px; padding:0 10px; border-radius:999px;
-  font-size:9.5px; font-weight:600; letter-spacing:0.07em;
-  color: var(--accent); background: color-mix(in srgb, var(--accent) var(--ma-badge-mix), transparent);
+  font-size:11px; font-weight:600; letter-spacing:0;
+  color: var(--ma-title); background: color-mix(in srgb, var(--ma-title) 7%, transparent);
 }
 .ma-badge.off { color: var(--ma-off-fg); background: var(--ma-off-bg); }
 .ma-badge.err { color:#ef4444; background:rgba(239,68,68,.14); }
@@ -130,43 +142,108 @@ const CARD_CSS = `
 }
 `
 
-function Card({ app, index, onOpen, isPinned, onTogglePin }: {
+function Card({
+  app,
+  index,
+  onOpen,
+  isPinned,
+  onTogglePin,
+  activity
+}: {
   app: rowboatApp.AppSummary
   index: number
   onOpen: () => void
   isPinned: boolean
   onTogglePin: () => void
+  activity: AppActivity
 }) {
-  const theme = themeForIndex(index)
-  const pattern = patternFor(app.folder)
-  const invalid = app.status === 'invalid'
+  // Identity determines the color, so sorting and filtering don't recolor apps.
+  const identity = [...app.folder].reduce((n, c) => n + c.charCodeAt(0), 0)
+  const theme = themeForIndex(identity)
+  const tasks = activity.tasks.filter((t) => app.agentSlugs.includes(t.slug))
+  const running = tasks.some((t) => activity.running(t.slug))
+  const failed =
+    tasks.some((t) => activity.failure(t)) ||
+    app.readiness === 'error' ||
+    app.status === 'invalid' ||
+    !!getAppHistory()[app.folder]?.runtimeError
+  const label = running
+    ? 'Updating…'
+    : failed
+      ? 'Needs attention'
+      : app.readiness === 'building'
+        ? 'Building'
+        : app.readiness === 'setup'
+          ? 'Needs setup'
+          : 'Ready to open'
+  const updated = app.dataUpdatedAt
+    ? new Date(app.dataUpdatedAt).toLocaleString()
+    : null
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <button
-          type="button"
-          onClick={onOpen}
-          title={invalid ? app.manifestError : undefined}
-          className={`ma-card ma-pat-${pattern}`}
-          style={{ '--accent': theme.accent, '--glow': theme.glow } as React.CSSProperties}
+        <div
+          className={`ma-card ma-pat-${patternFor(app.folder)}`}
+          style={
+            {
+              '--accent': theme.accent,
+              '--glow': theme.glow
+            } as React.CSSProperties
+          }
         >
-          <div className="ma-top">
-            {invalid && <span className="ma-badge err">INVALID</span>}
-            <span className={`ma-badge${app.kind === 'installed' ? '' : ' off'}`}>
-              {app.kind === 'installed' ? 'INSTALLED' : 'LOCAL'}
-            </span>
+          <div className="flex items-center justify-between gap-2">
+            <AppIcon
+              name={app.manifest?.name ?? app.folder}
+              src={
+                app.manifest?.icon
+                  ? `${app.origin}/${app.manifest.icon}`
+                  : undefined
+              }
+            />
+            <button
+              type="button"
+              onClick={onTogglePin}
+              aria-label={isPinned ? 'Remove from sidebar' : 'Add to sidebar'}
+              aria-pressed={isPinned}
+              title={isPinned ? 'Remove from sidebar' : 'Add to sidebar'}
+              className="rounded-md p-2 hover:bg-accent"
+            >
+              {isPinned ? (
+                <PanelLeftClose className="size-4" />
+              ) : (
+                <PanelLeft className="size-4" />
+              )}
+            </button>
           </div>
-          <div className="ma-title">{app.manifest?.name ?? app.folder}</div>
-          <div className="ma-desc">{invalid ? (app.manifestError ?? 'Invalid manifest') : (app.manifest?.description || 'No description yet.')}</div>
-          <div className="ma-footer">
-            <span className="ma-source">v{app.manifest?.version ?? '?'}</span>
-            <span className="ma-lastrun">{app.folder}</span>
-          </div>
-        </button>
+          <button
+            type="button"
+            onClick={onOpen}
+            className="flex flex-1 flex-col text-left after:absolute after:inset-x-0 after:bottom-0 after:top-16"
+            aria-label={`Open ${app.manifest?.name ?? app.folder}`}
+          >
+            <div className="ma-title">
+              {appTitle(app.manifest?.name ?? app.folder)}
+            </div>
+            <div className="ma-desc">
+              {app.manifest?.description || 'Open your app to get started.'}
+            </div>
+            <div className="ma-footer w-full">
+              <span className={`ma-badge${failed ? ' err' : ''}`}>{label}</span>
+              <span className="ma-lastrun" title={updated ?? undefined}>
+                {updated
+                  ? `Updated ${new Date(app.dataUpdatedAt!).toLocaleDateString()}`
+                  : index === 0 && getAppHistory()[app.folder]?.openedAt
+                    ? 'Recently used'
+                    : app.kind === 'local'
+                      ? 'Created by you'
+                      : 'From catalog'}
+              </span>
+            </div>
+          </button>
+        </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
         <ContextMenuItem onClick={onTogglePin}>
-          {isPinned ? <PanelLeftClose className="mr-2 size-3.5" /> : <PanelLeft className="mr-2 size-3.5" />}
           {isPinned ? 'Remove from sidebar' : 'Add to sidebar'}
         </ContextMenuItem>
       </ContextMenuContent>
@@ -174,120 +251,279 @@ function Card({ app, index, onOpen, isPinned, onTogglePin }: {
   )
 }
 
-export function AppsView({ initialAppFolder, initialVersion, onNewApp }: {
+export function AppsView({
+  initialAppFolder,
+  initialVersion,
+  onBuildApp,
+  onEditApp,
+  onContinueApp
+}: {
   initialAppFolder?: string | null
   initialVersion?: number
-  onNewApp?: () => void
-} = {}) {
-  // null = auto: land on "My apps" normally, but fall through to the catalog
-  // until the user has an app of their own. An explicit tab click wins.
-  const [tab, setTab] = useState<'mine' | 'catalog' | null>(null)
-  const [selectedFolder, setSelectedFolder] = useState<string | null>(initialAppFolder ?? null)
+  onBuildApp: (prompt: string, folder: string) => void
+  onEditApp: (app: rowboatApp.AppSummary, problem?: string) => void
+  onContinueApp: (app: rowboatApp.AppSummary) => void
+}) {
+  const [tab, setTab] = useState<'mine' | 'catalog'>('mine')
+  const [selectedFolder, setSelectedFolder] = useState<string | null>(
+    initialAppFolder ?? null
+  )
   const [apps, setApps] = useState<rowboatApp.AppSummary[]>([])
   const [appsLoaded, setAppsLoaded] = useState(false)
   const [serverError, setServerError] = useState<string | null>(null)
-  const [pinnedFolders, setPinnedFolders] = useState<string[]>(() => getPinnedApps())
-
+  const [pinnedFolders, setPinnedFolders] = useState<string[]>(() =>
+    getPinnedApps()
+  )
+  const [creating, setCreating] = useState(false)
+  const [query, setQuery] = useState('')
+  const [sort, setSort] = useState('recent')
+  const [refreshNonce, setRefreshNonce] = useState(0)
+  const activity = useAppActivity()
   useEffect(() => onPinnedAppsChanged(setPinnedFolders), [])
-
-  // Open a specific app when asked from outside (app-navigation open-app).
   const [appliedVersion, setAppliedVersion] = useState(initialVersion)
   if (initialVersion !== appliedVersion) {
     setAppliedVersion(initialVersion)
     setSelectedFolder(initialAppFolder ?? null)
   }
-
   useEffect(() => {
     let cancelled = false
+    let timer: ReturnType<typeof setTimeout>
     const load = async () => {
       try {
         const r = await window.ipc.invoke('apps:list', {})
         if (cancelled) return
         setApps(r.apps)
         setAppsLoaded(true)
-        // Drop a selection whose app no longer exists (uninstalled while
-        // open). Left stale, a later reinstall makes this view yank the user
-        // into the app frame mid-flow — e.g. while they're in the catalog's
-        // post-install agent dialog.
-        setSelectedFolder((cur) => (cur && !r.apps.some((a) => a.folder === cur) ? null : cur))
-        // Prune sidebar pins for apps that no longer exist (uninstalled via
-        // the copilot or another window) — but only off an authoritative
-        // list, never while the apps server is down.
         if (r.serverRunning) {
           const live = new Set(r.apps.map((a) => a.folder))
           for (const f of getPinnedApps()) if (!live.has(f)) unpinApp(f)
         }
-        setServerError(r.serverRunning ? null : (r.serverError ?? 'Apps server is not running.'))
+        setServerError(
+          r.serverRunning
+            ? null
+            : (r.serverError ?? 'Apps server is not running.')
+        )
       } catch (e) {
-        if (!cancelled) setServerError(e instanceof Error ? e.message : String(e))
+        if (!cancelled)
+          setServerError(e instanceof Error ? e.message : String(e))
+      } finally {
+        if (!cancelled) timer = setTimeout(load, 4000)
       }
     }
     void load()
-    const interval = setInterval(load, 4000) // keep the grid fresh (copilot installs)
-    return () => { cancelled = true; clearInterval(interval) }
-  }, [initialVersion])
-
-  const selected = selectedFolder ? apps.find((a) => a.folder === selectedFolder) : undefined
-  if (selected) {
-    return <AppFrame key={selected.folder} app={selected} onBack={() => setSelectedFolder(null)} />
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [initialVersion, refreshNonce])
+  const open = (folder: string) => {
+    rememberApp(folder, { openedAt: Date.now() })
+    setSelectedFolder(folder)
   }
-
-  const noOwnApps = appsLoaded && apps.length === 0
-  const activeTab = tab ?? (noOwnApps ? 'catalog' : 'mine')
-
+  const selected = selectedFolder
+    ? apps.find((a) => a.folder === selectedFolder)
+    : undefined
+  const history = getAppHistory()
+  const filtered = apps
+    .filter((a) =>
+      `${a.manifest?.name} ${a.manifest?.description} ${a.folder}`
+        .toLowerCase()
+        .includes(query.toLowerCase())
+    )
+    .sort((a, b) =>
+      sort === 'recent'
+        ? (history[b.folder]?.openedAt ?? 0) -
+            (history[a.folder]?.openedAt ?? 0) ||
+          a.folder.localeCompare(b.folder)
+        : (a.manifest?.name ?? a.folder).localeCompare(
+            b.manifest?.name ?? b.folder
+          )
+    )
   return (
-    <div className="ma-page">
-      <style>{CARD_CSS}</style>
-      <div className="ma-inner">
-        <h1 className="ma-h1">Apps</h1>
-        <p className="ma-sub">Apps that live inside Rowboat, powered by your agents and integrations.</p>
-
-        <div className="ma-tabs">
-          <button type="button" className={`ma-tab${activeTab === 'mine' ? ' on' : ''}`} onClick={() => setTab('mine')}>My apps</button>
-          <button type="button" className={`ma-tab${activeTab === 'catalog' ? ' on' : ''}`} onClick={() => setTab('catalog')}>Catalog</button>
-        </div>
-
-        {serverError && (
-          <div className="ma-banner">
-            <RefreshCw className="mr-1.5 inline size-3.5" /> Apps server unavailable: {serverError}
-          </div>
-        )}
-
-        {!appsLoaded && !serverError ? null : activeTab === 'catalog' ? (
-          <>
-            {noOwnApps && (
-              <div className="ma-welcome">
-                You don&apos;t have any apps of your own yet. Install one from this catalog, or{' '}
-                <button type="button" onClick={onNewApp}>build your own</button>.
+    <>
+      {selected ? (
+        <AppFrame
+          key={selected.folder}
+          app={selected}
+          activity={activity}
+          serverError={serverError}
+          onBack={() => {
+            setSelectedFolder(null)
+            setRefreshNonce((n) => n + 1)
+          }}
+          onEdit={(problem) => onEditApp(selected, problem)}
+          onContinue={() => onContinueApp(selected)}
+        />
+      ) : (
+        <div className="ma-page">
+          <style>{CARD_CSS}</style>
+          <div className="ma-inner">
+            <div className="mb-5 flex items-start justify-between gap-3">
+              <div>
+                <h1 className="ma-h1">Apps</h1>
+                <p className="ma-sub">
+                  Your own tools, built around the way you work.
+                </p>
               </div>
-            )}
-            <CatalogTab onInstalled={(folder) => { setSelectedFolder(folder); setTab('mine') }} />
-          </>
-        ) : (
-          <>
-            {apps.length > 0 && (
-              <p className="ma-hint">Tip: right-click an app to add it to the sidebar for quick access.</p>
-            )}
-            <div className="ma-grid">
-              {apps.map((app, i) => (
-                <Card
-                  key={app.folder}
-                  app={app}
-                  index={i}
-                  onOpen={() => setSelectedFolder(app.folder)}
-                  isPinned={pinnedFolders.includes(app.folder)}
-                  onTogglePin={() => (pinnedFolders.includes(app.folder) ? unpinApp(app.folder) : pinApp(app.folder))}
-                />
-              ))}
-              <button type="button" className="ma-new" onClick={onNewApp}>
-                <Plus className="size-5" />
-                <div className="ma-new-title">New app</div>
-                <div className="ma-new-hint">Describe one to the copilot</div>
+              <button
+                type="button"
+                onClick={() => setCreating(true)}
+                className="flex shrink-0 items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+              >
+                <Plus className="size-4" />
+                New app
               </button>
             </div>
-          </>
-        )}
-      </div>
-    </div>
+            <div className="ma-tabs" role="tablist" aria-label="App library">
+              <button
+                role="tab"
+                aria-selected={tab === 'mine'}
+                className={`ma-tab${tab === 'mine' ? ' on' : ''}`}
+                onClick={() => setTab('mine')}
+              >
+                My apps
+              </button>
+              <button
+                role="tab"
+                aria-selected={tab === 'catalog'}
+                className={`ma-tab${tab === 'catalog' ? ' on' : ''}`}
+                onClick={() => setTab('catalog')}
+              >
+                Catalog
+              </button>
+            </div>
+            {serverError && (
+              <div role="alert" className="ma-banner">
+                Apps are unavailable: {serverError}{' '}
+                <button
+                  className="ml-2 underline"
+                  onClick={() => setRefreshNonce((n) => n + 1)}
+                >
+                  Try again
+                </button>
+              </div>
+            )}
+            {selectedFolder && appsLoaded && !selected && (
+              <div className="mb-4 rounded-lg border p-3 text-sm">
+                {serverError
+                  ? 'Waiting to reconnect to your app.'
+                  : 'This app is not available yet or has been removed.'}
+                <button
+                  onClick={() => setSelectedFolder(null)}
+                  className="ml-2 underline"
+                >
+                  Back to library
+                </button>
+              </div>
+            )}
+            {tab === 'catalog' ? (
+              <CatalogTab
+                onInstalled={(folder) => {
+                  setRefreshNonce((n) => n + 1)
+                  open(folder)
+                  setTab('mine')
+                }}
+              />
+            ) : !appsLoaded && !serverError ? (
+              <p
+                role="status"
+                className="py-12 text-center text-muted-foreground"
+              >
+                Loading your apps…
+              </p>
+            ) : (
+              <>
+                {apps.length > 0 ? (
+                  <div className="mb-5 flex gap-3">
+                    <label className="relative flex-1">
+                      <Search className="absolute left-3 top-3 size-4 text-muted-foreground" />
+                      <input
+                        aria-label="Search my apps"
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                        placeholder="Find an app…"
+                        className="w-full rounded-lg border bg-background py-2 pl-9 pr-3 text-sm"
+                      />
+                    </label>
+                    <select
+                      aria-label="Sort apps"
+                      value={sort}
+                      onChange={(e) => setSort(e.target.value)}
+                      className="rounded-lg border bg-background px-3 text-sm"
+                    >
+                      <option value="recent">Recently used</option>
+                      <option value="name">Name</option>
+                    </select>
+                  </div>
+                ) : (
+                  !serverError && (
+                    <div className="mb-6 rounded-xl border p-6">
+                      <h2 className="mb-2 text-lg font-semibold">
+                        Make a tool you’ll use every day
+                      </h2>
+                      <p className="mb-4 text-sm text-muted-foreground">
+                        A daily briefing, a project dashboard, or a personal
+                        tracker. Start with an idea, then shape it with the
+                        copilot.
+                      </p>
+                      <button
+                        className="mr-4 text-sm font-medium underline"
+                        onClick={() => setCreating(true)}
+                      >
+                        Build your first app
+                      </button>
+                      <button
+                        className="text-sm underline"
+                        onClick={() => setTab('catalog')}
+                      >
+                        Explore ready-made apps
+                      </button>
+                    </div>
+                  )
+                )}
+                <div className="ma-grid">
+                  {filtered.map((app, i) => (
+                    <Card
+                      key={app.folder}
+                      app={app}
+                      index={i}
+                      activity={activity}
+                      onOpen={() => open(app.folder)}
+                      isPinned={pinnedFolders.includes(app.folder)}
+                      onTogglePin={() =>
+                        pinnedFolders.includes(app.folder)
+                          ? unpinApp(app.folder)
+                          : pinApp(app.folder)
+                      }
+                    />
+                  ))}
+                  {query && !filtered.length && (
+                    <p className="ma-empty">
+                      No apps match “{query}”.{' '}
+                      <button
+                        className="underline"
+                        onClick={() => setQuery('')}
+                      >
+                        Clear search
+                      </button>
+                    </p>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+      {creating && (
+        <NewAppDialog
+          onClose={() => setCreating(false)}
+          onBuild={(prompt, folder) => {
+            setRefreshNonce((n) => n + 1)
+            open(folder)
+            onBuildApp(prompt, folder)
+          }}
+        />
+      )}
+    </>
   )
 }
