@@ -2,7 +2,6 @@ import {
   parseMentions,
   stampsEqual,
   type Attribution,
-  type Member,
   type MentionStamps,
   type Message,
   type Poll,
@@ -837,13 +836,7 @@ export class Feed {
     const limit = Math.min(opts?.limit ?? 10, 50);
     const kinds = new Set<SearchKind>(opts?.kinds ?? ['messages', 'topics', 'assets']);
 
-    const memberships = await this.k.store.listMemberships(spaceId);
-    const members: Member[] = [];
-    for (const m of memberships) {
-      const member = await this.k.store.getMember(m.memberId);
-      if (member) members.push(member);
-    }
-    const query = parseSearchQuery(rawQuery, members);
+    const query = parseSearchQuery(rawQuery, await this.k.store.listSpaceMembers(spaceId));
 
     const empty: SearchResults = {
       messages: [],

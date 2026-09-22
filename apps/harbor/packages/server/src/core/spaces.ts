@@ -144,13 +144,7 @@ export class Spaces {
 
   async listMembers(ctx: ActorCtx, spaceId: string): Promise<Member[]> {
     await this.k.requireMember(ctx, spaceId);
-    const memberships = await this.k.store.listMemberships(spaceId);
-    const members: Member[] = [];
-    for (const m of memberships) {
-      const member = await this.k.store.getMember(m.memberId);
-      if (member) members.push(member);
-    }
-    return members;
+    return this.k.store.listSpaceMembers(spaceId);
   }
 
   /**
@@ -160,19 +154,10 @@ export class Spaces {
    * id breaks ties). Discovery is bounded by shared membership on purpose —
    * no admin directory, no privacy surface beyond what listMembers already
    * exposes per space. Always contains the caller (a member of no space at
-   * all still sees themself).
+   * all still sees themself). One statement (2026-09-22).
    */
   async listOrgMembers(ctx: ActorCtx): Promise<Member[]> {
-    const spaces = await this.k.store.listSpacesFor(ctx.memberId, { includeDirect: true });
-    const ids = new Set<string>([ctx.memberId]);
-    for (const space of spaces) {
-      for (const m of await this.k.store.listMemberships(space.id)) ids.add(m.memberId);
-    }
-    const members: Member[] = [];
-    for (const id of ids) {
-      const member = await this.k.store.getMember(id);
-      if (member) members.push(member);
-    }
+    const members = await this.k.store.listMembersSharingSpace(ctx.memberId);
     return members.sort(
       (a, b) =>
         a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' }) || a.id.localeCompare(b.id),

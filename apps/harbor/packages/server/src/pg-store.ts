@@ -333,6 +333,30 @@ export class PgStore implements Store {
     return rows.map(rowToMember);
   }
 
+  async listSpaceMembers(spaceId: string): Promise<Member[]> {
+    const rows = await this.sql.query<MemberRow>(
+      `select m.id, m.display_name, m.avatar_url, m.role from memberships ms
+       join members m on m.org_id = $1 and m.id = ms.member_id
+       where ms.space_id = $2
+       order by ms.joined_at, ms.member_id`,
+      [this.orgId, spaceId],
+    );
+    return rows.map(rowToMember);
+  }
+
+  async listMembersSharingSpace(memberId: string): Promise<Member[]> {
+    const rows = await this.sql.query<MemberRow>(
+      `select m.id, m.display_name, m.avatar_url, m.role from members m
+       where m.org_id = $1 and (m.id = $2 or exists (
+         select 1 from memberships mine
+         join memberships theirs on theirs.space_id = mine.space_id
+         where mine.member_id = $2 and theirs.member_id = m.id))
+       order by m.id`,
+      [this.orgId, memberId],
+    );
+    return rows.map(rowToMember);
+  }
+
   async putMember(member: Member): Promise<void> {
     await this.sql.query(
       `insert into members (org_id, id, display_name, avatar_url, role) values ($1, $2, $3, $4, $5)

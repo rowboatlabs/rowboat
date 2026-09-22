@@ -76,22 +76,18 @@ export function buildNotifyText(input: {
 
 /** Everyone this message reaches, with the reason and the text. Pure over the store's facts. */
 export async function decideNotifications(store: Store, space: Space, message: Message): Promise<Notification[]> {
-  const memberships = await store.listMemberships(space.id);
-  const names = new Map<string, string>();
-  for (const m of memberships) {
-    const member = await store.getMember(m.memberId);
-    if (member) names.set(member.id, member.displayName);
-  }
+  const members = await store.listSpaceMembers(space.id);
+  const names = new Map(members.map((m) => [m.id, m.displayName]));
   const followers = new Set<string>(
     message.threadRoot !== undefined ? await store.listThreadFollowers(space.id, message.threadRoot) : [],
   );
   const authorName = names.get(message.author.memberId) ?? message.author.memberId;
   const rows: Notification[] = [];
-  for (const m of memberships) {
-    if (m.memberId === message.author.memberId && message.author.actingMode === 'direct') continue;
-    const kind = classifyFor(m.memberId, space, message, followers);
+  for (const m of members) {
+    if (m.id === message.author.memberId && message.author.actingMode === 'direct') continue;
+    const kind = classifyFor(m.id, space, message, followers);
     const text = buildNotifyText({ kind, space, authorName, body: message.body, names });
-    rows.push({ memberId: m.memberId, kind, ...text });
+    rows.push({ memberId: m.id, kind, ...text });
   }
   return rows;
 }
