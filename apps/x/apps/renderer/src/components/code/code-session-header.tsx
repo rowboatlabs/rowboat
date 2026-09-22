@@ -100,7 +100,6 @@ export function CodeSessionControls({ session, panel, onTogglePanel }: CodeSessi
     <div className="flex min-w-0 flex-wrap items-center gap-1.5 py-2 @container">
       <HarnessControls value={{ enabled: session.codeModeEnabled !== false, agent: session.agent, model: session.agentModel, effort: session.agentEffort, policy: session.policy }}
         onChange={(value) => update({ codeModeEnabled: value.enabled, agent: value.agent, agentModel: value.model ?? 'default', agentEffort: value.effort ?? 'default', ...(value.policy ? { policy: value.policy } : { clearPolicy: true }) })} />
-      <Button variant="ghost" size="sm" onClick={() => void setDone(!session.doneAt)}>{session.doneAt ? 'Reopen' : 'Mark as done'}</Button>
       {session.codeModeEnabled !== false && <>
       {/* Doors to the workspace drawer. Clicking the open one closes it. */}
       {CODE_PANELS.map(({ id, label, icon: Icon }) => {
@@ -127,6 +126,9 @@ export function CodeSessionControls({ session, panel, onTogglePanel }: CodeSessi
       })}
       </>}
       <WorktreeActions session={session} />
+      <Button variant="ghost" size="sm"
+        className={cn('h-7 shrink-0 gap-1 text-xs text-muted-foreground hover:text-foreground', session.codeModeEnabled !== false && 'ml-auto')}
+        onClick={() => void setDone(!session.doneAt)}>{session.doneAt ? 'Reopen' : 'Mark as done'}</Button>
     </div>
   )
 }
