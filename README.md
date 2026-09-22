@@ -366,10 +366,6 @@ Harbor publishes OAuth protected-resource metadata, so any MCP client that speak
 
 ---
 
-<p align="center">
-  <img width="800" alt="Every teammate. Their own agent. One Space." src="assets/readme-spaces/spaces-closing.jpg" />
-</p>
-
 <div align="center">
 
 [Discord](https://discord.gg/wajrgmJQ6b) · [Twitter](https://x.com/intent/user?screen_name=rowboatlabshq)
