@@ -82,6 +82,7 @@ export const RPC_CHANNELS = [
   'todo:declineSuggestion',
   'todo:setPlanner',
   'todo:save',
+  'todo:section',
   'todo:addItem',
   'todo:addSubItem',
   'todo:runItem',

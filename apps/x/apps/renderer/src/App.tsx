@@ -1,3 +1,4 @@
+import type { TodoSectionRef } from '@x/shared/dist/todo.js'
 import { WorkspaceSessionTabs } from './components/code/workspace-session-tabs'
 import { DocumentFileViewer } from '@/components/document-file-viewer'
 import { parseSpacesLink, readLastSpace, resolveSpacesLocation, serverLandingSpaceId, type SpacesLinkTarget } from '@/lib/spaces-navigation'
@@ -639,7 +640,7 @@ const collectFilePaths = (nodes: TreeNode[]): string[] =>
 // Where the Home composer's next send goes — set by the list's ＋/reply
 // affordances, shown as a destination chip. Null = plain assistant chat.
 export type HomeComposeTarget =
-  | { kind: 'todo'; prefill?: string }
+  | { kind: 'todo'; prefill?: string; section?: TodoSectionRef | null }
   | { kind: 'sub'; parentKey: string; parentText: string; prefill?: string }
   | { kind: 'comment'; key: string; itemText: string; quote?: string }
   | { kind: 'chatReply'; sessionId: string; title: string; quote?: string }
@@ -5053,6 +5054,8 @@ function App() {
   // Destination chip: when set, the Home composer writes to the to-do list
   // instead of the chat. Entered via the list's ＋ affordances, announced by
   // the chip + tint, cleared on send/Escape/✕.
+  const flushTodoEditsRef = useRef<(() => Promise<boolean>) | null>(null)
+  const registerTodoFlush = useCallback((flush: (() => Promise<boolean>) | null) => { flushTodoEditsRef.current = flush }, [])
   const [homeComposeTarget, setHomeComposeTarget] = useState<HomeComposeTarget | null>(null)
   const [homeComposerFocusSignal, setHomeComposerFocusSignal] = useState(0)
   const [homeComposerPreset, setHomeComposerPreset] = useState<string | undefined>(undefined)
@@ -5110,7 +5113,7 @@ function App() {
     permissionMode?: PermissionMode
   } | null>(null)
 
-  const handleHomeComposerSubmit = useCallback((
+  const handleHomeComposerSubmit = useCallback(async (
     message: PromptInputMessage,
     mentions?: Mention[],
     stagedAttachments: StagedAttachment[] = [],
@@ -5126,6 +5129,11 @@ function App() {
     const target = homeComposeTargetRef.current
     if (target) {
       if (!text) return
+      if (flushTodoEditsRef.current && !await flushTodoEditsRef.current()) {
+        toast.error('Could not save pending todo edits')
+        setHomeComposerPreset(text)
+        return
+      }
       const attachments = stagedAttachments.length > 0
         ? stagedAttachments.map((a) => ({ path: a.path, name: a.filename }))
         : undefined
@@ -5147,7 +5155,14 @@ function App() {
         const code = codeProject
           ? { projectId: codeProject.id, agent: codeMode, isolation: homeCodeIsolationRef.current }
           : undefined
-        void window.ipc.invoke('todo:addItem', { text, run: /(^|\s)@rowboat\b/i.test(text) || !!code, attachments, model, permissionMode, code })
+        try {
+          const result = await window.ipc.invoke('todo:addItem', { text, section: target.section, run: /(^|\s)@rowboat\b/i.test(text) || !!code, attachments, model, permissionMode, code })
+          if (!result.success) throw new Error(result.error ?? 'Could not add task')
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : 'Could not add task')
+          setHomeComposerPreset(text)
+          return
+        }
       }
       setHomeComposeTarget(null)
       return
@@ -7603,7 +7618,7 @@ function App() {
                                 ? `Reply: ${homeComposeTarget.itemText.slice(0, 40)}`
                                 : homeComposeTarget.kind === 'chatReply'
                                   ? `Reply: ${homeComposeTarget.title.slice(0, 40)}`
-                                  : 'To-do',
+                                  : homeComposeTarget.section ? `To-do: ${homeComposeTarget.section.heading.replace(/^##\s+/, '')}` : 'To-do',
                             icon: homeComposeTarget.kind === 'comment' || homeComposeTarget.kind === 'chatReply' ? 'reply' : 'todo',
                             quote: homeComposeTarget.kind === 'comment' || homeComposeTarget.kind === 'chatReply'
                               ? homeComposeTarget.quote
@@ -7638,6 +7653,7 @@ function App() {
                         </div>
                       }
                       onComposeTodo={composeTodoOnHome}
+                      onFlushEditsReady={registerTodoFlush}
                       composeTarget={homeComposeTarget}
                       getRunModel={() => homeSelectionRef.current ?? undefined}
                       onFocusComposer={() => setHomeComposerFocusSignal((n) => n + 1)}

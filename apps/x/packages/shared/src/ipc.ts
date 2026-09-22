@@ -9,7 +9,7 @@ import { AgentScheduleConfig, AgentScheduleEntry } from './agent-schedule.js';
 import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
 import { LiveNoteAgentEvent, LiveNoteSchema } from './live-note.js';
-import { TodoChatBubbleSchema, TodoEvent, TodoItemSchema, TodoListSchema } from './todo.js';
+import { TodoSectionRefSchema, TodoSectionActionSchema, TodoChatBubbleSchema, TodoEvent, TodoItemSchema, TodoListSchema } from './todo.js';
 import { HomeThreadSchema } from './home-threads.js';
 import {
     BackgroundTaskAgentEvent,
@@ -3149,8 +3149,13 @@ export const ipcSchemas = {
       error: z.string().optional(),
     }),
   },
+  'todo:section': {
+    req: TodoSectionActionSchema,
+    res: z.object({ success: z.boolean(), list: TodoListSchema.optional(), error: z.string().optional() }),
+  },
   'todo:addItem': {
     req: z.object({
+      section: TodoSectionRefSchema.nullable().optional(),
       text: z.string(),
       // Fire the item's run immediately (composer delegate / @rowboat typed).
       run: z.boolean(),

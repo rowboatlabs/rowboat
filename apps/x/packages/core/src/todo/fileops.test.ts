@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { isDelegated, normalizeKey, parseArchive, parseTodoFile, serializeTodoFile, subKey } from './fileops.js';
+import { todoSections } from '@x/shared/dist/todo.js';
+import { applySectionAction, insertTodoItem, isDelegated, normalizeKey, parseArchive, parseTodoFile, serializeTodoFile, subKey } from './fileops.js';
 
 const SAMPLE = `- [ ] build a deck
 - [x] @rowboat research pricing models
@@ -124,5 +125,110 @@ describe('todo fileops parse/serialize', () => {
         expect(isDelegated('@rowboat do the thing')).toBe(true);
         expect(isDelegated('email arjun@rowboatlabs.com')).toBe(false);
         expect(isDelegated('plain item')).toBe(false);
+    });
+});
+
+describe('todo sections', () => {
+    const sample = () => parseTodoFile('- [ ] inbox\n## Work\n- [ ] parent\n  - [ ] child\n  - → receipt\nA note\n## Personal\n- [x] done\n');
+    it('discovers headings without changing archive parsing or raw Markdown', () => {
+        const list = sample();
+        expect(todoSections(list.blocks).map(s => s.name)).toEqual(['Uncategorized', 'Work', 'Personal']);
+        expect(serializeTodoFile(parseTodoFile(serializeTodoFile(list)))).toEqual(serializeTodoFile(list));
+        expect(parseArchive('2026-09', '## 2026-09-16\n- [x] archived\n')[0].date).toBe('2026-09-16');
+    });
+    it('renames the default section durably while keeping default insertion and task identities', () => {
+        const list = sample();
+        applySectionAction(list, { type: 'rename', section: null, name: 'Inbox' });
+        const reloaded = parseTodoFile(serializeTodoFile(list));
+        expect(todoSections(reloaded.blocks)[0].name).toBe('Inbox');
+        expect(todoSections(reloaded.blocks)[0].ref).toBeNull();
+        const block = parseTodoFile('- [ ] new task').blocks[0];
+        if (block.kind !== 'item') throw new Error('expected task');
+        insertTodoItem(reloaded, block);
+        expect(serializeTodoFile(reloaded)).toContain('- [ ] new task\n## Work');
+        expect(() => applySectionAction(reloaded, { type: 'create', name: 'Inbox' })).toThrow();
+        expect(() => applySectionAction(reloaded, { type: 'rename', section: null, name: 'Work' })).toThrow();
+        applySectionAction(reloaded, { type: 'rename', section: null, name: 'Inbox' });
+        applySectionAction(reloaded, { type: 'rename', section: null, name: 'Uncategorized' });
+        expect(todoSections(reloaded.blocks)[0].name).toBe('Uncategorized');
+        expect(serializeTodoFile(reloaded).match(/Default section:/g)).toHaveLength(1);
+        expect(reloaded.blocks.find(b => b.kind === 'item')).toMatchObject({ item: { key: 'inbox' } });
+    });
+
+    it('creates and renames empty sections, rejects invalid and duplicate names', () => {
+        const list = sample();
+        applySectionAction(list, { type: 'create', name: 'Ideas' });
+        const ref = todoSections(list.blocks).at(-1)!.ref!;
+        applySectionAction(list, { type: 'rename', section: ref, name: 'Later' });
+        expect(todoSections(list.blocks).at(-1)!.name).toBe('Later');
+        for (const name of ['', 'work', 'Uncategorized', 'a\nb']) {
+            expect(() => applySectionAction(list, { type: 'create', name })).toThrow();
+        }
+    });
+    it('moves a parent with child receipts and unchanged task keys', () => {
+        const list = sample();
+        const before = structuredClone(list.blocks.find(b => b.kind === 'item' && b.item.key === 'parent'));
+        applySectionAction(list, { type: 'move', key: 'parent', section: todoSections(list.blocks)[2].ref });
+        const last = list.blocks.filter(b => b.kind === 'item').at(-1);
+        expect(last).toEqual(before);
+        expect(serializeTodoFile(list)).toContain('## Personal\n- [x] done\n\n- [ ] parent');
+    });
+    it('moves both ways and into Uncategorized', () => {
+        const list = sample();
+        applySectionAction(list, { type: 'move', key: 'done', section: todoSections(list.blocks)[1].ref });
+        applySectionAction(list, { type: 'move', key: 'parent', section: null });
+        const first = todoSections(list.blocks)[0];
+        expect(list.blocks.slice(first.start, first.end).filter(b => b.kind === 'item').map(b => b.kind === 'item' && b.item.key)).toEqual(['inbox', 'parent']);
+    });
+    it('reorders a whole section including notes and children', () => {
+        const list = sample();
+        const original = serializeTodoFile(list);
+        applySectionAction(list, { type: 'reorder', section: todoSections(list.blocks)[2].ref!, direction: 'up' });
+        expect(todoSections(list.blocks).map(s => s.name)).toEqual(['Uncategorized', 'Personal', 'Work']);
+        expect(serializeTodoFile(list)).toContain('  - → receipt\nA note');
+        applySectionAction(list, { type: 'reorder', section: todoSections(list.blocks)[1].ref!, direction: 'down' });
+        expect(serializeTodoFile(list)).toEqual(original);
+    });
+    it('relocates across multiple sections without losing contents and ignores self drops', () => {
+        const list = sample();
+        applySectionAction(list, { type: 'create', name: 'Later' });
+        const original = structuredClone(list);
+        applySectionAction(list, { type: 'relocate', section: todoSections(list.blocks)[1].ref!, before: todoSections(list.blocks)[3].ref! });
+        expect(todoSections(list.blocks).map(s => s.name)).toEqual(['Uncategorized', 'Personal', 'Work', 'Later']);
+        applySectionAction(list, { type: 'relocate', section: todoSections(list.blocks)[2].ref!, before: todoSections(list.blocks)[1].ref! });
+        expect(list).toEqual(original);
+        const section = todoSections(list.blocks)[1].ref!;
+        applySectionAction(list, { type: 'relocate', section, before: section });
+        expect(list).toEqual(original);
+    });
+    it('removes only the heading, preserving tasks and notes in Uncategorized', () => {
+        const list = sample();
+        applySectionAction(list, { type: 'remove', section: todoSections(list.blocks)[1].ref! });
+        expect(todoSections(list.blocks).map(s => s.name)).toEqual(['Uncategorized', 'Personal']);
+        expect(serializeTodoFile(list)).toContain('  - → receipt\nA note\n## Personal');
+    });
+    it('defaults new and restored top-level items to Uncategorized', () => {
+        const list = sample();
+        const block = parseTodoFile('- [ ] new task').blocks[0];
+        if (block.kind !== 'item') throw new Error('expected item');
+        insertTodoItem(list, block);
+        expect(serializeTodoFile(list)).toContain('- [ ] inbox\n- [ ] new task\n## Work');
+        insertTodoItem(list, { ...block, item: { ...block.item, key: 'selected', text: 'selected' } }, todoSections(list.blocks)[1].ref);
+        expect(serializeTodoFile(list)).toContain('A note\n- [ ] selected\n## Personal');
+    });
+    it('rejects stale references and ambiguous task identities without mutating', () => {
+        const list = sample();
+        const ref = todoSections(list.blocks)[2].ref!;
+        applySectionAction(list, { type: 'remove', section: todoSections(list.blocks)[1].ref! });
+        const before = serializeTodoFile(list);
+        expect(() => applySectionAction(list, { type: 'rename', section: ref, name: 'Oops' })).toThrow('Section changed');
+        expect(serializeTodoFile(list)).toBe(before);
+        const duplicates = parseTodoFile('- [ ] same\n## Work\n- [ ] same\n');
+        expect(() => applySectionAction(duplicates, { type: 'move', key: 'same', section: null })).toThrow('ambiguous');
+    });
+    it('addresses manually duplicated headings separately', () => {
+        const list = parseTodoFile('## Work\n- [ ] one\n## Work\n- [ ] two\n');
+        applySectionAction(list, { type: 'rename', section: todoSections(list.blocks)[2].ref!, name: 'Other' });
+        expect(todoSections(list.blocks).map(s => s.name)).toEqual(['Uncategorized', 'Work', 'Other']);
     });
 });

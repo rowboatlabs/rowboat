@@ -1,3 +1,4 @@
+import { changeTodoSection } from '@x/core/dist/todo/fileops.js';
 import { listProjects, createProjectChat } from '@x/core/dist/projects/projects.js';
 import { ipcMain, BrowserWindow, shell, dialog, systemPreferences, desktopCapturer, app, powerSaveBlocker } from 'electron';
 import { ipc } from '@x/shared';
@@ -2871,11 +2872,20 @@ export function setupIpcHandlers() {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
       }
     },
+    'todo:section': async (_event, args) => {
+      try {
+        const list = await changeTodoSection(args);
+        todoBus.publish({ type: 'list_changed' });
+        return { success: true, list };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
     'todo:addItem': async (_event, args) => {
       try {
         const links = await importTodoAttachments(args.attachments ?? []);
         const text = links.length > 0 ? `${args.text} ${todoLinksToText(links)}` : args.text;
-        const item = await addTodoItem(text);
+        const item = await addTodoItem(text, { section: args.section });
         if (args.run || item.delegated) {
           void runTodoItem(item.key, undefined, { model: args.model, autoPermission: args.permissionMode !== 'manual', code: args.code }).catch(() => {});
         }
