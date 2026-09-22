@@ -1,3 +1,4 @@
+import { SearchMenu, SearchMenuItems } from '@/components/search-menu'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
@@ -14,7 +15,6 @@ import {
   FolderClock,
   FolderCog,
   FolderOpen,
-  Globe,
   ImagePlus,
   ListTodo,
   LoaderIcon,
@@ -999,26 +999,13 @@ function ChatInputInner({
             </TooltipContent>
           </Tooltip>
         )}
-        {searchAvailable && collapseLevel < 7 && (
-          <button
-            type="button"
-            onClick={() => setSearchEnabled((v) => !v)}
-            aria-label="Search"
-            aria-pressed={searchEnabled}
-            className={cn(
-              'flex h-7 shrink-0 items-center rounded-full border px-1.5 transition-colors duration-150 ease-out',
-              searchEnabled
-                ? 'border-transparent bg-secondary text-foreground hover:bg-secondary/80'
-                : 'border-transparent text-muted-foreground hover:bg-muted hover:text-foreground'
-            )}
-          >
-            <Globe className="h-4 w-4 shrink-0" />
-            {searchEnabled && collapseLevel < 3 && (
-              <span className="ml-1.5 whitespace-nowrap text-xs font-medium">
-                Search
-              </span>
-            )}
-          </button>
+        {collapseLevel < 7 && (
+          <SearchMenu
+            searchAvailable={searchAvailable}
+            searchEnabled={searchEnabled}
+            onSearchEnabledChange={setSearchEnabled}
+            showLabel={collapseLevel < 3}
+          />
         )}
         {collapseLevel < 6 && (
         <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
@@ -1083,14 +1070,12 @@ function ChatInputInner({
                   <Copy className="size-4" />Copy directory path
                 </DropdownMenuItem>
               )}
-              {searchAvailable && collapseLevel >= 7 && (
-                <DropdownMenuCheckboxItem
-                  checked={searchEnabled}
-                  onSelect={(e) => e.preventDefault()}
-                  onCheckedChange={(c) => setSearchEnabled(Boolean(c))}
-                >
-                  Web search
-                </DropdownMenuCheckboxItem>
+              {collapseLevel >= 7 && (
+                <SearchMenuItems
+                  searchAvailable={searchAvailable}
+                  searchEnabled={searchEnabled}
+                  onSearchEnabledChange={setSearchEnabled}
+                />
               )}
               {collapseLevel >= 6 && (
                 <DropdownMenuCheckboxItem

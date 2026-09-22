@@ -12,7 +12,6 @@ import { Bell,
   FileText,
   FilePlus,
   Folder,
-  Globe,
   History,
   LayoutGrid,
   ListTodo,
@@ -169,9 +168,6 @@ export type DockSidebarProps = {
   onOpenEmail?: (threadId?: string) => void
   onOpenHome?: () => void
   onNewChat?: () => void
-  onToggleBrowser?: () => void
-  /** Whether the browser overlay is up, for the Browser tile's running dot. */
-  browserOpen?: boolean
   /** Render only the ⌥/⌃+Tab app switcher — no tray, no flyouts. Used while
       the panel sidebar is expanded, so the switcher works in both modes (and
       its most-recently-used order survives collapsing/expanding). */
@@ -569,8 +565,6 @@ export function DockSidebar({
   onOpenEmail,
   onOpenHome,
   onNewChat,
-  onToggleBrowser,
-  browserOpen = false,
   switcherOnly = false,
   onStartTour,
   activeNav,
@@ -1027,13 +1021,6 @@ export function DockSidebar({
           onClick: () => { closeFlyouts(); onOpenBgTasks?.() },
         },
       },
-      ...(onToggleBrowser ? [{
-        item: {
-          key: 'browser', label: 'Browser', icon: Globe,
-          running: browserOpen,
-          onClick: () => { closeFlyouts(); onToggleBrowser() },
-        },
-      }] : []),
       {
         item: {
           key: 'apps', label: 'Apps', icon: LayoutGrid, tourId: 'nav-apps',
@@ -1075,7 +1062,7 @@ export function DockSidebar({
     activeNav, closeFlyouts, onOpenHome, unreadEmailCount, previewEmail, onOpenEmail,
     meetingIsRecording, meetingSublabel, onOpenMeetings,
     knowledgeUpdatedLabel, knowledgeActions, onOpenApps, pinnedApps, onOpenApp,
-    bgAgentsFailed, bgAgentsLabel, onToggleBrowser, browserOpen,
+    bgAgentsFailed, bgAgentsLabel,
     switcherOnly, openLastSpace, onOpenChatHistory,
     onNewChat, lastChat, onOpenRun, onOpenAssistant,
     onOpenBgTasks, spacesNotification, totalSpaces, spacesOpen, chatsOpen,

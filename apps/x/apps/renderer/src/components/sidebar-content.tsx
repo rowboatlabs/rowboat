@@ -10,7 +10,6 @@ import {
   ChevronRight,
   FileText,
   Folder,
-  Globe,
   AlertTriangle,
   LayoutGrid,
   ListTodo,
@@ -212,7 +211,6 @@ type SidebarContentPanelProps = {
   onOpenEmail?: (threadId?: string) => void
   onOpenHome?: () => void
   onNewChat?: () => void
-  onToggleBrowser?: () => void
   onVoiceNoteCreated?: (path: string) => void
   /** Starts the mascot-guided product tour. */
   onStartTour?: () => void
@@ -468,7 +466,6 @@ export function SidebarContentPanel({
   onOpenEmail,
   onOpenHome,
   onNewChat,
-  onToggleBrowser,
   onVoiceNoteCreated,
   onStartTour,
   activeNav,
@@ -1009,14 +1006,6 @@ export function SidebarContentPanel({
                   </div>
                 </SidebarMenuButton>
               </SidebarMenuItem>
-              {onToggleBrowser && (
-                <SidebarMenuItem>
-                  <SidebarMenuButton onClick={onToggleBrowser}>
-                    <Globe className="size-4 shrink-0" />
-                    <span className="flex-1 truncate">Browser</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              )}
               <SidebarMenuItem>
                 <SidebarMenuButton
                   data-tour-id="nav-apps"

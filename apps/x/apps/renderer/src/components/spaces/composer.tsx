@@ -1,8 +1,9 @@
+import { SearchMenu } from '@/components/search-menu'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import type { EditorView } from '@tiptap/pm/view'
 import { uploadInputFor } from '@/lib/spaces-upload'
-import { ArrowUp, BarChart3, Clock, FileText, Globe, Loader2, LoaderIcon, Mic, Paperclip, ShieldCheck, Square, Terminal, X as XIcon } from 'lucide-react'
+import { ArrowUp, BarChart3, Clock, FileText, Loader2, LoaderIcon, Mic, Paperclip, ShieldCheck, Square, Terminal, X as XIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
@@ -901,21 +902,11 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                                     <ShieldCheck className="size-3.5 shrink-0" />
                                     <span>{permissionMode === 'auto' ? 'Auto' : 'Manual'}</span>
                                 </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setSearchEnabled((v) => !v)}
-                                    aria-pressed={searchEnabled}
-                                    title="Web search"
-                                    className={cn(
-                                        'flex h-7 shrink-0 items-center rounded-full border px-1.5 transition-colors',
-                                        searchEnabled
-                                            ? 'border-transparent bg-secondary text-foreground hover:bg-secondary/70'
-                                            : 'border-transparent text-muted-foreground hover:bg-muted hover:text-foreground',
-                                    )}
-                                >
-                                    <Globe className="size-4 shrink-0" />
-                                    {searchEnabled && <span className="ml-1.5 text-xs font-medium">Search</span>}
-                                </button>
+                                <SearchMenu
+                                    searchAvailable
+                                    searchEnabled={searchEnabled}
+                                    onSearchEnabledChange={setSearchEnabled}
+                                />
                                 {codeModeAvailable && (
                                     <button
                                         type="button"
