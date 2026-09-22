@@ -3,9 +3,8 @@ import { CheckCircle2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { Step } from "./use-onboarding-state"
 
-// Both paths share one sequence now: screen 1 handles Rowboat sign-in, and
-// screen 2 ("Providers") serves everyone — first provider for key users,
-// optional extras for signed-in users.
+// Keep one sequence for account and API-key setup so users can revisit
+// Providers to add models after either login (2026-09-22, ChatGPT onboarding).
 const STEPS = [
   { step: 0 as Step, label: "Welcome" },
   { step: 1 as Step, label: "Providers" },

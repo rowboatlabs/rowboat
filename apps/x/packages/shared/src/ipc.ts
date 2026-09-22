@@ -3718,9 +3718,9 @@ export const ipcSchemas = {
       success: z.literal(true),
     }),
   },
-  // One-time first-run notice: returns { show: true } exactly once (when
-  // retention is enabled and the notice hasn't been shown), marking it shown.
-  // Same pull-on-boot pattern as app:consumeUpdateInfo.
+  // Retain the legacy response for client compatibility after removing the
+  // startup popup (2026-09-22, onboarding simplification). Calling this still
+  // initializes the retention gate; current clients ignore the display fields.
   'retention:consumeFirstRunNotice': {
     req: z.null(),
     res: z.object({

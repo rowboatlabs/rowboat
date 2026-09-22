@@ -773,9 +773,8 @@ export function markSessionsIndexReady(): void {
 
 // Daily storage-retention sweep (auto-delete old chats & task transcripts).
 // Started from main.ts once the session index is ready; the initial run is
-// delayed so it never competes with startup. The first launch with retention
-// enabled only arms the one-time notice (retention:consumeFirstRunNotice) —
-// sweeping begins on the next launch, after the user has seen it.
+// delayed so it never competes with startup. The renderer initializes the
+// legacy retention gate without a popup (2026-09-22, onboarding simplification).
 
 let servicesWatcher: (() => void) | null = null;
 export async function startServicesWatcher(): Promise<void> {
