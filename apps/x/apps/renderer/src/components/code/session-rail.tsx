@@ -31,6 +31,8 @@ import {
 } from '@/components/ui/context-menu'
 import { projectLabel, type ProjectRow } from './use-code-sessions'
 import { AGENT_LABEL, isAgentReady, type CodeAgentsStatus } from './code-agent-status'
+import { useUnreadCodeSessions } from './session-read-state'
+import { UnreadBadge } from '@/components/spaces/unread-badge'
 
 // The Done pile shows this many before asking for "Show all" — a display
 // cap, never a deletion policy.
@@ -137,6 +139,7 @@ function SessionRow({
   session,
   workspaceTitle,
   sessionCount = 1,
+  unreadCount,
   workspaceStarted = false,
   status,
   selected,
@@ -152,6 +155,7 @@ function SessionRow({
    *  name as sibling chats come and go. */
   workspaceTitle: string
   sessionCount?: number
+  unreadCount: number
   workspaceStarted?: boolean
   status: CodeSessionStatus
   selected: boolean
@@ -199,6 +203,7 @@ function SessionRow({
                 {prefix && <span className="text-muted-foreground">{prefix} · </span>}
                 {workspaceTitle}
               </span>
+              <UnreadBadge badge={{ unread: unreadCount, forYou: unreadCount }} direct />
               {/* The time's slot is exactly as wide as the hover actions, so the
                   actions replace the time — never the title beside it. */}
               <span className="w-12 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground/70 transition-opacity group-hover:opacity-0 group-has-[[data-state=open]]:opacity-0">
@@ -291,6 +296,8 @@ export function SessionRail({
    *  while the chat pane beside it draws the divider. */
   className?: string
 }) {
+  const unreadSessions = useUnreadCodeSessions()
+  const unreadCount = (members: CodeSession[]) => members.filter((s) => unreadSessions.has(s.id)).length
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
   const toggleCollapsed = (projectId: string) => {
     setCollapsed((prev) => {
@@ -317,6 +324,7 @@ export function SessionRail({
   const workspaceTitle = (s: CodeSession) => groups.get(codeWorkspaceKey(s))!
     .reduce((first, member) => (member.createdAt.localeCompare(first.createdAt) || member.id.localeCompare(first.id)) < 0 ? member : first).title
   const groupDone = (s: CodeSession) => groups.get(codeWorkspaceKey(s))!.every((member) => !!member.doneAt)
+  const groupUnreadCount = (s: CodeSession) => unreadCount(groups.get(codeWorkspaceKey(s))!)
   const groupStatus = (s: CodeSession): CodeSessionStatus => {
     const statuses = groups.get(codeWorkspaceKey(s))!.map((member) => statusOf(member.id))
     return statuses.includes('needs-you') ? 'needs-you' : statuses.includes('working') ? 'working' : 'idle'
@@ -328,6 +336,7 @@ export function SessionRail({
     .filter(groupDone)
     .sort((a, b) => (b.doneAt ?? '').localeCompare(a.doneAt ?? ''))
   const visibleDone = showAllDone ? done : done.slice(0, DONE_VISIBLE_LIMIT)
+  const doneUnreadCount = done.reduce((count, session) => count + groupUnreadCount(session), 0)
   const labelByProject = new Map(projects.map((row) => [row.project.id, projectLabel(row)]))
 
   // The rail's content — the shell renders it at the docked width.
@@ -366,11 +375,12 @@ export function SessionRail({
           // folder name needs its parent to stay tellable-apart.
           const parentHint = row.git.root ? '' : parentPath(project.path)
           const projectSessions = active.filter((s) => s.projectId === project.id)
+          const projectUnreadCount = unreadCount(sessions.filter((s) => s.projectId === project.id))
           const isCollapsed = collapsed.has(project.id)
-          // A collapsed group still surfaces its live sessions — attention
-          // must not hide behind a chevron.
+          // 2026-09-22: keep live and unread completed sessions visible when
+          // collapsed so the notification still points to the work to open.
           const visibleSessions = isCollapsed
-            ? projectSessions.filter((s) => groupStatus(s) !== 'idle' || s.id === selectedSessionId)
+            ? projectSessions.filter((s) => groupStatus(s) !== 'idle' || groupUnreadCount(s) > 0 || s.id === selectedSessionId)
             : projectSessions
           return (
             <div key={project.id} className="mb-2">
@@ -408,6 +418,7 @@ export function SessionRail({
                               )}
                             </span>
                           </span>
+                          <UnreadBadge badge={{ unread: projectUnreadCount, forYou: projectUnreadCount }} direct />
                         </button>
                       </TooltipTrigger>
                       <TooltipContent side="right" className="max-w-[420px] break-all font-mono text-xs">
@@ -458,6 +469,7 @@ export function SessionRail({
                   key={session.id}
                   session={session}
                   workspaceTitle={workspaceTitle(session)}
+                  unreadCount={groupUnreadCount(session)}
                   sessionCount={groups.get(codeWorkspaceKey(session))!.length}
                   workspaceStarted={groups.get(codeWorkspaceKey(session))!.some((member) => !!member.lastActivityAt || statusOf(member.id) !== 'idle')}
                   status={groupStatus(session)}
@@ -493,6 +505,7 @@ export function SessionRail({
             {doneOpen ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
             <span>Done</span>
             <span className="tabular-nums text-muted-foreground/70">{done.length}</span>
+            <UnreadBadge badge={{ unread: doneUnreadCount, forYou: doneUnreadCount }} direct />
           </button>
           {doneOpen && (
             <div className="min-h-0 flex-1 overflow-auto px-2 pb-2">
@@ -501,6 +514,7 @@ export function SessionRail({
                   key={session.id}
                   session={session}
                   workspaceTitle={workspaceTitle(session)}
+                  unreadCount={groupUnreadCount(session)}
                   sessionCount={groups.get(codeWorkspaceKey(session))!.length}
                   workspaceStarted={groups.get(codeWorkspaceKey(session))!.some((member) => !!member.lastActivityAt || statusOf(member.id) !== 'idle')}
                   status={groupStatus(session)}

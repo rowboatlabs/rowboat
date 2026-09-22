@@ -5,7 +5,9 @@ import { SessionRail } from './session-rail'
 import type { CodeAgentsStatus } from './code-agent-status'
 import type { ProjectRow } from './use-code-sessions'
 
-afterEach(() => { cleanup(); localStorage.clear() })
+const unreadSessions = vi.hoisted(() => new Set<string>())
+vi.mock('./session-read-state', () => ({ useUnreadCodeSessions: () => unreadSessions }))
+afterEach(() => { cleanup(); localStorage.clear(); unreadSessions.clear() })
 
 const project: ProjectRow = {
   project: { id: 'project', name: 'Example', path: '/Example', addedAt: '2026-09-08T00:00:00Z' },
@@ -131,4 +133,37 @@ it('groups sibling sessions into one worktree and exposes the parent branch cont
   openProjectMenu()
   fireEvent.click(screen.getByRole('menuitem', { name: 'Change branch' }))
   expect(onSwitchBranch).toHaveBeenCalledWith('project')
+})
+
+it('aggregates unread completions by project and worktree and keeps them visible when collapsed', () => {
+  unreadSessions.add(session.id)
+  unreadSessions.add('second')
+  unreadSessions.add('deleted')
+  const worktree = { path: '/wt', branch: 'rowboat/work', baseBranch: 'main' }
+  const props = {
+    projects: [project], sessions: [{ ...session, worktree }, { ...session, id: 'second', worktree }],
+    selectedSessionId: null, statusOf: () => 'idle' as const, agentsStatus: ready,
+    onSelectSession: vi.fn(), onAddProject: vi.fn(), onRemoveProject: vi.fn(),
+    onNewSession: vi.fn(), onSetDone: vi.fn(), onDeleteSession: vi.fn(),
+  }
+  const view = render(<SessionRail {...props} />)
+  expect(screen.getAllByLabelText('2 unread · all for you')).toHaveLength(2)
+  fireEvent.click(screen.getByRole('button', { name: 'Collapse project' }))
+  expect(screen.getByText(session.title)).toBeVisible()
+  expect(screen.getAllByLabelText('2 unread · all for you')).toHaveLength(2)
+  unreadSessions.delete(session.id)
+  view.rerender(<SessionRail {...props} />)
+  expect(screen.getAllByLabelText('1 unread · all for you')).toHaveLength(2)
+  unreadSessions.delete('second')
+  view.rerender(<SessionRail {...props} />)
+  expect(screen.queryByText(session.title)).toBeNull()
+  expect(screen.queryByLabelText(/unread · all for you/)).toBeNull()
+})
+
+it('shows unread completions in the collapsed Done section and its cards', () => {
+  unreadSessions.add(session.id)
+  setup(true)
+  expect(screen.getAllByLabelText('1 unread · all for you')).toHaveLength(3)
+  fireEvent.click(screen.getByRole('button', { name: /^Done/ }))
+  expect(screen.getAllByLabelText('1 unread · all for you')).toHaveLength(2)
 })

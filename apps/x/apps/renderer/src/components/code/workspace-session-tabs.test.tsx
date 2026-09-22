@@ -5,11 +5,26 @@ import { WorkspaceSessionTabs } from './workspace-session-tabs'
 
 const { refresh, invoke, sessions } = vi.hoisted(() => ({ refresh: vi.fn(), invoke: vi.fn(), sessions: [] as CodeSession[] }))
 vi.mock('./use-code-sessions', () => ({ useCodeSessions: () => ({ sessions, refresh, statusOf: () => 'idle' }) }))
-afterEach(() => { cleanup(); vi.clearAllMocks(); sessions.length = 0 })
+const unreadSessions = vi.hoisted(() => new Set<string>())
+vi.mock('./session-read-state', () => ({ useUnreadCodeSessions: () => unreadSessions }))
+afterEach(() => { cleanup(); vi.clearAllMocks(); sessions.length = 0; unreadSessions.clear() })
 const session: CodeSession = { id: 's1', projectId: 'p', title: 'First conversation', agent: 'codex', cwd: '/wt',
   createdAt: '2026-09-01T00:00:00Z', worktree: { path: '/wt', branch: 'rowboat/one', baseBranch: 'main' } }
 
 describe('workspace session tabs', () => {
+  it('identifies the unread sibling session and clears its badge when read', () => {
+    sessions.push(session, { ...session, id: 's2', title: 'Finished session' })
+    unreadSessions.add('s2')
+    const onSelect = vi.fn()
+    const view = render(<WorkspaceSessionTabs session={session} onSelect={onSelect} />)
+    const badge = screen.getByLabelText('1 unread · all for you')
+    expect(badge.closest('[role="tab"]')).toHaveTextContent('Finished session')
+    fireEvent.click(badge)
+    expect(onSelect).toHaveBeenCalledWith('s2')
+    unreadSessions.clear()
+    view.rerender(<WorkspaceSessionTabs session={session} onSelect={onSelect} />)
+    expect(screen.queryByLabelText('1 unread · all for you')).toBeNull()
+  })
   it('shows only the selected worktree’s sessions, in stable order', () => {
     sessions.push({ ...session, id: 's2', title: 'Second conversation', createdAt: '2026-09-02T00:00:00Z' }, session,
       { ...session, id: 'other', title: 'Other worktree', worktree: { ...session.worktree!, path: '/elsewhere' } })
