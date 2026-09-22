@@ -1,11 +1,11 @@
-<a href="https://www.rowboatlabs.com/" target="_blank" rel="noopener noreferrer">
-  <img width="1339" alt="Rowboat: every teammate, their own agent, one Space" src="assets/readme-spaces/spaces-hero.gif" />
+<a href="https://www.youtube.com/watch?v=5AWoGo-L16I" target="_blank" rel="noopener noreferrer">
+  <img width="1339" height="607" alt="rowboat-github-2" src="assets/readme-dark/hero-video.png" />
 </a>
 
 <h5 align="center">
 
 <h1 align="center">Rowboat</h1>
-<p align="center"><b>AI coworker with memory and collaboration</b></p>
+<p align="center"><b>The personal assistant with collaboration.</b></p>
 
 <p align="center" style="display: flex; justify-content: center; gap: 20px; align-items: center;">
   <a href="https://trendshift.io/repositories/13609" target="blank">
@@ -34,19 +34,200 @@
 
 </h5>
 
-AI work is still single-player: one person, one chat window, context pasted in by hand. Rowboat makes it multiplayer.
+Rowboat indexes your work into a living knowledge graph and uses that to get work done on your machine. It includes work surfaces for collaborating with AI: email client, notes, browser, code mode, meeting note taker, and workspaces for different projects.
 
-Everyone on the team runs their own Rowboat on their own machine, with their own memory of their work (email, meetings, notes, code) and their own model keys. A **Space** is the one thing you share: a place to talk, keep files and whiteboards, and get work done. Type `@rowboat` in a Space and *your* Rowboat picks it up, works with *your* context on *your* machine, and brings the result back to the room as you.
 
-Great on your own. Even better together.
+Download latest for Mac/Windows/Linux: [Download](https://www.rowboatlabs.com/downloads)
 
-**Download for Mac, Windows and Linux:** [rowboatlabs.com/downloads](https://www.rowboatlabs.com/downloads)
+<p align="center">
+<a href="https://www.youtube.com/watch?v=et5yQABJ3xI">
+<img width="800" height="450" alt="Rowboat Apps to Code demo" src="apps/x/demo.gif" />
+</a>
+</p>
+
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=et5yQABJ3xI"> Demo - apps to code </a> · <a href="https://www.youtube.com/watch?v=7xTpciZCfpw"> Demo - knowledge graph</a>
+</p>
+
 
 ⭐ If you find Rowboat useful, please star the repo. It helps more people find it.
 
 ---
+## Overview
+
+<table>
+<tr>
+<td width="40%" valign="middle">
+<h3>Brain</h3>
+Rowboat indexes email, meetings, slack and assistant conversations into a living Obsidian-style backlinked knowledge graph.
+</td>
+<td width="60%">
+<img width="1502" height="939" alt="Brain graph screenshot" src="assets/readme-dark/brain.png" />
+</td>
+</tr>
+<tr>
+<td width="40%" valign="middle">
+<h3>Email</h3>
+The built-in email client sorts emails into important and everything else. Rowboat automatically drafts responses for important email using all the work context.
+</td>
+<td width="60%">
+<img width="1512" height="948" alt="Email screenshot" src="assets/readme-dark/email.png" />
+</td>
+</tr>
+<tr>
+<td width="40%" valign="middle">
+<h3>Background agents</h3>
+You can set up background agents that run on events like new email or on schedule like every day at 8am. They can connect to tools, search the web, use the browser and write code using Claude Code or Codex.
+</td>
+<td width="60%">
+<img width="1512" height="951" alt="Background agents screenshot" src="assets/readme-dark/background-agents.png" />
+
+</td>
+</tr>
+<tr>
+<td width="40%" valign="middle">
+<h3>Built-in Browser</h3>
+Rowboat includes a browser that lets you and assistant collaborate on web tasks. Because it's isolated from your main browser, you can log in only to the accounts that you want the assistant to access.
+</td>
+<td width="60%">
+<img width="1512" height="948" alt="Browser screenshot" src="assets/readme-dark/browser.png" />
+</td>
+</tr>
+<tr>
+<td width="40%" valign="middle">
+<h3>Meeting Notes</h3>
+A local meeting note-taker that taps into mic & speaker, produces live transcript and summarizes the meeting in a markdown file and updates the knowledge graph.
+</td>
+<td width="60%">
+<img width="1512" height="947" alt="Meeting notes screenshot" src="assets/readme-dark/meeting-notes.png" />
+</td>
+</tr>
+<tr>
+<td width="40%" valign="middle">
+<h3>Code Mode</h3>
+Code mode lets you spin up parallel coding agents with Claude Code or Codex, and have Rowboat drive them with all the work context where needed.
+</td>
+<td width="60%">
+<img width="1512" height="949" alt="Code mode screenshot" src="assets/readme-dark/code-mode.png" />
+</td>
+</tr>
+<tr>
+<td width="40%" valign="middle">
+<h3>Apps</h3>
+You can build your own work surfaces inside Rowboat — they get access to all the tools and integrations, and you can share them with other people.
+</td>
+<td width="60%">
+<img width="1512" height="949" alt="Apps screenshot" src="assets/readme-dark/apps.png" />
+</td>
+</tr>
+<tr>
+<td width="40%" valign="middle">
+<h3>Integrations</h3>
+Includes one-click integrations to most popular products.
+</td>
+<td width="60%">
+<img width="1512" height="948" alt="Integrations screenshot" src="assets/readme-dark/integrations.png" />
+</td>
+</tr>
+
+</table>
+
+---
+
+## Installation
+
+**Download latest for Mac/Windows/Linux:** [Download](https://www.rowboatlabs.com/downloads)
+
+**All release files:**   https://github.com/rowboatlabs/rowboat/releases/latest
+
+### Google setup
+To connect Google services (Gmail, Calendar, and Drive), follow [Google setup](https://github.com/rowboatlabs/rowboat/blob/main/google-setup.md).
+
+### Voice input
+To enable voice input and voice notes (optional), add a Deepgram API key in `~/.rowboat/config/deepgram.json`
+
+### Voice output
+
+To enable voice output (optional), add an ElevenLabs API key in `~/.rowboat/config/elevenlabs.json`
+
+### Web search
+
+To use Exa research search (optional), add the Exa API key in `~/.rowboat/config/exa-search.json`
+
+### External tools
+
+To enable external tools (optional), you can add any MCP server or use Composio tools by adding an API key in `~/.rowboat/config/composio.json`
+
+All API key files use the same format:
+```
+{
+  "apiKey": "<key>"
+}
+```
+
+
+## How it’s different
+
+Most AI tools reconstruct context on demand by searching transcripts or documents.
+
+Rowboat maintains **long-lived knowledge** instead:
+- context accumulates over time
+- relationships are explicit and inspectable
+- notes are editable by you, not hidden inside a model
+- everything lives on your machine as plain Markdown
+
+The result is memory that compounds, rather than retrieval that starts cold every time.
+
+## Bring your own model
+
+Rowboat works with the model setup you prefer:
+- **Local models** via Ollama or LM Studio
+- **Hosted models** (bring your own API key/provider)
+- Swap models anytime — your data stays in your local Markdown vault
+
+## Extend Rowboat with tools (MCP)
+
+Rowboat can connect to external tools and services via **Model Context Protocol (MCP)**.
+That means you can plug in (for example) search, databases, CRMs, support tools, and automations - or your own internal tools.
+
+Examples: Exa (web search), Twitter/X, ElevenLabs (voice), Slack, Linear/Jira, GitHub, and more.
+
+### Example: Parallel web search
+
+[Parallel Search MCP](https://docs.parallel.ai/integrations/mcp/search-mcp) provides `web_search` and `web_fetch` for public web search and page extraction without a Parallel account or API key. Free access is rate limited.
+
+Open **Settings → MCP Servers**, add the `parallel` entry to your existing `mcpServers` object, and click **Save**. Keep any other server entries. If no servers are configured, use:
+
+```json
+{
+  "mcpServers": {
+    "parallel": {
+      "url": "https://search.parallel.ai/mcp"
+    }
+  }
+}
+```
+
+This connects through Rowboat's existing Streamable HTTP client. Ask Rowboat to list the tools on the `parallel` server, then try: "Use Parallel to find the official MCP documentation."
+
+Once configured, Rowboat can invoke these tools during its work, subject to your MCP tool permissions. Queries, requested URLs, and any supplied objectives or context are sent to Parallel. This setup leaves Exa and other configured providers unchanged. To remove it, delete the `parallel` entry in **Settings → MCP Servers** and save.
+
+## Local-first by design
+
+- All personal data is stored locally as plain Markdown
+- No proprietary formats or hosted lock-in
+- You can inspect, edit, back up, or delete everything at any time
+
+---
 
 ## Spaces: the multiplayer part
+
+Everyone on the team runs their own Rowboat on their own machine, with their own memory of their work and their own model keys. A **Space** is where you come together: a place to talk, share files and whiteboards, and get work done. Type `@rowboat` in a Space and your Rowboat works with your context on your machine, then brings the result back to the room as you.
+
+<p align="center">
+  <img width="1339" alt="Rowboat: every teammate, their own agent, one Space" src="assets/readme-spaces/spaces-hero.gif" />
+</p>
+
 
 <table>
 <tr>
@@ -139,126 +320,6 @@ Everything it posts lands in front of the team. Everything it reads might be pri
 
 You can belong to several servers at once, and a server can be just you: your notes to self live in a one-member DM.
 
----
-
-## Your own Rowboat
-
-The personal half is the same Rowboat it has always been: a desktop assistant with a memory of your work and built-in surfaces to act on it. Everything here runs on your machine.
-
-<table>
-<tr>
-<td width="40%" valign="middle">
-<h3>Brain</h3>
-Rowboat indexes email, meetings, slack and assistant conversations into a living Obsidian-style backlinked knowledge graph.
-</td>
-<td width="60%">
-<img width="1502" height="939" alt="Brain graph screenshot" src="assets/readme-dark/brain.png" />
-</td>
-</tr>
-<tr>
-<td width="40%" valign="middle">
-<h3>Email</h3>
-The built-in email client sorts emails into important and everything else. Rowboat automatically drafts responses for important email using all the work context.
-</td>
-<td width="60%">
-<img width="1512" height="948" alt="Email screenshot" src="assets/readme-dark/email.png" />
-</td>
-</tr>
-<tr>
-<td width="40%" valign="middle">
-<h3>Background agents</h3>
-You can set up background agents that run on events like new email or on schedule like every day at 8am. They can connect to tools, search the web, use the browser and write code using Claude Code or Codex.
-</td>
-<td width="60%">
-<img width="1512" height="951" alt="Background agents screenshot" src="assets/readme-dark/background-agents.png" />
-</td>
-</tr>
-<tr>
-<td width="40%" valign="middle">
-<h3>Built-in Browser</h3>
-Rowboat includes a browser that lets you and assistant collaborate on web tasks. Because it's isolated from your main browser, you can log in only to the accounts that you want the assistant to access.
-</td>
-<td width="60%">
-<img width="1512" height="948" alt="Browser screenshot" src="assets/readme-dark/browser.png" />
-</td>
-</tr>
-<tr>
-<td width="40%" valign="middle">
-<h3>Meeting Notes</h3>
-A local meeting note-taker that taps into mic & speaker, produces live transcript and summarizes the meeting in a markdown file and updates the knowledge graph.
-</td>
-<td width="60%">
-<img width="1512" height="947" alt="Meeting notes screenshot" src="assets/readme-dark/meeting-notes.png" />
-</td>
-</tr>
-<tr>
-<td width="40%" valign="middle">
-<h3>Code Mode</h3>
-Code mode lets you spin up parallel coding agents with Claude Code or Codex, and have Rowboat drive them with all the work context where needed.
-</td>
-<td width="60%">
-<img width="1512" height="949" alt="Code mode screenshot" src="assets/readme-dark/code-mode.png" />
-</td>
-</tr>
-<tr>
-<td width="40%" valign="middle">
-<h3>Apps</h3>
-You can build your own work surfaces inside Rowboat. They get access to all the tools and integrations, and you can share them with other people.
-</td>
-<td width="60%">
-<img width="1512" height="949" alt="Apps screenshot" src="assets/readme-dark/apps.png" />
-</td>
-</tr>
-<tr>
-<td width="40%" valign="middle">
-<h3>Integrations</h3>
-Includes one-click integrations to most popular products.
-</td>
-<td width="60%">
-<img width="1512" height="948" alt="Integrations screenshot" src="assets/readme-dark/integrations.png" />
-</td>
-</tr>
-
-</table>
-
-<p align="center">
-  <a href="https://www.youtube.com/watch?v=et5yQABJ3xI">Demo: apps to code</a> · <a href="https://www.youtube.com/watch?v=7xTpciZCfpw">Demo: knowledge graph</a>
-</p>
-
----
-
-## Installation
-
-**Download latest for Mac/Windows/Linux:** [Download](https://www.rowboatlabs.com/downloads)
-
-**All release files:**   https://github.com/rowboatlabs/rowboat/releases/latest
-
-### Google setup
-To connect Google services (Gmail, Calendar, and Drive), follow [Google setup](https://github.com/rowboatlabs/rowboat/blob/main/google-setup.md).
-
-### Voice input
-To enable voice input and voice notes (optional), add a Deepgram API key in `~/.rowboat/config/deepgram.json`
-
-### Voice output
-
-To enable voice output (optional), add an ElevenLabs API key in `~/.rowboat/config/elevenlabs.json`
-
-### Web search
-
-To use Exa research search (optional), add the Exa API key in `~/.rowboat/config/exa-search.json`
-
-### External tools
-
-To enable external tools (optional), you can add any MCP server or use Composio tools by adding an API key in `~/.rowboat/config/composio.json`
-
-All API key files use the same format:
-```
-{
-  "apiKey": "<key>"
-}
-```
-
----
 
 ## Run your own Harbor
 
@@ -301,59 +362,6 @@ claude mcp add --transport http my-team https://<org address>/mcp
 
 Harbor publishes OAuth protected-resource metadata, so any MCP client that speaks OAuth 2.1 finds the sign-in flow on its own. Sign in as yourself and the agent works as you; sign in as a member you created for it and it has a seat of its own.
 
----
-
-## How it's different
-
-Most AI tools reconstruct context on demand by searching transcripts or documents, and most team AI tools put one shared bot in the middle of everyone's data.
-
-Rowboat keeps **long-lived, personal knowledge** and makes the **sharing explicit**:
-- context accumulates over time, on your machine, as plain Markdown you can edit
-- relationships are explicit and inspectable
-- each teammate's agent is their own: their memory, their tools, their model keys
-- a Space holds only what people and their agents chose to post to it
-
-The result is memory that compounds, and collaboration that does not require handing your inbox to a shared bot.
-
-## Bring your own model
-
-Rowboat works with the model setup you prefer:
-- **Local models** via Ollama or LM Studio
-- **Hosted models** (bring your own API key/provider)
-- Swap models anytime. Your data stays in your local Markdown vault, and your teammates never need to share your keys.
-
-## Extend Rowboat with tools (MCP)
-
-Rowboat can connect to external tools and services via **Model Context Protocol (MCP)**.
-That means you can plug in (for example) search, databases, CRMs, support tools, and automations - or your own internal tools.
-
-Examples: Exa (web search), Twitter/X, ElevenLabs (voice), Slack, Linear/Jira, GitHub, and more.
-
-### Example: Parallel web search
-
-[Parallel Search MCP](https://docs.parallel.ai/integrations/mcp/search-mcp) provides `web_search` and `web_fetch` for public web search and page extraction without a Parallel account or API key. Free access is rate limited.
-
-Open **Settings → MCP Servers**, add the `parallel` entry to your existing `mcpServers` object, and click **Save**. Keep any other server entries. If no servers are configured, use:
-
-```json
-{
-  "mcpServers": {
-    "parallel": {
-      "url": "https://search.parallel.ai/mcp"
-    }
-  }
-}
-```
-
-This connects through Rowboat's existing Streamable HTTP client. Ask Rowboat to list the tools on the `parallel` server, then try: "Use Parallel to find the official MCP documentation."
-
-Once configured, Rowboat can invoke these tools during its work, subject to your MCP tool permissions. Queries, requested URLs, and any supplied objectives or context are sent to Parallel. This setup leaves Exa and other configured providers unchanged. To remove it, delete the `parallel` entry in **Settings → MCP Servers** and save.
-
-## Local-first by design
-
-- All personal data is stored locally as plain Markdown
-- No proprietary formats or hosted lock-in: the Space server is open source and self-hostable too
-- You can inspect, edit, back up, or delete everything at any time
 
 ## What's in this repo
 
