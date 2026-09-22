@@ -191,6 +191,15 @@ export interface Store {
   putMember(member: Member): Promise<void>;
   /** The whole org roster — operator-side reads only (the mentions backfill). */
   listAllMembers(): Promise<Member[]>;
+  /** A space's roster in join order — one statement (2026-09-22). */
+  listSpaceMembers(spaceId: string): Promise<Member[]>;
+  /**
+   * Every member who shares a space (DMs included) with `memberId`, plus the
+   * member themself — one statement (2026-09-22). The store answers the
+   * question; whether discovery is bounded this way is the core's rule
+   * (spaces.ts listOrgMembers; spec §5, open spaces).
+   */
+  listMembersSharingSpace(memberId: string): Promise<Member[]>;
 
   // identity mapping — (issuer, subject) → member (spec §4: the token proves
   // WHO; this table says which member that is). Written only by the invite

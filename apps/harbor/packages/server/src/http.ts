@@ -484,12 +484,12 @@ export function buildHttpApp(deps: {
     return reply(c, routes.activity.response, await service.activity(actor(c), q));
   });
   app.post(routes.markActivitySeen.path, async (c) => {
-    const body = parseWith(routes.markActivitySeen.request, await c.req.json());
-    return reply(c, routes.markActivitySeen.response, await service.markActivitySeen(actor(c), body.at));
+    const input = await body(c, routes.markActivitySeen.request);
+    return reply(c, routes.markActivitySeen.response, await service.markActivitySeen(actor(c), input.at));
   });
   app.post(routes.readAll.path, async (c) => {
-    const body = parseWith(routes.readAll.request, await c.req.json());
-    return reply(c, routes.readAll.response, await service.readAll(actor(c), body));
+    const input = await body(c, routes.readAll.request);
+    return reply(c, routes.readAll.response, await service.readAll(actor(c), input));
   });
 
   return app;
