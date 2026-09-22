@@ -8,6 +8,8 @@ import type { BlobStore } from './blobs.js';
 import { OrgDirectory, normalizeDomain, type CreateOrgInput, type OrgConfig } from './directory.js';
 import { HarborError } from './errors.js';
 import { SpaceHub } from './hub.js';
+import { internalHandler } from './internal.js';
+import { LiveStats } from './stats.js';
 import { migrate } from './migrations.js';
 import { PgStore } from './pg-store.js';
 import { buildOrgRuntime, type OrgRuntime } from './runtime.js';
@@ -53,11 +55,19 @@ export interface DeploymentOptions {
   blobs?: (orgId: string) => BlobStore;
   /** Upload cap for the raw-bytes blob route (default 100MB). */
   maxBlobBytes?: number;
+  /**
+   * The operator face (internal.ts). `key` enables GET /internal/stats; `log`
+   * prints the live-load line once a minute — independent of the key, the
+   * line is the passive record for whoever never polls. main.ts sets it;
+   * tests leave it off.
+   */
+  internal?: { key?: string; log?: boolean };
 }
 
 export interface RunningDeployment {
   url: string;
   port: number;
+  stats: LiveStats;
   directory: OrgDirectory;
   server: HttpServer;
   createOrg(input: CreateOrgInput): Promise<OrgConfig>;
@@ -72,7 +82,9 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
   // every org; per-org runtimes below deliberately never run init().
   await new PgStore(options.db).backfillAssetSearch();
   const directory = new OrgDirectory(options.db);
-  const hub = new SpaceHub();
+  const stats = new LiveStats({ log: options.internal?.log === true });
+  const hub = new SpaceHub(stats);
+  const internal = internalHandler({ key: options.internal?.key, stats });
   // One runtime per org, built on first sight — a Promise, so concurrent first
   // requests share the build — and one token verifier per issuer.
   const runtimes = new Map<string, Promise<OrgRuntime | undefined>>();
@@ -162,6 +174,7 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
         res.writeHead(200, { 'content-type': 'application/json' }).end('{"ok":true}');
         return;
       }
+      if (internal(req, res)) return;
       const host = hostOf(req);
       if (apex && host && normalizeDomain(host) === apexDomain) {
         apex(req, res);
@@ -181,7 +194,7 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
     });
   });
 
-  const closeLive = attachLive(server, async (host) => (await runtimeFor(host))?.live);
+  const closeLive = attachLive(server, async (host) => (await runtimeFor(host))?.live, { stats });
 
   await new Promise<void>((resolve) => server.listen(options.port ?? 0, resolve));
   const port = (server.address() as AddressInfo).port;
@@ -189,11 +202,13 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
   return {
     url: `http://localhost:${port}`,
     port,
+    stats,
     directory,
     server,
     createOrg: (input) => directory.createOrg(input),
     close: async () => {
       closeLive();
+      stats.close();
       await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
     },
   };

@@ -27,6 +27,7 @@ Two pnpm workspace packages under `packages/`:
 | `deployment.ts`, `directory.ts`, `apex.ts` | many orgs from one process: host → org runtime; the org directory; the apex face (create org, my orgs) |
 | `notify.ts`, `push.ts` | the one notification decision; Expo delivery |
 | `hub.ts`, `blobs*.ts`, `mime.ts`, `merge.ts`, `search.ts`, `mentions-backfill.ts` | in-process fan-out, blob drivers, sniffing, the three-way merge, query parsing, the mentions backfill |
+| `stats.ts`, `internal.ts` | the live-load counters (connections, subscriptions, frames per minute by kind, deliveries) and the operator face that reads them, `GET /internal/stats` behind `HARBOR_INTERNAL_KEY` |
 
 `test/` has one file per feature, every one on in-process Postgres. `helpers.ts` gives `startTestHarbor` (a harbor over a fresh database, closed with it), `restClient`, `agentClient`, `liveClient`, `startFakeAs` (a fake authorization server: discovery, JWKS, minted JWTs). `day-in-the-life.test.ts` is spec §11 as code; `mcp-parity.test.ts` proves the agent face; `policy.test.ts` pins every rule without a store.
 
@@ -107,9 +108,9 @@ Verified against Supabase Auth (2026-08-18/19), the flagship AS: tokens on a sha
 
 ## Ship
 
-- `HARBOR_MODE=deployment` with `DATABASE_URL`, `APEX_DOMAIN`, `AUTH_ISSUER`; optional `AUTH_PUBLISHABLE_KEY`, `BLOBS_S3_*` or `BLOBS_DIR`, `HARBOR_MAX_BLOB_BYTES`, `DATABASE_POOL_MAX`. The `Dockerfile` header lists them. Migrations self-apply at boot under an advisory lock; orgs are created on the apex face.
+- `HARBOR_MODE=deployment` with `DATABASE_URL`, `APEX_DOMAIN`, `AUTH_ISSUER`; optional `AUTH_PUBLISHABLE_KEY`, `BLOBS_S3_*` or `BLOBS_DIR`, `HARBOR_MAX_BLOB_BYTES`, `DATABASE_POOL_MAX`, `HARBOR_INTERNAL_KEY`. The `Dockerfile` header lists them. Migrations self-apply at boot under an advisory lock; orgs are created on the apex face.
 - **Server before app.** A breaking wire change deploys the server first and the app build the same day; an additive change needs no coupling. Say which in the PR.
-- **One instance.** The hub is in-process; a second instance partitions live delivery. Autoscaling stays off until the hub has a shared backend.
+- **One instance.** The hub is in-process; a second instance partitions live delivery. Autoscaling stays off until the hub has a shared backend. `GET /internal/stats` with the operator key shows what the instance carries — connections, subscriptions, frames per minute by kind, deliveries — the numbers that say when one stops being enough; the same line lands in the log once a minute whether or not the key is set. When a second instance comes, the counters feed an OpenTelemetry push and the hub gets its bus in the same change.
 - The S3 blob driver's conformance suite runs when `HARBOR_TEST_S3_BUCKET` is set; the disk driver's always.
 
 ## Before you open a PR
