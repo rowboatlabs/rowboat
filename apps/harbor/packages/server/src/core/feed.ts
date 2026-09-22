@@ -294,7 +294,7 @@ export class Feed {
     const author = this.k.attributionOf(ctx, input);
 
     const stamps = await this.stampsFor(spaceId, input.body);
-    const result = await this.k.locked(spaceId, async () => {
+    const result = await this.k.lockedAs(ctx, spaceId, async () => {
       const at = this.k.now();
       // The org stamps the poll from its own clock: answer ids 1..n, a
       // duration in becomes an expiry out (the Discord create asymmetry).
@@ -401,7 +401,7 @@ export class Feed {
     this.k.guardWrite();
     const by = this.k.attributionOf(ctx, input);
 
-    return this.k.locked(spaceId, async () => {
+    return this.k.lockedAs(ctx, spaceId, async () => {
       const at = this.k.now();
 
       let root: Message;
@@ -556,7 +556,7 @@ export class Feed {
     this.k.guardWrite();
     const by = this.k.attributionOf(ctx, input);
 
-    return this.k.locked(spaceId, async () => {
+    return this.k.lockedAs(ctx, spaceId, async () => {
       const message = await this.k.store.getMessage(spaceId, messageId);
       if (!message) throw new HarborError('not_found', 'no such message');
       enforce(isAuthor(ctx, message, 'delete a message'));
@@ -604,7 +604,7 @@ export class Feed {
     const by = this.k.attributionOf(ctx, input);
 
     const stamps = await this.stampsFor(spaceId, input.body);
-    return this.k.locked(spaceId, async () => {
+    return this.k.lockedAs(ctx, spaceId, async () => {
       const message = await this.k.store.getMessage(spaceId, messageId);
       if (!message) throw new HarborError('not_found', 'no such message');
       enforce(isAuthor(ctx, message, 'edit a message'));
@@ -633,7 +633,7 @@ export class Feed {
     this.k.guardWrite();
     const by = this.k.attributionOf(ctx, input);
 
-    return this.k.locked(spaceId, async () => {
+    return this.k.lockedAs(ctx, spaceId, async () => {
       const message = await this.k.store.getMessage(spaceId, messageId);
       if (!message) throw new HarborError('not_found', 'no such message');
       if (message.deletedAt && input.action === 'add') {
@@ -677,7 +677,7 @@ export class Feed {
     this.k.guardWrite();
     const by = this.k.attributionOf(ctx, input);
 
-    return this.k.locked(spaceId, async () => {
+    return this.k.lockedAs(ctx, spaceId, async () => {
       const message = await this.k.store.getMessage(spaceId, messageId);
       if (!message) throw new HarborError('not_found', 'no such message');
       const poll = message.poll;
@@ -738,7 +738,7 @@ export class Feed {
     // the author — the author-only check below is on memberId, not mode.
     const by = this.k.attributionOf(ctx, input);
 
-    return this.k.locked(spaceId, async () => {
+    return this.k.lockedAs(ctx, spaceId, async () => {
       const message = await this.k.store.getMessage(spaceId, messageId);
       if (!message) throw new HarborError('not_found', 'no such message');
       const poll = message.poll;
@@ -767,7 +767,7 @@ export class Feed {
     this.k.guardWrite();
     const by = this.k.attributionOf(ctx, action);
 
-    return this.k.locked(spaceId, async () => {
+    return this.k.lockedAs(ctx, spaceId, async () => {
       const topic = await this.k.store.getTopic(spaceId, topicId);
       if (!topic) throw new HarborError('not_found', 'no such topic');
       const at = this.k.now();

@@ -34,7 +34,7 @@ Two pnpm workspace packages under `packages/`:
 
 - **One core, three doors.** The faces hold `{ service, auth: OrgAuth }` and never the store. Rowboat's own agent uses the same MCP tools as any agent; there is no privileged path.
 - **Rules live in `policy.ts`.** Every question of the form "may this actor do this to this space or message" is a pure decision there; the core loads the facts and asks; no face decides anything.
-- **Every read-decide-write runs inside `k.locked(spaceId, …)`.** On Postgres the lock is the transaction. Events go through `k.append` / `k.appendNext`, which hold frames until the commit returns, so a subscriber never sees an uncommitted fact or a rolled-back phantom.
+- **Every read-decide-write runs inside the space lock.** A member's act uses `k.lockedAs(ctx, spaceId, …)`, which re-verifies access inside the transaction, so a write that lost a race to a removal is refused, never landed; acts that create the membership themselves, and operator passes, use `k.locked`. On Postgres the lock is the transaction. Events go through `k.append` / `k.appendNext`, which hold frames until the commit returns, so a subscriber never sees an uncommitted fact or a rolled-back phantom.
 - **The log is append-only, with two named exceptions.** Message deletion and message editing redact the stored event, because replay must never resurrect the text. Nothing else edits a stored event.
 - **Migrations are append-only.** One concern per entry, never edit an applied one, arbitrary SQL is fine from 002. Generated columns belong to Postgres; code never writes them.
 - **One store driver.** Tests and `pnpm dev` run the production SQL on PGlite. Do not add an in-memory store.
@@ -67,7 +67,7 @@ async renameSpace(ctx: ActorCtx, spaceId: string, input: RenameSpaceInput): Prom
   enforce(canRenameSpace(space));                            // the rule, from policy.ts
   this.k.guardWrite();                                       // the org may be read-only
   const by = this.k.attributionOf(ctx, input);               // who, and how
-  return this.k.locked(spaceId, async () => {                // the space lock — the transaction
+  return this.k.lockedAs(ctx, spaceId, async () => {        // the space lock — the transaction; access re-verified inside
     const current = (await this.k.store.getSpace(spaceId)) ?? space;   // re-read inside it
     if (current.name === input.name) return current;         // idempotent no-op: no write, no event
     const updated: Space = { ...current, name: input.name };

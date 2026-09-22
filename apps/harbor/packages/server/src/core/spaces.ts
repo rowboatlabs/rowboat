@@ -78,7 +78,7 @@ export class Spaces {
     enforce(canRenameSpace(space));
     this.k.guardWrite();
     const by = this.k.attributionOf(ctx, input);
-    return this.k.locked(spaceId, async () => {
+    return this.k.lockedAs(ctx, spaceId, async () => {
       const current = (await this.k.store.getSpace(spaceId)) ?? space;
       if (current.name === input.name) return current; // idempotent, no event
       const updated: Space = { ...current, name: input.name };
@@ -183,13 +183,15 @@ export class Spaces {
     const space = await this.k.requireMember(ctx, spaceId);
     enforce(canChangeMembership(space, 'leave'));
     // No write guard on purpose: over its limit an org cannot grow, but anyone may leave (policy.ts canWrite).
-    await this.k.locked(spaceId, async () => {
-      const membership = await this.k.store.getMembership(spaceId, ctx.memberId);
-      if (!membership) return;
+    const at = this.k.now();
+    await this.k.lockedAs(ctx, spaceId, async (membership) => {
       await this.k.store.deleteMembership(spaceId, ctx.memberId);
       await this.k.store.deleteReadMarks(spaceId, ctx.memberId);
-      await this.k.appendNext(spaceId, this.k.now(), { type: 'membership', membership, action: 'left' });
+      await this.k.appendNext(spaceId, at, { type: 'membership', membership, action: 'left' });
     });
+    // Every connection the member holds ends its subscription to the space
+    // (2026-09-22) — leave on the laptop, the phone stops receiving too.
+    this.k.hub.publishToMember(ctx.memberId, { kind: 'space_removed', spaceId, by: ctx.memberId, at });
   }
 
   // --- invites ---------------------------------------------------------------

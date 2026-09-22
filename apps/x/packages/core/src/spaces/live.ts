@@ -325,10 +325,11 @@ export class SpacesLive {
         return; // a frame we don't understand is not a reason to drop the socket
       }
       // Member-addressed frames carry a spaceId but ride no space
-      // subscription: someone put us in a space (space_added), one of our
-      // own connections moved a read mark (read_mark), or the org decided a
-      // message deserves our attention (notify).
-      if (frame.kind === 'space_added' || frame.kind === 'read_mark' || frame.kind === 'notify') {
+      // subscription: someone put us in a space (space_added), our membership
+      // of one ended (space_removed — the org already dropped the server-side
+      // subscription), one of our own connections moved a read mark
+      // (read_mark), or the org decided a message deserves our attention (notify).
+      if (frame.kind === 'space_added' || frame.kind === 'space_removed' || frame.kind === 'read_mark' || frame.kind === 'notify') {
         for (const h of this.memberHandlers) h(frame);
         return;
       }

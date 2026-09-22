@@ -173,6 +173,23 @@ export const ServerFrame = z.discriminatedUnion('kind', [
     at: z.iso.datetime(),
   }),
   /**
+   * Addressed to a MEMBER (2026-09-22), the mirror of `space_added`: your
+   * membership of a space ended — you left it (on this device or another)
+   * today; an admin removed you tomorrow. The live face drops the space's
+   * subscription on this frame BEFORE forwarding it, so no frame of that
+   * space reaches you after your departure, and a re-subscribe is refused.
+   * Ephemeral, never replayed: the durable truth is the `membership` event
+   * (`left` / `removed`) on the space's own log. Pre-2026-09-22 clients drop
+   * the unknown frame by contract.
+   */
+  z.object({
+    kind: z.literal('space_removed'),
+    spaceId: SpaceId,
+    /** Who ended it: yourself on leave, the remover once removal exists. */
+    by: MemberId,
+    at: z.iso.datetime(),
+  }),
+  /**
    * Addressed to a MEMBER (read state, 2026-09-09): one of your own
    * connections advanced a read mark — the stream's (no threadRootId) or a
    * followed thread's — so your other devices apply it and badges agree

@@ -134,9 +134,17 @@ function handleConnection(ws: LiveSocket, memberId: string, deps: LiveDeps, maxB
     send({ kind: 'error', ...(spaceId ? { spaceId } : {}), code, message });
   };
 
-  // Member-addressed frames (space_added) need no subscription — the whole
-  // point is that the space is one you could not have subscribed to yet.
-  const unsubscribeMember = deps.hub.subscribeMember(memberId, send);
+  // Member-addressed frames ride no space subscription: space_added is about
+  // a space you could not have subscribed to yet, and space_removed ends the
+  // one you hold — dropped here, before the frame is forwarded, so nothing
+  // from that space follows your departure (2026-09-22).
+  const unsubscribeMember = deps.hub.subscribeMember(memberId, (frame) => {
+    if (frame.kind === 'space_removed') {
+      subscriptions.get(frame.spaceId)?.();
+      subscriptions.delete(frame.spaceId);
+    }
+    send(frame);
+  });
 
   ws.on('message', (data) => {
     ws.sawLifeSinceLastBeat = true;
