@@ -48,6 +48,8 @@ Great on your own. Even better together.
 
 ## Spaces: the multiplayer part
 
+Read the [Spaces specification](docs/spaces-spec.md) for the design principles, architecture, and protocol decisions.
+
 <table>
 <tr>
 <td width="40%" valign="middle">
