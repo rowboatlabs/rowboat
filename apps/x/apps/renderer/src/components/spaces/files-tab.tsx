@@ -27,6 +27,7 @@ import {
 import { toast } from '@/lib/toast'
 import { copySpacesLink } from '@/lib/spaces-copy-link'
 import { copySpaceFile, downloadSpaceFile, spaceFileCopyLabel } from '@/lib/space-file-actions'
+import { readSpaceDraft, writeSpaceDraft, type SpaceDraft } from '@/lib/space-drafts'
 import { ClippedText, MemberAvatar } from '@/components/spaces/atoms'
 import { uploadInputFor } from '@/lib/spaces-upload'
 
@@ -399,12 +400,8 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
 // merges shows a notice, a conflict blocks nothing and loses nothing.
 // ---------------------------------------------------------------------------
 
-interface DraftState {
-    baseVersion: number
-    text: string
-    reason: string
-    conflict: Extract<spaces.ProposeChangeResult, { outcome: 'conflict' }> | null
-}
+/** The draft outlives this component — it is held by file identity in space-drafts. */
+type DraftState = SpaceDraft
 
 export function FileColumn({ org, space, assetId, entries = [], memberNames, refreshTick, onChanged, crumb, onDismiss, onDeleted, onOpenFile, onOpenSpaceFile }: {
     org: OrgWithSpaces
@@ -426,9 +423,12 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
     /** A canonical link to a file in ANOTHER space (by org address — the owner knows whether the reader is in it). */
     onOpenSpaceFile?: (orgAddress: string, spaceId: string, assetId: string) => void
 }) {
+    const draftRef = { orgId: org.id, spaceId: space.id, assetId }
     const [asset, setAsset] = useState<spaces.ReadAssetResult | null>(null)
     const [missing, setMissing] = useState(false)
-    const [draft, setDraft] = useState<DraftState | null>(null)
+    // A draft left open on an earlier mount resumes here — the column paints in
+    // edit mode, on that text, before the read comes back.
+    const [draft, setDraft] = useState<DraftState | null>(() => readSpaceDraft(draftRef))
     const [applying, setApplying] = useState(false)
     const [historyOpen, setHistoryOpen] = useState(false)
     const [diffView, setDiffView] = useState<{ title: string; unified: string; restorable: number | null } | null>(null)
@@ -457,6 +457,13 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
     // Esc returns to the topic this file was opened from (only when not editing).
     const crumbBack = crumb?.onBack
     const editing = draft !== null
+
+    // Every keystroke lands in the session's draft memory, so whatever the last
+    // painted state was is what an unmount leaves behind. There is no cleanup on
+    // unmount by design; clearing is the draft going null (applied, discarded).
+    useEffect(() => {
+        writeSpaceDraft({ orgId: org.id, spaceId: space.id, assetId }, draft)
+    }, [org.id, space.id, assetId, draft])
     useEffect(() => {
         if (!crumbBack || editing) return
         const onKey = (e: KeyboardEvent) => {
@@ -795,6 +802,8 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
                         entry={{ id: assetId, path, version: asset.version, updatedAt: '' }}
                         onClose={() => setDeleteOpen(false)}
                         onDeleted={() => {
+                            // The file is gone: its draft has nothing left to apply against.
+                            writeSpaceDraft(draftRef, null)
                             onChanged()
                             onDeleted?.()
                         }}
