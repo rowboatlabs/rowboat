@@ -147,6 +147,20 @@ export const CodeRunPermissionRequestEvent = BaseRunEvent.extend({
     ask: PermissionAsk,
 });
 
+// The answer to ONE `code-run-permission-request`, carrying the requestId it
+// pairs off. Published only for asks that actually reached the user (including
+// the synthetic reject a stop delivers), never for a policy/sticky
+// auto-approval: those were never announced as a request, so marking them
+// resolved would retire a card nobody ever saw. (2026-09-23: before this the
+// bridge derived the marker from every broker decision and the view counted
+// requests against resolutions, so one "Always allow" click drove the count
+// negative and swallowed every later ask - the agent blocked with no card.)
+export const CodeRunPermissionResolvedEvent = BaseRunEvent.extend({
+    type: z.literal("code-run-permission-resolved"),
+    toolCallId: z.string(),
+    requestId: z.string(),
+});
+
 // The complete, ordered code-run timeline, published ONCE when the coding turn
 // settles (consecutive agent message chunks coalesced — display-lossless, the
 // timeline concatenates them anyway). This is the durable record; the live
@@ -193,6 +207,7 @@ export const RunEvent = z.union([
     ToolPermissionResponseEvent,
     CodeRunStreamEvent,
     CodeRunPermissionRequestEvent,
+    CodeRunPermissionResolvedEvent,
     CodeRunEventsBatchEvent,
     ToolPermissionAutoDecisionEvent,
     RunErrorEvent,
