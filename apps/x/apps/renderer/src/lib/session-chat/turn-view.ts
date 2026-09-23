@@ -228,14 +228,19 @@ function toolStatus(tc: ToolCallState): ToolCall['status'] {
 // real-tool-registry.ts): ONE settle-time 'code-run-events' batch carrying the
 // whole timeline (the live per-event stream travels over the ephemeral
 // CodeRunFeed and never reaches turn state), plus per-ask
-// 'code-run-permission-request' / 'code-run-permission-resolved' pairs. An ask
-// is pending while requests outnumber resolutions and the tool hasn't settled.
+// 'code-run-permission-request' / 'code-run-permission-resolved' pairs keyed by
+// requestId. An ask is pending until ITS id is resolved and the tool settles.
+//
+// Pairing is by id, not by count (2026-09-23): a count treats any resolution as
+// answering any ask, and automatic approvals used to emit resolutions with no
+// request behind them, so the tally went negative and hid every later ask while
+// the coding agent sat blocked on it. Only the oldest pending ask renders - the
+// agent is blocked on all of them, and answering one surfaces the next.
 function codeRunViewOf(
   tc: ToolCallState,
 ): Pick<ToolCall, 'codeRunEvents' | 'pendingCodePermission'> {
   let events: CodeRunEvent[] | undefined
-  let pending: { requestId: string; ask: PermissionAsk } | null = null
-  let unresolved = 0
+  const pending = new Map<string, PermissionAsk>()
   for (const p of tc.progress) {
     const entry = p.progress
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
@@ -246,16 +251,27 @@ function codeRunViewOf(
     } else if (kind === 'code-run-permission-request') {
       const { requestId, ask } = entry as { requestId?: unknown; ask?: unknown }
       if (typeof requestId === 'string' && ask) {
-        pending = { requestId, ask: ask as PermissionAsk }
-        unresolved += 1
+        pending.set(requestId, ask as PermissionAsk)
       }
     } else if (kind === 'code-run-permission-resolved') {
-      unresolved -= 1
+      const { requestId } = entry as { requestId?: unknown }
+      if (typeof requestId === 'string') {
+        pending.delete(requestId)
+      } else {
+        // Pre-2026-09-23 logs: the marker carried no id. Those runs are long
+        // settled (a settled tool shows no card at all), so clearing the oldest
+        // is only about not stranding a card on a turn caught mid-upgrade.
+        const oldest = pending.keys().next()
+        if (!oldest.done) pending.delete(oldest.value)
+      }
     }
   }
+  const oldest = pending.entries().next()
   return {
     ...(events && events.length > 0 ? { codeRunEvents: events } : {}),
-    ...(pending && unresolved > 0 && !tc.result ? { pendingCodePermission: pending } : {}),
+    ...(!oldest.done && !tc.result
+      ? { pendingCodePermission: { requestId: oldest.value[0], ask: oldest.value[1] } }
+      : {}),
   }
 }
 

@@ -184,16 +184,22 @@ export class RealToolRegistry implements IToolRegistry {
                                         chunk: event.output,
                                     });
                                 } else if (event.type === "code-run-event") {
-                                    // The live per-event stream travels over the
-                                    // ephemeral CodeRunFeed (never persisted) — but a
-                                    // permission RESOLUTION is durably marked so an
-                                    // answered ask never resurrects as a pending card
+                                    // Nothing durable: the live per-event stream
+                                    // travels over the ephemeral CodeRunFeed. It
+                                    // used to mark a permission RESOLUTION from
+                                    // here, but that fires for automatic
+                                    // decisions too, which the view then counted
+                                    // against asks it had never been told about
+                                    // (2026-09-23). Resolutions are published by
+                                    // the ask path itself now, with their id.
+                                } else if (event.type === "code-run-permission-resolved") {
+                                    // Durably pairs off ONE ask by id, so an
+                                    // answered card never resurrects as pending
                                     // after a reload or session switch.
-                                    if (event.event.type === "permission") {
-                                        await ctx.reportProgress({
-                                            kind: "code-run-permission-resolved",
-                                        });
-                                    }
+                                    await ctx.reportProgress({
+                                        kind: "code-run-permission-resolved",
+                                        requestId: event.requestId,
+                                    });
                                 } else if (event.type === "code-run-permission-request") {
                                     // Durable (not feed-ephemeral): the coding turn is
                                     // BLOCKED until the user answers via
