@@ -45,11 +45,12 @@ async function mcpClient(token: string, headers: Record<string, string> = {}): P
 }
 
 describe('agent face (MCP)', () => {
-  it('lists exactly the thirty protocol tools, with JSON schemas', async () => {
+  it('lists exactly the protocol tools, with JSON schemas', async () => {
     const client = await mcpClient('dev-harsh');
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
       'asset_history',
+      'browse_spaces',
       'create_asset',
       'create_invite',
       'create_space',
@@ -59,7 +60,9 @@ describe('agent face (MCP)', () => {
       'diff',
       'edit_message',
       'end_poll',
+      'join_space',
       'leave_space',
+      'list_assets',
       'list_members',
       'list_spaces',
       'list_topics',

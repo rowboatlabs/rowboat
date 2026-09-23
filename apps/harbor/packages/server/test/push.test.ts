@@ -11,7 +11,7 @@ import type { Message, Space } from '@rowboat/spaces-protocol';
 // registration — against the store with a mocked Expo endpoint.
 
 const space = (kind: 'shared' | 'direct'): Space =>
-  ({ id: '01HZZZZZZZZZZZZZZZZZZZZZZZ', name: 'general', createdAt: new Date().toISOString(), kind }) as Space;
+  ({ id: '01HZZZZZZZZZZZZZZZZZZZZZZZ', name: 'general', createdAt: new Date().toISOString(), kind, visibility: 'private' }) as Space;
 
 const msg = (author = 'harsh'): Message =>
   ({

@@ -147,9 +147,17 @@ async function dispatch(
       const a = args as { memberId: string };
       return service.openDirect(ctx, a.memberId);
     }
+    case 'list_assets': {
+      const a = args as { spaceId: string; includeDeleted?: boolean };
+      return { entries: await service.listAssets(ctx, a.spaceId, a.includeDeleted) };
+    }
+    case 'browse_spaces':
+      return { spaces: await service.browseSpaces(ctx) };
+    case 'join_space':
+      return service.joinSpace(ctx, (args as { spaceId: string }).spaceId);
     case 'create_space': {
-      const a = args as { name: string };
-      return { space: await service.createSpace(ctx, a.name) };
+      const a = args as { name: string; visibility?: 'private' | 'open' };
+      return { space: await service.createSpace(ctx, a.name, a.visibility) };
     }
     case 'rename_space': {
       const a = args as { spaceId: string; name: string };
@@ -173,6 +181,7 @@ async function dispatch(
             id: space.id,
             name: space.name,
             kind: space.kind,
+            visibility: space.visibility,
             ...(space.participants ? { participants: space.participants, self: space.participants.length === 1 } : {}),
             memberCount: (await service.listMembers(ctx, space.id)).length,
             assets: await service.listAssets(ctx, space.id),

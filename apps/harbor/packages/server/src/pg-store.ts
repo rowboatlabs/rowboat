@@ -67,6 +67,7 @@ interface SpaceRow {
   name: string;
   created_at: string;
   kind: Space['kind'];
+  visibility: Space['visibility'];
   direct_key: string | null;
 }
 
@@ -76,6 +77,7 @@ function rowToSpace(r: SpaceRow): Space {
     name: r.name,
     createdAt: r.created_at,
     kind: r.kind,
+    visibility: r.visibility,
     ...(r.kind === 'direct' && r.direct_key !== null ? { participants: JSON.parse(r.direct_key) as string[] } : {}),
   };
 }
@@ -390,7 +392,7 @@ export class PgStore implements Store {
     // same direct_key trips the partial unique index (migration 014) and
     // raises — the service treats that as "lost the race, re-read".
     await this.sql.query(
-      `insert into spaces (org_id, id, name, created_at, kind, direct_key) values ($1, $2, $3, $4, $5, $6)
+      `insert into spaces (org_id, id, name, created_at, kind, visibility, direct_key) values ($1, $2, $3, $4, $5, $6, $7)
        on conflict (id) do update set name = excluded.name`,
       [
         this.orgId,
@@ -398,6 +400,7 @@ export class PgStore implements Store {
         space.name,
         space.createdAt,
         space.kind,
+        space.visibility,
         space.kind === 'direct' ? directKeyFor(space.participants ?? []) : null,
       ],
     );
@@ -407,15 +410,26 @@ export class PgStore implements Store {
     // Org-scoped on purpose: this is what makes a foreign org's space ids
     // (and invite tokens, which resolve through here) not_found.
     const rows = await this.sql.query<SpaceRow>(
-      'select id, name, created_at, kind, direct_key from spaces where org_id = $1 and id = $2',
+      'select id, name, created_at, kind, visibility, direct_key from spaces where org_id = $1 and id = $2',
       [this.orgId, id],
     );
     return rows[0] ? rowToSpace(rows[0]) : undefined;
   }
 
+  async browseSpaces(memberId: string): Promise<Array<{ space: Space; joined: boolean }>> {
+    const rows = await this.sql.query<SpaceRow & { joined: boolean }>(
+      `select s.id, s.name, s.created_at, s.kind, s.visibility, s.direct_key,
+        exists (select 1 from memberships m where m.space_id = s.id and m.member_id = $2) as joined
+       from spaces s where s.org_id = $1 and s.kind = 'shared' and s.visibility = 'open'
+       order by lower(s.name), s.id`,
+      [this.orgId, memberId],
+    );
+    return rows.map((r) => ({ space: rowToSpace(r), joined: r.joined }));
+  }
+
   async listSpacesFor(memberId: string, opts: { includeDirect?: boolean } = {}): Promise<Space[]> {
     const rows = await this.sql.query<SpaceRow>(
-      `select s.id, s.name, s.created_at, s.kind, s.direct_key from spaces s
+      `select s.id, s.name, s.created_at, s.kind, s.visibility, s.direct_key from spaces s
        join memberships m on m.space_id = s.id
        where s.org_id = $1 and m.member_id = $2 and ($3::boolean or s.kind <> 'direct')
        order by s.created_at, s.id`,
@@ -426,7 +440,7 @@ export class PgStore implements Store {
 
   async listAllSpaces(): Promise<Space[]> {
     const rows = await this.sql.query<SpaceRow>(
-      'select id, name, created_at, kind, direct_key from spaces where org_id = $1 order by created_at, id',
+      'select id, name, created_at, kind, visibility, direct_key from spaces where org_id = $1 order by created_at, id',
       [this.orgId],
     );
     return rows.map(rowToSpace);
@@ -434,7 +448,7 @@ export class PgStore implements Store {
 
   async getDirectSpace(directKey: string): Promise<Space | undefined> {
     const rows = await this.sql.query<SpaceRow>(
-      `select id, name, created_at, kind, direct_key from spaces
+      `select id, name, created_at, kind, visibility, direct_key from spaces
        where org_id = $1 and kind = 'direct' and direct_key = $2`,
       [this.orgId, directKey],
     );

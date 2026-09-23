@@ -185,7 +185,7 @@ function handleConnection(
 
             // Register on the hub BEFORE the catch-up read so nothing published
             // during it is lost; buffer until it completes, dedupe by offset.
-            // The read IS the gate (service.replay): a non-member's listener is
+            // The read IS the gate (service.replay): an unauthorized listener is
             // torn down below having sent nothing — `live` is still false.
             const state = { live: false, lastSent: 0, buffer: [] as ServerFrame[] };
             const unsubscribe = deps.hub.subscribe(frame.spaceId, (f) => {
@@ -203,9 +203,12 @@ function handleConnection(
             try {
               replay = await deps.service.replay({ memberId }, frame.spaceId, frame.afterOffset);
             } catch (err) {
+              if (subscriptions.get(frame.spaceId) !== unsubscribe) return;
               drop(frame.spaceId);
               throw err;
             }
+            // A departure/unsubscribe during replay must not resurrect delivery (spec §5, 2026-09-23).
+            if (subscriptions.get(frame.spaceId) !== unsubscribe || ws.readyState !== WebSocket.OPEN) return;
             const fromOffset = frame.afterOffset ?? replay.head;
             send({ kind: 'subscribed', spaceId: frame.spaceId, fromOffset });
 

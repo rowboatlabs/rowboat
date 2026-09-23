@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { monotonicFactory } from 'ulid';
 import { HarborError } from '../errors.js';
 import type { SpaceHub } from '../hub.js';
-import { canAccessSpace, canWrite, enforce } from '../policy.js';
+import { canAccessSpace, canReadSpace, canWrite, enforce } from '../policy.js';
 import type { Store, StoredEvent } from '../store.js';
 
 // The transactional core every aggregate is built on: the store and the hub,
@@ -68,6 +68,18 @@ export class Kernel {
     return space;
   }
 
+  async requireOrgMember(ctx: ActorCtx): Promise<void> {
+    if (!(await this.store.getMember(ctx.memberId))) throw new HarborError('not_a_member', 'you are not a member of this org');
+  }
+
+  async requireReadableSpace(ctx: ActorCtx, spaceId: string): Promise<Space> {
+    const space = await this.requireSpace(spaceId);
+    const membership = await this.store.getMembership(spaceId, ctx.memberId);
+    const orgMember = membership ? true : !!(await this.store.getMember(ctx.memberId));
+    enforce(canReadSpace(space, membership, orgMember));
+    return space;
+  }
+
   /** The access gate: load the facts, let policy decide — THE rule is policy.ts canAccessSpace. */
   async requireMember(ctx: ActorCtx, spaceId: string): Promise<Space> {
     const space = await this.requireSpace(spaceId);
@@ -84,15 +96,16 @@ export class Kernel {
    * uncommitted row), and a rollback would leave phantoms on every socket.
    * So `append` parks frames in the lock's outbox and `locked` flushes them
    * once the lock — and the commit — has returned. Outside a lock the
-   * outbox is empty and frames go straight out.
+   * outbox is empty and frames go straight out. Personal-state and ephemeral
+   * frames share this boundary (spec §5, 2026-09-23).
    */
-  private readonly outbox = new AsyncLocalStorage<Array<{ spaceId: string; frame: ServerFrame }>>();
+  private readonly outbox = new AsyncLocalStorage<Array<() => void>>();
 
   /** The space lock, with the hub held back until the commit is durable; a thrown lock publishes nothing. */
   async locked<T>(spaceId: string, fn: () => Promise<T>): Promise<T> {
-    const pending: Array<{ spaceId: string; frame: ServerFrame }> = [];
+    const pending: Array<() => void> = [];
     const result = await this.store.withSpaceLock(spaceId, () => this.outbox.run(pending, fn));
-    for (const { spaceId: target, frame } of pending) this.hub.publish(target, frame);
+    for (const publish of pending) publish();
     return result;
   }
 
@@ -119,9 +132,19 @@ export class Kernel {
     const stored: StoredEvent = { offset, at, event };
     await this.store.appendEvent(spaceId, stored);
     const frame: ServerFrame = { kind: 'event', spaceId, offset, at, event };
+    this.publish(spaceId, frame);
+  }
+
+  publish(spaceId: string, frame: ServerFrame): void {
     const pending = this.outbox.getStore();
-    if (pending) pending.push({ spaceId, frame });
+    if (pending) pending.push(() => this.hub.publish(spaceId, frame));
     else this.hub.publish(spaceId, frame);
+  }
+
+  publishToMember(memberId: string, frame: ServerFrame): void {
+    const pending = this.outbox.getStore();
+    if (pending) pending.push(() => this.hub.publishToMember(memberId, frame));
+    else this.hub.publishToMember(memberId, frame);
   }
 
   /** The next offset on the space's log — for a write that needs it before its event exists (message and change-set rows carry it). Inside the space lock only. */

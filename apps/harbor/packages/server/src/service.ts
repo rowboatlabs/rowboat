@@ -24,6 +24,7 @@ import type {
   CreateInviteResult,
   DeleteAssetResult,
   Member,
+  Membership,
   Message,
   MoveAssetResult,
   PresenceState,
@@ -99,8 +100,14 @@ export class HarborService {
   listSpaces(ctx: ActorCtx, opts: { includeDirect?: boolean } = {}): Promise<Space[]> {
     return this.spaces.listSpaces(ctx, opts);
   }
-  createSpace(ctx: ActorCtx, name: string): Promise<Space> {
-    return this.spaces.createSpace(ctx, name);
+  browseSpaces(ctx: ActorCtx): Promise<Array<{ space: Space; joined: boolean }>> {
+    return this.spaces.browseSpaces(ctx);
+  }
+  joinSpace(ctx: ActorCtx, spaceId: string): Promise<{ space: Space; membership: Membership }> {
+    return this.spaces.joinSpace(ctx, spaceId);
+  }
+  createSpace(ctx: ActorCtx, name: string, visibility: Space['visibility'] = 'private'): Promise<Space> {
+    return this.spaces.createSpace(ctx, name, visibility);
   }
   renameSpace(ctx: ActorCtx, spaceId: string, input: RenameSpaceInput): Promise<Space> {
     return this.spaces.renameSpace(ctx, spaceId, input);

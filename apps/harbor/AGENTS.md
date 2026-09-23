@@ -11,8 +11,8 @@ Two pnpm workspace packages under `packages/`:
 
 | `src/` | Owns |
 |---|---|
-| `core/kernel.ts` | store, hub, org, the read-only knob, the space lock with its publish-after-commit outbox, `append` / `nextOffset` / `appendNext`, `requireSpace` / `requireMember`, `guardWrite`, `attributionOf` |
-| `core/spaces.ts` | spaces, direct messages, invites and the bind ceremony, the roster, `me`, push registration, the membership-gated live relays |
+| `core/kernel.ts` | store, hub, org, the read-only knob, the space lock with its publish-after-commit outbox, `append` / `nextOffset` / `appendNext`, `requireSpace` / `requireReadableSpace` / `requireMember`, `guardWrite`, `attributionOf` |
+| `core/spaces.ts` | spaces, direct messages, invites and the bind ceremony, the roster, `me`, push registration, the read-gated replay and membership-gated live relays |
 | `core/assets.ts` | assets by id, versions, the change log, blobs, history, diff |
 | `core/feed.ts` | messages, threads, topics, reactions, polls, search, mention stamps and their backfill |
 | `core/read-state.ts` | read marks, follows, unread, Activity, read-all |
@@ -35,6 +35,7 @@ Two pnpm workspace packages under `packages/`:
 
 - **One core, three doors.** The faces hold `{ service, auth: OrgAuth }` and never the store. Rowboat's own agent uses the same MCP tools as any agent; there is no privileged path.
 - **Rules live in `policy.ts`.** Every question of the form "may this actor do this to this space or message" is a pure decision there; the core loads the facts and asks; no face decides anything.
+- **Reading and acting have separate gates (2026-09-23, spec §5).** `requireReadableSpace` loads the space, membership, and org member for `canReadSpace`; only shared open spaces admit nonmembers. `requireMember` and `lockedAs` retain the membership-only `canAccessSpace` rule, including personal-state writes and ephemeral publishing. `requireOrgMember` guards browse/self-join. Durable events, presence, whiteboard, and member read-mark frames use the transaction outbox, never publish an uncommitted write.
 - **Every read-decide-write runs inside the space lock.** A member's act uses `k.lockedAs(ctx, spaceId, …)`, which re-verifies access inside the transaction, so a write that lost a race to a removal is refused, never landed; acts that create the membership themselves, and operator passes, use `k.locked`. On Postgres the lock is the transaction. Events go through `k.append` / `k.appendNext`, which hold frames until the commit returns, so a subscriber never sees an uncommitted fact or a rolled-back phantom.
 - **The log is append-only, with two named exceptions.** Message deletion and message editing redact the stored event, because replay must never resurrect the text. Nothing else edits a stored event.
 - **Migrations are append-only.** One concern per entry, never edit an applied one, arbitrary SQL is fine from 002. Generated columns belong to Postgres; code never writes them.

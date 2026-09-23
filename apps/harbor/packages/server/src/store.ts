@@ -213,6 +213,7 @@ export interface Store {
   putSpace(space: Space): Promise<void>;
   getSpace(id: string): Promise<Space | undefined>;
   /** Shared spaces only unless `includeDirect` — the listing's compatibility posture (api.ts). */
+  browseSpaces(memberId: string): Promise<Array<{ space: Space; joined: boolean }>>;
   listSpacesFor(memberId: string, opts?: { includeDirect?: boolean }): Promise<Space[]>;
   /** Every space on the org, DMs included — operator-side reads only (the mentions backfill). */
   listAllSpaces(): Promise<Space[]>;

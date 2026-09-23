@@ -3,6 +3,8 @@ import type { Membership, Message, Space } from '@rowboat/spaces-protocol';
 import { HarborError } from '../src/errors.js';
 import {
   canAccessSpace,
+  canReadSpace,
+  canJoinSpace,
   canBind,
   canChangeMembership,
   canRenameSpace,
@@ -16,8 +18,8 @@ import {
 // prove the service ASKS.
 
 const NOW = '2026-09-21T10:00:00.000Z';
-const shared: Space = { id: 'S', name: 'Roadboard', createdAt: NOW, kind: 'shared' };
-const direct: Space = { id: 'D', name: 'Direct message', createdAt: NOW, kind: 'direct', participants: ['a', 'b'] };
+const shared: Space = { id: 'S', name: 'Roadboard', createdAt: NOW, kind: 'shared', visibility: 'private' };
+const direct: Space = { id: 'D', name: 'Direct message', createdAt: NOW, kind: 'direct', visibility: 'private', participants: ['a', 'b'] };
 const membership: Membership = { spaceId: 'S', memberId: 'a', joinedAt: NOW };
 const byA = { author: { memberId: 'a', actingMode: 'direct' } } as Message;
 
@@ -37,6 +39,20 @@ describe('policy', () => {
     expect(canAccessSpace(direct, { ...membership, spaceId: 'D' })).toBeNull();
     expect(canAccessSpace(shared, undefined)).toMatchObject({ code: 'forbidden' });
     expect(canAccessSpace(direct, undefined)).toMatchObject({ code: 'forbidden' });
+  });
+
+  it('open-space reads require org membership; acting still requires space membership', () => {
+    const open: Space = { ...shared, visibility: 'open' };
+    expect(canReadSpace(open, undefined, true)).toBeNull();
+    expect(canReadSpace(open, undefined, false)).toMatchObject({ code: 'forbidden' });
+    expect(canReadSpace(shared, undefined, true)).toMatchObject({ code: 'forbidden' });
+    expect(canReadSpace({ ...direct, visibility: 'open' }, undefined, true)).toMatchObject({ code: 'forbidden' });
+    expect(canReadSpace(shared, membership, true)).toBeNull();
+    expect(canAccessSpace(open, undefined)).toEqual({ code: 'forbidden', message: 'join this space to post' });
+    expect(canAccessSpace(open, membership)).toBeNull();
+    expect(canJoinSpace(open)).toBeNull();
+    expect(canJoinSpace(shared)).toMatchObject({ code: 'forbidden' });
+    expect(canJoinSpace({ ...direct, visibility: 'open' })).toMatchObject({ code: 'forbidden' });
   });
 
   it('canWrite: read-only orgs refuse writes with read_only_limit', () => {

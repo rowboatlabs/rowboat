@@ -44,6 +44,9 @@ export type Member = z.infer<typeof Member>;
 export const SpaceKind = z.enum(['shared', 'direct']);
 export type SpaceKind = z.infer<typeof SpaceKind>;
 
+export const SpaceVisibility = z.enum(['private', 'open']);
+export type SpaceVisibility = z.infer<typeof SpaceVisibility>;
+
 export const Space = z.object({
   id: SpaceId,
   /**
@@ -54,6 +57,8 @@ export const Space = z.object({
   name: z.string().min(1).max(128),
   createdAt: z.iso.datetime(),
   kind: SpaceKind.default('shared'),
+  /** Old payloads and existing spaces stay private (spec §5, 2026-09-22). */
+  visibility: SpaceVisibility.default('private'),
   /**
    * Direct spaces only: the fixed member set, sorted — the DM's identity.
    * Absent on shared spaces. ONE element = the member's self-DM (notes to
