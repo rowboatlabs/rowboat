@@ -1,5 +1,6 @@
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { readRailSelection, type RailSelection } from '@/lib/spaces-selection'
+import { lastVisitedSpaceId } from '@/lib/spaces-visits'
 
 export const LAST_SPACE_STORAGE_KEY = 'x:last-space'
 
@@ -19,12 +20,16 @@ export type SpaceLocation = {
 }
 
 /**
- * Where "open this server" lands: its first shared space, or its first DM when
- * it has no channels, or nothing at all on an empty server. One answer, so the
- * switcher, the sidebar and a restored location all enter a server the same way.
+ * Where "open this server" lands: the channel or DM this install was last in
+ * there, else its first shared space, its first DM when it has no channels, or
+ * nothing at all on an empty server. One answer, so the switcher, the sidebar
+ * and a restored location all enter a server the same way — and leaving a
+ * server and coming back returns to the room, not to the default channel
+ * (2026-09-23).
  */
-export function serverLandingSpaceId(org: Pick<OrgWithSpaces, 'spaces' | 'directs'>): string {
-    return org.spaces[0]?.id ?? org.directs[0]?.id ?? ''
+export function serverLandingSpaceId(org: Pick<OrgWithSpaces, 'id' | 'spaces' | 'directs'>): string {
+    const rooms = [...org.spaces, ...org.directs]
+    return lastVisitedSpaceId(org.id, rooms.map((room) => room.id)) ?? rooms[0]?.id ?? ''
 }
 
 /** Restore a valid location, preferring another space on the same server if it was deleted. */
