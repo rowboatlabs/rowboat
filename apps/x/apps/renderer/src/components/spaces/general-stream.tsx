@@ -268,7 +268,7 @@ export function GeneralStream({
         try {
             const { configured } = await window.ipc.invoke('typesafe:isConfigured', null)
             if (!configured) {
-                notify.info('Auto needs a Jev API key', { description: 'Add your TypeSafe key under Settings > Connections > Jev (TypeSafe).' })
+                notify.info('Auto needs a Jev API key', { description: 'Add your TypeSafe key under Settings > Models > Decision Models.' })
                 return
             }
         } catch {
@@ -322,7 +322,7 @@ export function GeneralStream({
             return
         }
         if (outcome.reason === 'no-key') {
-            notify.info('Posted to the stream: Auto needs a Jev API key', { description: 'Add your TypeSafe key under Settings > Connections > Jev (TypeSafe).' })
+            notify.info('Posted to the stream: Auto needs a Jev API key', { description: 'Add your TypeSafe key under Settings > Models > Decision Models.' })
         } else if (outcome.reason === 'error') {
             notify.warning('Posted to the stream: Auto could not decide', { description: outcome.error })
         }

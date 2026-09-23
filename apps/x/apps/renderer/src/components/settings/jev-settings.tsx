@@ -4,9 +4,12 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
-// Jev (TypeSafe) under Settings > Connections (2026-09-22): the bring-your-
-// own-key card behind the Spaces composer's Auto toggle. Same shape as the
-// Composio key section: the renderer only ever learns whether a key is set.
+// Jev (TypeSafe) under Settings > Models > Decision Models (2026-09-23; it
+// began under Connections on 2026-09-22): the bring-your-own-key card behind
+// the Spaces composer's Auto toggle. Not a provider in the Providers list:
+// Jev answers typed questions, not chat, so it has no models for the
+// pickers and can never be the Assistant model. Same shape as the Composio
+// key section: the renderer only ever learns whether a key is set.
 
 export function JevSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const [configured, setConfigured] = useState(false)
@@ -63,8 +66,9 @@ export function JevSettings({ dialogOpen }: { dialogOpen: boolean }) {
   return (
     <div className="space-y-2">
       <p className="text-xs text-muted-foreground">
-        Jev is TypeSafe's System One model. With a key, the Auto toggle in a space's composer lets Jev decide whether
-        a message starts something new or replies to an open thread. Get a key from{" "}
+        Jev is TypeSafe's System One model: it answers typed questions rather than chat, so it does not appear in the
+        model pickers above. With a key, the Auto toggle in a space's composer lets Jev decide whether a message starts
+        something new or replies to an open thread. Get a key from{" "}
         <a
           href="https://console.typesafe.ai/keys"
           target="_blank"

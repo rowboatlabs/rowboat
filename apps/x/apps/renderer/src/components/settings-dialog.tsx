@@ -2112,11 +2112,6 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
                     <h4 className="text-sm font-semibold">Library</h4>
                     <ToolsLibrarySettings dialogOpen={open} rowboatConnected={rowboatConnected} />
                   </div>
-                  <Separator />
-                  <div className="space-y-2">
-                    <h4 className="text-sm font-semibold">Jev (TypeSafe)</h4>
-                    <JevSettings dialogOpen={open} />
-                  </div>
                 </div>
               ) : activeTab === "mobile" ? (
                 <MobileChannelsSettings dialogOpen={open} />
@@ -2144,6 +2139,20 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
                         : "Connect API keys or local runtimes (Ollama, LM Studio). Every connected provider's models appear in the pickers above."}
                     </p>
                     <ProvidersSection dialogOpen={open} />
+                  </div>
+                  <Separator />
+                  {/* Decision models (2026-09-23): models that return typed
+                      judgments, not chat. They never enter the pickers above,
+                      so they get their own section rather than a provider row. */}
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-semibold">Decision Models</h4>
+                    <p className="text-xs text-muted-foreground">
+                      Models that answer typed questions for features like the Spaces composer's Auto toggle. They are not chat models and do not appear in the pickers above.
+                    </p>
+                    <div className="space-y-2">
+                      <span className="text-[13px] text-muted-foreground">Jev (TypeSafe)</span>
+                      <JevSettings dialogOpen={open} />
+                    </div>
                   </div>
                 </div>
               ) : activeTab === "note-tagging" ? (
