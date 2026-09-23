@@ -36,4 +36,5 @@ export * as message from './message.js';
 export * as rowboatAccount from './rowboat-account.js';
 export * as turnFollower from './turn-follower.js';
 export * as spaces from './spaces.js';
+export * as autoRoute from './auto-route.js';
 export { PrefixLogger };

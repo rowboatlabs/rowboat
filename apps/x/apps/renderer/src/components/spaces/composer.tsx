@@ -3,7 +3,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import type { EditorView } from '@tiptap/pm/view'
 import { uploadInputFor } from '@/lib/spaces-upload'
-import { ArrowUp, BarChart3, Clock, FileText, Loader2, LoaderIcon, Mic, Paperclip, ShieldCheck, Square, Terminal, X as XIcon } from 'lucide-react'
+import { ArrowUp, BarChart3, Clock, FileText, Loader2, LoaderIcon, Mic, Paperclip, Route, ShieldCheck, Square, Terminal, X as XIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
@@ -97,8 +97,9 @@ async function formatTranscript(raw: string): Promise<string> {
     }
 }
 
-export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, autoFocus, onType, seed, draftKey, commands = [] }: {
+export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, autoFocus, onType, seed, draftKey, commands = [], autoRoute }: {
     placeholder: string
+    /** Post the message. Throw to keep the draft in the box (the pane reports the failure). */
     onSend: (body: string, agent?: AgentOptions) => Promise<void>
     /** Send-later: the clock menu hands the built body + fire time here. */
     onSchedule?: (body: string, at: Date) => Promise<void>
@@ -118,6 +119,12 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     draftKey?: string
     /** Surface-specific slash commands (a "/" draft opens the menu; /ask is built in). */
     commands?: SlashCommand[]
+    /**
+     * The stream composer's Auto toggle (2026-09-22): on, Jev picks where the
+     * message lands (the stream, or the open thread it continues) at send
+     * time. Absent = no toggle (a thread composer already has a destination).
+     */
+    autoRoute?: { enabled: boolean; onToggle: () => void }
 }) {
     const [draft, setDraft] = useState(() => (draftKey ? window.localStorage.getItem(`spaces:draft:${draftKey}`) ?? '' : ''))
     useEffect(() => {
@@ -456,7 +463,12 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         if (!body) return
         // From the text actually going out — an /ask rewrite mentions @rowboat
         // even though the draft it came from didn't.
-        await onSend(body, agentOptionsFor(raw))
+        try {
+            await onSend(body, agentOptionsFor(raw))
+        } catch {
+            // The pane reported it; the draft stays in the box for another try.
+            return
+        }
         editor?.chain().clearContent().run()
         setDraft('')
         setAttachments([])
@@ -563,7 +575,16 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         if (!text) return
         // A transcript has no pills: whatever it says is prose, never an address.
         const body = replaceShortcodes(text)
-        if (body) await onSend(body, agentOptionsFor(text))
+        if (!body) return
+        try {
+            await onSend(body, agentOptionsFor(text))
+        } catch {
+            // The pane reported it; the words land in the box rather than vanish.
+            if (!editor) return
+            editor.commands.setContent(text)
+            setDraft(composerMarkdown(editor))
+            requestAnimationFrame(() => editor.commands.focus('end'))
+        }
     }
 
     const stopRecordingRef = useRef(stopRecording)
@@ -885,6 +906,23 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                         >
                             @rowboat
                         </button>
+                        {autoRoute && (
+                            <button
+                                type="button"
+                                onClick={autoRoute.onToggle}
+                                aria-pressed={autoRoute.enabled}
+                                title={autoRoute.enabled
+                                    ? 'Auto on: Jev decides at send time whether this is a new message or a reply to an open thread. Click to turn off'
+                                    : 'Auto: let Jev decide whether this is a new message or a reply to an open thread'}
+                                className={cn(
+                                    'flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium transition-colors',
+                                    autoRoute.enabled ? 'bg-secondary text-foreground hover:bg-secondary/70' : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                                )}
+                            >
+                                <Route className="size-3.5 shrink-0" />
+                                <span>Auto</span>
+                            </button>
+                        )}
                         {mentioned && (
                             <>
                                 <span className="mx-0.5 h-4 w-px bg-border" />

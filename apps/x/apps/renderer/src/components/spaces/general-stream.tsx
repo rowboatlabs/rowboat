@@ -12,7 +12,7 @@ import {
     loadOlderStreamMessages, loadStreamAround, prefetchThread, removeStreamMessage, resolvePendingStreamMessage, updateStreamMessage,
     usePresenceSender,
 } from '@/hooks/use-space-chat'
-import { useSpaceNames, type OrgWithSpaces } from '@/hooks/use-spaces'
+import { getSpaceFeed, useSpaceNames, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { subscribeComposeInsert } from '@/lib/spaces-compose'
 import { applyReaction, dayKey, formatDayLabel, isContinuation, threadLabelOf } from '@/lib/spaces-conventions'
 import { consumeJump, jumpFailureMessage, resolveJumpOffset, scrollToMessage, subscribeJump, type JumpAnchor } from '@/lib/spaces-jump'
@@ -20,11 +20,14 @@ import { PollDialogHost } from '@/components/spaces/poll-dialog'
 import { applyPollVote, myPollVotes, postPoll } from '@/lib/spaces-poll'
 import { resolveMentions } from '@/lib/spaces-presentation'
 import { formatScheduleTime, parseRemindArgs } from '@/lib/spaces-schedule'
-import { getSpaceReadState, getStreamReadOffset, getThreadReadState, isThreadUnread, markStreamRead, markThreadRead } from '@/lib/spaces-read-state'
+import { getSpaceReadState, getStreamReadOffset, getThreadReadState, isThreadUnread, markStreamRead, markThreadRead, noteThread } from '@/lib/spaces-read-state'
 import { toggleSaved, useSaved } from '@/lib/spaces-saved'
 import { maybeInvokeRowboat } from '@/lib/spaces-rowboat'
 import { openResponseChat } from '@/lib/spaces-response-chat'
+import { collectRouteCandidates, routeDraft, setAutoRouteEnabled, useAutoRouteEnabled, type AutoRouteOutcome } from '@/lib/spaces-auto-route'
 import { toast } from '@/lib/toast'
+// The Spaces toast queue has no renderer; sonner is what the person sees.
+import { toast as notify } from 'sonner'
 import * as analytics from '@/lib/analytics'
 import { containsRowboatAddress } from '@/lib/spaces-mentions'
 
@@ -229,7 +232,7 @@ export function GeneralStream({
     // Enter lands, dimmed as pending; the org's write confirms — or fails,
     // leaving a retry/discard row — in the background. The composer never
     // waits on the round trip.
-    const post = async (body: string, agent?: AgentOptions) => {
+    const postToStream = async (body: string, agent?: AgentOptions) => {
         if (detachedRef.current) await snapToLatest()
         const pending = buildPendingMessage(space.id, org.memberId, body)
         ingestStreamMessage(org.id, space.id, pending)
@@ -249,9 +252,86 @@ export function GeneralStream({
             })
     }
 
+    // Auto (Jev, 2026-09-22): before any echo, ask where the draft belongs. A
+    // thread answer posts there, the thread pane's own path minus the local
+    // echo (the live frame paints the reply and bumps the root's count).
+    // Everything else is the stream, with a word on why when Auto could not
+    // decide. The send button spins while Jev is asked, and the draft stays
+    // in the box until the destination is known.
+    const autoRoute = useAutoRouteEnabled()
+    const [routing, setRouting] = useState(false)
+    const toggleAutoRoute = async () => {
+        if (autoRoute) {
+            setAutoRouteEnabled(false)
+            return
+        }
+        try {
+            const { configured } = await window.ipc.invoke('typesafe:isConfigured', null)
+            if (!configured) {
+                notify.info('Auto needs a Jev API key', { description: 'Add your TypeSafe key under Settings > Connections > Jev (TypeSafe).' })
+                return
+            }
+        } catch {
+            // The send path reports a missing key too.
+        }
+        setAutoRouteEnabled(true)
+    }
+
+    /** What to call a thread in the toast: its topic title, else its root's first line. */
+    const threadLabelFor = (rootMessageId: string): string => {
+        const topic = stream.topicsByRoot.get(rootMessageId) ?? getSpaceFeed(org.id, space.id).topics.find((t) => t.rootMessageId === rootMessageId)
+        if (topic) return resolveMentions(topic.title, memberNames, spaceNames)
+        const root = stream.messages.find((m) => m.id === rootMessageId)
+        return root ? threadLabelOf(resolveMentions(root.body, memberNames, spaceNames)) : 'the thread'
+    }
+
+    const postInThread = async (rootMessageId: string, body: string, agent?: AgentOptions) => {
+        const label = threadLabelFor(rootMessageId)
+        let posted: spaces.Message
+        try {
+            posted = (await window.ipc.invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body })).message
+        } catch (err) {
+            notify.error(`Could not reply in “${label}”`, { description: err instanceof Error ? err.message : 'The send failed' })
+            // Rethrown so the composer keeps the draft for another try.
+            throw err
+        }
+        // Replying follows the thread and reads it up to our reply (the org's rule); mirror it.
+        noteThread(org.id, space.id, rootMessageId, { following: true, readOffset: posted.offset, lastReplyOffset: posted.offset })
+        analytics.spacesMessagePosted({ kind: 'topic', mentionsRowboat: containsRowboatAddress(body) })
+        maybeInvokeRowboat(org, space, { rootMessageId, label }, posted.id, body, agent)
+        notify.success(`Auto replied in “${label}”`, { action: { label: 'Open thread', onClick: () => onOpenThread(rootMessageId) } })
+    }
+
+    const post = async (body: string, agent?: AgentOptions) => {
+        if (!autoRoute) return postToStream(body, agent)
+        setRouting(true)
+        let outcome: AutoRouteOutcome
+        try {
+            const authorName = memberNames.get(org.memberId)
+            outcome = await routeDraft({
+                spaceName: space.name,
+                draft: body,
+                ...(authorName ? { authorName } : {}),
+                candidates: collectRouteCandidates(org.id, space.id, stream, memberNames, spaceNames),
+            })
+        } finally {
+            setRouting(false)
+        }
+        if (outcome.destination === 'thread' && outcome.threadRootId) {
+            await postInThread(outcome.threadRootId, body, agent)
+            return
+        }
+        if (outcome.reason === 'no-key') {
+            notify.info('Posted to the stream: Auto needs a Jev API key', { description: 'Add your TypeSafe key under Settings > Connections > Jev (TypeSafe).' })
+        } else if (outcome.reason === 'error') {
+            notify.warning('Posted to the stream: Auto could not decide', { description: outcome.error })
+        }
+        await postToStream(body, agent)
+    }
+
     const retryFailed = (message: spaces.Message) => {
         removeStreamMessage(org.id, space.id, message.id)
-        void post(message.body)
+        void postToStream(message.body)
     }
     const discardFailed = (message: spaces.Message) => removeStreamMessage(org.id, space.id, message.id)
 
@@ -837,9 +917,10 @@ export function GeneralStream({
             <PollDialogHost openRef={openPollRef} onSubmit={createPoll} />
             <Composer
                 placeholder={`Message ${space.name} — @rowboat to ask your agent`}
-                busy={false}
+                busy={routing}
                 draftKey={memoryKey}
                 onSend={post}
+                autoRoute={{ enabled: autoRoute, onToggle: () => void toggleAutoRoute() }}
                 onSchedule={async (body, at) => {
                     await window.ipc.invoke('spaces:schedule', {
                         orgId: org.id, spaceId: space.id, body, at: at.toISOString(), kind: 'message',

@@ -31,6 +31,7 @@ import { ConnectedAccountsSettings } from "@/components/settings/connected-accou
 import { MobileChannelsSettings } from "@/components/settings/mobile-channels-settings"
 import { PhonePairingSettings } from "@/components/settings/phone-pairing-settings"
 import { RemoteServerSettings } from "@/components/settings/remote-server-settings"
+import { JevSettings } from "@/components/settings/jev-settings"
 import type { ApprovalPolicy } from "@x/shared/src/code-mode.js"
 import { DEFAULT_TURN_LIMITS_SETTINGS } from "@x/shared/src/turn-limits.js"
 import type { ipc as ipcShared } from "@x/shared"
@@ -2110,6 +2111,11 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
                   <div className="space-y-2">
                     <h4 className="text-sm font-semibold">Library</h4>
                     <ToolsLibrarySettings dialogOpen={open} rowboatConnected={rowboatConnected} />
+                  </div>
+                  <Separator />
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-semibold">Jev (TypeSafe)</h4>
+                    <JevSettings dialogOpen={open} />
                   </div>
                 </div>
               ) : activeTab === "mobile" ? (

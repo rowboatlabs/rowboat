@@ -118,6 +118,8 @@ import * as composioHandler from '@x/core/dist/composio/flows.js';
 import { oauthConnectBus, composioConnectBus, chatgptStatusBus } from '@x/core/dist/auth/connector-events.js';
 import { subscribeTtsChunks } from '@x/core/dist/voice/tts-bus.js';
 import { formatDictation } from '@x/core/dist/voice/format_dictation.js';
+import * as typesafeClient from '@x/core/dist/typesafe/client.js';
+import { routeSpaceMessage } from '@x/core/dist/typesafe/route_message.js';
 import * as appsIndexer from '@x/core/dist/apps/indexer.js';
 import * as appsServer from '@x/core/dist/apps/server.js';
 import * as appsAgents from '@x/core/dist/apps/agents.js';
@@ -2145,6 +2147,14 @@ export function setupIpcHandlers() {
       markOnboardingComplete();
       return { success: true };
     },
+    // TypeSafe (Jev) and the Spaces composer's Auto toggle (2026-09-22)
+    'typesafe:isConfigured': async () => ({ configured: typesafeClient.isConfigured() }),
+    'typesafe:setApiKey': async (_event, args) => typesafeClient.saveApiKey(args.apiKey),
+    'typesafe:clearApiKey': async () => {
+      typesafeClient.clearApiKey();
+      return { success: true as const };
+    },
+    'spaces:autoRoute': async (_event, args) => routeSpaceMessage(args),
     // Composio integration handlers
     'composio:is-configured': async () => {
       return composioHandler.isConfigured();

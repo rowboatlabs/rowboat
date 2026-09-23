@@ -98,6 +98,7 @@ The implementation's semantic stylesheet is `apps/x/apps/renderer/src/styles/spa
 7. Agent status remains secondary to human content, while Stop, Chat, and permission-review affordances remain reachable.
 8. Narrow layouts prioritize the active conversation. Document viewing retains the existing two-column model.
 9. Motion communicates state briefly; reduced-motion preferences disable the new toolbar and frame transitions.
+10. The stream composer's Auto toggle (2026-09-22) hands the destination to Jev, TypeSafe's System One model: at send time the draft lands in the stream or in the open thread it continues, and a toast names the thread. Off, or with no TypeSafe key, sends go to the stream as before. Thread composers have no toggle.
 
 ## Verification and limitations
 

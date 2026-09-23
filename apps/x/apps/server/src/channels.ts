@@ -238,6 +238,12 @@ export const RPC_CHANNELS = [
   'voice:synthesizeStreamStart',
   'voice:synthesizeStreamCancel',
   'voice:formatDictation',
+  // TypeSafe (Jev), 2026-09-22: the key lives with core, and the Spaces
+  // composer's Auto toggle routes drafts through it.
+  'typesafe:isConfigured',
+  'typesafe:setApiKey',
+  'typesafe:clearApiKey',
+  'spaces:autoRoute',
   // Phase 5 (SEPARATION_PLAN.md): code-mode & terminal — the PTY lives with
   // core now (RFC Q13: the terminal shows the machine core runs on).
   // codeMode:provisionEngine stays client-local (sender-scoped progress).
