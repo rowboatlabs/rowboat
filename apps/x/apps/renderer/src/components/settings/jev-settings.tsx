@@ -68,7 +68,7 @@ export function JevSettings({ dialogOpen }: { dialogOpen: boolean }) {
       <p className="text-xs text-muted-foreground">
         Jev is TypeSafe's System One model: it answers typed questions rather than chat, so it does not appear in the
         model pickers above. With a key, the Auto toggle in a space's composer lets Jev decide whether a message starts
-        something new or replies to an open thread. Get a key from{" "}
+        something new or replies to an open thread, previewing the reply in the thread or posting it there. Get a key from{" "}
         <a
           href="https://console.typesafe.ai/keys"
           target="_blank"

@@ -13,5 +13,11 @@ export async function routeSpaceMessage(input: AutoRouteRequest): Promise<AutoRo
     if (candidates.length === 0 || !input.draft.trim()) return { destination: 'stream', reason: 'no-candidates' };
     const { state, questions } = buildRouteRequest(input, candidates);
     const response = await systemOne({ state, questions });
-    return decideRoute(response.answers, candidates);
+    const decision = decideRoute(response.answers, candidates);
+    // One line per decision in the host log: the composer only shows the
+    // verdict, and "why the stream?" is the question people ask first.
+    console.log(
+        `[TypeSafe] route: ${decision.destination} (${decision.reason}) p=${decision.probability?.toFixed(2) ?? '-'} c=${decision.confidence?.toFixed(2) ?? '-'} over ${candidates.length} candidates, ${response.usage?.input_tokens ?? '?'} in / ${response.usage?.output_tokens ?? '?'} out tokens`,
+    );
+    return decision;
 }

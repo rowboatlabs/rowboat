@@ -23,6 +23,15 @@ import { useTopicAgentPermissionWait } from '@/hooks/use-topic-agent-permission'
 import { useSpaceAgentActivity } from '@/lib/spaces-agent-activity'
 import { useSpaceNames, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { subscribeComposeInsert } from '@/lib/spaces-compose'
+import {
+    clearStagedThreadDraft, peekStagedReply, releaseStagedThreadDraft, stageThreadDraft, subscribeStagedThreadDraft, threadDraftKey, useStagedThreadDraft,
+} from '@/lib/spaces-thread-draft'
+import { AUTO_TOAST, collectRouteCandidates, routeDraft, routeThreadLabel } from '@/lib/spaces-auto-route'
+import { postStreamMessage } from '@/lib/spaces-post'
+import { getStreamState, jumpToLatest } from '@/hooks/use-space-chat'
+import { AutoBanner } from '@/components/spaces/auto-banner'
+// The Spaces toast queue has no renderer; sonner is what the person sees.
+import { toast as notify } from 'sonner'
 import { applyReaction, artifactsForThread, isContinuation, mergeMessages, threadLabelOf } from '@/lib/spaces-conventions'
 import { consumeJump, jumpFailureMessage, resolveJumpOffset, scrollToMessage, subscribeJump, type JumpAnchor } from '@/lib/spaces-jump'
 import { PollDialogHost } from '@/components/spaces/poll-dialog'
@@ -50,7 +59,7 @@ const NEW_FADE_MS = 800
 
 export function ThreadPane({
     org, space, rootMessageId, rootFromStream, topicFromStream, changeSets, entries, presence, memberNames, refreshTick,
-    showBack, onBack, expanded = false, onToggleExpanded, onCloseColumn, onOpenFile, onOpenSession, artifactsRailOpen, onToggleArtifactsRail, onFolding, visible = true,
+    showBack, onBack, expanded = false, onToggleExpanded, onCloseColumn, onOpenFile, onOpenSession, onOpenThread, artifactsRailOpen, onToggleArtifactsRail, onFolding, visible = true,
 }: {
     org: OrgWithSpaces
     space: spaces.Space
@@ -73,6 +82,8 @@ export function ThreadPane({
     /** Opens a file of this space by asset id (beside the thread, with a crumb back). */
     onOpenFile: (assetId: string) => void
     onOpenSession?: (sessionId: string) => void
+    /** Opens another thread of this space (Auto's "try another thread" re-stages the reply there). */
+    onOpenThread?: (rootMessageId: string) => void
     /** Whether the artifacts rail is showing; the summary line under the opener toggles it. */
     artifactsRailOpen: boolean
     onToggleArtifactsRail: () => void
@@ -130,6 +141,85 @@ export function ThreadPane({
         if (!visible) return
         return subscribeComposeInsert((insert) => setSeed({ text: insert.text, nonce: Date.now(), append: true }))
     }, [visible])
+    // Auto (Preview) staged a reply for THIS thread while the pane was already
+    // up: seed it in. A pane mounting fresh reads it off the stored draft.
+    const draftKey = threadDraftKey(org.id, space.id, rootMessageId)
+    useEffect(() => {
+        return subscribeStagedThreadDraft((staged) => {
+            if (staged.draftKey === draftKey) setSeed({ text: staged.text, nonce: Date.now(), append: true })
+        })
+    }, [draftKey])
+
+    // The banner above the composer while a routed reply is staged here: the
+    // corrections. Each reads the reply as it stands now (edits included) off
+    // the composer's stored draft, and taking it back seeds the editor with
+    // whatever was drafted here before.
+    const staged = useStagedThreadDraft(draftKey)
+    const [correcting, setCorrecting] = useState(false)
+    const takeBack = () => {
+        const released = releaseStagedThreadDraft(draftKey)
+        setSeed({ text: released?.before ?? '', nonce: Date.now() })
+        return released
+    }
+    const postToStreamInstead = async () => {
+        if (correcting) return
+        const text = peekStagedReply(draftKey)
+        if (!text) {
+            clearStagedThreadDraft(draftKey)
+            return
+        }
+        setCorrecting(true)
+        try {
+            // A detached stream window has no tail for the row to land on.
+            if (getStreamState(org.id, space.id).hasMoreAfter) await jumpToLatest(org.id, space.id)
+        } catch (err) {
+            notify.error('Could not reach the stream', { ...AUTO_TOAST, description: err instanceof Error ? err.message : 'Try again' })
+            setCorrecting(false)
+            return
+        }
+        takeBack()
+        postStreamMessage(org, space, text)
+        setCorrecting(false)
+        notify.success('Posted to the stream', AUTO_TOAST)
+        onBack()
+    }
+    const tryAnotherThread = async () => {
+        if (!staged || correcting) return
+        const text = peekStagedReply(draftKey)
+        if (!text) {
+            clearStagedThreadDraft(draftKey)
+            return
+        }
+        const rejected = [...staged.rejected, rootMessageId]
+        const candidates = collectRouteCandidates(org.id, space.id, getStreamState(org.id, space.id), memberNames, spaceNames)
+            .filter((c) => !rejected.includes(c.rootMessageId))
+        if (candidates.length === 0) {
+            notify.info('No other thread to try', { ...AUTO_TOAST, description: 'Send it here, or post it to the stream instead.' })
+            return
+        }
+        setCorrecting(true)
+        try {
+            const authorName = memberNames.get(org.memberId)
+            const outcome = await routeDraft({ spaceName: space.name, draft: text, ...(authorName ? { authorName } : {}), candidates })
+            if (outcome.destination === 'thread' && outcome.threadRootId) {
+                const next = outcome.threadRootId
+                takeBack()
+                stageThreadDraft(org.id, space.id, next, text, { rejected })
+                notify.info(`Auto picked “${routeThreadLabel(org.id, space.id, next, memberNames, spaceNames)}” instead`, AUTO_TOAST)
+                onOpenThread?.(next)
+                return
+            }
+            // Nothing else fits: no surprise post. The banner stays for the
+            // person to send here or post to the stream.
+            notify.info(outcome.reason === 'error' ? `Auto could not decide: ${outcome.error}` : 'No other thread fits', {
+                ...AUTO_TOAST,
+                description: 'Send it here, or post it to the stream instead.',
+            })
+        } finally {
+            setCorrecting(false)
+        }
+    }
+    const keepAsDraft = () => clearStagedThreadDraft(draftKey)
     // A ref, not an effect dep: visibility flips must not refetch the thread.
     const visibleRef = useRef(visible)
     visibleRef.current = visible
@@ -527,6 +617,8 @@ export function ThreadPane({
     // pending), confirm — or fail into a retry/discard row — in the
     // background. The composer never waits on the round trip.
     const post = async (body: string, agent?: AgentOptions) => {
+        // Sending settles a routed reply: whatever leaves this box is the person's own.
+        clearStagedThreadDraft(draftKey)
         if (hasMoreAfterRef.current) {
             await snapToLatest()
             // The snap toasts its own failure; a reply must not land in an old window.
@@ -1222,11 +1314,24 @@ export function ThreadPane({
                 <ForwardDialog org={org} space={space} message={forwarding} memberNames={memberNames} onClose={() => setForwarding(null)} />
             )}
             <PollDialogHost openRef={openPollRef} onSubmit={createPoll} />
+            {staged && (
+                <AutoBanner
+                    message="Auto put this reply here."
+                    busy={correcting}
+                    actions={[
+                        { label: 'Post to the stream instead', onClick: () => void postToStreamInstead() },
+                        { label: 'Try another thread', onClick: () => void tryAnotherThread() },
+                    ]}
+                    onDismiss={keepAsDraft}
+                    dismissTitle="Looks right: keep it here as a draft"
+                />
+            )}
             <Composer
                 placeholder="Reply…"
                 busy={false}
                 onSend={post}
                 onSchedule={async (body, at) => {
+                    clearStagedThreadDraft(draftKey)
                     await window.ipc.invoke('spaces:schedule', {
                         orgId: org.id, spaceId: space.id, threadRootId: rootMessageId, body, at: at.toISOString(), kind: 'message',
                     })
@@ -1236,7 +1341,7 @@ export function ThreadPane({
                 onType={onType}
                 seed={seed}
                 autoFocus
-                draftKey={`${org.id}/${space.id}/${rootMessageId}`}
+                draftKey={draftKey}
                 commands={[
                     {
                         name: 'fold',

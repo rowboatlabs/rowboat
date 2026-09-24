@@ -613,6 +613,11 @@ function wireBus(): void {
     })
 }
 
+/** Non-React read of a space's stream, for helpers that run outside the hook. */
+export function getStreamState(orgId: string, spaceId: string): StreamState {
+    return streamState.get(key(orgId, spaceId)) ?? EMPTY_STREAM
+}
+
 const watched = new Set<string>()
 
 /** The stream for one space: roots + annotations, kept live. */

@@ -6,7 +6,7 @@ import { z } from 'zod';
 // threads. The renderer gathers the candidates it already holds (topics plus
 // roots with replies); core owns the questions, the thresholds, and the key.
 
-/** An open thread the draft could continue, as the renderer already knows it. */
+/** A root message or open thread the draft could continue, as the renderer already knows it. */
 export const RouteCandidate = z.object({
   rootMessageId: z.string(),
   /** The topic title when the thread is annotated; null for a plain thread. */

@@ -8,13 +8,13 @@ import { ForwardDialog } from '@/components/spaces/forward-dialog'
 import { DayDivider, MessageRow, NewDivider, TypingIndicator, type ThreadRowData } from '@/components/spaces/message-row'
 import type { SpacePresence, StreamState } from '@/hooks/use-space-chat'
 import {
-    STREAM_READ_KEY, buildPendingMessage, failPendingStreamMessage, ingestStreamMessage, jumpToLatest, loadNewerStreamMessages,
-    loadOlderStreamMessages, loadStreamAround, prefetchThread, removeStreamMessage, resolvePendingStreamMessage, updateStreamMessage,
+    STREAM_READ_KEY, ingestStreamMessage, jumpToLatest, loadNewerStreamMessages,
+    loadOlderStreamMessages, loadStreamAround, prefetchThread, removeStreamMessage, updateStreamMessage,
     usePresenceSender,
 } from '@/hooks/use-space-chat'
-import { getSpaceFeed, useSpaceNames, type OrgWithSpaces } from '@/hooks/use-spaces'
+import { useSpaceNames, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { subscribeComposeInsert } from '@/lib/spaces-compose'
-import { applyReaction, dayKey, formatDayLabel, isContinuation, threadLabelOf } from '@/lib/spaces-conventions'
+import { applyReaction, dayKey, formatDayLabel, isContinuation } from '@/lib/spaces-conventions'
 import { consumeJump, jumpFailureMessage, resolveJumpOffset, scrollToMessage, subscribeJump, type JumpAnchor } from '@/lib/spaces-jump'
 import { PollDialogHost } from '@/components/spaces/poll-dialog'
 import { applyPollVote, myPollVotes, postPoll } from '@/lib/spaces-poll'
@@ -24,7 +24,11 @@ import { getSpaceReadState, getStreamReadOffset, getThreadReadState, isThreadUnr
 import { toggleSaved, useSaved } from '@/lib/spaces-saved'
 import { maybeInvokeRowboat } from '@/lib/spaces-rowboat'
 import { openResponseChat } from '@/lib/spaces-response-chat'
-import { collectRouteCandidates, routeDraft, setAutoRouteEnabled, useAutoRouteEnabled, type AutoRouteOutcome } from '@/lib/spaces-auto-route'
+import { AUTO_TOAST, collectRouteCandidates, routeDraft, routeThreadLabel, setAutoRouteMode, useAutoRouteMode, type AutoRouteOutcome } from '@/lib/spaces-auto-route'
+import { readThreadDraft, stageThreadDraft } from '@/lib/spaces-thread-draft'
+import { postStreamMessage } from '@/lib/spaces-post'
+import { AutoBanner } from '@/components/spaces/auto-banner'
+import { ThreadPickerDialog } from '@/components/spaces/thread-picker-dialog'
 import { toast } from '@/lib/toast'
 // The Spaces toast queue has no renderer; sonner is what the person sees.
 import { toast as notify } from 'sonner'
@@ -45,6 +49,8 @@ const RENDER_CAP = 100
 const NEW_LINGER_MS = 5_000
 /** Clear delay after the fade starts — must outlast the divider's duration-700. */
 const NEW_FADE_MS = 800
+/** Auto in Post mode holds a routed reply this long, with Undo, before it goes out. */
+const AUTO_POST_HOLD_MS = 5_000
 
 export function GeneralStream({
     org, space, stream, presence, memberNames, onOpenThread, onOpenSession, onClose, visible = true, composeActive = true, showHeader = true,
@@ -234,56 +240,38 @@ export function GeneralStream({
     // waits on the round trip.
     const postToStream = async (body: string, agent?: AgentOptions) => {
         if (detachedRef.current) await snapToLatest()
-        const pending = buildPendingMessage(space.id, org.memberId, body)
-        ingestStreamMessage(org.id, space.id, pending)
-        void window.ipc
-            .invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, body })
-            .then((result) => {
-                resolvePendingStreamMessage(org.id, space.id, pending.id, result.message)
-                // The org read the stream up to our own post; mirror it.
-                markStreamRead(org.id, space.id, result.message.offset, { sync: false })
-                analytics.spacesMessagePosted({ kind: 'general', mentionsRowboat: containsRowboatAddress(body) })
-                // @rowboat on a fresh stream message: the agent works the thread
-                // under it — its receipt lands as the first reply.
-                maybeInvokeRowboat(org, space, { rootMessageId: result.message.id, label: threadLabelOf(body) }, result.message.id, body, agent)
-            })
-            .catch(() => {
-                failPendingStreamMessage(org.id, space.id, pending.id, body)
-            })
+        postStreamMessage(org, space, body, agent)
     }
 
-    // Auto (Jev, 2026-09-22): before any echo, ask where the draft belongs. A
-    // thread answer posts there, the thread pane's own path minus the local
-    // echo (the live frame paints the reply and bumps the root's count).
-    // Everything else is the stream, with a word on why when Auto could not
-    // decide. The send button spins while Jev is asked, and the draft stays
-    // in the box until the destination is known.
-    const autoRoute = useAutoRouteEnabled()
+    // Auto (Jev, 2026-09-22): before any echo, ask where the draft belongs.
+    // A thread answer goes to that thread: in Preview (the default) the
+    // thread opens with the reply staged in its composer for a look before
+    // sending; in Post it posts there, the thread pane's own path minus the
+    // local echo (the live frame paints the reply and bumps the root's
+    // count). Everything else is the stream, with a word on why when Auto
+    // could not decide. The send button spins while Jev is asked, and the
+    // draft stays in the box until the destination is known.
+    const autoRouteMode = useAutoRouteMode()
     const [routing, setRouting] = useState(false)
     const toggleAutoRoute = async () => {
-        if (autoRoute) {
-            setAutoRouteEnabled(false)
+        if (autoRouteMode !== 'off') {
+            setAutoRouteMode('off')
             return
         }
         try {
             const { configured } = await window.ipc.invoke('typesafe:isConfigured', null)
             if (!configured) {
-                notify.info('Auto needs a Jev API key', { description: 'Add your TypeSafe key under Settings > Models > Decision Models.' })
+                notify.info('Auto needs a Jev API key', { ...AUTO_TOAST, description: 'Add your TypeSafe key under Settings > Models > Decision Models.' })
                 return
             }
         } catch {
             // The send path reports a missing key too.
         }
-        setAutoRouteEnabled(true)
+        // Turning on always lands in Preview: the safe default, every time.
+        setAutoRouteMode('preview')
     }
 
-    /** What to call a thread in the toast: its topic title, else its root's first line. */
-    const threadLabelFor = (rootMessageId: string): string => {
-        const topic = stream.topicsByRoot.get(rootMessageId) ?? getSpaceFeed(org.id, space.id).topics.find((t) => t.rootMessageId === rootMessageId)
-        if (topic) return resolveMentions(topic.title, memberNames, spaceNames)
-        const root = stream.messages.find((m) => m.id === rootMessageId)
-        return root ? threadLabelOf(resolveMentions(root.body, memberNames, spaceNames)) : 'the thread'
-    }
+    const threadLabelFor = (rootMessageId: string): string => routeThreadLabel(org.id, space.id, rootMessageId, memberNames, spaceNames)
 
     const postInThread = async (rootMessageId: string, body: string, agent?: AgentOptions) => {
         const label = threadLabelFor(rootMessageId)
@@ -291,7 +279,7 @@ export function GeneralStream({
         try {
             posted = (await window.ipc.invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body })).message
         } catch (err) {
-            notify.error(`Could not reply in “${label}”`, { description: err instanceof Error ? err.message : 'The send failed' })
+            notify.error(`Could not reply in “${label}”`, { ...AUTO_TOAST, description: err instanceof Error ? err.message : 'The send failed' })
             // Rethrown so the composer keeps the draft for another try.
             throw err
         }
@@ -299,11 +287,97 @@ export function GeneralStream({
         noteThread(org.id, space.id, rootMessageId, { following: true, readOffset: posted.offset, lastReplyOffset: posted.offset })
         analytics.spacesMessagePosted({ kind: 'topic', mentionsRowboat: containsRowboatAddress(body) })
         maybeInvokeRowboat(org, space, { rootMessageId, label }, posted.id, body, agent)
-        notify.success(`Auto replied in “${label}”`, { action: { label: 'Open thread', onClick: () => onOpenThread(rootMessageId) } })
+        notify.success(`Auto replied in “${label}”`, { ...AUTO_TOAST, action: { label: 'Open thread', onClick: () => onOpenThread(rootMessageId) } })
     }
 
-    const post = async (body: string, agent?: AgentOptions) => {
-        if (!autoRoute) return postToStream(body, agent)
+    // Preview: the reply goes INTO the thread's composer and the thread opens,
+    // for a look before sending; the pane's banner holds the corrections.
+    // Agent options do not travel; the thread composer sets its own when the
+    // person sends from there.
+    const stageInThread = (rootMessageId: string, body: string) => {
+        stageThreadDraft(org.id, space.id, rootMessageId, body)
+        // No toast: the thread opening and the banner above its composer say
+        // it all, and a toast here landed on the very text it described.
+        onOpenThread(rootMessageId)
+    }
+
+    // Post: a five-second hold before the reply goes out, with Undo (undo-send
+    // in mail). Undo lands the reply in the thread composer with the banner,
+    // exactly the Preview flow, so the corrections are one click away. A hold
+    // still pending when this pane unmounts posts at once: the send was asked
+    // for. A post that fails after the hold puts the words back in this box.
+    const holdsRef = useRef(new Map<number, { timer: number; fire: () => void }>())
+    const holdSeqRef = useRef(0)
+    const holdThenPostInThread = (rootMessageId: string, body: string, agent?: AgentOptions) => {
+        const label = threadLabelFor(rootMessageId)
+        const id = ++holdSeqRef.current
+        const fire = () => {
+            holdsRef.current.delete(id)
+            postInThread(rootMessageId, body, agent).catch(() => {
+                setSeed({ text: body, nonce: Date.now(), append: true })
+            })
+        }
+        const timer = window.setTimeout(fire, AUTO_POST_HOLD_MS)
+        holdsRef.current.set(id, { timer, fire })
+        notify(`Replying in “${label}”`, {
+            ...AUTO_TOAST,
+            description: `Sending in ${AUTO_POST_HOLD_MS / 1000} seconds`,
+            duration: AUTO_POST_HOLD_MS,
+            action: {
+                label: 'Undo',
+                onClick: () => {
+                    if (!holdsRef.current.delete(id)) return
+                    window.clearTimeout(timer)
+                    stageInThread(rootMessageId, body)
+                },
+            },
+        })
+    }
+    useEffect(() => {
+        const holds = holdsRef.current
+        return () => {
+            for (const hold of holds.values()) {
+                window.clearTimeout(hold.timer)
+                hold.fire()
+            }
+            holds.clear()
+        }
+    }, [])
+
+    // Preview holds EVERY verdict (2026-09-23): a thread pick is staged in
+    // its thread, and a stream verdict stays in this box under a notice.
+    // Send again on the same text, or the notice's button, posts it without
+    // asking Jev again; edited text is a new question. "Pick a thread" moves
+    // the text to a thread of the person's choosing. Nothing leaves the
+    // composer on a first send while Preview is on.
+    type StreamVerdict = { body: string; reason: 'new-message' | 'uncertain' | 'no-candidates' }
+    const [verdict, setVerdict] = useState<StreamVerdict | null>(null)
+    const confirmedRef = useRef(false)
+    const [submit, setSubmit] = useState<{ nonce: number } | null>(null)
+    const [picking, setPicking] = useState(false)
+    const confirmStreamPost = () => {
+        confirmedRef.current = true
+        setSubmit({ nonce: Date.now() })
+    }
+    // The text as it stands now comes off the composer's stored draft (kept
+    // current on every keystroke). Attachments do not travel: staging is text.
+    const moveDraftToThread = (rootMessageId: string) => {
+        const text = readThreadDraft(memoryKey).trim() || verdict?.body || ''
+        setVerdict(null)
+        if (!text) return
+        setSeed({ text: '', nonce: Date.now() })
+        stageInThread(rootMessageId, text)
+    }
+
+    const post = async (body: string, agent?: AgentOptions): Promise<void | 'keep'> => {
+        if (autoRouteMode === 'off') return postToStream(body, agent)
+        const confirmed = confirmedRef.current || (autoRouteMode === 'preview' && verdict?.body === body)
+        confirmedRef.current = false
+        if (confirmed) {
+            setVerdict(null)
+            return postToStream(body, agent)
+        }
+        setVerdict(null)
         setRouting(true)
         let outcome: AutoRouteOutcome
         try {
@@ -318,13 +392,18 @@ export function GeneralStream({
             setRouting(false)
         }
         if (outcome.destination === 'thread' && outcome.threadRootId) {
-            await postInThread(outcome.threadRootId, body, agent)
+            if (autoRouteMode === 'preview') stageInThread(outcome.threadRootId, body)
+            else holdThenPostInThread(outcome.threadRootId, body, agent)
             return
         }
         if (outcome.reason === 'no-key') {
-            notify.info('Posted to the stream: Auto needs a Jev API key', { description: 'Add your TypeSafe key under Settings > Models > Decision Models.' })
+            notify.info('Posted to the stream: Auto needs a Jev API key', { ...AUTO_TOAST, description: 'Add your TypeSafe key under Settings > Models > Decision Models.' })
         } else if (outcome.reason === 'error') {
-            notify.warning('Posted to the stream: Auto could not decide', { description: outcome.error })
+            notify.warning('Posted to the stream: Auto could not decide', { ...AUTO_TOAST, description: outcome.error })
+        } else if (autoRouteMode === 'preview' && outcome.reason !== 'thread') {
+            // Held: the notice above the box says what Auto saw; send again posts.
+            setVerdict({ body, reason: outcome.reason })
+            return 'keep'
         }
         await postToStream(body, agent)
     }
@@ -915,13 +994,41 @@ export function GeneralStream({
                 <ForwardDialog org={org} space={space} message={forwarding} memberNames={memberNames} onClose={() => setForwarding(null)} />
             )}
             <PollDialogHost openRef={openPollRef} onSubmit={createPoll} />
+            {picking && (
+                <ThreadPickerDialog
+                    candidates={collectRouteCandidates(org.id, space.id, stream, memberNames, spaceNames)}
+                    onPick={(rootMessageId) => {
+                        setPicking(false)
+                        moveDraftToThread(rootMessageId)
+                    }}
+                    onClose={() => setPicking(false)}
+                />
+            )}
+            {verdict && (
+                <AutoBanner
+                    message={verdict.reason === 'new-message'
+                        ? 'Auto: this reads as a new message for the stream.'
+                        : verdict.reason === 'no-candidates'
+                          ? 'Auto: nothing here to reply to yet, so the stream.'
+                          : 'Auto: no thread fit well enough, so the stream.'}
+                    hint="Send again to post it."
+                    actions={[
+                        { label: 'Post to the stream', onClick: confirmStreamPost },
+                        { label: 'Pick a thread', onClick: () => setPicking(true) },
+                    ]}
+                    onDismiss={() => setVerdict(null)}
+                    dismissTitle="Hide this; the next send asks Auto again"
+                />
+            )}
             <Composer
                 placeholder={`Message ${space.name} — @rowboat to ask your agent`}
                 busy={routing}
                 draftKey={memoryKey}
                 onSend={post}
-                autoRoute={{ enabled: autoRoute, onToggle: () => void toggleAutoRoute() }}
+                submit={submit}
+                autoRoute={{ mode: autoRouteMode, onToggle: () => void toggleAutoRoute(), onModeChange: setAutoRouteMode }}
                 onSchedule={async (body, at) => {
+                    setVerdict(null)
                     await window.ipc.invoke('spaces:schedule', {
                         orgId: org.id, spaceId: space.id, body, at: at.toISOString(), kind: 'message',
                     })

@@ -93,7 +93,7 @@ export function buildRouteRequest(
                 instructions: {
                     question: 'Where does `draft` belong in this team chat space?',
                     context:
-                        '`threads` lists the open threads in the space, newest activity first. A message belongs in a thread when it continues that specific conversation: it answers it, adds to it, or reacts to it. Otherwise it is a new message in the main stream.',
+                        '`threads` lists the recent messages and open threads in the space, newest activity first; replying to any of them continues its thread. A message belongs in a thread when it continues that specific conversation: it answers it, adds to it, or reacts to it. Otherwise it is a new message in the main stream.',
                 },
                 criteria,
             },
