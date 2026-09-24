@@ -99,7 +99,7 @@ async function formatTranscript(raw: string): Promise<string> {
     }
 }
 
-export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, autoFocus, onType, seed, draftKey, commands = [], autoRoute, submit }: {
+export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, autoFocus, onType, seed, draftKey, commands = [], autoRoute, submit, onDraftChange, onEscape }: {
     placeholder: string
     /**
      * Post the message. Resolve 'keep' to leave the draft in the box (the
@@ -135,6 +135,10 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     autoRoute?: { mode: AutoRouteMode; onToggle: () => void; onModeChange: (mode: 'preview' | 'post') => void }
     /** A pane's own confirm button: a new nonce sends what is in the box, exactly as the arrow would. */
     submit?: { nonce: number } | null
+    /** Every change to the box's markdown, for a pane that follows the text (Auto's tag chips). */
+    onDraftChange?: (draft: string) => void
+    /** Esc with no popover open. Return true to consume it (a pane closing its notice). */
+    onEscape?: () => boolean
 }) {
     const [draft, setDraft] = useState(() => (draftKey ? window.localStorage.getItem(draftStorageKey(draftKey)) ?? '' : ''))
     useEffect(() => {
@@ -147,6 +151,11 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         }
     }, [draftKey, draft])
     const [appliedSeed, setAppliedSeed] = useState<number | null>(null)
+    // The pane's follower of the text, through a ref like the other callbacks.
+    const onDraftChangeRef = useRef(onDraftChange)
+    useEffect(() => {
+        onDraftChangeRef.current?.(draft)
+    }, [draft])
 
     // ------------------------------------------------------------------
     // The rich input (TipTap). The editor owns what you see; `draft` is the
@@ -685,6 +694,8 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                 return true
             }
         }
+        // Esc with nothing open above: the pane may have a notice to close.
+        if (e.key === 'Escape') return onEscape ? onEscape() : false
         if (e.key !== 'Enter') return false
         // ⌘Enter always sends — even from inside a code fence.
         if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
@@ -720,6 +731,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     useEffect(() => {
         placeholderRef.current = placeholder
         onTypeRef.current = onType
+        onDraftChangeRef.current = onDraftChange
         keydownRef.current = handleEditorKeyDown
         pasteRef.current = handleEditorPaste
         dropRef.current = editorDropGuard

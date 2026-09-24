@@ -1,5 +1,6 @@
 import { Fragment } from 'react'
-import { Loader2, Route, X as XIcon } from 'lucide-react'
+import { Check, Loader2, Route, X as XIcon } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
 // The strip Auto puts above a composer (2026-09-23) when it has something to
 // say about the text in the box: "Auto put this reply here" over a thread
@@ -7,7 +8,21 @@ import { Loader2, Route, X as XIcon } from 'lucide-react'
 // where the person says "not this". It stays until they act, since a toast
 // would fade and a wrong destination should not. Rendered inside the composer
 // dock's side padding so it lines up with the frame.
-export function AutoBanner({ message, hint, actions, busy = false, onDismiss, dismissTitle }: {
+//
+// Chips (2026-09-24) are offers, never actions: a tag chip adds its mention
+// when clicked and takes it back when clicked again; its × declines it for
+// this draft. Sending with chips untouched sends nothing extra.
+
+export interface BannerChip {
+    key: string
+    label: string
+    /** The chip's mention is in the draft now. */
+    added: boolean
+    onToggle: () => void
+    onDecline: () => void
+}
+
+export function AutoBanner({ message, hint, actions, busy = false, onDismiss, dismissTitle, chips, chipsLabel = 'Tag' }: {
     message: string
     /** Quieter text after the message, e.g. how to confirm. */
     hint?: string
@@ -15,6 +30,8 @@ export function AutoBanner({ message, hint, actions, busy = false, onDismiss, di
     busy?: boolean
     onDismiss: () => void
     dismissTitle: string
+    chips?: BannerChip[]
+    chipsLabel?: string
 }) {
     return (
         <div className="shrink-0 px-[16px] pt-3">
@@ -48,6 +65,43 @@ export function AutoBanner({ message, hint, actions, busy = false, onDismiss, di
                 >
                     <XIcon className="size-3.5" />
                 </button>
+                {chips && chips.length > 0 && (
+                    /* w-full: its own line under the verdict. */
+                    <div className="flex w-full flex-wrap items-center gap-1.5 pt-0.5">
+                        <span className="text-muted-foreground">{chipsLabel}</span>
+                        {chips.map((chip) => (
+                            <span
+                                key={chip.key}
+                                className={cn(
+                                    'group inline-flex items-center rounded-full border transition-colors',
+                                    chip.added ? 'border-transparent bg-foreground text-background' : 'border-border bg-background text-foreground/90',
+                                )}
+                            >
+                                <button
+                                    type="button"
+                                    onClick={chip.onToggle}
+                                    aria-pressed={chip.added}
+                                    title={chip.added ? 'Remove the tag' : 'Tag them'}
+                                    className={cn('inline-flex items-center gap-1 py-0.5 pl-2', chip.added ? 'pr-2' : 'pr-1')}
+                                >
+                                    {chip.added && <Check className="size-3" />}
+                                    {chip.label}
+                                </button>
+                                {!chip.added && (
+                                    <button
+                                        type="button"
+                                        onClick={chip.onDecline}
+                                        aria-label={`Not ${chip.label}`}
+                                        title="Not this one"
+                                        className="mr-0.5 rounded-full p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                                    >
+                                        <XIcon className="size-3" />
+                                    </button>
+                                )}
+                            </span>
+                        ))}
+                    </div>
+                )}
             </div>
         </div>
     )

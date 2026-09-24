@@ -3,6 +3,8 @@ import { CheckCircle2, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Switch } from "@/components/ui/switch"
+import { setTagSuggestionsEnabled, useTagSuggestionsEnabled } from "@/lib/spaces-auto-route"
 
 // Jev (TypeSafe) under Settings > Models > Decision Models (2026-09-23; it
 // began under Connections on 2026-09-22): the bring-your-own-key card behind
@@ -16,6 +18,7 @@ export function JevSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const [editing, setEditing] = useState(false)
   const [input, setInput] = useState("")
   const [saving, setSaving] = useState(false)
+  const tagSuggestions = useTagSuggestionsEnabled()
 
   const refresh = useCallback(async () => {
     try {
@@ -119,6 +122,16 @@ export function JevSettings({ dialogOpen }: { dialogOpen: boolean }) {
           )}
         </div>
       )}
+      {/* Per install, like the Auto mode; off also skips the questions' tokens. */}
+      <label className="flex items-center justify-between gap-4 pt-2 text-sm">
+        <span>
+          Suggest people to tag
+          <span className="block text-xs text-muted-foreground">
+            In Auto previews of a stream message, offer @mentions judged from recent messages here. Nothing is added until you click.
+          </span>
+        </span>
+        <Switch checked={tagSuggestions} onCheckedChange={setTagSuggestionsEnabled} aria-label="Suggest people to tag" />
+      </label>
     </div>
   )
 }

@@ -14,7 +14,9 @@ vi.mock('@/hooks/use-space-chat', () => ({
     getThreadSnapshot: () => undefined,
 }))
 
-import { collectRouteCandidates, getAutoRouteMode, routeThreadLabel, setAutoRouteMode } from './spaces-auto-route'
+import {
+    collectRouteCandidates, getAutoRouteMode, getTagSuggestionsEnabled, routeThreadLabel, setAutoRouteMode, setTagSuggestionsEnabled, stripMentionTokens,
+} from './spaces-auto-route'
 
 const memberNames = new Map([['m1', 'Sam'], ['m2', 'Arjun']])
 const spaceNames = new Map<string, string>()
@@ -76,9 +78,19 @@ describe('collectRouteCandidates', () => {
         // r5 has no replies yet and still counts: a root IS a thread. r6 is
         // unconfirmed and r7 is a tombstone, so neither is a destination.
         expect(candidates.map((c) => c.rootMessageId)).toEqual(['r2', 'r1', 'r4', 'r5'])
-        expect(candidates[1]).toMatchObject({ title: 'CI status', rootText: 'CI is red on main', rootAuthor: 'Sam', replyCount: 3 })
-        expect(candidates[2]).toMatchObject({ title: null, rootText: 'Lunch?', rootAuthor: 'Arjun', replyCount: 2, lastActivityAt: '2026-09-22T11:00:00.000Z' })
+        expect(candidates[1]).toMatchObject({ title: 'CI status', rootText: 'CI is red on main', rootAuthor: 'Sam', rootAuthorId: 'm1', replyCount: 3 })
+        expect(candidates[2]).toMatchObject({ title: null, rootText: 'Lunch?', rootAuthor: 'Arjun', rootAuthorId: 'm2', replyCount: 2, lastActivityAt: '2026-09-22T11:00:00.000Z' })
         expect(candidates[3]).toMatchObject({ title: null, rootText: 'No replies here', replyCount: 0, lastActivityAt: '2026-09-22T09:00:00.000Z' })
+    })
+
+    it('carries no author id for an agent post', () => {
+        const stream = {
+            messages: [message({ id: 'r1', replyCount: 1, author: { memberId: 'm1', actingMode: 'agent', agentName: 'rowboat' } })],
+            topicsByRoot: new Map<string, spaces.Topic>(),
+        }
+        const [only] = collectRouteCandidates('o1', 's1', stream, memberNames, spaceNames)
+        expect(only).toMatchObject({ rootMessageId: 'r1', rootAuthor: 'Sam' })
+        expect(only).not.toHaveProperty('rootAuthorId')
     })
 
     it('skips a root whose topic is archived', () => {
@@ -99,6 +111,25 @@ describe('routeThreadLabel', () => {
         expect(routeThreadLabel('o1', 's1', 'r1', memberNames, spaceNames)).toBe('CI status')
         expect(routeThreadLabel('o1', 's1', 'r2', memberNames, spaceNames)).toBe('Lunch?')
         expect(routeThreadLabel('o1', 's1', 'zz', memberNames, spaceNames)).toBe('the thread')
+    })
+})
+
+describe('tag suggestions', () => {
+    it('are on unless switched off, per install', async () => {
+        expect(getTagSuggestionsEnabled()).toBe(true)
+        setTagSuggestionsEnabled(false)
+        expect(getTagSuggestionsEnabled()).toBe(false)
+        expect(window.localStorage.getItem('spaces:auto-tags')).toBe('off')
+        vi.resetModules()
+        const fresh = await import('./spaces-auto-route')
+        expect(fresh.getTagSuggestionsEnabled()).toBe(false)
+        setTagSuggestionsEnabled(true)
+        expect(window.localStorage.getItem('spaces:auto-tags')).toBeNull()
+    })
+
+    it('strips mention tokens so a tagged draft still matches its verdict', () => {
+        expect(stripMentionTokens('ship it [@Sam](#member:m1) [@here](#here)  today')).toBe('ship it today')
+        expect(stripMentionTokens('[#eng](#space:s1) plain')).toBe('plain')
     })
 })
 

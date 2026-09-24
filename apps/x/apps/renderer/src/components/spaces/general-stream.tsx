@@ -1,7 +1,7 @@
 import { startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowDown, ArrowUp, Loader2, X } from 'lucide-react'
-import type { spaces } from '@x/shared'
-import { messageUrl } from '@x/shared/dist/spaces.js'
+import type { autoRoute, spaces } from '@x/shared'
+import { mentionToken, messageUrl } from '@x/shared/dist/spaces.js'
 import { copySpacesLink } from '@/lib/spaces-copy-link'
 import { Composer, type AgentOptions } from '@/components/spaces/composer'
 import { ForwardDialog } from '@/components/spaces/forward-dialog'
@@ -24,7 +24,11 @@ import { getSpaceReadState, getStreamReadOffset, getThreadReadState, isThreadUnr
 import { toggleSaved, useSaved } from '@/lib/spaces-saved'
 import { maybeInvokeRowboat } from '@/lib/spaces-rowboat'
 import { openResponseChat } from '@/lib/spaces-response-chat'
-import { AUTO_TOAST, collectRouteCandidates, routeDraft, routeThreadLabel, setAutoRouteMode, useAutoRouteMode, type AutoRouteOutcome } from '@/lib/spaces-auto-route'
+import {
+    AUTO_TOAST, collectRouteCandidates, routeDraft, routeThreadLabel, setAutoRouteMode, stripMentionTokens, useAutoRouteMode, useTagSuggestionsEnabled,
+    type AutoRouteOutcome,
+} from '@/lib/spaces-auto-route'
+import type { BannerChip } from '@/components/spaces/auto-banner'
 import { readThreadDraft, stageThreadDraft } from '@/lib/spaces-thread-draft'
 import { postStreamMessage } from '@/lib/spaces-post'
 import { AutoBanner } from '@/components/spaces/auto-banner'
@@ -350,7 +354,7 @@ export function GeneralStream({
     // asking Jev again; edited text is a new question. "Pick a thread" moves
     // the text to a thread of the person's choosing. Nothing leaves the
     // composer on a first send while Preview is on.
-    type StreamVerdict = { body: string; reason: 'new-message' | 'uncertain' | 'no-candidates' }
+    type StreamVerdict = { body: string; reason: 'new-message' | 'uncertain' | 'no-candidates'; tags: autoRoute.TagSuggestion[]; here: number | null }
     const [verdict, setVerdict] = useState<StreamVerdict | null>(null)
     const confirmedRef = useRef(false)
     const [submit, setSubmit] = useState<{ nonce: number } | null>(null)
@@ -358,6 +362,58 @@ export function GeneralStream({
     const confirmStreamPost = () => {
         confirmedRef.current = true
         setSubmit({ nonce: Date.now() })
+    }
+
+    // Tag chips (2026-09-24) on a held stream verdict: offers, never actions.
+    // A chip's state follows the box (the composer reports every change), so
+    // a click adds the mention, a second click takes it back, and the ×
+    // declines it for this draft, which the declined set remembers across an
+    // edit-and-resend. A verdict is matched to its text with mentions
+    // stripped, so tagging never re-asks Jev. Every gesture is logged: Jev
+    // learns nothing from them, but the threshold can.
+    const tagSuggestions = useTagSuggestionsEnabled()
+    const [currentDraft, setCurrentDraft] = useState('')
+    const [declined, setDeclined] = useState<ReadonlySet<string>>(() => new Set())
+    const HERE_TOKEN = mentionToken({ kind: 'here' })
+    const toggleTag = (token: string, kind: 'member' | 'here') => {
+        if (currentDraft.includes(token)) {
+            const next = currentDraft.replace(`${token} `, '').replace(token, '').trim()
+            setSeed({ text: next, nonce: Date.now() })
+            analytics.spacesAutoTagChip({ action: 'remove', kind })
+        } else {
+            setSeed({ text: `${token} `, nonce: Date.now(), append: true })
+            analytics.spacesAutoTagChip({ action: 'accept', kind })
+        }
+    }
+    const declineTag = (key: string, kind: 'member' | 'here') => {
+        setDeclined((prev) => new Set(prev).add(key))
+        analytics.spacesAutoTagChip({ action: 'decline', kind })
+    }
+    const tagChips: BannerChip[] = verdict
+        ? [
+              ...verdict.tags
+                  .filter((t) => !declined.has(t.memberId))
+                  .map((t) => {
+                      const token = mentionToken({ kind: 'member', id: t.memberId, label: t.name })
+                      return {
+                          key: t.memberId,
+                          label: `@${t.name}`,
+                          added: currentDraft.includes(token),
+                          onToggle: () => toggleTag(token, 'member'),
+                          onDecline: () => declineTag(t.memberId, 'member'),
+                      }
+                  }),
+              ...(verdict.here !== null && !declined.has('here')
+                  ? [{ key: 'here', label: '@here', added: currentDraft.includes(HERE_TOKEN), onToggle: () => toggleTag(HERE_TOKEN, 'here'), onDecline: () => declineTag('here', 'here') }]
+                  : []),
+          ]
+        : []
+    const noteTagOutcome = (held: StreamVerdict, body: string) => {
+        const offers = [...held.tags.map((t) => ({ key: t.memberId, token: mentionToken({ kind: 'member', id: t.memberId, label: t.name }) })), ...(held.here !== null ? [{ key: 'here', token: HERE_TOKEN }] : [])]
+        if (offers.length === 0) return
+        const accepted = offers.filter((o) => body.includes(o.token)).length
+        const declinedCount = offers.filter((o) => !body.includes(o.token) && declined.has(o.key)).length
+        analytics.spacesAutoTagsSent({ shown: offers.length, accepted, declined: declinedCount, ignored: offers.length - accepted - declinedCount })
     }
     // The text as it stands now comes off the composer's stored draft (kept
     // current on every keystroke). Attachments do not travel: staging is text.
@@ -371,10 +427,13 @@ export function GeneralStream({
 
     const post = async (body: string, agent?: AgentOptions): Promise<void | 'keep'> => {
         if (autoRouteMode === 'off') return postToStream(body, agent)
-        const confirmed = confirmedRef.current || (autoRouteMode === 'preview' && verdict?.body === body)
+        const confirmed =
+            confirmedRef.current || (autoRouteMode === 'preview' && !!verdict && stripMentionTokens(verdict.body) === stripMentionTokens(body))
         confirmedRef.current = false
         if (confirmed) {
+            if (verdict) noteTagOutcome(verdict, body)
             setVerdict(null)
+            setDeclined(new Set())
             return postToStream(body, agent)
         }
         setVerdict(null)
@@ -387,6 +446,10 @@ export function GeneralStream({
                 draft: body,
                 ...(authorName ? { authorName } : {}),
                 candidates: collectRouteCandidates(org.id, space.id, stream, memberNames, spaceNames),
+                members: [...memberNames].map(([id, name]) => ({ id, name })),
+                senderId: org.memberId,
+                // A direct space has nobody to tag.
+                suggestTags: tagSuggestions && space.kind !== 'direct',
             })
         } finally {
             setRouting(false)
@@ -402,7 +465,7 @@ export function GeneralStream({
             notify.warning('Posted to the stream: Auto could not decide', { ...AUTO_TOAST, description: outcome.error })
         } else if (autoRouteMode === 'preview' && outcome.reason !== 'thread') {
             // Held: the notice above the box says what Auto saw; send again posts.
-            setVerdict({ body, reason: outcome.reason })
+            setVerdict({ body, reason: outcome.reason, tags: outcome.tags ?? [], here: outcome.here ?? null })
             return 'keep'
         }
         await postToStream(body, agent)
@@ -1018,6 +1081,7 @@ export function GeneralStream({
                     ]}
                     onDismiss={() => setVerdict(null)}
                     dismissTitle="Hide this; the next send asks Auto again"
+                    chips={tagChips}
                 />
             )}
             <Composer
@@ -1026,6 +1090,16 @@ export function GeneralStream({
                 draftKey={memoryKey}
                 onSend={post}
                 submit={submit}
+                onDraftChange={(draft) => {
+                    setCurrentDraft(draft)
+                    // An emptied box starts over: nothing declined any more.
+                    if (!draft && declined.size > 0) setDeclined(new Set())
+                }}
+                onEscape={() => {
+                    if (!verdict) return false
+                    setVerdict(null)
+                    return true
+                }}
                 autoRoute={{ mode: autoRouteMode, onToggle: () => void toggleAutoRoute(), onModeChange: setAutoRouteMode }}
                 onSchedule={async (body, at) => {
                     setVerdict(null)

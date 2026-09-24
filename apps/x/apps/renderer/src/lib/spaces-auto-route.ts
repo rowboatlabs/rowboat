@@ -26,6 +26,53 @@ export type AutoRouteMode = 'off' | 'preview' | 'post'
  */
 export const AUTO_TOAST = { position: 'top-center' } as const
 
+// Tag suggestions (2026-09-24): on by default; off skips the questions (and
+// their tokens). Per install, like the mode.
+const TAGS_KEY = 'spaces:auto-tags'
+const tagListeners = new Set<() => void>()
+
+function readTagsStored(): boolean {
+    try {
+        return window.localStorage.getItem(TAGS_KEY) !== 'off'
+    } catch {
+        return true
+    }
+}
+
+let tagsEnabled = readTagsStored()
+
+export function getTagSuggestionsEnabled(): boolean {
+    return tagsEnabled
+}
+
+export function setTagSuggestionsEnabled(next: boolean): void {
+    tagsEnabled = next
+    try {
+        if (next) window.localStorage.removeItem(TAGS_KEY)
+        else window.localStorage.setItem(TAGS_KEY, 'off')
+    } catch {
+        // Quota/private mode: the choice just does not persist.
+    }
+    for (const listener of tagListeners) listener()
+}
+
+export function useTagSuggestionsEnabled(): boolean {
+    return useSyncExternalStore(
+        (listener) => {
+            tagListeners.add(listener)
+            return () => {
+                tagListeners.delete(listener)
+            }
+        },
+        getTagSuggestionsEnabled,
+    )
+}
+
+/** A mention token as the composer writes it, so a chip can tell whether its tag is already in the draft. */
+export function stripMentionTokens(text: string): string {
+    return text.replace(/\[[@#][^\]]*\]\(#[^)]*\)/g, '').replace(/\s+/g, ' ').trim()
+}
+
 const STORAGE_KEY = 'spaces:auto-route'
 const listeners = new Set<() => void>()
 
@@ -106,6 +153,8 @@ export function collectRouteCandidates(
             title: resolveMentions(topic.title, memberNames, spaceNames),
             rootText: root && !root.deletedAt ? gist(root.body, memberNames, spaceNames) : '',
             ...(author ? { rootAuthor: author } : {}),
+            // The id travels only for a human post: a person is tagged for what they wrote themselves.
+            ...(root?.author.actingMode === 'direct' ? { rootAuthorId: root.author.memberId } : {}),
             replyCount: root?.replyCount ?? 0,
             lastActivityAt: topic.lastActivityAt,
         })
@@ -121,6 +170,7 @@ export function collectRouteCandidates(
             title: topic ? resolveMentions(topic.title, memberNames, spaceNames) : null,
             rootText: gist(message.body, memberNames, spaceNames),
             ...(author ? { rootAuthor: author } : {}),
+            ...(message.author.actingMode === 'direct' ? { rootAuthorId: message.author.memberId } : {}),
             replyCount: message.replyCount,
             lastActivityAt: message.lastReplyAt ?? message.postedAt,
         })
