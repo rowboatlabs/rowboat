@@ -15,6 +15,9 @@ overrides:
 
 packageExtensionsChecksum: sha256-W1SlpWj7apXkftba98d6OWsfgT2jo5j6xPM8BZ1Tzd0=
 
+patchedDependencies:
+  appdmg@0.6.6: d568fc7c2d824458e1778c1b28b0eac758f1fa9e444f26018f8c975ade19f589
+
 importers:
 
   .:
@@ -18128,7 +18131,7 @@ snapshots:
 
   anynum@1.0.1: {}
 
-  appdmg@0.6.6:
+  appdmg@0.6.6(patch_hash=d568fc7c2d824458e1778c1b28b0eac758f1fa9e444f26018f8c975ade19f589):
     dependencies:
       async: 1.5.2
       ds-store: 0.1.6
@@ -19361,7 +19364,7 @@ snapshots:
       debug: 4.4.3
       minimist: 1.2.8
     optionalDependencies:
-      appdmg: 0.6.6
+      appdmg: 0.6.6(patch_hash=d568fc7c2d824458e1778c1b28b0eac758f1fa9e444f26018f8c975ade19f589)
     transitivePeerDependencies:
       - supports-color
     optional: true
