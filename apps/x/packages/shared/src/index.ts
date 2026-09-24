@@ -37,4 +37,5 @@ export * as rowboatAccount from './rowboat-account.js';
 export * as turnFollower from './turn-follower.js';
 export * as spaces from './spaces.js';
 export * as autoRoute from './auto-route.js';
+export * as find from './find.js';
 export { PrefixLogger };

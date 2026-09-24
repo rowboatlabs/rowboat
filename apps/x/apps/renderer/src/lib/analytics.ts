@@ -243,6 +243,12 @@ export function spacesAutoTagsSent(props: { shown: number; accepted: number; dec
   posthog.capture('spaces_auto_tags_sent', props)
 }
 
+// /find (2026-09-24): how often the first pick is right is the number that
+// says whether "take me there" beats a results list.
+export function spacesFind(props: { outcome: 'landed' | 'not-found' | 'no-key' | 'error' | 'next' | 'search-instead' }) {
+  posthog.capture('spaces_find', props)
+}
+
 export function spacesReactionToggled(props: { action: 'add' | 'remove' }) {
   posthog.capture('spaces_reaction_toggled', { action: props.action })
 }

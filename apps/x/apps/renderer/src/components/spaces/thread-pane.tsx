@@ -30,6 +30,7 @@ import { AUTO_TOAST, collectRouteCandidates, routeDraft, routeThreadLabel } from
 import { postStreamMessage } from '@/lib/spaces-post'
 import { getStreamState, jumpToLatest } from '@/hooks/use-space-chat'
 import { AutoBanner } from '@/components/spaces/auto-banner'
+import { FindBanner } from '@/components/spaces/find-banner'
 // The Spaces toast queue has no renderer; sonner is what the person sees.
 import { toast as notify } from 'sonner'
 import { applyReaction, artifactsForThread, isContinuation, mergeMessages, threadLabelOf } from '@/lib/spaces-conventions'
@@ -1314,6 +1315,12 @@ export function ThreadPane({
                 <ForwardDialog org={org} space={space} message={forwarding} memberNames={memberNames} onClose={() => setForwarding(null)} />
             )}
             <PollDialogHost openRef={openPollRef} onSubmit={createPoll} />
+            <FindBanner
+                orgId={org.id}
+                spaceId={space.id}
+                pane={{ pane: 'thread', rootMessageId }}
+                nav={{ openThread: (id) => onOpenThread?.(id), openStream: onBack }}
+            />
             {staged && (
                 <AutoBanner
                     message="Auto put this reply here."

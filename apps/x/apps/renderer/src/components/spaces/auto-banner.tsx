@@ -33,22 +33,25 @@ export function AutoBanner({ message, hint, actions, busy = false, onDismiss, di
     chips?: BannerChip[]
     chipsLabel?: string
 }) {
+    // One size everywhere (2026-09-24 review): every text node says text-xs
+    // itself, so nothing inherits something else, and the message and the
+    // actions differ only by colour, not by size or weight.
     return (
         <div className="shrink-0 px-[16px] pt-3">
-            <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-border bg-muted/40 px-3 py-1.5 text-xs">
-                <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+            <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-border bg-muted/40 px-3 py-1.5 text-xs leading-5">
+                <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
                     <Route className="size-3.5 shrink-0" />
-                    {message}
-                    {hint && <span className="text-muted-foreground/70">{hint}</span>}
+                    <span className="text-xs">{message}</span>
+                    {hint && <span className="text-xs text-muted-foreground/70">{hint}</span>}
                 </span>
                 {actions.map((action, i) => (
                     <Fragment key={action.label}>
-                        {i > 0 && <span aria-hidden className="text-muted-foreground/60">·</span>}
+                        {i > 0 && <span aria-hidden className="text-xs text-muted-foreground/60">·</span>}
                         <button
                             type="button"
                             disabled={busy}
                             onClick={action.onClick}
-                            className="inline-flex items-center gap-1 font-medium text-foreground hover:underline disabled:opacity-50"
+                            className="inline-flex items-center gap-1 text-xs text-foreground hover:underline disabled:opacity-50"
                         >
                             {busy && i === actions.length - 1 && <Loader2 className="size-3 animate-spin" />}
                             {action.label}
@@ -68,12 +71,12 @@ export function AutoBanner({ message, hint, actions, busy = false, onDismiss, di
                 {chips && chips.length > 0 && (
                     /* w-full: its own line under the verdict. */
                     <div className="flex w-full flex-wrap items-center gap-1.5 pt-0.5">
-                        <span className="text-muted-foreground">{chipsLabel}</span>
+                        <span className="text-xs text-muted-foreground">{chipsLabel}</span>
                         {chips.map((chip) => (
                             <span
                                 key={chip.key}
                                 className={cn(
-                                    'group inline-flex items-center rounded-full border transition-colors',
+                                    'group inline-flex items-center rounded-full border text-xs transition-colors',
                                     chip.added ? 'border-transparent bg-foreground text-background' : 'border-border bg-background text-foreground/90',
                                 )}
                             >
@@ -82,7 +85,7 @@ export function AutoBanner({ message, hint, actions, busy = false, onDismiss, di
                                     onClick={chip.onToggle}
                                     aria-pressed={chip.added}
                                     title={chip.added ? 'Remove the tag' : 'Tag them'}
-                                    className={cn('inline-flex items-center gap-1 py-0.5 pl-2', chip.added ? 'pr-2' : 'pr-1')}
+                                    className={cn('inline-flex items-center gap-1 py-0.5 pl-2 text-xs', chip.added ? 'pr-2' : 'pr-1')}
                                 >
                                     {chip.added && <Check className="size-3" />}
                                     {chip.label}

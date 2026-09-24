@@ -244,6 +244,7 @@ export const RPC_CHANNELS = [
   'typesafe:setApiKey',
   'typesafe:clearApiKey',
   'spaces:autoRoute',
+  'spaces:findMessage',
   // Phase 5 (SEPARATION_PLAN.md): code-mode & terminal — the PTY lives with
   // core now (RFC Q13: the terminal shows the machine core runs on).
   // codeMode:provisionEngine stays client-local (sender-scoped progress).

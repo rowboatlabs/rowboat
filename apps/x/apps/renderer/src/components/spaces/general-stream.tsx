@@ -33,6 +33,8 @@ import { readThreadDraft, stageThreadDraft } from '@/lib/spaces-thread-draft'
 import { postStreamMessage } from '@/lib/spaces-post'
 import { AutoBanner } from '@/components/spaces/auto-banner'
 import { ThreadPickerDialog } from '@/components/spaces/thread-picker-dialog'
+import { FindBanner } from '@/components/spaces/find-banner'
+import { runFind, searchInstead } from '@/lib/spaces-find'
 import { toast } from '@/lib/toast'
 // The Spaces toast queue has no renderer; sonner is what the person sees.
 import { toast as notify } from 'sonner'
@@ -1067,6 +1069,7 @@ export function GeneralStream({
                     onClose={() => setPicking(false)}
                 />
             )}
+            <FindBanner orgId={org.id} spaceId={space.id} pane={{ pane: 'stream' }} nav={{ openThread: onOpenThread, openStream: () => {} }} />
             {verdict && (
                 <AutoBanner
                     message={verdict.reason === 'new-message'
@@ -1130,6 +1133,34 @@ export function GeneralStream({
                         name: 'poll',
                         hint: 'Create a poll — pick answers, votes tally live',
                         run: () => openPollRef.current?.(),
+                    },
+                    {
+                        // /find (2026-09-24): Jev picks the message or thread the
+                        // words describe and the app lands there; the banner walks
+                        // the rest. Anything short of a real match hands the query
+                        // to the search bar rather than landing somewhere plausible.
+                        name: 'find',
+                        args: '<what you remember>',
+                        hint: 'Jump to the message or thread you describe',
+                        run: async (args) => {
+                            const query = args.trim()
+                            const finding = notify.loading(`Finding "${query}"`, AUTO_TOAST)
+                            const res = await runFind({
+                                orgId: org.id, spaceId: space.id, spaceName: space.name, query, memberNames, spaceNames,
+                                nav: { openThread: onOpenThread, openStream: () => {} },
+                            })
+                            notify.dismiss(finding)
+                            analytics.spacesFind({ outcome: res.outcome })
+                            if (res.outcome === 'not-found') {
+                                notify.info(`No match for "${query}"`, { ...AUTO_TOAST, action: { label: 'Open search', onClick: () => searchInstead(query) } })
+                            } else if (res.outcome === 'no-key') {
+                                searchInstead(query)
+                                notify.info('Find needs a Jev API key, so this is a plain search', { ...AUTO_TOAST, description: 'Add your TypeSafe key under Settings > Models > Decision Models.' })
+                            } else if (res.outcome === 'error') {
+                                searchInstead(query)
+                                notify.warning('Find could not decide, so this is a plain search', { ...AUTO_TOAST, description: res.error })
+                            }
+                        },
                     },
                     {
                         name: 'remind',

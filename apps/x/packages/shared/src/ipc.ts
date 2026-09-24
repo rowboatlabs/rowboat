@@ -24,6 +24,7 @@ import { RowboatApiConfig } from './rowboat-account.js';
 import { RecommendationRowSchema, RecommendationSlot } from './recommendation-update.js';
 import { ZListToolkitsResponse } from './composio.js';
 import { AutoRouteDecision, AutoRouteRequest } from './auto-route.js';
+import { FindRequest, FindResult } from './find.js';
 import { AppSummarySchema, RegistryRecordSchema, RowboatAppManifestSchema } from './rowboat-app.js';
 import { BrowserStateSchema, DisplayMediaRequestSchema, HttpAuthRequestSchema } from './browser-control.js';
 import { BillingInfoSchema } from './billing.js';
@@ -4078,6 +4079,13 @@ export const ipcSchemas = {
   'spaces:autoRoute': {
     req: AutoRouteRequest,
     res: AutoRouteDecision,
+  },
+  // /find (2026-09-24): Jev ranks the candidates the renderer gathered
+  // against what the person remembers. A ranking, never a navigation; the
+  // renderer lands on the top pick and walks "next" through the rest locally.
+  'spaces:findMessage': {
+    req: FindRequest,
+    res: FindResult,
   },
   // The deliberate ceremony: promote a thread (rootMessageId) or post a new
   // root + annotate it (body) — exactly one of the two, org-enforced.
