@@ -1,30 +1,44 @@
 import { startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowDown, ArrowUp, Loader2, X } from 'lucide-react'
-import type { spaces } from '@x/shared'
-import { messageUrl } from '@x/shared/dist/spaces.js'
+import type { autoRoute, spaces } from '@x/shared'
+import { mentionToken, messageUrl } from '@x/shared/dist/spaces.js'
 import { copySpacesLink } from '@/lib/spaces-copy-link'
 import { Composer, type AgentOptions } from '@/components/spaces/composer'
 import { ForwardDialog } from '@/components/spaces/forward-dialog'
 import { DayDivider, MessageRow, NewDivider, TypingIndicator, type ThreadRowData } from '@/components/spaces/message-row'
 import type { SpacePresence, StreamState } from '@/hooks/use-space-chat'
 import {
-    STREAM_READ_KEY, buildPendingMessage, failPendingStreamMessage, ingestStreamMessage, jumpToLatest, loadNewerStreamMessages,
-    loadOlderStreamMessages, loadStreamAround, prefetchThread, removeStreamMessage, resolvePendingStreamMessage, updateStreamMessage,
+    STREAM_READ_KEY, ingestStreamMessage, jumpToLatest, loadNewerStreamMessages,
+    loadOlderStreamMessages, loadStreamAround, prefetchThread, removeStreamMessage, updateStreamMessage,
     usePresenceSender,
 } from '@/hooks/use-space-chat'
 import { useSpaceNames, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { subscribeComposeInsert } from '@/lib/spaces-compose'
-import { applyReaction, dayKey, formatDayLabel, isContinuation, threadLabelOf } from '@/lib/spaces-conventions'
+import { applyReaction, dayKey, formatDayLabel, isContinuation } from '@/lib/spaces-conventions'
 import { consumeJump, jumpFailureMessage, resolveJumpOffset, scrollToMessage, subscribeJump, type JumpAnchor } from '@/lib/spaces-jump'
 import { PollDialogHost } from '@/components/spaces/poll-dialog'
 import { applyPollVote, myPollVotes, postPoll } from '@/lib/spaces-poll'
 import { resolveMentions } from '@/lib/spaces-presentation'
 import { formatScheduleTime, parseRemindArgs } from '@/lib/spaces-schedule'
-import { getSpaceReadState, getStreamReadOffset, getThreadReadState, isThreadUnread, markStreamRead, markThreadRead } from '@/lib/spaces-read-state'
+import { getSpaceReadState, getStreamReadOffset, getThreadReadState, isThreadUnread, markStreamRead, markThreadRead, noteThread } from '@/lib/spaces-read-state'
 import { toggleSaved, useSaved } from '@/lib/spaces-saved'
 import { maybeInvokeRowboat } from '@/lib/spaces-rowboat'
 import { openResponseChat } from '@/lib/spaces-response-chat'
+import {
+    AUTO_TOAST, collectRouteCandidates, refreshTypeSafeConfigured, routeDraft, routeThreadLabel, setAutoRouteMode, stripMentionTokens, useAutoRouteMode,
+    useTagSuggestionsEnabled, useTypeSafeConfigured,
+    type AutoRouteOutcome,
+} from '@/lib/spaces-auto-route'
+import type { BannerChip } from '@/components/spaces/auto-banner'
+import { readThreadDraft, stageThreadDraft } from '@/lib/spaces-thread-draft'
+import { postStreamMessage } from '@/lib/spaces-post'
+import { AutoBanner } from '@/components/spaces/auto-banner'
+import { ThreadPickerDialog } from '@/components/spaces/thread-picker-dialog'
+import { FindBanner } from '@/components/spaces/find-banner'
+import { runFind, searchInstead } from '@/lib/spaces-find'
 import { toast } from '@/lib/toast'
+// The Spaces toast queue has no renderer; sonner is what the person sees.
+import { toast as notify } from 'sonner'
 import * as analytics from '@/lib/analytics'
 import { containsRowboatAddress } from '@/lib/spaces-mentions'
 
@@ -42,6 +56,10 @@ const RENDER_CAP = 100
 const NEW_LINGER_MS = 5_000
 /** Clear delay after the fade starts — must outlast the divider's duration-700. */
 const NEW_FADE_MS = 800
+/** Auto in Post mode holds a routed reply this long, with Undo, before it goes out. */
+const AUTO_POST_HOLD_MS = 5_000
+/** A thread label fit for a button: labels run to 80 chars, a button should not. */
+const shortLabel = (label: string, max = 40): string => (label.length > max ? `${label.slice(0, max - 1)}…` : label)
 
 export function GeneralStream({
     org, space, stream, presence, memberNames, onOpenThread, onOpenSession, onClose, visible = true, composeActive = true, showHeader = true,
@@ -229,29 +247,239 @@ export function GeneralStream({
     // Enter lands, dimmed as pending; the org's write confirms — or fails,
     // leaving a retry/discard row — in the background. The composer never
     // waits on the round trip.
-    const post = async (body: string, agent?: AgentOptions) => {
+    const postToStream = async (body: string, agent?: AgentOptions) => {
         if (detachedRef.current) await snapToLatest()
-        const pending = buildPendingMessage(space.id, org.memberId, body)
-        ingestStreamMessage(org.id, space.id, pending)
-        void window.ipc
-            .invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, body })
-            .then((result) => {
-                resolvePendingStreamMessage(org.id, space.id, pending.id, result.message)
-                // The org read the stream up to our own post; mirror it.
-                markStreamRead(org.id, space.id, result.message.offset, { sync: false })
-                analytics.spacesMessagePosted({ kind: 'general', mentionsRowboat: containsRowboatAddress(body) })
-                // @rowboat on a fresh stream message: the agent works the thread
-                // under it — its receipt lands as the first reply.
-                maybeInvokeRowboat(org, space, { rootMessageId: result.message.id, label: threadLabelOf(body) }, result.message.id, body, agent)
+        postStreamMessage(org, space, body, agent)
+    }
+
+    // Auto (Jev, 2026-09-22): before any echo, ask where the draft belongs.
+    // A thread answer goes to that thread: in Preview (the default) the
+    // thread opens with the reply staged in its composer for a look before
+    // sending; in Post it posts there, the thread pane's own path minus the
+    // local echo (the live frame paints the reply and bumps the root's
+    // count). Everything else is the stream, with a word on why when Auto
+    // could not decide. The send button spins while Jev is asked, and the
+    // draft stays in the box until the destination is known.
+    // No TypeSafe key, no Auto (2026-09-24): the pill and /find exist only
+    // once a key is set, the way the Terminal pill exists only with code
+    // mode. The stored mode is kept, so a key that goes away and comes back
+    // finds Auto as it was; meanwhile every send is a plain stream post.
+    const jev = useTypeSafeConfigured()
+    const storedMode = useAutoRouteMode()
+    const autoRouteMode = jev ? storedMode : 'off'
+    const [routing, setRouting] = useState(false)
+    // Turning on always lands in Preview: the safe default, every time.
+    const toggleAutoRoute = () => setAutoRouteMode(autoRouteMode === 'off' ? 'preview' : 'off')
+
+    const threadLabelFor = (rootMessageId: string): string => routeThreadLabel(org.id, space.id, rootMessageId, memberNames, spaceNames)
+
+    const postInThread = async (rootMessageId: string, body: string, agent?: AgentOptions) => {
+        const label = threadLabelFor(rootMessageId)
+        let posted: spaces.Message
+        try {
+            posted = (await window.ipc.invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body })).message
+        } catch (err) {
+            notify.error(`Could not reply in “${label}”`, { ...AUTO_TOAST, description: err instanceof Error ? err.message : 'The send failed' })
+            // Rethrown so the composer keeps the draft for another try.
+            throw err
+        }
+        // Replying follows the thread and reads it up to our reply (the org's rule); mirror it.
+        noteThread(org.id, space.id, rootMessageId, { following: true, readOffset: posted.offset, lastReplyOffset: posted.offset })
+        analytics.spacesMessagePosted({ kind: 'topic', mentionsRowboat: containsRowboatAddress(body) })
+        maybeInvokeRowboat(org, space, { rootMessageId, label }, posted.id, body, agent)
+        notify.success(`Auto replied in “${label}”`, { ...AUTO_TOAST, action: { label: 'Open thread', onClick: () => onOpenThread(rootMessageId) } })
+    }
+
+    // Preview: the reply goes INTO the thread's composer and the thread opens,
+    // for a look before sending; the pane's banner holds the corrections.
+    // Agent options do not travel; the thread composer sets its own when the
+    // person sends from there.
+    const stageInThread = (rootMessageId: string, body: string) => {
+        stageThreadDraft(org.id, space.id, rootMessageId, body)
+        // No toast: the thread opening and the banner above its composer say
+        // it all, and a toast here landed on the very text it described.
+        onOpenThread(rootMessageId)
+    }
+
+    // Post: a five-second hold before the reply goes out, with Undo (undo-send
+    // in mail). Undo lands the reply in the thread composer with the banner,
+    // exactly the Preview flow, so the corrections are one click away. A hold
+    // still pending when this pane unmounts posts at once: the send was asked
+    // for. A post that fails after the hold puts the words back in this box.
+    const holdsRef = useRef(new Map<number, { timer: number; fire: () => void }>())
+    const holdSeqRef = useRef(0)
+    const holdThenPostInThread = (rootMessageId: string, body: string, agent?: AgentOptions) => {
+        const label = threadLabelFor(rootMessageId)
+        const id = ++holdSeqRef.current
+        const fire = () => {
+            holdsRef.current.delete(id)
+            postInThread(rootMessageId, body, agent).catch(() => {
+                setSeed({ text: body, nonce: Date.now(), append: true })
             })
-            .catch(() => {
-                failPendingStreamMessage(org.id, space.id, pending.id, body)
+        }
+        const timer = window.setTimeout(fire, AUTO_POST_HOLD_MS)
+        holdsRef.current.set(id, { timer, fire })
+        notify(`Replying in “${label}”`, {
+            ...AUTO_TOAST,
+            description: `Sending in ${AUTO_POST_HOLD_MS / 1000} seconds`,
+            duration: AUTO_POST_HOLD_MS,
+            action: {
+                label: 'Undo',
+                onClick: () => {
+                    if (!holdsRef.current.delete(id)) return
+                    window.clearTimeout(timer)
+                    stageInThread(rootMessageId, body)
+                },
+            },
+        })
+    }
+    useEffect(() => {
+        const holds = holdsRef.current
+        return () => {
+            for (const hold of holds.values()) {
+                window.clearTimeout(hold.timer)
+                hold.fire()
+            }
+            holds.clear()
+        }
+    }, [])
+
+    // Preview holds EVERY verdict (2026-09-23): a thread pick is staged in
+    // its thread, and a stream verdict stays in this box under a notice.
+    // Send again on the same text, or the notice's button, posts it without
+    // asking Jev again; edited text is a new question. "Pick a thread" moves
+    // the text to a thread of the person's choosing. Nothing leaves the
+    // composer on a first send while Preview is on.
+    type StreamVerdict = {
+        body: string
+        reason: 'new-message' | 'uncertain' | 'no-candidates'
+        tags: autoRoute.TagSuggestion[]
+        here: number | null
+        /** The closest thread, by name, when Jev gave one real probability (2026-09-24): one click to reply there instead. */
+        runnerUp: { threadRootId: string; label: string } | null
+    }
+    const [verdict, setVerdict] = useState<StreamVerdict | null>(null)
+    const confirmedRef = useRef(false)
+    const [submit, setSubmit] = useState<{ nonce: number } | null>(null)
+    const [picking, setPicking] = useState(false)
+    const confirmStreamPost = () => {
+        confirmedRef.current = true
+        setSubmit({ nonce: Date.now() })
+    }
+
+    // Tag chips (2026-09-24) on a held stream verdict: offers, never actions.
+    // A chip's state follows the box (the composer reports every change), so
+    // a click adds the mention, a second click takes it back, and the ×
+    // declines it for this draft, which the declined set remembers across an
+    // edit-and-resend. A verdict is matched to its text with mentions
+    // stripped, so tagging never re-asks Jev. Every gesture is logged: Jev
+    // learns nothing from them, but the threshold can.
+    const tagSuggestions = useTagSuggestionsEnabled()
+    const [currentDraft, setCurrentDraft] = useState('')
+    const [declined, setDeclined] = useState<ReadonlySet<string>>(() => new Set())
+    const HERE_TOKEN = mentionToken({ kind: 'here' })
+    const toggleTag = (token: string, kind: 'member' | 'here') => {
+        if (currentDraft.includes(token)) {
+            const next = currentDraft.replace(`${token} `, '').replace(token, '').trim()
+            setSeed({ text: next, nonce: Date.now() })
+            analytics.spacesAutoTagChip({ action: 'remove', kind })
+        } else {
+            setSeed({ text: `${token} `, nonce: Date.now(), append: true })
+            analytics.spacesAutoTagChip({ action: 'accept', kind })
+        }
+    }
+    const declineTag = (key: string, kind: 'member' | 'here') => {
+        setDeclined((prev) => new Set(prev).add(key))
+        analytics.spacesAutoTagChip({ action: 'decline', kind })
+    }
+    const tagChips: BannerChip[] = verdict
+        ? [
+              ...verdict.tags
+                  .filter((t) => !declined.has(t.memberId))
+                  .map((t) => {
+                      const token = mentionToken({ kind: 'member', id: t.memberId, label: t.name })
+                      return {
+                          key: t.memberId,
+                          label: `@${t.name}`,
+                          added: currentDraft.includes(token),
+                          onToggle: () => toggleTag(token, 'member'),
+                          onDecline: () => declineTag(t.memberId, 'member'),
+                      }
+                  }),
+              ...(verdict.here !== null && !declined.has('here')
+                  ? [{ key: 'here', label: '@here', added: currentDraft.includes(HERE_TOKEN), onToggle: () => toggleTag(HERE_TOKEN, 'here'), onDecline: () => declineTag('here', 'here') }]
+                  : []),
+          ]
+        : []
+    const noteTagOutcome = (held: StreamVerdict, body: string) => {
+        const offers = [...held.tags.map((t) => ({ key: t.memberId, token: mentionToken({ kind: 'member', id: t.memberId, label: t.name }) })), ...(held.here !== null ? [{ key: 'here', token: HERE_TOKEN }] : [])]
+        if (offers.length === 0) return
+        const accepted = offers.filter((o) => body.includes(o.token)).length
+        const declinedCount = offers.filter((o) => !body.includes(o.token) && declined.has(o.key)).length
+        analytics.spacesAutoTagsSent({ shown: offers.length, accepted, declined: declinedCount, ignored: offers.length - accepted - declinedCount })
+    }
+    // The text as it stands now comes off the composer's stored draft (kept
+    // current on every keystroke). Attachments do not travel: staging is text.
+    const moveDraftToThread = (rootMessageId: string) => {
+        const text = readThreadDraft(memoryKey).trim() || verdict?.body || ''
+        setVerdict(null)
+        if (!text) return
+        setSeed({ text: '', nonce: Date.now() })
+        stageInThread(rootMessageId, text)
+    }
+
+    const post = async (body: string, agent?: AgentOptions): Promise<void | 'keep'> => {
+        if (autoRouteMode === 'off') return postToStream(body, agent)
+        const confirmed =
+            confirmedRef.current || (autoRouteMode === 'preview' && !!verdict && stripMentionTokens(verdict.body) === stripMentionTokens(body))
+        confirmedRef.current = false
+        if (confirmed) {
+            if (verdict) noteTagOutcome(verdict, body)
+            setVerdict(null)
+            setDeclined(new Set())
+            return postToStream(body, agent)
+        }
+        setVerdict(null)
+        setRouting(true)
+        let outcome: AutoRouteOutcome
+        try {
+            const authorName = memberNames.get(org.memberId)
+            outcome = await routeDraft({
+                spaceName: space.name,
+                draft: body,
+                ...(authorName ? { authorName } : {}),
+                candidates: collectRouteCandidates(org.id, space.id, stream, memberNames, spaceNames),
+                members: [...memberNames].map(([id, name]) => ({ id, name })),
+                senderId: org.memberId,
+                // A direct space has nobody to tag.
+                suggestTags: tagSuggestions && space.kind !== 'direct',
             })
+        } finally {
+            setRouting(false)
+        }
+        if (outcome.destination === 'thread' && outcome.threadRootId) {
+            if (autoRouteMode === 'preview') stageInThread(outcome.threadRootId, body)
+            else holdThenPostInThread(outcome.threadRootId, body, agent)
+            return
+        }
+        if (outcome.reason === 'no-key') {
+            // The key went away since the pill last looked: the stream,
+            // quietly, and the pill follows once core answers.
+            refreshTypeSafeConfigured()
+        } else if (outcome.reason === 'error') {
+            notify.warning('Posted to the stream: Auto could not decide', { ...AUTO_TOAST, description: outcome.error })
+        } else if (autoRouteMode === 'preview' && outcome.reason !== 'thread') {
+            // Held: the notice above the box says what Auto saw; send again posts.
+            const runnerUp = outcome.runnerUp ? { threadRootId: outcome.runnerUp.threadRootId, label: threadLabelFor(outcome.runnerUp.threadRootId) } : null
+            setVerdict({ body, reason: outcome.reason, tags: outcome.tags ?? [], here: outcome.here ?? null, runnerUp })
+            return 'keep'
+        }
+        await postToStream(body, agent)
     }
 
     const retryFailed = (message: spaces.Message) => {
         removeStreamMessage(org.id, space.id, message.id)
-        void post(message.body)
+        void postToStream(message.body)
     }
     const discardFailed = (message: spaces.Message) => removeStreamMessage(org.id, space.id, message.id)
 
@@ -835,12 +1063,60 @@ export function GeneralStream({
                 <ForwardDialog org={org} space={space} message={forwarding} memberNames={memberNames} onClose={() => setForwarding(null)} />
             )}
             <PollDialogHost openRef={openPollRef} onSubmit={createPoll} />
+            {picking && (
+                <ThreadPickerDialog
+                    candidates={collectRouteCandidates(org.id, space.id, stream, memberNames, spaceNames)}
+                    onPick={(rootMessageId) => {
+                        setPicking(false)
+                        moveDraftToThread(rootMessageId)
+                    }}
+                    onClose={() => setPicking(false)}
+                />
+            )}
+            <FindBanner orgId={org.id} spaceId={space.id} pane={{ pane: 'stream' }} nav={{ openThread: onOpenThread, openStream: () => {} }} />
+            {verdict && (
+                <AutoBanner
+                    // Verdict first, then one confirm, then the one alternative
+                    // that matters: the closest thread by name when Jev gave it
+                    // real probability, a picker only when it gave none.
+                    message={verdict.reason === 'new-message'
+                        ? 'Auto: new message.'
+                        : verdict.reason === 'no-candidates'
+                          ? 'Auto: nothing here to reply to yet.'
+                          : 'Auto: probably a new message.'}
+                    hint="Send again to post it."
+                    actions={[
+                        { label: 'Post to the stream', onClick: confirmStreamPost },
+                        ...(verdict.runnerUp
+                            ? [{ label: `Reply in "${shortLabel(verdict.runnerUp.label)}" instead`, onClick: () => moveDraftToThread(verdict.runnerUp!.threadRootId) }]
+                            : verdict.reason !== 'no-candidates'
+                              ? [{ label: 'Pick a thread', onClick: () => setPicking(true) }]
+                              : []),
+                    ]}
+                    onDismiss={() => setVerdict(null)}
+                    dismissTitle="Hide this; the next send asks Auto again"
+                    chips={tagChips}
+                />
+            )}
             <Composer
                 placeholder={`Message ${space.name} — @rowboat to ask your agent`}
-                busy={false}
+                busy={routing}
                 draftKey={memoryKey}
                 onSend={post}
+                submit={submit}
+                onDraftChange={(draft) => {
+                    setCurrentDraft(draft)
+                    // An emptied box starts over: nothing declined any more.
+                    if (!draft && declined.size > 0) setDeclined(new Set())
+                }}
+                onEscape={() => {
+                    if (!verdict) return false
+                    setVerdict(null)
+                    return true
+                }}
+                autoRoute={jev ? { mode: autoRouteMode, onToggle: toggleAutoRoute, onModeChange: setAutoRouteMode } : undefined}
                 onSchedule={async (body, at) => {
+                    setVerdict(null)
                     await window.ipc.invoke('spaces:schedule', {
                         orgId: org.id, spaceId: space.id, body, at: at.toISOString(), kind: 'message',
                     })
@@ -869,6 +1145,36 @@ export function GeneralStream({
                         hint: 'Create a poll — pick answers, votes tally live',
                         run: () => openPollRef.current?.(),
                     },
+                    ...(jev ? [{
+                        // /find (2026-09-24): Jev picks the message or thread the
+                        // words describe and the app lands there; the banner walks
+                        // the rest. Anything short of a real match hands the query
+                        // to the search bar rather than landing somewhere plausible.
+                        // Listed only with a key, like the Auto pill.
+                        name: 'find',
+                        args: '<what you remember>',
+                        hint: 'Jump to the message or thread you describe',
+                        run: async (args: string) => {
+                            const query = args.trim()
+                            const finding = notify.loading(`Finding "${query}"`, AUTO_TOAST)
+                            const res = await runFind({
+                                orgId: org.id, spaceId: space.id, spaceName: space.name, query, memberNames, spaceNames,
+                                nav: { openThread: onOpenThread, openStream: () => {} },
+                            })
+                            notify.dismiss(finding)
+                            analytics.spacesFind({ outcome: res.outcome })
+                            if (res.outcome === 'not-found') {
+                                notify.info(`No match for "${query}"`, { ...AUTO_TOAST, action: { label: 'Open search', onClick: () => searchInstead(query) } })
+                            } else if (res.outcome === 'no-key') {
+                                // The key went away since the menu was built: a plain search, and the entry follows.
+                                searchInstead(query)
+                                refreshTypeSafeConfigured()
+                            } else if (res.outcome === 'error') {
+                                searchInstead(query)
+                                notify.warning('Find could not decide, so this is a plain search', { ...AUTO_TOAST, description: res.error })
+                            }
+                        },
+                    }] : []),
                     {
                         name: 'remind',
                         args: '<when> <text>',

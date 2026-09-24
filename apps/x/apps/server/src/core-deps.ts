@@ -32,6 +32,9 @@ import type { IAgentScheduleStateRepo } from '@x/core/dist/agent-schedule/state-
 import * as voice from '@x/core/dist/voice/voice.js';
 import { publishTtsChunk, subscribeTtsChunks } from '@x/core/dist/voice/tts-bus.js';
 import { formatDictation } from '@x/core/dist/voice/format_dictation.js';
+import * as typesafeClient from '@x/core/dist/typesafe/client.js';
+import { routeSpaceMessage } from '@x/core/dist/typesafe/route_message.js';
+import { findSpaceMessage } from '@x/core/dist/typesafe/find_message.js';
 import { fetchLiveNote, listLiveNotes, setLiveNote, setLiveNoteActive, deleteLiveNote } from '@x/core/dist/knowledge/live-note/fileops.js';
 import { runningItemKeys } from '@x/core/dist/todo/runner.js';
 import { getSessionIndex as getTodoSessionIndex } from '@x/core/dist/todo/session-index.js';
@@ -959,6 +962,15 @@ export function createCoreRpcHandlers(opts?: { sessionsIndexReady?: Promise<void
     'composio:list-toolkits': async () => composioFlows.listToolkits(),
     'composio:execute-tool': async (args) => composioFlows.executeTool(args.toolkitSlug, args.toolSlug, args.arguments),
     'composio:search-tools': async (args) => composioFlows.searchToolsInToolkit(args.toolkitSlug, args.query),
+    // TypeSafe (Jev) and the Spaces composer's Auto toggle (2026-09-22).
+    'typesafe:isConfigured': async () => ({ configured: typesafeClient.isConfigured() }),
+    'typesafe:setApiKey': async (args) => typesafeClient.saveApiKey(args.apiKey),
+    'typesafe:clearApiKey': async () => {
+      typesafeClient.clearApiKey();
+      return { success: true as const };
+    },
+    'spaces:autoRoute': async (args) => routeSpaceMessage(args),
+    'spaces:findMessage': async (args) => findSpaceMessage(args),
     'chatgpt:signIn': async () => {
       const result = await signInWithChatGPT();
       if (result.signedIn) {

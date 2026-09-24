@@ -232,6 +232,23 @@ export function spacesMessagePosted(props: { kind: 'general' | 'topic'; mentions
   posthog.capture('spaces_message_posted', { kind: props.kind, mentions_rowboat: props.mentionsRowboat })
 }
 
+// Auto's tag chips (2026-09-24): every gesture is a signal for the threshold,
+// since Jev learns nothing from them on its own. One event per chip gesture,
+// and one per confirmed send with the counts of what was shown.
+export function spacesAutoTagChip(props: { action: 'accept' | 'remove' | 'decline'; kind: 'member' | 'here' }) {
+  posthog.capture('spaces_auto_tag_chip', props)
+}
+
+export function spacesAutoTagsSent(props: { shown: number; accepted: number; declined: number; ignored: number }) {
+  posthog.capture('spaces_auto_tags_sent', props)
+}
+
+// /find (2026-09-24): how often the first pick is right is the number that
+// says whether "take me there" beats a results list.
+export function spacesFind(props: { outcome: 'landed' | 'not-found' | 'no-key' | 'error' | 'next' | 'search-instead' }) {
+  posthog.capture('spaces_find', props)
+}
+
 export function spacesReactionToggled(props: { action: 'add' | 'remove' }) {
   posthog.capture('spaces_reaction_toggled', { action: props.action })
 }

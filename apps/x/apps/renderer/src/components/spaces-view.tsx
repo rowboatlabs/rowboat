@@ -1157,6 +1157,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                 artifactsRailOpen={artifactsRailOpen}
                                 onToggleArtifactsRail={toggleArtifactsRail}
                                 onFolding={setFolding}
+                                onOpenThread={(id) => select({ kind: 'thread', rootMessageId: id })}
                                 visible={active && !collectionOpen && showChat}
                             />
                         </section>

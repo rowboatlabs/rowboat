@@ -3,7 +3,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import type { EditorView } from '@tiptap/pm/view'
 import { uploadInputFor } from '@/lib/spaces-upload'
-import { ArrowUp, BarChart3, Clock, FileText, Loader2, LoaderIcon, Mic, Paperclip, ShieldCheck, Square, Terminal, X as XIcon } from 'lucide-react'
+import { ArrowUp, BarChart3, Clock, Eye, FileText, Loader2, LoaderIcon, Mic, Paperclip, Route, Send, ShieldCheck, Square, Terminal, X as XIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
@@ -22,6 +22,8 @@ import { isDirectImageUrl, useSpaceRefs } from '@/components/spaces/space-markdo
 import '@/styles/space-composer.css'
 import { noteEmojiUsed, replaceShortcodes, searchEmoji, type EmojiEntry } from '@/lib/emoji-data'
 import { containsRowboatAddress } from '@/lib/spaces-mentions'
+import type { AutoRouteMode } from '@/lib/spaces-auto-route'
+import { draftStorageKey } from '@/lib/spaces-thread-draft'
 import { schedulePresets } from '@/lib/spaces-schedule'
 import { blobAppUrl, blobWireUrl, formatBytes, isImageMime } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
@@ -97,9 +99,14 @@ async function formatTranscript(raw: string): Promise<string> {
     }
 }
 
-export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, autoFocus, onType, seed, draftKey, commands = [] }: {
+export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, autoFocus, onType, seed, draftKey, commands = [], autoRoute, submit, onDraftChange, onEscape }: {
     placeholder: string
-    onSend: (body: string, agent?: AgentOptions) => Promise<void>
+    /**
+     * Post the message. Resolve 'keep' to leave the draft in the box (the
+     * pane is holding it for a confirmation); throw to keep it after a
+     * failure the pane has reported.
+     */
+    onSend: (body: string, agent?: AgentOptions) => Promise<void | 'keep'>
     /** Send-later: the clock menu hands the built body + fire time here. */
     onSchedule?: (body: string, at: Date) => Promise<void>
     /** Opens the poll creation dialog (same flow as /poll) — the button beside attach. */
@@ -118,18 +125,37 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     draftKey?: string
     /** Surface-specific slash commands (a "/" draft opens the menu; /ask is built in). */
     commands?: SlashCommand[]
+    /**
+     * The stream composer's Auto toggle (2026-09-22): on, Jev picks where the
+     * message lands (the stream, or the open thread it continues) at send
+     * time. Preview (2026-09-23, the default) opens that thread with the reply
+     * staged; Post sends it there. Absent = no toggle (a thread composer
+     * already has a destination).
+     */
+    autoRoute?: { mode: AutoRouteMode; onToggle: () => void; onModeChange: (mode: 'preview' | 'post') => void }
+    /** A pane's own confirm button: a new nonce sends what is in the box, exactly as the arrow would. */
+    submit?: { nonce: number } | null
+    /** Every change to the box's markdown, for a pane that follows the text (Auto's tag chips). */
+    onDraftChange?: (draft: string) => void
+    /** Esc with no popover open. Return true to consume it (a pane closing its notice). */
+    onEscape?: () => boolean
 }) {
-    const [draft, setDraft] = useState(() => (draftKey ? window.localStorage.getItem(`spaces:draft:${draftKey}`) ?? '' : ''))
+    const [draft, setDraft] = useState(() => (draftKey ? window.localStorage.getItem(draftStorageKey(draftKey)) ?? '' : ''))
     useEffect(() => {
         if (!draftKey) return
         try {
-            if (draft) window.localStorage.setItem(`spaces:draft:${draftKey}`, draft)
-            else window.localStorage.removeItem(`spaces:draft:${draftKey}`)
+            if (draft) window.localStorage.setItem(draftStorageKey(draftKey), draft)
+            else window.localStorage.removeItem(draftStorageKey(draftKey))
         } catch {
             // Quota/private mode: the draft just doesn't persist.
         }
     }, [draftKey, draft])
     const [appliedSeed, setAppliedSeed] = useState<number | null>(null)
+    // The pane's follower of the text, through a ref like the other callbacks.
+    const onDraftChangeRef = useRef(onDraftChange)
+    useEffect(() => {
+        onDraftChangeRef.current?.(draft)
+    }, [draft])
 
     // ------------------------------------------------------------------
     // The rich input (TipTap). The editor owns what you see; `draft` is the
@@ -456,12 +482,30 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         if (!body) return
         // From the text actually going out — an /ask rewrite mentions @rowboat
         // even though the draft it came from didn't.
-        await onSend(body, agentOptionsFor(raw))
+        let result: void | 'keep'
+        try {
+            result = await onSend(body, agentOptionsFor(raw))
+        } catch {
+            // The pane reported it; the draft stays in the box for another try.
+            return
+        }
+        // Held by the pane (Auto's preview of a stream post): the words stay.
+        if (result === 'keep') return
         editor?.chain().clearContent().run()
         setDraft('')
         setAttachments([])
         mention.close()
     }
+
+    // The pane's confirm button sends what is in the box, exactly as the
+    // arrow would (attachments, commands and all). Guarded by nonce, so it
+    // is one send per press however many renders follow.
+    const [appliedSubmit, setAppliedSubmit] = useState<number | null>(null)
+    useEffect(() => {
+        if (!submit || submit.nonce === appliedSubmit) return
+        setAppliedSubmit(submit.nonce)
+        void send()
+    })
 
     // --- voice input ---------------------------------------------------------
     // The assistant composer's dictation UI: the mic swaps the box for a live
@@ -563,7 +607,19 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         if (!text) return
         // A transcript has no pills: whatever it says is prose, never an address.
         const body = replaceShortcodes(text)
-        if (body) await onSend(body, agentOptionsFor(text))
+        if (!body) return
+        try {
+            const result = await onSend(body, agentOptionsFor(text))
+            if (result !== 'keep') return
+        } catch {
+            // The pane reported it; fall through, the words land in the box.
+        }
+        // Held (Auto's preview) or failed: the words land in the box rather
+        // than vanish, for the person to confirm or retry.
+        if (!editor) return
+        editor.commands.setContent(text)
+        setDraft(composerMarkdown(editor))
+        requestAnimationFrame(() => editor.commands.focus('end'))
     }
 
     const stopRecordingRef = useRef(stopRecording)
@@ -638,6 +694,8 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                 return true
             }
         }
+        // Esc with nothing open above: the pane may have a notice to close.
+        if (e.key === 'Escape') return onEscape ? onEscape() : false
         if (e.key !== 'Enter') return false
         // ⌘Enter always sends — even from inside a code fence.
         if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
@@ -673,6 +731,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     useEffect(() => {
         placeholderRef.current = placeholder
         onTypeRef.current = onType
+        onDraftChangeRef.current = onDraftChange
         keydownRef.current = handleEditorKeyDown
         pasteRef.current = handleEditorPaste
         dropRef.current = editorDropGuard
@@ -885,6 +944,39 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                         >
                             @rowboat
                         </button>
+                        {autoRoute && (
+                            <>
+                                <button
+                                    type="button"
+                                    onClick={autoRoute.onToggle}
+                                    aria-pressed={autoRoute.mode !== 'off'}
+                                    title={autoRoute.mode !== 'off'
+                                        ? 'Auto on: Jev decides at send time whether this is a new message or a reply to an open thread. Click to turn off'
+                                        : 'Auto: let Jev decide whether this is a new message or a reply to an open thread'}
+                                    className={cn(
+                                        'flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium transition-colors',
+                                        autoRoute.mode !== 'off' ? 'bg-secondary text-foreground hover:bg-secondary/70' : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                                    )}
+                                >
+                                    <Route className="size-3.5 shrink-0" />
+                                    <span>Auto</span>
+                                </button>
+                                {autoRoute.mode !== 'off' && (
+                                    /* The mode pill cycles, like the permission pill beside @rowboat. */
+                                    <button
+                                        type="button"
+                                        onClick={() => autoRoute.onModeChange(autoRoute.mode === 'preview' ? 'post' : 'preview')}
+                                        title={autoRoute.mode === 'preview'
+                                            ? 'Preview: a reply opens its thread with the text staged for you to send. Click to post replies straight away'
+                                            : 'Post: a reply is sent to its thread straight away. Click to preview replies in the thread first'}
+                                        className="flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                    >
+                                        {autoRoute.mode === 'preview' ? <Eye className="size-3.5 shrink-0" /> : <Send className="size-3.5 shrink-0" />}
+                                        <span>{autoRoute.mode === 'preview' ? 'Preview' : 'Post'}</span>
+                                    </button>
+                                )}
+                            </>
+                        )}
                         {mentioned && (
                             <>
                                 <span className="mx-0.5 h-4 w-px bg-border" />

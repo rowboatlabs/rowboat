@@ -23,6 +23,8 @@ import type { QueuedSessionMessage, SessionBusEvent, SessionIndexEntry, SessionS
 import { RowboatApiConfig } from './rowboat-account.js';
 import { RecommendationRowSchema, RecommendationSlot } from './recommendation-update.js';
 import { ZListToolkitsResponse } from './composio.js';
+import { AutoRouteDecision, AutoRouteRequest } from './auto-route.js';
+import { FindRequest, FindResult } from './find.js';
 import { AppSummarySchema, RegistryRecordSchema, RowboatAppManifestSchema } from './rowboat-app.js';
 import { BrowserStateSchema, DisplayMediaRequestSchema, HttpAuthRequestSchema } from './browser-control.js';
 import { BillingInfoSchema } from './billing.js';
@@ -2486,6 +2488,23 @@ export const ipcSchemas = {
       error: z.string().optional(),
     }),
   },
+  // TypeSafe (Jev), the System One judgment API behind the Spaces composer's
+  // Auto toggle (2026-09-22). The key lives in ~/.rowboat/config/typesafe.json
+  // and never reaches the renderer, which only learns whether one is set.
+  'typesafe:isConfigured': {
+    req: z.null(),
+    res: z.object({ configured: z.boolean() }),
+  },
+  // Saving verifies the key with one tiny request: a rejected key is refused
+  // (error); an unreachable API saves it and says so (warning).
+  'typesafe:setApiKey': {
+    req: z.object({ apiKey: z.string() }),
+    res: z.object({ success: z.boolean(), error: z.string().optional(), warning: z.string().optional() }),
+  },
+  'typesafe:clearApiKey': {
+    req: z.null(),
+    res: z.object({ success: z.literal(true) }),
+  },
   // Agent schedule channels
   'agent-schedule:getConfig': {
     req: z.null(),
@@ -4053,6 +4072,20 @@ export const ipcSchemas = {
       poll: z.custom<SpacesTypes.SpacesNewPollInput>().optional(),
     }),
     res: z.custom<SpacesPostResult>(),
+  },
+  // The stream composer's Auto toggle (2026-09-22): Jev says whether a draft
+  // is a new root or a reply to one of the candidate threads the renderer
+  // already holds. A decision, never a post; the composer posts on it.
+  'spaces:autoRoute': {
+    req: AutoRouteRequest,
+    res: AutoRouteDecision,
+  },
+  // /find (2026-09-24): Jev ranks the candidates the renderer gathered
+  // against what the person remembers. A ranking, never a navigation; the
+  // renderer lands on the top pick and walks "next" through the rest locally.
+  'spaces:findMessage': {
+    req: FindRequest,
+    res: FindResult,
   },
   // The deliberate ceremony: promote a thread (rootMessageId) or post a new
   // root + annotate it (body) — exactly one of the two, org-enforced.
