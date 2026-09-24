@@ -18,7 +18,7 @@ export async function routeSpaceMessage(input: AutoRouteRequest): Promise<AutoRo
     // One line per decision in the host log: the composer only shows the
     // verdict, and "why the stream?" is the question people ask first.
     console.log(
-        `[TypeSafe] route: ${decision.destination} (${decision.reason}) p=${decision.probability?.toFixed(2) ?? '-'} c=${decision.confidence?.toFixed(2) ?? '-'} over ${candidates.length} candidates, ${people.length} people, tags=${decision.tags?.map((t) => `${t.name}:${t.probability.toFixed(2)}`).join(',') || '-'} here=${decision.here?.toFixed(2) ?? '-'}, ${response.usage?.input_tokens ?? '?'} in / ${response.usage?.output_tokens ?? '?'} out tokens`,
+        `[TypeSafe] route: ${decision.destination} (${decision.reason}) p=${decision.probability?.toFixed(2) ?? '-'} c=${decision.confidence?.toFixed(2) ?? '-'} runnerUp=${decision.runnerUp ? decision.runnerUp.probability.toFixed(2) : '-'} over ${candidates.length} candidates, ${people.length} people, tags=${decision.tags?.map((t) => `${t.name}:${t.probability.toFixed(2)}`).join(',') || '-'} here=${decision.here?.toFixed(2) ?? '-'}, ${response.usage?.input_tokens ?? '?'} in / ${response.usage?.output_tokens ?? '?'} out tokens`,
     );
     return decision;
 }

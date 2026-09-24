@@ -71,6 +71,12 @@ export const AutoRouteDecision = z.object({
   probability: z.number().optional(),
   /** Jev's confidence on the destination choice, when it was asked. */
   confidence: z.number().optional(),
+  /**
+   * On a stream verdict, the closest thread when one drew real probability
+   * (2026-09-24): the notice offers it by name as a one-click reply, so a
+   * near miss is one click rather than a picker.
+   */
+  runnerUp: z.object({ threadRootId: z.string(), probability: z.number() }).optional(),
   /** People the draft seems to need, strongest first, already thresholded; only on a stream verdict. */
   tags: z.array(TagSuggestion).optional(),
   /** Present when the draft reads as something everyone should see: the @here probability. */

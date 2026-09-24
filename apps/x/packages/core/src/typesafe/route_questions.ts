@@ -27,6 +27,10 @@ export const MAX_DRAFT_CHARS = 4000;
 // than a root in the stream, so every tie goes to the stream.
 export const THREAD_MIN_PROBABILITY = 0.5;
 export const CONTINUES_MIN = 0.5;
+// On a stream verdict the closest thread is offered by name. Below this it
+// is noise dressed as a suggestion ("yes" puts 0.02 on something), so the
+// notice falls back to a picker instead. A starting point like the rest.
+export const RUNNER_UP_MIN_PROBABILITY = 0.1;
 
 // A tag notifies someone, so the floor is high and the list short. Nothing
 // is ever inserted on its own; these are offers.
@@ -245,6 +249,18 @@ export function decideRoute(
                 : { destination: 'thread', threadRootId: candidate.rootMessageId, reason: 'thread', ...scored };
     }
     if (decision.destination !== 'stream') return decision;
+
+    // The closest thread (2026-09-24): the strongest thread option, whatever
+    // the verdict was. On an uncertain verdict that is the thread Jev leaned
+    // to; on a new-message verdict it is the nearest miss.
+    const runnerUp = Object.entries(destination.probabilities)
+        .map(([option, p]) => {
+            const m = OPTION_RE.exec(option);
+            return { candidate: m ? candidates[Number(m[1]) - 1] : undefined, probability: p };
+        })
+        .filter((x): x is { candidate: RouteCandidate; probability: number } => !!x.candidate && x.probability >= RUNNER_UP_MIN_PROBABILITY)
+        .sort((a, b) => b.probability - a.probability)[0];
+    if (runnerUp) decision.runnerUp = { threadRootId: runnerUp.candidate.rootMessageId, probability: runnerUp.probability };
 
     // Tags only on a stream verdict: a reply already reaches its thread.
     const tags: TagSuggestion[] = people

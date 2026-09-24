@@ -58,6 +58,8 @@ const NEW_LINGER_MS = 5_000
 const NEW_FADE_MS = 800
 /** Auto in Post mode holds a routed reply this long, with Undo, before it goes out. */
 const AUTO_POST_HOLD_MS = 5_000
+/** A thread label fit for a button: labels run to 80 chars, a button should not. */
+const shortLabel = (label: string, max = 40): string => (label.length > max ? `${label.slice(0, max - 1)}…` : label)
 
 export function GeneralStream({
     org, space, stream, presence, memberNames, onOpenThread, onOpenSession, onClose, visible = true, composeActive = true, showHeader = true,
@@ -348,7 +350,14 @@ export function GeneralStream({
     // asking Jev again; edited text is a new question. "Pick a thread" moves
     // the text to a thread of the person's choosing. Nothing leaves the
     // composer on a first send while Preview is on.
-    type StreamVerdict = { body: string; reason: 'new-message' | 'uncertain' | 'no-candidates'; tags: autoRoute.TagSuggestion[]; here: number | null }
+    type StreamVerdict = {
+        body: string
+        reason: 'new-message' | 'uncertain' | 'no-candidates'
+        tags: autoRoute.TagSuggestion[]
+        here: number | null
+        /** The closest thread, by name, when Jev gave one real probability (2026-09-24): one click to reply there instead. */
+        runnerUp: { threadRootId: string; label: string } | null
+    }
     const [verdict, setVerdict] = useState<StreamVerdict | null>(null)
     const confirmedRef = useRef(false)
     const [submit, setSubmit] = useState<{ nonce: number } | null>(null)
@@ -461,7 +470,8 @@ export function GeneralStream({
             notify.warning('Posted to the stream: Auto could not decide', { ...AUTO_TOAST, description: outcome.error })
         } else if (autoRouteMode === 'preview' && outcome.reason !== 'thread') {
             // Held: the notice above the box says what Auto saw; send again posts.
-            setVerdict({ body, reason: outcome.reason, tags: outcome.tags ?? [], here: outcome.here ?? null })
+            const runnerUp = outcome.runnerUp ? { threadRootId: outcome.runnerUp.threadRootId, label: threadLabelFor(outcome.runnerUp.threadRootId) } : null
+            setVerdict({ body, reason: outcome.reason, tags: outcome.tags ?? [], here: outcome.here ?? null, runnerUp })
             return 'keep'
         }
         await postToStream(body, agent)
@@ -1066,15 +1076,22 @@ export function GeneralStream({
             <FindBanner orgId={org.id} spaceId={space.id} pane={{ pane: 'stream' }} nav={{ openThread: onOpenThread, openStream: () => {} }} />
             {verdict && (
                 <AutoBanner
+                    // Verdict first, then one confirm, then the one alternative
+                    // that matters: the closest thread by name when Jev gave it
+                    // real probability, a picker only when it gave none.
                     message={verdict.reason === 'new-message'
-                        ? 'Auto: this reads as a new message for the stream.'
+                        ? 'Auto: new message.'
                         : verdict.reason === 'no-candidates'
-                          ? 'Auto: nothing here to reply to yet, so the stream.'
-                          : 'Auto: no thread fit well enough, so the stream.'}
+                          ? 'Auto: nothing here to reply to yet.'
+                          : 'Auto: probably a new message.'}
                     hint="Send again to post it."
                     actions={[
                         { label: 'Post to the stream', onClick: confirmStreamPost },
-                        { label: 'Pick a thread', onClick: () => setPicking(true) },
+                        ...(verdict.runnerUp
+                            ? [{ label: `Reply in "${shortLabel(verdict.runnerUp.label)}" instead`, onClick: () => moveDraftToThread(verdict.runnerUp!.threadRootId) }]
+                            : verdict.reason !== 'no-candidates'
+                              ? [{ label: 'Pick a thread', onClick: () => setPicking(true) }]
+                              : []),
                     ]}
                     onDismiss={() => setVerdict(null)}
                     dismissTitle="Hide this; the next send asks Auto again"

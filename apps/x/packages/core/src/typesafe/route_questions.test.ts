@@ -196,6 +196,25 @@ describe('decideRoute', () => {
         expect(() => decideRoute({}, two)).toThrow(/no destination/);
     });
 
+    describe('the runner-up', () => {
+        it('names the closest thread on a new-message verdict, above the floor', () => {
+            const near = decideRoute(answers(NEW_MESSAGE_OPTION, { new_message: 0.52, thread_1: 0.04, thread_2: 0.44 }, 0.6), two);
+            expect(near.runnerUp).toEqual({ threadRootId: 'b', probability: 0.44 });
+            const far = decideRoute(answers(NEW_MESSAGE_OPTION, { new_message: 0.96, thread_1: 0.02, thread_2: 0.02 }, 0.2), two);
+            expect(far.runnerUp).toBeUndefined();
+        });
+
+        it('is the thread Jev leaned to on an uncertain verdict', () => {
+            const decision = decideRoute(answers('thread_1', { new_message: 0.38, thread_1: 0.42, thread_2: 0.2 }, 0.7), two);
+            expect(decision).toMatchObject({ reason: 'uncertain', runnerUp: { threadRootId: 'a', probability: 0.42 } });
+        });
+
+        it('is absent on a thread verdict', () => {
+            const decision = decideRoute(answers('thread_2', { new_message: 0.05, thread_1: 0.05, thread_2: 0.9 }, 0.95), two);
+            expect(decision.runnerUp).toBeUndefined();
+        });
+    });
+
     describe('tags', () => {
         const people = Array.from({ length: MAX_TAGS + 2 }, (_, i) => ({ memberId: `m${i}`, name: `P${i}`, wrote: [], lastActiveAt: null, namedInDraft: false }));
         const tagAnswers = { tag_person_1: noul(0.95), tag_person_2: noul(0.2), tag_person_3: noul(0.75), tag_person_4: noul(0.9), tag_person_5: noul(0.71), tag_here: noul(0.85) };
