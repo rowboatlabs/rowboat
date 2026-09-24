@@ -68,6 +68,55 @@ export function useTagSuggestionsEnabled(): boolean {
     )
 }
 
+// Whether a TypeSafe key is set (2026-09-24): the Auto pill, the /find
+// command and the tag switch exist only when one is, the way the Terminal
+// pill exists only with code mode enabled. Asked of core once, re-asked when
+// the settings card says the key changed and whenever the window regains
+// focus (a key file edited by hand). Never at module load: panes subscribe.
+export const TYPESAFE_CONFIG_EVENT = 'typesafe-config-changed'
+let configured: boolean | null = null
+const configuredListeners = new Set<() => void>()
+let configuredWired = false
+
+function setConfigured(next: boolean): void {
+    if (next === configured) return
+    configured = next
+    for (const listener of configuredListeners) listener()
+}
+
+export function refreshTypeSafeConfigured(): void {
+    try {
+        void window.ipc
+            .invoke('typesafe:isConfigured', null)
+            .then((r) => setConfigured(!!r?.configured))
+            .catch(() => setConfigured(false))
+    } catch {
+        setConfigured(false)
+    }
+}
+
+function wireConfigured(): void {
+    if (configuredWired) return
+    configuredWired = true
+    window.addEventListener(TYPESAFE_CONFIG_EVENT, refreshTypeSafeConfigured)
+    window.addEventListener('focus', refreshTypeSafeConfigured)
+    refreshTypeSafeConfigured()
+}
+
+/** True once core has said a key is set; false until it answers, and while there is none. */
+export function useTypeSafeConfigured(): boolean {
+    return useSyncExternalStore(
+        (listener) => {
+            wireConfigured()
+            configuredListeners.add(listener)
+            return () => {
+                configuredListeners.delete(listener)
+            }
+        },
+        () => configured === true,
+    )
+}
+
 /** A mention token as the composer writes it, so a chip can tell whether its tag is already in the draft. */
 export function stripMentionTokens(text: string): string {
     return text.replace(/\[[@#][^\]]*\]\(#[^)]*\)/g, '').replace(/\s+/g, ' ').trim()

@@ -4,7 +4,7 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
-import { setTagSuggestionsEnabled, useTagSuggestionsEnabled } from "@/lib/spaces-auto-route"
+import { TYPESAFE_CONFIG_EVENT, setTagSuggestionsEnabled, useTagSuggestionsEnabled } from "@/lib/spaces-auto-route"
 
 // Jev (TypeSafe) under Settings > Models > Decision Models (2026-09-23; it
 // began under Connections on 2026-09-22): the bring-your-own-key card behind
@@ -46,6 +46,8 @@ export function JevSettings({ dialogOpen }: { dialogOpen: boolean }) {
       setConfigured(true)
       setEditing(false)
       setInput("")
+      // The composers gate their Auto pill and /find on this; tell them now.
+      window.dispatchEvent(new Event(TYPESAFE_CONFIG_EVENT))
       if (result.warning) toast.warning(result.warning)
       else toast.success("Jev API key saved")
     } catch {
@@ -60,6 +62,7 @@ export function JevSettings({ dialogOpen }: { dialogOpen: boolean }) {
       await window.ipc.invoke("typesafe:clearApiKey", null)
       setConfigured(false)
       setEditing(false)
+      window.dispatchEvent(new Event(TYPESAFE_CONFIG_EVENT))
       toast("Jev API key removed")
     } catch {
       toast.error("Could not remove the Jev API key")
@@ -70,8 +73,9 @@ export function JevSettings({ dialogOpen }: { dialogOpen: boolean }) {
     <div className="space-y-2">
       <p className="text-xs text-muted-foreground">
         Jev is TypeSafe's System One model: it answers typed questions rather than chat, so it does not appear in the
-        model pickers above. With a key, the Auto toggle in a space's composer lets Jev decide whether a message starts
-        something new or replies to an open thread, previewing the reply in the thread or posting it there. Get a key from{" "}
+        model pickers above. A key adds an Auto toggle beside @rowboat in a space's composer, which lets Jev decide
+        whether a message starts something new or replies to an open thread, and a /find command that jumps to the
+        message you describe. Without a key, nothing changes. Get a key from{" "}
         <a
           href="https://console.typesafe.ai/keys"
           target="_blank"
@@ -122,7 +126,8 @@ export function JevSettings({ dialogOpen }: { dialogOpen: boolean }) {
           )}
         </div>
       )}
-      {/* Per install, like the Auto mode; off also skips the questions' tokens. */}
+      {/* Per install, like the Auto mode; off also skips the questions' tokens. Only with a key, like the pill. */}
+      {configured && (
       <label className="flex items-center justify-between gap-4 pt-2 text-sm">
         <span>
           Suggest people to tag
@@ -132,6 +137,7 @@ export function JevSettings({ dialogOpen }: { dialogOpen: boolean }) {
         </span>
         <Switch checked={tagSuggestions} onCheckedChange={setTagSuggestionsEnabled} aria-label="Suggest people to tag" />
       </label>
+      )}
     </div>
   )
 }

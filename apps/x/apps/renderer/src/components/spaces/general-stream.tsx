@@ -25,7 +25,8 @@ import { toggleSaved, useSaved } from '@/lib/spaces-saved'
 import { maybeInvokeRowboat } from '@/lib/spaces-rowboat'
 import { openResponseChat } from '@/lib/spaces-response-chat'
 import {
-    AUTO_TOAST, collectRouteCandidates, routeDraft, routeThreadLabel, setAutoRouteMode, stripMentionTokens, useAutoRouteMode, useTagSuggestionsEnabled,
+    AUTO_TOAST, collectRouteCandidates, refreshTypeSafeConfigured, routeDraft, routeThreadLabel, setAutoRouteMode, stripMentionTokens, useAutoRouteMode,
+    useTagSuggestionsEnabled, useTypeSafeConfigured,
     type AutoRouteOutcome,
 } from '@/lib/spaces-auto-route'
 import type { BannerChip } from '@/components/spaces/auto-banner'
@@ -257,25 +258,16 @@ export function GeneralStream({
     // count). Everything else is the stream, with a word on why when Auto
     // could not decide. The send button spins while Jev is asked, and the
     // draft stays in the box until the destination is known.
-    const autoRouteMode = useAutoRouteMode()
+    // No TypeSafe key, no Auto (2026-09-24): the pill and /find exist only
+    // once a key is set, the way the Terminal pill exists only with code
+    // mode. The stored mode is kept, so a key that goes away and comes back
+    // finds Auto as it was; meanwhile every send is a plain stream post.
+    const jev = useTypeSafeConfigured()
+    const storedMode = useAutoRouteMode()
+    const autoRouteMode = jev ? storedMode : 'off'
     const [routing, setRouting] = useState(false)
-    const toggleAutoRoute = async () => {
-        if (autoRouteMode !== 'off') {
-            setAutoRouteMode('off')
-            return
-        }
-        try {
-            const { configured } = await window.ipc.invoke('typesafe:isConfigured', null)
-            if (!configured) {
-                notify.info('Auto needs a Jev API key', { ...AUTO_TOAST, description: 'Add your TypeSafe key under Settings > Models > Decision Models.' })
-                return
-            }
-        } catch {
-            // The send path reports a missing key too.
-        }
-        // Turning on always lands in Preview: the safe default, every time.
-        setAutoRouteMode('preview')
-    }
+    // Turning on always lands in Preview: the safe default, every time.
+    const toggleAutoRoute = () => setAutoRouteMode(autoRouteMode === 'off' ? 'preview' : 'off')
 
     const threadLabelFor = (rootMessageId: string): string => routeThreadLabel(org.id, space.id, rootMessageId, memberNames, spaceNames)
 
@@ -462,7 +454,9 @@ export function GeneralStream({
             return
         }
         if (outcome.reason === 'no-key') {
-            notify.info('Posted to the stream: Auto needs a Jev API key', { ...AUTO_TOAST, description: 'Add your TypeSafe key under Settings > Models > Decision Models.' })
+            // The key went away since the pill last looked: the stream,
+            // quietly, and the pill follows once core answers.
+            refreshTypeSafeConfigured()
         } else if (outcome.reason === 'error') {
             notify.warning('Posted to the stream: Auto could not decide', { ...AUTO_TOAST, description: outcome.error })
         } else if (autoRouteMode === 'preview' && outcome.reason !== 'thread') {
@@ -1103,7 +1097,7 @@ export function GeneralStream({
                     setVerdict(null)
                     return true
                 }}
-                autoRoute={{ mode: autoRouteMode, onToggle: () => void toggleAutoRoute(), onModeChange: setAutoRouteMode }}
+                autoRoute={jev ? { mode: autoRouteMode, onToggle: toggleAutoRoute, onModeChange: setAutoRouteMode } : undefined}
                 onSchedule={async (body, at) => {
                     setVerdict(null)
                     await window.ipc.invoke('spaces:schedule', {
@@ -1134,15 +1128,16 @@ export function GeneralStream({
                         hint: 'Create a poll — pick answers, votes tally live',
                         run: () => openPollRef.current?.(),
                     },
-                    {
+                    ...(jev ? [{
                         // /find (2026-09-24): Jev picks the message or thread the
                         // words describe and the app lands there; the banner walks
                         // the rest. Anything short of a real match hands the query
                         // to the search bar rather than landing somewhere plausible.
+                        // Listed only with a key, like the Auto pill.
                         name: 'find',
                         args: '<what you remember>',
                         hint: 'Jump to the message or thread you describe',
-                        run: async (args) => {
+                        run: async (args: string) => {
                             const query = args.trim()
                             const finding = notify.loading(`Finding "${query}"`, AUTO_TOAST)
                             const res = await runFind({
@@ -1154,14 +1149,15 @@ export function GeneralStream({
                             if (res.outcome === 'not-found') {
                                 notify.info(`No match for "${query}"`, { ...AUTO_TOAST, action: { label: 'Open search', onClick: () => searchInstead(query) } })
                             } else if (res.outcome === 'no-key') {
+                                // The key went away since the menu was built: a plain search, and the entry follows.
                                 searchInstead(query)
-                                notify.info('Find needs a Jev API key, so this is a plain search', { ...AUTO_TOAST, description: 'Add your TypeSafe key under Settings > Models > Decision Models.' })
+                                refreshTypeSafeConfigured()
                             } else if (res.outcome === 'error') {
                                 searchInstead(query)
                                 notify.warning('Find could not decide, so this is a plain search', { ...AUTO_TOAST, description: res.error })
                             }
                         },
-                    },
+                    }] : []),
                     {
                         name: 'remind',
                         args: '<when> <text>',
