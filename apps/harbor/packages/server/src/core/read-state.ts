@@ -48,30 +48,28 @@ export class ReadState {
    */
   async markRead(ctx: ActorCtx, spaceId: string, input: MarkReadInput): Promise<{ readOffset: number }> {
     await this.k.requireMember(ctx, spaceId);
-    return this.k.lockedAs(ctx, spaceId, async () => {
-      const head = await this.k.store.head(spaceId);
-      if (input.offset > head) {
-        throw new HarborError('invalid_request', `offset ${input.offset} is past the space's head (${head})`);
-      }
-      const at = this.k.now();
-      let threadRootId: string | undefined;
-      let readOffset: number;
-      if (input.threadRootId !== undefined) {
-        const root = await this.feed.resolveRoot(spaceId, input.threadRootId);
-        threadRootId = root.id;
-        readOffset = await this.k.store.advanceThreadReadMark(spaceId, root.id, ctx.memberId, input.offset, at);
-      } else {
-        readOffset = await this.k.store.advanceStreamReadMark(spaceId, ctx.memberId, input.offset, at);
-      }
-      this.k.publishToMember(ctx.memberId, {
-        kind: 'read_mark',
-        spaceId,
-        ...(threadRootId !== undefined ? { threadRootId } : {}),
-        offset: readOffset,
-        at,
-      });
-      return { readOffset };
+    const head = await this.k.store.head(spaceId);
+    if (input.offset > head) {
+      throw new HarborError('invalid_request', `offset ${input.offset} is past the space's head (${head})`);
+    }
+    const at = this.k.now();
+    let threadRootId: string | undefined;
+    let readOffset: number;
+    if (input.threadRootId !== undefined) {
+      const root = await this.feed.resolveRoot(spaceId, input.threadRootId);
+      threadRootId = root.id;
+      readOffset = await this.k.store.advanceThreadReadMark(spaceId, root.id, ctx.memberId, input.offset, at);
+    } else {
+      readOffset = await this.k.store.advanceStreamReadMark(spaceId, ctx.memberId, input.offset, at);
+    }
+    this.k.hub.publishToMember(ctx.memberId, {
+      kind: 'read_mark',
+      spaceId,
+      ...(threadRootId !== undefined ? { threadRootId } : {}),
+      offset: readOffset,
+      at,
     });
+    return { readOffset };
   }
 
   /** Follow or unfollow a thread; the mark survives an unfollow. */
@@ -82,11 +80,9 @@ export class ReadState {
     following: boolean,
   ): Promise<{ following: boolean; readOffset: number }> {
     await this.k.requireMember(ctx, spaceId);
-    return this.k.lockedAs(ctx, spaceId, async () => {
-      const root = await this.feed.resolveRoot(spaceId, rootMessageId);
-      const mark = await this.k.store.setThreadFollowing(spaceId, root.id, ctx.memberId, following, this.k.now());
-      return { following: mark.following, readOffset: mark.readOffset };
-    });
+    const root = await this.feed.resolveRoot(spaceId, rootMessageId);
+    const mark = await this.k.store.setThreadFollowing(spaceId, root.id, ctx.memberId, following, this.k.now());
+    return { following: mark.following, readOffset: mark.readOffset };
   }
 
   // --- activity (2026-09-10) -------------------------------------------------
@@ -165,8 +161,8 @@ export class ReadState {
    * one named) reads through its head, every thread holding an Activity row
    * for them reads through its newest reply, and reactions read as seen — so
    * Activity, the rail and every other device agree. Cheap: one stream mark
-   * and one thread statement per space, locked together (spec §5, 2026-09-23).
-   * Marks only advance, so the call is idempotent; each mark that moved echoes to the member's other
+   * per space plus one statement for the threads. Marks only advance, so the
+   * call is idempotent; each mark that moved echoes to the member's other
    * connections as a `read_mark` frame, the way single marks do.
    */
   async readAll(ctx: ActorCtx, input: { spaceId?: string }): Promise<{ spaces: Array<{ spaceId: string; readOffset: number }>; threads: number; seenAt: string }> {
@@ -177,23 +173,19 @@ export class ReadState {
     }
     const at = this.k.now();
     const out: Array<{ spaceId: string; readOffset: number }> = [];
-    let threadCount = 0;
     for (const space of spaces) {
-      await this.k.lockedAs(ctx, space.id, async () => {
-        const head = await this.k.store.head(space.id);
-        const before = await this.k.store.getStreamReadMark(space.id, ctx.memberId);
-        const readOffset = head > before ? await this.k.store.advanceStreamReadMark(space.id, ctx.memberId, head, at) : before;
-        out.push({ spaceId: space.id, readOffset });
-        if (readOffset > before) this.k.publishToMember(ctx.memberId, { kind: 'read_mark', spaceId: space.id, offset: readOffset, at });
-        const threads = await this.k.store.readAllThreads(ctx.memberId, [space.id], at);
-        threadCount += threads.length;
-        for (const t of threads) {
-          this.k.publishToMember(ctx.memberId, { kind: 'read_mark', spaceId: t.spaceId, threadRootId: t.rootMessageId, offset: t.readOffset, at });
-        }
-      });
+      const head = await this.k.store.head(space.id);
+      const before = await this.k.store.getStreamReadMark(space.id, ctx.memberId);
+      const readOffset = head > before ? await this.k.store.advanceStreamReadMark(space.id, ctx.memberId, head, at) : before;
+      out.push({ spaceId: space.id, readOffset });
+      if (readOffset > before) this.k.hub.publishToMember(ctx.memberId, { kind: 'read_mark', spaceId: space.id, offset: readOffset, at });
+    }
+    const threads = await this.k.store.readAllThreads(ctx.memberId, spaces.map((s) => s.id), at);
+    for (const t of threads) {
+      this.k.hub.publishToMember(ctx.memberId, { kind: 'read_mark', spaceId: t.spaceId, threadRootId: t.rootMessageId, offset: t.readOffset, at });
     }
     const seenAt = await this.k.store.advanceActivitySeenAt(ctx.memberId, at);
-    return { spaces: out, threads: threadCount, seenAt };
+    return { spaces: out, threads: threads.length, seenAt };
   }
 
   /** Every space the member is in (DMs included): cursor, unread roots, unread followed threads. */

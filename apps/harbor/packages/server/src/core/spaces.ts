@@ -299,15 +299,13 @@ export class Spaces {
     threadRootId?: string,
   ): Promise<void> {
     await this.k.requireMember(ctx, spaceId);
-    return this.k.lockedAs(ctx, spaceId, async () => {
-      this.k.publish(spaceId, {
-        kind: 'presence',
-        spaceId,
-        memberId: ctx.memberId,
-        state,
-        ...(threadRootId !== undefined ? { threadRootId } : {}),
-        at: this.k.now(),
-      });
+    this.k.hub.publish(spaceId, {
+      kind: 'presence',
+      spaceId,
+      memberId: ctx.memberId,
+      state,
+      ...(threadRootId !== undefined ? { threadRootId } : {}),
+      at: this.k.now(),
     });
   }
 
@@ -319,15 +317,13 @@ export class Spaces {
    */
   async publishWhiteboard(ctx: ActorCtx, spaceId: string, boardId: string, payload: unknown): Promise<void> {
     await this.k.requireMember(ctx, spaceId);
-    return this.k.lockedAs(ctx, spaceId, async () => {
-      this.k.publish(spaceId, {
-        kind: 'whiteboard',
-        spaceId,
-        boardId,
-        memberId: ctx.memberId,
-        at: this.k.now(),
-        payload,
-      });
+    this.k.hub.publish(spaceId, {
+      kind: 'whiteboard',
+      spaceId,
+      boardId,
+      memberId: ctx.memberId,
+      at: this.k.now(),
+      payload,
     });
   }
 

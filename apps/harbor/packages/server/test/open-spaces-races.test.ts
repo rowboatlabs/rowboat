@@ -62,36 +62,29 @@ describe('open-space transactional boundaries', () => {
     } finally { store.failAppend = false; unsubSpace(); unsubMember(); }
   });
 
-  it('rechecks membership for content, personal state, invitations and ephemeral publication', async () => {
+  it.each(['blob upload', 'message', 'asset', 'invite'])('rechecks membership under the lock for %s', async (operation) => {
     const ctx = { memberId: 'reader' };
     const bytes = Buffer.from('late upload');
-    const calls = [
-      () => service.uploadBlob(ctx, spaceId, bytes, { declaredSha256: blobHash(bytes) }),
-      () => service.postMessage(ctx, spaceId, { body: 'late', actingMode: 'direct' }),
-      () => service.createAsset(ctx, spaceId, { path: 'late.md', newContent: 'late', actingMode: 'direct' }),
-      () => service.markRead(ctx, spaceId, { offset: 1 }),
-      () => service.followThread(ctx, spaceId, root, true),
-      () => service.createInvite(ctx, spaceId),
-      () => service.readAll(ctx, { spaceId }),
-      () => service.publishPresence(ctx, spaceId, 'typing'),
-      () => service.publishWhiteboard(ctx, spaceId, 'board', {}),
-    ];
-    for (const call of calls) {
-      await service.joinSpace(ctx, spaceId);
-      const head = await store.head(spaceId);
-      const frames: ServerFrame[] = [];
-      const unsub = hub.subscribe(spaceId, (f) => frames.push(f));
-      store.removeBeforeLock = ctx.memberId;
-      try {
-        await expect(call()).rejects.toMatchObject({ code: 'forbidden', message: 'join this space to post' });
-        expect(await store.head(spaceId)).toBe(head);
-        expect(await store.getMembership(spaceId, ctx.memberId)).toBeUndefined();
-        expect(await store.getThreadReadMark(spaceId, root, ctx.memberId)).toBeUndefined();
-        expect(frames).toEqual([]);
-        expect(await store.getSpaceBlob(spaceId, blobHash(bytes))).toBeUndefined();
-        await expect(service.listStream(ctx, spaceId)).resolves.toBeDefined();
-      } finally { unsub(); }
-    }
+    const calls: Record<string, () => Promise<unknown>> = {
+      'blob upload': () => service.uploadBlob(ctx, spaceId, bytes, { declaredSha256: blobHash(bytes) }),
+      message: () => service.postMessage(ctx, spaceId, { body: 'late', actingMode: 'direct' }),
+      asset: () => service.createAsset(ctx, spaceId, { path: 'late.md', newContent: 'late', actingMode: 'direct' }),
+      invite: () => service.createInvite(ctx, spaceId),
+    };
+    await service.joinSpace(ctx, spaceId);
+    const head = await store.head(spaceId);
+    const frames: ServerFrame[] = [];
+    const unsub = hub.subscribe(spaceId, (f) => frames.push(f));
+    store.removeBeforeLock = ctx.memberId;
+    try {
+      await expect(calls[operation]!()).rejects.toMatchObject({ code: 'forbidden', message: 'join this space to post' });
+      expect(await store.head(spaceId)).toBe(head);
+      expect(await store.getMembership(spaceId, ctx.memberId)).toBeUndefined();
+      expect(await store.getThreadReadMark(spaceId, root, ctx.memberId)).toBeUndefined();
+      expect(frames).toEqual([]);
+      expect(await store.getSpaceBlob(spaceId, blobHash(bytes))).toBeUndefined();
+      await expect(service.listStream(ctx, spaceId)).resolves.toBeDefined();
+    } finally { unsub(); }
   });
 });
 

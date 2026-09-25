@@ -96,16 +96,15 @@ export class Kernel {
    * uncommitted row), and a rollback would leave phantoms on every socket.
    * So `append` parks frames in the lock's outbox and `locked` flushes them
    * once the lock — and the commit — has returned. Outside a lock the
-   * outbox is empty and frames go straight out. Personal-state and ephemeral
-   * frames share this boundary (spec §5, 2026-09-23).
+   * outbox is empty and frames go straight out.
    */
-  private readonly outbox = new AsyncLocalStorage<Array<() => void>>();
+  private readonly outbox = new AsyncLocalStorage<Array<{ spaceId: string; frame: ServerFrame }>>();
 
   /** The space lock, with the hub held back until the commit is durable; a thrown lock publishes nothing. */
   async locked<T>(spaceId: string, fn: () => Promise<T>): Promise<T> {
-    const pending: Array<() => void> = [];
+    const pending: Array<{ spaceId: string; frame: ServerFrame }> = [];
     const result = await this.store.withSpaceLock(spaceId, () => this.outbox.run(pending, fn));
-    for (const publish of pending) publish();
+    for (const { spaceId: target, frame } of pending) this.hub.publish(target, frame);
     return result;
   }
 
@@ -132,19 +131,9 @@ export class Kernel {
     const stored: StoredEvent = { offset, at, event };
     await this.store.appendEvent(spaceId, stored);
     const frame: ServerFrame = { kind: 'event', spaceId, offset, at, event };
-    this.publish(spaceId, frame);
-  }
-
-  publish(spaceId: string, frame: ServerFrame): void {
     const pending = this.outbox.getStore();
-    if (pending) pending.push(() => this.hub.publish(spaceId, frame));
+    if (pending) pending.push({ spaceId, frame });
     else this.hub.publish(spaceId, frame);
-  }
-
-  publishToMember(memberId: string, frame: ServerFrame): void {
-    const pending = this.outbox.getStore();
-    if (pending) pending.push(() => this.hub.publishToMember(memberId, frame));
-    else this.hub.publishToMember(memberId, frame);
   }
 
   /** The next offset on the space's log — for a write that needs it before its event exists (message and change-set rows carry it). Inside the space lock only. */
