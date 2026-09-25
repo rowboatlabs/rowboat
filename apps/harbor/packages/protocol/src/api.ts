@@ -12,7 +12,7 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { ActingMode, Attribution, Member, Message, ReactionEmoji, Space, SpaceKind, Topic } from './core.js';
+import { ActingMode, Attribution, Member, Membership, Message, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic } from './core.js';
 import { AssetId, AssetPath, BlobHash, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 import {
   AcceptInvite,
@@ -227,10 +227,21 @@ export const routes = {
     request: z.object({ token: z.string().min(1).max(200) }),
     response: z.object({ ok: z.literal(true) }),
   },
+  browseSpaces: {
+    method: 'GET',
+    path: '/v1/spaces/browse',
+    response: z.object({ spaces: z.array(z.object({ space: Space, joined: z.boolean() })) }),
+  },
+  joinSpace: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/join',
+    params: z.object({ spaceId: SpaceId }),
+    response: z.object({ space: Space, membership: Membership }),
+  },
   createSpace: {
     method: 'POST',
     path: '/v1/spaces',
-    request: z.object({ name: z.string().min(1).max(128) }),
+    request: z.object({ name: z.string().min(1).max(128), visibility: SpaceVisibility.default('private') }),
     response: z.object({ space: Space }),
   },
   /**

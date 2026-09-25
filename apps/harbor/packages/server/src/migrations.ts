@@ -684,6 +684,14 @@ export const MIGRATIONS: Migration[] = [
       `alter table activity_seen add primary key (org_id, member_id)`,
     ],
   },
+  {
+    id: '023-open-spaces',
+    statements: [
+      `alter table spaces add column visibility text not null default 'private'`,
+      `alter table spaces add constraint spaces_visibility_check check (visibility in ('private', 'open'))`,
+      `alter table spaces add constraint spaces_direct_private_check check (kind <> 'direct' or visibility = 'private')`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

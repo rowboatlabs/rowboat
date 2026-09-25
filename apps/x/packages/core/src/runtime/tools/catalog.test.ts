@@ -222,6 +222,9 @@ const HISTORICAL_KEY_ORDER = [
     "whoami",
     "list_members",
     "list_spaces",
+    "browse_spaces",
+    "list_assets",
+    "join_space",
     "open_direct",
     "create_space",
     "rename_space",
@@ -345,6 +348,7 @@ describe("BuiltinTools permission audit", () => {
             // the app-owned cache.
             // The projected agent face: every org write is gated; reads
             // (whoami, list_*, read_*, search, history, diff) are "none".
+            join_space: "prompt",
             open_direct: "prompt",
             create_space: "prompt",
             rename_space: "prompt",

@@ -153,3 +153,34 @@ describe('schema migrations', () => {
     await db.close();
   });
 });
+
+describe('open-space migration', () => {
+  it('keeps legacy spaces private and preserves membership/content, then enforces visibility constraints', async () => {
+    const db = await pgliteDb();
+    try {
+      await db.query('create table schema_migrations (id text primary key, applied_at text not null)');
+      for (const migration of MIGRATIONS.filter((m) => m.id !== '023-open-spaces')) {
+        for (const statement of migration.statements) await db.query(statement);
+        await db.query('insert into schema_migrations values ($1, $2)', [migration.id, '2026-09-22T00:00:00Z']);
+      }
+      await db.query(`insert into spaces (id, name, created_at, kind, direct_key) values
+        ('legacy-shared', 'Legacy', '2026-09-22T00:00:00Z', 'shared', null),
+        ('legacy-direct', 'Direct', '2026-09-22T00:00:00Z', 'direct', '["a","b"]')`);
+      await db.query(`insert into memberships (space_id, member_id, joined_at) values ('legacy-shared', 'a', '2026-09-22T00:00:00Z')`);
+      await db.query(`insert into events (space_id, stream_offset, at, event) values ('legacy-shared', 1, '2026-09-22T00:00:00Z', '{"legacy":"content"}')`);
+      const memberships = await db.query('select * from memberships');
+      const events = await db.query('select * from events');
+      await migrate(db);
+      expect(await db.query('select id, visibility from spaces order by id')).toEqual([
+        { id: 'legacy-direct', visibility: 'private' }, { id: 'legacy-shared', visibility: 'private' },
+      ]);
+      expect(await db.query('select * from memberships')).toEqual(memberships);
+      expect(await db.query('select * from events')).toEqual(events);
+      await expect(db.query("update spaces set visibility = 'open' where id = 'legacy-direct'")).rejects.toThrow();
+      await expect(db.query("update spaces set visibility = 'public' where id = 'legacy-shared'")).rejects.toThrow();
+      await db.query("update spaces set visibility = 'open' where id = 'legacy-shared'");
+      await migrate(db);
+      expect(await db.query("select visibility from spaces where id = 'legacy-shared'")).toEqual([{ visibility: 'open' }]);
+    } finally { await db.close(); }
+  });
+});

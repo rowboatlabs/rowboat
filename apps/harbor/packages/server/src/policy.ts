@@ -15,16 +15,25 @@ export function enforce(decision: Decision): void {
   if (decision) throw new HarborError(decision.code, decision.message);
 }
 
-/**
- * THE access gate: a membership row, nothing else. Direct spaces pass
- * through it unchanged — their participants are ordinary members. If this
- * ever grows a non-membership path (open spaces: browse/self-join for any
- * org member), that path MUST require `space.kind === 'shared'`; a DM is
- * private forever (SpaceKind, core.ts).
- */
-export function canAccessSpace(_space: Space, membership: Membership | undefined): Decision {
+/** Membership remains the write boundary (spec §5, 2026-09-22). */
+export function canAccessSpace(space: Space, membership: Membership | undefined): Decision {
   if (membership) return null;
+  return {
+    code: 'forbidden',
+    message: space.kind === 'shared' && space.visibility === 'open'
+      ? 'join this space to post' : 'you are not a member of this space',
+  };
+}
+
+/** Browsing never grants acting rights, and never opens a DM (spec §5, 2026-09-22). */
+export function canReadSpace(space: Space, membership: Membership | undefined, orgMember: boolean): Decision {
+  if (membership || (orgMember && space.kind === 'shared' && space.visibility === 'open')) return null;
   return { code: 'forbidden', message: 'you are not a member of this space' };
+}
+
+export function canJoinSpace(space: Space): Decision {
+  if (space.kind === 'shared' && space.visibility === 'open') return null;
+  return { code: 'forbidden', message: 'only shared open spaces can be self-joined' };
 }
 
 /**

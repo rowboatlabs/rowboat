@@ -11,7 +11,7 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { Attribution, Member, Message, ReactionEmoji, Space, SpaceKind, Topic } from './core.js';
+import { Attribution, Member, Membership, Message, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic } from './core.js';
 import { AssetId, AssetPath, BlobHash, MemberId, MessageId, SpaceId, TopicId } from './ids.js';
 import { CreateInviteResult } from './invite.js';
 import { SearchKind, SearchLimit, SearchResults } from './search.js';
@@ -103,6 +103,7 @@ export const listSpaces = tool({
         id: SpaceId,
         name: z.string(),
         kind: SpaceKind,
+        visibility: SpaceVisibility.default('private'),
         /** Direct spaces only: the member ids (one = a self-DM). */
         participants: z.array(MemberId).optional(),
         /** Direct spaces only: true when the caller is the only participant — their notes to self. */
@@ -127,13 +128,35 @@ export const openDirect = tool({
   output: z.object({ space: Space, created: z.boolean() }),
 });
 
+/** Browsers need file discovery without joining (spec §5, 2026-09-23). */
+export const listAssets = tool({
+  name: 'list_assets',
+  description: 'List files in a readable space, including an open space you have not joined. Returns asset IDs for read_asset, asset_history and diff. Set includeDeleted to also list trashed files.',
+  input: z.object({ spaceId: SpaceId, includeDeleted: z.boolean().optional() }),
+  output: z.object({ entries: z.array(Asset) }),
+});
+
+export const browseSpaces = tool({
+  name: 'browse_spaces',
+  description: 'Browse this org’s shared open spaces, including those already joined. Read any result without joining; call join_space before posting or other actions. Private spaces and DMs are never listed.',
+  input: z.object({}),
+  output: z.object({ spaces: z.array(z.object({ space: Space, joined: z.boolean() })) }),
+});
+
+export const joinSpace = tool({
+  name: 'join_space',
+  description: 'Join a shared open space as your person before posting or other actions. Repeated joins are a no-op. Private spaces and DMs cannot be self-joined.',
+  input: z.object({ spaceId: SpaceId }),
+  output: z.object({ space: Space, membership: Membership }),
+});
+
 export const createSpace = tool({
   name: 'create_space',
   description:
     'Create a new shared space (a channel: one message stream plus a file folder). Your person ' +
-    'becomes its first member; others join by invite link (create_invite). Check list_spaces ' +
+    'becomes its first member. Visibility defaults to private (invite required); open spaces allow org members to browse and self-join. Check list_spaces and browse_spaces ' +
     'first so you do not create a duplicate of a space that already exists.',
-  input: z.object({ name: z.string().min(1).max(128) }),
+  input: z.object({ name: z.string().min(1).max(128), visibility: SpaceVisibility.default('private') }),
   output: z.object({ space: Space }),
 });
 
@@ -599,6 +622,9 @@ export const mcpTools = [
   whoami,
   listMembers,
   listSpaces,
+  browseSpaces,
+  listAssets,
+  joinSpace,
   openDirect,
   createSpace,
   renameSpace,
@@ -633,6 +659,8 @@ export const readOnlyMcpToolNames: ReadonlySet<string> = new Set([
   whoami.name,
   listMembers.name,
   listSpaces.name,
+  browseSpaces.name,
+  listAssets.name,
   readStream.name,
   readThread.name,
   readActivity.name,

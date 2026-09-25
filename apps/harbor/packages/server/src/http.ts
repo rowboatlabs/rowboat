@@ -119,9 +119,17 @@ export function buildHttpApp(deps: {
     return reply(c, routes.listSpaces.response, { spaces });
   });
 
+  app.get(routes.browseSpaces.path, async (c) =>
+    reply(c, routes.browseSpaces.response, { spaces: await service.browseSpaces(actor(c)) }));
+
+  app.post(routes.joinSpace.path, async (c) => {
+    const { spaceId } = parseWith(routes.joinSpace.params, c.req.param());
+    return reply(c, routes.joinSpace.response, await service.joinSpace(actor(c), spaceId));
+  });
+
   app.post(routes.createSpace.path, async (c) => {
     const input = await body(c, routes.createSpace.request);
-    return reply(c, routes.createSpace.response, { space: await service.createSpace(actor(c), input.name) });
+    return reply(c, routes.createSpace.response, { space: await service.createSpace(actor(c), input.name, input.visibility) });
   });
 
   app.post('/v1/spaces/:spaceId/rename', async (c) => {

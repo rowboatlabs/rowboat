@@ -62,6 +62,25 @@ afterAll(async () => {
 });
 
 describe('multi-org deployment', () => {
+  it('open-space discovery, reads and joins stay org-scoped', async () => {
+    const token = await as.mint({ sub: 'sub-ram' });
+    const acme = http('acme.test', token);
+    const beta = http('beta.test', token);
+    const created = await acme.post('/v1/spaces', { name: 'Open isolation', visibility: 'open' });
+    const id = created.body.space.id;
+    expect((await acme.get('/v1/spaces/browse')).body.spaces.map((r: any) => r.space.id)).toContain(id);
+    expect((await beta.get('/v1/spaces/browse')).body.spaces).toEqual([]);
+    expect((await beta.get(`/v1/spaces/${id}/stream`)).status).toBe(404);
+    expect((await beta.post(`/v1/spaces/${id}/join`)).status).toBe(404);
+    const stranger = http('acme.test', await as.mint({ sub: 'unmapped-open-browser' }));
+    for (const path of ['/v1/spaces/browse', `/v1/spaces/${id}/stream`]) {
+      expect((await stranger.get(path)).body.code).toBe('not_a_member');
+    }
+    expect((await stranger.post(`/v1/spaces/${id}/join`)).body.code).toBe('not_a_member');
+    // Leave the shared fixture's joined-space listing unchanged for its existing cases.
+    await acme.post(`/v1/spaces/${id}/leave`);
+  });
+
   it('routes by host: each domain is its own org; unknown domains are 404', async () => {
     expect((await http('acme.test').get('/v1/health')).body.org.name).toBe('Acme');
     expect((await http('beta.test').get('/v1/health')).body.org.name).toBe('Beta');
