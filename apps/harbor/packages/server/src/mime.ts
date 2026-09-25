@@ -57,7 +57,14 @@ export function dispositionFor(mime: string, name?: string): string {
     .replace(/[\x00-\x1f\x7f"%;]/g, '')
     .trim()
     .slice(0, 255);
-  return clean ? `${base}; filename="${clean}"` : base;
+  if (!clean) return base;
+  // (2026-09-25) Header values are ByteStrings: a CJK or emoji name set raw throws and the
+  // download 500s. Such names ride in RFC 6266 `filename*` (UTF-8,
+  // percent-encoded), with an ASCII `filename` fallback for older clients.
+  const ascii = clean.replace(/[^\x20-\x7e]/g, '_');
+  if (ascii === clean) return `${base}; filename="${clean}"`;
+  const encoded = encodeURIComponent(clean).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `${base}; filename="${ascii}"; filename*=UTF-8''${encoded}`;
 }
 
 // ---------------------------------------------------------------------------
