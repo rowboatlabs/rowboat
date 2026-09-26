@@ -117,7 +117,13 @@ export function createEventsClient(opts: {
       });
     };
 
+    // reconnectNow() replaces `socket` while this one may still be mid-
+    // handshake; its late close/message events belong to a superseded
+    // attempt and must not touch the live connection's state.
+    const superseded = () => socket !== ws;
+
     ws.onmessage = (event: MessageEvent) => {
+      if (superseded()) return;
       let msg: ServerMessage;
       try {
         msg = JSON.parse(String(event.data)) as ServerMessage;
@@ -181,6 +187,7 @@ export function createEventsClient(opts: {
     };
 
     ws.onclose = (event: { code?: number }) => {
+      if (superseded()) return;
       if (event?.code === 4401) {
         closed = true;
         setStatus('disconnected');
@@ -242,7 +249,12 @@ export function createEventsClient(opts: {
         retryTimer = null;
       }
       backoff = BACKOFF_MIN_MS;
-      socket?.close();
+      // Detach before closing: on a CONNECTING socket close() fires onclose
+      // synchronously (Node), and a retry scheduled from there would open a
+      // second live socket behind the one connect() is about to make.
+      const stale = socket;
+      socket = null;
+      stale?.close();
       connect();
     },
     close() {
