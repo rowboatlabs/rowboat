@@ -18,6 +18,8 @@ import { SpaceComposer, type SpaceComposerHandle } from '@/components/space-comp
 import { PollCard, applyPollVote } from '@/components/poll-card';
 import { setActiveSpace } from '@/lib/push';
 import { useSpacesAccount } from '@/lib/spaces/account';
+import { StatusBanner } from '@/components/status-banner';
+import { loadRoster, loadThread, peekRoster, peekThread, saveRoster, saveThread } from '@/lib/spaces/cache';
 import { SpacesClient } from '@/lib/spaces/client';
 import { SpacesLive } from '@/lib/spaces/live';
 import { useColors } from '@/theme/colors';
@@ -37,35 +39,75 @@ export default function SpaceThreadScreen() {
     [org, account],
   );
 
-  const [rootMessage, setRootMessage] = useState<Message | null>(null);
-  const [replies, setReplies] = useState<Message[] | null>(null);
-  const [members, setMembers] = useState<Map<string, Member>>(new Map());
+  // Paint from cache synchronously when we can (stream-seeded root, or a
+  // thread opened earlier this session); the fetch below replaces it.
+  const initial = peekThread(org, space, root);
+  const [rootMessage, setRootMessage] = useState<Message | null>(initial?.root ?? null);
+  const [replies, setReplies] = useState<Message[] | null>(initial?.messages ?? null);
+  const [members, setMembers] = useState<Map<string, Member>>(() => new Map((peekRoster(org, space) ?? []).map((m) => [m.id, m])));
   const memberNames = useMemo(() => new Map([...members].map(([id, m]) => [id, m.displayName])), [members]);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [actionMessage, setActionMessage] = useState<Message | null>(null);
   const [reactionsOnly, setReactionsOnly] = useState(false);
-  const [following, setFollowing] = useState<boolean | null>(null);
+  const [following, setFollowing] = useState<boolean | null>(initial?.following ?? null);
   const scrollRef = useRef<ScrollView>(null);
   const composerRef = useRef<SpaceComposerHandle>(null);
   const lastOffset = useRef<number | undefined>(undefined);
 
+  if (lastOffset.current === undefined && initial?.messages) {
+    lastOffset.current = initial.messages.at(-1)?.offset ?? initial.root.offset;
+  }
+
   useEffect(() => {
     let cancelled = false;
-    Promise.all([client.listThread(space, root), client.listMembers(space)])
-      .then(([thread, memberList]) => {
+    // Disk cache (after a relaunch) — only if nothing better is on screen yet.
+    void loadThread(org, space, root).then((cached) => {
+      if (cancelled || !cached?.messages) return;
+      setRootMessage((prev) => prev ?? cached.root);
+      setReplies((prev) => {
+        if (prev) return prev;
+        lastOffset.current = cached.messages!.at(-1)?.offset ?? cached.root.offset;
+        return cached.messages;
+      });
+      setFollowing((prev) => prev ?? cached.following);
+    });
+    void loadRoster(org, space).then((cached) => {
+      if (!cancelled && cached) setMembers((prev) => (prev.size ? prev : new Map(cached.map((m) => [m.id, m]))));
+    });
+    // Names don't block the thread: each request lands on its own.
+    client
+      .listMembers(space)
+      .then((memberList) => {
         if (cancelled) return;
         setMembers(new Map(memberList.map((m) => [m.id, m])));
+        saveRoster(org, space, memberList);
+      })
+      .catch(() => {});
+    client
+      .listThread(space, root)
+      .then((thread) => {
+        if (cancelled) return;
+        const freshLast = thread.messages.at(-1)?.offset ?? thread.root.offset;
         setRootMessage(thread.root);
-        setReplies(thread.messages);
+        // Keep anything live delivered after the server's snapshot.
+        setReplies((prev) => [...thread.messages, ...(prev ?? []).filter((m) => m.offset > freshLast && !thread.messages.some((f) => f.id === m.id))]);
         setFollowing(thread.following);
-        lastOffset.current = thread.messages.at(-1)?.offset ?? thread.root.offset;
+        lastOffset.current = Math.max(lastOffset.current ?? 0, freshLast);
       })
       .catch((err) => !cancelled && setError(err instanceof Error ? err.message : String(err)));
     return () => {
       cancelled = true;
     };
-  }, [client, space, root]);
+  }, [client, org, space, root]);
+
+  // Deleted replies vanish (Slack) — they anchor nothing.
+  const visibleReplies = useMemo(() => replies?.filter((m) => !m.deletedAt) ?? null, [replies]);
+
+  // Write-through: whatever is on screen is what the next open paints.
+  useEffect(() => {
+    if (rootMessage && replies) saveThread(org, space, { root: rootMessage, messages: replies, following });
+  }, [org, space, rootMessage, replies, following]);
 
   useEffect(() => {
     if (replies === null) return;
@@ -280,8 +322,10 @@ export default function SpaceThreadScreen() {
           style={{ flex: 1 }}
           contentContainerStyle={{ paddingVertical: 12 }}
         >
-          {error ? <Text style={{ fontSize: 13, color: colors.destructive, paddingHorizontal: 16, paddingBottom: 8 }}>{error}</Text> : null}
-          {rootMessage ? (
+          <StatusBanner error={error} offlineText={replies ? "You're offline. Showing saved replies." : "You're offline. Replies will load when you're back online."} />
+          {rootMessage?.deletedAt ? (
+            <MessageRow message={rootMessage} me={me} onToggleReaction={toggleReaction} onLongPress={() => {}} />
+          ) : rootMessage ? (
             <RootMessage
               message={rootMessage}
               member={members.get(rootMessage.author.memberId)}
@@ -295,28 +339,30 @@ export default function SpaceThreadScreen() {
               onEndPoll={endPoll}
             />
           ) : null}
-          {rootMessage && replies !== null ? (
+          {rootMessage && visibleReplies !== null ? (
             <Pressable
-              onPress={replies.length === 0 ? () => composerRef.current?.focus() : undefined}
+              onPress={visibleReplies.length === 0 ? () => composerRef.current?.focus() : undefined}
               style={{
                 flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8, marginBottom: 4,
                 paddingHorizontal: 16, paddingVertical: 12,
                 borderTopWidth: 0.5, borderBottomWidth: 0.5, borderColor: colors.separator,
               }}
             >
-              {replies.length === 0 ? (
+              {visibleReplies.length === 0 ? (
                 <>
                   <Image source="sf:bubble.left" style={{ width: 17, height: 17 }} tintColor={colors.secondaryLabel} />
                   <Text style={{ fontSize: 15, fontWeight: '600', color: colors.secondaryLabel }}>Reply in Thread</Text>
                 </>
               ) : (
                 <Text style={{ fontSize: 15, color: colors.secondaryLabel }}>
-                  {replies.length} {replies.length === 1 ? 'reply' : 'replies'}
+                  {visibleReplies.length} {visibleReplies.length === 1 ? 'reply' : 'replies'}
                 </Text>
               )}
             </Pressable>
           ) : null}
-          {replies?.map((m) => (
+          {/* Root painted from the stream; replies still on their way. */}
+          {rootMessage && replies === null && !error ? <ActivityIndicator style={{ marginTop: 16 }} /> : null}
+          {visibleReplies?.map((m) => (
             <MessageRow key={m.id} message={m} member={members.get(m.author.memberId)} memberNames={memberNames} me={me} onToggleReaction={toggleReaction} onLongPress={(m) => { setReactionsOnly(false); setActionMessage(m); }}
               onAddReaction={(m) => { setReactionsOnly(true); setActionMessage(m); }} onVote={vote} onRemoveVote={removeVote} onEndPoll={endPoll} />
           ))}

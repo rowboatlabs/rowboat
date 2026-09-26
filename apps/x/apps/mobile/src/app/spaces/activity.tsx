@@ -8,6 +8,7 @@ import { spaces } from '@x/shared';
 
 import { useSpacesAccount, type SpacesOrg } from '@/lib/spaces/account';
 import { SpacesClient } from '@/lib/spaces/client';
+import { StatusBanner } from '@/components/status-banner';
 import { useColors } from '@/theme/colors';
 
 // Activity (desktop activity-view.tsx for parity): everything that involves
@@ -137,7 +138,7 @@ export default function ActivityScreen() {
           );
         })}
       </ScrollView>
-      {error ? <Text selectable style={{ fontSize: 13, color: colors.destructive, paddingHorizontal: 16 }}>{error}</Text> : null}
+      <StatusBanner error={error} offlineText="You're offline. Activity will update when you're back online." onRetry={() => void load()} />
       {rows === null && !error ? <ActivityIndicator style={{ marginTop: 32 }} /> : null}
       {visible?.length === 0 ? (
         <View style={{ alignItems: 'center', marginTop: 72, gap: 8 }}>

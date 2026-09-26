@@ -83,6 +83,16 @@ function clip(text: string | null, max: number): string | undefined {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
+/** Synchronous cache hit — lets a card paint on first render (no layout jump). */
+export function peekLinkPreview(rawUrl: string): LinkPreview | null | undefined {
+  try {
+    const hit = cache.get(new URL(rawUrl).href);
+    return hit && Date.now() - hit.at < CACHE_TTL_MS ? hit.preview : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function fetchLinkPreview(rawUrl: string): Promise<LinkPreview | null> {
   let target: URL;
   try {

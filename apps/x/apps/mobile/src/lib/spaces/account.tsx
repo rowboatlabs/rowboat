@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { clearSpacesCache } from '@/lib/spaces/cache';
 import * as SecureStore from 'expo-secure-store';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
@@ -121,6 +122,7 @@ export function SpacesAccountProvider({ children }: { children: ReactNode }) {
     if (orgs?.length) await unregisterFromHarbor(orgs, getAccessToken).catch(() => {});
     await persist(null);
     void AsyncStorage.removeItem(ORGS_CACHE_KEY).catch(() => {});
+    void clearSpacesCache();
     setOrgs(null);
     setOrgsError(null);
     setStatus('signedOut');

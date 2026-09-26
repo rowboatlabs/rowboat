@@ -99,11 +99,31 @@ export const MessageRow = memo(function MessageRow({
     [],
   );
 
+  // Deleted messages are filtered out by the screens (Slack); one that still
+  // has replies stays as a placeholder so its thread remains reachable.
   if (message.deletedAt) {
     return (
-      <Text style={{ paddingHorizontal: 16, paddingVertical: 6, fontSize: 13, fontStyle: 'italic', color: colors.tertiaryLabel }}>
-        Message deleted
-      </Text>
+      <Pressable
+        onPress={onOpenThread && message.replyCount > 0 ? () => onOpenThread(message) : undefined}
+        style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 16, paddingVertical: 6 }}
+      >
+        <View
+          style={{
+            width: 34, height: 34, borderRadius: 8, borderCurve: 'continuous', marginTop: 2,
+            alignItems: 'center', justifyContent: 'center', backgroundColor: colors.secondaryBackground,
+          }}
+        >
+          <Image source="sf:trash" style={{ width: 15, height: 15 }} tintColor={colors.tertiaryLabel} />
+        </View>
+        <View style={{ flex: 1, justifyContent: 'center', gap: 4 }}>
+          <Text style={{ fontSize: 15, color: colors.tertiaryLabel }}>This message was deleted.</Text>
+          {onOpenThread && message.replyCount > 0 ? (
+            <Text style={{ fontSize: 13, fontWeight: '600', color: '#0a84ff' }}>
+              {message.replyCount} {message.replyCount === 1 ? 'reply' : 'replies'} ›
+            </Text>
+          ) : null}
+        </View>
+      </Pressable>
     );
   }
 

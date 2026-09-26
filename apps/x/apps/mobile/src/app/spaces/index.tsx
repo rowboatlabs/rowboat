@@ -7,6 +7,9 @@ import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } 
 import { useSpacesAccount, type SpacesOrg } from '@/lib/spaces/account';
 import { SpacesClient } from '@/lib/spaces/client';
 import type { Member, Space, UnreadSnapshot } from '@rowboat/spaces-protocol';
+import { StatusBanner } from '@/components/status-banner';
+import { loadValue, peekValue, saveValue } from '@/lib/spaces/cache';
+import { isNetworkError } from '@/lib/spaces/errors';
 import { useColors } from '@/theme/colors';
 
 // Spaces home: signed out → one sign-in button; signed in → the user's orgs as
@@ -140,9 +143,7 @@ function OrgList() {
       contentContainerStyle={{ paddingVertical: 8, gap: 24 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} />}
     >
-      {account.orgsError ? (
-        <Text selectable style={{ fontSize: 13, color: colors.destructive, paddingHorizontal: 16 }}>{account.orgsError}</Text>
-      ) : null}
+      <StatusBanner error={account.orgsError} onRetry={() => void refresh()} />
       {account.orgs === null && !account.orgsError ? <ActivityIndicator style={{ marginTop: 48 }} /> : null}
       {account.orgs?.map((org) => <OrgCard key={org.id} org={org} />)}
       {account.orgs?.length === 0 && !account.orgsError ? (
@@ -206,9 +207,12 @@ function OrgCard({ org }: { org: SpacesOrg }) {
   const account = useSpacesAccount();
   const colors = useColors();
   const dark = colors.background === '#000000';
-  const [spaces, setSpaces] = useState<Space[] | null>(null);
-  const [directs, setDirects] = useState<Space[]>([]);
-  const [members, setMembers] = useState<Map<string, Member[]>>(new Map());
+  // Last-known space list: instant paint, and still there offline.
+  const spacesKey = `spaces:${org.address}`;
+  const cachedAll = peekValue<Space[]>(spacesKey);
+  const [spaces, setSpaces] = useState<Space[] | null>(cachedAll?.filter((s) => s.kind !== 'direct') ?? null);
+  const [directs, setDirects] = useState<Space[]>(cachedAll?.filter((s) => s.kind === 'direct') ?? []);
+  const [members, setMembers] = useState<Map<string, Member[]>>(() => new Map(peekValue<[string, Member[]][]>(`orgMembers:${org.address}`) ?? []));
   const [unread, setUnread] = useState<UnreadSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -218,20 +222,34 @@ function OrgCard({ org }: { org: SpacesOrg }) {
   );
 
   const load = useCallback(async () => {
-    try {
-      const all = await client.listSpaces({ includeDirect: true });
+    const apply = (all: Space[]) => {
       setSpaces(all.filter((s) => s.kind !== 'direct'));
       setDirects(all.filter((s) => s.kind === 'direct'));
+    };
+    const membersKey = `orgMembers:${org.address}`;
+    if (spaces === null) {
+      const [cached, cachedMembers] = await Promise.all([loadValue<Space[]>(spacesKey), loadValue<[string, Member[]][]>(membersKey)]);
+      if (cached) apply(cached);
+      if (cachedMembers) setMembers((prev) => (prev.size ? prev : new Map(cachedMembers)));
+    }
+    try {
+      const all = await client.listSpaces({ includeDirect: true });
+      apply(all);
+      saveValue(spacesKey, all);
       // Badges: the org's unread snapshot (read state is org-owned).
       client.unread().then(setUnread).catch(() => {});
       // Rosters per space — best-effort, rows render without them first.
       const loaded = await Promise.all(all.map(async (s) => [s.id, await client.listMembers(s.id).catch(() => [])] as const));
       setMembers(new Map(loaded));
+      saveValue(membersKey, loaded);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      // Offline is already said once at the top of the screen (the org list
+      // refresh fails the same way) — cards keep their saved rows quietly.
+      if (!isNetworkError(err)) setError(err instanceof Error ? err.message : String(err));
     }
-  }, [client]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- first-load check only
+  }, [client, org.address]);
 
   useEffect(() => {
     void load();
@@ -257,9 +275,13 @@ function OrgCard({ org }: { org: SpacesOrg }) {
     },
     [unread],
   );
-  /** The DM space with this member, if one exists yet. */
+  /** The DM space with this member, if one exists yet. Your own id is the
+      self-DM — one participant, so match on that instead of a pair. */
   const dmWith = useCallback(
-    (memberId: string) => directs.find((d) => d.participants?.includes(memberId) && d.participants?.includes(org.memberId)),
+    (memberId: string) =>
+      memberId === org.memberId
+        ? directs.find((d) => d.participants?.length === 1 && d.participants[0] === org.memberId)
+        : directs.find((d) => d.participants?.length === 2 && d.participants.includes(memberId) && d.participants.includes(org.memberId)),
     [directs, org.memberId],
   );
 
@@ -270,7 +292,8 @@ function OrgCard({ org }: { org: SpacesOrg }) {
     setOpeningDm(m.id);
     try {
       const { space } = await client.openDirect(m.id);
-      router.push({ pathname: '/spaces/chat', params: { org: org.address, space: space.id, title: m.displayName, me: org.memberId } });
+      const title = m.id === org.memberId ? `${m.displayName} (you)` : m.displayName;
+      router.push({ pathname: '/spaces/chat', params: { org: org.address, space: space.id, title, me: org.memberId } });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -281,8 +304,11 @@ function OrgCard({ org }: { org: SpacesOrg }) {
   const orgMembers = useMemo(() => {
     const seen = new Map<string, Member>();
     for (const list of members.values()) for (const m of list) if (!seen.has(m.id)) seen.set(m.id, m);
-    return [...seen.values()].sort((a, b) => a.displayName.localeCompare(b.displayName));
-  }, [members]);
+    // You first (the self-DM is your notes-to-self), then everyone by name.
+    return [...seen.values()].sort((a, b) =>
+      a.id === org.memberId ? -1 : b.id === org.memberId ? 1 : a.displayName.localeCompare(b.displayName),
+    );
+  }, [members, org.memberId]);
 
   return (
     <View style={{ gap: 4 }}>
@@ -307,7 +333,7 @@ function OrgCard({ org }: { org: SpacesOrg }) {
         </View>
       </View>
 
-      {error ? <Text selectable style={{ fontSize: 13, color: colors.destructive, paddingHorizontal: 16, paddingBottom: 8 }}>{error}</Text> : null}
+      <StatusBanner error={error} />
       {spaces === null && !error ? <ActivityIndicator style={{ alignSelf: 'center', marginVertical: 16 }} /> : null}
 
       {/* Spaces */}
@@ -333,13 +359,15 @@ function OrgCard({ org }: { org: SpacesOrg }) {
         </Text>
       ) : null}
 
-      {/* Direct messages: every other member is one tap from a DM (a DM is a
-          `direct` space — openDirect is get-or-create, idempotent). */}
-      {orgMembers.filter((m) => m.id !== org.memberId).length > 0 ? (
+      {/* Direct messages: every member is one tap from a DM (a DM is a
+          `direct` space — openDirect is get-or-create, idempotent). Your own
+          row opens the self-DM: notes to self, on the org, for every device
+          and your agent. */}
+      {orgMembers.length > 0 ? (
         <>
           <View style={{ height: 16 }} />
           <SectionLabel text="Direct messages" />
-          {orgMembers.filter((m) => m.id !== org.memberId).map((m) => (
+          {orgMembers.map((m) => (
             <Row key={m.id} disabled={openingDm !== null} dimmed={openingDm !== null && openingDm !== m.id} onPress={() => void openDm(m)}>
               <View style={{ width: 28, alignItems: 'center' }}>
                 <View
@@ -353,7 +381,10 @@ function OrgCard({ org }: { org: SpacesOrg }) {
                   </Text>
                 </View>
               </View>
-              <Text numberOfLines={1} style={{ flex: 1, fontSize: 16, fontWeight: (dmWith(m.id) && badgeFor(dmWith(m.id)!.id, true).unread > 0) ? '600' : '400', color: colors.label }}>{m.displayName}</Text>
+              <Text numberOfLines={1} style={{ flex: 1, fontSize: 16, fontWeight: (dmWith(m.id) && badgeFor(dmWith(m.id)!.id, true).unread > 0) ? '600' : '400', color: colors.label }}>
+                {m.displayName}
+                {m.id === org.memberId ? <Text style={{ color: colors.tertiaryLabel }}> (you)</Text> : null}
+              </Text>
               {openingDm === m.id ? <ActivityIndicator size="small" /> : dmWith(m.id) ? <UnreadBadge badge={badgeFor(dmWith(m.id)!.id, true)} /> : null}
             </Row>
           ))}

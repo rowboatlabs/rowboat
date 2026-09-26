@@ -2,7 +2,7 @@ import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Pressable, ScrollView, Text, View } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useKeyboardVisible } from '@/lib/use-keyboard-visible';
@@ -14,6 +14,8 @@ import { SpaceComposer, type SpaceComposerHandle } from '@/components/space-comp
 import { applyPollVote } from '@/components/poll-card';
 import { setActiveSpace } from '@/lib/push';
 import { useSpacesAccount } from '@/lib/spaces/account';
+import { STREAM_CACHE_LIMIT, loadRoster, loadValue, peekRoster, peekValue, saveRoster, saveValue, seedThreadRoot } from '@/lib/spaces/cache';
+import { StatusBanner } from '@/components/status-banner';
 import { SpacesClient } from '@/lib/spaces/client';
 import { SpacesLive } from '@/lib/spaces/live';
 import { useColors } from '@/theme/colors';
@@ -34,14 +36,17 @@ export default function SpaceChatScreen() {
     [org, account],
   );
 
-  const [messages, setMessages] = useState<Message[] | null>(null);
-  const [members, setMembers] = useState<Map<string, Member>>(new Map());
+  // Stream tail cache: paint the last visit instantly (and offline), then the
+  // server's answer replaces it.
+  const streamCacheKey = `stream:${org}:${space}`;
+  const [messages, setMessages] = useState<Message[] | null>(() => peekValue<Message[]>(streamCacheKey) ?? null);
+  const [members, setMembers] = useState<Map<string, Member>>(() => new Map((peekRoster(org, space) ?? []).map((m) => [m.id, m])));
   const memberNames = useMemo(() => new Map([...members].map(([id, m]) => [id, m.displayName])), [members]);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [actionMessage, setActionMessage] = useState<Message | null>(null);
   const [reactionsOnly, setReactionsOnly] = useState(false);
-  const scrollRef = useRef<ScrollView>(null);
+  const listRef = useRef<FlatList<Message>>(null);
   const composerRef = useRef<SpaceComposerHandle>(null);
   const lastOffset = useRef<number | undefined>(undefined);
 
@@ -62,20 +67,60 @@ export default function SpaceChatScreen() {
     });
   }, []);
 
+  if (lastOffset.current === undefined && messages?.length) lastOffset.current = messages.at(-1)?.offset;
+
+  const [reloadKey, setReloadKey] = useState(0);
   useEffect(() => {
     let cancelled = false;
-    Promise.all([client.listStream(space), client.listMembers(space)])
-      .then(([stream, memberList]) => {
+    // Disk cache after a relaunch — only if nothing is on screen yet.
+    void loadValue<Message[]>(streamCacheKey).then((cached) => {
+      if (cancelled || !cached) return;
+      setMessages((prev) => {
+        if (prev) return prev;
+        lastOffset.current = cached.at(-1)?.offset;
+        return cached;
+      });
+    });
+    void loadRoster(org, space).then((cached) => {
+      if (!cancelled && cached) setMembers((prev) => (prev.size ? prev : new Map(cached.map((m) => [m.id, m]))));
+    });
+    client
+      .listMembers(space)
+      .then((memberList) => {
         if (cancelled) return;
         setMembers(new Map(memberList.map((m) => [m.id, m])));
-        setMessages(stream.messages);
-        lastOffset.current = stream.messages.at(-1)?.offset;
+        saveRoster(org, space, memberList);
+      })
+      .catch(() => {});
+    client
+      .listStream(space)
+      .then((stream) => {
+        if (cancelled) return;
+        const freshLast = stream.messages.at(-1)?.offset ?? 0;
+        // Keep anything live delivered after the server's snapshot.
+        setMessages((prev) => [...stream.messages, ...(prev ?? []).filter((m) => m.offset > freshLast && !stream.messages.some((f) => f.id === m.id))]);
+        lastOffset.current = Math.max(lastOffset.current ?? 0, freshLast) || undefined;
+        setError(null);
       })
       .catch((err) => !cancelled && setError(err instanceof Error ? err.message : String(err)));
     return () => {
       cancelled = true;
     };
-  }, [client, space]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- streamCacheKey derives from org+space
+  }, [client, org, space, reloadKey]);
+
+  // Write-through (tail only).
+  useEffect(() => {
+    if (messages) saveValue(streamCacheKey, messages.slice(-STREAM_CACHE_LIMIT));
+  }, [streamCacheKey, messages]);
+
+  // Newest first for the inverted list: row 0 sits at the bottom, so content
+  // that grows later (link cards, images) pushes history UP, never the view.
+  // Deleted messages vanish (Slack) unless replies still hang off them.
+  const newestFirst = useMemo(
+    () => (messages ? messages.filter((m) => !m.deletedAt || m.replyCount > 0).reverse() : []),
+    [messages],
+  );
 
   // Live: one socket for this screen's lifetime, replay from the last offset
   // the initial fetch saw (subscribe waits until that fetch lands).
@@ -111,10 +156,6 @@ export default function SpaceChatScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- connect once per screen after first load
   }, [messages === null, org, space]);
 
-  useEffect(() => {
-    const t = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: false }), 50);
-    return () => clearTimeout(t);
-  }, [messages?.length]);
 
   const send = async (body: string) => {
     if (sending) return;
@@ -122,6 +163,8 @@ export default function SpaceChatScreen() {
     try {
       const { message } = await client.postMessage(space, { body, actingMode: 'direct' });
       foldMessage(message);
+      // Your own message: always land on it, wherever you were scrolled.
+      requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: 0, animated: true }));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -241,6 +284,7 @@ export default function SpaceChatScreen() {
 
   const openThread = useCallback(
     (message: Message) => {
+      seedThreadRoot(org, space, message);
       router.push({ pathname: '/spaces/thread', params: { org, space, root: message.id, title: title ?? 'Thread', me } });
     },
     [org, space, title, me],
@@ -263,24 +307,42 @@ export default function SpaceChatScreen() {
           ),
         }}
       />
+      <StatusBanner
+        error={error}
+        offlineText={messages ? "You're offline. Showing saved messages." : "You're offline. This space will load when you're back online."}
+        onRetry={() => {
+          setError(null);
+          setReloadKey((k) => k + 1);
+        }}
+      />
       {messages === null && !error ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <ActivityIndicator />
         </View>
+      ) : messages === null || newestFirst.length === 0 ? (
+        <ScrollView keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled" alwaysBounceVertical style={{ flex: 1 }}>
+          {messages && newestFirst.length === 0 ? (
+            <Text style={{ textAlign: 'center', marginTop: 48, fontSize: 14, color: colors.tertiaryLabel }}>
+              No messages yet — say hi.
+            </Text>
+          ) : null}
+        </ScrollView>
       ) : (
-        <ScrollView
-          ref={scrollRef}
+        <FlatList
+          ref={listRef}
+          inverted
+          data={newestFirst}
+          keyExtractor={(m) => m.id}
           keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="handled"
-          alwaysBounceVertical
           style={{ flex: 1 }}
           contentContainerStyle={{ paddingVertical: 12 }}
-          onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: false })}
-        >
-          {error ? <Text style={{ fontSize: 13, color: colors.destructive, paddingHorizontal: 16, paddingBottom: 8 }}>{error}</Text> : null}
-          {messages?.map((m) => (
+          // New messages: follow them only when you're already at the bottom.
+          maintainVisibleContentPosition={{ minIndexForVisible: 0, autoscrollToTopThreshold: 80 }}
+          initialNumToRender={20}
+          windowSize={15}
+          renderItem={({ item: m }) => (
             <MessageRow
-              key={m.id}
               message={m}
               member={members.get(m.author.memberId)}
               memberNames={memberNames}
@@ -293,13 +355,8 @@ export default function SpaceChatScreen() {
               onRemoveVote={removeVote}
               onEndPoll={endPoll}
             />
-          ))}
-          {messages?.length === 0 ? (
-            <Text style={{ textAlign: 'center', marginTop: 48, fontSize: 14, color: colors.tertiaryLabel }}>
-              No messages yet — say hi.
-            </Text>
-          ) : null}
-        </ScrollView>
+          )}
+        />
       )}
 
       {/* Composer */}
