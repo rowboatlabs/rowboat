@@ -497,7 +497,7 @@ export const MIGRATIONS: Migration[] = [
     ],
   },
   {
-    // Push notifications (PUSH_PLAN.md): device tokens + member levels.
+    // Push notifications (CONTRACT.md, the push bullet): device tokens + member levels.
     id: '015-push',
     statements: [
       `create table if not exists push_tokens (
@@ -612,6 +612,84 @@ export const MIGRATIONS: Migration[] = [
       // "which discussions are about this file" from the file's side.
       `alter table topics add column if not exists document_asset_id text`,
       `create index if not exists topics_document on topics (space_id, document_asset_id) where document_asset_id is not null`,
+    ],
+  },
+  {
+    id: '020-asset-ids-canonical',
+    statements: [
+      // Asset ids on the wire (2026-09-14): the id every operation addresses
+      // is the one 007 minted; the path is a display property. Redirects
+      // existed only because paths were addresses — a moved file kept
+      // answering at its old name. By id a move changes nothing an address
+      // depends on, so the table goes. The change log's lineage column is
+      // now a wire field (ChangeSet.assetId), so it binds NOT NULL, and the
+      // stored `change` events on the log gain it too (replay must parse).
+      `drop table if exists asset_redirects`,
+      // 007 filled asset_id by joining paths; a change-set whose path never
+      // matched an asset row (none are expected, but a bind must not fail a
+      // deploy) gets one minted lineage id per (space, path) so history stays
+      // coherent and the column can bind.
+      `update change_sets c set asset_id = o.id
+        from (select space_id, asset_path, gen_random_uuid()::text as id
+              from change_sets where asset_id is null group by space_id, asset_path) o
+        where c.space_id = o.space_id and c.asset_path = o.asset_path and c.asset_id is null`,
+      `alter table change_sets alter column asset_id set not null`,
+      `update events e set event = jsonb_set(e.event, '{changeSet,assetId}', to_jsonb(c.asset_id))
+        from change_sets c
+        where e.space_id = c.space_id
+          and e.event->>'type' = 'change'
+          and e.event->'changeSet'->>'id' = c.id
+          and e.event->'changeSet'->>'assetId' is null`,
+    ],
+  },
+  {
+    id: '021-reaction-read-offsets',
+    statements: [
+      `alter table reactions add column if not exists stream_offset int not null default 0`,
+      // Recover existing reactions' positions from their durable add events.
+      `update reactions r set stream_offset = e.last_offset from (
+        select space_id, event->'reaction'->>'messageId' as message_id,
+          event->'reaction'->>'emoji' as emoji, event->'reaction'->'by'->>'memberId' as member_id,
+          max(stream_offset) as last_offset
+        from events where event->>'type' = 'reaction' and event->>'action' = 'added'
+        group by space_id, event->'reaction'->>'messageId', event->'reaction'->>'emoji', event->'reaction'->'by'->>'memberId'
+      ) e where r.space_id = e.space_id and r.message_id = e.message_id and r.emoji = e.emoji and r.member_id = e.member_id`,
+    ],
+  },
+  {
+    id: '022-hygiene',
+    statements: [
+      // The five enum-shaped text columns get the database's own guard. Zod
+      // covers the wire, but migrations and backfills write SQL straight past
+      // it. Existing rows are validated as each constraint lands — a bad
+      // legacy row fails the deploy loudly instead of surfacing later as a
+      // row nothing knows how to render.
+      `alter table members add constraint members_role_check check (role in ('admin', 'member'))`,
+      `alter table spaces add constraint spaces_kind_check check (kind in ('shared', 'direct'))`,
+      `alter table assets add constraint assets_state_check check (state in ('live', 'deleted'))`,
+      `alter table change_sets add constraint change_sets_op_check check (op is null or op in ('move', 'delete', 'restore'))`,
+      `alter table push_prefs add constraint push_prefs_level_check check (level in ('off', 'mentions', 'dms', 'all'))`,
+      // The author as a column. Seven hot queries filtered on
+      // author->>'memberId' — a per-row jsonb extraction with no index and no
+      // statistics. A stored generated column (the body_tsv technique) is
+      // computed by Postgres for every existing row right here and on every
+      // later write, so no code path can forget it, and it indexes.
+      // Attribution.memberId is required, so NOT NULL holds.
+      `alter table messages add column if not exists author_member_id text generated always as (author->>'memberId') stored not null`,
+      `create index if not exists messages_space_author on messages (space_id, author_member_id)`,
+      // The one member-keyed table without an org (015 gave push its own):
+      // member ids are org-scoped, and the schema now says so.
+      `alter table activity_seen add column if not exists org_id text not null default 'org-default'`,
+      `alter table activity_seen drop constraint activity_seen_pkey`,
+      `alter table activity_seen add primary key (org_id, member_id)`,
+    ],
+  },
+  {
+    id: '023-open-spaces',
+    statements: [
+      `alter table spaces add column visibility text not null default 'private'`,
+      `alter table spaces add constraint spaces_visibility_check check (visibility in ('private', 'open'))`,
+      `alter table spaces add constraint spaces_direct_private_check check (kind <> 'direct' or visibility = 'private')`,
     ],
   },
 ];

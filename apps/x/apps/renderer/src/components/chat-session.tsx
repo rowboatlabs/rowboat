@@ -13,7 +13,7 @@ import {
 } from '@/components/ai-elements/message'
 import {
   type PromptInputMessage,
-  type FileMention,
+  type Mention,
 } from '@/components/ai-elements/prompt-input'
 import { AskHumanRequest } from '@/components/ai-elements/ask-human-request'
 import { ReasoningRow } from '@/components/reasoning-row'
@@ -257,13 +257,15 @@ export function ChatSessionPane({
 export interface ChatSessionComposerProps {
   tab: ChatTab
   isActive: boolean
+  /** Visible windows can remain interactive without all claiming autofocus/paste. */
+  focused?: boolean
   tabState: ChatTabViewState
   knowledgeFiles: string[]
   recentFiles: string[]
   visibleFiles: string[]
   onSubmit: (
     message: PromptInputMessage,
-    mentions?: FileMention[],
+    mentions?: Mention[],
     stagedAttachments?: StagedAttachment[],
     searchEnabled?: boolean,
     codeMode?: 'claude' | 'codex',
@@ -284,7 +286,7 @@ export interface ChatSessionComposerProps {
   onPullQueued?: (queueId: string) => void
   presetMessage: string | undefined
   onPresetMessageConsumed: () => void
-  codeSessionLocks: Record<string, { cwd: string; agent: 'claude' | 'codex' }>
+  codeSessionLocks: Record<string, { cwd: string; agent: 'claude' | 'codex'; codeModeEnabled?: boolean }>
   initialDraft: string | undefined
   onDraftChange: (tabId: string, text: string) => void
   /**
@@ -329,6 +331,7 @@ export interface ChatSessionComposerProps {
 export function ChatSessionComposer({
   tab,
   isActive,
+  focused = isActive,
   tabState,
   knowledgeFiles,
   recentFiles,
@@ -416,7 +419,7 @@ export function ChatSessionComposer({
         // sessions:sendOrQueueMessage (the Stop button still shows while busy).
         allowSubmitWhileProcessing
         isStopping={isActive && isStopping}
-        isActive={isActive}
+        isActive={focused}
         presetMessage={isActive ? presetMessage : undefined}
         onPresetMessageConsumed={isActive ? onPresetMessageConsumed : undefined}
         runId={tabState.runId}

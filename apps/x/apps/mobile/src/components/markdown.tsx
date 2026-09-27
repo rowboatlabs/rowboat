@@ -11,7 +11,10 @@ import { useColors } from '@/theme/colors';
 // \(…\)/\[…\] into math_* tokens; MathJax→SVG typesets them natively (no
 // WebView, Expo Go safe). The stub engine stops texmath require()-ing katex —
 // markdown-display walks tokens itself and never calls md.renderer.
-const markdownIt = MarkdownIt({ typographer: true }).use(texmath, {
+// `breaks` because typed line breaks reach here as plain newlines — the mobile
+// composer is a TextInput and the desktop one serializes Shift+Enter the same
+// way — and a chat line break has to survive without a blank line after it.
+const markdownIt = MarkdownIt({ typographer: true, breaks: true }).use(texmath, {
   delimiters: ['dollars', 'brackets'],
   engine: { renderToString: () => '' },
 });
@@ -75,10 +78,12 @@ const TALL_TEX = /\\frac|\\dfrac|\\sum|\\prod|\\int|\\begin\{|\\over(?![a-z])|\\
 
 const MONO = Platform.select({ ios: 'Menlo', default: 'monospace' });
 
-export function ChatMarkdown({ children, extraRules }: {
+export function ChatMarkdown({ children, extraRules, onLinkPress }: {
   children: string;
   /** Screen-specific render-rule overrides (e.g. authed images in notes). */
   extraRules?: Record<string, unknown>;
+  /** Return false to claim a tapped link (the default opens it in the browser). */
+  onLinkPress?: (url: string) => boolean;
 }) {
   const colors = useColors();
   const styles = useMemo(
@@ -171,7 +176,7 @@ export function ChatMarkdown({ children, extraRules }: {
 
   // react-native-markdown-display's style/rule typings are looser than ours.
   return (
-    <Markdown markdownit={markdownIt} rules={{ ...rules, ...extraRules } as never} style={styles as never}>
+    <Markdown markdownit={markdownIt} rules={{ ...rules, ...extraRules } as never} style={styles as never} onLinkPress={onLinkPress}>
       {children}
     </Markdown>
   );

@@ -14,9 +14,10 @@ import type {
 } from '@rowboat/spaces-protocol';
 import { migrate } from './migrations.js';
 import { sortActivity } from './activity-sort.js';
-import { extractSearchText, matchesAllTerms, searchTextFor, snippetAround, toPathPatterns, toTsQueryString, type SearchQuery } from './search.js';
+import { extractSearchText, searchTextFor, snippetAround, toPathPatterns, toTsQueryString, type SearchQuery } from './search.js';
 import type { SqlDb, SqlExecutor } from './sql.js';
-import { type PushLevel,
+import {
+  type MessageWindow, type PushLevel,
   directKeyFor,
   type AssetRecord,
   type AssetSearchRow,
@@ -66,6 +67,7 @@ interface SpaceRow {
   name: string;
   created_at: string;
   kind: Space['kind'];
+  visibility: Space['visibility'];
   direct_key: string | null;
 }
 
@@ -75,6 +77,7 @@ function rowToSpace(r: SpaceRow): Space {
     name: r.name,
     createdAt: r.created_at,
     kind: r.kind,
+    visibility: r.visibility,
     ...(r.kind === 'direct' && r.direct_key !== null ? { participants: JSON.parse(r.direct_key) as string[] } : {}),
   };
 }
@@ -82,6 +85,7 @@ function rowToSpace(r: SpaceRow): Space {
 interface ChangeSetRow {
   id: string;
   space_id: string;
+  asset_id: string;
   asset_path: string;
   base_version: number;
   result_version: number;
@@ -99,6 +103,7 @@ function rowToChangeSet(r: ChangeSetRow): ChangeSet {
   return {
     id: r.id,
     spaceId: r.space_id,
+    assetId: r.asset_id,
     assetPath: r.asset_path,
     baseVersion: r.base_version,
     resultVersion: r.result_version,
@@ -121,18 +126,11 @@ interface TopicRow {
   created_by: Topic['createdBy'];
   created_at: string;
   archived: boolean;
-  /** Projected by TOPIC_SELECT: the linked asset's current path, null unless it is live. */
-  document_path: string | null;
+  /** The linked file's id (migration 019), null when nothing is attached. */
+  document_asset_id: string | null;
 }
 
-/**
- * Every topic read goes through this projection: the row plus the linked
- * document's CURRENT live path (migration 019). A trashed file projects
- * null — the link is kept on the row and comes back on restore.
- */
-const TOPIC_SELECT = `select t.*, a.path as document_path
-  from topics t
-  left join assets a on a.space_id = t.space_id and a.id = t.document_asset_id and a.state = 'live'`;
+const TOPIC_SELECT = `select t.* from topics t`;
 
 function rowToTopic(r: TopicRow): Topic {
   return {
@@ -143,7 +141,7 @@ function rowToTopic(r: TopicRow): Topic {
     createdBy: r.created_by,
     createdAt: r.created_at,
     archived: r.archived,
-    ...(r.document_path !== null && r.document_path !== undefined ? { documentPath: r.document_path } : {}),
+    ...(r.document_asset_id !== null && r.document_asset_id !== undefined ? { documentAssetId: r.document_asset_id } : {}),
   };
 }
 
@@ -193,6 +191,7 @@ function rowToMessage(r: MessageRow): Message {
 }
 
 interface ReactionRow {
+  stream_offset: number | string;
   space_id: string;
   message_id: string;
   emoji: string;
@@ -202,6 +201,7 @@ interface ReactionRow {
 
 function rowToReaction(r: ReactionRow): StoredReaction {
   return {
+    offset: Number(r.stream_offset),
     spaceId: r.space_id,
     messageId: r.message_id,
     emoji: r.emoji,
@@ -306,6 +306,17 @@ export class PgStore implements Store {
     });
   }
 
+  /**
+   * One transaction for an org-level write that spans this store and the
+   * caller's own statements (directory.ts createOrg, 2026-09-22): the
+   * store's executor is bound to it — withSpaceLock's trick without the
+   * space lock — and the same transaction is handed to the caller, so
+   * everything commits or nothing does.
+   */
+  async transaction<T>(fn: (tx: SqlExecutor) => Promise<T>): Promise<T> {
+    return this.db.withTransaction((tx) => this.als.run(tx, () => fn(tx)));
+  }
+
   // --- members ---------------------------------------------------------------
 
   async getMember(id: string): Promise<Member | undefined> {
@@ -320,6 +331,30 @@ export class PgStore implements Store {
     const rows = await this.sql.query<MemberRow>(
       'select id, display_name, avatar_url, role from members where org_id = $1 order by id',
       [this.orgId],
+    );
+    return rows.map(rowToMember);
+  }
+
+  async listSpaceMembers(spaceId: string): Promise<Member[]> {
+    const rows = await this.sql.query<MemberRow>(
+      `select m.id, m.display_name, m.avatar_url, m.role from memberships ms
+       join members m on m.org_id = $1 and m.id = ms.member_id
+       where ms.space_id = $2
+       order by ms.joined_at, ms.member_id`,
+      [this.orgId, spaceId],
+    );
+    return rows.map(rowToMember);
+  }
+
+  async listMembersSharingSpace(memberId: string): Promise<Member[]> {
+    const rows = await this.sql.query<MemberRow>(
+      `select m.id, m.display_name, m.avatar_url, m.role from members m
+       where m.org_id = $1 and (m.id = $2 or exists (
+         select 1 from memberships mine
+         join memberships theirs on theirs.space_id = mine.space_id
+         where mine.member_id = $2 and theirs.member_id = m.id))
+       order by m.id`,
+      [this.orgId, memberId],
     );
     return rows.map(rowToMember);
   }
@@ -357,7 +392,7 @@ export class PgStore implements Store {
     // same direct_key trips the partial unique index (migration 014) and
     // raises — the service treats that as "lost the race, re-read".
     await this.sql.query(
-      `insert into spaces (org_id, id, name, created_at, kind, direct_key) values ($1, $2, $3, $4, $5, $6)
+      `insert into spaces (org_id, id, name, created_at, kind, visibility, direct_key) values ($1, $2, $3, $4, $5, $6, $7)
        on conflict (id) do update set name = excluded.name`,
       [
         this.orgId,
@@ -365,6 +400,7 @@ export class PgStore implements Store {
         space.name,
         space.createdAt,
         space.kind,
+        space.visibility,
         space.kind === 'direct' ? directKeyFor(space.participants ?? []) : null,
       ],
     );
@@ -374,15 +410,26 @@ export class PgStore implements Store {
     // Org-scoped on purpose: this is what makes a foreign org's space ids
     // (and invite tokens, which resolve through here) not_found.
     const rows = await this.sql.query<SpaceRow>(
-      'select id, name, created_at, kind, direct_key from spaces where org_id = $1 and id = $2',
+      'select id, name, created_at, kind, visibility, direct_key from spaces where org_id = $1 and id = $2',
       [this.orgId, id],
     );
     return rows[0] ? rowToSpace(rows[0]) : undefined;
   }
 
+  async browseSpaces(memberId: string): Promise<Array<{ space: Space; joined: boolean }>> {
+    const rows = await this.sql.query<SpaceRow & { joined: boolean }>(
+      `select s.id, s.name, s.created_at, s.kind, s.visibility, s.direct_key,
+        exists (select 1 from memberships m where m.space_id = s.id and m.member_id = $2) as joined
+       from spaces s where s.org_id = $1 and s.kind = 'shared' and s.visibility = 'open'
+       order by lower(s.name), s.id`,
+      [this.orgId, memberId],
+    );
+    return rows.map((r) => ({ space: rowToSpace(r), joined: r.joined }));
+  }
+
   async listSpacesFor(memberId: string, opts: { includeDirect?: boolean } = {}): Promise<Space[]> {
     const rows = await this.sql.query<SpaceRow>(
-      `select s.id, s.name, s.created_at, s.kind, s.direct_key from spaces s
+      `select s.id, s.name, s.created_at, s.kind, s.visibility, s.direct_key from spaces s
        join memberships m on m.space_id = s.id
        where s.org_id = $1 and m.member_id = $2 and ($3::boolean or s.kind <> 'direct')
        order by s.created_at, s.id`,
@@ -393,7 +440,7 @@ export class PgStore implements Store {
 
   async listAllSpaces(): Promise<Space[]> {
     const rows = await this.sql.query<SpaceRow>(
-      'select id, name, created_at, kind, direct_key from spaces where org_id = $1 order by created_at, id',
+      'select id, name, created_at, kind, visibility, direct_key from spaces where org_id = $1 order by created_at, id',
       [this.orgId],
     );
     return rows.map(rowToSpace);
@@ -401,7 +448,7 @@ export class PgStore implements Store {
 
   async getDirectSpace(directKey: string): Promise<Space | undefined> {
     const rows = await this.sql.query<SpaceRow>(
-      `select id, name, created_at, kind, direct_key from spaces
+      `select id, name, created_at, kind, visibility, direct_key from spaces
        where org_id = $1 and kind = 'direct' and direct_key = $2`,
       [this.orgId, directKey],
     );
@@ -439,7 +486,7 @@ export class PgStore implements Store {
     await this.sql.query('delete from memberships where space_id = $1 and member_id = $2', [spaceId, memberId]);
   }
 
-  // --- push (PUSH_PLAN.md) ---------------------------------------------------
+  // --- push (CONTRACT.md, the push bullet) -----------------------------------
 
   async putPushToken(memberId: string, token: string, updatedAt: string): Promise<void> {
     await this.sql.query(
@@ -451,6 +498,14 @@ export class PgStore implements Store {
 
   async deletePushToken(token: string): Promise<void> {
     await this.sql.query('delete from push_tokens where org_id = $1 and token = $2', [this.orgId, token]);
+  }
+
+  async deleteMemberPushToken(memberId: string, token: string): Promise<void> {
+    await this.sql.query('delete from push_tokens where org_id = $1 and member_id = $2 and token = $3', [
+      this.orgId,
+      memberId,
+      token,
+    ]);
   }
 
   async listPushTokens(memberId: string): Promise<string[]> {
@@ -505,15 +560,6 @@ export class PgStore implements Store {
   async getLiveAssetByPath(spaceId: string, path: string): Promise<AssetRecord | undefined> {
     const rows = await this.sql.query<AssetRow>(
       `${this.assetSelect} where a.space_id = $1 and a.path = $2 and a.state = 'live'`,
-      [spaceId, path],
-    );
-    return rows[0] ? this.assetRow(rows[0]) : undefined;
-  }
-
-  async getLatestDeletedByPath(spaceId: string, path: string): Promise<AssetRecord | undefined> {
-    const rows = await this.sql.query<AssetRow>(
-      `${this.assetSelect} where a.space_id = $1 and a.path = $2 and a.state = 'deleted'
-       order by a.updated_at desc limit 1`,
       [spaceId, path],
     );
     return rows[0] ? this.assetRow(rows[0]) : undefined;
@@ -582,28 +628,6 @@ export class PgStore implements Store {
     ]);
   }
 
-  // --- redirects -------------------------------------------------------------
-
-  async putRedirect(spaceId: string, path: string, assetId: string, movedAt: string): Promise<void> {
-    await this.sql.query(
-      `insert into asset_redirects (space_id, path, asset_id, moved_at) values ($1, $2, $3, $4)
-       on conflict (space_id, path) do update set asset_id = excluded.asset_id, moved_at = excluded.moved_at`,
-      [spaceId, path, assetId, movedAt],
-    );
-  }
-
-  async getRedirect(spaceId: string, path: string): Promise<string | undefined> {
-    const rows = await this.sql.query<{ asset_id: string }>(
-      'select asset_id from asset_redirects where space_id = $1 and path = $2',
-      [spaceId, path],
-    );
-    return rows[0]?.asset_id;
-  }
-
-  async deleteRedirect(spaceId: string, path: string): Promise<void> {
-    await this.sql.query('delete from asset_redirects where space_id = $1 and path = $2', [spaceId, path]);
-  }
-
   // --- uploaded blobs --------------------------------------------------------
 
   async putSpaceBlob(blob: StoredSpaceBlob): Promise<void> {
@@ -642,14 +666,14 @@ export class PgStore implements Store {
 
   // --- change log ------------------------------------------------------------
 
-  async appendChangeSet(changeSet: ChangeSet, assetId: string): Promise<void> {
+  async appendChangeSet(changeSet: ChangeSet): Promise<void> {
     await this.sql.query(
       `insert into change_sets (id, space_id, asset_id, asset_path, base_version, result_version, attribution, reason, thread_root_id, blob, op, moved_from, committed_at, stream_offset)
        values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10::jsonb, $11, $12, $13, $14)`,
       [
         changeSet.id,
         changeSet.spaceId,
-        assetId,
+        changeSet.assetId,
         changeSet.assetPath,
         changeSet.baseVersion,
         changeSet.resultVersion,
@@ -706,14 +730,6 @@ export class PgStore implements Store {
     await this.sql.query('update topics set document_asset_id = $3 where space_id = $1 and id = $2', [spaceId, topicId, assetId]);
   }
 
-  async getTopicDocument(spaceId: string, topicId: string): Promise<string | undefined> {
-    const rows = await this.sql.query<{ document_asset_id: string | null }>(
-      'select document_asset_id from topics where space_id = $1 and id = $2',
-      [spaceId, topicId],
-    );
-    return rows[0]?.document_asset_id ?? undefined;
-  }
-
   async putTopic(topic: Topic): Promise<void> {
     await this.sql.query(
       `insert into topics (id, space_id, root_message_id, title, created_by, created_at, archived, search_text)
@@ -763,25 +779,33 @@ export class PgStore implements Store {
   }
 
   /** Shared window shape: NEWEST `limit` rows below `beforeOffset`, returned oldest first. */
-  private async windowMessages(where: string, params: unknown[], opts?: { beforeOffset?: number; limit?: number }): Promise<Message[]> {
+  private async windowMessages(where: string, params: unknown[], opts?: MessageWindow): Promise<Message[]> {
     if (opts?.beforeOffset !== undefined) {
       params.push(opts.beforeOffset);
       where += ` and stream_offset < $${params.length}`;
     }
+    if (opts?.afterOffset !== undefined) {
+      params.push(opts.afterOffset);
+      where += ` and stream_offset > $${params.length}`;
+    }
     let sql = `select * from messages where ${where} order by stream_offset`;
     if (opts?.limit !== undefined) {
       params.push(opts.limit);
-      sql = `select * from (select * from messages where ${where} order by stream_offset desc limit $${params.length}) w order by stream_offset`;
+      // Paging forward takes the OLDEST rows above the edge; every other page the newest below it.
+      sql =
+        opts.afterOffset !== undefined
+          ? `select * from messages where ${where} order by stream_offset limit $${params.length}`
+          : `select * from (select * from messages where ${where} order by stream_offset desc limit $${params.length}) w order by stream_offset`;
     }
     const rows = await this.sql.query<MessageRow>(sql, params);
     return rows.map(rowToMessage);
   }
 
-  async listStream(spaceId: string, opts?: { beforeOffset?: number; limit?: number }): Promise<Message[]> {
+  async listStream(spaceId: string, opts?: MessageWindow): Promise<Message[]> {
     return this.windowMessages('space_id = $1 and thread_root is null', [spaceId], opts);
   }
 
-  async listThread(spaceId: string, rootMessageId: string, opts?: { beforeOffset?: number; limit?: number }): Promise<Message[]> {
+  async listThread(spaceId: string, rootMessageId: string, opts?: MessageWindow): Promise<Message[]> {
     return this.windowMessages('space_id = $1 and thread_root = $2', [spaceId, rootMessageId], opts);
   }
 
@@ -944,10 +968,10 @@ export class PgStore implements Store {
 
   async putReaction(reaction: StoredReaction): Promise<void> {
     await this.sql.query(
-      `insert into reactions (space_id, message_id, emoji, member_id, attribution, at)
-       values ($1, $2, $3, $4, $5::jsonb, $6)
-       on conflict (space_id, message_id, emoji, member_id) do update set attribution = excluded.attribution, at = excluded.at`,
-      [reaction.spaceId, reaction.messageId, reaction.emoji, reaction.by.memberId, JSON.stringify(reaction.by), reaction.at],
+      `insert into reactions (space_id, message_id, emoji, member_id, attribution, at, stream_offset)
+       values ($1, $2, $3, $4, $5::jsonb, $6, $7)
+       on conflict (space_id, message_id, emoji, member_id) do update set attribution = excluded.attribution, at = excluded.at, stream_offset = excluded.stream_offset`,
+      [reaction.spaceId, reaction.messageId, reaction.emoji, reaction.by.memberId, JSON.stringify(reaction.by), reaction.at, reaction.offset],
     );
   }
 
@@ -1143,7 +1167,7 @@ export class PgStore implements Store {
     const rows = await this.sql.query<{ n: number }>(
       `select count(*)::int as n from messages
        where space_id = $1 and thread_root is null and deleted_at is null
-         and stream_offset > $2 and author->>'memberId' <> $3`,
+         and stream_offset > $2 and author_member_id <> $3`,
       [spaceId, afterOffset, memberId],
     );
     return rows[0]?.n ?? 0;
@@ -1153,7 +1177,7 @@ export class PgStore implements Store {
     const rows = await this.sql.query<{ n: number }>(
       `select count(*)::int as n from messages
        where space_id = $1 and thread_root is null and deleted_at is null
-         and stream_offset > $2 and author->>'memberId' <> $3
+         and stream_offset > $2 and author_member_id <> $3
          and (mentions_here or mentions @> $4::jsonb)`,
       [spaceId, afterOffset, memberId, JSON.stringify([memberId])],
     );
@@ -1186,7 +1210,7 @@ export class PgStore implements Store {
              join spaces s on s.id = m.space_id
              left join space_read_marks r on r.space_id = m.space_id and r.member_id = $1
              left join thread_read_marks t on t.space_id = m.space_id and t.root_message_id = m.thread_root and t.member_id = $1
-            where m.space_id = any($3::text[]) and m.deleted_at is null and m.author->>'memberId' <> $1
+            where m.space_id = any($3::text[]) and m.deleted_at is null and m.author_member_id <> $1
          ) x
          where x.kind is not null
            and ($4::text[] is null or x.kind = any($4::text[]))
@@ -1206,17 +1230,20 @@ export class PgStore implements Store {
         `select * from (
            select r.space_id, r.message_id, r.emoji, max(r.at) as at,
                   json_agg(r.attribution order by r.at desc) as actors,
-                  max(r.at) > coalesce((select seen_at from activity_seen where member_id = $1), '') as unread
+                  bool_or(r.stream_offset > coalesce(case when m.thread_root is null
+                    then (select read_offset from space_read_marks where space_id = r.space_id and member_id = $1)
+                    else (select read_offset from thread_read_marks where space_id = r.space_id and root_message_id = m.thread_root and member_id = $1)
+                  end, 0) and r.at > coalesce((select seen_at from activity_seen where org_id = $7 and member_id = $1), '')) as unread
              from reactions r
              join messages m on m.space_id = r.space_id and m.id = r.message_id
-            where r.space_id = any($2::text[]) and r.member_id <> $1 and m.deleted_at is null and m.author->>'memberId' = $1
+            where r.space_id = any($2::text[]) and r.member_id <> $1 and m.deleted_at is null and m.author_member_id = $1
             group by r.space_id, r.message_id, r.emoji
          ) x
          where (not $3::boolean or x.unread)
            and ($4::text is null or x.at < $4 or (x.at = $4 and ('r:' || x.message_id || ':' || x.emoji) < $5))
          order by x.at desc, x.message_id desc, x.emoji desc
          limit $6`,
-        [memberId, q.spaceIds, q.unreadOnly, q.before?.at ?? null, q.before?.id ?? null, q.limit],
+        [memberId, q.spaceIds, q.unreadOnly, q.before?.at ?? null, q.before?.id ?? null, q.limit, this.orgId],
       );
       for (const r of rows) {
         const message = await this.getMessage(r.space_id, r.message_id);
@@ -1240,7 +1267,7 @@ export class PgStore implements Store {
          join messages r on r.space_id = m.space_id and r.id = m.thread_root
          left join thread_read_marks t on t.space_id = m.space_id and t.root_message_id = m.thread_root and t.member_id = $1
         where m.space_id = any($2::text[]) and m.thread_root is not null and m.deleted_at is null
-          and m.author->>'memberId' <> $1
+          and m.author_member_id <> $1
           and (m.mentions @> $3::jsonb or m.mentions_here or s.kind = 'direct' or t.following)
         group by m.space_id, m.thread_root, r.last_reply_offset
        on conflict (space_id, root_message_id, member_id) do update set
@@ -1253,16 +1280,19 @@ export class PgStore implements Store {
   }
 
   async getActivitySeenAt(memberId: string): Promise<string | undefined> {
-    const rows = await this.sql.query<{ seen_at: string }>('select seen_at from activity_seen where member_id = $1', [memberId]);
+    const rows = await this.sql.query<{ seen_at: string }>(
+      'select seen_at from activity_seen where org_id = $1 and member_id = $2',
+      [this.orgId, memberId],
+    );
     return rows[0]?.seen_at;
   }
 
   async advanceActivitySeenAt(memberId: string, at: string): Promise<string> {
     const rows = await this.sql.query<{ seen_at: string }>(
-      `insert into activity_seen (member_id, seen_at) values ($1, $2)
-       on conflict (member_id) do update set seen_at = greatest(activity_seen.seen_at, excluded.seen_at)
+      `insert into activity_seen (org_id, member_id, seen_at) values ($1, $2, $3)
+       on conflict (org_id, member_id) do update set seen_at = greatest(activity_seen.seen_at, excluded.seen_at)
        returning seen_at`,
-      [memberId, at],
+      [this.orgId, memberId, at],
     );
     return rows[0]!.seen_at;
   }
@@ -1288,11 +1318,11 @@ export class PgStore implements Store {
                 (select count(*)::int from messages m
                   where m.space_id = t.space_id and m.thread_root = t.root_message_id
                     and m.deleted_at is null and m.stream_offset > t.read_offset
-                    and m.author->>'memberId' <> t.member_id) as unread_replies,
+                    and m.author_member_id <> t.member_id) as unread_replies,
                 (select count(*)::int from messages m
                   where m.space_id = t.space_id and m.thread_root = t.root_message_id
                     and m.deleted_at is null and m.stream_offset > t.read_offset
-                    and m.author->>'memberId' <> t.member_id
+                    and m.author_member_id <> t.member_id
                     and (m.mentions_here or m.mentions @> jsonb_build_array(t.member_id))) as unread_mentions
            from thread_read_marks t
            join messages r on r.space_id = t.space_id and r.id = t.root_message_id

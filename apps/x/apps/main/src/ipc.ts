@@ -1,4 +1,5 @@
-import { listProjects, createProjectChat } from '@x/core/dist/projects/projects.js';
+import { createFilePreview, releaseFilePreview, releaseFilePreviews } from './file-previews.js';
+import { listProjects } from '@x/core/dist/projects/projects.js';
 import { ipcMain, BrowserWindow, shell, dialog, systemPreferences, desktopCapturer, app, powerSaveBlocker } from 'electron';
 import { ipc } from '@x/shared';
 import path from 'node:path';
@@ -117,12 +118,16 @@ import * as composioHandler from '@x/core/dist/composio/flows.js';
 import { oauthConnectBus, composioConnectBus, chatgptStatusBus } from '@x/core/dist/auth/connector-events.js';
 import { subscribeTtsChunks } from '@x/core/dist/voice/tts-bus.js';
 import { formatDictation } from '@x/core/dist/voice/format_dictation.js';
+import * as typesafeClient from '@x/core/dist/typesafe/client.js';
+import { routeSpaceMessage } from '@x/core/dist/typesafe/route_message.js';
+import { findSpaceMessage } from '@x/core/dist/typesafe/find_message.js';
 import * as appsIndexer from '@x/core/dist/apps/indexer.js';
 import * as appsServer from '@x/core/dist/apps/server.js';
 import * as appsAgents from '@x/core/dist/apps/agents.js';
 import { capture } from '@x/core/dist/analytics/posthog.js';
 import { recordAppVersion, isVersionUpgrade } from '@x/core/dist/config/app_version.js';
 import { getUpdaterStatus, checkForUpdates, quitAndInstallUpdate } from './updater.js';
+import { setSpacesDockBadge } from './dock-badge.js';
 import * as githubAuth from '@x/core/dist/apps/github-auth.js';
 import * as appsStars from '@x/core/dist/apps/stars.js';
 import * as appsInstaller from '@x/core/dist/apps/installer.js';
@@ -316,6 +321,8 @@ function markdownToHtml(markdown: string, title: string): string {
   a { color: #0066cc; }
 </style></head><body>${html}</body></html>`
 }
+
+const previewOwners = new Set<number>();
 
 function resolveShellPath(filePath: string): string {
   if (filePath.startsWith('~')) {
@@ -769,9 +776,8 @@ export function markSessionsIndexReady(): void {
 
 // Daily storage-retention sweep (auto-delete old chats & task transcripts).
 // Started from main.ts once the session index is ready; the initial run is
-// delayed so it never competes with startup. The first launch with retention
-// enabled only arms the one-time notice (retention:consumeFirstRunNotice) —
-// sweeping begins on the next launch, after the user has seen it.
+// delayed so it never competes with startup. The renderer initializes the
+// legacy retention gate without a popup (2026-09-22, onboarding simplification).
 
 let servicesWatcher: (() => void) | null = null;
 export async function startServicesWatcher(): Promise<void> {
@@ -867,6 +873,10 @@ export function setupIpcHandlers() {
       // 'app_updated' is taken by the in-app apps feature; this is the client itself.
       if (updatedFrom) capture('client_updated', { from: updatedFrom, to: version });
       return { version, updatedFrom };
+    },
+    'app:setSpacesDockBadge': async (_event, args) => {
+      setSpacesDockBadge(args);
+      return {};
     },
     'updater:getStatus': async () => {
       return getUpdaterStatus();
@@ -1410,11 +1420,35 @@ export function setupIpcHandlers() {
     // turnId immediately; the turn advances in the background and the
     // renderer reconciles via the sessions:events feed. Input-routing calls
     // settle with that advance's outcome (the renderer fire-and-forgets).
+    // Both old Projects callers and coding callers now use the same registry.
     'projects:list': async () => {
       await sessionsIndexReady;
-      return { projects: await listProjects(container.resolve<ISessions>('sessions')) };
+      await container.resolve<CodeSessionService>('codeSessionService').migrateLegacyProjects();
+      const projects = await container.resolve<ICodeProjectsRepo>('codeProjectsRepo').list();
+      const sessions = await container.resolve<ICodeSessionsRepo>('codeSessionsRepo').list();
+      return { projects: projects.map((project) => ({
+        id: project.id, name: project.name, path: project.path,
+        chats: sessions.filter((session) => session.projectId === project.id)
+          .map((session) => ({ id: session.id, title: session.title, modifiedAt: session.lastActivityAt ?? session.createdAt }))
+          .sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt)),
+      })) };
     },
-    'projects:createChat': async (_event, args) => ({ sessionId: await createProjectChat(container.resolve<ISessions>('sessions'), args.projectId) }),
+    'projects:createChat': async (_event, args) => {
+      await sessionsIndexReady;
+      const service = container.resolve<CodeSessionService>('codeSessionService');
+      await service.migrateLegacyProjects();
+      const repo = container.resolve<ICodeProjectsRepo>('codeProjectsRepo');
+      let project = await repo.get(args.projectId);
+      if (!project) {
+        // Old saved links can still carry the pre-unification project id.
+        const legacy = (await listProjects(container.resolve<ISessions>('sessions'))).find((p) => p.id === args.projectId);
+        if (legacy) project = await repo.add(path.join(WorkDir, legacy.path));
+      }
+      if (!project) throw new Error('Project folder is no longer available');
+      const git = await codeGit.repoInfo(project.path);
+      const session = await service.create({ projectId: project.id, agent: 'claude', isolation: git.isGitRepo ? 'worktree' : 'in-repo', codeModeEnabled: git.isGitRepo });
+      return { sessionId: session.id };
+    },
     'sessions:create': async (_event, args) => {
       const sessionId = await container.resolve<ISessions>('sessions').createSession(args);
       return { sessionId };
@@ -1736,7 +1770,7 @@ export function setupIpcHandlers() {
     },
     'codeProject:add': async (_event, args) => {
       const repo = container.resolve<ICodeProjectsRepo>('codeProjectsRepo');
-      const project = await repo.add(args.path);
+      const project = await repo.add(path.isAbsolute(args.path) ? args.path : path.join(WorkDir, args.path));
       const git = await codeGit.repoInfo(project.path);
       return { project, git };
     },
@@ -1746,6 +1780,8 @@ export function setupIpcHandlers() {
       return { success: true };
     },
     'codeProject:list': async () => {
+      await sessionsIndexReady;
+      await container.resolve<CodeSessionService>('codeSessionService').migrateLegacyProjects();
       const repo = container.resolve<ICodeProjectsRepo>('codeProjectsRepo');
       const projects = await repo.list();
       return {
@@ -1781,6 +1817,8 @@ export function setupIpcHandlers() {
       return { session };
     },
     'codeSession:list': async () => {
+      await sessionsIndexReady;
+      await container.resolve<CodeSessionService>('codeSessionService').migrateLegacyProjects();
       const repo = container.resolve<ICodeSessionsRepo>('codeSessionsRepo');
       const tracker = container.resolve<CodeSessionStatusTracker>('codeSessionStatusTracker');
       return { sessions: await repo.list(), statuses: tracker.getStatuses() };
@@ -2109,6 +2147,15 @@ export function setupIpcHandlers() {
       markOnboardingComplete();
       return { success: true };
     },
+    // TypeSafe (Jev) and the Spaces composer's Auto toggle (2026-09-22)
+    'typesafe:isConfigured': async () => ({ configured: typesafeClient.isConfigured() }),
+    'typesafe:setApiKey': async (_event, args) => typesafeClient.saveApiKey(args.apiKey),
+    'typesafe:clearApiKey': async () => {
+      typesafeClient.clearApiKey();
+      return { success: true as const };
+    },
+    'spaces:autoRoute': async (_event, args) => routeSpaceMessage(args),
+    'spaces:findMessage': async (_event, args) => findSpaceMessage(args),
     // Composio integration handlers
     'composio:is-configured': async () => {
       return composioHandler.isConfigured();
@@ -2360,6 +2407,21 @@ export function setupIpcHandlers() {
       return { success: true };
     },
     // Shell integration handlers
+    'shell:previewFile': async (event, args) => {
+      const sender = event.sender;
+      const owner = sender.id;
+      if (!previewOwners.has(owner)) {
+        previewOwners.add(owner);
+        sender.once('destroyed', () => { releaseFilePreviews(owner); previewOwners.delete(owner); });
+      }
+      const preview = await createFilePreview(owner, resolveShellPath(args.path));
+      if (sender.isDestroyed()) releaseFilePreview(owner, preview.url);
+      return preview;
+    },
+    'shell:releaseFilePreview': async (event, args) => {
+      releaseFilePreview(event.sender.id, args.url);
+      return { success: true };
+    },
     'shell:openPath': async (_event, args) => {
       const filePath = resolveShellPath(args.path);
       const error = await shell.openPath(filePath);
@@ -2395,7 +2457,7 @@ export function setupIpcHandlers() {
       const inputPath = args.attachment
         ? await (await import('@x/core/dist/spaces/document-file.js')).materializeAttachment(args.attachment.orgId, args.attachment.spaceId, args.attachment.hash, args.path)
         : args.space
-        ? await (await import('@x/core/dist/spaces/document-file.js')).materializeDocument(args.space.orgId, args.space.spaceId, args.path, args.space.version)
+        ? await (await import('@x/core/dist/spaces/document-file.js')).materializeDocument(args.space.orgId, args.space.spaceId, args.space.assetId, args.space.version)
         : args.path;
       const result = await loadSheetWindow(inputPath, args.sheet, args.offset, args.limit);
       return {
@@ -2417,7 +2479,7 @@ export function setupIpcHandlers() {
       const inputPath = args.attachment
         ? await (await import('@x/core/dist/spaces/document-file.js')).materializeAttachment(args.attachment.orgId, args.attachment.spaceId, args.attachment.hash, args.path)
         : args.space
-        ? await (await import('@x/core/dist/spaces/document-file.js')).materializeDocument(args.space.orgId, args.space.spaceId, args.path, args.space.version)
+        ? await (await import('@x/core/dist/spaces/document-file.js')).materializeDocument(args.space.orgId, args.space.spaceId, args.space.assetId, args.space.version)
         : args.path;
       return await findInSheet(inputPath, args.sheet, args.query, args.maxMatches);
     },

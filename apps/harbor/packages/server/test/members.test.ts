@@ -1,20 +1,16 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Member } from '@rowboat/spaces-protocol';
-import { PgStore } from '../src/pg-store.js';
-import { startHarbor, type HarborOptions, type RunningHarbor } from '../src/server.js';
-import type { SqlDb } from '../src/sql.js';
-import { restClient } from './helpers.js';
-import { pgliteDb } from './pglite.js';
+import type { RunningHarbor } from '../src/server.js';
+import { restClient, startTestHarbor } from './helpers.js';
 
 // GET /v1/members (2026-09-09): the org roster as THIS member may see it — the
 // union of every roster they belong to, DMs included, deduped, sorted by
 // display name. Discovery is bounded by shared membership: no directory.
 
 let harbor: RunningHarbor;
-let sqlDb: SqlDb | undefined;
 
-async function startForStore(kind: 'memory' | 'postgres'): Promise<void> {
-  const options: HarborOptions = {
+async function start(): Promise<void> {
+  harbor = await startTestHarbor({
     orgName: 'Rowboat Labs',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
@@ -23,21 +19,14 @@ async function startForStore(kind: 'memory' | 'postgres'): Promise<void> {
       { id: 'arjun', displayName: 'Arjun' },
       { id: 'loner', displayName: 'Loner' }, // shares nothing with anyone
     ],
-  };
-  if (kind === 'postgres') {
-    sqlDb = await pgliteDb();
-    const store = new PgStore(sqlDb);
-    await store.init();
-    options.store = store;
-  }
-  harbor = await startHarbor(options);
+  });
 }
 
-describe.each([['memory'], ['postgres']] as const)('GET /v1/members (%s store)', (storeKind) => {
+describe('GET /v1/members', () => {
   const ids = (members: Member[]) => members.map((m) => m.id);
 
   beforeAll(async () => {
-    await startForStore(storeKind);
+    await start();
     const ramnique = restClient(harbor, 'dev-ramnique');
     const harsh = restClient(harbor, 'dev-harsh');
     const arjun = restClient(harbor, 'dev-arjun');
@@ -57,8 +46,6 @@ describe.each([['memory'], ['postgres']] as const)('GET /v1/members (%s store)',
 
   afterAll(async () => {
     await harbor.close();
-    await sqlDb?.close();
-    sqlDb = undefined;
   });
 
   it('is the deduped union of every roster the caller belongs to, DMs included, sorted by display name', async () => {

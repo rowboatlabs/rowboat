@@ -274,7 +274,7 @@ export function DocxFileViewer({ path }: DocxFileViewerProps) {
         </div>
       )}
       {link && (
-        <div className="flex shrink-0 items-center gap-2 border-b border-border bg-muted/30 px-3 py-1.5 text-xs">
+        <div className="rowboat-header flex shrink-0 items-center gap-2 border-b border-border bg-muted/30 px-3 text-xs">
           <GoogleDocsIcon className="size-4 shrink-0" />
           <span className="truncate font-medium text-foreground">{link.title}</span>
           <span className="truncate text-muted-foreground">

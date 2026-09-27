@@ -222,6 +222,9 @@ const HISTORICAL_KEY_ORDER = [
     "whoami",
     "list_members",
     "list_spaces",
+    "browse_spaces",
+    "list_assets",
+    "join_space",
     "open_direct",
     "create_space",
     "rename_space",
@@ -241,6 +244,7 @@ const HISTORICAL_KEY_ORDER = [
     "list_topics",
     "create_topic",
     "manage_topic",
+    "create_asset",
     "read_asset",
     "propose_change",
     "move_asset",
@@ -253,6 +257,8 @@ const HISTORICAL_KEY_ORDER = [
     "schedule_message",
     "list_scheduled",
     "cancel_scheduled",
+    "whiteboard-read",
+    "whiteboard-draw",
     "spawn-agent",
 ];
 
@@ -342,6 +348,7 @@ describe("BuiltinTools permission audit", () => {
             // the app-owned cache.
             // The projected agent face: every org write is gated; reads
             // (whoami, list_*, read_*, search, history, diff) are "none".
+            join_space: "prompt",
             open_direct: "prompt",
             create_space: "prompt",
             rename_space: "prompt",
@@ -357,6 +364,7 @@ describe("BuiltinTools permission audit", () => {
             manage_topic: "prompt",
             // Personal state, but irreversible (marks only advance) — gated like a write.
             mark_all_read: "prompt",
+            create_asset: "prompt",
             propose_change: "prompt",
             move_asset: "prompt",
             delete_asset: "prompt",
@@ -364,6 +372,9 @@ describe("BuiltinTools permission audit", () => {
             "spaces-upload-blob": "prompt",
             // Local: a scheduled send still lands in front of the team.
             schedule_message: "prompt",
+            // Whiteboards: a draw is a propose_change on a shared board;
+            // the read is a member-readable snapshot summary.
+            "whiteboard-draw": "prompt",
         });
     });
 });

@@ -3,12 +3,15 @@ import { FileText, Hash, MessageSquare, PenTool, Search } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { useDebounce } from '@/hooks/use-debounce'
 import { STREAM_READ_KEY } from '@/hooks/use-space-chat'
+import { useSpaceNames } from '@/hooks/use-spaces'
 import { cn } from '@/lib/utils'
 import { hasKind, parseSearchQuery } from '@/lib/spaces-corpus'
 import { requestJump } from '@/lib/spaces-jump'
+import { FIND_SEARCH_EVENT } from '@/lib/spaces-find'
 import { chord } from '@/lib/shortcut'
 import { formatFeedTime, resolveMentions } from '@/lib/spaces-presentation'
 import type { RailSelection } from '@/lib/spaces-selection'
+import { highlight } from './highlight'
 import { useMemberNames } from './member-text'
 
 // The space's search bar (header, top right). ⌘⇧K focuses it while a space is
@@ -51,11 +54,24 @@ const FILTERED_PAGE = 50
 
 export function SpaceSearch({ orgId, spaceId, selfMemberId, onNavigate, className }: Props) {
     const names = useMemberNames()
+    const spaceNames = useSpaceNames(orgId)
     const inputRef = useRef<HTMLInputElement>(null)
     const [query, setQuery] = useState('')
     const [focused, setFocused] = useState(false)
     const [results, setResults] = useState<spaces.SearchResults>(EMPTY)
     const [loading, setLoading] = useState(false)
+
+    // /find's "Search instead" (2026-09-24): the query arrives prefilled and
+    // focused, and the debounced fetch below takes it from there.
+    useEffect(() => {
+        const onFind = (e: Event) => {
+            const q = (e as CustomEvent<{ query?: string }>).detail?.query ?? ''
+            setQuery(q)
+            inputRef.current?.focus()
+        }
+        window.addEventListener(FIND_SEARCH_EVENT, onFind)
+        return () => window.removeEventListener(FIND_SEARCH_EVENT, onFind)
+    }, [])
     const debounced = useDebounce(query, 250)
 
     // ⌘⇧K focuses THIS search while a space pane exists. Capture on window
@@ -116,7 +132,7 @@ export function SpaceSearch({ orgId, spaceId, selfMemberId, onNavigate, classNam
     }, [debounced, orgId, spaceId])
 
     const words = parsed.terms
-    const mark = (text: string) => highlight(resolveMentions(text, names), words)
+    const mark = (text: string) => highlight(resolveMentions(text, names, spaceNames), words)
 
     const pick = (sel: RailSelection) => {
         onNavigate(sel)
@@ -194,8 +210,8 @@ export function SpaceSearch({ orgId, spaceId, selfMemberId, onNavigate, classNam
         ...assets.map((a): Item => {
             const board = /\.excalidraw$/i.test(a.path)
             return {
-                key: `a:${a.path}`,
-                pick: () => pick(board ? { kind: 'whiteboard', path: a.path } : { kind: 'file', path: a.path }),
+                key: `a:${a.id}`,
+                pick: () => pick(board ? { kind: 'whiteboard', assetId: a.id } : { kind: 'file', assetId: a.id }),
                 row: (
                     <>
                         {board
@@ -325,35 +341,4 @@ export function SpaceSearch({ orgId, spaceId, selfMemberId, onNavigate, classNam
             )}
         </div>
     )
-}
-
-/** Bold every query-word occurrence (case-insensitive) in already-resolved text. */
-function highlight(text: string, words: string[]): ReactNode {
-    if (words.length === 0) return text
-    const lower = text.toLowerCase()
-    const parts: ReactNode[] = []
-    let at = 0
-    while (at < text.length) {
-        let hit = -1
-        let hitLen = 0
-        for (const w of words) {
-            const idx = lower.indexOf(w, at)
-            if (idx !== -1 && (hit === -1 || idx < hit)) {
-                hit = idx
-                hitLen = w.length
-            }
-        }
-        if (hit === -1) {
-            parts.push(text.slice(at))
-            break
-        }
-        if (hit > at) parts.push(text.slice(at, hit))
-        parts.push(
-            <span key={`${hit}`} className="font-semibold text-foreground">
-                {text.slice(hit, hit + hitLen)}
-            </span>,
-        )
-        at = hit + hitLen
-    }
-    return <>{parts}</>
 }

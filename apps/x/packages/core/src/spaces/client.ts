@@ -3,8 +3,11 @@ import { createHash } from 'node:crypto';
 import {
   routes,
   type AcceptInviteResult,
+  type Asset,
   type BlobInfo,
   type ChangeSet,
+  type CreateAsset,
+  type CreateAssetResult,
   type DeleteAssetResult,
   type CreateInviteResult,
   type Member,
@@ -34,6 +37,27 @@ export interface SpacesApiError {
   code: string;
   message: string;
   retryable: boolean;
+}
+
+/**
+ * The shortest honest description of why the socket never answered: the
+ * errno when there is one (undici nests it — sometimes an AggregateError over
+ * ::1 and 127.0.0.1 — under `cause`), else the deepest message we can find.
+ */
+function describeTransportFailure(err: unknown): string {
+  let cur: unknown = err;
+  for (let depth = 0; cur instanceof Error && depth < 4; depth++) {
+    const code = (cur as { code?: unknown }).code;
+    if (typeof code === 'string' && code.length > 0) return code;
+    if (cur instanceof AggregateError && cur.errors.length > 0) {
+      cur = cur.errors[0];
+      continue;
+    }
+    if (cur.cause === undefined) break;
+    cur = cur.cause;
+  }
+  if (cur instanceof Error && cur.message) return cur.message;
+  return err instanceof Error ? err.message : String(err);
 }
 
 export class SpacesRequestError extends Error {
@@ -81,6 +105,14 @@ type EditMessageInput = z.infer<Routes['editMessage']['request']>;
 type VotePollInput = z.infer<Routes['votePoll']['request']>;
 type EndPollInput = z.infer<Routes['endPoll']['request']>;
 
+/** One page of a message list (protocol listStream / listThread query): at most one of the three offsets. */
+export interface MessageWindowOpts {
+  beforeOffset?: number;
+  afterOffset?: number;
+  aroundOffset?: number;
+  limit?: number;
+}
+
 export class SpacesClient {
   private readonly baseUrl: string;
   private readonly token: string | SpacesTokenProvider;
@@ -96,6 +128,25 @@ export class SpacesClient {
     return typeof this.token === 'string' ? this.token : this.token(opts);
   }
 
+  /**
+   * Every request crosses here. A transport failure (nothing listening,
+   * DNS, reset — undici's bare `TypeError: fetch failed`) becomes a
+   * SpacesRequestError that names the org and the cause, so an org that is
+   * down reads as such all the way up to the app's logs instead of as an
+   * anonymous "fetch failed" with the errno dropped at the first serializer.
+   */
+  private async transport(url: string, init?: RequestInit): Promise<Response> {
+    try {
+      return await this.fetchImpl(url, init);
+    } catch (err) {
+      throw new SpacesRequestError(0, {
+        code: 'unreachable',
+        message: `Rowboat org at ${this.baseUrl} is unreachable (${describeTransportFailure(err)})`,
+        retryable: true,
+      });
+    }
+  }
+
   private async request<S extends z.ZodType>(
     method: 'GET' | 'POST',
     path: string,
@@ -104,7 +155,7 @@ export class SpacesClient {
     auth = true,
   ): Promise<z.infer<S>> {
     const send = async (token: string | undefined) =>
-      this.fetchImpl(`${this.baseUrl}${path}`, {
+      this.transport(`${this.baseUrl}${path}`, {
         method,
         headers: {
           ...(token !== undefined ? { authorization: `Bearer ${token}` } : {}),
@@ -146,7 +197,7 @@ export class SpacesClient {
 
   /** Also the connectivity probe for "org unreachable" states. */
   async health(): Promise<{ ok: boolean; org: { name: string; address: string } }> {
-    const res = await this.fetchImpl(`${this.baseUrl}/v1/health`);
+    const res = await this.transport(`${this.baseUrl}/v1/health`);
     if (!res.ok) throw new SpacesRequestError(res.status, { code: 'internal', message: 'health check failed', retryable: true });
     return (await res.json()) as { ok: boolean; org: { name: string; address: string } };
   }
@@ -221,12 +272,14 @@ export class SpacesClient {
 
   // --- assets ---------------------------------------------------------------
 
-  async listAssets(
-    spaceId: string,
-    opts: { includeDeleted?: boolean } = {},
-  ): Promise<Array<{ path: string; version: number; updatedAt: string; blob?: BlobInfo; state?: 'deleted' }>> {
+  async listAssets(spaceId: string, opts: { includeDeleted?: boolean } = {}): Promise<Asset[]> {
     const qs = opts.includeDeleted ? '?includeDeleted=true' : '';
     return (await this.request('GET', this.space(spaceId, `/assets${qs}`), routes.listAssets.response)).entries;
+  }
+
+  /** Birth: the one call that names a file by path. The result carries the id every later call uses. */
+  async createAsset(spaceId: string, input: CreateAsset): Promise<CreateAssetResult> {
+    return this.request('POST', this.space(spaceId, '/assets'), routes.createAsset.response, input);
   }
 
   /** Move or rename. Conflict comes back as a value (the file changed meanwhile). */
@@ -243,9 +296,9 @@ export class SpacesClient {
     return this.request('POST', this.space(spaceId, '/assets/restore'), routes.restoreAsset.response, input);
   }
 
-  async readAsset(spaceId: string, path: string, version?: number): Promise<ReadAssetResult> {
-    const q = new URLSearchParams({ path, ...(version !== undefined ? { version: String(version) } : {}) });
-    return this.request('GET', this.space(spaceId, `/asset?${q}`), routes.readAsset.response);
+  async readAsset(spaceId: string, assetId: string, version?: number): Promise<ReadAssetResult> {
+    const qs = version !== undefined ? `?version=${version}` : '';
+    return this.request('GET', this.space(spaceId, `/assets/${encodeURIComponent(assetId)}${qs}`), routes.readAsset.response);
   }
 
   /** All three outcomes come back as values — a conflict is a result, not an exception. */
@@ -255,18 +308,18 @@ export class SpacesClient {
 
   async assetHistory(
     spaceId: string,
-    opts: { path?: string; beforeOffset?: number; limit?: number } = {},
+    opts: { assetId?: string; beforeOffset?: number; limit?: number } = {},
   ): Promise<ChangeSet[]> {
     const q = new URLSearchParams();
-    if (opts.path !== undefined) q.set('path', opts.path);
+    if (opts.assetId !== undefined) q.set('assetId', opts.assetId);
     if (opts.beforeOffset !== undefined) q.set('beforeOffset', String(opts.beforeOffset));
     if (opts.limit !== undefined) q.set('limit', String(opts.limit));
     const qs = q.size > 0 ? `?${q}` : '';
     return (await this.request('GET', this.space(spaceId, `/history${qs}`), routes.assetHistory.response)).changeSets;
   }
 
-  async diff(spaceId: string, path: string, from: number, to: number): Promise<string> {
-    const q = new URLSearchParams({ path, from: String(from), to: String(to) });
+  async diff(spaceId: string, assetId: string, from: number, to: number): Promise<string> {
+    const q = new URLSearchParams({ assetId, from: String(from), to: String(to) });
     return (await this.request('GET', this.space(spaceId, `/diff?${q}`), routes.diff.response)).unified;
   }
 
@@ -281,7 +334,7 @@ export class SpacesClient {
   async uploadBlob(spaceId: string, bytes: Uint8Array, opts: { declaredMime?: string } = {}): Promise<BlobInfo> {
     const hash = createHash('sha256').update(bytes).digest('hex');
     const send = async (token: string) =>
-      this.fetchImpl(`${this.baseUrl}${this.space(spaceId, '/blobs')}`, {
+      this.transport(`${this.baseUrl}${this.space(spaceId, '/blobs')}`, {
         method: 'PUT',
         headers: {
           authorization: `Bearer ${token}`,
@@ -320,7 +373,7 @@ export class SpacesClient {
    */
   async fetchBlob(spaceId: string, hash: string): Promise<{ bytes: Uint8Array; mime: string }> {
     const send = async (token: string) =>
-      this.fetchImpl(`${this.baseUrl}${this.space(spaceId, `/blobs/${hash}`)}`, {
+      this.transport(`${this.baseUrl}${this.space(spaceId, `/blobs/${hash}`)}`, {
         headers: { authorization: `Bearer ${token}` },
       });
     let res = await send(await this.currentToken());
@@ -359,9 +412,12 @@ export class SpacesClient {
     return this.request('GET', this.space(spaceId, `/search?${qs.toString()}`), routes.search.response);
   }
 
-  private windowQuery(opts?: { beforeOffset?: number; limit?: number }): string {
+  /** A page request: newest by default, back from `beforeOffset`, forward from `afterOffset`, or landing around `aroundOffset` (at most one). */
+  private windowQuery(opts?: MessageWindowOpts): string {
     const q = new URLSearchParams();
     if (opts?.beforeOffset !== undefined) q.set('beforeOffset', String(opts.beforeOffset));
+    if (opts?.afterOffset !== undefined) q.set('afterOffset', String(opts.afterOffset));
+    if (opts?.aroundOffset !== undefined) q.set('aroundOffset', String(opts.aroundOffset));
     if (opts?.limit !== undefined) q.set('limit', String(opts.limit));
     return q.size > 0 ? `?${q.toString()}` : '';
   }
@@ -369,21 +425,29 @@ export class SpacesClient {
   /** The stream (roots only), windowed newest-first: without beforeOffset the LATEST page — never the full history. */
   async listStream(
     spaceId: string,
-    opts?: { beforeOffset?: number; limit?: number },
-  ): Promise<{ messages: Message[]; topics: Topic[]; hasMore: boolean; readOffset: number }> {
+    opts?: MessageWindowOpts,
+  ): Promise<{ messages: Message[]; topics: Topic[]; hasMore: boolean; hasMoreAfter?: boolean; readOffset: number }> {
     return this.request('GET', this.space(spaceId, `/stream${this.windowQuery(opts)}`), routes.listStream.response);
   }
 
   /** One flat thread: root + topic row (null = plain thread) + windowed replies. A reply id resolves to its root. */
+  /** One message by id, folded — a reply carries its threadRoot. */
+  async getMessage(spaceId: string, messageId: string): Promise<Message> {
+    return (
+      await this.request('GET', this.space(spaceId, `/messages/${encodeURIComponent(messageId)}`), routes.getMessage.response)
+    ).message;
+  }
+
   async listThread(
     spaceId: string,
     rootMessageId: string,
-    opts?: { beforeOffset?: number; limit?: number },
+    opts?: MessageWindowOpts,
   ): Promise<{
     root: Message;
     topic: Topic | null;
     messages: Message[];
     hasMore: boolean;
+    hasMoreAfter?: boolean;
     readOffset: number | null;
     following: boolean;
   }> {

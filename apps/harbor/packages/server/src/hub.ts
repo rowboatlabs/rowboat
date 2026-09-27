@@ -1,4 +1,5 @@
 import type { ServerFrame } from '@rowboat/spaces-protocol';
+import type { LiveStats } from './stats.js';
 
 /**
  * In-process fan-out for live frames (durable events after they are stored,
@@ -16,6 +17,9 @@ export class SpaceHub {
    */
   private memberListeners = new Map<string, Set<(frame: ServerFrame) => void>>();
 
+  /** Counters only (stats.ts): every frame through here is one publish and `listeners` deliveries. */
+  constructor(private readonly stats?: LiveStats) {}
+
   subscribe(spaceId: string, fn: (frame: ServerFrame) => void): () => void {
     let set = this.listeners.get(spaceId);
     if (!set) {
@@ -30,7 +34,9 @@ export class SpaceHub {
   }
 
   publish(spaceId: string, frame: ServerFrame): void {
-    for (const fn of this.listeners.get(spaceId) ?? []) {
+    const listeners = this.listeners.get(spaceId);
+    this.stats?.published(frame, listeners?.size ?? 0);
+    for (const fn of listeners ?? []) {
       try {
         fn(frame);
       } catch {
@@ -53,7 +59,9 @@ export class SpaceHub {
   }
 
   publishToMember(memberId: string, frame: ServerFrame): void {
-    for (const fn of this.memberListeners.get(memberId) ?? []) {
+    const listeners = this.memberListeners.get(memberId);
+    this.stats?.published(frame, listeners?.size ?? 0);
+    for (const fn of listeners ?? []) {
       try {
         fn(frame);
       } catch {

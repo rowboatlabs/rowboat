@@ -14,9 +14,10 @@ import { cn } from '@/lib/utils'
 
 export function AttachDocumentDialog({ entries, current, onPick, onClose }: {
     entries: spaces.SpacesAssetEntry[]
-    /** The file linked today, if any — shown first and marked. */
+    /** The asset id linked today, if any — shown first and marked. */
     current?: string
-    onPick: (path: string) => void
+    /** Picked by asset id. */
+    onPick: (assetId: string) => void
     onClose: () => void
 }) {
     const [query, setQuery] = useState('')
@@ -43,12 +44,12 @@ export function AttachDocumentDialog({ entries, current, onPick, onClose }: {
                 </label>
                 <div className="max-h-64 overflow-y-auto rounded-md border border-border p-1">
                     {shown.map((e) => {
-                        const linked = e.path === current
+                        const linked = e.id === current
                         return (
                             <button
-                                key={e.path}
+                                key={e.id}
                                 type="button"
-                                onClick={() => onPick(e.path)}
+                                onClick={() => onPick(e.id)}
                                 className={cn(
                                     'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px]',
                                     linked ? 'bg-accent text-foreground' : 'hover:bg-accent/60',

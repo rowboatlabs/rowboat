@@ -103,7 +103,7 @@ describe("composeSystemInstructions golden bytes", () => {
             "# Practice Session (Coach Mode)",
             "# Voice Output (MANDATORY — READ THIS FIRST)",
             "# Search",
-            "# Code Mode (Active)",
+            "# Harness (Active)",
         ];
         let last = -1;
         for (const marker of markers) {

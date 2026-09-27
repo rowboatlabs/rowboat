@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import type { spaces } from '@x/shared'
 import { subscribeSpacesFeed } from '@/lib/spaces-feed'
 import { SPACES_ENABLED } from '@/lib/feature-flags'
@@ -128,6 +128,46 @@ function resyncListing(): void {
     }, 300)
 }
 
+// ---------------------------------------------------------------------------
+// Account state — is there a Rowboat session, and is the app signed in on it?
+// The Spaces doors key off this: no session → "Sign in with Rowboat" first.
+// ---------------------------------------------------------------------------
+
+type AccountState = { hasSession: boolean; appSignedIn: boolean }
+let accountState: AccountState | null = null
+const accountListeners = new Set<() => void>()
+let accountFetched = false
+
+/** Re-read the account state — after the Spaces door's own sign-in, which broadcasts no app-level event. */
+export function refreshSpacesAccountState(): void {
+    refreshAccountState()
+}
+
+function refreshAccountState(): void {
+    void window.ipc.invoke('spaces:accountState', null)
+        .then((state) => {
+            accountState = state
+            for (const l of accountListeners) l()
+        })
+        .catch(() => {})
+}
+
+/** Null while unknown (first read in flight). */
+export function useSpacesAccountState(): AccountState | null {
+    const subscribe = useCallback((listener: () => void) => {
+        accountListeners.add(listener)
+        if (!accountFetched) {
+            accountFetched = true
+            wireFeedBus()
+            refreshAccountState()
+        }
+        return () => {
+            accountListeners.delete(listener)
+        }
+    }, [])
+    return useSyncExternalStore(subscribe, () => accountState, () => accountState)
+}
+
 export function subscribeOrgs(listener: () => void): () => void {
     orgsListeners.add(listener)
     // With Spaces dark, passive subscribers (e.g. the App title crumb) must
@@ -159,6 +199,31 @@ export function useSpacesOrgs(): { orgs: OrgWithSpaces[]; loading: boolean; refr
     const state = useSyncExternalStore(subscribeOrgs, () => orgsState)
     const refresh = useCallback(() => refreshSpacesOrgs(), [])
     return { orgs: state.orgs, loading: state.loading, refresh }
+}
+
+const EMPTY_NAMES: ReadonlyMap<string, string> = new Map()
+
+/**
+ * Space id → current name on one org (shared spaces by name, DMs by the
+ * other person's), for the plain-text face of a space token — titles,
+ * quotes, excerpts. Identity-stable while no name changed: a listing refresh
+ * rebuilds the org objects, and every message row memoizes on this map.
+ */
+export function useSpaceNames(orgId: string): ReadonlyMap<string, string> {
+    const { orgs } = useSpacesOrgs()
+    const org = orgs.find((o) => o.id === orgId)
+    const signature = org
+        ? [...org.spaces.map((s) => `${s.id}\u0000${s.name}`), ...org.directs.map((d) => `${d.id}\u0000${org.directLabels[d.id] ?? d.name}`)].join('\n')
+        : ''
+    return useMemo(() => {
+        if (!org) return EMPTY_NAMES
+        const out = new Map<string, string>()
+        for (const s of org.spaces) out.set(s.id, s.name)
+        for (const d of org.directs) out.set(d.id, org.directLabels[d.id] ?? d.name)
+        return out
+        // The signature IS the dependency — org identity changes on every refresh.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [signature])
 }
 
 // ---------------------------------------------------------------------------
@@ -329,6 +394,15 @@ function wireFeedBus(): void {
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible') resyncListing()
         })
+        // A Rowboat sign-in or sign-out changes which managed orgs we hold
+        // (one session, two uses): refetch the listing outright — the
+        // freshness window is for reconnects, not for this.
+        window.ipc.on('oauth:didConnect', (event) => {
+            if (event.provider !== 'rowboat') return
+            orgsRefreshedAt = 0
+            refreshAccountState()
+            void refreshSpacesOrgs()
+        })
     }
     subscribeSpacesFeed((event) => {
         if (!('frame' in event)) return
@@ -408,4 +482,15 @@ export function useSpaceFeed(orgId: string | null, spaceId: string | null): Spac
     }, [orgId, spaceId])
     if (!orgId || !spaceId) return EMPTY_FEED
     return state.get(liveKey(orgId, spaceId)) ?? EMPTY_FEED
+}
+
+/**
+ * Every loaded feed at once, as a lookup, for surfaces that walk all spaces
+ * (the ⌘K palette lists every discussion). The store already keeps every
+ * known space loaded and live; the lookup's identity changes with each
+ * refresh, so a memo keyed on it recomputes exactly when a feed did.
+ */
+export function useSpaceFeeds(): (orgId: string, spaceId: string) => SpaceFeedData {
+    const state = useSyncExternalStore(subscribeFeed, () => feedState)
+    return useCallback((orgId: string, spaceId: string) => state.get(liveKey(orgId, spaceId)) ?? EMPTY_FEED, [state])
 }

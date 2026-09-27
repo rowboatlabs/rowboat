@@ -1,7 +1,10 @@
 import { z } from 'zod';
 import { BlobInfo } from './blob.js';
 import {
+  Asset,
   ChangeSet,
+  CreateAsset,
+  CreateAssetResult,
   DeleteAssetResult,
   MoveAssetResult,
   ProposeChange,
@@ -9,8 +12,8 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { ActingMode, Attribution, Member, Message, ReactionEmoji, Space, SpaceKind, Topic } from './core.js';
-import { AssetPath, AssetVersion, BlobHash, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
+import { ActingMode, Attribution, Member, Membership, Message, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic } from './core.js';
+import { AssetId, AssetPath, BlobHash, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 import {
   AcceptInvite,
   AcceptInviteResult,
@@ -144,7 +147,8 @@ export const ActivityItem = z.object({
   /**
    * Message kinds: the message is past your stream mark (a root) or your
    * thread mark (a reply) — reading in place clears it, one read-state
-   * truth. Reactions: after your activity-seen mark (`markActivitySeen`).
+   * truth. Reactions use their event offsets against that same mark.
+   * Legacy activity-seen timestamps remain honored for older clients.
    */
   unread: z.boolean(),
 });
@@ -200,7 +204,7 @@ export const routes = {
     response: z.object({ space: Space, created: z.boolean() }),
   },
   /**
-   * Push notifications (2026-09-07, PUSH_PLAN.md): a member's device
+   * Push notifications (2026-09-07; CONTRACT.md, the push bullet): a member's device
    * registers its Expo push token and the member's notify level in one
    * idempotent call — the phone re-registers on every start and on every
    * preference change. Level is per MEMBER (all their devices); tokens are
@@ -223,10 +227,21 @@ export const routes = {
     request: z.object({ token: z.string().min(1).max(200) }),
     response: z.object({ ok: z.literal(true) }),
   },
+  browseSpaces: {
+    method: 'GET',
+    path: '/v1/spaces/browse',
+    response: z.object({ spaces: z.array(z.object({ space: Space, joined: z.boolean() })) }),
+  },
+  joinSpace: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/join',
+    params: z.object({ spaceId: SpaceId }),
+    response: z.object({ space: Space, membership: Membership }),
+  },
   createSpace: {
     method: 'POST',
     path: '/v1/spaces',
-    request: z.object({ name: z.string().min(1).max(128) }),
+    request: z.object({ name: z.string().min(1).max(128), visibility: SpaceVisibility.default('private') }),
     response: z.object({ space: Space }),
   },
   /**
@@ -290,45 +305,40 @@ export const routes = {
   },
 
   // --- assets --------------------------------------------------------------
+  /**
+   * Files are addressed by id (2026-09-14, Google-Docs style): every call
+   * below takes an assetId that came from a listing, a create, a search hit,
+   * or a link. The path is a display property on the record — the tree's
+   * label — changed only by moveAsset and named only by createAsset, the one
+   * call that runs before an id exists. Namespace ops are property updates
+   * (history and bytes never move); only content edits bump versions; each
+   * op appends one attributed change-set (op: move|delete|restore) and its
+   * feed event. Deleted files freeze in place, listable via includeDeleted,
+   * restorable while their path is free among the living.
+   */
   listAssets: {
     method: 'GET',
     path: '/v1/spaces/:spaceId/assets',
     params: z.object({ spaceId: SpaceId }),
-    /** Default = live files only (today's shape, unchanged). includeDeleted adds the trash. */
+    /** Default = live files only. includeDeleted adds the trash. */
     query: z.object({ includeDeleted: z.coerce.boolean().optional() }),
-    response: z.object({
-      entries: z.array(
-        z.object({
-          path: AssetPath,
-          version: AssetVersion,
-          updatedAt: z.iso.datetime(),
-          /** Present when the head version is binary. Folders are display: clients group paths on `/`. */
-          blob: BlobInfo.optional(),
-          /** Present only on trash entries (includeDeleted); absent = live. */
-          state: z.literal('deleted').optional(),
-        }),
-      ),
-    }),
+    response: z.object({ entries: z.array(Asset) }),
   },
-  /**
-   * Namespace ops (2026-08-26): the path is the product's identity, but
-   * storage keys on an internal per-asset id (the inode model), so these are
-   * property updates — history and bytes never move. Only content edits bump
-   * versions; each op appends one attributed change-set (op: move|delete|
-   * restore) and its feed event. Old paths keep a redirect: reads follow it
-   * (the result's `path` says where the file lives now); proposes refuse with
-   * a pointer. Deleted files freeze in place, listable via includeDeleted,
-   * restorable while their path is free; a fresh create over a deleted path
-   * starts a new lineage and never blocks.
-   */
+  createAsset: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/assets',
+    params: z.object({ spaceId: SpaceId }),
+    request: CreateAsset,
+    response: CreateAssetResult, // occupied path = invalid_request
+  },
   moveAsset: {
     method: 'POST',
     path: '/v1/spaces/:spaceId/assets/move',
     params: z.object({ spaceId: SpaceId }),
     request: z.object({
-      fromPath: AssetPath,
+      assetId: AssetId,
       toPath: AssetPath,
-      /** Version of fromPath you last read — stale = conflict, same discipline as propose. */
+      /** Version you last read — stale = conflict, same discipline as propose. */
       baseVersion: z.number().int().positive(),
       reason: z.string().max(1_000).optional(),
       threadRootId: MessageId.optional(),
@@ -342,7 +352,7 @@ export const routes = {
     path: '/v1/spaces/:spaceId/assets/delete',
     params: z.object({ spaceId: SpaceId }),
     request: z.object({
-      path: AssetPath,
+      assetId: AssetId,
       baseVersion: z.number().int().positive(),
       reason: z.string().max(1_000).optional(),
       threadRootId: MessageId.optional(),
@@ -356,8 +366,8 @@ export const routes = {
     path: '/v1/spaces/:spaceId/assets/restore',
     params: z.object({ spaceId: SpaceId }),
     request: z.object({
-      /** The trash entry's path (most recently deleted wins if several share it). */
-      path: AssetPath,
+      /** A trash entry's id (listAssets includeDeleted). */
+      assetId: AssetId,
       reason: z.string().max(1_000).optional(),
       actingMode: ActingMode,
       agentName: z.string().max(64).optional(),
@@ -366,10 +376,9 @@ export const routes = {
   },
   readAsset: {
     method: 'GET',
-    path: '/v1/spaces/:spaceId/asset',
-    params: z.object({ spaceId: SpaceId }),
+    path: '/v1/spaces/:spaceId/assets/:assetId',
+    params: z.object({ spaceId: SpaceId, assetId: AssetId }),
     query: z.object({
-      path: AssetPath,
       /** Omit for the current version; set for time-travel reads. */
       version: z.coerce.number().int().positive().optional(),
     }),
@@ -387,7 +396,7 @@ export const routes = {
     path: '/v1/spaces/:spaceId/history',
     params: z.object({ spaceId: SpaceId }),
     query: z.object({
-      path: AssetPath.optional(), // omit for the whole space's change log
+      assetId: AssetId.optional(), // omit for the whole space's change log
       beforeOffset: z.coerce.number().int().nonnegative().optional(),
       limit: z.coerce.number().int().positive().max(200).optional(),
     }),
@@ -398,7 +407,7 @@ export const routes = {
     path: '/v1/spaces/:spaceId/diff',
     params: z.object({ spaceId: SpaceId }),
     query: z.object({
-      path: AssetPath,
+      assetId: AssetId,
       from: z.coerce.number().int().nonnegative(),
       to: z.coerce.number().int().positive(),
     }),
@@ -457,18 +466,33 @@ export const routes = {
    * cursor (no timestamp ties). `topics` carries the rows annotating this
    * page's roots — the stream's badge decoration, one batched fetch.
    */
+  /**
+   * Windows (2026-09-14, load-around): a page is the NEWEST `limit` rows by
+   * default. `beforeOffset` pages back (rows below it), `afterOffset` pages
+   * forward (rows above it), and `aroundOffset` lands on a row — up to half
+   * the limit on each side of it, the row itself included when it exists in
+   * this window's set. At most one of the three. `hasMore` says whether older
+   * rows exist below the page; `hasMoreAfter` whether newer ones exist above
+   * it (always false for the newest page). A client that lands on an old
+   * row and pages both ways is Zulip's anchor / Discord's `around`; the
+   * offset is the space's event offset every message already carries.
+   */
   listStream: {
     method: 'GET',
     path: '/v1/spaces/:spaceId/stream',
     params: z.object({ spaceId: SpaceId }),
     query: z.object({
       beforeOffset: z.coerce.number().int().positive().optional(),
+      afterOffset: z.coerce.number().int().nonnegative().optional(),
+      aroundOffset: z.coerce.number().int().positive().optional(),
       limit: z.coerce.number().int().positive().max(200).optional(),
     }),
     response: z.object({
       messages: z.array(Message),
       topics: z.array(Topic),
       hasMore: z.boolean(),
+      /** Newer rows exist above this page. Optional on the wire so a client reading an older org treats absence as false. */
+      hasMoreAfter: z.boolean().optional(),
       /** The caller's stream mark (0 = never marked) — the New divider's anchor. */
       readOffset: StreamOffset,
     }),
@@ -485,6 +509,8 @@ export const routes = {
     params: z.object({ spaceId: SpaceId, rootMessageId: MessageId }),
     query: z.object({
       beforeOffset: z.coerce.number().int().positive().optional(),
+      afterOffset: z.coerce.number().int().nonnegative().optional(),
+      aroundOffset: z.coerce.number().int().positive().optional(),
       limit: z.coerce.number().int().positive().max(200).optional(),
     }),
     response: z.object({
@@ -492,10 +518,22 @@ export const routes = {
       topic: Topic.nullable(),
       messages: z.array(Message),
       hasMore: z.boolean(),
+      hasMoreAfter: z.boolean().optional(),
       /** The caller's mark in this thread, followed or not; null = never read nor followed. */
       readOffset: StreamOffset.nullable(),
       following: z.boolean(),
     }),
+  },
+  /**
+   * One message by id, live-folded (reactions, poll votes) — what a message
+   * link resolves through: a reply names its thread via `threadRoot`, so the
+   * app can land in the thread and scroll to it.
+   */
+  getMessage: {
+    method: 'GET',
+    path: '/v1/spaces/:spaceId/messages/:messageId',
+    params: z.object({ spaceId: SpaceId, messageId: MessageId }),
+    response: z.object({ message: Message }),
   },
   /**
    * Post a message: a stream root (no threadRoot) or a reply (threadRoot).
@@ -621,8 +659,8 @@ export const routes = {
         rootMessageId: MessageId.optional(),
         title: z.string().min(1).max(256),
         body: z.string().min(1).max(65_536).optional(),
-        /** Attach a space file at birth (a live asset path; moved paths resolve). */
-        documentPath: AssetPath.optional(),
+        /** Attach a space file at birth (a live asset's id). */
+        documentAssetId: AssetId.optional(),
         actingMode: ActingMode,
         agentName: z.string().max(64).optional(),
       })
@@ -637,7 +675,7 @@ export const routes = {
    * One-row lifecycle ops on the annotation — none can touch a message.
    * `remove` deletes the row ("convert back to thread"); the conversation
    * stays in the stream untouched, and re-promoting later is lossless.
-   * `attach_document` links one live space file (Topic.documentPath) —
+   * `attach_document` links one live space file (Topic.documentAssetId) —
    * replacing any earlier link; `detach_document` clears it. Both are
    * idempotent (no event when nothing changes).
    */
@@ -650,7 +688,7 @@ export const routes = {
       z.object({ action: z.literal('archive'), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
       z.object({ action: z.literal('unarchive'), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
       z.object({ action: z.literal('remove'), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
-      z.object({ action: z.literal('attach_document'), path: AssetPath, actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+      z.object({ action: z.literal('attach_document'), assetId: AssetId, actingMode: ActingMode, agentName: z.string().max(64).optional() }),
       z.object({ action: z.literal('detach_document'), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
     ]),
     response: z.object({ topic: Topic }),
@@ -714,7 +752,7 @@ export const routes = {
    * paged (the first time-ordered cross-space pager — `cursor` is opaque,
    * from the previous page's `nextCursor`). `kinds` narrows to a
    * comma-separated subset; `spaceId` to one space; `unread=true` to what
-   * the read marks (and the activity-seen mark, for reactions) say is unread.
+   * the conversation read marks say is unread (legacy reaction seen marks are also honored).
    */
   activity: {
     method: 'GET',

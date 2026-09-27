@@ -39,6 +39,80 @@ export interface AuthDriver {
   metadata?(): { authorizationServers: string[] } | undefined;
 }
 
+/**
+ * A driver bound to one org's store — what the faces receive. They
+ * authenticate and resolve; the store never reaches them, so the service is
+ * the only door to data by construction (CONTRACT.md "one core, three doors").
+ */
+export interface OrgAuth {
+  authenticate(authorization: string | undefined, queryToken?: string | null): Promise<AuthIdentity>;
+  resolveMember(identity: AuthIdentity): Promise<Member>;
+  /** RFC 9728 metadata; undefined under the dev driver (no AS). */
+  metadata(): { authorizationServers: string[] } | undefined;
+}
+
+export function bindAuth(driver: AuthDriver, store: Store): OrgAuth {
+  return {
+    authenticate: (authorization, queryToken) => driver.authenticate(authorization, queryToken),
+    resolveMember: (identity) => driver.resolveMember(store, identity),
+    metadata: () => driver.metadata?.(),
+  };
+}
+
+/** What a request's credentials resolve to on an org. */
+export interface Principal {
+  identity: AuthIdentity;
+  member: Member;
+}
+
+export interface RequestCredentials {
+  authorization: string | undefined;
+  /** The WS face's substitute for the header (browsers cannot set headers on upgrades). */
+  queryToken?: string | null;
+}
+
+/**
+ * The two-step dance every face runs, in one place: bearer → identity →
+ * member of THIS org. Throws the driver's HarborErrors (unauthorized,
+ * not_a_member). `allowUnmapped` is for the one route whose caller may be
+ * authenticated-but-not-yet-a-member — accept-invite — where the identity
+ * comes back with no member instead of not_a_member.
+ */
+export async function authenticateRequest(auth: OrgAuth, credentials: RequestCredentials): Promise<Principal>;
+export async function authenticateRequest(
+  auth: OrgAuth,
+  credentials: RequestCredentials,
+  opts: { allowUnmapped: true },
+): Promise<{ identity: AuthIdentity; member?: Member }>;
+export async function authenticateRequest(
+  auth: OrgAuth,
+  credentials: RequestCredentials,
+  opts?: { allowUnmapped: true },
+): Promise<{ identity: AuthIdentity; member?: Member }> {
+  const identity = await auth.authenticate(credentials.authorization, credentials.queryToken);
+  try {
+    return { identity, member: await auth.resolveMember(identity) };
+  } catch (err) {
+    if (opts?.allowUnmapped && err instanceof HarborError && err.code === 'not_a_member') return { identity };
+    throw err;
+  }
+}
+
+// --- RFC 9728, spelled once for every face -------------------------------------
+
+/** The 401's pointer at the resource metadata, so MCP-style clients find the OAuth dance mechanically. */
+export function wwwAuthenticate(origin: string): string {
+  return `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource"`;
+}
+
+/** The protected-resource metadata document: the org (or the apex) names its authorization server(s). */
+export function protectedResourceMetadata(
+  origin: string,
+  authorizationServers: string[],
+): { resource: string; authorization_servers: string[]; bearer_methods_supported: string[] } {
+  return { resource: origin, authorization_servers: authorizationServers, bearer_methods_supported: ['header'] };
+}
+
 // --- dev driver --------------------------------------------------------------
 
 export const DEV_ISSUER = 'dev';

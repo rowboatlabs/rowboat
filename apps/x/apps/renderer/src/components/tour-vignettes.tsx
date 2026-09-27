@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 
-export type MascotVignetteKind = 'email' | 'meetings' | 'brain'
+export type MascotVignetteKind = 'spaces' | 'email' | 'meetings' | 'brain'
 export type TourVignetteKind = MascotVignetteKind | 'agents'
 
 /**
@@ -68,7 +68,66 @@ export function MascotVignette({ kind, playDing }: { kind: MascotVignetteKind; p
           from { stroke-dashoffset: 60; }
           to { stroke-dashoffset: 0; }
         }
+        @keyframes tour-chat-pop {
+          0% { opacity: 0; transform: translateY(10px) scale(0.6); }
+          8% { opacity: 1; transform: translateY(0) scale(1.06); }
+          12% { transform: translateY(0) scale(1); }
+          70% { opacity: 1; transform: translateY(0) scale(1); }
+          82%, 100% { opacity: 0; transform: translateY(-8px) scale(0.96); }
+        }
       `}</style>
+
+      {kind === 'spaces' && (
+        <div className="relative" style={{ width: 300, height: 170, top: -106 }}>
+          {/* the crew chatting: teammates' bubbles pop up around the head, then the agent chimes in */}
+          {[
+            { x: 22, y: 54, tailX: 64, delay: 0, avatar: '#F2B8BE', initial: 'M', lines: [46, 30] },
+            { x: 202, y: 26, tailX: 14, delay: 1.6, avatar: '#7AC74F', initial: 'J', lines: [38, 52] },
+            { x: 108, y: 0, tailX: 38, delay: 3.2, avatar: '#5B8DEF', initial: '', lines: [54, 24] },
+          ].map((b, i) => (
+            <div
+              key={i}
+              className="absolute rounded-xl border-2 border-[#17171B] bg-[#FFFDF6] shadow-md"
+              style={{
+                left: b.x,
+                top: b.y,
+                width: 92,
+                padding: '7px 8px 8px',
+                transformOrigin: `${b.tailX + 7}px 100%`,
+                animation: `tour-chat-pop 5.2s ease-out ${b.delay}s infinite both`,
+              }}
+            >
+              <div className="flex items-center gap-1.5">
+                <span
+                  className="flex size-4 shrink-0 items-center justify-center rounded-[4px] border-[1.5px] border-[#17171B] text-[8px] font-bold text-[#17171B]"
+                  style={{ background: b.avatar }}
+                >
+                  {b.initial || (
+                    <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="#17171B" strokeWidth="3" strokeLinejoin="round" aria-hidden="true">
+                      <g transform="translate(12 12) scale(0.0245) translate(-497 -489)" strokeWidth="110">
+                        <path d="M 158 487 C 330 330, 620 180, 837 148 C 820 480, 640 720, 498 830 Q 550 720, 569 623 C 560 540, 450 440, 352 413 Q 250 440, 158 487 Z" />
+                      </g>
+                    </svg>
+                  )}
+                </span>
+                <span className="h-1.5 rounded bg-[#9AA1AE]" style={{ width: b.lines[0] }} />
+              </div>
+              <span className="mt-1.5 block h-1.5 rounded bg-[#C9CED8]" style={{ width: b.lines[1] }} />
+              {/* speech tail, dropping toward the mascot from the bubble's inner corner */}
+              <svg
+                className="absolute"
+                width="14"
+                height="14"
+                viewBox="0 0 14 14"
+                style={{ left: b.tailX, bottom: -12 }}
+              >
+                <path d="M 1 0 L 13 0 L 7 12 Z" fill="#FFFDF6" stroke="#17171B" strokeWidth="2" strokeLinejoin="round" />
+                <path d="M 3 0 L 11 0" stroke="#FFFDF6" strokeWidth="3" />
+              </svg>
+            </div>
+          ))}
+        </div>
+      )}
 
       {kind === 'email' && (
         <div className="relative" style={{ width: 240, height: 150 }}>

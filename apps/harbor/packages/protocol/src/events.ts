@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { ChangeSet } from './changeset.js';
 import { Attribution, Membership, Message, MessageDeletion, MessageEdit, PollEnd, PollVote, Reaction, Space, SpaceKind, Topic, TopicRemoval } from './core.js';
-import { AssetPath, MemberId, MessageId, SpaceId, StreamOffset } from './ids.js';
+import { AssetId, MemberId, MessageId, SpaceId, StreamOffset } from './ids.js';
 
 // Decision 2 (CONTRACT.md): one WebSocket per org, per-space subscriptions,
 // offset-based catch-up. Subscribing with `afterOffset` replays durable events
@@ -153,22 +153,35 @@ export const ServerFrame = z.discriminatedUnion('kind', [
    */
   z.object({ kind: z.literal('ping'), at: z.iso.datetime() }),
   /**
-   * Addressed to a MEMBER, not a space (direct messages, 2026-09-07): someone
-   * else put you into a space — a DM opened with you today; admin-adds and
-   * org invites tomorrow. Every other way into a space is an act you perform
-   * yourself, so your client already knows to refresh; this is the one case
-   * where it cannot. Ephemeral and never replayed: the durable truth is the
-   * membership row plus the `joined` event on the new space's own log, which
-   * you could not have been subscribed to yet. On receipt, refresh the space
-   * listing and subscribe from offset 0 — the log is a few events long and
-   * the opener's first message may already be on it. Pre-DM clients ignore
-   * unknown frame kinds by contract.
+   * Addressed to a MEMBER, not a space: refresh joined-space listings when
+   * someone adds you to a DM, or you self-join on another device (spec §5,
+   * 2026-09-23). Ephemeral and never replayed: the membership row and joined
+   * event are the durable truth. On receipt, refresh the listing and resume
+   * the space subscription from the client's known offset, or 0 if unknown.
+   * Pre-DM clients ignore unknown frame kinds by contract.
    */
   z.object({
     kind: z.literal('space_added'),
     spaceId: SpaceId,
     spaceKind: SpaceKind,
     /** Who put you here. */
+    by: MemberId,
+    at: z.iso.datetime(),
+  }),
+  /**
+   * Addressed to a MEMBER (2026-09-22), the mirror of `space_added`: your
+   * membership of a space ended — you left it (on this device or another)
+   * today; an admin removed you tomorrow. The live face drops the space's
+   * subscription on this frame BEFORE forwarding it, so no frame of that
+   * space reaches you after your departure, and a re-subscribe to a private space is refused.
+   * Ephemeral, never replayed: the durable truth is the `membership` event
+   * (`left` / `removed`) on the space's own log. Pre-2026-09-22 clients drop
+   * the unknown frame by contract.
+   */
+  z.object({
+    kind: z.literal('space_removed'),
+    spaceId: SpaceId,
+    /** Who ended it: yourself on leave, the remover once removal exists. */
     by: MemberId,
     at: z.iso.datetime(),
   }),
@@ -225,8 +238,8 @@ export const ServerFrame = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('whiteboard'),
     spaceId: SpaceId,
-    /** The board's asset path (its identity — a board IS an asset). */
-    boardId: AssetPath,
+    /** The board's asset id (a board IS an asset; a rename never splits a session). */
+    boardId: AssetId,
     memberId: MemberId,
     at: z.iso.datetime(),
     payload: z.unknown(),
@@ -253,7 +266,7 @@ export const ClientFrame = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('whiteboard'),
     spaceId: SpaceId,
-    boardId: AssetPath,
+    boardId: AssetId,
     payload: z.unknown(),
   }),
 ]);

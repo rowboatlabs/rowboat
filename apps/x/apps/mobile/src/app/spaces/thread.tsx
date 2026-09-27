@@ -1,8 +1,8 @@
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, Linking, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useKeyboardVisible } from '@/lib/use-keyboard-visible';
 import type { Member, Message } from '@rowboat/spaces-protocol';
@@ -12,7 +12,7 @@ import { spaces } from '@x/shared';
 import { ChatMarkdown } from '@/components/markdown';
 import { MessageLinkPreviews } from '@/components/link-preview-card';
 import { SpaceBlobImage } from '@/components/space-blob-image';
-import { MessageActionSheet, MessageRow, applyReaction } from '@/components/space-message';
+import { MessageActionSheet, MessageRow, applyReaction, parseAssetLink } from '@/components/space-message';
 import { useSpacesAccount } from '@/lib/spaces/account';
 import { SpacesClient } from '@/lib/spaces/client';
 import { SpacesLive } from '@/lib/spaces/live';
@@ -123,6 +123,19 @@ export default function SpaceThreadScreen() {
     }
   };
 
+  // A file link in a message: this org's files open in the file screen (by
+  // id, so a rename never breaks it); any other host goes to the browser.
+  const openAssetLink = useCallback(
+    (link: { host: string; spaceId: string; assetId: string }) => {
+      if (link.host !== org) {
+        void Linking.openURL(`https://${link.host}/s/${link.spaceId}/a/${link.assetId}`);
+        return;
+      }
+      router.push({ pathname: '/spaces/file', params: { org, space: link.spaceId, assetId: link.assetId, path: '', title: 'File', mime: '' } });
+    },
+    [org],
+  );
+
   const toggleReaction = useCallback(
     (message: Message, emoji: string) => {
       const mine = message.reactions.some((g) => g.emoji === emoji && g.memberIds.includes(me));
@@ -171,6 +184,7 @@ export default function SpaceThreadScreen() {
               onToggleReaction={toggleReaction}
               onLongPress={(m) => { setReactionsOnly(false); setActionMessage(m); }}
               onAddReaction={(m) => { setReactionsOnly(true); setActionMessage(m); }}
+              onOpenAsset={openAssetLink}
             />
           ) : null}
           {rootMessage && replies !== null ? (
@@ -195,7 +209,7 @@ export default function SpaceThreadScreen() {
             </Pressable>
           ) : null}
           {replies?.map((m) => (
-            <MessageRow key={m.id} message={m} member={members.get(m.author.memberId)} memberNames={memberNames} me={me} onToggleReaction={toggleReaction} onLongPress={(m) => { setReactionsOnly(false); setActionMessage(m); }}
+            <MessageRow key={m.id} message={m} member={members.get(m.author.memberId)} memberNames={memberNames} me={me} onToggleReaction={toggleReaction} onLongPress={(m) => { setReactionsOnly(false); setActionMessage(m); }} onOpenAsset={openAssetLink}
               onAddReaction={(m) => { setReactionsOnly(true); setActionMessage(m); }} />
           ))}
         </ScrollView>
@@ -240,7 +254,7 @@ export default function SpaceThreadScreen() {
 
 // The root, Slack-style: 40pt avatar, bold name with the timestamp UNDER it,
 // full-size body, then reaction pills + the always-on emoji+ pill.
-function RootMessage({ message, member, memberNames, me, onToggleReaction, onLongPress, onAddReaction }: {
+function RootMessage({ message, member, memberNames, me, onToggleReaction, onLongPress, onAddReaction, onOpenAsset }: {
   message: Message;
   member?: Member;
   memberNames: ReadonlyMap<string, string>;
@@ -248,6 +262,7 @@ function RootMessage({ message, member, memberNames, me, onToggleReaction, onLon
   onToggleReaction: (message: Message, emoji: string) => void;
   onLongPress: (message: Message) => void;
   onAddReaction: (message: Message) => void;
+  onOpenAsset?: (link: { host: string; spaceId: string; assetId: string; label: string }) => void;
 }) {
   const colors = useColors();
   const name = member?.displayName ?? message.author.memberId;
@@ -288,7 +303,15 @@ function RootMessage({ message, member, memberNames, me, onToggleReaction, onLon
           <Text style={{ fontSize: 13, color: colors.tertiaryLabel }}>{stamp}</Text>
         </View>
       </View>
-      <ChatMarkdown extraRules={imageRule}>{body}</ChatMarkdown>
+      <ChatMarkdown
+        extraRules={imageRule}
+        onLinkPress={(url) => {
+          const link = parseAssetLink(url);
+          if (!link || !onOpenAsset) return true;
+          onOpenAsset(link);
+          return false;
+        }}
+      >{body}</ChatMarkdown>
       <MessageLinkPreviews body={message.body} />
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 2 }}>
         {message.reactions.map((g) => {

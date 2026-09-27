@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react'
 import type { CodeProject, CodeSession, CodeSessionStatus, GitRepoInfo } from '@x/shared/src/code-sessions.js'
+import { noteCodeSessionCompleted } from './session-read-state'
 
 export interface ProjectRow {
   project: CodeProject
@@ -61,6 +62,9 @@ function ensureIpcSubscription() {
   if (ipcSubscribed || typeof window === 'undefined' || !window.ipc) return
   ipcSubscribed = true
   window.ipc.on('codeSession:status', ({ sessionId, status }) => {
+    if (status === 'idle' && state.statuses[sessionId] && state.statuses[sessionId] !== 'idle') {
+      noteCodeSessionCompleted(sessionId)
+    }
     if (state.statuses[sessionId] !== status) {
       setState({ statuses: { ...state.statuses, [sessionId]: status } })
     }

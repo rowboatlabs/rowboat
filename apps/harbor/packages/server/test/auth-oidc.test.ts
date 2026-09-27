@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { OidcAuthDriver } from '../src/auth-oidc.js';
-import { startHarbor, type RunningHarbor } from '../src/server.js';
-import { agentClient, callStructured, liveClient, restClient, startFakeAs, type FakeAs } from './helpers.js';
+import type { RunningHarbor } from '../src/server.js';
+import { agentClient, callStructured, liveClient, restClient, startFakeAs, startTestHarbor, type FakeAs } from './helpers.js';
 
 // The oidc driver against a local fake AS (helpers.ts): RFC 8414 discovery +
 // JWKS + JWTs we mint ourselves, so CI never needs a real IdP. (jose's
@@ -15,7 +15,7 @@ describe('oidc auth driver', () => {
 
   beforeAll(async () => {
     as = await startFakeAs();
-    harbor = await startHarbor({
+    harbor = await startTestHarbor({
       auth: new OidcAuthDriver({ issuer: as.issuer }),
       seedMembers: [
         { id: 'ramnique', displayName: 'Ramnique' },
@@ -40,7 +40,7 @@ describe('oidc auth driver', () => {
   });
 
   it('does NOT serve resource metadata under the dev driver', async () => {
-    const dev = await startHarbor({});
+    const dev = await startTestHarbor({});
     const res = await fetch(`${dev.url}/.well-known/oauth-protected-resource`);
     expect(res.status).toBe(404);
     await dev.close();
@@ -134,7 +134,7 @@ describe('invite-binding ceremony', () => {
   });
 
   it('walks a newcomer from not_a_member to member: resolve → accept binds (iss,sub) → tokens work', async () => {
-    const harbor = await startHarbor({
+    const harbor = await startTestHarbor({
       auth: new OidcAuthDriver({ issuer: as.issuer }),
       seedMembers: [{ id: 'ramnique', displayName: 'Ramnique' }],
       seedSpaces: [{ name: 'Roadboard', creator: 'ramnique' }],
@@ -179,7 +179,7 @@ describe('invite-binding ceremony', () => {
   });
 
   it('a mapped member accepting a second space reuses the member, adds a membership', async () => {
-    const harbor = await startHarbor({
+    const harbor = await startTestHarbor({
       auth: new OidcAuthDriver({ issuer: as.issuer }),
       seedMembers: [{ id: 'ramnique', displayName: 'Ramnique' }],
       seedSpaces: [
@@ -204,7 +204,7 @@ describe('invite-binding ceremony', () => {
   });
 
   it('domain rule: matching binds (case-insensitive), wrong or missing email is policy_refused', async () => {
-    const harbor = await startHarbor({
+    const harbor = await startTestHarbor({
       auth: new OidcAuthDriver({ issuer: as.issuer }),
       allowedEmailDomains: ['rowboatlabs.com'],
       seedMembers: [{ id: 'ramnique', displayName: 'Ramnique' }],

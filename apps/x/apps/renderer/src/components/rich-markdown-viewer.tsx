@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { EditorContent, useEditor, type Editor } from '@tiptap/react'
+import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
 import Image from '@tiptap/extension-image'
@@ -50,6 +51,7 @@ export function RichMarkdownViewer({ content, onToggleTask, onOpenLink }: {
   const onOpenLinkRef = useRef(onOpenLink)
   onOpenLinkRef.current = onOpenLink
   const editorRef = useRef<Editor | null>(null)
+  const taskPositionsRef = useRef(new WeakMap<ProseMirrorNode, () => number | undefined>())
   const editor = useEditor({
     editable: false,
     extensions: [
@@ -91,7 +93,18 @@ export function RichMarkdownViewer({ content, onToggleTask, onOpenLink }: {
       MermaidBlockExtension,
       WikiLink,
       TaskList,
-      TaskItem.configure({
+      TaskItem.extend({
+        addNodeView() {
+          const render = this.parent?.()
+          if (!render) return null
+          return (props) => {
+            // TipTap's checkbox callback retains the node from creation even
+            // when setContent reuses its view with a new node. getPos stays live.
+            taskPositionsRef.current.set(props.node, props.getPos)
+            return render(props)
+          }
+        },
+      }).configure({
         nested: true,
         // Only when a handler is mounted: otherwise read-only checkboxes stay
         // disabled (configuring this at all makes TipTap enable them).
@@ -101,11 +114,13 @@ export function RichMarkdownViewer({ content, onToggleTask, onOpenLink }: {
                 const cb = onToggleTaskRef.current
                 const instance = editorRef.current
                 if (!cb || !instance) return false
+                const position = taskPositionsRef.current.get(node)?.()
+                if (position === undefined) return false
                 let index = -1
                 let seen = 0
-                instance.state.doc.descendants((n) => {
+                instance.state.doc.descendants((n, pos) => {
                   if (n.type.name === 'taskItem') {
-                    if (n === node) index = seen
+                    if (pos === position) index = seen
                     seen += 1
                   }
                   return true

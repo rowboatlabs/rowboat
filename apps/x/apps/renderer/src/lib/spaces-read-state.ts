@@ -266,8 +266,8 @@ function queueMark(orgId: string, spaceId: string, threadRootId: string | undefi
 }
 
 /**
- * The reader has seen the stream up to `offset` (the newest root on screen —
- * never head, unless marking everything). Local state moves at once; the org
+ * The reader has seen the stream up to `offset` (a displayed message or
+ * reaction event — never head, unless marking everything). Local state moves at once; the org
  * hears about it debounced. `sync: false` = the org already knows (a post).
  */
 export function markStreamRead(orgId: string, spaceId: string, offset: number, opts?: { sync?: boolean }): void {

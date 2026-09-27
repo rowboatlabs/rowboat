@@ -18,6 +18,7 @@ export interface CreateSessionArgs {
     projectId: string;
     title?: string;
     agent: CodingAgent;
+    codeModeEnabled?: boolean;
     // Only pass a policy the USER explicitly chose (dialog, rail select).
     // Adoption/dispatch leave it unset — runs then resolve chip → global
     // settings → ask, so the stored field always means "the user chose".
@@ -35,8 +36,8 @@ export interface CreateSessionArgs {
     cwd?: string;
 }
 
-function worktreeRoot(projectId: string, sessionId: string): string {
-    return path.join(WorkDir, 'code-mode', 'worktrees', projectId, sessionId);
+function worktreeRoot(projectPath: string, sessionId: string): string {
+    return path.join(projectPath, '.rowboat', 'worktrees', sessionId);
 }
 
 // The per-chat work directory the copilot anchors its general context to
@@ -128,6 +129,32 @@ export class CodeSessionService {
         await fs.writeFile(marker, new Date().toISOString()).catch(() => {});
     }
 
+    async migrateLegacyProjects(): Promise<void> {
+        await withFileLock('projects-unification', async () => {
+            const marker = path.join(WorkDir, 'config', '.projects-unified');
+            try { await fs.access(marker); return; } catch { /* first migration */ }
+            const { listProjects } = await import('../../projects/projects.js');
+            let incomplete = false;
+            const liveIds = new Set(this.sessions.listSessions().map((s) => s.sessionId));
+            for (const legacy of await listProjects(this.sessions)) {
+                const project = await this.codeProjectsRepo.add(path.join(WorkDir, legacy.path));
+                for (const chat of legacy.chats) {
+                    // The legacy runtime still owns chats not converted to sessions.
+                    if (!liveIds.has(chat.id)) { incomplete = true; continue; }
+                    const workDirFile = path.join(WorkDir, 'config', `workdir-${chat.id}.json`);
+                    const saved = await fs.readFile(workDirFile, 'utf8').then((raw) => JSON.parse(raw)).catch(() => null);
+                    await this.createForSession(chat.id, {
+                        projectId: project.id, title: chat.title, agent: 'claude',
+                        isolation: 'in-repo', codeModeEnabled: false,
+                        ...(typeof saved?.path === 'string' ? { cwd: saved.path } : {}),
+                    });
+                }
+            }
+            await fs.mkdir(path.dirname(marker), { recursive: true });
+            if (!incomplete) await fs.writeFile(marker, new Date().toISOString());
+        });
+    }
+
     async create(args: CreateSessionArgs): Promise<CodeSession> {
         const project = await this.codeProjectsRepo.get(args.projectId);
         if (!project) throw new Error(`Unknown project: ${args.projectId}`);
@@ -208,22 +235,26 @@ export class CodeSessionService {
 
             let cwd = args.cwd ?? project.path;
             let worktree: CodeSession['worktree'];
+            let workspaceId = sessionId;
+            let codeModeEnabled = args.codeModeEnabled;
+            const info = args.workspaceSessionId ? null : await gitService.repoInfo(project.path);
             if (args.workspaceSessionId) {
                 const source = await this.codeSessionsRepo.get(args.workspaceSessionId);
                 if (!source || source.projectId !== project.id) throw new Error('Workspace no longer exists in this project.');
                 if (source.worktree?.removedAt) throw new Error('This worktree has been removed.');
                 await fs.access(source.cwd);
                 cwd = source.cwd;
+                workspaceId = source.workspaceId ?? source.cwd;
+                codeModeEnabled ??= source.codeModeEnabled ?? true;
                 worktree = source.worktree ? { ...source.worktree } : undefined;
-            } else if (args.isolation === 'worktree') {
-                const info = await gitService.repoInfo(project.path);
-                if (!info.isGitRepo || !info.hasCommits) {
-                    throw new Error('Worktree isolation needs a git repository with at least one commit.');
-                }
+            } else if (args.isolation === 'worktree' && info?.isGitRepo) {
                 const branch = `rowboat/${sessionId}`;
-                const wtPath = worktreeRoot(project.id, sessionId);
+                const wtPath = worktreeRoot(project.path, sessionId);
                 const baseBranch = args.baseBranch ?? info.branch ?? 'HEAD';
-                const baseCommit = await gitService.worktreeAdd(project.path, wtPath, branch, baseBranch);
+                await gitService.excludeWorktrees(project.path);
+                const baseCommit = info.hasCommits
+                    ? await gitService.worktreeAdd(project.path, wtPath, branch, baseBranch)
+                    : await gitService.worktreeAddUnborn(project.path, wtPath, branch);
                 worktree = { path: wtPath, branch, baseBranch, baseCommit };
                 cwd = wtPath;
             }
@@ -233,6 +264,8 @@ export class CodeSessionService {
                 projectId: project.id,
                 title,
                 agent: args.agent,
+                codeModeEnabled: codeModeEnabled ?? info?.isGitRepo ?? false,
+                workspaceId,
                 // Never freeze a transient posture: policy is stored only
                 // when the caller carries an explicit user choice.
                 ...(args.policy ? { policy: args.policy } : {}),
@@ -324,10 +357,12 @@ export class CodeSessionService {
         return best;
     }
 
-    async update(sessionId: string, patch: Partial<Pick<CodeSession, 'title' | 'policy' | 'agent' | 'agentModel' | 'agentEffort'>>): Promise<CodeSession> {
+    async update(sessionId: string, patch: Partial<Pick<CodeSession, 'title' | 'policy' | 'agent' | 'agentModel' | 'agentEffort' | 'codeModeEnabled'>> & { clearPolicy?: boolean }): Promise<CodeSession> {
         const session = await this.codeSessionsRepo.get(sessionId);
         if (!session) throw new Error(`Unknown session: ${sessionId}`);
-        const updated: CodeSession = { ...session, ...patch };
+        const { clearPolicy, ...values } = patch;
+        const updated: CodeSession = { ...session, ...values };
+        if (clearPolicy) delete updated.policy;
         // Model and effort are ids of ONE engine's catalog — a Codex model on
         // a Claude Code session is nonsense. Switching agents drops them back
         // to the engine default unless the same patch chooses new ones.

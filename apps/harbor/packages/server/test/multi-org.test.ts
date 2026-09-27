@@ -1,9 +1,10 @@
 import WebSocket from 'ws';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startHarborDeployment, type RunningDeployment } from '../src/deployment.js';
+import { OrgDirectory } from '../src/directory.js';
 import type { SqlDb } from '../src/sql.js';
 import { startFakeAs, type FakeAs } from './helpers.js';
-import { pgliteDb } from './pglite.js';
+import { pgliteDb } from '../src/sql-pglite.js';
 
 // Spec §4 "Deployment and tenancy" as tests: one deployment, many orgs,
 // resolved by host, with NOTHING crossing the org boundary — spaces, members,
@@ -61,6 +62,25 @@ afterAll(async () => {
 });
 
 describe('multi-org deployment', () => {
+  it('open-space discovery, reads and joins stay org-scoped', async () => {
+    const token = await as.mint({ sub: 'sub-ram' });
+    const acme = http('acme.test', token);
+    const beta = http('beta.test', token);
+    const created = await acme.post('/v1/spaces', { name: 'Open isolation', visibility: 'open' });
+    const id = created.body.space.id;
+    expect((await acme.get('/v1/spaces/browse')).body.spaces.map((r: any) => r.space.id)).toContain(id);
+    expect((await beta.get('/v1/spaces/browse')).body.spaces).toEqual([]);
+    expect((await beta.get(`/v1/spaces/${id}/stream`)).status).toBe(404);
+    expect((await beta.post(`/v1/spaces/${id}/join`)).status).toBe(404);
+    const stranger = http('acme.test', await as.mint({ sub: 'unmapped-open-browser' }));
+    for (const path of ['/v1/spaces/browse', `/v1/spaces/${id}/stream`]) {
+      expect((await stranger.get(path)).body.code).toBe('not_a_member');
+    }
+    expect((await stranger.post(`/v1/spaces/${id}/join`)).body.code).toBe('not_a_member');
+    // Leave the shared fixture's joined-space listing unchanged for its existing cases.
+    await acme.post(`/v1/spaces/${id}/leave`);
+  });
+
   it('routes by host: each domain is its own org; unknown domains are 404', async () => {
     expect((await http('acme.test').get('/v1/health')).body.org.name).toBe('Acme');
     expect((await http('beta.test').get('/v1/health')).body.org.name).toBe('Beta');
@@ -103,12 +123,13 @@ describe('multi-org deployment', () => {
   it('deployment boot backfills asset_search — the path single-org init() covers, on the fleet', async () => {
     const ram = await as.mint({ sub: 'sub-ram' });
     const spaceId = (await http('acme.test', ram).get('/v1/spaces')).body.spaces[0].id;
-    await http('acme.test', ram).post(`/v1/spaces/${spaceId}/changes`, {
-      assetPath: 'notes/relics.md',
-      baseVersion: 0,
+    const made = await http('acme.test', ram).post(`/v1/spaces/${spaceId}/assets`, {
+      path: 'notes/relics.md',
       newContent: 'the amphora survives the reboot',
       actingMode: 'direct',
     });
+    expect(made.status).toBe(200);
+    const relicsId: string = made.body.asset.id;
 
     // Simulate pre-012 data: the asset exists, its search row does not.
     await db.query('delete from asset_search', []);
@@ -123,8 +144,8 @@ describe('multi-org deployment', () => {
       const res = await fetch(`${url}/v1/spaces/${spaceId}/search?q=amphora`, {
         headers: { 'x-forwarded-host': 'acme.test', authorization: `Bearer ${ram}` },
       });
-      const body = (await res.json()) as { assets: Array<{ path: string; snippet?: string }> };
-      expect(body.assets.map((a) => a.path)).toEqual(['notes/relics.md']);
+      const body = (await res.json()) as { assets: Array<{ id: string; path: string; snippet?: string }> };
+      expect(body.assets.map((a) => [a.id, a.path])).toEqual([[relicsId, 'notes/relics.md']]);
       expect(body.assets[0]!.snippet).toContain('amphora');
     } finally {
       await dep2.close();
@@ -202,6 +223,40 @@ describe('multi-org deployment', () => {
   it('domains are unique across the deployment', async () => {
     await expect(dep.createOrg({ name: 'Squatter', domains: ['acme.test'] })).rejects.toThrow(/already routes/);
   });
+
+  it('a refused create leaves nothing behind — org, founder and identity roll back together', async () => {
+    const tables = ['orgs', 'org_domains', 'members', 'member_identities'];
+    const count = async (table: string) => (await db.query<{ n: number }>(`select count(*)::int as n from ${table}`))[0]!.n;
+    const before = await Promise.all(tables.map(count));
+    // The collision is on the SECOND domain — after the org row and its founder were written in the same transaction.
+    await expect(
+      dep.createOrg({
+        name: 'Half-made',
+        domains: ['fresh.test', 'acme.test'],
+        issuer: as.issuer,
+        firstAdmin: { iss: as.issuer, sub: 'sub-half', displayName: 'Half' },
+      }),
+    ).rejects.toMatchObject({ code: 'invalid_request', message: expect.stringMatching(/already routes/) });
+    expect(await Promise.all(tables.map(count))).toEqual(before);
+    expect(await dep.directory.getByDomain('fresh.test')).toBeUndefined();
+  });
+
+  it("listing an identity's orgs is one statement, whatever the number of orgs", async () => {
+    let statements = 0;
+    const counting: SqlDb = {
+      ...db,
+      async query<R>(text: string, params?: unknown[]): Promise<R[]> {
+        statements += 1;
+        return db.query<R>(text, params);
+      },
+    };
+    const rows = await new OrgDirectory(counting).listOrgsForIdentity(as.issuer, 'sub-ram');
+    expect(statements).toBe(1);
+    expect(rows.map((r) => [r.name, r.address, r.role]).sort()).toEqual([
+      ['Acme', 'acme.test', 'admin'],
+      ['Beta', 'beta.test', 'admin'],
+    ]);
+  });
 });
 
 describe('apex face (self-serve org creation)', () => {
@@ -223,13 +278,17 @@ describe('apex face (self-serve org creation)', () => {
     expect(me.body.member.role).toBe('admin');
     expect(me.body.member.id).toBe(created.body.member.id);
 
-    // Landing area: a Main space with a welcome README, attributed to the founder.
+    // Landing area: a general space with a welcome README, attributed to the founder.
     const spaces = (await http('roadboard.spaces.test', token).get('/v1/spaces')).body.spaces;
-    expect(spaces.map((s: any) => s.name)).toEqual(['Main']);
+    expect(spaces.map((s: any) => s.name)).toEqual(['general']);
+    const entries = (await http('roadboard.spaces.test', token).get(`/v1/spaces/${spaces[0].id}/assets`)).body.entries;
+    expect(entries.map((e: any) => e.path)).toEqual(['README.md']);
     const readme = await http('roadboard.spaces.test', token).get(
-      `/v1/spaces/${spaces[0].id}/asset?path=README.md`,
+      `/v1/spaces/${spaces[0].id}/assets/${entries[0].id}`,
     );
     expect(readme.status).toBe(200);
+    expect(readme.body.id).toBe(entries[0].id);
+    expect(readme.body.path).toBe('README.md');
     expect(readme.body.content).toContain('# Welcome to Roadboard');
     expect(readme.body.content).toContain('When to make more spaces');
     expect(readme.body.recentHistory[0].attribution.memberId).toBe(created.body.member.id);

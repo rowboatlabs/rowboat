@@ -411,6 +411,14 @@ module.exports = {
             console.log('Building renderer...');
             execSync('pnpm run build', {
                 cwd: path.join(__dirname, '../renderer'),
+                // The production renderer bundle exceeds Node's default heap on
+                // GitHub's macOS ARM runners while Vite renders/compresses chunks.
+                // Keep this scoped to the memory-intensive child process instead
+                // of changing the heap for Forge or the rest of the build.
+                env: {
+                    ...process.env,
+                    NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --max-old-space-size=4096`.trim(),
+                },
                 stdio: 'inherit'
             });
 

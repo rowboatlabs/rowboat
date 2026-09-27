@@ -1,9 +1,9 @@
+import { SearchMenu } from '@/components/search-menu'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import type { EditorView } from '@tiptap/pm/view'
 import { uploadInputFor } from '@/lib/spaces-upload'
-import { ArrowUp, BarChart3, Clock, FileText, Globe, Loader2, LoaderIcon, Mic, Paperclip, ShieldCheck, Square, Terminal, X as XIcon } from 'lucide-react'
-import type { spaces } from '@x/shared'
+import { ArrowUp, BarChart3, Clock, Eye, FileText, Loader2, LoaderIcon, Mic, Paperclip, Route, Send, ShieldCheck, Square, Terminal, X as XIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
@@ -15,21 +15,24 @@ import { VoiceWaveform } from '@/components/chat-input-with-mentions'
 import { useVoiceMode } from '@/hooks/useVoiceMode'
 import { useVoiceInputAvailable } from '@/hooks/use-voice-available'
 import { CALL_VOICE_HOLDER, acquireVoice, releaseVoice, voiceOwnerId } from '@/lib/voice-ownership'
-import { caretContext, composerExtensions, composerMarkdown, type CaretContext } from '@/components/spaces/composer-editor'
+import { caretContext, closeFenceLine, composerExtensions, composerMarkdown, openFenceLine, type CaretContext } from '@/components/spaces/composer-editor'
 import { RichFormattingToolbar } from '@/components/spaces/composer-toolbar'
 import { MentionMenu, useMentionAutocomplete } from '@/components/spaces/mention-autocomplete'
 import { isDirectImageUrl, useSpaceRefs } from '@/components/spaces/space-markdown'
 import '@/styles/space-composer.css'
 import { noteEmojiUsed, replaceShortcodes, searchEmoji, type EmojiEntry } from '@/lib/emoji-data'
 import { containsRowboatAddress } from '@/lib/spaces-mentions'
+import type { AutoRouteMode } from '@/lib/spaces-auto-route'
+import { draftStorageKey } from '@/lib/spaces-thread-draft'
 import { schedulePresets } from '@/lib/spaces-schedule'
 import { blobAppUrl, blobWireUrl, formatBytes, isImageMime } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
 
 // The space composer. A plain message box — Enter sends, Shift+Enter breaks a
-// line — with two things layered on: `@` autocompletes members, @here (notify
-// everyone online), @rowboat, and — once a query exists — space files (picked
-// files land as plain markdown links),
+// line — with two things layered on: `@` autocompletes the org's people,
+// @here (notify everyone online), @rowboat, the org's spaces (#Name
+// references) and — once a query exists — files from every shared space
+// (picked files land as plain markdown links),
 // and the moment the draft addresses @rowboat, a strip of agent options
 // (model · permissions · search · terminal) appears; they ride along with the
 // invocation for that one turn. The message itself always goes to the team.
@@ -96,9 +99,14 @@ async function formatTranscript(raw: string): Promise<string> {
     }
 }
 
-export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, autoFocus, onType, seed, members = [], entries = [], selfMemberId, draftKey, commands = [] }: {
+export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, autoFocus, onType, seed, draftKey, commands = [], autoRoute, submit, onDraftChange, onEscape }: {
     placeholder: string
-    onSend: (body: string, agent?: AgentOptions) => Promise<void>
+    /**
+     * Post the message. Resolve 'keep' to leave the draft in the box (the
+     * pane is holding it for a confirmation); throw to keep it after a
+     * failure the pane has reported.
+     */
+    onSend: (body: string, agent?: AgentOptions) => Promise<void | 'keep'>
     /** Send-later: the clock menu hands the built body + fire time here. */
     onSchedule?: (body: string, at: Date) => Promise<void>
     /** Opens the poll creation dialog (same flow as /poll) — the button beside attach. */
@@ -109,11 +117,6 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     onType?: () => void
     /** Prefill (e.g. "Ask @rowboat about this"); a new nonce re-applies it. `append` adds to the draft instead of replacing it. */
     seed?: { text: string; nonce: number; append?: boolean } | null
-    /** Space members, for @ autocomplete. */
-    members?: spaces.Member[]
-    /** Space files — the same @ autocomplete offers them; picking one links it. */
-    entries?: spaces.SpacesAssetEntry[]
-    selfMemberId?: string
     /**
      * Persist the unsent text under this key (per install, like read marks) —
      * switching spaces or restarting the app hands the draft back. Sending
@@ -122,18 +125,37 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     draftKey?: string
     /** Surface-specific slash commands (a "/" draft opens the menu; /ask is built in). */
     commands?: SlashCommand[]
+    /**
+     * The stream composer's Auto toggle (2026-09-22): on, Jev picks where the
+     * message lands (the stream, or the open thread it continues) at send
+     * time. Preview (2026-09-23, the default) opens that thread with the reply
+     * staged; Post sends it there. Absent = no toggle (a thread composer
+     * already has a destination).
+     */
+    autoRoute?: { mode: AutoRouteMode; onToggle: () => void; onModeChange: (mode: 'preview' | 'post') => void }
+    /** A pane's own confirm button: a new nonce sends what is in the box, exactly as the arrow would. */
+    submit?: { nonce: number } | null
+    /** Every change to the box's markdown, for a pane that follows the text (Auto's tag chips). */
+    onDraftChange?: (draft: string) => void
+    /** Esc with no popover open. Return true to consume it (a pane closing its notice). */
+    onEscape?: () => boolean
 }) {
-    const [draft, setDraft] = useState(() => (draftKey ? window.localStorage.getItem(`spaces:draft:${draftKey}`) ?? '' : ''))
+    const [draft, setDraft] = useState(() => (draftKey ? window.localStorage.getItem(draftStorageKey(draftKey)) ?? '' : ''))
     useEffect(() => {
         if (!draftKey) return
         try {
-            if (draft) window.localStorage.setItem(`spaces:draft:${draftKey}`, draft)
-            else window.localStorage.removeItem(`spaces:draft:${draftKey}`)
+            if (draft) window.localStorage.setItem(draftStorageKey(draftKey), draft)
+            else window.localStorage.removeItem(draftStorageKey(draftKey))
         } catch {
             // Quota/private mode: the draft just doesn't persist.
         }
     }, [draftKey, draft])
     const [appliedSeed, setAppliedSeed] = useState<number | null>(null)
+    // The pane's follower of the text, through a ref like the other callbacks.
+    const onDraftChangeRef = useRef(onDraftChange)
+    useEffect(() => {
+        onDraftChangeRef.current?.(draft)
+    }, [draft])
 
     // ------------------------------------------------------------------
     // The rich input (TipTap). The editor owns what you see; `draft` is the
@@ -301,10 +323,11 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
 
     // --- @ autocomplete ------------------------------------------------------
     // The shared hook (same popup the inline message editor uses) — it rides
-    // the editor's own events, so no wiring through onUpdate here. The menu
-    // portals out and measures against the box, hence the element in state.
+    // the editor's own events and reads its sources off the pane's refs, so
+    // no wiring through onUpdate or props here. The menu portals out and
+    // measures against the box, hence the element in state.
     const [box, setBox] = useState<HTMLDivElement | null>(null)
-    const mention = useMentionAutocomplete(editor, { members, entries, ...(selfMemberId ? { selfMemberId } : {}) })
+    const mention = useMentionAutocomplete(editor)
     const showMentions = mention.show
 
     // --- :emoji: autocomplete ------------------------------------------------
@@ -459,12 +482,30 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         if (!body) return
         // From the text actually going out — an /ask rewrite mentions @rowboat
         // even though the draft it came from didn't.
-        await onSend(body, agentOptionsFor(raw))
+        let result: void | 'keep'
+        try {
+            result = await onSend(body, agentOptionsFor(raw))
+        } catch {
+            // The pane reported it; the draft stays in the box for another try.
+            return
+        }
+        // Held by the pane (Auto's preview of a stream post): the words stay.
+        if (result === 'keep') return
         editor?.chain().clearContent().run()
         setDraft('')
         setAttachments([])
         mention.close()
     }
+
+    // The pane's confirm button sends what is in the box, exactly as the
+    // arrow would (attachments, commands and all). Guarded by nonce, so it
+    // is one send per press however many renders follow.
+    const [appliedSubmit, setAppliedSubmit] = useState<number | null>(null)
+    useEffect(() => {
+        if (!submit || submit.nonce === appliedSubmit) return
+        setAppliedSubmit(submit.nonce)
+        void send()
+    })
 
     // --- voice input ---------------------------------------------------------
     // The assistant composer's dictation UI: the mic swaps the box for a live
@@ -566,7 +607,19 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         if (!text) return
         // A transcript has no pills: whatever it says is prose, never an address.
         const body = replaceShortcodes(text)
-        if (body) await onSend(body, agentOptionsFor(text))
+        if (!body) return
+        try {
+            const result = await onSend(body, agentOptionsFor(text))
+            if (result !== 'keep') return
+        } catch {
+            // The pane reported it; fall through, the words land in the box.
+        }
+        // Held (Auto's preview) or failed: the words land in the box rather
+        // than vanish, for the person to confirm or retry.
+        if (!editor) return
+        editor.commands.setContent(text)
+        setDraft(composerMarkdown(editor))
+        requestAnimationFrame(() => editor.commands.focus('end'))
     }
 
     const stopRecordingRef = useRef(stopRecording)
@@ -641,6 +694,8 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                 return true
             }
         }
+        // Esc with nothing open above: the pane may have a notice to close.
+        if (e.key === 'Escape') return onEscape ? onEscape() : false
         if (e.key !== 'Enter') return false
         // ⌘Enter always sends — even from inside a code fence.
         if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
@@ -649,17 +704,20 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         }
         if (e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && editor) {
             // Shift+Enter continues a list — next item, or out of the list
-            // from an empty one; elsewhere the default hard break applies.
+            // from an empty one; a typed fence line (```) opens a code
+            // block; elsewhere the default hard break applies.
             if (editor.isActive('listItem')) {
                 const { $from } = editor.state.selection
                 if ($from.parent.textContent === '') return editor.chain().focus().liftListItem('listItem').run()
                 return editor.chain().focus().splitListItem('listItem').run()
             }
-            return false
+            return openFenceLine(editor)
         }
         if (!e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && !view.composing) {
-            // Inside a code fence Enter breaks the line (the editor behavior);
-            // everywhere else it sends.
+            // A typed fence line opens a code block (or, inside one, closes
+            // it) rather than sending; inside a code fence Enter breaks the
+            // line (the editor behavior); everywhere else it sends.
+            if (editor && (openFenceLine(editor) || closeFenceLine(editor))) return true
             if (view.state.selection.$from.parent.type.name === 'codeBlock') return false
             void send()
             return true
@@ -673,6 +731,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     useEffect(() => {
         placeholderRef.current = placeholder
         onTypeRef.current = onType
+        onDraftChangeRef.current = onDraftChange
         keydownRef.current = handleEditorKeyDown
         pasteRef.current = handleEditorPaste
         dropRef.current = editorDropGuard
@@ -885,6 +944,39 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                         >
                             @rowboat
                         </button>
+                        {autoRoute && (
+                            <>
+                                <button
+                                    type="button"
+                                    onClick={autoRoute.onToggle}
+                                    aria-pressed={autoRoute.mode !== 'off'}
+                                    title={autoRoute.mode !== 'off'
+                                        ? 'Auto on: Jev decides at send time whether this is a new message or a reply to an open thread. Click to turn off'
+                                        : 'Auto: let Jev decide whether this is a new message or a reply to an open thread'}
+                                    className={cn(
+                                        'flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium transition-colors',
+                                        autoRoute.mode !== 'off' ? 'bg-secondary text-foreground hover:bg-secondary/70' : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                                    )}
+                                >
+                                    <Route className="size-3.5 shrink-0" />
+                                    <span>Auto</span>
+                                </button>
+                                {autoRoute.mode !== 'off' && (
+                                    /* The mode pill cycles, like the permission pill beside @rowboat. */
+                                    <button
+                                        type="button"
+                                        onClick={() => autoRoute.onModeChange(autoRoute.mode === 'preview' ? 'post' : 'preview')}
+                                        title={autoRoute.mode === 'preview'
+                                            ? 'Preview: a reply opens its thread with the text staged for you to send. Click to post replies straight away'
+                                            : 'Post: a reply is sent to its thread straight away. Click to preview replies in the thread first'}
+                                        className="flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                    >
+                                        {autoRoute.mode === 'preview' ? <Eye className="size-3.5 shrink-0" /> : <Send className="size-3.5 shrink-0" />}
+                                        <span>{autoRoute.mode === 'preview' ? 'Preview' : 'Post'}</span>
+                                    </button>
+                                )}
+                            </>
+                        )}
                         {mentioned && (
                             <>
                                 <span className="mx-0.5 h-4 w-px bg-border" />
@@ -902,21 +994,11 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                                     <ShieldCheck className="size-3.5 shrink-0" />
                                     <span>{permissionMode === 'auto' ? 'Auto' : 'Manual'}</span>
                                 </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setSearchEnabled((v) => !v)}
-                                    aria-pressed={searchEnabled}
-                                    title="Web search"
-                                    className={cn(
-                                        'flex h-7 shrink-0 items-center rounded-full border px-1.5 transition-colors',
-                                        searchEnabled
-                                            ? 'border-transparent bg-secondary text-foreground hover:bg-secondary/70'
-                                            : 'border-transparent text-muted-foreground hover:bg-muted hover:text-foreground',
-                                    )}
-                                >
-                                    <Globe className="size-4 shrink-0" />
-                                    {searchEnabled && <span className="ml-1.5 text-xs font-medium">Search</span>}
-                                </button>
+                                <SearchMenu
+                                    searchAvailable
+                                    searchEnabled={searchEnabled}
+                                    onSearchEnabledChange={setSearchEnabled}
+                                />
                                 {codeModeAvailable && (
                                     <button
                                         type="button"

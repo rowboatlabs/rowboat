@@ -14,6 +14,7 @@ import { useColors } from '@/theme/colors';
 // arriving over the WS refresh the listing.
 
 interface Entry {
+  id: string;
   path: string;
   updatedAt: string;
   mime?: string;
@@ -71,7 +72,7 @@ export default function SpaceFilesScreen() {
   const refresh = useCallback(async () => {
     try {
       const result = await client.listAssets(space);
-      setEntries(result.map((e) => ({ path: e.path, updatedAt: e.updatedAt, mime: e.blob?.mime })));
+      setEntries(result.map((e) => ({ id: e.id, path: e.path, updatedAt: e.updatedAt, mime: e.blob?.mime })));
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -101,7 +102,8 @@ export default function SpaceFilesScreen() {
 
   const open = (node: Node) => {
     if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
-    router.push({ pathname: '/spaces/file', params: { org, space, path: node.path, title: node.name, mime: node.entry?.mime ?? '' } });
+    if (!node.entry) return;
+    router.push({ pathname: '/spaces/file', params: { org, space, assetId: node.entry.id, path: node.path, title: node.name, mime: node.entry.mime ?? '' } });
   };
 
   const toggle = (path: string) => {

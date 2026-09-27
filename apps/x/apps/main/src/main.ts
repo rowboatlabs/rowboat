@@ -1,4 +1,5 @@
 import "./node-guard.js";
+import { resolveFilePreview } from './file-previews.js';
 import { app, BrowserWindow, desktopCapturer, dialog, powerMonitor, protocol, net, shell, session, safeStorage, type Session } from "electron";
 import path from "node:path";
 import fsPromises from "node:fs/promises";
@@ -48,7 +49,8 @@ import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import container, { registerBrowserControlService, registerNotificationService, registerScreenPointerService, registerTextInsertService } from "@x/core/dist/di/container.js";
 import { forwardRpc } from "./rpc-forwarder.js";
-import { bounceAllLive, getClient as getSpaceClient } from "@x/core/dist/spaces/orgs.js";
+import { bounceAllLive, getClient as getSpaceClient, listOrgs as listSpaceOrgs } from "@x/core/dist/spaces/orgs.js";
+import { parseOrgUrl } from "@x/shared/dist/spaces.js";
 import type { CodeModeManager } from "@x/core/dist/code-mode/acp/manager.js";
 import type { ISessions } from "@x/core/dist/runtime/sessions/index.js";
 import { browserViewManager, BROWSER_PARTITION } from "./browser/view.js";
@@ -199,9 +201,34 @@ console.log("rendererPath", rendererPath);
 //     This is how <img> tags in space messages render: the renderer holds no
 //     org tokens, so blob bytes must resolve in main.
 //   app://<anything-else>/...   → renderer SPA (existing behavior)
+/**
+ * One space listing per (org, space) for a few seconds: an HTML document's
+ * every relative reference re-enters the space-document route, and each
+ * needs the path → id map — one fetch per page load, not one per <img>.
+ */
+const listingCache = new Map<string, { at: number; entries: Array<{ id: string; path: string }> }>();
+async function listSpaceAssets(orgId: string, spaceId: string): Promise<Array<{ id: string; path: string }>> {
+  const key = `${orgId}/${spaceId}`;
+  const hit = listingCache.get(key);
+  if (hit && Date.now() - hit.at < 5_000) return hit.entries;
+  const entries = await getSpaceClient(orgId).listAssets(spaceId);
+  listingCache.set(key, { at: Date.now(), entries });
+  return entries;
+}
+
 function registerAppProtocol() {
   protocol.handle("app", async (request) => {
     const url = new URL(request.url);
+
+    if (url.host === 'file-preview') {
+      const file = resolveFilePreview(request.url);
+      if (!file) return new Response('Preview expired', { status: 404 });
+      try {
+        return await net.fetch(pathToFileURL(file).toString(), { headers: request.headers });
+      } catch {
+        return new Response('File unavailable', { status: 404 });
+      }
+    }
 
     // Workspace files: app://workspace/<rel-path>
     if (url.host === "workspace") {
@@ -234,17 +261,31 @@ function registerAppProtocol() {
       })();
     }
 
-    // File-based URLs keep HTML's relative assets inside the same space.
+    // Space documents by asset id: app://space-document/<orgId>/<spaceId>/<assetId>[/<sub path>]
+    // An HTML document's relative references re-enter this route with a sub
+    // path; it resolves against the document's folder first, then the space
+    // root (so both `<assetId>/` and `<assetId>/<own path>` document URLs
+    // work), through the listing (path → id) — the read itself is by id.
     if (url.host === "space-document") {
       try {
-        const [orgId, spaceId, ...segments] = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
-        if (!orgId || !spaceId || !segments.length || segments.some((part) => part === '..' || part.includes('/') || part.includes('\\'))) {
+        const [orgId, spaceId, assetId, ...rest] = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+        if (!orgId || !spaceId || !assetId || rest.some((part) => part.includes('/') || part.includes('\\'))) {
           return new Response("Not Found", { status: 404 });
         }
-        const assetPath = segments.join('/');
-        const asset = await getSpaceClient(orgId).readAsset(spaceId, assetPath);
+        const client = getSpaceClient(orgId);
+        // The document's own URL is <assetId>/<its path>, so the browser has
+        // already resolved a page's relative references against its folder:
+        // what arrives after the id is the referenced file's space-root path.
+        let asset = await client.readAsset(spaceId, assetId);
+        const sub = path.posix.normalize(rest.join('/'));
+        if (rest.length > 0 && sub !== asset.path) {
+          if (sub === '.' || sub === '..' || sub.startsWith('../')) return new Response("Not Found", { status: 404 });
+          const hit = (await listSpaceAssets(orgId, spaceId)).find((a) => a.path === sub);
+          if (!hit) return new Response("Not Found", { status: 404 });
+          asset = await client.readAsset(spaceId, hit.id);
+        }
         const blob = asset.blob ? await spaceBlobCache.getBlob(orgId, spaceId, asset.blob.hash) : null;
-        const ext = path.extname(assetPath).toLowerCase();
+        const ext = path.extname(asset.path).toLowerCase();
         const textTypes: Record<string, string> = {
           '.html': 'text/html', '.htm': 'text/html', '.css': 'text/css',
           '.js': 'text/javascript', '.json': 'application/json', '.svg': 'image/svg+xml',
@@ -473,10 +514,26 @@ function createWindow(options: { startHidden?: boolean } = {}) {
     win.show();
   });
 
+  // A link into a signed-in org (the contract's link grammar: a space, a
+  // file, a message, a person) opens in the app, not in a browser that would
+  // only hand it straight back through the org's landing page. Any other
+  // URL is external.
+  const openOrgLinkInApp = (url: string): boolean => {
+    const link = parseOrgUrl(url);
+    if (!link || !listSpaceOrgs().some((o) => o.address === link.orgAddress)) return false;
+    const target = new URLSearchParams({ type: "spaces", org: link.orgAddress });
+    if ('spaceId' in link) target.set("spaceId", link.spaceId);
+    if (link.kind === "asset") target.set("assetId", link.assetId);
+    if (link.kind === "message") target.set("messageId", link.messageId);
+    if (link.kind === "member") target.set("memberId", link.memberId);
+    dispatchUrl(`rowboat://open?${target.toString()}`);
+    return true;
+  };
+
   // Open external links in system browser (not sandboxed Electron window)
   // This handles window.open() and target="_blank" links
   win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    if (!openOrgLinkInApp(url)) shell.openExternal(url);
     return { action: "deny" };
   });
 
@@ -486,7 +543,7 @@ function createWindow(options: { startHidden?: boolean } = {}) {
     const isInternal =
       url.startsWith("app://") || url.startsWith(DEV_SERVER_URL);
     if (isInternal) return false;
-    shell.openExternal(url);
+    if (!openOrgLinkInApp(url)) shell.openExternal(url);
     return true;
   };
 

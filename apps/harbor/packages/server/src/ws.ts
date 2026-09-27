@@ -1,11 +1,11 @@
 import type { Server } from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { ClientFrame, type ServerFrame } from '@rowboat/spaces-protocol';
-import type { AuthDriver } from './auth.js';
+import { authenticateRequest, type OrgAuth } from './auth.js';
 import { HarborError } from './errors.js';
 import type { SpaceHub } from './hub.js';
 import type { HarborService } from './service.js';
-import type { Store } from './store.js';
+import type { LiveStats } from './stats.js';
 
 // The live face (CONTRACT.md decision 2): one WebSocket per org, per-space
 // subscriptions, offset-based resume. subscribe{afterOffset} replays durable
@@ -17,15 +17,23 @@ import type { Store } from './store.js';
 // JSON {kind:'ping'} frame, which is the CLIENT'S evidence of life: a laptop
 // that slept or changed networks holds a half-open socket that will never see
 // a close event, so prolonged frame-silence is what tells it to bounce.
+//
+// Backpressure is one rule: a socket whose unsent bytes exceed MAX_BUFFERED_BYTES
+// is terminated rather than queued onto. A stalled peer (lid shut, tunnel) stops
+// draining TCP while whiteboard relay keeps producing ~30 frames/s per editor
+// plus full-scene syncs, and `ws` would hold all of it in process memory until
+// the heartbeat reaps the socket. Dropping is safe: the client reconnects and
+// replays durable events from its last offset; ephemeral frames were never
+// promised (the board self-heals on its next full sync).
 
-interface Deps {
+export interface LiveDeps {
   service: HarborService;
   hub: SpaceHub;
-  store: Store;
-  auth: AuthDriver;
+  auth: OrgAuth;
 }
 
 const DEFAULT_HEARTBEAT_MS = 25_000;
+const DEFAULT_MAX_BUFFERED_BYTES = 2 * 1024 * 1024;
 
 interface LiveSocket extends WebSocket {
   /** False until the next pong/message proves the peer is still there. */
@@ -37,14 +45,16 @@ interface LiveSocket extends WebSocket {
  * Host (spec §4 tenancy); the single-org server ignores the host. Undefined =
  * no org on that domain.
  */
-export type LiveDepsResolver = (host: string | undefined) => Deps | undefined | Promise<Deps | undefined>;
+export type LiveDepsResolver = (host: string | undefined) => LiveDeps | undefined | Promise<LiveDeps | undefined>;
 
 export function attachLive(
   server: Server,
   resolve: LiveDepsResolver,
-  opts: { heartbeatMs?: number } = {},
+  opts: { heartbeatMs?: number; maxBufferedBytes?: number; stats?: LiveStats } = {},
 ): () => void {
   const wss = new WebSocketServer({ noServer: true });
+  const maxBufferedBytes = opts.maxBufferedBytes ?? DEFAULT_MAX_BUFFERED_BYTES;
+  const stats = opts.stats;
 
   const heartbeat = setInterval(() => {
     const at = new Date().toISOString();
@@ -72,7 +82,7 @@ export function attachLive(
     // impossible. Nobody reads the socket during the await; bytes just buffer.
     socket.on('error', () => {});
     void (async () => {
-      let deps: Deps | undefined;
+      let deps: LiveDeps | undefined;
       let memberId: string;
       try {
         const forwarded = req.headers['x-forwarded-host'];
@@ -82,8 +92,8 @@ export function attachLive(
           socket.destroy();
           return;
         }
-        const identity = await deps.auth.authenticate(req.headers.authorization, url.searchParams.get('token'));
-        memberId = (await deps.auth.resolveMember(deps.store, identity)).id;
+        const credentials = { authorization: req.headers.authorization, queryToken: url.searchParams.get('token') };
+        memberId = (await authenticateRequest(deps.auth, credentials)).member.id;
       } catch (err) {
         const status = err instanceof HarborError && err.status === 403 ? '403 Forbidden' : '401 Unauthorized';
         socket.write(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`);
@@ -92,7 +102,7 @@ export function attachLive(
       }
       if (socket.destroyed) return;
       wss.handleUpgrade(req, socket, head, (ws) => {
-        handleConnection(ws, memberId, deps);
+        handleConnection(ws, memberId, deps, maxBufferedBytes, stats);
       });
     })();
   });
@@ -104,24 +114,51 @@ export function attachLive(
   };
 }
 
-function handleConnection(ws: LiveSocket, memberId: string, deps: Deps): void {
+function handleConnection(
+  ws: LiveSocket,
+  memberId: string,
+  deps: LiveDeps,
+  maxBufferedBytes: number,
+  stats: LiveStats | undefined,
+): void {
   const subscriptions = new Map<string, () => void>();
+  /** The one way a subscription ends, so the count (stats.ts) cannot drift from the map. */
+  const drop = (spaceId: string): void => {
+    const unsubscribe = subscriptions.get(spaceId);
+    if (!unsubscribe) return;
+    unsubscribe();
+    subscriptions.delete(spaceId);
+    stats?.unsubscribed();
+  };
 
+  stats?.connectionOpened();
   ws.sawLifeSinceLastBeat = true;
   ws.on('pong', () => {
     ws.sawLifeSinceLastBeat = true;
   });
 
   const send = (frame: ServerFrame): void => {
-    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(frame));
+    if (ws.readyState !== WebSocket.OPEN) return;
+    if (ws.bufferedAmount > maxBufferedBytes) {
+      // Stalled peer: drop it now rather than buffer without bound (see header).
+      // terminate() fires 'close', which releases every hub subscription.
+      ws.terminate();
+      return;
+    }
+    ws.send(JSON.stringify(frame));
   };
   const sendError = (code: string, message: string, spaceId?: string): void => {
     send({ kind: 'error', ...(spaceId ? { spaceId } : {}), code, message });
   };
 
-  // Member-addressed frames (space_added) need no subscription — the whole
-  // point is that the space is one you could not have subscribed to yet.
-  const unsubscribeMember = deps.hub.subscribeMember(memberId, send);
+  // Member-addressed frames ride no space subscription: space_added is about
+  // a space you could not have subscribed to yet, and space_removed ends the
+  // one you hold — dropped here, before the frame is forwarded, so nothing
+  // from that space follows your departure (2026-09-22).
+  const unsubscribeMember = deps.hub.subscribeMember(memberId, (frame) => {
+    if (frame.kind === 'space_removed') drop(frame.spaceId);
+    send(frame);
+  });
 
   ws.on('message', (data) => {
     ws.sawLifeSinceLastBeat = true;
@@ -144,13 +181,12 @@ function handleConnection(ws: LiveSocket, memberId: string, deps: Deps): void {
         switch (frame.kind) {
           case 'subscribe': {
             // Re-subscribing replaces the previous subscription (fresh resume point).
-            subscriptions.get(frame.spaceId)?.();
-            subscriptions.delete(frame.spaceId);
+            drop(frame.spaceId);
 
-            await deps.service.requireMember({ memberId }, frame.spaceId);
-
-            // Register on the hub BEFORE replaying so nothing published during
-            // replay is lost; buffer until replay completes, dedupe by offset.
+            // Register on the hub BEFORE the catch-up read so nothing published
+            // during it is lost; buffer until it completes, dedupe by offset.
+            // The read IS the gate (service.replay): an unauthorized listener is
+            // torn down below having sent nothing — `live` is still false.
             const state = { live: false, lastSent: 0, buffer: [] as ServerFrame[] };
             const unsubscribe = deps.hub.subscribe(frame.spaceId, (f) => {
               if (!state.live) {
@@ -161,18 +197,25 @@ function handleConnection(ws: LiveSocket, memberId: string, deps: Deps): void {
               }
             });
             subscriptions.set(frame.spaceId, unsubscribe);
+            stats?.subscribed();
 
-            const head = await deps.service.headOffset(frame.spaceId);
-            const fromOffset = frame.afterOffset ?? head;
+            let replay: Awaited<ReturnType<HarborService['replay']>>;
+            try {
+              replay = await deps.service.replay({ memberId }, frame.spaceId, frame.afterOffset);
+            } catch (err) {
+              if (subscriptions.get(frame.spaceId) !== unsubscribe) return;
+              drop(frame.spaceId);
+              throw err;
+            }
+            // A departure/unsubscribe during replay must not resurrect delivery (spec §5, 2026-09-23).
+            if (subscriptions.get(frame.spaceId) !== unsubscribe || ws.readyState !== WebSocket.OPEN) return;
+            const fromOffset = frame.afterOffset ?? replay.head;
             send({ kind: 'subscribed', spaceId: frame.spaceId, fromOffset });
 
-            if (frame.afterOffset !== undefined) {
-              for (const e of await deps.service.eventsAfter(frame.spaceId, frame.afterOffset)) {
-                send({ kind: 'event', spaceId: frame.spaceId, offset: e.offset, at: e.at, event: e.event });
-                state.lastSent = e.offset;
-              }
-            } else {
-              state.lastSent = head;
+            state.lastSent = fromOffset;
+            for (const e of replay.events) {
+              send({ kind: 'event', spaceId: frame.spaceId, offset: e.offset, at: e.at, event: e.event });
+              state.lastSent = e.offset;
             }
             for (const f of state.buffer) {
               if (f.kind !== 'event' || f.offset > state.lastSent) {
@@ -185,8 +228,7 @@ function handleConnection(ws: LiveSocket, memberId: string, deps: Deps): void {
             break;
           }
           case 'unsubscribe': {
-            subscriptions.get(frame.spaceId)?.();
-            subscriptions.delete(frame.spaceId);
+            drop(frame.spaceId);
             break;
           }
           case 'presence': {
@@ -207,7 +249,7 @@ function handleConnection(ws: LiveSocket, memberId: string, deps: Deps): void {
 
   ws.on('close', () => {
     unsubscribeMember();
-    for (const unsubscribe of subscriptions.values()) unsubscribe();
-    subscriptions.clear();
+    for (const spaceId of [...subscriptions.keys()]) drop(spaceId);
+    stats?.connectionClosed();
   });
 }

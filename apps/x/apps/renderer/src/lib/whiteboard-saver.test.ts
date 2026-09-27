@@ -7,7 +7,6 @@ import { createBoardSaver, type BoardSaverIO, type SnapshotProposeResult } from 
 // when Excalidraw swaps in a fresh empty scene). These tests pin the saver's
 // invariants; the pane wiring relies on every one of them.
 
-const FIRST_SAVE_MS = 1_500
 const SAVE_MS = 15_000
 
 /** Two drawn elements, the way a loaded snapshot looks. getSceneVersion sums versions → 40. */
@@ -55,7 +54,6 @@ function harness({ baseVersion = 3, elements = DRAWN as readonly unknown[], scen
         baseVersion,
         elements,
         sceneVersion: scene,
-        firstSaveDelayMs: FIRST_SAVE_MS,
         saveDelayMs: SAVE_MS,
         io,
     })
@@ -187,16 +185,6 @@ describe('createBoardSaver', () => {
         await vi.advanceTimersByTimeAsync(SAVE_MS)
         expect(proposes).toHaveLength(3)
         expect(proposes[2].baseVersion).toBe(6)
-    })
-
-    it('a brand-new board saves its first stroke quickly', async () => {
-        const stroke = [{ id: 'a', version: 3, isDeleted: false }]
-        const { saver, proposes } = harness({ baseVersion: 0, elements: [], scene: 0 })
-        expect(saver.onLocalChange(stroke, sceneVersion(stroke))).toBe(true)
-        await vi.advanceTimersByTimeAsync(FIRST_SAVE_MS)
-        expect(proposes).toHaveLength(1)
-        expect(proposes[0].baseVersion).toBe(0)
-        expect(elementsOf(proposes[0].json)).toEqual(stroke)
     })
 
     it('remote applies never mark the board dirty (idle viewers never write)', async () => {

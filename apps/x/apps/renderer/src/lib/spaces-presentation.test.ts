@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { spaces } from '@x/shared'
 import {
+    assetWireUrl,
     blobAppUrl,
     blobWireUrl,
     buildFileTree,
@@ -15,9 +16,13 @@ import {
     splitImageEmbeds,
     orgMonogram,
     parseAssetWireUrl,
+    parseMemberWireUrl,
+    parseMessageWireUrl,
     parseBlobAppUrl,
     parseSpaceFileAppUrl,
     parseSpaceMemberAppUrl,
+    parseSpaceRefAppUrl,
+    parseSpaceWireUrl,
     rewriteMentionLinks,
     resolveMentions,
     resolveSpaceLink,
@@ -26,12 +31,15 @@ import {
     rewriteRelativeImages,
     separateImageParagraphs,
     spaceFileAppUrl,
+    spacePathAppUrl,
+    parseSpacePathAppUrl,
     toggleTaskAt,
 } from './spaces-presentation'
 
 function cs(over: Partial<spaces.ChangeSet> & { id: string; committedAt: string }): spaces.ChangeSet {
     return {
         spaceId: 's1',
+        assetId: 'A-roadmap',
         assetPath: 'roadmap.md',
         baseVersion: 1,
         resultVersion: 2,
@@ -65,19 +73,21 @@ describe('formatFeedTime', () => {
 describe('buildFileTree', () => {
     it('nests folders, README first, files before folders', () => {
         const tree = buildFileTree([
-            { path: 'decisions/sso.md', version: 1, updatedAt: '' },
-            { path: 'roadmap.md', version: 1, updatedAt: '' },
-            { path: 'README.md', version: 1, updatedAt: '' },
-            { path: 'decisions/migration.md', version: 1, updatedAt: '' },
-            { path: 'briefs/onboarding.md', version: 1, updatedAt: '' },
+            { id: 'A1', path: 'decisions/sso.md', version: 1, updatedAt: '' },
+            { id: 'A2', path: 'roadmap.md', version: 1, updatedAt: '' },
+            { id: 'A3', path: 'README.md', version: 1, updatedAt: '' },
+            { id: 'A4', path: 'decisions/migration.md', version: 1, updatedAt: '' },
+            { id: 'A5', path: 'briefs/onboarding.md', version: 1, updatedAt: '' },
         ])
         expect(tree.map((n) => n.name)).toEqual(['README.md', 'roadmap.md', 'briefs', 'decisions'])
         expect(tree[3]!.children.map((n) => n.name)).toEqual(['migration.md', 'sso.md'])
         expect(tree[3]!.children[0]!.path).toBe('decisions/migration.md')
+        // The row's identity is the entry's id; the path is its label.
+        expect(tree[3]!.children[0]!.entry?.id).toBe('A4')
     })
     it('adds draft folders as empty dirs, nested paths included, without duplicating real ones', () => {
         const tree = buildFileTree(
-            [{ path: 'decisions/sso.md', version: 1, updatedAt: '' }],
+            [{ id: 'A1', path: 'decisions/sso.md', version: 1, updatedAt: '' }],
             ['design/screens', 'decisions'],
         )
         expect(tree.map((n) => n.name)).toEqual(['decisions', 'design'])
@@ -118,36 +128,60 @@ describe('file links — relative markdown resolves against the tree', () => {
         expect(target).not.toMatch(/[ ()]/)
         expect(resolveSpaceLink(target, '')).toBe(path)
     })
-    it('space-file app URLs round-trip (the render form that survives Streamdown hardening)', () => {
+    it('space-file app URLs round-trip by asset id (the render form that survives Streamdown hardening)', () => {
         const refs = { orgId: 'o1', spaceId: 's1' }
-        const url = spaceFileAppUrl(refs, 'design/notes (v2).md')
-        expect(url.startsWith('app://space-file/o1/s1/')).toBe(true)
-        expect(url).not.toMatch(/[ ()]/)
-        expect(parseSpaceFileAppUrl(url)).toEqual({ orgId: 'o1', spaceId: 's1', path: 'design/notes (v2).md' })
+        const url = spaceFileAppUrl(refs, '01HXAMPLEASSET0000000000A1')
+        expect(url).toBe('app://space-file/o1/s1/01HXAMPLEASSET0000000000A1')
+        expect(parseSpaceFileAppUrl(url)).toEqual({ orgId: 'o1', spaceId: 's1', assetId: '01HXAMPLEASSET0000000000A1' })
+        // Pre-2026-09-14 ids are UUIDs — opaque strings, encoded on the way in.
+        expect(parseSpaceFileAppUrl(spaceFileAppUrl(refs, 'a3f1-uuid'))).toEqual({ orgId: 'o1', spaceId: 's1', assetId: 'a3f1-uuid' })
         expect(parseSpaceFileAppUrl('app://space-blob/o1/s1/abc')).toBeNull()
+        expect(parseSpaceFileAppUrl('app://space-file/o1/s1/a/b.md')).toBeNull()
         expect(parseSpaceFileAppUrl('https://x.com/a')).toBeNull()
     })
-    it('rewriteFileLinks: relative links become app://space-file; images, absolute URLs, code stay', () => {
+    it('space-path app URLs keep a dangling relative link\u2019s path for the anchor to retry', () => {
         const refs = { orgId: 'o1', spaceId: 's1' }
-        expect(rewriteFileLinks('see [sso](decisions/sso.md)', refs))
-            .toBe('see [sso](app://space-file/o1/s1/decisions/sso.md)')
-        expect(rewriteFileLinks('see [n](design%20notes.md)', refs))
-            .toBe('see [n](app://space-file/o1/s1/design%20notes.md)')
+        const url = spacePathAppUrl(refs, 'design/notes (v2).md')
+        expect(url.startsWith('app://space-path/o1/s1/')).toBe(true)
+        expect(url).not.toMatch(/[ ()]/)
+        expect(parseSpacePathAppUrl(url)).toEqual({ orgId: 'o1', spaceId: 's1', path: 'design/notes (v2).md' })
+        expect(parseSpacePathAppUrl(spaceFileAppUrl(refs, 'A1'))).toBeNull()
+    })
+    it('rewriteFileLinks: relative links resolve through the listing to app://space-file by id, else keep their path; images, absolute URLs, code stay', () => {
+        const refs = { orgId: 'o1', spaceId: 's1' }
+        const ids = new Map([['decisions/sso.md', 'A-sso'], ['design notes.md', 'A-notes']])
+        const resolve = (path: string) => ids.get(path) ?? null
+        expect(rewriteFileLinks('see [sso](decisions/sso.md)', refs, resolve))
+            .toBe('see [sso](app://space-file/o1/s1/A-sso)')
+        expect(rewriteFileLinks('see [n](design%20notes.md)', refs, resolve))
+            .toBe('see [n](app://space-file/o1/s1/A-notes)')
+        expect(rewriteFileLinks('see [gone](missing/old.md "t")', refs, resolve))
+            .toBe('see [gone](app://space-path/o1/s1/missing/old.md "t")')
         const untouched = [
             '![img](shot.png)',
             '[ext](https://example.com/a)',
+            '[canon](https://rowboat.team/s/01HXAMPZESPACE00000000000A/a/A-sso)',
             '[m](mailto:a@b.c)',
             '`[c](a.md)`',
             '```\n[c](a.md)\n```',
         ]
-        for (const body of untouched) expect(rewriteFileLinks(body, refs)).toBe(body)
+        for (const body of untouched) expect(rewriteFileLinks(body, refs, resolve)).toBe(body)
     })
-    it('parses the canonical asset URL for this space only', () => {
+    it('mints and parses the canonical asset URL (…/s/<spaceId>/a/<assetId>) for any space on any org', () => {
         const refs = { orgId: 'o1', orgAddress: 'rowboat.team', spaceId: '01HXAMPZESPACE00000000000A' }
-        expect(parseAssetWireUrl('https://rowboat.team/s/01HXAMPZESPACE00000000000A/f/decisions/sso.md', refs)).toBe('decisions/sso.md')
-        expect(parseAssetWireUrl('https://rowboat.team/s/01HXAMPZESPACE00000000000A/f/design%20notes.md', refs)).toBe('design notes.md')
-        expect(parseAssetWireUrl('https://other.org/s/01HXAMPZESPACE00000000000A/f/a.md', refs)).toBeNull()
-        expect(parseAssetWireUrl('https://rowboat.team/s/01HXAMPZESPACE00000000000B/f/a.md', refs)).toBeNull()
+        const url = assetWireUrl(refs, '01HXAMPLEASSET0000000000A1')
+        expect(url).toBe('https://rowboat.team/s/01HXAMPZESPACE00000000000A/a/01HXAMPLEASSET0000000000A1')
+        expect(parseAssetWireUrl(url)).toEqual({ orgAddress: 'rowboat.team', spaceId: '01HXAMPZESPACE00000000000A', assetId: '01HXAMPLEASSET0000000000A1' })
+        // Another space, another org: still a parse — whether it opens is the anchor's call.
+        expect(parseAssetWireUrl('https://other.org/s/01HXAMPZESPACE00000000000B/a/A2'))
+            .toEqual({ orgAddress: 'other.org', spaceId: '01HXAMPZESPACE00000000000B', assetId: 'A2' })
+        // Fragments and queries ride along without changing the identity.
+        expect(parseAssetWireUrl(`${url}#section?x=1`)?.assetId).toBe('01HXAMPLEASSET0000000000A1')
+        // The retired /f/<path> form, blob links and anything else are not asset links.
+        expect(parseAssetWireUrl('https://rowboat.team/s/01HXAMPZESPACE00000000000A/f/decisions/sso.md')).toBeNull()
+        expect(parseAssetWireUrl(`https://rowboat.team/s/01HXAMPZESPACE00000000000A/b/${'a'.repeat(64)}`)).toBeNull()
+        expect(parseAssetWireUrl('https://rowboat.team/s/not-a-space/a/A1')).toBeNull()
+        expect(parseAssetWireUrl('https://rowboat.team/s/01HXAMPZESPACE00000000000A/a/')).toBeNull()
     })
 })
 
@@ -214,6 +248,25 @@ describe('mentions — tokens carry ids, the roster supplies names', () => {
         expect(rewriteMentionLinks('`' + tok('x', 'X') + '` stays')).toBe('`' + tok('x', 'X') + '` stays')
         expect(parseSpaceMemberAppUrl('app://space-member/01HXAMPLEULIDHARSH000000')).toBe('01HXAMPLEULIDHARSH000000')
         expect(parseSpaceMemberAppUrl('app://space-file/o/s/a.md')).toBeNull()
+    })
+
+    it('a space token maps to its own app link, keeping the # sigil; a mismatched sigil is prose', () => {
+        expect(rewriteMentionLinks('moved to [#General](#space:01HXAMPZESPACE00000000000A) — ask [@Harsh](#member:01HXAMPLEULIDHARSH000000)'))
+            .toBe('moved to [#General](app://space-ref/01HXAMPZESPACE00000000000A) — ask [@Harsh](app://space-member/01HXAMPLEULIDHARSH000000)')
+        // The grammar pairs the sigil with the href kind: neither of these is a token.
+        for (const prose of ['[#word](#member:x)', '[@x](#space:01HXAMPZESPACE00000000000A)']) expect(rewriteMentionLinks(prose)).toBe(prose)
+        expect(parseSpaceRefAppUrl('app://space-ref/01HXAMPZESPACE00000000000A')).toBe('01HXAMPZESPACE00000000000A')
+        expect(parseSpaceRefAppUrl('app://space-member/01HXAMPLEULIDHARSH000000')).toBeNull()
+        expect(resolveMentions('see [#General](#space:S1) and [#Old](#space:S9)', names, new Map([['S1', 'general-chat']]))).toBe('see #general-chat and #Old')
+    })
+
+    it('parseSpaceWireUrl takes the canonical space link and nothing under it', () => {
+        expect(parseSpaceWireUrl('https://rowboat.team/s/01HXAMPZESPACE00000000000A')).toEqual({ orgAddress: 'rowboat.team', spaceId: '01HXAMPZESPACE00000000000A' })
+        expect(parseSpaceWireUrl('https://rowboat.team/s/01HXAMPZESPACE00000000000A/')?.spaceId).toBe('01HXAMPZESPACE00000000000A')
+        expect(parseSpaceWireUrl('https://rowboat.team/s/01HXAMPZESPACE00000000000A/a/01HXAMPLEASSET0000000000A1')).toBeNull()
+        expect(parseSpaceWireUrl('https://rowboat.team/s/01HXAMPZESPACE00000000000A/m/01HXAMPLEMSG00000000000001')).toBeNull()
+        expect(parseSpaceWireUrl('https://rowboat.team/s/not-a-space')).toBeNull()
+        expect(parseSpaceWireUrl('http://rowboat.team/s/01HXAMPZESPACE00000000000A')).toBeNull()
     })
 })
 
@@ -305,6 +358,21 @@ describe('separateImageParagraphs — old messages get the tile-row layout too',
         expect(separateImageParagraphs(inline)).toBe(inline)
         const fenced = '```\ntext\n![x](y.png)\n```'
         expect(separateImageParagraphs(fenced)).toBe(fenced)
+    })
+})
+
+describe('parseMemberWireUrl / parseMessageWireUrl', () => {
+    it('read the contract\'s person and message links, and only those', () => {
+        expect(parseMemberWireUrl('https://rowboat.team/u/google%7C123')).toEqual({ orgAddress: 'rowboat.team', memberId: 'google|123' })
+        expect(parseMessageWireUrl('https://rowboat.team/s/01HXAMPZESPACE00000000000A/m/01HXAMPZEMSG000000000000A1')).toEqual({
+            orgAddress: 'rowboat.team',
+            spaceId: '01HXAMPZESPACE00000000000A',
+            messageId: '01HXAMPZEMSG000000000000A1',
+        })
+        expect(parseMemberWireUrl('https://rowboat.team/s/01HXAMPZESPACE00000000000A')).toBeNull()
+        expect(parseMessageWireUrl('https://rowboat.team/s/01HXAMPZESPACE00000000000A/a/x')).toBeNull()
+        expect(parseMessageWireUrl('https://rowboat.team/s/01HXAMPZESPACE00000000000A/m/not-a-ulid')).toBeNull()
+        expect(parseMemberWireUrl('https://rowboat.team/u/')).toBeNull()
     })
 })
 

@@ -1,25 +1,19 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { AtSign, Copy, Loader2, Mail, MoreHorizontal } from 'lucide-react'
+import { useRef, useState, type ReactNode } from 'react'
+import { AtSign, Copy, Link as LinkIcon, Mail, MessageSquare } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import {
-    Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
-} from '@/components/ui/dialog'
-import {
-    DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useMemberNames, useSpaceProfiles } from '@/components/spaces/member-text'
+import { useSpaceNav, useSpaceRefs } from '@/components/spaces/space-nav'
 import { requestComposeInsert } from '@/lib/spaces-compose'
-import { mentionToken } from '@x/shared/dist/spaces.js'
+import { memberUrl, mentionToken } from '@x/shared/dist/spaces.js'
 import { avatarColorClass, initials, orgMonogram } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
+import { copySpacesLink } from '@/lib/spaces-copy-link'
 
 // Shared atoms for the Spaces surfaces: identity visuals, the segmented
-// control, the dev add-org dialog, and the @rowboat trigger.
+// control, and the @rowboat trigger. The server dialogs live in server-dialogs.tsx.
 
 // ---------------------------------------------------------------------------
 // Identity atoms
@@ -55,6 +49,8 @@ export function MemberAvatar({ id, name, size = 'md', className }: {
 export function MemberProfilePopover({ id, children }: { id: string; children: ReactNode }) {
     const names = useMemberNames()
     const { byId, here, selfId } = useSpaceProfiles()
+    const refs = useSpaceRefs()
+    const nav = useSpaceNav()
     const [open, setOpen] = useState(false)
     const member = byId.get(id)
     const name = member?.displayName ?? names.get(id) ?? id
@@ -71,6 +67,11 @@ export function MemberProfilePopover({ id, children }: { id: string; children: R
         setOpen(false)
         requestComposeInsert(`${mentionToken({ kind: 'member', id, label: name })} `)
     }
+    // The DM with them — the org creates it on first use (the pane navigates).
+    const message = refs && nav?.onOpenDirect ? () => {
+        setOpen(false)
+        nav.onOpenDirect?.(refs.orgId, id)
+    } : null
     return (
         <Popover open={open} onOpenChange={setOpen}>
             <PopoverTrigger asChild>{children}</PopoverTrigger>
@@ -100,6 +101,17 @@ export function MemberProfilePopover({ id, children }: { id: string; children: R
                             <span className="truncate select-text">{email}</span>
                         </div>
                     )}
+                    {id !== selfId && message && (
+                        <button
+                            type="button"
+                            onClick={message}
+                            title="Open your direct message with them"
+                            className="flex items-center gap-2 rounded-md px-1 py-0.5 text-left hover:bg-accent hover:text-foreground"
+                        >
+                            <MessageSquare className="size-3 shrink-0" />
+                            <span className="truncate">Message</span>
+                        </button>
+                    )}
                     {id !== selfId && (
                         <button
                             type="button"
@@ -109,6 +121,15 @@ export function MemberProfilePopover({ id, children }: { id: string; children: R
                         >
                             <AtSign className="size-3 shrink-0" />
                             <span className="truncate">Mention</span>
+                        </button>
+                    )}
+                    {refs && (
+                        <button
+                            type="button"
+                            onClick={() => void copySpacesLink(memberUrl(refs.orgAddress, id))}
+                            className="flex items-center gap-2 rounded-md px-1 py-0.5 text-left hover:bg-accent hover:text-foreground"
+                        >
+                            <LinkIcon className="size-3 shrink-0" /> Copy member link
                         </button>
                     )}
                     <button
@@ -188,229 +209,6 @@ export function Segmented<T extends string>({ value, options, onChange, size = '
     )
 }
 
-
-export function AddOrgDialog({ open, onOpenChange, onAdded, initialAction }: {
-    open: boolean
-    onOpenChange: (open: boolean) => void
-    onAdded: (orgId: string, spaceId?: string) => void
-    initialAction?: 'create' | 'join'
-}) {
-    // One dialog, two doors: paste an invite link (resolve pre-auth, then
-    // join with a system-browser sign-in), or name a new server on the
-    // managed deployment (free for now — the address is generated in core,
-    // the user only names it). A dev org against the stub stays behind a
-    // tertiary link.
-    const [mode, setMode] = useState<'main' | 'dev'>('main')
-    const [inviteUrl, setInviteUrl] = useState('')
-    const [preview, setPreview] = useState<{ org: string; space: string; invitedBy?: string } | null>(null)
-    const [orgName, setOrgName] = useState('')
-    // The apex (/v1/config via core) gates Create. null = no spaces fleet for
-    // this environment; undefined = loading.
-    const [apexDomain, setApexDomain] = useState<string | null | undefined>(undefined)
-
-    useEffect(() => {
-        if (!open || apexDomain !== undefined) return
-        void window.ipc.invoke('spaces:apexInfo', null)
-            .then(({ apexDomain: domain }) => setApexDomain(domain))
-            .catch(() => setApexDomain(null))
-    }, [open, apexDomain])
-    const [baseUrl, setBaseUrl] = useState('http://localhost:4272')
-    const [memberId, setMemberId] = useState('')
-    const [busy, setBusy] = useState(false)
-    // Which door fired the browser dance — its button carries the spinner.
-    const [waiting, setWaiting] = useState<'join' | 'create' | null>(null)
-
-    const createOrg = async () => {
-        if (!orgName.trim()) return
-        setBusy(true)
-        setWaiting('create')
-        try {
-            const { org } = await window.ipc.invoke('spaces:createOrg', { name: orgName.trim() })
-            toast(`Created ${org.name} — you're the admin`, 'success')
-            onOpenChange(false)
-            setOrgName('')
-            onAdded(org.id)
-        } catch (err) {
-            toast(err instanceof Error ? err.message : 'Could not create the server', 'error')
-        } finally {
-            setBusy(false)
-            setWaiting(null)
-        }
-    }
-
-    // Pre-auth resolve as soon as the pasted text parses — show what's being joined.
-    const resolvePreview = async (url: string) => {
-        setInviteUrl(url)
-        setPreview(null)
-        if (!/\/join\//.test(url)) return
-        try {
-            const { resolved } = await window.ipc.invoke('spaces:resolveInviteLink', { url: url.trim() })
-            if (resolved.state === 'ok') {
-                setPreview({ org: resolved.org.name, space: resolved.space.name, ...(resolved.invitedBy ? { invitedBy: resolved.invitedBy } : {}) })
-            } else {
-                toast(`This invite is ${resolved.state}`, 'error')
-            }
-        } catch (err) {
-            toast(err instanceof Error ? err.message : 'Could not resolve the invite', 'error')
-        }
-    }
-
-    const join = async () => {
-        if (!inviteUrl.trim()) return
-        setBusy(true)
-        setWaiting('join')
-        try {
-            const { org, space } = await window.ipc.invoke('spaces:joinInvite', { url: inviteUrl.trim() })
-            toast(`Joined ${space.name} on ${org.name}`, 'success')
-            onOpenChange(false)
-            setInviteUrl('')
-            setPreview(null)
-            onAdded(org.id, space.id)
-        } catch (err) {
-            toast(err instanceof Error ? err.message : 'Could not join', 'error')
-        } finally {
-            setBusy(false)
-            setWaiting(null)
-        }
-    }
-
-    const addDev = async () => {
-        if (!baseUrl.trim() || !memberId.trim()) return
-        setBusy(true)
-        try {
-            const { org } = await window.ipc.invoke('spaces:addOrg', { baseUrl: baseUrl.trim(), memberId: memberId.trim() })
-            toast(`Signed into ${org.name} as ${org.memberId}`, 'success')
-            onOpenChange(false)
-            onAdded(org.id)
-        } catch (err) {
-            toast(err instanceof Error ? err.message : 'Could not reach the server', 'error')
-        } finally {
-            setBusy(false)
-        }
-    }
-
-    return (
-        <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-md">
-                <DialogHeader>
-                    <DialogTitle>{mode === 'dev' ? 'Add a dev server' : initialAction === 'create' ? 'Create a server' : initialAction === 'join' ? 'Join a server' : 'Add a server'}</DialogTitle>
-                    <DialogDescription>
-                        {mode === 'dev'
-                            ? 'Dev sign-in against a stub Harbor (run pnpm dev in apps/harbor/packages/server).'
-                            : 'Signing in opens your browser.'}
-                    </DialogDescription>
-                </DialogHeader>
-                {mode === 'main' ? (
-                    <div className="space-y-3">
-                        <div>
-                            <div className="text-sm font-medium">Join a server</div>
-                            <p className="text-xs text-muted-foreground">Paste an invite link someone sent you.</p>
-                            <div className="mt-1.5 flex items-center gap-2">
-                                <Input
-                                    autoFocus={initialAction !== 'create'}
-                                    value={inviteUrl}
-                                    onChange={(e) => void resolvePreview(e.target.value)}
-                                    placeholder="https://org.example/join/…"
-                                    className="flex-1"
-                                    onKeyDown={(e) => e.key === 'Enter' && void join()}
-                                />
-                                <Button onClick={() => void join()} disabled={busy || !inviteUrl.trim()} className="shrink-0">
-                                    {waiting === 'join' && <Loader2 className="size-3.5 mr-1 animate-spin" />} Join
-                                </Button>
-                            </div>
-                            {preview && (
-                                <div className="mt-2 rounded-md border px-3 py-2 text-sm">
-                                    Join <span className="font-medium">{preview.space}</span> on{' '}
-                                    <span className="font-medium">{preview.org}</span>
-                                    {preview.invitedBy ? <span className="text-muted-foreground"> — invited by {preview.invitedBy}</span> : null}
-                                </div>
-                            )}
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <div className="h-px flex-1 bg-border" />
-                            <span className="text-xs text-muted-foreground">or</span>
-                            <div className="h-px flex-1 bg-border" />
-                        </div>
-                        <div>
-                            <div className="text-sm font-medium">Create a new server</div>
-                            <p className="text-xs text-muted-foreground">Free — you name it and you’re its admin.</p>
-                            <div className="mt-1.5 flex items-center gap-2">
-                                <Input
-                                    autoFocus={initialAction === 'create'}
-                                    value={orgName}
-                                    onChange={(e) => setOrgName(e.target.value)}
-                                    placeholder="Acme, book club, just me…"
-                                    className="flex-1"
-                                    onKeyDown={(e) => e.key === 'Enter' && void createOrg()}
-                                />
-                                <Button onClick={() => void createOrg()} disabled={busy || !orgName.trim() || !apexDomain} className="shrink-0">
-                                    {waiting === 'create' && <Loader2 className="size-3.5 mr-1 animate-spin" />} Create
-                                </Button>
-                            </div>
-                            {apexDomain === null && (
-                                <p className="mt-1.5 text-xs text-muted-foreground">
-                                    Spaces isn’t available for this environment yet.
-                                </p>
-                            )}
-                        </div>
-                        {waiting && (
-                            <div className="text-xs text-muted-foreground flex items-center gap-1.5">
-                                <Loader2 className="size-3 animate-spin" /> Waiting for the browser sign-in…
-                            </div>
-                        )}
-                        <div className="flex items-center justify-between">
-                            {/* Dev sign-in stays reachable (Tailscale dogfood runs it in
-                                packaged builds) but hides behind … — a visible link here
-                                reads as a third way in to people who only have two. */}
-                            <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                    <button
-                                        type="button"
-                                        aria-label="More options"
-                                        className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground"
-                                    >
-                                        <MoreHorizontal className="size-3.5" />
-                                    </button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="start">
-                                    <DropdownMenuItem onClick={() => setMode('dev')}>Add a dev server</DropdownMenuItem>
-                                </DropdownMenuContent>
-                            </DropdownMenu>
-                            <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
-                        </div>
-                    </div>
-                ) : (
-                    <div className="space-y-3">
-                        <div>
-                            <label className="text-xs font-medium text-muted-foreground">Server URL</label>
-                            <Input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="http://localhost:4272" />
-                        </div>
-                        <div>
-                            <label className="text-xs font-medium text-muted-foreground">Member id</label>
-                            <Input
-                                value={memberId}
-                                onChange={(e) => setMemberId(e.target.value)}
-                                placeholder="e.g. ramnique"
-                                onKeyDown={(e) => e.key === 'Enter' && void addDev()}
-                            />
-                        </div>
-                        <div className="flex items-center justify-between">
-                            <button type="button" className="text-xs text-muted-foreground hover:underline" onClick={() => setMode('main')}>
-                                back
-                            </button>
-                            <div className="flex gap-2">
-                                <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
-                                <Button onClick={() => void addDev()} disabled={busy || !baseUrl.trim() || !memberId.trim()}>
-                                    {busy && <Loader2 className="size-3.5 mr-1 animate-spin" />} Sign in
-                                </Button>
-                            </div>
-                        </div>
-                    </div>
-                )}
-            </DialogContent>
-        </Dialog>
-    )
-}
 
 /**
  * A single-line label that truncates, with a quick tooltip carrying the full

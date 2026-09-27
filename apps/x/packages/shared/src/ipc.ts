@@ -23,6 +23,8 @@ import type { QueuedSessionMessage, SessionBusEvent, SessionIndexEntry, SessionS
 import { RowboatApiConfig } from './rowboat-account.js';
 import { RecommendationRowSchema, RecommendationSlot } from './recommendation-update.js';
 import { ZListToolkitsResponse } from './composio.js';
+import { AutoRouteDecision, AutoRouteRequest } from './auto-route.js';
+import { FindRequest, FindResult } from './find.js';
 import { AppSummarySchema, RegistryRecordSchema, RowboatAppManifestSchema } from './rowboat-app.js';
 import { BrowserStateSchema, DisplayMediaRequestSchema, HttpAuthRequestSchema } from './browser-control.js';
 import { BillingInfoSchema } from './billing.js';
@@ -40,7 +42,8 @@ import {
     type SpacesBusEvent,
     type SpacesManageTopicAction,
     type SpacesPostResult,
-    type SpacesProposeInput,
+  SpacesCreateInput,
+  SpacesProposeInput,
     type SpacesStreamPage,
     type SpacesThreadPage,
 } from './spaces.js';
@@ -56,14 +59,47 @@ import type * as SpacesTypes from './spaces.js';
 // bar's model/effort picks are applied by the app window before submitting.
 const QuickAskSubmitPayload = z.object({
   text: z.string(),
+  // The composer's @ picks — knowledge files, plus the Spaces objects
+  // (shared spaces, people) the message names. Mirrors the renderer's
+  // Mention union (prompt-input.tsx).
   mentions: z
     .array(
-      z.object({
-        id: z.string(),
-        path: z.string(),
-        displayName: z.string(),
-        lineNumber: z.number().optional(),
-      }),
+      z.discriminatedUnion('kind', [
+        z.object({
+          kind: z.literal('file'),
+          id: z.string(),
+          path: z.string(),
+          displayName: z.string(),
+          lineNumber: z.number().optional(),
+        }),
+        z.object({
+          kind: z.literal('space'),
+          id: z.string(),
+          orgId: z.string(),
+          orgName: z.string(),
+          spaceId: z.string(),
+          displayName: z.string(),
+        }),
+        z.object({
+          kind: z.literal('board'),
+          id: z.string(),
+          orgId: z.string(),
+          orgName: z.string(),
+          spaceId: z.string(),
+          spaceName: z.string(),
+          assetId: z.string(),
+          path: z.string(),
+          displayName: z.string(),
+        }),
+        z.object({
+          kind: z.literal('member'),
+          id: z.string(),
+          orgId: z.string(),
+          orgName: z.string(),
+          memberId: z.string(),
+          displayName: z.string(),
+        }),
+      ]),
     )
     .optional(),
   attachments: z
@@ -1231,6 +1267,14 @@ export const ipcSchemas = {
       updatedFrom: z.string().nullable(),
     }),
   },
+  // Main-window unread totals; macOS retains the last badge while it is closed.
+  'app:setSpacesDockBadge': {
+    req: z.object({
+      unread: z.number().int().nonnegative(),
+      forYou: z.number().int().nonnegative(),
+    }),
+    res: z.object({}),
+  },
   // --- Client auto-update (apps/main/src/updater.ts) ---
   // Pushed to all windows whenever the updater state changes.
   'updater:status': {
@@ -1824,6 +1868,7 @@ export const ipcSchemas = {
       // Only an explicit user choice; a quick-created session omits it and
       // follows the composer chip / global setting ("Auto").
       policy: ApprovalPolicy.optional(),
+      codeModeEnabled: z.boolean().optional(),
       isolation: z.enum(['in-repo', 'worktree']),
       baseBranch: z.string().min(1).optional(),
       // Reuse this session's workspace instead of creating a worktree.
@@ -1848,7 +1893,7 @@ export const ipcSchemas = {
   'codeSession:update': {
     req: z.object({
       sessionId: z.string(),
-      patch: CodeSession.pick({ title: true, policy: true, agent: true, agentModel: true, agentEffort: true }).partial(),
+      patch: CodeSession.pick({ title: true, policy: true, agent: true, agentModel: true, agentEffort: true, codeModeEnabled: true }).partial().extend({ clearPolicy: z.boolean().optional() }),
     }),
     res: z.object({
       session: CodeSession,
@@ -2443,6 +2488,23 @@ export const ipcSchemas = {
       error: z.string().optional(),
     }),
   },
+  // TypeSafe (Jev), the System One judgment API behind the Spaces composer's
+  // Auto toggle (2026-09-22). The key lives in ~/.rowboat/config/typesafe.json
+  // and never reaches the renderer, which only learns whether one is set.
+  'typesafe:isConfigured': {
+    req: z.null(),
+    res: z.object({ configured: z.boolean() }),
+  },
+  // Saving verifies the key with one tiny request: a rejected key is refused
+  // (error); an unreachable API saves it and says so (warning).
+  'typesafe:setApiKey': {
+    req: z.object({ apiKey: z.string() }),
+    res: z.object({ success: z.boolean(), error: z.string().optional(), warning: z.string().optional() }),
+  },
+  'typesafe:clearApiKey': {
+    req: z.null(),
+    res: z.object({ success: z.literal(true) }),
+  },
   // Agent schedule channels
   'agent-schedule:getConfig': {
     req: z.null(),
@@ -2470,6 +2532,14 @@ export const ipcSchemas = {
     }),
   },
   // Shell integration channels
+  'shell:previewFile': {
+    req: z.object({ path: z.string() }),
+    res: z.object({ url: z.string(), path: z.string(), name: z.string(), size: z.number(), mtimeMs: z.number() }),
+  },
+  'shell:releaseFilePreview': {
+    req: z.object({ url: z.string() }),
+    res: z.object({ success: z.literal(true) }),
+  },
   'shell:openPath': {
     req: z.object({ path: z.string() }),
     res: z.object({ error: z.string().optional() }),
@@ -2482,11 +2552,13 @@ export const ipcSchemas = {
     req: z.object({ path: z.string() }),
     res: z.object({ data: z.string(), mimeType: z.string(), size: z.number() }),
   },
-  // Spreadsheet viewer: windowed read of a local .xlsx/.xls/.csv/.tsv file
+  // Spreadsheet viewer: windowed read of a local .xlsx/.xls/.csv/.tsv file.
+  // `path` is the local file; with `space` (a space file, by asset id) or
+  // `attachment` (a message blob) it is only the display name.
   'spreadsheet:load': {
     req: z.object({
       path: z.string(),
-      space: z.object({ orgId: z.string(), spaceId: z.string(), version: z.number().int().min(1) }).optional(),
+      space: z.object({ orgId: z.string(), spaceId: z.string(), assetId: z.string(), version: z.number().int().min(1) }).optional(),
       attachment: z.object({ orgId: z.string(), spaceId: z.string(), hash: z.string().regex(/^[a-f0-9]{64}$/) }).optional(),
       sheet: z.string().optional(),
       offset: z.number().int().min(0),
@@ -2516,7 +2588,7 @@ export const ipcSchemas = {
   'spreadsheet:find': {
     req: z.object({
       path: z.string(),
-      space: z.object({ orgId: z.string(), spaceId: z.string(), version: z.number().int().min(1) }).optional(),
+      space: z.object({ orgId: z.string(), spaceId: z.string(), assetId: z.string(), version: z.number().int().min(1) }).optional(),
       attachment: z.object({ orgId: z.string(), spaceId: z.string(), hash: z.string().regex(/^[a-f0-9]{64}$/) }).optional(),
       sheet: z.string().optional(),
       query: z.string(),
@@ -3665,9 +3737,9 @@ export const ipcSchemas = {
       success: z.literal(true),
     }),
   },
-  // One-time first-run notice: returns { show: true } exactly once (when
-  // retention is enabled and the notice hasn't been shown), marking it shown.
-  // Same pull-on-boot pattern as app:consumeUpdateInfo.
+  // Retain the legacy response for client compatibility after removing the
+  // startup popup (2026-09-22, onboarding simplification). Calling this still
+  // initializes the retention gate; current clients ignore the display fields.
   'retention:consumeFirstRunNotice': {
     req: z.null(),
     res: z.object({
@@ -3779,6 +3851,27 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string() }),
     res: z.object({ org: SpacesOrgSummary }),
   },
+  // One session, two uses (2026-09-14): the Rowboat account IS the identity
+  // every managed org trusts. accountState says whether a session exists and
+  // whether the app is signed in on it (a space joined while staying signed
+  // out of the app leaves a spaces-only session). signInRowboat is the Spaces
+  // door's sign-in: a browser trip only if there is no session, then the
+  // apex's listing of every managed org the person belongs to.
+  'spaces:accountState': {
+    req: z.null(),
+    res: z.object({ hasSession: z.boolean(), appSignedIn: z.boolean() }),
+  },
+  'spaces:signInRowboat': {
+    req: z.null(),
+    res: z.object({ orgs: z.array(SpacesOrgSummary) }),
+  },
+  // The advanced door: a server by address — a URL, a host, or a managed
+  // org's slug — for an existing member (self-hosted orgs, or checking a
+  // specific one). Strangers get the not_a_member message.
+  'spaces:addOrgByAddress': {
+    req: z.object({ address: z.string() }),
+    res: z.object({ org: SpacesOrgSummary }),
+  },
   // Self-serve org creation on the managed deployment's apex (free for now —
   // billing/limits parked by decision 2026-08-20). Browser sign-in, then the
   // caller is the org's first admin. The address is generated in core
@@ -3847,13 +3940,18 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), spaceId: z.string(), includeDeleted: z.boolean().optional() }),
     res: z.object({ entries: z.array(z.custom<SpacesAssetEntry>()) }),
   },
-  // Namespace ops (inode model server-side): move/rename, delete-to-trash,
-  // restore. Conflict outcomes return as values, same as proposeChange.
+  // Birth: the one file call that takes a path (occupied path = error).
+  'spaces:createAsset': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), input: z.custom<SpacesCreateInput>() }),
+    res: z.custom<SpacesTypes.CreateAssetResult>(),
+  },
+  // Namespace ops by asset id: move/rename, delete-to-trash, restore.
+  // Conflict outcomes return as values, same as proposeChange.
   'spaces:moveAsset': {
     req: z.object({
       orgId: z.string(),
       spaceId: z.string(),
-      fromPath: z.string(),
+      assetId: z.string(),
       toPath: z.string(),
       baseVersion: z.number(),
       reason: z.string().optional(),
@@ -3864,21 +3962,21 @@ export const ipcSchemas = {
     req: z.object({
       orgId: z.string(),
       spaceId: z.string(),
-      path: z.string(),
+      assetId: z.string(),
       baseVersion: z.number(),
       reason: z.string().optional(),
     }),
     res: z.custom<SpacesTypes.DeleteAssetResult>(),
   },
   'spaces:restoreAsset': {
-    req: z.object({ orgId: z.string(), spaceId: z.string(), path: z.string() }),
+    req: z.object({ orgId: z.string(), spaceId: z.string(), assetId: z.string() }),
     res: z.custom<SpacesTypes.RestoreAssetResult>(),
   },
   'spaces:readAsset': {
     req: z.object({
       orgId: z.string(),
       spaceId: z.string(),
-      path: z.string(),
+      assetId: z.string(),
       version: z.number().optional(),
     }),
     res: z.custom<SpacesTypes.ReadAssetResult>(),
@@ -3893,7 +3991,7 @@ export const ipcSchemas = {
     req: z.object({
       orgId: z.string(),
       spaceId: z.string(),
-      path: z.string().optional(),
+      assetId: z.string().optional(),
       beforeOffset: z.number().optional(),
       limit: z.number().optional(),
     }),
@@ -3903,7 +4001,7 @@ export const ipcSchemas = {
     req: z.object({
       orgId: z.string(),
       spaceId: z.string(),
-      path: z.string(),
+      assetId: z.string(),
       from: z.number(),
       to: z.number(),
     }),
@@ -3935,18 +4033,27 @@ export const ipcSchemas = {
       spaceId: z.string(),
       /** Page back: only roots below this offset. Absent = the latest page. */
       beforeOffset: z.number().optional(),
+      afterOffset: z.number().optional(),
+      aroundOffset: z.number().optional(),
       limit: z.number().optional(),
     }),
     res: z.custom<SpacesStreamPage>(),
   },
   // One flat thread: root + topic annotation (null = plain thread) + windowed
   // replies. A reply id resolves to its root on the org.
+  /** One message by id — what a message link resolves through (a reply names its thread root). */
+  'spaces:getMessage': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), messageId: z.string() }),
+    res: z.object({ message: z.custom<SpacesTypes.Message>() }),
+  },
   'spaces:listThread': {
     req: z.object({
       orgId: z.string(),
       spaceId: z.string(),
       rootMessageId: z.string(),
       beforeOffset: z.number().optional(),
+      afterOffset: z.number().optional(),
+      aroundOffset: z.number().optional(),
       limit: z.number().optional(),
     }),
     res: z.custom<SpacesThreadPage>(),
@@ -3966,6 +4073,20 @@ export const ipcSchemas = {
     }),
     res: z.custom<SpacesPostResult>(),
   },
+  // The stream composer's Auto toggle (2026-09-22): Jev says whether a draft
+  // is a new root or a reply to one of the candidate threads the renderer
+  // already holds. A decision, never a post; the composer posts on it.
+  'spaces:autoRoute': {
+    req: AutoRouteRequest,
+    res: AutoRouteDecision,
+  },
+  // /find (2026-09-24): Jev ranks the candidates the renderer gathered
+  // against what the person remembers. A ranking, never a navigation; the
+  // renderer lands on the top pick and walks "next" through the rest locally.
+  'spaces:findMessage': {
+    req: FindRequest,
+    res: FindResult,
+  },
   // The deliberate ceremony: promote a thread (rootMessageId) or post a new
   // root + annotate it (body) — exactly one of the two, org-enforced.
   'spaces:createTopic': {
@@ -3975,6 +4096,8 @@ export const ipcSchemas = {
       rootMessageId: z.string().optional(),
       title: z.string(),
       body: z.string().optional(),
+      /** The file this discussion is about, by asset id (Topic.documentAssetId). */
+      documentAssetId: z.string().optional(),
     }),
     res: z.object({ topic: z.custom<SpacesTypes.Topic>(), rootMessage: z.custom<SpacesTypes.Message>() }),
   },
@@ -4130,6 +4253,11 @@ export const ipcSchemas = {
     }),
     res: z.object({ saved: z.boolean(), path: z.string().optional() }),
   },
+  // Save the current file by identity, including documents stored as inline text.
+  'spaces:saveAsset': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), assetId: z.string() }),
+    res: z.object({ saved: z.boolean(), path: z.string().optional() }),
+  },
   // Save an external image (a pasted GIF/image link) to disk. Main fetches
   // the URL — the renderer can't (CORS) — after the save dialog, so a
   // cancel never downloads. https only. saved:false = the person cancelled.
@@ -4269,7 +4397,7 @@ export const ipcSchemas = {
     req: z.object({
       orgId: z.string(),
       spaceId: z.string(),
-      /** The board's asset path — a board IS an asset (whiteboards/<name>.excalidraw). */
+      /** The board's asset id — a board IS an asset (whiteboards/<name>.excalidraw is its display path). */
       boardId: z.string(),
       payload: z.custom<SpacesTypes.SpacesWhiteboardPayload>(),
     }),

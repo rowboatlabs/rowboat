@@ -1,25 +1,20 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import type { ServerFrame, Space } from '@rowboat/spaces-protocol';
-import { PgStore } from '../src/pg-store.js';
-import { startHarbor, type HarborOptions, type RunningHarbor } from '../src/server.js';
-import type { SqlDb } from '../src/sql.js';
-import { agentClient, callStructured, liveClient, restClient } from './helpers.js';
-import { pgliteDb } from './pglite.js';
+import type { RunningHarbor } from '../src/server.js';
+import { agentClient, callStructured, liveClient, restClient, startTestHarbor } from './helpers.js';
 
 // Direct messages (2026-09-07): a DM is a `direct` space — same substrate,
-// fixed membership, private forever. Runs on both stores: the direct-key
-// uniqueness guard is a partial unique index on Postgres and a map in memory,
-// and the service's race handling must hold on either.
+// fixed membership, private forever. The direct-key uniqueness guard is a
+// partial unique index; the service's race handling rides on it.
 
 let harbor: RunningHarbor;
-let sqlDb: SqlDb | undefined;
 let ramnique: ReturnType<typeof restClient>;
 let harsh: ReturnType<typeof restClient>;
 let gagan: ReturnType<typeof restClient>;
 
-async function startForStore(kind: 'memory' | 'postgres'): Promise<void> {
-  const options: HarborOptions = {
+async function start(): Promise<void> {
+  harbor = await startTestHarbor({
     orgName: 'Rowboat Labs',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
@@ -27,14 +22,7 @@ async function startForStore(kind: 'memory' | 'postgres'): Promise<void> {
       { id: 'gagan', displayName: 'Gagan' },
     ],
     seedSpaces: [{ name: 'Main', creator: 'ramnique' }],
-  };
-  if (kind === 'postgres') {
-    sqlDb = await pgliteDb();
-    const store = new PgStore(sqlDb);
-    await store.init();
-    options.store = store;
-  }
-  harbor = await startHarbor(options);
+  });
   ramnique = restClient(harbor, 'dev-ramnique');
   harsh = restClient(harbor, 'dev-harsh');
   gagan = restClient(harbor, 'dev-gagan');
@@ -44,17 +32,15 @@ function spaceAdded(frames: ServerFrame[]) {
   return frames.filter((f): f is Extract<ServerFrame, { kind: 'space_added' }> => f.kind === 'space_added');
 }
 
-describe.each([['memory'], ['postgres']] as const)('direct messages (%s store)', (storeKind) => {
+describe('direct messages', () => {
   let dm: Space;
 
   beforeAll(async () => {
-    await startForStore(storeKind);
+    await start();
   });
 
   afterAll(async () => {
     await harbor.close();
-    await sqlDb?.close();
-    sqlDb = undefined;
   });
 
   it('opens a DM: a direct space with the sorted pair as participants and a placeholder name', async () => {
@@ -77,7 +63,7 @@ describe.each([['memory'], ['postgres']] as const)('direct messages (%s store)',
   it('both participants are ordinary members; their membership history is two joined events', async () => {
     const members = await ramnique.get(`/v1/spaces/${dm.id}/members`);
     expect(members.body.members.map((m: any) => m.id).sort()).toEqual(['harsh', 'ramnique']);
-    const events = await harbor.service.eventsAfter(dm.id, 0);
+    const events = await harbor.store.listEventsAfter(dm.id, 0);
     expect(events.map((e) => e.event.type)).toEqual(['membership', 'membership']);
     expect(events.map((e) => e.offset)).toEqual([1, 2]);
   });
@@ -121,7 +107,7 @@ describe.each([['memory'], ['postgres']] as const)('direct messages (%s store)',
     const again = await ramnique.post('/v1/direct', { memberId: 'ramnique' });
     expect(again.body).toMatchObject({ created: false, space: { id } });
     expect((await ramnique.get(`/v1/spaces/${id}/members`)).body.members.map((m: any) => m.id)).toEqual(['ramnique']);
-    expect((await harbor.service.eventsAfter(id, 0)).map((e) => e.event.type)).toEqual(['membership']);
+    expect((await harbor.store.listEventsAfter(id, 0)).map((e) => e.event.type)).toEqual(['membership']);
     // Private to one: nobody else can read it or see it listed, and it cannot grow.
     expect((await harsh.get(`/v1/spaces/${id}/stream`)).status).toBe(403);
     expect((await harsh.get('/v1/spaces?includeDirect=1')).body.spaces.map((s: Space) => s.id)).not.toContain(id);

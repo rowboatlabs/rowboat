@@ -1,3 +1,4 @@
+import { useReactionReadMark } from '@/hooks/use-reaction-read-mark'
 import { MESSAGE_PROSE } from '@/components/spaces/message-prose'
 import { memo, useState } from 'react'
 import { Bookmark, BookmarkCheck, Bot, ChevronRight, Copy, Forward, Link as LinkIcon, Loader2, MessageSquare, MessageSquareText, MoreHorizontal, Pencil, Pin, PinOff, Quote, SmilePlus, Square, Trash2, X } from 'lucide-react'
@@ -48,19 +49,24 @@ function joinNames(names: string[]): string {
 /** How many reactor avatars the hover card shows before collapsing to +N. */
 const REACTOR_AVATAR_CAP = 8
 
-function ReactionChips({ message, memberNames, selfMemberId, onReact, onPickerOpenChange }: {
+function ReactionChips({ message, memberNames, selfMemberId, onReact, onPickerOpenChange, orgId, visible }: {
     message: spaces.Message
     memberNames: Map<string, string>
     selfMemberId?: string
     onReact: (message: spaces.Message, emoji: string) => void
     onPickerOpenChange: (open: boolean) => void
+    orgId?: string
+    visible?: boolean
 }) {
-    // The 📌 group is the pin's storage, not a reaction to show: the stream's
-    // pinned banner is its only surface.
+    // The 📌 group is the pin's storage, not a reaction to show: the Bookmarks
+    // panel's Pinned section is its only surface.
     const groups = (message.reactions ?? []).filter((g) => g.emoji !== PIN_EMOJI)
+    const readRef = useReactionReadMark({ orgId, spaceId: message.spaceId, threadRootId: message.threadRoot,
+        offset: Math.max(0, ...groups.map((g) => g.lastOffset ?? 0)),
+        active: visible !== false && message.author.memberId === selfMemberId })
     if (groups.length === 0) return null
     return (
-        <div className="mt-1 flex flex-wrap items-center gap-1">
+        <div ref={readRef} className="mt-1 flex flex-wrap items-center gap-1">
             {groups.map((group) => {
                 const mine = !!selfMemberId && group.memberIds.includes(selfMemberId)
                 const nameOf = (id: string) => (id === selfMemberId ? 'You' : memberNames.get(id) ?? id)
@@ -132,10 +138,14 @@ export interface ThreadRowData {
 }
 
 function MessageRowImpl({
-    message, memberNames, continuation, thread, onOpenThread, onPrefetchThread, onOpenAgentChat, onOpenResponseChat, onStopAgent, onReplyInThread, onAskRowboat, onCopyLink, onReact, onDelete, onEdit, onQuoteReply, onForward, onToggleSave, saved, onRetryFailed, onDiscardFailed, onVotePoll, onRemovePollVote, onEndPoll, dense, selfMemberId,
+    message, memberNames, spaceNames, continuation, thread, onOpenThread, onPrefetchThread, onOpenAgentChat, onOpenResponseChat, onStopAgent, onReplyInThread, onAskRowboat, onCopyLink, onReact, onDelete, onEdit, onQuoteReply, onForward, onToggleSave, saved, onRetryFailed, onDiscardFailed, onVotePoll, onRemovePollVote, onEndPoll, dense, selfMemberId, orgId, visible,
 }: {
     message: spaces.Message & { pending?: boolean; failed?: boolean }
+    orgId?: string
+    visible?: boolean
     memberNames: Map<string, string>
+    /** Space id → current name (useSpaceNames) — the `#Name` face of a space token in copied text. */
+    spaceNames?: ReadonlyMap<string, string>
     /** Names the viewer's own agent "Your Rowboat" on thread rows. */
     selfMemberId?: string
     continuation: boolean
@@ -245,7 +255,7 @@ function MessageRowImpl({
     // What "Copy message" copies: mentions resolved to names, image embeds
     // dropped — their app:// addresses mean nothing outside the app. Empty
     // (image-only message, tombstone) hides the item.
-    const messageText = deleted || unconfirmed ? '' : resolveMentions(message.body, memberNames).replace(/!\[[^\]]*\]\([^)]*\)/g, '').trim()
+    const messageText = deleted || unconfirmed ? '' : resolveMentions(message.body, memberNames, spaceNames).replace(/!\[[^\]]*\]\([^)]*\)/g, '').trim()
     // The selection as it stood when the context menu opened (opening keeps it).
     const [selectionText, setSelectionText] = useState('')
     const copyToClipboard = (text: string) => {
@@ -390,6 +400,8 @@ function MessageRowImpl({
                         selfMemberId={selfMemberId}
                         onReact={onReact}
                         onPickerOpenChange={setPickerOpen}
+                        orgId={orgId}
+                        visible={visible}
                     />
                 )}
                 {thread && thread.replyCount > 0 && onOpenThread && (
@@ -689,9 +701,12 @@ export const MessageRow = memo(MessageRowImpl, (prev: MessageRowProps, next: Mes
     prev.message === next.message &&
     prev.continuation === next.continuation &&
     prev.selfMemberId === next.selfMemberId &&
+    prev.orgId === next.orgId &&
+    prev.visible === next.visible &&
     prev.dense === next.dense &&
     prev.saved === next.saved &&
     prev.memberNames === next.memberNames &&
+    prev.spaceNames === next.spaceNames &&
     threadRowEqual(prev.thread, next.thread),
 )
 

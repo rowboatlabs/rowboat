@@ -9,11 +9,9 @@ import { Bell,
   AppWindow,
   ArrowUpRight,
   Bot,
-  Code2,
   FileText,
   FilePlus,
   Folder,
-  Globe,
   History,
   LayoutGrid,
   ListTodo,
@@ -67,12 +65,14 @@ import {
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { toast } from "@/lib/toast"
+import * as analytics from '@/lib/analytics'
 import { getPinnedApps, onPinnedAppsChanged, unpinApp } from "@/lib/pinned-apps"
 import { isOutOfCredits, CREDIT_EXHAUSTED_EVENT, CREDIT_REPLENISHED_EVENT } from "@/lib/credit-status"
 import { SettingsDialog } from "@/components/settings-dialog"
 import { SidebarCreditRewards } from "@/components/sidebar-credit-rewards"
 import { SPACES_ENABLED } from "@/lib/feature-flags"
-import { AddOrgDialog, OrgMonogram, type SpaceSelection } from "@/components/spaces-view"
+import { OrgMonogram, type SpaceSelection } from "@/components/spaces-view"
+import { openServerDialog } from "@/lib/server-dialog"
 import { openSelfDirect, useSpacesOrgs, type OrgWithSpaces } from "@/hooks/use-spaces"
 import { prefetchStream, spaceLastActivityAt, useSpacesUnreadCounts, type SpaceBadge } from "@/hooks/use-space-chat"
 import { NO_BADGE } from "@/lib/spaces-read-state"
@@ -158,6 +158,7 @@ export type DockSidebarProps = {
   /** The space currently open, for highlighting its flyout row. */
   activeSpace?: SpaceSelection
   recentRuns?: { id: string; title?: string; createdAt: string; modifiedAt?: string }[]
+  onOpenAssistant?: () => void
   onOpenRun?: (runId: string) => void
   /** Persist a custom chat title (sessions:setTitle) and refresh the runs list. */
   onRenameRun?: (runId: string, title: string) => void
@@ -167,9 +168,6 @@ export type DockSidebarProps = {
   onOpenEmail?: (threadId?: string) => void
   onOpenHome?: () => void
   onNewChat?: () => void
-  onToggleBrowser?: () => void
-  /** Whether the browser overlay is up, for the Browser tile's running dot. */
-  browserOpen?: boolean
   /** Render only the ⌥/⌃+Tab app switcher — no tray, no flyouts. Used while
       the panel sidebar is expanded, so the switcher works in both modes (and
       its most-recently-used order survives collapsing/expanding). */
@@ -526,6 +524,8 @@ type DockItemDef = {
   badge?: string
   badgeAmber?: boolean
   badgePulse?: boolean
+  /** A compact unread marker for the icon rail. */
+  notification?: 'muted' | 'alert'
   status?: string
   statusAlert?: boolean
   running?: boolean
@@ -549,7 +549,6 @@ export function DockSidebar({
   knowledgeActions,
   bgTaskSummaries = [],
   onOpenMeetings,
-  onOpenCode,
   onOpenBgTasks,
   onOpenApps,
   onOpenApp,
@@ -559,14 +558,13 @@ export function DockSidebar({
   activeSpace = null,
   recentRuns = [],
   onOpenRun,
+  onOpenAssistant,
   onRenameRun,
   onDeleteRun,
   onOpenChatHistory,
   onOpenEmail,
   onOpenHome,
   onNewChat,
-  onToggleBrowser,
-  browserOpen = false,
   switcherOnly = false,
   onStartTour,
   activeNav,
@@ -585,7 +583,6 @@ export function DockSidebar({
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [connectionsSettingsOpen, setConnectionsSettingsOpen] = useState(false)
   const [syncLogOpen, setSyncLogOpen] = useState(false)
-  const [addOrgOpen, setAddOrgOpen] = useState(false)
 
   const closeFlyouts = useCallback(() => {
     setChatsOpen(false)
@@ -746,19 +743,6 @@ export function DockSidebar({
     return () => { cancelled = true; clearInterval(tick); cleanup() }
   }, [])
 
-  // ----- data: code mode flag -----
-  const [codeModeEnabled, setCodeModeEnabled] = useState(false)
-  useEffect(() => {
-    const load = () => {
-      window.ipc.invoke('codeMode:getConfig', null)
-        .then((r) => setCodeModeEnabled(r.enabled))
-        .catch(() => setCodeModeEnabled(false))
-    }
-    load()
-    window.addEventListener('code-mode-config-changed', load)
-    return () => window.removeEventListener('code-mode-config-changed', load)
-  }, [])
-
   // ----- data: pinned apps (right-click an app card in the Apps view) -----
   const [pinnedAppFolders, setPinnedAppFolders] = useState<string[]>(() => getPinnedApps())
   const [pinnedAppNames, setPinnedAppNames] = useState<Map<string, string> | null>(null)
@@ -800,22 +784,6 @@ export function DockSidebar({
     const tick = setInterval(update, 60 * 1000)
     return () => clearInterval(tick)
   }, [latestNoteMtime])
-
-  // ----- data: workspace count -----
-  const workspaceCount = useMemo(() => {
-    const find = (nodes: TreeNode[]): TreeNode | null => {
-      for (const n of nodes) {
-        if (n.path === 'knowledge/Workspace') return n
-        if (n.kind === 'dir' && n.children?.length) {
-          const found = find(n.children)
-          if (found) return found
-        }
-      }
-      return null
-    }
-    const node = find(tree)
-    return node?.children?.filter((c) => c.kind === 'dir').length ?? 0
-  }, [tree])
 
   // ----- data: background agents label -----
   const [bgAgentsLabel, setBgAgentsLabel] = useState<string | null>(null)
@@ -884,11 +852,24 @@ export function DockSidebar({
   // ----- data: spaces (safe when the flag is off — the store stays empty) -----
   const { orgs, loading: spacesLoading, refresh: refreshSpaces } = useSpacesOrgs()
   const spacesUnread = useSpacesUnreadCounts()
-  const totalSpacesUnread = useMemo(() => {
-    let sum = 0
-    for (const badge of spacesUnread.values()) sum += badge.forYou
-    return sum
+  const spacesNotification = useMemo(() => {
+    let unread = 0
+    let forYou = 0
+    for (const badge of spacesUnread.values()) {
+      unread += badge.unread
+      forYou += badge.forYou
+    }
+    return { unread, forYou }
   }, [spacesUnread])
+  useEffect(() => {
+    void window.ipc.invoke('app:setSpacesDockBadge', {
+      unread: spacesNotification.unread,
+      forYou: spacesNotification.forYou,
+    }).catch((error: unknown) => {
+      console.warn('[dock-badge] Failed to sync unread counts:', error)
+    })
+    // No cleanup: retain the last badge when the main window closes.
+  }, [spacesNotification.unread, spacesNotification.forYou])
   const totalSpaces = useMemo(() => orgs.reduce((n, o) => n + o.spaces.length + o.directs.length, 0), [orgs])
 
   // ----- data: sync status (for the Settings tooltip + activity popover) -----
@@ -945,7 +926,7 @@ export function DockSidebar({
   const rows = useMemo<DockRow[]>(() => {
     const items: DockRow[] = [
       // The top section: Assistant (resumes the most recent chat, falling
-      // back to a fresh one — white tile) with Spaces right under it, then a
+      // back to a fresh one — white tile), then Projects and Spaces, then a
       // divider before the destinations.
       ...(onOpenRun || onNewChat ? [
         {
@@ -955,18 +936,28 @@ export function DockSidebar({
             running: activeNav === 'assistant',
             onClick: () => {
               closeFlyouts()
-              if (lastChat && onOpenRun) onOpenRun(lastChat.id)
+              if (onOpenAssistant) onOpenAssistant()
+              else if (lastChat && onOpenRun) onOpenRun(lastChat.id)
               else onNewChat?.()
             },
           },
         },
       ] : []),
+      {
+        item: {
+          key: 'workspaces', label: 'Projects', icon: Folder, tourId: 'nav-workspaces',
+          running: activeNav === 'workspaces' || activeNav === 'code',
+          onClick: () => { closeFlyouts(); knowledgeActions.openWorkspaceAt() },
+        },
+      },
       ...(SPACES_ENABLED && (!switcherOnly || totalSpaces > 0) ? [{
         item: {
           key: 'spaces', label: 'Spaces', icon: MessagesSquare, tourId: 'nav-spaces',
-          badge: totalSpacesUnread > 0 ? (totalSpacesUnread > 99 ? '99+' : String(totalSpacesUnread)) : undefined,
-          status: totalSpacesUnread > 0
-            ? `${totalSpacesUnread} for you`
+          notification: spacesNotification.unread > 0
+            ? (spacesNotification.forYou > 0 ? 'alert' as const : 'muted' as const)
+            : undefined,
+          status: spacesNotification.unread > 0
+            ? `${spacesNotification.unread} unread${spacesNotification.forYou > 0 ? ` · ${spacesNotification.forYou} for you` : ''}`
             : totalSpaces > 0 ? `${totalSpaces} space${totalSpaces === 1 ? '' : 's'}` : undefined,
           running: activeNav === 'spaces' || spacesOpen,
           onClick: () => {
@@ -1004,13 +995,6 @@ export function DockSidebar({
           onClick: () => { closeFlyouts(); onOpenMeetings?.() },
         },
       },
-      ...(codeModeEnabled ? [{
-        item: {
-          key: 'code', label: 'Code', icon: Code2, tourId: 'nav-code',
-          running: activeNav === 'code',
-          onClick: () => { closeFlyouts(); onOpenCode?.() },
-        },
-      }] : []),
       {
         item: {
           key: 'brain', label: 'Brain', icon: FileText, tourId: 'nav-knowledge',
@@ -1029,14 +1013,6 @@ export function DockSidebar({
       { sep: true },
       {
         item: {
-          key: 'workspaces', label: 'Projects', icon: Folder, tourId: 'nav-workspaces',
-          status: workspaceCount === 0 ? 'No projects' : `${workspaceCount} project${workspaceCount === 1 ? '' : 's'}`,
-          running: activeNav === 'workspaces',
-          onClick: () => { closeFlyouts(); knowledgeActions.openWorkspaceAt() },
-        },
-      },
-      {
-        item: {
           key: 'agents', label: 'Background agents', switcherLabel: 'Agents', icon: Bot, tourId: 'nav-agents',
           badge: bgAgentsFailed ? '!' : undefined,
           status: bgAgentsLabel ?? undefined,
@@ -1045,13 +1021,6 @@ export function DockSidebar({
           onClick: () => { closeFlyouts(); onOpenBgTasks?.() },
         },
       },
-      ...(onToggleBrowser ? [{
-        item: {
-          key: 'browser', label: 'Browser', icon: Globe,
-          running: browserOpen,
-          onClick: () => { closeFlyouts(); onToggleBrowser() },
-        },
-      }] : []),
       {
         item: {
           key: 'apps', label: 'Apps', icon: LayoutGrid, tourId: 'nav-apps',
@@ -1091,12 +1060,12 @@ export function DockSidebar({
     return items
   }, [
     activeNav, closeFlyouts, onOpenHome, unreadEmailCount, previewEmail, onOpenEmail,
-    codeModeEnabled, onOpenCode, meetingIsRecording, meetingSublabel, onOpenMeetings,
+    meetingIsRecording, meetingSublabel, onOpenMeetings,
     knowledgeUpdatedLabel, knowledgeActions, onOpenApps, pinnedApps, onOpenApp,
-    bgAgentsFailed, bgAgentsLabel, onToggleBrowser, browserOpen,
+    bgAgentsFailed, bgAgentsLabel,
     switcherOnly, openLastSpace, onOpenChatHistory,
-    onNewChat, lastChat, onOpenRun,
-    onOpenBgTasks, workspaceCount, totalSpacesUnread, totalSpaces, spacesOpen, chatsOpen,
+    onNewChat, lastChat, onOpenRun, onOpenAssistant,
+    onOpenBgTasks, spacesNotification, totalSpaces, spacesOpen, chatsOpen,
     outOfCredits, hasOauthError, settingsStatus, settingsAlert,
   ])
 
@@ -1351,6 +1320,12 @@ export function DockSidebar({
                   {item.badge}
                 </span>
               )}
+              {item.notification && (
+                <span
+                  className={cn('rowboat-dock-notification', item.notification === 'alert' ? 'rowboat-dock-notification-alert' : 'rowboat-dock-notification-muted')}
+                  aria-label={item.notification === 'alert' ? 'Unread Spaces activity for you' : 'Unread Spaces activity'}
+                />
+              )}
             </button>
           )
           const menu = contextMenuFor(item.key)
@@ -1429,7 +1404,7 @@ export function DockSidebar({
           activeSpace={activeSpace}
           onOpenSpace={(orgId, spaceId) => { closeFlyouts(); onOpenSpace?.(orgId, spaceId) }}
           onOpenActivity={onOpenActivity ? (orgId) => { closeFlyouts(); onOpenActivity(orgId) } : undefined}
-          onAddOrg={() => setAddOrgOpen(true)}
+          onAddOrg={() => openServerDialog({ kind: 'create' })}
           onChanged={() => void refreshSpaces()}
           onRequestRemoveOrg={(id, name) => setRemoveOrgTarget({ id, name })}
         />
@@ -1545,10 +1520,6 @@ export function DockSidebar({
         onOpenChange={setConnectionsSettingsOpen}
       />
 
-      {/* Add-org dialog lives at the root so closing the flyout can't unmount it */}
-      {SPACES_ENABLED && (
-        <AddOrgDialog open={addOrgOpen} onOpenChange={setAddOrgOpen} onAdded={() => void refreshSpaces()} />
-      )}
     </>
   )
 }
@@ -1808,6 +1779,7 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, 
     if (!name) return
     try {
       const { space } = await window.ipc.invoke('spaces:createSpace', { orgId: org.id, name })
+      analytics.spacesSpaceCreated()
       setCreating(false)
       setNewName('')
       onChanged()

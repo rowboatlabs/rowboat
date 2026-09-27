@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AssetPath, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
+import { AssetId, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 
 // Core objects shared by both faces. Every act in a space belongs to a member
 // (spec §2, principle 4); attribution carries the acting mode, never a separate
@@ -44,6 +44,9 @@ export type Member = z.infer<typeof Member>;
 export const SpaceKind = z.enum(['shared', 'direct']);
 export type SpaceKind = z.infer<typeof SpaceKind>;
 
+export const SpaceVisibility = z.enum(['private', 'open']);
+export type SpaceVisibility = z.infer<typeof SpaceVisibility>;
+
 export const Space = z.object({
   id: SpaceId,
   /**
@@ -54,6 +57,8 @@ export const Space = z.object({
   name: z.string().min(1).max(128),
   createdAt: z.iso.datetime(),
   kind: SpaceKind.default('shared'),
+  /** Old payloads and existing spaces stay private (spec §5, 2026-09-22). */
+  visibility: SpaceVisibility.default('private'),
   /**
    * Direct spaces only: the fixed member set, sorted — the DM's identity.
    * Absent on shared spaces. ONE element = the member's self-DM (notes to
@@ -94,13 +99,12 @@ export const Topic = z.object({
   archived: z.boolean(),
   /**
    * The one file this discussion is about (2026-09-11): a space asset the
-   * UI opens beside the thread. Stored as the asset's internal id, so a
-   * rename keeps the link; PROJECTED here as the asset's CURRENT live path
-   * at read time — absent when nothing is attached and while the file sits
-   * in the trash (a restore brings it back, nothing to clean up). Set via
-   * createTopic.documentPath or manageTopic attach_document/detach_document.
+   * UI opens beside the thread, by id — a rename never touches the link, and
+   * a trashed file is simply an id the live listing does not know until it
+   * is restored. Set via createTopic.documentAssetId or manageTopic
+   * attach_document/detach_document.
    */
-  documentPath: AssetPath.optional(),
+  documentAssetId: AssetId.optional(),
 });
 export type Topic = z.infer<typeof Topic>;
 
@@ -143,6 +147,8 @@ export type Reaction = z.infer<typeof Reaction>;
 export const ReactionGroup = z.object({
   emoji: ReactionEmoji,
   memberIds: z.array(MemberId).min(1),
+  /** Latest reaction event represented by this group; absent on older servers. */
+  lastOffset: StreamOffset.optional(),
 });
 export type ReactionGroup = z.infer<typeof ReactionGroup>;
 

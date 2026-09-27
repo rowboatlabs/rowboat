@@ -1283,7 +1283,7 @@ function ControlSidebar({
     return (
         <aside className="flex w-[400px] max-w-[40vw] shrink-0 flex-col overflow-hidden border-l border-border bg-background">
             {/* Header */}
-            <div className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border px-4">
+            <div className="rowboat-header flex shrink-0 items-center gap-2.5 border-b border-border px-4">
                 <ListChecks
                     className={`size-4 shrink-0 ${paused ? 'text-muted-foreground' : 'text-[var(--rowboat-success)]'}`}
                 />
@@ -1554,7 +1554,7 @@ function TaskDetail({
     return (
         <div className="flex h-full flex-col overflow-hidden">
             {/* Top bar — back to list, sidebar toggle when collapsed */}
-            <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3">
+            <div className="rowboat-header flex shrink-0 items-center gap-2 border-b border-border px-3">
                 <button
                     type="button"
                     onClick={onBack}

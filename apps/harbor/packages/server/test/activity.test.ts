@@ -1,11 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ActivityItem, ActivityPage, Message, Space } from '@rowboat/spaces-protocol';
 import { readActivity } from '@rowboat/spaces-protocol';
-import { PgStore } from '../src/pg-store.js';
-import { startHarbor, type HarborOptions, type RunningHarbor } from '../src/server.js';
-import type { SqlDb } from '../src/sql.js';
-import { agentClient, callStructured, liveClient, restClient } from './helpers.js';
-import { pgliteDb } from './pglite.js';
+import type { RunningHarbor } from '../src/server.js';
+import { agentClient, callStructured, liveClient, restClient, startTestHarbor } from './helpers.js';
 
 // Activity (2026-09-10, layer 3): everything that involves the member, as a
 // query over the facts the org already keeps — stamps, follow rows, the DM
@@ -14,14 +11,13 @@ import { pgliteDb } from './pglite.js';
 // unread, and the cursor. The agent face gets names resolved.
 
 let harbor: RunningHarbor;
-let sqlDb: SqlDb | undefined;
 let ramnique: ReturnType<typeof restClient>;
 let harsh: ReturnType<typeof restClient>;
 let arjun: ReturnType<typeof restClient>;
 let main: string;
 
-async function startForStore(kind: 'memory' | 'postgres'): Promise<void> {
-  const options: HarborOptions = {
+async function start(): Promise<void> {
+  harbor = await startTestHarbor({
     orgName: 'Rowboat Labs',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
@@ -29,14 +25,7 @@ async function startForStore(kind: 'memory' | 'postgres'): Promise<void> {
       { id: 'arjun', displayName: 'Arjun' },
     ],
     seedSpaces: [{ name: 'Main', creator: 'ramnique' }],
-  };
-  if (kind === 'postgres') {
-    sqlDb = await pgliteDb();
-    const store = new PgStore(sqlDb);
-    await store.init();
-    options.store = store;
-  }
-  harbor = await startHarbor(options);
+  });
   ramnique = restClient(harbor, 'dev-ramnique');
   harsh = restClient(harbor, 'dev-harsh');
   arjun = restClient(harbor, 'dev-arjun');
@@ -67,13 +56,13 @@ async function activity(client: ReturnType<typeof restClient>, qs = ''): Promise
 const kinds = (page: ActivityPage) => page.items.map((i) => i.kind);
 const tick = () => new Promise((resolve) => setTimeout(resolve, 2)); // distinct instants, the order under test
 
-describe.each([['memory'], ['postgres']] as const)('activity (%s store)', (storeKind) => {
+describe('activity', () => {
   let r1: Message;
   let h1: Message;
   let dm: Space;
 
   beforeAll(async () => {
-    await startForStore(storeKind);
+    await start();
     r1 = await post(ramnique, main, 'kickoff: what should we ship first?');
     await tick();
     h1 = await post(harsh, main, 'hey [@Ramnique](#member:ramnique) look at this');
@@ -99,8 +88,6 @@ describe.each([['memory'], ['postgres']] as const)('activity (%s store)', (store
   });
   afterAll(async () => {
     await harbor.close();
-    await sqlDb?.close();
-    sqlDb = undefined;
   });
 
   it('lists everything that involves me, newest first, one kind per message by priority', async () => {
@@ -146,13 +133,13 @@ describe.each([['memory'], ['postgres']] as const)('activity (%s store)', (store
     expect(new Set(all).size).toBe(all.length);
   });
 
-  it('unread is the read marks’ answer for messages and the seen mark’s for reactions', async () => {
+  it('unread uses conversation offsets for messages and reactions, preserving legacy seen marks', async () => {
     expect(kinds(await activity(ramnique, '?unread=true'))).toEqual(['here', 'reaction', 'reaction', 'mention', 'reply', 'mention']);
     const head = (await ramnique.get('/v1/unread')).body.spaces.find((s: { spaceId: string }) => s.spaceId === main).head;
     await ramnique.post(`/v1/spaces/${main}/read`, { offset: head }); // roots read: the @here and the root mention
-    expect(kinds(await activity(ramnique, '?unread=true'))).toEqual(['reaction', 'reaction', 'mention', 'reply']);
+    expect(kinds(await activity(ramnique, '?unread=true'))).toEqual(['mention', 'reply']);
     await ramnique.post(`/v1/spaces/${main}/read`, { threadRootId: r1.id, offset: head }); // the followed thread read
-    expect(kinds(await activity(ramnique, '?unread=true'))).toEqual(['reaction', 'reaction']);
+    expect(kinds(await activity(ramnique, '?unread=true'))).toEqual([]);
     const seen = await ramnique.post('/v1/activity/seen', { at: new Date().toISOString() });
     expect(seen.status).toBe(200);
     expect(kinds(await activity(ramnique, '?unread=true'))).toEqual([]);
@@ -265,4 +252,51 @@ describe.each([['memory'], ['postgres']] as const)('activity (%s store)', (store
     expect(out.items[0]!.actors[0]).toMatchObject({ memberId: 'harsh', displayName: 'Harsh' });
     await agent.close();
   });
+  it('acknowledges later reactions with the existing scoped read mark and broadcasts it', async () => {
+    const target = await post(ramnique, dm.id, 'a message I already read');
+    const other = await post(ramnique, main, 'keep this conversation unread');
+    await react(harsh, main, other.id, '✅');
+    await tick();
+    await react(harsh, dm.id, target.id, '✅');
+    const read = async (id: string, spaceId: string) => (await ramnique.get(`/v1/spaces/${spaceId}/messages/${id}`)).body.message as Message;
+    const reactionOffset = (await read(target.id, dm.id)).reactions[0]!.lastOffset!;
+    expect(reactionOffset).toBeGreaterThan(target.offset);
+    const unread = async (id: string) => (await activity(ramnique)).items.find((i) => i.message.id === id && i.kind === 'reaction')?.unread;
+    expect(await unread(target.id)).toBe(true);
+    // Fetching the message or marking only its original offset does not read a later reaction.
+    await ramnique.post(`/v1/spaces/${dm.id}/read`, { offset: target.offset });
+    expect(await unread(target.id)).toBe(true);
+    const live = await liveClient(harbor, 'dev-ramnique');
+    try {
+      await ramnique.post(`/v1/spaces/${dm.id}/read`, { offset: reactionOffset });
+      await live.until((frames) => frames.some((f) => f.kind === 'read_mark' && f.spaceId === dm.id && f.offset === reactionOffset), 'reaction read mark');
+      expect(await unread(target.id)).toBe(false);
+      expect(await unread(other.id)).toBe(true);
+      await tick();
+      await react(arjun, main, other.id, '✅');
+      // A DM discussion has its own read mark even though it shares the space log.
+      const reply = await post(ramnique, dm.id, 'my reply', { threadRoot: target.id });
+      await react(harsh, dm.id, reply.id, '👍');
+      const offset = (await read(reply.id, dm.id)).reactions[0]!.lastOffset!;
+      await ramnique.post(`/v1/spaces/${dm.id}/read`, { offset });
+      expect(await unread(reply.id)).toBe(true);
+      await ramnique.post(`/v1/spaces/${dm.id}/read`, { threadRootId: target.id, offset });
+      expect(await unread(reply.id)).toBe(false);
+      await tick();
+      await react(harsh, dm.id, target.id, '🎉');
+      expect(await unread(target.id)).toBeDefined();
+      expect((await activity(ramnique)).items.find((i) => i.message.id === target.id && i.emoji === '🎉')?.unread).toBe(true);
+    } finally { live.close(); }
+  });
+
+
+
+  it('a seen mark without milliseconds is stored in the canonical form, so a later one still advances it', async () => {
+    // Text comparison would have put '…00Z' AFTER '…00.500Z' (the 'Z' sorts above the '.'); normalized, time wins.
+    const first = await arjun.post('/v1/activity/seen', { at: '2030-01-01T00:00:00Z' });
+    expect(first.body.seenAt).toBe('2030-01-01T00:00:00.000Z');
+    const later = await arjun.post('/v1/activity/seen', { at: '2030-01-01T00:00:00.500Z' });
+    expect(later.body.seenAt).toBe('2030-01-01T00:00:00.500Z');
+  });
+
 });

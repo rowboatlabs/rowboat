@@ -4,7 +4,7 @@ import * as oauthClient from '../auth/oauth-client.js';
 import type { Configuration } from '../auth/oauth-client.js';
 import { getProviderConfig, getAvailableProviders } from '../auth/providers.js';
 import container from '../di/container.js';
-import { IOAuthRepo } from '../auth/repo.js';
+import { IOAuthRepo, isAppSignIn, rowboatSession } from '../auth/repo.js';
 import { IClientRegistrationRepo } from '../auth/client-repo.js';
 import { triggerSync as triggerGmailSync } from '../knowledge/sync_gmail.js';
 import { triggerSync as triggerCalendarSync } from '../knowledge/sync_calendar.js';
@@ -254,6 +254,86 @@ export async function resolveStartPort(
 }
 
 /**
+ * What an APP sign-in does once the Rowboat session exists: seed the assistant
+ * model, and identify the user for billing + analytics. Runs after a fresh
+ * dance, and again when a spaces-only session is promoted to an app sign-in
+ * (connectProvider below) — the person never danced for the app before.
+ */
+async function afterRowboatSignIn(): Promise<string | undefined> {
+  // Signing in connects the rowboat provider: if no assistant model is
+  // saved yet, pick the initial one (recommendation if the gateway lists it,
+  // else first listed). Never replaces a saved choice; best-effort by design.
+  await applyRowboatInitialSelection();
+  captureProviderConnected('rowboat');
+  try {
+    const billing = await getBillingInfo();
+    if (billing.userId) {
+      analyticsIdentify(billing.userId, {
+        ...(billing.userEmail ? { email: billing.userEmail } : {}),
+        plan: billing.subscriptionPlanId,
+        status: billing.subscriptionStatus,
+      });
+      analyticsCapture('user_signed_in', {
+        plan: billing.subscriptionPlanId,
+        status: billing.subscriptionStatus,
+      });
+      return billing.userId;
+    }
+  } catch (meError) {
+    console.error('[OAuth] Failed to initialize user via /v1/me:', meError);
+  }
+  return undefined;
+}
+
+/**
+ * Make sure a Rowboat session exists, for Spaces (one session, two uses —
+ * auth/tokens.ts). A healthy session is reused as is. Otherwise the ordinary
+ * `rowboat` dance runs, and — since the person chose Spaces, not the app —
+ * the session it yields is stored `spacesOnly` and no app-level sign-in
+ * event is broadcast. Resolves when the browser flow has completed; rejects
+ * when it fails, is cancelled, or times out. Never demotes an existing app
+ * sign-in.
+ */
+export async function ensureRowboatSession(): Promise<void> {
+  const oauthRepo = getOAuthRepo();
+  const existing = rowboatSession(await oauthRepo.read('rowboat'));
+  if (existing && !existing.error) return;
+
+  // Success comes back through the waiter, not the connect bus: a
+  // spaces-only session is NOT an app sign-in, so the app-facing
+  // `oauth:didConnect` (which every sidebar, settings and onboarding handler
+  // reads as "signed in") is never broadcast for it. Failures still ride the
+  // bus as for any provider.
+  const completed = new Promise<void>((resolve, reject) => {
+    let unsubscribe = () => {};
+    rowboatSpacesWaiter = () => {
+      unsubscribe();
+      resolve();
+    };
+    unsubscribe = oauthConnectBus.subscribe((event) => {
+      if (event.provider !== 'rowboat' || event.success) return;
+      unsubscribe();
+      rowboatSpacesWaiter = null;
+      reject(new Error(event.error ?? 'Rowboat sign-in failed'));
+    });
+  });
+  const started = await connectProvider('rowboat');
+  if (!started.success) {
+    rowboatSpacesWaiter = null;
+    throw new Error(started.error ?? 'Rowboat sign-in could not start');
+  }
+  await completed;
+}
+
+/**
+ * Set by ensureRowboatSession for the next connectProvider('rowboat') —
+ * marks the dance as asked for by Spaces (a session it creates is stamped
+ * spacesOnly; a re-login of an existing app sign-in keeps its app status
+ * regardless) and receives the success. Consumed once.
+ */
+let rowboatSpacesWaiter: (() => void) | null = null;
+
+/**
  * Initiate OAuth flow for a provider
  */
 export async function connectProvider(provider: string, credentials?: { clientId: string; clientSecret: string }): Promise<{ success: boolean; error?: string }> {
@@ -264,6 +344,29 @@ export async function connectProvider(provider: string, credentials?: { clientId
     cancelActiveFlow('new_flow_started');
 
     const oauthRepo = getOAuthRepo();
+
+    // One session, two uses (auth/tokens.ts). Decide up front what the
+    // session this dance yields will be: spaces-only when Spaces asked for it
+    // AND no app sign-in exists (a re-login never demotes one). And a
+    // spaces-only session that already holds the person's identity makes an
+    // app sign-in a flag flip, not a second browser trip — the app-side
+    // steps a fresh sign-in runs happen right here.
+    const spacesWaiter = provider === 'rowboat' ? rowboatSpacesWaiter : null;
+    if (provider === 'rowboat') rowboatSpacesWaiter = null;
+    const forSpaces = spacesWaiter !== null;
+    let rowboatSpacesOnly = false;
+    if (provider === 'rowboat') {
+      const connection = await oauthRepo.read('rowboat');
+      const existing = rowboatSession(connection);
+      rowboatSpacesOnly = forSpaces && !isAppSignIn(connection);
+      if (!forSpaces && existing?.spacesOnly && !existing.error) {
+        await oauthRepo.upsert('rowboat', { spacesOnly: false });
+        const userId = await afterRowboatSignIn();
+        emitOAuthEvent({ provider, success: true, ...(userId ? { userId } : {}) });
+        return { success: true };
+      }
+    }
+
     const providerConfig = await getProviderConfig(provider);
 
     // Only one email provider (Google or Microsoft) may be connected at a
@@ -351,6 +454,7 @@ export async function connectProvider(provider: string, credentials?: { clientId
             tokens,
             ...(credentials ? { clientId: credentials.clientId, clientSecret: credentials.clientSecret } : {}),
             ...(provider === 'google' ? { mode: 'byok' as const } : {}),
+            ...(provider === 'rowboat' ? { spacesOnly: rowboatSpacesOnly } : {}),
             error: null,
           });
 
@@ -368,39 +472,24 @@ export async function connectProvider(provider: string, credentials?: { clientId
           // For Rowboat sign-in, ensure user + Stripe customer exist before
           // notifying the renderer. Without this, parallel API calls from
           // multiple renderer hooks race to create the user, causing duplicates.
+          // A spaces-only session (auth/tokens.ts) skips all of it: the app
+          // is not signed in, only the identity exists — the same steps run
+          // later, when settings turns the session into an app sign-in.
           let signedInUserId: string | undefined;
-          if (provider === 'rowboat') {
-            // Signing in connects the rowboat provider: if no assistant
-            // model is saved yet, pick the initial one (recommendation if
-            // the gateway lists it, else first listed). Never replaces a
-            // saved choice; best-effort by design.
-            await applyRowboatInitialSelection();
-            captureProviderConnected('rowboat');
-            try {
-              const billing = await getBillingInfo();
-              if (billing.userId) {
-                signedInUserId = billing.userId;
-                analyticsIdentify(billing.userId, {
-                  ...(billing.userEmail ? { email: billing.userEmail } : {}),
-                  plan: billing.subscriptionPlanId,
-                  status: billing.subscriptionStatus,
-                });
-                analyticsCapture('user_signed_in', {
-                  plan: billing.subscriptionPlanId,
-                  status: billing.subscriptionStatus,
-                });
-              }
-            } catch (meError) {
-              console.error('[OAuth] Failed to initialize user via /v1/me:', meError);
-            }
+          if (provider === 'rowboat' && !rowboatSpacesOnly) {
+            signedInUserId = await afterRowboatSignIn();
           }
 
-          // Emit success event to renderer
-          emitOAuthEvent({
-            provider,
-            success: true,
-            ...(signedInUserId ? { userId: signedInUserId } : {}),
-          });
+          spacesWaiter?.();
+          // Emit success event to renderer — except for a spaces-only
+          // session, which is not an app sign-in (see ensureRowboatSession).
+          if (!rowboatSpacesOnly) {
+            emitOAuthEvent({
+              provider,
+              success: true,
+              ...(signedInUserId ? { userId: signedInUserId } : {}),
+            });
+          }
         } catch (error) {
           console.error('OAuth token exchange failed:', error);
           // Log cause chain for debugging (e.g. OAUTH_INVALID_RESPONSE -> OperationProcessingError)

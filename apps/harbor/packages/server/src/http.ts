@@ -1,12 +1,11 @@
 import { Hono, type Context } from 'hono';
 import { routes } from '@rowboat/spaces-protocol';
 import type { z } from 'zod';
-import type { AuthDriver, AuthIdentity } from './auth.js';
+import { authenticateRequest, protectedResourceMetadata, wwwAuthenticate, type AuthIdentity, type OrgAuth } from './auth.js';
 import { consentPageHtml } from './consent.js';
 import { HarborError } from './errors.js';
 import { publicOrigin } from './origin.js';
 import type { HarborService } from './service.js';
-import type { Store } from './store.js';
 
 // The render face: every route in the protocol's api.ts, nothing more. Bodies
 // and queries are validated with the contract schemas; responses are validated
@@ -51,14 +50,13 @@ function actor(c: Context<Env>): { memberId: string } {
 
 export function buildHttpApp(deps: {
   service: HarborService;
-  store: Store;
-  auth: AuthDriver;
+  auth: OrgAuth;
   /** Mounts the login/consent page (Supabase-flagship glue; consent.ts). */
   consent?: { issuer: string; publishableKey: string };
   /** Upload cap for the raw-bytes blob route (default 100MB). */
   maxBlobBytes?: number;
 }): Hono<Env> {
-  const { service, store, auth, consent } = deps;
+  const { service, auth, consent } = deps;
   const maxBlobBytes = deps.maxBlobBytes ?? DEFAULT_MAX_BLOB_BYTES;
   const app = new Hono<Env>();
 
@@ -67,10 +65,7 @@ export function buildHttpApp(deps: {
     if (!(err instanceof HarborError)) console.error('[harbor] internal error:', err);
     // RFC 9728: 401s point clients at the resource metadata so any MCP-style
     // client can find the OAuth dance mechanically.
-    if (e.code === 'unauthorized' && auth.metadata?.()) {
-      const origin = publicOrigin(c);
-      c.header('WWW-Authenticate', `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource"`);
-    }
+    if (e.code === 'unauthorized' && auth.metadata()) c.header('WWW-Authenticate', wwwAuthenticate(publicOrigin(c)));
     return c.json(e.toBody(), e.status as 400);
   });
 
@@ -78,14 +73,9 @@ export function buildHttpApp(deps: {
   // server here (the org is only ever a resource server — spec §4). 404 under
   // the dev driver, which has no AS.
   app.get('/.well-known/oauth-protected-resource', (c) => {
-    const meta = auth.metadata?.();
+    const meta = auth.metadata();
     if (!meta) throw new HarborError('not_found', 'no authorization server configured (dev auth)');
-    const origin = publicOrigin(c);
-    return c.json({
-      resource: origin,
-      authorization_servers: meta.authorizationServers,
-      bearer_methods_supported: ['header'],
-    });
+    return c.json(protectedResourceMetadata(publicOrigin(c), meta.authorizationServers));
   });
 
   // The human moment of the OAuth dance (pre-auth by nature — the person is
@@ -103,28 +93,20 @@ export function buildHttpApp(deps: {
   // the handler runs the bind ceremony instead.
   app.use('/v1/*', async (c, next) => {
     if (c.req.path === routes.resolveInvite.path || c.req.path === '/v1/health') return next();
-    const identity = await auth.authenticate(c.req.header('authorization'), new URL(c.req.url).searchParams.get('token'));
+    const credentials = { authorization: c.req.header('authorization'), queryToken: new URL(c.req.url).searchParams.get('token') };
     if (c.req.path === routes.acceptInvite.path) {
+      const { identity, member } = await authenticateRequest(auth, credentials, { allowUnmapped: true });
       c.set('identity', identity);
-      try {
-        c.set('memberId', (await auth.resolveMember(store, identity)).id);
-      } catch (err) {
-        if (!(err instanceof HarborError) || err.code !== 'not_a_member') throw err;
-      }
+      if (member) c.set('memberId', member.id);
       return next();
     }
-    const member = await auth.resolveMember(store, identity);
-    c.set('memberId', member.id);
+    c.set('memberId', (await authenticateRequest(auth, credentials)).member.id);
     return next();
   });
 
   app.get('/v1/health', (c) => c.json({ ok: true, org: { name: service.org.name, address: service.org.address } }));
 
-  app.get(routes.me.path, async (c) => {
-    const member = await store.getMember(c.get('memberId'));
-    if (!member) throw new HarborError('not_found', 'member not found');
-    return reply(c, routes.me.response, { member });
-  });
+  app.get(routes.me.path, async (c) => reply(c, routes.me.response, { member: await service.me(actor(c)) }));
 
   // --- spaces & membership ---------------------------------------------------
 
@@ -137,9 +119,17 @@ export function buildHttpApp(deps: {
     return reply(c, routes.listSpaces.response, { spaces });
   });
 
+  app.get(routes.browseSpaces.path, async (c) =>
+    reply(c, routes.browseSpaces.response, { spaces: await service.browseSpaces(actor(c)) }));
+
+  app.post(routes.joinSpace.path, async (c) => {
+    const { spaceId } = parseWith(routes.joinSpace.params, c.req.param());
+    return reply(c, routes.joinSpace.response, await service.joinSpace(actor(c), spaceId));
+  });
+
   app.post(routes.createSpace.path, async (c) => {
     const input = await body(c, routes.createSpace.request);
-    return reply(c, routes.createSpace.response, { space: await service.createSpace(actor(c), input.name) });
+    return reply(c, routes.createSpace.response, { space: await service.createSpace(actor(c), input.name, input.visibility) });
   });
 
   app.post('/v1/spaces/:spaceId/rename', async (c) => {
@@ -201,17 +191,44 @@ export function buildHttpApp(deps: {
     return reply(c, routes.acceptInvite.response, result);
   });
 
-  // Human-shareable invite link target. The app intercepts these URLs; anyone
-  // else gets a plain page naming the space (resolution is pre-auth by design).
+  // The invite link's landing (2026-09-15): a browser-opened /join/<token>
+  // hands the invite into the app as rowboat://open?type=spaces&org=…&invite=…
+  // — the same deep-link grammar as the org link landings below, the org
+  // named by its address — and shows what is being joined meanwhile (invite
+  // resolution is pre-auth by design, spec §4). A dead invite says so and
+  // launches nothing.
   app.get('/join/:token', async (c) => {
-    const resolved = await service.resolveInvite(c.req.param('token'));
-    if (resolved.state !== 'ok') return c.text(`This invite is ${resolved.state}.`, 410);
-    const by = resolved.invitedBy ? ` by ${resolved.invitedBy}` : '';
-    return c.text(
-      `You're invited${by} to the space "${resolved.space.name}" on ${resolved.org.name}.\n` +
-        `Open this link in Rowboat to join.\n`,
-    );
+    const token = c.req.param('token');
+    const resolved = await service.resolveInvite(token);
+    if (resolved.state !== 'ok') return c.html(invitePage({ state: resolved.state }), 410);
+    const deep = `rowboat://open?type=spaces&org=${encodeURIComponent(service.org.address)}&invite=${encodeURIComponent(token)}`;
+    return c.html(invitePage({ state: 'ok', space: resolved.space.name, org: resolved.org.name, invitedBy: resolved.invitedBy, deep }));
   });
+
+  // --- link landings ---------------------------------------------------------
+  // Every org link (ids.ts grammar) opened in a browser lands here and is
+  // handed into the app as a rowboat:// deep link, the org named by its
+  // address. Nothing is looked up and nothing is rendered about the target,
+  // so a link says nothing to someone who cannot open it. The app itself
+  // intercepts these URLs before they ever reach a browser.
+  const landing = (target: URLSearchParams) => {
+    target.set('org', service.org.address);
+    const deep = `rowboat://open?type=spaces&${target.toString()}`;
+    return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Open in Rowboat</title>` +
+      `<style>body{font:15px/1.5 system-ui,sans-serif;margin:0;display:grid;place-items:center;min-height:100vh;color:#222;background:#fafafa}` +
+      `main{text-align:center;padding:2rem}a.b{display:inline-block;margin-top:1rem;padding:.6rem 1.1rem;border-radius:8px;background:#111;color:#fff;text-decoration:none}</style>` +
+      `<main><p>This link opens in Rowboat.</p><a class="b" href="${deep}">Open in Rowboat</a></main>` +
+      `<script>location.replace(${JSON.stringify(deep)})</script>`;
+  };
+  app.get('/', (c) => c.html(landing(new URLSearchParams())));
+  app.get('/s/:spaceId', (c) => c.html(landing(new URLSearchParams({ spaceId: c.req.param('spaceId') }))));
+  app.get('/s/:spaceId/m/:messageId', (c) =>
+    c.html(landing(new URLSearchParams({ spaceId: c.req.param('spaceId'), messageId: c.req.param('messageId') }))),
+  );
+  app.get('/s/:spaceId/a/:assetId', (c) =>
+    c.html(landing(new URLSearchParams({ spaceId: c.req.param('spaceId'), assetId: c.req.param('assetId') }))),
+  );
+  app.get('/u/:memberId', (c) => c.html(landing(new URLSearchParams({ memberId: c.req.param('memberId') }))));
 
   // --- assets ----------------------------------------------------------------
 
@@ -223,6 +240,12 @@ export function buildHttpApp(deps: {
     });
     const entries = await service.listAssets(actor(c), spaceId, q.includeDeleted ?? false);
     return reply(c, routes.listAssets.response, { entries });
+  });
+
+  app.post('/v1/spaces/:spaceId/assets', async (c) => {
+    const { spaceId } = parseWith(routes.createAsset.params, c.req.param());
+    const input = await body(c, routes.createAsset.request);
+    return reply(c, routes.createAsset.response, await service.createAsset(actor(c), spaceId, input));
   });
 
   app.post('/v1/spaces/:spaceId/assets/move', async (c) => {
@@ -244,13 +267,12 @@ export function buildHttpApp(deps: {
     return reply(c, routes.restoreAsset.response, await service.restoreAsset(actor(c), spaceId, input));
   });
 
-  app.get('/v1/spaces/:spaceId/asset', async (c) => {
-    const { spaceId } = parseWith(routes.readAsset.params, c.req.param());
+  app.get('/v1/spaces/:spaceId/assets/:assetId', async (c) => {
+    const { spaceId, assetId } = parseWith(routes.readAsset.params, c.req.param());
     const q = parseWith(routes.readAsset.query, {
-      path: c.req.query('path'),
       ...(c.req.query('version') !== undefined ? { version: c.req.query('version') } : {}),
     });
-    return reply(c, routes.readAsset.response, await service.readAsset(actor(c), spaceId, q.path, q.version));
+    return reply(c, routes.readAsset.response, await service.readAsset(actor(c), spaceId, assetId, q.version));
   });
 
   app.post('/v1/spaces/:spaceId/changes', async (c) => {
@@ -263,7 +285,7 @@ export function buildHttpApp(deps: {
   app.get('/v1/spaces/:spaceId/history', async (c) => {
     const { spaceId } = parseWith(routes.assetHistory.params, c.req.param());
     const q = parseWith(routes.assetHistory.query, {
-      ...(c.req.query('path') !== undefined ? { path: c.req.query('path') } : {}),
+      ...(c.req.query('assetId') !== undefined ? { assetId: c.req.query('assetId') } : {}),
       ...(c.req.query('beforeOffset') !== undefined ? { beforeOffset: c.req.query('beforeOffset') } : {}),
       ...(c.req.query('limit') !== undefined ? { limit: c.req.query('limit') } : {}),
     });
@@ -274,11 +296,11 @@ export function buildHttpApp(deps: {
   app.get('/v1/spaces/:spaceId/diff', async (c) => {
     const { spaceId } = parseWith(routes.diff.params, c.req.param());
     const q = parseWith(routes.diff.query, {
-      path: c.req.query('path'),
+      assetId: c.req.query('assetId'),
       from: c.req.query('from'),
       to: c.req.query('to'),
     });
-    const unified = await service.diff(actor(c), spaceId, q.path, q.from, q.to);
+    const unified = await service.diff(actor(c), spaceId, q.assetId, q.from, q.to);
     return reply(c, routes.diff.response, { unified });
   });
 
@@ -362,15 +384,24 @@ export function buildHttpApp(deps: {
     const { spaceId } = parseWith(routes.listStream.params, c.req.param());
     const q = parseWith(routes.listStream.query, {
       ...(c.req.query('beforeOffset') !== undefined ? { beforeOffset: c.req.query('beforeOffset') } : {}),
+      ...(c.req.query('afterOffset') !== undefined ? { afterOffset: c.req.query('afterOffset') } : {}),
+      ...(c.req.query('aroundOffset') !== undefined ? { aroundOffset: c.req.query('aroundOffset') } : {}),
       ...(c.req.query('limit') !== undefined ? { limit: c.req.query('limit') } : {}),
     });
     return reply(c, routes.listStream.response, await service.listStream(actor(c), spaceId, q));
+  });
+
+  app.get('/v1/spaces/:spaceId/messages/:messageId', async (c) => {
+    const { spaceId, messageId } = parseWith(routes.getMessage.params, c.req.param());
+    return reply(c, routes.getMessage.response, { message: await service.getMessage(actor(c), spaceId, messageId) });
   });
 
   app.get('/v1/spaces/:spaceId/threads/:rootMessageId', async (c) => {
     const { spaceId, rootMessageId } = parseWith(routes.listThread.params, c.req.param());
     const q = parseWith(routes.listThread.query, {
       ...(c.req.query('beforeOffset') !== undefined ? { beforeOffset: c.req.query('beforeOffset') } : {}),
+      ...(c.req.query('afterOffset') !== undefined ? { afterOffset: c.req.query('afterOffset') } : {}),
+      ...(c.req.query('aroundOffset') !== undefined ? { aroundOffset: c.req.query('aroundOffset') } : {}),
       ...(c.req.query('limit') !== undefined ? { limit: c.req.query('limit') } : {}),
     });
     return reply(c, routes.listThread.response, await service.listThread(actor(c), spaceId, rootMessageId, q));
@@ -461,13 +492,45 @@ export function buildHttpApp(deps: {
     return reply(c, routes.activity.response, await service.activity(actor(c), q));
   });
   app.post(routes.markActivitySeen.path, async (c) => {
-    const body = parseWith(routes.markActivitySeen.request, await c.req.json());
-    return reply(c, routes.markActivitySeen.response, await service.markActivitySeen(actor(c), body.at));
+    const input = await body(c, routes.markActivitySeen.request);
+    return reply(c, routes.markActivitySeen.response, await service.markActivitySeen(actor(c), input.at));
   });
   app.post(routes.readAll.path, async (c) => {
-    const body = parseWith(routes.readAll.request, await c.req.json());
-    return reply(c, routes.readAll.response, await service.readAll(actor(c), body));
+    const input = await body(c, routes.readAll.request);
+    return reply(c, routes.readAll.response, await service.readAll(actor(c), input));
   });
 
   return app;
+}
+
+const DOWNLOAD_URL = 'https://github.com/rowboatlabs/rowboat/releases/latest';
+
+function escapeHtml(text: string): string {
+  return text.replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!);
+}
+
+type InvitePage =
+  | { state: 'ok'; space: string; org: string; invitedBy?: string; deep: string }
+  | { state: 'expired' | 'revoked' };
+
+/** The /join landing: launch the app with the invite, or say why not. */
+function invitePage(page: InvitePage): string {
+  const style =
+    `<style>body{font:15px/1.5 system-ui,sans-serif;margin:0;display:grid;place-items:center;min-height:100vh;color:#222;background:#fafafa}` +
+    `main{text-align:center;padding:2rem;max-width:26rem}h1{font-size:1.25rem;margin:0 0 .25rem}p{margin:.25rem 0}.m{color:#666}` +
+    `a.b{display:inline-block;margin-top:1rem;padding:.6rem 1.1rem;border-radius:8px;background:#111;color:#fff;text-decoration:none}` +
+    `.s{margin-top:1.25rem;font-size:13px;color:#666}.s a{color:inherit}</style>`;
+  const head = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">`;
+  if (page.state !== 'ok') {
+    const why = page.state === 'expired' ? 'This invite has expired.' : 'This invite was revoked.';
+    return `${head}<title>Invite ${page.state}</title>${style}<main><h1>${why}</h1><p class="m">Ask whoever sent it for a new link.</p></main>`;
+  }
+  const by = page.invitedBy ? `<p class="m">Invited by ${escapeHtml(page.invitedBy)}</p>` : '';
+  return (
+    `${head}<title>Join ${escapeHtml(page.space)} on ${escapeHtml(page.org)}</title>${style}<main>` +
+    `<h1>You're invited to ${escapeHtml(page.space)}</h1><p class="m">on ${escapeHtml(page.org)}</p>${by}` +
+    `<a class="b" href="${page.deep}">Open in Rowboat</a>` +
+    `<p class="s">Don't have Rowboat? <a href="${DOWNLOAD_URL}">Download it</a>, then open this link again.</p></main>` +
+    `<script>location.replace(${JSON.stringify(page.deep)})</script>`
+  );
 }

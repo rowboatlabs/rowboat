@@ -31,6 +31,8 @@ import {
 } from '@/components/ui/context-menu'
 import { projectLabel, type ProjectRow } from './use-code-sessions'
 import { AGENT_LABEL, isAgentReady, type CodeAgentsStatus } from './code-agent-status'
+import { useUnreadCodeSessions } from './session-read-state'
+import { UnreadBadge } from '@/components/spaces/unread-badge'
 
 // The Done pile shows this many before asking for "Show all" — a display
 // cap, never a deletion policy.
@@ -82,7 +84,7 @@ function ProjectMenuItems({ context = false, projectId, agentsStatus, onNewSessi
   return (
     <>
       <Item onSelect={() => onNewSession(projectId)}>
-        <Plus className="size-4" /> New worktree
+        <Plus className="size-4" /> New thread
       </Item>
       {(['claude', 'codex'] as CodingAgent[]).map((agent) => (
         <Item
@@ -90,7 +92,7 @@ function ProjectMenuItems({ context = false, projectId, agentsStatus, onNewSessi
           disabled={agentsStatus !== null && !isAgentReady(agentsStatus, agent)}
           onSelect={() => onNewSession(projectId, agent)}
         >
-          <span className="size-4" /> New {AGENT_LABEL[agent]} worktree
+          <span className="size-4" /> New {AGENT_LABEL[agent]} thread
         </Item>
       ))}
       <Separator />
@@ -135,7 +137,9 @@ function StatusDot({ status }: { status: CodeSessionStatus }) {
 // membership and activity are aggregated by the rail below.
 function SessionRow({
   session,
+  workspaceTitle,
   sessionCount = 1,
+  unreadCount,
   workspaceStarted = false,
   status,
   selected,
@@ -147,7 +151,11 @@ function SessionRow({
   onDelete,
 }: {
   session: CodeSession
+  /** What the card is called: the first session's title, so the card keeps its
+   *  name as sibling chats come and go. */
+  workspaceTitle: string
   sessionCount?: number
+  unreadCount: number
   workspaceStarted?: boolean
   status: CodeSessionStatus
   selected: boolean
@@ -163,7 +171,7 @@ function SessionRow({
   const baseChange = useWorktreeBaseChange(session, actionsOpen, workspaceStarted)
   const worktree = session.worktree && !session.worktree.removedAt ? session.worktree : undefined
   const when = formatRelativeTime((done && session.doneAt) || session.lastActivityAt || session.createdAt)
-  const detail = `${sessionCount} session${sessionCount === 1 ? '' : 's'} · ${session.worktree?.removedAt ? 'Removed worktree' : session.title}`
+  const detail = `${sessionCount} session${sessionCount === 1 ? '' : 's'}${session.worktree?.removedAt ? ' · Removed worktree' : ''}`
   const ToggleIcon = done ? RotateCcw : Check
   const toggleLabel = done ? 'Reopen' : 'Mark as done'
   return (
@@ -173,7 +181,7 @@ function SessionRow({
         <div
           role="button"
           tabIndex={0}
-          title={`${session.title}\n${AGENT_LABEL[session.agent] ?? session.agent}${worktree ? ` · ${worktree.branch}` : ''}`}
+          title={`${workspaceTitle}\n${AGENT_LABEL[session.agent] ?? session.agent}${worktree ? ` · ${worktree.branch}` : ''}`}
           className={cn(
             'group relative mt-0.5 flex cursor-pointer items-start gap-2.5 rounded-lg py-1.5 pl-2.5 pr-1.5',
             indent && 'ml-3',
@@ -193,19 +201,18 @@ function SessionRow({
             <div className="flex items-baseline gap-2">
               <span className={cn('min-w-0 flex-1 truncate text-[13px] leading-5', selected ? 'font-medium' : 'text-foreground/90')}>
                 {prefix && <span className="text-muted-foreground">{prefix} · </span>}
-                {worktree?.branch ?? session.title}
+                {workspaceTitle}
               </span>
-              {/* The time's slot is exactly as wide as the hover actions, so the
-                  actions replace the time — never the title beside it. */}
-              <span className="w-12 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground/70 transition-opacity group-hover:opacity-0 group-has-[[data-state=open]]:opacity-0">
-                {when}
-              </span>
+              <UnreadBadge badge={{ unread: unreadCount, forYou: unreadCount }} direct />
             </div>
-            <div className="truncate text-[11px] leading-4 text-muted-foreground/70">{detail}</div>
+            <div className="flex items-baseline gap-1 truncate text-[11px] leading-4 text-muted-foreground/70">
+              <span className="truncate">{detail}</span>
+              <span className="shrink-0 tabular-nums">· {when}</span>
+            </div>
           </div>
-          {/* Hover actions sit in the time's reserved slot so the card never
-              reflows and nothing overlaps the text. */}
-          <div className="absolute right-1.5 top-1 flex items-center opacity-0 transition-opacity group-hover:opacity-100 has-[[data-state=open]]:opacity-100">
+          {/* 2026-09-22: float the actions like Spaces so titles can use the
+              full row width without reserving a permanent button slot. */}
+          <div className="pointer-events-none absolute right-1 -top-2 z-10 flex items-center rounded-md border border-border bg-[var(--rowboat-raised)] p-0.5 opacity-0 shadow-sm transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 has-[[data-state=open]]:pointer-events-auto has-[[data-state=open]]:opacity-100">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -287,6 +294,8 @@ export function SessionRail({
    *  while the chat pane beside it draws the divider. */
   className?: string
 }) {
+  const unreadSessions = useUnreadCodeSessions()
+  const unreadCount = (members: CodeSession[]) => members.filter((s) => unreadSessions.has(s.id)).length
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
   const toggleCollapsed = (projectId: string) => {
     setCollapsed((prev) => {
@@ -308,7 +317,12 @@ export function SessionRail({
     groups.set(key, [...(groups.get(key) ?? []), session])
   }
   const representatives = [...groups.values()].map((members) => members.find((s) => s.id === selectedSessionId) ?? members.find((s) => !s.doneAt) ?? members[0])
+  // The card is named after the chat that opened the workspace — the store
+  // orders sessions by attention, so ask for the oldest one explicitly.
+  const workspaceTitle = (s: CodeSession) => groups.get(codeWorkspaceKey(s))!
+    .reduce((first, member) => (member.createdAt.localeCompare(first.createdAt) || member.id.localeCompare(first.id)) < 0 ? member : first).title
   const groupDone = (s: CodeSession) => groups.get(codeWorkspaceKey(s))!.every((member) => !!member.doneAt)
+  const groupUnreadCount = (s: CodeSession) => unreadCount(groups.get(codeWorkspaceKey(s))!)
   const groupStatus = (s: CodeSession): CodeSessionStatus => {
     const statuses = groups.get(codeWorkspaceKey(s))!.map((member) => statusOf(member.id))
     return statuses.includes('needs-you') ? 'needs-you' : statuses.includes('working') ? 'working' : 'idle'
@@ -320,12 +334,13 @@ export function SessionRail({
     .filter(groupDone)
     .sort((a, b) => (b.doneAt ?? '').localeCompare(a.doneAt ?? ''))
   const visibleDone = showAllDone ? done : done.slice(0, DONE_VISIBLE_LIMIT)
+  const doneUnreadCount = done.reduce((count, session) => count + groupUnreadCount(session), 0)
   const labelByProject = new Map(projects.map((row) => [row.project.id, projectLabel(row)]))
 
   // The rail's content — the shell renders it at the docked width.
   const body = (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex h-9 shrink-0 items-center justify-between border-b border-border pl-3 pr-1.5">
+      <div className="rowboat-header flex shrink-0 items-center justify-between border-b border-border pl-3 pr-1.5">
         <span className="text-[13px] text-muted-foreground">Projects</span>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -343,7 +358,7 @@ export function SessionRail({
           <div className="flex flex-col items-center gap-3 px-3 py-10 text-center">
             <FolderGit2 className="size-8 text-muted-foreground/50" />
             <p className="text-xs text-muted-foreground">
-              Add a project folder to start running coding agents on it.
+              Open a folder to start a project conversation.
             </p>
             <Button size="sm" variant="outline" onClick={onAddProject}>
               <FolderPlus className="size-3.5" />
@@ -358,11 +373,12 @@ export function SessionRail({
           // folder name needs its parent to stay tellable-apart.
           const parentHint = row.git.root ? '' : parentPath(project.path)
           const projectSessions = active.filter((s) => s.projectId === project.id)
+          const projectUnreadCount = unreadCount(sessions.filter((s) => s.projectId === project.id))
           const isCollapsed = collapsed.has(project.id)
-          // A collapsed group still surfaces its live sessions — attention
-          // must not hide behind a chevron.
+          // 2026-09-22: keep live and unread completed sessions visible when
+          // collapsed so the notification still points to the work to open.
           const visibleSessions = isCollapsed
-            ? projectSessions.filter((s) => groupStatus(s) !== 'idle' || s.id === selectedSessionId)
+            ? projectSessions.filter((s) => groupStatus(s) !== 'idle' || groupUnreadCount(s) > 0 || s.id === selectedSessionId)
             : projectSessions
           return (
             <div key={project.id} className="mb-2">
@@ -400,6 +416,7 @@ export function SessionRail({
                               )}
                             </span>
                           </span>
+                          <UnreadBadge badge={{ unread: projectUnreadCount, forYou: projectUnreadCount }} direct />
                         </button>
                       </TooltipTrigger>
                       <TooltipContent side="right" className="max-w-[420px] break-all font-mono text-xs">
@@ -411,7 +428,7 @@ export function SessionRail({
                       size="sm"
                       className="h-6 w-6 shrink-0 p-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
                       onClick={() => onNewSession(project.id)}
-                      title="New worktree"
+                      title="New thread"
                     >
                       <Plus className="size-3.5" />
                     </Button>
@@ -442,13 +459,15 @@ export function SessionRail({
                   className="ml-6 flex h-7 items-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground"
                 >
                   <Plus className="size-3" />
-                  New worktree
+                  New thread
                 </button>
               )}
               {visibleSessions.map((session) => (
                 <SessionRow
                   key={session.id}
                   session={session}
+                  workspaceTitle={workspaceTitle(session)}
+                  unreadCount={groupUnreadCount(session)}
                   sessionCount={groups.get(codeWorkspaceKey(session))!.length}
                   workspaceStarted={groups.get(codeWorkspaceKey(session))!.some((member) => !!member.lastActivityAt || statusOf(member.id) !== 'idle')}
                   status={groupStatus(session)}
@@ -484,6 +503,7 @@ export function SessionRail({
             {doneOpen ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
             <span>Done</span>
             <span className="tabular-nums text-muted-foreground/70">{done.length}</span>
+            <UnreadBadge badge={{ unread: doneUnreadCount, forYou: doneUnreadCount }} direct />
           </button>
           {doneOpen && (
             <div className="min-h-0 flex-1 overflow-auto px-2 pb-2">
@@ -491,6 +511,8 @@ export function SessionRail({
                 <SessionRow
                   key={session.id}
                   session={session}
+                  workspaceTitle={workspaceTitle(session)}
+                  unreadCount={groupUnreadCount(session)}
                   sessionCount={groups.get(codeWorkspaceKey(session))!.length}
                   workspaceStarted={groups.get(codeWorkspaceKey(session))!.some((member) => !!member.lastActivityAt || statusOf(member.id) !== 'idle')}
                   status={groupStatus(session)}

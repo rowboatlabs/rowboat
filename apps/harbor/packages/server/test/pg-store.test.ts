@@ -4,7 +4,7 @@ import { SpaceHub } from '../src/hub.js';
 import { PgStore } from '../src/pg-store.js';
 import { HarborService } from '../src/service.js';
 import type { SqlDb } from '../src/sql.js';
-import { pgliteDb } from './pglite.js';
+import { pgliteDb } from '../src/sql-pglite.js';
 
 // Store-level paths the §11 day doesn't walk, exercised on real Postgres
 // through the real service (no HTTP — this is the storage contract, not the
@@ -15,6 +15,8 @@ let db: SqlDb;
 let store: PgStore;
 let service: HarborService;
 let spaceId: string;
+/** log.md's id — files are addressed by id (2026-09-14); the path is a display property. */
+let logId: string;
 
 const ram = { memberId: 'ramnique' };
 const gagan = { memberId: 'gagan' };
@@ -38,10 +40,18 @@ afterAll(async () => {
 
 describe('PgStore through the service', () => {
   it('history pagination pages backwards without gaps or repeats', async () => {
-    for (let i = 0; i < 7; i++) {
-      const head = i === 0 ? 0 : (await service.readAsset(ram, spaceId, 'log.md')).version;
+    const born = await service.createAsset(ram, spaceId, {
+      path: 'log.md',
+      newContent: 'line\n',
+      reason: 'edit 1',
+      actingMode: 'direct',
+    });
+    logId = born.asset.id;
+    expect(born.changeSet).toMatchObject({ assetId: logId, assetPath: 'log.md', baseVersion: 0, resultVersion: 1 });
+    for (let i = 1; i < 7; i++) {
+      const head = (await service.readAsset(ram, spaceId, logId)).version;
       const r = await service.proposeChange(ram, spaceId, {
-        assetPath: 'log.md',
+        assetId: logId,
         baseVersion: head,
         newContent: `line\n`.repeat(i + 1),
         reason: `edit ${i + 1}`,
@@ -49,24 +59,27 @@ describe('PgStore through the service', () => {
       });
       expect(r.outcome).toBe('applied');
     }
-    const page1 = await service.assetHistory(ram, spaceId, { path: 'log.md', limit: 3 });
+    const page1 = await service.assetHistory(ram, spaceId, { assetId: logId, limit: 3 });
     expect(page1.map((cs) => cs.resultVersion)).toEqual([7, 6, 5]);
     const page2 = await service.assetHistory(ram, spaceId, {
-      path: 'log.md',
+      assetId: logId,
       beforeOffset: page1.at(-1)!.offset,
       limit: 3,
     });
     expect(page2.map((cs) => cs.resultVersion)).toEqual([4, 3, 2]);
     const page3 = await service.assetHistory(ram, spaceId, {
-      path: 'log.md',
+      assetId: logId,
       beforeOffset: page2.at(-1)!.offset,
       limit: 3,
     });
     expect(page3.map((cs) => cs.resultVersion)).toEqual([1]);
+    // An unknown id is an empty lineage, not an error.
+    expect(await service.assetHistory(ram, spaceId, { assetId: 'no-such-asset', limit: 3 })).toEqual([]);
   });
 
   it('time-travel reads reconstruct any version with history filtered to it', async () => {
-    const v3 = await service.readAsset(ram, spaceId, 'log.md', 3);
+    const v3 = await service.readAsset(ram, spaceId, logId, 3);
+    expect(v3).toMatchObject({ id: logId, path: 'log.md', version: 3 });
     expect(v3.content).toBe('line\n'.repeat(3));
     expect(v3.recentHistory.every((cs) => cs.resultVersion <= 3)).toBe(true);
   });
@@ -100,38 +113,47 @@ describe('PgStore through the service', () => {
     expect(thread.messages.map((m) => m.body)).toEqual(['A follow-up']);
   });
 
-  it('a topic\'s document is stored by asset id and projected as the live path (migration 019)', async () => {
-    await service.proposeChange(ram, spaceId, { assetPath: 'brief.md', baseVersion: 0, newContent: '# Brief\n', actingMode: 'direct' });
+  it('a topic\'s document is the asset id on the row, carried through rename and trash (migrations 019/020)', async () => {
+    const { asset } = await service.createAsset(ram, spaceId, { path: 'brief.md', newContent: '# Brief\n', actingMode: 'direct' });
     const b = await service.postMessage(ram, spaceId, { body: 'Root B', actingMode: 'direct' });
     const { topic } = await service.createTopic(ram, spaceId, {
       rootMessageId: b.message.id,
       title: 'Review: the brief',
-      documentPath: 'brief.md',
+      documentAssetId: asset.id,
       actingMode: 'direct',
     });
-    expect(topic.documentPath).toBe('brief.md');
-    // The row keeps the internal id; putTopic (a retitle) must not disturb it.
-    const asset = await store.getLiveAssetByPath(spaceId, 'brief.md');
-    expect(await store.getTopicDocument(spaceId, topic.id)).toBe(asset!.id);
+    expect(topic.documentAssetId).toBe(asset.id);
+    // The row carries the id; putTopic (a retitle) must not disturb it.
+    expect((await store.getTopic(spaceId, topic.id))?.documentAssetId).toBe(asset.id);
     const retitled = await service.manageTopic(ram, spaceId, topic.id, { action: 'retitle', title: 'Review: the brief (v2)', actingMode: 'direct' });
-    expect(retitled.documentPath).toBe('brief.md');
+    expect(retitled.documentAssetId).toBe(asset.id);
 
-    // Rename → new path on every read; the getTopicByRoot and thread paths project too.
-    await service.moveAsset(ram, spaceId, { fromPath: 'brief.md', toPath: 'journal.md', baseVersion: 1, actingMode: 'direct' });
-    expect((await store.getTopicByRoot(spaceId, b.message.id))?.documentPath).toBe('journal.md');
-    expect((await service.listThread(ram, spaceId, b.message.id)).topic?.documentPath).toBe('journal.md');
+    // Rename → the link is by id, so nothing on the topic changes; the
+    // getTopicByRoot and thread paths carry the same id.
+    await service.moveAsset(ram, spaceId, { assetId: asset.id, toPath: 'journal.md', baseVersion: 1, actingMode: 'direct' });
+    expect((await store.getTopicByRoot(spaceId, b.message.id))?.documentAssetId).toBe(asset.id);
+    expect((await service.listThread(ram, spaceId, b.message.id)).topic?.documentAssetId).toBe(asset.id);
+    expect((await service.readAsset(ram, spaceId, asset.id)).path).toBe('journal.md');
 
-    // Trash → projected away, link kept; detach is still a real change then.
-    await service.deleteAsset(ram, spaceId, { path: 'journal.md', baseVersion: 1, actingMode: 'direct' });
-    expect((await store.getTopic(spaceId, topic.id))?.documentPath).toBeUndefined();
-    expect(await store.getTopicDocument(spaceId, topic.id)).toBe(asset!.id);
+    // Trash → the id is still projected (the client decides what to show);
+    // detach is a real change, and a second detach is a no-op.
+    await service.deleteAsset(ram, spaceId, { assetId: asset.id, baseVersion: 1, actingMode: 'direct' });
+    expect((await store.getTopic(spaceId, topic.id))?.documentAssetId).toBe(asset.id);
     const detached = await service.manageTopic(ram, spaceId, topic.id, { action: 'detach_document', actingMode: 'direct' });
-    expect(detached.documentPath).toBeUndefined();
-    expect(await store.getTopicDocument(spaceId, topic.id)).toBeUndefined();
+    expect(detached.documentAssetId).toBeUndefined();
+    expect((await store.getTopic(spaceId, topic.id))?.documentAssetId).toBeUndefined();
+    await service.manageTopic(ram, spaceId, topic.id, { action: 'detach_document', actingMode: 'direct' });
+    // A trashed file cannot be attached; restore it, attach, and attaching the same id again is a no-op.
+    await expect(
+      service.manageTopic(ram, spaceId, topic.id, { action: 'attach_document', assetId: asset.id, actingMode: 'direct' }),
+    ).rejects.toMatchObject({ code: 'not_found' });
+    await service.restoreAsset(ram, spaceId, { assetId: asset.id, actingMode: 'direct' });
+    const attached = await service.manageTopic(ram, spaceId, topic.id, { action: 'attach_document', assetId: asset.id, actingMode: 'direct' });
+    expect(attached.documentAssetId).toBe(asset.id);
+    await service.manageTopic(ram, spaceId, topic.id, { action: 'attach_document', assetId: asset.id, actingMode: 'direct' });
     const events = await store.listEventsAfter(spaceId, 0);
     expect(events.filter((e) => e.event.type === 'topic' && e.event.topic.id === topic.id).map((e) => (e.event as { action: string }).action))
-      .toEqual(['created', 'retitled', 'document_detached']);
-    await service.restoreAsset(ram, spaceId, { path: 'journal.md', actingMode: 'direct' });
+      .toEqual(['created', 'retitled', 'document_detached', 'document_attached']);
   });
 
   it('search finds topic-title and body matches across jsonb-backed rows', async () => {
@@ -160,8 +182,8 @@ describe('PgStore through the service', () => {
 
   it('attribution jsonb survives storage byte-for-byte', async () => {
     const r = await service.proposeChange(gagan, spaceId, {
-      assetPath: 'log.md',
-      baseVersion: (await service.readAsset(gagan, spaceId, 'log.md')).version,
+      assetId: logId,
+      baseVersion: (await service.readAsset(gagan, spaceId, logId)).version,
       newContent: 'rewritten\n',
       reason: 'agent push',
       actingMode: 'agent',
@@ -184,7 +206,7 @@ describe('PgStore through the service', () => {
       actingMode: 'agent',
       agentName: 'Rowboat',
     });
-    expect(both.reactions).toEqual([{ emoji: '👍', memberIds: ['gagan', 'ramnique'] }]);
+    expect(both.reactions).toEqual([{ emoji: '👍', memberIds: ['gagan', 'ramnique'], lastOffset: expect.any(Number) }]);
 
     // Attribution jsonb round-trips (same guarantee change_sets has).
     const stored = await store.getReaction(spaceId, messageId, '👍', 'ramnique');
@@ -193,7 +215,7 @@ describe('PgStore through the service', () => {
     // Windowed stream reads fold the same state in.
     const stream = await service.listStream(ram, spaceId);
     expect(stream.messages.find((m) => m.id === messageId)?.reactions).toEqual([
-      { emoji: '👍', memberIds: ['gagan', 'ramnique'] },
+      { emoji: '👍', memberIds: ['gagan', 'ramnique'], lastOffset: expect.any(Number) },
     ]);
 
     // Remove drops the member; removing the last drops the group.
@@ -217,7 +239,7 @@ describe('PgStore through the service', () => {
 
     // The stored message event was redacted in place — replay carries no body —
     // and the message_deleted event narrates with full attribution.
-    const events = await service.eventsAfter(spaceId, 0);
+    const events = await store.listEventsAfter(spaceId, 0);
     const messageEvent = events.find((e) => e.event.type === 'message' && e.event.message.id === messageId)!;
     expect(messageEvent.event).toMatchObject({ message: { body: '', deletedAt: deleted.deletedAt } });
     const deletion = events.find((e) => e.event.type === 'message_deleted')!;
@@ -226,9 +248,9 @@ describe('PgStore through the service', () => {
     });
 
     // Idempotent: re-deleting writes nothing new.
-    const head = await service.headOffset(spaceId);
+    const head = await store.head(spaceId);
     await service.deleteMessage(ram, spaceId, messageId, { actingMode: 'direct' });
-    expect(await service.headOffset(spaceId)).toBe(head);
+    expect(await store.head(spaceId)).toBe(head);
   });
 
   it('polls round-trip through jsonb: definition on the row, votes fold, single-select move, early end', async () => {
@@ -254,7 +276,7 @@ describe('PgStore through the service', () => {
     const ended = await service.endPoll(ram, spaceId, messageId, { actingMode: 'direct' });
     expect(ended.poll?.endedAt).toBeTruthy();
     expect((await store.getMessage(spaceId, messageId))?.poll?.endedAt).toBe(ended.poll?.endedAt);
-    const events = await service.eventsAfter(spaceId, 0);
+    const events = await store.listEventsAfter(spaceId, 0);
     const messageEvent = events.find((e) => e.event.type === 'message' && e.event.message.id === messageId)!;
     expect((messageEvent.event as { message: { poll?: { endedAt?: string } } }).message.poll?.endedAt).toBeUndefined();
     expect(events.some((e) => e.event.type === 'poll_ended')).toBe(true);
@@ -265,7 +287,7 @@ describe('PgStore through the service', () => {
     const deleted = await service.deleteMessage(ram, spaceId, messageId, { actingMode: 'direct' });
     expect(deleted.poll).toBeUndefined();
     expect(await store.listPollVotesForMessages(spaceId, [messageId])).toEqual([]);
-    const redacted = (await service.eventsAfter(spaceId, 0)).find(
+    const redacted = (await store.listEventsAfter(spaceId, 0)).find(
       (e) => e.event.type === 'message' && e.event.message.id === messageId,
     )!;
     expect((redacted.event as { message: { poll?: unknown } }).message.poll).toBeUndefined();
@@ -280,5 +302,34 @@ describe('PgStore through the service', () => {
     expect(await store.getMemberByIdentity('https://other.example', 'sub-1')).toBeUndefined();
     await store.putIdentity(iss, 'sub-1', 'gagan');
     expect((await store.getMemberByIdentity(iss, 'sub-1'))?.id).toBe('gagan');
+  });
+});
+
+describe('migration 022 — hygiene', () => {
+  it('the enum-shaped columns refuse values the code never writes', async () => {
+    await expect(
+      db.query(`insert into spaces (org_id, id, name, created_at, kind) values ('org-default', '01HZCHECK00000000000000000', 'x', '2026-01-01T00:00:00.000Z', 'weird')`),
+    ).rejects.toThrow(/spaces_kind_check/);
+    await expect(db.query(`insert into push_prefs (org_id, member_id, level) values ('org-default', 'x', 'loud')`)).rejects.toThrow(/push_prefs_level_check/);
+    await expect(db.query(`update members set role = 'owner' where id = 'ramnique'`)).rejects.toThrow(/members_role_check/);
+  });
+
+  it('author_member_id is the author, computed by the database on every row', async () => {
+    const rows = await db.query<{ n: number; drift: number }>(
+      `select count(*)::int as n, count(*) filter (where author_member_id <> author->>'memberId')::int as drift from messages`,
+    );
+    expect(rows[0]!.n).toBeGreaterThan(0);
+    expect(rows[0]!.drift).toBe(0);
+    // Nothing may write it — the column is the expression, not a field.
+    await expect(db.query(`update messages set author_member_id = 'someone-else'`)).rejects.toThrow(/can only be updated to DEFAULT/);
+  });
+
+  it('activity seen marks are org-scoped: the same member id in two orgs keeps two marks', async () => {
+    const alpha = new PgStore(db, 'org-alpha');
+    const beta = new PgStore(db, 'org-beta');
+    expect(await alpha.advanceActivitySeenAt('shared-id', '2026-09-21T10:00:00.000Z')).toBe('2026-09-21T10:00:00.000Z');
+    expect(await beta.getActivitySeenAt('shared-id')).toBeUndefined();
+    expect(await beta.advanceActivitySeenAt('shared-id', '2026-09-21T09:00:00.000Z')).toBe('2026-09-21T09:00:00.000Z');
+    expect(await alpha.getActivitySeenAt('shared-id')).toBe('2026-09-21T10:00:00.000Z');
   });
 });

@@ -2,8 +2,10 @@ import { z } from 'zod';
 import { addressesRowboat, mapMentionTokens, mentionsAsText } from '@rowboat/spaces-protocol';
 import type {
   AcceptInviteResult,
+  Asset,
   BlobInfo,
   ChangeSet,
+  CreateAssetResult,
   DeleteAssetResult,
   MoveAssetResult,
   RestoreAssetResult,
@@ -46,8 +48,10 @@ import type {
 
 export type {
   AcceptInviteResult,
+  Asset,
   BlobInfo,
   ChangeSet,
+  CreateAssetResult,
   DeleteAssetResult,
   MoveAssetResult,
   RestoreAssetResult,
@@ -107,13 +111,16 @@ export const SpacesOrgSummary = z.object({
   baseUrl: z.string(),
   /** Who we are on this org (org-scoped identity, spec §4). */
   memberId: z.string(),
-  authKind: z.enum(['dev', 'oauth']),
-  /** Present = the org needs a re-login (refresh dead). Visible and gentle, never silent. */
+  /** `session` = a managed org riding the Rowboat account session (one session, two uses — 2026-09-14). */
+  authKind: z.enum(['dev', 'oauth', 'session']),
+  /** Present = the org needs a re-login (refresh dead, or no Rowboat session). Visible and gentle, never silent. */
   authError: z.string().optional(),
 });
 export type SpacesOrgSummary = z.infer<typeof SpacesOrgSummary>;
 
+/** A space file as listings describe it: the id is what every operation takes; the path is its display name (tree label). */
 export interface SpacesAssetEntry {
+  id: string;
   path: string;
   version: number;
   updatedAt: string;
@@ -129,6 +136,8 @@ export interface SpacesStreamPage {
   topics: Topic[];
   /** Older roots exist below the returned window (listStream is windowed, newest-first). */
   hasMore: boolean;
+  /** Newer roots exist above it — only after an around / after page; absent on an older org. */
+  hasMoreAfter?: boolean;
   /** The caller's stream mark (0 = never marked) — the New divider's anchor. */
   readOffset: number;
 }
@@ -139,6 +148,7 @@ export interface SpacesThreadPage {
   topic: Topic | null;
   messages: Message[];
   hasMore: boolean;
+  hasMoreAfter?: boolean;
   /** The caller's mark in this thread; null = not following (no mark is kept). */
   readOffset: number | null;
   following: boolean;
@@ -160,8 +170,8 @@ export type SpacesManageTopicAction =
   | { action: 'archive' }
   | { action: 'unarchive' }
   | { action: 'remove' }
-  /** Link one live space file as what the discussion is about (replaces any earlier link). */
-  | { action: 'attach_document'; path: string }
+  /** Link one live space file (by id) as what the discussion is about (replaces any earlier link). */
+  | { action: 'attach_document'; assetId: string }
   | { action: 'detach_document' };
 
 /**
@@ -170,11 +180,19 @@ export type SpacesManageTopicAction =
  * org's MCP face, never through this IPC surface.
  */
 export interface SpacesProposeInput {
-  assetPath: string;
+  assetId: string;
   baseVersion: number;
   /** Text variant. Exactly one of newContent / blob (contract decision 1, amended). */
   newContent?: string;
   /** Binary variant: the hash of bytes already uploaded via spaces:uploadBlob. */
+  blob?: string;
+  reason?: string;
+}
+
+/** Birth: the one call that names a file by path (it has no id yet). Exactly one of newContent / blob. */
+export interface SpacesCreateInput {
+  path: string;
+  newContent?: string;
   blob?: string;
   reason?: string;
 }
@@ -247,6 +265,14 @@ export const WHITEBOARD_EXT = '.excalidraw';
 export const DEFAULT_WHITEBOARD_PATH = `${WHITEBOARD_DIR}/board${WHITEBOARD_EXT}`;
 
 /**
+ * Snapshots at or below this many UTF-8 bytes store as TEXT assets (the
+ * contract caps text at 1MB); above it they fall back to a blob version. One
+ * number for every writer — the pane and the agent's whiteboard tools — so a
+ * board never flips transport depending on who saved it last.
+ */
+export const WHITEBOARD_TEXT_SNAPSHOT_MAX_BYTES = 900_000;
+
+/**
  * A just-created board's snapshot — the same single-line shape the pane
  * saves, so creating via the rail's "+" and the pane's first save write
  * byte-identical content for an empty scene (identical proposes merge clean).
@@ -291,8 +317,15 @@ export {
   parseMentions,
   relabelMentions,
   MENTION_TOKEN_RE,
+  // The org link grammar (protocol ids.ts): builders and the one parser.
+  orgUrl,
+  spaceUrl,
+  assetUrl,
+  messageUrl,
+  memberUrl,
+  parseOrgUrl,
 } from '@rowboat/spaces-protocol';
-export type { MentionRef, MentionStamps } from '@rowboat/spaces-protocol';
+export type { MentionRef, MentionStamps, OrgLink } from '@rowboat/spaces-protocol';
 
 /** Does the body deliberately address @rowboat — a token, never the bare word (spec §8)? */
 export function containsRowboatAddress(body: string): boolean {
@@ -301,17 +334,21 @@ export function containsRowboatAddress(body: string): boolean {
 
 /**
  * For markdown surfaces without the chip renderer (the phone): tokens become
- * "**@Name**". Ids resolve through the roster; an id the roster no longer
- * knows keeps the token's label.
+ * "**@Name**" / "**#Space**". Ids resolve through the roster (and the space
+ * listing, when given); an id the maps no longer know keeps the token's label.
  */
-export function decorateMentions(body: string, memberNames: ReadonlyMap<string, string>): string {
-  return mapMentionTokens(body, (ref) => `**@${ref.kind === 'member' ? (memberNames.get(ref.id) ?? ref.label) : ref.kind}**`);
+export function decorateMentions(body: string, memberNames: ReadonlyMap<string, string>, spaceNames?: ReadonlyMap<string, string>): string {
+  return mapMentionTokens(body, (ref) => {
+    if (ref.kind === 'member') return `**@${memberNames.get(ref.id) ?? ref.label}**`;
+    if (ref.kind === 'space') return `**#${spaceNames?.get(ref.id) ?? ref.label}**`;
+    return `**@${ref.kind}**`;
+  });
 }
 
 /**
  * For plain-text surfaces (titles, crumbs, quotes, forwards, copied text,
- * notification bodies): tokens become "@Name", no markup.
+ * notification bodies): tokens become "@Name" / "#Space", no markup.
  */
-export function resolveMentions(body: string, memberNames: ReadonlyMap<string, string>): string {
-  return mentionsAsText(body, memberNames);
+export function resolveMentions(body: string, memberNames: ReadonlyMap<string, string>, spaceNames?: ReadonlyMap<string, string>): string {
+  return mentionsAsText(body, memberNames, spaceNames);
 }

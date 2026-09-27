@@ -24,6 +24,18 @@ interface OnboardingModalProps {
 
 export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   const state = useOnboardingState(open, onComplete)
+  const dialogRef = React.useRef<HTMLDivElement>(null)
+  const [panelHeight, setPanelHeight] = React.useState<number>()
+  const measureReference = React.useCallback((node: HTMLDivElement | null) => {
+    if (!node) return
+    // Ignore the dialog's opening scale animation when sizing every step
+    // (2026-09-22, fix unnecessary onboarding overflow).
+    const measure = () => setPanelHeight(node.offsetHeight)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
 
   const stepContent = React.useMemo(() => {
     switch (state.currentStep) {
@@ -56,13 +68,39 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
       />
       <Dialog open={open} onOpenChange={() => {}}>
         <DialogContent
-          className="w-[90vw] max-w-2xl max-h-[85vh] p-0 overflow-hidden"
+          ref={dialogRef}
+          tabIndex={-1}
+          className="flex flex-col gap-0 w-[90vw] max-w-2xl max-h-[85dvh] p-0 overflow-hidden"
+          style={panelHeight ? { height: `min(${panelHeight}px, 85dvh)` } : undefined}
           showCloseButton={false}
+          onOpenAutoFocus={(event) => {
+            // Avoid promoting the API-key link while account status loads
+            // (2026-09-22, onboarding startup focus).
+            event.preventDefault()
+            dialogRef.current?.focus({ preventScroll: true })
+          }}
           onPointerDownOutside={(e) => e.preventDefault()}
           onEscapeKeyDown={(e) => e.preventDefault()}
         >
-          <div className="flex flex-col h-full max-h-[85vh] overflow-y-auto p-8 md:p-10">
-            <StepIndicator currentStep={state.currentStep} />
+          {/* Measure the unchanged Connect page at this panel's width, so every
+              step matches it even when text wraps or the viewport changes. */}
+          <div
+            ref={measureReference}
+            aria-hidden="true"
+            inert
+            className="invisible pointer-events-none absolute inset-x-0 top-0 flex flex-col p-8 md:p-10"
+          >
+            <StepIndicator currentStep={2} />
+            <ConnectAccountsStep state={{
+              ...state,
+              providersLoading: false,
+              providers: state.providersLoading ? ['google', 'microsoft'] : state.providers,
+            }} />
+          </div>
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-8 md:p-10">
+            <div className="shrink-0">
+              <StepIndicator currentStep={state.currentStep} />
+            </div>
             <AnimatePresence mode="wait">
               <motion.div
                 key={state.currentStep}
@@ -70,7 +108,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -12 }}
                 transition={{ duration: 0.2, ease: "easeInOut" }}
-                className="flex-1 flex flex-col"
+                className="grow shrink-0 flex flex-col"
               >
                 {stepContent}
               </motion.div>

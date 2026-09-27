@@ -1,20 +1,19 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import type { EditorView } from '@tiptap/pm/view'
-import { composerExtensions, composerMarkdown } from '@/components/spaces/composer-editor'
+import { closeFenceLine, composerExtensions, composerMarkdown, openFenceLine } from '@/components/spaces/composer-editor'
 import { RichFormattingToolbar } from '@/components/spaces/composer-toolbar'
 import { MentionMenu, useMentionAutocomplete } from '@/components/spaces/mention-autocomplete'
-import { useSpaceProfiles } from '@/components/spaces/member-text'
 import '@/styles/space-composer.css'
 
 /**
  * The inline message editor — the composer's surface (same TipTap nodes,
- * markdown input rules, toolbar and @mention popup) minus the send-only
- * machinery (attachments, slash commands, drafts, scheduling). Enter saves,
- * Shift+Enter breaks a line, Escape cancels; members come from the space's
- * profiles context. The host owns the draft string (onChange fires with the
- * doc's markdown on every edit) and renders its own Save/Cancel row; extra
- * rows inside the bordered box (image thumbnails) ride in as children.
+ * markdown input rules, toolbar and @mention popup, off the same pane refs)
+ * minus the send-only machinery (attachments, slash commands, drafts,
+ * scheduling). Enter saves, Shift+Enter breaks a line, Escape cancels. The
+ * host owns the draft string (onChange fires with the doc's markdown on
+ * every edit) and renders its own Save/Cancel row; extra rows inside the
+ * bordered box (image thumbnails) ride in as children.
  */
 export function MessageEditBox({ initial, onChange, onSave, onCancel, children }: {
     /** The starting markdown — mentions already resolved to display names. */
@@ -30,8 +29,6 @@ export function MessageEditBox({ initial, onChange, onSave, onCancel, children }
     onCancel: () => void
     children?: ReactNode
 }) {
-    const { byId, selfId } = useSpaceProfiles()
-    const members = useMemo(() => [...byId.values()], [byId])
     // The menu anchors to this box; state (not a ref) so it re-renders once
     // the node exists and the menu can measure against it.
     const [box, setBox] = useState<HTMLDivElement | null>(null)
@@ -46,7 +43,7 @@ export function MessageEditBox({ initial, onChange, onSave, onCancel, children }
         },
         onUpdate: ({ editor: ed }) => onChangeRef.current(composerMarkdown(ed)),
     })
-    const mention = useMentionAutocomplete(editor, { members, ...(selfId ? { selfMemberId: selfId } : {}) })
+    const mention = useMentionAutocomplete(editor)
 
     const handleKeyDown = (view: EditorView, e: KeyboardEvent): boolean => {
         if (mention.onKeyDown(e)) return true
@@ -61,9 +58,13 @@ export function MessageEditBox({ initial, onChange, onSave, onCancel, children }
                 onSave()
                 return true
             }
+            // A typed fence line (```) opens a code block on Enter or
+            // Shift+Enter, and Enter on a closing fence leaves it — the
+            // composer's posture.
+            if (e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && editor) return openFenceLine(editor)
             if (!e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && !view.composing) {
-                // Inside a code fence Enter breaks the line (the composer's
-                // posture); everywhere else it saves.
+                if (editor && (openFenceLine(editor) || closeFenceLine(editor))) return true
+                // Inside a code fence Enter breaks the line; everywhere else it saves.
                 if (view.state.selection.$from.parent.type.name === 'codeBlock') return false
                 onSave()
                 return true

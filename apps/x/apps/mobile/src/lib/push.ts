@@ -81,7 +81,7 @@ export async function registerWithMac(rpc: RpcClient): Promise<'registered' | 'n
 
 /**
  * Register this device with every org's Harbor (the real sender —
- * PUSH_PLAN.md). Permission is requested on the first call after sign-in.
+ * apps/harbor/CONTRACT.md, the push bullet). Permission is requested on the first call after sign-in.
  */
 export async function registerWithHarbor(
   orgs: SpacesOrg[],

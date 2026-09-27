@@ -64,7 +64,7 @@ export function EmailRail({
 
     const renderBody = ({ togglePin }: SecondaryRailContext) => (
         <div className="flex h-full min-h-0 flex-col">
-            <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border pl-3 pr-1.5">
+            <div className="rowboat-header flex shrink-0 items-center gap-2 border-b border-border pl-3 pr-1.5">
                 <span className="min-w-0 flex-1 truncate text-[13px] text-muted-foreground">Mail</span>
                 <SecondaryRailToggle open={open} onToggle={togglePin} />
             </div>
