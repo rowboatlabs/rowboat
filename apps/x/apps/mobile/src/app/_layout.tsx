@@ -1,5 +1,9 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
 import { light as lightColors } from '@/theme/colors';
+import { applyStoredTheme } from '@/lib/theme-preference';
+
+// Pin the saved Light/Dark choice before the first screen paints.
+void applyStoredTheme();
 
 // Navigation chrome (headers, screen ground, drawer) on the same warm white.
 const LightTheme = {

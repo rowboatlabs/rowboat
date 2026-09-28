@@ -43,6 +43,7 @@ export default function SpacesLayout() {
       <Stack.Screen name="files" options={{ title: 'Files', headerBackButtonDisplayMode: 'minimal' }} />
       <Stack.Screen name="file" options={{ title: '', headerBackButtonDisplayMode: 'minimal' }} />
       <Stack.Screen name="search" options={{ title: 'Search', headerBackButtonDisplayMode: 'minimal' }} />
+      <Stack.Screen name="settings" options={{ title: 'Settings', headerBackButtonDisplayMode: 'minimal' }} />
       <Stack.Screen name="notifications" options={{ title: 'Notifications', headerBackButtonDisplayMode: 'minimal' }} />
       <Stack.Screen name="account" options={{ title: 'Account', headerBackButtonDisplayMode: 'minimal' }} />
       <Stack.Screen name="join" options={{ title: 'Join a space', headerBackButtonDisplayMode: 'minimal' }} />
