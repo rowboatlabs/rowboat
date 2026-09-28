@@ -23,11 +23,16 @@ export function parseBlobLink(src: string): { host: string; spaceId: string; has
   return { host: m[1], spaceId: decodeURIComponent(m[2]), hash: m[3], dims };
 }
 
+// The last bearer seen, shared by every image: a remounted row (the list
+// recycles rows as you scroll) paints from expo-image's cache in the same
+// frame instead of flashing a grey box while a token is fetched again.
+let lastToken: string | null = null;
+
 export function SpaceBlobImage({ src }: { src: string }) {
   const colors = useColors();
   const account = useSpacesAccount();
   const { width: screenWidth } = useWindowDimensions();
-  const [token, setToken] = useState<string | null>(null);
+  const [token, setToken] = useState<string | null>(lastToken);
   const [open, setOpen] = useState(false);
 
   const link = parseBlobLink(src);
@@ -37,7 +42,12 @@ export function SpaceBlobImage({ src }: { src: string }) {
     let cancelled = false;
     account
       .getAccessToken()
-      .then((t) => !cancelled && setToken(t))
+      .then((t) => {
+        lastToken = t;
+        // Same string → React skips the render; a rotated token just re-keys
+        // the request, and cacheKey still serves the bytes from cache.
+        if (!cancelled) setToken(t);
+      })
       .catch(() => {});
     return () => {
       cancelled = true;
@@ -71,6 +81,8 @@ export function SpaceBlobImage({ src }: { src: string }) {
   const source = {
     uri: `https://${link.host}/v1/spaces/${encodeURIComponent(link.spaceId)}/blobs/${link.hash}`,
     headers: { authorization: `Bearer ${token}` },
+    // Content-addressed: the hash IS the bytes, whatever token fetched them.
+    cacheKey: link.hash,
   };
   return (
     <>
@@ -79,7 +91,8 @@ export function SpaceBlobImage({ src }: { src: string }) {
           source={source}
           style={{ width, height, borderRadius: 10, marginVertical: 6, backgroundColor: colors.secondaryBackground }}
           contentFit="cover"
-          transition={120}
+          cachePolicy="memory-disk"
+          recyclingKey={link.hash}
         />
       </Pressable>
       <ImageViewer visible={open} source={source} onClose={() => setOpen(false)} />

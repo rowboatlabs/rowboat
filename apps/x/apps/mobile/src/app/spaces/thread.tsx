@@ -54,6 +54,11 @@ export default function SpaceThreadScreen() {
   const scrollRef = useRef<ScrollView>(null);
   const composerRef = useRef<SpaceComposerHandle>(null);
   const lastOffset = useRef<number | undefined>(undefined);
+  // Land on the root (what you tapped). Scroll down only for a reply that
+  // arrives live or that you send — never because a refresh swapped the list.
+  const scrollToNewest = useCallback(() => {
+    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
+  }, []);
 
   if (lastOffset.current === undefined && initial?.messages) {
     lastOffset.current = initial.messages.at(-1)?.offset ?? initial.root.offset;
@@ -62,8 +67,10 @@ export default function SpaceThreadScreen() {
   useEffect(() => {
     let cancelled = false;
     // Disk cache (after a relaunch) — only if nothing better is on screen yet.
-    void loadThread(org, space, root).then((cached) => {
-      if (cancelled || !cached?.messages) return;
+    void Promise.all([loadThread(org, space, root), loadRoster(org, space)]).then(([cached, roster]) => {
+      if (cancelled) return;
+      if (roster) setMembers((prev) => (prev.size ? prev : new Map(roster.map((m) => [m.id, m]))));
+      if (!cached?.messages) return;
       setRootMessage((prev) => prev ?? cached.root);
       setReplies((prev) => {
         if (prev) return prev;
@@ -71,9 +78,6 @@ export default function SpaceThreadScreen() {
         return cached.messages;
       });
       setFollowing((prev) => prev ?? cached.following);
-    });
-    void loadRoster(org, space).then((cached) => {
-      if (!cancelled && cached) setMembers((prev) => (prev.size ? prev : new Map(cached.map((m) => [m.id, m]))));
     });
     // Names don't block the thread: each request lands on its own.
     client
@@ -118,7 +122,11 @@ export default function SpaceThreadScreen() {
         if (frame.kind !== 'event') return;
         const event = frame.event;
         if (event.type === 'message' && event.message.threadRoot === root) {
-          setReplies((prev) => (prev && !prev.some((m) => m.id === event.message.id) ? [...prev, event.message] : prev));
+          setReplies((prev) => {
+            if (!prev || prev.some((m) => m.id === event.message.id)) return prev;
+            scrollToNewest();
+            return [...prev, event.message];
+          });
         } else if (event.type === 'message_deleted') {
           const patch = (m: Message) => (m.id === event.deletion.messageId ? { ...m, body: '', deletedAt: event.deletion.at } : m);
           setRootMessage((prev) => (prev ? patch(prev) : prev));
@@ -150,16 +158,6 @@ export default function SpaceThreadScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- connect once per screen after first load
   }, [replies === null, org, space, root]);
 
-  // Land on the root (what you tapped); scroll only when a new reply lands.
-  const seenReplies = useRef<number | null>(null);
-  useEffect(() => {
-    const n = replies?.length;
-    if (n === undefined) return;
-    if (seenReplies.current !== null && n > seenReplies.current) {
-      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
-    }
-    seenReplies.current = n;
-  }, [replies?.length]);
 
   const send = async (body: string) => {
     if (sending) return;
@@ -167,6 +165,7 @@ export default function SpaceThreadScreen() {
     try {
       const { message } = await client.postMessage(space, { body, threadRoot: root, actingMode: 'direct' });
       setReplies((prev) => (prev && !prev.some((m) => m.id === message.id) ? [...prev, message] : prev));
+      scrollToNewest();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {

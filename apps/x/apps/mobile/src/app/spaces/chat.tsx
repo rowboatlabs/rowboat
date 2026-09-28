@@ -52,12 +52,19 @@ export default function SpaceChatScreen() {
 
   // Fold one live message into the stream: roots append; replies bump their
   // root's reply chip.
+  // Idempotent: the live socket replays from an offset the (cached or fresh)
+  // snapshot may already include, so a reply counts only once — by id, and
+  // only if it's newer than the root's lastReplyAt the server already folded.
+  const countedReplies = useRef(new Set<string>());
+  const countedDeletes = useRef(new Set<string>());
   const foldMessage = useCallback((message: Message) => {
     setMessages((prev) => {
       if (!prev) return prev;
       if (message.threadRoot) {
+        if (countedReplies.current.has(message.id)) return prev;
+        countedReplies.current.add(message.id);
         return prev.map((m) =>
-          m.id === message.threadRoot
+          m.id === message.threadRoot && (!m.lastReplyAt || message.postedAt > m.lastReplyAt)
             ? { ...m, replyCount: m.replyCount + 1, lastReplyAt: message.postedAt }
             : m,
         );
@@ -72,17 +79,18 @@ export default function SpaceChatScreen() {
   const [reloadKey, setReloadKey] = useState(0);
   useEffect(() => {
     let cancelled = false;
-    // Disk cache after a relaunch — only if nothing is on screen yet.
-    void loadValue<Message[]>(streamCacheKey).then((cached) => {
-      if (cancelled || !cached) return;
-      setMessages((prev) => {
-        if (prev) return prev;
-        lastOffset.current = cached.at(-1)?.offset;
-        return cached;
-      });
-    });
-    void loadRoster(org, space).then((cached) => {
-      if (!cancelled && cached) setMembers((prev) => (prev.size ? prev : new Map(cached.map((m) => [m.id, m]))));
+    // Disk cache after a relaunch — names and messages land in the same
+    // render, so rows never flash raw member ids before names arrive.
+    void Promise.all([loadValue<Message[]>(streamCacheKey), loadRoster(org, space)]).then(([cached, roster]) => {
+      if (cancelled) return;
+      if (roster) setMembers((prev) => (prev.size ? prev : new Map(roster.map((m) => [m.id, m]))));
+      if (cached) {
+        setMessages((prev) => {
+          if (prev) return prev;
+          lastOffset.current = cached.at(-1)?.offset;
+          return cached;
+        });
+      }
     });
     client
       .listMembers(space)
@@ -134,7 +142,17 @@ export default function SpaceChatScreen() {
         const event = frame.event;
         if (event.type === 'message') foldMessage(event.message);
         else if (event.type === 'message_deleted') {
-          setMessages((prev) => prev?.map((m) => (m.id === event.deletion.messageId ? { ...m, body: '', deletedAt: event.deletion.at } : m)) ?? null);
+          // A deleted reply leaves its root's count (the server's count is live replies only).
+          const { messageId, threadRoot, at } = event.deletion;
+          setMessages((prev) =>
+            prev?.map((m) =>
+              m.id === messageId
+                ? { ...m, body: '', deletedAt: at }
+                : threadRoot && m.id === threadRoot && !countedDeletes.current.has(messageId)
+                  ? (countedDeletes.current.add(messageId), { ...m, replyCount: Math.max(0, m.replyCount - 1) })
+                  : m,
+            ) ?? null,
+          );
         } else if (event.type === 'message_edited') {
           setMessages((prev) => prev?.map((m) => (m.id === event.edit.messageId ? { ...m, body: event.edit.body, editedAt: event.edit.at } : m)) ?? null);
         } else if (event.type === 'reaction') {

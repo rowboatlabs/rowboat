@@ -27,9 +27,8 @@ function LinkPreviewCard({ url }: { url: string }) {
   const [preview, setPreview] = useState<LinkPreview | null>(() => peekLinkPreview(url) ?? null);
 
   useEffect(() => {
-    if (peekLinkPreview(url) !== undefined) return;
     let cancelled = false;
-    fetchLinkPreview(url).then((p) => !cancelled && setPreview(p));
+    fetchLinkPreview(url).then((p) => !cancelled && p && setPreview(p));
     return () => {
       cancelled = true;
     };
