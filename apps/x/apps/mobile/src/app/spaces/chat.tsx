@@ -59,21 +59,31 @@ export default function SpaceChatScreen() {
   const [positioned, setPositioned] = useState(false);
   // "Follow the bottom" is YOUR intent, decided only when a drag settles —
   // never by programmatic or keep-position scrolls (those fooled it before).
+  // While following, keep-position is OFF (it would pin the top of what's
+  // visible and leave a growing last message cut off); it switches on only
+  // once you've scrolled up, to hold your place there.
   const atBottom = useRef(true);
+  const [following, setFollowing] = useState(true);
   const dragging = useRef(false);
   const settle = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
     dragging.current = false;
     const { contentOffset, contentSize, layoutMeasurement, contentInset } = e.nativeEvent;
     atBottom.current = contentSize.height + (contentInset?.bottom ?? 0) - (contentOffset.y + layoutMeasurement.height) < 80;
+    setFollowing(atBottom.current);
+  }, []);
+  // After layout commits (a frame later), not mid-layout.
+  const toEnd = useCallback(() => {
+    requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: false }));
   }, []);
   const onContentSizeChange = useCallback(() => {
     if (!positioned) {
-      listRef.current?.scrollToEnd({ animated: false });
-      requestAnimationFrame(() => setPositioned(true));
+      toEnd();
+      // Reveal two frames later, once the jump has landed.
+      requestAnimationFrame(() => requestAnimationFrame(() => setPositioned(true)));
       return;
     }
-    if (atBottom.current && !dragging.current) listRef.current?.scrollToEnd({ animated: false });
-  }, [positioned]);
+    if (atBottom.current && !dragging.current) toEnd();
+  }, [positioned, toEnd]);
   const composerRef = useRef<SpaceComposerHandle>(null);
   const lastOffset = useRef<number | undefined>(undefined);
 
@@ -207,6 +217,7 @@ export default function SpaceChatScreen() {
       foldMessage(message);
       // Your own message: always land on it, wherever you were scrolled.
       atBottom.current = true;
+      setFollowing(true);
       requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -381,7 +392,7 @@ export default function SpaceChatScreen() {
           alwaysBounceVertical
           style={{ flex: 1, opacity: positioned ? 1 : 0 }}
           contentContainerStyle={{ paddingVertical: 12 }}
-          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+          maintainVisibleContentPosition={following ? undefined : { minIndexForVisible: 0 }}
           onScrollBeginDrag={() => { dragging.current = true; }}
           onScrollEndDrag={settle}
           onMomentumScrollEnd={settle}
