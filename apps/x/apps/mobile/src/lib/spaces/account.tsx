@@ -13,6 +13,9 @@ import { registerWithHarbor, unregisterFromHarbor } from '@/lib/push';
 /** The hosted deployment. Overridable for local Harbor dev. */
 export const APEX_URL = process.env.EXPO_PUBLIC_SPACES_APEX ?? 'https://spaces.x.rowboatlabs.com';
 
+/** Rowboat account API (rowboatx-backend) — owns the user record and billing. */
+export const ACCOUNT_API_URL = process.env.EXPO_PUBLIC_ACCOUNT_API ?? 'https://api.x.rowboatlabs.com';
+
 const ACCOUNT_KEY = 'rowboat.spaces.account.v1';
 /** Last-seen org list — painted instantly on launch, refreshed in the background. */
 const ORGS_CACHE_KEY = 'rowboat.spaces.orgs.v1';
@@ -42,6 +45,11 @@ interface SpacesAccount {
   orgsError: string | null;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
+  /**
+   * Permanently delete the Rowboat account (App Store 5.1.1(v)), then sign
+   * out locally. Throws with a readable message when the server refuses.
+   */
+  deleteAccount: () => Promise<void>;
   refreshOrgs: () => Promise<void>;
   /** Fresh bearer for Harbor calls (auto-refreshes near expiry). */
   getAccessToken: (opts?: { forceRefresh?: boolean }) => Promise<string>;
@@ -128,9 +136,27 @@ export function SpacesAccountProvider({ children }: { children: ReactNode }) {
     setStatus('signedOut');
   }, [persist, orgs, getAccessToken]);
 
+  // DELETE /v1/account on rowboatx-backend: cancels billing, removes org
+  // memberships, deletes the auth user, revokes Sign in with Apple. Push
+  // tokens go first, while the account can still authenticate.
+  const deleteAccount = useCallback(async () => {
+    if (orgs?.length) await unregisterFromHarbor(orgs, getAccessToken).catch(() => {});
+    const token = await getAccessToken();
+    const res = await fetch(`${ACCOUNT_API_URL}/v1/account`, {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    if (res.status === 404) throw new Error("Account deletion isn't available yet. Please try again later.");
+    if (!res.ok) {
+      const detail = await res.json().then((j: { message?: string; error?: string }) => j.message ?? j.error).catch(() => undefined);
+      throw new Error(detail ?? `Couldn't delete your account (${res.status}). Please try again.`);
+    }
+    await signOut();
+  }, [orgs, getAccessToken, signOut]);
+
   const value = useMemo(
-    () => ({ status, orgs, orgsError, signIn, signOut, refreshOrgs, getAccessToken }),
-    [status, orgs, orgsError, signIn, signOut, refreshOrgs, getAccessToken],
+    () => ({ status, orgs, orgsError, signIn, signOut, deleteAccount, refreshOrgs, getAccessToken }),
+    [status, orgs, orgsError, signIn, signOut, deleteAccount, refreshOrgs, getAccessToken],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

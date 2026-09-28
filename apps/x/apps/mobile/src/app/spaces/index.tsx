@@ -136,6 +136,7 @@ function OrgList() {
 
   const who = account.orgs?.[0]?.displayName;
 
+
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
@@ -163,10 +164,17 @@ function OrgList() {
       {/* Account footer */}
       <View style={{ borderTopWidth: 0.5, borderTopColor: colors.separator, paddingTop: 6 }}>
         {who ? (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 12 }}>
+          <Pressable
+            onPress={() => router.push('/spaces/account')}
+            style={({ pressed }) => ({
+              flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 12,
+              opacity: pressed ? 0.6 : 1,
+            })}
+          >
             <Image source="sf:person.crop.circle" style={{ width: 20, height: 20 }} tintColor={colors.secondaryLabel} />
-            <Text style={{ flex: 1, fontSize: 15, color: colors.secondaryLabel }}>{who}</Text>
-          </View>
+            <Text style={{ flex: 1, fontSize: 15, color: colors.label }}>{who}</Text>
+            <Image source="sf:chevron.right" style={{ width: 8, height: 13 }} tintColor={colors.tertiaryLabel} />
+          </Pressable>
         ) : null}
         {who ? <View style={{ height: 1, marginLeft: 44, backgroundColor: colors.separator }} /> : null}
         <Pressable
