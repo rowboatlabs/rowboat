@@ -1509,6 +1509,144 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
           </div>
         </div>
       )}
+
+      <ReplicasSettings dialogOpen={dialogOpen} />
+    </div>
+  )
+}
+
+// Replicas (2026-09-28): cloud coding workspaces. One PERSONAL key per
+// member — the org, repos and model credentials live on replicas.dev. A
+// saved key turns on the "Run on Replicas" pick in the Space composer's
+// agent strip (composer.tsx listens for replicas-config-changed).
+function ReplicasSettings({ dialogOpen }: { dialogOpen: boolean }) {
+  const [configured, setConfigured] = useState(false)
+  const [environments, setEnvironments] = useState<{ id: string; name: string; repositories: string[] }[]>([])
+  const [envError, setEnvError] = useState<string | null>(null)
+  const [showInput, setShowInput] = useState(false)
+  const [keyInput, setKeyInput] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [loading, setLoading] = useState(false)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const status = await window.ipc.invoke("replicas:getStatus", null)
+      setConfigured(status.configured)
+      if (status.configured) {
+        const res = await window.ipc.invoke("replicas:listEnvironments", null)
+        setEnvironments(res.environments)
+        setEnvError(res.error ?? null)
+      } else {
+        setEnvironments([])
+        setEnvError(null)
+      }
+    } catch {
+      setConfigured(false)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (dialogOpen) void load()
+  }, [dialogOpen, load])
+
+  const save = async () => {
+    const trimmed = keyInput.trim()
+    if (!trimmed) return
+    setSaving(true)
+    try {
+      const result = await window.ipc.invoke("replicas:setApiKey", { apiKey: trimmed })
+      if (result.success) {
+        setShowInput(false)
+        setKeyInput("")
+        toast.success(
+          result.environmentCount === 0
+            ? "Replicas connected — no environments yet; connect a repo on replicas.dev"
+            : `Replicas connected — ${result.environmentCount} environment${result.environmentCount === 1 ? "" : "s"}`,
+        )
+        window.dispatchEvent(new Event("replicas-config-changed"))
+        await load()
+      } else {
+        toast.error(result.error || "Replicas rejected that key")
+      }
+    } catch {
+      toast.error("Could not save the Replicas key")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const disconnect = async () => {
+    try {
+      await window.ipc.invoke("replicas:clearApiKey", null)
+      window.dispatchEvent(new Event("replicas-config-changed"))
+      toast.success("Replicas disconnected")
+      await load()
+    } catch {
+      toast.error("Could not disconnect Replicas")
+    }
+  }
+
+  return (
+    <div className="rounded-md border px-3 py-3 space-y-2">
+      <div className="text-sm font-medium">Replicas (cloud workspaces)</div>
+      <div className="text-xs text-muted-foreground">
+        Hand coding work to a Replicas cloud workspace instead of your machine — from a Space thread, pick
+        <strong className="text-foreground"> Run on Replicas</strong> in the @rowboat strip. Teammates steer the same
+        workspace from the thread. Use your <strong className="text-foreground">personal</strong> API key
+        (Personal → API Keys on replicas.dev) so pull requests are attributed to you.
+      </div>
+      {configured && !showInput ? (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 text-sm text-[var(--rowboat-success)]">
+              <CheckCircle2 className="size-4" />
+              Connected
+            </div>
+            <button onClick={() => setShowInput(true)} className="text-xs text-muted-foreground hover:text-foreground transition-colors">
+              Change key
+            </button>
+            <button onClick={() => { void disconnect() }} className="text-xs text-muted-foreground hover:text-foreground transition-colors">
+              Disconnect
+            </button>
+            <button onClick={() => { void load() }} disabled={loading} className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
+              {loading ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
+              Refresh
+            </button>
+          </div>
+          {envError ? (
+            <div className="text-xs text-amber-700 dark:text-amber-300">{envError}</div>
+          ) : environments.length === 0 ? (
+            <div className="text-xs text-muted-foreground">No environments yet — connect a repository on replicas.dev, then Refresh.</div>
+          ) : (
+            <div className="text-xs text-muted-foreground">
+              {environments.length} environment{environments.length === 1 ? "" : "s"}:{" "}
+              {environments.map((e) => e.name).join(", ")}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="flex gap-2">
+          <Input
+            type="password"
+            value={keyInput}
+            onChange={(e) => setKeyInput(e.target.value)}
+            placeholder="Paste your Replicas API key (sk_replicas_…)"
+            onKeyDown={(e) => e.key === "Enter" && save()}
+            className="flex-1"
+          />
+          <Button onClick={() => { void save() }} disabled={!keyInput.trim() || saving} size="sm">
+            {saving ? <Loader2 className="size-4 animate-spin" /> : "Connect"}
+          </Button>
+          {configured && (
+            <Button variant="outline" size="sm" onClick={() => { setShowInput(false); setKeyInput("") }}>
+              Cancel
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   )
 }

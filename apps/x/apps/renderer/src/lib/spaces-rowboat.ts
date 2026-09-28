@@ -17,6 +17,8 @@ export interface RowboatTurnOptions {
     permissionMode?: 'auto' | 'manual'
     searchEnabled?: boolean
     codeMode?: 'claude' | 'codex'
+    /** "Run on Replicas" (2026-09-28): the strip's environment; planMode mirrors Manual. */
+    replicas?: { environmentId: string; repository?: string; planMode?: boolean }
 }
 
 export function maybeInvokeRowboat(

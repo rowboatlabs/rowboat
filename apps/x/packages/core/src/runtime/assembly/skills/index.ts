@@ -8,12 +8,14 @@ import {
 import {
   isCodeModeAvailable,
   isComposioAvailable,
+  isReplicasAvailable,
   isSlackAvailable,
   isSpacesAvailable,
 } from "../connections.js";
 import { loadDiskSkills } from "./disk-loader.js";
 import { SPACES_TOOL_NAMES } from "../../tools/domains/spaces.js";
 import { WHITEBOARD_TOOL_NAMES } from "../../tools/domains/whiteboard.js";
+import { REPLICAS_TOOL_NAMES } from "../../tools/domains/replicas.js";
 import builtinToolsSkill from "./builtin-tools/skill.js";
 import deletionGuardrailsSkill from "./deletion-guardrails/skill.js";
 import docCollabSkill from "./doc-collab/skill.js";
@@ -35,6 +37,7 @@ import appsSkill from "./apps/skill.js";
 import slackSkill from "./slack/skill.js";
 import spacesSkill from "./spaces/skill.js";
 import whiteboardSkill from "./whiteboard/skill.js";
+import replicasSkill from "./replicas/skill.js";
 import chartsSkill from "./charts/skill.js";
 import voiceSkill from "./voice/skill.js";
 
@@ -152,6 +155,14 @@ const definitions: SkillDefinition[] = [
     summary: "Draw on, read, or change a shared whiteboard — the board in a space: 'draw the flow on the board', 'sketch/diagram X on the whiteboard', 'add a box for Y', 'what's on the board', 'connect A to B', 'clean up the board'. Attaches whiteboard-read and whiteboard-draw (operations, never raw JSON) plus list_spaces to find the space. Drawing is visible to the whole team live.",
     content: whiteboardSkill,
     tools: [...WHITEBOARD_TOOL_NAMES, "list_spaces"],
+  },
+  {
+    id: "replicas",
+    availability: isReplicasAvailable,
+    title: "Replicas (cloud coding workspaces)",
+    summary: "Hand coding work to a Replicas cloud workspace — an isolated VM with the team's repo that opens a pull request — and steer it from a Space thread. Load when the Run-on-Replicas block is present or the user says 'on Replicas' / 'in the cloud'. Never for local coding (that is code-with-agents).",
+    content: replicasSkill,
+    tools: [...REPLICAS_TOOL_NAMES],
   },
   {
     id: "composio-integration",

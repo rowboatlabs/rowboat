@@ -74,6 +74,7 @@ everyone in the space. To point at a space, \`[#Its Name](#space:<spaceId>)\`
 | "new space", "rename it", "invite link" | \`create_space\` / \`rename_space\` / \`create_invite\` |
 | "send at 9am", "remind me" | \`schedule_message\` |
 | "draw / sketch / diagram X on the board", "what's on the whiteboard" | \`loadSkill\` \`whiteboard\` → \`whiteboard-read\` / \`whiteboard-draw\` |
+| "send this to Replicas", "run it in the cloud", the Run-on-Replicas block | \`loadSkill\` \`replicas\` → \`replicas-dispatch\` (or \`replicas-send\` when the thread has a handle) |
 
 "Push / add X to <space>" means updating the right **file** (the obvious one
 in \`list_spaces\`, e.g. a roadmap item goes in roadmap.md), not posting to

@@ -167,6 +167,7 @@ describe("RealAgentResolver", () => {
                 coachMode: false,
                 commandCenter: false,
                 spaceThread: null,
+                replicas: null,
             }),
         );
     });

@@ -28,6 +28,7 @@ function input(
         coachMode: false,
         commandCenter: false,
         spaceThread: null,
+        replicas: null,
         ...overrides,
     };
 }
@@ -55,6 +56,22 @@ const MATRIX: Array<[name: string, overrides: Partial<ComposeSystemInstructionsI
                 threadRootId: "01M07ROOTAAAAAAAAAAAAAAAA1",
             },
         },
+    ],
+    [
+        "replicas in a space thread",
+        {
+            spaceThread: {
+                org: "org-1",
+                spaceName: "Roadboard",
+                spaceId: "01M07B68G1BQFP70TX5RPHJX89",
+                threadRootId: "01M07ROOTAAAAAAAAAAAAAAAA1",
+            },
+            replicas: { environmentId: "env_abc123", repository: "rowboatlabs/rowboat", planMode: false },
+        },
+    ],
+    [
+        "replicas plan mode, no repo name",
+        { replicas: { environmentId: "env_abc123", repository: null, planMode: true } },
     ],
     [
         "everything on",
