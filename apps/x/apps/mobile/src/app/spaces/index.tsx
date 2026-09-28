@@ -187,17 +187,6 @@ function OrgList() {
           <Image source="sf:link" style={{ width: 18, height: 18 }} tintColor={colors.secondaryLabel} />
           <Text style={{ fontSize: 15, color: colors.label }}>Join with an invite link</Text>
         </Pressable>
-        <View style={{ height: 1, marginLeft: 44, backgroundColor: colors.separator }} />
-        <Pressable
-          onPress={() => void account.signOut()}
-          style={({ pressed }) => ({
-            flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 12,
-            opacity: pressed ? 0.6 : 1,
-          })}
-        >
-          <Image source="sf:rectangle.portrait.and.arrow.right" style={{ width: 18, height: 18 }} tintColor={colors.destructive} />
-          <Text style={{ fontSize: 15, color: colors.destructive }}>Sign out</Text>
-        </Pressable>
       </View>
     </ScrollView>
   );
