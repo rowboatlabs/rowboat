@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useHeaderHeight } from 'expo-router/react-navigation';
 import { useKeyboardVisible } from '@/lib/use-keyboard-visible';
 import type { Member, Message } from '@rowboat/spaces-protocol';
 
@@ -30,6 +31,8 @@ export default function SpaceThreadScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const keyboardVisible = useKeyboardVisible();
+  // The header is see-through (soft scroll edge): content insets itself.
+  const headerHeight = useHeaderHeight();
   const account = useSpacesAccount();
   const params = useLocalSearchParams<{ org: string; space: string; root: string; title: string; me: string }>();
   const { org, space, root, me } = params;
@@ -282,7 +285,7 @@ export default function SpaceThreadScreen() {
   );
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.background }} behavior="padding" keyboardVerticalOffset={insets.top + 44}>
+    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.background }} behavior="padding" keyboardVerticalOffset={0}>
       <Stack.Screen
         options={{
           headerTitle: () => (
@@ -315,6 +318,7 @@ export default function SpaceThreadScreen() {
       ) : (
         <ScrollView
           ref={scrollRef}
+          contentInsetAdjustmentBehavior="automatic"
           keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="handled"
           alwaysBounceVertical

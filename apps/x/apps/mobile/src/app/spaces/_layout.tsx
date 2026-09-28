@@ -13,6 +13,11 @@ export default function SpacesLayout() {
       screenOptions={{
         headerShadowVisible: false,
         headerTintColor: tint,
+        // iOS 26: content scrolls under a see-through bar and fades out
+        // softly instead of meeting a hard edge. Screens inset themselves
+        // (contentInsetAdjustmentBehavior / header height).
+        headerTransparent: true,
+        scrollEdgeEffects: { top: 'soft' },
       }}
     >
       <Stack.Screen

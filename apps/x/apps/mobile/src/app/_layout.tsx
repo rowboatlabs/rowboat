@@ -1,4 +1,11 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
+import { light as lightColors } from '@/theme/colors';
+
+// Navigation chrome (headers, screen ground, drawer) on the same warm white.
+const LightTheme = {
+  ...DefaultTheme,
+  colors: { ...DefaultTheme.colors, background: lightColors.background, card: lightColors.background, border: lightColors.separator, text: lightColors.label },
+};
 import Drawer from 'expo-router/drawer';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
@@ -33,7 +40,7 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <KeyboardProvider>
-      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : LightTheme}>
         <ConnectionProvider>
           <SpacesAccountProvider>
           <PushRegistrar />

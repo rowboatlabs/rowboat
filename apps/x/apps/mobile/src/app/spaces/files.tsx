@@ -139,6 +139,7 @@ export default function SpaceFilesScreen() {
 
   return (
     <ScrollView
+      contentInsetAdjustmentBehavior="automatic"
       style={{ flex: 1, backgroundColor: colors.background }}
       contentContainerStyle={{ paddingVertical: 8 }}
       refreshControl={

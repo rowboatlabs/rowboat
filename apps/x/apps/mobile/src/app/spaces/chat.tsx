@@ -16,6 +16,7 @@ import { setActiveSpace } from '@/lib/push';
 import { useSpacesAccount } from '@/lib/spaces/account';
 import { STREAM_CACHE_LIMIT, loadRoster, loadValue, peekRoster, peekValue, saveRoster, saveValue, seedThreadRoot } from '@/lib/spaces/cache';
 import { StatusBanner } from '@/components/status-banner';
+import { HeaderFade } from '@/components/header-fade';
 import { SpacesClient } from '@/lib/spaces/client';
 import { SpacesLive } from '@/lib/spaces/live';
 import { useColors } from '@/theme/colors';
@@ -313,6 +314,11 @@ export default function SpaceChatScreen() {
       <Stack.Screen
         options={{
           title: title ?? 'Space',
+          // The inverted list fights iOS's see-through header + scroll-edge
+          // effect (it fogs the whole list): solid bar here, HeaderFade below it.
+          headerTransparent: false,
+          headerStyle: { backgroundColor: colors.background },
+          scrollEdgeEffects: { top: 'hidden', bottom: 'hidden' },
           headerRight: () => (
             <View style={{ flexDirection: 'row', gap: 18 }}>
               <Pressable hitSlop={10} onPress={() => router.push({ pathname: '/spaces/search', params: { org, space, title, me } })}>
@@ -325,6 +331,8 @@ export default function SpaceChatScreen() {
           ),
         }}
       />
+      <HeaderFade headerHeight={0} fade={20} />
+      <View pointerEvents="box-none" style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 2 }}>
       <StatusBanner
         error={error}
         offlineText={messages ? "You're offline. Showing saved messages." : "You're offline. This space will load when you're back online."}
@@ -333,6 +341,7 @@ export default function SpaceChatScreen() {
           setReloadKey((k) => k + 1);
         }}
       />
+      </View>
       {messages === null && !error ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <ActivityIndicator />
