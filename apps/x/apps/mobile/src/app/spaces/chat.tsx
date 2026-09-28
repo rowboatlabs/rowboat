@@ -2,7 +2,7 @@ import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View, type LayoutChangeEvent, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useHeaderHeight } from 'expo-router/react-navigation';
@@ -84,6 +84,18 @@ export default function SpaceChatScreen() {
     }
     if (atBottom.current && !dragging.current) toEnd();
   }, [positioned, toEnd]);
+  // The viewport changes size too — the composer and header settle after a
+  // push transition, the keyboard comes and goes. Same rule: re-pin if following.
+  const viewportHeight = useRef(0);
+  const onViewportLayout = useCallback(
+    (e: LayoutChangeEvent) => {
+      const h = e.nativeEvent.layout.height;
+      if (h === viewportHeight.current) return;
+      viewportHeight.current = h;
+      if (atBottom.current && !dragging.current) toEnd();
+    },
+    [toEnd],
+  );
   const composerRef = useRef<SpaceComposerHandle>(null);
   const lastOffset = useRef<number | undefined>(undefined);
 
@@ -397,6 +409,7 @@ export default function SpaceChatScreen() {
           onScrollEndDrag={settle}
           onMomentumScrollEnd={settle}
           onContentSizeChange={onContentSizeChange}
+          onLayout={onViewportLayout}
         >
           {visible.map((m) => (
             <MessageRow
