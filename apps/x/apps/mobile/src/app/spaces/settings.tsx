@@ -35,12 +35,12 @@ export default function SettingsScreen() {
       contentContainerStyle={{ padding: 16, gap: 24, paddingBottom: 48 }}
     >
       {account.status === 'signedIn' ? (
-        <Group radius={22}>
+        <Group radius={28 /* concentric: 8pt around a 40pt avatar */}>
           <Row first onPress={() => router.push('/spaces/account')}>
-            <View style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: '#3b6fb6' }}>
+            <View style={{ width: 40, height: 40, borderRadius: 20, marginLeft: -8, marginVertical: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: '#3b6fb6' }}>
               <Text style={{ fontSize: 17, fontWeight: '600', color: '#ffffff' }}>{((name ?? '?')[0] ?? '?').toUpperCase()}</Text>
             </View>
-            <Text style={{ flex: 1, paddingVertical: 14, fontSize: 17, fontWeight: '600', color: colors.label }}>{name ?? 'Your account'}</Text>
+            <Text style={{ flex: 1, fontSize: 17, fontWeight: '600', color: colors.label }}>{name ?? 'Your account'}</Text>
             <Chevron />
           </Row>
         </Group>
