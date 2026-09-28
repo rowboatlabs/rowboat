@@ -5,6 +5,7 @@ import { parseSpacesLink, readLastSpace, resolveSpacesLocation, serverLandingSpa
 import { openServerDialog } from '@/lib/server-dialog'
 import { ServerDialogs } from '@/components/spaces/server-dialogs'
 import { noteSpaceVisit } from '@/lib/spaces-visits'
+import { railForOpening, rememberRail } from '@/lib/spaces-rail-memory'
 import * as React from 'react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useRef } from 'react'
 import { workspace, quickAskShortcut, pttKey, type ipc } from '@x/shared';
@@ -5320,26 +5321,31 @@ function App() {
       case 'apps':
         setIsAppsOpen(true)
         return
-      case 'spaces':
+      case 'spaces': {
         // Feature-flag gate: every route into Spaces (sidebar, palette, deep
         // links, notification clicks, history, relaunch restore) funnels
         // through here. With the flag off, closeAllSections has already run,
         // so the app lands on the default full-screen chat.
         if (!SPACES_ENABLED) return
         if (view.orgId) setSpaceSelection({ orgId: view.orgId, spaceId: view.spaceId ?? '', ...(view.view ? { view: view.view } : {}) })
-        // A navigation IS the visit the sidebar's working set remembers — the
-        // Spaces view correcting its own selection goes through selectSpace
-        // instead and does not count.
-        if (view.orgId && view.spaceId) noteSpaceVisit(view.orgId, view.spaceId)
         // Checked, not trusted: a history entry from before files were named by
         // id degrades to the stream rather than reaching the org with a path.
-        setRailSelection(view.rail ? readRailSelection(view.rail) : { kind: 'general' })
+        const rail = view.rail ? readRailSelection(view.rail) : { kind: 'general' as const }
+        setRailSelection(rail)
+        // A navigation IS the visit the sidebar's working set remembers, and
+        // the place the space is left in — the Spaces view correcting its own
+        // selection goes through selectSpace instead and does not count.
+        if (view.orgId && view.spaceId) {
+          noteSpaceVisit(view.orgId, view.spaceId)
+          rememberRail(view.orgId, view.spaceId, rail)
+        }
         requestViewJump(view)
         // Spaces carries its own conversation surface, so entering it
         // collapses the assistant chat pane by default; in-space navigation
         // (topics, files, history within Spaces) leaves it as the user set it.
         setIsSpacesOpen(true)
         return
+      }
       case 'chat': {
         dismissBrowserOverlay()
         if (view.runId) {
@@ -5496,8 +5502,13 @@ function App() {
     openAppsView()
   }, [openAppsView])
 
-  const openSpace = useCallback((orgId: string, spaceId: string, rail: RailSelection = { kind: 'general' }) => {
-    void navigateToView({ type: 'spaces', orgId, spaceId, rail })
+  /**
+   * Open a space. A caller naming what to open inside it wins; one that just
+   * names the room — a sidebar row, the server switcher, the palette — gets it
+   * back as it was left, discussion and all (railForOpening).
+   */
+  const openSpace = useCallback((orgId: string, spaceId: string, rail?: RailSelection) => {
+    void navigateToView({ type: 'spaces', orgId, spaceId, rail: railForOpening(orgId, spaceId, rail) })
   }, [navigateToView])
 
   /** The org's Activity surface (layer 3): everything that involves you, newest first. */
@@ -5731,15 +5742,11 @@ function App() {
     })
   }, [])
 
-  // One-time storage-retention notice: a modal on the first launch with
-  // retention enabled; the actual sweep starts on the NEXT launch so months
-  // of history are never deleted before the user has seen this.
-  const [retentionNotice, setRetentionNotice] = useState<{ chatDays: number | null } | null>(null)
-  const [retentionSettingsOpen, setRetentionSettingsOpen] = useState(false)
+  // Keep the legacy retention gate initialized after removing the startup
+  // popup (2026-09-22, onboarding simplification); controls remain in Settings.
   useEffect(() => {
-    void window.ipc.invoke('retention:consumeFirstRunNotice', null).then(({ show, chatDays }) => {
-      if (show) setRetentionNotice({ chatDays })
-    }).catch(() => { /* settings unavailable — try again next launch */ })
+    void window.ipc.invoke('retention:consumeFirstRunNotice', null)
+      .catch(() => { /* settings unavailable — try again next launch */ })
   }, [])
 
   // The quick-ask chord failed to register at boot — another app owns it.
@@ -8177,37 +8184,6 @@ function App() {
         open={billingErrorOpen}
         match={billingErrorMatch}
         onOpenChange={setBillingErrorOpen}
-      />
-      {/* One-time storage-retention notice (see retention:consumeFirstRunNotice). */}
-      <Dialog open={retentionNotice !== null} onOpenChange={(open) => { if (!open) setRetentionNotice(null) }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Old chats are cleaned up automatically</DialogTitle>
-            <DialogDescription className="pt-1 leading-relaxed">
-              {retentionNotice?.chatDays != null
-                ? `To save disk space, Rowboat now deletes chats that have been inactive for ${retentionNotice.chatDays}+ days, along with old background-task transcripts.`
-                : 'To save disk space, Rowboat now deletes old background-task transcripts.'}
-              {' '}Notes and files created by agents are never touched. Cleanup starts from the next launch, and you can change or turn this off anytime.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setRetentionNotice(null)
-                setRetentionSettingsOpen(true)
-              }}
-            >
-              Open Settings
-            </Button>
-            <Button onClick={() => setRetentionNotice(null)}>Got it</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      <SettingsDialog
-        open={retentionSettingsOpen}
-        onOpenChange={setRetentionSettingsOpen}
-        defaultTab="advanced"
       />
       <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} />
       {/* The one host for Create / Join a server (lib/server-dialog.ts): whatever

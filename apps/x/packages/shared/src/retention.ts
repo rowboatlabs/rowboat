@@ -13,9 +13,9 @@ import { z } from 'zod';
  *   they are still reachable from a live session. Only the run transcripts
  *   go — the notes/files those runs produced are never touched.
  *
- * `noticeShown` gates the first sweep: the first launch with retention
- * enabled surfaces a one-time notice instead of silently deleting months
- * of history; sweeping starts on the next launch.
+ * `noticeShown` is the legacy startup gate, initialized by the renderer.
+ * The startup popup was removed on 2026-09-22 for onboarding simplification;
+ * the persisted field remains so existing retention settings stay compatible.
  */
 
 export const MIN_RETENTION_DAYS = 7;

@@ -219,9 +219,16 @@ const HISTORICAL_KEY_ORDER = [
     "spreadsheet-create",
     "spreadsheet-edit",
     "generate-image",
+    "get_replicas_config",
+    "configure_replicas",
+    "get_replicas_task",
+    "act_on_replicas_task",
     "whoami",
     "list_members",
     "list_spaces",
+    "browse_spaces",
+    "list_assets",
+    "join_space",
     "open_direct",
     "create_space",
     "rename_space",
@@ -350,6 +357,7 @@ describe("BuiltinTools permission audit", () => {
             // the app-owned cache.
             // The projected agent face: every org write is gated; reads
             // (whoami, list_*, read_*, search, history, diff) are "none".
+            join_space: "prompt",
             open_direct: "prompt",
             create_space: "prompt",
             rename_space: "prompt",
@@ -365,6 +373,8 @@ describe("BuiltinTools permission audit", () => {
             manage_topic: "prompt",
             // Personal state, but irreversible (marks only advance) — gated like a write.
             mark_all_read: "prompt",
+            configure_replicas: "prompt",
+            act_on_replicas_task: "prompt",
             create_asset: "prompt",
             propose_change: "prompt",
             move_asset: "prompt",

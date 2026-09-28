@@ -685,7 +685,15 @@ export const MIGRATIONS: Migration[] = [
     ],
   },
   {
-    id: '023-replicas-threads',
+    id: '023-open-spaces',
+    statements: [
+      `alter table spaces add column visibility text not null default 'private'`,
+      `alter table spaces add constraint spaces_visibility_check check (visibility in ('private', 'open'))`,
+      `alter table spaces add constraint spaces_direct_private_check check (kind <> 'direct' or visibility = 'private')`,
+    ],
+  },
+  {
+    id: '024-replicas-threads',
     statements: [
       `create table replicas_connections (space_id text primary key references spaces(id), org_id text not null, data jsonb not null)`,
       `create table replicas_tasks (space_id text not null references spaces(id), thread_root_id text not null,

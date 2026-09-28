@@ -7,6 +7,7 @@ import { useSpaceNames } from '@/hooks/use-spaces'
 import { cn } from '@/lib/utils'
 import { hasKind, parseSearchQuery } from '@/lib/spaces-corpus'
 import { requestJump } from '@/lib/spaces-jump'
+import { FIND_SEARCH_EVENT } from '@/lib/spaces-find'
 import { chord } from '@/lib/shortcut'
 import { formatFeedTime, resolveMentions } from '@/lib/spaces-presentation'
 import type { RailSelection } from '@/lib/spaces-selection'
@@ -59,6 +60,18 @@ export function SpaceSearch({ orgId, spaceId, selfMemberId, onNavigate, classNam
     const [focused, setFocused] = useState(false)
     const [results, setResults] = useState<spaces.SearchResults>(EMPTY)
     const [loading, setLoading] = useState(false)
+
+    // /find's "Search instead" (2026-09-24): the query arrives prefilled and
+    // focused, and the debounced fetch below takes it from there.
+    useEffect(() => {
+        const onFind = (e: Event) => {
+            const q = (e as CustomEvent<{ query?: string }>).detail?.query ?? ''
+            setQuery(q)
+            inputRef.current?.focus()
+        }
+        window.addEventListener(FIND_SEARCH_EVENT, onFind)
+        return () => window.removeEventListener(FIND_SEARCH_EVENT, onFind)
+    }, [])
     const debounced = useDebounce(query, 250)
 
     // ⌘⇧K focuses THIS search while a space pane exists. Capture on window

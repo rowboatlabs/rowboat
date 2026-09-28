@@ -119,6 +119,9 @@ import * as replicasClient from '@x/core/dist/replicas/client.js';
 import { oauthConnectBus, composioConnectBus, chatgptStatusBus } from '@x/core/dist/auth/connector-events.js';
 import { subscribeTtsChunks } from '@x/core/dist/voice/tts-bus.js';
 import { formatDictation } from '@x/core/dist/voice/format_dictation.js';
+import * as typesafeClient from '@x/core/dist/typesafe/client.js';
+import { routeSpaceMessage } from '@x/core/dist/typesafe/route_message.js';
+import { findSpaceMessage } from '@x/core/dist/typesafe/find_message.js';
 import * as appsIndexer from '@x/core/dist/apps/indexer.js';
 import * as appsServer from '@x/core/dist/apps/server.js';
 import * as appsAgents from '@x/core/dist/apps/agents.js';
@@ -774,9 +777,8 @@ export function markSessionsIndexReady(): void {
 
 // Daily storage-retention sweep (auto-delete old chats & task transcripts).
 // Started from main.ts once the session index is ready; the initial run is
-// delayed so it never competes with startup. The first launch with retention
-// enabled only arms the one-time notice (retention:consumeFirstRunNotice) —
-// sweeping begins on the next launch, after the user has seen it.
+// delayed so it never competes with startup. The renderer initializes the
+// legacy retention gate without a popup (2026-09-22, onboarding simplification).
 
 let servicesWatcher: (() => void) | null = null;
 export async function startServicesWatcher(): Promise<void> {
@@ -2146,6 +2148,15 @@ export function setupIpcHandlers() {
       markOnboardingComplete();
       return { success: true };
     },
+    // TypeSafe (Jev) and the Spaces composer's Auto toggle (2026-09-22)
+    'typesafe:isConfigured': async () => ({ configured: typesafeClient.isConfigured() }),
+    'typesafe:setApiKey': async (_event, args) => typesafeClient.saveApiKey(args.apiKey),
+    'typesafe:clearApiKey': async () => {
+      typesafeClient.clearApiKey();
+      return { success: true as const };
+    },
+    'spaces:autoRoute': async (_event, args) => routeSpaceMessage(args),
+    'spaces:findMessage': async (_event, args) => findSpaceMessage(args),
     // Composio integration handlers
     'composio:is-configured': async () => {
       return composioHandler.isConfigured();

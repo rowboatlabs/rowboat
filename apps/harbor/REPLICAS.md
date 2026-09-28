@@ -2,7 +2,7 @@
 
 ## Setup
 
-Build and deploy Harbor before the updated Rowboat client. Migration `023-replicas-threads` adds connection and task storage; no existing messages or personal Replicas settings are migrated.
+Build and deploy Harbor before the updated Rowboat client. Migration `024-replicas-threads` adds connection and task storage; no existing messages or personal Replicas settings are migrated.
 
 Set `HARBOR_INTEGRATION_KEY` on Harbor to a stable 32-byte random key encoded as 64 hexadecimal characters. Keep it in the deployment secret manager and back it up: changing it without re-encrypting connections makes existing credentials unreadable. Each connection is encrypted with the Space id as associated data. No key is sent to the coding workspace or returned by the API.
 

@@ -1,12 +1,52 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
-import { parseSpacesLink, resolveSpacesLocation } from './spaces-navigation'
+import { parseSpacesLink, resolveSpacesLocation, serverLandingSpaceId } from './spaces-navigation'
+import { noteSpaceVisit, resetSpaceVisitsForTest } from './spaces-visits'
 
 const orgs = [
     { id: 'first', spaces: [{ id: 'main' }], directs: [] },
     { id: 'second', spaces: [{ id: 'founders' }, { id: 'design' }], directs: [{ id: 'dm' }] },
     { id: 'empty', spaces: [], directs: [] },
 ] as unknown as OrgWithSpaces[]
+
+// The landing reads the visit record, so every test starts on a server this
+// install has never been in.
+beforeEach(() => {
+    window.localStorage.clear()
+    resetSpaceVisitsForTest()
+})
+
+describe('opening a server', () => {
+    it('lands on the default channel before the reader has been anywhere in it', () => {
+        expect(serverLandingSpaceId(orgs[1])).toBe('founders')
+    })
+
+    it('returns to the channel it was left in', () => {
+        noteSpaceVisit('second', 'founders', 1000)
+        noteSpaceVisit('second', 'design', 2000)
+        expect(serverLandingSpaceId(orgs[1])).toBe('design')
+    })
+
+    it('returns to a DM just as readily as a channel', () => {
+        noteSpaceVisit('second', 'design', 1000)
+        noteSpaceVisit('second', 'dm', 2000)
+        expect(serverLandingSpaceId(orgs[1])).toBe('dm')
+    })
+
+    it('reads only its own server', () => {
+        noteSpaceVisit('first', 'main', 3000)
+        expect(serverLandingSpaceId(orgs[1])).toBe('founders')
+    })
+
+    it('falls back to the default channel when the room it remembers is gone', () => {
+        noteSpaceVisit('second', 'archived', 2000)
+        expect(serverLandingSpaceId(orgs[1])).toBe('founders')
+    })
+
+    it('has nowhere to land on an empty server', () => {
+        expect(serverLandingSpaceId(orgs[2])).toBe('')
+    })
+})
 
 describe('returning to Spaces', () => {
     it.each(['design', 'dm'])('restores the saved location %s instead of the first server', (spaceId) => {

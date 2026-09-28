@@ -12,7 +12,7 @@ import {
 import { randomBytes } from 'node:crypto';
 import type { z } from 'zod';
 import { HarborError } from '../errors.js';
-import { canBind, canChangeMembership, canRenameSpace, enforce } from '../policy.js';
+import { canBind, canChangeMembership, canJoinSpace, canRenameSpace, enforce } from '../policy.js';
 import { DIRECT_SPACE_NAME, directKeyFor, type PushLevel, type StoredEvent } from '../store.js';
 import { Kernel, type ActorCtx, type BindIdentity } from './kernel.js';
 
@@ -51,10 +51,34 @@ export class Spaces {
     return this.k.store.listSpacesFor(ctx.memberId, opts);
   }
 
-  async createSpace(ctx: ActorCtx, name: string): Promise<Space> {
+  async browseSpaces(ctx: ActorCtx): Promise<Array<{ space: Space; joined: boolean }>> {
+    await this.k.requireOrgMember(ctx);
+    return this.k.store.browseSpaces(ctx.memberId);
+  }
+
+  async joinSpace(ctx: ActorCtx, spaceId: string): Promise<{ space: Space; membership: Membership }> {
+    const result = await this.k.locked(spaceId, async () => {
+      const space = await this.k.requireSpace(spaceId);
+      await this.k.requireOrgMember(ctx);
+      enforce(canJoinSpace(space));
+      const existing = await this.k.store.getMembership(spaceId, ctx.memberId);
+      if (existing) return { space, membership: existing, created: false };
+      this.k.guardWrite();
+      const membership: Membership = { spaceId, memberId: ctx.memberId, joinedAt: this.k.now() };
+      await this.k.store.putMembership(membership);
+      await this.k.appendNext(spaceId, membership.joinedAt, { type: 'membership', membership, action: 'joined' });
+      return { space, membership, created: true };
+    });
+    if (result.created) this.k.hub.publishToMember(ctx.memberId, {
+      kind: 'space_added', spaceId, spaceKind: 'shared', by: ctx.memberId, at: result.membership.joinedAt,
+    });
+    return { space: result.space, membership: result.membership };
+  }
+
+  async createSpace(ctx: ActorCtx, name: string, visibility: Space['visibility'] = 'private'): Promise<Space> {
     this.k.guardWrite();
     const now = this.k.now();
-    const space: Space = { id: this.k.ulid(), name, createdAt: now, kind: 'shared' };
+    const space: Space = { id: this.k.ulid(), name, createdAt: now, kind: 'shared', visibility };
     await this.k.store.putSpace(space);
     return this.k.locked(space.id, async () => {
       const membership: Membership = { spaceId: space.id, memberId: ctx.memberId, joinedAt: now };
@@ -116,7 +140,7 @@ export class Spaces {
 
     this.k.guardWrite();
     const now = this.k.now();
-    const space: Space = { id: this.k.ulid(), name: DIRECT_SPACE_NAME, createdAt: now, kind: 'direct', participants };
+    const space: Space = { id: this.k.ulid(), name: DIRECT_SPACE_NAME, createdAt: now, kind: 'direct', visibility: 'private', participants };
     try {
       await this.k.store.putSpace(space);
     } catch (err) {
@@ -143,7 +167,7 @@ export class Spaces {
   }
 
   async listMembers(ctx: ActorCtx, spaceId: string): Promise<Member[]> {
-    await this.k.requireMember(ctx, spaceId);
+    await this.k.requireReadableSpace(ctx, spaceId);
     return this.k.store.listSpaceMembers(spaceId);
   }
 
@@ -188,7 +212,8 @@ export class Spaces {
     const token = randomBytes(24).toString('base64url');
     const now = this.k.now();
     const expiresAt = new Date(Date.now() + (expiresInHours ?? DEFAULT_INVITE_HOURS) * 3_600_000).toISOString();
-    await this.k.store.putInvite({ token, spaceId, createdBy: ctx.memberId, createdAt: now, expiresAt, revoked: false });
+    await this.k.lockedAs(ctx, spaceId, () =>
+      this.k.store.putInvite({ token, spaceId, createdBy: ctx.memberId, createdAt: now, expiresAt, revoked: false }));
     return { token, link: inviteUrl(this.k.org.address, token), expiresAt };
   }
 
@@ -308,7 +333,7 @@ export class Spaces {
    * read of a space — the log has no ungated door.
    */
   async replay(ctx: ActorCtx, spaceId: string, afterOffset?: number): Promise<{ head: number; events: StoredEvent[] }> {
-    await this.k.requireMember(ctx, spaceId);
+    await this.k.requireReadableSpace(ctx, spaceId);
     const head = await this.k.store.head(spaceId);
     const events = afterOffset === undefined ? [] : await this.k.store.listEventsAfter(spaceId, afterOffset);
     return { head, events };

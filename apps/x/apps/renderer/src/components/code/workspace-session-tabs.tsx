@@ -5,9 +5,12 @@ import { codeWorkspaceKey, type CodeSession } from '@x/shared/src/code-sessions.
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useCodeSessions } from './use-code-sessions'
+import { useUnreadCodeSessions } from './session-read-state'
+import { UnreadBadge } from '@/components/spaces/unread-badge'
 
 export function WorkspaceSessionTabs({ session, onSelect }: { session: CodeSession; onSelect: (id: string) => void }) {
   const { sessions, statusOf, refresh } = useCodeSessions()
+  const unreadSessions = useUnreadCodeSessions()
   const creatingRef = useRef(false)
   const [creating, setCreating] = useState(false)
   const members = sessions.filter((s) => codeWorkspaceKey(s) === codeWorkspaceKey(session))
@@ -35,6 +38,7 @@ export function WorkspaceSessionTabs({ session, onSelect }: { session: CodeSessi
         className={cn('flex max-w-60 shrink-0 items-center gap-2 border-r px-3 text-xs hover:bg-accent/50', member.id === session.id ? 'bg-accent text-foreground' : 'text-muted-foreground')}>
         {statusOf(member.id) !== 'idle' && <span className={cn('size-1.5 shrink-0 rounded-full', statusOf(member.id) === 'working' ? 'animate-pulse bg-green-500' : 'bg-amber-500')} />}
         <span className="truncate">{member.title}</span>
+        {unreadSessions.has(member.id) && <UnreadBadge badge={{ unread: 1, forYou: 1 }} direct />}
       </button>)}
     </div>
     <Button variant="ghost" size="icon" className="size-9 shrink-0 self-center rounded-none" disabled={creating || !!session.worktree?.removedAt}

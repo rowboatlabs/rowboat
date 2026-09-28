@@ -57,6 +57,25 @@ export function spaceVisitedAt(orgId: string, spaceId: string): number | null {
     return load()[key(orgId, spaceId)] ?? null
 }
 
+/**
+ * Of these channels and DMs, the one this install opened most recently — null
+ * if none of them ever was. This is what "open this server" lands on, so
+ * coming back to a server returns to the room it was left in.
+ */
+export function lastVisitedSpaceId(orgId: string, spaceIds: readonly string[]): string | null {
+    const current = load()
+    let last: string | null = null
+    let lastAt = -Infinity
+    for (const spaceId of spaceIds) {
+        const at = current[key(orgId, spaceId)]
+        if (typeof at === 'number' && at > lastAt) {
+            last = spaceId
+            lastAt = at
+        }
+    }
+    return last
+}
+
 function subscribe(listener: () => void): () => void {
     listeners.add(listener)
     return () => {

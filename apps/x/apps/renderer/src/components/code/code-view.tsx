@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { useCodeSessions, projectLabel, type ProjectRow } from './use-code-sessions'
 import { SessionRail } from './session-rail'
+import { useCodeSessionReader } from './session-read-state'
 import { BranchDialog } from './branch-dialog'
 import { fetchCodeAgentsStatus, isAgentReady, type CodeAgentsStatus } from './code-agent-status'
 
@@ -82,6 +83,7 @@ export function CodeView({
 
   const selectedSession = sessions.find((s) => s.id === selectedSessionId) ?? null
   const selectedStatus = selectedSession ? statusOf(selectedSession.id) : 'idle'
+  useCodeSessionReader(focusSessionId ? null : selectedSession?.id ?? null)
 
   useEffect(() => {
     if (selectedSession) window.localStorage.setItem(`x:code-workspace-session:${codeWorkspaceKey(selectedSession)}`, selectedSession.id)

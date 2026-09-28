@@ -10,7 +10,7 @@ export interface ProviderState {
 
 export type Step = 0 | 1 | 2 | 3 | 4
 
-export type OnboardingPath = 'rowboat' | 'byok' | null
+export type OnboardingPath = 'rowboat' | 'chatgpt' | 'byok' | null
 
 export function useOnboardingState(open: boolean, onComplete: (opts?: { startTour?: boolean }) => void) {
   const [currentStep, setCurrentStep] = useState<Step>(0)
@@ -274,9 +274,6 @@ export function useOnboardingState(open: boolean, onComplete: (opts?: { startTou
     await startGoogleCalendarConnect()
   }, [startGoogleCalendarConnect])
 
-  // New step flow:
-  // Rowboat path: 0 (welcome) → 2 (connect) → 3 (code mode) → 4 (done)
-  // BYOK path: 0 (welcome) → 1 (llm setup) → 2 (connect) → 3 (code mode) → 4 (done)
   const handleNext = useCallback(() => {
     if (currentStep === 0) {
       setCurrentStep(1)
@@ -380,20 +377,6 @@ export function useOnboardingState(open: boolean, onComplete: (opts?: { startTou
 
     return cleanup
   }, [])
-
-  // Auto-advance from Rowboat sign-in step when OAuth completes
-  useEffect(() => {
-    if (onboardingPath !== 'rowboat' || currentStep !== 0) return
-
-    const cleanup = window.ipc.on('oauth:didConnect', async (event) => {
-      if (event.provider === 'rowboat' && event.success) {
-        // (Composio Gmail/Calendar flag re-check removed — sync was deleted.)
-        setCurrentStep(2) // Go to Connect Accounts
-      }
-    })
-
-    return cleanup
-  }, [onboardingPath, currentStep])
 
   // Listen for Composio connection events (state updates only — toasts handled by ConnectorsPopover)
   useEffect(() => {

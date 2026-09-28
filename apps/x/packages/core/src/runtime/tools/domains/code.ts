@@ -230,16 +230,45 @@ export const codeAgentRunTools: z.infer<typeof BuiltinToolsSchema> = {
                             subflow: [],
                         });
                     },
-                    ask: (permAsk) => registry.request(ctx.runId, (requestId) => {
-                        void ctx.publish({
+                    // The ask path, and ONLY the ask path, leaves a durable
+                    // request/resolution pair. Emitting the resolution here
+                    // rather than off the broker's decision stream is what keys
+                    // it to a requestId and keeps auto-approvals (policy or
+                    // sticky "always allow") out of the durable record entirely
+                    // — they were never announced, so they have nothing to pair
+                    // off (2026-09-23). The `emit` callback runs synchronously
+                    // inside request(), so `requestId` is set before the await.
+                    ask: async (permAsk) => {
+                        let requestId = '';
+                        const decision = await registry.request(ctx.runId, (id) => {
+                            requestId = id;
+                            void ctx.publish({
+                                runId: ctx.runId,
+                                type: 'code-run-permission-request',
+                                toolCallId: ctx.toolCallId,
+                                requestId: id,
+                                ask: permAsk,
+                                subflow: [],
+                            });
+                        });
+                        // Covers the stop path too: cancelRun() resolves pending
+                        // asks to 'reject', which clears their cards.
+                        //
+                        // Awaited, unlike the request above: the agent's prompt
+                        // is still blocked on this decision, so the tool cannot
+                        // settle underneath us and the marker can't land after
+                        // the tool result (which the reducer rejects). Failure
+                        // is swallowed — a lost marker leaves a stale card until
+                        // the run settles, but must never fail the coding turn.
+                        await ctx.publish({
                             runId: ctx.runId,
-                            type: 'code-run-permission-request',
+                            type: 'code-run-permission-resolved',
                             toolCallId: ctx.toolCallId,
                             requestId,
-                            ask: permAsk,
                             subflow: [],
-                        });
-                    }),
+                        }).catch(() => {});
+                        return decision;
+                    },
                 });
                 return {
                     success: result.stopReason === 'end_turn',

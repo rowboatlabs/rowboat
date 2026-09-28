@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { monotonicFactory } from 'ulid';
 import { HarborError } from '../errors.js';
 import type { SpaceHub } from '../hub.js';
-import { canAccessSpace, canWrite, enforce } from '../policy.js';
+import { canAccessSpace, canReadSpace, canWrite, enforce } from '../policy.js';
 import type { Store, StoredEvent } from '../store.js';
 
 // The transactional core every aggregate is built on: the store and the hub,
@@ -65,6 +65,18 @@ export class Kernel {
   async requireSpace(spaceId: string): Promise<Space> {
     const space = await this.store.getSpace(spaceId);
     if (!space) throw new HarborError('not_found', `no such space`);
+    return space;
+  }
+
+  async requireOrgMember(ctx: ActorCtx): Promise<void> {
+    if (!(await this.store.getMember(ctx.memberId))) throw new HarborError('not_a_member', 'you are not a member of this org');
+  }
+
+  async requireReadableSpace(ctx: ActorCtx, spaceId: string): Promise<Space> {
+    const space = await this.requireSpace(spaceId);
+    const membership = await this.store.getMembership(spaceId, ctx.memberId);
+    const orgMember = membership ? true : !!(await this.store.getMember(ctx.memberId));
+    enforce(canReadSpace(space, membership, orgMember));
     return space;
   }
 

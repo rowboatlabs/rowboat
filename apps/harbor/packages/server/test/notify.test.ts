@@ -15,7 +15,7 @@ const SPACE = '01HZZZZZZZZZZZZZZZZZZZZZZZ';
 const ROOT = '01HXXXXXXXXXXXXXXXXXXXXXXX';
 
 const space = (kind: 'shared' | 'direct'): Space =>
-  ({ id: SPACE, name: 'general', createdAt: new Date().toISOString(), kind }) as Space;
+  ({ id: SPACE, name: 'general', createdAt: new Date().toISOString(), kind, visibility: 'private' }) as Space;
 
 const msg = (body: string, author = 'harsh', opts: { agent?: boolean; threadRoot?: string } = {}): Message =>
   ({
