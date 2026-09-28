@@ -35,7 +35,7 @@ export default function SettingsScreen() {
       contentContainerStyle={{ padding: 16, gap: 24, paddingBottom: 48 }}
     >
       {account.status === 'signedIn' ? (
-        <Group>
+        <Group radius={22}>
           <Row first onPress={() => router.push('/spaces/account')}>
             <View style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: '#3b6fb6' }}>
               <Text style={{ fontSize: 17, fontWeight: '600', color: '#ffffff' }}>{((name ?? '?')[0] ?? '?').toUpperCase()}</Text>
@@ -87,12 +87,12 @@ function Chevron() {
   return <Image source="sf:chevron.right" style={{ width: 8, height: 13 }} tintColor={colors.tertiaryLabel} />;
 }
 
-function Group({ label, footer, children }: { label?: string; footer?: string; children: ReactNode }) {
+function Group({ label, footer, radius = 12, children }: { label?: string; footer?: string; radius?: number; children: ReactNode }) {
   const colors = useColors();
   return (
     <View style={{ gap: 6 }}>
       {label ? <Text style={{ fontSize: 13, color: colors.secondaryLabel, paddingHorizontal: 16, textTransform: 'uppercase' }}>{label}</Text> : null}
-      <View style={{ borderRadius: 12, borderCurve: 'continuous', overflow: 'hidden', backgroundColor: colors.background }}>{children}</View>
+      <View style={{ borderRadius: radius, borderCurve: 'continuous', overflow: 'hidden', backgroundColor: colors.background }}>{children}</View>
       {footer ? <Text style={{ fontSize: 13, lineHeight: 18, color: colors.secondaryLabel, paddingHorizontal: 16 }}>{footer}</Text> : null}
     </View>
   );
