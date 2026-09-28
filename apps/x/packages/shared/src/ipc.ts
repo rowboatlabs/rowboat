@@ -1,3 +1,4 @@
+import { ReplicasConfigInput, ReplicasConfigView, ReplicasTask, ReplicasThreadAction, ReplicasOptions } from '@rowboat/spaces-protocol';
 import { z } from 'zod';
 import { UseCase } from './analytics.js';
 import { DeckOutline, DeckOutlineSlide, EditSlideRequest, GenerateDeckOutlineRequest, GenerateSlideRequest } from './deck.js';
@@ -4084,6 +4085,18 @@ export const ipcSchemas = {
   // actingMode is set by main ('direct' — the renderer is the human surface;
   // agents write through the org's MCP face, never through IPC). Posting never
   // creates a topic; threadRoot present = a reply, absent = a stream root.
+  'spaces:getReplicasConfig': {
+    req: z.object({ orgId: z.string(), spaceId: z.string() }), res: ReplicasConfigView,
+  },
+  'spaces:configureReplicas': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), config: ReplicasConfigInput }), res: ReplicasConfigView,
+  },
+  'spaces:getReplicasTask': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), rootMessageId: z.string() }), res: z.object({ task: ReplicasTask.nullable() }),
+  },
+  'spaces:actOnReplicasTask': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), rootMessageId: z.string(), operation: ReplicasThreadAction }), res: z.object({ task: ReplicasTask }),
+  },
   'spaces:postMessage': {
     req: z.object({
       orgId: z.string(),
@@ -4091,6 +4104,7 @@ export const ipcSchemas = {
       threadRoot: z.string().optional(),
       anchorChangeSetId: z.string().optional(),
       body: z.string(),
+      replicas: ReplicasOptions.optional(),
       /** Present = the message carries a poll; body must be its markdown fallback. */
       poll: z.custom<SpacesTypes.SpacesNewPollInput>().optional(),
     }),

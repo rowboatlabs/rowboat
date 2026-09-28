@@ -638,3 +638,14 @@ Held softly — none block v1, all should be answered by use, not by speculation
 11. **Harbor repo timing.** When to extract Harbor from the monorepo into `rowboatlabs/harbor` with a one-command self-host path (likely: when third-party hosting is announced). The name is free: the private spec repo that held it was retired 2026-09-22.
 12. **Agent replies: in the stream or in the thread.** Deferred 2026-08-21 — agent replies stay in the stream for now. Revisit before the managed service opens; flipping later splits history into two eras.
 13. ~~**Open spaces and org membership.**~~ Answered 2026-09-22 — the six shape questions are Decided in §5, with the deletion doctrine in §6.
+
+
+## Shared cloud coding in Spaces (2026-09-28)
+
+A Space can contain a Replicas integration member. An org admin explicitly connects a Replicas account for use by **every member of that Space**. The account pays for cloud work and determines upstream attribution. The integration member has no login identity and cannot be used to authenticate as a person. Its messages and reactions use ordinary member attribution with agent mode.
+
+Addressing that member starts a task under the message's thread root. One thread owns one cloud workspace **and one chat**, shared across the IC, reviewer, and other participants. Five feature threads are five independent tasks. Questions, plans, implementations, and follow-ups all use that conversation; personal Rowboat sessions are not in the delivery path. A bot DM uses the same connection only while its human participant remains a member of the source Space; each DM root starts a task without a mention. Disconnecting the source pauses delivery in both surfaces.
+
+Harbor owns the durable queue and result delivery, independent of open apps. It preserves participant names and sends initial thread context followed by incremental discussion. Normal shared-space conversation is not an invocation. Planning is an explicit choice, separate from local tool permissions. Forking creates a new root with the source discussion and environment, leaving the original task intact.
+
+The public API does not document an idempotency key for workspace creation or message sends. After an ambiguous write, the integration must not silently repeat it. The thread reports uncertain delivery and supports attaching the known workspace and chat to resume tracking. Definitive rejections can be retried explicitly. See [CONTRACT.md](./CONTRACT.md) for the operations and [the integration guide](./REPLICAS.md) for setup and upstream limits.

@@ -1,9 +1,10 @@
+import { ReplicasPanel, type SharedReplicasOptions } from './replicas-panel'
 import { SearchMenu } from '@/components/search-menu'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import type { EditorView } from '@tiptap/pm/view'
 import { uploadInputFor } from '@/lib/spaces-upload'
-import { ArrowUp, BarChart3, Check, Clock, Cloud, FileText, Loader2, LoaderIcon, Mic, Paperclip, Route, Send, ShieldCheck, Square, Terminal, X as XIcon } from 'lucide-react'
+import { ArrowUp, BarChart3, Clock, Eye, FileText, Loader2, LoaderIcon, Mic, Paperclip, Route, Send, ShieldCheck, Square, Terminal, X as XIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
@@ -63,18 +64,8 @@ export interface AgentOptions {
     searchEnabled?: boolean
     codeMode?: 'claude' | 'codex'
     /** "Run on Replicas" (2026-09-28): coding work goes to a cloud workspace in this environment; planMode mirrors Manual. */
-    replicas?: { environmentId: string; repository?: string; planMode?: boolean }
+    replicas?: SharedReplicasOptions
 }
-
-interface ReplicasEnvironmentOption {
-    id: string
-    name: string
-    repositories: string[]
-}
-
-// The strip remembers the last environment per install — a team usually
-// dispatches into the same repo for weeks.
-const REPLICAS_ENV_KEY = 'spaces:replicas-env'
 
 /** A pane-provided slash command; `args` absent = picking it runs immediately. */
 export interface SlashCommand {
@@ -111,8 +102,9 @@ async function formatTranscript(raw: string): Promise<string> {
     }
 }
 
-export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, autoFocus, onType, seed, draftKey, commands = [], autoRoute, submit, onDraftChange, onEscape }: {
+export function Composer({ threadRootId, placeholder, onSend, onSchedule, onCreatePoll, busy, autoFocus, onType, seed, draftKey, commands = [], autoRoute, submit, onDraftChange, onEscape }: {
     placeholder: string
+    threadRootId?: string
     /**
      * Post the message. Resolve 'keep' to leave the draft in the box (the
      * pane is holding it for a confirmation); throw to keep it after a
@@ -320,47 +312,8 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         return () => window.removeEventListener('code-mode-config-changed', load)
     }, [])
 
-    // "Run on Replicas" (2026-09-28): shown only when a Replicas key is saved
-    // (Settings → Code Mode). The pick is an environment = one repo on the
-    // Replicas side; the id rides the invocation and the message body never
-    // changes, so teammates on older builds see plain text.
-    const [replicasEnvs, setReplicasEnvs] = useState<ReplicasEnvironmentOption[] | null>(null)
-    const [replicasEnvId, setReplicasEnvId] = useState<string | null>(null)
-    const [replicasOn, setReplicasOn] = useState(false)
-    useEffect(() => {
-        let cancelled = false
-        const load = async () => {
-            try {
-                const status = await window.ipc.invoke('replicas:getStatus', null)
-                if (!status.configured) {
-                    if (!cancelled) { setReplicasEnvs(null); setReplicasOn(false) }
-                    return
-                }
-                const res = await window.ipc.invoke('replicas:listEnvironments', null)
-                if (cancelled) return
-                setReplicasEnvs(res.environments)
-                const remembered = window.localStorage.getItem(REPLICAS_ENV_KEY)
-                setReplicasEnvId((current) => {
-                    const candidate = current ?? remembered
-                    if (candidate && res.environments.some((e) => e.id === candidate)) return candidate
-                    return res.environments[0]?.id ?? null
-                })
-            } catch {
-                if (!cancelled) setReplicasEnvs(null)
-            }
-        }
-        void load()
-        const onChange = () => { void load() }
-        window.addEventListener('replicas-config-changed', onChange)
-        return () => { cancelled = true; window.removeEventListener('replicas-config-changed', onChange) }
-    }, [])
-    const replicasEnv = replicasEnvs?.find((e) => e.id === replicasEnvId) ?? null
-    const pickReplicasEnv = (id: string) => {
-        setReplicasEnvId(id)
-        try { window.localStorage.setItem(REPLICAS_ENV_KEY, id) } catch { /* private mode */ }
-        setReplicasOn(true)
-        setCodeMode(null) // cloud and local Terminal are exclusive
-    }
+    const [sharedReplicasOptions, setSharedReplicasOptions] = useState<SharedReplicasOptions | undefined>()
+    const [replicasConnection, setReplicasConnection] = useState<{ memberId: string | null; direct: boolean }>({ memberId: null, direct: false })
 
     // Apply a new seed by rebuilding the doc from its markdown. Append (the
     // profile popover's "Mention") joins a draft in progress; a plain seed
@@ -462,24 +415,13 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     const mentioned = containsRowboatAddress(draft)
 
     /** Per-turn agent options — attached whenever the outgoing text addresses @rowboat. */
-    const agentOptionsFor = (text: string): AgentOptions | undefined =>
-        containsRowboatAddress(text)
-            ? {
-                  ...(model ? { model: { provider: model.provider, model: model.model, ...(model.effort ? { effort: model.effort } : {}) } } : {}),
-                  permissionMode,
-                  ...(searchEnabled ? { searchEnabled: true } : {}),
-                  ...(codeMode && !(replicasOn && replicasEnv) ? { codeMode } : {}),
-                  ...(replicasOn && replicasEnv
-                      ? {
-                            replicas: {
-                                environmentId: replicasEnv.id,
-                                ...(replicasEnv.repositories[0] ? { repository: replicasEnv.repositories[0] } : {}),
-                                ...(permissionMode === 'manual' ? { planMode: true } : {}),
-                            },
-                        }
-                      : {}),
-              }
-            : undefined
+    const agentOptionsFor = (text: string): AgentOptions | undefined => {
+        if (replicasConnection.direct || (replicasConnection.memberId && text.includes(`(#member:${replicasConnection.memberId})`))) return { replicas: sharedReplicasOptions ?? {} }
+        return containsRowboatAddress(text) ? {
+            ...(model ? { model: { provider: model.provider, model: model.model, ...(model.effort ? { effort: model.effort } : {}) } } : {}),
+            permissionMode, ...(searchEnabled ? { searchEnabled: true } : {}), ...(codeMode ? { codeMode } : {}),
+        } : undefined
+    }
 
     /** The one body builder — send and send-later produce identical wire text. */
     const buildBody = (raw: string): string => {
@@ -805,6 +747,15 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
 
     return (
         <div className="spaces-composer-dock shrink-0">
+            {refs && <ReplicasPanel key={`${refs.orgId}/${refs.spaceId}/${threadRootId ?? ''}`} orgId={refs.orgId} spaceId={refs.spaceId} threadRootId={threadRootId}
+                onConnection={setReplicasConnection}
+                onOptions={setSharedReplicasOptions}
+                onMention={memberId => {
+                    editor?.chain().focus().insertContent([
+                        { type: 'mention', attrs: { kind: 'member', id: memberId, label: 'Replicas' } },
+                        { type: 'text', text: ' ' },
+                    ]).run()
+                }} /> }
             <div
                 ref={setBox}
                 className="spaces-composer-frame relative border bg-background"
@@ -1065,7 +1016,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                                 {codeModeAvailable && (
                                     <button
                                         type="button"
-                                        onClick={() => { setCodeMode((m) => (m ? null : 'claude')); setReplicasOn(false) }}
+                                        onClick={() => { setCodeMode((m) => (m ? null : 'claude')) }}
                                         aria-pressed={!!codeMode}
                                         title={codeMode ? 'Terminal on (Claude Code) — click to turn off' : 'Let it use the terminal / code tools'}
                                         className={cn(
@@ -1076,48 +1027,6 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                                         <Terminal className="size-4 shrink-0" />
                                         {codeMode && <span className="ml-1.5 text-xs font-medium">Terminal</span>}
                                     </button>
-                                )}
-                                {replicasEnvs && replicasEnvs.length > 0 && (
-                                    <DropdownMenu>
-                                        <DropdownMenuTrigger asChild>
-                                            <button
-                                                type="button"
-                                                aria-pressed={replicasOn}
-                                                title={
-                                                    replicasOn && replicasEnv
-                                                        ? `Run on Replicas: ${replicasEnv.name}${permissionMode === 'manual' ? ' (plan first)' : ''} — click to change`
-                                                        : 'Run the coding work in a Replicas cloud workspace'
-                                                }
-                                                className={cn(
-                                                    'flex h-7 shrink-0 items-center rounded-full border px-1.5 transition-colors',
-                                                    replicasOn ? 'bg-secondary text-foreground border-transparent hover:bg-secondary/70' : 'border-transparent text-muted-foreground hover:bg-muted hover:text-foreground',
-                                                )}
-                                            >
-                                                <Cloud className="size-4 shrink-0" />
-                                                {replicasOn && replicasEnv && (
-                                                    <span className="ml-1.5 max-w-[160px] truncate text-xs font-medium">Replicas · {replicasEnv.name}</span>
-                                                )}
-                                            </button>
-                                        </DropdownMenuTrigger>
-                                        <DropdownMenuContent align="start" className="max-w-[320px]">
-                                            {replicasEnvs.map((env) => (
-                                                <DropdownMenuItem key={env.id} onClick={() => pickReplicasEnv(env.id)} className="gap-2">
-                                                    <Check className={cn('size-3.5 shrink-0', replicasOn && env.id === replicasEnvId ? 'opacity-100' : 'opacity-0')} />
-                                                    <span className="min-w-0 flex-1">
-                                                        <span className="block truncate">{env.name}</span>
-                                                        {env.repositories[0] && env.repositories[0] !== env.name && (
-                                                            <span className="block truncate text-[11px] text-muted-foreground">{env.repositories.join(', ')}</span>
-                                                        )}
-                                                    </span>
-                                                </DropdownMenuItem>
-                                            ))}
-                                            {replicasOn && (
-                                                <DropdownMenuItem onClick={() => setReplicasOn(false)} className="text-muted-foreground">
-                                                    Run locally instead
-                                                </DropdownMenuItem>
-                                            )}
-                                        </DropdownMenuContent>
-                                    </DropdownMenu>
                                 )}
                             </>
                         )}

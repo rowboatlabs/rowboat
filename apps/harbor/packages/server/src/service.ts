@@ -1,3 +1,6 @@
+import { Replicas } from './replicas/service.js';
+import type { ReplicasConfigInput, ReplicasThreadAction } from '@rowboat/spaces-protocol';
+import type { ReplicasApi } from './replicas/api.js';
 import type { z } from 'zod';
 import type { BlobStore } from './blobs.js';
 import { Assets } from './core/assets.js';
@@ -54,6 +57,7 @@ export type { ActingMode };
 
 export class HarborService {
   private readonly k: Kernel;
+  readonly replicas: Replicas;
   private readonly spaces: Spaces;
   private readonly assets: Assets;
   private readonly feed: Feed;
@@ -67,11 +71,14 @@ export class HarborService {
     blobs?: BlobStore,
     /** Absent = no notifications on this org (notify.ts: frames + push). */
     notifier?: Notifier,
+    replicasApiFactory?: (key: string) => ReplicasApi,
   ) {
     this.k = new Kernel(store, hub, org);
     this.spaces = new Spaces(this.k);
     this.assets = new Assets(this.k, blobs);
     this.feed = new Feed(this.k, this.assets, notifier);
+    this.replicas = new Replicas(this.k, this.feed, replicasApiFactory, blobs);
+    this.feed.onPosted = (message, input) => this.replicas.enqueue(message, input);
     this.readState = new ReadState(this.k, this.spaces, this.feed);
   }
 
@@ -87,6 +94,11 @@ export class HarborService {
   set readOnly(value: boolean) {
     this.k.readOnly = value;
   }
+
+  getReplicasConfig(ctx: ActorCtx, spaceId: string) { return this.replicas.config(ctx, spaceId); }
+  configureReplicas(ctx: ActorCtx, spaceId: string, input: ReplicasConfigInput) { return this.replicas.configure(ctx, spaceId, input); }
+  getReplicasTask(ctx: ActorCtx, spaceId: string, rootId: string) { return this.replicas.get(ctx, spaceId, rootId); }
+  actOnReplicasTask(ctx: ActorCtx, spaceId: string, rootId: string, input: ReplicasThreadAction) { return this.replicas.act(ctx, spaceId, rootId, input); }
 
   // --- the kernel (core/kernel.ts) -------------------------------------------------
   requireMember(ctx: ActorCtx, spaceId: string): Promise<Space> {

@@ -277,7 +277,7 @@ export function GeneralStream({
         const label = threadLabelFor(rootMessageId)
         let posted: spaces.Message
         try {
-            posted = (await window.ipc.invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body })).message
+            posted = (await window.ipc.invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body, ...(agent?.replicas ? { replicas: agent.replicas } : {}) })).message
         } catch (err) {
             notify.error(`Could not reply in “${label}”`, { ...AUTO_TOAST, description: err instanceof Error ? err.message : 'The send failed' })
             // Rethrown so the composer keeps the draft for another try.
@@ -429,7 +429,8 @@ export function GeneralStream({
     }
 
     const post = async (body: string, agent?: AgentOptions): Promise<void | 'keep'> => {
-        if (autoRouteMode === 'off') return postToStream(body, agent)
+        // Explicit cloud tasks keep their chosen thread and options (2026-09-28).
+        if (agent?.replicas || autoRouteMode === 'off') return postToStream(body, agent)
         const confirmed =
             confirmedRef.current || (autoRouteMode === 'preview' && !!verdict && stripMentionTokens(verdict.body) === stripMentionTokens(body))
         confirmedRef.current = false

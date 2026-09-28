@@ -49,8 +49,10 @@ describe('agent face (MCP)', () => {
     const client = await mcpClient('dev-harsh');
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
+      'act_on_replicas_task',
       'asset_history',
       'browse_spaces',
+      'configure_replicas',
       'create_asset',
       'create_invite',
       'create_space',
@@ -61,6 +63,8 @@ describe('agent face (MCP)', () => {
       'edit_message',
       'end_poll',
       'join_space',
+      'get_replicas_config',
+      'get_replicas_task',
       'leave_space',
       'list_assets',
       'list_members',
