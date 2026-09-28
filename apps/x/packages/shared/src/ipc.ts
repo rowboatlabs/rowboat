@@ -2288,6 +2288,29 @@ export const ipcSchemas = {
       toolkits: z.array(z.string()),
     }),
   },
+  // Replicas (2026-09-28): one PERSONAL API key per member, stored host-side
+  // (config/replicas.json). setApiKey verifies the key by listing
+  // environments before saving it; the environments list feeds the Space
+  // composer's "Run on Replicas" picker.
+  'replicas:getStatus': {
+    req: z.null(),
+    res: z.object({ configured: z.boolean(), baseUrl: z.string() }),
+  },
+  'replicas:setApiKey': {
+    req: z.object({ apiKey: z.string() }),
+    res: z.object({ success: z.boolean(), error: z.string().optional(), environmentCount: z.number().optional() }),
+  },
+  'replicas:clearApiKey': {
+    req: z.null(),
+    res: z.object({ success: z.literal(true) }),
+  },
+  'replicas:listEnvironments': {
+    req: z.null(),
+    res: z.object({
+      environments: z.array(z.object({ id: z.string(), name: z.string(), repositories: z.array(z.string()) })),
+      error: z.string().optional(),
+    }),
+  },
   'migration:check-composio-google': {
     req: z.null(),
     res: z.object({
@@ -4191,6 +4214,11 @@ export const ipcSchemas = {
           permissionMode: z.enum(['auto', 'manual']).optional(),
           searchEnabled: z.boolean().optional(),
           codeMode: z.enum(['claude', 'codex']).optional(),
+          // "Run on Replicas" (2026-09-28): the strip's environment pick;
+          // planMode mirrors Manual. Exclusive with codeMode in practice.
+          replicas: z
+            .object({ environmentId: z.string(), repository: z.string().optional(), planMode: z.boolean().optional() })
+            .optional(),
         })
         .optional(),
     }),
