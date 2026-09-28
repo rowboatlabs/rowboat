@@ -40,10 +40,7 @@ export default function SettingsScreen() {
             <View style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: '#3b6fb6' }}>
               <Text style={{ fontSize: 17, fontWeight: '600', color: '#ffffff' }}>{((name ?? '?')[0] ?? '?').toUpperCase()}</Text>
             </View>
-            <View style={{ flex: 1, paddingVertical: 10 }}>
-              <Text style={{ fontSize: 17, fontWeight: '600', color: colors.label }}>{name ?? 'Your account'}</Text>
-              <Text style={{ fontSize: 13, color: colors.tertiaryLabel }}>Account, orgs, sign out</Text>
-            </View>
+            <Text style={{ flex: 1, paddingVertical: 14, fontSize: 17, fontWeight: '600', color: colors.label }}>{name ?? 'Your account'}</Text>
             <Chevron />
           </Row>
         </Group>
