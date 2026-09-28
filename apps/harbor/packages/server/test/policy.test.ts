@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Membership, Message, Space } from '@rowboat/spaces-protocol';
 import { HarborError } from '../src/errors.js';
 import {
+  canConfigureReplicas,
   canAccessSpace,
   canReadSpace,
   canJoinSpace,
@@ -24,6 +25,11 @@ const membership: Membership = { spaceId: 'S', memberId: 'a', joinedAt: NOW };
 const byA = { author: { memberId: 'a', actingMode: 'direct' } } as Message;
 
 describe('policy', () => {
+  it('only admins can share a Replicas connection', () => {
+    expect(canConfigureReplicas({ role: 'admin' })).toBeNull();
+    expect(canConfigureReplicas({ role: 'member' })?.code).toBe('forbidden');
+    expect(canConfigureReplicas(undefined)?.code).toBe('forbidden');
+  });
   it('enforce throws the refusal as a HarborError and passes null through', () => {
     expect(() => enforce(null)).not.toThrow();
     expect(() => enforce({ code: 'forbidden', message: 'no' })).toThrow(HarborError);

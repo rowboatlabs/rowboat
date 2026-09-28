@@ -194,6 +194,9 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
     });
   });
 
+  // Recover pending cloud work before any client reconnects (2026-09-28).
+  await Promise.all((await directory.listOrgs()).map(org => runtimeForOrg(org)));
+
   const closeLive = attachLive(server, async (host) => (await runtimeFor(host))?.live, { stats });
 
   await new Promise<void>((resolve) => server.listen(options.port ?? 0, resolve));
@@ -207,6 +210,7 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
     server,
     createOrg: (input) => directory.createOrg(input),
     close: async () => {
+      await Promise.all([...runtimes.values()].map(async pending => (await pending)?.service.replicas.close()));
       closeLive();
       stats.close();
       await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));

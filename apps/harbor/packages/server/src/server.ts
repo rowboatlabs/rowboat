@@ -1,3 +1,4 @@
+import type { ReplicasApi } from './replicas/api.js';
 import { createServer, type Server as HttpServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { DevAuthDriver, ensureMember, type AuthDriver } from './auth.js';
@@ -31,6 +32,7 @@ export interface SeedSpace {
 }
 
 export interface HarborOptions {
+  replicasApiFactory?: (key: string) => ReplicasApi;
   /** Test injection: replaces the default PushSender (push.ts). */
   pushSender?: PushSender;
   /** 0 (default) picks an ephemeral port — tests never collide. */
@@ -95,6 +97,7 @@ export async function startHarbor(options: HarborOptions): Promise<RunningHarbor
       ...(options.allowedEmailDomains ? { allowedEmailDomains: options.allowedEmailDomains } : {}),
     },
     orgId: DEFAULT_ORG_ID,
+    replicasApiFactory: options.replicasApiFactory,
     auth: options.auth ?? new DevAuthDriver(),
     blobs: options.blobs ?? new MemoryBlobStore(),
     ...(options.pushSender ? { pushSender: options.pushSender } : {}),
@@ -128,6 +131,7 @@ export async function startHarbor(options: HarborOptions): Promise<RunningHarbor
     stats,
     server,
     close: async () => {
+      await runtime.service.replicas.close();
       closeLive();
       stats.close();
       await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));

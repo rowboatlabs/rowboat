@@ -17,6 +17,8 @@ export interface RowboatTurnOptions {
     permissionMode?: 'auto' | 'manual'
     searchEnabled?: boolean
     codeMode?: 'claude' | 'codex'
+    /** Shared Harbor routing (2026-09-28); planning is independent of permissions. */
+    replicas?: { environmentId?: string; repository?: string; planMode?: boolean }
 }
 
 export function maybeInvokeRowboat(
@@ -27,7 +29,7 @@ export function maybeInvokeRowboat(
     body: string,
     options?: RowboatTurnOptions,
 ): void {
-    if (!containsRowboatAddress(body)) return
+    if (options?.replicas || !containsRowboatAddress(body)) return
     void window.ipc
         .invoke('spaces:invokeRowboat', {
             orgId: org.id,
@@ -37,7 +39,7 @@ export function maybeInvokeRowboat(
             spaceName: space.name,
             messageId,
             body,
-            ...(options ? { options } : {}),
+            ...(options ? { options: { ...options, replicas: undefined } } : {}),
         })
         .catch((err) => {
             analytics.spacesRowboatInvokeFailed()

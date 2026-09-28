@@ -1,3 +1,4 @@
+import type { ReplicasConfigInput, ReplicasThreadAction } from '@rowboat/spaces-protocol';
 import type { ActivityKind, ActivityPage } from '@rowboat/spaces-protocol';
 import { createHash } from 'node:crypto';
 import {
@@ -506,6 +507,19 @@ export class SpacesClient {
   }
 
   /** A root (no threadRoot) or a reply (threadRoot) — never creates a topic. */
+  async getReplicasConfig(spaceId: string) {
+    return this.request('GET', this.space(spaceId, '/replicas'), routes.getReplicasConfig.response);
+  }
+  async configureReplicas(spaceId: string, input: ReplicasConfigInput) {
+    return this.request('POST', this.space(spaceId, '/replicas'), routes.configureReplicas.response, input);
+  }
+  async getReplicasTask(spaceId: string, rootId: string) {
+    return this.request('GET', this.space(spaceId, `/threads/${encodeURIComponent(rootId)}/replicas`), routes.getReplicasTask.response);
+  }
+  async actOnReplicasTask(spaceId: string, rootId: string, input: ReplicasThreadAction) {
+    return this.request('POST', this.space(spaceId, `/threads/${encodeURIComponent(rootId)}/replicas`), routes.actOnReplicasTask.response, input);
+  }
+
   async postMessage(spaceId: string, input: NewMessage): Promise<{ message: Message }> {
     return this.request('POST', this.space(spaceId, '/messages'), routes.postMessage.response, input);
   }

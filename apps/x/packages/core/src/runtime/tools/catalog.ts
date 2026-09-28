@@ -32,6 +32,7 @@ import { spreadsheetTools } from "./domains/spreadsheet.js";
 import { imageTools } from "./domains/image.js";
 import { spacesTools } from "./domains/spaces.js";
 import { whiteboardTools } from "./domains/whiteboard.js";
+import { replicasTools } from "./domains/replicas.js";
 import { BuiltinToolsSchema } from "./types.js";
 export { coalesceCodeRunEvents } from "./domains/code.js";
 
@@ -117,6 +118,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     ...imageTools,
     ...spacesTools,
     ...whiteboardTools,
+    ...replicasTools,
 
     [SPAWN_AGENT_TOOL_NAME]: {
         permission: "none",

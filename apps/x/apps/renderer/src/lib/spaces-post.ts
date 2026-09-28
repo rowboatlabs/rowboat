@@ -18,7 +18,7 @@ export function postStreamMessage(org: OrgWithSpaces, space: spaces.Space, body:
     const pending = buildPendingMessage(space.id, org.memberId, body)
     ingestStreamMessage(org.id, space.id, pending)
     void window.ipc
-        .invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, body })
+        .invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, body, ...(agent?.replicas ? { replicas: agent.replicas } : {}) })
         .then((result) => {
             resolvePendingStreamMessage(org.id, space.id, pending.id, result.message)
             // The org read the stream up to our own post; mirror it.

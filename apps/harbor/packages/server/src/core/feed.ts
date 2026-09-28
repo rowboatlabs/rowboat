@@ -69,6 +69,9 @@ function threadRootOf(message: Pick<Message, 'threadRoot'>): { threadRoot?: stri
 }
 
 export class Feed {
+  // Enqueue with the message transaction so a disconnect cannot lose a cloud task (2026-09-28).
+  onPosted?: (message: Message, input: NewMessage) => Promise<void>;
+
   constructor(
     private readonly k: Kernel,
     private readonly assets: Assets,
@@ -287,7 +290,7 @@ export class Feed {
     return folded;
   }
 
-  async postMessage(ctx: ActorCtx, spaceId: string, input: NewMessage): Promise<{ message: Message }> {
+  async postMessage(ctx: ActorCtx, spaceId: string, input: NewMessage, committed?: (message: Message) => Promise<void>): Promise<{ message: Message }> {
     const space = await this.k.requireMember(ctx, spaceId);
     this.k.guardWrite();
     const author = this.k.attributionOf(ctx, input);
@@ -349,6 +352,8 @@ export class Feed {
           await this.k.store.putTopic(revived);
           await this.k.append(spaceId, offset + 1, at, { type: 'topic', topic: revived, action: 'unarchived', by: author });
         }
+        await this.onPosted?.(message, input);
+        await committed?.(message);
         return { message };
       }
 
@@ -377,6 +382,8 @@ export class Feed {
       // Posting directly reads the stream up to your own message (read state, 2026-09-09).
       if (author.actingMode === 'direct') await this.k.store.advanceStreamReadMark(spaceId, ctx.memberId, offset, at);
       await this.followMentioned(spaceId, message.id, stamps, ctx.memberId, at);
+      await this.onPosted?.(message, input);
+      await committed?.(message);
       return { message };
     });
     // Notification decisions run OUTSIDE the lock and never block the reply

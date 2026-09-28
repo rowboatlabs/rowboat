@@ -219,6 +219,10 @@ const HISTORICAL_KEY_ORDER = [
     "spreadsheet-create",
     "spreadsheet-edit",
     "generate-image",
+    "get_replicas_config",
+    "configure_replicas",
+    "get_replicas_task",
+    "act_on_replicas_task",
     "whoami",
     "list_members",
     "list_spaces",
@@ -259,6 +263,11 @@ const HISTORICAL_KEY_ORDER = [
     "cancel_scheduled",
     "whiteboard-read",
     "whiteboard-draw",
+    "replicas-environments",
+    "replicas-dispatch",
+    "replicas-send",
+    "replicas-wait",
+    "replicas-status",
     "spawn-agent",
 ];
 
@@ -364,6 +373,8 @@ describe("BuiltinTools permission audit", () => {
             manage_topic: "prompt",
             // Personal state, but irreversible (marks only advance) — gated like a write.
             mark_all_read: "prompt",
+            configure_replicas: "prompt",
+            act_on_replicas_task: "prompt",
             create_asset: "prompt",
             propose_change: "prompt",
             move_asset: "prompt",
@@ -375,6 +386,10 @@ describe("BuiltinTools permission audit", () => {
             // Whiteboards: a draw is a propose_change on a shared board;
             // the read is a member-readable snapshot summary.
             "whiteboard-draw": "prompt",
+            // Replicas: dispatch boots a billed cloud VM and send steers one
+            // the whole team may be watching; wait/status/environments read.
+            "replicas-dispatch": "prompt",
+            "replicas-send": "prompt",
         });
     });
 });

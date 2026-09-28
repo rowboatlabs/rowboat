@@ -89,6 +89,7 @@ type SpacesRpcChannel =
   | 'spaces:resolveInvite' | 'spaces:acceptInvite' | 'spaces:listAssets' | 'spaces:createAsset' | 'spaces:moveAsset'
   | 'spaces:deleteAsset' | 'spaces:restoreAsset' | 'spaces:uploadBlob' | 'spaces:readAsset'
   | 'spaces:proposeChange' | 'spaces:assetHistory' | 'spaces:diff' | 'spaces:listTopics'
+  | 'spaces:getReplicasConfig' | 'spaces:configureReplicas' | 'spaces:getReplicasTask' | 'spaces:actOnReplicasTask'
   | 'spaces:search'
   | 'spaces:listStream' | 'spaces:getMessage' | 'spaces:listThread' | 'spaces:linkPreview' | 'spaces:postMessage' | 'spaces:createTopic'
   | 'spaces:manageTopic' | 'spaces:reactToMessage'
@@ -301,11 +302,17 @@ export const spacesRpcHandlers: SpacesHandlers = {
 
   'spaces:linkPreview': async (args) => ({ preview: await fetchLinkPreview(args.url) }),
 
+  'spaces:getReplicasConfig': async (args) => orgs.getClient(args.orgId).getReplicasConfig(args.spaceId),
+  'spaces:configureReplicas': async (args) => orgs.getClient(args.orgId).configureReplicas(args.spaceId, args.config),
+  'spaces:getReplicasTask': async (args) => orgs.getClient(args.orgId).getReplicasTask(args.spaceId, args.rootMessageId),
+  'spaces:actOnReplicasTask': async (args) => orgs.getClient(args.orgId).actOnReplicasTask(args.spaceId, args.rootMessageId, args.operation),
+
   'spaces:postMessage': async (args) =>
     orgs.getClient(args.orgId).postMessage(args.spaceId, {
       ...(args.threadRoot ? { threadRoot: args.threadRoot } : {}),
       ...(args.anchorChangeSetId ? { anchorChangeSetId: args.anchorChangeSetId } : {}),
       body: args.body,
+      ...(args.replicas ? { replicas: args.replicas } : {}),
       ...(args.poll ? { poll: args.poll } : {}),
       actingMode: 'direct',
     }),

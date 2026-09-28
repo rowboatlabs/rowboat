@@ -1,3 +1,4 @@
+import type { ReplicasApi } from './replicas/api.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { getRequestListener } from '@hono/node-server';
 import { bindAuth, type AuthDriver, type OrgAuth } from './auth.js';
@@ -19,6 +20,7 @@ import type { LiveDeps } from './ws.js';
 // exercises — and there is exactly one answer to "how is an org wired".
 
 export interface OrgRuntimeInput {
+  replicasApiFactory?: (key: string) => ReplicasApi;
   /** The org's store: a PgStore scoped to the org on a deployment, the whole store single-org. */
   store: Store;
   /** The process-wide hub — space ids are globally unique, so one hub serves every org. */
@@ -55,6 +57,7 @@ export async function buildOrgRuntime(input: OrgRuntimeInput): Promise<OrgRuntim
     input.org,
     input.blobs,
     new Notifier(store, hub, input.pushSender ?? new PushSender(store, input.orgId)),
+    input.replicasApiFactory,
   );
   // The mentions backfill (service.migrateMentions): idempotent, ledgered once per org, before the faces serve.
   await service.migrateMentions();
@@ -68,6 +71,7 @@ export async function buildOrgRuntime(input: OrgRuntimeInput): Promise<OrgRuntim
       ...(input.maxBlobBytes !== undefined ? { maxBlobBytes: input.maxBlobBytes } : {}),
     }).fetch,
   );
+  service.replicas.start();
   return {
     service,
     auth,

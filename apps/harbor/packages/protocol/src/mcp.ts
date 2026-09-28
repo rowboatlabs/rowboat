@@ -1,3 +1,4 @@
+import { ReplicasConfigInput, ReplicasConfigView, ReplicasTask, ReplicasThreadAction } from './replicas.js';
 import { z } from 'zod';
 import { MENTION_GRAMMAR } from './mentions.js';
 import { ActivityKind, NewPoll } from './api.js';
@@ -618,7 +619,25 @@ export const markAllRead = tool({
   }),
 });
 
+export const getReplicasConfig = tool({
+  name: 'get_replicas_config', description: 'Read the shared Replicas connection and available environments for a Space. Never returns credentials.',
+  input: z.object({ spaceId: SpaceId }), output: ReplicasConfigView,
+});
+export const configureReplicas = tool({
+  name: 'configure_replicas', description: 'Admin only: connect a paid Replicas account for all members of this Space, change defaults, or disconnect. The account credential is encrypted on Harbor.',
+  input: ReplicasConfigInput.extend({ spaceId: SpaceId }), output: ReplicasConfigView,
+});
+export const getReplicasTask = tool({
+  name: 'get_replicas_task', description: 'Read the shared coding workspace and chat for a thread, including queued work and errors.',
+  input: z.object({ spaceId: SpaceId, rootMessageId: MessageId }), output: z.object({ task: ReplicasTask.nullable() }),
+});
+export const actOnReplicasTask = tool({
+  name: 'act_on_replicas_task', description: 'Choose a pending task environment, attach a known workspace/chat after interrupted delivery, or fork a separate task. All Space members can participate.',
+  input: z.object({ spaceId: SpaceId, rootMessageId: MessageId, operation: ReplicasThreadAction }), output: z.object({ task: ReplicasTask }),
+});
+
 export const mcpTools = [
+  getReplicasConfig, configureReplicas, getReplicasTask, actOnReplicasTask,
   whoami,
   listMembers,
   listSpaces,
@@ -656,6 +675,7 @@ export const mcpTools = [
 
 /** Tool names whose only effect is reading — no event is appended, nothing is written. */
 export const readOnlyMcpToolNames: ReadonlySet<string> = new Set([
+  getReplicasConfig.name, getReplicasTask.name,
   whoami.name,
   listMembers.name,
   listSpaces.name,
