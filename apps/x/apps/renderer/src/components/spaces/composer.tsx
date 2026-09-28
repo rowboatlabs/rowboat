@@ -1,3 +1,4 @@
+import { ReplicasPanel, type SharedReplicasOptions } from './replicas-panel'
 import { SearchMenu } from '@/components/search-menu'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
@@ -62,6 +63,8 @@ export interface AgentOptions {
     permissionMode?: 'auto' | 'manual'
     searchEnabled?: boolean
     codeMode?: 'claude' | 'codex'
+    /** "Run on Replicas" (2026-09-28): coding work goes to a cloud workspace in this environment; planMode mirrors Manual. */
+    replicas?: SharedReplicasOptions
 }
 
 /** A pane-provided slash command; `args` absent = picking it runs immediately. */
@@ -99,8 +102,9 @@ async function formatTranscript(raw: string): Promise<string> {
     }
 }
 
-export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, autoFocus, onType, seed, draftKey, commands = [], autoRoute, submit, onDraftChange, onEscape }: {
+export function Composer({ threadRootId, placeholder, onSend, onSchedule, onCreatePoll, busy, autoFocus, onType, seed, draftKey, commands = [], autoRoute, submit, onDraftChange, onEscape }: {
     placeholder: string
+    threadRootId?: string
     /**
      * Post the message. Resolve 'keep' to leave the draft in the box (the
      * pane is holding it for a confirmation); throw to keep it after a
@@ -308,6 +312,9 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         return () => window.removeEventListener('code-mode-config-changed', load)
     }, [])
 
+    const [sharedReplicasOptions, setSharedReplicasOptions] = useState<SharedReplicasOptions | undefined>()
+    const [replicasConnection, setReplicasConnection] = useState<{ memberId: string | null; direct: boolean }>({ memberId: null, direct: false })
+
     // Apply a new seed by rebuilding the doc from its markdown. Append (the
     // profile popover's "Mention") joins a draft in progress; a plain seed
     // replaces it (quote-reply, ask-rowboat). Caret lands at the end.
@@ -408,15 +415,13 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     const mentioned = containsRowboatAddress(draft)
 
     /** Per-turn agent options — attached whenever the outgoing text addresses @rowboat. */
-    const agentOptionsFor = (text: string): AgentOptions | undefined =>
-        containsRowboatAddress(text)
-            ? {
-                  ...(model ? { model: { provider: model.provider, model: model.model, ...(model.effort ? { effort: model.effort } : {}) } } : {}),
-                  permissionMode,
-                  ...(searchEnabled ? { searchEnabled: true } : {}),
-                  ...(codeMode ? { codeMode } : {}),
-              }
-            : undefined
+    const agentOptionsFor = (text: string): AgentOptions | undefined => {
+        if (replicasConnection.direct || (replicasConnection.memberId && text.includes(`(#member:${replicasConnection.memberId})`))) return { replicas: sharedReplicasOptions ?? {} }
+        return containsRowboatAddress(text) ? {
+            ...(model ? { model: { provider: model.provider, model: model.model, ...(model.effort ? { effort: model.effort } : {}) } } : {}),
+            permissionMode, ...(searchEnabled ? { searchEnabled: true } : {}), ...(codeMode ? { codeMode } : {}),
+        } : undefined
+    }
 
     /** The one body builder — send and send-later produce identical wire text. */
     const buildBody = (raw: string): string => {
@@ -742,6 +747,15 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
 
     return (
         <div className="spaces-composer-dock shrink-0">
+            {refs && <ReplicasPanel key={`${refs.orgId}/${refs.spaceId}/${threadRootId ?? ''}`} orgId={refs.orgId} spaceId={refs.spaceId} threadRootId={threadRootId}
+                onConnection={setReplicasConnection}
+                onOptions={setSharedReplicasOptions}
+                onMention={memberId => {
+                    editor?.chain().focus().insertContent([
+                        { type: 'mention', attrs: { kind: 'member', id: memberId, label: 'Replicas' } },
+                        { type: 'text', text: ' ' },
+                    ]).run()
+                }} /> }
             <div
                 ref={setBox}
                 className="spaces-composer-frame relative border bg-background"
@@ -1002,7 +1016,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                                 {codeModeAvailable && (
                                     <button
                                         type="button"
-                                        onClick={() => setCodeMode((m) => (m ? null : 'claude'))}
+                                        onClick={() => { setCodeMode((m) => (m ? null : 'claude')) }}
                                         aria-pressed={!!codeMode}
                                         title={codeMode ? 'Terminal on (Claude Code) — click to turn off' : 'Let it use the terminal / code tools'}
                                         className={cn(

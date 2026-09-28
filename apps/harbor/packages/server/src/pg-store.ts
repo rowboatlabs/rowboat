@@ -1,3 +1,4 @@
+import type { ReplicasConnection, ReplicasTaskRecord } from './replicas/types.js';
 import type { ActivityKind, Attribution } from '@rowboat/spaces-protocol';
 import type { ActivityQuery, ActivityRow } from './store.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -241,6 +242,27 @@ interface AssetRow {
 export const DEFAULT_ORG_ID = 'org-default';
 
 export class PgStore implements Store {
+
+  async findReplicasConnection(botMemberId: string): Promise<{ spaceId: string; connection: ReplicasConnection } | undefined> {
+    const row = (await this.sql.query<{space_id: string; data: ReplicasConnection}>("select space_id, data from replicas_connections where org_id=$1 and data->>'botMemberId'=$2", [this.orgId, botMemberId]))[0];
+    return row ? { spaceId: row.space_id, connection: row.data } : undefined;
+  }
+  async getReplicasConnection(spaceId: string): Promise<ReplicasConnection | undefined> {
+    return (await this.sql.query<{data: ReplicasConnection}>('select data from replicas_connections where space_id=$1 and org_id=$2', [spaceId, this.orgId]))[0]?.data;
+  }
+  async putReplicasConnection(spaceId: string, connection: ReplicasConnection): Promise<void> {
+    await this.sql.query('insert into replicas_connections(space_id, org_id, data) values ($1,$2,$3) on conflict(space_id) do update set data=excluded.data where replicas_connections.org_id=excluded.org_id', [spaceId, this.orgId, JSON.stringify(connection)]);
+  }
+  async getReplicasTask(spaceId: string, rootId: string): Promise<ReplicasTaskRecord | undefined> {
+    return (await this.sql.query<{data: ReplicasTaskRecord}>('select data from replicas_tasks where space_id=$1 and thread_root_id=$2 and org_id=$3', [spaceId, rootId, this.orgId]))[0]?.data;
+  }
+  async putReplicasTask(task: ReplicasTaskRecord): Promise<void> {
+    await this.sql.query('insert into replicas_tasks(space_id, thread_root_id, org_id, data) values ($1,$2,$3,$4) on conflict(space_id,thread_root_id) do update set data=excluded.data where replicas_tasks.org_id=excluded.org_id', [task.spaceId, task.threadRootId, this.orgId, JSON.stringify(task)]);
+  }
+  async listReplicasTasks(): Promise<ReplicasTaskRecord[]> {
+    return (await this.sql.query<{data: ReplicasTaskRecord}>('select data from replicas_tasks where org_id=$1', [this.orgId])).map(r => r.data);
+  }
+
   private readonly als = new AsyncLocalStorage<SqlExecutor>();
 
   /**

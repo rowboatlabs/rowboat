@@ -91,3 +91,8 @@ export function canBind(identity: { email?: string }, org: { allowedEmailDomains
   if (domain && domains.some((d) => d.toLowerCase() === domain)) return null;
   return { code: 'policy_refused', message: `this org admits only ${domains.map((d) => `@${d}`).join(', ')} accounts` };
 }
+
+/** Sharing a paid cloud account with a Space is an admin decision (2026-09-28). */
+export function canConfigureReplicas(member: { role: string } | undefined): Decision {
+  return member?.role === 'admin' ? null : { code: 'forbidden', message: 'only an organization admin can connect Replicas' };
+}

@@ -51,6 +51,8 @@ export interface InvokeTopicAgentInput {
     permissionMode?: 'auto' | 'manual';
     searchEnabled?: boolean;
     codeMode?: 'claude' | 'codex';
+    /** The strip's "Run on Replicas" (2026-09-28): this message's coding work goes to a cloud workspace. */
+    replicas?: { environmentId: string; repository?: string; planMode?: boolean };
   };
 }
 
@@ -106,8 +108,14 @@ export function buildInvocationMessage(input: InvokeTopicAgentInput, mcpServerNa
   // spaces tools are already in the system prompt from token zero. The ids
   // ride the message too — a few tokens that survive context compaction.
   void mcpServerName; // the org rides the session pin (`org`), not the message
+  const replicas = input.options?.replicas;
   return [
     `[@rowboat in "${input.spaceName}" · spaceId ${input.spaceId} · thread ${input.threadRootId} · message ${input.messageId}]`,
+    // The Run-on-Replicas choice rides the message too (the composition
+    // block carries it for this turn; this line survives compaction).
+    ...(replicas
+      ? [`[Run on Replicas · environment ${replicas.environmentId}${replicas.repository ? ` · ${replicas.repository}` : ''}${replicas.planMode ? ' · plan mode' : ''}]`]
+      : []),
     input.body,
   ].join('\n');
 }
@@ -177,9 +185,24 @@ export async function invokeTopicAgent(input: InvokeTopicAgentInput): Promise<In
   const selection = picked
     ? { provider: picked.provider, model: picked.model, effort: picked.effort }
     : await (await import('../models/defaults.js')).getDefaultModelAndProvider();
+  const replicas = input.options?.replicas;
   const composition = {
     ...(input.options?.searchEnabled ? { searchEnabled: true } : {}),
-    ...(input.options?.codeMode ? { codeMode: input.options.codeMode } : {}),
+    // Replicas and the local Terminal are exclusive: the cloud choice wins
+    // (the composer never sends both, but the wire allows it).
+    ...(input.options?.codeMode && !replicas ? { codeMode: input.options.codeMode } : {}),
+    ...(replicas
+      ? {
+          replicas: {
+            environmentId: replicas.environmentId,
+            repository: replicas.repository ?? null,
+            planMode: replicas.planMode ?? false,
+          },
+          // The replicas tools attach at assembly (sessions.ts merges
+          // activeSkills with the thread's pinned `spaces`).
+          activeSkills: ['replicas'],
+        }
+      : {}),
   };
 
   const outcome = await sessions.sendOrQueueMessage(

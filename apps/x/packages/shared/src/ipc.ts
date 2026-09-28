@@ -1,3 +1,4 @@
+import { ReplicasConfigInput, ReplicasConfigView, ReplicasTask, ReplicasThreadAction, ReplicasOptions } from '@rowboat/spaces-protocol';
 import { z } from 'zod';
 import { UseCase } from './analytics.js';
 import { DeckOutline, DeckOutlineSlide, EditSlideRequest, GenerateDeckOutlineRequest, GenerateSlideRequest } from './deck.js';
@@ -2288,6 +2289,29 @@ export const ipcSchemas = {
       toolkits: z.array(z.string()),
     }),
   },
+  // Replicas (2026-09-28): one PERSONAL API key per member, stored host-side
+  // (config/replicas.json). setApiKey verifies the key by listing
+  // environments before saving it; the environments list feeds the Space
+  // composer's "Run on Replicas" picker.
+  'replicas:getStatus': {
+    req: z.null(),
+    res: z.object({ configured: z.boolean(), baseUrl: z.string() }),
+  },
+  'replicas:setApiKey': {
+    req: z.object({ apiKey: z.string() }),
+    res: z.object({ success: z.boolean(), error: z.string().optional(), environmentCount: z.number().optional() }),
+  },
+  'replicas:clearApiKey': {
+    req: z.null(),
+    res: z.object({ success: z.literal(true) }),
+  },
+  'replicas:listEnvironments': {
+    req: z.null(),
+    res: z.object({
+      environments: z.array(z.object({ id: z.string(), name: z.string(), repositories: z.array(z.string()) })),
+      error: z.string().optional(),
+    }),
+  },
   'migration:check-composio-google': {
     req: z.null(),
     res: z.object({
@@ -4061,6 +4085,18 @@ export const ipcSchemas = {
   // actingMode is set by main ('direct' — the renderer is the human surface;
   // agents write through the org's MCP face, never through IPC). Posting never
   // creates a topic; threadRoot present = a reply, absent = a stream root.
+  'spaces:getReplicasConfig': {
+    req: z.object({ orgId: z.string(), spaceId: z.string() }), res: ReplicasConfigView,
+  },
+  'spaces:configureReplicas': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), config: ReplicasConfigInput }), res: ReplicasConfigView,
+  },
+  'spaces:getReplicasTask': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), rootMessageId: z.string() }), res: z.object({ task: ReplicasTask.nullable() }),
+  },
+  'spaces:actOnReplicasTask': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), rootMessageId: z.string(), operation: ReplicasThreadAction }), res: z.object({ task: ReplicasTask }),
+  },
   'spaces:postMessage': {
     req: z.object({
       orgId: z.string(),
@@ -4068,6 +4104,7 @@ export const ipcSchemas = {
       threadRoot: z.string().optional(),
       anchorChangeSetId: z.string().optional(),
       body: z.string(),
+      replicas: ReplicasOptions.optional(),
       /** Present = the message carries a poll; body must be its markdown fallback. */
       poll: z.custom<SpacesTypes.SpacesNewPollInput>().optional(),
     }),
@@ -4191,6 +4228,11 @@ export const ipcSchemas = {
           permissionMode: z.enum(['auto', 'manual']).optional(),
           searchEnabled: z.boolean().optional(),
           codeMode: z.enum(['claude', 'codex']).optional(),
+          // "Run on Replicas" (2026-09-28): the strip's environment pick;
+          // planMode mirrors Manual. Exclusive with codeMode in practice.
+          replicas: z
+            .object({ environmentId: z.string(), repository: z.string().optional(), planMode: z.boolean().optional() })
+            .optional(),
         })
         .optional(),
     }),

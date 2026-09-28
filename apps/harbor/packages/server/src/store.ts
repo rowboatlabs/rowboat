@@ -1,3 +1,4 @@
+import type { ReplicasConnection, ReplicasTaskRecord } from './replicas/types.js';
 import type { ActivityKind } from '@rowboat/spaces-protocol';
 import type {
   Attribution,
@@ -186,6 +187,13 @@ export interface UnreadThreadRow {
 }
 
 export interface Store {
+  findReplicasConnection(botMemberId: string): Promise<{ spaceId: string; connection: ReplicasConnection } | undefined>;
+  getReplicasConnection(spaceId: string): Promise<ReplicasConnection | undefined>;
+  putReplicasConnection(spaceId: string, connection: ReplicasConnection): Promise<void>;
+  getReplicasTask(spaceId: string, rootId: string): Promise<ReplicasTaskRecord | undefined>;
+  putReplicasTask(task: ReplicasTaskRecord): Promise<void>;
+  listReplicasTasks(): Promise<ReplicasTaskRecord[]>;
+
   // members (org-level)
   getMember(id: string): Promise<Member | undefined>;
   putMember(member: Member): Promise<void>;

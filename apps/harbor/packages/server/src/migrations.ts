@@ -692,6 +692,16 @@ export const MIGRATIONS: Migration[] = [
       `alter table spaces add constraint spaces_direct_private_check check (kind <> 'direct' or visibility = 'private')`,
     ],
   },
+  {
+    id: '024-replicas-threads',
+    statements: [
+      `create table replicas_connections (space_id text primary key references spaces(id), org_id text not null, data jsonb not null)`,
+      `create table replicas_tasks (space_id text not null references spaces(id), thread_root_id text not null,
+        org_id text not null, data jsonb not null, primary key (space_id, thread_root_id))`,
+      `create index replicas_tasks_org on replicas_tasks(org_id)`,
+    ],
+  },
+
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

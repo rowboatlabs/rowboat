@@ -62,6 +62,10 @@ type SpacesHandlers = {
   'spaces:listStream': InvokeHandler<'spaces:listStream'>;
   'spaces:getMessage': InvokeHandler<'spaces:getMessage'>;
   'spaces:listThread': InvokeHandler<'spaces:listThread'>;
+  'spaces:getReplicasConfig': InvokeHandler<'spaces:getReplicasConfig'>;
+  'spaces:configureReplicas': InvokeHandler<'spaces:configureReplicas'>;
+  'spaces:getReplicasTask': InvokeHandler<'spaces:getReplicasTask'>;
+  'spaces:actOnReplicasTask': InvokeHandler<'spaces:actOnReplicasTask'>;
   'spaces:postMessage': InvokeHandler<'spaces:postMessage'>;
   'spaces:createTopic': InvokeHandler<'spaces:createTopic'>;
   'spaces:manageTopic': InvokeHandler<'spaces:manageTopic'>;
@@ -390,11 +394,17 @@ export const spacesIpcHandlers: SpacesHandlers = {
       ...(args.limit !== undefined ? { limit: args.limit } : {}),
     }),
 
+  'spaces:getReplicasConfig': async (_event, args) => orgs.getClient(args.orgId).getReplicasConfig(args.spaceId),
+  'spaces:configureReplicas': async (_event, args) => orgs.getClient(args.orgId).configureReplicas(args.spaceId, args.config),
+  'spaces:getReplicasTask': async (_event, args) => orgs.getClient(args.orgId).getReplicasTask(args.spaceId, args.rootMessageId),
+  'spaces:actOnReplicasTask': async (_event, args) => orgs.getClient(args.orgId).actOnReplicasTask(args.spaceId, args.rootMessageId, args.operation),
+
   'spaces:postMessage': async (_event, args) =>
     orgs.getClient(args.orgId).postMessage(args.spaceId, {
       ...(args.threadRoot ? { threadRoot: args.threadRoot } : {}),
       ...(args.anchorChangeSetId ? { anchorChangeSetId: args.anchorChangeSetId } : {}),
       body: args.body,
+      ...(args.replicas ? { replicas: args.replicas } : {}),
       ...(args.poll ? { poll: args.poll } : {}),
       actingMode: 'direct',
     }),

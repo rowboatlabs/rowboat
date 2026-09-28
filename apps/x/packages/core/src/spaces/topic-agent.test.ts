@@ -35,6 +35,20 @@ describe('buildInvocationMessage', () => {
     it('does not depend on the server name (the org rides the session pin)', () => {
         expect(buildInvocationMessage(input, null)).toBe(buildInvocationMessage(input, 'spaces-rowboat-labs-dev'));
     });
+
+    it('adds one Run-on-Replicas line between the header and the ask when the strip chose Replicas', () => {
+        const msg = buildInvocationMessage(
+            { ...input, options: { replicas: { environmentId: 'env_abc123', repository: 'rowboatlabs/rowboat', planMode: true } } },
+            null,
+        );
+        const lines = msg.split('\n');
+        expect(lines).toHaveLength(3);
+        expect(lines[1]).toBe('[Run on Replicas · environment env_abc123 · rowboatlabs/rowboat · plan mode]');
+        expect(lines[2]).toBe('@rowboat move SSO to P1');
+        expect(buildInvocationMessage({ ...input, options: { replicas: { environmentId: 'env_abc123' } } }, null).split('\n')[1]).toBe(
+            '[Run on Replicas · environment env_abc123]',
+        );
+    });
 });
 
 describe('mentionOrigin', () => {
