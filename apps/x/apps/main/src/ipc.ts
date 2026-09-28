@@ -115,6 +115,7 @@ function updateSelfCaptureState() {
   setSelfCaptureActive(meetingRecordingActive || voiceCallActive);
 }
 import * as composioHandler from '@x/core/dist/composio/flows.js';
+import * as replicasClient from '@x/core/dist/replicas/client.js';
 import { oauthConnectBus, composioConnectBus, chatgptStatusBus } from '@x/core/dist/auth/connector-events.js';
 import { subscribeTtsChunks } from '@x/core/dist/voice/tts-bus.js';
 import { formatDictation } from '@x/core/dist/voice/format_dictation.js';
@@ -2188,6 +2189,20 @@ export function setupIpcHandlers() {
     'composio:search-tools': async (_event, args) => {
       return composioHandler.searchToolsInToolkit(args.toolkitSlug, args.query);
     },
+    // Replicas (2026-09-28) — the key gates the `replicas` skill's catalog
+    // entry, so the copilot prompt cache is invalidated on every change.
+    'replicas:getStatus': async () => replicasClient.getStatus(),
+    'replicas:setApiKey': async (_event, args) => {
+      const result = await replicasClient.setApiKeyVerified(args.apiKey);
+      if (result.success) invalidateCopilotInstructionsCache();
+      return result;
+    },
+    'replicas:clearApiKey': async () => {
+      replicasClient.clearApiKey();
+      invalidateCopilotInstructionsCache();
+      return { success: true as const };
+    },
+    'replicas:listEnvironments': async () => replicasClient.listEnvironmentsForUi(),
     'migration:check-composio-google': async () => {
       return qualifyAndDisconnectComposioGoogle();
     },

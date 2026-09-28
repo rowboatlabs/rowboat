@@ -32,6 +32,17 @@ export async function isSpacesAvailable(): Promise<boolean> {
     }
 }
 
+// Replicas (2026-09-28): configured = a personal API key is saved. Gates
+// the `replicas` skill in the catalog and the Space composer's strip.
+export async function isReplicasAvailable(): Promise<boolean> {
+    try {
+        const { isConfigured } = await import("../../replicas/client.js");
+        return await isConfigured();
+    } catch {
+        return false;
+    }
+}
+
 export async function isSlackAvailable(): Promise<boolean> {
     try {
         const repo = await lazyResolve<import("../../slack/repo.js").ISlackConfigRepo>("slackConfigRepo");

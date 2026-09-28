@@ -48,6 +48,7 @@ import { getBillingInfo } from '@x/core/dist/billing/billing.js';
 import * as versionHistory from '@x/core/dist/knowledge/version_history.js';
 import { editSlide, generateDeckOutline, generateSlide } from '@x/core/dist/knowledge/deck_outline.js';
 import { invalidateCopilotInstructionsCache } from '@x/core/dist/runtime/assembly/copilot/instructions.js';
+import * as replicasClient from '@x/core/dist/replicas/client.js';
 import { syncSlackKnowledgeSources, triggerSync as triggerSlackKnowledgeSync } from '@x/core/dist/knowledge/sources/sync_slack.js';
 import { markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
 import { saveNotificationSettings } from '@x/core/dist/config/notification_config.js';
@@ -971,6 +972,19 @@ export function createCoreRpcHandlers(opts?: { sessionsIndexReady?: Promise<void
     },
     'spaces:autoRoute': async (args) => routeSpaceMessage(args),
     'spaces:findMessage': async (args) => findSpaceMessage(args),
+    // Replicas (2026-09-28): same bodies as apps/main/src/ipc.ts.
+    'replicas:getStatus': async () => replicasClient.getStatus(),
+    'replicas:setApiKey': async (args) => {
+      const result = await replicasClient.setApiKeyVerified(args.apiKey);
+      if (result.success) invalidateCopilotInstructionsCache();
+      return result;
+    },
+    'replicas:clearApiKey': async () => {
+      replicasClient.clearApiKey();
+      invalidateCopilotInstructionsCache();
+      return { success: true as const };
+    },
+    'replicas:listEnvironments': async () => replicasClient.listEnvironmentsForUi(),
     'chatgpt:signIn': async () => {
       const result = await signInWithChatGPT();
       if (result.signedIn) {
