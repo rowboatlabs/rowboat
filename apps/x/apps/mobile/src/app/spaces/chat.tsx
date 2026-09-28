@@ -2,9 +2,10 @@ import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useHeaderHeight } from 'expo-router/react-navigation';
 import { useKeyboardVisible } from '@/lib/use-keyboard-visible';
 import type { Member, Message } from '@rowboat/spaces-protocol';
 import { spaces } from '@x/shared';
@@ -16,7 +17,6 @@ import { setActiveSpace } from '@/lib/push';
 import { useSpacesAccount } from '@/lib/spaces/account';
 import { STREAM_CACHE_LIMIT, loadRoster, loadValue, peekRoster, peekValue, saveRoster, saveValue, seedThreadRoot } from '@/lib/spaces/cache';
 import { StatusBanner } from '@/components/status-banner';
-import { HeaderFade } from '@/components/header-fade';
 import { SpacesClient } from '@/lib/spaces/client';
 import { SpacesLive } from '@/lib/spaces/live';
 import { useColors } from '@/theme/colors';
@@ -47,7 +47,33 @@ export default function SpaceChatScreen() {
   const [sending, setSending] = useState(false);
   const [actionMessage, setActionMessage] = useState<Message | null>(null);
   const [reactionsOnly, setReactionsOnly] = useState(false);
-  const listRef = useRef<FlatList<Message>>(null);
+  const listRef = useRef<ScrollView>(null);
+  const headerHeight = useHeaderHeight();
+  // Bottom-anchored by hand (so iOS's soft scroll edge can run under the
+  // see-through header — an inverted list breaks it):
+  //  - first paint is hidden until we've jumped to the newest message;
+  //  - content growth follows the bottom only while you're AT the bottom
+  //    and not touching the list;
+  //  - maintainVisibleContentPosition keeps your place when rows above you
+  //    grow (late link cards/images) — the old flicker.
+  const [positioned, setPositioned] = useState(false);
+  // "Follow the bottom" is YOUR intent, decided only when a drag settles —
+  // never by programmatic or keep-position scrolls (those fooled it before).
+  const atBottom = useRef(true);
+  const dragging = useRef(false);
+  const settle = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    dragging.current = false;
+    const { contentOffset, contentSize, layoutMeasurement, contentInset } = e.nativeEvent;
+    atBottom.current = contentSize.height + (contentInset?.bottom ?? 0) - (contentOffset.y + layoutMeasurement.height) < 80;
+  }, []);
+  const onContentSizeChange = useCallback(() => {
+    if (!positioned) {
+      listRef.current?.scrollToEnd({ animated: false });
+      requestAnimationFrame(() => setPositioned(true));
+      return;
+    }
+    if (atBottom.current && !dragging.current) listRef.current?.scrollToEnd({ animated: false });
+  }, [positioned]);
   const composerRef = useRef<SpaceComposerHandle>(null);
   const lastOffset = useRef<number | undefined>(undefined);
 
@@ -126,10 +152,7 @@ export default function SpaceChatScreen() {
   // Newest first for the inverted list: row 0 sits at the bottom, so content
   // that grows later (link cards, images) pushes history UP, never the view.
   // Deleted messages vanish (Slack) unless replies still hang off them.
-  const newestFirst = useMemo(
-    () => (messages ? messages.filter((m) => !m.deletedAt || m.replyCount > 0).reverse() : []),
-    [messages],
-  );
+  const visible = useMemo(() => messages?.filter((m) => !m.deletedAt || m.replyCount > 0) ?? [], [messages]);
 
   // Live: one socket for this screen's lifetime, replay from the last offset
   // the initial fetch saw (subscribe waits until that fetch lands).
@@ -183,7 +206,8 @@ export default function SpaceChatScreen() {
       const { message } = await client.postMessage(space, { body, actingMode: 'direct' });
       foldMessage(message);
       // Your own message: always land on it, wherever you were scrolled.
-      requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: 0, animated: true }));
+      atBottom.current = true;
+      requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -310,15 +334,10 @@ export default function SpaceChatScreen() {
   );
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.background }} behavior="padding" keyboardVerticalOffset={insets.top + 44}>
+    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.background }} behavior="padding" keyboardVerticalOffset={0}>
       <Stack.Screen
         options={{
           title: title ?? 'Space',
-          // The inverted list fights iOS's see-through header + scroll-edge
-          // effect (it fogs the whole list): solid bar here, HeaderFade below it.
-          headerTransparent: false,
-          headerStyle: { backgroundColor: colors.background },
-          scrollEdgeEffects: { top: 'hidden', bottom: 'hidden' },
           headerRight: () => (
             <View style={{ flexDirection: 'row', gap: 18 }}>
               <Pressable hitSlop={10} onPress={() => router.push({ pathname: '/spaces/search', params: { org, space, title, me } })}>
@@ -331,8 +350,7 @@ export default function SpaceChatScreen() {
           ),
         }}
       />
-      <HeaderFade headerHeight={0} fade={20} />
-      <View pointerEvents="box-none" style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 2 }}>
+      <View pointerEvents="box-none" style={{ position: 'absolute', top: headerHeight, left: 0, right: 0, zIndex: 2 }}>
       <StatusBanner
         error={error}
         offlineText={messages ? "You're offline. Showing saved messages." : "You're offline. This space will load when you're back online."}
@@ -346,30 +364,32 @@ export default function SpaceChatScreen() {
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <ActivityIndicator />
         </View>
-      ) : messages === null || newestFirst.length === 0 ? (
-        <ScrollView keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled" alwaysBounceVertical style={{ flex: 1 }}>
-          {messages && newestFirst.length === 0 ? (
+      ) : messages === null || visible.length === 0 ? (
+        <ScrollView contentInsetAdjustmentBehavior="automatic" keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled" alwaysBounceVertical style={{ flex: 1 }}>
+          {messages && visible.length === 0 ? (
             <Text style={{ textAlign: 'center', marginTop: 48, fontSize: 14, color: colors.tertiaryLabel }}>
               No messages yet — say hi.
             </Text>
           ) : null}
         </ScrollView>
       ) : (
-        <FlatList
+        <ScrollView
           ref={listRef}
-          inverted
-          data={newestFirst}
-          keyExtractor={(m) => m.id}
+          contentInsetAdjustmentBehavior="automatic"
           keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="handled"
-          style={{ flex: 1 }}
+          alwaysBounceVertical
+          style={{ flex: 1, opacity: positioned ? 1 : 0 }}
           contentContainerStyle={{ paddingVertical: 12 }}
-          // New messages: follow them only when you're already at the bottom.
-          maintainVisibleContentPosition={{ minIndexForVisible: 0, autoscrollToTopThreshold: 80 }}
-          initialNumToRender={20}
-          windowSize={15}
-          renderItem={({ item: m }) => (
+          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+          onScrollBeginDrag={() => { dragging.current = true; }}
+          onScrollEndDrag={settle}
+          onMomentumScrollEnd={settle}
+          onContentSizeChange={onContentSizeChange}
+        >
+          {visible.map((m) => (
             <MessageRow
+              key={m.id}
               message={m}
               member={members.get(m.author.memberId)}
               memberNames={memberNames}
@@ -382,8 +402,8 @@ export default function SpaceChatScreen() {
               onRemoveVote={removeVote}
               onEndPoll={endPoll}
             />
-          )}
-        />
+          ))}
+        </ScrollView>
       )}
 
       {/* Composer */}
