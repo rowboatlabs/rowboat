@@ -25,6 +25,7 @@ Two pnpm workspace packages under `packages/`:
 | `runtime.ts` | `buildOrgRuntime` — the one assembly of an org |
 | `server.ts`, `main.ts` | `startHarbor` (one org) and the dev seed; the binary (dev, or `HARBOR_MODE=deployment`) |
 | `deployment.ts`, `directory.ts`, `apex.ts` | many orgs from one process: host → org runtime; the org directory; the apex face (create org, my orgs) |
+| `replicas/` | the shared cloud coding connection, encrypted credentials, durable per-thread queue, public API adapter, and background result delivery; [setup](./REPLICAS.md) |
 | `notify.ts`, `push.ts` | the one notification decision; Expo delivery |
 | `hub.ts`, `blobs*.ts`, `mime.ts`, `merge.ts`, `search.ts`, `mentions-backfill.ts` | in-process fan-out, blob drivers, sniffing, the three-way merge, query parsing, the mentions backfill |
 | `stats.ts`, `internal.ts` | the live-load counters (connections, subscriptions, frames per minute by kind, deliveries) and the operator face that reads them, `GET /internal/stats` behind `HARBOR_INTERNAL_KEY` |

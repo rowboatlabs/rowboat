@@ -39,44 +39,21 @@ reported above"), \`read_thread\` and append the relevant messages under a
 labeled **Context from the thread:** section. Never paste private material
 (DMs, emails, notes) into the task.
 
-## In a Space thread — the handle IS the shared state
+## In a Space thread
 
-The thread is what teammates see; Replicas is what one member's Rowboat
-talks to. The bridge is one line, posted verbatim from the tool result:
-\`Replicas workspace \\\`<id>\\\` — <url>\`. Any member's Rowboat can later
-read the thread, find that line, and steer the same workspace.
+Spaces uses a shared Replicas member and a Harbor-owned workspace/chat binding
+(2026-09-28). Do not dispatch a personal workspace or parse a workspace handle
+from prose in a Space thread. Use the Space's \`get_replicas_config\` and
+\`get_replicas_task\` tools to inspect the connection and shared task. When the
+person explicitly asks you to delegate cloud work, address the configured
+Replicas member in \`post_message\` in that thread; Harbor queues and delivers
+it. If no shared connection exists, explain that an org admin can connect it
+from Replicas Settings above the Space composer. Do not copy a personal key
+into shared settings without an explicit request to share that account.
 
-1. \`react\` 👀 on the invoking message (the thread procedure's receipt).
-2. \`read_thread\`. If a \`Replicas workspace\` handle line already exists in
-   this thread, this is a follow-up: \`replicas-send\` with that handle. Do
-   NOT start a second workspace for the same thread.
-3. Otherwise \`replicas-dispatch\` with the environment from the Run-on-Replicas
-   block (or the one the person named). Then \`post_message\` exactly ONE
-   message: the \`handle\` line verbatim, plus one short line saying what was
-   sent ("Sent to Replicas on rowboat: fix the login timeout.").
-4. \`replicas-wait\`.
-   - \`pr_opened\`: swap 👀 for ✅ and post ONE message: the PR link, one line
-     on what changed and how it was verified (from \`answer\` if useful),
-     nothing else. Do not summarize diffs.
-   - \`completed\` with no PR: \`answer\` is the agent's final message. For a
-     question-shaped ask ("summarize the last commit", "how does X work")
-     that IS the result: swap 👀 for ✅ and post it as the one reply,
-     trimmed to what the room needs. For coding work it says what happened
-     or what it needs: post one line, ✅ if finished, 👀 if not.
-   - \`still_running\` / \`timeout\`: call \`replicas-wait\` again. If it is
-     still running after that, post one line "Still running on Replicas —
-     <handle>" and leave 👀.
-   - \`error\` / \`cancelled\`: swap 👀 for ❗ and explain privately in this chat.
-5. A later \`@rowboat\` follow-up in the same thread (yours or a teammate's):
-   👀, \`replicas-send\` with the thread's handle, \`replicas-wait\`, then the
-   same reporting rules. Say "Steered the Replicas workspace" in your one
-   line, not "started".
-
-**Plan mode** (the strip's Manual, or \`planMode\` in the block): dispatch
-with \`planMode: true\`, wait, and post the plan from \`answer\` as ONE
-message (trim it to the steps). Then stop and leave 👀. When someone in the
-thread says go / 👍 / "proceed" with \`@rowboat\`, \`replicas-send\`
-"Proceed with the plan." and continue from step 4.
+The shared agent posts its own results. Do not wait through the personal
+\`replicas-wait\` tool or post a second completion summary. Environment
+selection, retry, and fork are exposed by \`act_on_replicas_task\`.
 
 ## In a plain chat (no thread)
 
@@ -101,6 +78,6 @@ same chat resume the bound workspace through \`replicas-send\`.
 - Two workspaces on one repo are two independent clones and branches — fine
   for two features, wrong for one thread. One thread, one workspace.
 - Replicas queues concurrent messages per chat and can steer a running turn;
-  there is no lock. Several teammates sending into one workspace is expected.
+  there is no lock. Spaces coordinates teammate requests through its shared queue.
 `;
 export default skill;

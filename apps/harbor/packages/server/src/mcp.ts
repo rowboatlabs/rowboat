@@ -1,3 +1,4 @@
+import type { ReplicasConfigInput, ReplicasThreadAction } from '@rowboat/spaces-protocol';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -293,6 +294,18 @@ async function dispatch(
         actingMode: actor.actingMode,
         ...(actor.agentName ? { agentName: actor.agentName } : {}),
       });
+    }
+    case 'get_replicas_config': {
+      const a = args as { spaceId: string }; return service.getReplicasConfig(ctx, a.spaceId);
+    }
+    case 'configure_replicas': {
+      const a = args as ReplicasConfigInput & { spaceId: string }; return service.configureReplicas(ctx, a.spaceId, a);
+    }
+    case 'get_replicas_task': {
+      const a = args as { spaceId: string; rootMessageId: string }; return service.getReplicasTask(ctx, a.spaceId, a.rootMessageId);
+    }
+    case 'act_on_replicas_task': {
+      const a = args as { spaceId: string; rootMessageId: string; operation: ReplicasThreadAction }; return service.actOnReplicasTask(ctx, a.spaceId, a.rootMessageId, a.operation);
     }
     case 'post_message': {
       const a = args as { spaceId: string; threadRoot?: string; body: string; poll?: z.infer<typeof NewPoll> };

@@ -1,3 +1,4 @@
+import { ReplicasOptions, ReplicasConfigInput, ReplicasConfigView, ReplicasTask, ReplicasThreadAction } from './replicas.js';
 import { z } from 'zod';
 import { BlobInfo } from './blob.js';
 import {
@@ -49,6 +50,7 @@ export const NewPoll = z.object({
 });
 
 const NewMessage = z.object({
+  replicas: ReplicasOptions.optional(),
   /**
    * Present = a reply into the flat thread under this root (the org
    * normalizes a reply's id to its root, Slack-style); absent = a new root
@@ -166,6 +168,24 @@ export const ActivityPage = z.object({
 export type ActivityPage = z.infer<typeof ActivityPage>;
 
 export const routes = {
+  getReplicasConfig: {
+    method: 'GET', path: '/v1/spaces/:spaceId/replicas',
+    params: z.object({ spaceId: SpaceId }), response: ReplicasConfigView,
+  },
+  configureReplicas: {
+    method: 'POST', path: '/v1/spaces/:spaceId/replicas',
+    params: z.object({ spaceId: SpaceId }), request: ReplicasConfigInput, response: ReplicasConfigView,
+  },
+  getReplicasTask: {
+    method: 'GET', path: '/v1/spaces/:spaceId/threads/:rootMessageId/replicas',
+    params: z.object({ spaceId: SpaceId, rootMessageId: MessageId }), response: z.object({ task: ReplicasTask.nullable() }),
+  },
+  actOnReplicasTask: {
+    method: 'POST', path: '/v1/spaces/:spaceId/threads/:rootMessageId/replicas',
+    params: z.object({ spaceId: SpaceId, rootMessageId: MessageId }), request: ReplicasThreadAction,
+    response: z.object({ task: ReplicasTask }),
+  },
+
   // --- identity ------------------------------------------------------------
   /** Who am I on this org — the client's only source of its own memberId under OAuth. */
   me: {

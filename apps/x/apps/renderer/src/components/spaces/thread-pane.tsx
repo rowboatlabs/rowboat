@@ -535,7 +535,7 @@ export function ThreadPane({
         const pending = buildPendingMessage(space.id, org.memberId, body, rootMessageId)
         setMessages((prev) => [...prev, pending])
         void window.ipc
-            .invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body })
+            .invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body, ...(agent?.replicas ? { replicas: agent.replicas } : {}) })
             .then((result) => {
                 setMessages((prev) => {
                     const rest = prev.filter((m) => m.id !== pending.id)
@@ -1223,6 +1223,7 @@ export function ThreadPane({
             )}
             <PollDialogHost openRef={openPollRef} onSubmit={createPoll} />
             <Composer
+                threadRootId={rootMessageId}
                 placeholder="Reply…"
                 busy={false}
                 onSend={post}

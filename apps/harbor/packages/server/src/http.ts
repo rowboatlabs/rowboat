@@ -106,6 +106,23 @@ export function buildHttpApp(deps: {
 
   app.get('/v1/health', (c) => c.json({ ok: true, org: { name: service.org.name, address: service.org.address } }));
 
+  app.get(routes.getReplicasConfig.path, async c => {
+    const p = parseWith(routes.getReplicasConfig.params, c.req.param());
+    return reply(c, routes.getReplicasConfig.response, await service.getReplicasConfig(actor(c), p.spaceId));
+  });
+  app.post(routes.configureReplicas.path, async c => {
+    const p = parseWith(routes.configureReplicas.params, c.req.param());
+    return reply(c, routes.configureReplicas.response, await service.configureReplicas(actor(c), p.spaceId, await body(c, routes.configureReplicas.request)));
+  });
+  app.get(routes.getReplicasTask.path, async c => {
+    const p = parseWith(routes.getReplicasTask.params, c.req.param());
+    return reply(c, routes.getReplicasTask.response, await service.getReplicasTask(actor(c), p.spaceId, p.rootMessageId));
+  });
+  app.post(routes.actOnReplicasTask.path, async c => {
+    const p = parseWith(routes.actOnReplicasTask.params, c.req.param());
+    return reply(c, routes.actOnReplicasTask.response, await service.actOnReplicasTask(actor(c), p.spaceId, p.rootMessageId, await body(c, routes.actOnReplicasTask.request)));
+  });
+
   app.get(routes.me.path, async (c) => reply(c, routes.me.response, { member: await service.me(actor(c)) }));
 
   // --- spaces & membership ---------------------------------------------------

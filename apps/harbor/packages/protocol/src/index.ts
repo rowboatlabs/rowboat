@@ -15,3 +15,5 @@ export * from './api.js';
 export * from './mcp.js';
 export * from './errors.js';
 export * from './fixtures.js';
+
+export * from './replicas.js';
