@@ -67,7 +67,7 @@ export default function AccountScreen() {
       ) : null}
 
       <Group>
-        <Row first onPress={() => router.push('/notifications')}>
+        <Row first onPress={() => router.push('/spaces/notifications')}>
           <Image source="sf:bell" style={{ width: 18, height: 18 }} tintColor={colors.secondaryLabel} />
           <Text style={{ flex: 1, fontSize: 16, color: colors.label }}>Notifications</Text>
           <Image source="sf:chevron.right" style={{ width: 8, height: 13 }} tintColor={colors.tertiaryLabel} />
