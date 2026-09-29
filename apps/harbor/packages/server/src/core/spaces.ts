@@ -30,6 +30,7 @@ function seedDisplayName(identity: BindIdentity): string {
 }
 
 export type RenameSpaceInput = z.infer<Routes['renameSpace']['request']>;
+export type AddMembersInput = z.infer<Routes['addMembers']['request']>;
 
 const DEFAULT_INVITE_HOURS = 24 * 7;
 
@@ -204,6 +205,49 @@ export class Spaces {
       (a, b) =>
         a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' }) || a.id.localeCompare(b.id),
     );
+  }
+
+  /**
+   * Add existing org members, people or agents, to a shared space the caller
+   * is in (spec §4 Roles: any member adds to spaces they are in; 2026-09-29).
+   * All or nothing: every id must be an org member before anything is
+   * written. Each one added gets the ordinary `joined` event with `by`, and a
+   * `space_added` frame once the transaction commits. No notification in v1
+   * (decided 2026-09-29): the sidebar and the stream's join line say it.
+   * Anyone already in is a no-op, so a repeated call writes nothing and
+   * passes a read-only org.
+   */
+  async addMembers(ctx: ActorCtx, spaceId: string, input: AddMembersInput): Promise<Membership[]> {
+    const space = await this.k.requireMember(ctx, spaceId);
+    enforce(canChangeMembership(space, 'add'));
+    const ids = [...new Set(input.memberIds)];
+    for (const id of ids) {
+      if (!(await this.k.store.getMember(id))) throw new HarborError('not_found', `no member ${id} in this org`);
+    }
+    const by = this.k.attributionOf(ctx, input);
+    const at = this.k.now();
+    const { memberships, added } = await this.k.lockedAs(ctx, spaceId, async () => {
+      const existing = new Map<string, Membership>();
+      for (const id of ids) {
+        const m = await this.k.store.getMembership(spaceId, id);
+        if (m) existing.set(id, m);
+      }
+      const added: Membership[] = [];
+      if (existing.size < ids.length) this.k.guardWrite();
+      for (const memberId of ids) {
+        if (existing.has(memberId)) continue;
+        const membership: Membership = { spaceId, memberId, joinedAt: at };
+        await this.k.store.putMembership(membership);
+        await this.k.appendNext(spaceId, at, { type: 'membership', membership, action: 'joined', by });
+        added.push(membership);
+      }
+      const memberships = ids.map((id) => existing.get(id) ?? added.find((m) => m.memberId === id)!);
+      return { memberships, added };
+    });
+    for (const m of added) {
+      this.k.hub.publishToMember(m.memberId, { kind: 'space_added', spaceId, spaceKind: 'shared', by: ctx.memberId, at });
+    }
+    return memberships;
   }
 
   async leaveSpace(ctx: ActorCtx, spaceId: string): Promise<void> {

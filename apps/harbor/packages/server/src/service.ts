@@ -5,7 +5,7 @@ import { Feed } from './core/feed.js';
 import { Kernel, type ActorCtx, type BindIdentity, type OrgInfo } from './core/kernel.js';
 import { ReadState } from './core/read-state.js';
 import { Spaces } from './core/spaces.js';
-import type { RenameSpaceInput } from './core/spaces.js';
+import type { AddMembersInput, RenameSpaceInput } from './core/spaces.js';
 import type { CreateTopicInput, DeleteMessageInput, EditMessageInput, EndPollInput, ManageTopicAction, NewMessage, PageOpts, ReactInput, VotePollInput } from './core/feed.js';
 import type { MarkReadInput, UnreadSnapshot } from './core/read-state.js';
 import type { SpaceHub } from './hub.js';
@@ -25,6 +25,7 @@ import type {
   DeleteAssetResult,
   Member,
   Membership,
+  StreamEvent,
   Message,
   MoveAssetResult,
   PresenceState,
@@ -123,6 +124,9 @@ export class HarborService {
   }
   listOrgMembers(ctx: ActorCtx): Promise<Member[]> {
     return this.spaces.listOrgMembers(ctx);
+  }
+  addMembers(ctx: ActorCtx, spaceId: string, input: AddMembersInput): Promise<Membership[]> {
+    return this.spaces.addMembers(ctx, spaceId, input);
   }
   leaveSpace(ctx: ActorCtx, spaceId: string): Promise<void> {
     return this.spaces.leaveSpace(ctx, spaceId);
@@ -229,7 +233,7 @@ export class HarborService {
     ctx: ActorCtx,
     spaceId: string,
     opts?: PageOpts,
-  ): Promise<{ messages: Message[]; topics: Topic[]; hasMore: boolean; hasMoreAfter: boolean; readOffset: number }> {
+  ): Promise<{ messages: Message[]; topics: Topic[]; hasMore: boolean; hasMoreAfter: boolean; readOffset: number; events: StreamEvent[] }> {
     return this.feed.listStream(ctx, spaceId, opts);
   }
   listThread(

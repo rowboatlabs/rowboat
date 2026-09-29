@@ -3905,6 +3905,12 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), spaceId: z.string(), name: z.string() }),
     res: z.object({ space: z.custom<SpacesTypes.Space>() }),
   },
+  // Add existing org members, people or agents, to a space the caller is in
+  // (2026-09-29). They learn of it by the space_added frame.
+  'spaces:addMembers': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), memberIds: z.array(z.string()).min(1) }),
+    res: z.object({ memberships: z.array(z.custom<SpacesTypes.Membership>()) }),
+  },
   // Direct messages: get-or-create the DM with another org member. No
   // invite, no acceptance — the other side learns of it by a space_added
   // frame on 'spaces:events' and shows it in their sidebar.

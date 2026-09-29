@@ -73,7 +73,7 @@ const msg = (offset: number): spaces.Message =>
     }) as spaces.Message
 const range = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => msg(from + i))
 const streamOf = (messages: spaces.Message[], patch: Partial<StreamState> = {}): StreamState => ({
-    messages, topicsByRoot: new Map(), hasMore: false, loadingOlder: false, hasMoreAfter: false, newerSince: 0, ready: true, ...patch,
+    messages, topicsByRoot: new Map(), events: [], hasMore: false, loadingOlder: false, hasMoreAfter: false, newerSince: 0, ready: true, ...patch,
 })
 const org = { id: 'org', memberId: 'me', address: 'org.example', name: 'Org', spaces: [], directs: [], directLabels: {} } as unknown as OrgWithSpaces
 const space = { id: 'space', name: 'Space', createdAt: '2026-09-01T00:00:00Z', kind: 'shared' } as spaces.Space
@@ -212,5 +212,38 @@ describe('GeneralStream jump to a row outside the window', () => {
         rerender(streamOf(range(90, 100)))
         await act(async () => {})
         expect(getMessage).toHaveBeenCalledTimes(1)
+    })
+})
+
+describe('GeneralStream join lines (2026-09-29)', () => {
+    const names = new Map([['alex', 'Alex'], ['sam', 'Sam'], ['kim', 'Kim']])
+    const joined = (offset: number, memberId: string, by?: string): spaces.StreamEvent => ({
+        offset,
+        at: '2026-09-14T09:00:00Z',
+        event: {
+            type: 'membership',
+            action: 'joined',
+            membership: { spaceId: 'space', memberId, joinedAt: '2026-09-14T09:00:00Z' },
+            ...(by ? { by: { memberId: by, actingMode: 'direct' as const } } : {}),
+        },
+    })
+    const show = (stream: StreamState, where: spaces.Space = space) =>
+        render(<GeneralStream org={org} space={where} stream={stream} presence={presence} memberNames={names} onOpenThread={vi.fn()} />)
+    const drawn = () => [...document.querySelectorAll('[data-mid], .spaces-membership-line')].map((el) => el.textContent)
+
+    it('draws each line before the first message after it, and the newest after the last', async () => {
+        show(streamOf([msg(2), msg(5)], { events: [joined(1, 'alex'), joined(3, 'sam', 'alex'), joined(7, 'kim')] }))
+        await screen.findByText('body 5')
+        expect(drawn()).toEqual(['Alex joined', 'body 2', 'Alex added Sam', 'body 5', 'Kim joined'])
+    })
+
+    it('keeps the empty-space copy when only lines exist, and draws none in a DM', async () => {
+        show(streamOf([], { events: [joined(1, 'alex')] }))
+        expect(screen.getByText(/Nothing here yet/)).toBeTruthy()
+        expect(drawn()).toEqual(['Alex joined'])
+        cleanup()
+        show(streamOf([msg(2)], { events: [joined(1, 'alex')] }), { ...space, kind: 'direct', participants: ['me', 'alex'] } as spaces.Space)
+        await screen.findByText('body 2')
+        expect(drawn()).toEqual(['body 2'])
     })
 })

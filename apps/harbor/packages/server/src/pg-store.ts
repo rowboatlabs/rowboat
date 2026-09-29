@@ -1385,4 +1385,19 @@ export class PgStore implements Store {
     );
     return rows.map((r) => ({ offset: r.stream_offset, at: r.at, event: r.event }));
   }
+
+  // A range scan on the primary key, filtered in the row. Unindexed on
+  // purpose (2026-09-29): a page's range is small unless its window spans a
+  // long, reply-heavy stretch; the trigger for a partial index on the type is
+  // a slow stream load.
+  async listMembershipEvents(spaceId: string, afterOffset: number, upToOffset: number | null): Promise<StoredEvent[]> {
+    const rows = await this.sql.query<{ stream_offset: number; at: string; event: StoredEvent['event'] }>(
+      `select stream_offset, at, event from events
+       where space_id = $1 and stream_offset > $2 and ($3::int is null or stream_offset <= $3)
+         and event->>'type' = 'membership'
+       order by stream_offset`,
+      [spaceId, afterOffset, upToOffset],
+    );
+    return rows.map((r) => ({ offset: r.stream_offset, at: r.at, event: r.event }));
+  }
 }

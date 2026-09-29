@@ -49,6 +49,7 @@ describe('agent face (MCP)', () => {
     const client = await mcpClient('dev-harsh');
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
+      'add_members',
       'asset_history',
       'browse_spaces',
       'create_asset',

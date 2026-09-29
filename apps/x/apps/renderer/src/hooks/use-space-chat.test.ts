@@ -217,3 +217,49 @@ describe('stream store — detached window', () => {
         expect(again.result.current.hasMoreAfter).toBe(false)
     })
 })
+
+// Join and leave lines (2026-09-29): the page's membership events ride with
+// its messages, merge by offset across pages, arrive live on the tail, and
+// paint from the cold-open cache.
+describe('stream store — join lines', () => {
+    const line = (offset: number, memberId: string): spaces.StreamEvent => ({
+        offset,
+        at: '2026-09-14T09:00:00Z',
+        event: { type: 'membership', action: 'joined', membership: { spaceId: 'space', memberId, joinedAt: '2026-09-14T09:00:00Z' } },
+    })
+    const offsets = (events: readonly spaces.StreamEvent[]) => events.map((e) => e.offset)
+
+    beforeEach(() => {
+        const base = invoke.getMockImplementation()!
+        invoke.mockImplementation(async (channel: string, args: { beforeOffset?: number; aroundOffset?: number; afterOffset?: number }) => {
+            const page = await base(channel, args)
+            if (args.beforeOffset !== undefined) return { messages: range(81, 90), topics: [], hasMore: true, readOffset: 0, events: [line(85.5, 'kim')] }
+            return { ...page, events: args.aroundOffset === undefined && args.afterOffset === undefined ? [line(95.5, 'sam'), line(100.5, 'alex')] : [] }
+        })
+    })
+
+    it('keeps the head page’s lines and adds an older page’s', async () => {
+        const { mod, hook } = await open()
+        expect(offsets(hook.result.current.events)).toEqual([95.5, 100.5])
+        await act(() => mod.loadOlderStreamMessages('org', 'space'))
+        expect(offsets(hook.result.current.events)).toEqual([85.5, 95.5, 100.5])
+    })
+
+    it('takes a live line on the tail, never while the window is detached', async () => {
+        const { mod, hook } = await open()
+        const frame = (offset: number) =>
+            emit({ orgId: 'org', frame: { kind: 'event', spaceId: 'space', offset, at: '2026-09-14T10:00:00Z', event: line(offset, 'kim').event } })
+        act(() => frame(101))
+        expect(offsets(hook.result.current.events)).toEqual([95.5, 100.5, 101])
+        await act(() => mod.loadStreamAround('org', 'space', 50))
+        act(() => frame(102))
+        expect(hook.result.current.events).toEqual([])
+        expect(hook.result.current.newerSince).toBe(0)
+    })
+
+    it('paints the cached tail’s lines on a cold open', async () => {
+        await open()
+        const cached = JSON.parse(window.localStorage.getItem('spaces:general:org/space')!) as { events: spaces.StreamEvent[] }
+        expect(offsets(cached.events)).toEqual([95.5, 100.5])
+    })
+})

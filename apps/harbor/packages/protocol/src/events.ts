@@ -8,6 +8,34 @@ import { AssetId, MemberId, MessageId, SpaceId, StreamOffset } from './ids.js';
 // after that offset, then goes live — the same resume pattern as the app's
 // turn-event spine. Presence is ephemeral and carries no offset.
 
+/** Someone joined, left, or was removed from the space. */
+export const MembershipEvent = z.object({
+  type: z.literal('membership'),
+  membership: Membership,
+  action: z.enum(['joined', 'left', 'removed']),
+  /**
+   * Who acted on someone else's membership (2026-09-29): on `joined`, the
+   * member who added them (addMembers). Absent when the member acted
+   * themselves — an accepted invite, a self-join, leaving. A field rather
+   * than an `added` action, so older clients still parse the frame.
+   */
+  by: Attribution.optional(),
+});
+export type MembershipEvent = z.infer<typeof MembershipEvent>;
+
+/**
+ * A log event the stream shows as a line between its messages (listStream
+ * `events`, 2026-09-29): membership only in v1, the Matrix model — the fact
+ * stays in the log and the client draws it, never a system message. Carries
+ * its offset so a client merges it with the messages in log order.
+ */
+export const StreamEvent = z.object({
+  offset: StreamOffset,
+  at: z.iso.datetime(),
+  event: z.discriminatedUnion('type', [MembershipEvent]),
+});
+export type StreamEvent = z.infer<typeof StreamEvent>;
+
 /** Durable, offsetted facts. The feed's activity strand renders these (spec §7). */
 export const SpaceEvent = z.discriminatedUnion('type', [
   z.object({ type: z.literal('change'), changeSet: ChangeSet }),
@@ -27,11 +55,7 @@ export const SpaceEvent = z.discriminatedUnion('type', [
   }),
   /** The row deleted ("convert back to thread") — the thread itself is untouched. */
   z.object({ type: z.literal('topic_removed'), removal: TopicRemoval }),
-  z.object({
-    type: z.literal('membership'),
-    membership: Membership,
-    action: z.enum(['joined', 'left', 'removed']),
-  }),
+  MembershipEvent,
   /** A reaction toggled on or off a message. Idempotent re-adds/re-removes emit nothing. */
   z.object({
     type: z.literal('reaction'),

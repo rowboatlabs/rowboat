@@ -416,6 +416,8 @@ export interface Store {
   /** `offset` must be head+1 — the caller allocates inside the space lock. */
   appendEvent(spaceId: string, stored: StoredEvent): Promise<void>;
   listEventsAfter(spaceId: string, afterOffset: number): Promise<StoredEvent[]>;
+  /** Membership events with offset in (afterOffset, upToOffset], or to the head when upToOffset is null — the stream's join lines. */
+  listMembershipEvents(spaceId: string, afterOffset: number, upToOffset: number | null): Promise<StoredEvent[]>;
 
   // one-time passes (the mentions backfill): a ledger so a pass that rewrites
   // content runs exactly once per org, not on every boot

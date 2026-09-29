@@ -6,6 +6,7 @@ import { copySpacesLink } from '@/lib/spaces-copy-link'
 import { Composer, type AgentOptions } from '@/components/spaces/composer'
 import { ForwardDialog } from '@/components/spaces/forward-dialog'
 import { DayDivider, MessageRow, NewDivider, TypingIndicator, type ThreadRowData } from '@/components/spaces/message-row'
+import { MembershipLine } from '@/components/spaces/membership-line'
 import type { SpacePresence, StreamState } from '@/hooks/use-space-chat'
 import {
     STREAM_READ_KEY, ingestStreamMessage, jumpToLatest, loadNewerStreamMessages,
@@ -864,6 +865,25 @@ export function GeneralStream({
     let prev: spaces.Message | undefined
     let prevDay = ''
     let newShown = false
+    let messageRows = 0
+    // Join and leave lines (2026-09-29): each drawn before the first message
+    // after it, the newest after the last. Lines under rows the render cap
+    // hides stay hidden with them. A DM's membership is fixed, so it has none.
+    const lineFloor = hiddenCount > 0 ? streamMessages[hiddenCount - 1]!.offset : 0
+    const lines = space.kind === 'direct' ? [] : stream.events.filter((e) => e.offset > lineFloor)
+    let lineAt = 0
+    const drawLinesBefore = (offset: number) => {
+        while (lineAt < lines.length && lines[lineAt]!.offset < offset) {
+            const line = lines[lineAt++]!
+            const day = dayKey(line.at)
+            if (day !== prevDay) {
+                rows.push(<DayDivider key={`day:${day}`} label={formatDayLabel(line.at)} />)
+                prevDay = day
+            }
+            rows.push(<MembershipLine key={`line:${line.offset}`} event={line.event} at={line.at} names={memberNames} />)
+            prev = undefined
+        }
+    }
     if (hiddenCount > 0 || stream.hasMore) {
         rows.push(
             <div key="earlier" className="flex justify-center py-2">
@@ -883,6 +903,7 @@ export function GeneralStream({
         )
     }
     visibleMessages.forEach((message) => {
+        drawLinesBefore(message.offset)
         // Deleted messages disappear — unless a thread grew from one, which
         // keeps a tombstone row so the thread stays reachable.
         const thread = threadRowFor(message)
@@ -931,8 +952,10 @@ export function GeneralStream({
                 onEndPoll={(m) => void endPoll(m)}
             />,
         )
+        messageRows++
         prev = message
     })
+    drawLinesBefore(Infinity)
 
     const typingNames = (presence.typing.get('') ?? []).map((id) => memberNames.get(id) ?? id)
 
@@ -1007,7 +1030,7 @@ export function GeneralStream({
                 {(!stream.ready || snapping) && (
                     <div className="flex items-center gap-2 px-2 py-3 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" /> Loading messages…</div>
                 )}
-                {stream.ready && !snapping && rows.length === 0 && (
+                {stream.ready && !snapping && messageRows === 0 && (
                     <div className="px-2 py-6 text-sm text-muted-foreground">
                         {space.kind === 'direct' && (space.participants ?? []).length === 1
                             ? 'Your notes to self — drafts, links, files for later. Only you can see this, and @rowboat works here too.'

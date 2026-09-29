@@ -168,6 +168,12 @@ export function buildHttpApp(deps: {
     return reply(c, routes.leaveSpace.response, { left: true });
   });
 
+  app.post(routes.addMembers.path, async (c) => {
+    const { spaceId } = parseWith(routes.addMembers.params, c.req.param());
+    const input = await body(c, routes.addMembers.request);
+    return reply(c, routes.addMembers.response, { memberships: await service.addMembers(actor(c), spaceId, input) });
+  });
+
   // --- invites ---------------------------------------------------------------
 
   app.post(routes.createInvite.path, async (c) => {

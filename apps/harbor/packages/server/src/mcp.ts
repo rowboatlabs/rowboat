@@ -163,6 +163,10 @@ async function dispatch(
       const a = args as { spaceId: string; name: string };
       return { space: await service.renameSpace(ctx, a.spaceId, { name: a.name, ...attribution }) };
     }
+    case 'add_members': {
+      const a = args as { spaceId: string; memberIds: string[] };
+      return { memberships: await service.addMembers(ctx, a.spaceId, { memberIds: a.memberIds, ...attribution }) };
+    }
     case 'leave_space': {
       const a = args as { spaceId: string };
       await service.leaveSpace(ctx, a.spaceId);

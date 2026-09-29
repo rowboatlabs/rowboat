@@ -169,6 +169,16 @@ export const renameSpace = tool({
   output: z.object({ space: Space }),
 });
 
+export const addMembers = tool({
+  name: 'add_members',
+  description:
+    'Add existing org members, people or agents, to a shared space your person is in. Take ' +
+    'memberIds from list_members. Anyone already in is a no-op. Direct messages cannot be added to. ' +
+    'Only when your person asked for it.',
+  input: z.object({ spaceId: SpaceId, memberIds: z.array(MemberId).min(1).max(100) }),
+  output: z.object({ memberships: z.array(Membership) }),
+});
+
 export const leaveSpace = tool({
   name: 'leave_space',
   description:
@@ -628,6 +638,7 @@ export const mcpTools = [
   openDirect,
   createSpace,
   renameSpace,
+  addMembers,
   leaveSpace,
   createInvite,
   readStream,
