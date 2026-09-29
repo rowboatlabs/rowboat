@@ -1,3 +1,4 @@
+import { useSpaceAccess } from '@/lib/spaces-access'
 import { FileConflictNotice, useSpaceFileSave, type SavedSpaceFile } from './file-conflict'
 import { createContext, memo, useContext, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode } from 'react'
 import type { spaces } from '@x/shared'
@@ -106,6 +107,7 @@ export function SpaceNavProvider({ onOpenFile, onOpenSpaceFile, onOpenSpace, onO
 
 /** Attachments preview on tap; saving to space files keeps the original link intact. */
 function BlobLinkCard({ href, children }: { href: string; children?: ReactNode }) {
+    const { member } = useSpaceAccess()
     const parsed = parseBlobAppUrl(href)
     const openAttachment = useContext(AttachmentNavContext)
     const [saveOpen, setSaveOpen] = useState(false)
@@ -144,12 +146,12 @@ function BlobLinkCard({ href, children }: { href: string; children?: ReactNode }
                     <FileText className="size-3.5 shrink-0 text-muted-foreground" />
                     <span className="truncate">{children}</span>
                 </button>
-                <button type="button" onClick={() => setSaveOpen(true)} title="Save to space files" aria-label="Save to space files" className="shrink-0 p-2 hover:bg-accent"><FilePlus2 className="size-3.5" /></button>
+                <button type="button" disabled={!member} onClick={() => setSaveOpen(true)} title="Save to space files" aria-label="Save to space files" className="shrink-0 p-2 hover:bg-accent"><FilePlus2 className="size-3.5" /></button>
                 <button type="button" disabled={saving} onClick={() => void save()} title="Download" aria-label="Download" className="shrink-0 p-2 hover:bg-accent">
                     {saving ? <Loader2 className="size-3.5 animate-spin" /> : <FileDown className="size-3.5" />}
                 </button>
             </span>
-            {saveOpen && <SaveToSpaceDialog src={href} suggestedName={suggestedName} onClose={() => setSaveOpen(false)} />}
+            {member && saveOpen && <SaveToSpaceDialog src={href} suggestedName={suggestedName} onClose={() => setSaveOpen(false)} />}
         </>
     )
 }
@@ -189,6 +191,7 @@ function MessageImageGallery({ children }: { children: ReactNode }) {
 
 /** Source-specific actions always follow the currently selected image. */
 function SpaceImageActions({ src }: { src: string }) {
+    const { member } = useSpaceAccess()
     const [saving, setSaving] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [saveOpen, setSaveOpen] = useState(false)
@@ -217,12 +220,12 @@ function SpaceImageActions({ src }: { src: string }) {
                 {saving ? 'Saving…' : 'Download'}
             </button>
             {parsed ? (
-                <button type="button" onClick={() => setSaveOpen(true)} className="text-white/80 hover:text-white hover:underline">Save to space files</button>
+                <button type="button" disabled={!member} onClick={() => setSaveOpen(true)} className="text-white/80 hover:text-white hover:underline">Save to space files</button>
             ) : (
                 <a href={src} target="_blank" rel="noreferrer" className="text-white/80 hover:text-white hover:underline">Open original</a>
             )}
             {error && <p role="alert" className="absolute right-0 top-full mt-2 w-72 rounded-md bg-background p-3 text-xs text-destructive shadow-lg">{error}</p>}
-            {saveOpen && <SaveToSpaceDialog src={src} onClose={() => setSaveOpen(false)} />}
+            {member && saveOpen && <SaveToSpaceDialog src={src} onClose={() => setSaveOpen(false)} />}
         </>
     )
 }
@@ -327,6 +330,7 @@ function SaveToSpaceDialog({ src, suggestedName, onSaved, onClose }: { src: stri
 }
 
 export function BlobImage({ src, alt }: { src: string; alt: string }) {
+    const { member } = useSpaceAccess()
     const imageRef = useRef<HTMLImageElement>(null)
     const openGallery = useContext(MessageImageGalleryContext)
     const preview = () => {
@@ -399,7 +403,7 @@ export function BlobImage({ src, alt }: { src: string; alt: string }) {
                     </ContextMenuItem>
                     {parsed && (
                         <>
-                            <ContextMenuItem onSelect={() => setSaveOpen(true)}>
+                            <ContextMenuItem disabled={!member} onSelect={() => setSaveOpen(true)}>
                                 <FilePlus2 className="size-3.5 mr-2" /> Save to space files…
                             </ContextMenuItem>
                             <ContextMenuItem onSelect={() => void save()}>
@@ -409,12 +413,12 @@ export function BlobImage({ src, alt }: { src: string; alt: string }) {
                     )}
                 </ContextMenuContent>
             </ContextMenu>
-            {parsed && <button type="button" title="Save to space files" aria-label={`Save ${alt || 'image'} to space files`} onClick={() => setSaveOpen(true)} className="absolute bottom-3 right-3 rounded-md border border-border bg-background p-1.5 text-foreground shadow-sm hover:bg-accent"><FilePlus2 className="size-3.5" /></button>}
+            {member && parsed && <button type="button" title="Save to space files" aria-label={`Save ${alt || 'image'} to space files`} onClick={() => setSaveOpen(true)} className="absolute bottom-3 right-3 rounded-md border border-border bg-background p-1.5 text-foreground shadow-sm hover:bg-accent"><FilePlus2 className="size-3.5" /></button>}
             </span>
             <ImageLightbox src={src} alt={alt} open={open} onOpenChange={setOpen}>
                 <SpaceImageActions src={src} />
             </ImageLightbox>
-            {saveOpen && <SaveToSpaceDialog src={src} onClose={() => setSaveOpen(false)} />}
+            {member && saveOpen && <SaveToSpaceDialog src={src} onClose={() => setSaveOpen(false)} />}
         </>
     )
 }
@@ -828,6 +832,7 @@ export const SpaceMarkdown = memo(function SpaceMarkdown({ body, className }: { 
 
 /** Attachment content occupies the same document column as saved space files. */
 export function AttachmentColumn({ src, onDismiss, onSaved }: { src: string; onDismiss: () => void; onSaved: (saved: SavedSpaceFile) => void }) {
+    const { member } = useSpaceAccess()
     const name = new URL(src).searchParams.get('name') || 'Attachment'
     const [saveOpen, setSaveOpen] = useState(false)
     const [downloading, setDownloading] = useState(false)
@@ -845,12 +850,12 @@ export function AttachmentColumn({ src, onDismiss, onSaved }: { src: string; onD
         <section aria-label="Attachment preview" className="flex min-h-0 min-w-0 flex-1 flex-col">
             <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2 text-xs text-muted-foreground">
                 <span className="min-w-0 flex-1 truncate font-mono text-foreground/80" title={name}>{name}</span>
-                <button type="button" onClick={() => setSaveOpen(true)} className="flex shrink-0 items-center gap-1 hover:text-foreground"><FilePlus2 className="size-3" /> Save to space files</button>
+                <button type="button" disabled={!member} onClick={() => setSaveOpen(true)} className="flex shrink-0 items-center gap-1 hover:text-foreground"><FilePlus2 className="size-3" /> Save to space files</button>
                 <button type="button" disabled={downloading} onClick={() => void download()} className="flex shrink-0 items-center gap-1 hover:text-foreground"><FileDown className="size-3" /> Download</button>
                 <button type="button" aria-label="Close attachment preview" onClick={onDismiss} className="rounded p-1 hover:bg-accent hover:text-foreground"><X className="size-3.5" /></button>
             </div>
             <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto"><BlobPreview src={src} name={name} /></div>
-            {saveOpen && <SaveToSpaceDialog src={src} suggestedName={name} onSaved={onSaved} onClose={() => setSaveOpen(false)} />}
+            {member && saveOpen && <SaveToSpaceDialog src={src} suggestedName={name} onSaved={onSaved} onClose={() => setSaveOpen(false)} />}
         </section>
     )
 }

@@ -35,6 +35,8 @@ type SpacesHandlers = {
   'spaces:apexInfo': InvokeHandler<'spaces:apexInfo'>;
   'spaces:removeOrg': InvokeHandler<'spaces:removeOrg'>;
   'spaces:listSpaces': InvokeHandler<'spaces:listSpaces'>;
+  'spaces:browseSpaces': InvokeHandler<'spaces:browseSpaces'>;
+  'spaces:joinSpace': InvokeHandler<'spaces:joinSpace'>;
   'spaces:createSpace': InvokeHandler<'spaces:createSpace'>;
   'spaces:renameSpace': InvokeHandler<'spaces:renameSpace'>;
   'spaces:openDirect': InvokeHandler<'spaces:openDirect'>;
@@ -213,8 +215,12 @@ export const spacesIpcHandlers: SpacesHandlers = {
     return { spaces };
   },
 
+  'spaces:browseSpaces': async (_event, args) => orgs.getClient(args.orgId).browseSpaces(),
+
+  'spaces:joinSpace': async (_event, args) => orgs.getClient(args.orgId).joinSpace(args.spaceId),
+
   'spaces:createSpace': async (_event, args) => {
-    const space = await orgs.getClient(args.orgId).createSpace(args.name);
+    const space = await orgs.getClient(args.orgId).createSpace(args.name, args.visibility);
     return { space };
   },
 

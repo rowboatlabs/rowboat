@@ -1,3 +1,4 @@
+import { invokeSpace } from '@/lib/spaces-invoke'
 import { SearchMenu } from '@/components/search-menu'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
@@ -214,7 +215,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
             void (async () => {
                 try {
                     const input = await uploadInputFor(file)
-                    const res = await window.ipc.invoke('spaces:uploadBlob', {
+                    const res = await invokeSpace('spaces:uploadBlob', {
                         orgId: refs.orgId,
                         spaceId: refs.spaceId,
                         ...input,

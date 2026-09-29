@@ -80,11 +80,13 @@ function hydrateMembers(k: string): void {
     }
 }
 
-async function loadMembers(orgId: string, spaceId: string): Promise<void> {
+const membersDirty = new Set<string>()
+
+async function loadMembers(orgId: string, spaceId: string, force = false): Promise<void> {
     // A composer mounted outside a space pane has no refs — nothing to ask for.
     if (!orgId || !spaceId) return
     const k = key(orgId, spaceId)
-    if (membersLoading.has(k)) return
+    if (membersLoading.has(k)) { if (force) membersDirty.add(k); return }
     membersLoading.add(k)
     try {
         const res = await window.ipc.invoke('spaces:listMembers', { orgId, spaceId })
@@ -95,6 +97,7 @@ async function loadMembers(orgId: string, spaceId: string): Promise<void> {
         // org unreachable — cached names (or ids) stand until a retry.
     } finally {
         membersLoading.delete(k)
+        if (membersDirty.delete(k)) void loadMembers(orgId, spaceId)
     }
 }
 
@@ -114,9 +117,9 @@ export function prefetchMembers(orgId: string, spaceId: string): void {
  * resubscribe), so this throttles: membership changes ride the next quiet
  * moment, not every message in a burst.
  */
-export function refreshMembers(orgId: string, spaceId: string): void {
+export function refreshMembers(orgId: string, spaceId: string, force = false): void {
     const k = key(orgId, spaceId)
-    if (Date.now() - (lastLoadedAt.get(k) ?? 0) >= REFRESH_MIN_MS) void loadMembers(orgId, spaceId)
+    if (force || Date.now() - (lastLoadedAt.get(k) ?? 0) >= REFRESH_MIN_MS) void loadMembers(orgId, spaceId, force)
     // Membership changes in any space change who is in the org's directory too.
     if (Date.now() - (lastLoadedAt.get(orgKey(orgId)) ?? 0) >= REFRESH_MIN_MS) void loadOrgRoster(orgId, [])
 }

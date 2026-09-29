@@ -1,3 +1,5 @@
+import { canActInSpace } from '@/lib/spaces-access'
+import { invokeSpace } from '@/lib/spaces-invoke'
 import type { spaces } from '@x/shared'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { buildPendingMessage, failPendingStreamMessage, ingestStreamMessage, resolvePendingStreamMessage } from '@/hooks/use-space-chat'
@@ -15,10 +17,10 @@ import * as analytics from '@/lib/analytics'
 // on a detached window snap to the tail first (jumpToLatest), or the row has
 // no tail to land on.
 export function postStreamMessage(org: OrgWithSpaces, space: spaces.Space, body: string, agent?: RowboatTurnOptions): void {
+    if (!canActInSpace(org.id, space.id)) return
     const pending = buildPendingMessage(space.id, org.memberId, body)
     ingestStreamMessage(org.id, space.id, pending)
-    void window.ipc
-        .invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, body })
+    void invokeSpace('spaces:postMessage', { orgId: org.id, spaceId: space.id, body })
         .then((result) => {
             resolvePendingStreamMessage(org.id, space.id, pending.id, result.message)
             // The org read the stream up to our own post; mirror it.

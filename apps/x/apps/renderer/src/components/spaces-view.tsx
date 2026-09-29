@@ -1,8 +1,12 @@
+import { invokeSpace } from '@/lib/spaces-invoke'
+import { SpaceAccessContext, useSpaceAccess, canActInSpace } from '@/lib/spaces-access'
+import { useSpaceDirectory, updateDirectoryMembership, loadSpaceDirectory } from '@/hooks/use-space-directory'
+import { SpaceBrowser } from '@/components/spaces/space-browser'
 import '@/styles/spaces.css'
 import { ThreadResizeHandle, THREAD_DEFAULT_WIDTH, THREAD_MIN_WIDTH, THREAD_DIVIDER_WIDTH, STREAM_MIN_WIDTH } from '@/components/spaces/thread-resize-handle'
 import { getViewerType } from '@/lib/file-types'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Link as LinkIcon, Loader2, MoreHorizontal, PenTool, Plus, UserPlus, Users } from 'lucide-react'
+import { Check, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Lock, Link as LinkIcon, Loader2, MoreHorizontal, PenTool, Plus, UserPlus, Users } from 'lucide-react'
 import { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import {
@@ -62,7 +66,7 @@ export type SpaceSelection = {
     orgId: string
     spaceId: string
     /** An org-level surface instead of a space (spaceId is '' then): Activity, layer 3. */
-    view?: 'activity'
+    view?: 'activity' | 'browse'
 } | null
 
 /** Chat never squeezes below this beside a doc; the doc takes the rest. */
@@ -112,7 +116,7 @@ const WhiteboardPane = lazy(() => import('@/components/spaces/whiteboard-pane'))
 // Root view: the selected space (the org/space list lives in the app sidebar)
 // ---------------------------------------------------------------------------
 
-export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, onRailSelect, onOpenSession, onOpenMessage, onOpenActivity, active = true }: {
+export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, onRailSelect, onOpenSession, onOpenMessage, onOpenActivity, onOpenBrowse, active = true }: {
     selection: SpaceSelection
     onSelect: (selection: SpaceSelection) => void
     /** Navigate to the destination and its rail together, without using the current space's selection. */
@@ -124,6 +128,7 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
     /** Activity → a message: the host navigates (space or thread, landing on the row). */
     onOpenMessage?: (target: ActivityTarget) => void
     /** The org's Activity surface. */
+    onOpenBrowse?: (orgId: string) => void
     onOpenActivity?: (orgId: string) => void
     /**
      * False while the view is kept mounted but hidden (the app shows another
@@ -140,7 +145,7 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
     const signInRowboat = async () => {
         setSigningIn(true)
         try {
-            const { orgs: signedIn } = await window.ipc.invoke('spaces:signInRowboat', null)
+            const { orgs: signedIn } = await invokeSpace('spaces:signInRowboat', null)
             refreshSpacesAccountState()
             await refreshSpacesOrgs()
             if (signedIn.length === 0) toast('Signed in — no servers yet. Create one or join with an invite link.', 'success')
@@ -152,14 +157,37 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
     }
 
     const selectedOrg = selection ? (orgs.find((o) => o.id === selection.orgId) ?? null) : null
-    const selectedSpace = selection && selectedOrg ? (findSpace(selectedOrg, selection.spaceId) ?? null) : null
+    const joinedSpace = selection && selectedOrg ? findSpace(selectedOrg, selection.spaceId) : undefined
+    const directory = useSpaceDirectory(selectedOrg?.id ?? null, active && !!selection?.spaceId && !joinedSpace)
+    const discovered = directory.entries.find(e => e.space.id === selection?.spaceId)
+    const selectedSpace = joinedSpace ?? discovered?.space ?? null
+    const member = !!joinedSpace || !!discovered?.joined
+    const [joining, setJoining] = useState(false)
+    const joinPending = useRef(false)
+    const join = async () => {
+        if (!selectedOrg || !selectedSpace || joinPending.current) return
+        joinPending.current = true
+        setJoining(true)
+        try {
+            const result = await invokeSpace('spaces:joinSpace', { orgId: selectedOrg.id, spaceId: selectedSpace.id })
+            updateDirectoryMembership(selectedOrg.id, result.space, true)
+            refreshMembers(selectedOrg.id, result.space.id, true)
+            await refreshSpacesOrgs()
+            void loadSpaceDirectory(selectedOrg.id)
+        } catch (error) {
+            toast(error instanceof Error ? error.message : 'Could not join this space', 'error')
+        } finally {
+            joinPending.current = false
+            setJoining(false)
+        }
+    }
 
     // No (valid) selection: land on the first space there is. An org-level
     // surface (Activity) is a valid selection with no space.
     useEffect(() => {
         if (loading) return
         if (selectedOrg && selectedSpace) return
-        if (selectedOrg && selection?.view === 'activity') return
+        if (selectedOrg && (selection?.view || selection?.spaceId)) return
         const first = selectedOrg ?? orgs.find((o) => o.spaces.length > 0 || o.directs.length > 0)
         const space = first?.spaces[0] ?? first?.directs[0]
         if (first && space) {
@@ -179,6 +207,7 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
 
     if (selectedOrg && selectedSpace) {
         return (
+            <SpaceAccessContext.Provider value={{ member, join: () => void join(), joining }}>
             <SpacePane
                 key={`${selectedOrg.id}/${selectedSpace.id}`}
                 org={selectedOrg}
@@ -188,9 +217,11 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
                 onSwitchSpace={onSwitchSpace}
                 onOpenSession={onOpenSession}
                 onOpenActivity={onOpenActivity}
+                onOpenBrowse={onOpenBrowse}
                 onOpenMessage={onOpenMessage}
                 active={active}
             />
+            </SpaceAccessContext.Provider>
         )
     }
 
@@ -207,11 +238,19 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
                     <span className="flex-1 px-1 text-[13px] font-semibold text-muted-foreground">Spaces</span>
                 </div>
                 <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-                    <ServerSpaceNavigation org={selectedOrg} spaceId="" onOpenSpace={onSwitchSpace} showDiscussions={false} />
+                    <ServerSpaceNavigation org={selectedOrg} spaceId="" onOpenSpace={onSwitchSpace} onOpenBrowse={onOpenBrowse} browseActive={selection?.view === 'browse'} showDiscussions={false} />
                 </div>
                 </SpaceRailSections>
             </aside>
-            {selection?.view === 'activity' && onOpenMessage ? (
+            {selection?.view === 'browse' || !selection?.spaceId && !selection?.view ? (
+                <SpaceBrowser key={selectedOrg.id} orgId={selectedOrg.id} active={active} onOpenSpace={onSwitchSpace} />
+            ) : selection?.spaceId ? (
+                <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-sm text-muted-foreground">
+                    <p>{!directory.loaded ? 'Loading space…' : directory.error ?? 'This space is unavailable or you do not have access.'}</p>
+                    {directory.error && <Button variant="outline" onClick={() => void loadSpaceDirectory(selectedOrg.id)}>Retry</Button>}
+                    <Button variant="outline" onClick={() => onOpenBrowse?.(selectedOrg.id)}>Browse spaces</Button>
+                </div>
+            ) : selection?.view === 'activity' && onOpenMessage ? (
                 <ActivityView org={selectedOrg} active={active} onOpenMessage={onOpenMessage} />
             ) : (
                 <div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
@@ -269,19 +308,21 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
 // One space: header across the top, then the space rail | the selected thing
 // ---------------------------------------------------------------------------
 
-function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSession, onOpenActivity, onOpenMessage, active = true }: {
+function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSession, onOpenActivity, onOpenMessage, onOpenBrowse, active = true }: {
     org: OrgWithSpaces
     space: spaces.Space
     selection: RailSelection
     onSelect: (selection: RailSelection) => void
     /** The quick switcher can land on another space entirely. */
     onSwitchSpace: (orgId: string, spaceId: string, selection?: RailSelection) => void
+    onOpenBrowse?: (orgId: string) => void
     onOpenActivity?: (orgId: string) => void
     onOpenMessage?: (target: ActivityTarget) => void
     onOpenSession?: (sessionId: string) => void
     /** False while the Spaces view is kept mounted but hidden. */
     active?: boolean
 }) {
+    const { member, join, joining } = useSpaceAccess()
     const [entries, setEntries] = useState<spaces.SpacesAssetEntry[]>([])
     const [filesLoaded, setFilesLoaded] = useState(false)
     const [filesError, setFilesError] = useState<string | null>(null)
@@ -299,7 +340,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
 
     const feed = useSpaceFeed(org.id, space.id)
     const stream = useStream(org.id, space.id)
-    const presence = useSpacePresence(org.id, space.id, org.memberId)
+    const presence = useSpacePresence(org.id, space.id, org.memberId, member || active)
     const readOffset = useStreamReadOffset(org.id, space.id)
     // The roster comes from the module store (cached, hydrated in render) so
     // names resolve in the same first frame as the stream's cached tail.
@@ -333,7 +374,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         // The roster store fetches on its own mount; the tick keeps it fresh
         // on live activity (throttled inside — one refetch per burst).
         refreshMembers(org.id, space.id)
-        void window.ipc.invoke('spaces:listAssets', { orgId: org.id, spaceId: space.id })
+        void invokeSpace('spaces:listAssets', { orgId: org.id, spaceId: space.id })
             .then((assetsRes) => {
                 if (cancelled) return
                 setEntries(assetsRes.entries)
@@ -368,17 +409,19 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     const removeFolder = (path: string) =>
         setDraftFolders((prev) => prev.filter((f) => f !== path && !f.startsWith(`${path}/`)))
 
-    useSpaceLive(org.id, space.id, (frame) => {
+    useSpaceLive(member || active ? org.id : null, member || active ? space.id : null, (frame) => {
         // Coarse-grained on purpose: any durable event refreshes the open
         // panes — and so does a (re)subscribe, since events published while a
         // socket was dead may have no replay to arrive by.
+        if (frame.kind === 'event' && frame.event.type === 'membership') refreshMembers(org.id, space.id, true)
         if (frame.kind !== 'event' && frame.kind !== 'subscribed') return
         setRefreshTick((t) => t + 1)
     })
 
     const invite = async () => {
+        if (!canActInSpace(org.id, space.id)) return
         try {
-            const result = await window.ipc.invoke('spaces:createInvite', { orgId: org.id, spaceId: space.id })
+            const result = await invokeSpace('spaces:createInvite', { orgId: org.id, spaceId: space.id })
             await navigator.clipboard.writeText(result.link)
             analytics.spacesInviteLinkCopied()
             toast('Invite link copied to clipboard', 'success')
@@ -403,8 +446,8 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // excluded: their saves are throttled snapshots, not reading material —
     // the boards rail is their surface, not the files tree.
     const unreadAssetIds = useMemo(
-        () => new Set(feed.changeSets.filter((c) => isUnreadChange(c, readOffset, org.memberId) && !spaces.isWhiteboardPath(c.assetPath)).map((c) => c.assetId)),
-        [feed.changeSets, readOffset, org.memberId],
+        () => new Set(feed.changeSets.filter((c) => member && isUnreadChange(c, readOffset, org.memberId) && !spaces.isWhiteboardPath(c.assetPath)).map((c) => c.assetId)),
+        [feed.changeSets, readOffset, org.memberId, member],
     )
 
     // ------------------------------------------------------------------
@@ -597,7 +640,8 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
      * store follows, and the caller opens it by id.
      */
     const createFile = async (input: spaces.SpacesCreateInput): Promise<spaces.SpacesAssetEntry> => {
-        const { asset } = await window.ipc.invoke('spaces:createAsset', { orgId: org.id, spaceId: space.id, input })
+        if (!canActInSpace(org.id, space.id)) throw new Error('Join this space to create files')
+        const { asset } = await invokeSpace('spaces:createAsset', { orgId: org.id, spaceId: space.id, input })
         setEntries((prev) => {
             const next = [...prev.filter((e) => e.id !== asset.id), asset]
             noteListingFromEntries(org.id, space.id, next)
@@ -689,9 +733,9 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
             .catch((err) => toast(err instanceof Error ? err.message : 'Could not create the file', 'error'))
     }
     /** A canonical link into another space the reader is in: the org address names the org, App does the navigation. */
-    const resolveSpace = (orgAddress: string, spaceId: string): string | null => {
+    const resolveSpace = (orgAddress: string, _spaceId: string): string | null => {
         const target = orgs.find((o) => o.address === orgAddress)
-        return target && findSpace(target, spaceId) ? target.id : null
+        return target?.id ?? null
     }
     const openSpaceFile = (orgId: string, spaceId: string, assetId: string) => {
         if (orgId === org.id && spaceId === space.id) openFile(assetId)
@@ -700,7 +744,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     const resolveOrg = (orgAddress: string): string | null => orgs.find((o) => o.address === orgAddress)?.id ?? null
     /** A person link or the popover's Message action: the org creates the DM on first use, the listing learns it, then it opens. */
     const openDirect = (orgId: string, memberId: string) => {
-        void window.ipc.invoke('spaces:openDirect', { orgId, memberId })
+        void invokeSpace('spaces:openDirect', { orgId, memberId })
             .then(async ({ space: dm }) => {
                 await refreshSpacesOrgs()
                 if (dm.id !== space.id) onSwitchSpace(orgId, dm.id)
@@ -709,7 +753,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     }
     /** A message link: read the message to learn its thread, then land on it — here, or in the space it lives in. */
     const openMessage = (orgId: string, spaceId: string, messageId: string) => {
-        void window.ipc.invoke('spaces:getMessage', { orgId, spaceId, messageId })
+        void invokeSpace('spaces:getMessage', { orgId, spaceId, messageId })
             .then(({ message }) => {
                 const rootId = message.threadRoot ?? STREAM_READ_KEY
                 if (orgId === org.id && spaceId === space.id) {
@@ -863,6 +907,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
             select({ kind: 'attachment', src: url.href, ...(chatRootId ? { fromThreadRootId: chatRootId } : {}) })
         }}>
         <div className="spaces-surface relative flex-1 min-h-0 flex flex-col">
+            {!member && <div className="flex items-center justify-between gap-3 border-b border-border bg-muted px-4 py-2 text-sm"><span>You’re previewing this open space</span><Button size="sm" onClick={join} disabled={joining}>{joining ? 'Joining…' : 'Join space'}</Button></div>}
             {/* One per pane — covers the stream and thread panes alike. */}
             {active && <SelectionCopy />}
             <header className="spaces-header flex shrink-0 items-center gap-2 border-b border-border">
@@ -879,7 +924,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                             <span className={cn('flex min-w-0 items-center', isDirect ? 'gap-1.5' : 'gap-0.5')}>
                                 {isDirect
                                     ? <MemberAvatar id={directOtherId} name={spaceTitle} size="sm" />
-                                    : <Hash className="size-4 shrink-0 text-muted-foreground" />}
+                                    : space.visibility === 'open' ? <Hash className="size-4 shrink-0 text-muted-foreground" /> : <Lock aria-label="Private space" className="size-4 shrink-0 text-muted-foreground" />}
                                 <h1 className="truncate text-[15px] font-semibold">{spaceTitle}</h1>
                             </span>
                         </button>
@@ -894,13 +939,13 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                             <div className={cn('mt-3 flex items-center text-lg font-semibold leading-tight', isDirect ? 'gap-1.5' : 'gap-0.5')}>
                                 {isDirect
                                     ? <MemberAvatar id={directOtherId} name={spaceTitle} size="sm" />
-                                    : <Hash className="size-4 text-muted-foreground" />}
+                                    : space.visibility === 'open' ? <Hash className="size-4 text-muted-foreground" /> : <Lock aria-label="Private space" className="size-4 text-muted-foreground" />}
                                 <span className="truncate">{spaceTitle}</span>
                             </div>
                             <div className="mt-0.5 text-xs text-muted-foreground">
                                 {isSelf
                                     ? `Your notes in ${org.name} — just you and your agent`
-                                    : isDirect ? `A direct message in ${org.name} — just the two of you` : `A space in ${org.name}`}
+                                    : isDirect ? `A direct message in ${org.name} — just the two of you` : `${space.visibility === 'open' ? 'An open' : 'A private'} space in ${org.name}`}
                             </div>
                         </div>
                         <dl className="mt-4 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-[13px]">
@@ -941,7 +986,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                 {/* Right: Invite (a DM's membership is fixed — nobody to
                     invite), members as one pill (a dot when anyone is here —
                     the roster says who), then the tools. */}
-                {!isDirect && (
+                {member && !isDirect && (
                     <Popover>
                         <PopoverTrigger asChild>
                             <button
@@ -1000,7 +1045,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                             })}
                         </div>
                         {/* A DM's membership is fixed — there is nobody to invite. */}
-                        {!isDirect && (
+                        {member && !isDirect && (
                             <div className="mt-1 border-t border-border pt-1">
                                 <button
                                     type="button"
@@ -1053,10 +1098,10 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                         <Button variant="ghost" size="icon" className="size-7 text-muted-foreground"><MoreHorizontal className="size-4" /></Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={markAllRead}>
+                        <DropdownMenuItem disabled={!member} onClick={markAllRead}>
                             <Check className="size-3.5 mr-2" /> Mark all read
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => setScheduledOpen(true)}>
+                        <DropdownMenuItem disabled={!member} onClick={() => setScheduledOpen(true)}>
                             <Clock className="size-3.5 mr-2" /> Scheduled
                         </DropdownMenuItem>
                     </DropdownMenuContent>
@@ -1065,6 +1110,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
 
             <div ref={paneRef} className="flex-1 min-h-0 flex">
                 <SpaceRail
+                    onOpenBrowse={onOpenBrowse}
                     onOpenMessage={onOpenMessage}
                     active={active}
                     onOpenActivity={onOpenActivity}
@@ -1248,11 +1294,11 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                 </div>
                 </div>
             </div>
-            {scheduledOpen && <ScheduledDialog orgId={org.id} spaceId={space.id} onClose={() => setScheduledOpen(false)} />}
-            {trashOpen && (
+            {member && scheduledOpen && <ScheduledDialog orgId={org.id} spaceId={space.id} onClose={() => setScheduledOpen(false)} />}
+            {member && trashOpen && (
                 <TrashDialog org={org} space={space} onClose={() => { setTrashOpen(false); setRefreshTick((t) => t + 1) }} />
             )}
-            {uploadFiles && (
+            {member && uploadFiles && (
                 <UploadFilesDialog
                     org={org}
                     space={space}
@@ -1328,7 +1374,7 @@ function InviteLinkPanel({ orgId, spaceId, spaceName }: { orgId: string; spaceId
 
     useEffect(() => {
         let cancelled = false
-        window.ipc.invoke('spaces:createInvite', { orgId, spaceId }).then(
+        invokeSpace('spaces:createInvite', { orgId, spaceId }).then(
             (result) => { if (!cancelled) setState({ kind: 'ready', link: result.link }) },
             (err: unknown) => {
                 if (cancelled) return

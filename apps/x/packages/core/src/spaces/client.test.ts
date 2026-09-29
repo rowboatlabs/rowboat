@@ -546,3 +546,26 @@ describe('read state', () => {
     expect((await ramnique.unread()).spaces.find((s) => s.spaceId === space.id)!.threads).toEqual([]);
   });
 });
+
+
+describe('open spaces through the desktop client', () => {
+  it('browses and reads before joining, then posts after an idempotent join', async () => {
+    const open = await ramnique.createSpace('Client open space', 'open');
+    const privateSpace = await ramnique.createSpace('Client private space');
+    expect(privateSpace.visibility).toBe('private');
+    const directory = await gagan.browseSpaces();
+    expect(directory.supported).toBe(true);
+    expect(directory.spaces).toContainEqual({ space: open, joined: false });
+    expect(directory.spaces.some(e => e.space.id === privateSpace.id)).toBe(false);
+    expect((await gagan.listSpaces()).some(s => s.id === open.id)).toBe(false);
+    await expect(gagan.listMembers(open.id)).resolves.toBeDefined();
+    await expect(gagan.postMessage(open.id, { body: 'not joined', actingMode: 'direct' })).rejects.toMatchObject({ code: 'forbidden' });
+    const joined = await gagan.joinSpace(open.id);
+    expect(joined.space.id).toBe(open.id);
+    await expect(gagan.postMessage(open.id, { body: 'joined', actingMode: 'direct' })).resolves.toHaveProperty('message.body', 'joined');
+    const again = await gagan.joinSpace(open.id);
+    expect(again.membership).toEqual(joined.membership);
+    expect((await gagan.listSpaces()).some(s => s.id === open.id)).toBe(true);
+    expect((await gagan.browseSpaces()).spaces).toContainEqual({ space: open, joined: true });
+  });
+});
