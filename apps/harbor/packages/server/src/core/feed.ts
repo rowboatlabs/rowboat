@@ -2,6 +2,7 @@ import {
   parseMentions,
   stampsEqual,
   type Attribution,
+  type MembershipEvent,
   type MentionStamps,
   type Message,
   type Poll,
@@ -9,6 +10,7 @@ import {
   type Routes,
   type SearchKind,
   type SearchResults,
+  type StreamEvent,
   type Topic,
   type TopicListing,
   type TopicRemoval,
@@ -38,6 +40,8 @@ export type CreateTopicInput = z.infer<Routes['createTopic']['request']>;
 
 /** A page request (protocol listStream / listThread query): at most one of the three offsets. */
 export type PageOpts = { beforeOffset?: number; afterOffset?: number; aroundOffset?: number; limit?: number };
+/** The log range a page answers for: offsets in (after, upTo], or to the head when upTo is null. */
+type PageSpan = { after: number; upTo: number | null };
 
 export type ManageTopicAction = z.infer<Routes['manageTopic']['request']>;
 
@@ -168,7 +172,7 @@ export class Feed {
   private async pageOf(
     fetch: (window: MessageWindow) => Promise<Message[]>,
     opts?: PageOpts,
-  ): Promise<{ rows: Message[]; hasMore: boolean; hasMoreAfter: boolean }> {
+  ): Promise<{ rows: Message[]; hasMore: boolean; hasMoreAfter: boolean; span: PageSpan }> {
     const given = [opts?.beforeOffset, opts?.afterOffset, opts?.aroundOffset].filter((v) => v !== undefined).length;
     if (given > 1) throw new HarborError('invalid_request', 'pass at most one of beforeOffset, afterOffset, aroundOffset');
     const limit = this.pageLimit(opts?.limit);
@@ -182,35 +186,47 @@ export class Feed {
       const above = await fetch({ afterOffset: opts.aroundOffset - 1, limit: aboveShare + 1 });
       const hasMore = below.length > belowShare;
       const hasMoreAfter = above.length > aboveShare;
+      const rows = [...(hasMore ? below.slice(1) : below), ...(hasMoreAfter ? above.slice(0, aboveShare) : above)];
       return {
-        rows: [...(hasMore ? below.slice(1) : below), ...(hasMoreAfter ? above.slice(0, aboveShare) : above)],
+        rows,
         hasMore,
         hasMoreAfter,
+        span: { after: hasMore ? below[0]!.offset : 0, upTo: hasMoreAfter ? rows.at(-1)!.offset : null },
       };
     }
     if (opts?.afterOffset !== undefined) {
       const above = await fetch({ afterOffset: opts.afterOffset, limit: limit + 1 });
       const hasMoreAfter = above.length > limit;
+      const rows = hasMoreAfter ? above.slice(0, limit) : above;
       // Paging forward says nothing about what lies below the edge the
       // caller already holds; that side is theirs to track.
-      return { rows: hasMoreAfter ? above.slice(0, limit) : above, hasMore: false, hasMoreAfter };
+      return { rows, hasMore: false, hasMoreAfter, span: { after: opts.afterOffset, upTo: hasMoreAfter ? rows.at(-1)!.offset : null } };
     }
     const window = await fetch({
       ...(opts?.beforeOffset !== undefined ? { beforeOffset: opts.beforeOffset } : {}),
       limit: limit + 1,
     });
     const hasMore = window.length > limit;
-    return { rows: hasMore ? window.slice(1) : window, hasMore, hasMoreAfter: false };
+    const rows = hasMore ? window.slice(1) : window;
+    // Paging back ends at this page's newest row: what lies above it belongs
+    // to the page the caller already holds. The newest page runs to the head.
+    const upTo = opts?.beforeOffset !== undefined ? (rows.at(-1)?.offset ?? 0) : null;
+    return { rows, hasMore, hasMoreAfter: false, span: { after: hasMore ? window[0]!.offset : 0, upTo } };
   }
 
   async listStream(
     ctx: ActorCtx,
     spaceId: string,
     opts?: PageOpts,
-  ): Promise<{ messages: Message[]; topics: Topic[]; hasMore: boolean; hasMoreAfter: boolean; readOffset: number }> {
+  ): Promise<{ messages: Message[]; topics: Topic[]; hasMore: boolean; hasMoreAfter: boolean; readOffset: number; events: StreamEvent[] }> {
     await this.k.requireReadableSpace(ctx, spaceId);
     // Newest page by default — never the full history.
-    const { rows: roots, hasMore, hasMoreAfter } = await this.pageOf((w) => this.k.store.listStream(spaceId, w), opts);
+    const { rows: roots, hasMore, hasMoreAfter, span } = await this.pageOf((w) => this.k.store.listStream(spaceId, w), opts);
+    // The join lines between these messages (2026-09-29, the Matrix model):
+    // each belongs to the page holding the next message after it, so paging
+    // either way never shows one twice or drops one. An empty older page
+    // (upTo 0) holds none.
+    const events = span.upTo === 0 ? [] : await this.k.store.listMembershipEvents(spaceId, span.after, span.upTo);
     // The page's topic badges, one batched decoration.
     const topics: Topic[] = [];
     for (const m of roots) {
@@ -223,6 +239,7 @@ export class Feed {
       hasMore,
       hasMoreAfter,
       readOffset: await this.k.store.getStreamReadMark(spaceId, ctx.memberId),
+      events: events.map((e) => ({ offset: e.offset, at: e.at, event: e.event as MembershipEvent })),
     };
   }
 

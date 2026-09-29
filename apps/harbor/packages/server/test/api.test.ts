@@ -408,7 +408,15 @@ describe('feed: the stream, threads, and topic annotations', () => {
   it('a new space has an empty stream and no topics — the stream is not an object', async () => {
     const r = await ramnique.post('/v1/spaces', { name: 'Born empty' });
     const stream = await ramnique.get(`/v1/spaces/${r.body.space.id}/stream`);
-    expect(stream.body).toEqual({ messages: [], topics: [], hasMore: false, hasMoreAfter: false, readOffset: 0 });
+    // No messages, but its creator's join shows as a line (2026-09-29).
+    expect(stream.body).toEqual({
+      messages: [],
+      topics: [],
+      hasMore: false,
+      hasMoreAfter: false,
+      readOffset: 0,
+      events: [{ offset: expect.any(Number), at: expect.any(String), event: expect.objectContaining({ type: 'membership', action: 'joined', membership: expect.objectContaining({ memberId: 'ramnique' }) }) }],
+    });
     const topics = await ramnique.get(`/v1/spaces/${r.body.space.id}/topics`);
     expect(topics.body.topics).toEqual([]);
   });

@@ -12,6 +12,8 @@ import type {
   ConflictRegion,
   CreateInviteResult,
   Member,
+  Membership,
+  MembershipEvent,
   Message,
   Poll,
   PollAnswer,
@@ -25,6 +27,7 @@ import type {
   ResolveInviteResult,
   SearchKind,
   SearchResults,
+  StreamEvent,
   MessageSearchHit,
   TopicSearchHit,
   AssetSearchHit,
@@ -58,6 +61,8 @@ export type {
   ConflictRegion,
   CreateInviteResult,
   Member,
+  Membership,
+  MembershipEvent,
   Message,
   Poll,
   PollAnswer,
@@ -71,6 +76,7 @@ export type {
   ResolveInviteResult,
   SearchKind,
   SearchResults,
+  StreamEvent,
   MessageSearchHit,
   TopicSearchHit,
   AssetSearchHit,
@@ -140,6 +146,8 @@ export interface SpacesStreamPage {
   hasMoreAfter?: boolean;
   /** The caller's stream mark (0 = never marked) — the New divider's anchor. */
   readOffset: number;
+  /** Join and leave lines between the page's messages (2026-09-29); empty from an older org. */
+  events: StreamEvent[];
 }
 
 /** One flat thread: the root, its annotation (null = a plain thread), windowed replies. */

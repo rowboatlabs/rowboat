@@ -15,6 +15,7 @@ import { BookmarksPopover } from '@/components/spaces/bookmarks'
 import { FileColumn, TrashDialog, UploadFilesDialog } from '@/components/spaces/files-tab'
 import { GeneralStream } from '@/components/spaces/general-stream'
 import { ScheduledDialog } from '@/components/spaces/scheduled-dialog'
+import { AddMembersDialog } from '@/components/spaces/add-members-dialog'
 import { SelectionCopy } from '@/components/spaces/selection-copy'
 import { ServerSwitcher } from '@/components/spaces/server-switcher'
 import { ServerSpaceNavigation } from '@/components/spaces-sidebar-section'
@@ -851,6 +852,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // upload confirmation. Default to Space files; choosing a folder is optional.
     const [uploadFiles, setUploadFiles] = useState<File[] | null>(null)
     const [trashOpen, setTrashOpen] = useState(false)
+    const [addMembersOpen, setAddMembersOpen] = useState(false)
 
     return (
         <SpaceMembersProvider members={memberNames} spaceNames={spaceNames}>
@@ -1000,9 +1002,16 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                 )
                             })}
                         </div>
-                        {/* A DM's membership is fixed — there is nobody to invite. */}
+                        {/* A DM's membership is fixed — there is nobody to add or invite. */}
                         {!isDirect && (
                             <div className="mt-1 border-t border-border pt-1">
+                                <button
+                                    type="button"
+                                    onClick={() => setAddMembersOpen(true)}
+                                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+                                >
+                                    <UserPlus className="size-3.5" /> Add people
+                                </button>
                                 <button
                                     type="button"
                                     onClick={() => void invite()}
@@ -1250,6 +1259,9 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                 </div>
             </div>
             {scheduledOpen && <ScheduledDialog orgId={org.id} spaceId={space.id} onClose={() => setScheduledOpen(false)} />}
+            {!isDirect && (
+                <AddMembersDialog org={org} space={space} members={members} open={addMembersOpen} onOpenChange={setAddMembersOpen} />
+            )}
             {trashOpen && (
                 <TrashDialog org={org} space={space} onClose={() => { setTrashOpen(false); setRefreshTick((t) => t + 1) }} />
             )}

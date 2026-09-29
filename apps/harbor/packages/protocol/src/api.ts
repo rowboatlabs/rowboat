@@ -22,6 +22,7 @@ import {
   ResolveInvite,
   ResolveInviteResult,
 } from './invite.js';
+import { StreamEvent } from './events.js';
 import { SearchKind, SearchResults } from './search.js';
 
 // The render face (spec §9): REST + the live stream in events.ts. Member token
@@ -264,6 +265,23 @@ export const routes = {
     response: z.object({ members: z.array(Member) }),
   },
   /**
+   * Add existing org members, people or agents, to a shared space the caller
+   * is in (spec §4 Roles, 2026-09-29). Each one added gets a `joined` event
+   * with `by`, and a `space_added` frame. Anyone already in is a no-op;
+   * `memberships` answers for every id asked, in the order asked.
+   */
+  addMembers: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/members',
+    params: z.object({ spaceId: SpaceId }),
+    request: z.object({
+      memberIds: z.array(MemberId).min(1).max(100),
+      actingMode: ActingMode,
+      agentName: z.string().max(64).optional(),
+    }),
+    response: z.object({ memberships: z.array(Membership) }),
+  },
+  /**
    * The org roster as THIS member may see it (2026-09-09): the union of the
    * rosters of every space (DMs included) the caller belongs to, deduped,
    * sorted by display name. Discovery is bounded by shared membership on
@@ -495,6 +513,13 @@ export const routes = {
       hasMoreAfter: z.boolean().optional(),
       /** The caller's stream mark (0 = never marked) — the New divider's anchor. */
       readOffset: StreamOffset,
+      /**
+       * The log events the page shows as lines between its messages, oldest
+       * first (2026-09-29): membership in v1. Each belongs to the page
+       * holding the next message after it; the newest page also takes those
+       * after its newest message. Absent from older orgs.
+       */
+      events: z.array(StreamEvent).default([]),
     }),
   },
   /**

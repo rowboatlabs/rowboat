@@ -11,6 +11,8 @@ import {
   type DeleteAssetResult,
   type CreateInviteResult,
   type Member,
+  type Membership,
+  type StreamEvent,
   type Message,
   type MoveAssetResult,
   type ProposeChange,
@@ -236,6 +238,16 @@ export class SpacesClient {
     ).space;
   }
 
+  /** Add existing org members, people or agents, to a space the caller is in (api.ts addMembers). */
+  async addMembers(spaceId: string, memberIds: string[]): Promise<Membership[]> {
+    return (
+      await this.request('POST', this.space(spaceId, '/members'), routes.addMembers.response, {
+        memberIds,
+        actingMode: 'direct',
+      })
+    ).memberships;
+  }
+
   async listMembers(spaceId: string): Promise<Member[]> {
     return (await this.request('GET', this.space(spaceId, '/members'), routes.listMembers.response)).members;
   }
@@ -426,7 +438,7 @@ export class SpacesClient {
   async listStream(
     spaceId: string,
     opts?: MessageWindowOpts,
-  ): Promise<{ messages: Message[]; topics: Topic[]; hasMore: boolean; hasMoreAfter?: boolean; readOffset: number }> {
+  ): Promise<{ messages: Message[]; topics: Topic[]; hasMore: boolean; hasMoreAfter?: boolean; readOffset: number; events: StreamEvent[] }> {
     return this.request('GET', this.space(spaceId, `/stream${this.windowQuery(opts)}`), routes.listStream.response);
   }
 

@@ -47,14 +47,16 @@ export function canWrite(org: { readOnly: boolean }): Decision {
 }
 
 /** A direct space has a fixed membership: nobody is invited, nobody leaves. */
-export function canChangeMembership(space: Space, act: 'invite' | 'leave'): Decision {
+export function canChangeMembership(space: Space, act: 'invite' | 'add' | 'leave'): Decision {
   if (space.kind !== 'direct') return null;
   return {
     code: 'invalid_request',
     message:
       act === 'invite'
         ? 'a direct message has a fixed membership — nobody can be invited'
-        : 'a direct message has a fixed membership — it cannot be left',
+        : act === 'add'
+          ? 'a direct message has a fixed membership — nobody can be added'
+          : 'a direct message has a fixed membership — it cannot be left',
   };
 }
 

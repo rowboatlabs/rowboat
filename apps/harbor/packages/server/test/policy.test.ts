@@ -62,9 +62,11 @@ describe('policy', () => {
 
   it('canChangeMembership / canRenameSpace: shared spaces allow, direct spaces refuse with a reason', () => {
     expect(canChangeMembership(shared, 'invite')).toBeNull();
+    expect(canChangeMembership(shared, 'add')).toBeNull();
     expect(canChangeMembership(shared, 'leave')).toBeNull();
     expect(canRenameSpace(shared)).toBeNull();
     expect(canChangeMembership(direct, 'invite')).toMatchObject({ code: 'invalid_request', message: /nobody can be invited/ });
+    expect(canChangeMembership(direct, 'add')).toMatchObject({ code: 'invalid_request', message: /nobody can be added/ });
     expect(canChangeMembership(direct, 'leave')).toMatchObject({ code: 'invalid_request', message: /cannot be left/ });
     expect(canRenameSpace(direct)).toMatchObject({ code: 'invalid_request', message: /cannot be renamed/ });
   });
