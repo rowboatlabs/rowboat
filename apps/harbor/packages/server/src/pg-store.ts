@@ -2,6 +2,7 @@ import type { ActivityKind, Attribution } from '@rowboat/spaces-protocol';
 import type { ActivityQuery, ActivityRow } from './store.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type {
+  AgentKey,
   BlobInfo,
   ChangeSet,
   Member,
@@ -24,6 +25,7 @@ import {
   type AssetVersionData,
   type MessageSearchRow,
   type Store,
+  type StoredAgentKey,
   type StoredEvent,
   type StoredInvite,
   type StoredPollVote,
@@ -52,6 +54,29 @@ interface MemberRow {
   avatar_url: string | null;
   role: Member['role'];
   kind: Member['kind'];
+  owner_id: string | null;
+}
+
+interface AgentKeyRow {
+  id: string;
+  agent_id: string;
+  hash: string;
+  created_by: string;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
+
+function rowToAgentKey(r: AgentKeyRow): StoredAgentKey {
+  return {
+    id: r.id,
+    agentId: r.agent_id,
+    hash: r.hash,
+    createdBy: r.created_by,
+    createdAt: r.created_at,
+    ...(r.last_used_at !== null ? { lastUsedAt: r.last_used_at } : {}),
+    ...(r.revoked_at !== null ? { revokedAt: r.revoked_at } : {}),
+  };
 }
 
 function rowToMember(r: MemberRow): Member {
@@ -61,6 +86,7 @@ function rowToMember(r: MemberRow): Member {
     ...(r.avatar_url !== null ? { avatarUrl: r.avatar_url } : {}),
     role: r.role,
     kind: r.kind,
+    ...(r.owner_id !== null ? { ownerId: r.owner_id } : {}),
   };
 }
 
@@ -323,7 +349,7 @@ export class PgStore implements Store {
 
   async getMember(id: string): Promise<Member | undefined> {
     const rows = await this.sql.query<MemberRow>(
-      'select id, display_name, avatar_url, role, kind from members where org_id = $1 and id = $2',
+      'select id, display_name, avatar_url, role, kind, owner_id from members where org_id = $1 and id = $2',
       [this.orgId, id],
     );
     return rows[0] ? rowToMember(rows[0]) : undefined;
@@ -331,7 +357,7 @@ export class PgStore implements Store {
 
   async listAllMembers(): Promise<Member[]> {
     const rows = await this.sql.query<MemberRow>(
-      'select id, display_name, avatar_url, role, kind from members where org_id = $1 order by id',
+      'select id, display_name, avatar_url, role, kind, owner_id from members where org_id = $1 order by id',
       [this.orgId],
     );
     return rows.map(rowToMember);
@@ -339,7 +365,7 @@ export class PgStore implements Store {
 
   async listSpaceMembers(spaceId: string): Promise<Member[]> {
     const rows = await this.sql.query<MemberRow>(
-      `select m.id, m.display_name, m.avatar_url, m.role, m.kind from memberships ms
+      `select m.id, m.display_name, m.avatar_url, m.role, m.kind, m.owner_id from memberships ms
        join members m on m.org_id = $1 and m.id = ms.member_id
        where ms.space_id = $2
        order by ms.joined_at, ms.member_id`,
@@ -350,8 +376,8 @@ export class PgStore implements Store {
 
   async listMembersSharingSpace(memberId: string): Promise<Member[]> {
     const rows = await this.sql.query<MemberRow>(
-      `select m.id, m.display_name, m.avatar_url, m.role, m.kind from members m
-       where m.org_id = $1 and (m.id = $2 or exists (
+      `select m.id, m.display_name, m.avatar_url, m.role, m.kind, m.owner_id from members m
+       where m.org_id = $1 and (m.id = $2 or m.owner_id = $2 or exists (
          select 1 from memberships mine
          join memberships theirs on theirs.space_id = mine.space_id
          where mine.member_id = $2 and theirs.member_id = m.id))
@@ -362,18 +388,19 @@ export class PgStore implements Store {
   }
 
   async putMember(member: Member): Promise<void> {
-    // Kind is written once and never updated: a person never becomes an agent
-    // or back (spec §4 Agent members, 2026-09-29).
+    // Kind and owner are written once and never updated: a person never
+    // becomes an agent or back, and ownership has no transfer yet (spec §4
+    // Agent members, 2026-09-29).
     await this.sql.query(
-      `insert into members (org_id, id, display_name, avatar_url, role, kind) values ($1, $2, $3, $4, $5, $6)
+      `insert into members (org_id, id, display_name, avatar_url, role, kind, owner_id) values ($1, $2, $3, $4, $5, $6, $7)
        on conflict (org_id, id) do update set display_name = excluded.display_name, avatar_url = excluded.avatar_url, role = excluded.role`,
-      [this.orgId, member.id, member.displayName, member.avatarUrl ?? null, member.role, member.kind],
+      [this.orgId, member.id, member.displayName, member.avatarUrl ?? null, member.role, member.kind, member.ownerId ?? null],
     );
   }
 
   async getMemberByIdentity(iss: string, sub: string): Promise<Member | undefined> {
     const rows = await this.sql.query<MemberRow>(
-      `select m.id, m.display_name, m.avatar_url, m.role, m.kind from member_identities mi
+      `select m.id, m.display_name, m.avatar_url, m.role, m.kind, m.owner_id from member_identities mi
        join members m on m.org_id = mi.org_id and m.id = mi.member_id
        where mi.org_id = $1 and mi.iss = $2 and mi.sub = $3`,
       [this.orgId, iss, sub],
@@ -1384,6 +1411,58 @@ export class PgStore implements Store {
       [spaceId, afterOffset],
     );
     return rows.map((r) => ({ offset: r.stream_offset, at: r.at, event: r.event }));
+  }
+
+  // --- agent keys ------------------------------------------------------------
+
+  async listAgents(ownerId: string | null): Promise<Member[]> {
+    const rows = await this.sql.query<MemberRow>(
+      `select id, display_name, avatar_url, role, kind, owner_id from members
+       where org_id = $1 and kind = 'agent' and ($2::text is null or owner_id = $2)
+       order by lower(display_name), id`,
+      [this.orgId, ownerId],
+    );
+    return rows.map(rowToMember);
+  }
+
+  async putAgentKey(key: StoredAgentKey): Promise<void> {
+    await this.sql.query(
+      `insert into agent_keys (org_id, id, agent_id, hash, created_by, created_at) values ($1, $2, $3, $4, $5, $6)`,
+      [this.orgId, key.id, key.agentId, key.hash, key.createdBy, key.createdAt],
+    );
+  }
+
+  async getAgentKey(id: string): Promise<StoredAgentKey | undefined> {
+    const rows = await this.sql.query<AgentKeyRow>('select * from agent_keys where org_id = $1 and id = $2', [this.orgId, id]);
+    return rows[0] ? rowToAgentKey(rows[0]) : undefined;
+  }
+
+  async getAgentKeyByHash(hash: string): Promise<StoredAgentKey | undefined> {
+    const rows = await this.sql.query<AgentKeyRow>('select * from agent_keys where org_id = $1 and hash = $2', [this.orgId, hash]);
+    return rows[0] ? rowToAgentKey(rows[0]) : undefined;
+  }
+
+  async listAgentKeys(agentIds: string[]): Promise<AgentKey[]> {
+    if (agentIds.length === 0) return [];
+    const rows = await this.sql.query<AgentKeyRow>(
+      'select * from agent_keys where org_id = $1 and agent_id = any($2::text[]) order by created_at, id',
+      [this.orgId, agentIds],
+    );
+    return rows.map((r) => {
+      const { hash: _hash, ...key } = rowToAgentKey(r);
+      return key;
+    });
+  }
+
+  async revokeAgentKey(id: string, at: string): Promise<void> {
+    await this.sql.query('update agent_keys set revoked_at = coalesce(revoked_at, $3) where org_id = $1 and id = $2', [this.orgId, id, at]);
+  }
+
+  async touchAgentKey(id: string, at: string, since: string): Promise<void> {
+    await this.sql.query(
+      'update agent_keys set last_used_at = $3 where org_id = $1 and id = $2 and (last_used_at is null or last_used_at < $4)',
+      [this.orgId, id, at, since],
+    );
   }
 
   // A range scan on the primary key, filtered in the row. Unindexed on

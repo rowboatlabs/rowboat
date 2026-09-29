@@ -3905,6 +3905,25 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), spaceId: z.string(), name: z.string() }),
     res: z.object({ space: z.custom<SpacesTypes.Space>() }),
   },
+  // Agent members and their keys (2026-09-29): the caller's own agents, or
+  // every agent for an admin. A key's secret crosses IPC once, on the
+  // response that created it, for the Agents dialog to show and forget.
+  'spaces:listAgents': {
+    req: z.object({ orgId: z.string() }),
+    res: z.object({ agents: z.array(z.custom<SpacesTypes.AgentListing>()) }),
+  },
+  'spaces:addAgent': {
+    req: z.object({ orgId: z.string(), displayName: z.string() }),
+    res: z.object({ agent: z.custom<SpacesTypes.Member>(), key: z.custom<SpacesTypes.AgentKeySecret>() }),
+  },
+  'spaces:createAgentKey': {
+    req: z.object({ orgId: z.string(), agentId: z.string() }),
+    res: z.object({ key: z.custom<SpacesTypes.AgentKeySecret>() }),
+  },
+  'spaces:revokeAgentKey': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), keyId: z.string() }),
+    res: z.object({ key: z.custom<SpacesTypes.AgentKey>() }),
+  },
   // Add existing org members, people or agents, to a space the caller is in
   // (2026-09-29). They learn of it by the space_added frame.
   'spaces:addMembers': {

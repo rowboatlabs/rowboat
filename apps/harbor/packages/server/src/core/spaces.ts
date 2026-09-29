@@ -53,13 +53,14 @@ export class Spaces {
    * its own: the integration that owns the agent calls this and gates who may.
    * The first is the Replicas coding agent (PR #1130).
    */
-  async createAgent(input: { displayName: string }): Promise<Member> {
+  async createAgent(input: { displayName: string; ownerId?: string }): Promise<Member> {
     const displayName = input.displayName.trim();
     if (!Member.shape.displayName.safeParse(displayName).success) {
       throw new HarborError('invalid_request', 'an agent needs a display name of 1 to 128 characters');
     }
     this.k.guardWrite();
-    const member: Member = { id: this.k.ulid(), displayName, role: 'member', kind: 'agent' };
+    // No owner = org-owned, managed by admins (Replicas); a member-added agent names its person (core/agents.ts).
+    const member: Member = { id: this.k.ulid(), displayName, role: 'member', kind: 'agent', ...(input.ownerId ? { ownerId: input.ownerId } : {}) };
     await this.k.store.putMember(member);
     return member;
   }
@@ -193,7 +194,9 @@ export class Spaces {
   /**
    * The org roster as THIS member may see it (api.ts listOrgMembers,
    * 2026-09-09): the union of every roster the caller belongs to, DMs
-   * included, deduped by id and sorted by display name (case-insensitive,
+   * included, plus the agents they own (2026-09-29: a new agent is in no
+   * space, and its owner must find it to add it to one), deduped by id and
+   * sorted by display name (case-insensitive,
    * id breaks ties). Discovery is bounded by shared membership on purpose —
    * no admin directory, no privacy surface beyond what listMembers already
    * exposes per space. Always contains the caller (a member of no space at

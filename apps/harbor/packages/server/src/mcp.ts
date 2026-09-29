@@ -30,17 +30,22 @@ interface McpActor {
   memberId: string;
   actingMode: ActingMode;
   agentName?: string;
+  /** An agent member on its own key (2026-09-29): acts as itself, so always direct. */
+  agent?: boolean;
 }
 
 export async function handleMcpRequest(req: IncomingMessage, res: ServerResponse, deps: Deps): Promise<void> {
   let actor: McpActor;
   try {
     const { member } = await authenticateRequest(deps.auth, { authorization: req.headers.authorization });
-    actor = {
-      memberId: member.id,
-      actingMode: req.headers['x-acting-mode'] === 'scheduled' ? 'scheduled' : 'agent',
-      ...(typeof req.headers['x-agent-name'] === 'string' ? { agentName: req.headers['x-agent-name'] } : {}),
-    };
+    actor = member.kind === 'agent'
+      // An agent member on its own key is not a person's agent: no "via".
+      ? { memberId: member.id, actingMode: 'direct', agent: true }
+      : {
+          memberId: member.id,
+          actingMode: req.headers['x-acting-mode'] === 'scheduled' ? 'scheduled' : 'agent',
+          ...(typeof req.headers['x-agent-name'] === 'string' ? { agentName: req.headers['x-agent-name'] } : {}),
+        };
   } catch (err) {
     const e = err instanceof HarborError ? err : new HarborError('unauthorized', 'unauthorized');
     const headers: Record<string, string> = { 'content-type': 'application/json' };
@@ -122,7 +127,7 @@ async function dispatch(
   name: string,
   args: unknown,
 ): Promise<unknown> {
-  const ctx = { memberId: actor.memberId };
+  const ctx = { memberId: actor.memberId, ...(actor.agent ? { agent: true } : {}) };
   // Every write is attributed as the token's member acting in the declared
   // mode (PARITY 2026-09-09: an agent's vote/reaction/edit is the member's act).
   const attribution = {

@@ -1,5 +1,6 @@
 import type { ActivityKind } from '@rowboat/spaces-protocol';
 import type {
+  AgentKey,
   Attribution,
   BlobInfo,
   ChangeSet,
@@ -101,6 +102,11 @@ export function directKeyFor(participants: readonly string[]): string {
 }
 
 /** A durable, offsetted fact as stored — exactly what WS replay sends. */
+/** An agent key as stored: its metadata plus the SHA-256 of the secret (never the secret). */
+export interface StoredAgentKey extends AgentKey {
+  hash: string;
+}
+
 export interface StoredEvent {
   offset: number;
   at: string;
@@ -199,6 +205,7 @@ export interface Store {
    * question; whether discovery is bounded this way is the core's rule
    * (spaces.ts listOrgMembers; spec §5, open spaces).
    */
+  /** The member, everyone sharing a space with them, and the agents they own (a new agent is in no space yet — 2026-09-29). */
   listMembersSharingSpace(memberId: string): Promise<Member[]>;
 
   // identity mapping — (issuer, subject) → member (spec §4: the token proves
@@ -416,6 +423,18 @@ export interface Store {
   /** `offset` must be head+1 — the caller allocates inside the space lock. */
   appendEvent(spaceId: string, stored: StoredEvent): Promise<void>;
   listEventsAfter(spaceId: string, afterOffset: number): Promise<StoredEvent[]>;
+
+  // --- agent keys (spec §4 Agent members, 2026-09-29) ---
+  /** Agent members, by display name: every one, or those `ownerId` owns. */
+  listAgents(ownerId: string | null): Promise<Member[]>;
+  putAgentKey(key: StoredAgentKey): Promise<void>;
+  getAgentKey(id: string): Promise<StoredAgentKey | undefined>;
+  getAgentKeyByHash(hash: string): Promise<StoredAgentKey | undefined>;
+  listAgentKeys(agentIds: string[]): Promise<AgentKey[]>;
+  /** Stamp revocation once; a revoked key stays revoked at its first time. */
+  revokeAgentKey(id: string, at: string): Promise<void>;
+  /** Record use, at most once per `since` window, so authentication rarely writes. */
+  touchAgentKey(id: string, at: string, since: string): Promise<void>;
   /** Membership events with offset in (afterOffset, upToOffset], or to the head when upToOffset is null — the stream's join lines. */
   listMembershipEvents(spaceId: string, afterOffset: number, upToOffset: number | null): Promise<StoredEvent[]>;
 

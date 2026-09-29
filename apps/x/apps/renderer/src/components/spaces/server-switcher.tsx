@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import { orgUrl } from '@x/shared/dist/spaces.js'
 import { copySpacesLink } from '@/lib/spaces-copy-link'
-import { Check, ChevronsUpDown, Link as LinkIcon, LogIn, Plus, Trash2 } from 'lucide-react'
+import { Bot, Check, ChevronsUpDown, Link as LinkIcon, LogIn, Plus, Trash2 } from 'lucide-react'
 import { OrgMonogram } from '@/components/spaces/atoms'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { serverLandingSpaceId } from '@/lib/spaces-navigation'
 import { openServerDialog } from '@/lib/server-dialog'
+import { AgentsDialog } from './agents-dialog'
 import { RemoveServerDialog } from './remove-server-dialog'
 
 export function ServerSwitcher({ org, onOpenSpace, onMenuOpenChange }: {
@@ -17,6 +18,7 @@ export function ServerSwitcher({ org, onOpenSpace, onMenuOpenChange }: {
     const { orgs, refresh } = useSpacesOrgs()
     const [menuOpen, setMenuOpen] = useState(false)
     const [confirmRemove, setConfirmRemove] = useState(false)
+    const [agentsOpen, setAgentsOpen] = useState(false)
     const openServer = (server: OrgWithSpaces, spaceId?: string) => {
         onOpenSpace(server.id, spaceId ?? serverLandingSpaceId(server))
     }
@@ -37,7 +39,7 @@ export function ServerSwitcher({ org, onOpenSpace, onMenuOpenChange }: {
                     <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" />
                 </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" sideOffset={4} className="w-64" onCloseAutoFocus={(event) => { if (confirmRemove) event.preventDefault() }}>
+            <DropdownMenuContent align="start" sideOffset={4} className="w-64" onCloseAutoFocus={(event) => { if (confirmRemove || agentsOpen) event.preventDefault() }}>
                 {orgs.map((server) => <DropdownMenuItem key={server.id}
                     onSelect={() => { if (server.id !== org.id) openServer(server) }}>
                     <OrgMonogram org={server} />
@@ -46,6 +48,12 @@ export function ServerSwitcher({ org, onOpenSpace, onMenuOpenChange }: {
                 </DropdownMenuItem>)}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onSelect={() => void copySpacesLink(orgUrl(org.address))}><LinkIcon className="size-4" /> Copy server link</DropdownMenuItem>
+                <DropdownMenuItem onSelect={(event) => {
+                    event.preventDefault()
+                    setMenuOpen(false)
+                    setAgentsOpen(true)
+                    onMenuOpenChange?.(true)
+                }}><Bot className="size-4" /> Agents</DropdownMenuItem>
                 <DropdownMenuSeparator />
                 {/* The dialogs are hosted once in App (lib/server-dialog.ts); a finished one lands in the new server itself. */}
                 <DropdownMenuItem onSelect={() => openServerDialog({ kind: 'create' })}><Plus className="size-4" /> Create a server</DropdownMenuItem>
@@ -59,6 +67,7 @@ export function ServerSwitcher({ org, onOpenSpace, onMenuOpenChange }: {
                 }}><Trash2 className="size-4" />Remove server</DropdownMenuItem>
             </DropdownMenuContent>
         </DropdownMenu>
+        <AgentsDialog org={org} open={agentsOpen} onOpenChange={(open) => { setAgentsOpen(open); onMenuOpenChange?.(open) }} />
         <RemoveServerDialog org={org} open={confirmRemove} onOpenChange={(open) => { setConfirmRemove(open); onMenuOpenChange?.(open) }} onRemoved={() => void refresh()} />
     </>
 }

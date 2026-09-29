@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { Membership, Message, Space } from '@rowboat/spaces-protocol';
+import type { Member, Membership, Message, Space } from '@rowboat/spaces-protocol';
 import { HarborError } from '../src/errors.js';
 import {
+  agentsManagedBy,
   canAccessSpace,
+  canAddAgent,
+  canCreateAgentKey,
+  canRevokeAgentKey,
   canReadSpace,
   canJoinSpace,
   canBind,
@@ -89,5 +93,25 @@ describe('policy', () => {
       message: 'this org admits only @rowboatlabs.com, @acme.io accounts',
     });
     expect(canBind({}, { allowedEmailDomains: ['rowboatlabs.com'] })).toMatchObject({ code: 'policy_refused' });
+  });
+
+  it('agents: any person adds one; the owner alone creates keys; the owner or an admin revokes', () => {
+    const person = (id: string, role: Member['role'] = 'member'): Member => ({ id, displayName: id, role, kind: 'human' });
+    const owner = person('harsh');
+    const admin = person('ramnique', 'admin');
+    const other = person('gagan');
+    const hermes: Member = { id: 'hermes', displayName: 'Hermes', role: 'member', kind: 'agent', ownerId: 'harsh' };
+    const replicas: Member = { id: 'replicas', displayName: 'Replicas', role: 'member', kind: 'agent' };
+    expect(canAddAgent(other)).toBeNull();
+    expect(canAddAgent(hermes)).toMatchObject({ code: 'forbidden' });
+    expect(canCreateAgentKey(owner, hermes)).toBeNull();
+    expect(canCreateAgentKey(admin, hermes)).toMatchObject({ code: 'forbidden' });
+    expect(canCreateAgentKey(other, hermes)).toMatchObject({ code: 'forbidden' });
+    expect(canCreateAgentKey(admin, replicas)).toMatchObject({ code: 'forbidden' });
+    expect(canRevokeAgentKey(owner, hermes)).toBeNull();
+    expect(canRevokeAgentKey(admin, hermes)).toBeNull();
+    expect(canRevokeAgentKey(other, hermes)).toMatchObject({ code: 'forbidden' });
+    expect(agentsManagedBy(admin)).toBe('all');
+    expect(agentsManagedBy(owner)).toBe('owned');
   });
 });

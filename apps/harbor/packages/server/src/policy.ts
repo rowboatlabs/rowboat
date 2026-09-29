@@ -1,4 +1,4 @@
-import type { ErrorCode, Membership, Message, Space } from '@rowboat/spaces-protocol';
+import type { ErrorCode, Member, Membership, Message, Space } from '@rowboat/spaces-protocol';
 import { HarborError } from './errors.js';
 
 // Who may do what. The service loads the facts (space, membership, message,
@@ -92,4 +92,33 @@ export function canBind(identity: { email?: string }, org: { allowedEmailDomains
   const domain = identity.email?.toLowerCase().split('@')[1];
   if (domain && domains.some((d) => d.toLowerCase() === domain)) return null;
   return { code: 'policy_refused', message: `this org admits only ${domains.map((d) => `@${d}`).join(', ')} accounts` };
+}
+
+// --- agent members and their keys (spec §4 Agent members, 2026-09-29) --------
+
+/** Any person may add an agent and becomes its owner. An agent may not: one agent minting others escapes every owner. */
+export function canAddAgent(actor: Member): Decision {
+  if (actor.kind === 'human') return null;
+  return { code: 'forbidden', message: 'only a person can add an agent' };
+}
+
+/**
+ * Creating a key is the owner's alone. A key IS the agent's identity: an
+ * admin who could mint one could post as the agent, so admins get the off
+ * switch (revoke) and never this. An org-owned agent (no owner) takes no keys.
+ */
+export function canCreateAgentKey(actor: Member, agent: Member): Decision {
+  if (agent.kind === 'agent' && agent.ownerId !== undefined && agent.ownerId === actor.id) return null;
+  return { code: 'forbidden', message: 'only the agent’s owner can create its keys' };
+}
+
+/** Revoking: the owner, or any admin — the off switch for an agent that misbehaves. */
+export function canRevokeAgentKey(actor: Member, agent: Member): Decision {
+  if (agent.kind === 'agent' && (actor.role === 'admin' || (agent.ownerId !== undefined && agent.ownerId === actor.id))) return null;
+  return { code: 'forbidden', message: 'only the agent’s owner or an admin can revoke its keys' };
+}
+
+/** The agents a member manages, and so sees on the Agents screen: an admin, every one; anyone else, their own. */
+export function agentsManagedBy(actor: Member): 'all' | 'owned' {
+  return actor.role === 'admin' ? 'all' : 'owned';
 }

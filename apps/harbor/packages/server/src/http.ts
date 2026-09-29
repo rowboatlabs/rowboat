@@ -12,7 +12,7 @@ import type { HarborService } from './service.js';
 // too before they leave, so contract drift fails loudly in the stub instead of
 // silently in a client.
 
-type Env = { Variables: { memberId: string; identity?: AuthIdentity } };
+type Env = { Variables: { memberId: string; agent?: boolean; identity?: AuthIdentity } };
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 /** Uploads only (raw-bytes route). 100MB across the board — dogfood decision 2026-08-24. */
 const DEFAULT_MAX_BLOB_BYTES = 100 * 1024 * 1024;
@@ -44,8 +44,8 @@ function reply<S extends z.ZodType>(c: Context<Env>, schema: S, data: z.infer<S>
   return c.json(r.data as object);
 }
 
-function actor(c: Context<Env>): { memberId: string } {
-  return { memberId: c.get('memberId') };
+function actor(c: Context<Env>): { memberId: string; agent?: boolean } {
+  return { memberId: c.get('memberId'), ...(c.get('agent') ? { agent: true } : {}) };
 }
 
 export function buildHttpApp(deps: {
@@ -100,7 +100,10 @@ export function buildHttpApp(deps: {
       if (member) c.set('memberId', member.id);
       return next();
     }
-    c.set('memberId', (await authenticateRequest(auth, credentials)).member.id);
+    const { member } = await authenticateRequest(auth, credentials);
+    c.set('memberId', member.id);
+    // An agent presenting its own key acts as itself (2026-09-29).
+    if (member.kind === 'agent') c.set('agent', true);
     return next();
   });
 
@@ -166,6 +169,26 @@ export function buildHttpApp(deps: {
     const { spaceId } = parseWith(routes.leaveSpace.params, c.req.param());
     await service.leaveSpace(actor(c), spaceId);
     return reply(c, routes.leaveSpace.response, { left: true });
+  });
+
+  // --- agents and their keys (render face only: secrets never cross a tool) ----
+
+  app.get(routes.listAgents.path, async (c) =>
+    reply(c, routes.listAgents.response, { agents: await service.listAgents(actor(c)) }));
+
+  app.post(routes.createAgent.path, async (c) => {
+    const input = await body(c, routes.createAgent.request);
+    return reply(c, routes.createAgent.response, await service.addAgent(actor(c), input.displayName));
+  });
+
+  app.post(routes.createAgentKey.path, async (c) => {
+    const { agentId } = parseWith(routes.createAgentKey.params, c.req.param());
+    return reply(c, routes.createAgentKey.response, { key: await service.createAgentKey(actor(c), agentId) });
+  });
+
+  app.post(routes.revokeAgentKey.path, async (c) => {
+    const { agentId, keyId } = parseWith(routes.revokeAgentKey.params, c.req.param());
+    return reply(c, routes.revokeAgentKey.response, { key: await service.revokeAgentKey(actor(c), agentId, keyId) });
   });
 
   app.post(routes.addMembers.path, async (c) => {
