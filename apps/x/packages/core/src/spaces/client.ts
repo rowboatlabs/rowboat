@@ -10,6 +10,9 @@ import {
   type CreateAssetResult,
   type DeleteAssetResult,
   type CreateInviteResult,
+  type AgentKey,
+  type AgentKeySecret,
+  type AgentListing,
   type Member,
   type Membership,
   type StreamEvent,
@@ -236,6 +239,26 @@ export class SpacesClient {
         actingMode: 'direct',
       })
     ).space;
+  }
+
+  /** The agents this member manages, with their keys' metadata (api.ts listAgents). */
+  async listAgents(): Promise<AgentListing[]> {
+    return (await this.request('GET', routes.listAgents.path, routes.listAgents.response)).agents;
+  }
+
+  /** Add an agent this member owns; the response carries its first key's secret, the only time it is shown. */
+  async addAgent(displayName: string): Promise<{ agent: Member; key: AgentKeySecret }> {
+    return this.request('POST', routes.createAgent.path, routes.createAgent.response, { displayName });
+  }
+
+  async createAgentKey(agentId: string): Promise<AgentKeySecret> {
+    return (await this.request('POST', `/v1/agents/${encodeURIComponent(agentId)}/keys`, routes.createAgentKey.response)).key;
+  }
+
+  async revokeAgentKey(agentId: string, keyId: string): Promise<AgentKey> {
+    return (
+      await this.request('POST', `/v1/agents/${encodeURIComponent(agentId)}/keys/${encodeURIComponent(keyId)}/revoke`, routes.revokeAgentKey.response)
+    ).key;
   }
 
   /** Add existing org members, people or agents, to a space the caller is in (api.ts addMembers). */

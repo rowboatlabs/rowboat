@@ -2,6 +2,9 @@ import { z } from 'zod';
 import { addressesRowboat, mapMentionTokens, mentionsAsText } from '@rowboat/spaces-protocol';
 import type {
   AcceptInviteResult,
+  AgentKey,
+  AgentKeySecret,
+  AgentListing,
   Asset,
   BlobInfo,
   ChangeSet,
@@ -51,6 +54,9 @@ import type {
 
 export type {
   AcceptInviteResult,
+  AgentKey,
+  AgentKeySecret,
+  AgentListing,
   Asset,
   BlobInfo,
   ChangeSet,

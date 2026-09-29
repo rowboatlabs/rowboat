@@ -1,5 +1,6 @@
 import type { z } from 'zod';
 import type { BlobStore } from './blobs.js';
+import { Agents } from './core/agents.js';
 import { Assets } from './core/assets.js';
 import { Feed } from './core/feed.js';
 import { Kernel, type ActorCtx, type BindIdentity, type OrgInfo } from './core/kernel.js';
@@ -24,6 +25,9 @@ import type {
   CreateInviteResult,
   DeleteAssetResult,
   Member,
+  AgentKey,
+  AgentKeySecret,
+  AgentListing,
   Membership,
   StreamEvent,
   Message,
@@ -59,6 +63,7 @@ export class HarborService {
   private readonly assets: Assets;
   private readonly feed: Feed;
   private readonly readState: ReadState;
+  private readonly agents: Agents;
 
   constructor(
     store: Store,
@@ -74,6 +79,7 @@ export class HarborService {
     this.assets = new Assets(this.k, blobs);
     this.feed = new Feed(this.k, this.assets, notifier);
     this.readState = new ReadState(this.k, this.spaces, this.feed);
+    this.agents = new Agents(this.k, this.spaces);
   }
 
   /** The org this service serves — `address` is set once the listener knows its port (server.ts). */
@@ -98,8 +104,22 @@ export class HarborService {
   me(ctx: ActorCtx): Promise<Member> {
     return this.spaces.me(ctx);
   }
-  createAgent(input: { displayName: string }): Promise<Member> {
+  createAgent(input: { displayName: string; ownerId?: string }): Promise<Member> {
     return this.spaces.createAgent(input);
+  }
+
+  // --- agents and their keys (core/agents.ts) --------------------------------------
+  listAgents(ctx: ActorCtx): Promise<AgentListing[]> {
+    return this.agents.list(ctx);
+  }
+  addAgent(ctx: ActorCtx, displayName: string): Promise<{ agent: Member; key: AgentKeySecret }> {
+    return this.agents.add(ctx, displayName);
+  }
+  createAgentKey(ctx: ActorCtx, agentId: string): Promise<AgentKeySecret> {
+    return this.agents.createKey(ctx, agentId);
+  }
+  revokeAgentKey(ctx: ActorCtx, agentId: string, keyId: string): Promise<AgentKey> {
+    return this.agents.revokeKey(ctx, agentId, keyId);
   }
   listSpaces(ctx: ActorCtx, opts: { includeDirect?: boolean } = {}): Promise<Space[]> {
     return this.spaces.listSpaces(ctx, opts);

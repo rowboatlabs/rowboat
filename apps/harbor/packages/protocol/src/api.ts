@@ -12,7 +12,7 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { ActingMode, Attribution, Member, Membership, Message, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic } from './core.js';
+import { ActingMode, AgentKey, AgentKeySecret, AgentListing, Attribution, Member, Membership, Message, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic } from './core.js';
 import { AssetId, AssetPath, BlobHash, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 import {
   AcceptInvite,
@@ -265,6 +265,38 @@ export const routes = {
     response: z.object({ members: z.array(Member) }),
   },
   /**
+   * Agent members and their keys (spec §4 Agent members, 2026-09-29). Render
+   * face only: a key is a secret, and a secret never passes through a tool.
+   * listAgents answers with the agents the caller manages — their own, or
+   * every agent for an admin.
+   */
+  listAgents: {
+    method: 'GET',
+    path: '/v1/agents',
+    response: z.object({ agents: z.array(AgentListing) }),
+  },
+  /** Add an agent: the caller becomes its owner and gets its first key, the one time the secret is shown. */
+  createAgent: {
+    method: 'POST',
+    path: '/v1/agents',
+    request: z.object({ displayName: z.string().trim().min(1).max(128) }),
+    response: z.object({ agent: Member, key: AgentKeySecret }),
+  },
+  /** Another key for an agent (rotation: create, switch, revoke the old one). Owner only. */
+  createAgentKey: {
+    method: 'POST',
+    path: '/v1/agents/:agentId/keys',
+    params: z.object({ agentId: MemberId }),
+    response: z.object({ key: AgentKeySecret }),
+  },
+  /** Revoke a key: the owner, or an admin — the off switch. Idempotent. */
+  revokeAgentKey: {
+    method: 'POST',
+    path: '/v1/agents/:agentId/keys/:keyId/revoke',
+    params: z.object({ agentId: MemberId, keyId: z.string().min(1).max(64) }),
+    response: z.object({ key: AgentKey }),
+  },
+  /**
    * Add existing org members, people or agents, to a shared space the caller
    * is in (spec §4 Roles, 2026-09-29). Each one added gets a `joined` event
    * with `by`, and a `space_added` frame. Anyone already in is a no-op;
@@ -283,8 +315,9 @@ export const routes = {
   },
   /**
    * The org roster as THIS member may see it (2026-09-09): the union of the
-   * rosters of every space (DMs included) the caller belongs to, deduped,
-   * sorted by display name. Discovery is bounded by shared membership on
+   * rosters of every space (DMs included) the caller belongs to, plus the
+   * agents they own (2026-09-29: a new agent is in no space, and its owner
+   * must find it to add it to one), deduped, sorted by display name. Discovery is bounded by shared membership on
    * purpose — you can only find people you already share a space with — so
    * no admin-only directory and no privacy surface beyond what listMembers
    * already exposes per space. Both faces use it: the app's "New message"

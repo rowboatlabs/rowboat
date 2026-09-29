@@ -15,6 +15,11 @@ import type { Store, StoredEvent } from '../store.js';
 
 export interface ActorCtx {
   memberId: string;
+  /**
+   * The caller is an agent member presenting its own key (2026-09-29): it
+   * acts as itself, so attribution is always direct — never "via" anything.
+   */
+  agent?: boolean;
 }
 
 /** What bindInvite needs from an authenticated identity (auth.ts AuthIdentity satisfies this). */
@@ -150,6 +155,7 @@ export class Kernel {
 
   /** Who did it and how (core.ts Attribution): the caller, in the mode the request declares, under its display label. */
   attributionOf(ctx: ActorCtx, input: { actingMode: ActingMode; agentName?: string }): Attribution {
+    if (ctx.agent) return { memberId: ctx.memberId, actingMode: 'direct' };
     return { memberId: ctx.memberId, actingMode: input.actingMode, ...(input.agentName ? { agentName: input.agentName } : {}) };
   }
 }

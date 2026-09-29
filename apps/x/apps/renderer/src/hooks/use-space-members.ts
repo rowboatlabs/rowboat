@@ -123,6 +123,11 @@ export function refreshMembers(orgId: string, spaceId: string, opts: { force?: b
     if (due(lastLoadedAt.get(orgKey(orgId)))) void loadOrgRoster(orgId, [])
 }
 
+/** Refetch the org roster now: a change this member just made (a new agent) must show in the pickers at once. */
+export function refreshOrgRoster(orgId: string): void {
+    void loadOrgRoster(orgId, [])
+}
+
 /** The union of whatever per-space rosters are already in, A–Z. */
 function unionOfRosters(orgId: string, spaceIds: readonly string[]): spaces.Member[] {
     const byId = new Map<string, spaces.Member>()

@@ -41,8 +41,37 @@ export const Member = z.object({
   role: MemberRole.default('member'),
   /** Absent from servers before 2026-09-29, whose members are all people. */
   kind: MemberKind.default('human'),
+  /**
+   * An agent's owner (spec §4 Agent members, 2026-09-29): the person who
+   * added it and alone holds its keys. Absent for people, and for an
+   * org-owned agent such as Replicas, which admins manage.
+   */
+  ownerId: MemberId.optional(),
 });
 export type Member = z.infer<typeof Member>;
+
+/**
+ * A credential an agent member presents as itself (spec §4, 2026-09-29): a
+ * bearer secret the org stores only as a hash. The secret is shown once, at
+ * creation (AgentKeySecret); every other read is this metadata.
+ */
+export const AgentKey = z.object({
+  id: z.string().min(1).max(64),
+  agentId: MemberId,
+  createdBy: MemberId,
+  createdAt: z.iso.datetime(),
+  lastUsedAt: z.iso.datetime().optional(),
+  revokedAt: z.iso.datetime().optional(),
+});
+export type AgentKey = z.infer<typeof AgentKey>;
+
+/** A key at the one moment its secret exists outside the agent: the response that created it. */
+export const AgentKeySecret = AgentKey.extend({ secret: z.string().startsWith('rbk_') });
+export type AgentKeySecret = z.infer<typeof AgentKeySecret>;
+
+/** An agent with its keys, as the Agents screen lists them. */
+export const AgentListing = z.object({ agent: Member, keys: z.array(AgentKey) });
+export type AgentListing = z.infer<typeof AgentListing>;
 
 /**
  * What a space IS at the org level (direct messages, 2026-09-07). `shared` =

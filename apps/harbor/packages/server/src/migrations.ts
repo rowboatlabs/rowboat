@@ -704,6 +704,33 @@ export const MIGRATIONS: Migration[] = [
       `alter table members add constraint members_agent_not_admin_check check (kind = 'human' or role = 'member')`,
     ],
   },
+  {
+    // 025 is PR #1130's replicas-threads; this ladder takes 026 so the two
+    // merge in either order.
+    id: '026-agent-keys',
+    statements: [
+      // An agent's owner (spec §4 Agent members, 2026-09-29): the person who
+      // added it. Null for people and for an org-owned agent (Replicas).
+      `alter table members add column owner_id text`,
+      `alter table members add constraint members_owner_agent_check check (owner_id is null or kind = 'agent')`,
+      // Keys stored as a SHA-256 of the secret, never the secret: a 256-bit
+      // random token needs no slow hash, and a leaked table grants nothing.
+      `create table agent_keys (
+        org_id text not null,
+        id text not null,
+        agent_id text not null,
+        hash text not null,
+        created_by text not null,
+        created_at text not null,
+        last_used_at text,
+        revoked_at text,
+        primary key (org_id, id),
+        foreign key (org_id, agent_id) references members(org_id, id)
+      )`,
+      `create unique index agent_keys_hash on agent_keys (hash)`,
+      `create index agent_keys_agent on agent_keys (org_id, agent_id)`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {
