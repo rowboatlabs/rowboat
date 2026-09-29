@@ -26,7 +26,7 @@ beforeAll(async () => {
   await store.init();
   service = new HarborService(store, new SpaceHub(), { name: 'Search Org', address: 'search.test' });
   await ensureMember(store, 'ramnique');
-  await store.putMember({ id: 'harshv01', displayName: 'Harsh Verma', role: 'member' });
+  await store.putMember({ id: 'harshv01', displayName: 'Harsh Verma', role: 'member', kind: 'human' });
   const space = await service.createSpace(ram, 'Search Space');
   spaceId = space.id;
   const invite = await service.createInvite(ram, spaceId);
@@ -72,10 +72,10 @@ describe('message search', () => {
 
     // Rename: the index never stored a name, so the new name works instantly
     // and the old one stops matching.
-    await store.putMember({ id: 'harshv01', displayName: 'Hrsvrn', role: 'member' });
+    await store.putMember({ id: 'harshv01', displayName: 'Hrsvrn', role: 'member', kind: 'human' });
     expect((await service.search(ram, spaceId, 'hrsvrn review')).messages.length).toBe(1);
     expect((await service.search(ram, spaceId, 'verma')).messages.length).toBe(0);
-    await store.putMember({ id: 'harshv01', displayName: 'Harsh Verma', role: 'member' });
+    await store.putMember({ id: 'harshv01', displayName: 'Harsh Verma', role: 'member', kind: 'human' });
   });
 
   it('tombstones and edits reindex via the generated column, no code involved', async () => {

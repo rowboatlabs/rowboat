@@ -335,13 +335,14 @@ describe('SpacesClient.listOrgMembers', () => {
   }
 
   it('GETs /v1/members with the bearer and returns the members list', async () => {
+    // A server from before agent members (2026-09-29) sends no kind: everyone is a person.
     const members = [
       { id: 'gagan', displayName: 'Gagan', role: 'member' },
       { id: 'ramnique', displayName: 'Ramnique', role: 'member' },
     ];
     const { calls, fetchImpl } = fakeFetch({ members });
     const client = new SpacesClient({ baseUrl: 'http://org.test/', token: 'dev-ramnique', fetchImpl });
-    expect(await client.listOrgMembers()).toEqual(members);
+    expect(await client.listOrgMembers()).toEqual(members.map((m) => ({ ...m, kind: 'human' })));
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toBe('http://org.test/v1/members');
     expect(calls[0].init?.method).toBe('GET');
@@ -431,7 +432,7 @@ describe('SpacesLive', () => {
   });
 
   it('a member-addressed space_added frame reaches the other participant without any subscription', async () => {
-    await harbor.store.putMember({ id: 'harsh', displayName: 'Harsh', role: 'member' });
+    await harbor.store.putMember({ id: 'harsh', displayName: 'Harsh', role: 'member', kind: 'human' });
     const harsh = new SpacesLive({ baseUrl: harbor.url, token: 'dev-harsh' });
     const added: Array<{ spaceId: string; by: string }> = [];
     harsh.onMemberFrame((frame) => {

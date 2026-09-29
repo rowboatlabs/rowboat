@@ -51,6 +51,7 @@ interface MemberRow {
   display_name: string;
   avatar_url: string | null;
   role: Member['role'];
+  kind: Member['kind'];
 }
 
 function rowToMember(r: MemberRow): Member {
@@ -59,6 +60,7 @@ function rowToMember(r: MemberRow): Member {
     displayName: r.display_name,
     ...(r.avatar_url !== null ? { avatarUrl: r.avatar_url } : {}),
     role: r.role,
+    kind: r.kind,
   };
 }
 
@@ -321,7 +323,7 @@ export class PgStore implements Store {
 
   async getMember(id: string): Promise<Member | undefined> {
     const rows = await this.sql.query<MemberRow>(
-      'select id, display_name, avatar_url, role from members where org_id = $1 and id = $2',
+      'select id, display_name, avatar_url, role, kind from members where org_id = $1 and id = $2',
       [this.orgId, id],
     );
     return rows[0] ? rowToMember(rows[0]) : undefined;
@@ -329,7 +331,7 @@ export class PgStore implements Store {
 
   async listAllMembers(): Promise<Member[]> {
     const rows = await this.sql.query<MemberRow>(
-      'select id, display_name, avatar_url, role from members where org_id = $1 order by id',
+      'select id, display_name, avatar_url, role, kind from members where org_id = $1 order by id',
       [this.orgId],
     );
     return rows.map(rowToMember);
@@ -337,7 +339,7 @@ export class PgStore implements Store {
 
   async listSpaceMembers(spaceId: string): Promise<Member[]> {
     const rows = await this.sql.query<MemberRow>(
-      `select m.id, m.display_name, m.avatar_url, m.role from memberships ms
+      `select m.id, m.display_name, m.avatar_url, m.role, m.kind from memberships ms
        join members m on m.org_id = $1 and m.id = ms.member_id
        where ms.space_id = $2
        order by ms.joined_at, ms.member_id`,
@@ -348,7 +350,7 @@ export class PgStore implements Store {
 
   async listMembersSharingSpace(memberId: string): Promise<Member[]> {
     const rows = await this.sql.query<MemberRow>(
-      `select m.id, m.display_name, m.avatar_url, m.role from members m
+      `select m.id, m.display_name, m.avatar_url, m.role, m.kind from members m
        where m.org_id = $1 and (m.id = $2 or exists (
          select 1 from memberships mine
          join memberships theirs on theirs.space_id = mine.space_id
@@ -360,16 +362,18 @@ export class PgStore implements Store {
   }
 
   async putMember(member: Member): Promise<void> {
+    // Kind is written once and never updated: a person never becomes an agent
+    // or back (spec §4 Agent members, 2026-09-29).
     await this.sql.query(
-      `insert into members (org_id, id, display_name, avatar_url, role) values ($1, $2, $3, $4, $5)
+      `insert into members (org_id, id, display_name, avatar_url, role, kind) values ($1, $2, $3, $4, $5, $6)
        on conflict (org_id, id) do update set display_name = excluded.display_name, avatar_url = excluded.avatar_url, role = excluded.role`,
-      [this.orgId, member.id, member.displayName, member.avatarUrl ?? null, member.role],
+      [this.orgId, member.id, member.displayName, member.avatarUrl ?? null, member.role, member.kind],
     );
   }
 
   async getMemberByIdentity(iss: string, sub: string): Promise<Member | undefined> {
     const rows = await this.sql.query<MemberRow>(
-      `select m.id, m.display_name, m.avatar_url, m.role from member_identities mi
+      `select m.id, m.display_name, m.avatar_url, m.role, m.kind from member_identities mi
        join members m on m.org_id = mi.org_id and m.id = mi.member_id
        where mi.org_id = $1 and mi.iss = $2 and mi.sub = $3`,
       [this.orgId, iss, sub],

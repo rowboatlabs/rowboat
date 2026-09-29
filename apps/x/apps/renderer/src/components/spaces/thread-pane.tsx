@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { ArtifactsSummary } from '@/components/spaces/artifacts'
 import { AttachDocumentDialog } from '@/components/spaces/attach-document-dialog'
-import { MemberAvatar, MemberProfilePopover } from '@/components/spaces/atoms'
+import { AgentMark, MemberAvatar, MemberProfilePopover } from '@/components/spaces/atoms'
 import { Composer, type AgentOptions } from '@/components/spaces/composer'
 import { ForwardDialog } from '@/components/spaces/forward-dialog'
 import { MemberName, MemberText } from '@/components/spaces/member-text'
@@ -1186,6 +1186,7 @@ export function ThreadPane({
                                 <MemberProfilePopover id={root.author.memberId}>
                                     <button type="button" className="cursor-pointer text-[15px] font-bold hover:underline">{parentName}</button>
                                 </MemberProfilePopover>
+                                <AgentMark id={root.author.memberId} />
                                 {root.author.actingMode !== 'direct' && (
                                     <span className="text-muted-foreground">via {root.author.agentName ?? 'agent'}</span>
                                 )}

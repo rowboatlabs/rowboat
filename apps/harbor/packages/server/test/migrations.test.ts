@@ -149,7 +149,7 @@ describe('schema migrations', () => {
     // The legacy row survived and picked up the role default via 002.
     const store = new PgStore(db);
     const member = await store.getMember('ramnique');
-    expect(member).toEqual({ id: 'ramnique', displayName: 'Ramnique', role: 'member' });
+    expect(member).toEqual({ id: 'ramnique', displayName: 'Ramnique', role: 'member', kind: 'human' });
     await db.close();
   });
 });

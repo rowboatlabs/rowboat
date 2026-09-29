@@ -106,10 +106,12 @@ export function useMentionAutocomplete(editor: Editor | null) {
         // is a substring of most ULIDs and would drown the files below.
         const matches = (m: spaces.Member) => !q || m.displayName.toLowerCase().includes(q) || m.id.toLowerCase().startsWith(q)
         for (const m of spaceMembers) {
-            if (matches(m)) people.push({ id: m.id, label: m.displayName, ...(m.id === selfMemberId ? { hint: 'you' } : {}) })
+            const hint = m.id === selfMemberId ? 'you' : m.kind === 'agent' ? 'agent' : undefined
+            if (matches(m)) people.push({ id: m.id, label: m.displayName, ...(hint ? { hint } : {}) })
         }
         for (const m of orgRoster) {
-            if (!inSpace.has(m.id) && matches(m)) people.push({ id: m.id, label: m.displayName, hint: 'not in this space' })
+            const hint = m.kind === 'agent' ? 'agent · not in this space' : 'not in this space'
+            if (!inSpace.has(m.id) && matches(m)) people.push({ id: m.id, label: m.displayName, hint })
         }
         // Shared spaces, as #Name references (a DM is nobody's to point at).
         const spaceRows: MentionCandidate[] = (org?.spaces ?? [])

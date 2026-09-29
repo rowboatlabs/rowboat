@@ -9,7 +9,7 @@ import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { MemberAvatar, MemberProfilePopover, OrgMonogram } from '@/components/spaces/atoms'
+import { AgentBadge, MemberAvatar, MemberProfilePopover, OrgMonogram } from '@/components/spaces/atoms'
 import { openServerDialog } from '@/lib/server-dialog'
 import { BookmarksPopover } from '@/components/spaces/bookmarks'
 import { FileColumn, TrashDialog, UploadFilesDialog } from '@/components/spaces/files-tab'
@@ -983,13 +983,14 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                     <MemberProfilePopover key={m.id} id={m.id}>
                                         <button type="button" className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-accent/60">
                                             <span className="relative shrink-0">
-                                                <MemberAvatar id={m.id} name={m.displayName} size="md" />
+                                                <MemberAvatar id={m.id} name={m.displayName} size="md" agent={m.kind === 'agent'} />
                                                 {isHere && <span className="absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-[var(--rowboat-success)] ring-2 ring-popover" />}
                                             </span>
                                             <span className="min-w-0 flex-1 truncate text-sm">
                                                 {m.displayName}
                                                 {m.id === org.memberId && <span className="text-muted-foreground"> (you)</span>}
                                             </span>
+                                            {m.kind === 'agent' && <AgentBadge />}
                                             {m.role === 'admin' && (
                                                 <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] font-medium text-muted-foreground">admin</span>
                                             )}

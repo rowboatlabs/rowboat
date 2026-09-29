@@ -1,8 +1,8 @@
 import {
   inviteUrl,
+  Member,
   type AcceptInviteResult,
   type CreateInviteResult,
-  type Member,
   type Membership,
   type PresenceState,
   type ResolveInviteResult,
@@ -17,9 +17,9 @@ import { DIRECT_SPACE_NAME, directKeyFor, type PushLevel, type StoredEvent } fro
 import { Kernel, type ActorCtx, type BindIdentity } from './kernel.js';
 
 // Spaces and membership: the org's containers and who is in them — spaces and
-// direct messages, invites and the bind ceremony, the roster, push
-// registration, and the membership-gated live relays (presence, whiteboard,
-// the subscribe-time replay).
+// direct messages, invites and the bind ceremony, the roster and its agent
+// members, push registration, and the membership-gated live relays (presence,
+// whiteboard, the subscribe-time replay).
 
 function seedDisplayName(identity: BindIdentity): string {
   const name = identity.name?.trim();
@@ -42,6 +42,24 @@ export class Spaces {
   async me(ctx: ActorCtx): Promise<Member> {
     const member = await this.k.store.getMember(ctx.memberId);
     if (!member) throw new HarborError('not_found', 'member not found');
+    return member;
+  }
+
+  /**
+   * An agent member (spec §4 Agent members, 2026-09-29): a minted id, a
+   * display name, never admin, and no identity binding, so no one signs in as
+   * it. It joins spaces through ordinary membership. No route creates one on
+   * its own: the integration that owns the agent calls this and gates who may.
+   * The first is the Replicas coding agent (PR #1130).
+   */
+  async createAgent(input: { displayName: string }): Promise<Member> {
+    const displayName = input.displayName.trim();
+    if (!Member.shape.displayName.safeParse(displayName).success) {
+      throw new HarborError('invalid_request', 'an agent needs a display name of 1 to 128 characters');
+    }
+    this.k.guardWrite();
+    const member: Member = { id: this.k.ulid(), displayName, role: 'member', kind: 'agent' };
+    await this.k.store.putMember(member);
     return member;
   }
 
@@ -252,7 +270,7 @@ export class Spaces {
     if (!member) {
       // Minted id, NOT the raw sub: issuer subjects live only in the mapping
       // table, so an org can change AS someday without rewriting history.
-      member = { id: this.k.ulid(), displayName: seedDisplayName(identity), role: 'member' };
+      member = { id: this.k.ulid(), displayName: seedDisplayName(identity), role: 'member', kind: 'human' };
       await this.k.store.putMember(member);
       await this.k.store.putIdentity(identity.iss, identity.sub, member.id);
     }

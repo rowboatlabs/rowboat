@@ -132,7 +132,7 @@ export function parseDevToken(authorization: string | undefined, queryToken?: st
 export async function ensureMember(store: Store, memberId: string): Promise<Member> {
   const existing = await store.getMember(memberId);
   if (existing) return existing;
-  const member: Member = { id: memberId, displayName: prettify(memberId), role: 'member' };
+  const member: Member = { id: memberId, displayName: prettify(memberId), role: 'member', kind: 'human' };
   await store.putMember(member);
   return member;
 }

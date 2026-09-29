@@ -2,8 +2,9 @@ import { z } from 'zod';
 import { AssetId, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 
 // Core objects shared by both faces. Every act in a space belongs to a member
-// (spec §2, principle 4); attribution carries the acting mode, never a separate
-// "bot" identity.
+// (spec §2, principle 4); attribution carries the acting mode. An agent that
+// acts as itself is a member of kind 'agent' (2026-09-29), never a label on
+// someone else's attribution.
 
 export const ActingMode = z.enum(['direct', 'agent', 'scheduled']);
 export type ActingMode = z.infer<typeof ActingMode>;
@@ -23,12 +24,23 @@ export type Attribution = z.infer<typeof Attribution>;
 export const MemberRole = z.enum(['admin', 'member']);
 export type MemberRole = z.infer<typeof MemberRole>;
 
+/**
+ * What a member IS (spec §4 Agent members, 2026-09-29): a person, or an agent
+ * that is a member in its own right and acts as itself. Fixed at creation.
+ * Distinct from `actingMode: 'agent'`, which is a person's own agent acting
+ * as that person.
+ */
+export const MemberKind = z.enum(['human', 'agent']);
+export type MemberKind = z.infer<typeof MemberKind>;
+
 export const Member = z.object({
   id: MemberId,
   /** Display-only, org-scoped, not unique. Attribution keys on `id`, never on names. */
   displayName: z.string().min(1).max(128),
   avatarUrl: z.string().url().optional(),
   role: MemberRole.default('member'),
+  /** Absent from servers before 2026-09-29, whose members are all people. */
+  kind: MemberKind.default('human'),
 });
 export type Member = z.infer<typeof Member>;
 

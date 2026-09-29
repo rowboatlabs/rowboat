@@ -55,7 +55,7 @@ describe('GET /v1/members', () => {
     expect(r.body.members.map((m: Member) => m.displayName)).toEqual(['Arjun', 'Gagan', 'harsh', 'Ramnique']);
     expect(ids(r.body.members)).not.toContain('loner');
     // Full Member objects, the same rows listMembers serves.
-    expect(r.body.members.find((m: Member) => m.id === 'harsh')).toEqual({ id: 'harsh', displayName: 'harsh', role: 'member' });
+    expect(r.body.members.find((m: Member) => m.id === 'harsh')).toEqual({ id: 'harsh', displayName: 'harsh', role: 'member', kind: 'human' });
   });
 
   it('is bounded by shared membership: each member sees a different roster, always including themself', async () => {

@@ -157,7 +157,7 @@ describe('direct messages', () => {
     const ramLive = await liveClient(harbor, 'dev-ramnique');
     const harshLive = await liveClient(harbor, 'dev-harsh');
     // A brand-new pair so the open actually creates.
-    await harbor.store.putMember({ id: 'prakhar', displayName: 'Prakhar', role: 'member' });
+    await harbor.store.putMember({ id: 'prakhar', displayName: 'Prakhar', role: 'member', kind: 'human' });
     const prakhar = restClient(harbor, 'dev-prakhar');
     const prakharLive = await liveClient(harbor, 'dev-prakhar');
     await ramnique.post('/v1/direct', { memberId: 'prakhar' });

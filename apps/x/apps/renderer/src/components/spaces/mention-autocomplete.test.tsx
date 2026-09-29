@@ -34,9 +34,9 @@ vi.mock('@/hooks/use-spaces', async (importOriginal) => ({
 }))
 vi.mock('@/lib/spaces-feed', () => ({ subscribeSpacesFeed: () => () => {} }))
 
-const member = (id: string, displayName: string) => ({ id, displayName, role: 'member' })
-const here = [member('me', 'Me Myself'), member('01HHARSH', 'Harsh')]
-const org = [...here, member('01HADA', 'Ada Lovelace'), member('01HZED', 'Zed')]
+const member = (id: string, displayName: string, kind = 'human') => ({ id, displayName, role: 'member', kind })
+const here = [member('me', 'Me Myself'), member('01HHARSH', 'Harsh'), member('01HREPL', 'Replicas', 'agent')]
+const org = [...here, member('01HADA', 'Ada Lovelace'), member('01HZED', 'Zed'), member('01HBOT', 'Hermes', 'agent')]
 const files: Record<string, unknown[]> = {
     [HERE]: [
         { id: 'A-plan', path: 'plan.md', version: 1, updatedAt: '' },
@@ -78,12 +78,16 @@ const ids = (c: readonly MentionCandidate[]) => c.map((x) => x.id)
 describe('useMentionAutocomplete', () => {
     it('a bare @ lists this space’s people, then the rest of the org (hinted), then the shared spaces — DMs never', async () => {
         const { result } = await mountAndType('hey @')
-        await waitFor(() => expect(result.current.candidates.length).toBe(8))
-        expect(ids(result.current.candidates)).toEqual(['rowboat', 'here', 'me', '01HHARSH', '01HADA', '01HZED', `space:${HERE}`, `space:${DESIGN}`])
+        await waitFor(() => expect(result.current.candidates.length).toBe(10))
+        expect(ids(result.current.candidates)).toEqual(['rowboat', 'here', 'me', '01HHARSH', '01HREPL', '01HADA', '01HZED', '01HBOT', `space:${HERE}`, `space:${DESIGN}`])
         const byId = new Map(result.current.candidates.map((c) => [c.id, c]))
         expect(byId.get('me')?.hint).toBe('you')
         expect(byId.get('01HHARSH')?.hint).toBeUndefined()
         expect(byId.get('01HADA')?.hint).toBe('not in this space')
+        // Agent members (2026-09-29) are marked, and stay ordinary members, never the @rowboat address.
+        expect(byId.get('01HREPL')).toMatchObject({ hint: 'agent', label: 'Replicas' })
+        expect(byId.get('01HREPL')?.isAgent).toBeUndefined()
+        expect(byId.get('01HBOT')?.hint).toBe('agent · not in this space')
         expect(byId.get(`space:${DESIGN}`)?.space).toEqual({ id: DESIGN, name: 'Design' })
         expect(result.current.candidates.some((c) => c.file)).toBe(false)
     })
