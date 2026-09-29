@@ -79,19 +79,20 @@ describe('agent face parity', () => {
     expect(other.member.id).toBe('harsh');
   });
 
-  it('list_members without spaceId is the union of shared rosters, DMs included, and nothing more', async () => {
+  it('list_members without spaceId is the whole org roster, the same for every caller', async () => {
     const mine = await call<{ members: Member[] }>(ramAgent, 'list_members');
-    // Sorted by display name, case-insensitively; the caller is present.
-    expect(mine.members.map((m) => m.id)).toEqual(['gagan', 'harsh', 'ramnique']);
-    expect(mine.members.map((m) => m.id)).not.toContain('loner');
-    // Discovery is bounded by shared membership: harsh shares no space with gagan.
+    const everyone = (await harbor.store.listAllMembers()).map((m) => m.id);
+    // Sorted by display name, case-insensitively; everyone on the org is present.
+    expect(mine.members.map((m) => m.id).sort()).toEqual(everyone.sort());
+    expect(mine.members.map((m) => m.id)).toContain('loner');
+    // Org-wide (2026-09-29): harsh sees gagan though they share no space.
     const harshs = await call<{ members: Member[] }>(harshAgent, 'list_members');
-    expect(harshs.members.map((m) => m.id)).toEqual(['harsh', 'ramnique']);
-    // A member of nothing still sees themself.
+    expect(harshs.members).toEqual(mine.members);
+    // A member of nothing sees the same list.
     const lonerAgent = await agentClient(harbor, 'dev-loner');
     try {
       const alone = await call<{ members: Member[] }>(lonerAgent, 'list_members');
-      expect(alone.members.map((m) => m.id)).toEqual(['loner']);
+      expect(alone.members).toEqual(mine.members);
     } finally {
       await lonerAgent.close();
     }

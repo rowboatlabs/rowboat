@@ -70,9 +70,8 @@ export const whoami = tool({
 export const listMembers = tool({
   name: 'list_members',
   description:
-    'People, with names. Omit spaceId for the org roster as your person sees it: everyone they ' +
-    'share at least one space or DM with (deduped, sorted by display name). Pass spaceId for that ' +
-    "space's members only. This is how a name becomes a memberId — match displayName " +
+    'People, with names. Omit spaceId for the org roster: every member of the org, sorted by ' +
+    "display name. Pass spaceId for that space's members only. This is how a name becomes a memberId — match displayName " +
     '(case-insensitive, first name is usually enough); if several match, say so and ask. ' +
     'Messages and reactions carry memberIds only; resolve them here before naming anyone.',
   input: z.object({ spaceId: SpaceId.optional() }),

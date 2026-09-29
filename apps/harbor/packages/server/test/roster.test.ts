@@ -69,13 +69,13 @@ describe('rosters are one statement', () => {
     expect(result.map((m) => m.id)).toEqual(['ramnique', 'harsh', 'gagan']);
   });
 
-  it('listOrgMembers: one statement, the caller included, sorted by name case-insensitively', async () => {
+  it('listOrgMembers: one statement, the whole org, sorted by name case-insensitively', async () => {
     const { result, statements: n } = await count(() => harbor.service.listOrgMembers({ memberId: 'ramnique' }));
     expect(n).toBe(1);
-    expect(result.map((m) => m.id)).toEqual(['gagan', 'harsh', 'ramnique']);
+    expect(result.map((m) => m.id)).toEqual(['gagan', 'harsh', 'loner', 'ramnique']);
     const alone = await count(() => harbor.service.listOrgMembers({ memberId: 'loner' }));
     expect(alone.statements).toBe(1);
-    expect(alone.result.map((m) => m.id)).toEqual(['loner']);
+    expect(alone.result).toEqual(result);
   });
 
   it('the notification decision reads the roster once for a root message', async () => {

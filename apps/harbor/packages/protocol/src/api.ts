@@ -264,13 +264,11 @@ export const routes = {
     response: z.object({ members: z.array(Member) }),
   },
   /**
-   * The org roster as THIS member may see it (2026-09-09): the union of the
-   * rosters of every space (DMs included) the caller belongs to, deduped,
-   * sorted by display name. Discovery is bounded by shared membership on
-   * purpose — you can only find people you already share a space with — so
-   * no admin-only directory and no privacy surface beyond what listMembers
-   * already exposes per space. Both faces use it: the app's "New message"
-   * picker and the agent's `list_members` resolve a name to a memberId here.
+   * The org roster: every member of the org, sorted by display name — the
+   * same list for everyone, admins included (2026-09-29, spec §5 Open
+   * spaces; bounded to shared membership from 2026-09-09 until then). Both
+   * faces use it: the app's "New message" and mention pickers and the
+   * agent's `list_members` resolve a name to a memberId here.
    */
   listOrgMembers: {
     method: 'GET',

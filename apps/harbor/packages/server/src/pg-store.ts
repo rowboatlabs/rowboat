@@ -348,19 +348,6 @@ export class PgStore implements Store {
     return rows.map(rowToMember);
   }
 
-  async listMembersSharingSpace(memberId: string): Promise<Member[]> {
-    const rows = await this.sql.query<MemberRow>(
-      `select m.id, m.display_name, m.avatar_url, m.role, m.kind from members m
-       where m.org_id = $1 and (m.id = $2 or exists (
-         select 1 from memberships mine
-         join memberships theirs on theirs.space_id = mine.space_id
-         where mine.member_id = $2 and theirs.member_id = m.id))
-       order by m.id`,
-      [this.orgId, memberId],
-    );
-    return rows.map(rowToMember);
-  }
-
   async putMember(member: Member): Promise<void> {
     // Kind is written once and never updated: a person never becomes an agent
     // or back (spec §4 Agent members, 2026-09-29).
