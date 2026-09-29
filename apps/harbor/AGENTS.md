@@ -12,7 +12,7 @@ Two pnpm workspace packages under `packages/`:
 | `src/` | Owns |
 |---|---|
 | `core/kernel.ts` | store, hub, org, the read-only knob, the space lock with its publish-after-commit outbox, `append` / `nextOffset` / `appendNext`, `requireSpace` / `requireReadableSpace` / `requireMember`, `guardWrite`, `attributionOf` |
-| `core/spaces.ts` | spaces, direct messages, invites and the bind ceremony, the roster, `me`, push registration, the read-gated replay and membership-gated live relays |
+| `core/spaces.ts` | spaces, direct messages, invites and the bind ceremony, the roster, `me`, agent members (`createAgent`), push registration, the read-gated replay and membership-gated live relays |
 | `core/assets.ts` | assets by id, versions, the change log, blobs, history, diff |
 | `core/feed.ts` | messages, threads, topics, reactions, polls, search, mention stamps and their backfill |
 | `core/read-state.ts` | read marks, follows, unread, Activity, read-all |

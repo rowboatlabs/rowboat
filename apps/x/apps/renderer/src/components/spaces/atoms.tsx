@@ -19,12 +19,38 @@ import { copySpacesLink } from '@/lib/spaces-copy-link'
 // Identity atoms
 // ---------------------------------------------------------------------------
 
-export function MemberAvatar({ id, name, size = 'md', className }: {
+/**
+ * Agent members (Harbor spec §4, 2026-09-29) are marked wherever a member
+ * shows: a round avatar and this label. Kind comes from the roster in
+ * context; a surface outside one passes `agent` itself.
+ */
+function useIsAgent(id: string): boolean {
+    return useSpaceProfiles().byId.get(id)?.kind === 'agent'
+}
+
+export function AgentBadge({ className }: { className?: string }) {
+    return (
+        <span className={cn('shrink-0 self-center rounded bg-muted px-1 py-0.5 text-[10px] font-medium leading-none text-muted-foreground', className)}>
+            agent
+        </span>
+    )
+}
+
+/** The label for an author known only by id, looked up in the roster. */
+export function AgentMark({ id }: { id: string }) {
+    return useIsAgent(id) ? <AgentBadge /> : null
+}
+
+export function MemberAvatar({ id, name, size = 'md', agent, className }: {
     id: string
     name: string
     size?: 'sm' | 'md' | 'lg' | 'xl'
+    /** Overrides the roster lookup, for surfaces that hold the Member row. */
+    agent?: boolean
     className?: string
 }) {
+    const isAgentInRoster = useIsAgent(id)
+    const round = agent ?? isAgentInRoster
     // Stream dialect: people are near-square tiles; circles stay reserved for AI.
     const dims = size === 'sm' ? 'size-5 rounded-[4px] text-[9px]'
         : size === 'lg' ? 'size-8 rounded-[5px] text-xs'
@@ -33,7 +59,7 @@ export function MemberAvatar({ id, name, size = 'md', className }: {
     return (
         <span
             title={name}
-            className={cn('inline-flex shrink-0 items-center justify-center font-semibold leading-none select-none', dims, avatarColorClass(id), className)}
+            className={cn('inline-flex shrink-0 items-center justify-center font-semibold leading-none select-none', dims, avatarColorClass(id), className, round && 'rounded-full')}
         >
             {initials(name)}
         </span>
@@ -85,6 +111,7 @@ export function MemberProfilePopover({ id, children }: { id: string; children: R
                         <div className="flex items-center gap-1.5">
                             <span className="truncate text-sm font-semibold">{name}</span>
                             {id === selfId && <span className="shrink-0 text-xs text-muted-foreground">(you)</span>}
+                            {member?.kind === 'agent' && <AgentBadge />}
                             {member?.role === 'admin' && (
                                 <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[9.5px] font-medium uppercase tracking-wide text-muted-foreground">admin</span>
                             )}
@@ -170,7 +197,7 @@ export function AvatarStack({ members, max = 5 }: { members: spaces.Member[]; ma
     return (
         <div className="flex items-center -space-x-1.5">
             {shown.map((m) => (
-                <MemberAvatar key={m.id} id={m.id} name={m.displayName} size="md" className="ring-2 ring-background" />
+                <MemberAvatar key={m.id} id={m.id} name={m.displayName} size="md" agent={m.kind === 'agent'} className="ring-2 ring-background" />
             ))}
             {members.length > max && (
                 <span className="inline-flex size-7 items-center justify-center rounded-[5px] bg-muted text-[10px] font-medium text-muted-foreground ring-2 ring-background">

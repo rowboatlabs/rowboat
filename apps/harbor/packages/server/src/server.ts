@@ -148,7 +148,7 @@ async function seedOrg(
 ): Promise<void> {
   for (const m of options.seedMembers ?? []) {
     const existing = await store.getMember(m.id);
-    await store.putMember({ id: m.id, displayName: m.displayName, role: existing?.role ?? 'member' });
+    await store.putMember({ id: m.id, displayName: m.displayName, role: existing?.role ?? 'member', kind: 'human' });
   }
   for (const seed of options.seedSpaces ?? []) {
     const creator = await ensureMember(store, seed.creator);

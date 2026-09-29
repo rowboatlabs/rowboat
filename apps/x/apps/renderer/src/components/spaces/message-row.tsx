@@ -13,7 +13,7 @@ import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
-import { MemberAvatar, MemberProfilePopover } from '@/components/spaces/atoms'
+import { AgentMark, MemberAvatar, MemberProfilePopover } from '@/components/spaces/atoms'
 import { MessageEditBox } from '@/components/spaces/edit-box'
 import { EmojiPickerPopover } from '@/components/spaces/emoji-picker'
 import { MessageLinkPreview } from '@/components/spaces/link-preview-card'
@@ -302,6 +302,7 @@ function MessageRowImpl({
                         <MemberProfilePopover id={message.author.memberId}>
                             <button type="button" className="cursor-pointer text-[15px] font-bold leading-[22px] text-foreground hover:underline">{name}</button>
                         </MemberProfilePopover>
+                        <AgentMark id={message.author.memberId} />
                         {viaAgent && (
                             canOpenResponseChat ? (
                                 // Your own Rowboat's post: the label is the subtle way in

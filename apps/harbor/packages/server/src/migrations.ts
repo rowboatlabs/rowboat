@@ -692,6 +692,18 @@ export const MIGRATIONS: Migration[] = [
       `alter table spaces add constraint spaces_direct_private_check check (kind <> 'direct' or visibility = 'private')`,
     ],
   },
+  {
+    id: '024-agent-members',
+    statements: [
+      // Agent members (spec §4, 2026-09-29). Every existing row is a person.
+      `alter table members add column kind text not null default 'human'`,
+      `alter table members add constraint members_kind_check check (kind in ('human', 'agent'))`,
+      // Admin powers are membership and policy; an agent holding them could
+      // add itself to spaces past the people who invoke it. Held here, not
+      // only in code, because seeds and backfills write SQL directly.
+      `alter table members add constraint members_agent_not_admin_check check (kind = 'human' or role = 'member')`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

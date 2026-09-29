@@ -89,7 +89,7 @@ export class OrgDirectory {
           input.allowedEmailDomains ? JSON.stringify(input.allowedEmailDomains) : null,
         ]);
         if (input.firstAdmin) {
-          const member: Member = { id: ulid(), displayName: input.firstAdmin.displayName, role: 'admin' };
+          const member: Member = { id: ulid(), displayName: input.firstAdmin.displayName, role: 'admin', kind: 'human' };
           await store.putMember(member);
           await store.putIdentity(input.firstAdmin.iss, input.firstAdmin.sub, member.id);
         }

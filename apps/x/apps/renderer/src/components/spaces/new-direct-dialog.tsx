@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { MemberAvatar } from '@/components/spaces/atoms'
+import { AgentBadge, MemberAvatar } from '@/components/spaces/atoms'
 import { useOrgRoster } from '@/hooks/use-space-members'
 import { refreshSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { isSelfDirect, otherParticipant } from '@/lib/spaces-direct'
@@ -129,11 +129,12 @@ export function NewDirectDialog({ org, open, onOpenChange, onOpened }: {
                                     i === active && 'bg-accent',
                                 )}
                             >
-                                <MemberAvatar id={m.id} name={m.displayName} size="md" />
+                                <MemberAvatar id={m.id} name={m.displayName} size="md" agent={m.kind === 'agent'} />
                                 <span className="min-w-0 flex-1 truncate">
                                     {m.displayName}
                                     {m.id === org.memberId && <span className="text-muted-foreground"> (you) · notes to self</span>}
                                 </span>
+                                {m.kind === 'agent' && <AgentBadge />}
                                 {opening === m.id ? (
                                     <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
                                 ) : existing.has(m.id) ? (

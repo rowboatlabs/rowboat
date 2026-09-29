@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { spaces } from '@x/shared'
 
 vi.mock('@/components/spaces/atoms', () => ({
+    AgentMark: () => null,
     MemberAvatar: () => <span />,
     MemberProfilePopover: ({ children }: { children: ReactNode }) => <>{children}</>,
 }))

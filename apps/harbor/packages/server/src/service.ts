@@ -97,6 +97,9 @@ export class HarborService {
   me(ctx: ActorCtx): Promise<Member> {
     return this.spaces.me(ctx);
   }
+  createAgent(input: { displayName: string }): Promise<Member> {
+    return this.spaces.createAgent(input);
+  }
   listSpaces(ctx: ActorCtx, opts: { includeDirect?: boolean } = {}): Promise<Space[]> {
     return this.spaces.listSpaces(ctx, opts);
   }
