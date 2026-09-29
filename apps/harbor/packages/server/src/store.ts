@@ -205,8 +205,6 @@ export interface Store {
    * question; whether discovery is bounded this way is the core's rule
    * (spaces.ts listOrgMembers; spec §5, open spaces).
    */
-  /** The member, everyone sharing a space with them, and the agents they own (a new agent is in no space yet — 2026-09-29). */
-  listMembersSharingSpace(memberId: string): Promise<Member[]>;
 
   // identity mapping — (issuer, subject) → member (spec §4: the token proves
   // WHO; this table says which member that is). Written only by the invite

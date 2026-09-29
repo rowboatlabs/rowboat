@@ -184,10 +184,10 @@ export function useSelfDisplayName(orgId: string, memberId: string, spaceIds: re
 }
 
 /**
- * Everyone your person shares a space with on this org, A–Z — the people a
- * DM can be opened with. The org computes it (GET /v1/members: the union of
- * your space rosters, DMs included, deduped — Discord's "people you share a
- * server with" rule, by construction rather than policy). Cached per org
+ * Everyone on this org, people and agents, A–Z (GET /v1/members: the whole
+ * org since 2026-09-29, Slack's workspace-wide member list; it was the
+ * people you share a space with before) — who a DM can be opened with, who
+ * Add people offers, who a mention can name. Cached per org
  * like the per-space rosters, so the picker's first frame is already full;
  * refreshed on mount and, throttled, on live activity (refreshMembers).
  * `spaceIds` only feeds the fallback for an org that does not serve the route.

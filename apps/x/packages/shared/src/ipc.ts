@@ -3941,8 +3941,8 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), spaceId: z.string() }),
     res: z.object({ members: z.array(z.custom<SpacesTypes.Member>()) }),
   },
-  // The org roster as the caller sees it: everyone they share a space with
-  // (DMs included), deduped, A–Z — computed by the org (GET /v1/members).
+  // The org roster: every member, people and agents, A–Z — computed by the
+  // org (GET /v1/members; the whole org since 2026-09-29).
   'spaces:listOrgMembers': {
     req: z.object({ orgId: z.string() }),
     res: z.object({ members: z.array(z.custom<SpacesTypes.Member>()) }),

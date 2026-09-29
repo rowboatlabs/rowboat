@@ -275,10 +275,7 @@ export class SpacesClient {
     return (await this.request('GET', this.space(spaceId, '/members'), routes.listMembers.response)).members;
   }
 
-  /**
-   * The org roster as this member sees it: the union of every space they are
-   * in (DMs included), deduped and sorted by displayName (api.ts listOrgMembers).
-   */
+  /** The org roster: every member, people and agents, sorted by displayName (api.ts listOrgMembers; org-wide since 2026-09-29). */
   async listOrgMembers(): Promise<Member[]> {
     return (await this.request('GET', routes.listOrgMembers.path, routes.listOrgMembers.response)).members;
   }

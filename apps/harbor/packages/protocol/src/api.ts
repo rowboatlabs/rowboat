@@ -314,14 +314,12 @@ export const routes = {
     response: z.object({ memberships: z.array(Membership) }),
   },
   /**
-   * The org roster as THIS member may see it (2026-09-09): the union of the
-   * rosters of every space (DMs included) the caller belongs to, plus the
-   * agents they own (2026-09-29: a new agent is in no space, and its owner
-   * must find it to add it to one), deduped, sorted by display name. Discovery is bounded by shared membership on
-   * purpose — you can only find people you already share a space with — so
-   * no admin-only directory and no privacy surface beyond what listMembers
-   * already exposes per space. Both faces use it: the app's "New message"
-   * picker and the agent's `list_members` resolve a name to a memberId here.
+   * The org roster: every member of the org, people and agents, sorted by
+   * display name (spec §5 answer 4, built 2026-09-29 — inside one org the org
+   * is the trust boundary, as inside one Slack workspace). Until then it was
+   * bounded to people sharing a space with the caller. Both faces use it: the
+   * app's pickers (New message, Add people, mentions) and the agent's
+   * `list_members` resolve a name to a memberId here.
    */
   listOrgMembers: {
     method: 'GET',
