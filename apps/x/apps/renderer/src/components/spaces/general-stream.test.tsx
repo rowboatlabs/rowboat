@@ -1,3 +1,5 @@
+import { SpaceAccessContext } from '@/lib/spaces-access'
+import { markStreamRead } from '@/lib/spaces-read-state'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { spaces } from '@x/shared'
@@ -213,4 +215,18 @@ describe('GeneralStream jump to a row outside the window', () => {
         await act(async () => {})
         expect(getMessage).toHaveBeenCalledTimes(1)
     })
+})
+
+
+it('renders preview content and an explicit Join action without marking it read', () => {
+    vi.mocked(markStreamRead).mockClear()
+    const join = vi.fn()
+    render(<SpaceAccessContext.Provider value={{ member: false, join, joining: false }}>
+        <GeneralStream org={org} space={space} stream={streamOf([msg(1)])} presence={presence} memberNames={new Map()}
+            onOpenThread={vi.fn()} />
+    </SpaceAccessContext.Provider>)
+    expect(screen.getByText('body 1')).toBeInTheDocument()
+    expect(vi.mocked(markStreamRead)).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Join space' }))
+    expect(join).toHaveBeenCalledTimes(1)
 })

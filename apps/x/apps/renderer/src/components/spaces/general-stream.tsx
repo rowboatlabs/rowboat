@@ -1,3 +1,5 @@
+import { invokeSpace } from '@/lib/spaces-invoke'
+import { useSpaceAccess, JoinSpacePrompt, canActInSpace } from '@/lib/spaces-access'
 import { startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowDown, ArrowUp, Loader2, X } from 'lucide-react'
 import type { autoRoute, spaces } from '@x/shared'
@@ -86,10 +88,11 @@ export function GeneralStream({
     /** The content strip already labels a lone stream; split panes retain their headings. */
     showHeader?: boolean
 }) {
+    const { member } = useSpaceAccess()
     const [seed, setSeed] = useState<{ text: string; nonce: number; append?: boolean } | null>(null)
     const scrollRef = useRef<HTMLDivElement | null>(null)
     const bottomRef = useRef<HTMLDivElement | null>(null)
-    const { onType } = usePresenceSender(org.id, space.id, undefined, visible)
+    const { onType } = usePresenceSender(org.id, space.id, undefined, visible && member)
     // The plain-text faces (quotes, titles, copies) name a space token by its current name.
     const spaceNames = useSpaceNames(org.id)
 
@@ -115,12 +118,12 @@ export function GeneralStream({
         setNewSince(markOrNull(getStreamReadOffset(org.id, space.id)))
     }, [visible, org.id, space.id])
     useEffect(() => {
-        if (!visible || !stream.ready) return
+        if (!member || !visible || !stream.ready) return
         // The newest root on screen, never head (Slack's rule).
         const newest = newestSettledOffset()
         if (newest > 0) markStreamRead(org.id, space.id, newest)
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [org.id, space.id, stream.ready, stream.messages.length, visible])
+    }, [org.id, space.id, stream.ready, stream.messages.length, visible, member])
 
     // First paint: start at the bottom — the newest messages, always. After
     // that: keep the tail in view when new messages land, unless the reader
@@ -277,7 +280,7 @@ export function GeneralStream({
         const label = threadLabelFor(rootMessageId)
         let posted: spaces.Message
         try {
-            posted = (await window.ipc.invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body })).message
+            posted = (await invokeSpace('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body })).message
         } catch (err) {
             notify.error(`Could not reply in “${label}”`, { ...AUTO_TOAST, description: err instanceof Error ? err.message : 'The send failed' })
             // Rethrown so the composer keeps the draft for another try.
@@ -308,6 +311,11 @@ export function GeneralStream({
     // for. A post that fails after the hold puts the words back in this box.
     const holdsRef = useRef(new Map<number, { timer: number; fire: () => void }>())
     const holdSeqRef = useRef(0)
+    useEffect(() => {
+        if (member) return
+        for (const hold of holdsRef.current.values()) window.clearTimeout(hold.timer)
+        holdsRef.current.clear()
+    }, [member])
     const holdThenPostInThread = (rootMessageId: string, body: string, agent?: AgentOptions) => {
         const label = threadLabelFor(rootMessageId)
         const id = ++holdSeqRef.current
@@ -338,7 +346,7 @@ export function GeneralStream({
         return () => {
             for (const hold of holds.values()) {
                 window.clearTimeout(hold.timer)
-                hold.fire()
+                if (canActInSpace(org.id, space.id)) hold.fire()
             }
             holds.clear()
         }
@@ -490,7 +498,7 @@ export function GeneralStream({
     // The working strip's "Open chat": the thread's agent session, one click.
     const openAgentChat = async (rootMessageId: string) => {
         try {
-            const { sessionId } = await window.ipc.invoke('spaces:topicSession', { orgId: org.id, spaceId: space.id, threadRootId: rootMessageId })
+            const { sessionId } = await invokeSpace('spaces:topicSession', { orgId: org.id, spaceId: space.id, threadRootId: rootMessageId })
             if (sessionId && onOpenSession) onOpenSession(sessionId)
             else if (!sessionId) toast('No agent chat for this thread yet', 'info')
         } catch {
@@ -507,7 +515,7 @@ export function GeneralStream({
     // The chip clears when the cancelled turn releases its presence lease.
     const stopAgent = async (rootMessageId: string) => {
         try {
-            const { stopped } = await window.ipc.invoke('spaces:stopRowboat', { orgId: org.id, spaceId: space.id, threadRootId: rootMessageId })
+            const { stopped } = await invokeSpace('spaces:stopRowboat', { orgId: org.id, spaceId: space.id, threadRootId: rootMessageId })
             if (!stopped) toast('Nothing to stop — the run already finished', 'info')
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not stop the run', 'error')
@@ -579,7 +587,7 @@ export function GeneralStream({
         try {
             let updated: spaces.Message | undefined
             for (const answerId of answerIds) {
-                const res = await window.ipc.invoke('spaces:votePoll', {
+                const res = await invokeSpace('spaces:votePoll', {
                     orgId: org.id, spaceId: space.id, messageId: message.id, answerId, action: 'add',
                 })
                 updated = res.message
@@ -603,7 +611,7 @@ export function GeneralStream({
         try {
             let updated: spaces.Message | undefined
             for (const answerId of mine) {
-                const res = await window.ipc.invoke('spaces:votePoll', {
+                const res = await invokeSpace('spaces:votePoll', {
                     orgId: org.id, spaceId: space.id, messageId: message.id, answerId, action: 'remove',
                 })
                 updated = res.message
@@ -618,7 +626,7 @@ export function GeneralStream({
     const endPoll = async (message: spaces.Message) => {
         if (!window.confirm('End this poll now? Voting stops immediately.')) return
         try {
-            const { message: updated } = await window.ipc.invoke('spaces:endPoll', {
+            const { message: updated } = await invokeSpace('spaces:endPoll', {
                 orgId: org.id, spaceId: space.id, messageId: message.id,
             })
             updateStreamMessage(org.id, space.id, updated)
@@ -638,7 +646,7 @@ export function GeneralStream({
             reactions: applyReaction(message.reactions, { emoji, memberId: org.memberId, action: action === 'add' ? 'added' : 'removed' }),
         })
         try {
-            const { message: updated } = await window.ipc.invoke('spaces:reactToMessage', {
+            const { message: updated } = await invokeSpace('spaces:reactToMessage', {
                 orgId: org.id, spaceId: space.id, messageId: message.id, emoji, action,
             })
             updateStreamMessage(org.id, space.id, updated)
@@ -654,7 +662,7 @@ export function GeneralStream({
     const editMessage = async (message: spaces.Message, body: string) => {
         updateStreamMessage(org.id, space.id, { ...message, body, editedAt: new Date().toISOString() })
         try {
-            const { message: updated } = await window.ipc.invoke('spaces:editMessage', {
+            const { message: updated } = await invokeSpace('spaces:editMessage', {
                 orgId: org.id, spaceId: space.id, messageId: message.id, body,
             })
             updateStreamMessage(org.id, space.id, updated)
@@ -667,7 +675,7 @@ export function GeneralStream({
     const deleteMessage = async (message: spaces.Message) => {
         if (!window.confirm('Delete this message? This cannot be undone.')) return
         try {
-            const { message: deleted } = await window.ipc.invoke('spaces:deleteMessage', {
+            const { message: deleted } = await invokeSpace('spaces:deleteMessage', {
                 orgId: org.id, spaceId: space.id, messageId: message.id,
             })
             updateStreamMessage(org.id, space.id, deleted)
@@ -1059,10 +1067,10 @@ export function GeneralStream({
                 )
             })()}
             </div>
-            {forwarding && (
+            {member && forwarding && (
                 <ForwardDialog org={org} space={space} message={forwarding} memberNames={memberNames} onClose={() => setForwarding(null)} />
             )}
-            <PollDialogHost openRef={openPollRef} onSubmit={createPoll} />
+            {member && <PollDialogHost openRef={openPollRef} onSubmit={createPoll} />}
             {picking && (
                 <ThreadPickerDialog
                     candidates={collectRouteCandidates(org.id, space.id, stream, memberNames, spaceNames)}
@@ -1098,7 +1106,7 @@ export function GeneralStream({
                     chips={tagChips}
                 />
             )}
-            <Composer
+            {member ? <Composer
                 placeholder={`Message ${space.name} — @rowboat to ask your agent`}
                 busy={routing}
                 draftKey={memoryKey}
@@ -1117,7 +1125,7 @@ export function GeneralStream({
                 autoRoute={jev ? { mode: autoRouteMode, onToggle: toggleAutoRoute, onModeChange: setAutoRouteMode } : undefined}
                 onSchedule={async (body, at) => {
                     setVerdict(null)
-                    await window.ipc.invoke('spaces:schedule', {
+                    await invokeSpace('spaces:schedule', {
                         orgId: org.id, spaceId: space.id, body, at: at.toISOString(), kind: 'message',
                     })
                     toast(`Scheduled — sends ${formatScheduleTime(at)}`, 'success')
@@ -1131,7 +1139,7 @@ export function GeneralStream({
                         hint: 'Copy an invite link to this space',
                         run: async () => {
                             try {
-                                const result = await window.ipc.invoke('spaces:createInvite', { orgId: org.id, spaceId: space.id })
+                                const result = await invokeSpace('spaces:createInvite', { orgId: org.id, spaceId: space.id })
                                 await navigator.clipboard.writeText(result.link)
                                 analytics.spacesInviteLinkCopied()
                                 toast('Invite link copied to clipboard', 'success')
@@ -1186,7 +1194,7 @@ export function GeneralStream({
                                 return
                             }
                             try {
-                                await window.ipc.invoke('spaces:schedule', {
+                                await invokeSpace('spaces:schedule', {
                                     orgId: org.id, spaceId: space.id, body: parsed.text, at: parsed.at.toISOString(), kind: 'reminder',
                                 })
                                 toast(`Reminder set for ${formatScheduleTime(parsed.at)}`, 'success')
@@ -1206,7 +1214,7 @@ export function GeneralStream({
                         },
                     },
                 ]}
-            />
+            /> : <JoinSpacePrompt />}
         </section>
     )
 }
