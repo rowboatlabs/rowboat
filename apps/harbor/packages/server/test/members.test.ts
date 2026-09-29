@@ -3,9 +3,9 @@ import type { Member } from '@rowboat/spaces-protocol';
 import type { RunningHarbor } from '../src/server.js';
 import { restClient, startTestHarbor } from './helpers.js';
 
-// GET /v1/members (2026-09-09): the org roster as THIS member may see it — the
-// union of every roster they belong to, DMs included, deduped, sorted by
-// display name. Discovery is bounded by shared membership: no directory.
+// GET /v1/members: the org roster — every member of the org, sorted by
+// display name (spec §5 answer 4; org-wide since 2026-09-29, bounded to
+// shared spaces before). The same answer for everyone in the org.
 
 let harbor: RunningHarbor;
 
@@ -48,31 +48,28 @@ describe('GET /v1/members', () => {
     await harbor.close();
   });
 
-  it('is the deduped union of every roster the caller belongs to, DMs included, sorted by display name', async () => {
+  const everyone = ['arjun', 'gagan', 'harsh', 'loner', 'ramnique'];
+
+  it('is every member of the org, sorted by display name case-insensitively', async () => {
     const r = await restClient(harbor, 'dev-ramnique').get('/v1/members');
     expect(r.status).toBe(200);
-    expect(ids(r.body.members)).toEqual(['arjun', 'gagan', 'harsh', 'ramnique']);
-    expect(r.body.members.map((m: Member) => m.displayName)).toEqual(['Arjun', 'Gagan', 'harsh', 'Ramnique']);
-    expect(ids(r.body.members)).not.toContain('loner');
+    expect(ids(r.body.members)).toEqual(everyone);
+    expect(r.body.members.map((m: Member) => m.displayName)).toEqual(['Arjun', 'Gagan', 'harsh', 'Loner', 'Ramnique']);
     // Full Member objects, the same rows listMembers serves.
     expect(r.body.members.find((m: Member) => m.id === 'harsh')).toEqual({ id: 'harsh', displayName: 'harsh', role: 'member', kind: 'human' });
   });
 
-  it('is bounded by shared membership: each member sees a different roster, always including themself', async () => {
-    expect(ids((await restClient(harbor, 'dev-harsh').get('/v1/members')).body.members)).toEqual(['arjun', 'harsh', 'ramnique']);
-    expect(ids((await restClient(harbor, 'dev-arjun').get('/v1/members')).body.members)).toEqual(['arjun', 'harsh', 'ramnique']);
-    // gagan only ever shared a DM with ramnique.
-    expect(ids((await restClient(harbor, 'dev-gagan').get('/v1/members')).body.members)).toEqual(['gagan', 'ramnique']);
-    // A member of nothing sees exactly themself.
-    expect(ids((await restClient(harbor, 'dev-loner').get('/v1/members')).body.members)).toEqual(['loner']);
+  it('is the same for everyone, whatever spaces they share — a member of nothing included', async () => {
+    for (const who of ['harsh', 'arjun', 'gagan', 'loner']) {
+      expect(ids((await restClient(harbor, `dev-${who}`).get('/v1/members')).body.members)).toEqual(everyone);
+    }
   });
 
-  it('follows membership changes: leaving a space narrows the roster', async () => {
+  it('does not narrow when someone leaves a space', async () => {
     const arjun = restClient(harbor, 'dev-arjun');
     const launch = (await arjun.get('/v1/spaces')).body.spaces.find((s: { name: string }) => s.name === 'Launch');
     await arjun.post(`/v1/spaces/${launch.id}/leave`);
-    expect(ids((await arjun.get('/v1/members')).body.members)).toEqual(['arjun']);
-    expect(ids((await restClient(harbor, 'dev-ramnique').get('/v1/members')).body.members)).toEqual(['gagan', 'harsh', 'ramnique']);
+    expect(ids((await arjun.get('/v1/members')).body.members)).toEqual(everyone);
   });
 
   it('is authenticated like every /v1 route', async () => {

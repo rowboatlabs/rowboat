@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils'
 
 // "New message": pick a person, land in the DM. Get-or-create on the org, so
 // picking someone you already talk to just opens that conversation. The
-// candidates are everyone you share a space with on this org.
+// candidates are everyone on this org (the org-wide roster, 2026-09-29).
 
 export function NewDirectDialog({ org, open, onOpenChange, onOpened }: {
     org: OrgWithSpaces
@@ -113,7 +113,7 @@ export function NewDirectDialog({ org, open, onOpenChange, onOpened }: {
                     {candidates.length === 0 ? (
                         <div className="px-2 py-6 text-center text-xs text-muted-foreground">
                             {roster.length === 0
-                                ? 'Nobody to message yet — you can DM anyone you share a space with, or yourself.'
+                                ? `Nobody else is in ${org.name} yet — you can still message yourself.`
                                 : 'No one matches.'}
                         </div>
                     ) : (

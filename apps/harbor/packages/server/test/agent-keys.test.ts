@@ -53,11 +53,11 @@ describe('adding an agent', () => {
     expect(all.map((a) => a.agent.id)).toContain(agent.id);
   });
 
-  it('puts a new agent, in no space yet, on its owner’s roster only — so the owner can add it to one', async () => {
+  it('puts a new agent, in no space yet, on the org roster — so anyone can add it to a space', async () => {
     const fresh = (await as('dev-harsh').post('/v1/agents', { displayName: 'Fresh' })).body.agent as Member;
     const roster = (token: string) => as(token).get('/v1/members').then((r) => (r.body.members as Member[]).map((m) => m.id));
     expect(await roster('dev-harsh')).toContain(fresh.id);
-    expect(await roster('dev-gagan')).not.toContain(fresh.id);
+    expect(await roster('dev-gagan')).toContain(fresh.id);
     expect((await as('dev-harsh').post(`/v1/spaces/${spaceId}/members`, { memberIds: [fresh.id], actingMode: 'direct' })).status).toBe(200);
   });
 

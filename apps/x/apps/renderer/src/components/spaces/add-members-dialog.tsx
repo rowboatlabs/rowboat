@@ -11,10 +11,9 @@ import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 
 // "Add people" (2026-09-29): any member adds existing org members, people or
-// agents, to a space they are in. The candidates are the org roster as this
-// member sees it, minus who is already here — the whole org once the org-wide
-// roster lands (Slack parity item 3). They learn of it by their sidebar; no
-// notification in v1.
+// agents, to a space they are in. The candidates are the org roster (the
+// whole org since 2026-09-29) minus who is already here. They learn of it by
+// their sidebar and the stream's join line; no notification in v1.
 
 export function AddMembersDialog({ org, space, members, open, onOpenChange }: {
     org: OrgWithSpaces
@@ -84,7 +83,7 @@ export function AddMembersDialog({ org, space, members, open, onOpenChange }: {
                 <div className="max-h-72 overflow-y-auto border-t border-border p-1.5">
                     {candidates.length === 0 ? (
                         <div className="px-2 py-6 text-center text-xs text-muted-foreground">
-                            {query.trim() ? 'No one matches.' : `Everyone you can see is already in #${space.name}.`}
+                            {query.trim() ? 'No one matches.' : `Everyone in ${org.name} is already in #${space.name}.`}
                         </div>
                     ) : (
                         candidates.map((m) => {
