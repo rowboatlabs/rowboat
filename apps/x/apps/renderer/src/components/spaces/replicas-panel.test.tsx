@@ -60,3 +60,16 @@ it('refreshes a teammate’s connection on focus and clears it on a Space switch
     expect(screen.queryByLabelText('Replicas shared agent')).toBeNull()
     expect(p.onOptions).toHaveBeenLastCalledWith(undefined)
 })
+
+it('offers Cancel for the caller’s queued requests while retaining the running task link', async () => {
+    const task = { threadRootId: 'root', status: 'running', pending: 2, url: null, cancellableMessageIds: ['queued'] }
+    invoke.mockImplementation(async (name: string) => name === 'spaces:getReplicasTask' ? { task }
+        : name === 'spaces:actOnReplicasTask' ? { task: { ...task, pending: 1, cancellableMessageIds: [] } } : config)
+    render(<ReplicasPanel {...props()} threadRootId="root" />)
+    fireEvent.click(await screen.findByText('Cancel queued request'))
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:actOnReplicasTask', {
+        orgId: 'org', spaceId: 'space', rootMessageId: 'root', operation: { action: 'cancel', messageId: 'queued' },
+    }))
+    await waitFor(() => expect(screen.queryByText('Cancel queued request')).toBeNull())
+    expect(screen.getByText('Open in Replicas').closest('a')?.getAttribute('href')).toBe('https://app.replicas.dev')
+})

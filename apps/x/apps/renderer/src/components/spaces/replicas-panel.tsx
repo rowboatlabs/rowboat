@@ -49,7 +49,7 @@ export function ReplicasPanel({ orgId, spaceId, threadRootId, onMention, onOptio
     }, [orgId, spaceId, onConnection, onOptions])
     useEffect(() => {
         setTask(null)
-        if (!threadRootId || !config?.enabled) return
+        if (!threadRootId || !config?.configured) return
         let alive = true
         const refresh = async () => {
             try {
@@ -60,7 +60,7 @@ export function ReplicasPanel({ orgId, spaceId, threadRootId, onMention, onOptio
         void refresh()
         const interval = setInterval(() => { void refresh() }, 3000)
         return () => { alive = false; clearInterval(interval) }
-    }, [orgId, spaceId, threadRootId, config?.enabled])
+    }, [orgId, spaceId, threadRootId, config?.configured])
     const run = async (fn: () => Promise<void>) => {
         setBusy(true); setError(null)
         try { await fn() } catch (e) { setError(e instanceof Error ? e.message : 'Replicas could not complete this request') }
@@ -93,12 +93,16 @@ export function ReplicasPanel({ orgId, spaceId, threadRootId, onMention, onOptio
                     setPlan(e.target.checked); onOptions({ ...(environment ? { environmentId: environment } : {}), planMode: e.target.checked })
                 }} />Plan first</label>
                 {task && <span role="status" className="text-muted-foreground">{task.status.replaceAll('_', ' ')}{task.pending > 1 ? ` · ${task.pending - 1} queued` : ''}</span>}
-                {task?.url && <a href={task.url} target="_blank" rel="noreferrer" className="flex gap-1 items-center hover:underline">Workspace <ExternalLink className="size-3" /></a>}
+                {task && <a href={task.url ?? 'https://app.replicas.dev'} target="_blank" rel="noreferrer" className="flex gap-1 items-center hover:underline">Open in Replicas <ExternalLink className="size-3" /></a>}
                 {task && <button type="button" onClick={() => setForking(v => !v)} className="hover:underline">Fork task</button>}
             </> : <span className="text-muted-foreground">{config.canConfigure ? 'Connect a shared coding agent' : 'An admin can connect this Space'}</span>}
             {config.canConfigure && <button type="button" className="ml-auto hover:underline" onClick={() => setSettings(v => !v)}>Settings</button>}
         </div>
-        {task?.status === 'select_environment' && <button type="button" disabled={!environment || busy} className="mt-2 underline disabled:opacity-50" onClick={() => void act({ action: 'select_environment', environmentId: environment })}>Start in selected environment</button>}
+        {task?.cancellableMessageIds?.map((messageId, index) => <button key={messageId} type="button" disabled={busy} className="mt-2 mr-3 underline disabled:opacity-50"
+            onClick={() => void act({ action: 'cancel', messageId })}>
+            {task.cancellableMessageIds.length === 1 ? 'Cancel queued request' : `Cancel queued request ${index + 1}`}
+        </button>)}
+        {task?.status === 'select_environment'  && <button type="button" disabled={!environment || busy} className="mt-2 underline disabled:opacity-50" onClick={() => void act({ action: 'select_environment', environmentId: environment })}>Start in selected environment</button>}
         {task?.status === 'error' && <button type="button" disabled={busy} className="mt-2 underline" onClick={() => void act({ action: 'retry' })}>Retry request</button>}
         {task?.error && <p role="status" className="mt-2 text-amber-600">{task.error}</p>}
         {(task?.status === 'uncertain' || task?.status === 'error') && <div className="mt-2 flex gap-2 flex-wrap">
@@ -111,7 +115,7 @@ export function ReplicasPanel({ orgId, spaceId, threadRootId, onMention, onOptio
             <button type="button" disabled={busy || !forkText.trim()} onClick={() => void act({ action: 'fork', messageId: threadRootId!, body: forkText.trim() })}>Start separate task</button>
         </div>}
         {settings && <div className="mt-3 space-y-2 rounded border p-3">
-            <p>Everyone in this Space can start and steer work using this Replicas account. Usage is billed to that account. Work continues when Rowboat is closed.</p>
+            <p>Everyone in this Space can start and steer work using this Replicas account. Usage is billed to that account. Work continues when Rowboat is closed. Use an org API key. Replacing it updates the same agent across all connected Spaces; disconnecting pauses only this Space.</p>
             <input type="password" autoComplete="off" aria-label="Replicas API key" placeholder={config.configured ? 'New API key (optional)' : 'Replicas API key'} className="w-full rounded border bg-background px-2 py-1.5" value={key} onChange={e => setKey(e.target.value)} />
             <div className="flex gap-3">
                 <button type="button" disabled={busy || (!key && !config.configured)} onClick={() => void run(async () => {

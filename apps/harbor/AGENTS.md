@@ -25,7 +25,7 @@ Two pnpm workspace packages under `packages/`:
 | `runtime.ts` | `buildOrgRuntime` — the one assembly of an org |
 | `server.ts`, `main.ts` | `startHarbor` (one org) and the dev seed; the binary (dev, or `HARBOR_MODE=deployment`) |
 | `deployment.ts`, `directory.ts`, `apex.ts` | many orgs from one process: host → org runtime; the org directory; the apex face (create org, my orgs) |
-| `replicas/` | the shared cloud coding connection, encrypted credentials, durable per-thread queue, public API adapter, and background result delivery; [setup](./REPLICAS.md) |
+| `replicas/` | the org’s Replicas agent/credential, per-(agent, Space) defaults, durable per-thread queue, public API adapter, and background result delivery (PR #1130, 2026-09-29); [setup](./REPLICAS.md) |
 | `notify.ts`, `push.ts` | the one notification decision; Expo delivery |
 | `hub.ts`, `blobs*.ts`, `mime.ts`, `merge.ts`, `search.ts`, `mentions-backfill.ts` | in-process fan-out, blob drivers, sniffing, the three-way merge, query parsing, the mentions backfill |
 | `stats.ts`, `internal.ts` | the live-load counters (connections, subscriptions, frames per minute by kind, deliveries) and the operator face that reads them, `GET /internal/stats` behind `HARBOR_INTERNAL_KEY` |
@@ -41,7 +41,7 @@ Two pnpm workspace packages under `packages/`:
 - **The log is append-only, with two named exceptions.** Message deletion and message editing redact the stored event, because replay must never resurrect the text. Nothing else edits a stored event.
 - **Migrations are append-only.** One concern per entry, never edit an applied one, arbitrary SQL is fine from 002. Generated columns belong to Postgres; code never writes them.
 - **One store driver.** Tests and `pnpm dev` run the production SQL on PGlite. Do not add an in-memory store.
-- **Parity.** Every member operation exists on both the render face and the agent face; `reason` is required on the agent face's file operations. `mcp-parity.test.ts` is where a new tool proves itself.
+- **Parity.** Every member operation exists on both the render face and the agent face; `reason` is required on the agent face's file operations. `mcp-parity.test.ts` is where a new tool proves itself. Replicas key entry is the explicit exception (PR #1130, 2026-09-29): Settings/REST only, never an MCP argument that would reach a model provider or transcript.
 - **Attribution is universal.** Every act is a member's, built by `k.attributionOf(ctx, input)`; `actingMode` records how, never who else. Author-only checks compare member ids, not modes: a member's agent counts as the member.
 - **Org-scoped everything.** Member ids are org-scoped and every member-keyed table carries `org_id`; space ids are global ULIDs, so space-keyed tables need no org column and one hub serves every org.
 - **Bytes-derived facts are the org's.** Mime, image dimensions, hashes — computed from the bytes at upload; a client's claim is a fallback, never a fact.

@@ -3,6 +3,8 @@ import type { Membership, Message, Space } from '@rowboat/spaces-protocol';
 import { HarborError } from '../src/errors.js';
 import {
   canConfigureReplicas,
+  canInvokeReplicas,
+  canCancelReplicasRequest,
   canAccessSpace,
   canReadSpace,
   canJoinSpace,
@@ -25,6 +27,14 @@ const membership: Membership = { spaceId: 'S', memberId: 'a', joinedAt: NOW };
 const byA = { author: { memberId: 'a', actingMode: 'direct' } } as Message;
 
 describe('policy', () => {
+  it('invoking Replicas requires a shared Space; a DM alone is insufficient', () => {
+    expect(canInvokeReplicas(true)).toBeNull();
+    expect(canInvokeReplicas(false)?.code).toBe('forbidden');
+  });
+  it('only the requester can cancel queued Replicas work', () => {
+    expect(canCancelReplicasRequest('ic', 'ic')).toBeNull();
+    expect(canCancelReplicasRequest('tl', 'ic')?.code).toBe('forbidden');
+  });
   it('only admins can share a Replicas connection', () => {
     expect(canConfigureReplicas({ role: 'admin' })).toBeNull();
     expect(canConfigureReplicas({ role: 'member' })?.code).toBe('forbidden');

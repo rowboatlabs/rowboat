@@ -624,8 +624,8 @@ export const getReplicasConfig = tool({
   input: z.object({ spaceId: SpaceId }), output: ReplicasConfigView,
 });
 export const configureReplicas = tool({
-  name: 'configure_replicas', description: 'Admin only: connect a paid Replicas account for all members of this Space, change defaults, or disconnect. The account credential is encrypted on Harbor.',
-  input: ReplicasConfigInput.extend({ spaceId: SpaceId }), output: ReplicasConfigView,
+  name: 'configure_replicas', description: 'Admin only: enable an existing Replicas agent in this Space, change defaults, or disconnect. Enter or replace the org API key only in Settings, never in tool arguments.',
+  input: ReplicasConfigInput.omit({ apiKey: true }).extend({ spaceId: SpaceId }).strict(), output: ReplicasConfigView,
 });
 export const getReplicasTask = tool({
   name: 'get_replicas_task', description: 'Read the shared coding workspace and chat for a thread, including queued work and errors.',

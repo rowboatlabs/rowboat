@@ -3,6 +3,8 @@ import { agentClient, callStructured, restClient, startTestHarbor, freshStore } 
 import { startHarbor, type RunningHarbor } from '../src/server.js';
 import type { ReplicasApi } from '../src/replicas/api.js';
 import { summarizeConversation } from '../src/replicas/api.js';
+import { PgStore } from '../src/pg-store.js';
+import { seal, unseal } from '../src/replicas/credentials.js';
 import { blobHash } from '../src/blobs.js';
 
 let harbor: RunningHarbor;
@@ -64,6 +66,138 @@ describe('shared Replicas threads', () => {
     expect(api.create).toHaveBeenCalledTimes(1);
     expect(api.send).toHaveBeenLastCalledWith('workspace-1', 'chat-1', expect.stringContaining('Engineer: @Replicas Apply the feedback'), false, []);
   });
+  it('creates one agent per org across concurrent Space setup and keeps Space defaults separate', async () => {
+    const others = await Promise.all(['Backend', 'Frontend'].map(name => admin.post('/v1/spaces', { name })));
+    const configs = await Promise.all(others.map((r, i) => admin.post(`/v1/spaces/${r.body.space.id}/replicas`, { enabled: true, environmentId: i ? null : 'env', codingAgent: 'codex' })));
+    expect(configs.map(c => c.status)).toEqual([200, 200]);
+    expect(configs.map(c => c.body.botMemberId)).toEqual([bot, bot]);
+    expect((await harbor.store.listAllMembers()).filter(m => m.kind === 'agent')).toEqual([
+      { id: bot, displayName: 'Replicas', role: 'member', kind: 'agent' },
+    ]);
+    expect(await harbor.store.getMembership(others[0]!.body.space.id, bot)).toBeDefined();
+    expect((await admin.get(`/v1/spaces/${space}/replicas`)).body.codingAgent).toBe('codex');
+    expect((await admin.get(`/v1/spaces/${others[1]!.body.space.id}/replicas`)).body.environmentId).toBeNull();
+    expect((await admin.get(`/v1/spaces/${space}/replicas`)).body.environmentId).toBe('env');
+    const connection = (await harbor.store.getReplicasConnection())!;
+    expect(unseal(connection.sealedKey, harbor.store.orgId, bot)).toBe('test-secret');
+    expect(() => unseal(connection.sealedKey, harbor.store.orgId, space)).toThrow();
+  });
+  it('serializes first-time setup across Spaces without creating orphan agents', async () => {
+    const other = await startTestHarbor({ ...seed, replicasApiFactory: () => api });
+    try {
+      const client = restClient(other, 'dev-tl');
+      const first = (await client.get('/v1/spaces')).body.spaces[0].id;
+      const second = (await client.post('/v1/spaces', { name: 'Another' })).body.space.id;
+      const results = await Promise.all([first, second].map(id => client.post(`/v1/spaces/${id}/replicas`, { enabled: true, apiKey: 'org-key' })));
+      expect(results.map(r => r.status)).toEqual([200, 200]);
+      expect(results[0]!.body.botMemberId).toBe(results[1]!.body.botMemberId);
+      expect((await other.store.listAllMembers()).filter(m => m.kind === 'agent')).toHaveLength(1);
+    } finally { await other.close(); }
+  });
+  it('keeps Replicas credentials and defaults isolated across orgs', async () => {
+    const { db, store } = await freshStore();
+    try {
+      const other = new PgStore(db, 'other-org');
+      for (const org of [store, other]) await org.putMember({ id: 'same-agent-id', displayName: 'Replicas', kind: 'agent', role: 'member' });
+      await store.putReplicasConnection({ botMemberId: 'same-agent-id', sealedKey: seal('secret', store.orgId, 'same-agent-id'), configuredBy: 'tl', codingAgent: 'claude' });
+      expect(await other.getReplicasConnection()).toBeUndefined();
+      const sealed = (await store.getReplicasConnection())!.sealedKey;
+      expect(() => unseal(sealed, other.orgId, 'same-agent-id')).toThrow();
+    } finally { await db.close(); }
+  });
+  it('includes requester attribution and the canonical thread link on each upstream request', async () => {
+    const root = await post(ic, `${mention()} Implement`);
+    await harbor.service.replicas.tick();
+    const link = `https://${harbor.service.org.address}/s/${space}/m/${root.id}`;
+    expect(vi.mocked(api.create).mock.calls[0]![0].message).toContain(`Requested by Engineer, ${link}`);
+    completed = true;
+    await harbor.service.replicas.tick();
+    await post(admin, `${mention()} Update the PR`, root.id);
+    await harbor.service.replicas.tick();
+    expect(vi.mocked(api.send).mock.calls[0]![2]).toContain(`Requested by Team Lead, ${link}`);
+  });
+  it('allows DM invocation through any shared Space and uses no shared-Space environment default', async () => {
+    const other = (await admin.post('/v1/spaces', { name: 'Other' })).body.space.id;
+    await admin.post(`/v1/spaces/${other}/replicas`, { enabled: true });
+    const invite = await admin.post('/v1/invites', { spaceId: other });
+    await ic.post('/v1/invites/accept', { token: invite.body.token });
+    await ic.post(`/v1/spaces/${space}/leave`);
+    vi.mocked(api.environments).mockResolvedValue([{ id: 'env', name: 'App' }, { id: 'other', name: 'Other' }]);
+    const sid = (await ic.post('/v1/direct', { memberId: bot })).body.space.id;
+    const result = await ic.post(`/v1/spaces/${sid}/messages`, { body: 'Investigate', actingMode: 'direct' });
+    expect(result.status).toBe(200);
+    await harbor.service.replicas.tick();
+    expect(api.create).not.toHaveBeenCalled();
+    expect((await ic.get(`/v1/spaces/${sid}/threads/${result.body.message.id}/replicas`)).body.task.status).toBe('select_environment');
+  });
+  it('refuses a DM without a shared Space and rechecks queued DM spending rights after leaving', async () => {
+    const outsider = restClient(harbor, 'dev-outsider');
+    const sid = (await outsider.post('/v1/direct', { memberId: bot })).body.space.id;
+    expect((await outsider.post(`/v1/spaces/${sid}/messages`, { body: 'Spend', actingMode: 'direct' })).status).toBe(403);
+    const dm = (await ic.post('/v1/direct', { memberId: bot })).body.space.id;
+    expect((await ic.post(`/v1/spaces/${dm}/messages`, { body: 'Implement', actingMode: 'direct' })).status).toBe(200);
+    await ic.post(`/v1/spaces/${space}/leave`);
+    await harbor.service.replicas.tick();
+    expect(api.create).not.toHaveBeenCalled();
+    expect((await ic.post(`/v1/spaces/${dm}/messages`, { body: 'Still spend', actingMode: 'direct' })).status).toBe(403);
+  });
+  it('cancels only the requester’s queued work and never cancels a running request', async () => {
+    const root = await post(ic, `${mention()} Implement`);
+    expect((await task(root.id)).cancellableMessageIds).toEqual([root.id]);
+    const cancel = { action: 'cancel', messageId: root.id };
+    expect((await admin.post(`/v1/spaces/${space}/threads/${root.id}/replicas`, cancel)).status).toBe(403);
+    expect((await ic.post(`/v1/spaces/${space}/threads/${root.id}/replicas`, cancel)).status).toBe(200);
+    expect((await task(root.id)).pending).toBe(0);
+    await harbor.service.replicas.tick();
+    expect(api.create).not.toHaveBeenCalled();
+    const reply = await post(ic, `${mention()} Proceed`, root.id);
+    await harbor.service.replicas.tick();
+    expect((await ic.post(`/v1/spaces/${space}/threads/${root.id}/replicas`, { action: 'cancel', messageId: reply.id })).status).toBe(400);
+    const queued = await post(ic, `${mention()} Extra`, root.id);
+    expect((await ic.post(`/v1/spaces/${space}/threads/${root.id}/replicas`, { action: 'cancel', messageId: queued.id })).status).toBe(200);
+    completed = true;
+    await harbor.service.replicas.tick();
+    await harbor.service.replicas.tick();
+    expect(api.send).not.toHaveBeenCalled();
+  });
+  it('allows queued work to be cancelled while the Space connection is disabled', async () => {
+    const root = await post(ic, `${mention()} Implement`);
+    await admin.post(`/v1/spaces/${space}/replicas`, { enabled: false });
+    expect((await ic.post(`/v1/spaces/${space}/threads/${root.id}/replicas`, { action: 'cancel', messageId: root.id })).status).toBe(200);
+    await admin.post(`/v1/spaces/${space}/replicas`, { enabled: true });
+    await harbor.service.replicas.tick();
+    expect(api.create).not.toHaveBeenCalled();
+  });
+  it.each([1, 2])('does not revive cancelled work when an in-flight lookup returns %i environments', async (count) => {
+    await admin.post(`/v1/spaces/${space}/replicas`, { enabled: true, environmentId: null });
+    const root = await post(ic, `${mention()} Implement`);
+    let release!: () => void;
+    let entered!: () => void;
+    const ready = new Promise<void>(resolve => { entered = resolve; });
+    vi.mocked(api.environments).mockImplementationOnce(async () => {
+      entered(); await new Promise<void>(resolve => { release = resolve; });
+      return Array.from({ length: count }, (_, i) => ({ id: `env-${i}`, name: `App ${i}` }));
+    });
+    const tick = harbor.service.replicas.tick();
+    await ready;
+    try { expect((await ic.post(`/v1/spaces/${space}/threads/${root.id}/replicas`, { action: 'cancel', messageId: root.id })).status).toBe(200); }
+    finally { release(); await tick; }
+    expect(api.create).not.toHaveBeenCalled();
+    expect((await task(root.id)).status).toBe('idle');
+  });
+  it('keeps credentials out of the agent tool schema and rejects key-bearing tool calls', async () => {
+    const agent = await agentClient(harbor, 'dev-tl');
+    try {
+      const tool = (await agent.listTools()).tools.find(t => t.name === 'configure_replicas')!;
+      expect(tool.inputSchema.properties).not.toHaveProperty('apiKey');
+      const result = await agent.callTool({ name: 'configure_replicas', arguments: { spaceId: space, enabled: true, apiKey: 'must-not-be-saved' } });
+      expect(result.isError).toBe(true);
+      const connection = (await harbor.store.getReplicasConnection())!;
+      expect(unseal(connection.sealedKey, harbor.store.orgId, bot)).toBe('test-secret');
+      const config = await callStructured<{ enabled: boolean }>(agent, 'configure_replicas', { spaceId: space, enabled: false });
+      expect(config.enabled).toBe(false);
+    } finally { await agent.close(); }
+  });
   it('serializes simultaneous follow-ups without duplicate workspaces', async () => {
     const root = await post(ic, `${mention()} Implement feature`);
     await Promise.all([post(ic, `${mention()} Also test it`, root.id), post(admin, `${mention()} Explain your approach`, root.id)]);
@@ -105,7 +239,7 @@ describe('shared Replicas threads', () => {
     expect((await ic.post(`/v1/spaces/${space}/replicas`, { enabled: false })).status).toBe(403);
     const config = await ic.get(`/v1/spaces/${space}/replicas`);
     expect(JSON.stringify(config.body)).not.toContain('test-secret');
-    expect(JSON.stringify(await harbor.store.getReplicasConnection(space))).not.toContain('test-secret');
+    expect(JSON.stringify(await harbor.store.getReplicasConnection())).not.toContain('test-secret');
     const root = await post(ic, `${mention()} Implement`);
     const outsider = restClient(harbor, 'dev-outsider');
     expect((await outsider.get(`/v1/spaces/${space}/threads/${root.id}/replicas`)).status).toBe(403);

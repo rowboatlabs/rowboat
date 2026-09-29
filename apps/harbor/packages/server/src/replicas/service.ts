@@ -1,19 +1,20 @@
 import type { Message, ReplicasConfigInput, ReplicasConfigView, ReplicasTask, ReplicasThreadAction } from '@rowboat/spaces-protocol';
-import { mentionsAsText } from '@rowboat/spaces-protocol';
+import { mentionsAsText, messageUrl } from '@rowboat/spaces-protocol';
 import type { Kernel, ActorCtx } from '../core/kernel.js';
+import type { Spaces } from '../core/spaces.js';
 import type { Feed, NewMessage } from '../core/feed.js';
 import { HarborError } from '../errors.js';
-import { canConfigureReplicas, enforce } from '../policy.js';
+import { canConfigureReplicas, canInvokeReplicas, canCancelReplicasRequest, enforce } from '../policy.js';
 import type { BlobStore } from '../blobs.js';
 import { RemoteError, replicasApi, type ReplicasImage, type ReplicasApi } from './api.js';
 import { seal, unseal } from './credentials.js';
-import type { ReplicasConnection, ReplicasTaskRecord } from './types.js';
+import type { ReplicasConnection, ResolvedReplicasConnection, ReplicasTaskRecord } from './types.js';
 
 export class Replicas {
   private timer?: ReturnType<typeof setInterval>;
   private running: Promise<void> | null = null;
   private stopped = false;
-  constructor(private readonly k: Kernel, private readonly feed: Feed, private readonly apiFactory: (key: string) => ReplicasApi = replicasApi, private readonly blobs?: BlobStore) {}
+  constructor(private readonly k: Kernel, private readonly feed: Feed, private readonly spaces: Spaces, private readonly apiFactory: (key: string) => ReplicasApi = replicasApi, private readonly blobs?: BlobStore) {}
 
   start(): void {
     this.timer = setInterval(() => { void this.tick().catch(() => console.error('[replicas] background scan failed')); }, 3000);
@@ -25,28 +26,27 @@ export class Replicas {
     if (this.timer) clearInterval(this.timer);
     await this.running;
   }
-  private api(spaceId: string, connection: ReplicasConnection): ReplicasApi {
-    return this.apiFactory(unseal(connection.sealedKey, connection.sourceSpaceId ?? spaceId));
+  private api(connection: ReplicasConnection): ReplicasApi {
+    return this.apiFactory(unseal(connection.sealedKey, this.k.store.orgId, connection.botMemberId));
   }
-  private async connection(spaceId: string): Promise<ReplicasConnection | undefined> {
-    const own = await this.k.store.getReplicasConnection(spaceId);
-    if (own) return own;
+  private async connection(spaceId: string): Promise<ResolvedReplicasConnection | undefined> {
+    const connection = await this.k.store.getReplicasConnection();
+    if (!connection || !await this.k.store.getMembership(spaceId, connection.botMemberId)) return undefined;
     const space = await this.k.store.getSpace(spaceId);
-    if (space?.kind !== 'direct') return undefined;
-    for (const participant of space.participants ?? []) {
-      const source = await this.k.store.findReplicasConnection(participant);
-      if (!source) continue;
-      // A bot DM inherits its Space connection only for members who can already use it (2026-09-28).
-      for (const memberId of space.participants ?? []) {
-        if (!await this.k.store.getMembership(source.spaceId, memberId)) return undefined;
-      }
-      return { ...source.connection, sourceSpaceId: source.spaceId };
-    }
-    return undefined;
+    if (space?.kind === 'direct') return { ...connection, enabled: true, environmentId: null };
+    const config = await this.k.store.getReplicasSpaceConfig(spaceId, connection.botMemberId);
+    return { ...connection, enabled: config?.enabled ?? true, environmentId: config?.environmentId ?? null };
   }
-  private view(task: ReplicasTaskRecord): ReplicasTask {
+  private async invocationDecision(memberId: string, botMemberId: string) {
+    const spaces = await this.k.store.listSpacesFor(memberId);
+    for (const space of spaces) {
+      if (space.kind === 'shared' && await this.k.store.getMembership(space.id, botMemberId)) return canInvokeReplicas(true);
+    }
+    return canInvokeReplicas(false);
+  }
+  private view(task: ReplicasTaskRecord, memberId: string): ReplicasTask {
     const { queue, active, deliveredOffset: _offset, forkContext: _context, notice: _notice, ...view } = task;
-    return { ...view, pending: queue.length + (active ? 1 : 0) };
+    return { ...view, pending: queue.length + (active ? 1 : 0), cancellableMessageIds: queue.filter(q => q.memberId === memberId).map(q => q.messageId) };
   }
   private fresh(spaceId: string, root: string, env: string | null): ReplicasTaskRecord {
     return { spaceId, threadRootId: root, workspaceId: null, chatId: null, url: null, environmentId: env,
@@ -54,16 +54,18 @@ export class Replicas {
   }
   async config(ctx: ActorCtx, spaceId: string): Promise<ReplicasConfigView> {
     await this.k.requireMember(ctx, spaceId);
-    const c = await this.connection(spaceId);
+    let c = await this.connection(spaceId);
+    if (c && await this.invocationDecision(ctx.memberId, c.botMemberId)) c = undefined;
+    const orgConnection = await this.k.store.getReplicasConnection();
     const canConfigure = (await this.k.store.getSpace(spaceId))?.kind === 'shared' && canConfigureReplicas(await this.k.store.getMember(ctx.memberId)) === null;
     let environments: Array<{ id: string; name: string }> = [];
     let error: string | null = null;
     if (c?.enabled) {
-      try { environments = await this.api(spaceId, c).environments(); }
+      try { environments = await this.api(c).environments(); }
       catch { error = 'Replicas could not be reached. An admin can check or replace the connection below.'; }
     }
-    return { direct: !!c?.sourceSpaceId, error, enabled: c?.enabled ?? false, configured: !!c?.sealedKey, canConfigure, botMemberId: c?.botMemberId ?? null,
-      environmentId: c?.environmentId ?? null, codingAgent: c?.codingAgent ?? 'claude',
+    return { direct: (await this.k.store.getSpace(spaceId))?.kind === 'direct', error, enabled: c?.enabled ?? false, configured: !!(c?.sealedKey || (canConfigure && orgConnection?.sealedKey)), canConfigure, botMemberId: c?.botMemberId ?? null,
+      environmentId: c?.environmentId ?? null, codingAgent: c?.codingAgent ?? (canConfigure ? orgConnection?.codingAgent : undefined) ?? 'claude',
       environments };
   }
   async configure(ctx: ActorCtx, spaceId: string, input: ReplicasConfigInput): Promise<ReplicasConfigView> {
@@ -71,26 +73,27 @@ export class Replicas {
     enforce(canConfigureReplicas(await this.k.store.getMember(ctx.memberId)));
     this.k.guardWrite();
     if (space.kind !== 'shared') throw new HarborError('invalid_request', 'Connect Replicas in a shared Space.');
-    const previous = await this.k.store.getReplicasConnection(spaceId);
-    const sealedKey = input.apiKey ? seal(input.apiKey, spaceId) : previous?.sealedKey;
-    if (!sealedKey) throw new HarborError('invalid_request', 'A Replicas API key is required.');
-    const environments = input.enabled ? await this.apiFactory(unseal(sealedKey, spaceId)).environments() : [];
+    const previous = await this.k.store.getReplicasConnection();
+    if (!input.apiKey && !previous) throw new HarborError('invalid_request', 'A Replicas org API key is required in Settings.');
+    const environments = input.enabled || input.apiKey
+      ? await (input.apiKey ? this.apiFactory(input.apiKey) : this.api(previous!)).environments() : [];
     if (input.enabled && input.environmentId && !environments.some(e => e.id === input.environmentId)) throw new HarborError('invalid_request', 'That environment is not available to this connection.');
     await this.k.lockedAs(ctx, spaceId, async () => {
+      await this.k.store.lockReplicasConnection();
       enforce(canConfigureReplicas(await this.k.store.getMember(ctx.memberId)));
-      const current = await this.k.store.getReplicasConnection(spaceId);
-      const botMemberId = current?.botMemberId ?? this.k.ulid();
-      if (!current) {
-        await this.k.store.putMember({ id: botMemberId, displayName: 'Replicas', role: 'member' });
+      const current = await this.k.store.getReplicasConnection();
+      const botMemberId = current?.botMemberId ?? (await this.spaces.createAgent({ displayName: 'Replicas' })).id;
+      const sealedKey = input.apiKey ? seal(input.apiKey, this.k.store.orgId, botMemberId) : current!.sealedKey;
+      if (!await this.k.store.getMembership(spaceId, botMemberId)) {
         const membership = { spaceId, memberId: botMemberId, joinedAt: this.k.now() };
         await this.k.store.putMembership(membership);
         await this.k.appendNext(spaceId, membership.joinedAt, { type: 'membership', membership, action: 'joined' });
       }
-      await this.k.store.putReplicasConnection(spaceId, {
-        enabled: input.enabled, sealedKey, botMemberId, configuredBy: ctx.memberId,
-        environmentId: input.environmentId !== undefined ? input.environmentId : current?.environmentId ?? null,
-        codingAgent: input.codingAgent ?? current?.codingAgent ?? 'claude',
-      });
+      await this.k.store.putReplicasConnection({ sealedKey, botMemberId, configuredBy: ctx.memberId,
+        codingAgent: input.codingAgent ?? current?.codingAgent ?? 'claude' });
+      const defaults = await this.k.store.getReplicasSpaceConfig(spaceId, botMemberId);
+      await this.k.store.putReplicasSpaceConfig(spaceId, { botMemberId, enabled: input.enabled,
+        environmentId: input.environmentId !== undefined ? input.environmentId : defaults?.environmentId ?? null });
     });
     return this.config(ctx, spaceId);
   }
@@ -98,7 +101,7 @@ export class Replicas {
     await this.k.requireMember(ctx, spaceId);
     const root = await this.feed.resolveRoot(spaceId, rootId);
     const task = await this.k.store.getReplicasTask(spaceId, root.id);
-    return { task: task ? this.view(task) : null };
+    return { task: task ? this.view(task, ctx.memberId) : null };
   }
 
   // Called only inside Feed's transaction; users posting together serialize on the same binding.
@@ -112,6 +115,7 @@ export class Replicas {
     const direct = (await this.k.store.getSpace(message.spaceId))?.kind === 'direct';
     const addressed = direct || message.mentions.includes(connection.botMemberId) || !!input.replicas;
     if (!addressed) return;
+    enforce(await this.invocationDecision(message.author.memberId, connection.botMemberId));
     if (!connection.enabled) throw new HarborError('invalid_request', 'Replicas is disconnected in this Space.');
     const rootId = message.threadRoot ?? message.id;
     const task = await this.k.store.getReplicasTask(message.spaceId, rootId) ?? this.fresh(message.spaceId, rootId, input.replicas?.environmentId ?? connection.environmentId);
@@ -127,9 +131,24 @@ export class Replicas {
     await this.k.requireMember(ctx, spaceId);
     this.k.guardWrite();
     const root = await this.feed.resolveRoot(spaceId, rootId);
+    if (action.action === 'cancel') {
+      const task = await this.k.lockedAs(ctx, spaceId, async () => {
+        const current = await this.k.store.getReplicasTask(spaceId, root.id);
+        const queued = current?.queue.find(q => q.messageId === action.messageId);
+        if (!current || !queued) throw new HarborError('invalid_request', 'Only queued requests can be cancelled. Open Replicas for running work.');
+        enforce(canCancelReplicasRequest(ctx.memberId, queued.memberId));
+        current.queue = current.queue.filter(q => q.messageId !== action.messageId);
+        if (!current.active && !current.queue.length) { current.status = 'idle'; current.error = null; current.notice = null; }
+        current.updatedAt = this.k.now();
+        await this.k.store.putReplicasTask(current);
+        return current;
+      });
+      return { task: this.view(task, ctx.memberId) };
+    }
     const connection = await this.connection(spaceId);
     if (!connection?.enabled) throw new HarborError('invalid_request', 'Replicas is not connected.');
-    const api = this.api(spaceId, connection);
+    enforce(await this.invocationDecision(ctx.memberId, connection.botMemberId));
+    const api = this.api(connection);
     if (action.action === 'fork') {
       const source = await this.k.store.getReplicasTask(spaceId, root.id);
       if (!source) throw new HarborError('not_found', 'No Replicas task in this thread.');
@@ -144,7 +163,7 @@ export class Replicas {
         fork.forkContext = context;
         await this.k.store.putReplicasTask(fork);
       });
-      return { task: this.view(fork) };
+      return { task: this.view(fork, ctx.memberId) };
     }
     let attached: Awaited<ReturnType<ReplicasApi['workspace']>> | null = null;
     if (action.action === 'select_environment') {
@@ -178,7 +197,7 @@ export class Replicas {
       await this.k.store.putReplicasTask(current);
       return current;
     });
-    return { task: this.view(task) };
+    return { task: this.view(task, ctx.memberId) };
   }
 
   async tick(): Promise<void> {
@@ -193,17 +212,18 @@ export class Replicas {
     for (let i = 0; i < tasks.length && !this.stopped; i += 8) {
       await Promise.all(tasks.slice(i, i + 8).map(t => this.advance(t).catch(async () => {
         if (t.status === 'queued' || t.status === 'select_environment') {
-          await this.update(t, current => { current.status = 'error'; current.error = 'The request could not be prepared. Check the connection and attachments, then retry.'; });
+          await this.update(t, current => { if (!current.active && !current.queue.length) return false; current.status = 'error'; current.error = 'The request could not be prepared. Check the connection and attachments, then retry.'; });
         } else console.error('[replicas] task scan failed');
       })));
     }
   }
-  private async update(task: ReplicasTaskRecord, edit: (fresh: ReplicasTaskRecord) => void): Promise<void> {
-    await this.k.locked(task.spaceId, async () => {
+  private async update(task: ReplicasTaskRecord, edit: (fresh: ReplicasTaskRecord) => void | boolean): Promise<boolean> {
+    return this.k.locked(task.spaceId, async () => {
       const current = await this.k.store.getReplicasTask(task.spaceId, task.threadRootId);
-      if (!current) return;
-      edit(current); current.updatedAt = this.k.now();
+      if (!current || edit(current) === false) return false;
+      current.updatedAt = this.k.now();
       await this.k.store.putReplicasTask(current);
+      return true;
     });
   }
   private async notice(task: ReplicasTaskRecord, c: ReplicasConnection, body: string, finish = false): Promise<void> {
@@ -256,7 +276,7 @@ export class Replicas {
     if (task.status === 'idle' && !task.queue.length) return;
     const c = await this.connection(task.spaceId);
     if (!c?.enabled || !await this.k.store.getMembership(task.spaceId, c.botMemberId)) return;
-    const api = this.api(task.spaceId, c);
+    const api = this.api(c);
     if (task.status === 'sending') {
       // No documented upstream idempotency key: a crash after POST is ambiguous, not permission to spend twice.
       await this.update(task, t => { t.status = 'uncertain'; t.error = 'Delivery was interrupted. Check Replicas and attach the existing workspace and chat before continuing.'; });
@@ -297,8 +317,8 @@ export class Replicas {
     if (!task.queue.length) return;
     const next = task.queue[0]!;
     const message = await this.k.store.getMessage(task.spaceId, next.messageId);
-    if (!message || message.deletedAt || !await this.k.store.getMembership(task.spaceId, next.memberId)) {
-      await this.update(task, t => { t.queue = t.queue.filter(q => q.messageId !== next.messageId); });
+    if (!message || message.deletedAt || !await this.k.store.getMembership(task.spaceId, next.memberId) || await this.invocationDecision(next.memberId, c.botMemberId)) {
+      await this.update(task, t => { t.queue = t.queue.filter(q => q.messageId !== next.messageId); if (!t.active && !t.queue.length) { t.status = 'idle'; t.error = null; t.notice = null; } });
       return;
     }
     if (!task.workspaceId && (!task.environmentId || /\[env:[^\]]+\]/.test(message.body))) {
@@ -309,24 +329,35 @@ export class Replicas {
         task.environmentId = matches[0]!.id;
         await this.update(task, t => { t.environmentId = task.environmentId; });
       } else {
-        await this.update(task, t => { t.status = 'select_environment'; });
+        const waiting = await this.update(task, t => {
+          if (!t.queue.some(q => q.messageId === next.messageId)) return false;
+          t.status = 'select_environment';
+        });
+        if (!waiting) return;
         await this.notice(task, c, 'Choose a Replicas environment above the reply box to start this task.');
         return;
       }
     }
     const space = await this.k.store.getSpace(task.spaceId);
     const context = await this.context(task.spaceId, task.threadRootId, task.deliveredOffset, next.offset);
-    const text = `[Spaces request ${next.messageId}]\nSpace: ${space?.name}\n\n${task.forkContext ?? ''}\n${context}\n\nRespond to the latest request. Questions asking for explanation do not authorize code changes. Reply concisely for the shared thread, including verification and PR links when relevant. Do not post to Slack.`;
+    const requester = (await this.k.store.getMember(next.memberId))?.displayName ?? next.memberId;
+    const attribution = `Requested by ${requester}, ${messageUrl(this.k.org.address, task.spaceId, task.threadRootId)}`;
+    const text = `[Spaces request ${next.messageId}]\nSpace: ${space?.name}\n\n${task.forkContext ?? ''}\n${context}\n\nRespond to the latest request. Questions asking for explanation do not authorize code changes. Reply concisely for the shared thread, including verification and PR links when relevant. Include the following attribution in every PR description you create or update for this request: ${attribution}. Do not post to Slack.`;
     const images = await this.images(task.spaceId, text);
     const active = { ...next, text };
-    await this.k.lockedAs({ memberId: next.memberId }, task.spaceId, async () => {
+    const claimed = await this.k.lockedAs({ memberId: next.memberId }, task.spaceId, async () => {
       this.k.guardWrite();
       if (!(await this.connection(task.spaceId))?.enabled) throw new HarborError('invalid_request', 'Replicas was disconnected.');
+      enforce(await this.invocationDecision(next.memberId, c.botMemberId));
       const current = (await this.k.store.getReplicasTask(task.spaceId, task.threadRootId))!;
+      const latestMessage = await this.k.store.getMessage(task.spaceId, next.messageId);
+      if (!current.queue.some(q => q.messageId === next.messageId) || latestMessage?.deletedAt) return false;
       current.active = active; current.queue = current.queue.filter(q => q.messageId !== next.messageId); current.status = 'sending'; current.notice = null;
       current.updatedAt = this.k.now();
       await this.k.store.putReplicasTask(current);
+      return true;
     });
+    if (!claimed) return;
     await this.feed.reactToMessage({ memberId: c.botMemberId }, task.spaceId, next.messageId, { emoji: '👀', action: 'add', actingMode: 'agent', agentName: 'Replicas' });
     try {
       if (!task.workspaceId) {

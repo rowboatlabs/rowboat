@@ -25,10 +25,12 @@ export const ReplicasTask = z.object({
   workspaceId: z.string().nullable(), chatId: z.string().nullable(), url: z.string().nullable(),
   environmentId: z.string().nullable(),
   status: z.enum(['queued', 'select_environment', 'sending', 'running', 'idle', 'error', 'uncertain']),
+  cancellableMessageIds: z.array(MessageId),
   error: z.string().nullable(), pending: z.number().int().nonnegative(), updatedAt: z.string(),
 });
 export const ReplicasThreadAction = z.discriminatedUnion('action', [
   z.object({ action: z.literal('retry') }),
+  z.object({ action: z.literal('cancel'), messageId: MessageId }),
   z.object({ action: z.literal('select_environment'), environmentId: z.string().min(1) }),
   z.object({ action: z.literal('attach'), workspaceId: z.string().min(1), chatId: z.string().min(1) }),
   z.object({ action: z.literal('fork'), messageId: MessageId, body: z.string().min(1).max(65536) }),

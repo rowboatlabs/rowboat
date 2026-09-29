@@ -308,7 +308,8 @@ async function dispatch(
       const a = args as { spaceId: string }; return service.getReplicasConfig(ctx, a.spaceId);
     }
     case 'configure_replicas': {
-      const a = args as ReplicasConfigInput & { spaceId: string }; return service.configureReplicas(ctx, a.spaceId, a);
+      const a = args as Omit<ReplicasConfigInput, 'apiKey'> & { spaceId: string };
+      return service.configureReplicas(ctx, a.spaceId, { enabled: a.enabled, environmentId: a.environmentId, codingAgent: a.codingAgent });
     }
     case 'get_replicas_task': {
       const a = args as { spaceId: string; rootMessageId: string }; return service.getReplicasTask(ctx, a.spaceId, a.rootMessageId);

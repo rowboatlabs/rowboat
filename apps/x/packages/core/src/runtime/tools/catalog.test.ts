@@ -219,6 +219,10 @@ const HISTORICAL_KEY_ORDER = [
     "spreadsheet-create",
     "spreadsheet-edit",
     "generate-image",
+    "get_replicas_config",
+    "configure_replicas",
+    "get_replicas_task",
+    "act_on_replicas_task",
     "whoami",
     "list_members",
     "list_spaces",
@@ -353,6 +357,8 @@ describe("BuiltinTools permission audit", () => {
             // the app-owned cache.
             // The projected agent face: every org write is gated; reads
             // (whoami, list_*, read_*, search, history, diff) are "none".
+            configure_replicas: "prompt",
+            act_on_replicas_task: "prompt",
             join_space: "prompt",
             open_direct: "prompt",
             create_space: "prompt",

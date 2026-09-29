@@ -1,4 +1,4 @@
-import type { ReplicasConnection, ReplicasTaskRecord } from './replicas/types.js';
+import type { ReplicasConnection, ReplicasSpaceConfig, ReplicasTaskRecord } from './replicas/types.js';
 import type { ActivityKind, Attribution } from '@rowboat/spaces-protocol';
 import type { ActivityQuery, ActivityRow } from './store.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -245,15 +245,23 @@ export const DEFAULT_ORG_ID = 'org-default';
 
 export class PgStore implements Store {
 
-  async findReplicasConnection(botMemberId: string): Promise<{ spaceId: string; connection: ReplicasConnection } | undefined> {
-    const row = (await this.sql.query<{space_id: string; data: ReplicasConnection}>("select space_id, data from replicas_connections where org_id=$1 and data->>'botMemberId'=$2", [this.orgId, botMemberId]))[0];
-    return row ? { spaceId: row.space_id, connection: row.data } : undefined;
+  // 2026-09-29, PR #1130 review: serialize first-time setup across Spaces
+  // inside the caller's transaction so only one agent identity can be minted.
+  async lockReplicasConnection(): Promise<void> {
+    if (!this.als.getStore()) throw new Error('Replicas setup requires a transaction');
+    await this.sql.query('select pg_advisory_xact_lock(hashtext($1))', [`replicas:${this.orgId}`]);
   }
-  async getReplicasConnection(spaceId: string): Promise<ReplicasConnection | undefined> {
-    return (await this.sql.query<{data: ReplicasConnection}>('select data from replicas_connections where space_id=$1 and org_id=$2', [spaceId, this.orgId]))[0]?.data;
+  async getReplicasConnection(): Promise<ReplicasConnection | undefined> {
+    return (await this.sql.query<{data: ReplicasConnection}>('select data from replicas_connections where org_id=$1', [this.orgId]))[0]?.data;
   }
-  async putReplicasConnection(spaceId: string, connection: ReplicasConnection): Promise<void> {
-    await this.sql.query('insert into replicas_connections(space_id, org_id, data) values ($1,$2,$3) on conflict(space_id) do update set data=excluded.data where replicas_connections.org_id=excluded.org_id', [spaceId, this.orgId, JSON.stringify(connection)]);
+  async putReplicasConnection(connection: ReplicasConnection): Promise<void> {
+    await this.sql.query('insert into replicas_connections(org_id, member_id, data) values ($1,$2,$3) on conflict(org_id) do update set data=excluded.data', [this.orgId, connection.botMemberId, JSON.stringify(connection)]);
+  }
+  async getReplicasSpaceConfig(spaceId: string, memberId: string): Promise<ReplicasSpaceConfig | undefined> {
+    return (await this.sql.query<{data: ReplicasSpaceConfig}>('select data from replicas_space_config where org_id=$1 and member_id=$2 and space_id=$3', [this.orgId, memberId, spaceId]))[0]?.data;
+  }
+  async putReplicasSpaceConfig(spaceId: string, config: ReplicasSpaceConfig): Promise<void> {
+    await this.sql.query('insert into replicas_space_config(org_id, member_id, space_id, data) values ($1,$2,$3,$4) on conflict(org_id,member_id,space_id) do update set data=excluded.data', [this.orgId, config.botMemberId, spaceId, JSON.stringify(config)]);
   }
   async getReplicasTask(spaceId: string, rootId: string): Promise<ReplicasTaskRecord | undefined> {
     return (await this.sql.query<{data: ReplicasTaskRecord}>('select data from replicas_tasks where space_id=$1 and thread_root_id=$2 and org_id=$3', [spaceId, rootId, this.orgId]))[0]?.data;
@@ -275,7 +283,7 @@ export class PgStore implements Store {
    */
   constructor(
     private readonly db: SqlDb,
-    private readonly orgId: string = DEFAULT_ORG_ID,
+    readonly orgId: string = DEFAULT_ORG_ID,
   ) {}
 
   async init(): Promise<void> {

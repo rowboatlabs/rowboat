@@ -96,3 +96,13 @@ export function canBind(identity: { email?: string }, org: { allowedEmailDomains
 export function canConfigureReplicas(member: { role: string } | undefined): Decision {
   return member?.role === 'admin' ? null : { code: 'forbidden', message: 'only an organization admin can connect Replicas' };
 }
+
+// 2026-09-29, PR #1130 review: a DM alone must not grant spending rights.
+export function canInvokeReplicas(sharesSpace: boolean): Decision {
+  return sharesSpace ? null : { code: 'forbidden', message: 'you must share a Space with the Replicas agent to invoke it' };
+}
+
+// 2026-09-29, PR #1130 review: cancellation has the same author boundary as deletion.
+export function canCancelReplicasRequest(memberId: string, requesterId: string): Decision {
+  return memberId === requesterId ? null : { code: 'forbidden', message: 'only the requester can cancel queued work' };
+}

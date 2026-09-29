@@ -77,7 +77,7 @@ export class HarborService {
     this.spaces = new Spaces(this.k);
     this.assets = new Assets(this.k, blobs);
     this.feed = new Feed(this.k, this.assets, notifier);
-    this.replicas = new Replicas(this.k, this.feed, replicasApiFactory, blobs);
+    this.replicas = new Replicas(this.k, this.feed, this.spaces, replicasApiFactory, blobs);
     this.feed.onPosted = (message, input) => this.replicas.enqueue(message, input);
     this.readState = new ReadState(this.k, this.spaces, this.feed);
   }

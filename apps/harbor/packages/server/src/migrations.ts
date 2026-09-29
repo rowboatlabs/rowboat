@@ -707,7 +707,10 @@ export const MIGRATIONS: Migration[] = [
   {
     id: '025-replicas-threads',
     statements: [
-      `create table replicas_connections (space_id text primary key references spaces(id), org_id text not null, data jsonb not null)`,
+      `create table replicas_connections (org_id text primary key, member_id text not null, data jsonb not null,
+        unique (org_id, member_id), foreign key (org_id, member_id) references members(org_id, id))`,
+      `create table replicas_space_config (org_id text not null, member_id text not null, space_id text not null references spaces(id), data jsonb not null,
+        primary key (org_id, member_id, space_id), foreign key (org_id, member_id) references replicas_connections(org_id, member_id))`,
       `create table replicas_tasks (space_id text not null references spaces(id), thread_root_id text not null,
         org_id text not null, data jsonb not null, primary key (space_id, thread_root_id))`,
       `create index replicas_tasks_org on replicas_tasks(org_id)`,
