@@ -173,6 +173,67 @@ const nodeNames = (e: Editor) => e.state.doc.content.content.map((n) => n.type.n
 /** Keystrokes at the caret. (Any transaction lets StarterKit's TrailingNode add its empty paragraph after a trailing block.) */
 const type = (e: Editor, text: string) => e.view.dispatch(e.state.tr.insertText(text))
 
+describe('formatting boundaries', () => {
+    it.each(['text', 'html'])('typing after a pasted %s link stays outside the link', (format) => {
+        const e = makeEditor('')
+        e.commands.focus('end')
+        if (format === 'text') e.view.pasteText('https://example.com', pasteEvent())
+        else e.view.pasteHTML('<a href="https://example.com">docs</a>', pasteEvent())
+        type(e, ' normal text')
+        expect(e.state.doc.firstChild!.lastChild!.marks).toEqual([])
+        expect(e.view.dom.querySelector('a')?.textContent).toBe(format === 'text' ? 'https://example.com' : 'docs')
+    })
+
+    it('editing inside a link preserves its formatting', () => {
+        const e = makeEditor('[docs](https://example.com)')
+        e.commands.setTextSelection(3)
+        type(e, 'X')
+        expect(composerMarkdown(e)).toBe('[doXcs](https://example.com)')
+    })
+
+    it('opens an empty code block after prose and allows prose after it', () => {
+        const e = makeEditor('intro')
+        e.chain().focus('end').toggleCodeBlock().run()
+        type(e, 'code')
+        e.commands.exitCode()
+        type(e, 'after')
+        expect(composerMarkdown(e)).toBe('intro\n\n```\ncode\n```\n\nafter')
+    })
+
+    it('formats only the current line after Shift+Enter', () => {
+        const e = makeEditor('intro')
+        e.chain().focus('end').setHardBreak().run()
+        type(e, 'code')
+        e.commands.toggleCodeBlock()
+        expect(composerMarkdown(e)).toBe('intro\n\n```\ncode\n```')
+        e.commands.toggleCodeBlock()
+        expect(composerMarkdown(e)).toBe('intro\n\ncode')
+    })
+
+    it('opens an empty code block on a blank line after Shift+Enter', () => {
+        const e = makeEditor('intro')
+        e.chain().focus('end').setHardBreak().toggleCodeBlock().run()
+        type(e, 'code')
+        expect(composerMarkdown(e)).toBe('intro\n\n```\ncode\n```')
+    })
+
+    it('the code block shortcut preserves prose above and below the current line', () => {
+        const e = makeEditor('**intro**\ncode\n*after*')
+        e.commands.setTextSelection(9)
+        e.commands.keyboardShortcut('Mod-Alt-Shift-c')
+        expect(composerMarkdown(e)).toBe('**intro**\n\n```\ncode\n```\n\n*after*')
+    })
+
+    it('converts selected text while preserving surrounding prose', () => {
+        const e = makeEditor('intro\ncode\nafter')
+        e.commands.setTextSelection({ from: 7, to: 11 })
+        e.commands.toggleCodeBlock()
+        expect(composerMarkdown(e)).toBe('intro\n\n```\ncode\n```\n\nafter')
+        e.commands.undo()
+        expect(composerMarkdown(e)).toBe('intro\ncode\nafter')
+    })
+})
+
 describe('fenced code', () => {
     it('a plain-text paste with a fence becomes a code block — lines, blank lines and the language kept, the prose around it literal', () => {
         const e = makeEditor('')
