@@ -1,4 +1,6 @@
-import { ReplicasPanel, type SharedReplicasOptions } from './replicas-panel'
+import { ReplicasComposerOptions, type SharedReplicasOptions } from './replicas-panel'
+import { useReplicasConfig } from './use-replicas-config'
+import { ReplicasLogo } from './replicas-logo'
 import { SearchMenu } from '@/components/search-menu'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
@@ -102,9 +104,8 @@ async function formatTranscript(raw: string): Promise<string> {
     }
 }
 
-export function Composer({ threadRootId, placeholder, onSend, onSchedule, onCreatePoll, busy, autoFocus, onType, seed, draftKey, commands = [], autoRoute, submit, onDraftChange, onEscape }: {
+export function Composer({ defaultMention, placeholder, onSend, onSchedule, onCreatePoll, busy, autoFocus, onType, seed, draftKey, commands = [], autoRoute, submit, onDraftChange, onEscape }: {
     placeholder: string
-    threadRootId?: string
     /**
      * Post the message. Resolve 'keep' to leave the draft in the box (the
      * pane is holding it for a confirmation); throw to keep it after a
@@ -121,6 +122,8 @@ export function Composer({ threadRootId, placeholder, onSend, onSchedule, onCrea
     onType?: () => void
     /** Prefill (e.g. "Ask @rowboat about this"); a new nonce re-applies it. `append` adds to the draft instead of replacing it. */
     seed?: { text: string; nonce: number; append?: boolean } | null
+    /** A mention an empty box starts with, and gets back after each send — deleting it opts out for that message. */
+    defaultMention?: { id: string; label: string } | null
     /**
      * Persist the unsent text under this key (per install, like read marks) —
      * switching spaces or restarting the app hands the draft back. Sending
@@ -312,8 +315,21 @@ export function Composer({ threadRootId, placeholder, onSend, onSchedule, onCrea
         return () => window.removeEventListener('code-mode-config-changed', load)
     }, [])
 
-    const [sharedReplicasOptions, setSharedReplicasOptions] = useState<SharedReplicasOptions | undefined>()
-    const [replicasConnection, setReplicasConnection] = useState<{ memberId: string | null; direct: boolean }>({ memberId: null, direct: false })
+    const { config: replicasConfig } = useReplicasConfig(refs?.orgId, refs?.spaceId)
+    const replicasMemberId = replicasConfig?.enabled ? replicasConfig.botMemberId : null
+    const replicasDirect = !!(replicasConfig?.enabled && replicasConfig.direct)
+    const [replicasOptions, setReplicasOptions] = useState<SharedReplicasOptions>({})
+    useEffect(() => {
+        setReplicasOptions(replicasConfig?.environmentId ? { environmentId: replicasConfig.environmentId } : {})
+    }, [refs?.orgId, refs?.spaceId, replicasConfig?.environmentId])
+    const addressesReplicas = (text: string) => replicasDirect || (!!replicasMemberId && text.includes(`(#member:${replicasMemberId})`))
+    const insertReplicasChip = () => {
+        if (!replicasMemberId) return
+        editor?.chain().focus().insertContent([
+            { type: 'mention', attrs: { kind: 'member', id: replicasMemberId, label: 'Replicas' } },
+            { type: 'text', text: ' ' },
+        ]).run()
+    }
 
     // Apply a new seed by rebuilding the doc from its markdown. Append (the
     // profile popover's "Mention") joins a draft in progress; a plain seed
@@ -395,6 +411,21 @@ export function Composer({ threadRootId, placeholder, onSend, onSchedule, onCrea
         }
     }
 
+    const defaultMentionId = defaultMention?.id
+    const defaultMentionLabel = defaultMention?.label
+    const insertDefaultMention = () => {
+        if (!editor || !defaultMentionId) return
+        editor.chain().insertContent([
+            { type: 'mention', attrs: { kind: 'member', id: defaultMentionId, label: defaultMentionLabel ?? '' } },
+            { type: 'text', text: ' ' },
+        ]).run()
+    }
+    useEffect(() => {
+        if (!editor || !defaultMentionId || composerMarkdown(editor).trim()) return
+        insertDefaultMention()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per mention appearing, not on every edit
+    }, [editor, defaultMentionId])
+
     const insertRowboatChip = () => {
         if (!editor) return
         const { $from, empty } = editor.state.selection
@@ -413,10 +444,11 @@ export function Composer({ threadRootId, placeholder, onSend, onSchedule, onCrea
 
     // --- send ----------------------------------------------------------------
     const mentioned = containsRowboatAddress(draft)
+    const replicasAddressed = addressesReplicas(draft)
 
     /** Per-turn agent options — attached whenever the outgoing text addresses @rowboat. */
     const agentOptionsFor = (text: string): AgentOptions | undefined => {
-        if (replicasConnection.direct || (replicasConnection.memberId && text.includes(`(#member:${replicasConnection.memberId})`))) return { replicas: sharedReplicasOptions ?? {} }
+        if (addressesReplicas(text)) return { replicas: replicasOptions }
         return containsRowboatAddress(text) ? {
             ...(model ? { model: { provider: model.provider, model: model.model, ...(model.effort ? { effort: model.effort } : {}) } } : {}),
             permissionMode, ...(searchEnabled ? { searchEnabled: true } : {}), ...(codeMode ? { codeMode } : {}),
@@ -500,6 +532,7 @@ export function Composer({ threadRootId, placeholder, onSend, onSchedule, onCrea
         setDraft('')
         setAttachments([])
         mention.close()
+        insertDefaultMention()
     }
 
     // The pane's confirm button sends what is in the box, exactly as the
@@ -747,15 +780,6 @@ export function Composer({ threadRootId, placeholder, onSend, onSchedule, onCrea
 
     return (
         <div className="spaces-composer-dock shrink-0">
-            {refs && <ReplicasPanel key={`${refs.orgId}/${refs.spaceId}/${threadRootId ?? ''}`} orgId={refs.orgId} spaceId={refs.spaceId} threadRootId={threadRootId}
-                onConnection={setReplicasConnection}
-                onOptions={setSharedReplicasOptions}
-                onMention={memberId => {
-                    editor?.chain().focus().insertContent([
-                        { type: 'mention', attrs: { kind: 'member', id: memberId, label: 'Replicas' } },
-                        { type: 'text', text: ' ' },
-                    ]).run()
-                }} /> }
             <div
                 ref={setBox}
                 className="spaces-composer-frame relative border bg-background"
@@ -958,6 +982,19 @@ export function Composer({ threadRootId, placeholder, onSend, onSchedule, onCrea
                         >
                             @rowboat
                         </button>
+                        {replicasMemberId && !replicasDirect && (
+                            <button
+                                type="button"
+                                onClick={insertReplicasChip}
+                                title="Hand this to Replicas — a cloud coding agent that works on your repo and opens a PR"
+                                className={cn(
+                                    'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs',
+                                    replicasAddressed ? 'bg-foreground text-background' : 'bg-muted text-foreground/80 hover:bg-accent',
+                                )}
+                            >
+                                <ReplicasLogo className="size-3" />@replicas
+                            </button>
+                        )}
                         {autoRoute && (
                             <>
                                 <button
@@ -991,7 +1028,10 @@ export function Composer({ threadRootId, placeholder, onSend, onSchedule, onCrea
                                 )}
                             </>
                         )}
-                        {mentioned && (
+                        {replicasAddressed && replicasConfig && (
+                            <ReplicasComposerOptions config={replicasConfig} options={replicasOptions} onChange={setReplicasOptions} />
+                        )}
+                        {mentioned && !replicasAddressed && (
                             <>
                                 <span className="mx-0.5 h-4 w-px bg-border" />
                                 <span className="text-[11px] text-muted-foreground">runs as your Rowboat</span>

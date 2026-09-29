@@ -1,3 +1,5 @@
+import { ReplicasLogo } from '@/components/spaces/replicas-logo'
+import { useIsReplicasMember } from '@/components/spaces/replicas-identity'
 import { useRef, useState, type ReactNode } from 'react'
 import { AtSign, Copy, Link as LinkIcon, Mail, MessageSquare } from 'lucide-react'
 import type { spaces } from '@x/shared'
@@ -51,11 +53,19 @@ export function MemberAvatar({ id, name, size = 'md', agent, className }: {
 }) {
     const isAgentInRoster = useIsAgent(id)
     const round = agent ?? isAgentInRoster
+    const replicas = useIsReplicasMember(id)
     // Stream dialect: people are near-square tiles; circles stay reserved for AI.
     const dims = size === 'sm' ? 'size-5 rounded-[4px] text-[9px]'
         : size === 'lg' ? 'size-8 rounded-[5px] text-xs'
         : size === 'xl' ? 'size-9 rounded-md text-[13px]'
         : 'size-7 rounded-[5px] text-[10.5px]'
+    if (replicas) {
+        return (
+            <span title={name} className={cn('inline-flex shrink-0 items-center justify-center bg-neutral-900 select-none', dims, className, 'rounded-full')}>
+                <ReplicasLogo className="size-[55%]" />
+            </span>
+        )
+    }
     return (
         <span
             title={name}

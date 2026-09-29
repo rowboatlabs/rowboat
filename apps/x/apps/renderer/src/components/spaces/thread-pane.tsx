@@ -1,3 +1,5 @@
+import { ReplicasThreadStatus } from './replicas-panel'
+import { noteReplicasRequestSent } from './use-replicas-config'
 import { MESSAGE_PROSE } from '@/components/spaces/message-prose'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
@@ -627,6 +629,7 @@ export function ThreadPane({
         }
         const pending = buildPendingMessage(space.id, org.memberId, body, rootMessageId)
         setMessages((prev) => [...prev, pending])
+        if (agent?.replicas) noteReplicasRequestSent(rootMessageId)
         void window.ipc
             .invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body, ...(agent?.replicas ? { replicas: agent.replicas } : {}) })
             .then((result) => {
@@ -639,6 +642,7 @@ export function ThreadPane({
                 })
                 // Replying follows the thread and reads it up to our reply (the org's rule); mirror it.
                 noteThread(org.id, space.id, rootMessageId, { following: true, readOffset: result.message.offset, lastReplyOffset: result.message.offset })
+                if (agent?.replicas) noteReplicasRequestSent(rootMessageId)
                 analytics.spacesMessagePosted({ kind: 'topic', mentionsRowboat: containsRowboatAddress(body) })
                 maybeInvokeRowboat(org, space, { rootMessageId, label: threadLabel }, result.message.id, body, agent)
             })
@@ -919,6 +923,7 @@ export function ThreadPane({
     // The stop square beside your working chip: cancel the run from here.
     // The chip clears when the cancelled turn releases its presence lease.
     const [stopping, setStopping] = useState(false)
+    const [replicasAgent, setReplicasAgent] = useState<string | null>(null)
     const stopRowboat = async () => {
         setStopping(true)
         try {
@@ -1273,6 +1278,7 @@ export function ThreadPane({
                         })}
                     </div>
                 )}
+                <ReplicasThreadStatus orgId={org.id} spaceId={space.id} threadRootId={rootMessageId} onAgent={setReplicasAgent} />
                 <TypingIndicator names={typingNames} />
                 </div>
             </div>
@@ -1335,7 +1341,7 @@ export function ThreadPane({
                 />
             )}
             <Composer
-                threadRootId={rootMessageId}
+                defaultMention={replicasAgent ? { id: replicasAgent, label: 'Replicas' } : null}
                 placeholder="Reply…"
                 busy={false}
                 onSend={post}

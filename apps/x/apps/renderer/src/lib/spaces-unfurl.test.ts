@@ -40,3 +40,8 @@ describe('previewUrls', () => {
         expect(previewUrls('http://insecure.example.com and nothing else')).toEqual([])
     })
 })
+
+it('skips links into the Replicas app, which only unfurl as its marketing page', () => {
+    expect(previewUrls('Started work. [Open Replicas](https://app.replicas.dev) and https://github.com/o/r/pull/1')).toEqual(['https://github.com/o/r/pull/1'])
+})
+

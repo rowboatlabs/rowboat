@@ -1,3 +1,4 @@
+import { isReplicasMember } from './replicas-identity'
 import { Extension, Node, mergeAttributes, type Editor, type Command } from '@tiptap/core'
 import { Fragment, Slice, type Mark, type Node as ProseMirrorNode, type NodeType, type Schema } from '@tiptap/pm/model'
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
@@ -211,7 +212,7 @@ export const MentionNode = Node.create({
                 'data-mention': attrs.kind,
                 'data-id': attrs.id ?? '',
                 'data-label': pillText(attrs).slice(1),
-                class: 'composer-mention',
+                class: attrs.kind === 'member' && isReplicasMember(attrs.id) ? 'composer-mention composer-mention-replicas' : 'composer-mention',
             }),
             pillText(attrs),
         ]

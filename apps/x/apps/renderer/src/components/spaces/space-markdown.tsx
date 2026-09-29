@@ -1,3 +1,5 @@
+import { ReplicasLogo } from '@/components/spaces/replicas-logo'
+import { useIsReplicasMember } from '@/components/spaces/replicas-identity'
 import { FileConflictNotice, useSpaceFileSave, type SavedSpaceFile } from './file-conflict'
 import { createContext, memo, useContext, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode } from 'react'
 import type { spaces } from '@x/shared'
@@ -605,6 +607,7 @@ function MentionChip({ memberId, broadcast, fallback }: { memberId?: string; bro
     const { selfId } = useSpaceProfiles()
     const label = broadcast ? `@${broadcast}` : `@${(memberId !== undefined ? names.get(memberId) : undefined) ?? fallback.replace(/^@/, '')}`
     const addressesMe = broadcast === 'here' || (!!selfId && memberId === selfId)
+    const replicas = useIsReplicasMember(memberId)
     const chip = addressesMe ? 'rounded-[4px] px-[3px] py-px font-medium bg-[var(--stream-you-wash)] text-[var(--stream-you-ink)]' : CHIP_CLASS
     // @here and @rowboat address the room and your agent — no profile to open.
     if (broadcast || memberId === undefined || !names.has(memberId)) {
@@ -612,8 +615,8 @@ function MentionChip({ memberId, broadcast, fallback }: { memberId?: string; bro
     }
     return (
         <MemberProfilePopover id={memberId}>
-            <button type="button" className={cn(chip, 'cursor-pointer hover:brightness-95 dark:hover:brightness-110')}>
-                {label}
+            <button type="button" className={cn(chip, 'cursor-pointer hover:brightness-95 dark:hover:brightness-110', replicas && 'inline-flex items-center gap-1 align-baseline')}>
+                {replicas && <ReplicasLogo className="size-[0.85em]" />}{label}
             </button>
         </MemberProfilePopover>
     )

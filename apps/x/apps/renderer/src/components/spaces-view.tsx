@@ -1,3 +1,4 @@
+import { ReplicasHeaderButton } from '@/components/spaces/replicas-panel'
 import '@/styles/spaces.css'
 import { ThreadResizeHandle, THREAD_DEFAULT_WIDTH, THREAD_MIN_WIDTH, THREAD_DIVIDER_WIDTH, STREAM_MIN_WIDTH } from '@/components/spaces/thread-resize-handle'
 import { getViewerType } from '@/lib/file-types'
@@ -958,6 +959,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                         </PopoverContent>
                     </Popover>
                 )}
+                {!isDirect && <ReplicasHeaderButton orgId={org.id} spaceId={space.id} />}
                 <Popover>
                     <PopoverTrigger asChild>
                         <button

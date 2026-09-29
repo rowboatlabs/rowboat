@@ -123,3 +123,12 @@
     color: var(--stream-link);
     white-space: nowrap;
 }
+
+/* The Replicas agent's pill carries its mark (replicas-logo.tsx). */
+.composer-mention-replicas {
+    padding-left: 17px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 225 300' fill='%233eeba3'%3E%3Cpath d='M0 0H150V75H0Z'/%3E%3Cpath d='M150 75H225V150H150Z'/%3E%3Cpath d='M0 150H150V225H0Z'/%3E%3Cpath d='M0 225H75V300H0Z'/%3E%3Cpath d='M150 225H225V300H150Z'/%3E%3C/svg%3E"), linear-gradient(var(--stream-mention-wash), var(--stream-mention-wash));
+    background-repeat: no-repeat;
+    background-size: 9px 12px, auto;
+    background-position: 4px center, 0 0;
+}

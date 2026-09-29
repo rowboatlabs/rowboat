@@ -297,7 +297,7 @@ export class Replicas {
         }
         const result = await api.history(task.workspaceId, task.chatId, task.active.messageId);
         if (!result.requestSeen || !result.finished) return;
-        await this.notice(task, c, `${result.text ?? 'The agent finished without a text response.'}\n\n[${task.url ? 'Open workspace' : 'Open Replicas'}](${task.url ?? 'https://app.replicas.dev'})`, true);
+        await this.notice(task, c, result.text ?? 'The agent finished without a text response.', true);
         try {
           await this.feed.reactToMessage({ memberId: c.botMemberId }, task.spaceId, task.active.messageId, { emoji: '👀', action: 'remove', actingMode: 'agent', agentName: 'Replicas' });
           await this.feed.reactToMessage({ memberId: c.botMemberId }, task.spaceId, task.active.messageId, { emoji: result.failed ? '❗' : '✅', action: 'add', actingMode: 'agent', agentName: 'Replicas' });
@@ -334,7 +334,9 @@ export class Replicas {
           t.status = 'select_environment';
         });
         if (!waiting) return;
-        await this.notice(task, c, 'Choose a Replicas environment above the reply box to start this task.');
+        await this.notice(task, c, envs.length === 0
+          ? 'There are no Replicas environments yet. Add a repo on replicas.dev, then reply here to start.'
+          : `Which environment should I work in? ${envs.map(e => e.name).join(', ')}. Pick one below, or reply with [env:name].`);
         return;
       }
     }

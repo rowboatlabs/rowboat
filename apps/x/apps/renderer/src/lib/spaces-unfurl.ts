@@ -23,6 +23,10 @@ export function previewUrls(body: string, orgAddresses: readonly string[] = []):
     for (const m of stripped.matchAll(/https:\/\/[^\s<>)"'\]]+/g)) {
         const url = m[0]!.replace(/[.,;:!?]+$/, '')
         if (isDirectImageUrl(url)) continue
+        // Replicas' app is a sign-in wall: every link to it unfurls as the same marketing card.
+        if (/^https:\/\/app\.replicas\.dev(\/|$)/.test(url)) continue
+        // Replicas' app is a sign-in wall: every link to it unfurls as the same marketing card.
+        if (/^https:\/\/app\.replicas\.dev(\/|$)/.test(url)) continue
         const link = parseOrgUrl(url)
         // Every HTTPS homepage matches the org-root grammar. Only a known
         // org address identifies its hand-off page; other homepages unfurl.
