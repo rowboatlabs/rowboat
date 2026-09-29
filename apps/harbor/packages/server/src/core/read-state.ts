@@ -127,7 +127,7 @@ export class ReadState {
       };
     });
     const last = page[page.length - 1];
-    // Names for everyone on the page, from the roster the caller may see —
+    // Names for everyone on the page, from the org roster —
     // actors and mention labels alike, so no client walks spaces for names.
     const wanted = new Set<string>();
     for (const item of items) {

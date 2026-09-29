@@ -190,16 +190,16 @@ export class Spaces {
   }
 
   /**
-   * The org roster as THIS member may see it (api.ts listOrgMembers,
-   * 2026-09-09): the union of every roster the caller belongs to, DMs
-   * included, deduped by id and sorted by display name (case-insensitive,
-   * id breaks ties). Discovery is bounded by shared membership on purpose —
-   * no admin directory, no privacy surface beyond what listMembers already
-   * exposes per space. Always contains the caller (a member of no space at
-   * all still sees themself). One statement (2026-09-22).
+   * The org roster (api.ts listOrgMembers): every member of the org, sorted
+   * by display name (case-insensitive, id breaks ties). Org-wide since
+   * 2026-09-29 (spec §5 Open spaces, question 4): inside one org the org is
+   * the trust boundary, so everyone sees the same list and admins see
+   * nothing more. It was bounded to shared membership from 2026-09-09; that
+   * bound returns with the guest flag (spec §4 Invites), not before. One
+   * statement.
    */
-  async listOrgMembers(ctx: ActorCtx): Promise<Member[]> {
-    const members = await this.k.store.listMembersSharingSpace(ctx.memberId);
+  async listOrgMembers(_ctx: ActorCtx): Promise<Member[]> {
+    const members = await this.k.store.listAllMembers();
     return members.sort(
       (a, b) =>
         a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' }) || a.id.localeCompare(b.id),
