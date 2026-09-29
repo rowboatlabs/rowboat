@@ -259,6 +259,11 @@ const HISTORICAL_KEY_ORDER = [
     "cancel_scheduled",
     "whiteboard-read",
     "whiteboard-draw",
+    "replicas-environments",
+    "replicas-dispatch",
+    "replicas-send",
+    "replicas-wait",
+    "replicas-status",
     "spawn-agent",
 ];
 
@@ -375,6 +380,10 @@ describe("BuiltinTools permission audit", () => {
             // Whiteboards: a draw is a propose_change on a shared board;
             // the read is a member-readable snapshot summary.
             "whiteboard-draw": "prompt",
+            // Replicas: dispatch boots a billed cloud VM and send steers one
+            // the whole team may be watching; wait/status/environments read.
+            "replicas-dispatch": "prompt",
+            "replicas-send": "prompt",
         });
     });
 });

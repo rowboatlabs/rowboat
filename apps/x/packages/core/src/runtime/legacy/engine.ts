@@ -919,6 +919,7 @@ export async function* streamAgent({
             coachMode: false,
             commandCenter: false,
             spaceThread: null,
+            replicas: null,
         });
         let streamError: string | null = null;
         for await (const event of streamLlm(

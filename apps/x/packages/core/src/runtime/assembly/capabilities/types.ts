@@ -59,6 +59,17 @@ export const ModeFlags = z.object({
         })
         .nullable()
         .default(null),
+    // The Space composer's "Run on Replicas" strip (2026-09-28): this turn's
+    // coding work goes to a Replicas cloud workspace in that environment.
+    // Set per message by spaces/topic-agent.ts, never sticky.
+    replicas: z
+        .object({
+            environmentId: z.string(),
+            repository: z.string().nullable().default(null),
+            planMode: z.boolean().default(false),
+        })
+        .nullable()
+        .default(null),
 });
 export type ModeFlags = z.infer<typeof ModeFlags>;
 

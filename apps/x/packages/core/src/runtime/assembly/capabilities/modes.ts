@@ -72,7 +72,25 @@ export const MODE_CAPABILITIES: readonly EagerCapability[] = [
         promptFragment: (ctx: CapabilityContext) =>
             ctx.spaceThread ? SPACE_THREAD_TEMPLATE(ctx.spaceThread) : null,
     },
+    {
+        // The Space composer's "Run on Replicas" strip (2026-09-28): the
+        // replicas tools attach through the turn's activeSkills; this block
+        // makes the routing decision from token zero.
+        id: "replicas",
+        activation: "app",
+        promptFragment: (ctx: CapabilityContext) =>
+            ctx.replicas ? REPLICAS_TEMPLATE(ctx.replicas) : null,
+    },
 ];
+
+const REPLICAS_TEMPLATE = (replicas: NonNullable<CapabilityContext["replicas"]>): string =>
+    `# Run on Replicas (Active)
+The composer's agent strip is set to **Run on Replicas** for this message: environment \`${replicas.environmentId}\`${replicas.repository ? ` (${replicas.repository})` : ""}${replicas.planMode ? ", plan mode ON" : ""}. The coding work goes to a Replicas cloud workspace — NOT to this machine.
+
+- Your FIRST action: \`read_thread\` when in a Space thread, then \`replicas-send\` if the thread already carries a \`Replicas workspace\` handle line, else \`replicas-dispatch\` with \`environmentId: "${replicas.environmentId}"\`${replicas.planMode ? " and `planMode: true`" : ""}.
+- Do NOT use \`code_agent_run\`, \`launch-code-task\`, \`executeCommand\`, or your own file tools for this work, even if a Harness block or the code-with-agents skill says otherwise — this block wins for this message.
+- Follow the replicas skill's thread procedure: post the handle line once, \`replicas-wait\`, then the PR link — or, for a question-shaped ask, the \`answer\` the wait returns${replicas.planMode ? ". Plan mode: post the plan and stop until someone says go" : ""}.
+- Nothing about the run exists on this machine: never run shell commands, search local files, or read Rowboat's source to understand a Replicas result — call \`replicas-status\` / \`replicas-wait\` again instead.`;
 
 const SPACE_THREAD_TEMPLATE = (thread: NonNullable<CapabilityContext["spaceThread"]>): string =>
     `# Space thread session\n\n${threadProcedure({
