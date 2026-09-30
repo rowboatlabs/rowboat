@@ -47,6 +47,8 @@ Chaque catégorie est une **interface** de `@warell/providers`. Un fournisseur e
 | `CardIssuer` | Service de paiement seul | `issueSingleUseCard`, `destroyCard` |
 | `SmsProvider` | Plan de contrôle | `send`, `getDeliveryStatus` |
 | `MessagingProvider` (WhatsApp) | Plan de contrôle | `sendTemplate`, `sendText`, `parseInbound` |
+| `VoiceProvider` (transcription, synthèse, voix en temps réel) | Plan de contrôle | `transcribe`, `synthesize`, `openRealtimeSession` |
+| `TelephonyProvider` (numéros, appels) | Plan de contrôle | `provisionNumber`, `placeCall`, `parseInboundCall` |
 | `TravelProvider`, `TransportProvider`, `DeliveryProvider`, `CommerceProvider` | Outils de l'instance, **risque déclaré** (sécurité §7.2) | Recherche (bas) ; réservation ou commande = outil **asynchrone** (archi §3.4) |
 
 `capabilities()` rend ce que le fournisseur sait **vraiment** faire, par pays et par moyen de paiement : mode de validation, débit pré-autorisé, remboursement, montants minimum et maximum. Le moteur de politique et l'interface lisent ces capacités ; ils ne supposent rien.
@@ -197,6 +199,20 @@ Les notifications sortantes d'approbation sont des **messages modèles** que Met
 | Push mobile | **Réutilise l'existant** | Harbor envoie déjà des notifications Expo (`apps/harbor/packages/server/src/push.ts`) |
 | Email | RESEARCH_REQUIRED | Fournisseur d'envoi transactionnel standard ; secondaire dans la région |
 
+### 5.4 Voix et téléphone
+
+Prévu en phase 8 de la roadmap. Règles de sécurité : sécurité §10.1.
+
+| Besoin | Candidat | Statut |
+|---|---|---|
+| Transcription (parole → texte) | Deepgram, déjà utilisé par Rowboat (`core/voice/voice.ts`) | DOCUMENTED par le code upstream ; qualité sur le français d'Afrique de l'Ouest **à mesurer** |
+| Synthèse (texte → parole) | ElevenLabs, déjà utilisé par Rowboat | DOCUMENTED par le code upstream ; choix d'une voix Warell FR/EN à faire |
+| Voix en temps réel (conversation sans attente) | Modèles vocaux temps réel | RESEARCH_REQUIRED : latence depuis la région, coût à la minute |
+| Numéros locaux et appels, dans les 7 pays | Fournisseurs de téléphonie programmable, opérateurs locaux | RESEARCH_REQUIRED, pays par pays : disponibilité des numéros, règles sur la téléphonie par internet, coût des appels vers les mobiles |
+| Langues nationales à la voix | — | RESEARCH_REQUIRED, après le français et l'anglais |
+
+**Décidé :** Warell ne passe par un fournisseur de téléphonie que s'il fournit des numéros **légalement attribués** dans le pays. Pas de numéro étranger présenté comme local.
+
 ## 6. Voyage, transport, livraison, commerce
 
 C'est là que la mission demande le plus de prudence : les API ouvertes sont rares dans la région, et **aucune n'a été vérifiée** pour ce document.
@@ -228,6 +244,8 @@ C'est là que la mission demande le plus de prudence : les API ouvertes sont rar
 | SMS (LigdiCash) | R | R | R | R | R | R | R |
 | SMS (second fournisseur) | R | R | R | R | R | R | R |
 | WhatsApp Business | R | R | R | R | R | R | R |
+| Voix : transcription et synthèse (Deepgram, ElevenLabs) | D | D | D | D | D | D | D |
+| Téléphonie : numéros locaux | R | R | R | R | R | R | R |
 | Push (Expo, via Harbor) | ✓ existant | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Voyage, transport, livraison, commerce | R / N | R / N | R / N | R / N | R / N | R / N | R / N |
 

@@ -338,7 +338,7 @@ Chaque instance tourne dans son propre conteneur (ou sa propre micro-VM, selon l
 - aucun accès au démon de conteneurs, aucun montage de l'hôte ;
 - **aucun volume partagé entre instances**.
 
-**Décidé :** une isolation au niveau du noyau (micro-VM ou équivalent) est **préférée** pour les instances qui exécutent du code (`executeCommand`, Code Mode). **À trancher** avec le choix de l'hébergeur : isolation noyau pour toutes les instances, ou bac à sable de code séparé (archi §3.11).
+**Décidé :** une isolation au niveau du noyau (micro-VM ou équivalent) est **préférée** pour les instances qui exécutent du code (`executeCommand`, Code Mode). **Tranché le 30/09/2026 par le choix de Fly.io** (archi §6) : chaque instance est une micro-VM Firecracker, donc toutes les instances ont une isolation noyau.
 
 ### 9.2 Ce que l'instance peut joindre
 
@@ -374,6 +374,20 @@ Il **journalise** chaque destination, par instance et par `tool_call_id`, sans l
 | Telegram : liste `allowFrom` de Rowboat, alimentée par le plan de contrôle | Latitude |
 | Un agent ne peut écrire qu'à l'utilisateur, ou à des destinataires qu'il a lui-même désignés. Écrire à un nouveau destinataire est un risque élevé | Décidé |
 | Plafond d'envois sortants par agent et par jour | Décidé ; valeur en Latitude |
+
+### 10.1 Le téléphone
+
+La voix et le téléphone arrivent en phase 8 (roadmap). Leurs règles sont fixées dès maintenant, parce qu'**une voix s'imite et un numéro appelant se falsifie**.
+
+| Règle | |
+|---|---|
+| Un appel entrant est rattaché à un utilisateur par le numéro appelant, **comme une demande**, jamais comme une preuve d'identité | Décidé |
+| Une approbation à risque élevé, un paiement ou un mandat **ne se décide jamais au téléphone** : l'agent envoie un lien vers l'application | Décidé |
+| Un appel sortant (Warell appelle un tiers) est un outil **asynchrone à risque élevé**. L'utilisateur approuve l'objet de l'appel, et l'agent ne peut rien engager d'autre au cours de la conversation. | Décidé |
+| L'agent **annonce** qu'il est un assistant qui appelle pour le compte de l'utilisateur | Décidé |
+| La transcription de chaque appel est gardée comme preuve (vérificateur, runtime §3.5). L'enregistrement audio suit la loi de chaque pays (§18) : RESEARCH_REQUIRED. | Décidé / RESEARCH_REQUIRED |
+| Ce qu'un tiers dit au téléphone est du **contenu non fiable** : il contamine la session comme une page web (§12.2) | Décidé |
+| Plafond d'appels sortants par agent et par jour ; aucun appel vers un numéro surtaxé | Décidé ; valeurs en Latitude |
 
 ## 11. Le navigateur
 
@@ -556,6 +570,7 @@ Le plafond de coût des modèles est tenu **par le plan de contrôle**, pas par 
 | S14 | Réponse « OUI » par SMS à une demande élevée → aucune décision | §7.3 |
 | S15 | Modification d'une ligne de `audit_log` en base → la vérification quotidienne la détecte | §15.2 |
 | S16 | Plafond de coût de modèles atteint → `/v1/llm` refuse, même si l'instance insiste | §16 |
+| S17 | Approbation d'un paiement demandée au téléphone → refusée, lien envoyé vers l'application | §10.1 |
 
 ## 18. Données personnelles
 
@@ -631,6 +646,6 @@ Les interrupteurs de plateforme sont des **données** (lues à chaque décision)
 | 6 | L'agent ne reçoit jamais de mot de passe ; l'utilisateur prend la main pour se connecter | **Décidé** (§11.3) |
 | 7 | JEV désactivé par défaut, contexte vide, accord de traitement avec TypeSafe | **Décidé** (§11.4) |
 | 8 | WhatsApp par l'API Business en cloud | **Décidé** (§10). Reste le fournisseur (`WEST_AFRICA_PROVIDER_ARCHITECTURE.md`). |
-| 9 | Isolation noyau pour toutes les instances, ou seulement pour le code | **À trancher** avec l'hébergeur (§9.1) |
+| 9 | Isolation noyau pour toutes les instances, ou seulement pour le code | **Décidé 30/09 :** toutes, par les micro-VM de Fly.io (§9.1) |
 | 10 | Récupération de compte assistée par le support | **À trancher** (§4.5) |
 | 11 | Obligations légales par pays sur les données | **RESEARCH_REQUIRED**, juriste (§18) |

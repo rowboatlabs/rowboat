@@ -329,13 +329,30 @@ Les états et transitions exacts sont spécifiés dans `AGENT_RUNTIME_SPEC.md`. 
 
 **Décidé (29/09/2026) : les instances s'endorment quand elles ne servent pas.** Une instance inactive ne consomme pas de calcul ; elle se réveille sur une requête d'un client, sur une réponse attendue (approbation, résultat de paiement) ou sur le réveil planifié (§3.5).
 
-**Reste à choisir la plateforme (avant la phase 0).** Il faut un **volume persistant** (le dossier de travail) et un arrêt/réveil automatiques. Les candidats sont à comparer sur trois critères :
+**Décidé (30/09/2026) : Fly.io, région Paris (`cdg`).** Chaque instance est une *Fly Machine* avec son volume.
 
-- le coût mensuel d'un utilisateur *peu actif* ;
-- le délai de réveil ;
-- la présence d'une région proche de l'Afrique de l'Ouest.
+| Besoin | Réponse de Fly.io (documentation lue le 30/09/2026) |
+|---|---|
+| Volume persistant | Un volume par Machine, lié à sa région. Il n'est pas répliqué : les sauvegardes sont à notre charge (sécurité §6.3). |
+| Veille | `autostop = suspend` : la mémoire est figée dans un instantané, et le réveil prend « quelques centaines de millisecondes ». Une Machine suspendue ne coûte **que son stockage**. |
+| Réveil | Le proxy Fly réveille la Machine à la première requête (`autostart`). Le plan de contrôle et le réveil planifié passent par lui. |
+| Isolation | Chaque Machine est une micro-VM Firecracker : **isolation noyau pour toutes les instances** (sécurité §9.1). |
+| Région | Paris (`cdg`) et Johannesburg (`jnb`) existent. Paris est retenu parce que le trafic d'Afrique de l'Ouest passe en grande partie par l'Europe (câbles sous-marins). **À mesurer** depuis Ouagadougou et Abidjan avant l'ouverture, avec une Machine de test dans chaque région. |
 
-Pistes : machines à arrêt automatique avec volume, environnements qui hibernent (Hermes Agent utilise Modal et Daytona), conteneurs managés.
+**Limite connue.** La suspension exige une Machine de **2 Go de mémoire au plus**. Rowboat plus un Chromium headless peuvent dépasser. Deux parades, à mesurer en phase 0 : lancer Chromium seulement quand une tâche en a besoin, ou accepter l'arrêt simple (`autostop = stop`), avec un réveil de plusieurs secondes.
+
+**Les alternatives regardées** (30/09/2026), pour pouvoir changer si Fly.io déçoit :
+
+| Plateforme | Ce qui convient | Ce qui bloque |
+|---|---|---|
+| Koyeb | Micro-VM Firecracker, veille légère avec réveil en ≈ 200 ms | Rachetée par Mistral en février 2026, recentrée sur l'inférence IA ; la veille légère est citée parmi les fonctions menacées ; compatibilité veille + volume non documentée |
+| Northflank | Micro-VM, veille qui garde le volume, déploiement possible dans notre propre compte cloud | Réveil à froid (pas d'instantané mémoire) |
+| Railway | Volumes, facturation à la minute, veille | Conteneurs, pas de micro-VM ; créer une instance par utilisateur par API est moins naturel |
+| Modal, Daytona | Bacs à sable rapides à créer | Faits pour des sessions courtes (durée de vie bornée, archivage automatique) : bons candidats pour le **bac à sable de code** (§3.11), pas pour l'instance |
+| Cloudflare Containers | Une instance par utilisateur, veille gratuite | **Disque effacé à chaque veille** : incompatible avec le dossier de travail |
+| Grands clouds (AWS, Google, Azure) | Tout est possible | Tout est à construire et à administrer |
+
+**Plan de repli : Northflank**, parce qu'il garde l'isolation par micro-VM et permet de migrer plus tard vers notre propre compte cloud. Rien dans l'instance ne dépend de Fly.io : le plan de contrôle parle à l'hébergeur par une interface `InstanceHost` (créer, réveiller, endormir, sauvegarder), dont Fly.io est la première implémentation.
 
 Contrainte connue : on privilégie le **managé**, pas de VPS à administrer soi-même. Le plan de contrôle et le service de paiement, eux, sont des services classiques.
 
@@ -378,7 +395,7 @@ Contrainte connue : on privilégie le **managé**, pas de VPS à administrer soi
 | # | Question | État |
 |---|---|---|
 | 1 | Connexion | **Décidé 29/09 :** téléphone + code SMS (§3.5). Reste l'agrégateur SMS par pays. |
-| 2 | Hébergement des instances | **Décidé 29/09 :** mise en veille obligatoire (§6). Reste la plateforme, avant la phase 0. |
+| 2 | Hébergement des instances | **Décidé 29/09 :** mise en veille obligatoire. **Décidé 30/09 :** Fly.io, Paris, repli Northflank (§6). |
 | 3 | i18n des chaînes upstream | **Décidé 29/09 :** proposée d'abord à l'upstream (§3.12). |
 | 4 | Composio | **Décidé 29/09 :** désactivé en V1, MCP et connecteurs natifs à la place (§3.14). |
 | 5 | Argent des clients | **Décidé 29/09 :** Warell ne détient jamais d'argent (§3.9). Reste la validation juridique. |

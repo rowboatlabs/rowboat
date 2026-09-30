@@ -10,11 +10,11 @@ Warell est une plateforme agentique « West Africa first, global by design », c
 | 4 | [`AGENT_RUNTIME_SPEC.md`](./AGENT_RUNTIME_SPEC.md) | Comment un objectif s'exécute, de bout en bout ? |
 | 5 | [`AGENT_SECURITY_MODEL.md`](./AGENT_SECURITY_MODEL.md) | Qui peut faire quoi, et comment on le prouve ? |
 | 6 | [`WEST_AFRICA_PROVIDER_ARCHITECTURE.md`](./WEST_AFRICA_PROVIDER_ARCHITECTURE.md) | Quels fournisseurs par pays, et avec quel niveau de preuve ? |
-| 7 | `IMPLEMENTATION_ROADMAP.md` | Dans quel ordre on construit ? |
+| 7 | [`IMPLEMENTATION_ROADMAP.md`](./IMPLEMENTATION_ROADMAP.md) | Dans quel ordre on construit ? |
 
 Deux documents de fonctionnement :
 
 - [`UPSTREAM.md`](./UPSTREAM.md) : comment rester à jour avec `rowboatlabs/rowboat` ;
 - [`DIVERGENCES.md`](./DIVERGENCES.md) : chaque fichier upstream modifié, et pourquoi.
 
-Un document sans lien n'est pas encore écrit.
+La série est complète au 30/09/2026.
