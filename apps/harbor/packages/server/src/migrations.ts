@@ -705,12 +705,13 @@ export const MIGRATIONS: Migration[] = [
     ],
   },
   {
-    // 025 is PR #1130's replicas-threads; this ladder takes 026 so the two
-    // merge in either order.
+    // 025 was reserved for PR #1130's replicas-threads, which the 2026-09-30
+    // redesign on the agent contract replaced (028); the gap stays.
     id: '026-agent-keys',
     statements: [
       // An agent's owner (spec §4 Agent members, 2026-09-29): the person who
-      // added it. Null for people and for an org-owned agent (Replicas).
+      // added it. Null for people. (Replicas was to be org-owned; the
+      // 2026-09-30 redesign gave every agent an owner.)
       `alter table members add column owner_id text`,
       `alter table members add constraint members_owner_agent_check check (owner_id is null or kind = 'agent')`,
       // Keys stored as a SHA-256 of the secret, never the secret: a 256-bit
@@ -765,6 +766,49 @@ export const MIGRATIONS: Migration[] = [
         data jsonb not null,
         updated_at text not null,
         primary key (org_id, agent_id)
+      )`,
+    ],
+  },
+  {
+    // What an agent is and how Harbor reaches it, and what a connector Harbor
+    // runs keeps (spec §4 Agent members and §8 Connectors, 2026-09-30: the
+    // Replicas redesign on the agent contract). Open strings: which pairs are
+    // valid is AGENT_PAIRS in the protocol, so a new pair needs no migration.
+    id: '028-agent-connections',
+    statements: [
+      `alter table members add column agent_kind text`,
+      `alter table members add column agent_connection text`,
+      `update members set agent_kind = 'custom', agent_connection = 'contract' where kind = 'agent'`,
+      `alter table members add constraint members_agent_connection_check check (
+        (kind = 'agent' and agent_kind is not null and agent_connection is not null)
+        or (kind = 'human' and agent_kind is null and agent_connection is null)
+      )`,
+      // A platform's key, which Harbor presents, so sealed rather than hashed
+      // (sealing.ts), unlike agent_keys. One per agent; replacing it clears a rejection.
+      `create table agent_connection_credentials (
+        org_id text not null,
+        agent_id text not null,
+        sealed text not null,
+        hint text not null,
+        set_by text not null,
+        set_at text not null,
+        rejected_at text,
+        rejected_reason text,
+        primary key (org_id, agent_id),
+        foreign key (org_id, agent_id) references members(org_id, id)
+      )`,
+      // A connector's record per thread (its platform session, how far
+      // delivery reached, what is in flight), for follow-ups and restart
+      // recovery. `data` is the connector's own shape.
+      `create table agent_connection_threads (
+        org_id text not null,
+        agent_id text not null,
+        space_id text not null,
+        thread_root_id text not null,
+        data jsonb not null,
+        updated_at text not null,
+        primary key (org_id, agent_id, space_id, thread_root_id),
+        foreign key (org_id, agent_id) references members(org_id, id)
       )`,
     ],
   },

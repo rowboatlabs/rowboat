@@ -367,6 +367,9 @@ export class Assets {
     spaceId: string,
     hash: string,
     name?: string,
+    // A connector handing a platform an image link needs it to outlive the
+    // platform's own queue (spec §8 Connectors, 2026-09-30); people get 5 minutes.
+    opts: { expiresInSeconds?: number } = {},
   ): Promise<{ blob: BlobInfo; disposition: string; url?: string; bytes?: Uint8Array }> {
     await this.k.requireReadableSpace(ctx, spaceId);
     const blobs = this.requireBlobStore();
@@ -376,7 +379,7 @@ export class Assets {
     const disposition = dispositionFor(stored.mime, name);
     if (blobs.downloadUrl) {
       const url = await blobs.downloadUrl(hash, {
-        expiresInSeconds: 300,
+        expiresInSeconds: opts.expiresInSeconds ?? 300,
         responseContentType: stored.mime,
         responseContentDisposition: disposition,
       });

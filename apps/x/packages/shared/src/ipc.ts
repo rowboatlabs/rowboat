@@ -3912,9 +3912,21 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string() }),
     res: z.object({ agents: z.array(z.custom<SpacesTypes.AgentListing>()) }),
   },
+  // An agent's kind and connection (2026-09-30); a platform agent's
+  // credential crosses IPC once, on the way to Harbor, which seals it.
   'spaces:addAgent': {
-    req: z.object({ orgId: z.string(), displayName: z.string() }),
+    req: z.object({
+      orgId: z.string(),
+      displayName: z.string(),
+      kind: z.string().optional(),
+      connection: z.string().optional(),
+      credential: z.string().optional(),
+    }),
     res: z.object({ agent: z.custom<SpacesTypes.Member>(), key: z.custom<SpacesTypes.AgentKeySecret>() }),
+  },
+  'spaces:setAgentCredential': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), secret: z.string() }),
+    res: z.object({ credential: z.custom<SpacesTypes.AgentCredential>() }),
   },
   'spaces:createAgentKey': {
     req: z.object({ orgId: z.string(), agentId: z.string() }),

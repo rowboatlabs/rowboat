@@ -1,15 +1,66 @@
+import claudeCodeLogo from '@/assets/agents/claude-code/logo.png'
+import claudeCodeLogoDark from '@/assets/agents/claude-code/logo-dark.png'
+import codexLogo from '@/assets/agents/codex/logo.png'
+import codexLogoDark from '@/assets/agents/codex/logo-dark.png'
+import cursorLogo from '@/assets/agents/cursor/logo.png'
+import cursorLogoDark from '@/assets/agents/cursor/logo-dark.png'
 import hermesLogo from '@/assets/agents/hermes/logo.png'
 import hermesLogoDark from '@/assets/agents/hermes/logo-dark.png'
+import opencodeLogo from '@/assets/agents/opencode/logo.png'
+import opencodeLogoDark from '@/assets/agents/opencode/logo-dark.png'
+import piLogo from '@/assets/agents/pi/logo.png'
+import piLogoDark from '@/assets/agents/pi/logo-dark.png'
+import replicasLogo from '@/assets/agents/replicas/logo.png'
+import replicasLogoDark from '@/assets/agents/replicas/logo-dark.png'
 
-// The kinds of agent the Agents dialog offers (Harbor spec §8 Connectors,
-// 2026-09-30). Each kind says what to do on the agent's side to connect it,
-// filled in with the new key and the org's address; the dialog renders any
-// kind's steps the same way. The kind is chosen when the agent is added and
-// not stored: Harbor knows the agent by its key.
+// What an agent is, how Harbor reaches it, and how you set one up (Harbor spec
+// §4 Agent members and §8 Connectors, 2026-09-30). Harbor stores every agent's
+// kind (what it is underneath: hermes, a coding agent, custom) and connection
+// (the path: plugin, contract, or a platform Harbor calls such as replicas);
+// every surface draws the agent from them: the kind's logo on its avatar,
+// "Claude Code · via Replicas" beside its name.
+//
+// The Agents dialog offers ways to connect (AGENT_SETUPS): each fixes the
+// connection, offers one or more kinds, and says what to do on the agent's
+// side, filled in with the new key and the org's address.
 //
 // Adding a kind: its official logo in `assets/agents/<id>/` (logo.png,
 // logo-dark.png, and a SOURCE.md saying where they came from), and an entry
-// here with its setup.
+// in KINDS. A kind without a usable official mark shows the generic one.
+
+export interface Logo {
+    light: string
+    dark: string
+}
+
+/** What an agent is underneath. Unknown kinds (from a newer Harbor) read as a generic agent. */
+export const KINDS: Record<string, { label: string; logo?: Logo }> = {
+    hermes: { label: 'Hermes', logo: { light: hermesLogo, dark: hermesLogoDark } },
+    'claude-code': { label: 'Claude Code', logo: { light: claudeCodeLogo, dark: claudeCodeLogoDark } },
+    codex: { label: 'Codex', logo: { light: codexLogo, dark: codexLogoDark } },
+    cursor: { label: 'Cursor', logo: { light: cursorLogo, dark: cursorLogoDark } },
+    opencode: { label: 'OpenCode', logo: { light: opencodeLogo, dark: opencodeLogoDark } },
+    pi: { label: 'Pi', logo: { light: piLogo, dark: piLogoDark } },
+    // Meta publishes no mark for Muse Code (2026-09-30): the generic one until it does.
+    'muse-code': { label: 'Muse Code' },
+    custom: { label: 'Agent' },
+}
+
+/** Platforms Harbor calls on an agent's behalf: named after the kind ("via Replicas"). */
+export const PLATFORMS: Record<string, { label: string; logo?: Logo }> = {
+    replicas: { label: 'Replicas', logo: { light: replicasLogo, dark: replicasLogoDark } },
+}
+
+export function kindInfo(kind: string | undefined): { label: string; logo?: Logo } {
+    return (kind && KINDS[kind]) || { label: 'Agent' }
+}
+
+/** "Hermes", "Claude Code · via Replicas", or "Agent". */
+export function agentLabel(kind: string | undefined, connection: string | undefined): string {
+    const platform = connection ? PLATFORMS[connection] : undefined
+    const what = kindInfo(kind).label
+    return platform ? `${what} · via ${platform.label}` : what
+}
 
 /** Something to paste, with Copy. `secret` values read as their ends on screen and copy whole. */
 export interface SetupValue {
@@ -43,15 +94,22 @@ export interface SetupContext {
     homeChannel?: string
 }
 
-export interface AgentKind {
+/** A way to connect an agent: one tile on the Add screen. */
+export interface AgentSetup {
     id: string
     label: string
     /** One line under the label in the picker. */
     description: string
     /** The official mark, for light and dark themes. None = the generic icon. */
-    logo?: { light: string; dark: string }
-    /** What the name field suggests. */
+    logo?: Logo
+    /** The connection every agent added this way has. */
+    connection: string
+    /** The kinds it offers: one is fixed; several are a choice on the Add screen. */
+    kinds: readonly string[]
+    /** What the name field suggests; empty = the chosen kind's label. */
     defaultName: string
+    /** A platform key the person pastes on the Add screen; Harbor checks it with the platform and seals it. */
+    credential?: { label: string; placeholder: string; note: string }
     /** Where the agent's side is documented. */
     docsUrl?: string
     /** Opens the owner's DM with the agent before setup, for `homeChannel`. */
@@ -185,28 +243,84 @@ function customSetup({ orgUrl, agentKey }: SetupContext): SetupRoute[] {
     ]
 }
 
-export const AGENT_KINDS: readonly AgentKind[] = [
+// Replicas (2026-09-30): Harbor runs the connector, so connecting is the Replicas key on the Add
+// screen. What's left on Replicas's side is optional: our MCP server and two variables on the
+// environment the agent uses, so its coding agent can act in Spaces and download attachments.
+// MCP servers are per environment, so one environment per Rowboat agent, and not Global.
+function replicasSetup({ orgUrl, agentKey }: SetupContext): SetupRoute[] {
+    return [
+        {
+            id: 'replicas',
+            label: 'Replicas',
+            steps: [
+                {
+                    title: 'Give it the Spaces tools (optional)',
+                    note: 'In Replicas, open the environment this agent will use (not Global), then MCPs → Add server. Give each Rowboat agent its own environment: the server acts as this agent.',
+                    values: [
+                        { label: 'URL', text: `${orgUrl}/mcp` },
+                        { label: 'Header: Authorization', text: `Bearer ${agentKey}`, secret: true },
+                    ],
+                },
+                {
+                    title: 'Let it download attachments (optional)',
+                    note: 'In the same environment, add these as variables (the key as a secret).',
+                    values: [
+                        { label: 'ROWBOAT_URL', text: orgUrl },
+                        { label: 'ROWBOAT_AGENT_KEY', text: agentKey, secret: true },
+                    ],
+                },
+            ],
+        },
+    ]
+}
+
+export const AGENT_SETUPS: readonly AgentSetup[] = [
     {
         id: 'hermes',
         label: 'Hermes',
         description: 'A Hermes agent you run, connected by the Rowboat plugin',
         logo: { light: hermesLogo, dark: hermesLogoDark },
+        connection: 'plugin',
+        kinds: ['hermes'],
         defaultName: 'Hermes',
         docsUrl: `https://github.com/${HERMES_PLUGIN}#readme`,
         wantsHomeChannel: true,
         setup: hermesSetup,
     },
     {
+        id: 'replicas',
+        label: 'Replicas',
+        description: 'A coding agent running in Replicas, on your Replicas account',
+        logo: { light: replicasLogo, dark: replicasLogoDark },
+        connection: 'replicas',
+        kinds: ['claude-code', 'codex', 'cursor', 'opencode', 'pi', 'muse-code'],
+        defaultName: '',
+        credential: {
+            label: 'Replicas API key',
+            placeholder: 'Paste the key from replicas.dev → API keys',
+            note: 'Harbor checks it with Replicas and keeps it sealed. Nobody sees it again, you included.',
+        },
+        docsUrl: 'https://docs.replicas.dev/features/environments',
+        setup: replicasSetup,
+    },
+    {
         id: 'custom',
         label: 'Custom',
         description: 'Anything that speaks the agent contract, set up by hand with its key',
+        connection: 'contract',
+        kinds: ['custom'],
         defaultName: '',
         setup: customSetup,
     },
 ]
 
-export const CUSTOM_KIND = AGENT_KINDS.find((kind) => kind.id === 'custom')!
+export const CUSTOM_SETUP = AGENT_SETUPS.find((setup) => setup.id === 'custom')!
 
-export function agentKind(id: string): AgentKind {
-    return AGENT_KINDS.find((kind) => kind.id === id) ?? CUSTOM_KIND
+export function agentSetup(id: string): AgentSetup {
+    return AGENT_SETUPS.find((setup) => setup.id === id) ?? CUSTOM_SETUP
+}
+
+/** How an existing agent is set up, from what Harbor stores about it. */
+export function setupFor(member: { agentKind?: string; agentConnection?: string }): AgentSetup {
+    return AGENT_SETUPS.find((setup) => setup.connection === member.agentConnection && setup.kinds.includes(member.agentKind ?? '')) ?? CUSTOM_SETUP
 }

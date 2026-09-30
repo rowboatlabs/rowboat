@@ -36,7 +36,8 @@ afterAll(async () => {
 
 describe('createAgent', () => {
   it('mints an id and stores an agent that is never admin', async () => {
-    expect(agent).toEqual({ id: expect.any(String), displayName: 'Replicas', role: 'member', kind: 'agent' });
+    // A kind and connection on every agent: custom/contract unless given (2026-09-30).
+    expect(agent).toEqual({ id: expect.any(String), displayName: 'Replicas', role: 'member', kind: 'agent', agentKind: 'custom', agentConnection: 'contract' });
     expect(await harbor.store.getMember(agent.id)).toEqual(agent);
   });
 
@@ -44,12 +45,24 @@ describe('createAgent', () => {
     await expect(harbor.service.createAgent({ displayName: '   ' })).rejects.toMatchObject({ code: 'invalid_request' });
   });
 
-  it('keeps kind fixed: an upsert never turns an agent into a person, or back', async () => {
-    await harbor.store.putMember({ ...agent, kind: 'human' });
-    expect((await harbor.store.getMember(agent.id))?.kind).toBe('agent');
+  it('keeps kind, and an agent\'s kind and connection, fixed: an upsert never changes them', async () => {
+    const { agentKind: _kind, agentConnection: _connection, ...asPerson } = agent;
+    await harbor.store.putMember({ ...asPerson, kind: 'human' });
+    await harbor.store.putMember({ ...agent, agentKind: 'hermes', agentConnection: 'plugin' });
+    expect(await harbor.store.getMember(agent.id)).toMatchObject({ kind: 'agent', agentKind: 'custom', agentConnection: 'contract' });
     const ram = (await harbor.store.getMember('ramnique'))!;
-    await harbor.store.putMember({ ...ram, kind: 'agent' });
-    expect((await harbor.store.getMember('ramnique'))?.kind).toBe('human');
+    await harbor.store.putMember({ ...ram, kind: 'agent', agentKind: 'custom', agentConnection: 'contract' });
+    const after = await harbor.store.getMember('ramnique');
+    expect(after?.kind).toBe('human');
+    expect(after?.agentKind).toBeUndefined();
+  });
+
+  it('refuses a half-described agent, or a person with an agent\'s fields, in the database', async () => {
+    const { agentConnection: _connection, ...halfAgent } = agent;
+    await expect(harbor.store.putMember({ ...halfAgent, id: 'half-agent' })).rejects.toThrow(/members_agent_connection_check/);
+    await expect(
+      harbor.store.putMember({ id: 'person-with-kind', displayName: 'P', role: 'member', kind: 'human', agentKind: 'custom', agentConnection: 'contract' }),
+    ).rejects.toThrow(/members_agent_connection_check/);
   });
 
   it('cannot be made admin, even by a direct write', async () => {

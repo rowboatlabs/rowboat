@@ -12,7 +12,7 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { ActingMode, AgentKey, AgentKeySecret, AgentListing, Attribution, Member, Membership, Message, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic } from './core.js';
+import { ActingMode, AgentCredential, AgentKey, AgentKeySecret, AgentListing, Attribution, Member, Membership, Message, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic } from './core.js';
 import { AssetId, AssetPath, BlobHash, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 import {
   AcceptInvite,
@@ -69,7 +69,8 @@ const NewMessage = z.object({
    * Options picked for agents this message mentions (spec §8 Invocation
    * options), keyed by the agent's member id. They land on that agent's
    * invocation, uninterpreted; values for an agent the message does not
-   * mention are ignored.
+   * invoke are ignored (it invokes the agents it mentions, and in a DM with
+   * an agent, that agent: spec §8, 2026-09-30).
    */
   agentOptions: z.record(MemberId, InvocationOptionValues).optional(),
 });
@@ -283,12 +284,36 @@ export const routes = {
     path: '/v1/agents',
     response: z.object({ agents: z.array(AgentListing) }),
   },
-  /** Add an agent: the caller becomes its owner and gets its first key, the one time the secret is shown. */
+  /**
+   * Add an agent: the caller becomes its owner and gets its first key, the
+   * one time the secret is shown. `kind` and `connection` must be a pair in
+   * AGENT_PAIRS (2026-09-30; absent = custom/contract, as before). A platform
+   * connection (HARBOR_RUN_CONNECTIONS) needs the platform's `credential`,
+   * which Harbor checks with the platform before anything is created, and
+   * seals; any other connection takes none.
+   */
   createAgent: {
     method: 'POST',
     path: '/v1/agents',
-    request: z.object({ displayName: z.string().trim().min(1).max(128) }),
+    request: z.object({
+      displayName: z.string().trim().min(1).max(128),
+      kind: z.string().min(1).max(32).default('custom'),
+      connection: z.string().min(1).max(32).default('contract'),
+      credential: z.string().min(1).max(512).optional(),
+    }),
     response: z.object({ agent: Member, key: AgentKeySecret }),
+  },
+  /**
+   * Replace a platform agent's credential (spec §8 Connectors, 2026-09-30).
+   * Owner only; checked with the platform before it is saved; clears a
+   * rejection. Render face only, like keys: a secret never passes through a tool.
+   */
+  setAgentCredential: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/credential',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ secret: z.string().min(1).max(512) }),
+    response: z.object({ credential: AgentCredential }),
   },
   /** Another key for an agent (rotation: create, switch, revoke the old one). Owner only. */
   createAgentKey: {

@@ -40,6 +40,7 @@ type SpacesHandlers = {
   'spaces:addMembers': InvokeHandler<'spaces:addMembers'>;
   'spaces:listAgents': InvokeHandler<'spaces:listAgents'>;
   'spaces:addAgent': InvokeHandler<'spaces:addAgent'>;
+  'spaces:setAgentCredential': InvokeHandler<'spaces:setAgentCredential'>;
   'spaces:createAgentKey': InvokeHandler<'spaces:createAgentKey'>;
   'spaces:revokeAgentKey': InvokeHandler<'spaces:revokeAgentKey'>;
   'spaces:openDirect': InvokeHandler<'spaces:openDirect'>;
@@ -235,7 +236,8 @@ export const spacesIpcHandlers: SpacesHandlers = {
   }),
 
   'spaces:listAgents': async (_event, args) => ({ agents: await orgs.getClient(args.orgId).listAgents() }),
-  'spaces:addAgent': async (_event, args) => orgs.getClient(args.orgId).addAgent(args.displayName),
+  'spaces:addAgent': async (_event, { orgId, ...input }) => orgs.getClient(orgId).addAgent(input),
+  'spaces:setAgentCredential': async (_event, args) => ({ credential: await orgs.getClient(args.orgId).setAgentCredential(args.agentId, args.secret) }),
   'spaces:createAgentKey': async (_event, args) => ({ key: await orgs.getClient(args.orgId).createAgentKey(args.agentId) }),
   'spaces:revokeAgentKey': async (_event, args) => ({ key: await orgs.getClient(args.orgId).revokeAgentKey(args.agentId, args.keyId) }),
 

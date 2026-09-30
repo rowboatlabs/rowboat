@@ -130,6 +130,7 @@ export async function startHarbor(options: HarborOptions): Promise<RunningHarbor
     close: async () => {
       closeLive();
       stats.close();
+      await runtime.close();
       await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
     },
   };

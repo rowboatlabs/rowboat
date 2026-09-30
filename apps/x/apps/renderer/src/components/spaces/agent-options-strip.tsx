@@ -7,8 +7,9 @@ import { cn } from '@/lib/utils'
 
 // The options an agent's connector declared (Harbor spec §8 Invocation
 // options, 2026-09-30), offered in the composer while the draft mentions that
-// agent — e.g. a coding agent's Environment. Harbor passes the picked values
-// through uninterpreted; unpicked means the connector's own default.
+// agent, or always in a DM with it, where every message invokes it — e.g. a
+// coding agent's Environment. Harbor passes the picked values through
+// uninterpreted; unpicked means the connector's own default.
 
 export type AgentOptionValues = Record<string, Record<string, string | boolean>>
 
@@ -20,7 +21,8 @@ export function AgentOptionsStrip({ draft, values, onChange }: {
     const refs = useSpaceRefs()
     const { byId } = useSpaceProfiles()
     const names = useMemberNames()
-    const agentIds = mentionedMemberIds(draft).filter((id) => byId.get(id)?.kind === 'agent')
+    const addressed = new Set([...mentionedMemberIds(draft), ...(refs?.directWith ? [refs.directWith] : [])])
+    const agentIds = [...addressed].filter((id) => byId.get(id)?.kind === 'agent')
     const caps = useAgentCapabilities(refs?.orgId, agentIds)
     const offering = agentIds.filter((id) => (caps.get(id)?.options.length ?? 0) > 0)
     if (offering.length === 0) return null

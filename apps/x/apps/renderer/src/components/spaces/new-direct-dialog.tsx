@@ -129,12 +129,12 @@ export function NewDirectDialog({ org, open, onOpenChange, onOpened }: {
                                     i === active && 'bg-accent',
                                 )}
                             >
-                                <MemberAvatar id={m.id} name={m.displayName} size="md" agent={m.kind === 'agent'} />
+                                <MemberAvatar id={m.id} name={m.displayName} size="md" agent={m.kind === 'agent'} agentKind={m.agentKind} />
                                 <span className="min-w-0 flex-1 truncate">
                                     {m.displayName}
                                     {m.id === org.memberId && <span className="text-muted-foreground"> (you) · notes to self</span>}
                                 </span>
-                                {m.kind === 'agent' && <AgentBadge />}
+                                {m.kind === 'agent' && <AgentBadge agentKind={m.agentKind} agentConnection={m.agentConnection} />}
                                 {opening === m.id ? (
                                     <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
                                 ) : existing.has(m.id) ? (

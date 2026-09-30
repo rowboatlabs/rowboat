@@ -60,7 +60,12 @@ export class Invocations {
     out: InvocationOutbox,
   ): Promise<Invocation[]> {
     const created: Invocation[] = [];
-    for (const agentId of new Set(message.mentions)) {
+    // The agents it mentions, and in a DM with an agent that agent, mention or
+    // not (spec §8, amended 2026-09-30). The checks below keep a person's DMs
+    // and a self-DM out: only an agent that is not the author is invoked.
+    const invoked = new Set(message.mentions);
+    if (space.kind === 'direct') for (const id of space.participants ?? []) invoked.add(id);
+    for (const agentId of invoked) {
       if (agentId === message.author.memberId) continue;
       const agent = await this.k.store.getMember(agentId);
       if (agent?.kind !== 'agent') continue;
@@ -140,21 +145,48 @@ export class Invocations {
       if (TERMINAL.has(current.state) || current.state === 'queued') {
         throw new HarborError('invalid_request', `this invocation is ${current.state}: it takes no reports`);
       }
-      const { activity: _activity, error: _error, ...rest } = current;
-      const next: Invocation = { ...rest, state: update.state, updatedAt: this.k.now() };
-      if (update.state === 'working' || update.state === 'waiting') {
-        if (update.activity) next.activity = update.activity;
-      }
-      if (update.state === 'working' && update.link) next.link = update.link;
-      if (update.state === 'failed' && update.error) next.error = update.error;
-      await this.k.store.putInvocation(next);
-      this.announce(next, out);
-      if (TERMINAL.has(next.state)) await this.promote(next.agentId, next.conversation.spaceId, next.conversation.threadRootId, out);
-      return next;
+      return this.apply(current, update, out);
     });
     this.flush(out);
     return result;
   }
+
+  /**
+   * The checked half of answering (Feed.postMessage `finishes`, spec §8
+   * Connectors, 2026-09-30), run inside the answer's own transaction: the
+   * invocation is this agent's, in this thread, and not finished. A replay of
+   * an answer finds it done and posts nothing.
+   */
+  async assertFinishable(ctx: ActorCtx, id: string, spaceId: string, threadRootId: string): Promise<Invocation> {
+    const current = await this.own(ctx, id);
+    if (current.conversation.spaceId !== spaceId || current.conversation.threadRootId !== threadRootId) {
+      throw new HarborError('invalid_request', 'an answer goes in its invocation\'s thread');
+    }
+    if (current.state !== 'working' && current.state !== 'waiting') {
+      throw new HarborError('invalid_request', `this invocation is ${current.state}: it takes no answer`);
+    }
+    return current;
+  }
+
+  /** The other half: done, in the same transaction as the answer. */
+  async finishWithin(current: Invocation, out: InvocationOutbox): Promise<Invocation> {
+    return this.apply(current, { state: 'done' }, out);
+  }
+
+  private async apply(current: Invocation, update: InvocationUpdate, out: InvocationOutbox): Promise<Invocation> {
+    const { activity: _activity, error: _error, ...rest } = current;
+    const next: Invocation = { ...rest, state: update.state, updatedAt: this.k.now() };
+    if (update.state === 'working' || update.state === 'waiting') {
+      if (update.activity) next.activity = update.activity;
+    }
+    if (update.state === 'working' && update.link) next.link = update.link;
+    if (update.state === 'failed' && update.error) next.error = update.error;
+    await this.k.store.putInvocation(next);
+    this.announce(next, out);
+    if (TERMINAL.has(next.state)) await this.promote(next.agentId, next.conversation.spaceId, next.conversation.threadRootId, out);
+    return next;
+  }
+
 
   /** What the connector's agent can do: Stop, and the options the composer offers. Declared again whenever it changes. */
   async declareCapabilities(ctx: ActorCtx, capabilities: ConnectorCapabilities): Promise<ConnectorCapabilities> {
@@ -253,6 +285,11 @@ export class Invocations {
   private async deepestLive(agentId: string): Promise<number> {
     const live = await this.k.store.listInvocationsForAgent(agentId, LIVE);
     return live.reduce((max, i) => Math.max(max, i.depth), 0);
+  }
+
+  /** One of the calling agent's own invocations, as it stands. */
+  ownInvocation(ctx: ActorCtx, id: string): Promise<Invocation> {
+    return this.own(ctx, id);
   }
 
   private requireConnector(ctx: ActorCtx): void {
