@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server as HttpServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { getRequestListener } from '@hono/node-server';
+import { HARBOR_RUN_CONNECTIONS } from '@rowboat/spaces-protocol';
 import { buildApexApp } from './apex.js';
 import { DevAuthDriver, type AuthDriver } from './auth.js';
 import { OidcAuthDriver } from './auth-oidc.js';
@@ -197,6 +198,19 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
   const closeLive = attachLive(server, async (host) => (await runtimeFor(host))?.live, { stats });
 
   await new Promise<void>((resolve) => server.listen(options.port ?? 0, resolve));
+
+  // An org's runtime is otherwise built on its first request, but the
+  // connectors Harbor runs (spec §8 Connectors, 2026-09-30) must pick up
+  // their agents' mentions after a restart whether or not anyone visits:
+  // build, at boot, the runtime of every org that has such an agent.
+  const connectorOrgs = await options.db.query<{ org_id: string }>(
+    `select distinct org_id from members where kind = 'agent' and agent_connection = any($1::text[])`,
+    [[...HARBOR_RUN_CONNECTIONS]],
+  );
+  for (const { org_id } of connectorOrgs) {
+    const org = await directory.getById(org_id);
+    if (org) runtimeForOrg(org).catch((err) => console.error(`[harbor] could not start org ${org_id} at boot:`, err));
+  }
   const port = (server.address() as AddressInfo).port;
 
   return {
@@ -209,6 +223,7 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
     close: async () => {
       closeLive();
       stats.close();
+      await Promise.allSettled([...runtimes.values()].map(async (pending) => (await pending)?.close()));
       await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
     },
   };

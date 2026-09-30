@@ -69,7 +69,8 @@ const NewMessage = z.object({
    * Options picked for agents this message mentions (spec §8 Invocation
    * options), keyed by the agent's member id. They land on that agent's
    * invocation, uninterpreted; values for an agent the message does not
-   * mention are ignored.
+   * invoke are ignored (it invokes the agents it mentions, and in a DM with
+   * an agent, that agent: spec §8, 2026-09-30).
    */
   agentOptions: z.record(MemberId, InvocationOptionValues).optional(),
 });

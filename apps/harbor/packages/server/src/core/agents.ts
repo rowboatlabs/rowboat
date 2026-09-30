@@ -1,4 +1,4 @@
-import type { AgentKey, AgentKeySecret, AgentListing, Member } from '@rowboat/spaces-protocol';
+import { HARBOR_RUN_CONNECTIONS, isAgentPair, type AgentCredential, type AgentKey, type AgentKeySecret, type AgentListing, type Member } from '@rowboat/spaces-protocol';
 import { hashAgentKey, mintAgentKeySecret } from '../agent-keys.js';
 import { HarborError } from '../errors.js';
 import { agentsManagedBy, canAddAgent, canCreateAgentKey, canRevokeAgentKey, enforce } from '../policy.js';
@@ -11,12 +11,30 @@ import type { Spaces } from './spaces.js';
 // owner or an admin revokes them. A key is a bearer secret presented as the
 // agent itself — auth.ts resolves it on every face — and the org keeps only
 // its hash. Render face only: a secret never passes through a tool.
+//
+// An agent's kind and connection (2026-09-30) are set here and never change.
+// A platform connection's credential is checked and stored by the connector
+// host (connectors/host.ts), which seals it for this org; this module keeps
+// the rules: who may set it, and that only a platform agent has one.
+
+/** What the connector host does for agent creation. Absent = this org runs no connectors. */
+export interface AgentConnectorHooks {
+  verify(connection: string, secret: string): Promise<void>;
+  save(agentId: string, secret: string, setBy: string): Promise<AgentCredential>;
+  added(agent: Member): void;
+}
 
 export class Agents {
+  private hooks: AgentConnectorHooks | undefined;
+
   constructor(
     private readonly k: Kernel,
     private readonly spaces: Spaces,
   ) {}
+
+  attachConnectors(hooks: AgentConnectorHooks): void {
+    this.hooks = hooks;
+  }
 
   private async actor(ctx: ActorCtx): Promise<Member> {
     const member = await this.k.store.getMember(ctx.memberId);
@@ -35,14 +53,56 @@ export class Agents {
     const actor = await this.actor(ctx);
     const agents = await this.k.store.listAgents(agentsManagedBy(actor) === 'all' ? null : actor.id);
     const keys = await this.k.store.listAgentKeys(agents.map((a) => a.id));
-    return agents.map((agent) => ({ agent, keys: keys.filter((k) => k.agentId === agent.id) }));
+    const credentials = await this.k.store.listAgentCredentials(agents.map((a) => a.id));
+    return agents.map((agent) => {
+      const stored = credentials.find((c) => c.agentId === agent.id);
+      const { agentId: _agentId, sealed: _sealed, ...credential } = stored ?? ({} as never);
+      return { agent, keys: keys.filter((k) => k.agentId === agent.id), ...(stored ? { credential } : {}) };
+    });
   }
 
-  /** Add an agent: the caller owns it and gets its first key, shown this once. */
-  async add(ctx: ActorCtx, displayName: string): Promise<{ agent: Member; key: AgentKeySecret }> {
+  /**
+   * Add an agent: the caller owns it and gets its first key, shown this once.
+   * A platform agent's credential is checked with the platform first, so a
+   * refused key creates nothing.
+   */
+  async add(
+    ctx: ActorCtx,
+    input: { displayName: string; kind: string; connection: string; credential?: string },
+  ): Promise<{ agent: Member; key: AgentKeySecret }> {
     enforce(canAddAgent(await this.actor(ctx)));
-    const agent = await this.spaces.createAgent({ displayName, ownerId: ctx.memberId });
-    return { agent, key: await this.mint(ctx, agent.id) };
+    if (!isAgentPair(input.kind, input.connection)) {
+      throw new HarborError('invalid_request', `${input.kind} through ${input.connection} is not a kind of agent this Harbor knows`);
+    }
+    const platform = HARBOR_RUN_CONNECTIONS.includes(input.connection);
+    if (platform && input.credential === undefined) throw new HarborError('invalid_request', `a ${input.connection} agent needs its ${input.connection} key`);
+    if (!platform && input.credential !== undefined) throw new HarborError('invalid_request', 'only an agent Harbor reaches through a platform takes a credential');
+    if (platform) {
+      if (!this.hooks) throw new HarborError('invalid_request', `this Harbor runs no ${input.connection} connector`);
+      await this.hooks.verify(input.connection, input.credential!);
+    }
+    const agent = await this.spaces.createAgent({
+      displayName: input.displayName,
+      ownerId: ctx.memberId,
+      agentKind: input.kind,
+      agentConnection: input.connection,
+    });
+    if (platform) await this.hooks!.save(agent.id, input.credential!, ctx.memberId);
+    const key = await this.mint(ctx, agent.id);
+    this.hooks?.added(agent);
+    return { agent, key };
+  }
+
+  /** Replace a platform agent's credential: the owner only, checked with the platform first; clears a rejection. */
+  async setCredential(ctx: ActorCtx, agentId: string, secret: string): Promise<AgentCredential> {
+    const agent = await this.agent(agentId);
+    enforce(canCreateAgentKey(await this.actor(ctx), agent));
+    const connection = agent.agentConnection ?? '';
+    if (!HARBOR_RUN_CONNECTIONS.includes(connection)) throw new HarborError('invalid_request', 'only an agent Harbor reaches through a platform has a credential');
+    if (!this.hooks) throw new HarborError('invalid_request', `this Harbor runs no ${connection} connector`);
+    this.k.guardWrite();
+    await this.hooks.verify(connection, secret);
+    return this.hooks.save(agentId, secret, ctx.memberId);
   }
 
   /** Another key, for rotation: create, switch the agent over, revoke the old one. */

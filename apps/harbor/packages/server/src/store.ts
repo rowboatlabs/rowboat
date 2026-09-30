@@ -1,5 +1,6 @@
 import type { ActivityKind } from '@rowboat/spaces-protocol';
 import type {
+  AgentCredential,
   AgentKey,
   Attribution,
   ConnectorCapabilities,
@@ -108,6 +109,12 @@ export function directKeyFor(participants: readonly string[]): string {
 /** An agent key as stored: its metadata plus the SHA-256 of the secret (never the secret). */
 export interface StoredAgentKey extends AgentKey {
   hash: string;
+}
+
+/** A platform credential as stored (spec §8 Connectors, 2026-09-30): what its owner sees, plus the sealed secret. */
+export interface StoredAgentCredential extends AgentCredential {
+  agentId: string;
+  sealed: string;
 }
 
 export interface StoredEvent {
@@ -436,6 +443,19 @@ export interface Store {
   revokeAgentKey(id: string, at: string): Promise<void>;
   /** Record use, at most once per `since` window, so authentication rarely writes. */
   touchAgentKey(id: string, at: string, since: string): Promise<void>;
+
+  // --- connectors Harbor runs (spec §8 Connectors, 2026-09-30) ---
+  /** Agent members whose connection is one of these. */
+  listAgentsByConnection(connections: readonly string[]): Promise<Member[]>;
+  getAgentCredential(agentId: string): Promise<StoredAgentCredential | undefined>;
+  listAgentCredentials(agentIds: string[]): Promise<StoredAgentCredential[]>;
+  /** Set or replace an agent's credential; a replacement clears its rejection. */
+  putAgentCredential(credential: StoredAgentCredential): Promise<void>;
+  /** Mark it rejected by its platform; true only the first time, until it is replaced. */
+  rejectAgentCredential(agentId: string, at: string, reason: string): Promise<boolean>;
+  /** A connector's own record for one thread (its shape is the connector's). */
+  getConnectionThread(agentId: string, spaceId: string, threadRootId: string): Promise<unknown | undefined>;
+  putConnectionThread(agentId: string, spaceId: string, threadRootId: string, data: unknown, at: string): Promise<void>;
 
   // --- invocations (spec §8 Invoking agent members, 2026-09-30) ---
   /** A new invocation, with its triggering message's offset: the queue's order. */

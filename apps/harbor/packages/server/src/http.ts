@@ -217,7 +217,22 @@ export function buildHttpApp(deps: {
 
   app.post(routes.createAgent.path, async (c) => {
     const input = await body(c, routes.createAgent.request);
-    return reply(c, routes.createAgent.response, await service.addAgent(actor(c), input.displayName));
+    return reply(
+      c,
+      routes.createAgent.response,
+      await service.addAgent(actor(c), {
+        displayName: input.displayName,
+        kind: input.kind,
+        connection: input.connection,
+        ...(input.credential !== undefined ? { credential: input.credential } : {}),
+      }),
+    );
+  });
+
+  app.put(routes.setAgentCredential.path, async (c) => {
+    const { agentId } = parseWith(routes.setAgentCredential.params, c.req.param());
+    const input = await body(c, routes.setAgentCredential.request);
+    return reply(c, routes.setAgentCredential.response, { credential: await service.setAgentCredential(actor(c), agentId, input.secret) });
   });
 
   app.post(routes.createAgentKey.path, async (c) => {

@@ -308,7 +308,17 @@ export class Feed {
     return folded;
   }
 
-  async postMessage(ctx: ActorCtx, spaceId: string, input: NewMessage): Promise<{ message: Message; invocations: Invocation[] }> {
+  /**
+   * `finishes` (in-process only, never on the wire): this message is the
+   * answer to that invocation, which is marked done in the same transaction,
+   * or nothing is posted (spec §8 Connectors, 2026-09-30).
+   */
+  async postMessage(
+    ctx: ActorCtx,
+    spaceId: string,
+    input: NewMessage,
+    opts: { finishes?: string } = {},
+  ): Promise<{ message: Message; invocations: Invocation[] }> {
     const space = await this.k.requireMember(ctx, spaceId);
     this.k.guardWrite();
     const author = this.k.attributionOf(ctx, input);
@@ -318,11 +328,17 @@ export class Feed {
     // mention is never lost between the post and the queue (spec §8); their
     // frames leave with the rest, after the commit.
     const outbox: InvocationOutbox = [];
-    const invoke = async (message: Message): Promise<{ message: Message; invocations: Invocation[] }> => ({
-      message,
-      invocations: this.invocations ? await this.invocations.onMessage(ctx, space, message, input.agentOptions, outbox) : [],
-    });
+    let finishing: Invocation | undefined;
+    const invoke = async (message: Message): Promise<{ message: Message; invocations: Invocation[] }> => {
+      const invocations = this.invocations ? await this.invocations.onMessage(ctx, space, message, input.agentOptions, outbox) : [];
+      if (finishing && this.invocations) await this.invocations.finishWithin(finishing, outbox);
+      return { message, invocations };
+    };
     const result = await this.k.lockedAs(ctx, spaceId, async () => {
+      if (opts.finishes) {
+        if (!this.invocations || !input.threadRoot) throw new HarborError('invalid_request', 'an answer is a reply in its invocation\'s thread');
+        finishing = await this.invocations.assertFinishable(ctx, opts.finishes, spaceId, input.threadRoot);
+      }
       const at = this.k.now();
       // The org stamps the poll from its own clock: answer ids 1..n, a
       // duration in becomes an expiry out (the Discord create asymmetry).

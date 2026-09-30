@@ -53,14 +53,23 @@ export class Spaces {
    * its own: the integration that owns the agent calls this and gates who may.
    * The first is the Replicas coding agent (PR #1130).
    */
-  async createAgent(input: { displayName: string; ownerId?: string }): Promise<Member> {
+  async createAgent(input: { displayName: string; ownerId?: string; agentKind?: string; agentConnection?: string }): Promise<Member> {
     const displayName = input.displayName.trim();
     if (!Member.shape.displayName.safeParse(displayName).success) {
       throw new HarborError('invalid_request', 'an agent needs a display name of 1 to 128 characters');
     }
     this.k.guardWrite();
-    // No owner = org-owned, managed by admins (Replicas); a member-added agent names its person (core/agents.ts).
-    const member: Member = { id: this.k.ulid(), displayName, role: 'member', kind: 'agent', ...(input.ownerId ? { ownerId: input.ownerId } : {}) };
+    // A member-added agent names its person (core/agents.ts); its kind and
+    // connection default to custom/contract (spec §4 Agent members, 2026-09-30).
+    const member: Member = {
+      id: this.k.ulid(),
+      displayName,
+      role: 'member',
+      kind: 'agent',
+      ...(input.ownerId ? { ownerId: input.ownerId } : {}),
+      agentKind: input.agentKind ?? 'custom',
+      agentConnection: input.agentConnection ?? 'contract',
+    };
     await this.k.store.putMember(member);
     return member;
   }

@@ -1,6 +1,6 @@
 import type { z } from 'zod';
 import type { BlobStore } from './blobs.js';
-import { Agents } from './core/agents.js';
+import { Agents, type AgentConnectorHooks } from './core/agents.js';
 import { Assets } from './core/assets.js';
 import { Feed } from './core/feed.js';
 import { Invocations } from './core/invocations.js';
@@ -27,6 +27,7 @@ import type {
   DeleteAssetResult,
   Member,
   AgentKey,
+  AgentCredential,
   AgentKeySecret,
   AgentListing,
   ConnectorCapabilities,
@@ -88,6 +89,16 @@ export class HarborService {
     this.agents = new Agents(this.k, this.spaces);
   }
 
+  /** The kernel's clock, for code outside the core that stamps rows (connectors/host.ts). */
+  now(): string {
+    return this.k.now();
+  }
+
+  /** The connector host, for creating agents Harbor reaches through a platform (runtime.ts). */
+  attachConnectors(hooks: AgentConnectorHooks): void {
+    this.agents.attachConnectors(hooks);
+  }
+
   /** The org this service serves — `address` is set once the listener knows its port (server.ts). */
   get org(): OrgInfo {
     return this.k.org;
@@ -141,8 +152,14 @@ export class HarborService {
   listAgents(ctx: ActorCtx): Promise<AgentListing[]> {
     return this.agents.list(ctx);
   }
-  addAgent(ctx: ActorCtx, displayName: string): Promise<{ agent: Member; key: AgentKeySecret }> {
-    return this.agents.add(ctx, displayName);
+  addAgent(
+    ctx: ActorCtx,
+    input: { displayName: string; kind: string; connection: string; credential?: string },
+  ): Promise<{ agent: Member; key: AgentKeySecret }> {
+    return this.agents.add(ctx, input);
+  }
+  setAgentCredential(ctx: ActorCtx, agentId: string, secret: string): Promise<AgentCredential> {
+    return this.agents.setCredential(ctx, agentId, secret);
   }
   createAgentKey(ctx: ActorCtx, agentId: string): Promise<AgentKeySecret> {
     return this.agents.createKey(ctx, agentId);
@@ -306,6 +323,17 @@ export class HarborService {
   }
   postMessage(ctx: ActorCtx, spaceId: string, input: NewMessage): Promise<{ message: Message; invocations: Invocation[] }> {
     return this.feed.postMessage(ctx, spaceId, input);
+  }
+  /**
+   * A connector's answer to one of its agent's invocations: posted in its
+   * thread and marked done in one transaction, or not at all if the
+   * invocation has already finished (spec §8 Connectors, 2026-09-30).
+   * In-process only; nothing on the wire takes `finishes`.
+   */
+  async answerInvocation(ctx: ActorCtx, invocationId: string, body: string): Promise<{ message: Message; invocations: Invocation[] }> {
+    const invocation = await this.invocations.ownInvocation(ctx, invocationId);
+    const { spaceId, threadRootId } = invocation.conversation;
+    return this.feed.postMessage(ctx, spaceId, { body, threadRoot: threadRootId, actingMode: 'direct' }, { finishes: invocationId });
   }
   createTopic(
     ctx: ActorCtx,
