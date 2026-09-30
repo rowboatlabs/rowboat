@@ -380,6 +380,6 @@ Contrainte connue : on privilégie le **managé**, pas de VPS à administrer soi
 | 1 | Connexion | **Décidé 29/09 :** téléphone + code SMS (§3.5). Reste l'agrégateur SMS par pays. |
 | 2 | Hébergement des instances | **Décidé 29/09 :** mise en veille obligatoire (§6). Reste la plateforme, avant la phase 0. |
 | 3 | i18n des chaînes upstream | **Décidé 29/09 :** proposée d'abord à l'upstream (§3.12). |
-| 4 | Composio | **Proposé :** désactivé en V1, MCP et connecteurs natifs à la place (§3.14). En attente de validation. |
+| 4 | Composio | **Décidé 29/09 :** désactivé en V1, MCP et connecteurs natifs à la place (§3.14). |
 | 5 | Argent des clients | **Décidé 29/09 :** Warell ne détient jamais d'argent (§3.9). Reste la validation juridique. |
 | 6 | JEV | **Décidé 29/09 :** accélérateur optionnel de lecture et recherche, adopté sur mesures (§3.10). |
