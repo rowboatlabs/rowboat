@@ -39,7 +39,7 @@ fi
 echo "→ $behind commit(s) upstream à intégrer."
 
 branch="sync/upstream-$(date +%Y-%m-%d)"
-git switch -C "$branch" origin/main
+git switch --no-track -C "$branch" origin/main
 
 if git merge --no-ff --no-edit -m "sync: intègre $TARGET ($(git rev-parse --short "$TARGET"))" "$TARGET"; then
   echo "✓ Fusion propre sur $branch."
