@@ -1,0 +1,19 @@
+import { describe, expect, it } from 'vitest';
+import { RowboatApiConfig } from '@x/shared/dist/rowboat-account.js';
+import { buildApiConfig } from '../src/config.js';
+
+// Contract test (roadmap phase 0): the body is validated by the upstream zod
+// schema itself, so an upstream change to /v1/config breaks here at sync time.
+describe('GET /v1/config body', () => {
+  it('parses with the upstream RowboatApiConfig schema', () => {
+    const body = buildApiConfig({ publicUrl: 'https://control.example.test/' });
+    expect(() => RowboatApiConfig.parse(body)).not.toThrow();
+  });
+
+  it('points every URL at the control plane, never at Rowboat Labs', () => {
+    const body = buildApiConfig({ publicUrl: 'https://control.example.test/' });
+    expect(body.appUrl).toBe('https://control.example.test');
+    expect(body.supabaseUrl).toBe('https://control.example.test');
+    expect(JSON.stringify(body)).not.toContain('rowboatlabs.com');
+  });
+});

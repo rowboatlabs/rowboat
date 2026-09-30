@@ -1,0 +1,22 @@
+{
+  "name": "@warell/control",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@x/shared": "link:../../../x/packages/shared",
+    "zod": "4.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "4.1.7"
+  }
+}
