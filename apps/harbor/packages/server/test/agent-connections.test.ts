@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { routes, type AgentListing, type Invocation, type Member } from '@rowboat/spaces-protocol';
+import { HARBOR_RUN_CONNECTIONS, routes, type AgentListing, type Invocation, type Member } from '@rowboat/spaces-protocol';
 import { HostedConnectors } from '../src/connectors/host.js';
 import { PLATFORMS, type ConnectorEnv, type ConnectorPlatform } from '../src/connectors/platforms.js';
 import { HarborError } from '../src/errors.js';
@@ -56,6 +56,12 @@ afterAll(async () => {
   if (original) PLATFORMS.replicas = original;
   else delete PLATFORMS.replicas;
   delete process.env.HARBOR_INTEGRATION_KEY;
+});
+
+describe('the registry', () => {
+  it('has a connector for every connection the protocol says Harbor runs', () => {
+    for (const connection of HARBOR_RUN_CONNECTIONS) expect(original ?? PLATFORMS[connection], connection).toBeDefined();
+  });
 });
 
 describe('kind and connection', () => {

@@ -274,8 +274,9 @@ export class HarborService {
     spaceId: string,
     hash: string,
     name?: string,
+    opts?: { expiresInSeconds?: number },
   ): Promise<{ blob: BlobInfo; disposition: string; url?: string; bytes?: Uint8Array }> {
-    return this.assets.downloadBlob(ctx, spaceId, hash, name);
+    return this.assets.downloadBlob(ctx, spaceId, hash, name, opts);
   }
   proposeChange(ctx: ActorCtx, spaceId: string, input: ProposeChange): Promise<ProposeChangeResult> {
     return this.assets.proposeChange(ctx, spaceId, input);
