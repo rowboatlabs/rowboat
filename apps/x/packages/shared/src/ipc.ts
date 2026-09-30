@@ -4095,8 +4095,26 @@ export const ipcSchemas = {
       body: z.string(),
       /** Present = the message carries a poll; body must be its markdown fallback. */
       poll: z.custom<SpacesTypes.SpacesNewPollInput>().optional(),
+      /** Options picked for agents the message mentions, keyed by agent member id (2026-09-30). */
+      agentOptions: z.record(z.string(), z.record(z.string(), z.union([z.string(), z.boolean()]))).optional(),
     }),
     res: z.custom<SpacesPostResult>(),
+  },
+  // Agent invocations (Harbor spec §8, 2026-09-30): a space's, newest first,
+  // for the lines under the messages that invoked an agent; cancel a queued
+  // one or stop a running one; an agent's declared capabilities (the
+  // composer's options, whether Stop is offered).
+  'spaces:listInvocations': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), threadRootId: z.string().optional() }),
+    res: z.object({ invocations: z.array(z.custom<SpacesTypes.Invocation>()) }),
+  },
+  'spaces:cancelInvocation': {
+    req: z.object({ orgId: z.string(), invocationId: z.string() }),
+    res: z.object({ invocation: z.custom<SpacesTypes.Invocation>() }),
+  },
+  'spaces:getAgentCapabilities': {
+    req: z.object({ orgId: z.string(), agentId: z.string() }),
+    res: z.object({ capabilities: z.custom<SpacesTypes.ConnectorCapabilities>() }),
   },
   // The stream composer's Auto toggle (2026-09-22): Jev says whether a draft
   // is a new root or a reply to one of the candidate threads the renderer

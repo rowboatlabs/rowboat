@@ -6,6 +6,11 @@ import type {
   AgentKeySecret,
   AgentListing,
   Asset,
+  ConnectorCapabilities,
+  Invocation,
+  InvocationOption,
+  InvocationOptionValues,
+  InvocationState,
   BlobInfo,
   ChangeSet,
   CreateAssetResult,
@@ -58,6 +63,11 @@ export type {
   AgentKeySecret,
   AgentListing,
   Asset,
+  ConnectorCapabilities,
+  Invocation,
+  InvocationOption,
+  InvocationOptionValues,
+  InvocationState,
   BlobInfo,
   ChangeSet,
   CreateAssetResult,
@@ -170,6 +180,8 @@ export interface SpacesThreadPage {
 
 export interface SpacesPostResult {
   message: Message;
+  /** The agents the message invoked, or was refused to (Harbor spec §8, 2026-09-30); absent from older orgs. */
+  invocations?: Invocation[];
 }
 
 /** Promote (rootMessageId) or post + annotate (body) — exactly one of the two. */

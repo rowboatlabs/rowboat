@@ -32,7 +32,8 @@ import {
 } from '@/lib/spaces-auto-route'
 import type { BannerChip } from '@/components/spaces/auto-banner'
 import { readThreadDraft, stageThreadDraft } from '@/lib/spaces-thread-draft'
-import { postStreamMessage } from '@/lib/spaces-post'
+import { agentOptionsPayload, postStreamMessage } from '@/lib/spaces-post'
+import { noteInvocations } from '@/hooks/use-space-invocations'
 import { AutoBanner } from '@/components/spaces/auto-banner'
 import { ThreadPickerDialog } from '@/components/spaces/thread-picker-dialog'
 import { FindBanner } from '@/components/spaces/find-banner'
@@ -278,7 +279,9 @@ export function GeneralStream({
         const label = threadLabelFor(rootMessageId)
         let posted: spaces.Message
         try {
-            posted = (await window.ipc.invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body })).message
+            const result = await window.ipc.invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body, ...agentOptionsPayload(agent) })
+            posted = result.message
+            noteInvocations(org.id, space.id, result.invocations)
         } catch (err) {
             notify.error(`Could not reply in “${label}”`, { ...AUTO_TOAST, description: err instanceof Error ? err.message : 'The send failed' })
             // Rethrown so the composer keeps the draft for another try.

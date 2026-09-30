@@ -27,7 +27,8 @@ import {
     clearStagedThreadDraft, peekStagedReply, releaseStagedThreadDraft, stageThreadDraft, subscribeStagedThreadDraft, threadDraftKey, useStagedThreadDraft,
 } from '@/lib/spaces-thread-draft'
 import { AUTO_TOAST, collectRouteCandidates, routeDraft, routeThreadLabel } from '@/lib/spaces-auto-route'
-import { postStreamMessage } from '@/lib/spaces-post'
+import { agentOptionsPayload, postStreamMessage } from '@/lib/spaces-post'
+import { noteInvocations } from '@/hooks/use-space-invocations'
 import { getStreamState, jumpToLatest } from '@/hooks/use-space-chat'
 import { AutoBanner } from '@/components/spaces/auto-banner'
 import { FindBanner } from '@/components/spaces/find-banner'
@@ -628,8 +629,9 @@ export function ThreadPane({
         const pending = buildPendingMessage(space.id, org.memberId, body, rootMessageId)
         setMessages((prev) => [...prev, pending])
         void window.ipc
-            .invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body })
+            .invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body, ...agentOptionsPayload(agent) })
             .then((result) => {
+                noteInvocations(org.id, space.id, result.invocations)
                 setMessages((prev) => {
                     const rest = prev.filter((m) => m.id !== pending.id)
                     // A jump landed while the send was in flight: the reply lives

@@ -4,10 +4,12 @@
 // lists its pending invocations on start and every minute (the live frame is
 // the fast path, the list the guarantee), acknowledges each one, reports
 // progress, replies in the thread through the ordinary messages route, and
-// reports done. It declares Stop and honors invocation_stop. "slow" in a
-// message makes it take 15 seconds, so a second mention in the same thread
-// visibly waits its turn. A real connector (Hermes, OpenClaw) keeps this
-// shape and swaps the echo for its agent.
+// reports done. It declares Stop and honors invocation_stop, and declares
+// one option (Style: Plain or Shout) that the composer offers when you mention
+// it. "slow" in a message makes it take 15 seconds, so a second mention in
+// the same thread visibly waits its turn; "approve" makes it wait on you until
+// a reply that mentions it arrives as the answer. A real connector (Hermes,
+// OpenClaw) keeps this shape and swaps the echo for its agent.
 //
 // Try it against a dev Harbor: add an agent under Agents in the app, add it
 // to a space, then
@@ -35,10 +37,16 @@ const plain = (body) => body.replace(/\[@([^\]]+)\]\(#member:[^)]+\)/g, '@$1');
 
 const me = (await api('GET', '/v1/me')).member;
 console.log(`echo agent running as ${me.displayName} (${me.id})`);
-await api('POST', '/v1/agent/capabilities', { stop: true });
+await api('POST', '/v1/agent/capabilities', {
+  stop: true,
+  options: [{ type: 'select', key: 'style', label: 'Style', choices: [{ id: 'plain', label: 'Plain' }, { id: 'shout', label: 'Shout' }] }],
+});
 
 const seen = new Set();
 const stopping = new Set();
+/** Turns waiting on a person: invocation id → resolve with the answer's text. */
+const waiting = new Map();
+const report = (id, update) => api('POST', `/v1/agent/invocations/${id}/update`, update);
 
 async function handle(invocation) {
   if (seen.has(invocation.id) || invocation.state !== 'pending') return;
@@ -46,8 +54,31 @@ async function handle(invocation) {
   const { spaceId, threadRootId } = invocation.conversation;
   const text = plain(invocation.trigger.body);
   console.log(`→ invoked by ${invocation.trigger.authorId}: ${text}`);
+  // An answer to a turn that is waiting on a person: hand it over, and it's done.
+  if (invocation.answers) {
+    await api('POST', `/v1/agent/invocations/${invocation.id}/ack`);
+    await report(invocation.id, { state: 'done' });
+    waiting.get(invocation.answers)?.(text);
+    return;
+  }
+  const say = (body) =>
+    api('POST', `/v1/spaces/${spaceId}/messages`, {
+      threadRoot: threadRootId,
+      body: invocation.options?.style === 'shout' ? body.toUpperCase() : body,
+      actingMode: 'direct',
+    });
   try {
     await api('POST', `/v1/agent/invocations/${invocation.id}/ack`);
+    if (/\bapprove\b/i.test(text)) {
+      await report(invocation.id, { state: 'waiting', activity: 'Reply mentioning me to approve or reject' });
+      const answer = await new Promise((resolve) => waiting.set(invocation.id, resolve));
+      waiting.delete(invocation.id);
+      await report(invocation.id, { state: 'working', activity: 'Carrying on' });
+      await say(`Echo: you answered “${answer}” to “${text}”`);
+      await report(invocation.id, { state: 'done' });
+      console.log('  answered, done');
+      return;
+    }
     const slow = /\bslow\b/i.test(text);
     await api('POST', `/v1/agent/invocations/${invocation.id}/update`, { state: 'working', activity: slow ? 'Taking my time' : 'Thinking it over' });
     for (let waited = 0; waited < (slow ? 15_000 : 1_500); waited += 500) {
@@ -58,8 +89,8 @@ async function handle(invocation) {
       }
       await sleep(500);
     }
-    await api('POST', `/v1/spaces/${spaceId}/messages`, { threadRoot: threadRootId, body: `Echo: ${text}`, actingMode: 'direct' });
-    await api('POST', `/v1/agent/invocations/${invocation.id}/update`, { state: 'done' });
+    await say(`Echo: ${text}`);
+    await report(invocation.id, { state: 'done' });
     console.log('  replied, done');
   } catch (err) {
     console.error('  failed:', err.message);

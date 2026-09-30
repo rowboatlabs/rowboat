@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { AgentMark, MemberAvatar, MemberProfilePopover } from '@/components/spaces/atoms'
+import { InvocationLines } from '@/components/spaces/invocation-lines'
 import { MessageEditBox } from '@/components/spaces/edit-box'
 import { EmojiPickerPopover } from '@/components/spaces/emoji-picker'
 import { MessageLinkPreview } from '@/components/spaces/link-preview-card'
@@ -394,6 +395,7 @@ function MessageRowImpl({
                         )}
                     </div>
                 )}
+                {!deleted && !unconfirmed && <InvocationLines messageId={message.id} />}
                 {!deleted && !unconfirmed && onReact && (
                     <ReactionChips
                         message={message}
