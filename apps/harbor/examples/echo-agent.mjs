@@ -98,6 +98,13 @@ async function handle(invocation) {
   }
 }
 
+// What a previous run acknowledged and never finished died with it (an echo
+// can't resume): say so now, or its thread waits out Harbor's 30 minutes
+// behind a turn that is gone (SPEC.md §8).
+for (const invocation of (await api('GET', '/v1/agent/invocations')).invocations) {
+  if (invocation.state !== 'pending') await report(invocation.id, { state: 'failed', error: 'The agent restarted before finishing this.' });
+}
+
 // The list is the guarantee: on start, and every minute.
 async function sweep() {
   const { invocations } = await api('GET', '/v1/agent/invocations');
