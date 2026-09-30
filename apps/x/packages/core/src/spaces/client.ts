@@ -11,6 +11,7 @@ import {
   type DeleteAssetResult,
   type CreateInviteResult,
   type AgentKey,
+  type AgentCredential,
   type AgentKeySecret,
   type AgentListing,
   type ConnectorCapabilities,
@@ -155,7 +156,7 @@ export class SpacesClient {
   }
 
   private async request<S extends z.ZodType>(
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'PUT',
     path: string,
     responseSchema: S,
     body?: unknown,
@@ -248,9 +249,19 @@ export class SpacesClient {
     return (await this.request('GET', routes.listAgents.path, routes.listAgents.response)).agents;
   }
 
-  /** Add an agent this member owns; the response carries its first key's secret, the only time it is shown. */
-  async addAgent(displayName: string): Promise<{ agent: Member; key: AgentKeySecret }> {
-    return this.request('POST', routes.createAgent.path, routes.createAgent.response, { displayName });
+  /**
+   * Add an agent this member owns; the response carries its first key's
+   * secret, the only time it is shown. `kind`/`connection` say what it is and
+   * how Harbor reaches it (2026-09-30); a platform agent (Replicas) also
+   * brings the platform's `credential`, which Harbor checks and seals.
+   */
+  async addAgent(input: { displayName: string; kind?: string; connection?: string; credential?: string }): Promise<{ agent: Member; key: AgentKeySecret }> {
+    return this.request('POST', routes.createAgent.path, routes.createAgent.response, input);
+  }
+
+  /** Replace a platform agent's credential (owner only); Harbor checks it with the platform first. */
+  async setAgentCredential(agentId: string, secret: string): Promise<AgentCredential> {
+    return (await this.request('PUT', `/v1/agents/${encodeURIComponent(agentId)}/credential`, routes.setAgentCredential.response, { secret })).credential;
   }
 
   async createAgentKey(agentId: string): Promise<AgentKeySecret> {

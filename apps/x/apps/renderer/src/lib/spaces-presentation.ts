@@ -193,6 +193,8 @@ export interface SpaceRefs {
     /** host[:port] — the org address links are minted on. */
     orgAddress: string
     spaceId: string
+    /** In a DM, the other member: a DM with an agent invokes it without a mention (Harbor spec §8, 2026-09-30). */
+    directWith?: string
 }
 
 /**

@@ -34,9 +34,10 @@ vi.mock('@/hooks/use-spaces', async (importOriginal) => ({
 }))
 vi.mock('@/lib/spaces-feed', () => ({ subscribeSpacesFeed: () => () => {} }))
 
-const member = (id: string, displayName: string, kind = 'human') => ({ id, displayName, role: 'member', kind })
-const here = [member('me', 'Me Myself'), member('01HHARSH', 'Harsh'), member('01HREPL', 'Replicas', 'agent')]
-const org = [...here, member('01HADA', 'Ada Lovelace'), member('01HZED', 'Zed'), member('01HBOT', 'Hermes', 'agent')]
+const member = (id: string, displayName: string, kind = 'human', agentKind?: string, agentConnection?: string) =>
+    ({ id, displayName, role: 'member', kind, ...(agentKind ? { agentKind, agentConnection } : {}) })
+const here = [member('me', 'Me Myself'), member('01HHARSH', 'Harsh'), member('01HREPL', 'Replicas', 'agent', 'claude-code', 'replicas')]
+const org = [...here, member('01HADA', 'Ada Lovelace'), member('01HZED', 'Zed'), member('01HBOT', 'Hermes', 'agent', 'hermes', 'plugin')]
 const files: Record<string, unknown[]> = {
     [HERE]: [
         { id: 'A-plan', path: 'plan.md', version: 1, updatedAt: '' },
@@ -85,9 +86,9 @@ describe('useMentionAutocomplete', () => {
         expect(byId.get('01HHARSH')?.hint).toBeUndefined()
         expect(byId.get('01HADA')?.hint).toBe('not in this space')
         // Agent members (2026-09-29) are marked, and stay ordinary members, never the @rowboat address.
-        expect(byId.get('01HREPL')).toMatchObject({ hint: 'agent', label: 'Replicas' })
+        expect(byId.get('01HREPL')).toMatchObject({ hint: 'Claude Code · via Replicas', label: 'Replicas' })
         expect(byId.get('01HREPL')?.isAgent).toBeUndefined()
-        expect(byId.get('01HBOT')?.hint).toBe('agent · not in this space')
+        expect(byId.get('01HBOT')?.hint).toBe('Hermes · not in this space')
         expect(byId.get(`space:${DESIGN}`)?.space).toEqual({ id: DESIGN, name: 'Design' })
         expect(result.current.candidates.some((c) => c.file)).toBe(false)
     })

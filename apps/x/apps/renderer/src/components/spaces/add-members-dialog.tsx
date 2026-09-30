@@ -97,9 +97,9 @@ export function AddMembersDialog({ org, space, members, open, onOpenChange }: {
                                     onClick={() => toggle(m.id)}
                                     className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/60', on && 'bg-accent')}
                                 >
-                                    <MemberAvatar id={m.id} name={m.displayName} size="md" agent={m.kind === 'agent'} />
+                                    <MemberAvatar id={m.id} name={m.displayName} size="md" agent={m.kind === 'agent'} agentKind={m.agentKind} />
                                     <span className="min-w-0 flex-1 truncate">{m.displayName}</span>
-                                    {m.kind === 'agent' && <AgentBadge />}
+                                    {m.kind === 'agent' && <AgentBadge agentKind={m.agentKind} agentConnection={m.agentConnection} />}
                                     <span className={cn('inline-flex size-4 shrink-0 items-center justify-center rounded border', on ? 'border-foreground bg-foreground text-background' : 'border-border')}>
                                         {on && <Check className="size-3" />}
                                     </span>

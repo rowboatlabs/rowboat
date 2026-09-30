@@ -4,11 +4,11 @@ import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { AgentKindLogo, ConnectAgent } from '@/components/spaces/agent-setup'
+import { AgentLogo, ConnectAgent } from '@/components/spaces/agent-setup'
 import { MemberAvatar } from '@/components/spaces/atoms'
 import { refreshOrgRoster, useOrgRoster } from '@/hooks/use-space-members'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
-import { AGENT_KINDS, agentKind, CUSTOM_KIND, type AgentKind } from '@/lib/agent-kinds'
+import { AGENT_SETUPS, agentLabel, agentSetup, kindInfo, PLATFORMS, setupFor, type AgentSetup } from '@/lib/agent-kinds'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 
@@ -19,15 +19,17 @@ import { cn } from '@/lib/utils'
 // never mint.
 //
 // Three screens, one job each (2026-09-30): the list; adding one, which
-// starts with its kind (lib/agent-kinds.ts); and connecting it with its new
-// key, by the steps its kind gives. A new key for an existing agent goes
-// straight to connecting, and asks how the agent runs, since the kind isn't
-// stored.
+// starts with how it connects (lib/agent-kinds.ts: Hermes, Replicas with its
+// coding agent and key, or Custom); and connecting it with its new key, by
+// the steps its setup gives. Harbor stores each agent's kind and connection,
+// so a new key for an existing agent goes straight to its own setup. A
+// platform agent (Replicas) also shows its platform key's last characters,
+// whether the platform has rejected it, and Replace, for its owner.
 
 type Screen =
     | { name: 'list' }
     | { name: 'add' }
-    | { name: 'connect'; agentId: string; agentName: string; secret: string; kindId: string; askKind: boolean }
+    | { name: 'connect'; agentId: string; agentName: string; secret: string; setupId: string; kind: string }
 
 function when(iso: string | undefined): string {
     return iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : 'never'
@@ -63,51 +65,124 @@ function Footer({ children }: { children: ReactNode }) {
     return <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-3">{children}</div>
 }
 
-function KindTile({ kind, selected, onSelect }: { kind: AgentKind; selected: boolean; onSelect: () => void }) {
+function SetupTile({ setup, selected, onSelect }: { setup: AgentSetup; selected: boolean; onSelect: () => void }) {
     return (
         <button
             type="button"
             role="radio"
             aria-checked={selected}
-            aria-label={kind.label}
+            aria-label={setup.label}
             onClick={onSelect}
             className={cn(
                 'flex min-w-0 items-start gap-3 rounded-xl border p-3 text-left transition-colors',
                 selected ? 'border-foreground/50 bg-accent ring-1 ring-foreground/20' : 'border-border hover:bg-accent/50',
             )}
         >
-            <AgentKindLogo kind={kind} className="size-9" />
+            <AgentLogo logo={setup.logo} className="size-9" />
             <span className="min-w-0">
-                <span className="block text-[13px] font-medium text-foreground">{kind.label}</span>
-                <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">{kind.description}</span>
+                <span className="block text-[13px] font-medium text-foreground">{setup.label}</span>
+                <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">{setup.description}</span>
             </span>
         </button>
     )
 }
 
-function KindSwitch({ kinds, selected, onSelect }: { kinds: AgentKind[]; selected: string; onSelect: (id: string) => void }) {
+/** The coding agent a Replicas agent runs: its kind. */
+function KindChoice({ kinds, selected, onSelect }: { kinds: readonly string[]; selected: string; onSelect: (kind: string) => void }) {
     return (
-        <div className="mb-4 flex flex-wrap items-center gap-2">
-            <span className="text-xs text-muted-foreground">How does it run?</span>
-            <div role="radiogroup" aria-label="How does it run?" className="flex gap-1 rounded-lg bg-muted p-0.5">
+        <div className="mt-4 flex flex-col gap-1.5">
+            <span className="text-xs font-medium text-foreground">Coding agent</span>
+            <div role="radiogroup" aria-label="Coding agent" className="flex flex-wrap gap-1.5">
                 {kinds.map((k) => (
                     <button
-                        key={k.id}
+                        key={k}
                         type="button"
                         role="radio"
-                        aria-checked={k.id === selected}
-                        aria-label={k.label}
-                        onClick={() => onSelect(k.id)}
+                        aria-checked={k === selected}
+                        aria-label={kindInfo(k).label}
+                        onClick={() => onSelect(k)}
                         className={cn(
-                            'flex items-center gap-1.5 rounded-md px-2 py-1 text-xs',
-                            k.id === selected ? 'bg-background font-medium text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                            'flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs',
+                            k === selected ? 'border-foreground/50 bg-accent font-medium text-foreground' : 'border-border text-muted-foreground hover:bg-accent/50 hover:text-foreground',
                         )}
                     >
-                        <AgentKindLogo kind={k} className="size-4" />
-                        {k.label}
+                        <AgentLogo logo={kindInfo(k).logo} className="size-4" />
+                        {kindInfo(k).label}
                     </button>
                 ))}
             </div>
+        </div>
+    )
+}
+
+/** A platform agent's key: its end, whether the platform rejected it, and Replace for the owner. */
+function CredentialRow({ orgId, agent, credential, canReplace, onReplaced }: {
+    orgId: string
+    agent: spaces.Member
+    credential: spaces.AgentCredential
+    canReplace: boolean
+    onReplaced: () => Promise<void>
+}) {
+    const [editing, setEditing] = useState(false)
+    const [secret, setSecret] = useState('')
+    const [error, setError] = useState<string | null>(null)
+    const [saving, setSaving] = useState(false)
+    const platform = PLATFORMS[agent.agentConnection ?? '']?.label ?? 'Platform'
+    const save = async () => {
+        setSaving(true)
+        setError(null)
+        try {
+            await window.ipc.invoke('spaces:setAgentCredential', { orgId, agentId: agent.id, secret: secret.trim() })
+            setEditing(false)
+            setSecret('')
+            toast(`${platform} key replaced`, 'success')
+            await onReplaced()
+        } catch (err) {
+            setError(err instanceof Error ? err.message : `Could not replace the ${platform} key`)
+        } finally {
+            setSaving(false)
+        }
+    }
+    return (
+        <div className="mt-1.5 flex flex-col gap-1 text-[11px]">
+            <div className="flex items-center justify-between gap-2 text-muted-foreground">
+                <span className="min-w-0 truncate">
+                    {platform} key {credential.hint}
+                    {credential.rejectedAt && <span className="text-destructive"> · Key rejected: replace it to bring the agent back</span>}
+                </span>
+                {canReplace && !editing && (
+                    <button type="button" onClick={() => setEditing(true)} className="shrink-0 rounded px-1.5 py-0.5 hover:bg-accent hover:text-foreground">
+                        Replace
+                    </button>
+                )}
+            </div>
+            {editing && (
+                <form
+                    className="flex items-center gap-1.5"
+                    onSubmit={(e) => {
+                        e.preventDefault()
+                        if (secret.trim()) void save()
+                    }}
+                >
+                    <Input
+                        type="password"
+                        value={secret}
+                        onChange={(e) => setSecret(e.target.value)}
+                        placeholder={`New ${platform} key`}
+                        aria-label={`New ${platform} key`}
+                        className="h-7 text-xs"
+                        autoFocus
+                    />
+                    <Button type="submit" size="sm" className="h-7" disabled={!secret.trim() || saving}>
+                        {saving && <Loader2 className="size-3 animate-spin" />}
+                        Save
+                    </Button>
+                    <Button type="button" size="sm" variant="ghost" className="h-7" onClick={() => (setEditing(false), setSecret(''), setError(null))}>
+                        Cancel
+                    </Button>
+                </form>
+            )}
+            {error && <span className="text-destructive">{error}</span>}
         </div>
     )
 }
@@ -126,13 +201,17 @@ export function AgentsDialog({ org, open, onOpenChange }: {
     const [busy, setBusy] = useState(false)
     const [confirming, setConfirming] = useState<string | null>(null)
     const [chosen, setChosen] = useState<string | null>(null)
+    const [chosenKind, setChosenKind] = useState<string | null>(null)
     const [name, setName] = useState('')
     const [nameEdited, setNameEdited] = useState(false)
-    const kinds = AGENT_KINDS as AgentKind[]
-    // Until the person picks, the first kind this server can set up.
-    const kind = kinds.find((k) => k.id === chosen) ?? kinds[0] ?? CUSTOM_KIND
-    // The name suggests the kind's own until the person types one.
-    const shownName = nameEdited ? name : kind.defaultName
+    const [credential, setCredential] = useState('')
+    const [addError, setAddError] = useState<string | null>(null)
+    // Until the person picks, the first way to connect, and its first kind.
+    const setup = AGENT_SETUPS.find((k) => k.id === chosen) ?? AGENT_SETUPS[0]!
+    const kind = chosenKind && setup.kinds.includes(chosenKind) ? chosenKind : setup.kinds[0]!
+    // The name suggests the setup's own, or the kind's, until the person types one.
+    const shownName = nameEdited ? name : setup.defaultName || kindInfo(kind).label
+    const ready = shownName.trim() !== '' && (!setup.credential || credential.trim() !== '')
 
     const load = useCallback(async () => {
         try {
@@ -166,22 +245,43 @@ export function AgentsDialog({ org, open, onOpenChange }: {
 
     const startAdding = () => {
         setChosen(null)
+        setChosenKind(null)
         setName('')
         setNameEdited(false)
+        setCredential('')
+        setAddError(null)
         setScreen({ name: 'add' })
     }
 
-    const add = () => run(async () => {
-        const { agent, key } = await window.ipc.invoke('spaces:addAgent', { orgId: org.id, displayName: shownName.trim() })
-        // Your new agent is on your roster (and so in Add people) right away.
-        refreshOrgRoster(org.id)
-        setScreen({ name: 'connect', agentId: agent.id, agentName: agent.displayName, secret: key.secret, kindId: kind.id, askKind: false })
-    }, 'Could not add the agent')
+    // A refused platform key shows under its field, not as a toast: nothing was created.
+    const add = async () => {
+        if (busy) return
+        setBusy(true)
+        setAddError(null)
+        try {
+            const { agent, key } = await window.ipc.invoke('spaces:addAgent', {
+                orgId: org.id,
+                displayName: shownName.trim(),
+                kind,
+                connection: setup.connection,
+                ...(setup.credential ? { credential: credential.trim() } : {}),
+            })
+            setCredential('')
+            // Your new agent is on your roster (and so in Add people) right away.
+            refreshOrgRoster(org.id)
+            await load()
+            setScreen({ name: 'connect', agentId: agent.id, agentName: agent.displayName, secret: key.secret, setupId: setup.id, kind })
+        } catch (err) {
+            setAddError(err instanceof Error ? err.message : 'Could not add the agent')
+        } finally {
+            setBusy(false)
+        }
+    }
 
     const newKey = (agent: spaces.Member) => run(async () => {
         const { key } = await window.ipc.invoke('spaces:createAgentKey', { orgId: org.id, agentId: agent.id })
-        // The kind isn't stored: start from the manual setup, and the person picks the agent's own.
-        setScreen({ name: 'connect', agentId: agent.id, agentName: agent.displayName, secret: key.secret, kindId: CUSTOM_KIND.id, askKind: true })
+        // Harbor knows how it runs: straight to its own setup.
+        setScreen({ name: 'connect', agentId: agent.id, agentName: agent.displayName, secret: key.secret, setupId: setupFor(agent).id, kind: agent.agentKind ?? 'custom' })
     }, 'Could not create a key')
 
     const revoke = (agent: spaces.Member, keyId: string) => run(async () => {
@@ -204,23 +304,28 @@ export function AgentsDialog({ org, open, onOpenChange }: {
                                 <div className="flex flex-col items-center gap-2 py-8 text-center">
                                     <Bot className="size-6 text-muted-foreground" />
                                     <div className="text-sm font-medium">{isAdmin ? 'No agents in this server yet' : 'You have no agents yet'}</div>
-                                    <div className="max-w-xs text-xs text-muted-foreground">Add one to connect Hermes, or anything that speaks the agent contract.</div>
+                                    <div className="max-w-xs text-xs text-muted-foreground">Add one to connect Hermes, a coding agent in Replicas, or anything that speaks the agent contract.</div>
                                 </div>
                             ) : (
                                 <ul className="-mx-2 flex flex-col">
-                                    {agents.map(({ agent, keys }) => {
+                                    {agents.map(({ agent, keys, credential }) => {
                                         const mine = agent.ownerId === org.memberId
                                         const live = keys.filter((k) => !k.revokedAt)
                                         return (
                                             <li key={agent.id} className="flex items-start gap-3 rounded-lg px-2 py-2.5">
-                                                <MemberAvatar id={agent.id} name={agent.displayName} size="md" agent />
+                                                <MemberAvatar id={agent.id} name={agent.displayName} size="md" agent agentKind={agent.agentKind} />
                                                 <div className="min-w-0 flex-1">
                                                     <div className="truncate text-sm font-medium">{agent.displayName}</div>
                                                     <div className="truncate text-[11px] text-muted-foreground">
+                                                        {agentLabel(agent.agentKind, agent.agentConnection)}
+                                                        {' · '}
                                                         {agent.ownerId ? (mine ? 'Yours' : `Owned by ${names.get(agent.ownerId) ?? 'another member'}`) : 'Managed by admins'}
                                                         {' · '}
                                                         {live.length === 0 ? 'no active keys' : live.length === 1 ? '1 key' : `${live.length} keys`}
                                                     </div>
+                                                    {credential && (
+                                                        <CredentialRow orgId={org.id} agent={agent} credential={credential} canReplace={mine} onReplaced={load} />
+                                                    )}
                                                     {live.length > 0 && (
                                                         <ul className="mt-1.5 flex flex-col gap-1">
                                                             {live.map((k) => (
@@ -265,16 +370,25 @@ export function AgentsDialog({ org, open, onOpenChange }: {
                         className="contents"
                         onSubmit={(e) => {
                             e.preventDefault()
-                            if (shownName.trim()) void add()
+                            if (ready) void add()
                         }}
                     >
                         <Header title="Add an agent" description="Choose what runs it. The steps to connect it come next." onBack={() => setScreen({ name: 'list' })} />
                         <Body>
-                            <div role="radiogroup" aria-label="Kind of agent" className="grid grid-cols-2 gap-2">
-                                {kinds.map((k) => (
-                                    <KindTile key={k.id} kind={k} selected={k.id === kind.id} onSelect={() => setChosen(k.id)} />
+                            <div role="radiogroup" aria-label="How it connects" className="grid grid-cols-2 gap-2">
+                                {AGENT_SETUPS.map((k) => (
+                                    <SetupTile
+                                        key={k.id}
+                                        setup={k}
+                                        selected={k.id === setup.id}
+                                        onSelect={() => {
+                                            setChosen(k.id)
+                                            setAddError(null)
+                                        }}
+                                    />
                                 ))}
                             </div>
+                            {setup.kinds.length > 1 && <KindChoice kinds={setup.kinds} selected={kind} onSelect={setChosenKind} />}
                             <label className="mt-4 flex flex-col gap-1.5">
                                 <span className="text-xs font-medium text-foreground">Name</span>
                                 <Input
@@ -291,10 +405,29 @@ export function AgentsDialog({ org, open, onOpenChange }: {
                                 />
                                 <span className="text-[11px] text-muted-foreground">How it appears in Spaces, and what people type to mention it.</span>
                             </label>
+                            {setup.credential && (
+                                <label className="mt-4 flex flex-col gap-1.5">
+                                    <span className="text-xs font-medium text-foreground">{setup.credential.label}</span>
+                                    <Input
+                                        type="password"
+                                        value={credential}
+                                        onChange={(e) => {
+                                            setCredential(e.target.value)
+                                            setAddError(null)
+                                        }}
+                                        placeholder={setup.credential.placeholder}
+                                        aria-label={setup.credential.label}
+                                        className="h-9 text-sm"
+                                        autoComplete="off"
+                                    />
+                                    <span className="text-[11px] text-muted-foreground">{setup.credential.note}</span>
+                                </label>
+                            )}
+                            {addError && <div role="alert" className="mt-3 text-xs text-destructive">{addError}</div>}
                         </Body>
                         <Footer>
                             <Button type="button" size="sm" variant="ghost" onClick={() => setScreen({ name: 'list' })}>Cancel</Button>
-                            <Button type="submit" size="sm" disabled={!shownName.trim() || busy}>
+                            <Button type="submit" size="sm" disabled={!ready || busy}>
                                 {busy && <Loader2 className="size-3.5 animate-spin" />}
                                 Add agent
                             </Button>
@@ -307,15 +440,12 @@ export function AgentsDialog({ org, open, onOpenChange }: {
                         <Header
                             title={`Connect ${screen.agentName}`}
                             description="This is the only time its key is shown. Finish these steps before you close this."
-                            icon={<AgentKindLogo kind={agentKind(screen.kindId)} className="size-5" />}
+                            icon={<AgentLogo logo={kindInfo(screen.kind).logo ?? agentSetup(screen.setupId).logo} className="size-5" />}
                         />
                         <Body>
-                            {screen.askKind && kinds.length > 1 && (
-                                <KindSwitch kinds={kinds} selected={screen.kindId} onSelect={(kindId) => setScreen({ ...screen, kindId })} />
-                            )}
                             <ConnectAgent
                                 org={org}
-                                kind={agentKind(screen.kindId)}
+                                setup={agentSetup(screen.setupId)}
                                 agentId={screen.agentId}
                                 agentName={screen.agentName}
                                 agentKey={screen.secret}

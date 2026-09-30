@@ -619,7 +619,11 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // when none exists yet), an artifact link, a deep link, or history. It
     // must never render as raw JSON in the document pane.
     // ------------------------------------------------------------------
-    const spaceRefs = useMemo(() => ({ orgId: org.id, orgAddress: org.address, spaceId: space.id }), [org.id, org.address, space.id])
+    const directWith = space.kind === 'direct' ? space.participants?.find((p) => p !== org.memberId) : undefined
+    const spaceRefs = useMemo(
+        () => ({ orgId: org.id, orgAddress: org.address, spaceId: space.id, ...(directWith ? { directWith } : {}) }),
+        [org.id, org.address, space.id, directWith],
+    )
     const isBoardKey = (key: string | null): key is string => {
         if (!key || isAttachmentKey(key)) return false
         const entry = entryById.get(key)
@@ -991,14 +995,14 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                     <MemberProfilePopover key={m.id} id={m.id}>
                                         <button type="button" className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-accent/60">
                                             <span className="relative shrink-0">
-                                                <MemberAvatar id={m.id} name={m.displayName} size="md" agent={m.kind === 'agent'} />
+                                                <MemberAvatar id={m.id} name={m.displayName} size="md" agent={m.kind === 'agent'} agentKind={m.agentKind} />
                                                 {isHere && <span className="absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-[var(--rowboat-success)] ring-2 ring-popover" />}
                                             </span>
                                             <span className="min-w-0 flex-1 truncate text-sm">
                                                 {m.displayName}
                                                 {m.id === org.memberId && <span className="text-muted-foreground"> (you)</span>}
                                             </span>
-                                            {m.kind === 'agent' && <AgentBadge />}
+                                            {m.kind === 'agent' && <AgentBadge agentKind={m.agentKind} agentConnection={m.agentConnection} />}
                                             {m.role === 'admin' && (
                                                 <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] font-medium text-muted-foreground">admin</span>
                                             )}

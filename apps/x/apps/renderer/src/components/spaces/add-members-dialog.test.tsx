@@ -35,7 +35,7 @@ describe('AddMembersDialog', () => {
         render(<AddMembersDialog org={org} space={space} members={[ram]} open onOpenChange={onOpenChange} />)
         await waitFor(() => expect(screen.getByRole('checkbox', { name: /Harsh/ })).toBeInTheDocument())
         expect(screen.queryByRole('checkbox', { name: /Ramnique/ })).not.toBeInTheDocument()
-        expect(screen.getByRole('checkbox', { name: /Replicas/ })).toHaveTextContent('agent')
+        expect(screen.getByRole('checkbox', { name: /Replicas/ })).toHaveTextContent('Agent')
 
         fireEvent.click(screen.getByRole('checkbox', { name: /Replicas/ }))
         fireEvent.click(screen.getByRole('checkbox', { name: /Harsh/ }))

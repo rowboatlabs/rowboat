@@ -1,18 +1,19 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Check, Copy, ExternalLink, Loader2, Plug } from 'lucide-react'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
-import type { AgentKind, SetupStep, SetupValue } from '@/lib/agent-kinds'
+import type { AgentSetup, Logo, SetupStep, SetupValue } from '@/lib/agent-kinds'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 
 // How to connect an agent with a new key (Harbor spec §8 Connectors,
 // 2026-09-30): the body of the Agents dialog's Connect screen. It renders the
-// steps the agent's kind gives for this key (lib/agent-kinds.ts), in whichever
-// of the kind's routes the person picks, and ends with the app's own step:
-// add the agent to a space and mention it.
+// steps the agent's setup gives for this key (lib/agent-kinds.ts), in whichever
+// of its routes the person picks, and ends with the app's own step: add the
+// agent to a space and mention it.
 
-export function AgentKindLogo({ kind, className }: { kind: AgentKind; className?: string }) {
-    if (!kind.logo) {
+/** An official mark for light and dark themes, or the generic one. */
+export function AgentLogo({ logo, className }: { logo: Logo | undefined; className?: string }) {
+    if (!logo) {
         return (
             <span className={cn('flex shrink-0 items-center justify-center rounded-md border border-border bg-muted text-muted-foreground', className)}>
                 <Plug className="size-[55%]" />
@@ -23,8 +24,8 @@ export function AgentKindLogo({ kind, className }: { kind: AgentKind; className?
     // app's theme class, so `dark:` fires under a dark OS even when the app is light. This follows the app.
     return (
         <>
-            <img src={kind.logo.light} alt="" className={cn('shrink-0 rounded-md [.dark_&]:hidden', className)} />
-            <img src={kind.logo.dark} alt="" className={cn('hidden shrink-0 rounded-md [.dark_&]:block', className)} />
+            <img src={logo.light} alt="" className={cn('shrink-0 rounded-md [.dark_&]:hidden', className)} />
+            <img src={logo.dark} alt="" className={cn('hidden shrink-0 rounded-md [.dark_&]:block', className)} />
         </>
     )
 }
@@ -126,9 +127,9 @@ function StepBody({ step }: { step: SetupStep }) {
     )
 }
 
-export function ConnectAgent({ org, kind, agentId, agentName, agentKey }: {
+export function ConnectAgent({ org, setup: kind, agentId, agentName, agentKey }: {
     org: OrgWithSpaces
-    kind: AgentKind
+    setup: AgentSetup
     agentId: string
     agentName: string
     agentKey: string
