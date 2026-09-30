@@ -158,7 +158,9 @@ Harbor reste inchangé et continue de servir les Spaces, les membres, le temps r
 | Pays & fournisseurs | Registre `CountryConfig` et disponibilité des fournisseurs (§3.8). |
 | Journal d'audit | Append-only : qui a demandé, approuvé et exécuté quoi. |
 
-**À trancher (avant la phase identité) : le fournisseur d'identité.** Harbor sait parler OIDC (`auth-oidc.ts`). Il faut un émetteur qui gère la connexion **par numéro de téléphone** (OTP par SMS ou WhatsApp), indispensable pour le marché visé, en plus de l'email et de Google. Critères : auto-hébergeable ou managé, OTP téléphone, coût par SMS dans la zone UEMOA.
+**Décidé (29/09/2026) : on se connecte par numéro de téléphone, avec un code reçu par SMS.** C'est l'identifiant principal ; l'email et Google viennent en second. Harbor sait déjà parler OIDC (`auth-oidc.ts`) : le plan de contrôle joue le rôle d'émetteur OIDC, et Harbor le consomme sans modification.
+
+**Latitude :** l'envoi des SMS passe par un `CommunicationProvider` (§3.8), jamais par un fournisseur codé en dur. Le choix de l'agrégateur SMS se fait par pays, sur deux critères : la délivrabilité réelle dans chacun des 7 pays, et le coût par message. Voir `WEST_AFRICA_PROVIDER_ARCHITECTURE.md`. Le module doit aussi limiter la fraude aux SMS : plafond d'envois par numéro et par IP, expiration courte du code, nombre d'essais borné.
 
 ### 3.6 La vérification : exécuté ≠ vérifié
 
@@ -216,7 +218,16 @@ Il porte, dans cet ordre de construction (mission §90) :
 
 Le **moteur de politique** est une fonction pure. Il prend l'intention, le mandat et l'historique du ledger, et rend `EXECUTE`, `REQUIRE_APPROVAL` ou `BLOCK` avec la raison. Il se teste exhaustivement sans réseau, comme `policy.ts` dans Harbor.
 
-**Point réglementaire (À trancher avant la phase 3 : Mobile Money).** Dans la zone UEMOA, détenir des fonds pour autrui ou émettre de la monnaie électronique relève d'agréments de la BCEAO. Warell doit rester **orchestrateur** : l'argent va du moyen de paiement de l'utilisateur au marchand, via un agrégateur ou un établissement agréé, et ne transite jamais par un compte Warell. À valider par un juriste avant tout encaissement réel.
+**Décidé (29/09/2026) : Warell ne détient jamais d'argent.** Dans la zone UEMOA, détenir des fonds pour autrui ou émettre de la monnaie électronique relève d'agréments de la BCEAO. Warell reste donc **orchestrateur** : l'argent va directement du moyen de paiement de l'utilisateur au marchand, via un agrégateur ou un établissement agréé, et ne transite jamais par un compte Warell.
+
+Conséquences qui s'imposent au code :
+
+- pas de solde, pas de portefeuille, pas de compte de passage côté Warell ;
+- le ledger **enregistre** des mouvements exécutés par des tiers, il n'en **porte** aucun ;
+- un remboursement est demandé au fournisseur ou au marchand, jamais versé par Warell ;
+- l'abonnement de l'utilisateur à Warell est un flux séparé (Warell y est le marchand) et n'a rien à voir avec les dépenses des agents.
+
+Reste à faire valider ce montage par un juriste avant le premier encaissement réel.
 
 ### 3.10 Le navigateur côté serveur
 
@@ -226,7 +237,22 @@ Le **moteur de politique** est une fonction pure. Il prend l'intention, le manda
 - les mêmes éléments indexés (DOM structuré, pas de vision par défaut) ;
 - les mêmes skills par site.
 
-JEV, évoqué par la mission (§13), s'évaluera **derrière cette interface**, sans toucher aux agents. (Décrit dans la mission, mais pas encore identifié : à préciser par le propriétaire.)
+**JEV** (`benewende-dev/jev-ultrafast`, fork de `browser-use/jev-ultrafast`, MIT, v0.1.0 du 18/09/2026) est un agent de navigation **par choix plutôt que par génération**. À chaque étape, il lit un tableau indexé des éléments de la page. Un modèle spécialisé (Jev, de TypeSafe) choisit en un seul aller-retour l'opération (`CLICK`, `TYPE_TEXT`, `SELECT`, `SCROLL`, `WAIT`, `DONE`, `BLOCKED`) et l'élément visé. Un petit LLM (via OpenRouter) n'écrit du texte que pour `TYPE_TEXT`.
+
+| | |
+|---|---|
+| Forces | Très rapide (Google Flights en ≈ 7 s selon ses mesures). Pas de vision. Aucune sortie du modèle ne devient sélecteur, coordonnées ou JavaScript. Petit (≈ 850 lignes, lisible). Même famille que les skills par site déjà utilisés par Rowboat (browser-use / browser-harness). |
+| Limites (déclarées par ses auteurs) | Pas d'iframes, de shadow DOM, d'upload, de pop-ups, de canvas, ni de défilement imbriqué. Or les pages de paiement sont souvent en iframe : **JEV ne fera pas de checkout**, ce qui tombe bien, puisque les paiements passent par le service de paiement (§3.4). Les auteurs précisent aussi que leurs mesures ne sont pas un banc de fiabilité : 3 exécutions d'une seule tâche. |
+| Dépendance | L'API de TypeSafe (`api.typesafe.ai`, clé payante) reçoit l'état de la page à chaque étape. C'est un tiers qui voit ce que l'agent voit, donc un point à couvrir dans `AGENT_SECURITY_MODEL.md` (données de l'utilisateur envoyées hors de Warell). |
+| Langage | Python ≥ 3.12, alors que l'instance est en Node. |
+
+**Décidé : JEV est un accélérateur optionnel, pas le moteur du navigateur.**
+
+- Il tourne comme **processus annexe (Python) dans l'instance**, relié au même Chromium headless par le protocole de débogage (CDP).
+- Il est exposé comme **un outil de plus**, `browser.pursue(url, goal)`, réservé aux **objectifs de lecture et de recherche** : trouver des vols, filtrer des hôtels, ouvrir une page. Son `DONE` est toujours suivi d'une vérification indépendante (§3.6), comme le font ses propres exemples.
+- **Tout geste engageant** (valider un formulaire, réserver) repasse par `browser-control`, avec son niveau de risque et son approbation.
+- **Si TypeSafe est indisponible, trop cher ou refusé par l'utilisateur, `browser-control` fait le travail seul.** Warell ne dépend pas de JEV pour fonctionner.
+- L'adopter pour de bon se décide sur **mesures** : un banc de tâches réelles sur des sites d'Afrique de l'Ouest (compagnies régionales, hôtels, commerce en ligne), qui compare taux de réussite, durée et coût avec `browser-control` seul.
 
 | | |
 |---|---|
@@ -245,9 +271,9 @@ Code Mode (audit §9) lance Claude Code ou Codex sur la machine qui héberge le 
 **Décidé : l'i18n est une couche, pas une réécriture.**
 
 - **Agents et contenus :** la langue d'exécution (`executionLocale`) est injectée dans les instructions composées (`runtime/assembly/compose-instructions.ts`) par un « trait » Warell. On ne modifie pas le prompt de base de l'upstream.
-- **UI :** toutes les chaînes Warell naissent traduites, via un package `@warell/i18n`. Pour les chaînes **upstream**, **à trancher** entre deux voies :
-  1. **Proposer l'i18n à l'upstream.** C'est la voie préférée : si elle est acceptée, la divergence disparaît et le monde entier en profite.
-  2. **Extraire nous-mêmes, composant par composant**, en évitant `App.tsx`. Chaque extraction est une divergence déclarée.
+- **UI :** toutes les chaînes Warell naissent traduites, via un package `@warell/i18n`. **Décidé (29/09/2026)** pour les chaînes **upstream** :
+  1. **D'abord, proposer l'i18n à l'upstream.** Une issue d'abord, pour valider l'approche avec leurs mainteneurs, puis une première PR petite (le mécanisme et un écran) plutôt qu'une extraction massive. Si elle est acceptée, la divergence disparaît et le monde entier en profite.
+  2. **Seulement en cas de refus, extraire nous-mêmes, composant par composant**, en évitant `App.tsx`. Chaque extraction est alors une divergence déclarée.
 - **Marque :** « Warell » ne s'affiche que via la couche i18n et marque. Les identifiants internes ne bougent pas (UPSTREAM.md §2).
 
 ### 3.13 Clients
@@ -270,7 +296,7 @@ Chaque appel à `API_URL` (audit §11) trouve son remplaçant, **fonction par fo
 | `/v1/me` | Identité du plan de contrôle. |
 | `/v1/llm`, `/v1/llm/models` | OpenRouter directement, avec la clé détenue par le plan de contrôle. |
 | `/v1/search/exa` | Recherche via le plan de contrôle (Exa ou autre, clé chez nous). |
-| `/v1/composio` | Mandataire Composio dans le plan de contrôle, ou abandon au profit de MCP. **À trancher.** |
+| `/v1/composio` | **Désactivé en V1.** Les intégrations V1 passent par les connecteurs natifs de Rowboat (Gmail, agendas) et par MCP. Composio se réévalue quand le besoin d'intégrations nombreuses apparaît (§8). |
 | `/v1/voice/text-to-speech/` | Mandataire TTS dans le plan de contrôle. |
 | `/v1/google-oauth/claim-picked` | OAuth Google géré par le plan de contrôle (fin du retour sur `localhost` en cloud). |
 | `/v1/billing/*`, `/v1/referral` | Budgets et usage Warell ; parrainage hors V1. |
@@ -301,7 +327,9 @@ Les états et transitions exacts sont spécifiés dans `AGENT_RUNTIME_SPEC.md`. 
 
 ## 6. Hébergement
 
-**À trancher avant la phase 0.** Il faut héberger des instances **avec volume persistant** (le dossier de travail) et **arrêt quand elles ne servent pas**, réveillées par une requête. Les candidats sont à comparer sur trois critères :
+**Décidé (29/09/2026) : les instances s'endorment quand elles ne servent pas.** Une instance inactive ne consomme pas de calcul ; elle se réveille sur une requête d'un client, sur une réponse attendue (approbation, résultat de paiement) ou sur le réveil planifié (§3.5).
+
+**Reste à choisir la plateforme (avant la phase 0).** Il faut un **volume persistant** (le dossier de travail) et un arrêt/réveil automatiques. Les candidats sont à comparer sur trois critères :
 
 - le coût mensuel d'un utilisateur *peu actif* ;
 - le délai de réveil ;
@@ -345,13 +373,13 @@ Contrainte connue : on privilégie le **managé**, pas de VPS à administrer soi
 
 **Ce qu'on laisse mourir chez eux :** `runtime/legacy`.
 
-## 8. Décisions à trancher
+## 8. Décisions
 
-| # | Question | Avant la phase |
+| # | Question | État |
 |---|---|---|
-| 1 | Fournisseur d'identité avec OTP par téléphone | Identité & organisations |
-| 2 | Hébergement des instances (veille et volume) | 0 |
-| 3 | i18n : proposition à l'upstream ou extraction locale | FR/EN |
-| 4 | Composio : mandataire ou abandon au profit de MCP | Intégrations |
-| 5 | Cadre réglementaire BCEAO pour l'orchestration de paiements | Mobile Money |
-| 6 | JEV : de quoi s'agit-il exactement ? | Navigateur |
+| 1 | Connexion | **Décidé 29/09 :** téléphone + code SMS (§3.5). Reste l'agrégateur SMS par pays. |
+| 2 | Hébergement des instances | **Décidé 29/09 :** mise en veille obligatoire (§6). Reste la plateforme, avant la phase 0. |
+| 3 | i18n des chaînes upstream | **Décidé 29/09 :** proposée d'abord à l'upstream (§3.12). |
+| 4 | Composio | **Proposé :** désactivé en V1, MCP et connecteurs natifs à la place (§3.14). En attente de validation. |
+| 5 | Argent des clients | **Décidé 29/09 :** Warell ne détient jamais d'argent (§3.9). Reste la validation juridique. |
+| 6 | JEV | **Décidé 29/09 :** accélérateur optionnel de lecture et recherche, adopté sur mesures (§3.10). |
