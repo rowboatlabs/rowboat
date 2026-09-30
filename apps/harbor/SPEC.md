@@ -72,7 +72,7 @@ These eight rules are the constitution. Every later section is derivable from th
 
 1. **The hub never thinks.** The server — Harbor — stores state — files, messages, membership, history — and moves bytes. It runs no agents, holds no model keys, executes no tools. "We host bytes, not brains."
 2. **All agency lives at the edges.** Anything that acts — drafting, reviewing, housekeeping, summarizing — is some member's agent running on that member's machine with that member's models, tools, accounts, and permissions.
-3. **Only you command your compute.** No one can instruct another person's agent. Requests to another person's agent are requests to the *person*, made socially, in the open.
+3. **Only you command your compute.** No one can instruct another person's agent. Requests to another person's agent are requests to the *person*, made socially, in the open. *Amended 2026-09-30:* this still holds for a person's own agent. An agent member is offered by its owner, who adds it to spaces, and anyone sharing a space with it may invoke it (§8 *Invoking agent members*).
 4. **Attribution is universal.** Every act in a space belongs to a member: "Ramnique", "Ramnique (via Rowboat)", "Ramnique (via Rowboat, scheduled)". There are no unowned actions.
 5. **No write is ever silently lost.** Concurrent edits merge or surface a conflict; they never clobber. Last-write-wins at document granularity is rejected.
 6. **Convention over enforcement; merge-then-correct.** The system records everything and gates almost nothing. Coordination (who pushes standup notes, who housekeeps) is social; the complete history is the safety net. Designed for high-trust teams first.
@@ -217,7 +217,7 @@ An agent can be a member in its own right: a team's shared coding agent, or a He
 - **The owner alone creates keys; the owner or an admin revokes them.** A key is the agent's identity, so an admin who could mint one could post as the agent. Admins get the off switch and never the pen. An org-owned agent takes no keys.
 - **Keys are managed in the app only**, never through an agent tool: a secret returned to a tool lands in a model transcript. This is the one exception to parity (§9).
 - **An agent goes where it is invited**, like anyone: added to a space, sent an invite, or joining an open space. No rule ties an agent's spaces to its owner's.
-- **Still open:** how an agent is invoked, and the bridges that connect a Hermes or OpenClaw gateway. Renaming and removing an agent come with profiles and org removal (§5 answers 5 and 6), and so does revoking its keys when its owner leaves the org.
+- **How an agent is invoked** is §8 *Invoking agent members* (2026-09-30). **Still open:** the connectors themselves, such as the bridges for a Hermes or OpenClaw gateway. Renaming and removing an agent come with profiles and org removal (§5 answers 5 and 6), and so does revoking its keys when its owner leaves the org.
 
 ### Deployment and tenancy — **Decided**
 
@@ -469,7 +469,7 @@ Wire and storage: [CONTRACT.md](./CONTRACT.md), the Activity bullet.
 
 ## 8. Agents in spaces
 
-*Added 2026-09-29:* this section governs a member's own agent. An agent that is a member in its own right follows §4 Agent members.
+*Added 2026-09-29:* this section governs a member's own agent. An agent that is a member in its own right follows §4 Agent members, and is invoked through the contract in *Invoking agent members* at the end of this section (2026-09-30).
 
 ### The grammar — **Decided**
 
@@ -492,6 +492,34 @@ Members push from private context (meeting notes, emails, chats) into a space **
 
 - **DRI pattern**: housekeeping (dedupe, prune shipped items, normalize format, archive stale topics) is a member's local scheduled task pointed at shared assets. One person takes charge, or several — the system doesn't referee.
 - **First-pusher-wins**: five people captured the same standup; whoever pushes first sets the baseline, and later agents' bundled read-before-write makes them add only deltas. Redundant-observer dedup is a social problem the system declines to solve.
+
+### Invoking agent members — **Decided** *(added 2026-09-30)*
+
+Every agent member, whatever runs it (a Hermes or OpenClaw gateway, Claude Code, Codex, Replicas), is reached through one contract with three parts. **Harbor decides and a connector carries out.** A connector is the adapter between Harbor and one kind of agent. It never re-decides a rule below, so any rule here can change without touching a connector. The objects live in `invocation.ts` in the protocol package. #1130's Replicas agent becomes one implementation of this contract, like every connector after it.
+
+**1. Invocation (Harbor → agent)**
+
+- **A conversation is a thread.** Every top-level message starts one, in a channel or a DM alike, and its replies continue it. The key is (space, thread root), and each connector maps it to one session of its own. The agent answers inside the thread, never at the top level: a top-level answer would start a new conversation.
+- **A mention invokes, and in v1 only a mention.** A message that mentions the agent invokes it; nothing else does, including a DM message or a thread follow-up without a mention. An agent's own posts never invoke itself. The rule is one decision in Harbor, beside the notification decision, over the same mention stamps. A connector must switch off its agent's own gating (Hermes's and OpenClaw's mention and DM policies) and answer every invocation, or the agent's rule would silently override this one. Invoking on every DM message, or on thread follow-ups, is a later change to this rule alone. Most chat integrations already do both (Hermes, OpenClaw, Replicas, Devin), so it is the first rule to revisit once a connector is live; Cursor and Codex require a mention each time, as v1 does.
+- **You may invoke an agent you share a space with** (`canInvokeAgent`, v1 for every agent; #1130's rule for Replicas, generalized). A DM alone does not count. A refused mention creates no work and says why. Anyone may add an agent to a space (§4 Agent members), so anyone may widen who can invoke it; the owner's backstop is revoking its keys. A per-agent "only me" setting is Deferred.
+- **Agents may invoke agents, three hops deep.** Every invocation carries a depth, and a person's mention has depth 0. When an agent posts a message that mentions another agent, the new invocation's depth is one more than the deepest invocation its author is working on (1 if none). Harbor infers this from the key and the running invocations, so nothing passes an id around. Past three, the invocation is recorded as refused ("too many agent hand-offs"), shown under the message, and returned to the posting agent. The limit is one constant in `policy.ts`.
+- **An invocation carries a pointer, not a copy:** the conversation key; the message that invoked it (id, text, and author, who is the invoker); where it happened (channel or DM, and the space's name); its depth; and the values of any options the invoker picked. The agent reads the thread through the actions contract, as it stands now, edits included. Threads can be long, and a copy would be stale by the time it was read. This is Slack's model for agents too; a connector whose agent expects the recent messages copied in (as Hermes's and OpenClaw's Slack adapters do) fetches them itself.
+- **Invocation options.** A connector may declare a few options on its invocations, each a choice list or a toggle, such as Environment, Plan first, or Model, and declares them again whenever they change. When a person mentions the agent, the composer offers its options; the picked values travel with the message and land on its invocation. Harbor passes them through without interpreting them: nothing in Harbor is specific to coding. The equivalents elsewhere are Cursor's `repo=` options and Replicas' environment picker.
+- **Where a coding agent's work runs is its connector's to resolve, not Harbor's.** A coding agent needs an environment or repository before it starts, because its sandbox must exist first. Its connector resolves one in its own order: an option picked in the composer, then what the message names, then its own defaults (for the space, the person, the org). It says which it chose in its first reply, and the choice holds for the conversation. Changing it means a new thread. This is how the Slack integrations of Cursor, Codex, Replicas, Claude and Devin all work: each resolves the environment in its own bot, from its own catalog of environments and its own defaults. General agents such as Hermes and OpenClaw have no per-message workspace at all; it is part of the agent's configuration. So Harbor models no workspaces.
+- **Invocations are durable.** Harbor stores each one with an id. A connected connector receives it live; a reconnecting one lists what is pending; the connector acknowledges by id, so a duplicate delivery is handled once. A mention that silently vanished while a laptop slept would be the worst failure a chat product can have.
+- **One invocation per conversation at a time, queued in Harbor.** Harbor delivers the next only after the connector reports the current one done or failed; a stuck working one times out as failed. The one exception is an invocation that is **waiting** on a person: the next mention in its conversation is delivered to it at once, marked as its answer, not queued behind it, or the thread would deadlock. There is no interrupting in v1: whoever queued an invocation may cancel it while it waits in the queue. Different conversations run in parallel. Steering a running invocation is Deferred and additive: a connector will declare that it can steer, and one that does not will keep queueing. Who may steer will be a Harbor rule. Hermes and OpenClaw both steer by default, so steering is likely needed early.
+
+**2. Progress (agent → Harbor)**
+
+- **Every invocation has a state:** queued (waiting in Harbor), pending (delivered, not yet acknowledged), working, waiting (on a person: an approval or an answer), then done, failed or cancelled; or refused, never delivered. Every connector reports working and the end state, and the app shows it with the thread's working indicator. It is the same small set Slack gives agents (processing, suspended while a person is needed, closed).
+- **An optional one-line activity** ("Running tests") comes from connectors whose agent has the detail; a waiting invocation always says what it waits for. The line is ephemeral, never in the log. The person answers with an ordinary reply that mentions the agent.
+- **The answer is a message** the agent posts in the thread; streaming is posting, then editing. Harbor keeps no traces: they differ in shape from system to system and can hold secrets. A connector may offer a link to its own ("Open in Replicas").
+- **Stopping a running invocation is a capability** a connector declares. Harbor offers Stop only then, and the connector reports cancelled. The invoker and admins may stop. Cancelling a queued invocation is Harbor's alone, and always works.
+
+**3. Actions (agent → Harbor)**
+
+- **The agent face is the action contract:** the MCP tools, on the agent's own key, acting as itself (§4 Agent members), with the same operations as the app, REST and MCP kept in step (§9). Agents that speak MCP (Claude Code, Codex, Hermes, OpenClaw) use it directly; a connector for one that does not calls it on the agent's behalf.
+- **A connector has a few operations of its own,** which are not tools for the model: list pending invocations, acknowledge one, report state and activity, and declare capabilities (Stop, and its invocation options). They land on the wire (CONTRACT.md) with the Harbor build that serves them.
 
 ---
 

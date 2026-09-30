@@ -6,7 +6,7 @@ Harbor is the Spaces server: orgs, spaces, members, an append-only log, three fa
 
 Two pnpm workspace packages under `packages/`:
 
-- **`protocol/`** — `@rowboat/spaces-protocol`, the contract: zod schemas imported by the server *and* the app, so drift is structurally impossible. `core.ts` (the objects), `ids.ts` (ids, the link grammar and its one parser), `changeset.ts`, `events.ts` (`SpaceEvent` and the live frames), `api.ts` (`routes`), `mcp.ts` (`mcpTools`), `mentions.ts`, `search.ts`, `invite.ts`, `errors.ts`, `fixtures/merge/` (the golden merge cases every engine must pass).
+- **`protocol/`** — `@rowboat/spaces-protocol`, the contract: zod schemas imported by the server *and* the app, so drift is structurally impossible. `core.ts` (the objects), `ids.ts` (ids, the link grammar and its one parser), `changeset.ts`, `events.ts` (`SpaceEvent` and the live frames), `invocation.ts` (the agent contracts: `Invocation`, its states, `InvocationOption`, `InvocationUpdate`, `ConnectorCapabilities`), `api.ts` (`routes`), `mcp.ts` (`mcpTools`), `mentions.ts`, `search.ts`, `invite.ts`, `errors.ts`, `fixtures/merge/` (the golden merge cases every engine must pass).
 - **`server/`** — `@rowboat/harbor`:
 
 | `src/` | Owns |
