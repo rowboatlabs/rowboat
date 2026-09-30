@@ -6,10 +6,10 @@ Warell est un fork de [`rowboatlabs/rowboat`](https://github.com/rowboatlabs/row
 
 | Remote | URL | Rôle |
 |---|---|---|
-| `origin` | `benewende-dev/rowboat` (futur `benewende-dev/warell`) | Notre dépôt. `main` = Warell. |
+| `origin` | `benewende-dev/warell` (ex-`benewende-dev/rowboat`, renommé le 29/09/2026) | Notre dépôt. `main` = Warell. |
 | `upstream` | `rowboatlabs/rowboat` | Lecture seule : push désactivé (`git remote set-url --push upstream DISABLED`). |
 
-Renommer le dépôt GitHub en `warell` ne casse pas le lien de fork. GitHub redirige l'ancienne URL.
+Le renommage n'a pas cassé le lien de fork, et GitHub redirige l'ancienne URL. Mettre à jour un clone existant : `git remote set-url origin https://github.com/benewende-dev/warell.git`.
 
 ## 2. La règle d'or : on ajoute, on n'édite pas
 
