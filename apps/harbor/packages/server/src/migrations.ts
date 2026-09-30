@@ -731,6 +731,43 @@ export const MIGRATIONS: Migration[] = [
       `create index agent_keys_agent on agent_keys (org_id, agent_id)`,
     ],
   },
+  {
+    // Agent invocations (spec §8 Invoking agent members, 2026-09-30). The
+    // object lives in `data` (protocol Invocation); the columns are what the
+    // queue and the listings query on. One invocation per (message, agent):
+    // the unique index makes a replayed post a no-op. The queue runs in the
+    // order the messages were posted — `message_offset`, the space's log
+    // order, allocated under the space lock — never by a machine's clock,
+    // which can disagree across Harbor instances.
+    id: '027-invocations',
+    statements: [
+      `create table invocations (
+        org_id text not null,
+        id text not null,
+        agent_id text not null,
+        space_id text not null,
+        thread_root_id text not null,
+        message_id text not null,
+        message_offset int not null,
+        state text not null,
+        created_at text not null,
+        data jsonb not null,
+        primary key (org_id, id)
+      )`,
+      `alter table invocations add constraint invocations_state_check
+        check (state in ('queued', 'pending', 'working', 'waiting', 'done', 'failed', 'cancelled', 'refused'))`,
+      `create unique index invocations_message_agent on invocations (org_id, message_id, agent_id)`,
+      `create index invocations_agent_state on invocations (org_id, agent_id, state)`,
+      `create index invocations_conversation on invocations (space_id, thread_root_id, message_offset)`,
+      `create table agent_capabilities (
+        org_id text not null,
+        agent_id text not null,
+        data jsonb not null,
+        updated_at text not null,
+        primary key (org_id, agent_id)
+      )`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

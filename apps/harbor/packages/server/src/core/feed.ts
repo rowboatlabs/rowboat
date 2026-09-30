@@ -2,6 +2,7 @@ import {
   parseMentions,
   stampsEqual,
   type Attribution,
+  type Invocation,
   type MembershipEvent,
   type MentionStamps,
   type Message,
@@ -23,6 +24,7 @@ import { enforce, isAuthor } from '../policy.js';
 import { parseSearchQuery } from '../search.js';
 import type { MessageWindow, StoredPollVote, StoredReaction } from '../store.js';
 import type { Assets } from './assets.js';
+import type { InvocationOutbox, Invocations } from './invocations.js';
 import { Kernel, type ActorCtx } from './kernel.js';
 
 // The conversation (the annotation model, spec §7): one stream of root
@@ -78,6 +80,8 @@ export class Feed {
     private readonly assets: Assets,
     /** Absent = no notifications on this org (notify.ts: frames + push). */
     private readonly notifier?: Notifier,
+    /** Absent = no agent invocations (core/invocations.ts). */
+    private readonly invocations?: Invocations,
   ) {}
 
   // --- mentions (protocol mentions.ts, 2026-09-10) -----------------------------
@@ -304,12 +308,20 @@ export class Feed {
     return folded;
   }
 
-  async postMessage(ctx: ActorCtx, spaceId: string, input: NewMessage): Promise<{ message: Message }> {
+  async postMessage(ctx: ActorCtx, spaceId: string, input: NewMessage): Promise<{ message: Message; invocations: Invocation[] }> {
     const space = await this.k.requireMember(ctx, spaceId);
     this.k.guardWrite();
     const author = this.k.attributionOf(ctx, input);
 
     const stamps = await this.stampsFor(spaceId, input.body);
+    // The agents this message invokes are decided in its transaction, so a
+    // mention is never lost between the post and the queue (spec §8); their
+    // frames leave with the rest, after the commit.
+    const outbox: InvocationOutbox = [];
+    const invoke = async (message: Message): Promise<{ message: Message; invocations: Invocation[] }> => ({
+      message,
+      invocations: this.invocations ? await this.invocations.onMessage(ctx, space, message, input.agentOptions, outbox) : [],
+    });
     const result = await this.k.lockedAs(ctx, spaceId, async () => {
       const at = this.k.now();
       // The org stamps the poll from its own clock: answer ids 1..n, a
@@ -366,7 +378,7 @@ export class Feed {
           await this.k.store.putTopic(revived);
           await this.k.append(spaceId, offset + 1, at, { type: 'topic', topic: revived, action: 'unarchived', by: author });
         }
-        return { message };
+        return invoke(message);
       }
 
       // A new root in the stream. Never a container — createTopic is the
@@ -394,8 +406,9 @@ export class Feed {
       // Posting directly reads the stream up to your own message (read state, 2026-09-09).
       if (author.actingMode === 'direct') await this.k.store.advanceStreamReadMark(spaceId, ctx.memberId, offset, at);
       await this.followMentioned(spaceId, message.id, stamps, ctx.memberId, at);
-      return { message };
+      return invoke(message);
     });
+    this.invocations?.flush(outbox);
     // Notification decisions run OUTSIDE the lock and never block the reply
     // (notify.ts: the `notify` frame to every connection, push to phones);
     // the notifier logs its own failures.

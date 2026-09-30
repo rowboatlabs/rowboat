@@ -23,6 +23,7 @@ import {
   ResolveInviteResult,
 } from './invite.js';
 import { StreamEvent } from './events.js';
+import { ConnectorCapabilities, Invocation, InvocationId, InvocationOptionValues, InvocationUpdate } from './invocation.js';
 import { SearchKind, SearchResults } from './search.js';
 
 // The render face (spec §9): REST + the live stream in events.ts. Member token
@@ -64,6 +65,13 @@ const NewMessage = z.object({
   poll: NewPoll.optional(),
   actingMode: ActingMode,
   agentName: z.string().max(64).optional(),
+  /**
+   * Options picked for agents this message mentions (spec §8 Invocation
+   * options), keyed by the agent's member id. They land on that agent's
+   * invocation, uninterpreted; values for an agent the message does not
+   * mention are ignored.
+   */
+  agentOptions: z.record(MemberId, InvocationOptionValues).optional(),
 });
 
 /**
@@ -295,6 +303,58 @@ export const routes = {
     path: '/v1/agents/:agentId/keys/:keyId/revoke',
     params: z.object({ agentId: MemberId, keyId: z.string().min(1).max(64) }),
     response: z.object({ key: AgentKey }),
+  },
+  /**
+   * The connector's operations (spec §8 Invoking agent members, 2026-09-30):
+   * called on an agent's own key, about that agent's invocations only. Not
+   * tools for the model — the connector acknowledges and reports; the agent
+   * acts through the ordinary routes and tools.
+   */
+  listAgentInvocations: {
+    method: 'GET',
+    path: '/v1/agent/invocations',
+    response: z.object({ invocations: z.array(Invocation) }),
+  },
+  acknowledgeInvocation: {
+    method: 'POST',
+    path: '/v1/agent/invocations/:invocationId/ack',
+    params: z.object({ invocationId: InvocationId }),
+    response: z.object({ invocation: Invocation }),
+  },
+  updateInvocation: {
+    method: 'POST',
+    path: '/v1/agent/invocations/:invocationId/update',
+    params: z.object({ invocationId: InvocationId }),
+    request: InvocationUpdate,
+    response: z.object({ invocation: Invocation }),
+  },
+  declareCapabilities: {
+    method: 'POST',
+    path: '/v1/agent/capabilities',
+    request: ConnectorCapabilities,
+    response: z.object({ capabilities: ConnectorCapabilities }),
+  },
+  /** What an agent's connector declared — the composer's options, whether Stop is offered. Any org member. */
+  getAgentCapabilities: {
+    method: 'GET',
+    path: '/v1/agents/:agentId/capabilities',
+    params: z.object({ agentId: MemberId }),
+    response: z.object({ capabilities: ConnectorCapabilities }),
+  },
+  /** A space's invocations, newest first (a thread's, with threadRootId): the working indicators and refused lines. */
+  listInvocations: {
+    method: 'GET',
+    path: '/v1/spaces/:spaceId/invocations',
+    params: z.object({ spaceId: SpaceId }),
+    query: z.object({ threadRootId: MessageId.optional() }),
+    response: z.object({ invocations: z.array(Invocation) }),
+  },
+  /** Cancel a queued invocation (its invoker), or stop a running one (its invoker or an admin, when the connector can stop). */
+  cancelInvocation: {
+    method: 'POST',
+    path: '/v1/invocations/:invocationId/cancel',
+    params: z.object({ invocationId: InvocationId }),
+    response: z.object({ invocation: Invocation }),
   },
   /**
    * Add existing org members, people or agents, to a shared space the caller
@@ -602,7 +662,8 @@ export const routes = {
     path: '/v1/spaces/:spaceId/messages',
     params: z.object({ spaceId: SpaceId }),
     request: NewMessage,
-    response: z.object({ message: Message }),
+    /** `invocations`: the agents this message invoked, or refused to (spec §8) — absent from older orgs. */
+    response: z.object({ message: Message, invocations: z.array(Invocation).default([]) }),
   },
   /**
    * Author-only tombstone (the content plane is role-flat, so deleter ==

@@ -2,6 +2,9 @@ import type { ActivityKind } from '@rowboat/spaces-protocol';
 import type {
   AgentKey,
   Attribution,
+  ConnectorCapabilities,
+  Invocation,
+  InvocationState,
   BlobInfo,
   ChangeSet,
   Member,
@@ -433,6 +436,23 @@ export interface Store {
   revokeAgentKey(id: string, at: string): Promise<void>;
   /** Record use, at most once per `since` window, so authentication rarely writes. */
   touchAgentKey(id: string, at: string, since: string): Promise<void>;
+
+  // --- invocations (spec §8 Invoking agent members, 2026-09-30) ---
+  /** A new invocation, with its triggering message's offset: the queue's order. */
+  insertInvocation(invocation: Invocation, messageOffset: number): Promise<void>;
+  /** Replace an existing invocation's state and object, by id. */
+  putInvocation(invocation: Invocation): Promise<void>;
+  getInvocation(id: string): Promise<Invocation | undefined>;
+  /** One agent's invocations in the given states, oldest first. */
+  listInvocationsForAgent(agentId: string, states: InvocationState[]): Promise<Invocation[]>;
+  /** One agent's invocations in one conversation, in the order their messages were posted. */
+  listConversationInvocations(agentId: string, spaceId: string, threadRootId: string): Promise<Invocation[]>;
+  /** A space's invocations (one thread's, when given), newest message first. */
+  listSpaceInvocations(spaceId: string, threadRootId: string | null, limit: number): Promise<Invocation[]>;
+  /** Whether two members share a shared (not direct) space. */
+  sharesSharedSpace(a: string, b: string): Promise<boolean>;
+  getAgentCapabilities(agentId: string): Promise<ConnectorCapabilities | undefined>;
+  putAgentCapabilities(agentId: string, capabilities: ConnectorCapabilities, at: string): Promise<void>;
   /** Membership events with offset in (afterOffset, upToOffset], or to the head when upToOffset is null — the stream's join lines. */
   listMembershipEvents(spaceId: string, afterOffset: number, upToOffset: number | null): Promise<StoredEvent[]>;
 

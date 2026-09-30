@@ -13,6 +13,8 @@ import {
   type AgentKey,
   type AgentKeySecret,
   type AgentListing,
+  type ConnectorCapabilities,
+  type Invocation,
   type Member,
   type Membership,
   type StreamEvent,
@@ -538,8 +540,24 @@ export class SpacesClient {
   }
 
   /** A root (no threadRoot) or a reply (threadRoot) — never creates a topic. */
-  async postMessage(spaceId: string, input: NewMessage): Promise<{ message: Message }> {
+  async postMessage(spaceId: string, input: NewMessage): Promise<{ message: Message; invocations: Invocation[] }> {
     return this.request('POST', this.space(spaceId, '/messages'), routes.postMessage.response, input);
+  }
+
+  /** A space's agent invocations, newest first (api.ts listInvocations; one thread's with threadRootId). */
+  async listInvocations(spaceId: string, threadRootId?: string): Promise<Invocation[]> {
+    const q = threadRootId ? `?threadRootId=${encodeURIComponent(threadRootId)}` : '';
+    return (await this.request('GET', this.space(spaceId, `/invocations${q}`), routes.listInvocations.response)).invocations;
+  }
+
+  /** Cancel a queued invocation, or stop a running one (api.ts cancelInvocation). */
+  async cancelInvocation(invocationId: string): Promise<Invocation> {
+    return (await this.request('POST', `/v1/invocations/${encodeURIComponent(invocationId)}/cancel`, routes.cancelInvocation.response)).invocation;
+  }
+
+  /** What an agent's connector declared (api.ts getAgentCapabilities). */
+  async getAgentCapabilities(agentId: string): Promise<ConnectorCapabilities> {
+    return (await this.request('GET', `/v1/agents/${encodeURIComponent(agentId)}/capabilities`, routes.getAgentCapabilities.response)).capabilities;
   }
 
   /** The deliberate ceremony: promote a thread (rootMessageId) or post + annotate (body). */

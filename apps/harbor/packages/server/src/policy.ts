@@ -1,4 +1,4 @@
-import type { ErrorCode, Member, Membership, Message, Space } from '@rowboat/spaces-protocol';
+import type { ErrorCode, Invocation, InvocationRefusal, Member, Membership, Message, Space } from '@rowboat/spaces-protocol';
 import { HarborError } from './errors.js';
 
 // Who may do what. The service loads the facts (space, membership, message,
@@ -121,4 +121,40 @@ export function canRevokeAgentKey(actor: Member, agent: Member): Decision {
 /** The agents a member manages, and so sees on the Agents screen: an admin, every one; anyone else, their own. */
 export function agentsManagedBy(actor: Member): 'all' | 'owned' {
   return actor.role === 'admin' ? 'all' : 'owned';
+}
+
+// --- invoking agent members (spec §8 Invoking agent members, 2026-09-30) -----
+
+/** How many agent hand-offs may lead to an invocation. A person's mention is depth 0. */
+export const AGENT_HOP_LIMIT = 3;
+
+/**
+ * Whether a mention may invoke an agent, or why not. You must share a shared
+ * space with the agent: a DM alone does not count (PR #1130's rule for
+ * Replicas, generalized). Past the hop limit an agent's hand-off is refused.
+ * A refusal is a recorded outcome shown under the message, not an error.
+ */
+export function invocationRefusal(sharesSharedSpace: boolean, depth: number): InvocationRefusal | null {
+  if (!sharesSharedSpace) {
+    return { reason: 'not_permitted', message: 'You need to share a space with this agent to ask it for something.' };
+  }
+  if (depth > AGENT_HOP_LIMIT) {
+    return { reason: 'hop_limit', message: `Too many agent hand-offs: at most ${AGENT_HOP_LIMIT} agents can pass work along in a row.` };
+  }
+  return null;
+}
+
+/** Cancelling an invocation still in the queue is its invoker's act. */
+export function canCancelQueuedInvocation(actor: { memberId: string }, invocation: Invocation): Decision {
+  if (invocation.trigger.authorId === actor.memberId) return null;
+  return { code: 'forbidden', message: 'only the person who asked can cancel it' };
+}
+
+/** Stopping a running invocation: its invoker or an admin, and only when the agent's connector can stop. */
+export function canStopInvocation(actor: Member, invocation: Invocation, stopDeclared: boolean): Decision {
+  if (invocation.trigger.authorId !== actor.id && actor.role !== 'admin') {
+    return { code: 'forbidden', message: 'only the person who asked, or an admin, can stop it' };
+  }
+  if (!stopDeclared) return { code: 'invalid_request', message: 'this agent can’t be stopped from Spaces; open it in its own app' };
+  return null;
 }

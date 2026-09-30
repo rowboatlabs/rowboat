@@ -21,7 +21,8 @@ import { MentionMenu, useMentionAutocomplete } from '@/components/spaces/mention
 import { isDirectImageUrl, useSpaceRefs } from '@/components/spaces/space-markdown'
 import '@/styles/space-composer.css'
 import { noteEmojiUsed, replaceShortcodes, searchEmoji, type EmojiEntry } from '@/lib/emoji-data'
-import { containsRowboatAddress } from '@/lib/spaces-mentions'
+import { containsRowboatAddress, mentionedMemberIds } from '@/lib/spaces-mentions'
+import { AgentOptionsStrip, type AgentOptionValues } from '@/components/spaces/agent-options-strip'
 import type { AutoRouteMode } from '@/lib/spaces-auto-route'
 import { draftStorageKey } from '@/lib/spaces-thread-draft'
 import { schedulePresets } from '@/lib/spaces-schedule'
@@ -62,6 +63,8 @@ export interface AgentOptions {
     permissionMode?: 'auto' | 'manual'
     searchEnabled?: boolean
     codeMode?: 'claude' | 'codex'
+    /** Options picked for agent members the text mentions, by agent id (Harbor spec §8, 2026-09-30). */
+    members?: AgentOptionValues
 }
 
 /** A pane-provided slash command; `args` absent = picking it runs immediately. */
@@ -141,6 +144,8 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     onEscape?: () => boolean
 }) {
     const [draft, setDraft] = useState(() => (draftKey ? window.localStorage.getItem(draftStorageKey(draftKey)) ?? '' : ''))
+    // Picked options for mentioned agent members; sticky for the session, sent only for agents the text mentions.
+    const [memberOptions, setMemberOptions] = useState<AgentOptionValues>({})
     useEffect(() => {
         if (!draftKey) return
         try {
@@ -407,16 +412,27 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     // --- send ----------------------------------------------------------------
     const mentioned = containsRowboatAddress(draft)
 
-    /** Per-turn agent options — attached whenever the outgoing text addresses @rowboat. */
-    const agentOptionsFor = (text: string): AgentOptions | undefined =>
-        containsRowboatAddress(text)
-            ? {
-                  ...(model ? { model: { provider: model.provider, model: model.model, ...(model.effort ? { effort: model.effort } : {}) } } : {}),
-                  permissionMode,
-                  ...(searchEnabled ? { searchEnabled: true } : {}),
-                  ...(codeMode ? { codeMode } : {}),
-              }
-            : undefined
+    /**
+     * Per-turn agent options — @rowboat's whenever the outgoing text addresses
+     * it, plus the options picked for any agent member the text mentions.
+     */
+    const agentOptionsFor = (text: string): AgentOptions | undefined => {
+        const mentionedIds = new Set(mentionedMemberIds(text))
+        const members = Object.fromEntries(Object.entries(memberOptions).filter(([id]) => mentionedIds.has(id)))
+        const rowboat = containsRowboatAddress(text)
+        if (!rowboat && Object.keys(members).length === 0) return undefined
+        return {
+            ...(rowboat
+                ? {
+                      ...(model ? { model: { provider: model.provider, model: model.model, ...(model.effort ? { effort: model.effort } : {}) } } : {}),
+                      permissionMode,
+                      ...(searchEnabled ? { searchEnabled: true } : {}),
+                      ...(codeMode ? { codeMode } : {}),
+                  }
+                : {}),
+            ...(Object.keys(members).length > 0 ? { members } : {}),
+        }
+    }
 
     /** The one body builder — send and send-later produce identical wire text. */
     const buildBody = (raw: string): string => {
@@ -977,6 +993,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                                 )}
                             </>
                         )}
+                        <AgentOptionsStrip draft={draft} values={memberOptions} onChange={setMemberOptions} />
                         {mentioned && (
                             <>
                                 <span className="mx-0.5 h-4 w-px bg-border" />

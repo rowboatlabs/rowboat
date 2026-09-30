@@ -61,6 +61,7 @@ describe('agent face (MCP)', () => {
       'diff',
       'edit_message',
       'end_poll',
+      'get_invocations',
       'join_space',
       'leave_space',
       'list_assets',
@@ -81,6 +82,7 @@ describe('agent face (MCP)', () => {
       'rename_space',
       'restore_asset',
       'search_space',
+      'stop_invocation',
       'vote_poll',
       'whoami',
     ]);

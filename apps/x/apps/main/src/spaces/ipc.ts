@@ -68,6 +68,9 @@ type SpacesHandlers = {
   'spaces:getMessage': InvokeHandler<'spaces:getMessage'>;
   'spaces:listThread': InvokeHandler<'spaces:listThread'>;
   'spaces:postMessage': InvokeHandler<'spaces:postMessage'>;
+  'spaces:listInvocations': InvokeHandler<'spaces:listInvocations'>;
+  'spaces:cancelInvocation': InvokeHandler<'spaces:cancelInvocation'>;
+  'spaces:getAgentCapabilities': InvokeHandler<'spaces:getAgentCapabilities'>;
   'spaces:createTopic': InvokeHandler<'spaces:createTopic'>;
   'spaces:manageTopic': InvokeHandler<'spaces:manageTopic'>;
   'spaces:reactToMessage': InvokeHandler<'spaces:reactToMessage'>;
@@ -410,8 +413,19 @@ export const spacesIpcHandlers: SpacesHandlers = {
       ...(args.anchorChangeSetId ? { anchorChangeSetId: args.anchorChangeSetId } : {}),
       body: args.body,
       ...(args.poll ? { poll: args.poll } : {}),
+      ...(args.agentOptions ? { agentOptions: args.agentOptions } : {}),
       actingMode: 'direct',
     }),
+
+  'spaces:listInvocations': async (_event, args) => ({
+    invocations: await orgs.getClient(args.orgId).listInvocations(args.spaceId, args.threadRootId),
+  }),
+  'spaces:cancelInvocation': async (_event, args) => ({
+    invocation: await orgs.getClient(args.orgId).cancelInvocation(args.invocationId),
+  }),
+  'spaces:getAgentCapabilities': async (_event, args) => ({
+    capabilities: await orgs.getClient(args.orgId).getAgentCapabilities(args.agentId),
+  }),
 
   'spaces:createTopic': async (_event, args) =>
     orgs.getClient(args.orgId).createTopic(args.spaceId, {

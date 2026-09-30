@@ -4,6 +4,9 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import type {
   AgentKey,
   BlobInfo,
+  ConnectorCapabilities,
+  Invocation,
+  InvocationState,
   ChangeSet,
   Member,
   Membership,
@@ -1449,6 +1452,98 @@ export class PgStore implements Store {
     await this.sql.query(
       'update agent_keys set last_used_at = $3 where org_id = $1 and id = $2 and (last_used_at is null or last_used_at < $4)',
       [this.orgId, id, at, since],
+    );
+  }
+
+  // --- invocations -------------------------------------------------------------
+
+  async insertInvocation(invocation: Invocation, messageOffset: number): Promise<void> {
+    await this.sql.query(
+      `insert into invocations (org_id, id, agent_id, space_id, thread_root_id, message_id, message_offset, state, created_at, data)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [
+        this.orgId,
+        invocation.id,
+        invocation.agentId,
+        invocation.conversation.spaceId,
+        invocation.conversation.threadRootId,
+        invocation.trigger.messageId,
+        messageOffset,
+        invocation.state,
+        invocation.createdAt,
+        JSON.stringify(invocation),
+      ],
+    );
+  }
+
+  async putInvocation(invocation: Invocation): Promise<void> {
+    await this.sql.query('update invocations set state = $3, data = $4 where org_id = $1 and id = $2', [
+      this.orgId,
+      invocation.id,
+      invocation.state,
+      JSON.stringify(invocation),
+    ]);
+  }
+
+  async getInvocation(id: string): Promise<Invocation | undefined> {
+    const rows = await this.sql.query<{ data: Invocation }>('select data from invocations where org_id = $1 and id = $2', [this.orgId, id]);
+    return rows[0]?.data;
+  }
+
+  async listInvocationsForAgent(agentId: string, states: InvocationState[]): Promise<Invocation[]> {
+    const rows = await this.sql.query<{ data: Invocation }>(
+      'select data from invocations where org_id = $1 and agent_id = $2 and state = any($3::text[]) order by created_at, id',
+      [this.orgId, agentId, states],
+    );
+    return rows.map((r) => r.data);
+  }
+
+  async listConversationInvocations(agentId: string, spaceId: string, threadRootId: string): Promise<Invocation[]> {
+    const rows = await this.sql.query<{ data: Invocation }>(
+      `select data from invocations
+       where space_id = $1 and thread_root_id = $2 and org_id = $3 and agent_id = $4
+       order by message_offset, id`,
+      [spaceId, threadRootId, this.orgId, agentId],
+    );
+    return rows.map((r) => r.data);
+  }
+
+  async listSpaceInvocations(spaceId: string, threadRootId: string | null, limit: number): Promise<Invocation[]> {
+    const rows = await this.sql.query<{ data: Invocation }>(
+      `select data from invocations
+       where space_id = $1 and org_id = $2 and ($3::text is null or thread_root_id = $3)
+       order by message_offset desc, id desc limit $4`,
+      [spaceId, this.orgId, threadRootId, limit],
+    );
+    return rows.map((r) => r.data);
+  }
+
+  async sharesSharedSpace(a: string, b: string): Promise<boolean> {
+    const rows = await this.sql.query<{ shares: boolean }>(
+      `select exists (
+         select 1 from memberships ma
+         join memberships mb on mb.space_id = ma.space_id
+         join spaces s on s.id = ma.space_id
+         where s.org_id = $1 and s.kind = 'shared' and ma.member_id = $2 and mb.member_id = $3
+       ) as shares`,
+      [this.orgId, a, b],
+    );
+    return rows[0]?.shares === true;
+  }
+
+  async getAgentCapabilities(agentId: string): Promise<ConnectorCapabilities | undefined> {
+    const rows = await this.sql.query<{ data: ConnectorCapabilities }>(
+      'select data from agent_capabilities where org_id = $1 and agent_id = $2',
+      [this.orgId, agentId],
+    );
+    return rows[0]?.data;
+  }
+
+  async putAgentCapabilities(agentId: string, capabilities: ConnectorCapabilities, at: string): Promise<void> {
+    await this.sql.query(
+      `insert into agent_capabilities (org_id, agent_id, data, updated_at) values ($1, $2, $3, $4)
+       on conflict (org_id, agent_id) do update set data = excluded.data, updated_at = excluded.updated_at`,
+      [this.orgId, agentId, JSON.stringify(capabilities), at],
     );
   }
 

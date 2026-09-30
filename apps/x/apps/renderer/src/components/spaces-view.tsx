@@ -16,6 +16,8 @@ import { FileColumn, TrashDialog, UploadFilesDialog } from '@/components/spaces/
 import { GeneralStream } from '@/components/spaces/general-stream'
 import { ScheduledDialog } from '@/components/spaces/scheduled-dialog'
 import { AddMembersDialog } from '@/components/spaces/add-members-dialog'
+import { SpaceInvocationsProvider } from '@/components/spaces/invocation-lines'
+import { useSpaceInvocations } from '@/hooks/use-space-invocations'
 import { SelectionCopy } from '@/components/spaces/selection-copy'
 import { ServerSwitcher } from '@/components/spaces/server-switcher'
 import { ServerSpaceNavigation } from '@/components/spaces-sidebar-section'
@@ -309,6 +311,8 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // roster winning on identity), so a chip for someone mentioned from
     // another space still reads as a person here.
     const members = useSpaceMembers(org.id, space.id)
+    // Agent invocations (Harbor spec §8): the lines under messages that invoked an agent.
+    const invocationsByMessage = useSpaceInvocations(org.id, space.id)
     const orgSpaceIds = useMemo(() => org.spaces.map((s) => s.id), [org.spaces])
     const orgRoster = useOrgRoster(org.id, orgSpaceIds)
     const profiles = useMemo(() => {
@@ -317,6 +321,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         return [...byId.values()]
     }, [orgRoster, members])
     const memberNames = useMemo(() => new Map(profiles.map((m) => [m.id, m.displayName])), [profiles])
+    const selfIsAdmin = profiles.find((m) => m.id === org.memberId)?.role === 'admin'
     const spaceNames = useSpaceNames(org.id)
     // A direct message is this same pane with a two-person roster: named by
     // the other person, no invites.
@@ -858,6 +863,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         <SpaceMembersProvider members={memberNames} spaceNames={spaceNames}>
         <SpaceProfilesProvider members={profiles} here={hereSet} selfId={org.memberId}>
         <SpaceRefsProvider refs={spaceRefs}>
+        <SpaceInvocationsProvider byMessage={invocationsByMessage} orgId={org.id} selfId={org.memberId} isAdmin={selfIsAdmin}>
         <SpaceAssetsProvider entries={entries}>
         <SpaceNavProvider onOpenFile={openFile} onOpenSpaceFile={openSpaceFile} onOpenSpace={openSpace} onOpenMessage={openMessage} onOpenDirect={openDirect} resolveOrg={resolveOrg} resolveSpace={resolveSpace} onOpenAttachment={(src, name) => {
             const url = new URL(src)
@@ -1278,6 +1284,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         </div>
         </SpaceNavProvider>
         </SpaceAssetsProvider>
+        </SpaceInvocationsProvider>
         </SpaceRefsProvider>
         </SpaceProfilesProvider>
         </SpaceMembersProvider>
