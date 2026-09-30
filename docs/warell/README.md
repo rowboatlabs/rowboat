@@ -9,7 +9,7 @@ Warell est une plateforme agentique « West Africa first, global by design », c
 | 3 | [`AGENTIC_DATA_MODEL.md`](./AGENTIC_DATA_MODEL.md) | Quelles entités, et comment elles s'articulent avec le schéma existant ? |
 | 4 | [`AGENT_RUNTIME_SPEC.md`](./AGENT_RUNTIME_SPEC.md) | Comment un objectif s'exécute, de bout en bout ? |
 | 5 | [`AGENT_SECURITY_MODEL.md`](./AGENT_SECURITY_MODEL.md) | Qui peut faire quoi, et comment on le prouve ? |
-| 6 | `WEST_AFRICA_PROVIDER_ARCHITECTURE.md` | Quels fournisseurs par pays, et avec quel niveau de preuve ? |
+| 6 | [`WEST_AFRICA_PROVIDER_ARCHITECTURE.md`](./WEST_AFRICA_PROVIDER_ARCHITECTURE.md) | Quels fournisseurs par pays, et avec quel niveau de preuve ? |
 | 7 | `IMPLEMENTATION_ROADMAP.md` | Dans quel ordre on construit ? |
 
 Deux documents de fonctionnement :
