@@ -14,6 +14,7 @@ import {
 import { Attribution, Member, Membership, Message, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic } from './core.js';
 import { AssetId, AssetPath, BlobHash, MemberId, MessageId, SpaceId, TopicId } from './ids.js';
 import { CreateInviteResult } from './invite.js';
+import { Invocation, InvocationId, InvocationOptionValues, InvocationRefusal, InvocationState } from './invocation.js';
 import { SearchKind, SearchLimit, SearchResults } from './search.js';
 
 // Decision 5 (CONTRACT.md): the agent face — direct projections of the core
@@ -293,8 +294,35 @@ export const postMessage = tool({
     threadRoot: MessageId.optional(),
     body: z.string().min(1).max(65_536),
     poll: NewPoll.optional(),
+    /** Options for agents the message mentions, keyed by agent member id (their declared options; see get_invocations). */
+    agentOptions: z.record(MemberId, InvocationOptionValues).optional(),
   }),
-  output: z.object({ messageId: MessageId, threadRoot: MessageId.optional() }),
+  output: z.object({
+    messageId: MessageId,
+    threadRoot: MessageId.optional(),
+    /** Agents this message invoked, or was refused (spec §8): say so if a hand-off was refused. */
+    invocations: z.array(z.object({ agentId: MemberId, state: InvocationState, refusal: InvocationRefusal.optional() })).optional(),
+  }),
+});
+
+/** Agent invocations in a space (spec §8), for "is it still working?" and "why didn't it answer?". */
+export const getInvocations = tool({
+  name: 'get_invocations',
+  description:
+    'Agent invocations in a space, newest first: which agent was asked, by whom, and its state ' +
+    '(queued, pending, working, waiting on a person, done, failed, cancelled, refused), with any ' +
+    'activity line. Pass threadRootId for one thread.',
+  input: z.object({ spaceId: SpaceId, threadRootId: MessageId.optional() }),
+  output: z.object({ invocations: z.array(Invocation) }),
+});
+
+export const stopInvocation = tool({
+  name: 'stop_invocation',
+  description:
+    'Cancel an agent invocation your person queued, or stop a running one (your person invoked it, ' +
+    'or is an admin) when the agent can be stopped. Only when they asked for it.',
+  input: z.object({ invocationId: InvocationId }),
+  output: z.object({ invocation: Invocation }),
 });
 
 export const editMessage = tool({
@@ -646,6 +674,8 @@ export const mcpTools = [
   markAllRead,
   searchSpace,
   postMessage,
+  getInvocations,
+  stopInvocation,
   editMessage,
   deleteMessage,
   react,
@@ -679,4 +709,5 @@ export const readOnlyMcpToolNames: ReadonlySet<string> = new Set([
   readAsset.name,
   assetHistory.name,
   diff.name,
+  getInvocations.name,
 ]);

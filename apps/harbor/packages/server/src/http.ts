@@ -171,6 +171,45 @@ export function buildHttpApp(deps: {
     return reply(c, routes.leaveSpace.response, { left: true });
   });
 
+  // --- invocations (spec §8): the connector's operations, on an agent's own key ----
+
+  app.get(routes.listAgentInvocations.path, async (c) =>
+    reply(c, routes.listAgentInvocations.response, { invocations: await service.listAgentInvocations(actor(c)) }));
+
+  app.post(routes.acknowledgeInvocation.path, async (c) => {
+    const { invocationId } = parseWith(routes.acknowledgeInvocation.params, c.req.param());
+    return reply(c, routes.acknowledgeInvocation.response, { invocation: await service.acknowledgeInvocation(actor(c), invocationId) });
+  });
+
+  app.post(routes.updateInvocation.path, async (c) => {
+    const { invocationId } = parseWith(routes.updateInvocation.params, c.req.param());
+    const update = await body(c, routes.updateInvocation.request);
+    return reply(c, routes.updateInvocation.response, { invocation: await service.updateInvocation(actor(c), invocationId, update) });
+  });
+
+  app.post(routes.declareCapabilities.path, async (c) => {
+    const capabilities = await body(c, routes.declareCapabilities.request);
+    return reply(c, routes.declareCapabilities.response, { capabilities: await service.declareCapabilities(actor(c), capabilities) });
+  });
+
+  // --- invocations: people's side ----------------------------------------------------
+
+  app.get(routes.getAgentCapabilities.path, async (c) => {
+    const { agentId } = parseWith(routes.getAgentCapabilities.params, c.req.param());
+    return reply(c, routes.getAgentCapabilities.response, { capabilities: await service.getAgentCapabilities(agentId) });
+  });
+
+  app.get(routes.listInvocations.path, async (c) => {
+    const { spaceId } = parseWith(routes.listInvocations.params, c.req.param());
+    const q = parseWith(routes.listInvocations.query, c.req.query());
+    return reply(c, routes.listInvocations.response, { invocations: await service.listInvocations(actor(c), spaceId, q.threadRootId) });
+  });
+
+  app.post(routes.cancelInvocation.path, async (c) => {
+    const { invocationId } = parseWith(routes.cancelInvocation.params, c.req.param());
+    return reply(c, routes.cancelInvocation.response, { invocation: await service.cancelInvocation(actor(c), invocationId) });
+  });
+
   // --- agents and their keys (render face only: secrets never cross a tool) ----
 
   app.get(routes.listAgents.path, async (c) =>

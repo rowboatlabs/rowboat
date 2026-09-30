@@ -14,6 +14,7 @@ Two pnpm workspace packages under `packages/`:
 | `core/kernel.ts` | store, hub, org, the read-only knob, the space lock with its publish-after-commit outbox, `append` / `nextOffset` / `appendNext`, `requireSpace` / `requireReadableSpace` / `requireMember`, `guardWrite`, `attributionOf` |
 | `core/spaces.ts` | spaces, direct messages, invites and the bind ceremony, the roster, `me`, agent members (`createAgent`), push registration, the read-gated replay and membership-gated live relays |
 | `core/agents.ts` | agent members' owners and keys: add an agent, list the ones a member manages, create and revoke keys |
+| `core/invocations.ts` | invoking agent members (spec §8): the trigger `Feed.postMessage` runs in its transaction, the per-(agent, conversation) queue, the connector's operations, cancel and stop; its frames leave after the commit through its own outbox |
 | `core/assets.ts` | assets by id, versions, the change log, blobs, history, diff |
 | `core/feed.ts` | messages, threads, topics, reactions, polls, search, mention stamps and their backfill |
 | `core/read-state.ts` | read marks, follows, unread, Activity, read-all |
@@ -29,6 +30,8 @@ Two pnpm workspace packages under `packages/`:
 | `notify.ts`, `push.ts` | the one notification decision; Expo delivery |
 | `hub.ts`, `blobs*.ts`, `mime.ts`, `merge.ts`, `search.ts`, `mentions-backfill.ts` | in-process fan-out, blob drivers, sniffing, the three-way merge, query parsing, the mentions backfill |
 | `stats.ts`, `internal.ts` | the live-load counters (connections, subscriptions, frames per minute by kind, deliveries) and the operator face that reads them, `GET /internal/stats` behind `HARBOR_INTERNAL_KEY` |
+
+`examples/echo-agent.mjs` is the smallest connector for the agent contract (spec §8): one agent's key, the live frame plus a list every minute, acknowledge, report, reply in the thread. Run it against a dev Harbor to watch invocations end to end, and start a real connector from its shape.
 
 `test/` has one file per feature, every one on in-process Postgres. `helpers.ts` gives `startTestHarbor` (a harbor over a fresh database, closed with it), `restClient`, `agentClient`, `liveClient`, `startFakeAs` (a fake authorization server: discovery, JWKS, minted JWTs). `day-in-the-life.test.ts` is spec §11 as code; `mcp-parity.test.ts` proves the agent face; `policy.test.ts` pins every rule without a store.
 

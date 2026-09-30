@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { ChangeSet } from './changeset.js';
 import { Attribution, Membership, Message, MessageDeletion, MessageEdit, PollEnd, PollVote, Reaction, Space, SpaceKind, Topic, TopicRemoval } from './core.js';
 import { AssetId, MemberId, MessageId, SpaceId, StreamOffset } from './ids.js';
+import { Invocation, InvocationId } from './invocation.js';
 
 // Decision 2 (CONTRACT.md): one WebSocket per org, per-space subscriptions,
 // offset-based catch-up. Subscribing with `afterOffset` replays durable events
@@ -268,6 +269,22 @@ export const ServerFrame = z.discriminatedUnion('kind', [
     at: z.iso.datetime(),
     payload: z.unknown(),
   }),
+  /**
+   * Addressed to an AGENT member's connections (spec §8 Invoking agent
+   * members, 2026-09-30): an invocation is ready for it — new, or next out of
+   * its conversation's queue. Ephemeral: a connector that was away lists the
+   * pending ones (listAgentInvocations), so nothing depends on this arriving.
+   */
+  z.object({ kind: z.literal('invocation'), invocation: Invocation }),
+  /** Addressed to an AGENT member's connections: stop this running invocation, then report it cancelled. */
+  z.object({ kind: z.literal('invocation_stop'), invocationId: InvocationId }),
+  /**
+   * To a space's subscribers, on every change of state of an invocation in
+   * it: the working indicator, what it waits for, a refused line. Ephemeral,
+   * never replayed; listInvocations is the snapshot. Older clients ignore
+   * unknown frame kinds by contract.
+   */
+  z.object({ kind: z.literal('invocation_state'), spaceId: SpaceId, invocation: Invocation }),
 ]);
 export type ServerFrame = z.infer<typeof ServerFrame>;
 

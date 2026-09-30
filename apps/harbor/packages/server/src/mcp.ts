@@ -313,16 +313,36 @@ async function dispatch(
       });
     }
     case 'post_message': {
-      const a = args as { spaceId: string; threadRoot?: string; body: string; poll?: z.infer<typeof NewPoll> };
-      const { message } = await service.postMessage(ctx, a.spaceId, {
+      const a = args as {
+        spaceId: string;
+        threadRoot?: string;
+        body: string;
+        poll?: z.infer<typeof NewPoll>;
+        agentOptions?: Record<string, Record<string, string | boolean>>;
+      };
+      const { message, invocations } = await service.postMessage(ctx, a.spaceId, {
         ...(a.threadRoot ? { threadRoot: a.threadRoot } : {}),
         body: a.body,
         ...(a.poll !== undefined ? { poll: a.poll } : {}),
+        ...(a.agentOptions ? { agentOptions: a.agentOptions } : {}),
         actingMode: actor.actingMode,
         ...(actor.agentName ? { agentName: actor.agentName } : {}),
       });
-      return { messageId: message.id, ...(message.threadRoot !== undefined ? { threadRoot: message.threadRoot } : {}) };
+      return {
+        messageId: message.id,
+        ...(message.threadRoot !== undefined ? { threadRoot: message.threadRoot } : {}),
+        // A refused hand-off comes back to the agent that posted it (spec §8).
+        ...(invocations.length > 0
+          ? { invocations: invocations.map((i) => ({ agentId: i.agentId, state: i.state, ...(i.refusal ? { refusal: i.refusal } : {}) })) }
+          : {}),
+      };
     }
+    case 'get_invocations': {
+      const a = args as { spaceId: string; threadRootId?: string };
+      return { invocations: await service.listInvocations(ctx, a.spaceId, a.threadRootId) };
+    }
+    case 'stop_invocation':
+      return { invocation: await service.cancelInvocation(ctx, (args as { invocationId: string }).invocationId) };
     case 'edit_message': {
       const a = args as { spaceId: string; messageId: string; body: string };
       return { message: await service.editMessage(ctx, a.spaceId, a.messageId, { body: a.body, ...attribution }) };

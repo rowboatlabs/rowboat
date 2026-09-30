@@ -3,6 +3,7 @@ import type { BlobStore } from './blobs.js';
 import { Agents } from './core/agents.js';
 import { Assets } from './core/assets.js';
 import { Feed } from './core/feed.js';
+import { Invocations } from './core/invocations.js';
 import { Kernel, type ActorCtx, type BindIdentity, type OrgInfo } from './core/kernel.js';
 import { ReadState } from './core/read-state.js';
 import { Spaces } from './core/spaces.js';
@@ -28,6 +29,9 @@ import type {
   AgentKey,
   AgentKeySecret,
   AgentListing,
+  ConnectorCapabilities,
+  Invocation,
+  InvocationUpdate,
   Membership,
   StreamEvent,
   Message,
@@ -64,6 +68,7 @@ export class HarborService {
   private readonly feed: Feed;
   private readonly readState: ReadState;
   private readonly agents: Agents;
+  private readonly invocations: Invocations;
 
   constructor(
     store: Store,
@@ -77,7 +82,8 @@ export class HarborService {
     this.k = new Kernel(store, hub, org);
     this.spaces = new Spaces(this.k);
     this.assets = new Assets(this.k, blobs);
-    this.feed = new Feed(this.k, this.assets, notifier);
+    this.invocations = new Invocations(this.k);
+    this.feed = new Feed(this.k, this.assets, notifier, this.invocations);
     this.readState = new ReadState(this.k, this.spaces, this.feed);
     this.agents = new Agents(this.k, this.spaces);
   }
@@ -106,6 +112,29 @@ export class HarborService {
   }
   createAgent(input: { displayName: string; ownerId?: string }): Promise<Member> {
     return this.spaces.createAgent(input);
+  }
+
+  // --- invocations (core/invocations.ts) -------------------------------------------
+  listAgentInvocations(ctx: ActorCtx): Promise<Invocation[]> {
+    return this.invocations.listForAgent(ctx);
+  }
+  acknowledgeInvocation(ctx: ActorCtx, invocationId: string): Promise<Invocation> {
+    return this.invocations.acknowledge(ctx, invocationId);
+  }
+  updateInvocation(ctx: ActorCtx, invocationId: string, update: InvocationUpdate): Promise<Invocation> {
+    return this.invocations.update(ctx, invocationId, update);
+  }
+  declareCapabilities(ctx: ActorCtx, capabilities: ConnectorCapabilities): Promise<ConnectorCapabilities> {
+    return this.invocations.declareCapabilities(ctx, capabilities);
+  }
+  getAgentCapabilities(agentId: string): Promise<ConnectorCapabilities> {
+    return this.invocations.capabilities(agentId);
+  }
+  listInvocations(ctx: ActorCtx, spaceId: string, threadRootId?: string): Promise<Invocation[]> {
+    return this.invocations.listForSpace(ctx, spaceId, threadRootId);
+  }
+  cancelInvocation(ctx: ActorCtx, invocationId: string): Promise<Invocation> {
+    return this.invocations.cancel(ctx, invocationId);
   }
 
   // --- agents and their keys (core/agents.ts) --------------------------------------
@@ -275,7 +304,7 @@ export class HarborService {
   getMessage(ctx: ActorCtx, spaceId: string, messageId: string): Promise<Message> {
     return this.feed.getMessage(ctx, spaceId, messageId);
   }
-  postMessage(ctx: ActorCtx, spaceId: string, input: NewMessage): Promise<{ message: Message }> {
+  postMessage(ctx: ActorCtx, spaceId: string, input: NewMessage): Promise<{ message: Message; invocations: Invocation[] }> {
     return this.feed.postMessage(ctx, spaceId, input);
   }
   createTopic(

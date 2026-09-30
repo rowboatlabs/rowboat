@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { Member, Membership, Message, Space } from '@rowboat/spaces-protocol';
+import type { Invocation, Member, Membership, Message, Space } from '@rowboat/spaces-protocol';
 import { HarborError } from '../src/errors.js';
 import {
+  AGENT_HOP_LIMIT,
   agentsManagedBy,
+  canCancelQueuedInvocation,
+  canStopInvocation,
+  invocationRefusal,
   canAccessSpace,
   canAddAgent,
   canCreateAgentKey,
@@ -113,5 +117,20 @@ describe('policy', () => {
     expect(canRevokeAgentKey(other, hermes)).toMatchObject({ code: 'forbidden' });
     expect(agentsManagedBy(admin)).toBe('all');
     expect(agentsManagedBy(owner)).toBe('owned');
+  });
+
+  it('invocations: a shared space to invoke, three hops, the invoker cancels, invoker or admin stops when the connector can', () => {
+    expect(invocationRefusal(true, 0)).toBeNull();
+    expect(invocationRefusal(true, AGENT_HOP_LIMIT)).toBeNull();
+    expect(invocationRefusal(true, AGENT_HOP_LIMIT + 1)).toMatchObject({ reason: 'hop_limit' });
+    expect(invocationRefusal(false, 0)).toMatchObject({ reason: 'not_permitted' });
+    const inv = { trigger: { authorId: 'harsh' } } as Invocation;
+    const person = (id: string, role: Member['role'] = 'member'): Member => ({ id, displayName: id, role, kind: 'human' });
+    expect(canCancelQueuedInvocation({ memberId: 'harsh' }, inv)).toBeNull();
+    expect(canCancelQueuedInvocation({ memberId: 'gagan' }, inv)).toMatchObject({ code: 'forbidden' });
+    expect(canStopInvocation(person('harsh'), inv, true)).toBeNull();
+    expect(canStopInvocation(person('ramnique', 'admin'), inv, true)).toBeNull();
+    expect(canStopInvocation(person('gagan'), inv, true)).toMatchObject({ code: 'forbidden' });
+    expect(canStopInvocation(person('harsh'), inv, false)).toMatchObject({ code: 'invalid_request' });
   });
 });

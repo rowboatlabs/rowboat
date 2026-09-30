@@ -52,6 +52,10 @@ export const InvocationOption = z.discriminatedUnion('type', [
 ]);
 export type InvocationOption = z.infer<typeof InvocationOption>;
 
+/** Values picked for a connector's declared options: a choice's id, or a toggle's on/off. */
+export const InvocationOptionValues = z.record(InvocationOptionKey, z.union([z.string().max(256), z.boolean()]));
+export type InvocationOptionValues = z.infer<typeof InvocationOptionValues>;
+
 export const Invocation = z.object({
   id: InvocationId,
   /** The agent member invoked. */
@@ -64,8 +68,8 @@ export const Invocation = z.object({
   where: z.object({ spaceKind: SpaceKind, spaceName: z.string() }),
   /** Agent hand-offs that led here: 0 for a person's mention. Harbor refuses past its limit. */
   depth: z.number().int().nonnegative(),
-  /** The values the invoker picked for the connector's declared options: a choice's id, or a toggle's on/off. */
-  options: z.record(InvocationOptionKey, z.union([z.string().max(256), z.boolean()])).optional(),
+  /** The values the invoker picked for the connector's declared options. */
+  options: InvocationOptionValues.optional(),
   /** Set when this invocation is a person's answer to one that is waiting in the same conversation. */
   answers: InvocationId.optional(),
   state: InvocationState,
@@ -75,6 +79,8 @@ export const Invocation = z.object({
   link: z.string().url().optional(),
   error: z.string().max(1000).optional(),
   refusal: InvocationRefusal.optional(),
+  /** Someone asked to stop it while it ran; the connector stops and reports cancelled. */
+  stopRequested: z.boolean().optional(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
 });
