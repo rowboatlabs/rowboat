@@ -10,9 +10,15 @@ importers:
 
   packages/control:
     dependencies:
+      '@hono/node-server':
+        specifier: ^1.19.7
+        version: 1.19.17(hono@4.13.12)
       '@x/shared':
         specifier: link:../../../x/packages/shared
         version: link:../../../x/packages/shared
+      hono:
+        specifier: ^4.11.9
+        version: 4.13.12
       zod:
         specifier: 4.2.1
         version: 4.2.1
@@ -28,6 +34,12 @@ importers:
         version: 4.1.7(@types/node@24.19.0)(vite@8.3.1(@types/node@24.19.0))
 
 packages:
+
+  '@hono/node-server@1.19.17':
+    resolution: {integrity: sha512-dSneS5qhiauZWGDCeK4o695Xd9nUNjviSZCMQrj10eetr8Uln1ucn6bbphOM6UynAMMtNIzZNSpL9vnASJwrPQ==}
+    engines: {node: '>=18.14.1'}
+    peerDependencies:
+      hono: ^4
 
   '@jridgewell/sourcemap-codec@1.6.0':
     resolution: {integrity: sha512-T7jf+5zgsZHwNJ4lvQ7/aezbyk0nNX+zJVWpmHA7VYsEx7a7qr5Rg5IbtJFqkgze5Y2sruq1RUY8Q837Od7iFw==}
@@ -210,6 +222,10 @@ packages:
     resolution: {integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==}
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
+
+  hono@4.13.12:
+    resolution: {integrity: sha512-6E2QDAc9Ick9Sq77ZrGS/dk2WUYni91aufTw6LJKpV7w8kW5/GxVUc650FOADOmlwg3K+f7Pun6XlV+pYmW6gw==}
+    engines: {node: '>=16.9.0'}
 
   lightningcss-android-arm64@1.33.0:
     resolution: {integrity: sha512-gEpRTalKdosp4Bb8qWtc2iOgE5SeIHlpS1up9bFq2wAyYhl1UdTObYiHe98zEM9SQvSoqQZ1IQD0JNpg3Ml5pg==}
@@ -442,6 +458,10 @@ packages:
 
 snapshots:
 
+  '@hono/node-server@1.19.17(hono@4.13.12)':
+    dependencies:
+      hono: 4.13.12
+
   '@jridgewell/sourcemap-codec@1.6.0': {}
 
   '@oxc-project/types@0.152.0': {}
@@ -571,6 +591,8 @@ snapshots:
 
   fsevents@2.3.3:
     optional: true
+
+  hono@4.13.12: {}
 
   lightningcss-android-arm64@1.33.0:
     optional: true

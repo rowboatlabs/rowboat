@@ -1,5 +1,7 @@
 import type { z } from 'zod';
 import type { RowboatApiConfig } from '@x/shared/dist/rowboat-account.js';
+import { budgetsForWeek } from './quota.js';
+import type { Plan } from './store.js';
 
 export type ApiConfig = z.infer<typeof RowboatApiConfig>;
 
@@ -18,14 +20,26 @@ export interface ControlSettings {
  * - `websocketApiUrl` stays empty until the voice phase (roadmap phase 8):
  *   core then fails voice with an explicit error instead of calling Rowboat.
  * - `spacesApexUrl` is null: no managed Spaces fleet in V1.
+ * - `billing.plans` keeps the upstream shape: `monthlyCredits` carries the
+ *   week budget and `dailyCredits` the session budget (architecture §3.5,
+ *   quota decided 30/09/2026). No price is served until one is decided.
  */
-export function buildApiConfig(settings: ControlSettings): ApiConfig {
+export function buildApiConfig(settings: ControlSettings, plans: Plan[] = []): ApiConfig {
   const base = settings.publicUrl.replace(/\/+$/, '');
   return {
     appUrl: base,
     websocketApiUrl: '',
     supabaseUrl: base,
     spacesApexUrl: null,
-    billing: { plans: [] },
+    billing: {
+      plans: plans.map((plan) => ({
+        id: plan.id,
+        category: plan.category,
+        displayName: plan.displayName,
+        monthlyCredits: plan.weekCredits,
+        dailyCredits: budgetsForWeek(plan.weekCredits).sessionCredits,
+        monthlyPriceCents: null,
+      })),
+    },
   };
 }

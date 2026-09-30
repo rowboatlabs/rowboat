@@ -102,7 +102,7 @@ L'ordre des phases 4 à 8 est souple (**Latitude**). Chacune ne dépend que des 
 **But :** une instance Rowboat tourne sur Fly.io, se met en veille, se réveille, et parle à un plan de contrôle Warell qui remplace le backend Rowboat Labs.
 
 - Espace de travail `apps/warell/`, sa CI (`.github/workflows/warell-tests.yml`), sans toucher la CI upstream.
-- `@warell/control` minimal : `/v1/config`, `/v1/me`, `/v1/llm` (mandataire vers OpenRouter, avec un compteur de coût par instance). **Test de contrat** : les réponses sont validées par les schémas zod de `@x/shared`, ce qui casse à la synchro si l'upstream les change.
+- `@warell/control` minimal : `/v1/config`, `/v1/me`, `/v1/llm` (mandataire vers OpenRouter, sous le quota 5 h / semaine au coût réel, archi §3.5). **Test de contrat** : les réponses sont validées par les schémas zod de `@x/shared`, ce qui casse à la synchro si l'upstream les change.
 - Image d'instance : le bundle headless (`build-headless.mjs`) dans une image, `ROWBOAT_WORKDIR=/data` sur un volume Fly, `API_URL` vers le plan de contrôle.
 - **Mesures** (archi §6) :
   - mémoire de l'instance, avec et sans Chromium : la suspension exige 2 Go au plus ;
@@ -233,7 +233,7 @@ L'ordre de l'addendum (§90), appliqué à ce que les fournisseurs permettent vr
 | # | PR | Contenu | Touche l'upstream ? | Preuve |
 |---|---|---|---|---|
 | 1 | `feat(warell): espace de travail apps/warell` | `package.json`, `pnpm-workspace.yaml`, `tsconfig`, Vitest, dépendances `link:` vers `@x/shared`. Workflow `warell-tests.yml`. Un test trivial. | Non | CI verte |
-| 2 | `feat(control): routes /v1 minimales` | `@warell/control` (Hono, comme `rowboat-server`) : `/v1/config`, `/v1/me`, `/v1/llm` vers OpenRouter avec compteur de coût, `/health`. Tests de contrat contre les schémas de `@x/shared`. | Non | Tests de contrat verts |
+| 2 | `feat(control): routes /v1 minimales` | `@warell/control` (Hono, comme `rowboat-server`) : `/v1/config`, `/v1/me`, `/v1/llm` vers OpenRouter sous le quota 5 h / semaine au coût réel (archi §3.5), `/health`. Tests de contrat contre les schémas de `@x/shared`. | Non | Tests de contrat verts |
 | 3 | `feat(instance): image et déploiement Fly.io` | Dockerfile qui empaquette `build-headless.mjs`, `fly.toml` (Paris, volume, `autostop = suspend`), script de déploiement du plan de contrôle et d'une instance de test. | Non | Instance joignable ; conversation via OpenRouter depuis l'app de bureau |
 | 4 | `docs(warell): mesures d'hébergement` | Mémoire (avec et sans Chromium), suspension et réveil, latence Paris / Johannesburg depuis BF et CI, coût d'une instance endormie. Mise à jour de l'architecture §6. | Non | Chiffres versés |
 | 5 | Upstream : issue i18n, PR du contrôle `cwd` | Textes rédigés ici, envoyés chez `rowboatlabs/rowboat` depuis une branche créée sur `upstream/main` (UPSTREAM.md §7) | Chez eux, pas chez nous | Liens de l'issue et de la PR |

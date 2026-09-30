@@ -162,6 +162,24 @@ Harbor reste inchangé et continue de servir les Spaces, les membres, le temps r
 
 **Latitude :** l'envoi des SMS passe par un `CommunicationProvider` (§3.8), jamais par un fournisseur codé en dur. Le choix de l'agrégateur SMS se fait par pays, sur deux critères : la délivrabilité réelle dans chacun des 7 pays, et le coût par message. Voir `WEST_AFRICA_PROVIDER_ARCHITECTURE.md`. Le module doit aussi limiter la fraude aux SMS : plafond d'envois par numéro et par IP, expiration courte du code, nombre d'essais borné.
 
+#### Le quota d'utilisation
+
+**Décidé (30/09/2026) : l'utilisation se mesure en deux fenêtres, 5 heures et une semaine,** comme chez les assistants grand public. L'utilisateur ne compte ni messages ni crédits : il voit une jauge par fenêtre et l'heure à laquelle elle se remet à zéro.
+
+| | Fenêtre de session | Fenêtre hebdomadaire |
+|---|---|---|
+| Durée | 5 heures | 7 jours |
+| Ouverture | Au premier appel modèle, quand aucune session n'est en cours | À la date d'ouverture du compte, puis tous les 7 jours à la même heure |
+| Budget | Un quart du budget hebdomadaire | Fixé par le forfait |
+| Remise à zéro | 5 heures après son ouverture | À l'échéance suivante |
+
+- **Ce qu'on mesure : le coût réel de chaque appel**, lu dans `usage.cost` d'OpenRouter (le plan de contrôle demande `usage: { include: true }`). Il est compté en crédits, l'unité de l'upstream (`CREDITS_PER_DOLLAR`, 100 M = 1 $). Une réponse sans coût est comptée au **plancher** d'un millième de dollar et marquée `estimated`, jamais à zéro.
+- **Tout passe par là :** texte, images et tâches de fond appellent `/v1/llm`, donc le même quota. Un Goal consomme le quota de son propriétaire, appel par appel.
+- **Le refus se décide avant l'appel.** Si l'une des deux fenêtres est épuisée, `/v1/llm` répond `429` avec `{ error: { code: "quota_reached", window: "session" | "week", resets_at } }`. **Un appel commencé n'est jamais coupé** : il peut dépasser le budget de son propre coût, compté ensuite. Le moteur d'objectifs relira la jauge avant chaque tâche (phase 1).
+- **Les budgets sont des données**, dans le catalogue des forfaits, pas dans le code. Les montants par forfait restent à fixer (🧑). En phase 0, un seul forfait, dont le budget hebdomadaire vient de la configuration.
+
+**Sur le fil, on garde le schéma de l'upstream** (§3.14) : `GET /v1/me` porte la session dans le compartiment `daily` et la semaine dans `monthly`, et `usageDay` donne l'heure de remise à zéro de la session. Les libellés de l'écran d'usage upstream (« jour », « mois ») sont donc faux jusqu'à ce que la couche de marque et d'i18n (§3.12) les remplace : c'est accepté pour la phase 0, où seul le propriétaire utilise l'app.
+
 ### 3.6 La vérification : exécuté ≠ vérifié
 
 **Décidé.** Une Action a deux états distincts : `executed` et `verified`. Chaque outil à effet déclare comment prouver son effet :
@@ -400,3 +418,4 @@ Contrainte connue : on privilégie le **managé**, pas de VPS à administrer soi
 | 4 | Composio | **Décidé 29/09 :** désactivé en V1, MCP et connecteurs natifs à la place (§3.14). |
 | 5 | Argent des clients | **Décidé 29/09 :** Warell ne détient jamais d'argent (§3.9). Reste la validation juridique. |
 | 6 | JEV | **Décidé 29/09 :** accélérateur optionnel de lecture et recherche, adopté sur mesures (§3.10). |
+| 7 | Facturation de l'usage | **Décidé 30/09 :** quota en deux fenêtres, 5 h et semaine, au coût réel (§3.5). Restent les montants par forfait. |
