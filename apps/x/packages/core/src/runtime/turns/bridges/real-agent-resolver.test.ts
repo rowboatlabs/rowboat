@@ -36,6 +36,11 @@ const fakeBuiltins = {
         inputSchema: z.object({ task: z.string() }),
         execute: async () => null,
     },
+    code_agent_run: {
+        description: "Run a coding agent",
+        inputSchema: z.object({ prompt: z.string() }),
+        execute: async () => null,
+    },
 } as unknown as typeof BuiltinTools;
 
 function makeResolver(agent: z.infer<typeof Agent>, deps: Partial<ConstructorParameters<typeof RealAgentResolver>[0]> = {}) {
@@ -224,6 +229,71 @@ describe("RealAgentResolver", () => {
         await expect(resolver.resolve({ agentId: "ghost" })).rejects.toThrowError(
             "no such agent",
         );
+    });
+});
+
+describe("harness gating (work directory)", () => {
+    const withHarness = () =>
+        makeAgent({
+            tools: {
+                code_agent_run: { type: "builtin", name: "code_agent_run" },
+                "file-list": { type: "builtin", name: "file-list" },
+            },
+        });
+
+    it("withholds the harness from a chat with no work directory", async () => {
+        const resolved = await makeResolver(withHarness()).resolve({
+            agentId: "copilot",
+            overrides: { composition: { workDirId: "sess-1" } },
+        });
+        expect(resolved.tools.map((t) => t.name)).toEqual(["file-list"]);
+    });
+
+    it("attaches the harness once the chat has a work directory", async () => {
+        const resolver = makeResolver(withHarness(), {
+            loadWorkDir: (id) => (id === "sess-1" ? "/Users/me/work" : null),
+        });
+        const resolved = await resolver.resolve({
+            agentId: "copilot",
+            overrides: { composition: { workDirId: "sess-1" } },
+        });
+        expect(resolved.tools.map((t) => t.name)).toEqual([
+            "code_agent_run",
+            "file-list",
+        ]);
+    });
+
+    it("attaches the harness for a Code session's pinned cwd", async () => {
+        const resolved = await makeResolver(withHarness()).resolve({
+            agentId: "copilot",
+            overrides: {
+                composition: { codeMode: "codex", codeCwd: "/repo/worktree" },
+            },
+        });
+        expect(resolved.tools.map((t) => t.name)).toContain("code_agent_run");
+    });
+
+    it("keeps the harness for agents that resolve their repo elsewhere", async () => {
+        // The to-do item agent has no work-directory concept: its coding
+        // work lands in the item's pinned session or the default repo.
+        const agent = withHarness();
+        agent.name = "todo-item-agent";
+        const resolved = await makeResolver(agent).resolve({
+            agentId: "todo-item-agent",
+        });
+        expect(resolved.tools.map((t) => t.name)).toContain("code_agent_run");
+    });
+
+    it("does not let an active skill re-attach the harness", async () => {
+        const resolver = makeResolver(
+            makeAgent({ tools: { "file-list": { type: "builtin", name: "file-list" } } }),
+            { skillTools: (id) => (id === "rogue" ? ["code_agent_run"] : []) },
+        );
+        const resolved = await resolver.resolve({
+            agentId: "copilot",
+            overrides: { composition: { activeSkills: ["rogue"] } },
+        });
+        expect(resolved.tools.map((t) => t.name)).toEqual(["file-list"]);
     });
 });
 
