@@ -43,12 +43,39 @@ export const Member = z.object({
   kind: MemberKind.default('human'),
   /**
    * An agent's owner (spec §4 Agent members, 2026-09-29): the person who
-   * added it and alone holds its keys. Absent for people, and for an
-   * org-owned agent such as Replicas, which admins manage.
+   * added it and alone holds its keys. Absent for people.
    */
   ownerId: MemberId.optional(),
+  /**
+   * What an agent is underneath, and the path Harbor takes to reach it (spec
+   * §4 Agent members, amended 2026-09-30). Set for every agent, absent for
+   * people, fixed at creation. Open strings on the wire: a kind this client
+   * doesn't know is drawn as a generic agent. AGENT_PAIRS is what Harbor accepts.
+   */
+  agentKind: z.string().min(1).max(32).optional(),
+  agentConnection: z.string().min(1).max(32).optional(),
 });
 export type Member = z.infer<typeof Member>;
+
+/**
+ * The (kind, connection) pairs Harbor accepts when an agent is added (spec §4
+ * Agent members, 2026-09-30). What Harbor does for an agent is looked up from
+ * its pair, never stored: a pair whose connection is in HARBOR_RUN_CONNECTIONS
+ * gets a connector Harbor runs; any other waits for whoever holds the agent's
+ * key. A new pair is a line here, never a migration.
+ */
+export const REPLICAS_CODING_AGENTS = ['claude-code', 'codex', 'cursor', 'opencode', 'pi', 'muse-code'] as const;
+export const AGENT_PAIRS: ReadonlyArray<{ kind: string; connection: string }> = [
+  { kind: 'custom', connection: 'contract' },
+  { kind: 'hermes', connection: 'plugin' },
+  ...REPLICAS_CODING_AGENTS.map((kind) => ({ kind, connection: 'replicas' })),
+];
+/** Connections whose connector Harbor runs, calling the platform with a credential it holds (spec §8 Connectors). */
+export const HARBOR_RUN_CONNECTIONS: readonly string[] = ['replicas'];
+
+export function isAgentPair(kind: string, connection: string): boolean {
+  return AGENT_PAIRS.some((pair) => pair.kind === kind && pair.connection === connection);
+}
 
 /**
  * A credential an agent member presents as itself (spec §4, 2026-09-29): a
@@ -69,8 +96,23 @@ export type AgentKey = z.infer<typeof AgentKey>;
 export const AgentKeySecret = AgentKey.extend({ secret: z.string().startsWith('rbk_') });
 export type AgentKeySecret = z.infer<typeof AgentKeySecret>;
 
-/** An agent with its keys, as the Agents screen lists them. */
-export const AgentListing = z.object({ agent: Member, keys: z.array(AgentKey) });
+/**
+ * The platform credential Harbor holds for an agent it reaches through that
+ * platform (spec §8 Connectors, 2026-09-30), as its owner sees it: only its
+ * last characters. The secret is sealed and never read back. `rejectedAt` is
+ * set when the platform refused it, and cleared when it is replaced.
+ */
+export const AgentCredential = z.object({
+  hint: z.string().max(16),
+  setBy: MemberId,
+  setAt: z.iso.datetime(),
+  rejectedAt: z.iso.datetime().optional(),
+  rejectedReason: z.string().max(280).optional(),
+});
+export type AgentCredential = z.infer<typeof AgentCredential>;
+
+/** An agent with its keys, as the Agents screen lists them, and its platform credential when Harbor runs its connector. */
+export const AgentListing = z.object({ agent: Member, keys: z.array(AgentKey), credential: AgentCredential.optional() });
 export type AgentListing = z.infer<typeof AgentListing>;
 
 /**
