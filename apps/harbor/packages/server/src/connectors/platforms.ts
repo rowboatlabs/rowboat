@@ -1,6 +1,7 @@
 import type { Member, ServerFrame } from '@rowboat/spaces-protocol';
 import type { ActorCtx } from '../core/kernel.js';
 import type { HarborService } from '../service.js';
+import { agent37Platform } from './agent37/index.js';
 import { replicasPlatform } from './replicas/index.js';
 
 // Connectors Harbor runs (spec §8 Connectors, 2026-09-30): for an agent whose
@@ -50,4 +51,5 @@ export interface ConnectorPlatform {
 /** One entry per connection in HARBOR_RUN_CONNECTIONS. */
 export const PLATFORMS: Record<string, ConnectorPlatform> = {
   replicas: replicasPlatform(),
+  agent37: agent37Platform(),
 };

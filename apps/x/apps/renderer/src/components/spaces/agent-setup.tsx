@@ -127,9 +127,11 @@ function StepBody({ step }: { step: SetupStep }) {
     )
 }
 
-export function ConnectAgent({ org, setup: kind, agentId, agentName, agentKey }: {
+export function ConnectAgent({ org, setup: kind, agentKind, agentId, agentName, agentKey }: {
     org: OrgWithSpaces
     setup: AgentSetup
+    /** What the agent is, for a setup that offers several kinds (Agent37: Hermes or OpenClaw). */
+    agentKind?: string
     agentId: string
     agentName: string
     agentKey: string
@@ -161,7 +163,7 @@ export function ConnectAgent({ org, setup: kind, agentId, agentName, agentKey }:
         )
     }
 
-    const routes = kind.setup({ orgUrl: org.baseUrl, agentKey, ...(home?.spaceId ? { homeChannel: home.spaceId } : {}) })
+    const routes = kind.setup({ orgUrl: org.baseUrl, agentKey, ...(agentKind ? { kind: agentKind } : {}), ...(home?.spaceId ? { homeChannel: home.spaceId } : {}) })
     const route = routes.find((r) => r.id === routeId) ?? routes[0]!
     return (
         <div className="flex min-w-0 flex-col gap-3">

@@ -93,7 +93,7 @@ export function AgentPage({ org, listing, isAdmin, onChanged }: {
                         : `A key is shown only once, when it is made. Where the steps say ${KEY_PLACEHOLDER}, use that key${mine ? ', or make a new one to fill them in' : ''}.`
                 }
             >
-                <ConnectAgent org={org} setup={setupFor(agent)} agentId={agent.id} agentName={agent.displayName} agentKey={secret ?? KEY_PLACEHOLDER} />
+                <ConnectAgent org={org} setup={setupFor(agent)} {...(agent.agentKind ? { agentKind: agent.agentKind } : {})} agentId={agent.id} agentName={agent.displayName} agentKey={secret ?? KEY_PLACEHOLDER} />
             </Section>
 
             <Section title="Keys" note="Each key lets whatever runs the agent act as it. Revoking one cuts that off at once.">
