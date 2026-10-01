@@ -207,6 +207,37 @@ describe('the Replicas connector', () => {
     ];
   });
 
+  it('takes the environment the message names, as Replicas’s Slack bot does, and keeps the tag out of the request', async () => {
+    fake.environments = [
+      { id: 'env-global', name: 'Global', is_global: true },
+      { id: 'env-web', name: 'web-app' },
+      { id: 'env-api', name: 'api' },
+    ];
+    const { invocations } = await org.post(`${mention(claude)} [env:API] /plan the migration`);
+    expect((await org.ended(invocations[0]!.id)).state).toBe('done');
+    const create = fake.creates().at(-1)!.body!;
+    expect(create).toMatchObject({ environment_id: 'env-api' });
+    expect(String(create.message).startsWith('/plan the migration')).toBe(true); // the tag goes, so the command leads
+    expect(String(create.message)).not.toContain('[env:');
+  });
+
+  it('asks when the message names an environment it does not have', async () => {
+    const { message, invocations } = await org.post(`${mention(claude)} [env:mobile] fix the build`);
+    await until(async () => (await org.invocation(invocations[0]!.id))?.state === 'waiting', 'the question');
+    const question = (await org.thread(message.id)).find((m) => m.author.memberId === claude.id)!;
+    expect(question.body).toBe(
+      'I don\'t see an environment called "mobile". Which Replicas environment should I use? Reply mentioning @Claude with one of: web-app, api. ' +
+        'Next time, you can name it in your message: [env:api].',
+    );
+    await org.post(`${mention(claude)} web-app`, { threadRoot: message.id });
+    expect((await org.ended(invocations[0]!.id)).state).toBe('done');
+    expect(fake.creates().at(-1)!.body).toMatchObject({ environment_id: 'env-web' });
+    fake.environments = [
+      { id: 'env-global', name: 'Global', is_global: true },
+      { id: 'env-web', name: 'web-app' },
+    ];
+  });
+
   it('sends the invoking message’s images, and lists every attachment with its download address', async () => {
     const hash = createHash('sha256').update(PNG).digest('hex');
     await org.harbor.service.uploadBlob({ memberId: 'harsh' }, org.spaceId, PNG, { declaredSha256: hash, declaredMime: 'image/png' });

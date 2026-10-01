@@ -2,7 +2,7 @@ import type { ConnectorCapabilities, Invocation, InvocationOption, InvocationUpd
 import { HarborError } from '../../errors.js';
 import type { ConnectorEnv, RunningConnector } from '../platforms.js';
 import { ReplicasError, type AgentEvent, type EngineEvent, type ReplicasApi, type ReplicasEnvironment, type ReplicasImage } from './api.js';
-import { attachmentLinks, buildPrompt, requestMarker, type Attachment } from './prompt.js';
+import { attachmentLinks, buildPrompt, environmentTag, requestMarker, type Attachment } from './prompt.js';
 import { activityOf, answerOf, CODING_AGENTS, failureOf, readsAnswers } from './turns.js';
 
 // The Replicas connector (spec §8 Connectors, 2026-09-30): one per agent whose
@@ -198,27 +198,35 @@ export class ReplicasConnector implements RunningConnector {
     await this.follow(invocation, record);
   }
 
-  /** The composer's pick, or the only environment, or ask the thread (the invocation then waits). */
+  /** The composer's pick, or the one the message names, or the only environment, or ask the thread (the invocation then waits). */
   private async chooseEnvironment(invocation: Invocation): Promise<string | undefined> {
     const environments = await this.withReplicas(invocation, (api) => api.environments());
     if (!environments) return undefined;
-    const picked = invocation.options?.environment;
-    if (typeof picked === 'string' && environments.some((e) => e.id === picked)) return picked;
-    if (environments.length === 1) return environments[0]!.id;
     if (environments.length === 0) {
       await this.fail(invocation, 'This Replicas account has no environments yet: add one on replicas.dev, then mention me again.');
       return undefined;
     }
+    const picked = invocation.options?.environment;
+    if (typeof picked === 'string' && environments.some((e) => e.id === picked)) return picked;
+    const named = environmentTag(invocation.trigger.body);
+    if (named) {
+      const match = environments.find((e) => e.name.toLowerCase() === named.toLowerCase() || e.id === named);
+      if (match) return match.id;
+      await this.ask(invocation, environments, named);
+      return undefined;
+    }
+    if (environments.length === 1) return environments[0]!.id;
     await this.ask(invocation, environments);
     return undefined;
   }
 
   private async ask(invocation: Invocation, environments: ReplicasEnvironment[], unknown?: string): Promise<void> {
     const names = environments.map((e) => e.name).join(', ');
+    const example = environments.reduce((a, b) => (b.name.length < a.name.length ? b : a)).name;
     const lead = unknown ? `I don't see an environment called "${unknown}". ` : '';
     const reply = invocation.where.spaceKind === 'direct' ? 'Reply' : `Reply mentioning @${this.env.agent.displayName}`;
     await this.env.service.postMessage(this.env.ctx, invocation.conversation.spaceId, {
-      body: `${lead}Which Replicas environment should I use? ${reply} with one of: ${names}.`,
+      body: `${lead}Which Replicas environment should I use? ${reply} with one of: ${names}. Next time, you can name it in your message: [env:${example}].`,
       threadRoot: invocation.conversation.threadRootId,
       actingMode: 'direct',
     });
