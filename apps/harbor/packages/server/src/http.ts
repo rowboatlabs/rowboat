@@ -174,7 +174,34 @@ export function buildHttpApp(deps: {
   // --- invocations (spec §8): the connector's operations, on an agent's own key ----
 
   app.get(routes.listAgentInvocations.path, async (c) =>
-    reply(c, routes.listAgentInvocations.response, { invocations: await service.listAgentInvocations(actor(c)) }));
+    reply(c, routes.listAgentInvocations.response, {
+      invocations: await service.listAgentInvocations(actor(c)),
+      approvals: await service.listApprovalDecisions(actor(c)),
+    }));
+
+  // Approvals (spec §8 part 4, 2026-10-01): the connector raises and settles; a person decides, REST only.
+  app.post(routes.requestApproval.path, async (c) => {
+    const { invocationId } = parseWith(routes.requestApproval.params, c.req.param());
+    const request = await body(c, routes.requestApproval.request);
+    return reply(c, routes.requestApproval.response, await service.requestApproval(actor(c), invocationId, request));
+  });
+
+  app.post(routes.applyApproval.path, async (c) => {
+    const { approvalId } = parseWith(routes.applyApproval.params, c.req.param());
+    return reply(c, routes.applyApproval.response, { approval: await service.applyApproval(actor(c), approvalId) });
+  });
+
+  app.post(routes.closeApproval.path, async (c) => {
+    const { approvalId } = parseWith(routes.closeApproval.params, c.req.param());
+    const close = await body(c, routes.closeApproval.request);
+    return reply(c, routes.closeApproval.response, { approval: await service.closeApproval(actor(c), approvalId, close) });
+  });
+
+  app.post(routes.decideApproval.path, async (c) => {
+    const { spaceId, approvalId } = parseWith(routes.decideApproval.params, c.req.param());
+    const decision = await body(c, routes.decideApproval.request);
+    return reply(c, routes.decideApproval.response, { approval: await service.decideApproval(actor(c), spaceId, approvalId, decision) });
+  });
 
   app.post(routes.acknowledgeInvocation.path, async (c) => {
     const { invocationId } = parseWith(routes.acknowledgeInvocation.params, c.req.param());

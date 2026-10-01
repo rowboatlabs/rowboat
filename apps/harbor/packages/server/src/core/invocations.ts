@@ -1,5 +1,10 @@
 import {
   ConnectorCapabilities,
+  type ActingMode,
+  type Approval,
+  type ApprovalClose,
+  type ApprovalDecision,
+  type ApprovalRequest,
   type Invocation,
   type InvocationOptionValues,
   type InvocationState,
@@ -9,7 +14,7 @@ import {
   type Space,
 } from '@rowboat/spaces-protocol';
 import { HarborError } from '../errors.js';
-import { canCancelQueuedInvocation, canStopInvocation, enforce, invocationRefusal } from '../policy.js';
+import { canCancelQueuedInvocation, canDecideApproval, canStopInvocation, enforce, invocationRefusal } from '../policy.js';
 import type { ActorCtx, Kernel } from './kernel.js';
 
 // Invoking agent members (spec §8, 2026-09-30). Harbor decides and a
@@ -93,7 +98,8 @@ export class Invocations {
         const live = await this.settle(agentId, space.id, threadRootId, out);
         const turn = live.find((i) => !i.answers);
         if (!turn) invocation.state = 'pending';
-        else if (turn.state === 'waiting') Object.assign(invocation, { state: 'pending', answers: turn.id });
+        // One waiting on an approval is decided on its card: a mention queues (spec §8 part 4).
+        else if (turn.state === 'waiting' && !(await this.hasOpenApproval(turn.id))) Object.assign(invocation, { state: 'pending', answers: turn.id });
         else invocation.state = 'queued';
       }
       await this.k.store.insertInvocation(invocation, message.offset);
@@ -174,6 +180,13 @@ export class Invocations {
   }
 
   private async apply(current: Invocation, update: InvocationUpdate, out: InvocationOutbox): Promise<Invocation> {
+    // A heartbeat while an approval is open keeps it waiting: it shows waiting while any is (spec §8 part 4).
+    if (update.state === 'working' && current.state === 'waiting' && (await this.hasOpenApproval(current.id))) {
+      const held: Invocation = { ...current, ...(update.link ? { link: update.link } : {}), updatedAt: this.k.now() };
+      await this.k.store.putInvocation(held);
+      this.announce(held, out);
+      return held;
+    }
     const { activity: _activity, error: _error, ...rest } = current;
     const next: Invocation = { ...rest, state: update.state, updatedAt: this.k.now() };
     if (update.state === 'working' || update.state === 'waiting') {
@@ -183,7 +196,10 @@ export class Invocations {
     if (update.state === 'failed' && update.error) next.error = update.error;
     await this.k.store.putInvocation(next);
     this.announce(next, out);
-    if (TERMINAL.has(next.state)) await this.promote(next.agentId, next.conversation.spaceId, next.conversation.threadRootId, out);
+    if (TERMINAL.has(next.state)) {
+      await this.cancelOpenApprovals(next);
+      await this.promote(next.agentId, next.conversation.spaceId, next.conversation.threadRootId, out);
+    }
     return next;
   }
 
@@ -246,6 +262,155 @@ export class Invocations {
     });
     this.flush(out);
     return result;
+  }
+
+  // --- approvals (spec §8 part 4, 2026-10-01) -----------------------------------------
+
+  /**
+   * The checked half of raising an approval, run inside the card's own
+   * transaction (Feed.postMessage `approval`): the agent's invocation, in this
+   * thread, working or already waiting.
+   */
+  async assertCanRaise(ctx: ActorCtx, id: string, spaceId: string, threadRootId: string): Promise<Invocation> {
+    const current = await this.own(ctx, id);
+    if (current.conversation.spaceId !== spaceId || current.conversation.threadRootId !== threadRootId) {
+      throw new HarborError('invalid_request', 'an approval goes in its invocation\'s thread');
+    }
+    if (current.state !== 'working' && current.state !== 'waiting') {
+      throw new HarborError('invalid_request', `this invocation is ${current.state}: it can ask for no approval`);
+    }
+    return current;
+  }
+
+  /** The approval a card carries: open, for the invocation's agent and thread. */
+  approvalFor(current: Invocation, messageId: string, request: ApprovalRequest): Approval {
+    const now = this.k.now();
+    return {
+      id: this.k.ulid(),
+      invocationId: current.id,
+      agentId: current.agentId,
+      conversation: current.conversation,
+      messageId,
+      requestKey: request.requestKey,
+      title: request.title,
+      detail: request.detail,
+      ...(request.reason ? { reason: request.reason } : {}),
+      choices: request.choices,
+      state: 'open',
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+
+  /** The other half: the approval is stored with its card, and the invocation waits on it. */
+  async raiseWithin(current: Invocation, approval: Approval, out: InvocationOutbox): Promise<void> {
+    await this.k.store.insertApproval(approval);
+    const held: Invocation = { ...current, state: 'waiting', activity: `Waiting for approval: ${approval.title}`.slice(0, 200), updatedAt: this.k.now() };
+    await this.k.store.putInvocation(held);
+    this.announce(held, out);
+  }
+
+  /** The agent's approval for this request key, if it raised one already. */
+  findApproval(invocationId: string, requestKey: string): Promise<Approval | undefined> {
+    return this.k.store.getApprovalByRequest(invocationId, requestKey);
+  }
+
+  /**
+   * A person decides (spec §8 part 4): any person who can see the card, for
+   * now, acting directly; never an agent. The first decision wins. The
+   * decision goes to the connector, which confirms once its agent has it.
+   */
+  async decideApproval(ctx: ActorCtx, spaceId: string, id: string, input: ApprovalDecision & { actingMode: ActingMode }): Promise<Approval> {
+    enforce(canDecideApproval(ctx, input.actingMode));
+    const found = await this.k.store.getApproval(id);
+    if (!found || found.conversation.spaceId !== spaceId) throw new HarborError('not_found', 'no such approval');
+    if (input.note && input.decision !== 'deny') throw new HarborError('invalid_request', 'a note goes with a deny');
+    await this.k.requireMember(ctx, spaceId);
+    const out: InvocationOutbox = [];
+    const result = await this.k.lockedAs(ctx, spaceId, async () => {
+      const current = (await this.k.store.getApproval(id))!;
+      if (current.state !== 'open') throw new HarborError('invalid_request', `this approval is already ${current.state}`);
+      if (!current.choices.includes(input.decision)) throw new HarborError('invalid_request', 'this agent does not offer that choice');
+      const at = this.k.now();
+      const next: Approval = {
+        ...current,
+        state: input.decision === 'deny' ? 'denied' : 'allowed',
+        decision: input.decision,
+        decidedBy: ctx.memberId,
+        decidedAt: at,
+        ...(input.note ? { note: input.note } : {}),
+        updatedAt: at,
+      };
+      await this.settleApproval(next, out);
+      out.push({ to: 'agent', memberId: next.agentId, frame: { kind: 'approval_decided', approval: next } });
+      return next;
+    });
+    this.flush(out);
+    return result;
+  }
+
+  /** The connector closes one its agent no longer waits on. A settled one is returned as it is. */
+  async closeApproval(ctx: ActorCtx, id: string, close: ApprovalClose): Promise<Approval> {
+    const found = await this.ownApproval(ctx, id);
+    const out: InvocationOutbox = [];
+    const result = await this.k.locked(found.conversation.spaceId, async () => {
+      const current = (await this.k.store.getApproval(id))!;
+      if (current.state !== 'open') return current;
+      const next: Approval = { ...current, state: close.state, updatedAt: this.k.now() };
+      await this.settleApproval(next, out);
+      return next;
+    });
+    this.flush(out);
+    return result;
+  }
+
+  /** The connector passed a decision to its agent: it leaves the listing. Idempotent. */
+  async applyApproval(ctx: ActorCtx, id: string): Promise<Approval> {
+    const found = await this.ownApproval(ctx, id);
+    if (found.state !== 'allowed' && found.state !== 'denied') throw new HarborError('invalid_request', `this approval is ${found.state}: nothing to apply`);
+    if (found.appliedAt) return found;
+    const next: Approval = { ...found, appliedAt: this.k.now() };
+    await this.k.store.putApproval(next);
+    return next;
+  }
+
+  /** Decisions on the agent's approvals its connector has not confirmed applying: the guarantee behind `approval_decided`. */
+  async listDecisionsForAgent(ctx: ActorCtx): Promise<Approval[]> {
+    this.requireConnector(ctx);
+    return this.k.store.listUnappliedDecisions(ctx.memberId);
+  }
+
+  /** Store a settled approval, log it for the card, and let its invocation go on when none is left open. Inside the space lock. */
+  private async settleApproval(next: Approval, out: InvocationOutbox): Promise<void> {
+    await this.k.store.putApproval(next);
+    await this.k.appendNext(next.conversation.spaceId, next.updatedAt, { type: 'approval', approval: next });
+    const invocation = await this.k.store.getInvocation(next.invocationId);
+    if (invocation?.state === 'waiting' && !(await this.hasOpenApproval(invocation.id))) {
+      const { activity: _activity, ...rest } = invocation;
+      const resumed: Invocation = { ...rest, state: 'working', updatedAt: this.k.now() };
+      await this.k.store.putInvocation(resumed);
+      this.announce(resumed, out);
+    }
+  }
+
+  /** An invocation that ends cancels its open approvals. Inside the space lock. */
+  private async cancelOpenApprovals(invocation: Invocation): Promise<void> {
+    for (const open of await this.k.store.listInvocationApprovals(invocation.id, ['open'])) {
+      const next: Approval = { ...open, state: 'cancelled', updatedAt: this.k.now() };
+      await this.k.store.putApproval(next);
+      await this.k.appendNext(next.conversation.spaceId, next.updatedAt, { type: 'approval', approval: next });
+    }
+  }
+
+  private async hasOpenApproval(invocationId: string): Promise<boolean> {
+    return (await this.k.store.listInvocationApprovals(invocationId, ['open'])).length > 0;
+  }
+
+  private async ownApproval(ctx: ActorCtx, id: string): Promise<Approval> {
+    this.requireConnector(ctx);
+    const found = await this.k.store.getApproval(id);
+    if (!found || found.agentId !== ctx.memberId) throw new HarborError('not_found', 'no such approval for this agent');
+    return found;
   }
 
   // --- the queue ---------------------------------------------------------------------

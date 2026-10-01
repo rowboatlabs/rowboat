@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { Approval } from './approval.js';
 import { AssetId, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 
 // Core objects shared by both faces. Every act in a space belongs to a member
@@ -384,6 +385,13 @@ export const Message = z.object({
    * the poll along with the body.
    */
   poll: Poll.optional(),
+  /**
+   * Present on an agent's approval card (spec §8 part 4, 2026-10-01), folded
+   * to its current state wherever messages are read; `approval` space events
+   * carry each change. `body` keeps a text rendering for clients that cannot
+   * show the card.
+   */
+  approval: Approval.optional(),
   /**
    * Who this message addresses — STAMPED by the org at post and edit from the
    * body's mention tokens (mentions.ts), never from names, and only ids that

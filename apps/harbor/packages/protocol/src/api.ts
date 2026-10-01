@@ -23,6 +23,7 @@ import {
   ResolveInviteResult,
 } from './invite.js';
 import { StreamEvent } from './events.js';
+import { Approval, ApprovalClose, ApprovalDecision, ApprovalId, ApprovalRequest } from './approval.js';
 import { ConnectorCapabilities, Invocation, InvocationId, InvocationOptionValues, InvocationUpdate } from './invocation.js';
 import { SearchKind, SearchResults } from './search.js';
 
@@ -338,7 +339,8 @@ export const routes = {
   listAgentInvocations: {
     method: 'GET',
     path: '/v1/agent/invocations',
-    response: z.object({ invocations: z.array(Invocation) }),
+    /** `approvals`: decisions on the agent's approvals it has not yet confirmed applying (spec §8 part 4). */
+    response: z.object({ invocations: z.array(Invocation), approvals: z.array(Approval).default([]) }),
   },
   acknowledgeInvocation: {
     method: 'POST',
@@ -352,6 +354,34 @@ export const routes = {
     params: z.object({ invocationId: InvocationId }),
     request: InvocationUpdate,
     response: z.object({ invocation: Invocation }),
+  },
+  /**
+   * Raise an approval on one of the agent's working invocations (spec §8
+   * part 4, 2026-10-01): posts the agent's card in the invocation's thread,
+   * with the approval riding on it, and shows the invocation waiting. Raising
+   * the same requestKey again returns the first.
+   */
+  requestApproval: {
+    method: 'POST',
+    path: '/v1/agent/invocations/:invocationId/approvals',
+    params: z.object({ invocationId: InvocationId }),
+    request: ApprovalRequest,
+    response: z.object({ approval: Approval, message: Message }),
+  },
+  /** The connector passed a decision to its agent: it leaves the listing. Idempotent. */
+  applyApproval: {
+    method: 'POST',
+    path: '/v1/agent/approvals/:approvalId/applied',
+    params: z.object({ approvalId: ApprovalId }),
+    response: z.object({ approval: Approval }),
+  },
+  /** The connector closes an approval its agent no longer waits on (it expired, or the turn went). A settled one is returned as it is. */
+  closeApproval: {
+    method: 'POST',
+    path: '/v1/agent/approvals/:approvalId/close',
+    params: z.object({ approvalId: ApprovalId }),
+    request: ApprovalClose,
+    response: z.object({ approval: Approval }),
   },
   declareCapabilities: {
     method: 'POST',
@@ -373,6 +403,18 @@ export const routes = {
     params: z.object({ spaceId: SpaceId }),
     query: z.object({ threadRootId: MessageId.optional() }),
     response: z.object({ invocations: z.array(Invocation) }),
+  },
+  /**
+   * Decide an approval (spec §8 part 4): any person who can see it, acting
+   * directly. Never an agent and never a tool, so a person's assistant cannot
+   * either. The first decision wins; a deny may carry a note to the model.
+   */
+  decideApproval: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/approvals/:approvalId/decide',
+    params: z.object({ spaceId: SpaceId, approvalId: ApprovalId }),
+    request: ApprovalDecision.extend({ actingMode: ActingMode }),
+    response: z.object({ approval: Approval }),
   },
   /** Cancel a queued invocation (its invoker), or stop a running one (its invoker or an admin, when the connector can stop). */
   cancelInvocation: {

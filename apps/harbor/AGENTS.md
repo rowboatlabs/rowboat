@@ -6,7 +6,7 @@ Harbor is the Spaces server: orgs, spaces, members, an append-only log, three fa
 
 Two pnpm workspace packages under `packages/`:
 
-- **`protocol/`** — `@rowboat/spaces-protocol`, the contract: zod schemas imported by the server *and* the app, so drift is structurally impossible. `core.ts` (the objects), `ids.ts` (ids, the link grammar and its one parser), `changeset.ts`, `events.ts` (`SpaceEvent` and the live frames), `invocation.ts` (the agent contracts: `Invocation`, its states, `InvocationOption`, `InvocationUpdate`, `ConnectorCapabilities`), `api.ts` (`routes`), `mcp.ts` (`mcpTools`), `mentions.ts`, `search.ts`, `invite.ts`, `errors.ts`, `fixtures/merge/` (the golden merge cases every engine must pass).
+- **`protocol/`** — `@rowboat/spaces-protocol`, the contract: zod schemas imported by the server *and* the app, so drift is structurally impossible. `core.ts` (the objects), `ids.ts` (ids, the link grammar and its one parser), `changeset.ts`, `events.ts` (`SpaceEvent` and the live frames), `invocation.ts` (the agent contracts: `Invocation`, its states, `InvocationOption`, `InvocationUpdate`, `ConnectorCapabilities`), `approval.ts` (`Approval`, an agent's request for a person's OK, and its choices), `api.ts` (`routes`), `mcp.ts` (`mcpTools`), `mentions.ts`, `search.ts`, `invite.ts`, `errors.ts`, `fixtures/merge/` (the golden merge cases every engine must pass).
 - **`server/`** — `@rowboat/harbor`:
 
 | `src/` | Owns |
@@ -14,7 +14,7 @@ Two pnpm workspace packages under `packages/`:
 | `core/kernel.ts` | store, hub, org, the read-only knob, the space lock with its publish-after-commit outbox, `append` / `nextOffset` / `appendNext`, `requireSpace` / `requireReadableSpace` / `requireMember`, `guardWrite`, `attributionOf` |
 | `core/spaces.ts` | spaces, direct messages, invites and the bind ceremony, the roster, `me`, agent members (`createAgent`), push registration, the read-gated replay and membership-gated live relays |
 | `core/agents.ts` | agent members' owners and keys: add an agent, list the ones a member manages, create and revoke keys |
-| `core/invocations.ts` | invoking agent members (spec §8): the trigger `Feed.postMessage` runs in its transaction, the per-(agent, conversation) queue, the connector's operations, cancel and stop; its frames leave after the commit through its own outbox |
+| `core/invocations.ts` | invoking agent members (spec §8): the trigger `Feed.postMessage` runs in its transaction, the per-(agent, conversation) queue, the connector's operations, cancel and stop, and approvals (part 4: raised with their card in `Feed.postMessage`'s transaction, decided by a person, settled by the connector; `approval-card.ts` writes the card's text); its frames leave after the commit through its own outbox |
 | `core/assets.ts` | assets by id, versions, the change log, blobs, history, diff |
 | `core/feed.ts` | messages, threads, topics, reactions, polls, search, mention stamps and their backfill |
 | `core/read-state.ts` | read marks, follows, unread, Activity, read-all |
