@@ -3,6 +3,8 @@
 // nothing loaded from elsewhere: they must work on a slow phone connection.
 // Strings live in STRINGS until @baarali/i18n exists (roadmap phase 1).
 
+import { FAVICON, logoTile, logoWord } from './logo.js';
+
 export interface SignInMethods {
   email: boolean;
   phone: boolean;
@@ -80,6 +82,7 @@ function layout(lang: Lang, title: string, nonce: string, body: string, script: 
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex">
 <title>${escape(title)}</title>
+<link rel="icon" href="${FAVICON}">
 <style nonce="${nonce}">
 :root { --bg:#f7f7f5; --card:#ffffff; --ink:#18181b; --muted:#5f5f66; --line:#dcdcd8; --accent:#18181b; --on-accent:#ffffff; --error:#b42318; color-scheme: light; }
 @media (prefers-color-scheme: dark) { :root { --bg:#111113; --card:#1b1b1e; --ink:#f2f2f0; --muted:#a3a3a8; --line:#2e2e33; --accent:#f2f2f0; --on-accent:#111113; --error:#f97066; color-scheme: dark; } }
@@ -88,6 +91,7 @@ function layout(lang: Lang, title: string, nonce: string, body: string, script: 
 [hidden] { display: none !important; }
 body { margin:0; min-height:100svh; display:grid; place-items:center; padding:24px 16px; background:var(--bg); color:var(--ink); font:16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
 main { width:100%; max-width:380px; background:var(--card); border:1px solid var(--line); border-radius:16px; padding:28px 24px; display:grid; gap:16px; }
+.logo { display:flex; align-items:center; gap:8px; font-weight:800; font-size:18px; letter-spacing:-.02em; color:var(--ink); text-decoration:none; }
 h1 { margin:0; font-size:22px; line-height:1.25; text-wrap:balance; }
 p { margin:0; color:var(--muted); }
 form, .stack { display:grid; gap:10px; }
@@ -107,6 +111,7 @@ button:disabled { opacity:.6; cursor:default; }
 </head>
 <body>
 <main>
+<a class="logo" href="/">${logoTile(30)}${logoWord(22)}</a>
 ${body}
 </main>
 <script nonce="${nonce}">

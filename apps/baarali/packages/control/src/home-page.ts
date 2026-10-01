@@ -1,5 +1,6 @@
 import type { SoldPack } from './admin.js';
 import type { Money, Offer } from './pricing.js';
+import { FAVICON, logoTile, logoWord } from './logo.js';
 import { pickLang } from './sign-in-page.js';
 
 // The home page at baarali.com, with the prices (decided 01/10/2026). Prices
@@ -215,9 +216,10 @@ export function homePage(data: HomeData, opts: { lang: string | null; nonce: str
 <meta name="description" content="${escape(t.description)}">
 <meta property="og:title" content="${escape(t.title)}">
 <meta property="og:description" content="${escape(t.description)}">
+<link rel="icon" href="${FAVICON}">
 <style nonce="${opts.nonce}">
-:root { --bg:#f7f7fb; --surface:#ffffff; --ink:#15162a; --muted:#585a73; --line:#e1e2ee; --accent:#3240c8; --on-accent:#ffffff; --mango:#ffb21e; --soft:#eef0ff; color-scheme: light; }
-@media (prefers-color-scheme: dark) { :root { --bg:#0e0f1a; --surface:#171829; --ink:#f1f1f8; --muted:#a7a9c2; --line:#2a2c45; --accent:#8b95ff; --on-accent:#0e0f1a; --mango:#ffc350; --soft:#1d1f38; color-scheme: dark; } }
+:root { --bg:#f7f7fb; --surface:#ffffff; --ink:#15162a; --muted:#585a73; --line:#e1e2ee; --accent:#155eef; --on-accent:#ffffff; --soft:#eaf1ff; color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root { --bg:#0e0f1a; --surface:#171829; --ink:#f1f1f8; --muted:#a7a9c2; --line:#2a2c45; --accent:#6ea0ff; --on-accent:#0e0f1a; --soft:#16223d; color-scheme: dark; } }
 * { box-sizing:border-box; }
 [hidden] { display:none !important; }
 html { scroll-behavior:smooth; }
@@ -226,7 +228,6 @@ a { color:inherit; }
 .wrap { max-width:1080px; margin:0 auto; padding-inline:20px; }
 header { display:flex; align-items:center; justify-content:space-between; gap:16px; padding-block:18px; }
 .brand { font-weight:800; font-size:20px; letter-spacing:-.02em; text-decoration:none; display:flex; align-items:center; gap:10px; }
-.brand i { width:14px; height:14px; border-radius:50%; background:var(--mango); box-shadow:10px 0 0 var(--accent); margin-right:10px; }
 nav { display:flex; gap:18px; align-items:center; font-size:15px; }
 nav a { text-decoration:none; color:var(--muted); }
 nav a.button { color:var(--ink); }
@@ -271,7 +272,7 @@ footer { padding-block:40px; color:var(--muted); font-size:14px; border-top:1px 
 <body>
 <div class="wrap">
 <header>
-  <a class="brand" href="/"><i aria-hidden="true"></i>Baarali</a>
+  <a class="brand" href="/">${logoTile(34)}${logoWord(26)}</a>
   <nav><a href="#tarifs">${escape(t.navPrices)}</a><a class="button" href="/auth/v1/sign-in">${escape(t.navSignIn)}</a></nav>
 </header>
 <main>

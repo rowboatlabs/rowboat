@@ -1,14 +1,5 @@
+<!-- Baarali (01/10/2026) : le B qui regarde, sur ses deux pieds ; principal = fond bleu, corps blanc, yeux noirs qui regardent à droite. Icône d'app : la grille macOS, 824 px et 100 px de marge. -->
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <!-- Baarali's mark (01/10/2026): the two dots of baarali.com's header, apart, on
-       the accent of its palette (control/src/home-page.ts). The body follows
-       the macOS icon grid: 824 px, 100 px margin. -->
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#3d4bd6"/>
-      <stop offset="1" stop-color="#2532a8"/>
-    </linearGradient>
-  </defs>
-  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
-  <circle cx="660" cy="512" r="118" fill="#ffffff"/>
-  <circle cx="364" cy="512" r="118" fill="#ffb21e"/>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="#1A6DFF"/>
+  <g transform="translate(512 512) scale(1.37) translate(-505 -423)"><path d="M450 250 H502 C574 250 612 280 612 322 C612 345 602 360 590 368 Q584 373 590 378 C612 388 626 408 626 436 C626 476 590 502 512 502 H450 C413 502 384 473 384 436 V316 C384 279 413 250 450 250 Z" fill="#FFFFFF"/><circle cx="460" cy="556" r="38" fill="#FFFFFF"/><circle cx="552" cy="556" r="38" fill="#FFFFFF"/><circle cx="500" cy="324" r="12" fill="#0A0A0A"/><circle cx="554" cy="324" r="12" fill="#0A0A0A"/></g>
 </svg>

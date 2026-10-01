@@ -64,6 +64,13 @@ describe('the home page', () => {
     expect(res.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");
   });
 
+  it('carries the Baarali mark, in the header and as the tab icon', async () => {
+    const page = await (await app.request('/')).text();
+    expect(page).toMatch(/<a class="brand" href="\/"><svg [^>]*aria-hidden="true"/);
+    expect(page).toContain('role="img" aria-label="Baarali"');
+    expect(page).toContain('<link rel="icon" href="data:image/svg+xml,');
+  });
+
   it('writes prices the way people write them', () => {
     expect(norm(formatPrice({ amount: 2000, currency: 'EUR' }, 'fr'))).toBe('20 €');
     expect(formatPrice({ amount: 2000, currency: 'EUR' }, 'en')).toBe('€20');
