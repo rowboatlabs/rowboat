@@ -382,9 +382,53 @@ Les états et transitions exacts sont spécifiés dans `AGENT_RUNTIME_SPEC.md`. 
 | Veille | `autostop = suspend` : la mémoire est figée dans un instantané, et le réveil prend « quelques centaines de millisecondes ». Une Machine suspendue ne coûte **que son stockage**. |
 | Réveil | Le proxy Fly réveille la Machine à la première requête (`autostart`). Le plan de contrôle et le réveil planifié passent par lui. |
 | Isolation | Chaque Machine est une micro-VM Firecracker : **isolation noyau pour toutes les instances** (sécurité §9.1). |
-| Région | Paris (`cdg`) et Johannesburg (`jnb`) existent. Paris est retenu parce que le trafic d'Afrique de l'Ouest passe en grande partie par l'Europe (câbles sous-marins). **À mesurer** depuis Ouagadougou et Abidjan avant l'ouverture, avec une Machine de test dans chaque région. |
+| Région | Paris (`cdg`) et Johannesburg (`jnb`) existent. Paris est retenu parce que le trafic d'Afrique de l'Ouest passe en grande partie par l'Europe (câbles sous-marins). **Mesuré le 01/10/2026 : Paris répond 3,5 fois plus vite que Johannesburg** depuis l'Afrique de l'Ouest (ci-dessous). |
 
-**Limite connue.** La suspension exige une Machine de **2 Go de mémoire au plus**. Rowboat plus un Chromium headless peuvent dépasser. Deux parades, à mesurer en phase 0 : lancer Chromium seulement quand une tâche en a besoin, ou accepter l'arrêt simple (`autostop = stop`), avec un réveil de plusieurs secondes.
+**Limite connue.** La suspension exige une Machine de **2 Go de mémoire au plus**. Mesuré : l'instance en utilise environ 610 Mo, ce qui laisse 1,4 Go pour un Chromium headless. Si ça ne suffit pas, deux parades : lancer Chromium seulement quand une tâche en a besoin, ou accepter l'arrêt simple (`autostop = stop`), avec un réveil de plusieurs secondes.
+
+#### Mesures de la phase 0 (01/10/2026)
+
+Faites sur les deux apps réelles (`warell-control` et `warell-owner`, `shared-cpu-1x`, Paris), et sur une app jetable à deux Machines identiques (Paris et Johannesburg), supprimée aussitôt après.
+
+**Mémoire de l'instance**, avec l'app de bureau et l'app mobile connectées : 610 Mo utilisés sur 2 Go. Dossier de travail : 10 Mo. Chromium n'est pas dans l'image : en phase 0, les actions de navigateur passent par le client connecté (capacité `browser-control` de l'upstream). Sa mémoire se mesurera quand il entrera dans l'image.
+
+**Démarrage et réveil**
+
+| | Durée |
+|---|---|
+| Démarrage à froid de l'instance (Machine lancée → serveur prêt) | 9 s |
+| Réveil de l'instance suspendue, par le tunnel `fly proxy` | 2,3 s |
+| Réveil du plan de contrôle suspendu, par Internet (3 essais) | 0,9 à 1,1 s |
+| Requête sur le plan de contrôle éveillé | 0,4 s |
+
+Le réveil coûte donc environ **une demi-seconde à deux secondes de plus** sur la première requête, ce qui reste invisible à côté du temps de réponse d'un modèle.
+
+**Latence depuis l'Afrique de l'Ouest** (sondes publiques Globalping, HTTPS, temps jusqu'au premier octet, médiane de 3 essais) :
+
+| Sonde | Vers Paris | Vers Johannesburg | Porte d'entrée Fly |
+|---|---|---|---|
+| Ouagadougou (Burkina Faso Internet Exchange) | 132 ms | 453 ms | Amsterdam |
+| Cotonou (ISOCEL) | 107 ms | 491 ms | Paris |
+| Lagos | 128 ms | 479 ms | Londres |
+
+Le trafic d'Afrique de l'Ouest entre chez Fly **en Europe** dans tous les cas : une Machine à Johannesburg ajoute l'aller-retour Europe-Afrique du Sud. Aucune sonde publique n'existe en Côte d'Ivoire sur ce réseau : Abidjan reste à mesurer, par une sonde RIPE Atlas ou par un testeur sur place.
+
+**Coût** (tarifs Fly.io lus le 01/10/2026 ; Paris = tarif de base × 1,13) :
+
+| | Prix |
+|---|---|
+| Instance 2 Go éveillée | 12,13 $ par 30 jours, soit 0,017 $ de l'heure |
+| Instance endormie | stockage seulement : volume 1 Go à 0,15 $/mois, plus le disque système de la Machine à 0,15 $/Go/mois |
+| Plan de contrôle 256 Mo éveillé en continu | 2,21 $ par 30 jours |
+| Trafic sortant (Europe) | 0,02 $/Go |
+
+Une instance éveillée **2 heures par jour** coûte environ **1,20 $ par mois** ; 8 heures par jour, environ 4,20 $. Ce coût sort de la marge de 55 % (§3.5).
+
+**Ce que les mesures ont appris**
+
+- **Une app ouverte garde l'instance éveillée** : le lien WebSocket de l'app de bureau ou du téléphone compte comme du trafic. Le coût réel dépend donc du temps où l'app reste ouverte, pas seulement du temps de travail de l'agent.
+- **Une instance suspendue ne fait plus rien** : ses tâches de fond sont gelées avec elle. Le réveil planifié du plan de contrôle (§3.5) est donc indispensable avant d'ouvrir les tâches programmées.
+- **L'accueil upstream exige un espace d'équipe** dès qu'un compte est connecté, et bloque tant qu'aucun serveur d'espaces n'existe. À traiter dans la préparation de l'instance, sans toucher l'upstream.
 
 **Les alternatives regardées** (30/09/2026), pour pouvoir changer si Fly.io déçoit :
 
