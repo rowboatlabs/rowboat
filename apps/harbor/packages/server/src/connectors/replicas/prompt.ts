@@ -45,6 +45,14 @@ export function attachmentLinks(body: string, spaceId: string): Array<{ hash: st
 
 export const requestMarker = (messageId: string) => `[Spaces request ${messageId}]`;
 
+/** `[env:backend]`: the environment named in a message, the syntax of Replicas's own Slack bot (2026-10-01). */
+const ENV_TAG_RE = /[ \t]*\[env:([^\]\n]+)\][ \t]*/gi;
+
+/** The environment a message names, if any (the first tag). */
+export function environmentTag(body: string): string | undefined {
+  return [...body.matchAll(ENV_TAG_RE)][0]?.[1]?.trim() || undefined;
+}
+
 /** A body's same-space attachment links as their names: the files themselves are listed (and images sent) separately. */
 function namingAttachments(body: string, spaceId: string): string {
   return body.replace(ATTACHMENT_RE, (raw, label: string, _url, space: string, hash: string, encodedName?: string) => {
@@ -75,7 +83,8 @@ export function buildPrompt(input: {
   const { invocation, names } = input;
   const readable = (body: string) => relabelMentions(namingAttachments(body, invocation.conversation.spaceId), names).trim();
   const token = (memberId: string) => mentionToken({ kind: 'member', id: memberId, label: names.get(memberId) ?? '' });
-  const request = readable(invocation.trigger.body.replace(leadingMentionOf(input.agentId), ''));
+  // The environment tag is for the connector, not the coding agent; then a command it frees can lead.
+  const request = readable(invocation.trigger.body.replace(ENV_TAG_RE, ' ').trim().replace(leadingMentionOf(input.agentId), ''));
   const invoker = names.get(invocation.trigger.authorId) ?? 'a teammate';
   const where =
     invocation.where.spaceKind === 'direct' ? `a direct message with ${invoker}` : `the space "${invocation.where.spaceName}"`;
