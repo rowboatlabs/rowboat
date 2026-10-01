@@ -1,12 +1,15 @@
 import { serve } from '@hono/node-server';
+import pg from 'pg';
 import { createApp } from './app.js';
 import { ASSUMPTIONS, MEDIA_PACKS, OFFERS } from './catalog.js';
 import { packCredits, plansFrom } from './pricing.js';
-import { MemoryStore, hashToken, type Account } from './store.js';
+import { migrate, poolDb } from './db.js';
+import { PgStore } from './pg-store.js';
+import { MemoryStore, hashToken, type Account, type ControlStore } from './store.js';
 
-// Phase 0 entry point (roadmap §4): one owner, one instance token, the plan
-// catalog of catalog.ts. Accounts and usage move to Postgres with the first
-// multi-user deployment.
+// Entry point (roadmap §4): the owner, their instance token, the plan catalog
+// of catalog.ts. With DATABASE_URL, everything lives in Postgres (decided
+// 01/10/2026); without it, in memory, forgotten when the machine stops.
 
 function required(name: string): string {
   const value = process.env[name];
@@ -27,11 +30,23 @@ const owner: Account = {
   createdAt: Date.parse(process.env.WARELL_ACCOUNT_CREATED_AT ?? '') || Date.now(),
 };
 
-const store = new MemoryStore(new Map([[hashToken(required('WARELL_INSTANCE_TOKEN')), owner]]), plans);
+const instanceToken = required('WARELL_INSTANCE_TOKEN');
+let store: ControlStore;
+if (process.env.DATABASE_URL) {
+  const db = poolDb(new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 5 }));
+  console.log(`[control] ${await migrate(db)} migration(s) applied`);
+  const pgStore = new PgStore(db, plans);
+  // An existing account keeps its creation date: its weeks stay anchored there.
+  await pgStore.upsertAccount(owner);
+  await pgStore.grantToken(instanceToken, owner.id);
+  store = pgStore;
+} else {
+  store = new MemoryStore(new Map([[hashToken(instanceToken), owner]]), plans);
+}
 
-// The in-memory store forgets everything when the machine stops: the
-// owner's media credits are granted again at each start, until accounts move
-// to Postgres (roadmap phase 1). Owner only, phase 0 only.
+// The owner's media credits, granted once: in Postgres the reference is
+// already taken on the next start; in memory everything was forgotten, so
+// the grant comes back (phase 0 only).
 const ownerMediaCredits = Number(process.env.WARELL_OWNER_MEDIA_CREDITS ?? '0');
 if (Number.isInteger(ownerMediaCredits) && ownerMediaCredits > 0) {
   await store.applyMediaEntry({ accountId: owner.id, at: Date.now(), kind: 'topup', credits: ownerMediaCredits, reference: 'owner-grant' });

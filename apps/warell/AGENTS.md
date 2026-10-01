@@ -36,7 +36,8 @@ OPENROUTER_API_KEY=<clé> WARELL_PLAN_ID=essentiel PORT=8787 pnpm start
 | `WARELL_ACCOUNT_ID`, `WARELL_ACCOUNT_EMAIL`, `WARELL_ACCOUNT_CREATED_AT` | Le compte du propriétaire ; la semaine est ancrée à sa date de création |
 | `PIXAZO_API_KEY` | Facultative : sans elle, `/v1/media` répond 503 et le texte marche quand même |
 | `WARELL_ADMIN_TOKEN` | Facultatif : le jeton de l'opérateur pour `/v1/admin/*` (recharges de crédits médias à la main). Absent : ces routes répondent 404 |
-| `WARELL_OWNER_MEDIA_CREDITS` | Phase 0 : crédits médias rendus au propriétaire à chaque démarrage, puisque le magasin en mémoire les oublie |
+| `WARELL_OWNER_MEDIA_CREDITS` | Crédits médias offerts au propriétaire, une seule fois en Postgres (référence `owner-grant`) ; en mémoire, à chaque démarrage |
+| `DATABASE_URL` | Postgres (schéma `warell`, migrations au démarrage, `src/db.ts`). Absente : tout reste en mémoire et s'oublie à l'arrêt de la machine |
 | `PORT` | Défaut : 8080 |
 
 L'instance le trouve par `API_URL` : on ne modifie aucun fichier upstream qui l'appelle (archi §3.14).
@@ -74,6 +75,10 @@ curl -X POST https://warell-control.fly.dev/v1/admin/media-credits \
   -H "authorization: Bearer $WARELL_ADMIN_TOKEN" -H 'content-type: application/json' \
   -d '{"account_id":"owner","pack":"medias-5","reference":"<reçu>"}'
 ```
+
+## Postgres
+
+Une migration déployée ne se modifie jamais : on ajoute la suivante à `MIGRATIONS` (`src/db.ts`). Les tests du magasin (`test/store.contract.test.ts`) passent les **mêmes** règles au magasin en mémoire et à Postgres. Pour Postgres, ils tournent sur PGlite, dans le processus : ni serveur ni Docker. PGlite met une dizaine de secondes à démarrer : une base par fichier de test, vidée entre deux tests.
 
 ## Les tests de contrat
 

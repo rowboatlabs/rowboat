@@ -287,7 +287,7 @@ Décidé le 30/09/2026. La vidéo, la voix et la musique passent par **Pixazo**,
 - **Une génération n'est visible que de son compte.** Celle d'un autre compte répond 404.
 - **Le relevé d'usage** (`UsageRecord`) garde le coût réel de chaque génération, dans l'unité du quota, pour suivre ce qu'on dépense chez Pixazo.
 
-**Phase 0 :** le magasin en mémoire oublie tout quand la machine s'arrête. Le solde du propriétaire est donc recréé à chaque démarrage (`WARELL_OWNER_MEDIA_CREDITS`). Le journal devient durable avec Postgres.
+**Durable avec Postgres** (`DATABASE_URL`, décidé le 01/10/2026). Le journal y est en ajout seul : un déclencheur refuse toute modification et toute suppression. Un débit verrouille la ligne du compte pendant sa transaction. Sans base, le magasin en mémoire oublie tout quand la machine s'arrête, et le solde du propriétaire (`WARELL_OWNER_MEDIA_CREDITS`) revient à chaque démarrage.
 
 **Côté agent**, l'instance déclare un serveur MCP `warell-media` dans `config/mcp.json` et un skill disque `skills/warell-media/SKILL.md` (`packages/instance`, `seed.ts` et `media-mcp.ts`). Aucun fichier de l'upstream ne change :
 - le skill se charge quand on demande une vidéo, une voix ou une musique, et n'attache que les outils MCP existants (`listMcpTools`, `executeMcpTool`), qui gardent leur demande d'accord avant chaque appel ;

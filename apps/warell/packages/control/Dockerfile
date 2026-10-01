@@ -3,8 +3,8 @@
 #   fly deploy --config apps/warell/packages/control/fly.toml \
 #     --dockerfile apps/warell/packages/control/Dockerfile .
 #
-# Runtime env: OPENROUTER_API_KEY, WARELL_INSTANCE_TOKEN (secrets),
-# WARELL_PUBLIC_URL, WARELL_PLAN_ID.
+# Runtime env: OPENROUTER_API_KEY, WARELL_INSTANCE_TOKEN, DATABASE_URL
+# (secrets), WARELL_PUBLIC_URL, WARELL_PLAN_ID. See apps/warell/AGENTS.md.
 
 FROM node:22-bookworm-slim AS build
 RUN corepack enable && corepack prepare pnpm@10.20.0 --activate
