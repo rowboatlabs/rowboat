@@ -5,6 +5,7 @@ Le code propre à Warell : les packages `@warell/*`. C'est un espace de travail 
 | Package | Rôle | Conception |
 |---|---|---|
 | `packages/control` | Le plan de contrôle : remplace le backend Rowboat Labs en servant les mêmes routes `/v1/*` | `TARGET_AGENTIC_ARCHITECTURE.md` §3.5 |
+| `packages/instance` | Le lanceur d'une instance : prépare le dossier de travail, démarre `rowboat-server` sur la boucle locale, ouvre le portier | `TARGET_AGENTIC_ARCHITECTURE.md` §3.1 |
 
 ## Dépendre de l'upstream
 
@@ -36,6 +37,24 @@ OPENROUTER_API_KEY=<clé> WARELL_PLAN_ID=essentiel PORT=8787 pnpm start
 | `PORT` | Défaut : 8080 |
 
 L'instance le trouve par `API_URL` : on ne modifie aucun fichier upstream qui l'appelle (archi §3.14).
+
+## Déployer sur Fly.io
+
+Deux apps, à Paris (`cdg`), construites sur les serveurs de Fly depuis la **racine du dépôt** (le contexte inclut `apps/harbor` et `apps/x`) :
+
+```sh
+fly deploy --config apps/warell/packages/control/fly.toml  --dockerfile apps/warell/packages/control/Dockerfile  --remote-only --ha=false .
+fly deploy --config apps/warell/packages/instance/fly.toml --dockerfile apps/warell/packages/instance/Dockerfile --remote-only --ha=false --no-public-ips .
+```
+
+| App | Exposition | Secrets (`fly secrets`) |
+|---|---|---|
+| `warell-control` | Publique, `https://warell-control.fly.dev` | `OPENROUTER_API_KEY`, `WARELL_INSTANCE_TOKEN` |
+| `warell-owner` | **Privée** (Flycast), disque `data` monté sur `/data` | `WARELL_INSTANCE_TOKEN` |
+
+Les deux se suspendent au repos et se réveillent à la requête suivante. Une instance n'a pas d'adresse publique : en phase 0, on l'atteint par un tunnel, `fly proxy 3221:80 warell-owner.flycast -a warell-owner`, puis `http://localhost:3221` avec la clé de `/data/server-key`.
+
+**Le portier.** `rowboat-server` refuse tout `Host` qui n'est pas un nom de la machine (protection contre le *DNS rebinding*). Le portier (`packages/instance/src/gate.ts`) réécrit le `Host` vers la boucle locale ; la clé porteur du serveur reste exigée. Ainsi aucun fichier upstream ne change.
 
 ## Changer un prix ou une devise
 

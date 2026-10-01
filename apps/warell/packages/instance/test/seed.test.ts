@@ -1,0 +1,36 @@
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { NEVER_EXPIRES, seedWorkdir } from '../src/seed.js';
+
+async function tmp() { return fs.mkdtemp(path.join(os.tmpdir(), 'warell-seed-')); }
+const read = async (dir: string, f: string) => JSON.parse(await fs.readFile(path.join(dir, 'config', f), 'utf8'));
+
+describe('seedWorkdir', () => {
+  it('prepares an empty workdir: loopback server, control-plane session, initial model', async () => {
+    const dir = await tmp();
+    await seedWorkdir({ workDir: dir, instanceToken: 't1', assistantModel: 'openai/gpt-6-luna' });
+    expect(await read(dir, 'server.json')).toEqual({ lanEnabled: false });
+    expect((await read(dir, 'oauth.json')).providers.rowboat).toEqual({
+      mode: 'rowboat',
+      tokens: { access_token: 't1', refresh_token: null, expires_at: NEVER_EXPIRES, token_type: 'Bearer' },
+    });
+    expect(await read(dir, 'models.json')).toEqual({ version: 2, providers: {}, assistantModel: { provider: 'rowboat', model: 'openai/gpt-6-luna' } });
+    expect((await fs.stat(path.join(dir, 'config', 'oauth.json'))).mode & 0o777).toBe(0o600);
+  });
+
+  it('keeps what the person chose and rewrites only the control-plane session', async () => {
+    const dir = await tmp();
+    await fs.mkdir(path.join(dir, 'config'));
+    await fs.writeFile(path.join(dir, 'config', 'oauth.json'), JSON.stringify({ version: 2, providers: { google: { tokens: null, clientId: 'g' }, rowboat: { tokens: { access_token: 'old' } } } }));
+    await fs.writeFile(path.join(dir, 'config', 'models.json'), JSON.stringify({ version: 2, providers: {}, assistantModel: { provider: 'rowboat', model: 'anthropic/claude-sonnet-5.5' } }));
+    await fs.writeFile(path.join(dir, 'config', 'server.json'), JSON.stringify({ lanEnabled: true, port: 3220 }));
+    await seedWorkdir({ workDir: dir, instanceToken: 't2', assistantModel: 'openai/gpt-6-luna' });
+    const oauth = await read(dir, 'oauth.json');
+    expect(oauth.providers.google).toEqual({ tokens: null, clientId: 'g' });
+    expect(oauth.providers.rowboat.tokens.access_token).toBe('t2');
+    expect((await read(dir, 'models.json')).assistantModel.model).toBe('anthropic/claude-sonnet-5.5');
+    expect(await read(dir, 'server.json')).toEqual({ lanEnabled: false, port: 3220 });
+  });
+});

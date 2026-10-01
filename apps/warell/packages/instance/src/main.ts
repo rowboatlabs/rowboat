@@ -1,0 +1,50 @@
+import { spawn } from 'node:child_process';
+import process from 'node:process';
+import { createGate } from './gate.js';
+import { seedWorkdir } from './seed.js';
+
+// Instance entry point on Fly (roadmap phase 0, 30/09/2026): prepare the
+// workdir, start the headless rowboat-server on loopback, open the gate.
+// API_URL points core at the Warell control plane, never at Rowboat Labs
+// (architecture §3.14); no POSTHOG_KEY is set, so core analytics stay off.
+
+function required(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is required`);
+  return value;
+}
+
+const workDir = process.env.ROWBOAT_WORKDIR ?? '/data';
+const serverPort = 3220;
+
+await seedWorkdir({
+  workDir,
+  instanceToken: required('WARELL_INSTANCE_TOKEN'),
+  assistantModel: process.env.WARELL_ASSISTANT_MODEL ?? 'openai/gpt-6-luna',
+});
+
+const child = spawn(process.execPath, [required('ROWBOAT_SERVER_ENTRY')], {
+  stdio: 'inherit',
+  env: {
+    ...process.env,
+    ROWBOAT_WORKDIR: workDir,
+    ROWBOAT_SERVER_PORT: String(serverPort),
+    API_URL: required('API_URL'),
+    // The instance token is the session in oauth.json; the server needs no copy.
+    WARELL_INSTANCE_TOKEN: '',
+  },
+});
+
+const gate = createGate({ targetPort: serverPort });
+const port = Number(process.env.PORT ?? '8080');
+gate.listen(port, '0.0.0.0', () => console.log(`[instance] gate on :${port} → 127.0.0.1:${serverPort}`));
+
+// One process tree: if the server dies, the machine restarts it whole.
+child.on('exit', (code, signal) => {
+  console.error(`[instance] rowboat-server exited (${signal ?? code})`);
+  gate.close();
+  process.exit(code ?? 1);
+});
+for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(sig, () => child.kill(sig));
+}
