@@ -130,7 +130,7 @@ describe('the Replicas connector', () => {
     const create = fake.creates().at(-1)!.body!;
     expect(create).toMatchObject({ name: `spaces-${message.id}`, environment_id: 'env-web', coding_agent: 'claude', plan_mode: false });
     const prompt = String(create.message);
-    expect(prompt.startsWith('fix the login bug')).toBe(true); // the person's words first: Replicas's own /commands work
+    expect(prompt.startsWith(`${mention(claude)} fix the login bug`)).toBe(true); // the person's words first, as written
     expect(prompt.endsWith(`[Spaces request ${message.id}]`)).toBe(true);
     expect(prompt).toContain('Requested by Harsh');
 
@@ -155,9 +155,29 @@ describe('the Replicas connector', () => {
     const send = fake.sends().at(-1)!;
     expect(send.body).toMatchObject({ chat_id: expect.stringMatching(/^chat-/) });
     const prompt = String(send.body!.message);
-    expect(prompt.startsWith('also add a test')).toBe(true);
-    expect(prompt).toContain("Earlier in this thread:\nHarsh: it's the session cookie");
+    expect(prompt.startsWith(`${mention(claude)} also add a test`)).toBe(true);
+    expect(prompt).toContain("Earlier in this thread:\n[@Harsh](#member:harsh): it's the session cookie");
     expect(prompt).not.toContain('fix checkout'); // the workspace heard that already
+  });
+
+  it('keeps mentions and writes authors as tokens, so the agent can mention anyone in the thread', async () => {
+    const { message, invocations: first } = await org.post(`${mention(claude)} look at the cart`);
+    expect((await org.ended(first[0]!.id)).state).toBe('done');
+    await org.post('[@Harsh](#member:harsh) can you check the totals?', { threadRoot: message.id }, 'dev-ramnique');
+    const { invocations } = await org.post(`${mention(claude)} /plan pair with [@Ramnique](#member:ramnique) on it`, { threadRoot: message.id });
+    expect((await org.ended(invocations[0]!.id)).state).toBe('done');
+    const prompt = String(fake.sends().at(-1)!.body!.message);
+    expect(prompt.startsWith('/plan pair with [@Ramnique](#member:ramnique) on it')).toBe(true); // its mention goes only before a command, so Replicas runs it
+    expect(prompt).toContain('Earlier in this thread:\n[@Ramnique](#member:ramnique): [@Harsh](#member:harsh) can you check the totals?');
+    expect(prompt).toContain(`You are [@Claude](#member:${claude.id}) in Rowboat, and this request comes from [@Harsh](#member:harsh) in the space "Payments"`);
+    expect(prompt).toContain('Agents see only messages that mention them');
+  });
+
+  it('keeps a mention of the agent in mid-sentence, so the request has no blank in it', async () => {
+    const { invocations } = await org.post(`[@Ramnique](#member:ramnique) and ${mention(claude)}, introduce yourselves`);
+    expect((await org.ended(invocations[0]!.id)).state).toBe('done');
+    const prompt = String(fake.creates().at(-1)!.body!.message);
+    expect(prompt.startsWith(`[@Ramnique](#member:ramnique) and ${mention(claude)}, introduce yourselves`)).toBe(true);
   });
 
   it('asks which environment when there are several, and the reply picks it', async () => {
@@ -196,7 +216,7 @@ describe('the Replicas connector', () => {
     const create = fake.creates().at(-1)!.body!;
     expect(create.images).toEqual([{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG.toString('base64') } }]);
     expect(String(create.message)).toContain(`- shot (image/png, 70 B): ${org.harbor.url}/v1/spaces/${org.spaceId}/blobs/${hash}?name=shot`);
-    expect(String(create.message).startsWith('why does this render wrong? [attached: shot]')).toBe(true); // no raw link for Replicas to render broken
+    expect(String(create.message).startsWith(`${mention(claude)} why does this render wrong? [attached: shot]`)).toBe(true); // no raw link for Replicas to render broken
   });
 
   it('reads Codex’s answer too', async () => {
