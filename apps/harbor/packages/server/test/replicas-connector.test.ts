@@ -291,6 +291,45 @@ describe('the Replicas connector', () => {
   });
 });
 
+describe('the Replicas connector starting up', () => {
+  it('never sends again a turn it took on while it was still starting', async () => {
+    const store = await freshStore();
+    const org = await new Org(store).start();
+    await org.space();
+    const service = org.harbor.service;
+    // Its first list returns only once a mention it took on live is working; that turn has not
+    // sent anything yet (it is still building its prompt), as on a slow machine.
+    const list = service.listAgentInvocations.bind(service);
+    let releaseList!: () => void;
+    const listHeld = new Promise<void>((r) => (releaseList = r));
+    vi.spyOn(service, 'listAgentInvocations').mockImplementationOnce(async (...args) => (await listHeld, list(...args)));
+    const members = service.listOrgMembers.bind(service);
+    let releasePrompt!: () => void;
+    const promptHeld = new Promise<void>((r) => (releasePrompt = r));
+    let first = true;
+    vi.spyOn(service, 'listOrgMembers').mockImplementation(async (...args) => {
+      if (args[0].agent && first) {
+        first = false;
+        await promptHeld;
+      }
+      return members(...args);
+    });
+    const claude = await org.agent('claude-code', 'Claude');
+    fake.nextTurn = { events: [], hold: true };
+    const { message, invocations } = await org.post(`${mention(claude)} quick one`);
+    await until(async () => (await org.invocation(invocations[0]!.id))?.state === 'working', 'its own turn to start');
+    releaseList();
+    await new Promise((r) => setTimeout(r, 300));
+    releasePrompt();
+    await until(async () => [...fake.workspaces.values()].some((w) => w.name === `spaces-${message.id}`), 'the workspace');
+    await new Promise((r) => setTimeout(r, 300));
+    expect(fake.creates().filter((c) => c.body?.name === `spaces-${message.id}`)).toHaveLength(1);
+    vi.restoreAllMocks();
+    await org.harbor.close();
+    await store.db.close();
+  });
+});
+
 describe('the Replicas connector after a restart', () => {
   it('finishes a turn that ended while Harbor was down, without sending anything again', async () => {
     const store = await freshStore();

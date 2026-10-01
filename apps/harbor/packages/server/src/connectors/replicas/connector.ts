@@ -76,6 +76,8 @@ export interface ThreadRecord {
 
 export class ReplicasConnector implements RunningConnector {
   private readonly running = new Map<string, Promise<void>>();
+  /** What this run took on. A working invocation at boot that it did not take on is from before a restart. */
+  private readonly takenOn = new Set<string>();
   private readonly aborts = new Set<AbortController>();
   private readonly timers: NodeJS.Timeout[] = [];
   private unsubscribe: (() => void) | undefined;
@@ -112,8 +114,10 @@ export class ReplicasConnector implements RunningConnector {
   private async boot(): Promise<void> {
     await this.declare();
     // Settle what a previous run acknowledged (spec §8), then pick up what waits.
+    // A live frame can deliver one first; by the time this list returns, it is working, but it is
+    // this run's own turn, not one to settle (sending it again would answer it twice).
     for (const invocation of await this.safe(() => this.env.service.listAgentInvocations(this.env.ctx), [])) {
-      if (invocation.state === 'working') this.track(invocation.id, () => this.recover(invocation));
+      if (invocation.state === 'working' && !this.takenOn.has(invocation.id)) this.track(invocation.id, () => this.recover(invocation));
       else if (invocation.state === 'pending') this.intake(invocation);
     }
   }
@@ -130,6 +134,7 @@ export class ReplicasConnector implements RunningConnector {
 
   private intake(invocation: Invocation): void {
     if (this.stopped || invocation.state !== 'pending' || this.running.has(invocation.id)) return;
+    this.takenOn.add(invocation.id);
     this.track(invocation.id, async () => {
       try {
         await this.env.service.acknowledgeInvocation(this.env.ctx, invocation.id);
