@@ -44,7 +44,7 @@ export interface ModelsSnapshot {
   // Raw catalog model ids per provider id, unpinned — for provider-scoped
   // pickers that need a provider's list without group ordering applied.
   catalogByProvider: Record<string, string[]>
-  // WARELL(30/09/2026): display names ("provider/model" → name) when the
+  // BAARALI(30/09/2026): display names ("provider/model" → name) when the
   // catalog has one; the picker falls back to the id.
   namesByKey: Record<string, string>
 }

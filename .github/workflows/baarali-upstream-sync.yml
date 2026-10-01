@@ -1,0 +1,127 @@
+# Synchro hebdomadaire avec l'upstream (rowboatlabs/rowboat).
+# Méthode : docs/baarali/UPSTREAM.md. Ce workflow ne touche jamais main :
+# - fusion propre  → branche sync/upstream-AAAA-MM-JJ + PR vers main (tests lancés) ;
+# - conflits       → une issue qui liste les fichiers, à résoudre en local avec
+#                    scripts/baarali-sync-upstream.sh.
+#
+# Jeton : le secret BAARALI_SYNC_TOKEN (PAT fine-grained : contents, pull-requests,
+# issues, workflows en écriture) est recommandé. Sans lui, GITHUB_TOKEN suffit
+# SAUF quand l'upstream a modifié un fichier de .github/workflows (GitHub refuse
+# alors le push) : le workflow le détecte et ouvre une issue à la place.
+name: baarali-upstream-sync
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # lundi 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: write
+
+concurrency:
+  group: baarali-upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    # Ne jamais tourner sur le dépôt d'origine s'il récupérait ce fichier.
+    if: github.repository != 'rowboatlabs/rowboat'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.BAARALI_SYNC_TOKEN || github.token }}
+      HAS_PAT: ${{ secrets.BAARALI_SYNC_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.BAARALI_SYNC_TOKEN || github.token }}
+
+      - name: Récupérer l'upstream
+        id: fetch
+        run: |
+          git remote add upstream https://github.com/rowboatlabs/rowboat.git
+          git fetch upstream main
+          behind=$(git rev-list --count HEAD..upstream/main)
+          echo "behind=$behind" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse --short upstream/main)" >> "$GITHUB_OUTPUT"
+          echo "branch=sync/upstream-$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Fusionner sur une branche de synchro
+        id: merge
+        if: steps.fetch.outputs.behind != '0'
+        run: |
+          git config user.name "baarali-sync[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "${{ steps.fetch.outputs.branch }}"
+          if git merge --no-ff --no-edit -m "sync: intègre upstream/main (${{ steps.fetch.outputs.sha }})" upstream/main; then
+            echo "conflicts=false" >> "$GITHUB_OUTPUT"
+            touched=$(git diff --name-only HEAD^1 HEAD -- .github/workflows | wc -l | tr -d ' ')
+            echo "workflows_touched=$touched" >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo "conflicts=true"
+              echo "files<<EOF"
+              git diff --name-only --diff-filter=U
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+            git merge --abort
+          fi
+
+      - name: Pousser et ouvrir la PR
+        if: steps.merge.outputs.conflicts == 'false' && (steps.merge.outputs.workflows_touched == '0' || env.HAS_PAT == 'true')
+        run: |
+          branch="${{ steps.fetch.outputs.branch }}"
+          git push --force-with-lease origin "$branch"
+          if ! gh pr view "$branch" >/dev/null 2>&1; then
+            gh pr create --base main --head "$branch" \
+              --title "sync: upstream ${{ steps.fetch.outputs.sha }} (${{ steps.fetch.outputs.behind }} commits)" \
+              --body "Synchro automatique avec rowboatlabs/rowboat — ${{ steps.fetch.outputs.behind }} commit(s).
+
+          Avant de fusionner (docs/baarali/UPSTREAM.md §4) :
+          - [ ] CI verte
+          - [ ] relire les fichiers listés dans docs/baarali/DIVERGENCES.md s'ils ont bougé
+          - [ ] aucun nouvel appel vers un service hébergé par Rowboat Labs (docs/baarali/UPSTREAM.md §6)
+
+          Fusionner avec **Create a merge commit** (jamais squash ni rebase : l'historique upstream doit rester intact)."
+          fi
+          # Un push fait avec GITHUB_TOKEN ne déclenche pas les autres workflows :
+          # on lance les tests explicitement (workflow_dispatch est autorisé).
+          if [ "$HAS_PAT" != "true" ]; then
+            gh workflow run x-tests.yml --ref "$branch"
+          fi
+
+      - name: Signaler ce qui demande une main humaine
+        if: steps.merge.outputs.conflicts == 'true' || (steps.merge.outputs.workflows_touched != '0' && steps.merge.outputs.workflows_touched != '' && env.HAS_PAT != 'true')
+        env:
+          # Noms de fichiers venus de l'upstream : passés par l'environnement,
+          # jamais interpolés dans le script.
+          CONFLICT_FILES: ${{ steps.merge.outputs.files }}
+        run: |
+          if [ "${{ steps.merge.outputs.conflicts }}" = "true" ]; then
+            title="sync upstream : conflits à résoudre (${{ steps.fetch.outputs.sha }})"
+            body="La fusion de upstream/main (${{ steps.fetch.outputs.behind }} commits) produit des conflits sur :
+
+          \`\`\`
+          ${CONFLICT_FILES}
+          \`\`\`
+
+          En local : \`scripts/baarali-sync-upstream.sh\`, puis suivre docs/baarali/UPSTREAM.md §5."
+          else
+            title="sync upstream : l'upstream a modifié des workflows (${{ steps.fetch.outputs.sha }})"
+            body="La fusion est propre mais touche .github/workflows ; GITHUB_TOKEN ne peut pas la pousser.
+          Soit ajouter le secret BAARALI_SYNC_TOKEN, soit lancer \`scripts/baarali-sync-upstream.sh\` en local."
+          fi
+          existing=$(gh issue list --state open --search "in:title \"sync upstream\"" --json number --jq '.[0].number')
+          # Les issues sont désactivées par défaut sur un fork : si elles le sont,
+          # le run rouge (et son email) reste le signal.
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body" || true
+          else
+            gh issue create --title "$title" --body "$body" || true
+          fi
+          echo "::error::$title"
+          exit 1

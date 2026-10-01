@@ -1,4 +1,4 @@
-Warell
+Baarali
 Copyright 2026 OpenBaara
 
 This product is derived from Rowboat (https://github.com/rowboatlabs/rowboat),
@@ -6,4 +6,4 @@ licensed under the Apache License, Version 2.0 (see LICENSE).
 
 "Rowboat" is a name of its authors; the Apache License grants no rights to
 their trademarks (section 6). Files modified from the upstream project are
-listed with the reason for each change in docs/warell/DIVERGENCES.md.
+listed with the reason for each change in docs/baarali/DIVERGENCES.md.

@@ -48,7 +48,7 @@ export async function listGatewayModels(): Promise<{ providers: ProviderSummary[
     const body = await response.json() as { data: Array<{ id: string; name?: string }> };
     // The gateway returns bare "vendor/model" ids; the models.dev cache
     // supplies the reasoning capability the composer's effort control needs.
-    // WARELL(30/09/2026): keep the gateway's display name, for the picker.
+    // BAARALI(30/09/2026): keep the gateway's display name, for the picker.
     const models = await annotateReasoningFlags(body.data.map((m) => ({ id: m.id, ...(m.name ? { name: m.name } : {}) })));
     return {
         providers: [{

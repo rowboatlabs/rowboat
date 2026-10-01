@@ -1,4 +1,4 @@
-# Warell images build from the repo root (apps/warell/packages/*/Dockerfile).
+# Baarali images build from the repo root (apps/baarali/packages/*/Dockerfile).
 # Local installs and builds never enter the context: the image rebuilds them.
 **/node_modules
 **/dist

@@ -76,7 +76,7 @@ describe('useModels', () => {
       { id: 'openai', flavor: 'openai', models: ['gpt-5.4', 'gpt-5.4-mini'], status: 'ok' },
     ])
     expect(first.result.current.reasoningByKey).toEqual({ 'openai/gpt-5.4': true })
-    // WARELL(30/09/2026): names for the picker, only where the catalog has one.
+    // BAARALI(30/09/2026): names for the picker, only where the catalog has one.
     expect(first.result.current.namesByKey).toEqual({ 'openai/gpt-5.4': 'GPT-5.4' })
     expect(first.result.current.defaultModel).toEqual({ provider: 'openai', model: 'gpt-5.4' })
     // Raw catalog is exposed for provider-scoped pickers.

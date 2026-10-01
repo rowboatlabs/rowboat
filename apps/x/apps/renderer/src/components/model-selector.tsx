@@ -223,7 +223,7 @@ export function ModelSelector({
   effortSelectable = false,
 }: ModelSelectorProps) {
   const { groups: catalogGroups, reasoningByKey, defaultModel: catalogDefault, catalogByProvider, refresh, namesByKey = {} } = useModels()
-  // WARELL(30/09/2026): the catalog's display name when it has one, else the id.
+  // BAARALI(30/09/2026): the catalog's display name when it has one, else the id.
   const nameOf = (provider: string, model: string) => namesByKey[`${provider}/${model}`]
   const allGroups = groupsProp ?? catalogGroups
   // The chat default has no standing in a caller-supplied model space.

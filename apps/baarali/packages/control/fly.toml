@@ -1,0 +1,26 @@
+# The control plane on Fly, Paris (architecture §6, decided 30/09/2026).
+# Secrets (fly secrets): OPENROUTER_API_KEY, BAARALI_INSTANCE_TOKEN.
+app = "warell-control"
+primary_region = "cdg"
+
+[env]
+  BAARALI_PUBLIC_URL = "https://app.baarali.com"
+  BAARALI_PLAN_ID = "essentiel"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/health"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
