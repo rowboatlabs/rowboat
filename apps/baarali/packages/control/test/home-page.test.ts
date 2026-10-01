@@ -15,6 +15,27 @@ const app = createApp({
   fetch: (async () => new Response('{}')) as typeof fetch, now: Date.now,
 });
 
+describe('the download section', () => {
+  const base = 'https://github.com/benewende-dev/warell/releases/latest/download';
+  const withDownloads = createApp({
+    store: new MemoryStore(new Map(), plans), openRouterKey: 'or', publicUrl: 'https://app.baarali.test', appName: 'Baarali',
+    mediaPacks: packs, home: { offers: OFFERS, weekCredits: {}, packs, downloadBase: base },
+    fetch: (async () => new Response('{}')) as typeof fetch, now: Date.now,
+  });
+
+  it('links the installers of the latest release once one is published', async () => {
+    const page = await (await withDownloads.request('/')).text();
+    for (const file of ['Baarali-mac-arm64.dmg', 'Baarali-mac-intel.dmg', 'Baarali-windows-setup.exe']) expect(page).toContain(`${base}/${file}`);
+    expect(page).toContain('href="#telecharger"');
+  });
+
+  it('offers the account only while there is nothing to download', async () => {
+    const page = await (await app.request('/')).text();
+    expect(page).not.toContain('telecharger');
+    expect(page).toContain('href="/auth/v1/sign-in"');
+  });
+});
+
 describe('the home page', () => {
   it('shows every plan at the catalog prices, in euros and CFA francs', async () => {
     const page = norm(await (await app.request('/')).text());

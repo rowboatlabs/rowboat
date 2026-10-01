@@ -56,7 +56,8 @@ export class FlyMachines implements FlyApi {
   private async call<T>(method: string, path: string, body?: unknown): Promise<T> {
     const res = await this.fetchFn(`${this.base}${path}`, {
       method,
-      headers: { authorization: `Bearer ${this.token}`, 'content-type': 'application/json' },
+      // `fly tokens create` gives macaroons that carry their own scheme ("FlyV1 …").
+      headers: { authorization: this.token.startsWith('FlyV1 ') ? this.token : `Bearer ${this.token}`, 'content-type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(90_000),
     });

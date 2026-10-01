@@ -148,7 +148,13 @@ const app = createApp({
   // Optional: without it, media generation answers 503 and text still works.
   pixazoKey: process.env.PIXAZO_API_KEY || undefined,
   mediaPacks,
-  home: { offers: OFFERS, weekCredits: Object.fromEntries(plans.map((p) => [p.id, p.weekCredits])), packs: mediaPacks },
+  home: {
+    offers: OFFERS,
+    weekCredits: Object.fromEntries(plans.map((p) => [p.id, p.weekCredits])),
+    packs: mediaPacks,
+    // Set once a desktop version is published (apps/baarali/AGENTS.md « L'app de bureau »).
+    downloadBase: process.env.BAARALI_DOWNLOAD_BASE || undefined,
+  },
   adminTokenHash: process.env.BAARALI_ADMIN_TOKEN ? hashToken(process.env.BAARALI_ADMIN_TOKEN) : undefined,
   auth,
   instances,

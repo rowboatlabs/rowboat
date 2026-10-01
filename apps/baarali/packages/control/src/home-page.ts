@@ -20,7 +20,15 @@ const STRINGS = {
     hero: 'L’assistant qui agit pour vous.',
     lead: 'Baarali cherche, rédige, organise et crée pour vous. Il vous demande votre accord avant chaque geste qui compte. Pensé pour l’Afrique de l’Ouest, en français et en anglais.',
     start: 'Créer mon compte gratuit',
+    download: 'Télécharger Baarali',
     seePrices: 'Voir les tarifs',
+    downloadTitle: 'Télécharger Baarali',
+    downloadLead: 'Installez l’app, connectez-vous avec votre email : votre espace Baarali se crée tout seul, et vous retrouvez tout d’un appareil à l’autre.',
+    macArm: 'Mac (Apple M1 et plus récent)',
+    macIntel: 'Mac (Intel)',
+    windows: 'Windows 10 et 11',
+    macNote: 'Au premier lancement sur Mac, si macOS refuse d’ouvrir l’app : Réglages Système › Confidentialité et sécurité › Ouvrir quand même.',
+    phoneNote: 'Sur téléphone : bientôt.',
     featuresTitle: 'Ce qu’il fait',
     features: [
       ['Il travaille', 'Recherches, documents, tableaux, emails à rédiger : vous demandez, il fait, et il continue en arrière-plan.'],
@@ -49,7 +57,7 @@ const STRINGS = {
     examples: 'Exemples : une vidéo de 5 secondes, 38 crédits · une voix d’une minute, 2 crédits · une musique, 5 crédits.',
     faqTitle: 'Questions',
     faq: [
-      ['Comment je me connecte ?', 'Sans mot de passe : vous recevez un code par email. Google, Apple et GitHub arrivent bientôt, puis le SMS.'],
+      ['Comment je me connecte ?', 'Dans l’app, sans mot de passe : vous recevez un code par email. Google, Apple et GitHub arrivent bientôt, puis le SMS.'],
       ['Que se passe-t-il quand j’atteins ma limite ?', 'Vous attendez la fin de la fenêtre de 5 heures ou de la semaine, ou vous passez au forfait du dessus. Une réponse commencée n’est jamais coupée.'],
       ['Mes crédits médias expirent-ils ?', 'Non. Ils restent sur votre compte jusqu’à ce que vous les utilisiez.'],
       ['Où sont mes données ?', 'Chaque compte a son propre espace de travail, séparé des autres, hébergé en Europe.'],
@@ -65,7 +73,15 @@ const STRINGS = {
     hero: 'The assistant that acts for you.',
     lead: 'Baarali researches, writes, organizes and creates for you. It asks for your approval before every step that matters. Built for West Africa, in French and English.',
     start: 'Create my free account',
+    download: 'Download Baarali',
     seePrices: 'See pricing',
+    downloadTitle: 'Download Baarali',
+    downloadLead: 'Install the app and sign in with your email: your Baarali space is set up for you, and everything follows you from one device to another.',
+    macArm: 'Mac (Apple M1 or newer)',
+    macIntel: 'Mac (Intel)',
+    windows: 'Windows 10 and 11',
+    macNote: 'On a Mac, if macOS refuses to open the app the first time: System Settings › Privacy & Security › Open Anyway.',
+    phoneNote: 'On your phone: soon.',
     featuresTitle: 'What it does',
     features: [
       ['It works', 'Research, documents, spreadsheets, emails to draft: you ask, it does it, and keeps going in the background.'],
@@ -94,7 +110,7 @@ const STRINGS = {
     examples: 'Examples: a 5-second video, 38 credits · a one-minute voice, 2 credits · a song, 5 credits.',
     faqTitle: 'Questions',
     faq: [
-      ['How do I sign in?', 'No password: you get a code by email. Google, Apple and GitHub are coming soon, then SMS.'],
+      ['How do I sign in?', 'In the app, with no password: you get a code by email. Google, Apple and GitHub are coming soon, then SMS.'],
       ['What happens when I reach my limit?', 'Wait for the 5-hour or weekly window to end, or move up a plan. An answer already started is never cut.'],
       ['Do my media credits expire?', 'No. They stay on your account until you use them.'],
       ['Where is my data?', 'Each account has its own workspace, separate from the others, hosted in Europe.'],
@@ -120,7 +136,15 @@ export interface HomeData {
   /** Week budget per plan id, to show usage relative to Essentiel. */
   weekCredits: Record<string, number>;
   packs: SoldPack[];
+  /**
+   * Where the installers are (the latest GitHub release, baarali-desktop.yml).
+   * Unset until a version is published: the page then offers the account only.
+   */
+  downloadBase?: string;
 }
+
+/** The release's stable file names (baarali-desktop.yml, « Gather the files »). */
+export const DOWNLOADS = { macArm: 'Baarali-mac-arm64.dmg', macIntel: 'Baarali-mac-intel.dmg', windows: 'Baarali-windows-setup.exe' } as const;
 
 export function homePage(data: HomeData, opts: { lang: string | null; nonce: string }): string {
   const lang = pickLang(opts.lang);
@@ -130,6 +154,18 @@ export function homePage(data: HomeData, opts: { lang: string | null; nonce: str
     const r = (data.weekCredits[id] ?? 0) / base;
     return r >= 2 ? String(Math.round(r)) : '1';
   };
+
+  const download = data.downloadBase
+    ? `
+<section id="telecharger" aria-labelledby="download">
+  <h2 id="download">${escape(t.downloadTitle)}</h2>
+  <p class="sub">${escape(t.downloadLead)}</p>
+  <div class="ctas">${(['macArm', 'macIntel', 'windows'] as const)
+    .map((k) => `<a class="button${k === 'macArm' ? ' primary' : ''}" href="${escape(`${data.downloadBase}/${DOWNLOADS[k]}`)}">${escape(t[k])}</a>`)
+    .join('')}</div>
+  <p class="fine">${escape(t.macNote)} ${escape(t.phoneNote)}</p>
+</section>`
+    : '';
 
   const priceBlock = (offer: Offer) => {
     if (offer.billing.kind === 'free') return `<p class="price"><strong>${escape(t.free)}</strong></p>`;
@@ -243,8 +279,12 @@ footer { padding-block:40px; color:var(--muted); font-size:14px; border-top:1px 
   <span class="eyebrow">${escape(t.eyebrow)}</span>
   <h1>${escape(t.hero)}</h1>
   <p class="lead">${escape(t.lead)}</p>
-  <div class="ctas"><a class="button primary" href="/auth/v1/sign-in">${escape(t.start)}</a><a class="button" href="#tarifs">${escape(t.seePrices)}</a></div>
-</div>
+  <div class="ctas">${
+    data.downloadBase
+      ? `<a class="button primary" href="#telecharger">${escape(t.download)}</a>`
+      : `<a class="button primary" href="/auth/v1/sign-in">${escape(t.start)}</a>`
+  }<a class="button" href="#tarifs">${escape(t.seePrices)}</a></div>
+</div>${download}
 <section aria-labelledby="features">
   <h2 id="features">${escape(t.featuresTitle)}</h2>
   <div class="features">${t.features.map(([h, p]) => `<div><h3>${escape(h)}</h3><p>${escape(p)}</p></div>`).join('')}</div>
