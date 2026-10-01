@@ -26,7 +26,19 @@ const invocation = (id: string, state: spaces.InvocationState, extra: Partial<sp
 })
 
 let stop = true
-const invoke = vi.fn(async (channel: string, args: { invocationId?: string }) => {
+const invoke = vi.fn(async (channel: string, args: { invocationId?: string; agentId?: string }) => {
+    if (channel === 'spaces:getAgentCapabilities' && args.agentId === 'coder') {
+        return {
+            capabilities: {
+                stop: false,
+                options: [
+                    { type: 'select', key: 'environment', label: 'Env', choices: [{ id: 'web', label: 'web-app' }, { id: 'api', label: 'payments-api' }] },
+                    { type: 'toggle', key: 'plan_first', label: 'Plan first' },
+                ],
+            },
+            defaults: { environment: 'api', plan_first: true },
+        }
+    }
     if (channel === 'spaces:getAgentCapabilities') {
         return { capabilities: { stop, options: [{ type: 'select', key: 'environment', label: 'Env', choices: [{ id: 'api', label: 'payments-api' }] }] } }
     }
@@ -108,5 +120,25 @@ describe('AgentOptionsStrip', () => {
         const select = await screen.findByRole('combobox', { name: 'Echo Env' })
         fireEvent.change(select, { target: { value: 'api' } })
         expect(onChange).toHaveBeenCalledWith({ echo: { environment: 'api' } })
+    })
+
+    it('shows the owner’s defaults preselected, and sends an explicit off for a toggle that defaults on', async () => {
+        const onChange = vi.fn()
+        const coder = { id: 'coder', displayName: 'Coder', role: 'member', kind: 'agent' } as spaces.Member
+        render(
+            <SpaceRefsProvider refs={{ orgId: 'org-defaults', orgAddress: 'x', spaceId: 'S' }}>
+                <SpaceMembersProvider members={new Map([['coder', 'Coder']])}>
+                    <SpaceProfilesProvider members={[coder]} here={new Set()} selfId="harsh">
+                        <AgentOptionsStrip draft="[@Coder](#member:coder) fix it" values={{}} onChange={onChange} />
+                    </SpaceProfilesProvider>
+                </SpaceMembersProvider>
+            </SpaceRefsProvider>,
+        )
+        const select = (await screen.findByRole('combobox', { name: 'Coder Env' })) as HTMLSelectElement
+        expect(select.selectedOptions[0]!.textContent).toBe('Env: payments-api')
+        const plan = screen.getByRole('button', { name: 'Plan first' })
+        expect(plan).toHaveAttribute('aria-pressed', 'true')
+        fireEvent.click(plan)
+        expect(onChange).toHaveBeenCalledWith({ coder: { plan_first: false } })
     })
 })

@@ -23,6 +23,10 @@ const ROTATED = 'rbk_R0tat3dR0tat3dR0tat3dR0tat3dR0tat3dR0tat3d'
 
 let roster: spaces.Member[]
 let listing: spaces.AgentListing[]
+let options: Record<string, spaces.InvocationOption[]> = {}
+let defaults: Record<string, Record<string, string | boolean>> = {}
+const ENVIRONMENT: spaces.InvocationOption = { type: 'select', key: 'environment', label: 'Environment', choices: [{ id: 'env-web', label: 'web-app' }, { id: 'env-api', label: 'api' }] }
+const PLAN: spaces.InvocationOption = { type: 'toggle', key: 'plan_first', label: 'Plan first' }
 const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
     switch (channel) {
         case 'spaces:listOrgMembers': return { members: roster }
@@ -34,6 +38,8 @@ const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
         case 'spaces:setAgentCredential': return { credential: { hint: `…${args.secret!.slice(-4)}`, setBy: 'me', setAt: '2026-09-30T12:00:00Z' } }
         case 'spaces:createAgentKey': return { key: { ...key('k2', args.agentId!), secret: ROTATED } }
         case 'spaces:revokeAgentKey': return { key: key(args.keyId!, args.agentId!, { revokedAt: '2026-09-29T11:00:00Z' }) }
+        case 'spaces:getAgentCapabilities': return { capabilities: { stop: false, options: options[args.agentId!] ?? [] }, defaults: defaults[args.agentId!] ?? {} }
+        case 'spaces:setAgentOptionDefaults': return { defaults: (args as unknown as { defaults: Record<string, string | boolean> }).defaults }
     }
     throw new Error(`unexpected ${channel}`)
 })
@@ -42,6 +48,8 @@ beforeEach(() => {
     invoke.mockClear()
     window.localStorage.clear()
     roster = [person('me', 'Ramnique'), person('harsh', 'Harsh')]
+    options = {}
+    defaults = {}
     listing = [{ agent: hermes, keys: [key('k1', 'hermes', { lastUsedAt: '2026-09-29T10:30:00Z' }), key('k0', 'hermes', { revokedAt: '2026-09-28T10:00:00Z' })] }]
     ;(window as unknown as { ipc: unknown }).ipc = { invoke, on: () => () => {} }
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn(async () => {}) } })
@@ -49,13 +57,13 @@ beforeEach(() => {
 
 const setupsOffered = () => within(screen.getByRole('radiogroup', { name: 'How it connects' })).getAllByRole('radio').map((r) => r.getAttribute('aria-label'))
 
-// The Agents dialog (2026-09-29; three screens, 2026-09-30): the list, adding one, connecting it.
+// The Agents dialog (2026-09-29; screens 2026-09-30; the agent's page 2026-10-01): the list, adding one, connecting it, its page.
 describe('AgentsDialog', () => {
-    it('opens on the list: agents, their live keys, and Add agent — nothing else', async () => {
+    it('opens on the list: a roster to click into, and Add agent — nothing else', async () => {
         render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
         await screen.findByText('Hermes')
         expect(screen.getByText('Hermes · Yours · 1 key')).toBeInTheDocument()
-        expect(screen.getAllByText(/Key made/)).toHaveLength(1)
+        expect(screen.queryByText(/Key made/)).toBeNull()
         expect(screen.getByRole('button', { name: /Add agent/ })).toBeInTheDocument()
         expect(screen.queryByRole('radiogroup')).toBeNull()
         expect(screen.queryByText(/only time its key is shown/)).toBeNull()
@@ -155,17 +163,49 @@ describe('AgentsDialog', () => {
         fireEvent.click(screen.getByRole('radio', { name: 'Custom' }))
         expect(screen.getByLabelText('Agent name')).toHaveValue('Athena')
         fireEvent.click(screen.getByRole('button', { name: 'Back' }))
-        expect(await screen.findByText(/Key made/)).toBeInTheDocument()
+        expect(await screen.findByText('Hermes · Yours · 1 key')).toBeInTheDocument()
     })
 
-    it('a new key goes straight to the agent’s own setup: Harbor knows how it runs', async () => {
+    it('an agent’s page shows its setup any time, its key a placeholder until a new one fills it in', async () => {
         render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
-        await screen.findByText('Hermes')
+        fireEvent.click(await screen.findByRole('button', { name: /Hermes/ }))
+        await screen.findByRole('heading', { name: 'Hermes' })
+        expect(screen.getAllByText(/Key made .* · last used/)).toHaveLength(1) // the live key, not the revoked one
+        expect(await screen.findByText(/ROWBOAT_AGENT_KEY 'YOUR_AGENT_KEY'/)).toBeInTheDocument()
+        expect(screen.getByText(/A key is shown only once/)).toBeInTheDocument()
+        expect(screen.queryByRole('heading', { name: 'Defaults' })).toBeNull() // Hermes declares no options
         fireEvent.click(screen.getByRole('button', { name: /New key/ }))
-        await screen.findByRole('heading', { name: 'Connect Hermes' })
-        expect(screen.queryByRole('radiogroup', { name: 'How does it run?' })).toBeNull()
-        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:openDirect', { orgId: 'org-1', memberId: 'hermes' }))
         expect(await screen.findByText(/ROWBOAT_AGENT_KEY 'rbk_R0…at3d'/)).toBeInTheDocument()
+        expect(screen.getByText(/This is the only time this key is shown/)).toBeInTheDocument()
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:openDirect', { orgId: 'org-1', memberId: 'hermes' }))
+    })
+
+    it('lets the owner set an agent’s defaults for the options its connector declares', async () => {
+        listing = [{ agent: claude, keys: [key('k3', 'claude')], credential: { hint: '…ab12', setBy: 'me', setAt: '2026-09-30T10:00:00Z' } }]
+        options = { claude: [ENVIRONMENT, PLAN] }
+        defaults = { claude: { environment: 'env-api' } }
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        fireEvent.click(await screen.findByRole('button', { name: /Claude/ }))
+        const environment = await screen.findByLabelText('Default Environment')
+        expect(environment).toHaveValue('env-api')
+        fireEvent.change(environment, { target: { value: 'env-web' } })
+        await waitFor(() =>
+            expect(invoke).toHaveBeenCalledWith('spaces:setAgentOptionDefaults', { orgId: 'org-1', agentId: 'claude', defaults: { environment: 'env-web' } }),
+        )
+        fireEvent.click(screen.getByLabelText('Plan first by default'))
+        await waitFor(() =>
+            expect(invoke).toHaveBeenCalledWith('spaces:setAgentOptionDefaults', { orgId: 'org-1', agentId: 'claude', defaults: { environment: 'env-web', plan_first: true } }),
+        )
+    })
+
+    it('shows someone else’s agent’s defaults read-only', async () => {
+        roster = [person('me', 'Ramnique', 'admin'), person('harsh', 'Harsh')]
+        listing = [{ agent: scout, keys: [key('k5', 'scout')] }]
+        options = { scout: [ENVIRONMENT] }
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        fireEvent.click(await screen.findByRole('button', { name: /Scout/ }))
+        expect(await screen.findByLabelText('Default Environment')).toBeDisabled()
+        expect(screen.getByText(/Only its owner can change these/)).toBeInTheDocument()
     })
 
     it('adds a Replicas agent: the coding agent, a name, and the Replicas key; a refused key creates nothing', async () => {
@@ -201,9 +241,11 @@ describe('AgentsDialog', () => {
         listing = [{ agent: claude, keys: [key('k3', 'claude')], credential: { hint: '…ab12', setBy: 'me', setAt: '2026-09-30T10:00:00Z', rejectedAt: '2026-09-30T11:00:00Z', rejectedReason: 'Replicas rejected this agent\'s API key.' } }]
         render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
         await screen.findByText('Claude')
-        expect(screen.getByText('Claude Code · via Replicas · Yours · 1 key')).toBeInTheDocument()
-        expect(screen.getByText(/Replicas key …ab12/)).toBeInTheDocument()
-        expect(screen.getByText(/Key rejected/)).toBeInTheDocument()
+        expect(screen.getByText(/Claude Code · via Replicas · Yours · 1 key/)).toBeInTheDocument()
+        expect(screen.getByText(/Key rejected/)).toBeInTheDocument() // flagged on the list, too
+        fireEvent.click(screen.getByRole('button', { name: /Claude/ }))
+        expect(await screen.findByText(/Replicas key …ab12/)).toBeInTheDocument()
+        expect(screen.getByText(/replace it to bring the agent back/)).toBeInTheDocument()
         fireEvent.click(screen.getByRole('button', { name: 'Replace' }))
         fireEvent.change(screen.getByLabelText('New Replicas key'), { target: { value: 'rpl_live_cd34' } })
         fireEvent.click(screen.getByRole('button', { name: 'Save' }))
@@ -212,8 +254,8 @@ describe('AgentsDialog', () => {
 
     it('revokes on a second click', async () => {
         render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
-        await screen.findByText('Hermes')
-        fireEvent.click(screen.getByRole('button', { name: 'Revoke' }))
+        fireEvent.click(await screen.findByRole('button', { name: /Hermes/ }))
+        fireEvent.click(await screen.findByRole('button', { name: 'Revoke' }))
         expect(invoke).not.toHaveBeenCalledWith('spaces:revokeAgentKey', expect.anything())
         fireEvent.click(screen.getByRole('button', { name: 'Confirm revoke' }))
         await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:revokeAgentKey', { orgId: 'org-1', agentId: 'hermes', keyId: 'k1' }))
@@ -224,6 +266,8 @@ describe('AgentsDialog', () => {
         listing = [{ agent: scout, keys: [key('k5', 'scout')] }]
         render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
         await screen.findByText('Agent · Owned by Harsh · 1 key')
+        fireEvent.click(screen.getByRole('button', { name: /Scout/ }))
+        await screen.findByRole('heading', { name: 'Scout' })
         expect(screen.queryByRole('button', { name: /New key/ })).not.toBeInTheDocument()
         await waitFor(() => expect(screen.getByRole('button', { name: 'Revoke' })).toBeInTheDocument())
     })

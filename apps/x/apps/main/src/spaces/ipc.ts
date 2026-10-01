@@ -72,6 +72,7 @@ type SpacesHandlers = {
   'spaces:listInvocations': InvokeHandler<'spaces:listInvocations'>;
   'spaces:cancelInvocation': InvokeHandler<'spaces:cancelInvocation'>;
   'spaces:getAgentCapabilities': InvokeHandler<'spaces:getAgentCapabilities'>;
+  'spaces:setAgentOptionDefaults': InvokeHandler<'spaces:setAgentOptionDefaults'>;
   'spaces:createTopic': InvokeHandler<'spaces:createTopic'>;
   'spaces:manageTopic': InvokeHandler<'spaces:manageTopic'>;
   'spaces:reactToMessage': InvokeHandler<'spaces:reactToMessage'>;
@@ -426,8 +427,12 @@ export const spacesIpcHandlers: SpacesHandlers = {
   'spaces:cancelInvocation': async (_event, args) => ({
     invocation: await orgs.getClient(args.orgId).cancelInvocation(args.invocationId),
   }),
+  'spaces:setAgentOptionDefaults': async (_event, args) => ({
+    defaults: await orgs.getClient(args.orgId).setAgentOptionDefaults(args.agentId, args.defaults),
+  }),
+
   'spaces:getAgentCapabilities': async (_event, args) => ({
-    capabilities: await orgs.getClient(args.orgId).getAgentCapabilities(args.agentId),
+    ...(await orgs.getClient(args.orgId).getAgentCapabilities(args.agentId)),
   }),
 
   'spaces:createTopic': async (_event, args) =>

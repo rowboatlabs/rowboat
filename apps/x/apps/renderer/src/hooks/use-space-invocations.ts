@@ -98,7 +98,7 @@ export function useSpaceInvocations(orgId: string, spaceId: string): ReadonlyMap
 // --- capabilities: what an agent's connector declared -------------------------------
 
 const CAPABILITIES_TTL_MS = 60_000
-const capabilities = new Map<string, { at: number; value: spaces.ConnectorCapabilities }>()
+const capabilities = new Map<string, { at: number; value: spaces.ConnectorCapabilities; defaults: Record<string, string | boolean> }>()
 const capabilitiesLoading = new Set<string>()
 let capabilitiesVersion = 0
 const capabilityListeners = new Set<() => void>()
@@ -109,8 +109,8 @@ async function loadCapabilities(orgId: string, agentId: string): Promise<void> {
     if (capabilitiesLoading.has(k) || (cached && Date.now() - cached.at < CAPABILITIES_TTL_MS)) return
     capabilitiesLoading.add(k)
     try {
-        const { capabilities: value } = await window.ipc.invoke('spaces:getAgentCapabilities', { orgId, agentId })
-        capabilities.set(k, { at: Date.now(), value })
+        const { capabilities: value, defaults } = await window.ipc.invoke('spaces:getAgentCapabilities', { orgId, agentId })
+        capabilities.set(k, { at: Date.now(), value, defaults: defaults ?? {} })
         capabilitiesVersion += 1
         for (const l of capabilityListeners) l()
     } catch {
@@ -118,6 +118,36 @@ async function loadCapabilities(orgId: string, agentId: string): Promise<void> {
     } finally {
         capabilitiesLoading.delete(k)
     }
+}
+
+/** Fetch an agent's capabilities and defaults again now: after its owner changed its defaults. */
+export function refreshAgentCapabilities(orgId: string, agentId: string): Promise<void> {
+    capabilities.delete(key(orgId, agentId))
+    return loadCapabilities(orgId, agentId)
+}
+
+/**
+ * The defaults these agents' owners set for their options (Harbor spec §8,
+ * 2026-10-01), as far as they still fit what the connector declares: Harbor
+ * fills them into an invocation whose invoker picked none.
+ */
+export function useAgentOptionDefaults(orgId: string | undefined, agentIds: readonly string[]): ReadonlyMap<string, Record<string, string | boolean>> {
+    const caps = useAgentCapabilities(orgId, agentIds)
+    return useMemo(() => {
+        const out = new Map<string, Record<string, string | boolean>>()
+        if (!orgId) return out
+        for (const [id, declared] of caps) {
+            const stored = capabilities.get(key(orgId, id))?.defaults ?? {}
+            const fit: Record<string, string | boolean> = {}
+            for (const option of declared.options) {
+                const value = stored[option.key]
+                if (value === undefined) continue
+                if (option.type === 'toggle' ? typeof value === 'boolean' : option.choices.some((c) => c.id === value)) fit[option.key] = value
+            }
+            out.set(id, fit)
+        }
+        return out
+    }, [orgId, caps])
 }
 
 /** The declared capabilities of these agents, fetched on demand and refreshed after a minute. */
