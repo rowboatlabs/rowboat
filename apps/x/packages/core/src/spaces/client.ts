@@ -15,6 +15,7 @@ import {
   type AgentKeySecret,
   type AgentListing,
   type ConnectorCapabilities,
+  type Approval,
   type Invocation,
   type Member,
   type Membership,
@@ -112,6 +113,7 @@ type DeleteMessageInput = z.infer<Routes['deleteMessage']['request']>;
 type EditMessageInput = z.infer<Routes['editMessage']['request']>;
 type VotePollInput = z.infer<Routes['votePoll']['request']>;
 type EndPollInput = z.infer<Routes['endPoll']['request']>;
+type DecideApprovalInput = z.infer<Routes['decideApproval']['request']>;
 
 /** One page of a message list (protocol listStream / listThread query): at most one of the three offsets. */
 export interface MessageWindowOpts {
@@ -610,6 +612,13 @@ export class SpacesClient {
         input,
       )
     ).message;
+  }
+
+  /** Decide an agent's approval (spec §8 part 4): a person acting directly; the first decision wins. */
+  async decideApproval(spaceId: string, approvalId: string, input: DecideApprovalInput): Promise<Approval> {
+    return (
+      await this.request('POST', this.space(spaceId, `/approvals/${encodeURIComponent(approvalId)}/decide`), routes.decideApproval.response, input)
+    ).approval;
   }
 
   /** Toggle a poll vote (idempotent; single-select add moves the vote). Returns the message with votes folded. */
