@@ -1,0 +1,154 @@
+name: baarali-desktop
+
+# Builds the Baarali desktop app and publishes it as a GitHub release
+# (option A, decided 01/10/2026). Separate from the upstream
+# electron-build.yml, which builds Rowboat: the brand is applied to this
+# run's checkout only (apps/baarali/packages/desktop/scripts/brand.mjs).
+#
+# The release is created with GITHUB_TOKEN, so it does not trigger the
+# upstream workflow. Its tag is `v<version>`, the form update.electronjs.org
+# reads for the app's automatic updates.
+#
+# Signing is optional: with the secrets below the macOS app is signed and
+# notarized, otherwise macOS asks the person to allow it by hand.
+#   APPLE_CERTIFICATE (base64 .p12), APPLE_CERTIFICATE_PASSWORD,
+#   APPLE_ID, APPLE_PASSWORD (app-specific), APPLE_TEAM_ID
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version, without the v (e.g. 0.1.0)'
+        required: true
+      publish:
+        description: 'Publish at once (otherwise a draft, to check before anyone downloads it)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: macos-latest
+            platform: darwin
+            arch: arm64,x64
+          - os: windows-latest
+            platform: win32
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    env:
+      HAS_APPLE_CERT: ${{ secrets.APPLE_CERTIFICATE != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.15.0
+          cache: pnpm
+          cache-dependency-path: apps/x/pnpm-lock.yaml
+
+      - name: Check the version
+        shell: bash
+        run: |
+          [[ "${{ inputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "version must be X.Y.Z"; exit 1; }
+
+      - name: Set the version
+        shell: bash
+        run: |
+          node -e "
+            const fs = require('fs');
+            for (const f of ['apps/x/package.json', 'apps/x/apps/main/package.json']) {
+              const pkg = JSON.parse(fs.readFileSync(f, 'utf8'));
+              pkg.version = '${{ inputs.version }}';
+              fs.writeFileSync(f, JSON.stringify(pkg, null, 2) + '\n');
+            }
+          "
+
+      - name: Apply the Baarali brand
+        run: node apps/baarali/packages/desktop/scripts/brand.mjs --yes
+
+      - name: Import the signing certificate (macOS)
+        if: matrix.platform == 'darwin' && env.HAS_APPLE_CERT == 'true'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          echo "$APPLE_CERTIFICATE" | base64 --decode > $RUNNER_TEMP/certificate.p12
+          security import $RUNNER_TEMP/certificate.p12 -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain
+          rm -f $RUNNER_TEMP/certificate.p12
+
+      - name: Build apps/harbor (link deps)
+        run: pnpm install --frozen-lockfile && pnpm -r build
+        working-directory: apps/harbor
+
+      - name: Install apps/x
+        run: pnpm install --frozen-lockfile
+        working-directory: apps/x
+
+      - name: Make the installers
+        shell: bash
+        env:
+          ROWBOAT_SKIP_CODE_SIGNING: ${{ (matrix.platform == 'win32' || env.HAS_APPLE_CERT != 'true') && '1' || '' }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npx electron-forge make --arch=${{ matrix.arch }} --platform=${{ matrix.platform }}
+        working-directory: apps/x/apps/main
+
+      - name: Cleanup keychain
+        if: always() && matrix.platform == 'darwin'
+        run: security delete-keychain $RUNNER_TEMP/app-signing.keychain-db 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: baarali-${{ matrix.platform }}
+          path: apps/x/apps/main/out/make/
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: make
+
+      # Stable names for the two files people download (baarali.com links to
+      # releases/latest/download/<name>). The update files keep the names the
+      # update service expects: the macOS zips, and Squirrel's RELEASES and nupkg.
+      - name: Gather the files
+        run: |
+          mkdir out
+          V='${{ inputs.version }}'
+          cp "make/baarali-darwin/Baarali-darwin-arm64-$V.dmg" out/Baarali-mac-arm64.dmg
+          cp "make/baarali-darwin/Baarali-darwin-x64-$V.dmg" out/Baarali-mac-intel.dmg
+          find make/baarali-darwin/zip -name '*.zip' -exec cp {} out/ \;
+          cp "make/baarali-win32/squirrel.windows/x64/Baarali-win32-x64-$V-setup.exe" out/Baarali-windows-setup.exe
+          cp make/baarali-win32/squirrel.windows/x64/RELEASES out/
+          find make/baarali-win32/squirrel.windows/x64 -name '*.nupkg' -exec cp {} out/ \;
+          ls -la out
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "v${{ inputs.version }}" out/* \
+            --repo "${{ github.repository }}" --target "${{ github.sha }}" \
+            --title "Baarali ${{ inputs.version }}" ${{ inputs.publish && ' ' || '--draft' }} \
+            --notes "Baarali pour Mac et Windows. Téléchargement : https://baarali.com"

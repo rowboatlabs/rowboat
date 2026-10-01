@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="800" viewBox="0 0 800 800">
+  <!-- The mark without its tile, for the app's own screens (light and dark). -->
+  <circle cx="575" cy="400" r="150" fill="#3240c8"/>
+  <circle cx="225" cy="400" r="150" fill="#ffb21e"/>
+</svg>

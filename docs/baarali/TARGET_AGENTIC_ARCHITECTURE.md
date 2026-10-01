@@ -425,7 +425,7 @@ Code Mode (audit §9) lance Claude Code ou Codex sur la machine qui héberge le 
 
 | Client | Existe | Cible |
 |---|---|---|
-| Desktop | ✅ | Deux modes : instance **locale** (le Rowboat d'aujourd'hui, données sur la machine) ou instance **cloud** (le plan de séparation upstream l'a validé, `apps/x/REMOTE_SERVER.md`). |
+| Desktop | ✅ | Deux modes : instance **locale** (le Rowboat d'aujourd'hui, données sur la machine) ou instance **cloud** (le plan de séparation upstream l'a validé, `apps/x/REMOTE_SERVER.md`). **Décidé (01/10/2026) : l'app distribuée est en cloud.** Après la connexion, elle se branche d'elle-même sur l'instance du compte, par la passerelle (§3.5 « Les instances », `apps/baarali/packages/desktop`). |
 | Mobile | ✅ (appairage, chat, notifications) | Ajouter la connexion au plan de contrôle, **les approbations** (mission §40) et le statut des Goals. |
 | Web | ❌ | Le renderer parle à `window.ipc`, et `@x/client` fournit déjà le jumeau HTTP typé des mêmes canaux (`packages/client/src/rpc.ts`). Une coquille web qui adapte l'un à l'autre est **faisable sans réécrire l'UI**. À planifier après le premier jalon. |
 | WhatsApp / SMS | ✅ WhatsApp, Telegram (`core/channels`) | Canal de premier rang pour les approbations et le suivi : c'est l'interface réelle du marché. |

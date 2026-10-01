@@ -19,8 +19,12 @@ COPY apps/harbor/packages/server/package.json apps/harbor/packages/server/
 RUN cd apps/harbor && pnpm install --frozen-lockfile --filter @rowboat/spaces-protocol \
  && pnpm --filter @rowboat/spaces-protocol build
 
-# 2. rowboat-server and what it needs, then its self-contained bundle.
+# 2. rowboat-server and what it needs, then its self-contained bundle. The
+# agent speaks of itself as Baarali: the brand is applied to this copy of
+# core only, the repository keeps the upstream text (desktop/scripts/brand.mjs).
 COPY apps/x apps/x
+COPY apps/baarali/packages/desktop/scripts/brand.mjs apps/baarali/packages/desktop/scripts/brand.mjs
+RUN node apps/baarali/packages/desktop/scripts/brand.mjs --yes --only core
 RUN cd apps/x && pnpm install --frozen-lockfile --filter "@x/server..." \
  && (cd packages/shared && npm run build) \
  && (cd packages/core && npm run build) \

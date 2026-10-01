@@ -6,6 +6,7 @@ Le code propre à Baarali : les packages `@baarali/*`. C'est un espace de travai
 |---|---|---|
 | `packages/control` | Le plan de contrôle : remplace le backend Rowboat Labs en servant les mêmes routes `/v1/*` | `TARGET_AGENTIC_ARCHITECTURE.md` §3.5 |
 | `packages/instance` | Le lanceur d'une instance : prépare le dossier de travail, démarre `rowboat-server` sur la boucle locale, ouvre le portier ; le serveur MCP `baarali-media` (vidéo, voix, musique) | `TARGET_AGENTIC_ARCHITECTURE.md` §3.1 et §3.5 |
+| `packages/desktop` | L'app de bureau Baarali : la marque appliquée au build (`scripts/brand.mjs`), l'icône, et le lien qui branche l'app sur l'instance du compte après la connexion (`src/cloud-link.ts`) | `TARGET_AGENTIC_ARCHITECTURE.md` §3.5 « Les instances », §3.13 |
 
 ## Dépendre de l'upstream
 
@@ -80,6 +81,26 @@ fly secrets set BAARALI_INSTANCE_IMAGE=registry.fly.io/baarali-instances:vN -a w
 **Les noms des apps Fly** gardent l'ancien nom du produit (renommé Baarali le 01/10/2026) : Fly ne renomme pas une app, et en recréer une ferait migrer le disque de l'instance. Personne ne les voit : le public passe par `baarali.com`. Le dépôt GitHub `benewende-dev/warell` garde aussi son nom tant que `benewende-dev/baarali` est pris par l'ancien site.
 
 **DNS** : `baarali.com` est chez Hostinger. `@` (A + AAAA de `warell-control`), `www` et `app` (CNAME vers `warell-control.fly.dev`), plus les lignes d'envoi Resend (`resend._domainkey`, `send`, `rsend`) et `_dmarc`. Les certificats sont émis par Fly (`fly certs list -a warell-control`).
+
+## L'app de bureau
+
+Le dépôt garde les fichiers de l'upstream tels quels. **La marque s'applique à la copie d'un build**, jamais au dépôt (`packages/desktop/scripts/brand.mjs`) :
+
+- « Rowboat » devient « Baarali » dans les textes de `main`, `renderer` et `core` ;
+- l'identifiant d'app macOS, les noms des installeurs, les icônes ;
+- les liens (site, dépôt des mises à jour, contact) ;
+- `API_URL` par défaut, `https://app.baarali.com` ;
+- le lien vers l'instance : `src/cloud-link.ts`, copié dans `main` et démarré par une ligne.
+
+Le script refuse d'écrire sans `--yes`. Chaque ancre doit se trouver exactement une fois : si l'upstream en change une, `test/brand.test.ts` casse sur la PR de synchro. L'image d'instance applique la même marque à `core` seulement (`--only core`), pour que l'agent se présente comme Baarali.
+
+**Ce que fait l'app après la connexion.** L'accueil upstream connecte le compte, ce qui écrit `config/oauth.json`. Le lien voit la session, demande une clé d'appareil (`POST /v1/devices`), puis passe l'app en mode distant sur la passerelle et recharge les fenêtres. La première fois, l'instance est créée et démarre : le lien réessaie pendant environ une minute.
+
+**Publier une version** : Actions › `baarali-desktop` › *Run workflow*, avec la version (`0.1.0`). Le workflow fait un brouillon de release `v0.1.0` : Mac arm64 et Intel, Windows. On le vérifie, puis on le publie. Le site pointe vers `releases/latest/download/` : `Baarali-mac-arm64.dmg`, `Baarali-mac-intel.dmg`, `Baarali-windows-setup.exe`. Les mises à jour automatiques passent par update.electronjs.org, qui lit ces releases.
+
+**Signature (🧑).** Sans certificat, l'app Mac est signée ad hoc : macOS la dit « non vérifiée », et il faut l'autoriser une fois dans *Réglages › Confidentialité et sécurité*. Pour une app signée et notarisée, il faut un compte Apple Developer (99 $/an) et les secrets `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_PASSWORD` et `APPLE_TEAM_ID`. Windows affiche un avertissement SmartScreen tant que l'app n'est pas signée.
+
+Ce qui reste en anglais : l'interface upstream, jusqu'à `@baarali/i18n` (archi §3.12).
 
 ## Changer un prix ou une devise
 

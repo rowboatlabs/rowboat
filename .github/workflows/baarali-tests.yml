@@ -3,16 +3,24 @@ name: baarali-tests
 # Baarali's own CI, separate from the upstream x-tests.yml so upstream syncs
 # never conflict on it (UPSTREAM.md §2, 30/09/2026).
 on:
+  # apps/x's main, renderer and core too: the brand test checks that every
+  # anchor of desktop/scripts/brand.mjs is still there after an upstream sync.
   pull_request:
     paths:
       - 'apps/baarali/**'
       - 'apps/x/packages/shared/**'
+      - 'apps/x/packages/core/**'
+      - 'apps/x/apps/main/**'
+      - 'apps/x/apps/renderer/**'
       - '.github/workflows/baarali-tests.yml'
   push:
     branches: [main]
     paths:
       - 'apps/baarali/**'
       - 'apps/x/packages/shared/**'
+      - 'apps/x/packages/core/**'
+      - 'apps/x/apps/main/**'
+      - 'apps/x/apps/renderer/**'
       - '.github/workflows/baarali-tests.yml'
   workflow_dispatch:
 
