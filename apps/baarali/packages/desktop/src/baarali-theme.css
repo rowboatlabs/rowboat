@@ -1,0 +1,78 @@
+/*
+ * The Baarali theme of the desktop app (decided 01/10/2026): the brand's
+ * white, blue and black over the upstream's own tokens (renderer App.css,
+ * DESIGN_LANGUAGE.md). Nothing upstream changes: scripts/brand.mjs copies
+ * this file into the build and imports it after App.css. `html:root` and
+ * `html.dark` outrank the upstream's `:root` and `.dark`, whatever the
+ * bundle order.
+ *
+ * What moves: the blue becomes the brand's (#1A6DFF), the neutrals lean a
+ * hair towards it like the site (baarali.com), the selected row in the
+ * sidebar takes the blue, and dark mode takes the site's blue-black.
+ * What stays: black is still the action colour, the system font, the radii.
+ */
+
+html:root {
+  --foreground: #0a0a0a;
+  --card-foreground: #0a0a0a;
+  --popover-foreground: #0a0a0a;
+  --primary: #0a0a0a;
+  --secondary: #eef1f7;
+  --secondary-foreground: #0a0a0a;
+  --muted: #f1f3f8;
+  --muted-foreground: #8a8f9c;
+  --accent: rgba(10, 20, 40, 0.05);
+  --accent-foreground: #0a0a0a;
+  --border: rgba(10, 20, 40, 0.08);
+  --input: rgba(10, 20, 40, 0.13);
+  --ring: #1a6dff;
+  --sidebar: #f4f6fb;
+  --sidebar-foreground: #0a0a0a;
+  --sidebar-primary: #0a0a0a;
+  --sidebar-accent: rgba(26, 109, 255, 0.1);
+  --sidebar-accent-foreground: #155eef;
+  --sidebar-ring: #1a6dff;
+  --rowboat-panel: #f4f6fb;
+  --rowboat-panel-soft: #fafbfd;
+  --rowboat-wash: #eaedf4;
+  --rowboat-command: #0a0a0a;
+  --rowboat-link: #155eef;
+  --rowboat-bubble: #0a0a0a;
+  --rowboat-ink-secondary: #5d6271;
+}
+
+html.dark {
+  --background: #0b0c0f;
+  --foreground: #f5f6f8;
+  --card: #15161b;
+  --card-foreground: #f5f6f8;
+  --popover: #15161b;
+  --popover-foreground: #f5f6f8;
+  --primary: #f5f6f8;
+  --primary-foreground: #0a0a0a;
+  --secondary: #1b1d23;
+  --secondary-foreground: #f5f6f8;
+  --muted: #17181d;
+  --muted-foreground: #8e93a0;
+  --accent: rgba(255, 255, 255, 0.06);
+  --accent-foreground: #f5f6f8;
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.14);
+  --ring: #4d8dff;
+  --sidebar: #08090c;
+  --sidebar-foreground: #f5f6f8;
+  --sidebar-primary: #f5f6f8;
+  --sidebar-accent: rgba(77, 141, 255, 0.16);
+  --sidebar-accent-foreground: #8fb4ff;
+  --sidebar-ring: #4d8dff;
+  --card-surface: #15161b;
+  --rowboat-panel: #08090c;
+  --rowboat-panel-soft: #0e0f13;
+  --rowboat-raised: #15161b;
+  --rowboat-wash: #1b1d23;
+  --rowboat-command: #f5f6f8;
+  --rowboat-link: #6f9fff;
+  --rowboat-bubble: #1f2128;
+  --rowboat-bubble-foreground: #f5f6f8;
+  --rowboat-ink-secondary: #a3a7b3;
+}

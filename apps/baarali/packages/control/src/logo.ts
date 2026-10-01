@@ -7,8 +7,11 @@
 
 const BLUE = '#1A6DFF';
 
+const BODY =
+  'M450 250 H502 C574 250 612 280 612 322 C612 345 602 360 590 368 Q584 373 590 378 C612 388 626 408 626 436 C626 476 590 502 512 502 H450 C413 502 384 473 384 436 V316 C384 279 413 250 450 250 Z';
+
 const FACE =
-  '<path d="M450 250 H502 C574 250 612 280 612 322 C612 345 602 360 590 368 Q584 373 590 378 C612 388 626 408 626 436 C626 476 590 502 512 502 H450 C413 502 384 473 384 436 V316 C384 279 413 250 450 250 Z" fill="#FFFFFF"/>' +
+  `<path d="${BODY}" fill="#FFFFFF"/>` +
   '<circle cx="460" cy="556" r="38" fill="#FFFFFF"/><circle cx="552" cy="556" r="38" fill="#FFFFFF"/>' +
   '<circle cx="500" cy="324" r="12" fill="#0A0A0A"/><circle cx="554" cy="324" r="12" fill="#0A0A0A"/>';
 
@@ -30,3 +33,22 @@ export function logoWord(height: number): string {
 
 /** The tile as the tab's icon. */
 export const FAVICON = `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">${TILE}</svg>`)}`;
+
+/**
+ * The character itself, for the page to bring to life (decided 01/10/2026:
+ * the glint in the eyes is kept for the animation, not the logo). The page's
+ * CSS moves the classes: .m-body, .m-foot, .m-eyes (look), .m-lids (blink).
+ */
+export function mascot(height: number, color = '#FFFFFF'): string {
+  const width = Math.round((height * 270) / 380);
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="370 236 270 380" width="${width}" height="${height}" class="mascot" aria-hidden="true" focusable="false">` +
+    `<g class="m-body"><path d="${BODY}" fill="${color}"/>` +
+    `<g class="m-eyes"><g class="m-lids">` +
+    '<circle cx="498" cy="324" r="14" fill="#0A0A0A"/><circle cx="552" cy="324" r="14" fill="#0A0A0A"/>' +
+    `<circle cx="502.9" cy="318.4" r="4.5" fill="${color}"/><circle cx="556.9" cy="318.4" r="4.5" fill="${color}"/>` +
+    '</g></g></g>' +
+    `<circle class="m-foot" cx="460" cy="556" r="38" fill="${color}"/><circle class="m-foot m-foot-2" cx="552" cy="556" r="38" fill="${color}"/>` +
+    '</svg>'
+  );
+}

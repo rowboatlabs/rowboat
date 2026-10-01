@@ -60,7 +60,7 @@ describe('the home page', () => {
 
   it('answers in English when asked, and runs only its own script', async () => {
     const res = await app.request('/', { headers: { 'accept-language': 'en-US,en' } });
-    expect(await res.text()).toContain('The assistant that acts for you.');
+    expect(await res.text()).toContain('<title>Baarali — the assistant that acts for you</title>');
     expect(res.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");
   });
 
@@ -79,3 +79,41 @@ describe('the home page', () => {
     expect(formatPrice({ amount: 65000, currency: 'XOF' }, 'fr')).not.toContain(' ');
   });
 });
+
+describe('the page files', () => {
+  it('serves its fonts, for a year', async () => {
+    const res = await app.request('/assets/inter.woff2');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('font/woff2');
+    expect(res.headers.get('cache-control')).toContain('immutable');
+  });
+
+  it('serves nothing outside its list', async () => {
+    for (const path of ['/assets/OFL-Inter.txt', '/assets/..%2Fsrc%2Fapp.ts', '/assets/..%2F..%2Fpackage.json', '/assets/']) {
+      expect((await app.request(path)).status).toBe(404);
+    }
+  });
+});
+
+describe('the legal pages', () => {
+  it('publishes who we are, what we do with data, and the terms', async () => {
+    for (const [path, text] of [['/mentions-legales', 'OpenBaara SAS'], ['/confidentialite', 'loi burkinabè'], ['/conditions', 'droit burkinabè']]) {
+      const res = await app.request(path);
+      expect(res.status).toBe(200);
+      const page = await res.text();
+      expect(page).toContain(text);
+      expect(page).toContain('contact@baarali.com');
+    }
+  });
+
+  it('answers in English when asked', async () => {
+    const page = await (await app.request('/confidentialite', { headers: { 'accept-language': 'en' } })).text();
+    expect(page).toContain('<title>Privacy — Baarali</title>');
+  });
+
+  it('is linked from the home page footer', async () => {
+    const page = await (await app.request('/')).text();
+    for (const path of ['/mentions-legales', '/confidentialite', '/conditions']) expect(page).toContain(`href="${path}"`);
+  });
+});
+

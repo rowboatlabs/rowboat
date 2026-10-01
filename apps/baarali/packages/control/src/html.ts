@@ -10,7 +10,7 @@ export function html(render: (nonce: string) => string): Response {
   return new Response(render(nonce), {
     headers: {
       'content-type': 'text/html; charset=utf-8',
-      'content-security-policy': `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`,
+      'content-security-policy': `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'; img-src 'self' data:; font-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`,
       'referrer-policy': 'no-referrer',
       'x-content-type-options': 'nosniff',
     },

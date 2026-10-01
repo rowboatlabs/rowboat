@@ -38,6 +38,7 @@ describe('apply on this checkout', () => {
     expect(changes).toContain('edit apps/x/packages/core/src/config/env.ts');
     expect(changes).toContain('edit apps/x/apps/main/src/updater.ts');
     expect(changes).toContain('write apps/x/apps/main/src/baarali-cloud.ts');
+    expect(changes).toContain('copy src/baarali-theme.css → apps/x/apps/renderer/src/baarali-theme.css');
   });
 
   it('brands only the core for the instance image', () => {
@@ -51,7 +52,7 @@ describe('apply on a Windows checkout', () => {
   it('finds its anchors in CRLF files', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'brand-crlf-'));
     const main = 'apps/x/apps/main';
-    for (const rel of [`${main}/forge.config.cjs`, `${main}/src/main.ts`, `${main}/package.json`]) {
+    for (const rel of [`${main}/forge.config.cjs`, `${main}/src/main.ts`, `${main}/package.json`, 'apps/x/apps/renderer/src/main.tsx']) {
       fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
       fs.writeFileSync(path.join(root, rel), fs.readFileSync(path.join(ROOT, rel), 'utf8').replace(/\r?\n/g, '\r\n'));
     }
@@ -60,5 +61,6 @@ describe('apply on a Windows checkout', () => {
     const changes = apply({ root, write: false });
     expect(changes).toContain(`edit ${main}/forge.config.cjs`);
     expect(changes).toContain(`edit ${main}/src/main.ts`);
+    expect(changes).toContain('edit apps/x/apps/renderer/src/main.tsx');
   });
 });

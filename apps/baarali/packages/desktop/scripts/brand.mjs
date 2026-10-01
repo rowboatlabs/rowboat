@@ -175,6 +175,8 @@ export function desktopPlan() {
         "  startServerHost().catch((error) => {\n    console.error('[server-host] failed to start rowboat-server:', error);\n  });",
         "  startServerHost().catch((error) => {\n    console.error('[server-host] failed to start rowboat-server:', error);\n  });\n  startBaaraliCloud();",
       ),
+      // The brand's colours, loaded after App.css (src/baarali-theme.css).
+      edit('apps/x/apps/renderer/src/main.tsx', "import App from './App.tsx'\n", "import App from './App.tsx'\nimport './baarali-theme.css'\n"),
     ],
     copies: [
       ['assets/icon.icns', `${main}/icons/icon.icns`],
@@ -183,6 +185,7 @@ export function desktopPlan() {
       ['assets/install-loading.gif', `${main}/icons/install-loading.gif`],
       ['assets/logo-only.png', 'apps/x/apps/renderer/public/logo-only.png'],
       ['src/cloud-link.ts', `${main}/src/baarali-cloud-link.ts`],
+      ['src/baarali-theme.css', 'apps/x/apps/renderer/src/baarali-theme.css'],
     ],
     writes: [[`${main}/src/baarali-cloud.ts`, CLOUD_GLUE]],
     packageJson: {

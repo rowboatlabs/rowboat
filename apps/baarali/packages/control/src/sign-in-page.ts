@@ -84,22 +84,24 @@ function layout(lang: Lang, title: string, nonce: string, body: string, script: 
 <title>${escape(title)}</title>
 <link rel="icon" href="${FAVICON}">
 <style nonce="${nonce}">
-:root { --bg:#f7f7f5; --card:#ffffff; --ink:#18181b; --muted:#5f5f66; --line:#dcdcd8; --accent:#18181b; --on-accent:#ffffff; --error:#b42318; color-scheme: light; }
-@media (prefers-color-scheme: dark) { :root { --bg:#111113; --card:#1b1b1e; --ink:#f2f2f0; --muted:#a3a3a8; --line:#2e2e33; --accent:#f2f2f0; --on-accent:#111113; --error:#f97066; color-scheme: dark; } }
+/* The home page's look (01/10/2026): its font, from this origin, and the brand blue. */
+@font-face { font-family:"Inter"; src:url(/assets/inter.woff2) format("woff2"); font-weight:400 800; font-display:swap; }
+:root { --bg:#f4f6fb; --card:#ffffff; --ink:#0a0a0a; --muted:#5d6271; --line:#e1e4ec; --accent:#155eef; --on-accent:#ffffff; --error:#b42318; color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root { --bg:#0b0c0f; --card:#15161b; --ink:#f5f6f8; --muted:#9a9fac; --line:#26282f; --accent:#1a6dff; --on-accent:#ffffff; --error:#f97066; color-scheme: dark; } }
 * { box-sizing: border-box; }
 /* .stack sets display:grid, which would beat the hidden attribute (seen 01/10/2026). */
 [hidden] { display: none !important; }
-body { margin:0; min-height:100svh; display:grid; place-items:center; padding:24px 16px; background:var(--bg); color:var(--ink); font:16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-main { width:100%; max-width:380px; background:var(--card); border:1px solid var(--line); border-radius:16px; padding:28px 24px; display:grid; gap:16px; }
+body { margin:0; min-height:100svh; display:grid; place-items:center; padding:24px 16px; background:var(--bg); color:var(--ink); font:16px/1.5 "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing:antialiased; }
+main { width:100%; max-width:400px; background:var(--card); border:1px solid var(--line); border-radius:22px; padding:32px 28px; box-shadow:0 30px 60px -40px rgb(10 10 10 / .35); display:grid; gap:16px; }
 .logo { display:flex; align-items:center; gap:8px; font-weight:800; font-size:18px; letter-spacing:-.02em; color:var(--ink); text-decoration:none; }
-h1 { margin:0; font-size:22px; line-height:1.25; text-wrap:balance; }
+h1 { margin:0; font-size:24px; letter-spacing:-.03em; line-height:1.25; text-wrap:balance; }
 p { margin:0; color:var(--muted); }
 form, .stack { display:grid; gap:10px; }
 label { font-size:14px; color:var(--muted); }
 /* 16 px at least: below it, iPhone zooms into the field. */
-input { width:100%; font:inherit; font-size:16px; padding:12px; border:1px solid var(--line); border-radius:10px; background:transparent; color:var(--ink); }
+input { width:100%; font:inherit; font-size:16px; padding:12px 14px; border:1px solid var(--line); border-radius:12px; background:transparent; color:var(--ink); }
 input:focus-visible, button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
-button { font:inherit; font-weight:600; padding:12px; border-radius:10px; border:1px solid var(--line); background:transparent; color:var(--ink); cursor:pointer; }
+button { font:inherit; font-weight:600; padding:12px; border-radius:999px; border:1px solid var(--line); background:transparent; color:var(--ink); cursor:pointer; }
 button.primary { background:var(--accent); color:var(--on-accent); border-color:var(--accent); }
 button:disabled { opacity:.6; cursor:default; }
 .or { display:flex; align-items:center; gap:10px; color:var(--muted); font-size:14px; }
