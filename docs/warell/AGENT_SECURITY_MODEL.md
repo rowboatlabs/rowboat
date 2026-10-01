@@ -66,7 +66,7 @@ Rowboat a été pensé pour **un ordinateur personnel, un seul utilisateur, sur 
 | H2 | Si le classifieur LLM répond `allow`, l'outil s'exécute **sans humain**. | TR §9.3 | Acceptable | Dangereux : un classifieur se manipule comme le reste | `WarellClassifier` : `allow` accepté **seulement pour le risque bas** (archi §3.3). |
 | H3 | `fetch-url` : `permission: "none"`, toute URL, GET et POST, en-têtes libres. | `core/runtime/tools/domains/web.ts` | Acceptable | **Canal d'exfiltration** sans témoin, et accès possible aux adresses internes de l'hébergeur | §9.3 (filtre de sortie) et §7.2 (POST = risque moyen). |
 | H4 | `browser-control` : `permission: "none"` pour lire **et** pour cliquer, taper, valider. | `core/runtime/tools/domains/browser.ts` | C'est le navigateur de l'utilisateur, sous ses yeux | Le navigateur est connecté aux comptes de l'utilisateur, **sans personne devant** | Risque par sous-action (§7.2). |
-| H5 | `executeCommand` : liste blanche de commandes, mais le contrôle qui bornait `cwd` au dossier de travail est **commenté** (`TODO: Re-enable this check`). | `core/runtime/tools/domains/shell.ts` | L'utilisateur est chez lui | Le conteneur devient la seule frontière | Le conteneur **est** la frontière (§9). Correctif proposé à l'upstream (UPSTREAM.md §7). |
+| H5 | `executeCommand` : liste blanche de commandes, mais le contrôle qui bornait `cwd` au dossier de travail est **commenté** (`TODO: Re-enable this check`). **C'est voulu** (vérifié le 01/10/2026) : il a été désactivé dans le commit qui ajoute la compétence d'organisation de fichiers (`fdbd7343`, 20/01/2026), qui range le Bureau et les Téléchargements par cette commande. De plus, une commande peut toujours faire `cd` elle-même : `cwd` n'est pas une frontière. | `core/runtime/tools/domains/shell.ts` | L'utilisateur est chez lui | Le conteneur devient la seule frontière | Le conteneur **est** la frontière (§9). On ne propose **pas** de réactiver le contrôle, qui casserait une fonction du bureau ; on propose à l'upstream une limite **réglable** pour le serveur à distance (issue, UPSTREAM.md §7). |
 | H6 | Jetons OAuth (`config/oauth.json`) et clés d'API des modèles (`config/models.json`, champ `apiKey`) stockés **en clair**. Seuls les jetons ChatGPT et GitHub sont chiffrés. | `core/auth/repo.ts`, `core/models/repo.ts`, `shared/src/models.ts` | Protégés par le compte de l'ordinateur | Un volume copié = tous les comptes | Ces secrets ne vivent plus dans l'instance (§6). |
 | H7 | Le serveur sans interface chiffre en AES-256-GCM, avec une clé rangée **à côté** des données (`<workdir>/cipher-key`). Le commentaire du fichier le dit lui-même. | `apps/x/apps/server/src/file-cipher.ts` | Même posture qu'un démon serveur | Une sauvegarde du volume contient la clé | Clé injectée au réveil depuis le coffre, en mémoire seulement (§6.3). |
 | H8 | Clé porteur unique par instance, rotation = tout révoquer. | `apps/x/apps/server/src/auth.ts` | Simple | Ne distingue ni appareil ni utilisateur | Elle reste interne au plan de contrôle (§2). |
@@ -75,7 +75,7 @@ Rowboat a été pensé pour **un ordinateur personnel, un seul utilisateur, sur 
 | H11 | `load-browser-skill` télécharge à l'usage des fiches d'instructions depuis un dépôt tiers (browser-use / browser-harness), puis les met en cache. | `core/runtime/tools/domains/browser.ts` | Confiance dans ce dépôt | Des instructions tierces, non relues, dans le contexte de l'agent | Version figée et relue (§12.4). |
 | H12 | Les clés d'agent de Harbor sont stockées **par empreinte** (SHA-256), jamais en clair. | `apps/harbor/packages/server/src/agent-keys.ts` | ✅ | ✅ | Même règle pour nos jetons (modèle §6.3 `server_key_hash`). |
 
-H1, H9 et H12 sont de bonnes bases. H2 à H8, H10 et H11 se traitent **sans modifier les fichiers upstream** : par nos implémentations des coutures, par l'infrastructure, ou par la configuration. Seul H5 mérite un correctif upstream, proposé chez eux et non gardé chez nous.
+H1, H9 et H12 sont de bonnes bases. H2 à H8, H10 et H11 se traitent **sans modifier les fichiers upstream** : par nos implémentations des coutures, par l'infrastructure, ou par la configuration. H5 relève d'un choix de l'upstream pour le bureau : chez nous, la micro-VM fait frontière ; chez eux, on propose seulement une option pour le serveur à distance.
 
 ## 4. Identité et authentification
 
@@ -626,7 +626,7 @@ Les interrupteurs de plateforme sont des **données** (lues à chaque décision)
 | Transport WhatsApp « appareil lié » désactivé en cloud | Configuration de l'instance | Non |
 | Skills de navigateur épinglés, sans rafraîchissement | Configuration ou module Warell | **À vérifier** : si le dépôt source n'est pas configurable, une divergence d'une ligne |
 | Masquage des champs sensibles dans les instantanés du navigateur | Moteur Chromium headless Warell (archi §3.10) | Non, si le moteur headless est à nous ; sinon une divergence dans `page-scripts.ts` |
-| Contrôle du `cwd` d'`executeCommand` (H5) | **Proposé à l'upstream** | Non chez nous |
+| Limite du `cwd` d'`executeCommand` (H5) | **Option proposée à l'upstream** pour le serveur à distance ; frontière = micro-VM | Non chez nous |
 
 **Risques de régression :**
 
