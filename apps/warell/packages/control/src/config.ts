@@ -22,7 +22,8 @@ export interface ControlSettings {
  * - `spacesApexUrl` is null: no managed Spaces fleet in V1.
  * - `billing.plans` keeps the upstream shape: `monthlyCredits` carries the
  *   week budget and `dailyCredits` the session budget (architecture §3.5,
- *   quota decided 30/09/2026). No price is served until one is decided.
+ *   quota decided 30/09/2026). The upstream field holds one price, in
+ *   cents: the euro price is served there.
  */
 export function buildApiConfig(settings: ControlSettings, plans: Plan[] = []): ApiConfig {
   const base = settings.publicUrl.replace(/\/+$/, '');
@@ -38,7 +39,7 @@ export function buildApiConfig(settings: ControlSettings, plans: Plan[] = []): A
         displayName: plan.displayName,
         monthlyCredits: plan.weekCredits,
         dailyCredits: budgetsForWeek(plan.weekCredits).sessionCredits,
-        monthlyPriceCents: null,
+        monthlyPriceCents: plan.monthlyPrices.find((p) => p.currency === 'EUR')?.amount ?? null,
       })),
     },
   };

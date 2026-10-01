@@ -7,7 +7,7 @@ import { MemoryStore, hashToken, type Account, type Plan } from '../src/store.js
 
 const T0 = Date.UTC(2026, 8, 30, 8, 0, 0);
 const TOKEN = 'instance-token';
-const plan: Plan = { id: 'p', category: 'starter', displayName: 'P', weekCredits: 4 * CREDITS_PER_DOLLAR };
+const plan: Plan = { id: 'p', category: 'starter', displayName: 'P', weekCredits: 4 * CREDITS_PER_DOLLAR, monthlyPrices: [{ amount: 4900, currency: 'EUR' }] };
 const owner: Account = { id: 'acc', email: 'owner@example.test', planId: 'p', createdAt: T0 };
 
 interface Seen { url: string; init: RequestInit }
@@ -58,7 +58,7 @@ describe('GET /v1/config (contract)', () => {
     const body = await (await call('/v1/config', {}, null)).json();
     const parsed = RowboatApiConfig.parse(body);
     expect(parsed.billing.plans).toEqual([
-      { id: 'p', category: 'starter', displayName: 'P', monthlyCredits: plan.weekCredits, dailyCredits: plan.weekCredits / 4, monthlyPriceCents: null },
+      { id: 'p', category: 'starter', displayName: 'P', monthlyCredits: plan.weekCredits, dailyCredits: plan.weekCredits / 4, monthlyPriceCents: 4900 },
     ]);
   });
 });

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { Money } from './pricing.js';
 import type { QuotaState } from './quota.js';
 
 /** Tokens are kept hashed, so a memory dump or a log line never leaks one. */
@@ -18,6 +19,7 @@ export interface Plan {
   category: 'free' | 'starter' | 'pro';
   displayName: string;
   weekCredits: number;
+  monthlyPrices: Money[];
 }
 
 /** One model call, as the control plane saw it (architecture §3.5, UsageRecord). */

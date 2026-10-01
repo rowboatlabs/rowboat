@@ -23,7 +23,7 @@ cd ../warell && pnpm install && pnpm typecheck && pnpm test
 ```sh
 cd packages/control && pnpm build
 WARELL_PUBLIC_URL=http://127.0.0.1:8787 WARELL_INSTANCE_TOKEN=<jeton> \
-OPENROUTER_API_KEY=<clé> WARELL_WEEK_BUDGET_USD=5 PORT=8787 pnpm start
+OPENROUTER_API_KEY=<clé> WARELL_PLAN_ID=essentiel PORT=8787 pnpm start
 ```
 
 | Variable | Rôle |
@@ -31,11 +31,15 @@ OPENROUTER_API_KEY=<clé> WARELL_WEEK_BUDGET_USD=5 PORT=8787 pnpm start
 | `WARELL_PUBLIC_URL` | URL publique du plan de contrôle, servie dans `/v1/config` |
 | `WARELL_INSTANCE_TOKEN` | Jeton porteur de l'instance (phase 0 : un seul propriétaire) ; gardé en empreinte SHA-256 |
 | `OPENROUTER_API_KEY` | Ne sort jamais du plan de contrôle |
-| `WARELL_WEEK_BUDGET_USD` | Budget de la semaine ; la session de 5 h en vaut un quart (archi §3.5). Défaut : 5 |
+| `WARELL_PLAN_ID` | Forfait du propriétaire, pris dans `src/catalog.ts` (budgets calculés depuis les prix, archi §3.5). Défaut : `essentiel` |
 | `WARELL_ACCOUNT_ID`, `WARELL_ACCOUNT_EMAIL`, `WARELL_ACCOUNT_CREATED_AT` | Le compte du propriétaire ; la semaine est ancrée à sa date de création |
 | `PORT` | Défaut : 8080 |
 
 L'instance le trouve par `API_URL` : on ne modifie aucun fichier upstream qui l'appelle (archi §3.14).
+
+## Changer un prix ou une devise
+
+Tout est dans `packages/control/src/catalog.ts` : un prix par devise et par forfait, et un taux par devise. Le budget se recalcule ; `test/pricing.test.ts` casse si la marge de 55 % ne tient plus dans une devise.
 
 ## Les tests de contrat
 

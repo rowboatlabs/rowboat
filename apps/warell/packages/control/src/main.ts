@@ -1,11 +1,12 @@
 import { serve } from '@hono/node-server';
-import { CREDITS_PER_DOLLAR } from '@x/shared/dist/billing.js';
 import { createApp } from './app.js';
-import { MemoryStore, hashToken, type Account, type Plan } from './store.js';
+import { ASSUMPTIONS, OFFERS } from './catalog.js';
+import { plansFrom } from './pricing.js';
+import { MemoryStore, hashToken, type Account } from './store.js';
 
-// Phase 0 entry point (roadmap §4, PR 2): one owner, one instance token, one
-// plan whose week budget comes from the environment. Accounts, plans and
-// usage move to Postgres with the first multi-user deployment.
+// Phase 0 entry point (roadmap §4): one owner, one instance token, the plan
+// catalog of catalog.ts. Accounts and usage move to Postgres with the first
+// multi-user deployment.
 
 function required(name: string): string {
   const value = process.env[name];
@@ -14,25 +15,19 @@ function required(name: string): string {
 }
 
 const publicUrl = required('WARELL_PUBLIC_URL').replace(/\/+$/, '');
-const weekBudgetUsd = Number(process.env.WARELL_WEEK_BUDGET_USD ?? '5');
-if (!Number.isFinite(weekBudgetUsd) || weekBudgetUsd <= 0) {
-  throw new Error('WARELL_WEEK_BUDGET_USD must be a positive number of dollars');
+const plans = plansFrom(OFFERS, ASSUMPTIONS);
+const planId = process.env.WARELL_PLAN_ID ?? 'essentiel';
+if (!plans.some((p) => p.id === planId)) {
+  throw new Error(`WARELL_PLAN_ID must be one of: ${plans.map((p) => p.id).join(', ')}`);
 }
-
-const plan: Plan = {
-  id: 'phase0',
-  category: 'starter',
-  displayName: 'Phase 0',
-  weekCredits: Math.round(weekBudgetUsd * CREDITS_PER_DOLLAR),
-};
 const owner: Account = {
   id: process.env.WARELL_ACCOUNT_ID ?? 'owner',
   email: process.env.WARELL_ACCOUNT_EMAIL ?? null,
-  planId: plan.id,
+  planId,
   createdAt: Date.parse(process.env.WARELL_ACCOUNT_CREATED_AT ?? '') || Date.now(),
 };
 
-const store = new MemoryStore(new Map([[hashToken(required('WARELL_INSTANCE_TOKEN')), owner]]), [plan]);
+const store = new MemoryStore(new Map([[hashToken(required('WARELL_INSTANCE_TOKEN')), owner]]), plans);
 
 const app = createApp({
   store,
