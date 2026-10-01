@@ -84,12 +84,12 @@ function SetupTile({ setup, selected, onSelect }: { setup: AgentSetup; selected:
     )
 }
 
-/** The coding agent a Replicas agent runs: its kind. */
-function KindChoice({ kinds, selected, onSelect }: { kinds: readonly string[]; selected: string; onSelect: (kind: string) => void }) {
+/** The agent a platform runs (Replicas's coding agent, Agent37's Hermes or OpenClaw): its kind. */
+function KindChoice({ label, kinds, selected, onSelect }: { label: string; kinds: readonly string[]; selected: string; onSelect: (kind: string) => void }) {
     return (
         <div className="mt-4 flex flex-col gap-1.5">
-            <span className="text-xs font-medium text-foreground">Coding agent</span>
-            <div role="radiogroup" aria-label="Coding agent" className="flex flex-wrap gap-1.5">
+            <span className="text-xs font-medium text-foreground">{label}</span>
+            <div role="radiogroup" aria-label={label} className="flex flex-wrap gap-1.5">
                 {kinds.map((k) => (
                     <button
                         key={k}
@@ -268,7 +268,7 @@ export function AgentsDialog({ org, open, onOpenChange }: {
                                     />
                                 ))}
                             </div>
-                            {setup.kinds.length > 1 && <KindChoice kinds={setup.kinds} selected={kind} onSelect={setChosenKind} />}
+                            {setup.kinds.length > 1 && <KindChoice label={setup.kindChoice ?? 'Agent'} kinds={setup.kinds} selected={kind} onSelect={setChosenKind} />}
                             <label className="mt-4 flex flex-col gap-1.5">
                                 <span className="text-xs font-medium text-foreground">Name</span>
                                 <Input
@@ -326,6 +326,7 @@ export function AgentsDialog({ org, open, onOpenChange }: {
                             <ConnectAgent
                                 org={org}
                                 setup={agentSetup(screen.setupId)}
+                                agentKind={screen.kind}
                                 agentId={screen.agentId}
                                 agentName={screen.agentName}
                                 agentKey={screen.secret}

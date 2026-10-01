@@ -73,7 +73,7 @@ describe('AgentsDialog', () => {
         render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
         await screen.findByText('Hermes')
         fireEvent.click(screen.getByRole('button', { name: /Add agent/ }))
-        expect(setupsOffered()).toEqual(['Hermes', 'Replicas', 'Custom'])
+        expect(setupsOffered()).toEqual(['Hermes', 'Replicas', 'Agent37', 'Custom'])
         expect(screen.getByRole('radio', { name: 'Hermes' })).toHaveAttribute('aria-checked', 'true')
         // The name suggests the kind's own.
         expect(screen.getByLabelText('Agent name')).toHaveValue('Hermes')
@@ -235,6 +235,30 @@ describe('AgentsDialog', () => {
         expect(screen.getByText('ROWBOAT_AGENT_KEY')).toBeInTheDocument()
         expect(screen.getByText('Add it to a space')).toBeInTheDocument()
         expect(invoke).not.toHaveBeenCalledWith('spaces:openDirect', expect.anything())
+    })
+
+    it('adds an Agent37 agent: Hermes or OpenClaw, a name, and the Agent37 key; then the steps on the instance', async () => {
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        await screen.findByText('Hermes')
+        fireEvent.click(screen.getByRole('button', { name: /Add agent/ }))
+        fireEvent.click(screen.getByRole('radio', { name: 'Agent37' }))
+        const which = screen.getByRole('radiogroup', { name: 'Agent' })
+        expect(within(which).getAllByRole('radio').map((r) => r.getAttribute('aria-label'))).toEqual(['Hermes', 'OpenClaw'])
+        fireEvent.click(within(which).getByRole('radio', { name: 'OpenClaw' }))
+        expect(screen.getByLabelText('Agent name')).toHaveValue('OpenClaw')
+        expect(screen.getByRole('button', { name: 'Add agent' })).toBeDisabled()
+
+        fireEvent.change(screen.getByLabelText('Agent37 API key'), { target: { value: 'sk_live_ab12' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Add agent' }))
+        await screen.findByRole('heading', { name: 'Connect OpenClaw' })
+        expect(invoke).toHaveBeenCalledWith('spaces:addAgent', { orgId: 'org-1', displayName: 'OpenClaw', kind: 'openclaw', connection: 'agent37', credential: 'sk_live_ab12' })
+        // On the instance: OpenClaw's own commands, with our MCP server on the new key.
+        expect(screen.getByText('Give it the Spaces tools (recommended)')).toBeInTheDocument()
+        fireEvent.click(screen.getAllByRole('button', { name: /Copy/ })[0]!)
+        expect(vi.mocked(navigator.clipboard.writeText).mock.calls.at(-1)![0]).toBe(
+            `openclaw mcp add rowboat --url 'https://rowboat.example/mcp' --transport streamable-http --header 'Authorization: Bearer ${NEW_KEY}'`,
+        )
+        expect(screen.getByText('Restart the instance')).toBeInTheDocument()
     })
 
     it('shows a Replicas agent’s key by its end, flags a rejected one, and lets its owner replace it', async () => {
