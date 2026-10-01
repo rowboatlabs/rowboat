@@ -842,6 +842,23 @@ export const MIGRATIONS: Migration[] = [
       `alter table messages add column approval jsonb`,
     ],
   },
+  {
+    // An agent's option defaults, set by its owner (spec §8 Invocation
+    // options, 2026-10-01): kept apart from agent_capabilities, which its
+    // connector rewrites whenever it declares, so a reconnect never loses them.
+    id: '030-agent-option-defaults',
+    statements: [
+      `create table agent_option_defaults (
+        org_id text not null,
+        agent_id text not null,
+        data jsonb not null,
+        set_by text not null,
+        set_at text not null,
+        primary key (org_id, agent_id),
+        foreign key (org_id, agent_id) references members(org_id, id)
+      )`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

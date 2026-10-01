@@ -8,6 +8,7 @@ import type {
   Approval,
   ApprovalState,
   Invocation,
+  InvocationOptionValues,
   InvocationState,
   ChangeSet,
   Member,
@@ -1642,6 +1643,22 @@ export class PgStore implements Store {
       [this.orgId, agentId],
     );
     return rows[0]?.data;
+  }
+
+  async getAgentOptionDefaults(agentId: string): Promise<InvocationOptionValues | undefined> {
+    const rows = await this.sql.query<{ data: InvocationOptionValues }>(
+      'select data from agent_option_defaults where org_id = $1 and agent_id = $2',
+      [this.orgId, agentId],
+    );
+    return rows[0]?.data;
+  }
+
+  async putAgentOptionDefaults(agentId: string, defaults: InvocationOptionValues, by: string, at: string): Promise<void> {
+    await this.sql.query(
+      `insert into agent_option_defaults (org_id, agent_id, data, set_by, set_at) values ($1, $2, $3, $4, $5)
+       on conflict (org_id, agent_id) do update set data = excluded.data, set_by = excluded.set_by, set_at = excluded.set_at`,
+      [this.orgId, agentId, JSON.stringify(defaults), by, at],
+    );
   }
 
   async putAgentCapabilities(agentId: string, capabilities: ConnectorCapabilities, at: string): Promise<void> {

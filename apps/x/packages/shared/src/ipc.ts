@@ -4126,7 +4126,14 @@ export const ipcSchemas = {
   },
   'spaces:getAgentCapabilities': {
     req: z.object({ orgId: z.string(), agentId: z.string() }),
-    res: z.object({ capabilities: z.custom<SpacesTypes.ConnectorCapabilities>() }),
+    // `defaults`: what the agent's owner set for its options (Harbor spec §8, 2026-10-01).
+    res: z.object({ capabilities: z.custom<SpacesTypes.ConnectorCapabilities>(), defaults: z.record(z.string(), z.union([z.string(), z.boolean()])) }),
+  },
+  // The agent's owner sets defaults for the options its connector declares;
+  // Harbor fills them into any invocation whose invoker picked none.
+  'spaces:setAgentOptionDefaults': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), defaults: z.record(z.string(), z.union([z.string(), z.boolean()])) }),
+    res: z.object({ defaults: z.record(z.string(), z.union([z.string(), z.boolean()])) }),
   },
   // The stream composer's Auto toggle (2026-09-22): Jev says whether a draft
   // is a new root or a reply to one of the candidate threads the renderer

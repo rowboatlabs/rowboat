@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { ArrowLeft, Bot, KeyRound, Loader2, Plus } from 'lucide-react'
+import { ArrowLeft, Bot, ChevronRight, Loader2, Plus } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { AgentPage } from '@/components/spaces/agent-page'
 import { AgentLogo, ConnectAgent } from '@/components/spaces/agent-setup'
 import { MemberAvatar } from '@/components/spaces/atoms'
 import { refreshOrgRoster, useOrgRoster } from '@/hooks/use-space-members'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
-import { AGENT_SETUPS, agentLabel, agentSetup, kindInfo, PLATFORMS, setupFor, type AgentSetup } from '@/lib/agent-kinds'
+import { AGENT_SETUPS, agentLabel, agentSetup, kindInfo, setupFor, type AgentSetup } from '@/lib/agent-kinds'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 
@@ -18,22 +19,18 @@ import { cn } from '@/lib/utils'
 // hash. You see the agents you own; an admin sees every one and can revoke,
 // never mint.
 //
-// Three screens, one job each (2026-09-30): the list; adding one, which
-// starts with how it connects (lib/agent-kinds.ts: Hermes, Replicas with its
-// coding agent and key, or Custom); and connecting it with its new key, by
-// the steps its setup gives. Harbor stores each agent's kind and connection,
-// so a new key for an existing agent goes straight to its own setup. A
-// platform agent (Replicas) also shows its platform key's last characters,
-// whether the platform has rejected it, and Replace, for its owner.
+// Four screens, one job each (2026-09-30; the agent's page, 2026-10-01): the
+// list, a roster to click into; adding one, which starts with how it connects
+// (lib/agent-kinds.ts: Hermes, Replicas with its coding agent and key, or
+// Custom); connecting it with its new key, by the steps its setup gives; and
+// its page (agent-page.tsx): its option defaults, its setup steps any time
+// after, its keys, and a platform agent's key (Replicas) with Replace.
 
 type Screen =
     | { name: 'list' }
     | { name: 'add' }
     | { name: 'connect'; agentId: string; agentName: string; secret: string; setupId: string; kind: string }
-
-function when(iso: string | undefined): string {
-    return iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : 'never'
-}
+    | { name: 'agent'; agentId: string }
 
 function Header({ title, description, icon, onBack }: { title: string; description: string; icon?: ReactNode; onBack?: () => void }) {
     return (
@@ -116,77 +113,6 @@ function KindChoice({ kinds, selected, onSelect }: { kinds: readonly string[]; s
 }
 
 /** A platform agent's key: its end, whether the platform rejected it, and Replace for the owner. */
-function CredentialRow({ orgId, agent, credential, canReplace, onReplaced }: {
-    orgId: string
-    agent: spaces.Member
-    credential: spaces.AgentCredential
-    canReplace: boolean
-    onReplaced: () => Promise<void>
-}) {
-    const [editing, setEditing] = useState(false)
-    const [secret, setSecret] = useState('')
-    const [error, setError] = useState<string | null>(null)
-    const [saving, setSaving] = useState(false)
-    const platform = PLATFORMS[agent.agentConnection ?? '']?.label ?? 'Platform'
-    const save = async () => {
-        setSaving(true)
-        setError(null)
-        try {
-            await window.ipc.invoke('spaces:setAgentCredential', { orgId, agentId: agent.id, secret: secret.trim() })
-            setEditing(false)
-            setSecret('')
-            toast(`${platform} key replaced`, 'success')
-            await onReplaced()
-        } catch (err) {
-            setError(err instanceof Error ? err.message : `Could not replace the ${platform} key`)
-        } finally {
-            setSaving(false)
-        }
-    }
-    return (
-        <div className="mt-1.5 flex flex-col gap-1 text-[11px]">
-            <div className="flex items-center justify-between gap-2 text-muted-foreground">
-                <span className="min-w-0 truncate">
-                    {platform} key {credential.hint}
-                    {credential.rejectedAt && <span className="text-destructive"> · Key rejected: replace it to bring the agent back</span>}
-                </span>
-                {canReplace && !editing && (
-                    <button type="button" onClick={() => setEditing(true)} className="shrink-0 rounded px-1.5 py-0.5 hover:bg-accent hover:text-foreground">
-                        Replace
-                    </button>
-                )}
-            </div>
-            {editing && (
-                <form
-                    className="flex items-center gap-1.5"
-                    onSubmit={(e) => {
-                        e.preventDefault()
-                        if (secret.trim()) void save()
-                    }}
-                >
-                    <Input
-                        type="password"
-                        value={secret}
-                        onChange={(e) => setSecret(e.target.value)}
-                        placeholder={`New ${platform} key`}
-                        aria-label={`New ${platform} key`}
-                        className="h-7 text-xs"
-                        autoFocus
-                    />
-                    <Button type="submit" size="sm" className="h-7" disabled={!secret.trim() || saving}>
-                        {saving && <Loader2 className="size-3 animate-spin" />}
-                        Save
-                    </Button>
-                    <Button type="button" size="sm" variant="ghost" className="h-7" onClick={() => (setEditing(false), setSecret(''), setError(null))}>
-                        Cancel
-                    </Button>
-                </form>
-            )}
-            {error && <span className="text-destructive">{error}</span>}
-        </div>
-    )
-}
-
 export function AgentsDialog({ org, open, onOpenChange }: {
     org: OrgWithSpaces
     open: boolean
@@ -199,7 +125,6 @@ export function AgentsDialog({ org, open, onOpenChange }: {
     const [agents, setAgents] = useState<spaces.AgentListing[] | null>(null)
     const [screen, setScreen] = useState<Screen>({ name: 'list' })
     const [busy, setBusy] = useState(false)
-    const [confirming, setConfirming] = useState<string | null>(null)
     const [chosen, setChosen] = useState<string | null>(null)
     const [chosenKind, setChosenKind] = useState<string | null>(null)
     const [name, setName] = useState('')
@@ -225,23 +150,9 @@ export function AgentsDialog({ org, open, onOpenChange }: {
     useEffect(() => {
         if (!open) return
         setScreen({ name: 'list' })
-        setConfirming(null)
         setAgents(null)
         void load()
     }, [open, load])
-
-    const run = async (work: () => Promise<void>, failure: string) => {
-        if (busy) return
-        setBusy(true)
-        try {
-            await work()
-            await load()
-        } catch (err) {
-            toast(err instanceof Error ? err.message : failure, 'error')
-        } finally {
-            setBusy(false)
-        }
-    }
 
     const startAdding = () => {
         setChosen(null)
@@ -278,22 +189,10 @@ export function AgentsDialog({ org, open, onOpenChange }: {
         }
     }
 
-    const newKey = (agent: spaces.Member) => run(async () => {
-        const { key } = await window.ipc.invoke('spaces:createAgentKey', { orgId: org.id, agentId: agent.id })
-        // Harbor knows how it runs: straight to its own setup.
-        setScreen({ name: 'connect', agentId: agent.id, agentName: agent.displayName, secret: key.secret, setupId: setupFor(agent).id, kind: agent.agentKind ?? 'custom' })
-    }, 'Could not create a key')
-
-    const revoke = (agent: spaces.Member, keyId: string) => run(async () => {
-        await window.ipc.invoke('spaces:revokeAgentKey', { orgId: org.id, agentId: agent.id, keyId })
-        setConfirming(null)
-        toast('Key revoked', 'success')
-    }, 'Could not revoke the key')
-
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             {/* One column that may shrink: long setup lines wrap inside it instead of widening the dialog. */}
-            <DialogContent className={cn('grid-cols-[minmax(0,1fr)] gap-0 overflow-hidden p-0', screen.name === 'connect' ? 'sm:max-w-2xl' : 'sm:max-w-xl')}>
+            <DialogContent className={cn('grid-cols-[minmax(0,1fr)] gap-0 overflow-hidden p-0', screen.name === 'connect' || screen.name === 'agent' ? 'sm:max-w-2xl' : 'sm:max-w-xl')}>
                 {screen.name === 'list' && (
                     <>
                         <Header title={`Agents in ${org.name}`} description="Agents are members with their own key. Add one, connect what runs it, then add it to spaces." />
@@ -312,45 +211,26 @@ export function AgentsDialog({ org, open, onOpenChange }: {
                                         const mine = agent.ownerId === org.memberId
                                         const live = keys.filter((k) => !k.revokedAt)
                                         return (
-                                            <li key={agent.id} className="flex items-start gap-3 rounded-lg px-2 py-2.5">
-                                                <MemberAvatar id={agent.id} name={agent.displayName} size="md" agent agentKind={agent.agentKind} />
-                                                <div className="min-w-0 flex-1">
-                                                    <div className="truncate text-sm font-medium">{agent.displayName}</div>
-                                                    <div className="truncate text-[11px] text-muted-foreground">
-                                                        {agentLabel(agent.agentKind, agent.agentConnection)}
-                                                        {' · '}
-                                                        {agent.ownerId ? (mine ? 'Yours' : `Owned by ${names.get(agent.ownerId) ?? 'another member'}`) : 'Managed by admins'}
-                                                        {' · '}
-                                                        {live.length === 0 ? 'no active keys' : live.length === 1 ? '1 key' : `${live.length} keys`}
+                                            <li key={agent.id}>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setScreen({ name: 'agent', agentId: agent.id })}
+                                                    className="flex w-full items-center gap-3 rounded-lg px-2 py-2.5 text-left hover:bg-accent"
+                                                >
+                                                    <MemberAvatar id={agent.id} name={agent.displayName} size="md" agent agentKind={agent.agentKind} />
+                                                    <div className="min-w-0 flex-1">
+                                                        <div className="truncate text-sm font-medium">{agent.displayName}</div>
+                                                        <div className="truncate text-[11px] text-muted-foreground">
+                                                            {agentLabel(agent.agentKind, agent.agentConnection)}
+                                                            {' · '}
+                                                            {agent.ownerId ? (mine ? 'Yours' : `Owned by ${names.get(agent.ownerId) ?? 'another member'}`) : 'Managed by admins'}
+                                                            {' · '}
+                                                            {live.length === 0 ? 'no active keys' : live.length === 1 ? '1 key' : `${live.length} keys`}
+                                                            {credential?.rejectedAt && <span className="text-destructive">{' · '}Key rejected</span>}
+                                                        </div>
                                                     </div>
-                                                    {credential && (
-                                                        <CredentialRow orgId={org.id} agent={agent} credential={credential} canReplace={mine} onReplaced={load} />
-                                                    )}
-                                                    {live.length > 0 && (
-                                                        <ul className="mt-1.5 flex flex-col gap-1">
-                                                            {live.map((k) => (
-                                                                <li key={k.id} className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
-                                                                    <span className="min-w-0 truncate">Key made {when(k.createdAt)} · last used {when(k.lastUsedAt)}</span>
-                                                                    {(mine || isAdmin) && (
-                                                                        <button
-                                                                            type="button"
-                                                                            disabled={busy}
-                                                                            onClick={() => (confirming === k.id ? void revoke(agent, k.id) : setConfirming(k.id))}
-                                                                            className="shrink-0 rounded px-1.5 py-0.5 text-destructive hover:bg-destructive/10"
-                                                                        >
-                                                                            {confirming === k.id ? 'Confirm revoke' : 'Revoke'}
-                                                                        </button>
-                                                                    )}
-                                                                </li>
-                                                            ))}
-                                                        </ul>
-                                                    )}
-                                                </div>
-                                                {mine && (
-                                                    <Button size="sm" variant="outline" disabled={busy} onClick={() => void newKey(agent)}>
-                                                        <KeyRound className="size-3.5" /> New key
-                                                    </Button>
-                                                )}
+                                                    <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                                                </button>
                                             </li>
                                         )
                                     })}
@@ -456,6 +336,29 @@ export function AgentsDialog({ org, open, onOpenChange }: {
                         </Footer>
                     </>
                 )}
+
+                {screen.name === 'agent' && (() => {
+                    const listing = agents?.find((a) => a.agent.id === screen.agentId)
+                    if (!listing) return null
+                    const { agent } = listing
+                    const owner = agent.ownerId === org.memberId ? 'Yours' : agent.ownerId ? `Owned by ${names.get(agent.ownerId) ?? 'another member'}` : 'Managed by admins'
+                    return (
+                        <>
+                            <Header
+                                title={agent.displayName}
+                                description={`${agentLabel(agent.agentKind, agent.agentConnection)} · ${owner}`}
+                                icon={<AgentLogo logo={kindInfo(agent.agentKind ?? 'custom').logo ?? setupFor(agent).logo} className="size-5" />}
+                                onBack={() => setScreen({ name: 'list' })}
+                            />
+                            <Body>
+                                <AgentPage org={org} listing={listing} isAdmin={isAdmin} onChanged={load} />
+                            </Body>
+                            <Footer>
+                                <Button size="sm" onClick={() => setScreen({ name: 'list' })}>Done</Button>
+                            </Footer>
+                        </>
+                    )
+                })()}
             </DialogContent>
         </Dialog>
     )

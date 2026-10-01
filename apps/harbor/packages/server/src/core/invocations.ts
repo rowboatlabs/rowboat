@@ -40,6 +40,23 @@ const WORKING_TIMEOUT_MS = 30 * 60 * 1000;
 /** How many of a space's invocations a listing returns, newest first. */
 const LIST_LIMIT = 100;
 
+/**
+ * The owner's defaults that still fit what the connector declares (spec §8
+ * Invocation options, 2026-10-01): a default for an option it no longer
+ * declares, or a choice it no longer offers, is skipped rather than sent.
+ */
+export function applicableDefaults(capabilities: ConnectorCapabilities, defaults: InvocationOptionValues): InvocationOptionValues {
+  const fit: InvocationOptionValues = {};
+  for (const option of capabilities.options) {
+    const value = defaults[option.key];
+    if (value === undefined) continue;
+    if (option.type === 'toggle' ? typeof value === 'boolean' : typeof value === 'string' && option.choices.some((c) => c.id === value)) {
+      fit[option.key] = value;
+    }
+  }
+  return fit;
+}
+
 /** Frames to send once the lock — the transaction — has returned. */
 export type InvocationOutbox = Array<
   { to: 'agent'; memberId: string; frame: ServerFrame } | { to: 'space'; spaceId: string; frame: ServerFrame }
@@ -80,7 +97,8 @@ export class Invocations {
       const shares = space.kind === 'shared' || (await this.k.store.sharesSharedSpace(message.author.memberId, agentId));
       const refusal = invocationRefusal(shares, depth);
       const now = this.k.now();
-      const options = agentOptions?.[agentId];
+      // The owner's defaults fill what the invoker did not pick: a mention, a DM, an agent's hand-off alike.
+      const options = { ...(await this.defaultsFor(agentId)), ...agentOptions?.[agentId] };
       const invocation: Invocation = {
         id: this.k.ulid(),
         agentId,
@@ -212,6 +230,18 @@ export class Invocations {
   }
 
   // --- people's side ---------------------------------------------------------------
+
+  /** The owner's defaults that fit the agent's declared options, as an invocation gets them. */
+  private async defaultsFor(agentId: string): Promise<InvocationOptionValues> {
+    const defaults = await this.k.store.getAgentOptionDefaults(agentId);
+    if (!defaults || Object.keys(defaults).length === 0) return {};
+    return applicableDefaults((await this.k.store.getAgentCapabilities(agentId)) ?? ConnectorCapabilities.parse({}), defaults);
+  }
+
+  /** The defaults the agent's owner set, as set (the composer preselects those that fit). Any org member. */
+  async optionDefaults(agentId: string): Promise<InvocationOptionValues> {
+    return (await this.k.store.getAgentOptionDefaults(agentId)) ?? {};
+  }
 
   /** Any org member may read an agent's capabilities: the composer shows its options, the thread its Stop. */
   async capabilities(agentId: string): Promise<ConnectorCapabilities> {

@@ -17,6 +17,7 @@ import {
   type ConnectorCapabilities,
   type Approval,
   type Invocation,
+  type InvocationOptionValues,
   type Member,
   type Membership,
   type StreamEvent,
@@ -568,9 +569,16 @@ export class SpacesClient {
     return (await this.request('POST', `/v1/invocations/${encodeURIComponent(invocationId)}/cancel`, routes.cancelInvocation.response)).invocation;
   }
 
-  /** What an agent's connector declared (api.ts getAgentCapabilities). */
-  async getAgentCapabilities(agentId: string): Promise<ConnectorCapabilities> {
-    return (await this.request('GET', `/v1/agents/${encodeURIComponent(agentId)}/capabilities`, routes.getAgentCapabilities.response)).capabilities;
+  /** What an agent's connector declared, and the defaults its owner set for those options (api.ts getAgentCapabilities). */
+  async getAgentCapabilities(agentId: string): Promise<{ capabilities: ConnectorCapabilities; defaults: InvocationOptionValues }> {
+    return this.request('GET', `/v1/agents/${encodeURIComponent(agentId)}/capabilities`, routes.getAgentCapabilities.response);
+  }
+
+  /** Set an agent's option defaults: its owner only; `{}` clears them. */
+  async setAgentOptionDefaults(agentId: string, defaults: InvocationOptionValues): Promise<InvocationOptionValues> {
+    return (
+      await this.request('PUT', `/v1/agents/${encodeURIComponent(agentId)}/option-defaults`, routes.setAgentOptionDefaults.response, { defaults })
+    ).defaults;
   }
 
   /** The deliberate ceremony: promote a thread (rootMessageId) or post + annotate (body). */
