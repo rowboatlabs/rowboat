@@ -1,6 +1,8 @@
 import { serve } from '@hono/node-server';
 import pg from 'pg';
 import { createApp } from './app.js';
+import { SOCIAL_PROVIDERS, createAuth, migrateAuth, type AuthDeps, type SocialCredentials, type WarellAuth } from './auth.js';
+import { LogSender, NoSender } from './codes.js';
 import { ASSUMPTIONS, MEDIA_PACKS, OFFERS } from './catalog.js';
 import { packCredits, plansFrom } from './pricing.js';
 import { migrate, poolDb } from './db.js';
@@ -32,14 +34,51 @@ const owner: Account = {
 
 const instanceToken = required('WARELL_INSTANCE_TOKEN');
 let store: ControlStore;
+let auth: WarellAuth | undefined;
 if (process.env.DATABASE_URL) {
-  const db = poolDb(new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 5 }));
+  // Our statements name the `warell` schema; Better Auth's do not, so the
+  // search path puts its tables there too (architecture §3.5).
+  const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 5 });
+  // Set on each new connection rather than as a startup option, which some
+  // poolers drop silently (seen 01/10/2026: Better Auth's tables then landed
+  // in `public`). A client runs its queries in order, so this one goes first
+  // (pg 8 warns that queueing is deprecated; pinned to 8, revisit with pg 9).
+  pool.on('connect', (client) => {
+    client.query('SET search_path TO warell').catch((err: unknown) => console.error('[control] search_path', err));
+  });
+  const db = poolDb(pool);
   console.log(`[control] ${await migrate(db)} migration(s) applied`);
   const pgStore = new PgStore(db, plans);
   // An existing account keeps its creation date: its weeks stay anchored there.
   await pgStore.upsertAccount(owner);
   await pgStore.grantToken(instanceToken, owner.id);
   store = pgStore;
+
+  // The sign-in server (architecture §3.5 "Comptes et connexion"): only with
+  // its secret, so a deployment without one keeps phase 0's instance token.
+  if (process.env.WARELL_AUTH_SECRET) {
+    const social = Object.fromEntries(
+      SOCIAL_PROVIDERS.flatMap((p): Array<[string, SocialCredentials]> => {
+        const id = process.env[`${p.toUpperCase()}_CLIENT_ID`];
+        const secret = process.env[`${p.toUpperCase()}_CLIENT_SECRET`];
+        return id && secret ? [[p, { clientId: id, clientSecret: secret }]] : [];
+      }),
+    );
+    const authDeps: AuthDeps = {
+      publicUrl,
+      secret: process.env.WARELL_AUTH_SECRET,
+      database: pool,
+      db,
+      // Codes in the log are for development only: never set in production.
+      sender: process.env.WARELL_DEV_CODES === '1' ? new LogSender() : new NoSender(),
+      social,
+      onUserCreated: (u) => pgStore.upsertAccount({ id: u.id, email: u.email, planId: 'decouverte', createdAt: u.createdAt }),
+      now: Date.now,
+    };
+    await migrateAuth(authDeps);
+    auth = createAuth(authDeps);
+    console.log(`[control] sign-in: ${[...(authDeps.sender.email ? ['email'] : []), ...(authDeps.sender.sms ? ['sms'] : []), ...Object.keys(social)].join(', ') || 'no method yet'}`);
+  }
 } else {
   store = new MemoryStore(new Map([[hashToken(instanceToken), owner]]), plans);
 }
@@ -61,6 +100,7 @@ const app = createApp({
   pixazoKey: process.env.PIXAZO_API_KEY || undefined,
   mediaPacks: MEDIA_PACKS.map((pack) => ({ id: pack.id, credits: packCredits(pack, ASSUMPTIONS), prices: pack.prices })),
   adminTokenHash: process.env.WARELL_ADMIN_TOKEN ? hashToken(process.env.WARELL_ADMIN_TOKEN) : undefined,
+  auth,
   fetch: globalThis.fetch,
   now: Date.now,
 });

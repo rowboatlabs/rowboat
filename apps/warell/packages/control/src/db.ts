@@ -111,6 +111,24 @@ export const MIGRATIONS: string[] = [
   CREATE TRIGGER media_ledger_append_only BEFORE UPDATE OR DELETE ON warell.media_ledger
     FOR EACH ROW EXECUTE FUNCTION warell.refuse_change();
   `,
+  // 2 — sign-in codes (security §4.1, decided 01/10/2026): every send is
+  // counted, to cap them per number or address; phone codes are kept hashed.
+  // Better Auth's own tables are created by its migrator, in this schema too.
+  `
+  CREATE TABLE warell.code_sends (
+    id bigserial PRIMARY KEY,
+    identifier text NOT NULL,
+    at timestamptz NOT NULL
+  );
+  CREATE INDEX code_sends_identifier_at ON warell.code_sends (identifier, at);
+
+  CREATE TABLE warell.phone_codes (
+    phone_e164 text PRIMARY KEY,
+    code_hash text NOT NULL,
+    attempts integer NOT NULL DEFAULT 0,
+    expires_at timestamptz NOT NULL
+  );
+  `,
 ];
 
 /** Brings the schema up to date. Safe on several machines at once: the lock serializes them. */

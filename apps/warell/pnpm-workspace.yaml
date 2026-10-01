@@ -1,2 +1,8 @@
 packages:
   - 'packages/*'
+
+# Better Auth's packages must share one @better-auth/core: the oauth provider
+# plugin asks for utils 0.4.2 while a transitive range pulls 0.5.0, which
+# installs core twice (decided 01/10/2026).
+overrides:
+  '@better-auth/utils': 0.4.2

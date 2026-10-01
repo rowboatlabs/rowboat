@@ -38,6 +38,9 @@ OPENROUTER_API_KEY=<clé> WARELL_PLAN_ID=essentiel PORT=8787 pnpm start
 | `WARELL_ADMIN_TOKEN` | Facultatif : le jeton de l'opérateur pour `/v1/admin/*` (recharges de crédits médias à la main). Absent : ces routes répondent 404 |
 | `WARELL_OWNER_MEDIA_CREDITS` | Crédits médias offerts au propriétaire, une seule fois en Postgres (référence `owner-grant`) ; en mémoire, à chaque démarrage |
 | `DATABASE_URL` | Postgres (schéma `warell`, migrations au démarrage, `src/db.ts`). Absente : tout reste en mémoire et s'oublie à l'arrêt de la machine |
+| `WARELL_AUTH_SECRET` | Le serveur de connexion (`/auth/v1`, archi §3.5 « Comptes et connexion »), seulement avec `DATABASE_URL`. 32 octets aléatoires au moins. Absent : seul le jeton d'instance ouvre `/v1` |
+| `GOOGLE_CLIENT_ID` / `_SECRET`, `APPLE_…`, `GITHUB_…`, `MICROSOFT_…` | Un fournisseur n'apparaît sur la page de connexion que si ses deux valeurs sont là |
+| `WARELL_DEV_CODES` | `1` en développement seulement : les codes email et SMS s'écrivent dans le journal. Sans lui et sans vrai fournisseur, ni l'email ni le SMS ne sont proposés |
 | `PORT` | Défaut : 8080 |
 
 L'instance le trouve par `API_URL` : on ne modifie aucun fichier upstream qui l'appelle (archi §3.14).
@@ -79,6 +82,12 @@ curl -X POST https://warell-control.fly.dev/v1/admin/media-credits \
 ## Postgres
 
 Une migration déployée ne se modifie jamais : on ajoute la suivante à `MIGRATIONS` (`src/db.ts`). Les tests du magasin (`test/store.contract.test.ts`) passent les **mêmes** règles au magasin en mémoire et à Postgres. Pour Postgres, ils tournent sur PGlite, dans le processus : ni serveur ni Docker. PGlite met une dizaine de secondes à démarrer : une base par fichier de test, vidée entre deux tests.
+
+## La connexion
+
+`test/auth.test.ts` joue la connexion **comme le cœur la joue** : même `openid-client`, découverte à la même adresse, enregistrement dynamique avec les mêmes métadonnées, PKCE, puis `/v1/me` avec le jeton. Si l'upstream change sa façon de se connecter, c'est ce test qui doit casser.
+
+Le serveur complète deux choses dans les requêtes de l'app (`asAppRequest`, `src/auth.ts`) : `offline_access`, sans quoi le cœur n'aurait pas de jeton de rafraîchissement, et `application_type: native`, sans quoi la redirection vers `http://localhost` serait refusée.
 
 ## Les tests de contrat
 

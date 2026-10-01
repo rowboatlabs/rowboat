@@ -3,6 +3,7 @@ import { createMiddleware } from 'hono/factory';
 import { buildApiConfig } from './config.js';
 import { proxyLlm, type ProxyDeps } from './llm-proxy.js';
 import { isAdmin, topUpMedia, type SoldPack } from './admin.js';
+import { AUTH_BASE_PATH, type WarellAuth } from './auth.js';
 import { createGeneration, getGeneration, listMediaModels, mediaBalance } from './media-route.js';
 import { budgetsForWeek, gauges, initialState } from './quota.js';
 import type { Account } from './store.js';
@@ -15,6 +16,8 @@ export type ControlDeps = ProxyDeps & {
   mediaPacks: SoldPack[];
   /** SHA-256 of the operator token; unset: /v1/admin answers 404. */
   adminTokenHash?: string;
+  /** The sign-in server; unset: only instance tokens open /v1 (phase 0). */
+  auth?: WarellAuth;
 };
 
 type Env = { Variables: { account: Account } };
@@ -34,9 +37,23 @@ export function createApp(deps: ControlDeps) {
     c.json(buildApiConfig({ publicUrl: deps.publicUrl }, await deps.store.plans())),
   );
 
+  // Where core looks for its OAuth server (`${supabaseUrl}/auth/v1`).
+  if (deps.auth) {
+    const auth = deps.auth;
+    app.all(`${AUTH_BASE_PATH}/*`, (c) => auth.handle(c.req.raw));
+  }
+
+  // An instance token, or an access token our sign-in server issued.
+  const accountFor = async (token: string) => {
+    const byToken = await deps.store.accountByToken(token);
+    if (byToken || !deps.auth) return byToken;
+    const userId = await deps.auth.userIdForAccessToken(token);
+    return userId ? deps.store.account(userId) : null;
+  };
+
   const authed = createMiddleware<Env>(async (c, next) => {
     const token = bearer(c.req.header('authorization'));
-    const account = token ? await deps.store.accountByToken(token) : null;
+    const account = token ? await accountFor(token) : null;
     if (!account) return c.json({ error: { code: 'unauthorized' } }, 401);
     c.set('account', account);
     await next();
