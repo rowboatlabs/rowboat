@@ -57,6 +57,16 @@ export async function seedWorkdir(opts: SeedOptions): Promise<void> {
     },
   });
 
+  // The upstream onboarding does not fit an instance: models come from the
+  // control plane, and its last step demands a team space, which fails
+  // while no Spaces server exists (measured 01/10/2026, architecture §6).
+  // Marked done; Warell's own onboarding (phone login) replaces it.
+  const noteFile = path.join(config, 'note_creation.json');
+  const note = (await readJson(noteFile)) ?? { strictness: 'medium', configured: false };
+  if (note.onboardingComplete !== true) {
+    await writeJson(noteFile, { ...note, onboardingComplete: true });
+  }
+
   // Initial model choice only; a choice already made is never overwritten.
   const modelsFile = path.join(config, 'models.json');
   const models = (await readJson(modelsFile)) ?? { version: 2, providers: {} };

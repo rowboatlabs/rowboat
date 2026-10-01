@@ -18,6 +18,15 @@ describe('seedWorkdir', () => {
     });
     expect(await read(dir, 'models.json')).toEqual({ version: 2, providers: {}, assistantModel: { provider: 'rowboat', model: 'openai/gpt-6-luna' } });
     expect((await fs.stat(path.join(dir, 'config', 'oauth.json'))).mode & 0o777).toBe(0o600);
+    expect(await read(dir, 'note_creation.json')).toEqual({ strictness: 'medium', configured: false, onboardingComplete: true });
+  });
+
+  it('marks the upstream onboarding done without touching the note settings', async () => {
+    const dir = await tmp();
+    await fs.mkdir(path.join(dir, 'config'));
+    await fs.writeFile(path.join(dir, 'config', 'note_creation.json'), JSON.stringify({ strictness: 'high', configured: true }));
+    await seedWorkdir({ workDir: dir, instanceToken: 't', assistantModel: 'm' });
+    expect(await read(dir, 'note_creation.json')).toEqual({ strictness: 'high', configured: true, onboardingComplete: true });
   });
 
   it('keeps what the person chose and rewrites only the control-plane session', async () => {

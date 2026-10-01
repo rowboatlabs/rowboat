@@ -428,7 +428,7 @@ Une instance éveillée **2 heures par jour** coûte environ **1,20 $ par mois**
 
 - **Une app ouverte garde l'instance éveillée** : le lien WebSocket de l'app de bureau ou du téléphone compte comme du trafic. Le coût réel dépend donc du temps où l'app reste ouverte, pas seulement du temps de travail de l'agent.
 - **Une instance suspendue ne fait plus rien** : ses tâches de fond sont gelées avec elle. Le réveil planifié du plan de contrôle (§3.5) est donc indispensable avant d'ouvrir les tâches programmées.
-- **L'accueil upstream exige un espace d'équipe** dès qu'un compte est connecté, et bloque tant qu'aucun serveur d'espaces n'existe. À traiter dans la préparation de l'instance, sans toucher l'upstream.
+- **L'accueil upstream exige un espace d'équipe** dès qu'un compte est connecté, et bloque tant qu'aucun serveur d'espaces n'existe. **Traité** : la préparation de l'instance (`packages/instance/src/seed.ts`) le marque comme fait. L'accueil Warell (connexion par téléphone) le remplacera.
 
 **Les alternatives regardées** (30/09/2026), pour pouvoir changer si Fly.io déçoit :
 
