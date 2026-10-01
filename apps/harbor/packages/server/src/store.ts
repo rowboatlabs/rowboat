@@ -7,6 +7,7 @@ import type {
   Approval,
   ApprovalState,
   Invocation,
+  InvocationOptionValues,
   InvocationState,
   BlobInfo,
   ChangeSet,
@@ -487,6 +488,9 @@ export interface Store {
   /** The approvals riding on these messages (their cards). */
   listApprovalsForMessages(spaceId: string, messageIds: string[]): Promise<Approval[]>;
   getAgentCapabilities(agentId: string): Promise<ConnectorCapabilities | undefined>;
+  /** The defaults an agent's owner set for its declared options (spec §8, 2026-10-01). */
+  getAgentOptionDefaults(agentId: string): Promise<InvocationOptionValues | undefined>;
+  putAgentOptionDefaults(agentId: string, defaults: InvocationOptionValues, by: string, at: string): Promise<void>;
   putAgentCapabilities(agentId: string, capabilities: ConnectorCapabilities, at: string): Promise<void>;
   /** Membership events with offset in (afterOffset, upToOffset], or to the head when upToOffset is null — the stream's join lines. */
   listMembershipEvents(spaceId: string, afterOffset: number, upToOffset: number | null): Promise<StoredEvent[]>;

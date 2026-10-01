@@ -1,4 +1,4 @@
-import { HARBOR_RUN_CONNECTIONS, isAgentPair, type AgentCredential, type AgentKey, type AgentKeySecret, type AgentListing, type Member } from '@rowboat/spaces-protocol';
+import { HARBOR_RUN_CONNECTIONS, isAgentPair, type AgentCredential, type AgentKey, type AgentKeySecret, type AgentListing, type InvocationOptionValues, type Member } from '@rowboat/spaces-protocol';
 import { hashAgentKey, mintAgentKeySecret } from '../agent-keys.js';
 import { HarborError } from '../errors.js';
 import { agentsManagedBy, canAddAgent, canCreateAgentKey, canRevokeAgentKey, enforce } from '../policy.js';
@@ -103,6 +103,26 @@ export class Agents {
     this.k.guardWrite();
     await this.hooks.verify(connection, secret);
     return this.hooks.save(agentId, secret, ctx.memberId);
+  }
+
+  /**
+   * Set the agent's option defaults (spec §8 Invocation options, 2026-10-01):
+   * the owner only, like its keys; each for an option its connector declared,
+   * a declared choice or a toggle's value. Replaces them all.
+   */
+  async setOptionDefaults(ctx: ActorCtx, agentId: string, defaults: InvocationOptionValues): Promise<InvocationOptionValues> {
+    const agent = await this.agent(agentId);
+    enforce(canCreateAgentKey(await this.actor(ctx), agent));
+    this.k.guardWrite();
+    const declared = (await this.k.store.getAgentCapabilities(agentId))?.options ?? [];
+    for (const [key, value] of Object.entries(defaults)) {
+      const option = declared.find((o) => o.key === key);
+      if (!option) throw new HarborError('invalid_request', `${agent.displayName} has no option "${key}"`);
+      const fits = option.type === 'toggle' ? typeof value === 'boolean' : typeof value === 'string' && option.choices.some((c) => c.id === value);
+      if (!fits) throw new HarborError('invalid_request', `that is not one of ${option.label}'s choices`);
+    }
+    await this.k.store.putAgentOptionDefaults(agentId, defaults, ctx.memberId, this.k.now());
+    return defaults;
   }
 
   /** Another key, for rotation: create, switch the agent over, revoke the old one. */

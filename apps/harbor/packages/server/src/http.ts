@@ -223,7 +223,10 @@ export function buildHttpApp(deps: {
 
   app.get(routes.getAgentCapabilities.path, async (c) => {
     const { agentId } = parseWith(routes.getAgentCapabilities.params, c.req.param());
-    return reply(c, routes.getAgentCapabilities.response, { capabilities: await service.getAgentCapabilities(agentId) });
+    return reply(c, routes.getAgentCapabilities.response, {
+      capabilities: await service.getAgentCapabilities(agentId),
+      defaults: await service.getAgentOptionDefaults(agentId),
+    });
   });
 
   app.get(routes.listInvocations.path, async (c) => {
@@ -260,6 +263,12 @@ export function buildHttpApp(deps: {
     const { agentId } = parseWith(routes.setAgentCredential.params, c.req.param());
     const input = await body(c, routes.setAgentCredential.request);
     return reply(c, routes.setAgentCredential.response, { credential: await service.setAgentCredential(actor(c), agentId, input.secret) });
+  });
+
+  app.put(routes.setAgentOptionDefaults.path, async (c) => {
+    const { agentId } = parseWith(routes.setAgentOptionDefaults.params, c.req.param());
+    const input = await body(c, routes.setAgentOptionDefaults.request);
+    return reply(c, routes.setAgentOptionDefaults.response, { defaults: await service.setAgentOptionDefaults(actor(c), agentId, input.defaults) });
   });
 
   app.post(routes.createAgentKey.path, async (c) => {

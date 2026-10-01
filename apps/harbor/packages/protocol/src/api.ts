@@ -389,12 +389,29 @@ export const routes = {
     request: ConnectorCapabilities,
     response: z.object({ capabilities: ConnectorCapabilities }),
   },
-  /** What an agent's connector declared — the composer's options, whether Stop is offered. Any org member. */
+  /**
+   * What an agent's connector declared — the composer's options, whether Stop
+   * is offered — and the defaults its owner set for those options, which the
+   * composer shows preselected (spec §8, 2026-10-01). Any org member.
+   */
   getAgentCapabilities: {
     method: 'GET',
     path: '/v1/agents/:agentId/capabilities',
     params: z.object({ agentId: MemberId }),
-    response: z.object({ capabilities: ConnectorCapabilities }),
+    response: z.object({ capabilities: ConnectorCapabilities, defaults: InvocationOptionValues.default({}) }),
+  },
+  /**
+   * Set an agent's option defaults (spec §8 Invocation options, 2026-10-01):
+   * its owner only, for options its connector declared, each a declared
+   * choice or a toggle's value. Replaces them all; `{}` clears them. Harbor
+   * fills them into an invocation whose invoker picked none. App only.
+   */
+  setAgentOptionDefaults: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/option-defaults',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ defaults: InvocationOptionValues }),
+    response: z.object({ defaults: InvocationOptionValues }),
   },
   /** A space's invocations, newest first (a thread's, with threadRootId): the working indicators and refused lines. */
   listInvocations: {

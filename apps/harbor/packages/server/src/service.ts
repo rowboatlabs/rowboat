@@ -37,6 +37,7 @@ import type {
   ApprovalDecision,
   ApprovalRequest,
   Invocation,
+  InvocationOptionValues,
   InvocationUpdate,
   Membership,
   StreamEvent,
@@ -142,6 +143,12 @@ export class HarborService {
   }
   declareCapabilities(ctx: ActorCtx, capabilities: ConnectorCapabilities): Promise<ConnectorCapabilities> {
     return this.invocations.declareCapabilities(ctx, capabilities);
+  }
+  getAgentOptionDefaults(agentId: string): Promise<InvocationOptionValues> {
+    return this.invocations.optionDefaults(agentId);
+  }
+  setAgentOptionDefaults(ctx: ActorCtx, agentId: string, defaults: InvocationOptionValues): Promise<InvocationOptionValues> {
+    return this.agents.setOptionDefaults(ctx, agentId, defaults);
   }
   getAgentCapabilities(agentId: string): Promise<ConnectorCapabilities> {
     return this.invocations.capabilities(agentId);
