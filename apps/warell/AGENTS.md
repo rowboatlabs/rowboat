@@ -35,6 +35,8 @@ OPENROUTER_API_KEY=<clé> WARELL_PLAN_ID=essentiel PORT=8787 pnpm start
 | `WARELL_PLAN_ID` | Forfait du propriétaire, pris dans `src/catalog.ts` (budgets calculés depuis les prix, archi §3.5). Défaut : `essentiel` |
 | `WARELL_ACCOUNT_ID`, `WARELL_ACCOUNT_EMAIL`, `WARELL_ACCOUNT_CREATED_AT` | Le compte du propriétaire ; la semaine est ancrée à sa date de création |
 | `PIXAZO_API_KEY` | Facultative : sans elle, `/v1/media` répond 503 et le texte marche quand même |
+| `WARELL_ADMIN_TOKEN` | Facultatif : le jeton de l'opérateur pour `/v1/admin/*` (recharges de crédits médias à la main). Absent : ces routes répondent 404 |
+| `WARELL_OWNER_MEDIA_CREDITS` | Phase 0 : crédits médias rendus au propriétaire à chaque démarrage, puisque le magasin en mémoire les oublie |
 | `PORT` | Défaut : 8080 |
 
 L'instance le trouve par `API_URL` : on ne modifie aucun fichier upstream qui l'appelle (archi §3.14).
@@ -50,7 +52,7 @@ fly deploy --config apps/warell/packages/instance/fly.toml --dockerfile apps/war
 
 | App | Exposition | Secrets (`fly secrets`) |
 |---|---|---|
-| `warell-control` | Publique, `https://warell-control.fly.dev` | `OPENROUTER_API_KEY`, `WARELL_INSTANCE_TOKEN`, `PIXAZO_API_KEY` |
+| `warell-control` | Publique, `https://warell-control.fly.dev` | `OPENROUTER_API_KEY`, `WARELL_INSTANCE_TOKEN`, `PIXAZO_API_KEY`, `WARELL_ADMIN_TOKEN` |
 | `warell-owner` | **Privée** (Flycast), disque `data` monté sur `/data` | `WARELL_INSTANCE_TOKEN` |
 
 Les deux se suspendent au repos et se réveillent à la requête suivante. Une instance n'a pas d'adresse publique : en phase 0, on l'atteint par un tunnel, `fly proxy 3221:80 warell-owner.flycast -a warell-owner`, puis `http://localhost:3221` avec la clé de `/data/server-key`.
@@ -63,7 +65,15 @@ Tout est dans `packages/control/src/catalog.ts` : un prix par devise et par forf
 
 Les modèles de Découverte sont dans le même fichier (`DISCOVERY_MODELS`) : le premier est le défaut, les suivants prennent le relais. Avant d'en ajouter un, vérifier qu'il répond en français avec `reasoning: { enabled: false }` (archi §3.5, « Les modèles par forfait »).
 
-Les médias sont dans `packages/control/src/media.ts` : un modèle = un chemin Pixazo, un corps et un prix. Un prix se relit sur `pixazo.ai/models/<famille>`, et on garde le prix normal quand une promotion court (archi §3.5, « Les médias »).
+Les médias sont dans `packages/control/src/media.ts` : un modèle = un chemin Pixazo, un corps et un prix. Un prix se relit sur `pixazo.ai/models/<famille>`, et on garde le prix normal quand une promotion court (archi §3.5, « Les médias »). Ils se paient en crédits médias, vendus en recharges (`MEDIA_PACKS` dans `catalog.ts`). `test/pricing.test.ts` casse si une recharge ne garde plus 55 %.
+
+Ajouter une recharge à la main, tant qu'aucun paiement n'est branché (la même référence deux fois n'ajoute qu'une fois) :
+
+```sh
+curl -X POST https://warell-control.fly.dev/v1/admin/media-credits \
+  -H "authorization: Bearer $WARELL_ADMIN_TOKEN" -H 'content-type: application/json' \
+  -d '{"account_id":"owner","pack":"medias-5","reference":"<reçu>"}'
+```
 
 ## Les tests de contrat
 

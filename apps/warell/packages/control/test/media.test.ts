@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CREDITS_PER_DOLLAR } from '@x/shared/dist/billing.js';
-import { mediaCredits, mediaModel, parseMediaRequest, type MediaRequest } from '../src/media.js';
+import { creditsForUsd, mediaCredits, mediaModel, parseMediaRequest, type MediaRequest } from '../src/media.js';
 
 const cost = (req: MediaRequest) => mediaModel(req.model)!.costUsd(req);
 
@@ -18,9 +17,14 @@ describe('media prices (pixazo.ai, 30/09/2026)', () => {
     expect(cost({ model: 'lyria-pro', prompt: 'x' })).toBeCloseTo(0.084);
   });
 
-  it('rounds credits up, never down', () => {
-    const m = mediaModel('lyria')!;
-    expect(mediaCredits(m, { model: 'lyria', prompt: 'x' })).toBe(Math.ceil(0.042 * CREDITS_PER_DOLLAR));
+  it('counts one credit per cent of cost, rounded up, never down', () => {
+    expect(mediaCredits(mediaModel('lyria')!, { model: 'lyria', prompt: 'x' })).toBe(5);
+    expect(mediaCredits(mediaModel('seedance-mini')!, { model: 'seedance-mini', prompt: 'x' })).toBe(38);
+    expect(mediaCredits(mediaModel('gemini-voice')!, { model: 'gemini-voice', prompt: 'bonjour' })).toBe(2);
+    // 0.4 * 8 is 3.2000000000000006 in floating point: still 320, not 321.
+    expect(mediaCredits(mediaModel('veo')!, { model: 'veo', prompt: 'x' })).toBe(320);
+    expect(creditsForUsd(0.01)).toBe(1);
+    expect(creditsForUsd(0.010001)).toBe(2);
   });
 
   it('asks Veo for 1080p only at 8 seconds', () => {

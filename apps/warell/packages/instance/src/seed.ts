@@ -39,7 +39,7 @@ Generations run on the \`${MEDIA_SERVER_NAME}\` MCP server, through \`executeMcp
 3. Tell the user it has started and usually takes 1 to 5 minutes, then call \`check\` with the id, again and again while it says it is still running.
 4. When ready, show the saved path to the user in a \`\`\`filepath code block.
 
-Each generation is charged to the user's media budget when it starts. Generate once per request; never retry a successful one, and never start several variants unless asked. If \`generate\` reports \`quota_reached\` or \`over_plan\`, explain it plainly and offer a shorter duration or a cheaper model.
+Each generation is paid from the user's media credits when it starts, and refunded if it fails; \`list_models\` gives each model's price and the balance. Before a video, tell the user its price in credits. Generate once per request; never retry a successful one, and never start several variants unless asked. If \`generate\` reports \`insufficient_media_credits\`, say plainly what it costs and what is left, and offer a cheaper model, a shorter duration, or buying a media credit pack.
 `;
 
 /** Far future: the control plane rotates the token, core must never try to refresh it. */

@@ -37,13 +37,13 @@ export interface ToolDef {
 export const MEDIA_TOOLS: ToolDef[] = [
   {
     name: 'list_models',
-    description: 'List the video, speech and music models this account can use, with allowed video durations.',
+    description: 'List the video, speech and music models, with allowed video durations, the media credits each costs for its default request, and the account balance.',
     inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'generate',
     description:
-      'Start generating a video, a voice-over or a song. Returns a generation id at once; then call `check` with it until the file is ready. Each generation is charged to the account when started.',
+      "Start generating a video, a voice-over or a song. Returns a generation id at once; then call `check` with it until the file is ready. Each generation is paid from the account's media credits when started, and refunded if it fails.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -106,8 +106,11 @@ export function createMediaTools(deps: MediaToolsDeps) {
 
   const errorText = (data: Record<string, unknown>) => {
     const e = (data.error ?? {}) as Record<string, unknown>;
-    const resets = typeof e.resets_at === 'string' ? ` It resets at ${e.resets_at}.` : '';
-    return `${String(e.code ?? 'error')}: ${String(e.message ?? 'request failed')}.${resets}`;
+    const base = `${String(e.code ?? 'error')}: ${String(e.message ?? 'request failed')}.`;
+    if (e.code === 'insufficient_media_credits') {
+      return `${base} It costs ${String(e.cost)} media credits; the balance is ${String(e.balance)}. The user can buy a media credit pack, or pick a cheaper model or a shorter duration.`;
+    }
+    return base;
   };
 
   async function save(url: string, filename: string | undefined, id: string): Promise<string> {
@@ -126,8 +129,8 @@ export function createMediaTools(deps: MediaToolsDeps) {
       const { status, data } = await call('GET', '/models');
       if (status !== 200) return text(errorText(data), true);
       const models = Array.isArray(data.data) ? data.data : [];
-      if (models.length === 0) return text('No media models are available on this plan.', true);
-      return text(JSON.stringify(models));
+      if (models.length === 0) return text('Media generation is not available right now.', true);
+      return text(JSON.stringify({ models, balance: data.balance }));
     }
 
     if (name === 'generate') {
@@ -139,7 +142,9 @@ export function createMediaTools(deps: MediaToolsDeps) {
         ...(args.audio !== undefined ? { audio: args.audio } : {}),
       });
       if (status !== 202) return text(errorText(data), true);
-      return text(`Started generation ${String(data.id)} (${String(data.kind)}). Call check with this id; it usually takes 1 to 5 minutes.`);
+      return text(
+        `Started generation ${String(data.id)} (${String(data.kind)}), ${String(data.credits)} media credits; ${String(data.balance)} left. Call check with this id; it usually takes 1 to 5 minutes.`,
+      );
     }
 
     if (name === 'check') {
@@ -153,7 +158,7 @@ export function createMediaTools(deps: MediaToolsDeps) {
           const file = await save(data.url, typeof args.filename === 'string' ? args.filename : undefined, args.id);
           return text(`Ready. Saved to ${file}. Show this path to the user in a \`\`\`filepath code block.`);
         }
-        if (data.status === 'failed') return text('The generation failed; it was not charged. You may try again or another model.', true);
+        if (data.status === 'failed') return text('The generation failed; its credits were given back. You may try again or another model.', true);
         if (deps.now() + POLL_MS > deadline) {
           return text(`Still ${String(data.status)}. Call check again with id ${args.id}.`);
         }

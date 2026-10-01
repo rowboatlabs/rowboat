@@ -1,9 +1,8 @@
-import { CREDITS_PER_DOLLAR } from '@x/shared/dist/billing.js';
-
-// Video, speech and music through Pixazo (architecture §3.5 "Les médias",
-// decided 30/09/2026). A generation is charged to the same quota as text, at
-// its price, before it is submitted: it costs at once what a long chat costs
-// over hours, so it must fit in what is left, never overrun.
+// Video, speech and music through Pixazo (architecture §3.5 "Les médias").
+// A generation is paid from the account's media credits, bought in packs,
+// not from the text quota (decided 01/10/2026): one video costs what hours
+// of chat cost, and a quota sized for text would either refuse it or be
+// emptied by it. It is charged before it is submitted, at its full price.
 //
 // Prices read on pixazo.ai model pages on 30/09/2026. The list price is kept
 // where a promotion runs (Seedance 2.0 Mini): a promotion ends without
@@ -156,6 +155,19 @@ export function parseMediaRequest(raw: unknown): ParsedRequest {
   return { ok: true, model, req };
 }
 
+/**
+ * One media credit is one cent of our cost (decided 01/10/2026): whole
+ * numbers a person can read ("38 credits"), where the text quota's units
+ * would show millions.
+ */
+export const MEDIA_CREDIT_USD = 0.01;
+
+/** Credits for a cost in dollars, rounded up: never charge less than we pay. */
+export function creditsForUsd(usd: number): number {
+  // Rounded to a millionth first: 0.4 * 8 is 3.2000000000000006 in floating point.
+  return Math.ceil(Math.round(usd * 1e6) / (MEDIA_CREDIT_USD * 1e6));
+}
+
 export function mediaCredits(model: MediaModel, req: MediaRequest): number {
-  return Math.ceil(model.costUsd(req) * CREDITS_PER_DOLLAR);
+  return creditsForUsd(model.costUsd(req));
 }

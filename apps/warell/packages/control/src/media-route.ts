@@ -1,11 +1,12 @@
+import { randomUUID } from 'node:crypto';
+import { CREDITS_PER_DOLLAR } from '@x/shared/dist/billing.js';
 import { MEDIA_MODELS, mediaCredits, parseMediaRequest } from './media.js';
-import { admitCost, budgetsForWeek, charge, initialState, refund } from './quota.js';
 import type { Account, ControlStore, MediaJob } from './store.js';
 
 // /v1/media: video, speech and music through Pixazo (architecture §3.5 "Les
-// médias", decided 30/09/2026). The Pixazo key never leaves the control
-// plane. A generation is asynchronous: POST charges and submits, GET follows
-// it and refunds it once if Pixazo reports a failure.
+// médias"). The Pixazo key never leaves the control plane. A generation is
+// paid from the account's media credits (decided 01/10/2026): POST charges
+// and submits, GET follows it and refunds it once if Pixazo reports a failure.
 
 export const PIXAZO_BASE = 'https://gateway.pixazo.ai';
 
@@ -27,23 +28,29 @@ function pixazoHeaders(key: string): Record<string, string> {
   return { 'content-type': 'application/json', 'cache-control': 'no-cache', 'ocp-apim-subscription-key': key };
 }
 
-/** The models a plan may generate with. Découverte has none: its budget is sized for text. */
-async function mediaAllowed(store: ControlStore, account: Account) {
-  const plan = await store.plan(account.planId);
-  return plan && plan.category !== 'free' ? plan : null;
+/**
+ * Every plan, Découverte included: credits are paid for before they are
+ * spent, so they need no budget from the plan (decided 01/10/2026).
+ * `credits` is the price of the model's default request.
+ */
+export async function listMediaModels(deps: MediaDeps, account: Account): Promise<Response> {
+  const data = deps.pixazoKey
+    ? MEDIA_MODELS.map((m) => ({
+        id: m.id,
+        kind: m.kind,
+        name: m.displayName,
+        ...(m.durations ? { durations: m.durations } : {}),
+        credits: mediaCredits(m, { model: m.id, prompt: 'x' }),
+      }))
+    : [];
+  return Response.json({ data, balance: await deps.store.mediaBalance(account.id) });
 }
 
-export async function listMediaModels(deps: MediaDeps, account: Account): Promise<Response> {
-  const plan = await mediaAllowed(deps.store, account);
-  const data = plan && deps.pixazoKey
-    ? MEDIA_MODELS.map((m) => ({ id: m.id, kind: m.kind, name: m.displayName, ...(m.durations ? { durations: m.durations } : {}) }))
-    : [];
-  return Response.json({ data });
+export async function mediaBalance(deps: MediaDeps, account: Account): Promise<Response> {
+  return Response.json({ credits: await deps.store.mediaBalance(account.id) });
 }
 
 export async function createGeneration(deps: MediaDeps, account: Account, req: Request): Promise<Response> {
-  const plan = await mediaAllowed(deps.store, account);
-  if (!plan) return error(403, 'not_in_plan', 'This plan does not include media generation');
   if (!deps.pixazoKey) return error(503, 'media_unavailable', 'Media generation is not configured');
 
   let raw: unknown;
@@ -57,21 +64,17 @@ export async function createGeneration(deps: MediaDeps, account: Account, req: R
   const { model, req: media } = parsed;
 
   const credits = mediaCredits(model, media);
-  const budgets = budgetsForWeek(plan.weekCredits);
   const at = deps.now();
-  const before = (await deps.store.quotaState(account.id)) ?? initialState(account.createdAt);
-  const admission = admitCost(before, budgets, credits, at);
-  if (!admission.ok) {
-    return admission.reason === 'over_plan'
-      ? error(403, 'over_plan', `This generation costs more than the plan's whole ${admission.window}`, { window: admission.window })
-      : error(429, 'quota_reached', `Not enough left in this ${admission.window}`, {
-          window: admission.window,
-          resets_at: new Date(admission.resetsAt).toISOString(),
-        });
+  const chargeRef = randomUUID();
+  // Charged before submitting, in one atomic step: two generations sent
+  // together never both spend the same credits.
+  const charged = await deps.store.applyMediaEntry({ accountId: account.id, at, kind: 'charge', credits: -credits, reference: chargeRef });
+  if (charged !== 'applied') {
+    return error(402, 'insufficient_media_credits', 'Not enough media credits for this generation', {
+      cost: credits,
+      balance: await deps.store.mediaBalance(account.id),
+    });
   }
-  // Charged before submitting: two generations sent together must not both
-  // pass the check against the same remaining budget.
-  await deps.store.saveQuotaState(account.id, charge(before, credits, at));
 
   const { path, body } = model.submit(media);
   let id: string | null = null;
@@ -90,12 +93,11 @@ export async function createGeneration(deps: MediaDeps, account: Account, req: R
     id = null;
   }
   if (!id) {
-    const state = (await deps.store.quotaState(account.id)) ?? before;
-    await deps.store.saveQuotaState(account.id, refund(state, credits, at, deps.now()));
+    await deps.store.applyMediaEntry({ accountId: account.id, at: deps.now(), kind: 'refund', credits, reference: chargeRef });
     return error(502, 'upstream_failed', 'The media provider refused the request');
   }
 
-  const job: MediaJob = { id, accountId: account.id, model: model.id, credits, chargedAt: at, status: 'pending', url: null, refunded: false };
+  const job: MediaJob = { id, accountId: account.id, model: model.id, credits, chargeRef, status: 'pending', url: null, refunded: false };
   await deps.store.saveMediaJob(job);
   await deps.store.appendUsage({
     accountId: account.id,
@@ -104,12 +106,16 @@ export async function createGeneration(deps: MediaDeps, account: Account, req: R
     model: model.id,
     requestedModel: null,
     status: 202,
-    credits,
+    // Usage records count our cost in the quota's unit, for every kind of call.
+    credits: Math.round(model.costUsd(media) * CREDITS_PER_DOLLAR),
     estimated: model.kind === 'speech',
     useCase: req.headers.get('x-rowboat-use-case'),
     agentName: req.headers.get('x-rowboat-agent-name'),
   });
-  return Response.json({ id, status: job.status, model: model.id, kind: model.kind }, { status: 202 });
+  return Response.json(
+    { id, status: job.status, model: model.id, kind: model.kind, credits, balance: await deps.store.mediaBalance(account.id) },
+    { status: 202 },
+  );
 }
 
 function normalizeStatus(raw: unknown): MediaJob['status'] {
@@ -153,22 +159,9 @@ export async function getGeneration(deps: MediaDeps, account: Account, id: strin
   const next: MediaJob = { ...job, status, url: status === 'completed' ? url : null };
 
   if (status === 'failed' && !job.refunded) {
-    const now = deps.now();
-    const state = (await deps.store.quotaState(account.id)) ?? initialState(account.createdAt);
-    await deps.store.saveQuotaState(account.id, refund(state, job.credits, job.chargedAt, now));
+    // The ledger applies a refund once per charge, even if two polls race here.
+    await deps.store.applyMediaEntry({ accountId: account.id, at: deps.now(), kind: 'refund', credits: job.credits, reference: job.chargeRef });
     next.refunded = true;
-    await deps.store.appendUsage({
-      accountId: account.id,
-      at: now,
-      path: '/media/refund',
-      model: job.model,
-      requestedModel: null,
-      status: 200,
-      credits: -job.credits,
-      estimated: false,
-      useCase: null,
-      agentName: null,
-    });
   }
   await deps.store.saveMediaJob(next);
   return view(next);

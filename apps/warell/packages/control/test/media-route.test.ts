@@ -10,38 +10,46 @@ const PLANS = [plan('pro', 'pro', 20), plan('small', 'starter', 2), plan('free',
 
 interface Seen { url: string; init: RequestInit }
 
-function setup(respond: (s: Seen) => Response, opts: { planId?: string; key?: string | null } = {}) {
+function setup(respond: (s: Seen) => Response, opts: { planId?: string; key?: string | null; credits?: number; admin?: string } = {}) {
   const accounts = new Map<string, Account>([
     [hashToken('me'), { id: 'me', email: null, planId: opts.planId ?? 'pro', createdAt: T0 }],
     [hashToken('other'), { id: 'other', email: null, planId: 'pro', createdAt: T0 }],
   ]);
   const store = new MemoryStore(accounts, PLANS);
+  const credits = opts.credits ?? 1000;
+  if (credits > 0) void store.applyMediaEntry({ accountId: 'me', at: T0, kind: 'topup', credits, reference: 'seed' });
   const seen: Seen[] = [];
   const app = createApp({
     store, openRouterKey: 'or', publicUrl: 'https://c.test', appName: 'Warell', now: () => T0,
     pixazoKey: opts.key === null ? undefined : (opts.key ?? 'pz-secret'),
+    mediaPacks: [{ id: 'medias-5', credits: 203, prices: [{ amount: 500, currency: 'EUR' }] }],
+    adminTokenHash: opts.admin ? hashToken(opts.admin) : undefined,
     fetch: (async (url: string, init: RequestInit = {}) => { const s = { url: String(url), init }; seen.push(s); return respond(s); }) as typeof fetch,
   });
   const call = (path: string, init: RequestInit = {}, token = 'me') =>
     app.request(path, { ...init, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' } });
   const generate = (body: unknown, token = 'me') => call('/v1/media/generations', { method: 'POST', body: JSON.stringify(body) }, token);
-  return { store, seen, call, generate };
+  const topUp = (body: unknown, token: string) =>
+    app.request('/v1/admin/media-credits', { method: 'POST', body: JSON.stringify(body), headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' } });
+  return { store, seen, call, generate, topUp };
 }
 
 const json = (body: unknown, status = 200) => Response.json(body, { status });
-const used = async (store: MemoryStore) => (await store.quotaState('me'))?.weekUsed ?? 0;
+const balance = (store: MemoryStore) => store.mediaBalance('me');
 
 describe('/v1/media', () => {
   it('submits with our key, charges the price and answers 202', async () => {
     const { generate, seen, store } = setup(() => json({ request_id: 'job1' }));
     const res = await generate({ model: 'veo-fast', prompt: 'Un marché', duration: 4 });
     expect(res.status).toBe(202);
-    expect(await res.json()).toEqual({ id: 'job1', status: 'pending', model: 'veo-fast', kind: 'video' });
+    expect(await res.json()).toEqual({ id: 'job1', status: 'pending', model: 'veo-fast', kind: 'video', credits: 40, balance: 960 });
     expect(seen[0].url).toBe('https://gateway.pixazo.ai/veo31f/v1/veo-3.1-fast/generate');
     expect((seen[0].init.headers as Record<string, string>)['ocp-apim-subscription-key']).toBe('pz-secret');
     expect(JSON.parse(seen[0].init.body as string)).toMatchObject({ prompt: 'Un marché', duration: 4, resolution: '720p', generate_audio: false });
-    expect(await used(store)).toBe(Math.ceil(0.4 * CREDITS_PER_DOLLAR));
-    expect(store.usage[0]).toMatchObject({ path: '/media/video', model: 'veo-fast', status: 202 });
+    expect(await balance(store)).toBe(960);
+    // The text quota is untouched; the usage record keeps our cost in its unit.
+    expect(await store.quotaState('me')).toBeNull();
+    expect(store.usage[0]).toMatchObject({ path: '/media/video', model: 'veo-fast', status: 202, credits: 0.4 * CREDITS_PER_DOLLAR });
   });
 
   it('follows the job to its file', async () => {
@@ -61,24 +69,24 @@ describe('/v1/media', () => {
   it('refunds a failed job once', async () => {
     const { generate, call, store } = setup((s) => s.url.includes('/status/') ? json({ status: 'FAILED' }) : json({ request_id: 'job1' }));
     await generate({ model: 'lyria', prompt: 'x' });
-    expect(await used(store)).toBeGreaterThan(0);
+    expect(await balance(store)).toBe(995);
     expect(await (await call('/v1/media/generations/job1')).json()).toMatchObject({ status: 'failed' });
     await call('/v1/media/generations/job1');
-    expect(await used(store)).toBe(0);
-    expect(store.usage.filter((u) => u.path === '/media/refund')).toHaveLength(1);
+    expect(await balance(store)).toBe(1000);
+    expect(store.ledger.filter((e) => e.kind === 'refund')).toHaveLength(1);
   });
 
   it('treats a completed job without a file as failed', async () => {
     const { generate, call, store } = setup((s) => s.url.includes('/status/') ? json({ status: 'COMPLETED', output: {} }) : json({ request_id: 'job1' }));
     await generate({ model: 'lyria', prompt: 'x' });
     expect(await (await call('/v1/media/generations/job1')).json()).toMatchObject({ status: 'failed' });
-    expect(await used(store)).toBe(0);
+    expect(await balance(store)).toBe(1000);
   });
 
   it('refunds when Pixazo refuses the submission', async () => {
     const { generate, store } = setup(() => json({ message: 'no' }, 400));
     expect((await generate({ model: 'lyria', prompt: 'x' })).status).toBe(502);
-    expect(await used(store)).toBe(0);
+    expect(await balance(store)).toBe(1000);
   });
 
   it("hides someone else's job", async () => {
@@ -87,37 +95,62 @@ describe('/v1/media', () => {
     expect((await call('/v1/media/generations/job1', {}, 'other')).status).toBe(404);
   });
 
-  it('refuses what does not fit, and says whether waiting helps', async () => {
-    const { generate, seen } = setup(() => json({ request_id: 'j' }), { planId: 'small' });
-    // Week of 2 $, session of 0.50 $: a 3.20 $ Veo never fits.
-    const over = await generate({ model: 'veo', prompt: 'x' });
-    expect(over.status).toBe(403);
-    expect((await over.json()).error).toMatchObject({ code: 'over_plan', window: 'week' });
+  it('refuses what the balance cannot pay, before calling Pixazo', async () => {
+    const { generate, seen, store } = setup(() => json({ request_id: 'j' }), { credits: 45 });
     expect((await generate({ model: 'veo-fast', prompt: 'x', duration: 4 })).status).toBe(202);
-    const full = await generate({ model: 'veo-fast', prompt: 'x', duration: 4 });
-    expect(full.status).toBe(429);
-    expect((await full.json()).error).toMatchObject({ code: 'quota_reached', window: 'session' });
+    const short = await generate({ model: 'veo-fast', prompt: 'x', duration: 4 });
+    expect(short.status).toBe(402);
+    expect((await short.json()).error).toMatchObject({ code: 'insufficient_media_credits', cost: 40, balance: 5 });
     expect(seen).toHaveLength(1);
+    expect(await balance(store)).toBe(5);
   });
 
-  it('is not part of Découverte, and is off without a key', async () => {
-    const free = setup(() => json({}), { planId: 'free' });
-    expect((await free.generate({ model: 'lyria', prompt: 'x' })).status).toBe(403);
-    expect(await (await free.call('/v1/media/models')).json()).toEqual({ data: [] });
+  it('is open to every plan with credits, and off without a key', async () => {
+    const free = setup(() => json({ request_id: 'j' }), { planId: 'free' });
+    expect((await free.generate({ model: 'lyria', prompt: 'x' })).status).toBe(202);
     const off = setup(() => json({}), { key: null });
     expect((await off.generate({ model: 'lyria', prompt: 'x' })).status).toBe(503);
-    expect(free.seen.length + off.seen.length).toBe(0);
+    expect(await (await off.call('/v1/media/models')).json()).toEqual({ data: [], balance: 1000 });
+    expect(off.seen).toHaveLength(0);
+  });
+
+  it('shows the balance and the packs', async () => {
+    const { call } = setup(() => json({}), { credits: 12 });
+    expect(await (await call('/v1/media/balance')).json()).toEqual({ credits: 12 });
+    expect((await (await call('/v1/media/packs')).json()).data[0]).toMatchObject({ id: 'medias-5', credits: 203 });
   });
 
   it('lists the models with their kind and durations', async () => {
     const { call } = setup(() => json({}));
     const { data } = await (await call('/v1/media/models')).json();
-    expect(data.find((m: { id: string }) => m.id === 'veo-fast')).toEqual({ id: 'veo-fast', kind: 'video', name: 'Veo 3.1 Fast', durations: [8, 4, 6] });
+    expect(data.find((m: { id: string }) => m.id === 'veo-fast')).toEqual({ id: 'veo-fast', kind: 'video', name: 'Veo 3.1 Fast', durations: [8, 4, 6], credits: 80 });
   });
 
   it('refuses a bad request before charging', async () => {
     const { generate, store } = setup(() => json({ request_id: 'j' }));
     expect((await generate({ model: 'veo-fast', prompt: 'x', duration: 7 })).status).toBe(400);
-    expect(await store.quotaState('me')).toBeNull();
+    expect(await balance(store)).toBe(1000);
+  });
+});
+
+describe('/v1/admin/media-credits', () => {
+  it('adds a pack once per payment reference', async () => {
+    const { topUp, store } = setup(() => json({}), { credits: 0, admin: 'op' });
+    const body = { account_id: 'me', pack: 'medias-5', reference: 'ligdi-123' };
+    expect(await (await topUp(body, 'op')).json()).toEqual({ added: 203, duplicate: false, balance: 203 });
+    expect(await (await topUp(body, 'op')).json()).toEqual({ added: 0, duplicate: true, balance: 203 });
+    expect(await store.mediaBalance('me')).toBe(203);
+  });
+
+  it('refuses a bad pack or an unknown account', async () => {
+    const { topUp } = setup(() => json({}), { admin: 'op' });
+    expect((await topUp({ account_id: 'me', pack: 'medias-999', reference: 'r' }, 'op')).status).toBe(400);
+    expect((await topUp({ account_id: 'nobody', pack: 'medias-5', reference: 'r' }, 'op')).status).toBe(404);
+  });
+
+  it('does not exist without the operator token, or without one configured', async () => {
+    const body = { account_id: 'me', pack: 'medias-5', reference: 'r' };
+    expect((await setup(() => json({}), { admin: 'op' }).topUp(body, 'me')).status).toBe(404);
+    expect((await setup(() => json({})).topUp(body, 'op')).status).toBe(404);
   });
 });

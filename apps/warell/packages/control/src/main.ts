@@ -1,7 +1,7 @@
 import { serve } from '@hono/node-server';
 import { createApp } from './app.js';
-import { ASSUMPTIONS, OFFERS } from './catalog.js';
-import { plansFrom } from './pricing.js';
+import { ASSUMPTIONS, MEDIA_PACKS, OFFERS } from './catalog.js';
+import { packCredits, plansFrom } from './pricing.js';
 import { MemoryStore, hashToken, type Account } from './store.js';
 
 // Phase 0 entry point (roadmap §4): one owner, one instance token, the plan
@@ -29,6 +29,14 @@ const owner: Account = {
 
 const store = new MemoryStore(new Map([[hashToken(required('WARELL_INSTANCE_TOKEN')), owner]]), plans);
 
+// The in-memory store forgets everything when the machine stops: the
+// owner's media credits are granted again at each start, until accounts move
+// to Postgres (roadmap phase 1). Owner only, phase 0 only.
+const ownerMediaCredits = Number(process.env.WARELL_OWNER_MEDIA_CREDITS ?? '0');
+if (Number.isInteger(ownerMediaCredits) && ownerMediaCredits > 0) {
+  await store.applyMediaEntry({ accountId: owner.id, at: Date.now(), kind: 'topup', credits: ownerMediaCredits, reference: 'owner-grant' });
+}
+
 const app = createApp({
   store,
   openRouterKey: required('OPENROUTER_API_KEY'),
@@ -36,6 +44,8 @@ const app = createApp({
   appName: process.env.WARELL_APP_NAME ?? 'Warell',
   // Optional: without it, media generation answers 503 and text still works.
   pixazoKey: process.env.PIXAZO_API_KEY || undefined,
+  mediaPacks: MEDIA_PACKS.map((pack) => ({ id: pack.id, credits: packCredits(pack, ASSUMPTIONS), prices: pack.prices })),
+  adminTokenHash: process.env.WARELL_ADMIN_TOKEN ? hashToken(process.env.WARELL_ADMIN_TOKEN) : undefined,
   fetch: globalThis.fetch,
   now: Date.now,
 });

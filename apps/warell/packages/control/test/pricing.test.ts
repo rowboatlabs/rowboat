@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { CREDITS_PER_DOLLAR } from '@x/shared/dist/billing.js';
-import { ASSUMPTIONS, OFFERS } from '../src/catalog.js';
+import { ASSUMPTIONS, MEDIA_PACKS, OFFERS } from '../src/catalog.js';
 import {
   WEEKS_PER_MONTH,
   marginAtFullUsage,
   netUsd,
+  packCredits,
+  packMargin,
   periodModelBudgetUsd,
   plansFrom,
   weekCredits,
@@ -42,6 +44,26 @@ describe('plan catalog guarantee', () => {
   it('keeps the free plan under 10 cents a week', () => {
     const free = OFFERS.find((o) => o.billing.kind === 'free')!;
     expect(weekCredits(free, ASSUMPTIONS)).toBeLessThanOrEqual(0.1 * CREDITS_PER_DOLLAR);
+  });
+});
+
+// Media credits keep the same guarantee (decided 01/10/2026): a pack spent
+// to its last credit still leaves 55 % of what we keep from its price.
+describe('media packs guarantee', () => {
+  for (const pack of MEDIA_PACKS) {
+    for (const price of pack.prices) {
+      it(`${pack.id} in ${price.currency} keeps at least 55 % once spent`, () => {
+        expect(packMargin(price, pack, ASSUMPTIONS)).toBeGreaterThanOrEqual(ASSUMPTIONS.minMarginRate - 1e-9);
+      });
+    }
+  }
+
+  it('prices packs in the same currencies as the plans, larger packs giving more', () => {
+    const plan = paid[0].billing.kind === 'paid' ? paid[0].billing.prices.map((p) => p.currency).sort() : [];
+    for (const pack of MEDIA_PACKS) expect(pack.prices.map((p) => p.currency).sort()).toEqual(plan);
+    const credits = MEDIA_PACKS.map((p) => packCredits(p, ASSUMPTIONS));
+    expect(credits).toEqual([...credits].sort((x, y) => x - y));
+    expect(credits[0]).toBeGreaterThan(38); // the smallest pack still pays a 5 s video
   });
 });
 

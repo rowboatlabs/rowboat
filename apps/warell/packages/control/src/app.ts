@@ -2,7 +2,8 @@ import { Hono } from 'hono';
 import { createMiddleware } from 'hono/factory';
 import { buildApiConfig } from './config.js';
 import { proxyLlm, type ProxyDeps } from './llm-proxy.js';
-import { createGeneration, getGeneration, listMediaModels } from './media-route.js';
+import { isAdmin, topUpMedia, type SoldPack } from './admin.js';
+import { createGeneration, getGeneration, listMediaModels, mediaBalance } from './media-route.js';
 import { budgetsForWeek, gauges, initialState } from './quota.js';
 import type { Account } from './store.js';
 
@@ -10,6 +11,10 @@ export type ControlDeps = ProxyDeps & {
   /** Unset: media generation is off (503). */
   pixazoKey?: string;
   pixazoBase?: string;
+  /** The media credit packs on sale (pricing.ts, packCredits). */
+  mediaPacks: SoldPack[];
+  /** SHA-256 of the operator token; unset: /v1/admin answers 404. */
+  adminTokenHash?: string;
 };
 
 type Env = { Variables: { account: Account } };
@@ -70,8 +75,17 @@ export function createApp(deps: ControlDeps) {
   app.all('/v1/llm/*', (c) => proxyLlm(deps, c.get('account'), c.req.raw));
 
   app.get('/v1/media/models', (c) => listMediaModels(deps, c.get('account')));
+  app.get('/v1/media/balance', (c) => mediaBalance(deps, c.get('account')));
+  app.get('/v1/media/packs', (c) => c.json({ data: deps.mediaPacks }));
   app.post('/v1/media/generations', (c) => createGeneration(deps, c.get('account'), c.req.raw));
   app.get('/v1/media/generations/:id', (c) => getGeneration(deps, c.get('account'), c.req.param('id')));
+
+  app.post('/v1/admin/media-credits', async (c) => {
+    if (!isAdmin({ ...deps, packs: deps.mediaPacks }, bearer(c.req.header('authorization')))) {
+      return c.json({ error: { code: 'not_found' } }, 404);
+    }
+    return topUpMedia({ ...deps, packs: deps.mediaPacks }, c.req.raw);
+  });
 
   return app;
 }

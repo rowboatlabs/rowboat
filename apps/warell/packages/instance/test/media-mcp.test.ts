@@ -25,20 +25,22 @@ const textOf = (r: { content: Array<{ text: string }> }) => r.content[0].text;
 
 describe('media tools', () => {
   it('starts a generation with the instance token', async () => {
-    const { tools, seen } = await setup(() => json({ id: 'job1', status: 'pending', kind: 'video' }, 202));
+    const { tools, seen } = await setup(() => json({ id: 'job1', status: 'pending', kind: 'video', credits: 38, balance: 165 }, 202));
     const r = await tools.run('generate', { model: 'seedance-mini', prompt: 'Un marché', aspect_ratio: '9:16' });
     expect(r.isError).toBeUndefined();
-    expect(textOf(r)).toContain('job1');
+    expect(textOf(r)).toContain('Started generation job1 (video), 38 media credits; 165 left.');
     expect(seen[0].url).toBe('https://c.test/v1/media/generations');
     expect((seen[0].init!.headers as Record<string, string>).authorization).toBe('Bearer tok');
     expect(JSON.parse(seen[0].init!.body as string)).toEqual({ model: 'seedance-mini', prompt: 'Un marché', aspect_ratio: '9:16' });
   });
 
-  it('passes the control plane refusal on, with its reset time', async () => {
-    const { tools } = await setup(() => json({ error: { code: 'quota_reached', message: 'Not enough left in this session', resets_at: '2026-10-01T10:00:00.000Z' } }, 429));
+  it('passes a refusal on with the price and the balance', async () => {
+    const { tools } = await setup(() => json({ error: { code: 'insufficient_media_credits', message: 'Not enough media credits for this generation', cost: 320, balance: 12 } }, 402));
     const r = await tools.run('generate', { model: 'veo', prompt: 'x' });
     expect(r.isError).toBe(true);
-    expect(textOf(r)).toBe('quota_reached: Not enough left in this session. It resets at 2026-10-01T10:00:00.000Z.');
+    expect(textOf(r)).toBe(
+      'insufficient_media_credits: Not enough media credits for this generation. It costs 320 media credits; the balance is 12. The user can buy a media credit pack, or pick a cheaper model or a shorter duration.',
+    );
   });
 
   it('waits, then saves the file in the workspace', async () => {
@@ -62,11 +64,11 @@ describe('media tools', () => {
     expect(seen.length).toBe(10); // at 0, 5 … 45 s
   });
 
-  it('reports a failed generation as not charged', async () => {
+  it('reports a failed generation as refunded', async () => {
     const { tools } = await setup(() => json({ status: 'failed' }));
     const r = await tools.run('check', { id: 'job1' });
     expect(r.isError).toBe(true);
-    expect(textOf(r)).toContain('not charged');
+    expect(textOf(r)).toContain('credits were given back');
   });
 
   it('says so when the plan has no media', async () => {

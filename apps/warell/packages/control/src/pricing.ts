@@ -1,4 +1,5 @@
 import { CREDITS_PER_DOLLAR } from '@x/shared/dist/billing.js';
+import { MEDIA_CREDIT_USD } from './media.js';
 import type { ModelPolicy } from './models.js';
 
 // From a plan's price to its model budget, with a guaranteed margin
@@ -36,6 +37,8 @@ export interface PricingAssumptions {
   paymentFixedUsd: number;
   /** OpenRouter's fee when buying credits: every model dollar costs this much more. */
   providerFeeRate: number;
+  /** The same for the media provider (Pixazo), on media credit packs. */
+  mediaProviderFeeRate: number;
   /** What must remain after model costs, as a share of net revenue. */
   minMarginRate: number;
 }
@@ -103,4 +106,25 @@ export function plansFrom(offers: Offer[], a: PricingAssumptions) {
     monthlyPrices: offer.billing.kind === 'paid' && offer.billing.period === 'month' ? offer.billing.prices : [],
     models: offer.models ?? null,
   }));
+}
+
+/** Media credits sold in packs, paid once and kept until spent (decided 01/10/2026). */
+export interface MediaPack {
+  id: string;
+  /** One fixed price per currency, excluding taxes. */
+  prices: Money[];
+}
+
+/** Credits a pack gives, from its least favorable currency, so every currency keeps the margin. */
+export function packCredits(pack: MediaPack, a: PricingAssumptions): number {
+  if (pack.prices.length === 0) throw new Error(`Pack ${pack.id} has no price`);
+  const worstNet = Math.min(...pack.prices.map((p) => netUsd(p, a)));
+  return Math.floor((worstNet * (1 - a.minMarginRate)) / (1 + a.mediaProviderFeeRate) / MEDIA_CREDIT_USD);
+}
+
+/** Margin left on one pack price once all its credits are spent. */
+export function packMargin(price: Money, pack: MediaPack, a: PricingAssumptions): number {
+  const net = netUsd(price, a);
+  const cost = packCredits(pack, a) * MEDIA_CREDIT_USD * (1 + a.mediaProviderFeeRate);
+  return (net - cost) / net;
 }

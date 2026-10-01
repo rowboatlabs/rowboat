@@ -47,12 +47,31 @@ export interface MediaJob {
   id: string;
   accountId: string;
   model: string;
+  /** Media credits charged (media.ts, MEDIA_CREDIT_USD). */
   credits: number;
-  chargedAt: number;
+  /** The ledger reference of its charge, reused by its refund. */
+  chargeRef: string;
   status: 'pending' | 'processing' | 'completed' | 'failed';
   url: string | null;
   refunded: boolean;
 }
+
+/** One change to an account's media credits; the balance is their sum (decided 01/10/2026). */
+export interface MediaLedgerEntry {
+  accountId: string;
+  at: number;
+  kind: 'topup' | 'charge' | 'refund';
+  /** Positive for a top-up or a refund, negative for a charge. */
+  credits: number;
+  /** The payment of a top-up, the charge a refund gives back: each is applied once. */
+  reference: string;
+}
+
+/**
+ * `duplicate`: an entry of this kind and reference was applied already.
+ * `insufficient`: it would take the balance below zero; nothing changed.
+ */
+export type LedgerResult = 'applied' | 'duplicate' | 'insufficient';
 
 /**
  * Persistence seam. Phase 0 runs the in-memory store; the Postgres one, in
@@ -61,6 +80,7 @@ export interface MediaJob {
  */
 export interface ControlStore {
   accountByToken(token: string): Promise<Account | null>;
+  account(id: string): Promise<Account | null>;
   plan(planId: string): Promise<Plan | null>;
   plans(): Promise<Plan[]>;
   quotaState(accountId: string): Promise<QuotaState | null>;
@@ -68,10 +88,14 @@ export interface ControlStore {
   appendUsage(record: UsageRecord): Promise<void>;
   mediaJob(id: string): Promise<MediaJob | null>;
   saveMediaJob(job: MediaJob): Promise<void>;
+  mediaBalance(accountId: string): Promise<number>;
+  /** Atomic: the balance check and the write happen together, so two charges never both spend the same credits. */
+  applyMediaEntry(entry: MediaLedgerEntry): Promise<LedgerResult>;
 }
 
 export class MemoryStore implements ControlStore {
   readonly usage: UsageRecord[] = [];
+  readonly ledger: MediaLedgerEntry[] = [];
   private readonly states = new Map<string, QuotaState>();
   private readonly jobs = new Map<string, MediaJob>();
 
@@ -83,6 +107,9 @@ export class MemoryStore implements ControlStore {
 
   async accountByToken(token: string) {
     return this.tokens.get(hashToken(token)) ?? null;
+  }
+  async account(id: string) {
+    return [...this.tokens.values()].find((a) => a.id === id) ?? null;
   }
   async plan(planId: string) {
     return this.catalog.find((p) => p.id === planId) ?? null;
@@ -104,5 +131,16 @@ export class MemoryStore implements ControlStore {
   }
   async saveMediaJob(job: MediaJob) {
     this.jobs.set(job.id, job);
+  }
+  async mediaBalance(accountId: string) {
+    return this.ledger.filter((e) => e.accountId === accountId).reduce((sum, e) => sum + e.credits, 0);
+  }
+  // No await between the check and the push: atomic on Node's single thread.
+  async applyMediaEntry(entry: MediaLedgerEntry): Promise<LedgerResult> {
+    if (this.ledger.some((e) => e.kind === entry.kind && e.reference === entry.reference)) return 'duplicate';
+    const balance = this.ledger.filter((e) => e.accountId === entry.accountId).reduce((sum, e) => sum + e.credits, 0);
+    if (balance + entry.credits < 0) return 'insufficient';
+    this.ledger.push(entry);
+    return 'applied';
   }
 }

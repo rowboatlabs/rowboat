@@ -1,5 +1,5 @@
 import type { ModelPolicy } from './models.js';
-import type { Offer, PricingAssumptions } from './pricing.js';
+import type { MediaPack, Offer, PricingAssumptions } from './pricing.js';
 
 // The plans and what their budget rests on (architecture §3.5 "Les
 // forfaits", decided 30/09/2026). Prices are the owner's; each one is fixed
@@ -21,6 +21,9 @@ export const ASSUMPTIONS: PricingAssumptions = {
   paymentFixedUsd: 0.35,
   // OpenRouter charges 5.5 % on credit purchases.
   providerFeeRate: 0.055,
+  // Pixazo's fee on its own top-ups is not written anywhere we could read:
+  // OpenRouter's is reserved until it is.
+  mediaProviderFeeRate: 0.055,
   minMarginRate: 0.55,
 };
 
@@ -47,4 +50,13 @@ export const OFFERS: Offer[] = [
   { id: 'essentiel', category: 'starter', displayName: 'Essentiel', billing: { kind: 'paid', period: 'month', prices: prices(20, 13000) } },
   { id: 'pro-100', category: 'pro', displayName: 'Pro', billing: { kind: 'paid', period: 'month', prices: prices(100, 65000) } },
   { id: 'pro-200', category: 'pro', displayName: 'Pro', billing: { kind: 'paid', period: 'month', prices: prices(200, 130000) } },
+];
+
+// Media credit packs (decided 01/10/2026): small enough for mobile money,
+// the smallest one still a few voice-overs or a short video. The CFA price
+// is rounded under the euro's, as for the plans.
+export const MEDIA_PACKS: MediaPack[] = [
+  { id: 'medias-2', prices: prices(2, 1300) },
+  { id: 'medias-5', prices: prices(5, 3300) },
+  { id: 'medias-20', prices: prices(20, 13000) },
 ];

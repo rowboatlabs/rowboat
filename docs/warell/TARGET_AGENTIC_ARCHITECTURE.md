@@ -219,33 +219,35 @@ L'instance part sur DeepSeek V4.1 Flash quel que soit le forfait (`WARELL_ASSIST
 
 #### Les médias
 
-Décidé le 30/09/2026. La vidéo, la voix et la musique passent par **Pixazo**, avec une seule clé gardée dans le plan de contrôle (`/v1/media`, `media.ts` et `media-route.ts`). Une génération se paie **sur le même quota que le texte**, au prix lu sur les pages modèles de pixazo.ai le 30/09/2026. Quand une promotion court, on garde le prix normal, pour ne jamais compter moins que ce qu'on paie.
+Décidé le 30/09/2026. La vidéo, la voix et la musique passent par **Pixazo**, avec une seule clé gardée dans le plan de contrôle (`/v1/media`, `media.ts` et `media-route.ts`). Les prix ont été lus sur les pages modèles de pixazo.ai le 30/09/2026. Quand une promotion court, on garde le prix normal, pour ne jamais compter moins que ce qu'on paie.
 
-| Modèle | Usage | Prix retenu |
-|---|---|---|
-| Seedance 2.0 Mini | vidéo, 4 à 30 s, 720p | 0,0756 $/s (promotion : 0,03024 $/s) |
-| Veo 3.1 Fast | vidéo, 4, 6 ou 8 s | 0,10 $/s sans son, 0,15 $/s avec |
-| Veo 3.1 | vidéo, 720p, son compris | 0,40 $/s |
-| Gemini 3.8 Flash TTS | voix, 4 000 caractères au plus | 0,01728 $ la minute commencée, estimée à 12 caractères par seconde |
-| Lyria 3 / Lyria 3 Pro | musique | 0,042 $ / 0,084 $ le morceau |
+| Modèle | Usage | Prix retenu | Crédits (requête par défaut) |
+|---|---|---|---|
+| Seedance 2.0 Mini | vidéo, 4 à 30 s, 720p | 0,0756 $/s (promotion : 0,03024 $/s) | 38 (5 s) |
+| Veo 3.1 Fast | vidéo, 4, 6 ou 8 s | 0,10 $/s sans son, 0,15 $/s avec | 80 (8 s) |
+| Veo 3.1 | vidéo, 720p, son compris | 0,40 $/s | 320 (8 s) |
+| Gemini 3.8 Flash TTS | voix, 4 000 caractères au plus | 0,01728 $ la minute commencée, estimée à 12 caractères par seconde | 2 la minute |
+| Lyria 3 / Lyria 3 Pro | musique | 0,042 $ / 0,084 $ le morceau | 5 / 9 |
 
-Ce qui diffère du texte :
+**Des crédits médias, pas le quota du texte** (décidé le 01/10/2026). Une vidéo coûte d'un coup ce qu'une conversation coûte en plusieurs heures : un quota taillé pour le texte la refusait, ou se vidait d'un coup. Les médias se paient donc sur un **solde de crédits médias**, acheté en recharges et gardé jusqu'à ce qu'il soit dépensé :
 
-- **Le prix est connu avant, et il est pris avant.** Une vidéo coûte d'un coup ce qu'une conversation coûte en plusieurs heures, et ne s'arrête pas en route. Elle doit donc tenir dans ce qui reste de la session **et** de la semaine (`admitCost`), sans les dépasser. Elle est débitée avant l'envoi, pour que deux demandes simultanées ne passent pas sur le même reste.
-- **Deux refus distincts.** `429 quota_reached` : attendre la remise à zéro suffira. `403 over_plan` : la génération coûte plus que la fenêtre entière du forfait, et attendre ne servira à rien.
-- **Un échec est rendu, une seule fois.** Si Pixazo refuse l'envoi, ou si la génération échoue (y compris une génération « terminée » sans fichier), le débit est rendu aux fenêtres encore ouvertes depuis le débit.
+- **Un crédit = un centime de notre coût** (`MEDIA_CREDIT_USD`), arrondi au-dessus. Ce sont des nombres qu'on lit (« 38 crédits »), alors que les unités du quota en montreraient des millions.
+- **Les recharges** (`MEDIA_PACKS`, `catalog.ts`) gardent la même garantie que les forfaits : une recharge dépensée jusqu'au dernier crédit laisse au moins 55 % de ce qu'on garde de son prix, dans chaque devise (`packCredits`, `test/pricing.test.ts`). Les frais de Pixazo sur ses propres recharges ne sont écrits nulle part : on réserve ceux d'OpenRouter (5,5 %) en attendant.
+
+| Recharge | EUR | F CFA | Crédits |
+|---|---|---|---|
+| `medias-2` | 2 € | 1 300 F | 71 |
+| `medias-5` | 5 € | 3 300 F | 203 |
+| `medias-20` | 20 € | 13 000 F | 851 |
+
+- **Tous les forfaits y ont droit, Découverte compris** : un crédit est payé avant d'être dépensé, il ne prend rien au budget du forfait.
+- **Le solde est un journal** (`MediaLedgerEntry`) : recharge, débit et remboursement. Le solde est leur somme. Le débit se fait **avant l'envoi**, en une seule opération atomique, pour que deux demandes simultanées ne dépensent pas les mêmes crédits. S'il n'y a pas assez de crédits, la réponse est `402 insufficient_media_credits`, avec le prix et le solde.
+- **Un échec est rendu, une seule fois.** Si Pixazo refuse l'envoi, ou si la génération échoue (y compris une génération « terminée » sans fichier), le débit est rendu. Le journal n'applique qu'un remboursement par débit, même si deux suivis se croisent.
+- **Une recharge n'est appliquée qu'une fois par paiement** : sa référence (le reçu, la transaction mobile money) est unique. Tant qu'aucun moyen de paiement n'est branché, l'opérateur ajoute une recharge à la main (`POST /v1/admin/media-credits`, jeton `WARELL_ADMIN_TOKEN`). Le paiement appellera la même règle.
 - **Une génération n'est visible que de son compte.** Celle d'un autre compte répond 404.
-- **Découverte n'a pas les médias** : son budget est taillé pour le texte.
+- **Le relevé d'usage** (`UsageRecord`) garde le coût réel de chaque génération, dans l'unité du quota, pour suivre ce qu'on dépense chez Pixazo.
 
-Ce que ça donne par forfait (une session est un quart de la semaine) :
-
-| Forfait | Session | Seedance 5 s | Veo Fast 8 s | Veo 8 s | Morceaux Lyria |
-|---|---|---|---|---|---|
-| Semaine, Essentiel | ≈ 0,50 $ | 1 | 0 (4 s : 1) | 0 | 11 |
-| Pro 100 € | ≈ 2,49 $ | 6 | 3 | 0 | 59 |
-| Pro 200 € | ≈ 4,99 $ | 13 | 6 | 1 | 118 |
-
-La marge de 55 % tient sans calcul nouveau : un média est compté à notre coût, sur le même budget que le texte.
+**Phase 0 :** le magasin en mémoire oublie tout quand la machine s'arrête. Le solde du propriétaire est donc recréé à chaque démarrage (`WARELL_OWNER_MEDIA_CREDITS`). Le journal devient durable avec Postgres.
 
 **Côté agent**, l'instance déclare un serveur MCP `warell-media` dans `config/mcp.json` et un skill disque `skills/warell-media/SKILL.md` (`packages/instance`, `seed.ts` et `media-mcp.ts`). Aucun fichier de l'upstream ne change :
 - le skill se charge quand on demande une vidéo, une voix ou une musique, et n'attache que les outils MCP existants (`listMcpTools`, `executeMcpTool`), qui gardent leur demande d'accord avant chaque appel ;

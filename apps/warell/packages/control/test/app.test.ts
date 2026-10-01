@@ -23,6 +23,7 @@ function setup(respond: (seen: Seen) => Response | Promise<Response>, planId = '
     openRouterKey: 'or-secret',
     publicUrl: 'https://control.example.test',
     appName: 'Warell',
+    mediaPacks: [],
     now: () => clock,
     fetch: (async (url: string, init: RequestInit) => {
       const s = { url: String(url), init };
