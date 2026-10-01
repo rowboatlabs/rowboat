@@ -203,3 +203,21 @@ describe('the sign-in page', () => {
     expect(await res.text()).toContain(`<script nonce="${nonce}">`);
   });
 });
+
+describe('ResendSender', () => {
+  it('sends the code by Resend’s API, code first in the subject', async () => {
+    const { ResendSender } = await import('../src/codes.js');
+    const seen: Array<{ url: string; init: RequestInit }> = [];
+    const sender = new ResendSender('re_key', 'Warell <connexion@example.test>', (async (url: string, init: RequestInit) => {
+      seen.push({ url: String(url), init });
+      return new Response('{"id":"e1"}');
+    }) as typeof fetch);
+    await sender.sendEmailCode('awa@example.test', '123456');
+    expect(seen[0].url).toBe('https://api.resend.com/emails');
+    expect((seen[0].init.headers as Record<string, string>).authorization).toBe('Bearer re_key');
+    const body = JSON.parse(seen[0].init.body as string);
+    expect(body).toMatchObject({ from: 'Warell <connexion@example.test>', to: ['awa@example.test'] });
+    expect(body.subject.startsWith('123456')).toBe(true);
+    expect(sender.sms).toBe(false);
+  });
+});

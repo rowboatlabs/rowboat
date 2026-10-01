@@ -26,6 +26,50 @@ export class NoSender implements CodeSender {
 }
 
 /**
+ * Email codes through Resend (decided 01/10/2026), by its HTTP API: one call,
+ * no SDK. The sender address must be on a domain verified at Resend: an
+ * unverified one is refused, or lands in spam (lesson from Baarali,
+ * lib/apis/resend.ts). SMS stays off until an aggregator is chosen.
+ */
+export class ResendSender implements CodeSender {
+  readonly email = true;
+  readonly sms = false;
+  constructor(
+    private readonly apiKey: string,
+    /** e.g. "Warell <connexion@domaine-verifie>" */
+    private readonly from: string,
+    private readonly fetchFn: typeof fetch = fetch,
+  ) {}
+
+  async sendEmailCode(email: string, code: string) {
+    // Code first in the subject: it shows in the notification, no need to open.
+    const res = await this.fetchFn('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${this.apiKey}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        from: this.from,
+        to: [email],
+        subject: `${code} — votre code Warell / your Warell code`,
+        text: [
+          `Votre code de connexion Warell : ${code}`,
+          'Il est valable 5 minutes. Si vous n’avez rien demandé, ignorez ce message.',
+          '',
+          `Your Warell sign-in code: ${code}`,
+          'It is valid for 5 minutes. If you did not ask for it, ignore this message.',
+        ].join('\n'),
+      }),
+    });
+    // The person sees the same answer either way (no account enumeration);
+    // a failure is for our logs, never with the code in it.
+    if (!res.ok) console.error(`[codes] Resend refused a send: ${res.status}`);
+  }
+
+  async sendSmsCode(): Promise<void> {
+    throw new Error('No SMS sender configured');
+  }
+}
+
+/**
  * Development only (WARELL_DEV_CODES=1): writes the code to the log instead
  * of sending it. Never in production: the log would hold every code.
  */

@@ -2,7 +2,7 @@ import { serve } from '@hono/node-server';
 import pg from 'pg';
 import { createApp } from './app.js';
 import { SOCIAL_PROVIDERS, createAuth, migrateAuth, type AuthDeps, type SocialCredentials, type WarellAuth } from './auth.js';
-import { LogSender, NoSender } from './codes.js';
+import { LogSender, NoSender, ResendSender, type CodeSender } from './codes.js';
 import { ASSUMPTIONS, MEDIA_PACKS, OFFERS } from './catalog.js';
 import { packCredits, plansFrom } from './pricing.js';
 import { migrate, poolDb } from './db.js';
@@ -12,6 +12,13 @@ import { MemoryStore, hashToken, type Account, type ControlStore } from './store
 // Entry point (roadmap §4): the owner, their instance token, the plan catalog
 // of catalog.ts. With DATABASE_URL, everything lives in Postgres (decided
 // 01/10/2026); without it, in memory, forgotten when the machine stops.
+
+/** Codes in the log are for development only: never set WARELL_DEV_CODES in production. */
+function codeSender(): CodeSender {
+  if (process.env.WARELL_DEV_CODES === '1') return new LogSender();
+  if (process.env.RESEND_API_KEY && process.env.EMAIL_FROM) return new ResendSender(process.env.RESEND_API_KEY, process.env.EMAIL_FROM);
+  return new NoSender();
+}
 
 function required(name: string): string {
   const value = process.env[name];
@@ -69,8 +76,7 @@ if (process.env.DATABASE_URL) {
       secret: process.env.WARELL_AUTH_SECRET,
       database: pool,
       db,
-      // Codes in the log are for development only: never set in production.
-      sender: process.env.WARELL_DEV_CODES === '1' ? new LogSender() : new NoSender(),
+      sender: codeSender(),
       social,
       onUserCreated: (u) => pgStore.upsertAccount({ id: u.id, email: u.email, planId: 'decouverte', createdAt: u.createdAt }),
       now: Date.now,

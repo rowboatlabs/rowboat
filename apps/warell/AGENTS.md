@@ -37,7 +37,8 @@ OPENROUTER_API_KEY=<clé> WARELL_PLAN_ID=essentiel PORT=8787 pnpm start
 | `PIXAZO_API_KEY` | Facultative : sans elle, `/v1/media` répond 503 et le texte marche quand même |
 | `WARELL_ADMIN_TOKEN` | Facultatif : le jeton de l'opérateur pour `/v1/admin/*` (recharges de crédits médias à la main). Absent : ces routes répondent 404 |
 | `WARELL_OWNER_MEDIA_CREDITS` | Crédits médias offerts au propriétaire, une seule fois en Postgres (référence `owner-grant`) ; en mémoire, à chaque démarrage |
-| `DATABASE_URL` | Postgres (schéma `warell`, migrations au démarrage, `src/db.ts`). Absente : tout reste en mémoire et s'oublie à l'arrêt de la machine |
+| `DATABASE_URL` | Postgres (schéma `warell`, migrations au démarrage, `src/db.ts`). Absente : tout reste en mémoire et s'oublie à l'arrêt de la machine. Chez Neon (choisi le 01/10/2026), l'adresse **directe**, pas celle du pooler (`-pooler` dans l'hôte) : le pooler en mode transaction perd le `search_path` et les verrous de migration |
+| `RESEND_API_KEY`, `EMAIL_FROM` | Les codes par email, par Resend (choisi le 01/10/2026). `EMAIL_FROM` sur un domaine vérifié chez Resend, sinon l'envoi est refusé ou part en indésirable |
 | `WARELL_AUTH_SECRET` | Le serveur de connexion (`/auth/v1`, archi §3.5 « Comptes et connexion »), seulement avec `DATABASE_URL`. 32 octets aléatoires au moins. Absent : seul le jeton d'instance ouvre `/v1` |
 | `GOOGLE_CLIENT_ID` / `_SECRET`, `APPLE_…`, `GITHUB_…`, `MICROSOFT_…` | Un fournisseur n'apparaît sur la page de connexion que si ses deux valeurs sont là |
 | `WARELL_DEV_CODES` | `1` en développement seulement : les codes email et SMS s'écrivent dans le journal. Sans lui et sans vrai fournisseur, ni l'email ni le SMS ne sont proposés |
