@@ -5,7 +5,7 @@ Le code propre à Warell : les packages `@warell/*`. C'est un espace de travail 
 | Package | Rôle | Conception |
 |---|---|---|
 | `packages/control` | Le plan de contrôle : remplace le backend Rowboat Labs en servant les mêmes routes `/v1/*` | `TARGET_AGENTIC_ARCHITECTURE.md` §3.5 |
-| `packages/instance` | Le lanceur d'une instance : prépare le dossier de travail, démarre `rowboat-server` sur la boucle locale, ouvre le portier | `TARGET_AGENTIC_ARCHITECTURE.md` §3.1 |
+| `packages/instance` | Le lanceur d'une instance : prépare le dossier de travail, démarre `rowboat-server` sur la boucle locale, ouvre le portier ; le serveur MCP `warell-media` (vidéo, voix, musique) | `TARGET_AGENTIC_ARCHITECTURE.md` §3.1 et §3.5 |
 
 ## Dépendre de l'upstream
 

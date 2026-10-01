@@ -247,6 +247,11 @@ Ce que ça donne par forfait (une session est un quart de la semaine) :
 
 La marge de 55 % tient sans calcul nouveau : un média est compté à notre coût, sur le même budget que le texte.
 
+**Côté agent**, l'instance déclare un serveur MCP `warell-media` dans `config/mcp.json` et un skill disque `skills/warell-media/SKILL.md` (`packages/instance`, `seed.ts` et `media-mcp.ts`). Aucun fichier de l'upstream ne change :
+- le skill se charge quand on demande une vidéo, une voix ou une musique, et n'attache que les outils MCP existants (`listMcpTools`, `executeMcpTool`), qui gardent leur demande d'accord avant chaque appel ;
+- le serveur expose trois outils : `list_models`, `generate` et `check`. Le client MCP du cœur abandonne au bout de 60 s, alors qu'une voix prend déjà plus d'une minute. `generate` rend donc la main tout de suite, et `check` attend au plus 45 s par appel. L'agent rappelle `check` jusqu'à ce que le fichier soit enregistré dans `generated_media/` ;
+- le jeton est lu dans `oauth.json` : `mcp.json` ne contient aucun secret.
+
 **Sur le fil, on garde le schéma de l'upstream** (§3.14) : `GET /v1/me` porte la session dans le compartiment `daily` et la semaine dans `monthly`, et `usageDay` donne l'heure de remise à zéro de la session. Les libellés de l'écran d'usage upstream (« jour », « mois ») sont donc faux jusqu'à ce que la couche de marque et d'i18n (§3.12) les remplace : c'est accepté pour la phase 0, où seul le propriétaire utilise l'app.
 
 ### 3.6 La vérification : exécuté ≠ vérifié

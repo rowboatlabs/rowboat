@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 import { createGate } from './gate.js';
 import { seedWorkdir } from './seed.js';
 
@@ -21,6 +22,11 @@ await seedWorkdir({
   workDir,
   instanceToken: required('WARELL_INSTANCE_TOKEN'),
   assistantModel: process.env.WARELL_ASSISTANT_MODEL ?? 'deepseek/deepseek-v4.1-flash',
+  mediaServer: {
+    command: process.execPath,
+    args: [fileURLToPath(new URL('./media-mcp-main.js', import.meta.url))],
+    env: { ROWBOAT_WORKDIR: workDir, API_URL: required('API_URL') },
+  },
 });
 
 const child = spawn(process.execPath, [required('ROWBOAT_SERVER_ENTRY')], {

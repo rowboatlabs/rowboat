@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { NEVER_EXPIRES, seedWorkdir } from '../src/seed.js';
+import { MEDIA_SKILL, NEVER_EXPIRES, seedWorkdir } from '../src/seed.js';
 
 async function tmp() { return fs.mkdtemp(path.join(os.tmpdir(), 'warell-seed-')); }
 const read = async (dir: string, f: string) => JSON.parse(await fs.readFile(path.join(dir, 'config', f), 'utf8'));
@@ -41,5 +41,20 @@ describe('seedWorkdir', () => {
     expect(oauth.providers.rowboat.tokens.access_token).toBe('t2');
     expect((await read(dir, 'models.json')).assistantModel.model).toBe('anthropic/claude-sonnet-5.5');
     expect(await read(dir, 'server.json')).toEqual({ lanEnabled: false, port: 3220 });
+  });
+
+  it('registers the media server and its skill, keeping the person\'s own servers', async () => {
+    const dir = await tmp();
+    await fs.mkdir(path.join(dir, 'config'));
+    await fs.writeFile(path.join(dir, 'config', 'mcp.json'), JSON.stringify({ mcpServers: { mine: { url: 'https://x.test' }, 'warell-media': { command: 'old' } } }));
+    const mediaServer = { command: '/usr/bin/node', args: ['/app/instance/dist/media-mcp-main.js'], env: { ROWBOAT_WORKDIR: dir, API_URL: 'https://c.test' } };
+    await seedWorkdir({ workDir: dir, instanceToken: 't', assistantModel: 'm', mediaServer });
+    expect(await read(dir, 'mcp.json')).toEqual({ mcpServers: { mine: { url: 'https://x.test' }, 'warell-media': { type: 'stdio', ...mediaServer } } });
+    const skill = await fs.readFile(path.join(dir, 'skills', 'warell-media', 'SKILL.md'), 'utf8');
+    expect(skill).toBe(MEDIA_SKILL);
+    expect(skill).toMatch(/^---\nname: .+\ndescription: .+\ntools: \[listMcpTools, executeMcpTool\]\n---/);
+    expect(skill).toContain('`warell-media` MCP server');
+    // No secret in mcp.json: the server reads the session from oauth.json.
+    expect(JSON.stringify(await read(dir, 'mcp.json'))).not.toContain('"t"');
   });
 });
