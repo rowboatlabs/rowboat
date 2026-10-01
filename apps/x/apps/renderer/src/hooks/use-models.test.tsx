@@ -34,7 +34,7 @@ function serveCatalog(catalog: {
     flavor?: string
     status?: 'ok' | 'error'
     error?: string
-    models: Array<{ id: string; reasoning?: boolean }>
+    models: Array<{ id: string; name?: string; reasoning?: boolean }>
   }>
   defaultModel: { provider: string; model: string } | null
 }): void {
@@ -60,7 +60,7 @@ describe('useModels', () => {
   it('shares one fetch across concurrently mounted consumers', async () => {
     serveCatalog({
       providers: [
-        { id: 'openai', models: [{ id: 'gpt-5.4', reasoning: true }, { id: 'gpt-5.4-mini' }] },
+        { id: 'openai', models: [{ id: 'gpt-5.4', name: 'GPT-5.4', reasoning: true }, { id: 'gpt-5.4-mini' }] },
       ],
       defaultModel: { provider: 'openai', model: 'gpt-5.4' },
     })
@@ -76,6 +76,8 @@ describe('useModels', () => {
       { id: 'openai', flavor: 'openai', models: ['gpt-5.4', 'gpt-5.4-mini'], status: 'ok' },
     ])
     expect(first.result.current.reasoningByKey).toEqual({ 'openai/gpt-5.4': true })
+    // WARELL(30/09/2026): names for the picker, only where the catalog has one.
+    expect(first.result.current.namesByKey).toEqual({ 'openai/gpt-5.4': 'GPT-5.4' })
     expect(first.result.current.defaultModel).toEqual({ provider: 'openai', model: 'gpt-5.4' })
     // Raw catalog is exposed for provider-scoped pickers.
     expect(first.result.current.catalogByProvider).toEqual({ openai: ['gpt-5.4', 'gpt-5.4-mini'] })

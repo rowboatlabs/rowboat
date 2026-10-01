@@ -1,4 +1,4 @@
-import { applyPolicy, filterCatalog } from './models.js';
+import { applyPolicy, presentCatalog } from './models.js';
 import type { Account, ControlStore } from './store.js';
 import {
   admit,
@@ -111,8 +111,8 @@ export async function proxyLlm(deps: ProxyDeps, account: Account, req: Request):
   // Reads (the model catalog) cost nothing and are not metered.
   if (req.method === 'GET' || req.method === 'HEAD') {
     const upstream = await deps.fetch(target, { method: req.method, headers });
-    if (plan.models && subpath === '/models' && req.method === 'GET' && upstream.ok) {
-      const filtered = filterCatalog(plan.models, await upstream.text());
+    if (subpath === '/models' && req.method === 'GET' && upstream.ok) {
+      const filtered = presentCatalog(plan.models, await upstream.text());
       if (filtered === null) return errorResponse(502, { code: 'upstream_invalid', message: 'Unexpected model catalog' });
       return new Response(filtered, { status: 200, headers: passHeaders(upstream) });
     }

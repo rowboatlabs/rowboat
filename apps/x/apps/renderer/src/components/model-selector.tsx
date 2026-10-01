@@ -222,7 +222,9 @@ export function ModelSelector({
   lockedModel = null,
   effortSelectable = false,
 }: ModelSelectorProps) {
-  const { groups: catalogGroups, reasoningByKey, defaultModel: catalogDefault, catalogByProvider, refresh } = useModels()
+  const { groups: catalogGroups, reasoningByKey, defaultModel: catalogDefault, catalogByProvider, refresh, namesByKey = {} } = useModels()
+  // WARELL(30/09/2026): the catalog's display name when it has one, else the id.
+  const nameOf = (provider: string, model: string) => namesByKey[`${provider}/${model}`]
   const allGroups = groupsProp ?? catalogGroups
   // The chat default has no standing in a caller-supplied model space.
   const defaultModel = groupsProp ? null : catalogDefault
@@ -252,6 +254,8 @@ export function ModelSelector({
   // provider name — typing "rowboat" surfaces the whole Rowboat group.
   const [query, setQuery] = useState('')
   const queryValue = query.trim().toLowerCase()
+  const matchesQuery = (provider: string, model: string) =>
+    model.toLowerCase().includes(queryValue) || (nameOf(provider, model) ?? '').toLowerCase().includes(queryValue)
   const groupMatchesFilter = useCallback((g: ModelPickerGroup) =>
     (providerDisplayNames[g.flavor] || g.flavor).toLowerCase().includes(queryValue)
     || g.id.toLowerCase().includes(queryValue), [queryValue])
@@ -380,7 +384,7 @@ export function ModelSelector({
     : standaloneVisible
       || groups.some((g) =>
         groupMatchesFilter(g) ? g.models.length > 0
-          : g.models.some((m) => m.toLowerCase().includes(queryValue)))
+          : g.models.some((m) => matchesQuery(g.id, m)))
 
   // The cmdk value of the current selection, for check indicators.
   const selectedKey = value
@@ -499,7 +503,7 @@ export function ModelSelector({
           : undefined}
       >
         <Check className={cn('size-3.5 shrink-0', isSelected ? 'opacity-100' : 'opacity-0')} />
-        <span className="truncate">{model}</span>
+        <span className="truncate">{nameOf(providerId, model) ?? model}</span>
         {isSelected && canEffort && shownEffort !== '' && (
           <span className="shrink-0 text-xs text-muted-foreground">
             {REASONING_EFFORT_OPTIONS.find((o) => o.value === shownEffort)?.short}
@@ -584,7 +588,7 @@ export function ModelSelector({
             type="button"
             className="flex h-7 min-w-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
-            <span className="min-w-0 truncate text-foreground/80">{getModelDisplayName(lockedModel.model)}</span>
+            <span className="min-w-0 truncate text-foreground/80">{nameOf(lockedModel.provider, lockedModel.model) ?? getModelDisplayName(lockedModel.model)}</span>
             {renderEffortBadge()}
             <ChevronDown className="h-3 w-3 shrink-0" />
           </button>
@@ -630,7 +634,7 @@ export function ModelSelector({
                 <span className="flex min-w-0 items-center gap-2">
                   <span className={cn('truncate', !value && sentinelMuted && 'text-muted-foreground')}>
                     {value
-                      ? (staticOptions ? staticLabelFor(value.model) : value.model)
+                      ? (staticOptions ? staticLabelFor(value.model) : (nameOf(value.provider, value.model) ?? value.model))
                       : (sentinel?.label || defaultModel?.model || 'Select a model')}
                   </span>
                   {renderEffortBadge()}
@@ -653,7 +657,10 @@ export function ModelSelector({
                 <span className="min-w-0 truncate text-foreground/80">
                   {staticOptions
                     ? (value ? staticLabelFor(value.model) : (sentinel?.label ?? 'Model'))
-                    : getModelDisplayName(value?.model || defaultModel?.model || 'Model')}
+                    : (() => {
+                        const shown = value ?? defaultModel
+                        return (shown && nameOf(shown.provider, shown.model)) ?? getModelDisplayName(shown?.model || 'Model')
+                      })()}
                 </span>
                 {renderEffortBadge()}
                 <ChevronDown className="h-3 w-3 shrink-0" />
@@ -784,7 +791,7 @@ export function ModelSelector({
                     {!staticOptions && groups.map((g) => {
                       // A provider-name match shows the whole group.
                       const visibleModels = queryValue && !groupMatchesFilter(g)
-                        ? g.models.filter((m) => m.toLowerCase().includes(queryValue))
+                        ? g.models.filter((m) => matchesQuery(g.id, m))
                         : g.models
                       // Error rows are status, not models: they render (with
                       // the header) regardless of the filter and don't count

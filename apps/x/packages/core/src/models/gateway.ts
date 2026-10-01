@@ -45,10 +45,11 @@ export async function listGatewayModels(): Promise<{ providers: ProviderSummary[
     if (!response.ok) {
         throw new Error(`Gateway /v1/models failed: ${response.status}`);
     }
-    const body = await response.json() as { data: Array<{ id: string }> };
+    const body = await response.json() as { data: Array<{ id: string; name?: string }> };
     // The gateway returns bare "vendor/model" ids; the models.dev cache
     // supplies the reasoning capability the composer's effort control needs.
-    const models = await annotateReasoningFlags(body.data.map((m) => ({ id: m.id })));
+    // WARELL(30/09/2026): keep the gateway's display name, for the picker.
+    const models = await annotateReasoningFlags(body.data.map((m) => ({ id: m.id, ...(m.name ? { name: m.name } : {}) })));
     return {
         providers: [{
             id: 'rowboat',

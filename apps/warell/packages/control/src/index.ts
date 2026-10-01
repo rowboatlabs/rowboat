@@ -5,7 +5,7 @@ export type { ControlDeps } from './app.js';
 export { MemoryStore, hashToken } from './store.js';
 export type { Account, ControlStore, Plan, UsageRecord } from './store.js';
 export { ASSUMPTIONS, DISCOVERY_MODELS, OFFERS } from './catalog.js';
-export { applyPolicy, filterCatalog } from './models.js';
+export { applyPolicy, displayName, presentCatalog } from './models.js';
 export type { ModelPolicy, PolicyResult } from './models.js';
 export { marginAtFullUsage, netUsd, periodModelBudgetUsd, plansFrom, weekCredits } from './pricing.js';
 export type { Billing, Money, Offer, PricingAssumptions } from './pricing.js';

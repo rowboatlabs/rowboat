@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyPolicy, filterCatalog, type ModelPolicy } from '../src/models.js';
+import { applyPolicy, displayName, presentCatalog, type ModelPolicy } from '../src/models.js';
 
 const policy: ModelPolicy = { models: ['a/one', 'b/two'], settings: { reasoning: { enabled: false } } };
 
@@ -20,9 +20,27 @@ describe('applyPolicy', () => {
   });
 });
 
-describe('filterCatalog', () => {
+describe('presentCatalog', () => {
+  it('drops the vendor prefix from names, and keeps everything else', () => {
+    const raw = JSON.stringify({ data: [{ id: 'a/one', name: 'Alpha: One Mini', context_length: 8 }, { id: 'z/zed' }] });
+    expect(JSON.parse(presentCatalog(null, raw)!)).toEqual({ data: [{ id: 'a/one', name: 'One Mini', context_length: 8 }, { id: 'z/zed' }] });
+  });
+
+  it('keeps only the policy models', () => {
+    const raw = JSON.stringify({ data: [{ id: 'a/one' }, { id: 'z/zed' }, { id: 'b/two' }] });
+    expect(JSON.parse(presentCatalog(policy, raw)!).data.map((m: { id: string }) => m.id)).toEqual(['a/one', 'b/two']);
+  });
+
   it('returns null on a catalog it cannot read', () => {
-    expect(filterCatalog(policy, '{"nodata":1}')).toBeNull();
-    expect(filterCatalog(policy, 'x')).toBeNull();
+    expect(presentCatalog(policy, '{"nodata":1}')).toBeNull();
+    expect(presentCatalog(null, 'x')).toBeNull();
+  });
+});
+
+describe('displayName', () => {
+  it('keeps a name without a prefix, or one that would end empty', () => {
+    expect(displayName('DeepSeek: DeepSeek V4.1 Flash')).toBe('DeepSeek V4.1 Flash');
+    expect(displayName('GPT-6 Luna')).toBe('GPT-6 Luna');
+    expect(displayName('Odd:')).toBe('Odd:');
   });
 });

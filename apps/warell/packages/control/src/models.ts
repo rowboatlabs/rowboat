@@ -47,14 +47,28 @@ export function applyPolicy(policy: ModelPolicy, path: string, raw: string): Pol
   return { ok: true, body: JSON.stringify(rewritten), requested, served };
 }
 
-/** The model catalog a policy shows: only its models, so the picker offers nothing it would replace. */
-export function filterCatalog(policy: ModelPolicy, raw: string): string | null {
+/**
+ * OpenRouter names a model "Vendor: Model" ("DeepSeek: DeepSeek V4.1 Flash");
+ * the picker already groups by provider, so the vendor prefix is noise.
+ */
+export function displayName(name: string): string {
+  const short = name.replace(/^[^:]+:\s*/, '').trim();
+  return short || name;
+}
+
+/**
+ * The model catalog as the picker shows it (decided 30/09/2026): readable
+ * names, and with a policy only its models, so the picker offers nothing it
+ * would replace. null when the catalog cannot be read.
+ */
+export function presentCatalog(policy: ModelPolicy | null, raw: string): string | null {
   try {
     const parsed = JSON.parse(raw) as { data?: unknown };
     if (!Array.isArray(parsed.data)) return null;
-    const data = parsed.data.filter(
-      (m): m is { id: string } => !!m && typeof m === 'object' && policy.models.includes((m as { id?: unknown }).id as string),
-    );
+    const data = parsed.data
+      .filter((m): m is { id: string; name?: unknown } => !!m && typeof m === 'object' && typeof (m as { id?: unknown }).id === 'string')
+      .filter((m) => !policy || policy.models.includes(m.id))
+      .map((m) => (typeof m.name === 'string' ? { ...m, name: displayName(m.name) } : m));
     return JSON.stringify({ ...parsed, data });
   } catch {
     return null;

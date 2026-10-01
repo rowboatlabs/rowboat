@@ -44,6 +44,9 @@ export interface ModelsSnapshot {
   // Raw catalog model ids per provider id, unpinned — for provider-scoped
   // pickers that need a provider's list without group ordering applied.
   catalogByProvider: Record<string, string[]>
+  // WARELL(30/09/2026): display names ("provider/model" → name) when the
+  // catalog has one; the picker falls back to the id.
+  namesByKey: Record<string, string>
 }
 
 export interface UseModelsResult extends ModelsSnapshot {
@@ -63,6 +66,7 @@ const EMPTY_SNAPSHOT: ModelsSnapshot = {
   defaultEffort: '',
   isRowboatConnected: false,
   catalogByProvider: {},
+  namesByKey: {},
 }
 
 // Module-level store: every mounted consumer shares one snapshot and one
@@ -88,6 +92,7 @@ async function buildSnapshot(refreshProvider?: string): Promise<ModelsSnapshot> 
   const defaultEffort = catalog.defaultModel?.effort ?? ''
   const reasoningByKey: Record<string, boolean> = {}
   const catalogByProvider: Record<string, string[]> = {}
+  const namesByKey: Record<string, string> = {}
   const groups: ModelPickerGroup[] = []
 
   for (const p of catalog.providers) {
@@ -97,6 +102,7 @@ async function buildSnapshot(refreshProvider?: string): Promise<ModelsSnapshot> 
       if (typeof m.reasoning === 'boolean') {
         reasoningByKey[`${p.id}/${m.id}`] = m.reasoning
       }
+      if (m.name) namesByKey[`${p.id}/${m.id}`] = m.name
     }
     groups.push({
       id: p.id,
@@ -129,6 +135,7 @@ async function buildSnapshot(refreshProvider?: string): Promise<ModelsSnapshot> 
     defaultEffort,
     isRowboatConnected: catalog.providers.some((p) => p.id === 'rowboat'),
     catalogByProvider,
+    namesByKey,
   }
 }
 
