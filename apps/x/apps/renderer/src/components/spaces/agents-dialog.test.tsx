@@ -94,14 +94,15 @@ describe('AgentsDialog', () => {
         // By hand, from a terminal.
         fireEvent.click(screen.getByRole('radio', { name: 'Terminal' }))
         expect(screen.getByText('Save the settings')).toBeInTheDocument()
-        expect(screen.getByText('Install the Rowboat plugin')).toBeInTheDocument()
+        expect(screen.getByText('Install the Rowboat plugin and skill')).toBeInTheDocument()
         expect(screen.getByText('Restart Hermes')).toBeInTheDocument()
         expect(screen.getByText('Add it to a space')).toBeInTheDocument()
         expect(screen.getByText('hermes plugins install rowboatlabs/hermes-rowboat --enable')).toBeInTheDocument()
+        expect(screen.getByText('hermes skills install rowboatlabs/rowboat/skills/rowboat-spaces --yes')).toBeInTheDocument()
         // The key reads as its ends; Copy takes the whole commands.
         expect(screen.getByText(/ROWBOAT_AGENT_KEY 'rbk_LX…zz9U'/)).toBeInTheDocument()
         expect(screen.queryByText(new RegExp(NEW_KEY))).toBeNull()
-        fireEvent.click(screen.getByRole('button', { name: 'Copy the commands' }))
+        fireEvent.click(screen.getAllByRole('button', { name: 'Copy the commands' })[0]!) // the settings; the second block installs
         const copied = vi.mocked(navigator.clipboard.writeText).mock.calls.at(-1)![0]
         expect(copied.split('\n')).toEqual([
             "hermes config set ROWBOAT_URL 'https://rowboat.example'",

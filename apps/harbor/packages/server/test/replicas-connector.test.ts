@@ -130,7 +130,7 @@ describe('the Replicas connector', () => {
     const create = fake.creates().at(-1)!.body!;
     expect(create).toMatchObject({ name: `spaces-${message.id}`, environment_id: 'env-web', coding_agent: 'claude', plan_mode: false });
     const prompt = String(create.message);
-    expect(prompt.startsWith('fix the login bug')).toBe(true); // the person's words first: Replicas's own /commands work
+    expect(prompt.startsWith(`${mention(claude)} fix the login bug`)).toBe(true); // the person's words first, as written
     expect(prompt.endsWith(`[Spaces request ${message.id}]`)).toBe(true);
     expect(prompt).toContain('Requested by Harsh');
 
@@ -155,9 +155,29 @@ describe('the Replicas connector', () => {
     const send = fake.sends().at(-1)!;
     expect(send.body).toMatchObject({ chat_id: expect.stringMatching(/^chat-/) });
     const prompt = String(send.body!.message);
-    expect(prompt.startsWith('also add a test')).toBe(true);
-    expect(prompt).toContain("Earlier in this thread:\nHarsh: it's the session cookie");
+    expect(prompt.startsWith(`${mention(claude)} also add a test`)).toBe(true);
+    expect(prompt).toContain("Earlier in this thread:\n[@Harsh](#member:harsh): it's the session cookie");
     expect(prompt).not.toContain('fix checkout'); // the workspace heard that already
+  });
+
+  it('keeps mentions and writes authors as tokens, so the agent can mention anyone in the thread', async () => {
+    const { message, invocations: first } = await org.post(`${mention(claude)} look at the cart`);
+    expect((await org.ended(first[0]!.id)).state).toBe('done');
+    await org.post('[@Harsh](#member:harsh) can you check the totals?', { threadRoot: message.id }, 'dev-ramnique');
+    const { invocations } = await org.post(`${mention(claude)} /plan pair with [@Ramnique](#member:ramnique) on it`, { threadRoot: message.id });
+    expect((await org.ended(invocations[0]!.id)).state).toBe('done');
+    const prompt = String(fake.sends().at(-1)!.body!.message);
+    expect(prompt.startsWith('/plan pair with [@Ramnique](#member:ramnique) on it')).toBe(true); // its mention goes only before a command, so Replicas runs it
+    expect(prompt).toContain('Earlier in this thread:\n[@Ramnique](#member:ramnique): [@Harsh](#member:harsh) can you check the totals?');
+    expect(prompt).toContain(`You are [@Claude](#member:${claude.id}) in Rowboat, and this request comes from [@Harsh](#member:harsh) in the space "Payments"`);
+    expect(prompt).toContain('Agents see only messages that mention them');
+  });
+
+  it('keeps a mention of the agent in mid-sentence, so the request has no blank in it', async () => {
+    const { invocations } = await org.post(`[@Ramnique](#member:ramnique) and ${mention(claude)}, introduce yourselves`);
+    expect((await org.ended(invocations[0]!.id)).state).toBe('done');
+    const prompt = String(fake.creates().at(-1)!.body!.message);
+    expect(prompt.startsWith(`[@Ramnique](#member:ramnique) and ${mention(claude)}, introduce yourselves`)).toBe(true);
   });
 
   it('asks which environment when there are several, and the reply picks it', async () => {
@@ -196,7 +216,7 @@ describe('the Replicas connector', () => {
     const create = fake.creates().at(-1)!.body!;
     expect(create.images).toEqual([{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG.toString('base64') } }]);
     expect(String(create.message)).toContain(`- shot (image/png, 70 B): ${org.harbor.url}/v1/spaces/${org.spaceId}/blobs/${hash}?name=shot`);
-    expect(String(create.message).startsWith('why does this render wrong? [attached: shot]')).toBe(true); // no raw link for Replicas to render broken
+    expect(String(create.message).startsWith(`${mention(claude)} why does this render wrong? [attached: shot]`)).toBe(true); // no raw link for Replicas to render broken
   });
 
   it('reads Codex’s answer too', async () => {
@@ -268,6 +288,45 @@ describe('the Replicas connector', () => {
     const dm = (await org.as('dev-ramnique').post('/v1/direct', { memberId: claude.id })).body.space.id;
     const stream = (await org.as('dev-ramnique').get(`/v1/spaces/${dm}/stream`)).body.messages as Message[];
     expect(stream.filter((m) => m.author.memberId === claude.id && /Replicas rejected/.test(m.body))).toHaveLength(1);
+  });
+});
+
+describe('the Replicas connector starting up', () => {
+  it('never sends again a turn it took on while it was still starting', async () => {
+    const store = await freshStore();
+    const org = await new Org(store).start();
+    await org.space();
+    const service = org.harbor.service;
+    // Its first list returns only once a mention it took on live is working; that turn has not
+    // sent anything yet (it is still building its prompt), as on a slow machine.
+    const list = service.listAgentInvocations.bind(service);
+    let releaseList!: () => void;
+    const listHeld = new Promise<void>((r) => (releaseList = r));
+    vi.spyOn(service, 'listAgentInvocations').mockImplementationOnce(async (...args) => (await listHeld, list(...args)));
+    const members = service.listOrgMembers.bind(service);
+    let releasePrompt!: () => void;
+    const promptHeld = new Promise<void>((r) => (releasePrompt = r));
+    let first = true;
+    vi.spyOn(service, 'listOrgMembers').mockImplementation(async (...args) => {
+      if (args[0].agent && first) {
+        first = false;
+        await promptHeld;
+      }
+      return members(...args);
+    });
+    const claude = await org.agent('claude-code', 'Claude');
+    fake.nextTurn = { events: [], hold: true };
+    const { message, invocations } = await org.post(`${mention(claude)} quick one`);
+    await until(async () => (await org.invocation(invocations[0]!.id))?.state === 'working', 'its own turn to start');
+    releaseList();
+    await new Promise((r) => setTimeout(r, 300));
+    releasePrompt();
+    await until(async () => [...fake.workspaces.values()].some((w) => w.name === `spaces-${message.id}`), 'the workspace');
+    await new Promise((r) => setTimeout(r, 300));
+    expect(fake.creates().filter((c) => c.body?.name === `spaces-${message.id}`)).toHaveLength(1);
+    vi.restoreAllMocks();
+    await org.harbor.close();
+    await store.db.close();
   });
 });
 

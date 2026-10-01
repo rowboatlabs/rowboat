@@ -130,6 +130,11 @@ export interface AgentSetup {
 const HERMES_PLUGIN = 'rowboatlabs/hermes-rowboat'
 const HERMES_ASK = `Connect yourself to Rowboat: read https://raw.githubusercontent.com/${HERMES_PLUGIN}/main/SETUP.md and follow it.`
 
+// The rowboat-spaces skill (spec §8, 2026-10-01): how to behave in Spaces (mentions, hand-offs,
+// threads, the tools), published once from the monorepo for every kind of agent.
+const SKILL_REPO = 'rowboatlabs/rowboat'
+const HERMES_SKILL = `hermes skills install ${SKILL_REPO}/skills/rowboat-spaces --yes`
+
 function hermesSetup({ orgUrl, agentKey, homeChannel }: SetupContext): SetupRoute[] {
     const settings: Array<[string, string]> = [
         ['ROWBOAT_URL', orgUrl],
@@ -180,8 +185,9 @@ function hermesSetup({ orgUrl, agentKey, homeChannel }: SetupContext): SetupRout
                     code: { caption: 'Terminal', secret: true, text: [...settings, ...config].map(([k, v]) => `hermes config set ${k} '${v}'`).join('\n') },
                 },
                 {
-                    title: 'Install the Rowboat plugin',
-                    code: { caption: 'Terminal', text: `hermes plugins install ${HERMES_PLUGIN} --enable` },
+                    title: 'Install the Rowboat plugin and skill',
+                    note: 'The skill teaches it how to behave in Spaces: mentions, hand-offs, threads.',
+                    code: { caption: 'Terminal', text: `hermes plugins install ${HERMES_PLUGIN} --enable\n${HERMES_SKILL}` },
                 },
                 {
                     title: 'Restart Hermes',
@@ -213,6 +219,11 @@ function hermesSetup({ orgUrl, agentKey, homeChannel }: SetupContext): SetupRout
                     ],
                 },
                 {
+                    title: 'Add the Spaces skill',
+                    note: 'It teaches Hermes how to behave in Spaces: mentions, hand-offs, threads. Run it where Hermes runs, or ask your Hermes to run it.',
+                    code: { caption: 'Terminal', text: HERMES_SKILL },
+                },
+                {
                     title: 'Keep progress chatter out of threads',
                     note: 'Config → YAML mode: put these lines under the existing display:.',
                     code: {
@@ -238,6 +249,11 @@ function customSetup({ orgUrl, agentKey }: SetupContext): SetupRoute[] {
                     note: 'The server, for the agent contract (list, acknowledge and report its invocations, reply in the thread), and its MCP tools.',
                     values: [{ label: 'Server', text: orgUrl }, { label: 'MCP', text: `${orgUrl}/mcp` }],
                 },
+                {
+                    title: 'Teach it Spaces (recommended)',
+                    note: 'A skill on how to behave in Spaces: mentions, hand-offs, threads, the tools. For agents that load skills (Claude Code, Codex, Cursor, OpenCode and more).',
+                    code: { caption: 'Terminal', text: `npx skills add ${SKILL_REPO} --skill rowboat-spaces` },
+                },
             ],
         },
     ]
@@ -245,8 +261,9 @@ function customSetup({ orgUrl, agentKey }: SetupContext): SetupRoute[] {
 
 // Replicas (2026-09-30): Harbor runs the connector, so connecting is the Replicas key on the Add
 // screen. What's left on Replicas's side is optional: our MCP server and two variables on the
-// environment the agent uses, so its coding agent can act in Spaces and download attachments.
-// MCP servers are per environment, so one environment per Rowboat agent, and not Global.
+// environment the agent uses, so its coding agent can act in Spaces and download attachments,
+// and our repository as a skill registry, for the rowboat-spaces skill (2026-10-01). MCP servers
+// are per environment, so one environment per Rowboat agent, and not Global.
 function replicasSetup({ orgUrl, agentKey }: SetupContext): SetupRoute[] {
     return [
         {
@@ -268,6 +285,11 @@ function replicasSetup({ orgUrl, agentKey }: SetupContext): SetupRoute[] {
                         { label: 'ROWBOAT_URL', text: orgUrl },
                         { label: 'ROWBOAT_AGENT_KEY', text: agentKey, secret: true },
                     ],
+                },
+                {
+                    title: 'Teach it Spaces (recommended)',
+                    note: 'In the same environment’s Skills tab, add this repository as a skill registry. Its rowboat-spaces skill teaches the agent how to behave in Spaces: mentions, hand-offs, threads.',
+                    values: [{ label: 'Registry', text: `https://github.com/${SKILL_REPO}` }],
                 },
             ],
         },

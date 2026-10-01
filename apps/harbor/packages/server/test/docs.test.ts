@@ -7,7 +7,8 @@ import { mcpTools, routes } from '@rowboat/spaces-protocol';
 // route and every agent tool, and SPEC.md, CONTRACT.md and AGENTS.md link
 // into each other by heading. Pinning both here means a route without a
 // bullet, or a link to a renamed section, fails in CI instead of in a
-// reader's head.
+// reader's head. The rowboat-spaces skill teaches agents the tools by name
+// (spec §8, 2026-10-01), so a renamed tool fails here too.
 
 const HARBOR = resolve(import.meta.dirname, '../../..');
 const DOCS = ['SPEC.md', 'CONTRACT.md', 'AGENTS.md'];
@@ -34,6 +35,13 @@ describe('the docs beside the code', () => {
     }
     for (const tool of mcpTools) if (!contract.includes(tool.name)) missing.push(`tool ${tool.name}`);
     expect(missing).toEqual([]);
+  });
+
+  it('the rowboat-spaces skill names only tools the agent face has', () => {
+    const skill = readFileSync(resolve(HARBOR, '../../skills/rowboat-spaces/SKILL.md'), 'utf8');
+    const named = [...skill.matchAll(/`([a-z]+(?:_[a-z]+)+)`/g)].map((m) => m[1]!);
+    expect(named.length).toBeGreaterThan(0);
+    expect(named.filter((name) => !mcpTools.some((tool) => tool.name === name))).toEqual([]);
   });
 
   it('every relative link in SPEC, CONTRACT and AGENTS reaches a file, and every anchor a heading', () => {

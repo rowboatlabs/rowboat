@@ -1,4 +1,4 @@
-import { mapMentionTokens, mentionsAsText, messageUrl, type Invocation, type Message } from '@rowboat/spaces-protocol';
+import { mentionToken, messageUrl, relabelMentions, type Invocation, type Message } from '@rowboat/spaces-protocol';
 
 // The message the Replicas connector sends into a thread's workspace (spec §8
 // Connectors, 2026-09-30). The person's words come first, as written: Replicas
@@ -7,6 +7,12 @@ import { mapMentionTokens, mentionsAsText, messageUrl, type Invocation, type Mes
 // from it, the files attached, the standing instructions (carried over from
 // #1130), and last the marker the connector finds this request by in the
 // workspace's history when it recovers after a restart.
+//
+// Mentions stay tokens, and authors are written as tokens (spec §8, 2026-10-01):
+// an agent shown plain names answers with plain names, which reach no one. A
+// mention of the agent is dropped only before a command ("@Claude /plan …"
+// reaches it as "/plan …"); anywhere else it stays, and the agent is told its
+// own token, or it reads a blank where its name was.
 
 export interface Attachment {
   name: string;
@@ -67,9 +73,9 @@ export function buildPrompt(input: {
   earlierAttachments: Attachment[];
 }): string {
   const { invocation, names } = input;
-  const plain = (body: string) => mentionsAsText(namingAttachments(body, invocation.conversation.spaceId), names).trim();
-  // The agent's own mention addresses it; it is not part of the request.
-  const request = plain(mapMentionTokens(invocation.trigger.body, (ref, raw) => (ref.kind === 'member' && ref.id === input.agentId ? '' : raw)));
+  const readable = (body: string) => relabelMentions(namingAttachments(body, invocation.conversation.spaceId), names).trim();
+  const token = (memberId: string) => mentionToken({ kind: 'member', id: memberId, label: names.get(memberId) ?? '' });
+  const request = readable(invocation.trigger.body.replace(leadingMentionOf(input.agentId), ''));
   const invoker = names.get(invocation.trigger.authorId) ?? 'a teammate';
   const where =
     invocation.where.spaceKind === 'direct' ? `a direct message with ${invoker}` : `the space "${invocation.where.spaceName}"`;
@@ -80,7 +86,7 @@ export function buildPrompt(input: {
   const parts = [request || '(no text)'];
   if (input.context.length > 0) {
     parts.push(
-      ['Earlier in this thread:', ...input.context.map((m) => `${names.get(m.author.memberId) ?? 'Someone'}: ${plain(m.body)}`)].join('\n'),
+      ['Earlier in this thread:', ...input.context.map((m) => `${token(m.author.memberId)}: ${readable(m.body)}`)].join('\n'),
     );
   }
   const files = [...input.attachments, ...input.earlierAttachments];
@@ -94,14 +100,24 @@ export function buildPrompt(input: {
     );
   }
   parts.push(
-    `This request comes from ${invoker} in ${where} in Rowboat. Respond to the request above. ` +
+    `You are ${token(input.agentId)} in Rowboat, and this request comes from ${token(invocation.trigger.authorId)} in ${where}. Respond to the request above. ` +
       'Questions asking for explanation do not authorize code changes. ' +
       'Reply concisely for the shared thread, including verification and PR links when relevant. ' +
+      'To mention someone, copy their token exactly as it appears here; a bare @Name is plain text that reaches no one. ' +
+      'Agents see only messages that mention them. Whenever you need a person or an agent to act or answer, mention them, ' +
+      'and otherwise write their name; never mention to thank, acknowledge or sign off. ' +
+      'For more on Rowboat, use the rowboat-spaces skill. ' +
       `Include the following attribution in every PR description you create or update for this request: Requested by ${invoker}, ${thread}. ` +
       'Do not post to Slack.',
   );
   parts.push(requestMarker(invocation.trigger.messageId));
   return parts.join('\n\n');
+}
+
+/** Mentions of the agent that lead a command ("@Claude /plan …"): Replicas acts on the command only when it comes first. */
+function leadingMentionOf(agentId: string): RegExp {
+  const id = agentId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^\\s*(?:\\[@[^\\]\\n]*\\]\\(#member:${id}\\)[\\s,:]*)+(?=/)`);
 }
 
 function formatSize(bytes: number): string {
