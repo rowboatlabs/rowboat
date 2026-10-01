@@ -4,6 +4,8 @@ import type {
   AgentKey,
   Attribution,
   ConnectorCapabilities,
+  Approval,
+  ApprovalState,
   Invocation,
   InvocationState,
   BlobInfo,
@@ -471,6 +473,19 @@ export interface Store {
   listSpaceInvocations(spaceId: string, threadRootId: string | null, limit: number): Promise<Invocation[]>;
   /** Whether two members share a shared (not direct) space. */
   sharesSharedSpace(a: string, b: string): Promise<boolean>;
+
+  // --- approvals (spec §8 part 4, 2026-10-01) ---
+  insertApproval(approval: Approval): Promise<void>;
+  /** Replace an existing approval's state and object, by id. */
+  putApproval(approval: Approval): Promise<void>;
+  getApproval(id: string): Promise<Approval | undefined>;
+  getApprovalByRequest(invocationId: string, requestKey: string): Promise<Approval | undefined>;
+  /** An invocation's approvals in the given states, oldest first. */
+  listInvocationApprovals(invocationId: string, states: ApprovalState[]): Promise<Approval[]>;
+  /** One agent's decided approvals its connector has not confirmed applying, oldest first. */
+  listUnappliedDecisions(agentId: string): Promise<Approval[]>;
+  /** The approvals riding on these messages (their cards). */
+  listApprovalsForMessages(spaceId: string, messageIds: string[]): Promise<Approval[]>;
   getAgentCapabilities(agentId: string): Promise<ConnectorCapabilities | undefined>;
   putAgentCapabilities(agentId: string, capabilities: ConnectorCapabilities, at: string): Promise<void>;
   /** Membership events with offset in (afterOffset, upToOffset], or to the head when upToOffset is null — the stream's join lines. */

@@ -2,6 +2,8 @@ import {
   parseMentions,
   stampsEqual,
   type Attribution,
+  type Approval,
+  type ApprovalRequest,
   type Invocation,
   type MembershipEvent,
   type MentionStamps,
@@ -129,10 +131,15 @@ export class Feed {
         votesByMessage.set(v.messageId, [...(votesByMessage.get(v.messageId) ?? []), v]);
       }
     }
+    // An approval card shows its approval as it stands (spec §8 part 4), fetched only when the page carries one.
+    const cardIds = messages.filter((m) => m.approval).map((m) => m.id);
+    const approvals = new Map<string, Approval>();
+    for (const a of await this.k.store.listApprovalsForMessages(spaceId, cardIds)) approvals.set(a.messageId, a);
     return messages.map((m) => ({
       ...m,
       reactions: foldReactions(byMessage.get(m.id) ?? []),
       ...(m.poll ? { poll: foldPollVotes(m.poll, votesByMessage.get(m.id) ?? []) } : {}),
+      ...(m.approval && !m.deletedAt ? { approval: approvals.get(m.id) ?? m.approval } : {}),
     }));
   }
 
@@ -305,19 +312,24 @@ export class Feed {
     if (message.poll) {
       folded.poll = foldPollVotes(message.poll, await this.k.store.listPollVotesByMessage(spaceId, message.id));
     }
+    if (message.approval && !message.deletedAt) {
+      folded.approval = (await this.k.store.listApprovalsForMessages(spaceId, [message.id]))[0] ?? message.approval;
+    }
     return folded;
   }
 
   /**
    * `finishes` (in-process only, never on the wire): this message is the
    * answer to that invocation, which is marked done in the same transaction,
-   * or nothing is posted (spec §8 Connectors, 2026-09-30).
+   * or nothing is posted (spec §8 Connectors, 2026-09-30). `approval`
+   * (in-process only): this message is the agent's approval card, and the
+   * approval rides on it, raised in the same transaction (spec §8 part 4).
    */
   async postMessage(
     ctx: ActorCtx,
     spaceId: string,
     input: NewMessage,
-    opts: { finishes?: string } = {},
+    opts: { finishes?: string; approval?: { invocationId: string; request: ApprovalRequest } } = {},
   ): Promise<{ message: Message; invocations: Invocation[] }> {
     const space = await this.k.requireMember(ctx, spaceId);
     this.k.guardWrite();
@@ -329,6 +341,7 @@ export class Feed {
     // frames leave with the rest, after the commit.
     const outbox: InvocationOutbox = [];
     let finishing: Invocation | undefined;
+    let raising: Invocation | undefined;
     const invoke = async (message: Message): Promise<{ message: Message; invocations: Invocation[] }> => {
       const invocations = this.invocations ? await this.invocations.onMessage(ctx, space, message, input.agentOptions, outbox) : [];
       if (finishing && this.invocations) await this.invocations.finishWithin(finishing, outbox);
@@ -338,6 +351,10 @@ export class Feed {
       if (opts.finishes) {
         if (!this.invocations || !input.threadRoot) throw new HarborError('invalid_request', 'an answer is a reply in its invocation\'s thread');
         finishing = await this.invocations.assertFinishable(ctx, opts.finishes, spaceId, input.threadRoot);
+      }
+      if (opts.approval) {
+        if (!this.invocations || !input.threadRoot) throw new HarborError('invalid_request', 'an approval card is a reply in its invocation\'s thread');
+        raising = await this.invocations.assertCanRaise(ctx, opts.approval.invocationId, spaceId, input.threadRoot);
       }
       const at = this.k.now();
       // The org stamps the poll from its own clock: answer ids 1..n, a
@@ -357,8 +374,9 @@ export class Feed {
         // replying to its thread) — threads stay flat by construction.
         const root = await this.resolveRoot(spaceId, input.threadRoot);
         const offset = await this.k.nextOffset(spaceId);
+        const id = this.k.ulid();
         const message: Message = {
-          id: this.k.ulid(),
+          id,
           spaceId,
           threadRoot: root.id,
           author,
@@ -368,9 +386,11 @@ export class Feed {
           replyCount: 0,
           reactions: [],
           ...(poll ? { poll } : {}),
+          ...(raising && opts.approval ? { approval: this.invocations!.approvalFor(raising, id, opts.approval.request) } : {}),
           ...stampFields(stamps),
         };
         await this.k.store.appendMessage(message);
+        if (raising && message.approval) await this.invocations!.raiseWithin(raising, message.approval, outbox);
         await this.k.store.refreshReplyStats(spaceId, root.id);
         await this.k.append(spaceId, offset, at, { type: 'message', message });
         // Read state (2026-09-09), the provisional follow rules: replying
@@ -626,7 +646,7 @@ export class Feed {
         },
       });
       // A poll is content: redacted with the body (the store already dropped it). A tombstone addresses nobody.
-      const { poll: _poll, ...rest } = message;
+      const { poll: _poll, approval: _approval, ...rest } = message;
       return this.foldLive(spaceId, { ...rest, body: '', deletedAt: at, mentions: [], mentionsHere: false, mentionsRowboat: false });
     });
   }

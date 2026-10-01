@@ -9,6 +9,7 @@ export * from './core.js';
 export * from './changeset.js';
 export * from './events.js';
 export * from './invocation.js';
+export * from './approval.js';
 export * from './invite.js';
 export * from './search.js';
 export * from './mentions.js';

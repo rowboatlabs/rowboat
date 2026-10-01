@@ -812,6 +812,36 @@ export const MIGRATIONS: Migration[] = [
       )`,
     ],
   },
+  {
+    // Approvals (spec §8 part 4, 2026-10-01): an agent's request for a
+    // person's OK, its own record on an invocation. `data` is the whole
+    // Approval; the columns are what the queries need. One per request key
+    // per invocation, so a connector raising it again gets the first back.
+    id: '029-approvals',
+    statements: [
+      `create table approvals (
+        org_id text not null,
+        id text not null,
+        invocation_id text not null,
+        agent_id text not null,
+        space_id text not null,
+        message_id text not null,
+        request_key text not null,
+        state text not null,
+        applied boolean not null default false,
+        created_at text not null,
+        data jsonb not null,
+        primary key (org_id, id)
+      )`,
+      `alter table approvals add constraint approvals_state_check
+        check (state in ('open', 'allowed', 'denied', 'expired', 'cancelled'))`,
+      `create unique index approvals_request on approvals (org_id, invocation_id, request_key)`,
+      `create index approvals_agent_state on approvals (org_id, agent_id, state)`,
+      `create index approvals_message on approvals (space_id, message_id)`,
+      // The card's approval as raised rides its message row, as a poll does.
+      `alter table messages add column approval jsonb`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

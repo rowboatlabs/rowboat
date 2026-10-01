@@ -5,6 +5,8 @@ import type {
   AgentKey,
   BlobInfo,
   ConnectorCapabilities,
+  Approval,
+  ApprovalState,
   Invocation,
   InvocationState,
   ChangeSet,
@@ -217,6 +219,7 @@ interface MessageRow {
   deleted_at: string | null;
   edited_at: string | null;
   poll: Poll | null;
+  approval?: Approval | null;
   stream_offset: number;
   mentions: string[] | null;
   mentions_here: boolean | null;
@@ -242,6 +245,8 @@ function rowToMessage(r: MessageRow): Message {
     reactions: [],
     // The poll definition rides the row; live votes fold in on reads too.
     ...(r.poll !== null && r.poll !== undefined ? { poll: r.poll } : {}),
+    // An approval card's approval as raised; the current one folds in on reads (spec §8 part 4).
+    ...(r.approval !== null && r.approval !== undefined ? { approval: r.approval } : {}),
     mentions: r.mentions ?? [],
     mentionsHere: r.mentions_here ?? false,
     mentionsRowboat: r.mentions_rowboat ?? false,
@@ -917,8 +922,8 @@ export class PgStore implements Store {
 
   async appendMessage(message: Message): Promise<void> {
     await this.sql.query(
-      `insert into messages (id, space_id, thread_root, author, body, posted_at, stream_offset, reply_count, last_reply_at, anchor_change_set_id, poll, mentions, mentions_here, mentions_rowboat, search_text)
-       values ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14, $15)`,
+      `insert into messages (id, space_id, thread_root, author, body, posted_at, stream_offset, reply_count, last_reply_at, anchor_change_set_id, poll, mentions, mentions_here, mentions_rowboat, search_text, approval)
+       values ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14, $15, $16::jsonb)`,
       [
         message.id,
         message.spaceId,
@@ -935,6 +940,7 @@ export class PgStore implements Store {
         message.mentionsHere,
         message.mentionsRowboat,
         searchTextFor(message.body),
+        message.approval ? JSON.stringify(message.approval) : null,
       ],
     );
   }
@@ -984,7 +990,7 @@ export class PgStore implements Store {
 
   async markMessageDeleted(spaceId: string, messageId: string, deletedAt: string): Promise<void> {
     await this.sql.query(
-      `update messages set body = '', deleted_at = $3, poll = null, mentions = '[]'::jsonb, mentions_here = false, mentions_rowboat = false, search_text = ''
+      `update messages set body = '', deleted_at = $3, poll = null, approval = null, mentions = '[]'::jsonb, mentions_here = false, mentions_rowboat = false, search_text = ''
        where space_id = $1 and id = $2`,
       [spaceId, messageId, deletedAt],
     );
@@ -993,7 +999,7 @@ export class PgStore implements Store {
     // Redact the stored message event too — replay must never resurrect the
     // body (nor a poll, which is content the same way).
     await this.sql.query(
-      `update events set event = jsonb_set(event, '{message}', ((event->'message') #- '{poll}') || jsonb_build_object(
+      `update events set event = jsonb_set(event, '{message}', ((event->'message') #- '{poll}' #- '{approval}') || jsonb_build_object(
          'body', '', 'deletedAt', $3::text, 'mentions', '[]'::jsonb, 'mentionsHere', false, 'mentionsRowboat', false))
        where space_id = $1 and event->>'type' = 'message' and event->'message'->>'id' = $2`,
       [spaceId, messageId, deletedAt],
@@ -1542,6 +1548,77 @@ export class PgStore implements Store {
        where space_id = $1 and org_id = $2 and ($3::text is null or thread_root_id = $3)
        order by message_offset desc, id desc limit $4`,
       [spaceId, this.orgId, threadRootId, limit],
+    );
+    return rows.map((r) => r.data);
+  }
+
+  // --- approvals (spec §8 part 4, 2026-10-01) ------------------------------------
+
+  async insertApproval(approval: Approval): Promise<void> {
+    await this.sql.query(
+      `insert into approvals (org_id, id, invocation_id, agent_id, space_id, message_id, request_key, state, applied, created_at, data)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [
+        this.orgId,
+        approval.id,
+        approval.invocationId,
+        approval.agentId,
+        approval.conversation.spaceId,
+        approval.messageId,
+        approval.requestKey,
+        approval.state,
+        approval.appliedAt !== undefined,
+        approval.createdAt,
+        JSON.stringify(approval),
+      ],
+    );
+  }
+
+  async putApproval(approval: Approval): Promise<void> {
+    await this.sql.query('update approvals set state = $3, applied = $4, data = $5 where org_id = $1 and id = $2', [
+      this.orgId,
+      approval.id,
+      approval.state,
+      approval.appliedAt !== undefined,
+      JSON.stringify(approval),
+    ]);
+  }
+
+  async getApproval(id: string): Promise<Approval | undefined> {
+    const rows = await this.sql.query<{ data: Approval }>('select data from approvals where org_id = $1 and id = $2', [this.orgId, id]);
+    return rows[0]?.data;
+  }
+
+  async getApprovalByRequest(invocationId: string, requestKey: string): Promise<Approval | undefined> {
+    const rows = await this.sql.query<{ data: Approval }>(
+      'select data from approvals where org_id = $1 and invocation_id = $2 and request_key = $3',
+      [this.orgId, invocationId, requestKey],
+    );
+    return rows[0]?.data;
+  }
+
+  async listInvocationApprovals(invocationId: string, states: ApprovalState[]): Promise<Approval[]> {
+    const rows = await this.sql.query<{ data: Approval }>(
+      'select data from approvals where org_id = $1 and invocation_id = $2 and state = any($3::text[]) order by created_at, id',
+      [this.orgId, invocationId, states],
+    );
+    return rows.map((r) => r.data);
+  }
+
+  async listUnappliedDecisions(agentId: string): Promise<Approval[]> {
+    const rows = await this.sql.query<{ data: Approval }>(
+      `select data from approvals where org_id = $1 and agent_id = $2 and state in ('allowed', 'denied') and not applied
+       order by created_at, id`,
+      [this.orgId, agentId],
+    );
+    return rows.map((r) => r.data);
+  }
+
+  async listApprovalsForMessages(spaceId: string, messageIds: string[]): Promise<Approval[]> {
+    if (messageIds.length === 0) return [];
+    const rows = await this.sql.query<{ data: Approval }>(
+      'select data from approvals where space_id = $1 and org_id = $2 and message_id = any($3::text[])',
+      [spaceId, this.orgId, messageIds],
     );
     return rows.map((r) => r.data);
   }

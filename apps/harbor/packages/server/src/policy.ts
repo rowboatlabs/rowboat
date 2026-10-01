@@ -150,6 +150,16 @@ export function canCancelQueuedInvocation(actor: { memberId: string }, invocatio
   return { code: 'forbidden', message: 'only the person who asked can cancel it' };
 }
 
+/**
+ * Deciding an approval (spec §8 part 4, 2026-10-01): any person who can see
+ * it, for now, but a person acting directly. An agent, or a person's Rowboat
+ * assistant acting for them, may not: an approval is a person's OK.
+ */
+export function canDecideApproval(ctx: { agent?: boolean }, actingMode: string): Decision {
+  if (ctx.agent || actingMode !== 'direct') return { code: 'forbidden', message: 'only a person, acting directly, can decide an approval' };
+  return null;
+}
+
 /** Stopping a running invocation: its invoker or an admin, and only when the agent's connector can stop. */
 export function canStopInvocation(actor: Member, invocation: Invocation, stopDeclared: boolean): Decision {
   if (invocation.trigger.authorId !== actor.id && actor.role !== 'admin') {

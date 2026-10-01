@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { ChangeSet } from './changeset.js';
 import { Attribution, Membership, Message, MessageDeletion, MessageEdit, PollEnd, PollVote, Reaction, Space, SpaceKind, Topic, TopicRemoval } from './core.js';
 import { AssetId, MemberId, MessageId, SpaceId, StreamOffset } from './ids.js';
+import { Approval } from './approval.js';
 import { Invocation, InvocationId } from './invocation.js';
 
 // Decision 2 (CONTRACT.md): one WebSocket per org, per-space subscriptions,
@@ -103,6 +104,16 @@ export const SpaceEvent = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('poll_ended'),
     end: PollEnd,
+  }),
+  /**
+   * An approval changed (spec §8 part 4, 2026-10-01): decided, or closed by
+   * its connector. Carries the whole approval; the stored card message keeps
+   * the at-request one, and folding clients replace the card's `approval`
+   * with this, the way they fold poll votes.
+   */
+  z.object({
+    type: z.literal('approval'),
+    approval: Approval,
   }),
   /**
    * The space was renamed (api.ts renameSpace) — the full row plus who did
@@ -278,6 +289,12 @@ export const ServerFrame = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('invocation'), invocation: Invocation }),
   /** Addressed to an AGENT member's connections: stop this running invocation, then report it cancelled. */
   z.object({ kind: z.literal('invocation_stop'), invocationId: InvocationId }),
+  /**
+   * Addressed to an AGENT member's connections: a person decided one of its
+   * approvals (spec §8 part 4). Ephemeral like `invocation`: the connector's
+   * listing returns every decision it has not confirmed applying.
+   */
+  z.object({ kind: z.literal('approval_decided'), approval: Approval }),
   /**
    * To a space's subscribers, on every change of state of an invocation in
    * it: the working indicator, what it waits for, a refused line. Ephemeral,

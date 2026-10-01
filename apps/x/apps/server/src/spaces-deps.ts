@@ -92,7 +92,7 @@ type SpacesRpcChannel =
   | 'spaces:search'
   | 'spaces:listStream' | 'spaces:getMessage' | 'spaces:listThread' | 'spaces:linkPreview' | 'spaces:postMessage' | 'spaces:createTopic'
   | 'spaces:manageTopic' | 'spaces:reactToMessage'
-  | 'spaces:deleteMessage' | 'spaces:editMessage' | 'spaces:votePoll' | 'spaces:endPoll'
+  | 'spaces:deleteMessage' | 'spaces:editMessage' | 'spaces:votePoll' | 'spaces:endPoll' | 'spaces:decideApproval'
   | 'spaces:invokeRowboat' | 'spaces:topicSession' | 'spaces:responseSession' | 'spaces:stopRowboat'
   | 'spaces:subscribeSpace' | 'spaces:unsubscribeSpace' | 'spaces:presence' | 'spaces:whiteboard'
   | 'spaces:bounceLive'
@@ -355,6 +355,14 @@ export const spacesRpcHandlers: SpacesHandlers = {
 
   'spaces:endPoll': async (args) => ({
     message: await orgs.getClient(args.orgId).endPoll(args.spaceId, args.messageId, {
+      actingMode: 'direct',
+    }),
+  }),
+
+  'spaces:decideApproval': async (args) => ({
+    approval: await orgs.getClient(args.orgId).decideApproval(args.spaceId, args.approvalId, {
+      decision: args.decision,
+      ...(args.note ? { note: args.note } : {}),
       actingMode: 'direct',
     }),
   }),

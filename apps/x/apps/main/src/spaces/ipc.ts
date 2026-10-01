@@ -79,6 +79,7 @@ type SpacesHandlers = {
   'spaces:editMessage': InvokeHandler<'spaces:editMessage'>;
   'spaces:votePoll': InvokeHandler<'spaces:votePoll'>;
   'spaces:endPoll': InvokeHandler<'spaces:endPoll'>;
+  'spaces:decideApproval': InvokeHandler<'spaces:decideApproval'>;
   'spaces:invokeRowboat': InvokeHandler<'spaces:invokeRowboat'>;
   'spaces:topicSession': InvokeHandler<'spaces:topicSession'>;
   'spaces:responseSession': InvokeHandler<'spaces:responseSession'>;
@@ -473,6 +474,14 @@ export const spacesIpcHandlers: SpacesHandlers = {
 
   'spaces:endPoll': async (_event, args) => ({
     message: await orgs.getClient(args.orgId).endPoll(args.spaceId, args.messageId, {
+      actingMode: 'direct',
+    }),
+  }),
+
+  'spaces:decideApproval': async (_event, args) => ({
+    approval: await orgs.getClient(args.orgId).decideApproval(args.spaceId, args.approvalId, {
+      decision: args.decision,
+      ...(args.note ? { note: args.note } : {}),
       actingMode: 'direct',
     }),
   }),

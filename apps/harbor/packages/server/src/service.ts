@@ -3,6 +3,7 @@ import type { BlobStore } from './blobs.js';
 import { Agents, type AgentConnectorHooks } from './core/agents.js';
 import { Assets } from './core/assets.js';
 import { Feed } from './core/feed.js';
+import { approvalCardBody } from './core/approval-card.js';
 import { Invocations } from './core/invocations.js';
 import { Kernel, type ActorCtx, type BindIdentity, type OrgInfo } from './core/kernel.js';
 import { ReadState } from './core/read-state.js';
@@ -31,6 +32,10 @@ import type {
   AgentKeySecret,
   AgentListing,
   ConnectorCapabilities,
+  Approval,
+  ApprovalClose,
+  ApprovalDecision,
+  ApprovalRequest,
   Invocation,
   InvocationUpdate,
   Membership,
@@ -335,6 +340,43 @@ export class HarborService {
     const invocation = await this.invocations.ownInvocation(ctx, invocationId);
     const { spaceId, threadRootId } = invocation.conversation;
     return this.feed.postMessage(ctx, spaceId, { body, threadRoot: threadRootId, actingMode: 'direct' }, { finishes: invocationId });
+  }
+
+  // --- approvals (core/invocations.ts, spec §8 part 4, 2026-10-01) ----------------------
+
+  /** The connector raises an approval: the agent's card in the invocation's thread, with the approval on it. Idempotent by requestKey. */
+  async requestApproval(ctx: ActorCtx, invocationId: string, request: ApprovalRequest): Promise<{ approval: Approval; message: Message }> {
+    const invocation = await this.invocations.ownInvocation(ctx, invocationId);
+    const { spaceId, threadRootId } = invocation.conversation;
+    const raised = async () => {
+      const existing = await this.invocations.findApproval(invocationId, request.requestKey);
+      return existing ? { approval: existing, message: await this.feed.getMessage(ctx, spaceId, existing.messageId) } : undefined;
+    };
+    const already = await raised();
+    if (already) return already;
+    const agent = await this.k.store.getMember(ctx.memberId);
+    const body = approvalCardBody(agent?.displayName ?? 'The agent', request);
+    try {
+      const { message } = await this.feed.postMessage(ctx, spaceId, { body, threadRoot: threadRootId, actingMode: 'direct' }, { approval: { invocationId, request } });
+      return { approval: message.approval!, message };
+    } catch (err) {
+      // The same request raised twice at once: the unique key let one through.
+      const raced = await raised();
+      if (raced) return raced;
+      throw err;
+    }
+  }
+  decideApproval(ctx: ActorCtx, spaceId: string, approvalId: string, input: ApprovalDecision & { actingMode: ActingMode }): Promise<Approval> {
+    return this.invocations.decideApproval(ctx, spaceId, approvalId, input);
+  }
+  closeApproval(ctx: ActorCtx, approvalId: string, close: ApprovalClose): Promise<Approval> {
+    return this.invocations.closeApproval(ctx, approvalId, close);
+  }
+  applyApproval(ctx: ActorCtx, approvalId: string): Promise<Approval> {
+    return this.invocations.applyApproval(ctx, approvalId);
+  }
+  listApprovalDecisions(ctx: ActorCtx): Promise<Approval[]> {
+    return this.invocations.listDecisionsForAgent(ctx);
   }
   createTopic(
     ctx: ActorCtx,

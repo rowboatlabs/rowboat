@@ -4224,6 +4224,19 @@ export const ipcSchemas = {
     }),
     res: z.object({ message: z.custom<SpacesTypes.Message>() }),
   },
+  // Decide an agent's approval card (spec §8 part 4): any person who can see
+  // it; actingMode is stamped 'direct' by main, and Harbor refuses agents and
+  // a person's assistant. The first decision wins; a note only with a deny.
+  'spaces:decideApproval': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      approvalId: z.string(),
+      decision: z.enum(['allow_once', 'allow_session', 'allow_always', 'deny']),
+      note: z.string().max(1000).optional(),
+    }),
+    res: z.object({ approval: z.custom<SpacesTypes.Approval>() }),
+  },
   // @rowboat in a thread (spec §8): the renderer detected an addressed message
   // it just posted; main routes it into the thread's session (keyed on the
   // permanent root message id, creating one on first use — the queue/steer
