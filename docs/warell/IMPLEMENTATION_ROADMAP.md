@@ -128,12 +128,13 @@ L'ordre des phases 4 à 8 est souple (**Latitude**). Chacune ne dépend que des 
 **But :** plusieurs vrais utilisateurs, chacun dans son instance, sans qu'aucun ne voie l'autre.
 
 - Connexion par code SMS : plafonds, anti-fraude, période de 72 h (sécurité §4). Fournisseur SMS derrière `SmsProvider`, **choisi après le banc de mesure** (fournisseurs §5.1) ; faux fournisseur en attendant.
+- Aussi par code email, Google, Apple et GitHub, sans mot de passe ; liaison seulement par email vérifié (archi §3.5, décidé le 01/10/2026).
 - Organisation personnelle à l'inscription, capacités (sécurité §5), sécurité au niveau des lignes (sécurité §13).
 - `InstanceHost` → Fly.io : création, réveil, veille, sauvegarde du volume.
 - Passerelle client → instance (sécurité §2), relais d'événements, projections, `usage_records`, plafond de coût des modèles.
 - Émetteur OIDC du plan de contrôle, pour que Harbor accepte nos utilisateurs sans modification.
 
-**Critère de sortie :** deux utilisateurs inscrits par SMS, chacun avec son instance. Tests de sécurité S1, S2, S3, S9, S10, S12 et S16 verts.
+**Critère de sortie :** deux utilisateurs inscrits, l'un par SMS, l'autre par Google ou par email, chacun avec son instance. Tests de sécurité S1, S2, S3, S9, S10, S12 et S16 verts.
 
 ### Phase 3 — Le deuxième jalon : approbations
 

@@ -95,6 +95,13 @@ H1, H9 et H12 sont de bonnes bases. H2 à H8, H10 et H11 se traitent **sans modi
 
 **Fraude aux SMS.** Un attaquant peut faire envoyer des milliers de codes vers des numéros surtaxés qu'il contrôle, et c'est nous qui payons. Parades, dans l'ordre : liste des indicatifs autorisés, plafonds par préfixe, défi anti-robot au-delà d'un seuil, alerte sur le coût SMS journalier (`usage_records.category = sms`).
 
+**Les autres moyens (décidé le 01/10/2026, archi §3.5 « Comptes et connexion »).**
+
+- **Le code par email** suit les mêmes règles : 6 chiffres, empreinte seulement, 5 min, 5 essais, 3 envois par adresse par heure et 10 par jour, plafonds par IP, même réponse que l'adresse existe ou non.
+- **Google, Apple et GitHub** : le jeton d'identité est vérifié côté serveur (signature, émetteur, audience, expiration), jamais côté client.
+- **Liaison de comptes** : un email ne relie deux identités que s'il est vérifié des deux côtés. Un numéro ne se lie jamais automatiquement.
+- **Aucun mot de passe** n'est demandé ni stocké.
+
 ### 4.2 Sessions
 
 - **Jeton d'accès** court (15 min) et **jeton de rafraîchissement** tournant : chaque usage en émet un nouveau et invalide l'ancien. Un jeton de rafraîchissement **réutilisé** révèle un vol : toute la famille de jetons est révoquée, et l'utilisateur est prévenu.
@@ -120,7 +127,7 @@ C'est **le** risque propre à une connexion par SMS, et il est réel dans la ré
 
 **Décidé :**
 
-- Une connexion **depuis un nouvel appareil par SMS seul** ouvre une période de **72 h** pendant laquelle :
+- Une connexion **depuis un nouvel appareil sans passkey**, quel que soit le moyen (SMS, email, Google, Apple, GitHub), ouvre une période de **72 h** pendant laquelle :
   - aucun mandat ne se crée ni ne s'élargit ;
   - aucun moyen de paiement ne s'ajoute ;
   - les mandats existants continuent, mais chaque paiement demande une approbation.

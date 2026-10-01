@@ -183,14 +183,18 @@ Seuls les champs structurants sont listés. `org_id` est sous-entendu partout o�
 | Champ | Type | Contraintes |
 |---|---|---|
 | `id` | `usr_…` | PK |
-| `phone_e164` | texte | Unique, **vérifié** par SMS |
-| `email` | texte? | Unique si présent |
+| `phone_e164` | texte? | Unique si présent, **vérifié** par SMS |
+| `email` | texte? | Unique si présent, **vérifié** (code email ou fournisseur qui l'atteste) |
 | `display_name` | texte | — |
 | `preferred_locale` | BCP 47 | Défaut selon le pays |
 | `country` | ISO 3166 | — |
 | `status` | `active` \| `suspended` \| `deleted` | — |
 
-**`phone_verifications`** : `id`, `phone_e164`, `code_hash` (jamais le code en clair), `attempts`, `max_attempts`, `expires_at`, `ip`, `consumed_at`. Des index par numéro et par IP permettent de plafonner les envois (fraude aux SMS, architecture §3.5).
+Un utilisateur a au moins un moyen de connexion : téléphone, email, ou une identité externe (décidé le 01/10/2026).
+
+**`user_identities`** : `user_id`, `provider` (`phone` \| `email` \| `google` \| `apple` \| `github` \| `microsoft`), `subject` (le numéro, l'adresse, ou le `sub` du fournisseur), `email_verified`, `linked_at`. **Unique `(provider, subject)`.** Les tables de Better Auth (`user`, `account`, `session`, `verification`) en sont l'implémentation, dans le schéma `warell` (architecture §3.5).
+
+**`phone_verifications`** : `id`, `phone_e164`, `code_hash` (jamais le code en clair), `attempts`, `max_attempts`, `expires_at`, `ip`, `consumed_at`. Des index par numéro et par IP permettent de plafonner les envois (fraude aux SMS, architecture §3.5). Les codes par email suivent la même forme.
 
 **`organizations`**
 

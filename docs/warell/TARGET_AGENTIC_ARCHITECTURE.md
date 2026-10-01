@@ -158,9 +158,49 @@ Harbor reste inchangé et continue de servir les Spaces, les membres, le temps r
 | Pays & fournisseurs | Registre `CountryConfig` et disponibilité des fournisseurs (§3.8). |
 | Journal d'audit | Append-only : qui a demandé, approuvé et exécuté quoi. |
 
-**Décidé (29/09/2026) : on se connecte par numéro de téléphone, avec un code reçu par SMS.** C'est l'identifiant principal ; l'email et Google viennent en second. Harbor sait déjà parler OIDC (`auth-oidc.ts`) : le plan de contrôle joue le rôle d'émetteur OIDC, et Harbor le consomme sans modification.
+#### Comptes et connexion
 
-**Latitude :** l'envoi des SMS passe par un `CommunicationProvider` (§3.8), jamais par un fournisseur codé en dur. Le choix de l'agrégateur SMS se fait par pays, sur deux critères : la délivrabilité réelle dans chacun des 7 pays, et le coût par message. Voir `WEST_AFRICA_PROVIDER_ARCHITECTURE.md`. Le module doit aussi limiter la fraude aux SMS : plafond d'envois par numéro et par IP, expiration courte du code, nombre d'essais borné.
+**Décidé (29/09/2026) : on se connecte par numéro de téléphone, avec un code reçu par SMS.** C'est l'identifiant principal. **Décidé (01/10/2026) : l'email, Google, Apple et GitHub sont proposés aussi, dès la première version**, à l'inscription comme à la connexion. S'inscrire et se connecter sont le même geste : le compte naît à la première connexion réussie, sur le forfait Découverte.
+
+| Moyen | Preuve | Pourquoi |
+|---|---|---|
+| Téléphone | Code de 6 chiffres par SMS (sécurité §4.1) | Ce que tout le monde a, dans les 7 pays |
+| Email | Code de 6 chiffres par email, mêmes règles que le SMS | Partout, et dans les pays où le SMS n'est pas ouvert |
+| Google | OpenID Connect ; l'email compte seulement si Google le dit vérifié | Le compte le plus répandu sur Android |
+| Apple | OpenID Connect | **Obligatoire** sur iPhone dès qu'on propose Google (règle 4.8 de l'App Store) |
+| GitHub | OAuth ; seul l'email principal **vérifié** compte (`/user/emails`) | Les profils techniques |
+| Microsoft | OpenID Connect | Prévu, éteint tant qu'aucune demande ne le justifie |
+
+**Pas de mot de passe** (décidé le 01/10/2026). Un mot de passe se réutilise d'un site à l'autre, se vole, et sa réinitialisation passe de toute façon par l'email. Un code à usage unique ne laisse rien à voler. Les clés d'accès (*passkeys*) viendront ensuite (sécurité §4.3).
+
+**Un utilisateur, plusieurs identités** (`user_identities`, modèle §6.1) :
+
+- **La liaison automatique ne se fait que par un email vérifié des deux côtés.** Exemple : quelqu'un inscrit par code email se connecte ensuite avec Google, sur la même adresse, que Google dit vérifiée. Sinon, c'est un nouveau compte. Lier un email non vérifié, c'est la porte classique du vol de compte.
+- **Un numéro de téléphone ne se lie jamais automatiquement** : les opérateurs réattribuent les numéros.
+- **Lier, ajouter ou retirer un moyen depuis les réglages** est un geste sensible (revalidation de moins de 5 min, sécurité §4.3). On ne retire jamais le dernier moyen.
+- **La période de 72 h** (sécurité §4.4) s'applique à toute connexion depuis un nouvel appareil sans passkey, quel que soit le moyen. Un compte Google ou GitHub se vole aussi.
+
+**Comment l'app se connecte, sans toucher à l'upstream.** Le cœur connaît déjà un serveur d'autorisation : celui de Rowboat Labs. Il le trouve à `${supabaseUrl}/auth/v1/.well-known/oauth-authorization-server` (`core/auth/providers.ts`), y enregistre l'app par enregistrement dynamique (DCR), puis se connecte en OAuth 2.1 avec PKCE et une redirection vers la machine de l'utilisateur. Le plan de contrôle joue ce rôle à la même adresse (`/v1/config` sert déjà `supabaseUrl`). La page de connexion qu'il sert propose les moyens ci-dessus. Le jeton reçu ouvre `/v1/*` pour cet utilisateur. Harbor consomme le même émetteur OIDC (`auth-oidc.ts`) sans modification.
+
+**Une bibliothèque, pas du code à la main.** Écrire soi-même un serveur OAuth, la vérification des jetons Google ou Apple et la liaison de comptes, c'est une source connue de failles. Le plan de contrôle s'appuie sur **Better Auth** (MIT, TypeScript). Elle fournit :
+
+- les codes par email et par SMS ;
+- Google, Apple, GitHub et Microsoft ;
+- la liaison de comptes et les sessions ;
+- la limitation de débit ;
+- le serveur OAuth 2.1 avec DCR et PKCE (`@better-auth/oauth-provider`).
+
+Ses tables vont dans le schéma `warell`. Nos règles s'ajoutent par ses points d'extension : liaison seulement par email vérifié, période de 72 h, indicatifs ouverts au SMS.
+
+**Latitude :** l'envoi des SMS et des emails passe par un `CommunicationProvider` (§3.8), jamais par un fournisseur codé en dur. En développement, un faux fournisseur écrit le code dans le journal. Le choix de l'agrégateur SMS se fait par pays, sur deux critères : la délivrabilité réelle dans chacun des 7 pays, et le coût par message. Voir `WEST_AFRICA_PROVIDER_ARCHITECTURE.md`. Les mêmes plafonds valent pour l'email : par adresse, par IP, avec une expiration courte et un nombre d'essais borné.
+
+**L'ordre de construction :**
+1. les comptes, l'usage et les crédits passent en Postgres ;
+2. le serveur de connexion, avec ses six moyens et de faux envois ;
+3. l'accueil : premier écran, choix du moyen, compte Découverte, puis une instance créée pour chaque compte ;
+4. la page des tarifs dans l'app, puis le paiement.
+
+Les vrais envois (agrégateur SMS, service d'email) et les applications OAuth chez Google, Apple et GitHub se branchent par des secrets, sans changer le code.
 
 #### Le quota d'utilisation
 
@@ -532,7 +572,7 @@ Contrainte connue : on privilégie le **managé**, pas de VPS à administrer soi
 
 | # | Question | État |
 |---|---|---|
-| 1 | Connexion | **Décidé 29/09 :** téléphone + code SMS (§3.5). Reste l'agrégateur SMS par pays. |
+| 1 | Connexion | **Décidé 29/09 :** téléphone + code SMS (§3.5). **Décidé 01/10 :** aussi email + code, Google, Apple, GitHub ; pas de mot de passe ; liaison seulement par email vérifié ; Better Auth. Restent l'agrégateur SMS par pays et le service d'email. |
 | 2 | Hébergement des instances | **Décidé 29/09 :** mise en veille obligatoire. **Décidé 30/09 :** Fly.io, Paris, repli Northflank (§6). |
 | 3 | i18n des chaînes upstream | **Décidé 29/09 :** proposée d'abord à l'upstream (§3.12). |
 | 4 | Composio | **Décidé 29/09 :** désactivé en V1, MCP et connecteurs natifs à la place (§3.14). |
