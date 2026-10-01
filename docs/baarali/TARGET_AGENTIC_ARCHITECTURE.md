@@ -202,6 +202,17 @@ Ses tables vont dans le schéma `baarali`. Nos règles s'ajoutent par ses points
 
 Les vrais envois (agrégateur SMS, service d'email) et les applications OAuth chez Google, Apple et GitHub se branchent par des secrets, sans changer le code.
 
+#### Les instances
+
+**Décidé (01/10/2026) : une machine Fly et son volume par compte, dans une seule app Fly (`baarali-instances`), créées la première fois qu'un appareil du compte se connecte** (`packages/control/src/instances.ts`). Pas à l'inscription sur le site : quelqu'un qui n'installe jamais l'app ne coûte rien.
+
+- **Même gabarit que l'instance du propriétaire** (`packages/instance/fly.toml`) : 2 Go, suspendue au repos, réveillée à la requête suivante.
+- **Joignable seulement par Flycast**, à travers la passerelle (sécurité §2). L'en-tête `fly-force-instance-id` choisit la machine du compte parmi celles de l'app.
+- **La passerelle** sert le mode distant de l'app upstream à `https://app.baarali.com/instance` : RPC, fichiers de l'espace de travail et WebSocket des événements. Elle réveille la machine si elle dort, puis relaie avec la clé de l'instance. Elle répond elle-même à `/instance/health`, que l'app interroge avant d'envoyer sa clé.
+- **La mise à jour** suit la connexion d'un appareil : une machine sur une image plus ancienne que `BAARALI_INSTANCE_IMAGE` y passe à ce moment-là, jamais au milieu d'une session.
+- **Accès anticipé** : au plus `BAARALI_MAX_INSTANCES` instances (20 par défaut). Au-delà, l'app reçoit `instances_full`.
+- **Le plan de contrôle tourne sur une seule machine** : deux appareils qui se connectent ensemble obtiennent la même instance grâce à un verrou en mémoire. Le jour où il en a plusieurs, ce verrou passe en base.
+
 #### Le quota d'utilisation
 
 **Décidé (30/09/2026) : l'utilisation se mesure en deux fenêtres, 5 heures et une semaine,** comme chez les assistants grand public. L'utilisateur ne compte ni messages ni crédits : il voit une jauge par fenêtre et l'heure à laquelle elle se remet à zéro.

@@ -1,0 +1,154 @@
+import { describe, expect, it } from 'vitest';
+import type { FlyApi, Machine, MachineConfig } from '../src/fly.js';
+import { Instances, InstanceUnavailable, type InstancesConfig } from '../src/instances.js';
+import { MemoryStore, hashToken, type Account, type Plan } from '../src/store.js';
+
+const T0 = Date.UTC(2026, 9, 1, 8, 0, 0);
+const PLAN: Plan = { id: 'decouverte', category: 'free', displayName: 'Découverte', weekCredits: 1, monthlyPrices: [], models: null };
+const ME: Account = { id: 'acc_me', email: 'me@example.test', planId: 'decouverte', createdAt: T0 };
+const OTHER: Account = { id: 'acc_other', email: null, planId: 'decouverte', createdAt: T0 };
+const CONFIG: InstancesConfig = { app: 'baarali-instances', region: 'cdg', image: 'registry.fly.io/baarali-instances:v2', apiUrl: 'https://app.baarali.test', maxInstances: 2 };
+
+/** Fly in memory: volumes and machines, and the calls made. */
+class FakeFly implements FlyApi {
+  readonly calls: string[] = [];
+  readonly machines = new Map<string, Machine & { config: MachineConfig }>();
+  failCreateMachine = false;
+  private n = 0;
+
+  async createVolume(app: string) {
+    this.calls.push(`volume ${app}`);
+    return { id: `vol_${++this.n}` };
+  }
+  async createMachine(app: string, { config }: { region: string; config: MachineConfig }) {
+    this.calls.push(`create ${app} ${config.mounts[0].volume}`);
+    // A tick, so two callers would overlap if nothing serialized them.
+    await new Promise((r) => setTimeout(r, 5));
+    if (this.failCreateMachine) throw new Error('fly is down');
+    const machine = { id: `m_${++this.n}`, state: 'started', config };
+    this.machines.set(machine.id, machine);
+    return machine;
+  }
+  async machine(_app: string, id: string) {
+    this.calls.push(`get ${id}`);
+    return this.machines.get(id)!;
+  }
+  async updateMachine(_app: string, id: string, config: MachineConfig) {
+    this.calls.push(`update ${id} ${config.image}`);
+    const machine = { ...this.machines.get(id)!, config };
+    this.machines.set(id, machine);
+    return machine;
+  }
+  async start(_app: string, id: string) {
+    this.calls.push(`start ${id}`);
+    this.machines.get(id)!.state = 'started';
+  }
+  async waitStarted(_app: string, id: string) {
+    this.calls.push(`wait ${id}`);
+  }
+}
+
+function setup(config: InstancesConfig | null = CONFIG) {
+  const store = new MemoryStore(new Map([[hashToken('tok-me'), ME], [hashToken('tok-other'), OTHER]]), [PLAN]);
+  const fly = new FakeFly();
+  let clock = T0;
+  const instances = new Instances({ store, secret: 'test-secret-0123456789abcdef0123', fly: config ? fly : undefined, config: config ?? undefined, now: () => clock });
+  return { store, fly, instances, tick: (ms: number) => { clock += ms; } };
+}
+
+describe('Instances.ensure', () => {
+  it('creates a volume and a machine once, with the keys and the control plane in its env', async () => {
+    const { store, fly, instances } = setup();
+    const record = await instances.ensure(ME);
+    expect(record).toEqual({ accountId: ME.id, app: CONFIG.app, machineId: 'm_2', volumeId: 'vol_1', image: CONFIG.image, managed: true });
+    expect(await store.instance(ME.id)).toEqual(record);
+    const env = fly.machines.get('m_2')!.config.env;
+    expect(env).toEqual({ API_URL: CONFIG.apiUrl, BAARALI_INSTANCE_TOKEN: instances.instanceToken(ME.id), BAARALI_SERVER_KEY: instances.serverKey(ME.id) });
+    expect(fly.machines.get('m_2')!.config.services[0].autostop).toBe('suspend');
+    expect(fly.machines.get('m_2')!.config.guest.memory_mb).toBeLessThanOrEqual(2048);
+    // The instance's own token opens /v1 as its account.
+    expect(await store.accountByToken(instances.instanceToken(ME.id))).toEqual(ME);
+
+    await instances.ensure(ME);
+    expect(fly.calls).toEqual(['volume baarali-instances', 'create baarali-instances vol_1']);
+  });
+
+  it('gives two devices connecting together the same machine', async () => {
+    const { fly, instances } = setup();
+    const [a, b] = await Promise.all([instances.ensure(ME), instances.ensure(ME)]);
+    expect(a).toEqual(b);
+    expect(fly.calls.filter((c) => c.startsWith('create'))).toHaveLength(1);
+  });
+
+  it('resumes a creation cut short on the volume it already made', async () => {
+    const { fly, instances } = setup();
+    fly.failCreateMachine = true;
+    await expect(instances.ensure(ME)).rejects.toThrow('fly is down');
+    fly.failCreateMachine = false;
+    expect((await instances.ensure(ME)).volumeId).toBe('vol_1');
+    expect(fly.calls.filter((c) => c.startsWith('volume'))).toHaveLength(1);
+  });
+
+  it('moves a machine to the new image when a device connects', async () => {
+    const { store, fly, instances } = setup();
+    const old = await instances.ensure(ME);
+    await store.saveInstance({ ...old, image: 'registry.fly.io/baarali-instances:v1' });
+    expect((await instances.ensure(ME)).image).toBe(CONFIG.image);
+    expect(fly.calls.at(-1)).toBe(`update ${old.machineId} ${CONFIG.image}`);
+  });
+
+  it('creates none beyond the cap, and none at all without Fly', async () => {
+    const { instances } = setup({ ...CONFIG, maxInstances: 1 });
+    await instances.ensure(ME);
+    await expect(instances.ensure(OTHER)).rejects.toEqual(new InstanceUnavailable('full'));
+
+    const off = setup(null);
+    await expect(off.instances.ensure(ME)).rejects.toEqual(new InstanceUnavailable('off'));
+  });
+
+  it('leaves the owner instance of phase 0 as deployed', async () => {
+    const { store, fly, instances } = setup();
+    const owner = { accountId: 'owner', app: 'warell-owner', machineId: null, volumeId: null, image: null, managed: false };
+    await store.saveInstance(owner);
+    // Not a machine of ours: the record stands, nothing is created.
+    expect(await instances.ensure({ ...ME, id: 'owner' })).toEqual(owner);
+    expect(fly.calls).toEqual([]);
+  });
+});
+
+describe('Instances keys and reach', () => {
+  it('derives distinct keys per account and per purpose, the same every time', () => {
+    const { instances } = setup();
+    expect(instances.serverKey(ME.id)).toBe(instances.serverKey(ME.id));
+    expect(instances.serverKey(ME.id)).not.toBe(instances.serverKey(OTHER.id));
+    expect(instances.serverKey(ME.id)).not.toBe(instances.instanceToken(ME.id));
+    const other = new Instances({ store: new MemoryStore(new Map(), []), secret: 'another-secret-0123456789abcdef', now: () => T0 });
+    expect(other.serverKey(ME.id)).not.toBe(instances.serverKey(ME.id));
+  });
+
+  it('pins a managed machine over Flycast, and reaches the owner by its app', () => {
+    const { instances } = setup();
+    const managed = { accountId: ME.id, app: 'baarali-instances', machineId: 'm_9', volumeId: 'v', image: 'i', managed: true };
+    expect(instances.target(managed)).toEqual({
+      host: 'baarali-instances.flycast',
+      port: 80,
+      headers: { 'fly-force-instance-id': 'm_9' },
+      key: instances.serverKey(ME.id),
+    });
+    expect(instances.target({ ...managed, accountId: 'owner', app: 'warell-owner', machineId: null, managed: false }).headers).toEqual({});
+  });
+
+  it('starts a suspended machine and waits for it, then trusts it awake for a while', async () => {
+    const { fly, instances, tick } = setup();
+    const record = await instances.ensure(ME);
+    fly.machines.get(record.machineId!)!.state = 'suspended';
+    fly.calls.length = 0;
+    await instances.wake(record);
+    expect(fly.calls).toEqual([`get ${record.machineId}`, `start ${record.machineId}`, `wait ${record.machineId}`]);
+    await instances.wake(record);
+    expect(fly.calls).toHaveLength(3);
+    tick(31_000);
+    await instances.wake(record);
+    expect(fly.calls.at(-1)).toBe(`get ${record.machineId}`);
+  });
+});

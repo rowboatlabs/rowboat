@@ -1,6 +1,9 @@
 import { serve } from '@hono/node-server';
 import pg from 'pg';
 import { createApp } from './app.js';
+import { FlyMachines } from './fly.js';
+import { createGateway } from './gateway.js';
+import { Instances, type InstancesConfig } from './instances.js';
 import { SOCIAL_PROVIDERS, createAuth, migrateAuth, type AuthDeps, type SocialCredentials, type BaaraliAuth } from './auth.js';
 import { LogSender, NoSender, ResendSender, type CodeSender } from './codes.js';
 import { ASSUMPTIONS, MEDIA_PACKS, OFFERS } from './catalog.js';
@@ -83,6 +86,11 @@ if (process.env.DATABASE_URL) {
     };
     await migrateAuth(authDeps);
     auth = createAuth(authDeps);
+    // The owner's account predates the sign-in server: it becomes theirs
+    // when they sign in with its email, verified (architecture §3.5).
+    if (owner.email && (await pgStore.linkUserByVerifiedEmail(owner.id, owner.email))) {
+      console.log('[control] owner account linked to its sign-in');
+    }
     console.log(`[control] sign-in: ${[...(authDeps.sender.email ? ['email'] : []), ...(authDeps.sender.sms ? ['sms'] : []), ...Object.keys(social)].join(', ') || 'no method yet'}`);
   }
 } else {
@@ -99,6 +107,39 @@ if (Number.isInteger(ownerMediaCredits) && ownerMediaCredits > 0) {
 
 const mediaPacks = MEDIA_PACKS.map((pack) => ({ id: pack.id, credits: packCredits(pack, ASSUMPTIONS), prices: pack.prices }));
 
+// One instance per account (architecture §3.5 « Instances »). Without the
+// gateway secret, no device connects; without Fly's token, only the owner's
+// instance of phase 0 is reached, no new one is created.
+let instances: Instances | undefined;
+if (process.env.BAARALI_GATEWAY_SECRET) {
+  const flyToken = process.env.FLY_API_TOKEN;
+  const image = process.env.BAARALI_INSTANCE_IMAGE;
+  const config: InstancesConfig | undefined =
+    flyToken && image
+      ? {
+          app: process.env.BAARALI_INSTANCES_APP ?? 'baarali-instances',
+          region: process.env.BAARALI_INSTANCES_REGION ?? 'cdg',
+          image,
+          apiUrl: publicUrl,
+          maxInstances: Number(process.env.BAARALI_MAX_INSTANCES ?? '20'),
+        }
+      : undefined;
+  instances = new Instances({
+    store,
+    secret: process.env.BAARALI_GATEWAY_SECRET,
+    fly: flyToken ? new FlyMachines(flyToken) : undefined,
+    config,
+    now: Date.now,
+  });
+  // Deployed by hand (packages/instance/fly.toml), reached, never updated.
+  const ownerApp = process.env.BAARALI_OWNER_INSTANCE_APP;
+  if (ownerApp) {
+    await store.saveInstance({ accountId: owner.id, app: ownerApp, machineId: null, volumeId: null, image: null, managed: false });
+  }
+  console.log(`[control] instances: ${config ? `${config.app}, ${config.maxInstances} at most` : 'owner only'}`);
+}
+const gateway = instances ? createGateway({ store, instances, now: Date.now, fetch: globalThis.fetch }) : undefined;
+
 const app = createApp({
   store,
   openRouterKey: required('OPENROUTER_API_KEY'),
@@ -110,11 +151,16 @@ const app = createApp({
   home: { offers: OFFERS, weekCredits: Object.fromEntries(plans.map((p) => [p.id, p.weekCredits])), packs: mediaPacks },
   adminTokenHash: process.env.BAARALI_ADMIN_TOKEN ? hashToken(process.env.BAARALI_ADMIN_TOKEN) : undefined,
   auth,
+  instances,
+  gateway,
   fetch: globalThis.fetch,
   now: Date.now,
 });
 
 const port = Number(process.env.PORT ?? '8080');
-serve({ fetch: app.fetch, port }, () => {
+const server = serve({ fetch: app.fetch, port }, () => {
   console.log(`[control] listening on :${port}`);
 });
+// The instance's event WebSocket goes through the gateway too.
+if (gateway) server.on('upgrade', gateway.upgrade);
+else server.on('upgrade', (_req, socket) => socket.destroy());

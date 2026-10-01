@@ -1,3 +1,4 @@
+import { randomBytes, randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import { createMiddleware } from 'hono/factory';
 import { buildApiConfig } from './config.js';
@@ -6,9 +7,11 @@ import { isAdmin, topUpMedia, type SoldPack } from './admin.js';
 import { AUTH_BASE_PATH, type BaaraliAuth } from './auth.js';
 import { homePage, type HomeData } from './home-page.js';
 import { html } from './html.js';
+import { GATEWAY_PATH, type Gateway } from './gateway.js';
+import { InstanceUnavailable, type Instances } from './instances.js';
 import { createGeneration, getGeneration, listMediaModels, mediaBalance } from './media-route.js';
 import { budgetsForWeek, gauges, initialState } from './quota.js';
-import type { Account } from './store.js';
+import { hashToken, type Account } from './store.js';
 
 export type ControlDeps = ProxyDeps & {
   /** Unset: media generation is off (503). */
@@ -22,6 +25,9 @@ export type ControlDeps = ProxyDeps & {
   home?: HomeData;
   /** The sign-in server; unset: only instance tokens open /v1 (phase 0). */
   auth?: BaaraliAuth;
+  /** One instance per account and the door to it; unset: no device can connect. */
+  instances?: Instances;
+  gateway?: Gateway;
 };
 
 type Env = { Variables: { account: Account } };
@@ -30,6 +36,17 @@ function bearer(header: string | undefined): string | null {
   const match = header?.match(/^Bearer\s+(.+)$/i);
   return match ? match[1].trim() : null;
 }
+
+/** Each sign-in on an app adds one; old ones are revoked from the list. */
+const MAX_DEVICES = 10;
+
+const publicDevice = (d: { id: string; name: string; createdAt: number; lastSeenAt: number | null; revokedAt: number | null }) => ({
+  id: d.id,
+  name: d.name,
+  created_at: new Date(d.createdAt).toISOString(),
+  last_seen_at: d.lastSeenAt === null ? null : new Date(d.lastSeenAt).toISOString(),
+  revoked_at: d.revokedAt === null ? null : new Date(d.revokedAt).toISOString(),
+});
 
 export function createApp(deps: ControlDeps) {
   const app = new Hono<Env>();
@@ -57,7 +74,7 @@ export function createApp(deps: ControlDeps) {
     const byToken = await deps.store.accountByToken(token);
     if (byToken || !deps.auth) return byToken;
     const userId = await deps.auth.userIdForAccessToken(token);
-    return userId ? deps.store.account(userId) : null;
+    return userId ? deps.store.accountForUser(userId) : null;
   };
 
   const authed = createMiddleware<Env>(async (c, next) => {
@@ -105,6 +122,59 @@ export function createApp(deps: ControlDeps) {
   app.get('/v1/media/packs', (c) => c.json({ data: deps.mediaPacks }));
   app.post('/v1/media/generations', (c) => createGeneration(deps, c.get('account'), c.req.raw));
   app.get('/v1/media/generations/:id', (c) => getGeneration(deps, c.get('account'), c.req.param('id')));
+
+  // Devices (security §2): only a signed-in person adds one, with the
+  // access token of their sign-in, never an instance with its own token.
+  if (deps.auth && deps.instances) {
+    const auth = deps.auth;
+    const instances = deps.instances;
+    const person = createMiddleware<Env>(async (c, next) => {
+      const token = bearer(c.req.header('authorization'));
+      const userId = token ? await auth.userIdForAccessToken(token) : null;
+      const account = userId ? await deps.store.accountForUser(userId) : null;
+      if (!account) return c.json({ error: { code: 'unauthorized' } }, 401);
+      c.set('account', account);
+      await next();
+    });
+    app.use('/v1/devices', person);
+    app.use('/v1/devices/*', person);
+
+    // The app calls this once signed in: the instance is created the first
+    // time, and the device gets the key it will show the gateway.
+    app.post('/v1/devices', async (c) => {
+      const account = c.get('account');
+      const body = (await c.req.json().catch(() => ({}))) as { name?: unknown };
+      const name = typeof body.name === 'string' && body.name.trim() ? body.name.trim().slice(0, 80) : 'Appareil';
+      try {
+        await instances.ensure(account);
+      } catch (err) {
+        if (err instanceof InstanceUnavailable) {
+          return c.json({ error: { code: err.problem === 'full' ? 'instances_full' : 'instances_off' } }, 503);
+        }
+        console.error('[control] instance creation failed', err);
+        return c.json({ error: { code: 'instance_unavailable' } }, 503);
+      }
+      const active = (await deps.store.devices(account.id)).filter((d) => d.revokedAt === null);
+      if (active.length >= MAX_DEVICES) return c.json({ error: { code: 'too_many_devices' } }, 409);
+      const key = `bdk_${randomBytes(32).toString('base64url')}`;
+      const device = { id: `dev_${randomUUID()}`, accountId: account.id, name, createdAt: deps.now(), lastSeenAt: null, revokedAt: null };
+      await deps.store.addDevice(device, hashToken(key));
+      return c.json({ device: publicDevice(device), server: { url: `${deps.publicUrl}${GATEWAY_PATH}`, key } }, 201);
+    });
+
+    app.get('/v1/devices', async (c) => c.json({ data: (await deps.store.devices(c.get('account').id)).map(publicDevice) }));
+
+    app.delete('/v1/devices/:id', async (c) => {
+      const revoked = await deps.store.revokeDevice(c.get('account').id, c.req.param('id'), deps.now());
+      return revoked ? c.body(null, 204) : c.json({ error: { code: 'not_found' } }, 404);
+    });
+  }
+
+  if (deps.gateway) {
+    const gateway = deps.gateway;
+    app.all(GATEWAY_PATH, (c) => gateway.http(c.req.raw));
+    app.all(`${GATEWAY_PATH}/*`, (c) => gateway.http(c.req.raw));
+  }
 
   app.post('/v1/admin/media-credits', async (c) => {
     if (!isAdmin({ ...deps, packs: deps.mediaPacks }, bearer(c.req.header('authorization')))) {

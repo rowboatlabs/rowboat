@@ -129,6 +129,36 @@ export const MIGRATIONS: string[] = [
     expires_at timestamptz NOT NULL
   );
   `,
+  // 3 — one instance per account, reached through the control plane
+  // (decided 01/10/2026; architecture §3.5 « Instances », security §2).
+  // `user_id`: the sign-in user an account answers to, when it is not the
+  // account's own id (the owner's account predates the sign-in server).
+  // A device holds a key of its own, never the instance's: kept by hash,
+  // revoked one by one.
+  `
+  ALTER TABLE baarali.accounts ADD COLUMN user_id text UNIQUE;
+
+  CREATE TABLE baarali.instances (
+    account_id text PRIMARY KEY REFERENCES baarali.accounts(id),
+    app text NOT NULL,
+    machine_id text,
+    volume_id text,
+    image text,
+    managed boolean NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  );
+
+  CREATE TABLE baarali.devices (
+    id text PRIMARY KEY,
+    account_id text NOT NULL REFERENCES baarali.accounts(id),
+    key_hash text NOT NULL UNIQUE,
+    name text NOT NULL,
+    created_at timestamptz NOT NULL,
+    last_seen_at timestamptz,
+    revoked_at timestamptz
+  );
+  CREATE INDEX devices_account ON baarali.devices (account_id);
+  `,
 ];
 
 /** Brings the schema up to date. Safe on several machines at once: the lock serializes them. */

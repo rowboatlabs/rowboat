@@ -3,7 +3,8 @@
 #   fly deploy --config apps/baarali/packages/instance/fly.toml \
 #     --dockerfile apps/baarali/packages/instance/Dockerfile .
 #
-# Runtime env: BAARALI_INSTANCE_TOKEN (secret), API_URL (the control plane).
+# Runtime env: BAARALI_INSTANCE_TOKEN (secret), API_URL (the control plane),
+# BAARALI_SERVER_KEY (set by the control plane on the instances it creates).
 
 FROM node:22-bookworm AS build
 RUN corepack enable && corepack prepare pnpm@10.20.0 --activate \

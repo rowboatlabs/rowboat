@@ -1,8 +1,9 @@
 # The owner's instance on Fly, Paris (architecture §6, decided 30/09/2026):
 # suspended when idle, woken by the next request. Suspend needs 2 GB or
-# less. No public IP: reached over Flycast (private), by `fly proxy` from
-# the desktop in phase 0, by the control plane later.
-# Secret (fly secrets): BAARALI_INSTANCE_TOKEN.
+# less. No public IP: reached over Flycast (private), through the control
+# plane's gateway (control/src/gateway.ts), or by `fly proxy` for a check.
+# Secrets (fly secrets): BAARALI_INSTANCE_TOKEN, BAARALI_SERVER_KEY (the key the
+# control plane's gateway relays with, derived from BAARALI_GATEWAY_SECRET).
 app = "warell-owner"
 primary_region = "cdg"
 

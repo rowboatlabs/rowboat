@@ -74,6 +74,31 @@ export interface MediaLedgerEntry {
 export type LedgerResult = 'applied' | 'duplicate' | 'insufficient';
 
 /**
+ * Where an account's instance lives on Fly (architecture §3.5 « Instances »).
+ * `managed`: created by the control plane, which also updates its image; the
+ * owner's instance of phase 0 is deployed by hand and only reached.
+ */
+export interface InstanceRecord {
+  accountId: string;
+  app: string;
+  /** null until the machine exists: a creation cut short resumes from what was saved. */
+  machineId: string | null;
+  volumeId: string | null;
+  image: string | null;
+  managed: boolean;
+}
+
+/** One app install that may reach its owner's instance through the gateway (security §2). */
+export interface Device {
+  id: string;
+  accountId: string;
+  name: string;
+  createdAt: number;
+  lastSeenAt: number | null;
+  revokedAt: number | null;
+}
+
+/**
  * Persistence seam. Phase 0 runs the in-memory store; the Postgres one, in
  * the `baarali` schema with its own migration ladder (UPSTREAM.md §2), comes
  * with the first multi-user deployment.
@@ -91,6 +116,21 @@ export interface ControlStore {
   mediaBalance(accountId: string): Promise<number>;
   /** Atomic: the balance check and the write happen together, so two charges never both spend the same credits. */
   applyMediaEntry(entry: MediaLedgerEntry): Promise<LedgerResult>;
+  /** Lets `token` act as the account. Kept hashed only. */
+  grantToken(token: string, accountId: string): Promise<void>;
+  /** The account a signed-in user acts as: the one linked to them, else the one they created. */
+  accountForUser(userId: string): Promise<Account | null>;
+  instance(accountId: string): Promise<InstanceRecord | null>;
+  saveInstance(record: InstanceRecord): Promise<void>;
+  countInstances(): Promise<number>;
+  /** `keyHash`: hashToken of the device key, which is never stored. */
+  addDevice(device: Device, keyHash: string): Promise<void>;
+  /** A device that is not revoked, by its key. */
+  deviceByKey(key: string): Promise<Device | null>;
+  devices(accountId: string): Promise<Device[]>;
+  touchDevice(id: string, at: number): Promise<void>;
+  /** Only the account's own device; false when there is none to revoke. */
+  revokeDevice(accountId: string, id: string, at: number): Promise<boolean>;
 }
 
 export class MemoryStore implements ControlStore {
@@ -98,6 +138,8 @@ export class MemoryStore implements ControlStore {
   readonly ledger: MediaLedgerEntry[] = [];
   private readonly states = new Map<string, QuotaState>();
   private readonly jobs = new Map<string, MediaJob>();
+  private readonly instances = new Map<string, InstanceRecord>();
+  private readonly deviceList: Array<Device & { keyHash: string }> = [];
 
   /** `tokens` maps a token HASH (hashToken) to its account. */
   constructor(
@@ -142,5 +184,45 @@ export class MemoryStore implements ControlStore {
     if (balance + entry.credits < 0) return 'insufficient';
     this.ledger.push(entry);
     return 'applied';
+  }
+  async grantToken(token: string, accountId: string) {
+    const account = await this.account(accountId);
+    if (account) this.tokens.set(hashToken(token), account);
+  }
+  // In memory there is no sign-in server, hence no link: a user is their account.
+  async accountForUser(userId: string) {
+    return this.account(userId);
+  }
+  async instance(accountId: string) {
+    const record = this.instances.get(accountId);
+    return record ? { ...record } : null;
+  }
+  async saveInstance(record: InstanceRecord) {
+    this.instances.set(record.accountId, { ...record });
+  }
+  async countInstances() {
+    return this.instances.size;
+  }
+  async addDevice(device: Device, keyHash: string) {
+    this.deviceList.push({ ...device, keyHash });
+  }
+  async deviceByKey(key: string) {
+    const found = this.deviceList.find((d) => d.keyHash === hashToken(key) && d.revokedAt === null);
+    if (!found) return null;
+    const { keyHash: _, ...device } = found;
+    return device;
+  }
+  async devices(accountId: string) {
+    return this.deviceList.filter((d) => d.accountId === accountId).map(({ keyHash: _, ...d }) => d);
+  }
+  async touchDevice(id: string, at: number) {
+    const found = this.deviceList.find((d) => d.id === id);
+    if (found) found.lastSeenAt = at;
+  }
+  async revokeDevice(accountId: string, id: string, at: number) {
+    const found = this.deviceList.find((d) => d.id === id && d.accountId === accountId && d.revokedAt === null);
+    if (!found) return false;
+    found.revokedAt = at;
+    return true;
   }
 }

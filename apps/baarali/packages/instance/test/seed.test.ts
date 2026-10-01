@@ -21,6 +21,16 @@ describe('seedWorkdir', () => {
     expect(await read(dir, 'note_creation.json')).toEqual({ strictness: 'medium', configured: false, onboardingComplete: true });
   });
 
+  it('writes the server key the control plane gives, and leaves the minted one otherwise', async () => {
+    const dir = await tmp();
+    await fs.writeFile(path.join(dir, 'server-key'), 'minted\n');
+    await seedWorkdir({ workDir: dir, instanceToken: 't', assistantModel: 'm' });
+    expect(await fs.readFile(path.join(dir, 'server-key'), 'utf8')).toBe('minted\n');
+    await seedWorkdir({ workDir: dir, instanceToken: 't', assistantModel: 'm', serverKey: 'from-control' });
+    expect(await fs.readFile(path.join(dir, 'server-key'), 'utf8')).toBe('from-control\n');
+    expect((await fs.stat(path.join(dir, 'server-key'))).mode & 0o777).toBe(0o600);
+  });
+
   it('marks the upstream onboarding done without touching the note settings', async () => {
     const dir = await tmp();
     await fs.mkdir(path.join(dir, 'config'));

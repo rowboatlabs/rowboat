@@ -56,6 +56,14 @@ Quatre zones (archi §2). Ce tableau dit **qui s'authentifie auprès de qui, ave
 
 **Décidé : le client ne parle jamais directement à l'instance.** Le plan de contrôle sert de passerelle : il authentifie l'utilisateur, réveille l'instance si elle dort, puis relaie le RPC et le WebSocket de `@x/client` avec la clé de l'instance. La clé porteur de Rowboat ne quitte jamais le plan de contrôle. Chez Rowboat, cette clé est **unique** et donne tout pouvoir sur l'instance (la faire tourner révoque tous les clients, `auth.ts`). La distribuer aux appareils de l'utilisateur reviendrait à donner le serveur entier au premier téléphone perdu.
 
+**Décidé (01/10/2026) : chaque appareil reçoit sa propre clé, et seulement pour la passerelle.** Le mode distant de l'app upstream ne sait présenter qu'une clé fixe : il ne renouvelle pas un jeton de 15 minutes. Une fois connectée, l'app demande donc au plan de contrôle une **clé d'appareil** (`POST /v1/devices`, avec le jeton d'accès de la connexion ; ni un jeton d'instance ni une clé d'appareil n'en obtiennent une autre). Cette clé :
+
+- n'ouvre que la passerelle (`/instance/*`), jamais `/v1` ;
+- est gardée en empreinte seulement ;
+- se révoque seule, depuis la liste des appareils, sans toucher les autres ni la clé de l'instance.
+
+Dix appareils actifs au plus par compte. La passerelle retire les en-têtes de routage de Fly envoyés par l'appareil : c'est elle seule qui choisit la machine.
+
 ## 3. Ce qu'on hérite de Rowboat
 
 Rowboat a été pensé pour **un ordinateur personnel, un seul utilisateur, sur un réseau de confiance**. Plusieurs choix raisonnables dans ce cadre deviennent des failles en cloud. Relevés au commit upstream de l'audit, fichier par fichier :

@@ -21,6 +21,7 @@ const serverPort = 3220;
 await seedWorkdir({
   workDir,
   instanceToken: required('BAARALI_INSTANCE_TOKEN'),
+  serverKey: process.env.BAARALI_SERVER_KEY || undefined,
   assistantModel: process.env.BAARALI_ASSISTANT_MODEL ?? 'deepseek/deepseek-v4.1-flash',
   mediaServer: {
     command: process.execPath,
@@ -38,6 +39,8 @@ const child = spawn(process.execPath, [required('ROWBOAT_SERVER_ENTRY')], {
     API_URL: required('API_URL'),
     // The instance token is the session in oauth.json; the server needs no copy.
     BAARALI_INSTANCE_TOKEN: '',
+    // Same for the server key: it reads it from its file.
+    BAARALI_SERVER_KEY: '',
   },
 });
 

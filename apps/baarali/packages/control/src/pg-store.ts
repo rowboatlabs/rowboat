@@ -4,6 +4,8 @@ import {
   hashToken,
   type Account,
   type ControlStore,
+  type Device,
+  type InstanceRecord,
   type LedgerResult,
   type MediaJob,
   type MediaLedgerEntry,
@@ -25,6 +27,26 @@ interface AccountRow {
   plan_id: string;
   created_at: Date;
 }
+
+interface DeviceRow {
+  id: string;
+  account_id: string;
+  name: string;
+  created_at: Date;
+  last_seen_at: Date | null;
+  revoked_at: Date | null;
+}
+
+const DEVICE_COLUMNS = 'id, account_id, name, created_at, last_seen_at, revoked_at';
+
+const toDevice = (r: DeviceRow): Device => ({
+  id: r.id,
+  accountId: r.account_id,
+  name: r.name,
+  createdAt: r.created_at.getTime(),
+  lastSeenAt: ms(r.last_seen_at),
+  revokedAt: ms(r.revoked_at),
+});
 
 const toAccount = (r: AccountRow): Account => ({ id: r.id, email: r.email, planId: r.plan_id, createdAt: r.created_at.getTime() });
 
@@ -57,6 +79,23 @@ export class PgStore implements ControlStore {
       'INSERT INTO baarali.access_tokens (token_hash, account_id) VALUES ($1, $2) ON CONFLICT (token_hash) DO UPDATE SET account_id = EXCLUDED.account_id',
       [hashToken(token), accountId],
     );
+  }
+
+  /**
+   * Links an account that predates the sign-in server (the owner's) to the
+   * user who signs in with its email, once Better Auth says that email is
+   * verified: the same rule as linking two identities (architecture §3.5).
+   * Does nothing until that user exists, nor once the account is linked.
+   */
+  async linkUserByVerifiedEmail(accountId: string, email: string): Promise<boolean> {
+    const { rows } = await this.db.query(
+      `UPDATE baarali.accounts a SET user_id = u.id FROM baarali.users u
+       WHERE a.id = $1 AND a.user_id IS NULL AND lower(u.email) = lower($2) AND u."emailVerified"
+         AND NOT EXISTS (SELECT 1 FROM baarali.accounts o WHERE o.user_id = u.id)
+       RETURNING a.id`,
+      [accountId, email],
+    );
+    return rows.length > 0;
   }
 
   async accountByToken(token: string) {
@@ -127,6 +166,73 @@ export class PgStore implements ControlStore {
 
   async mediaBalance(accountId: string) {
     return balanceOf(this.db, accountId);
+  }
+
+  async accountForUser(userId: string) {
+    const { rows } = await this.db.query<AccountRow>(
+      `SELECT id, email, plan_id, created_at FROM baarali.accounts WHERE user_id = $1 OR id = $1
+       ORDER BY (user_id IS NOT NULL AND user_id = $1) DESC LIMIT 1`,
+      [userId],
+    );
+    return rows[0] ? toAccount(rows[0]) : null;
+  }
+
+  async instance(accountId: string): Promise<InstanceRecord | null> {
+    const { rows } = await this.db.query<{ account_id: string; app: string; machine_id: string | null; volume_id: string | null; image: string | null; managed: boolean }>(
+      'SELECT account_id, app, machine_id, volume_id, image, managed FROM baarali.instances WHERE account_id = $1',
+      [accountId],
+    );
+    const r = rows[0];
+    return r ? { accountId: r.account_id, app: r.app, machineId: r.machine_id, volumeId: r.volume_id, image: r.image, managed: r.managed } : null;
+  }
+
+  async saveInstance(i: InstanceRecord) {
+    await this.db.query(
+      `INSERT INTO baarali.instances (account_id, app, machine_id, volume_id, image, managed) VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (account_id) DO UPDATE SET app = EXCLUDED.app, machine_id = EXCLUDED.machine_id, volume_id = EXCLUDED.volume_id,
+         image = EXCLUDED.image, managed = EXCLUDED.managed`,
+      [i.accountId, i.app, i.machineId, i.volumeId, i.image, i.managed],
+    );
+  }
+
+  async countInstances() {
+    const { rows } = await this.db.query<{ n: unknown }>('SELECT count(*) AS n FROM baarali.instances');
+    return num(rows[0].n);
+  }
+
+  async addDevice(d: Device, keyHash: string) {
+    await this.db.query(
+      'INSERT INTO baarali.devices (id, account_id, key_hash, name, created_at, last_seen_at, revoked_at) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+      [d.id, d.accountId, keyHash, d.name, new Date(d.createdAt), date(d.lastSeenAt), date(d.revokedAt)],
+    );
+  }
+
+  async deviceByKey(key: string) {
+    const { rows } = await this.db.query<DeviceRow>(
+      `SELECT ${DEVICE_COLUMNS} FROM baarali.devices WHERE key_hash = $1 AND revoked_at IS NULL`,
+      [hashToken(key)],
+    );
+    return rows[0] ? toDevice(rows[0]) : null;
+  }
+
+  async devices(accountId: string) {
+    const { rows } = await this.db.query<DeviceRow>(
+      `SELECT ${DEVICE_COLUMNS} FROM baarali.devices WHERE account_id = $1 ORDER BY created_at`,
+      [accountId],
+    );
+    return rows.map(toDevice);
+  }
+
+  async touchDevice(id: string, at: number) {
+    await this.db.query('UPDATE baarali.devices SET last_seen_at = $2 WHERE id = $1', [id, new Date(at)]);
+  }
+
+  async revokeDevice(accountId: string, id: string, at: number) {
+    const { rows } = await this.db.query(
+      'UPDATE baarali.devices SET revoked_at = $3 WHERE id = $1 AND account_id = $2 AND revoked_at IS NULL RETURNING id',
+      [id, accountId, new Date(at)],
+    );
+    return rows.length > 0;
   }
 
   async applyMediaEntry(e: MediaLedgerEntry): Promise<LedgerResult> {

@@ -243,6 +243,12 @@ Pourquoi un registre : un mandat, une ligne de ledger ou une règle de budget do
 | `server_key_hash` | texte | Empreinte de la clé porteur (même règle que `agent_keys` Harbor : jamais le secret) |
 | `last_active_at`, `sleeping_since` | horodatages | Base de la mise en veille |
 
+**Ce qui existe (migration 3, 01/10/2026).** Une première forme, plus courte, sans organisation ni statut :
+
+- **`instances`** : `account_id` (clé primaire : une instance par compte), `app` et `machine_id` (Fly), `volume_id`, `image`, `managed`. `managed` vaut faux pour l'instance du propriétaire, déployée à la main en phase 0 : le plan de contrôle l'atteint sans jamais la modifier. **Aucune clé n'est stockée** : la clé porteur de l'instance et son jeton vers `/v1` se dérivent d'un secret du plan de contrôle et de l'identifiant du compte (HMAC).
+- **`devices`** : `id`, `account_id`, `key_hash` (jamais la clé), `name`, `created_at`, `last_seen_at`, `revoked_at`. Un appareil = une installation de l'app connectée, révocable seule (sécurité §2).
+- **`accounts.user_id`** : l'utilisateur de connexion qui agit comme ce compte, quand ce n'est pas l'identifiant du compte lui-même. Le compte du propriétaire existait avant le serveur de connexion ; il est lié à son email vérifié.
+
 **`scheduled_wakes`** : `instance_id`, `due_at`, `reason` (`bg_task` \| `goal_wait` \| `mandate_expiry`…), `ref` (slug de bg-task, `gol_…`). Avant de s'endormir, l'instance publie ses prochaines échéances. Le réveil planifié (architecture §3.5) lit cette table.
 
 **`computer_sessions`** : `id`, `instance_id`, `kind` (`browser` \| `code_sandbox`), `task_id?`, `status`, `started_at`, `expires_at`, `ended_at`. Il n'y a pas de table pour l'instance elle-même en tant qu'ordinateur : elle *est* la ComputerSession principale de l'utilisateur (mission §12).

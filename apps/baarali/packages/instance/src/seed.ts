@@ -11,6 +11,12 @@ export interface SeedOptions {
   workDir: string;
   /** Bearer the control plane issued to this instance (core reads it as the Rowboat session). */
   instanceToken: string;
+  /**
+   * rowboat-server's bearer key, when the control plane sets it (its
+   * gateway relays with it, security §2). Unset: the server keeps the key it
+   * minted, as on the owner's instance of phase 0.
+   */
+  serverKey?: string;
   /** Model used until the person picks one, as an OpenRouter id. */
   assistantModel: string;
   /** How rowboat-server starts the media MCP server (media-mcp-main.ts). */
@@ -68,6 +74,16 @@ export async function seedWorkdir(opts: SeedOptions): Promise<void> {
   const serverFile = path.join(config, 'server.json');
   const server = (await readJson(serverFile)) ?? {};
   await writeJson(serverFile, { ...server, lanEnabled: false });
+
+  // Where rowboat-server reads its key (apps/server/src/auth.ts,
+  // SERVER_KEY_FILE): rewritten on every boot, the control plane owns it.
+  if (opts.serverKey) {
+    await fs.mkdir(opts.workDir, { recursive: true });
+    const keyFile = path.join(opts.workDir, 'server-key');
+    await fs.writeFile(keyFile, opts.serverKey + '\n', { mode: 0o600 });
+    // `mode` only applies to a new file.
+    await fs.chmod(keyFile, 0o600);
+  }
 
   // The `rowboat` session is how core authenticates to API_URL
   // (core auth/tokens.ts getAccessToken): here, the control plane.

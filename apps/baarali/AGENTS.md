@@ -41,6 +41,10 @@ OPENROUTER_API_KEY=<clé> BAARALI_PLAN_ID=essentiel PORT=8787 pnpm start
 | `RESEND_API_KEY`, `EMAIL_FROM` | Les codes par email, par Resend (choisi le 01/10/2026). `EMAIL_FROM` sur un domaine vérifié chez Resend, sinon l'envoi est refusé ou part en indésirable |
 | `BAARALI_AUTH_SECRET` | Le serveur de connexion (`/auth/v1`, archi §3.5 « Comptes et connexion »), seulement avec `DATABASE_URL`. 32 octets aléatoires au moins. Absent : seul le jeton d'instance ouvre `/v1` |
 | `GOOGLE_CLIENT_ID` / `_SECRET`, `APPLE_…`, `GITHUB_…`, `MICROSOFT_…` | Un fournisseur n'apparaît sur la page de connexion que si ses deux valeurs sont là |
+| `BAARALI_GATEWAY_SECRET` | La passerelle vers les instances (archi §3.5 « Les instances »). 32 octets aléatoires au moins ; les clés de chaque instance en dérivent, le changer les change toutes. Absent : aucun appareil ne se connecte |
+| `FLY_API_TOKEN`, `BAARALI_INSTANCE_IMAGE` | Créer les instances : un jeton limité à l'app des instances (`fly tokens create deploy -a baarali-instances`) et l'image à y lancer. Absents : seule l'instance du propriétaire est joignable |
+| `BAARALI_INSTANCES_APP`, `BAARALI_INSTANCES_REGION`, `BAARALI_MAX_INSTANCES` | Défauts : `baarali-instances`, `cdg`, `20` |
+| `BAARALI_OWNER_INSTANCE_APP` | L'app Fly de l'instance du propriétaire (phase 0, `warell-owner`), atteinte sans être modifiée |
 | `BAARALI_DEV_CODES` | `1` en développement seulement : les codes email et SMS s'écrivent dans le journal. Sans lui et sans vrai fournisseur, ni l'email ni le SMS ne sont proposés |
 | `PORT` | Défaut : 8080 |
 
@@ -57,10 +61,19 @@ fly deploy --config apps/baarali/packages/instance/fly.toml --dockerfile apps/ba
 
 | App | Exposition | Secrets (`fly secrets`) |
 |---|---|---|
-| `warell-control` | Publique, **`https://app.baarali.com`** (aussi `https://warell-control.fly.dev`) | `OPENROUTER_API_KEY`, `BAARALI_INSTANCE_TOKEN`, `PIXAZO_API_KEY`, `BAARALI_ADMIN_TOKEN` |
-| `warell-owner` | **Privée** (Flycast), disque `data` monté sur `/data` | `BAARALI_INSTANCE_TOKEN` |
+| `warell-control` | Publique, **`https://app.baarali.com`** (aussi `https://warell-control.fly.dev`) | `OPENROUTER_API_KEY`, `BAARALI_INSTANCE_TOKEN`, `PIXAZO_API_KEY`, `BAARALI_ADMIN_TOKEN`, `BAARALI_GATEWAY_SECRET`, `FLY_API_TOKEN`, `BAARALI_INSTANCE_IMAGE` |
+| `warell-owner` | **Privée** (Flycast), disque `data` monté sur `/data` | `BAARALI_INSTANCE_TOKEN`, `BAARALI_SERVER_KEY` |
+| `baarali-instances` | **Privée** (Flycast). Une machine et un volume par compte, créés par le plan de contrôle, jamais par `fly deploy` | Aucun : chaque machine reçoit ses clés à sa création |
 
-Les deux se suspendent au repos et se réveillent à la requête suivante. Une instance n'a pas d'adresse publique : en phase 0, on l'atteint par un tunnel, `fly proxy 3221:80 warell-owner.flycast -a warell-owner`, puis `http://localhost:3221` avec la clé de `/data/server-key`.
+Toutes se suspendent au repos et se réveillent à la requête suivante. Une instance n'a pas d'adresse publique : l'app l'atteint par la passerelle du plan de contrôle, `https://app.baarali.com/instance`, avec sa clé d'appareil. Pour une vérification à la main : `fly proxy 3221:80 warell-owner.flycast -a warell-owner`, puis `http://localhost:3221` avec la clé de l'instance.
+
+**Publier une nouvelle image d'instance.** On la construit dans l'app des instances sans rien y déployer, puis le plan de contrôle la reçoit. Chaque machine y passe à la prochaine connexion d'un de ses appareils :
+
+```sh
+fly deploy --config apps/baarali/packages/instance/fly.toml --dockerfile apps/baarali/packages/instance/Dockerfile \
+  -a baarali-instances --build-only --push --image-label vN --remote-only .
+fly secrets set BAARALI_INSTANCE_IMAGE=registry.fly.io/baarali-instances:vN -a warell-control
+```
 
 **Le portier.** `rowboat-server` refuse tout `Host` qui n'est pas un nom de la machine (protection contre le *DNS rebinding*). Le portier (`packages/instance/src/gate.ts`) réécrit le `Host` vers la boucle locale ; la clé porteur du serveur reste exigée. Ainsi aucun fichier upstream ne change.
 

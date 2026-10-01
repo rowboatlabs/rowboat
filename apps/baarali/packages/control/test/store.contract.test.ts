@@ -93,12 +93,78 @@ describe.each([
     expect(await store.mediaBalance(ME.id)).toBe(10);
   });
 
+  it('grants a token to an account', async () => {
+    const store = await make();
+    await store.grantToken('tok-new', OTHER.id);
+    expect(await store.accountByToken('tok-new')).toEqual(OTHER);
+  });
+
+  it('keeps an instance record and its later steps', async () => {
+    const store = await make();
+    expect(await store.instance(ME.id)).toBeNull();
+    const record = { accountId: ME.id, app: 'baarali-instances', machineId: null, volumeId: 'vol_1', image: null, managed: true };
+    await store.saveInstance(record);
+    await store.saveInstance({ ...record, machineId: 'm1', image: 'img:1' });
+    expect(await store.instance(ME.id)).toEqual({ ...record, machineId: 'm1', image: 'img:1' });
+    expect(await store.countInstances()).toBe(1);
+  });
+
+  it('finds a device by its key until it is revoked, and only its owner revokes it', async () => {
+    const store = await make();
+    const device = { id: 'dev_1', accountId: ME.id, name: 'Mac', createdAt: T0, lastSeenAt: null, revokedAt: null };
+    await store.addDevice(device, hashToken('bdk_secret'));
+    expect(await store.deviceByKey('bdk_secret')).toEqual(device);
+    expect(await store.deviceByKey('bdk_other')).toBeNull();
+    await store.touchDevice('dev_1', T0 + 5);
+    expect(await store.devices(ME.id)).toEqual([{ ...device, lastSeenAt: T0 + 5 }]);
+    expect(await store.devices(OTHER.id)).toEqual([]);
+    expect(await store.revokeDevice(OTHER.id, 'dev_1', T0 + 9)).toBe(false);
+    expect(await store.revokeDevice(ME.id, 'dev_1', T0 + 9)).toBe(true);
+    expect(await store.revokeDevice(ME.id, 'dev_1', T0 + 10)).toBe(false);
+    expect(await store.deviceByKey('bdk_secret')).toBeNull();
+    expect((await store.devices(ME.id))[0].revokedAt).toBe(T0 + 9);
+  });
+
+  it('gives a signed-in user the account they created', async () => {
+    const store = await make();
+    expect(await store.accountForUser(ME.id)).toEqual(ME);
+    expect(await store.accountForUser('user_nobody')).toBeNull();
+  });
+
   it('appends usage without failing', async () => {
     const store = await make();
     await store.appendUsage({
       accountId: ME.id, at: T0, path: '/chat/completions', model: 'deepseek/deepseek-v4.1-flash', requestedModel: null,
       status: 200, credits: 12345, estimated: false, useCase: 'chat', agentName: 'copilot',
     });
+  });
+});
+
+describe('linking an account to a sign-in', () => {
+  // Better Auth's own table, reduced to the columns the link reads.
+  async function withUsers(users: Array<{ id: string; email: string; verified: boolean }>) {
+    const db = await freshDb();
+    await migrate(db);
+    await db.query('CREATE TABLE baarali.users (id text PRIMARY KEY, email text NOT NULL, "emailVerified" boolean NOT NULL)');
+    for (const u of users) await db.query('INSERT INTO baarali.users VALUES ($1, $2, $3)', [u.id, u.email, u.verified]);
+    const store = new PgStore(db, [PLAN]);
+    await store.upsertAccount({ ...ME, id: 'owner', email: 'Me@Example.test' });
+    return store;
+  }
+
+  it('links the owner to the user who signed in with its email, verified', async () => {
+    const store = await withUsers([{ id: 'user_1', email: 'me@example.test', verified: true }]);
+    // The account the sign-in created first, on Découverte, is set aside.
+    await store.upsertAccount({ ...ME, id: 'user_1', planId: 'decouverte' });
+    expect(await store.linkUserByVerifiedEmail('owner', 'Me@Example.test')).toBe(true);
+    expect((await store.accountForUser('user_1'))?.id).toBe('owner');
+    expect(await store.linkUserByVerifiedEmail('owner', 'Me@Example.test')).toBe(false);
+  });
+
+  it('never links an unverified email, nor a user already linked', async () => {
+    const store = await withUsers([{ id: 'user_1', email: 'me@example.test', verified: false }]);
+    expect(await store.linkUserByVerifiedEmail('owner', 'me@example.test')).toBe(false);
+    expect(await store.accountForUser('user_1')).toBeNull();
   });
 });
 
