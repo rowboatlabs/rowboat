@@ -1,4 +1,5 @@
 import { CREDITS_PER_DOLLAR } from '@x/shared/dist/billing.js';
+import type { ModelPolicy } from './models.js';
 
 // From a plan's price to its model budget, with a guaranteed margin
 // (architecture §3.5 "Les forfaits", decided 30/09/2026). The prices and the
@@ -50,6 +51,8 @@ export interface Offer {
   category: 'free' | 'starter' | 'pro';
   displayName: string;
   billing: Billing;
+  /** Absent: any model. */
+  models?: ModelPolicy;
 }
 
 /** 52 weeks share 12 months: a full week of usage every week stays inside the month. */
@@ -98,5 +101,6 @@ export function plansFrom(offers: Offer[], a: PricingAssumptions) {
     displayName: offer.displayName,
     weekCredits: weekCredits(offer, a),
     monthlyPrices: offer.billing.kind === 'paid' && offer.billing.period === 'month' ? offer.billing.prices : [],
+    models: offer.models ?? null,
   }));
 }

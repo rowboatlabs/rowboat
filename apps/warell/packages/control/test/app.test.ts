@@ -2,18 +2,20 @@ import { describe, expect, it } from 'vitest';
 import { BillingInfoSchema, BillingUsageBucketSchema, CREDITS_PER_DOLLAR } from '@x/shared/dist/billing.js';
 import { RowboatApiConfig } from '@x/shared/dist/rowboat-account.js';
 import { createApp } from '../src/app.js';
+import { DISCOVERY_MODELS } from '../src/catalog.js';
 import { FLOOR_CREDITS, SESSION_MS } from '../src/quota.js';
 import { MemoryStore, hashToken, type Account, type Plan } from '../src/store.js';
 
 const T0 = Date.UTC(2026, 8, 30, 8, 0, 0);
 const TOKEN = 'instance-token';
-const plan: Plan = { id: 'p', category: 'starter', displayName: 'P', weekCredits: 4 * CREDITS_PER_DOLLAR, monthlyPrices: [{ amount: 4900, currency: 'EUR' }] };
+const plan: Plan = { id: 'p', category: 'starter', displayName: 'P', weekCredits: 4 * CREDITS_PER_DOLLAR, monthlyPrices: [{ amount: 4900, currency: 'EUR' }], models: null };
+const freePlan: Plan = { id: 'free', category: 'free', displayName: 'F', weekCredits: 4 * CREDITS_PER_DOLLAR, monthlyPrices: [], models: DISCOVERY_MODELS };
 const owner: Account = { id: 'acc', email: 'owner@example.test', planId: 'p', createdAt: T0 };
 
 interface Seen { url: string; init: RequestInit }
 
-function setup(respond: (seen: Seen) => Response | Promise<Response>) {
-  const store = new MemoryStore(new Map([[hashToken(TOKEN), owner]]), [plan]);
+function setup(respond: (seen: Seen) => Response | Promise<Response>, planId = 'p') {
+  const store = new MemoryStore(new Map([[hashToken(TOKEN), { ...owner, planId }]]), [plan, freePlan]);
   const seen: Seen[] = [];
   let clock = T0;
   const app = createApp({
@@ -57,9 +59,9 @@ describe('GET /v1/config (contract)', () => {
     const { call } = setup(() => json({}));
     const body = await (await call('/v1/config', {}, null)).json();
     const parsed = RowboatApiConfig.parse(body);
-    expect(parsed.billing.plans).toEqual([
+    expect(parsed.billing.plans[0]).toEqual(
       { id: 'p', category: 'starter', displayName: 'P', monthlyCredits: plan.weekCredits, dailyCredits: plan.weekCredits / 4, monthlyPriceCents: 4900 },
-    ]);
+    );
   });
 });
 
@@ -163,5 +165,46 @@ describe('/v1/llm proxy', () => {
     const { call, store } = setup(() => { throw new Error('down'); });
     expect((await call('/v1/llm/chat/completions', chat())).status).toBe(502);
     expect(store.usage[0]).toMatchObject({ status: 502, credits: 0 });
+  });
+});
+
+describe('/v1/llm on a plan with a model policy (Découverte)', () => {
+  const [first, second] = DISCOVERY_MODELS.models;
+  const sent = (s: Seen) => JSON.parse(s.init.body as string);
+
+  it('replaces a model outside the list by the default, with the fallback and reasoning off', async () => {
+    const { call, seen, store } = setup(() => json({ usage: { cost: 0.0001 } }), 'free');
+    expect((await call('/v1/llm/chat/completions', chat({ model: 'anthropic/claude-opus-4.7' }))).status).toBe(200);
+    expect(sent(seen[0])).toMatchObject({ model: first, models: [first, second], reasoning: { enabled: false }, usage: { include: true } });
+    expect(store.usage[0]).toMatchObject({ model: first, requestedModel: 'anthropic/claude-opus-4.7' });
+  });
+
+  it('keeps a listed model, the others behind it', async () => {
+    const { call, seen, store } = setup(() => json({ usage: { cost: 0.0001 } }), 'free');
+    await call('/v1/llm/chat/completions', chat({ model: second, reasoning: { effort: 'high' } }));
+    expect(sent(seen[0])).toMatchObject({ model: second, models: [second, first], reasoning: { enabled: false } });
+    expect(store.usage[0]).toMatchObject({ model: second, requestedModel: null });
+  });
+
+  it('refuses image generation and other endpoints without opening a session', async () => {
+    const { call, seen, store } = setup(() => json({}), 'free');
+    const image = await call('/v1/llm/chat/completions', chat({ modalities: ['image', 'text'] }));
+    expect(image.status).toBe(403);
+    expect((await image.json()).error.code).toBe('not_in_plan');
+    expect((await call('/v1/llm/embeddings', chat())).status).toBe(403);
+    expect(seen).toHaveLength(0);
+    expect(await store.quotaState('acc')).toBeNull();
+  });
+
+  it('shows only its models in the catalog', async () => {
+    const { call } = setup(() => json({ data: [{ id: first }, { id: 'anthropic/claude-opus-4.7' }, { id: second }] }), 'free');
+    expect(await (await call('/v1/llm/models')).json()).toEqual({ data: [{ id: first }, { id: second }] });
+  });
+
+  it('leaves paid plans free to pick any model', async () => {
+    const { call, seen } = setup(() => json({ usage: { cost: 0.0001 } }));
+    await call('/v1/llm/chat/completions', chat({ model: 'anthropic/claude-opus-4.7' }));
+    expect(sent(seen[0]).model).toBe('anthropic/claude-opus-4.7');
+    expect(sent(seen[0]).models).toBeUndefined();
   });
 });

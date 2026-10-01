@@ -1,3 +1,4 @@
+import { applyPolicy, filterCatalog } from './models.js';
 import type { Account, ControlStore } from './store.js';
 import {
   admit,
@@ -12,7 +13,8 @@ import {
 // /v1/llm: the instance's OpenRouter-compatible gateway (core
 // models/gateway.ts sets baseURL `${API_URL}/v1/llm`). The OpenRouter key
 // never leaves the control plane (architecture §3.14), and every call goes
-// through the usage quota (§3.5, decided 30/09/2026).
+// through the usage quota (§3.5, decided 30/09/2026) and the plan's model
+// policy (models.ts).
 
 export const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
 
@@ -103,14 +105,29 @@ export async function proxyLlm(deps: ProxyDeps, account: Account, req: Request):
   const accept = req.headers.get('accept');
   if (accept) headers.accept = accept;
 
+  const plan = await deps.store.plan(account.planId);
+  if (!plan) return errorResponse(403, { code: 'no_plan', message: 'Account has no active plan' });
+
   // Reads (the model catalog) cost nothing and are not metered.
   if (req.method === 'GET' || req.method === 'HEAD') {
     const upstream = await deps.fetch(target, { method: req.method, headers });
+    if (plan.models && subpath === '/models' && req.method === 'GET' && upstream.ok) {
+      const filtered = filterCatalog(plan.models, await upstream.text());
+      if (filtered === null) return errorResponse(502, { code: 'upstream_invalid', message: 'Unexpected model catalog' });
+      return new Response(filtered, { status: 200, headers: passHeaders(upstream) });
+    }
     return new Response(upstream.body, { status: upstream.status, headers: passHeaders(upstream) });
   }
 
-  const plan = await deps.store.plan(account.planId);
-  if (!plan) return errorResponse(403, { code: 'no_plan', message: 'Account has no active plan' });
+  // Checked before the quota: a refused call must not open a session.
+  let raw = await req.text();
+  let requestedModel: string | null = null;
+  if (plan.models) {
+    const fitted = applyPolicy(plan.models, subpath, raw);
+    if (!fitted.ok) return errorResponse(fitted.status, { code: fitted.code, message: fitted.message });
+    raw = fitted.body;
+    requestedModel = fitted.requested !== fitted.served ? fitted.requested : null;
+  }
   const budgets = budgetsForWeek(plan.weekCredits);
 
   const started = deps.now();
@@ -126,7 +143,7 @@ export async function proxyLlm(deps: ProxyDeps, account: Account, req: Request):
   }
   await deps.store.saveQuotaState(account.id, open(before, started));
 
-  const { body, model } = withUsageAccounting(await req.text());
+  const { body, model } = withUsageAccounting(raw);
   headers['content-type'] = req.headers.get('content-type') ?? 'application/json';
 
   let settled = false;
@@ -144,6 +161,7 @@ export async function proxyLlm(deps: ProxyDeps, account: Account, req: Request):
       at,
       path: subpath,
       model,
+      requestedModel,
       status,
       credits,
       estimated,

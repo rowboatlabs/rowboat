@@ -20,7 +20,7 @@ const serverPort = 3220;
 await seedWorkdir({
   workDir,
   instanceToken: required('WARELL_INSTANCE_TOKEN'),
-  assistantModel: process.env.WARELL_ASSISTANT_MODEL ?? 'openai/gpt-6-luna',
+  assistantModel: process.env.WARELL_ASSISTANT_MODEL ?? 'deepseek/deepseek-v4.1-flash',
 });
 
 const child = spawn(process.execPath, [required('ROWBOAT_SERVER_ENTRY')], {

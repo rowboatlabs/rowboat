@@ -205,6 +205,18 @@ Un test parcourt chaque offre et chaque devise, et casse si la marge à pleine u
 
 Ce que la marge de 55 % paie encore : l'hébergement de l'instance, le plan de contrôle, les SMS, le support, et les utilisateurs de Découverte. Les taxes s'ajoutent au prix affiché.
 
+#### Les modèles par forfait
+
+Décidé le 30/09/2026. Les forfaits payants appellent n'importe quel modèle, dans leur quota. **Découverte** n'appelle que sa liste (`DISCOVERY_MODELS`, `catalog.ts`), testée en français le même jour : **DeepSeek V4.1 Flash** par défaut, au choix du propriétaire, puis **GPT-6 Luna** si le premier échoue. Le plan de contrôle applique la liste (`models.ts`) :
+
+- un modèle hors liste est **remplacé** par le défaut, pas refusé : le travail de fond du cœur (notes, titres, connaissances) demande ses propres modèles et doit continuer de tourner ;
+- chaque appel part avec la liste entière dans `models`, pour qu'OpenRouter passe au suivant si l'un tombe, et avec la **réflexion coupée** : sans elle, DeepSeek dépense les jetons de la réponse à réfléchir et ne rend rien ;
+- la génération d'images et les autres routes que `/chat/completions` sont **refusées** (403 `not_in_plan`) avant le quota, sans ouvrir de session ;
+- le catalogue `GET /v1/llm/models` ne montre que la liste, pour que le sélecteur ne propose rien qui serait remplacé ;
+- l'enregistrement d'usage garde le modèle demandé à côté du modèle servi.
+
+L'instance part sur DeepSeek V4.1 Flash quel que soit le forfait (`WARELL_ASSISTANT_MODEL` le change) ; un choix déjà fait dans l'app n'est jamais écrasé.
+
 **Sur le fil, on garde le schéma de l'upstream** (§3.14) : `GET /v1/me` porte la session dans le compartiment `daily` et la semaine dans `monthly`, et `usageDay` donne l'heure de remise à zéro de la session. Les libellés de l'écran d'usage upstream (« jour », « mois ») sont donc faux jusqu'à ce que la couche de marque et d'i18n (§3.12) les remplace : c'est accepté pour la phase 0, où seul le propriétaire utilise l'app.
 
 ### 3.6 La vérification : exécuté ≠ vérifié

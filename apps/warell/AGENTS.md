@@ -60,6 +60,8 @@ Les deux se suspendent au repos et se réveillent à la requête suivante. Une i
 
 Tout est dans `packages/control/src/catalog.ts` : un prix par devise et par forfait, et un taux par devise. Le budget se recalcule ; `test/pricing.test.ts` casse si la marge de 55 % ne tient plus dans une devise.
 
+Les modèles de Découverte sont dans le même fichier (`DISCOVERY_MODELS`) : le premier est le défaut, les suivants prennent le relais. Avant d'en ajouter un, vérifier qu'il répond en français avec `reasoning: { enabled: false }` (archi §3.5, « Les modèles par forfait »).
+
 ## Les tests de contrat
 
 Une réponse servie à l'instance est validée par le schéma zod de `@x/shared` lui-même, pas par une copie. Si l'upstream change un schéma, notre test casse à la synchro hebdomadaire, avant la production.

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { ModelPolicy } from './models.js';
 import type { Money } from './pricing.js';
 import type { QuotaState } from './quota.js';
 
@@ -20,6 +21,8 @@ export interface Plan {
   displayName: string;
   weekCredits: number;
   monthlyPrices: Money[];
+  /** null: any model, within the quota. */
+  models: ModelPolicy | null;
 }
 
 /** One model call, as the control plane saw it (architecture §3.5, UsageRecord). */
@@ -27,7 +30,10 @@ export interface UsageRecord {
   accountId: string;
   at: number;
   path: string;
+  /** The model sent to OpenRouter. */
   model: string | null;
+  /** The model core asked for, when a plan policy replaced it. */
+  requestedModel: string | null;
   status: number;
   credits: number;
   estimated: boolean;

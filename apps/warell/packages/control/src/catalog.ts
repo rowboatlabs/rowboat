@@ -1,3 +1,4 @@
+import type { ModelPolicy } from './models.js';
 import type { Offer, PricingAssumptions } from './pricing.js';
 
 // The plans and what their budget rests on (architecture §3.5 "Les
@@ -23,6 +24,14 @@ export const ASSUMPTIONS: PricingAssumptions = {
   minMarginRate: 0.55,
 };
 
+// Tested in French on 30/09/2026 (architecture §3.5): DeepSeek first, by the
+// owner's choice, GPT-6 Luna when it fails. Reasoning off: DeepSeek otherwise
+// spends the answer's tokens thinking and returns nothing.
+export const DISCOVERY_MODELS: ModelPolicy = {
+  models: ['deepseek/deepseek-v4.1-flash', 'openai/gpt-6-luna'],
+  settings: { reasoning: { enabled: false } },
+};
+
 const prices = (eur: number, cfa: number) => [
   { amount: eur * 100, currency: 'EUR' },
   { amount: cfa, currency: 'XOF' },
@@ -30,9 +39,9 @@ const prices = (eur: number, cfa: number) => [
 ];
 
 export const OFFERS: Offer[] = [
-  // The cheapest tool-capable models only (routing comes in its own PR):
-  // about 150 calls a week at 0.05 cent each.
-  { id: 'decouverte', category: 'free', displayName: 'Découverte', billing: { kind: 'free', weekBudgetUsd: 0.08 } },
+  // The cheapest tool-capable models only: about 150 calls a week at 0.05
+  // cent each.
+  { id: 'decouverte', category: 'free', displayName: 'Découverte', billing: { kind: 'free', weekBudgetUsd: 0.08 }, models: DISCOVERY_MODELS },
   // The prepaid week, for mobile money: LigdiCash has no recurring debit.
   { id: 'semaine', category: 'starter', displayName: 'Semaine', billing: { kind: 'paid', period: 'week', prices: prices(5, 3300) } },
   { id: 'essentiel', category: 'starter', displayName: 'Essentiel', billing: { kind: 'paid', period: 'month', prices: prices(20, 13000) } },
