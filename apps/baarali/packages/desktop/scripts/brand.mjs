@@ -199,7 +199,9 @@ export function desktopPlan() {
  */
 export function apply({ root = ROOT, only, write = false }) {
   const changes = [];
-  const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
+  // A Windows checkout ends lines with CRLF (git's autocrlf): the anchors
+  // are written with LF, so the build copy is read, and written, in LF.
+  const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8').replace(/\r\n/g, '\n');
   const pending = new Map();
   const current = (rel) => (pending.has(rel) ? pending.get(rel) : read(rel));
 

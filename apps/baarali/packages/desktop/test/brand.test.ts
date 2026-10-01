@@ -1,5 +1,8 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { apply, brandText } from '../scripts/brand.mjs';
+import { ROOT, apply, brandText } from '../scripts/brand.mjs';
 
 describe('brandText', () => {
   it('names the product Baarali and keeps every internal id', () => {
@@ -41,5 +44,21 @@ describe('apply on this checkout', () => {
     const changes = apply({ only: 'core', write: false });
     expect(changes.length).toBeGreaterThan(0);
     expect(changes.every((c) => c.startsWith('edit apps/x/packages/core/src/'))).toBe(true);
+  });
+});
+
+describe('apply on a Windows checkout', () => {
+  it('finds its anchors in CRLF files', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'brand-crlf-'));
+    const main = 'apps/x/apps/main';
+    for (const rel of [`${main}/forge.config.cjs`, `${main}/src/main.ts`, `${main}/package.json`]) {
+      fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+      fs.writeFileSync(path.join(root, rel), fs.readFileSync(path.join(ROOT, rel), 'utf8').replace(/\r?\n/g, '\r\n'));
+    }
+    for (const dir of ['apps/x/packages/core/src', 'apps/x/apps/renderer/src']) fs.mkdirSync(path.join(root, dir), { recursive: true });
+    fs.writeFileSync(path.join(root, 'apps/x/apps/renderer/index.html'), '<title>Rowboat</title>\r\n');
+    const changes = apply({ root, write: false });
+    expect(changes).toContain(`edit ${main}/forge.config.cjs`);
+    expect(changes).toContain(`edit ${main}/src/main.ts`);
   });
 });
