@@ -97,6 +97,8 @@ if (Number.isInteger(ownerMediaCredits) && ownerMediaCredits > 0) {
   await store.applyMediaEntry({ accountId: owner.id, at: Date.now(), kind: 'topup', credits: ownerMediaCredits, reference: 'owner-grant' });
 }
 
+const mediaPacks = MEDIA_PACKS.map((pack) => ({ id: pack.id, credits: packCredits(pack, ASSUMPTIONS), prices: pack.prices }));
+
 const app = createApp({
   store,
   openRouterKey: required('OPENROUTER_API_KEY'),
@@ -104,7 +106,8 @@ const app = createApp({
   appName: process.env.BAARALI_APP_NAME ?? 'Baarali',
   // Optional: without it, media generation answers 503 and text still works.
   pixazoKey: process.env.PIXAZO_API_KEY || undefined,
-  mediaPacks: MEDIA_PACKS.map((pack) => ({ id: pack.id, credits: packCredits(pack, ASSUMPTIONS), prices: pack.prices })),
+  mediaPacks,
+  home: { offers: OFFERS, weekCredits: Object.fromEntries(plans.map((p) => [p.id, p.weekCredits])), packs: mediaPacks },
   adminTokenHash: process.env.BAARALI_ADMIN_TOKEN ? hashToken(process.env.BAARALI_ADMIN_TOKEN) : undefined,
   auth,
   fetch: globalThis.fetch,

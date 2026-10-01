@@ -146,6 +146,18 @@ describe('signing the app in, as core does', () => {
     await expect(client.refreshTokenGrant(config, tokens.refresh_token!)).rejects.toThrow();
   });
 
+  it('signs in from the page alone, outside the app, and says so', async () => {
+    const { browser, post, sender, store } = await setup();
+    expect(await (await browser('/auth/v1/sign-in')).text()).toContain('Vous êtes connecté');
+    await post('/email-otp/send-verification-otp', { email: 'direct@example.test', type: 'sign-in', oauth_query: '' });
+    const res = await post('/sign-in/email-otp', { email: 'direct@example.test', otp: sender.sent.at(-1)!.code, oauth_query: '' });
+    // No authorization flow to resume: no URL, the page shows its done panel.
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.url).toBeUndefined();
+    expect(await store.account(body.user.id)).toMatchObject({ planId: 'decouverte' });
+  });
+
   it('refuses /v1 to a made-up token', async () => {
     const { app } = await setup();
     expect((await app.request('/v1/me', { headers: { authorization: 'Bearer nope' } })).status).toBe(401);

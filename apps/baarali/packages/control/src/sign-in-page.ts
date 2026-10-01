@@ -32,6 +32,9 @@ const STRINGS = {
     consentBody: 'L’application Baarali sur cet appareil pourra agir avec votre compte : vos conversations, votre usage et vos crédits. Vous pourrez retirer cet accès depuis vos réglages.',
     allow: 'Autoriser',
     deny: 'Refuser',
+    done: 'Vous êtes connecté',
+    doneBody: 'Votre compte Baarali est prêt. Ouvrez l’application Baarali pour continuer.',
+    home: 'Retour à l’accueil',
   },
   en: {
     title: 'Sign in to Baarali',
@@ -53,6 +56,9 @@ const STRINGS = {
     consentBody: 'The Baarali app on this device will act with your account: your conversations, your usage and your credits. You can remove this access from your settings.',
     allow: 'Allow',
     deny: 'Deny',
+    done: 'You are signed in',
+    doneBody: 'Your Baarali account is ready. Open the Baarali app to continue.',
+    home: 'Back to home',
   },
 } satisfies Record<Lang, Record<string, string>>;
 
@@ -158,9 +164,22 @@ ${codeForms.length ? `<button class="primary" id="send" type="button">${escape(t
   <button class="primary" type="submit">${escape(t.signIn)}</button>
   <button class="link" type="button" id="back">${escape(t.otherMethod)}</button>
 </form>
-<p class="error" id="error" role="alert" hidden></p>`;
+<p class="error" id="error" role="alert" hidden></p>
+<div id="done" class="stack" hidden>
+  <p>${escape(t.doneBody)}</p>
+  <a class="link" href="/">${escape(t.home)}</a>
+</div>`;
   const script = `
 const t = ${JSON.stringify({ failed: t.failed, tooMany: t.tooMany })};
+// Opened from the app, a sign-in hands back the URL that resumes the app's
+// authorization. Opened alone, there is none: say it worked, instead of
+// leaving the form up for a second, refused, try (seen 01/10/2026).
+function finish(data) {
+  if (data && typeof data.url === "string") return follow(data);
+  document.querySelector("h1").textContent = ${JSON.stringify(t.done)};
+  for (const el of document.querySelectorAll("main > :not(h1):not(#done)")) el.hidden = true;
+  document.getElementById("done").hidden = false;
+}
 const error = document.getElementById("error");
 function fail(e) { error.textContent = e && e.status === 429 ? t.tooMany : t.failed; error.hidden = false; }
 for (const b of document.querySelectorAll("[data-provider]")) {
@@ -196,7 +215,7 @@ verify.addEventListener("submit", async (e) => {
   error.hidden = true;
   const code = document.getElementById("code").value.trim();
   try {
-    follow(target.kind === "email"
+    finish(target.kind === "email"
       ? await post("/sign-in/email-otp", { email: target.id, otp: code })
       : await post("/phone-number/verify", { phoneNumber: target.id, code }));
   } catch (err) { fail(err); }

@@ -1,10 +1,10 @@
-import { randomBytes } from 'node:crypto';
 import { oauthProvider } from '@better-auth/oauth-provider';
 import { betterAuth, type BetterAuthOptions } from 'better-auth';
 import { getMigrations } from 'better-auth/db/migration';
 import { emailOTP, jwt, phoneNumber } from 'better-auth/plugins';
 import { checkPhoneCode, newCode, smsAllowed, storePhoneCode, takeSend, type CodeSender } from './codes.js';
 import type { Queryable } from './db.js';
+import { html } from './html.js';
 import { consentPage, signInPage, type SignInMethods } from './sign-in-page.js';
 
 // The sign-in server (architecture §3.5 "Comptes et connexion", decided
@@ -235,18 +235,4 @@ export function createAuth(deps: AuthDeps): BaaraliAuth {
       }
     },
   };
-}
-
-function html(render: (nonce: string) => string): Response {
-  const nonce = randomBytes(16).toString('base64');
-  return new Response(render(nonce), {
-    headers: {
-      'content-type': 'text/html; charset=utf-8',
-      // The page runs only its own script, talks only to this origin, and
-      // cannot be framed (no clickjacking of the consent button).
-      'content-security-policy': `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`,
-      'referrer-policy': 'no-referrer',
-      'x-content-type-options': 'nosniff',
-    },
-  });
 }

@@ -4,6 +4,8 @@ import { buildApiConfig } from './config.js';
 import { proxyLlm, type ProxyDeps } from './llm-proxy.js';
 import { isAdmin, topUpMedia, type SoldPack } from './admin.js';
 import { AUTH_BASE_PATH, type BaaraliAuth } from './auth.js';
+import { homePage, type HomeData } from './home-page.js';
+import { html } from './html.js';
 import { createGeneration, getGeneration, listMediaModels, mediaBalance } from './media-route.js';
 import { budgetsForWeek, gauges, initialState } from './quota.js';
 import type { Account } from './store.js';
@@ -16,6 +18,8 @@ export type ControlDeps = ProxyDeps & {
   mediaPacks: SoldPack[];
   /** SHA-256 of the operator token; unset: /v1/admin answers 404. */
   adminTokenHash?: string;
+  /** The home page with the prices (baarali.com); unset: `/` answers 404. */
+  home?: HomeData;
   /** The sign-in server; unset: only instance tokens open /v1 (phase 0). */
   auth?: BaaraliAuth;
 };
@@ -31,6 +35,11 @@ export function createApp(deps: ControlDeps) {
   const app = new Hono<Env>();
 
   app.get('/health', (c) => c.json({ ok: true }));
+
+  if (deps.home) {
+    const home = deps.home;
+    app.get('/', (c) => html((nonce) => homePage(home, { lang: c.req.header('accept-language') ?? null, nonce })));
+  }
 
   // Unauthenticated, like the Rowboat Labs route: core reads it before login.
   app.get('/v1/config', async (c) =>
