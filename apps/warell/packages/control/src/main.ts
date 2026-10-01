@@ -34,6 +34,8 @@ const app = createApp({
   openRouterKey: required('OPENROUTER_API_KEY'),
   publicUrl,
   appName: process.env.WARELL_APP_NAME ?? 'Warell',
+  // Optional: without it, media generation answers 503 and text still works.
+  pixazoKey: process.env.PIXAZO_API_KEY || undefined,
   fetch: globalThis.fetch,
   now: Date.now,
 });

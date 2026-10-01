@@ -69,6 +69,46 @@ export function admit(state: QuotaState, budgets: Budgets, now: number): Admissi
   return { ok: true };
 }
 
+export type CostAdmission =
+  | { ok: true }
+  /** Waiting helps: the window resets at `resetsAt`. */
+  | { ok: false; reason: 'quota_reached'; window: QuotaWindow; resetsAt: number }
+  /** Waiting never helps: the cost is larger than the plan's whole window. */
+  | { ok: false; reason: 'over_plan'; window: QuotaWindow };
+
+/**
+ * For a call whose price is known before it runs (a generated video): it
+ * must fit in what both windows have left, since it cannot be cut midway
+ * and would otherwise overrun by its whole price (decided 30/09/2026).
+ */
+export function admitCost(state: QuotaState, budgets: Budgets, credits: number, now: number): CostAdmission {
+  if (credits > budgets.weekCredits) return { ok: false, reason: 'over_plan', window: 'week' };
+  if (credits > budgets.sessionCredits) return { ok: false, reason: 'over_plan', window: 'session' };
+  const s = advance(state, now);
+  if (s.weekUsed + credits > budgets.weekCredits) {
+    return { ok: false, reason: 'quota_reached', window: 'week', resetsAt: s.weekStart + WEEK_MS };
+  }
+  if (s.sessionStart !== null && s.sessionUsed + credits > budgets.sessionCredits) {
+    return { ok: false, reason: 'quota_reached', window: 'session', resetsAt: s.sessionStart + SESSION_MS };
+  }
+  return { ok: true };
+}
+
+/**
+ * Gives back a charge whose work failed. Only to windows still open since
+ * the charge: a window that has reset already gave everything back.
+ */
+export function refund(state: QuotaState, credits: number, chargedAt: number, now: number): QuotaState {
+  const s = advance(state, now);
+  const sameSession = s.sessionStart !== null && chargedAt >= s.sessionStart;
+  const sameWeek = chargedAt >= s.weekStart;
+  return {
+    ...s,
+    sessionUsed: sameSession ? Math.max(0, s.sessionUsed - credits) : s.sessionUsed,
+    weekUsed: sameWeek ? Math.max(0, s.weekUsed - credits) : s.weekUsed,
+  };
+}
+
 /** Opens the session on the first call when none is open. */
 export function open(state: QuotaState, now: number): QuotaState {
   const s = advance(state, now);

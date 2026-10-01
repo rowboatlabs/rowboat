@@ -9,3 +9,6 @@ export { applyPolicy, displayName, presentCatalog } from './models.js';
 export type { ModelPolicy, PolicyResult } from './models.js';
 export { marginAtFullUsage, netUsd, periodModelBudgetUsd, plansFrom, weekCredits } from './pricing.js';
 export type { Billing, Money, Offer, PricingAssumptions } from './pricing.js';
+export { MEDIA_MODELS, mediaCredits, mediaModel, parseMediaRequest } from './media.js';
+export type { MediaKind, MediaModel, MediaRequest } from './media.js';
+export type { MediaJob } from './store.js';

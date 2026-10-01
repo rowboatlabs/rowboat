@@ -34,6 +34,7 @@ OPENROUTER_API_KEY=<clé> WARELL_PLAN_ID=essentiel PORT=8787 pnpm start
 | `OPENROUTER_API_KEY` | Ne sort jamais du plan de contrôle |
 | `WARELL_PLAN_ID` | Forfait du propriétaire, pris dans `src/catalog.ts` (budgets calculés depuis les prix, archi §3.5). Défaut : `essentiel` |
 | `WARELL_ACCOUNT_ID`, `WARELL_ACCOUNT_EMAIL`, `WARELL_ACCOUNT_CREATED_AT` | Le compte du propriétaire ; la semaine est ancrée à sa date de création |
+| `PIXAZO_API_KEY` | Facultative : sans elle, `/v1/media` répond 503 et le texte marche quand même |
 | `PORT` | Défaut : 8080 |
 
 L'instance le trouve par `API_URL` : on ne modifie aucun fichier upstream qui l'appelle (archi §3.14).
@@ -49,7 +50,7 @@ fly deploy --config apps/warell/packages/instance/fly.toml --dockerfile apps/war
 
 | App | Exposition | Secrets (`fly secrets`) |
 |---|---|---|
-| `warell-control` | Publique, `https://warell-control.fly.dev` | `OPENROUTER_API_KEY`, `WARELL_INSTANCE_TOKEN` |
+| `warell-control` | Publique, `https://warell-control.fly.dev` | `OPENROUTER_API_KEY`, `WARELL_INSTANCE_TOKEN`, `PIXAZO_API_KEY` |
 | `warell-owner` | **Privée** (Flycast), disque `data` monté sur `/data` | `WARELL_INSTANCE_TOKEN` |
 
 Les deux se suspendent au repos et se réveillent à la requête suivante. Une instance n'a pas d'adresse publique : en phase 0, on l'atteint par un tunnel, `fly proxy 3221:80 warell-owner.flycast -a warell-owner`, puis `http://localhost:3221` avec la clé de `/data/server-key`.
@@ -61,6 +62,8 @@ Les deux se suspendent au repos et se réveillent à la requête suivante. Une i
 Tout est dans `packages/control/src/catalog.ts` : un prix par devise et par forfait, et un taux par devise. Le budget se recalcule ; `test/pricing.test.ts` casse si la marge de 55 % ne tient plus dans une devise.
 
 Les modèles de Découverte sont dans le même fichier (`DISCOVERY_MODELS`) : le premier est le défaut, les suivants prennent le relais. Avant d'en ajouter un, vérifier qu'il répond en français avec `reasoning: { enabled: false }` (archi §3.5, « Les modèles par forfait »).
+
+Les médias sont dans `packages/control/src/media.ts` : un modèle = un chemin Pixazo, un corps et un prix. Un prix se relit sur `pixazo.ai/models/<famille>`, et on garde le prix normal quand une promotion court (archi §3.5, « Les médias »).
 
 ## Les tests de contrat
 

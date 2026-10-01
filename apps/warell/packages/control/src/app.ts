@@ -2,10 +2,15 @@ import { Hono } from 'hono';
 import { createMiddleware } from 'hono/factory';
 import { buildApiConfig } from './config.js';
 import { proxyLlm, type ProxyDeps } from './llm-proxy.js';
+import { createGeneration, getGeneration, listMediaModels } from './media-route.js';
 import { budgetsForWeek, gauges, initialState } from './quota.js';
 import type { Account } from './store.js';
 
-export type ControlDeps = ProxyDeps;
+export type ControlDeps = ProxyDeps & {
+  /** Unset: media generation is off (503). */
+  pixazoKey?: string;
+  pixazoBase?: string;
+};
 
 type Env = { Variables: { account: Account } };
 
@@ -33,6 +38,7 @@ export function createApp(deps: ControlDeps) {
   });
   app.use('/v1/me', authed);
   app.use('/v1/llm/*', authed);
+  app.use('/v1/media/*', authed);
 
   // Same body as the Rowboat Labs /v1/me (core billing/billing.ts reads it).
   // Session → `daily`, week → `monthly`: see architecture §3.5.
@@ -62,6 +68,10 @@ export function createApp(deps: ControlDeps) {
   });
 
   app.all('/v1/llm/*', (c) => proxyLlm(deps, c.get('account'), c.req.raw));
+
+  app.get('/v1/media/models', (c) => listMediaModels(deps, c.get('account')));
+  app.post('/v1/media/generations', (c) => createGeneration(deps, c.get('account'), c.req.raw));
+  app.get('/v1/media/generations/:id', (c) => getGeneration(deps, c.get('account'), c.req.param('id')));
 
   return app;
 }

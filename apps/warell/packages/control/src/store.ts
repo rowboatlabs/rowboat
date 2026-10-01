@@ -41,6 +41,19 @@ export interface UsageRecord {
   agentName: string | null;
 }
 
+/** One media generation, kept so its owner alone can follow it and a failure is refunded once. */
+export interface MediaJob {
+  /** Pixazo's request id. */
+  id: string;
+  accountId: string;
+  model: string;
+  credits: number;
+  chargedAt: number;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  url: string | null;
+  refunded: boolean;
+}
+
 /**
  * Persistence seam. Phase 0 runs the in-memory store; the Postgres one, in
  * the `warell` schema with its own migration ladder (UPSTREAM.md §2), comes
@@ -53,11 +66,14 @@ export interface ControlStore {
   quotaState(accountId: string): Promise<QuotaState | null>;
   saveQuotaState(accountId: string, state: QuotaState): Promise<void>;
   appendUsage(record: UsageRecord): Promise<void>;
+  mediaJob(id: string): Promise<MediaJob | null>;
+  saveMediaJob(job: MediaJob): Promise<void>;
 }
 
 export class MemoryStore implements ControlStore {
   readonly usage: UsageRecord[] = [];
   private readonly states = new Map<string, QuotaState>();
+  private readonly jobs = new Map<string, MediaJob>();
 
   /** `tokens` maps a token HASH (hashToken) to its account. */
   constructor(
@@ -82,5 +98,11 @@ export class MemoryStore implements ControlStore {
   }
   async appendUsage(record: UsageRecord) {
     this.usage.push(record);
+  }
+  async mediaJob(id: string) {
+    return this.jobs.get(id) ?? null;
+  }
+  async saveMediaJob(job: MediaJob) {
+    this.jobs.set(job.id, job);
   }
 }

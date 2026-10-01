@@ -217,6 +217,36 @@ Décidé le 30/09/2026. Les forfaits payants appellent n'importe quel modèle, d
 
 L'instance part sur DeepSeek V4.1 Flash quel que soit le forfait (`WARELL_ASSISTANT_MODEL` le change) ; un choix déjà fait dans l'app n'est jamais écrasé.
 
+#### Les médias
+
+Décidé le 30/09/2026. La vidéo, la voix et la musique passent par **Pixazo**, avec une seule clé gardée dans le plan de contrôle (`/v1/media`, `media.ts` et `media-route.ts`). Une génération se paie **sur le même quota que le texte**, au prix lu sur les pages modèles de pixazo.ai le 30/09/2026. Quand une promotion court, on garde le prix normal, pour ne jamais compter moins que ce qu'on paie.
+
+| Modèle | Usage | Prix retenu |
+|---|---|---|
+| Seedance 2.0 Mini | vidéo, 4 à 30 s, 720p | 0,0756 $/s (promotion : 0,03024 $/s) |
+| Veo 3.1 Fast | vidéo, 4, 6 ou 8 s | 0,10 $/s sans son, 0,15 $/s avec |
+| Veo 3.1 | vidéo, 720p, son compris | 0,40 $/s |
+| Gemini 3.8 Flash TTS | voix, 4 000 caractères au plus | 0,01728 $ la minute commencée, estimée à 12 caractères par seconde |
+| Lyria 3 / Lyria 3 Pro | musique | 0,042 $ / 0,084 $ le morceau |
+
+Ce qui diffère du texte :
+
+- **Le prix est connu avant, et il est pris avant.** Une vidéo coûte d'un coup ce qu'une conversation coûte en plusieurs heures, et ne s'arrête pas en route. Elle doit donc tenir dans ce qui reste de la session **et** de la semaine (`admitCost`), sans les dépasser. Elle est débitée avant l'envoi, pour que deux demandes simultanées ne passent pas sur le même reste.
+- **Deux refus distincts.** `429 quota_reached` : attendre la remise à zéro suffira. `403 over_plan` : la génération coûte plus que la fenêtre entière du forfait, et attendre ne servira à rien.
+- **Un échec est rendu, une seule fois.** Si Pixazo refuse l'envoi, ou si la génération échoue (y compris une génération « terminée » sans fichier), le débit est rendu aux fenêtres encore ouvertes depuis le débit.
+- **Une génération n'est visible que de son compte.** Celle d'un autre compte répond 404.
+- **Découverte n'a pas les médias** : son budget est taillé pour le texte.
+
+Ce que ça donne par forfait (une session est un quart de la semaine) :
+
+| Forfait | Session | Seedance 5 s | Veo Fast 8 s | Veo 8 s | Morceaux Lyria |
+|---|---|---|---|---|---|
+| Semaine, Essentiel | ≈ 0,50 $ | 1 | 0 (4 s : 1) | 0 | 11 |
+| Pro 100 € | ≈ 2,49 $ | 6 | 3 | 0 | 59 |
+| Pro 200 € | ≈ 4,99 $ | 13 | 6 | 1 | 118 |
+
+La marge de 55 % tient sans calcul nouveau : un média est compté à notre coût, sur le même budget que le texte.
+
 **Sur le fil, on garde le schéma de l'upstream** (§3.14) : `GET /v1/me` porte la session dans le compartiment `daily` et la semaine dans `monthly`, et `usageDay` donne l'heure de remise à zéro de la session. Les libellés de l'écran d'usage upstream (« jour », « mois ») sont donc faux jusqu'à ce que la couche de marque et d'i18n (§3.12) les remplace : c'est accepté pour la phase 0, où seul le propriétaire utilise l'app.
 
 ### 3.6 La vérification : exécuté ≠ vérifié
