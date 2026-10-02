@@ -83,3 +83,14 @@ describe("workspace.writeFile etag guard", () => {
     expect(recreated.stat.size).toBe(6);
   });
 });
+
+describe("workspace.readFile path boundary", () => {
+  it("rejects symlinks that resolve outside the workspace", async () => {
+    const workspace = await loadWorkspace();
+    const outsidePath = path.join(tmpDir, "outside.txt");
+    await fs.writeFile(outsidePath, "secret", "utf8");
+    await fs.symlink(outsidePath, path.join(workspaceDir, "link.txt"));
+
+    await expect(workspace.readFile("link.txt", "utf8")).rejects.toThrow("Path outside workspace boundary");
+  });
+});
