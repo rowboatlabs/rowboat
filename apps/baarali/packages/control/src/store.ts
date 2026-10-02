@@ -122,6 +122,8 @@ export interface ControlStore {
   accountForUser(userId: string): Promise<Account | null>;
   instance(accountId: string): Promise<InstanceRecord | null>;
   saveInstance(record: InstanceRecord): Promise<void>;
+  /** Forgets an account's instance record (the machine itself is not touched). */
+  removeInstance(accountId: string): Promise<void>;
   countInstances(): Promise<number>;
   /** `keyHash`: hashToken of the device key, which is never stored. */
   addDevice(device: Device, keyHash: string): Promise<void>;
@@ -199,6 +201,9 @@ export class MemoryStore implements ControlStore {
   }
   async saveInstance(record: InstanceRecord) {
     this.instances.set(record.accountId, { ...record });
+  }
+  async removeInstance(accountId: string) {
+    this.instances.delete(accountId);
   }
   async countInstances() {
     return this.instances.size;

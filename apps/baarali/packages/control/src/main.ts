@@ -3,7 +3,7 @@ import pg from 'pg';
 import { createApp } from './app.js';
 import { FlyMachines } from './fly.js';
 import { createGateway } from './gateway.js';
-import { Instances, type InstancesConfig } from './instances.js';
+import { Instances, settleOwnerInstance, type InstancesConfig } from './instances.js';
 import { SOCIAL_PROVIDERS, createAuth, migrateAuth, type AuthDeps, type SocialCredentials, type BaaraliAuth } from './auth.js';
 import { LogSender, NoSender, ResendSender, type CodeSender } from './codes.js';
 import { ASSUMPTIONS, MEDIA_PACKS, OFFERS } from './catalog.js';
@@ -136,8 +136,8 @@ if (process.env.BAARALI_GATEWAY_SECRET) {
   });
   // Deployed by hand (packages/instance/fly.toml), reached, never updated.
   const ownerApp = process.env.BAARALI_OWNER_INSTANCE_APP;
-  if (ownerApp) {
-    await store.saveInstance({ accountId: owner.id, app: ownerApp, machineId: null, volumeId: null, image: null, managed: false });
+  if ((await settleOwnerInstance(store, owner.id, ownerApp)) === 'retired') {
+    console.log('[control] owner instance retired; a managed one comes at the next sign-in');
   }
   console.log(`[control] instances: ${config ? `${config.app}, ${config.maxInstances} at most` : 'owner only'}`);
 }

@@ -195,6 +195,10 @@ export class PgStore implements ControlStore {
     );
   }
 
+  async removeInstance(accountId: string) {
+    await this.db.query('DELETE FROM baarali.instances WHERE account_id = $1', [accountId]);
+  }
+
   async countInstances() {
     const { rows } = await this.db.query<{ n: unknown }>('SELECT count(*) AS n FROM baarali.instances');
     return num(rows[0].n);

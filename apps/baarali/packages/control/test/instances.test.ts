@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { FlyApiError, type FlyApi, type Machine, type MachineConfig } from '../src/fly.js';
-import { Instances, InstanceUnavailable, type InstancesConfig } from '../src/instances.js';
+import { Instances, InstanceUnavailable, settleOwnerInstance, type InstancesConfig } from '../src/instances.js';
 import { MemoryStore, hashToken, type Account, type Plan } from '../src/store.js';
 
 const T0 = Date.UTC(2026, 9, 1, 8, 0, 0);
@@ -187,5 +187,26 @@ describe('Instances keys and reach', () => {
       throw new FlyApiError(500, 'boom');
     };
     await expect(instances.wake(record)).rejects.toThrow('boom');
+  });
+});
+
+describe("the owner's hand-deployed instance", () => {
+  it('is reached while configured, then forgotten so a managed one comes', async () => {
+    const { store, instances, fly } = setup();
+    expect(await settleOwnerInstance(store, ME.id, 'warell-owner')).toBe('reached');
+    expect((await store.instance(ME.id))?.app).toBe('warell-owner');
+    expect(await settleOwnerInstance(store, ME.id, undefined)).toBe('retired');
+    expect(await store.instance(ME.id)).toBeNull();
+    // At the next sign-in, the owner gets a managed instance like everyone.
+    const record = await instances.ensure(ME);
+    expect(record.managed).toBe(true);
+    expect(fly.calls.some((c) => c.startsWith('create '))).toBe(true);
+  });
+
+  it('leaves a managed instance alone', async () => {
+    const { store, instances } = setup();
+    await instances.ensure(ME);
+    expect(await settleOwnerInstance(store, ME.id, undefined)).toBe('none');
+    expect((await store.instance(ME.id))?.managed).toBe(true);
   });
 });

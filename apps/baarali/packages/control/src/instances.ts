@@ -205,3 +205,23 @@ export class Instances {
     };
   }
 }
+
+/**
+ * The owner's hand-deployed instance of phase 0 (BAARALI_OWNER_INSTANCE_APP):
+ * reached while it is configured; once unset, its record is forgotten, and
+ * the owner gets a managed instance like everyone at the next sign-in of a
+ * device (POST /v1/devices). The machine itself is left to whoever removes it.
+ */
+export async function settleOwnerInstance(
+  store: ControlStore,
+  ownerId: string,
+  ownerApp: string | undefined,
+): Promise<'reached' | 'retired' | 'none'> {
+  if (ownerApp) {
+    await store.saveInstance({ accountId: ownerId, app: ownerApp, machineId: null, volumeId: null, image: null, managed: false });
+    return 'reached';
+  }
+  if ((await store.instance(ownerId))?.managed !== false) return 'none';
+  await store.removeInstance(ownerId);
+  return 'retired';
+}

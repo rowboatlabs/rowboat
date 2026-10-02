@@ -107,6 +107,9 @@ describe.each([
     await store.saveInstance({ ...record, machineId: 'm1', image: 'img:1' });
     expect(await store.instance(ME.id)).toEqual({ ...record, machineId: 'm1', image: 'img:1' });
     expect(await store.countInstances()).toBe(1);
+    await store.removeInstance(ME.id);
+    expect(await store.instance(ME.id)).toBeNull();
+    expect(await store.countInstances()).toBe(0);
   });
 
   it('finds a device by its key until it is revoked, and only its owner revokes it', async () => {

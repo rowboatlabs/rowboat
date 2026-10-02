@@ -46,7 +46,7 @@ OPENROUTER_API_KEY=<clé> BAARALI_PLAN_ID=essentiel PORT=8787 pnpm start
 | `BAARALI_GATEWAY_SECRET` | La passerelle vers les instances (archi §3.5 « Les instances »). 32 octets aléatoires au moins ; les clés de chaque instance en dérivent, le changer les change toutes. Absent : aucun appareil ne se connecte |
 | `FLY_API_TOKEN`, `BAARALI_INSTANCE_IMAGE` | Créer les instances : un jeton limité à l'app des instances (`fly tokens create deploy -a baarali-instances`) et l'image à y lancer. Absents : seule l'instance du propriétaire est joignable |
 | `BAARALI_INSTANCES_APP`, `BAARALI_INSTANCES_REGION`, `BAARALI_MAX_INSTANCES` | Défauts : `baarali-instances`, `cdg`, `20` |
-| `BAARALI_OWNER_INSTANCE_APP` | L'app Fly de l'instance du propriétaire (phase 0, `warell-owner`), atteinte sans être modifiée |
+| `BAARALI_OWNER_INSTANCE_APP` | L'app Fly de l'instance du propriétaire (phase 0, `warell-owner`), atteinte sans être modifiée. Retirée : le plan de contrôle oublie cette instance au démarrage et le propriétaire reçoit une instance gérée à sa prochaine connexion (`settleOwnerInstance`) ; l'app Fly se supprime ensuite à la main |
 | `BAARALI_SPACES_URL` | Notre serveur des espaces (Harbor, `apps/harbor`), décidé le 02/10/2026 : nous les hébergeons nous-mêmes. Servi dans `/v1/config` (`spacesApexUrl`), et seulement avec `BAARALI_AUTH_SECRET`. Absent : les apps n'affichent pas les espaces |
 | `BAARALI_DEV_CODES` | `1` en développement seulement : les codes email et SMS s'écrivent dans le journal. Sans lui et sans vrai fournisseur, ni l'email ni le SMS ne sont proposés |
 | `PORT` | Défaut : 8080 |
