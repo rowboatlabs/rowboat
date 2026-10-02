@@ -79,7 +79,7 @@ const mention = (agent: Member) => `[@${agent.displayName}](#member:${agent.id})
 beforeAll(async () => {
   process.env.HARBOR_INTEGRATION_KEY = 'd'.repeat(64);
   fake = await new FakeCapy().start();
-  PLATFORMS.capy = capyPlatform(fake.url, { tickMs: 100, graceMs: 500 });
+  PLATFORMS.capy = capyPlatform(fake.url, { tickMs: 100, graceMs: 500, streamRetryMs: 60_000 });
 });
 
 afterAll(async () => {
@@ -140,6 +140,23 @@ describe('the Capy connector', () => {
     expect(send.body).toMatchObject({ clientKey: second.message.id, delivery: 'queue' });
     expect(String(send.body!.text)).toContain('Earlier in this thread:\n[@Ramnique](#member:ramnique): I think it is the timeout');
     expect(await org.replies(first.message.id, capy)).toEqual(['Done.', 'Agreed, raised it.']);
+  });
+
+  it('when Capy refuses its stream, polls the thread and still answers, with the activity', async () => {
+    fake.streamDown = true;
+    fake.next = { tools: ['bash'], hold: true };
+    const reports: string[] = [];
+    const { message, invocations } = await org.post(`${mention(capy)} the stream is down`);
+    const thread = await until(async () => [...fake.threads.values()].find((t) => t.requestId === requestIdFor(capy.id, message.id) && t.transcript.some((m) => m.source === 'tool')), 'the run');
+    await until(async () => {
+      const i = await org.invocation(invocations[0]!.id);
+      if (i?.activity) reports.push(i.activity);
+      return i?.activity === 'Using bash';
+    }, 'the activity from polling');
+    fake.finish(thread.id, { answer: 'Answered without a stream.' });
+    expect((await org.ended(invocations[0]!.id)).state).toBe('done');
+    fake.streamDown = false;
+    expect(await org.replies(message.id, capy)).toEqual(['Answered without a stream.']);
   });
 
   it('with several projects, uses the one picked, and says what to pick when none is', async () => {
@@ -250,7 +267,7 @@ describe('reading a Capy transcript', () => {
         'M1',
         marker,
       ),
-    ).toEqual({ answer: 'the answer' });
+    ).toEqual({ answer: 'the answer', lastTool: 'bash' });
     expect(requestInTranscript([{ id: '1', source: 'user', text: 'x', clientKey: 'M1' }], 'M1', marker)).toEqual({ answer: undefined });
   });
 });

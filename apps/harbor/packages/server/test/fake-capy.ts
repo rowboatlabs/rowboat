@@ -40,6 +40,8 @@ export class FakeCapy {
   readonly threads = new Map<string, Thread>();
   next: Script = { answer: 'Done.' };
   refuse: { status: number; tag: string; paths?: RegExp } | undefined;
+  /** Answer every stream with 503 capy/StreamUnavailable, as Capy did live (2026-10-02). */
+  streamDown = false;
   private server!: Server;
   private seq = 0;
   url = '';
@@ -151,6 +153,7 @@ export class FakeCapy {
       setTimeout(() => this.end(thread, 'idle'), 20);
       return;
     }
+    if (req.method === 'GET' && verb === '/stream' && this.streamDown) return json(503, { _tag: 'capy/StreamUnavailable' });
     if (req.method === 'GET' && verb === '/stream') {
       res.writeHead(200, { 'content-type': 'text/event-stream' });
       // `until=run`: closes with `done` once the run ends, or at once when the thread is not working.

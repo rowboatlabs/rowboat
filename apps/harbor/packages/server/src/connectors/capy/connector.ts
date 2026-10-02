@@ -17,7 +17,8 @@ import { buildPrompt } from './prompt.js';
 // thread, or reports the message `deduped`. Nothing is ever sent twice.
 //
 // A turn is followed on the thread's stream with `until=run`, which closes once
-// the run in progress ends; the thread's status and transcript then say where
+// the run in progress ends (when Capy refuses the stream, the connector polls
+// the thread instead); the thread's status and transcript then say where
 // the request stands, and the answer is Capy's last reply after it (PR links
 // arrive in that text). Capy runs unattended (no approvals); a thread that needs
 // a person ends its run with the question, and the next mention answers it.
@@ -38,8 +39,10 @@ export interface FollowTiming {
   tickMs: number;
   /** How long an idle thread may show no reply to this request before the connector stops waiting for one. */
   graceMs: number;
+  /** After the stream refuses, how long the connector polls before trying the stream again. */
+  streamRetryMs: number;
 }
-const DEFAULT_TIMING: FollowTiming = { tickMs: 5_000, graceMs: 2 * 60_000 };
+const DEFAULT_TIMING: FollowTiming = { tickMs: 5_000, graceMs: 2 * 60_000, streamRetryMs: 60_000 };
 
 /**
  * Statuses that mean the run is over. The OpenAPI's set (`idle`, `failed`,
@@ -246,30 +249,43 @@ export class CapyConnector implements RunningConnector {
       void this.report(invocation, { state: 'working', activity: lastActivity || 'Working in Capy' });
     }, 30_000);
     try {
+      // The stream is how a run's end is heard at once; when Capy refuses it (`capy/StreamUnavailable`,
+      // found live 2026-10-02), the connector polls the thread instead and tries the stream again later.
+      let streamDownUntil = 0;
+      const showActivity = async (tool: string | undefined) => {
+        if (!tool) return;
+        const activity = `Using ${tool}`.slice(0, 200);
+        if (activity === lastActivity || Date.now() - lastActivityAt < ACTIVITY_EVERY_MS) return;
+        lastActivity = activity;
+        lastActivityAt = lastReport = Date.now();
+        await this.report(invocation, { state: 'working', activity });
+      };
       while (!this.stopped) {
         const abort = new AbortController();
         this.aborts.add(abort);
         const openedAt = Date.now();
         try {
           const api = await this.api();
-          for await (const { event, data } of api.stream(threadId, abort.signal)) {
-            giveUpAt = Date.now() + RETRY_FOR_MS;
-            backoff = 1_000;
-            if (event === 'done' || event === 'error') break;
-            if (event !== 'transcript') continue;
-            const message = data as CapyMessage | undefined;
-            if (message?.source !== 'tool' || !message.tool) continue;
-            const activity = `Using ${message.tool}`.slice(0, 200);
-            if (activity !== lastActivity && Date.now() - lastActivityAt >= ACTIVITY_EVERY_MS) {
-              lastActivity = activity;
-              lastActivityAt = lastReport = Date.now();
-              await this.report(invocation, { state: 'working', activity });
+          if (Date.now() >= streamDownUntil) {
+            try {
+              for await (const { event, data } of api.stream(threadId, abort.signal)) {
+                giveUpAt = Date.now() + RETRY_FOR_MS;
+                backoff = 1_000;
+                if (event === 'done' || event === 'error') break;
+                const message = event === 'transcript' ? (data as CapyMessage | undefined) : undefined;
+                if (message?.source === 'tool') await showActivity(message.tool);
+              }
+            } catch (err) {
+              if (!(err instanceof CapyError) || !err.transient || this.stopped) throw err;
+              this.env.log('Capy stream unavailable; polling the thread instead', { error: err.message });
+              streamDownUntil = Date.now() + this.timing.streamRetryMs;
             }
           }
           if (this.stopped) return;
 
           const [thread, transcript] = await Promise.all([api.thread(threadId), api.messages(threadId)]);
           giveUpAt = Date.now() + RETRY_FOR_MS;
+          backoff = 1_000;
           const turn = requestInTranscript(transcript, invocation.trigger.messageId, marker);
           if (turn && AT_REST.has(thread.status)) {
             if (turn.answer !== undefined || FAILED.has(thread.status) || this.stopping.has(invocation.id)) {
@@ -280,6 +296,7 @@ export class CapyConnector implements RunningConnector {
             if (Date.now() - restingWithoutReplySince > this.timing.graceMs) return await this.finish(invocation, record, undefined, undefined);
           } else {
             restingWithoutReplySince = undefined;
+            if (turn) await showActivity(turn.lastTool);
           }
         } catch (err) {
           if (this.stopped) return; // not a failure: the invocation stays working, and the next start sends it again
@@ -299,7 +316,7 @@ export class CapyConnector implements RunningConnector {
         } finally {
           this.aborts.delete(abort);
         }
-        // The stream closed at once: Capy is not running this yet, or waits on something external.
+        // The stream closed at once, or is down: Capy is not running this yet, waits on something external, or we poll.
         if (Date.now() - openedAt < this.timing.tickMs) await sleep(this.timing.tickMs, this.shutdown.signal);
       }
     } finally {
@@ -468,21 +485,27 @@ export class CapyConnector implements RunningConnector {
 /**
  * This request in a Capy transcript: the last user message with its client
  * key (a follow-up) or its marker (the thread's first message, which takes no
- * key), and Capy's last reply after it, before anyone spoke again. Undefined
+ * key), Capy's last reply after it (and its last tool, for the activity line), before anyone spoke again. Undefined
  * when the request is not there yet; `answer` undefined when Capy has not replied.
  */
-export function requestInTranscript(transcript: CapyMessage[], triggerMessageId: string, marker: string): { answer: string | undefined } | undefined {
+export function requestInTranscript(
+  transcript: CapyMessage[],
+  triggerMessageId: string,
+  marker: string,
+): { answer: string | undefined; lastTool?: string } | undefined {
   let at = -1;
   transcript.forEach((m, i) => {
     if (m.source === 'user' && (m.clientKey === triggerMessageId || (m.text ?? '').includes(marker))) at = i;
   });
   if (at < 0) return undefined;
   let answer: string | undefined;
+  let lastTool: string | undefined;
   for (const m of transcript.slice(at + 1)) {
     if (m.source === 'user') break;
     if (m.source === 'assistant' && m.text?.trim()) answer = m.text;
+    if (m.source === 'tool' && m.tool) lastTool = m.tool;
   }
-  return { answer };
+  return { answer, ...(lastTool ? { lastTool } : {}) };
 }
 
 function projectLabel(p: CapyProject): string {
