@@ -6,6 +6,8 @@ primary_region = "cdg"
 [env]
   BAARALI_PUBLIC_URL = "https://app.baarali.com"
   BAARALI_PLAN_ID = "essentiel"
+  # Our Spaces server (packages/spaces, baarali-spaces), decided 02/10/2026.
+  BAARALI_SPACES_URL = "https://spaces.baarali.com"
 
 [http_service]
   internal_port = 8080

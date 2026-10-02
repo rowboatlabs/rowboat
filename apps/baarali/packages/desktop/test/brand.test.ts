@@ -98,6 +98,11 @@ describe('the mobile app', () => {
 
   // Control's sign-in server takes a phone's redirect only as RFC 8252 §7.1
   // describes it (control src/auth.ts, asAppRequest): reverse-domain, no `//`.
+  it('finds Spaces on our own server', () => {
+    const e = mobilePlan().edits.find((x) => x.file.endsWith('spaces/account.tsx') && x.from.includes('SPACES_APEX'))!;
+    expect(e.to).toBe("process.env.EXPO_PUBLIC_SPACES_APEX ?? 'https://spaces.baarali.com';");
+  });
+
   it('comes back from the sign-in by a redirect our server accepts', () => {
     const e = mobilePlan().edits.find((x) => x.file.endsWith('spaces/oauth.ts'))!;
     expect(e.to).toBe("export const REDIRECT_URI = 'com.baarali.app.mobile:/oauth-callback';");

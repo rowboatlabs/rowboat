@@ -297,6 +297,9 @@ const MOBILE_PERMISSIONS = {
   },
 };
 
+/** Our Spaces server (apps/baarali/packages/spaces). */
+const SPACES_URL = 'https://spaces.baarali.com';
+
 /** The phone app's identifier, on both stores. */
 const MOBILE_ID = `${BRAND.bundleId}.mobile`;
 
@@ -310,10 +313,10 @@ export function mobilePlan() {
       // The upstream's sailboat, its logo, becomes ours (tinted like a symbol).
       edit(`${mobile}/src/app/onboarding.tsx`, "    icon: 'sf:sailboat',", "    icon: require('../../assets/images/baarali-mark.png'),"),
       edit(`${mobile}/src/app/spaces/index.tsx`, '<Image source="sf:sailboat"', "<Image source={require('../../../assets/images/baarali-mark.png')}"),
-      // Never the upstream's Spaces fleet (decided 02/10/2026): Baarali has no
-      // Spaces server of its own yet (control /v1/config: spacesApexUrl null),
-      // so the app opens on « Connect your Mac » and Spaces says it is coming.
-      edit(`${mobile}/src/lib/spaces/account.tsx`, "process.env.EXPO_PUBLIC_SPACES_APEX ?? 'https://spaces.x.rowboatlabs.com';", "process.env.EXPO_PUBLIC_SPACES_APEX ?? '';"),
+      // Never the upstream's Spaces fleet: ours (decided 02/10/2026,
+      // packages/spaces). A build with EXPO_PUBLIC_SPACES_APEX empty opens on
+      // « Connect your Mac » and Spaces says it is coming.
+      edit(`${mobile}/src/lib/spaces/account.tsx`, "process.env.EXPO_PUBLIC_SPACES_APEX ?? 'https://spaces.x.rowboatlabs.com';", `process.env.EXPO_PUBLIC_SPACES_APEX ?? '${SPACES_URL}';`),
       edit(
         `${mobile}/src/lib/spaces/account.tsx`,
         '    const issuer = await discoverIssuer(APEX_URL);',
