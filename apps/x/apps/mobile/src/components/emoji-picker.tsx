@@ -1,8 +1,9 @@
 import * as Haptics from 'expo-haptics';
 import { useState } from 'react';
-import { Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { BottomSheet } from '@/components/bottom-sheet';
 import { useColors } from '@/theme/colors';
 
 // A compact emoji sheet for reactions: the common set, grouped, with a
@@ -21,12 +22,9 @@ export function EmojiPicker({ visible, onPick, onClose }: { visible: boolean; on
   const [q, setQ] = useState('');
   const filter = q.trim();
   return (
-    <Modal transparent visible={visible} animationType="slide" onRequestClose={onClose}>
-      <Pressable style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.35)' }} onPress={onClose}>
-        <Pressable
-          onPress={(e) => e.stopPropagation()}
-          style={{ maxHeight: '60%', paddingTop: 12, paddingBottom: insets.bottom + 8, borderTopLeftRadius: 20, borderTopRightRadius: 20, backgroundColor: colors.background }}
-        >
+    <BottomSheet visible={visible} onClose={onClose} maxHeight={0.6}
+      style={{ paddingTop: 12, paddingBottom: insets.bottom + 8, borderTopLeftRadius: 20, borderTopRightRadius: 20, backgroundColor: colors.background }}
+    >
           <View style={{ alignSelf: 'center', width: 36, height: 5, borderRadius: 3, backgroundColor: colors.separator, marginBottom: 10 }} />
           <TextInput
             value={q}
@@ -62,8 +60,6 @@ export function EmojiPicker({ visible, onPick, onClose }: { visible: boolean; on
               );
             })}
           </ScrollView>
-        </Pressable>
-      </Pressable>
-    </Modal>
+    </BottomSheet>
   );
 }

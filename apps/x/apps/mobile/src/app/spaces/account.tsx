@@ -43,7 +43,7 @@ export default function AccountScreen() {
 
   return (
     <ScrollView
-      style={{ flex: 1, backgroundColor: colors.secondaryBackground }}
+      style={{ flex: 1, backgroundColor: colors.groupedBackground }}
       contentInsetAdjustmentBehavior="automatic"
       contentContainerStyle={{ padding: 16, gap: 24, paddingBottom: 48 }}
     >
@@ -93,7 +93,7 @@ function Group({ label, footer, children }: { label?: string; footer?: string; c
   return (
     <View style={{ gap: 6 }}>
       {label ? <Text style={{ fontSize: 13, color: colors.secondaryLabel, paddingHorizontal: 16, textTransform: 'uppercase' }}>{label}</Text> : null}
-      <View style={{ borderRadius: 12, borderCurve: 'continuous', overflow: 'hidden', backgroundColor: colors.background }}>{children}</View>
+      <View style={{ borderRadius: 12, borderCurve: 'continuous', overflow: 'hidden', backgroundColor: colors.card }}>{children}</View>
       {footer ? <Text style={{ fontSize: 13, lineHeight: 18, color: colors.secondaryLabel, paddingHorizontal: 16 }}>{footer}</Text> : null}
     </View>
   );

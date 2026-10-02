@@ -1,6 +1,11 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
-import { light as lightColors } from '@/theme/colors';
+import { dark as darkColors, light as lightColors } from '@/theme/colors';
 import { applyStoredTheme } from '@/lib/theme-preference';
+
+const WarmDarkTheme = {
+  ...DarkTheme,
+  colors: { ...DarkTheme.colors, background: darkColors.background, card: darkColors.background, border: darkColors.separator, text: darkColors.label },
+};
 
 // Pin the saved Light/Dark choice before the first screen paints.
 void applyStoredTheme();
@@ -44,7 +49,7 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <KeyboardProvider>
-      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : LightTheme}>
+      <ThemeProvider value={colorScheme === 'dark' ? WarmDarkTheme : LightTheme}>
         <ConnectionProvider>
           <SpacesAccountProvider>
           <PushRegistrar />

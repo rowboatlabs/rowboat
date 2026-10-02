@@ -12,6 +12,7 @@ import { MessageLinkPreviews } from '@/components/link-preview-card';
 import { PollCard } from '@/components/poll-card';
 import { SpaceBlobImage } from '@/components/space-blob-image';
 import { EmojiPicker } from '@/components/emoji-picker';
+import { BottomSheet } from '@/components/bottom-sheet';
 import { useColors } from '@/theme/colors';
 
 // Shared message presentation for the stream and thread screens: row, reaction
@@ -78,7 +79,7 @@ export const MessageRow = memo(function MessageRow({
   onEndPoll?: (message: Message) => void;
 }) {
   const colors = useColors();
-  const dark = colors.background === '#000000';
+  const dark = colors.isDark;
   const name = member?.displayName ?? message.author.memberId;
   const agent = message.author.actingMode !== 'direct';
   const time = new Date(message.postedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -262,7 +263,7 @@ function ReactorsSheet({
   onClose: () => void;
 }) {
   const colors = useColors();
-  const dark = colors.background === '#000000';
+  const dark = colors.isDark;
   const [tab, setTab] = useState<string>(initial);
   const nameOf = (id: string) => (id === me ? 'You' : memberNames?.get(id) ?? 'Unknown member');
   const total = message.reactions.reduce((n, g) => n + g.memberIds.length, 0);
@@ -274,12 +275,9 @@ function ReactorsSheet({
   const tabs = [{ key: 'all', label: `All ${total}` }, ...message.reactions.map((g) => ({ key: g.emoji, label: `${g.emoji} ${g.memberIds.length}` }))];
 
   return (
-    <Modal transparent visible animationType="slide" onRequestClose={onClose}>
-      <Pressable style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.35)' }} onPress={onClose}>
-        <Pressable
-          onPress={(e) => e.stopPropagation()}
-          style={{ maxHeight: '60%', paddingTop: 10, paddingBottom: 34, borderTopLeftRadius: 20, borderTopRightRadius: 20, backgroundColor: colors.background }}
-        >
+    <BottomSheet visible={true} onClose={onClose} maxHeight={0.6}
+      style={{ paddingTop: 10, paddingBottom: 34, borderTopLeftRadius: 20, borderTopRightRadius: 20, backgroundColor: colors.background }}
+    >
           <View style={{ alignSelf: 'center', width: 36, height: 5, borderRadius: 3, backgroundColor: colors.separator, marginBottom: 12 }} />
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={{ paddingHorizontal: 16, gap: 8, paddingBottom: 10 }}>
             {tabs.map((t) => {
@@ -318,9 +316,7 @@ function ReactorsSheet({
               );
             })}
           </ScrollView>
-        </Pressable>
-      </Pressable>
-    </Modal>
+    </BottomSheet>
   );
 }
 

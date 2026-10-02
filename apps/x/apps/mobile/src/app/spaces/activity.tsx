@@ -172,7 +172,7 @@ const KIND_ICON: Record<ActivityItem['kind'], string> = {
 
 function ActivityRow({ row, first, onPress }: { row: Row; first: boolean; onPress: () => void }) {
   const colors = useColors();
-  const dark = colors.background === '#000000';
+  const dark = colors.isDark;
   const { item, names } = row;
   const nameMap = useMemo(() => new Map(Object.entries(names)), [names]);
   const actorId = item.actors[0]?.memberId ?? '';

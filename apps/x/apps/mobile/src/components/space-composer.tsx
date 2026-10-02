@@ -289,7 +289,7 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
               onPress={() => void pickMedia()}
               style={{
                 width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center',
-                backgroundColor: colors.background === '#000000' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)',
+                backgroundColor: colors.isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)',
                 opacity: uploading ? 0.5 : 1,
               }}
             >
