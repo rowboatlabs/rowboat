@@ -72,6 +72,14 @@ jobs:
             }
           "
 
+      # No release with English left in it (decided 02/10/2026): a string the
+      # French dictionary lacks stops the build here, never the installed app.
+      - name: Check the French
+        shell: bash
+        run: |
+          (cd apps/baarali && pnpm install --frozen-lockfile)
+          node apps/baarali/packages/desktop/scripts/i18n-extract.mjs --check
+
       - name: Apply the Baarali brand
         run: node apps/baarali/packages/desktop/scripts/brand.mjs --yes
 
