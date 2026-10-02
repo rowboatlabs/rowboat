@@ -3,6 +3,7 @@ import { routes } from '@rowboat/spaces-protocol';
 import type { z } from 'zod';
 import { authenticateRequest, protectedResourceMetadata, wwwAuthenticate, type AuthIdentity, type OrgAuth } from './auth.js';
 import { consentPageHtml } from './consent.js';
+import { MAX_PROFILE_IMAGE_BYTES } from './core/images.js';
 import { HarborError } from './errors.js';
 import { publicOrigin } from './origin.js';
 import type { HarborService } from './service.js';
@@ -110,6 +111,50 @@ export function buildHttpApp(deps: {
   app.get('/v1/health', (c) => c.json({ ok: true, org: { name: service.org.name, address: service.org.address } }));
 
   app.get(routes.me.path, async (c) => reply(c, routes.me.response, { member: await service.me(actor(c)) }));
+
+  // --- profile images (2026-10-02) -------------------------------------------
+  // The body is the image; the limit is checked on the claim and again on the bytes.
+  const imageBody = async (c: Context<Env>): Promise<Uint8Array> => {
+    if (Number(c.req.header('content-length') ?? '0') > MAX_PROFILE_IMAGE_BYTES) {
+      throw new HarborError('payload_too_large', `profile images are limited to ${MAX_PROFILE_IMAGE_BYTES} bytes`);
+    }
+    return new Uint8Array(await c.req.arrayBuffer());
+  };
+
+  app.put(routes.setAvatar.path, async (c) =>
+    reply(c, routes.setAvatar.response, { member: await service.setAvatar(actor(c), await imageBody(c), publicOrigin(c)) }));
+
+  app.delete(routes.clearAvatar.path, async (c) =>
+    reply(c, routes.clearAvatar.response, { member: await service.clearAvatar(actor(c)) }));
+
+  app.get(routes.getOrgLogo.path, async (c) => {
+    const logoUrl = await service.orgLogoUrl(actor(c), publicOrigin(c));
+    return reply(c, routes.getOrgLogo.response, logoUrl ? { logoUrl } : {});
+  });
+
+  app.put(routes.setOrgLogo.path, async (c) =>
+    reply(c, routes.setOrgLogo.response, await service.setOrgLogo(actor(c), await imageBody(c), publicOrigin(c))));
+
+  app.delete(routes.clearOrgLogo.path, async (c) =>
+    reply(c, routes.clearOrgLogo.response, await service.clearOrgLogo(actor(c))));
+
+  // Immutable by address → cache forever, privately. Always an image (sniffed at upload).
+  app.get(routes.getImage.path, async (c) => {
+    const { hash } = parseWith(routes.getImage.params, c.req.param());
+    const result = await service.getImage(actor(c), hash);
+    if (result.url) {
+      c.header('cache-control', 'private, max-age=240');
+      return c.redirect(result.url, 302);
+    }
+    c.header('content-type', result.blob.mime);
+    c.header('content-length', String(result.blob.size));
+    c.header('content-disposition', 'inline');
+    c.header('cache-control', 'private, max-age=31536000, immutable');
+    c.header('x-content-type-options', 'nosniff');
+    c.header('content-security-policy', "default-src 'none'");
+    const bytes = result.bytes!;
+    return c.body(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
+  });
 
   // --- spaces & membership ---------------------------------------------------
 

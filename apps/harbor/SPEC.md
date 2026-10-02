@@ -577,7 +577,7 @@ A member's own agent holds no credentials of its own; both faces authenticate wi
 |---|---|
 | **Auth** | OAuth discovery metadata, DCR, PKCE authorization, token refresh. |
 | **Spaces** | List my spaces; create (per org policy, choosing visibility); resolve an invite link; read membership; leave. *Amended 2026-09-22:* browse open spaces; join; add members; admin acts — change visibility, remove a member, archive/unarchive, delete. |
-| **Org** *(added 2026-09-22)* | The org-wide roster; my profile (name, title, avatar); invites to the org; org settings — invite policy, domain rule, default spaces, roles; remove a member from the org (admin). |
+| **Org** *(added 2026-09-22)* | The org-wide roster; my profile (name, title, avatar); the org's logo, set by an admin *(avatar and logo built 2026-10-02)*; invites to the org; org settings — invite policy, domain rule, default spaces, roles; remove a member from the org (admin). |
 | **Assets** | List directory; read asset (content + current version); **propose change-set** (base version, edits, optional reasoning, acting mode) → applied \| merged \| conflict; read history; read diff between versions; read version. |
 | **Feed** | List topics (with activity strand data); read a topic; post a message; create topic (implicitly, by posting); edit/retitle/archive/merge topics (the tidying operations). |
 | **Live** | An event stream per space (WebSocket or SSE): new change-sets, new messages, topic changes, presence. This is part of the protocol, not a deployment implementation detail — clients render live from it. |

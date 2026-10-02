@@ -16,6 +16,7 @@ Two pnpm workspace packages under `packages/`:
 | `core/agents.ts` | agent members' owners and keys: add an agent, list the ones a member manages, create and revoke keys |
 | `core/invocations.ts` | invoking agent members (spec §8): the trigger `Feed.postMessage` runs in its transaction, the per-(agent, conversation) queue, the connector's operations, cancel and stop, and approvals (part 4: raised with their card in `Feed.postMessage`'s transaction, decided by a person, settled by the connector; `approval-card.ts` writes the card's text); its frames leave after the commit through its own outbox |
 | `core/assets.ts` | assets by id, versions, the change log, blobs, history, diff |
+| `core/images.ts` | profile images: a member's avatar and the org's logo, the org-wide image registry (`org_images`) and its read gate |
 | `core/feed.ts` | messages, threads, topics, reactions, polls, search, mention stamps and their backfill |
 | `core/read-state.ts` | read marks, follows, unread, Activity, read-all |
 | `service.ts` | `HarborService`, the facade: one delegate per public method, `org` / `readOnly` accessors |

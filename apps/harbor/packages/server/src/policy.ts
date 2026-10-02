@@ -94,6 +94,12 @@ export function canBind(identity: { email?: string }, org: { allowedEmailDomains
   return { code: 'policy_refused', message: `this org admits only ${domains.map((d) => `@${d}`).join(', ')} accounts` };
 }
 
+/** The org's logo is its admins' to set (2026-10-02); a member's avatar is always their own. */
+export function canSetOrgLogo(actor: Member): Decision {
+  if (actor.role === 'admin') return null;
+  return { code: 'forbidden', message: 'only an admin can change the org’s logo' };
+}
+
 // --- agent members and their keys (spec §4 Agent members, 2026-09-29) --------
 
 /** Any person may add an agent and becomes its owner. An agent may not: one agent minting others escapes every owner. */
