@@ -31,10 +31,14 @@ export function createGate({ targetPort, targetHost = '127.0.0.1' }: GateOptions
         up.pipe(res);
       },
     );
-    upstream.on('error', () => {
+    upstream.on('error', (err: NodeJS.ErrnoException) => {
       if (res.headersSent) return void res.destroy();
-      res.writeHead(502, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ error: { code: 'instance_unavailable' } }));
+      // Refused: the server is still booting and never saw the request, so
+      // the app may ask again (@x/client starting.ts). Anything else may
+      // have reached it: an error the app shows.
+      const starting = err.code === 'ECONNREFUSED';
+      res.writeHead(starting ? 503 : 502, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: { code: starting ? 'instance_starting' : 'instance_unavailable' } }));
     });
     // The caller hung up (an app giving up while the machine wakes): stop
     // asking the server. Every stream's error is heard here — an unheard

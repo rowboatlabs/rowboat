@@ -1,4 +1,5 @@
 import { ipc } from '@x/shared';
+import { fetchWhileStarting } from './starting.js';
 
 // Typed HTTP twin of window.ipc.invoke: POST /rpc/{channel} against a
 // rowboat-server, request/response shapes taken from the same ipcSchemas the
@@ -37,14 +38,16 @@ export function createRpcClient(opts: {
     async call(channel, args) {
       let res: Response;
       try {
-        res = await fetch(`${baseUrl}/rpc/${channel}`, {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            authorization: `Bearer ${opts.token}`,
-          },
-          body: JSON.stringify(args ?? null),
-        });
+        res = await fetchWhileStarting(() =>
+          fetch(`${baseUrl}/rpc/${channel}`, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              authorization: `Bearer ${opts.token}`,
+            },
+            body: JSON.stringify(args ?? null),
+          }),
+        );
       } catch (err) {
         throw new RpcError(
           err instanceof Error ? err.message : String(err),

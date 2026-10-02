@@ -23,12 +23,13 @@ describe('gate', () => {
     expect(seen[0].authorization).toBe('Bearer k');
   });
 
-  it('answers 502 when the server is down', async () => {
+  it('says the server is starting while it does not listen yet, so the app asks again', async () => {
     const free = await listen(http.createServer());
     servers.pop()!.close();
     const gate = await listen(createGate({ targetPort: free }));
     const res = await fetch(`http://127.0.0.1:${gate}/health`);
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(503);
+    expect((await res.json()).error.code).toBe('instance_starting');
   });
 
   // A request cut short on either side — the app giving up while the

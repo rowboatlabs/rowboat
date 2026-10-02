@@ -53,6 +53,9 @@ export function useRowboatAccount() {
     return cleanup;
   }, [refresh]);
 
+  // Back from a drop: a check that failed meanwhile read as signed out.
+  useEffect(() => window.ipc.on('server:resync', () => void refresh()), [refresh]);
+
   return {
     signedIn: state.signedIn,
     accessToken: state.accessToken,

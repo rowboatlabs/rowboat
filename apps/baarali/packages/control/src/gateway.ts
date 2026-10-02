@@ -82,7 +82,8 @@ export function createGateway(deps: GatewayDeps) {
       found = await resolve(keyFrom(req.headers.get('authorization'), url));
     } catch (err) {
       console.error('[gateway] wake failed', err);
-      return json(503, 'instance_unavailable');
+      // Nothing was relayed: the app may ask again (@x/client starting.ts).
+      return json(503, 'instance_waking');
     }
     if (found === 'unauthorized') return json(401, 'unauthorized');
     if (found === 'no_instance') return json(409, 'no_instance');

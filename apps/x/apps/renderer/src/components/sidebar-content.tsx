@@ -741,10 +741,13 @@ export function SidebarContentPanel({
       refreshOauthError()
       setLoggingIn(false)
     })
+    // Back from a drop: a check that failed meanwhile read as signed out.
+    const cleanupResync = window.ipc.on('server:resync', () => refreshOauthError())
 
     return () => {
       mounted = false
       cleanup()
+      cleanupResync()
     }
   }, [])
 

@@ -111,6 +111,20 @@ describe('gateway, HTTP', () => {
     expect(target.seen).toHaveLength(0);
   });
 
+  it('says an instance that would not wake is waking, relaying nothing, so the app asks again', async () => {
+    const { store, target } = await setup();
+    const gateway = createGateway({
+      store,
+      instances: { wake: async () => { throw new Error('deadline_exceeded'); }, target: () => { throw new Error('unreached'); } },
+      now: () => T0,
+      fetch: globalThis.fetch,
+    });
+    const res = await gateway.http(new Request('https://app.baarali.test/instance/rpc/sessions:get', { method: 'POST', headers: { authorization: 'Bearer bdk_mine' }, body: '{}' }));
+    expect(res.status).toBe(503);
+    expect((await res.json()).error.code).toBe('instance_waking');
+    expect(target.seen).toHaveLength(0);
+  });
+
   it('says so when the account has no instance yet', async () => {
     const { call, store } = await setup();
     await store.saveInstance({ ...RECORD, machineId: null });

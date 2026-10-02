@@ -1,3 +1,4 @@
+import { fetchWhileStarting } from '@x/client';
 import { isRpcChannel } from '@x/server';
 import { whenServerReady } from './server-host.js';
 
@@ -24,14 +25,18 @@ export function shouldForwardChannel(channel: string): boolean {
 
 export async function forwardRpc(channel: string, args: unknown): Promise<unknown> {
   const server = await whenServerReady();
-  const res = await fetch(`${server.baseUrl}/rpc/${channel}`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      authorization: `Bearer ${server.key}`,
-    },
-    body: JSON.stringify(args ?? null),
-  });
+  // A cloud instance still waking answers 503 without running the call:
+  // wait for it rather than fail (Baarali, @x/client starting.ts).
+  const res = await fetchWhileStarting(() =>
+    fetch(`${server.baseUrl}/rpc/${channel}`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${server.key}`,
+      },
+      body: JSON.stringify(args ?? null),
+    }),
+  );
   const body = (await res.json().catch(() => null)) as
     | { error?: { code?: string; message?: string } }
     | Record<string, unknown>

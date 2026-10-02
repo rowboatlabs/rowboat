@@ -87,6 +87,12 @@ export function AccountSettings({ dialogOpen }: AccountSettingsProps) {
     }
   }, [dialogOpen, checkConnection])
 
+  // Back from a drop: a check that failed meanwhile read as signed out.
+  useEffect(() => {
+    if (!dialogOpen) return
+    return window.ipc.on('server:resync', () => void checkConnection())
+  }, [dialogOpen, checkConnection])
+
   useEffect(() => {
     const cleanup = window.ipc.on('oauth:didConnect', (event) => {
       if (event.provider === 'rowboat') {
