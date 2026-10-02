@@ -8,8 +8,12 @@ import { API_URL } from "./env.js";
  *
  * Cached as a Promise so concurrent first-callers all await the same fetch
  * (no thundering herd). On failure the cache is cleared so the next call
- * can retry.
+ * can retry. A success is kept for CACHE_MS only: a long-lived process (a
+ * cloud instance that sleeps and wakes with its memory intact) would
+ * otherwise never see the api's config change, e.g. Spaces turned on.
  */
+
+const CACHE_MS = 10 * 60 * 1000;
 
 interface RemoteConfig {
     appUrl: string;
@@ -20,6 +24,7 @@ interface RemoteConfig {
 }
 
 let _cached: Promise<RemoteConfig> | null = null;
+let _fetchedAt = 0;
 
 async function fetchRemoteConfig(): Promise<RemoteConfig> {
     const res = await fetch(`${API_URL}/v1/config`);
@@ -39,7 +44,8 @@ async function fetchRemoteConfig(): Promise<RemoteConfig> {
 }
 
 export async function getRemoteConfig(): Promise<RemoteConfig> {
-    if (!_cached) {
+    if (!_cached || Date.now() - _fetchedAt > CACHE_MS) {
+        _fetchedAt = Date.now();
         _cached = fetchRemoteConfig().catch((err) => {
             _cached = null; // allow retry
             throw err;
