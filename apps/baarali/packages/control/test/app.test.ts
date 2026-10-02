@@ -3,7 +3,7 @@ import { BillingInfoSchema, BillingUsageBucketSchema, CREDITS_PER_DOLLAR } from 
 import { RowboatApiConfig } from '@x/shared/dist/rowboat-account.js';
 import { createApp } from '../src/app.js';
 import { DISCOVERY_MODELS } from '../src/catalog.js';
-import { FLOOR_CREDITS, SESSION_MS } from '../src/quota.js';
+import { FLOOR_CREDITS, SESSION_MS, WEEK_MS } from '../src/quota.js';
 import { MemoryStore, hashToken, type Account, type Plan } from '../src/store.js';
 
 const T0 = Date.UTC(2026, 8, 30, 8, 0, 0);
@@ -84,6 +84,16 @@ describe('GET /v1/me (contract)', () => {
     expect(monthly.usedCredits).toBe(0.5 * CREDITS_PER_DOLLAR);
     expect(daily.sanctionedCredits).toBe(CREDITS_PER_DOLLAR);
     expect(body.billing.usage.daily.usageDay).toBe(new Date(T0 + SESSION_MS).toISOString());
+    // When each window starts over, for the app to say it.
+    expect(daily.resetsAt).toBe(new Date(T0 + SESSION_MS).toISOString());
+    expect(monthly.resetsAt).toBe(new Date(T0 + WEEK_MS).toISOString());
+  });
+
+  it('gives no end to a session not open yet', async () => {
+    const { call } = setup(() => json({}));
+    const body = await (await call('/v1/me')).json();
+    expect(body.billing.usage.daily.resetsAt).toBeUndefined();
+    expect(body.billing.usage.monthly.resetsAt).toBeDefined();
   });
 });
 

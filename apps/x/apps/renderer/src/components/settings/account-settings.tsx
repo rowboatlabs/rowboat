@@ -20,6 +20,7 @@ import { useRowboatConfig } from "@/hooks/use-rowboat-config"
 import { CreditRewards } from "@/components/settings/credit-rewards"
 import { toast } from "sonner"
 import { getBillingPlanData, type BillingUsageBucket } from "@x/shared/dist/billing.js"
+import { sessionResetText, weekResetText } from '@/lib/usage-reset'
 
 interface AccountSettingsProps {
   dialogOpen: boolean
@@ -232,11 +233,12 @@ export function AccountSettings({ dialogOpen }: AccountSettingsProps) {
               </Button>
             </div>
             <div className="space-y-3 border-t pt-3">
-              <CreditUsageBar label="Plan usage" bucket={billing.monthly} />
+              {/* Baarali's windows: a week and a 5-hour session (lib/usage-reset.ts). */}
+              <CreditUsageBar label="This week" bucket={billing.monthly} helper={weekResetText(billing.monthly.resetsAt)} />
               <CreditUsageBar
-                label="Daily use"
+                label="5-hour session"
                 bucket={billing.daily}
-                helper="Daily usage resets at 00:00 UTC"
+                helper={sessionResetText(billing.daily.resetsAt)}
               />
             </div>
           </div>

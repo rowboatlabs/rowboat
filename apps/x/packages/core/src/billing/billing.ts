@@ -26,12 +26,14 @@ export async function getBillingInfo(): Promise<BillingInfo> {
           sanctionedCredits: number;
           usedCredits: number;
           availableCredits: number;
+          resetsAt?: string;
         };
         daily: {
           sanctionedCredits: number;
           usedCredits: number;
           availableCredits: number;
           usageDay: string;
+          resetsAt?: string;
         };
         // credit-store bucket; absent on API deployments that predate grants
         store?: {

@@ -10,7 +10,7 @@ export const BILLING_ERROR_PATTERNS = [
     kind: 'out_of_credits',
     pattern: /not enough credits/i,
     title: "You've run out of credits",
-    subtitle: 'Upgrade your plan for more usage. Daily usage resets at 00:00 UTC.',
+    subtitle: 'Upgrade your plan for more usage, or wait: usage renews every 5 hours and every week.',
     cta: 'Upgrade plan',
   },
   {

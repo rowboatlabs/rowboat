@@ -30,6 +30,9 @@ export const BillingUsageBucketSchema = z.object({
   sanctionedCredits: z.number(),
   usedCredits: z.number(),
   availableCredits: z.number(),
+  // When this window starts over (ISO). Baarali (02/10/2026): absent when
+  // the window is not running yet — a session opens with its first message.
+  resetsAt: z.string().optional(),
 });
 export type BillingUsageBucket = z.infer<typeof BillingUsageBucketSchema>;
 

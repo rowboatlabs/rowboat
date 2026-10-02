@@ -13,7 +13,7 @@ import { LEGAL_PATHS, legalPage, type LegalDoc } from './legal-page.js';
 import { GATEWAY_PATH, type Gateway } from './gateway.js';
 import { InstanceUnavailable, type Instances } from './instances.js';
 import { createGeneration, getGeneration, listMediaModels, mediaBalance } from './media-route.js';
-import { budgetsForWeek, gauges, initialState } from './quota.js';
+import { advance, budgetsForWeek, gauges, initialState } from './quota.js';
 import { hashToken, type Account } from './store.js';
 
 export type ControlDeps = ProxyDeps & {
@@ -126,7 +126,10 @@ export function createApp(deps: ControlDeps) {
     const account = c.get('account');
     const plan = await deps.store.plan(account.planId);
     const state = (await deps.store.quotaState(account.id)) ?? initialState(account.createdAt);
-    const g = gauges(state, budgetsForWeek(plan?.weekCredits ?? 0), deps.now());
+    const now = deps.now();
+    const g = gauges(state, budgetsForWeek(plan?.weekCredits ?? 0), now);
+    // A session opens with its first message: before that, it ends nowhere.
+    const sessionOpen = advance(state, now).sessionStart !== null;
     const bucket = ({ sanctionedCredits, usedCredits, availableCredits }: typeof g.week) => ({
       sanctionedCredits,
       usedCredits,
@@ -139,8 +142,12 @@ export function createApp(deps: ControlDeps) {
         status: plan ? 'active' : null,
         trialExpiresAt: null,
         usage: {
-          monthly: bucket(g.week),
-          daily: { ...bucket(g.session), usageDay: new Date(g.session.resetsAt).toISOString() },
+          monthly: { ...bucket(g.week), resetsAt: new Date(g.week.resetsAt).toISOString() },
+          daily: {
+            ...bucket(g.session),
+            usageDay: new Date(g.session.resetsAt).toISOString(),
+            ...(sessionOpen ? { resetsAt: new Date(g.session.resetsAt).toISOString() } : {}),
+          },
           store: { availableCredits: 0 },
         },
       },
