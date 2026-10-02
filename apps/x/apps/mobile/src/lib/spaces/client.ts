@@ -1,3 +1,4 @@
+import type { ActivityKind, ActivityPage } from '@rowboat/spaces-protocol';
 import * as Crypto from 'expo-crypto';
 import {
   routes,
@@ -23,6 +24,7 @@ import {
   type Space,
   type Topic,
   type TopicListing,
+  type UnreadSnapshot,
 } from '@rowboat/spaces-protocol';
 import type { z } from 'zod';
 
@@ -56,6 +58,14 @@ export class SpacesRequestError extends Error {
  * was rejected, get a genuinely new one (orgs.ts refreshes + persists).
  */
 export type SpacesTokenProvider = (opts?: { forceRefresh?: boolean }) => Promise<string>;
+
+export interface ActivityQueryInput {
+  kinds?: ActivityKind[];
+  spaceId?: string;
+  unread?: boolean;
+  cursor?: string;
+  limit?: number;
+}
 
 export interface SpacesClientOptions {
   /** e.g. http://localhost:4272 — scheme + host[:port], no trailing slash. */
@@ -151,6 +161,54 @@ export class SpacesClient {
     return this.request('GET', routes.me.path, routes.me.response);
   }
 
+  // --- profile images (Harbor CONTRACT.md, 2026-10-02) -----------------------
+  // Paths are literal: this app's protocol copy predates the routes. An org
+  // that hasn't deployed them answers 404, which callers treat as "none".
+
+  private async imageCall(method: 'GET' | 'PUT' | 'DELETE', path: string, image?: { bytes: Uint8Array; mime: string }): Promise<unknown> {
+    const send = async (token: string) =>
+      this.fetchImpl(`${this.baseUrl}${path}`, {
+        method,
+        headers: { authorization: `Bearer ${token}`, ...(image ? { 'content-type': image.mime } : {}) },
+        ...(image ? { body: image.bytes as unknown as BodyInit } : {}),
+      });
+    let res = await send(await this.currentToken());
+    if (res.status === 401 && typeof this.token !== 'string') res = await send(await this.currentToken({ forceRefresh: true }));
+    const json = (await res.json().catch(() => undefined)) as unknown;
+    if (!res.ok) {
+      const parsed = (json ?? {}) as Partial<SpacesApiError>;
+      throw new SpacesRequestError(res.status, {
+        code: parsed.code ?? 'internal',
+        message: parsed.message ?? (res.status === 404 ? 'This org does not support profile images yet.' : `request failed with ${res.status}`),
+        retryable: parsed.retryable ?? false,
+      });
+    }
+    return json;
+  }
+
+  /** Your avatar on this org. */
+  async setAvatar(image: { bytes: Uint8Array; mime: string }): Promise<Member> {
+    return ((await this.imageCall('PUT', '/v1/me/avatar', image)) as { member: Member }).member;
+  }
+
+  async clearAvatar(): Promise<Member> {
+    return ((await this.imageCall('DELETE', '/v1/me/avatar')) as { member: Member }).member;
+  }
+
+  /** The org's logo URL, or undefined when none is set (or the org predates the route). */
+  async getOrgLogo(): Promise<string | undefined> {
+    return ((await this.imageCall('GET', '/v1/org/logo')) as { logoUrl?: string }).logoUrl;
+  }
+
+  /** Admins only (the org refuses anyone else). */
+  async setOrgLogo(image: { bytes: Uint8Array; mime: string }): Promise<string> {
+    return ((await this.imageCall('PUT', '/v1/org/logo', image)) as { logoUrl: string }).logoUrl;
+  }
+
+  async clearOrgLogo(): Promise<void> {
+    await this.imageCall('DELETE', '/v1/org/logo');
+  }
+
   // --- spaces & membership --------------------------------------------------
 
   /** Shared spaces by default; `includeDirect` adds the member's DMs (api.ts listSpaces). */
@@ -177,8 +235,26 @@ export class SpacesClient {
     return (await this.request('POST', routes.createSpace.path, routes.createSpace.response, { name })).space;
   }
 
+  /** Rename a shared space (api.ts renameSpace). Identical name = idempotent no-op. */
+  async renameSpace(spaceId: string, name: string): Promise<Space> {
+    return (
+      await this.request('POST', this.space(spaceId, '/rename'), routes.renameSpace.response, {
+        name,
+        actingMode: 'direct',
+      })
+    ).space;
+  }
+
   async listMembers(spaceId: string): Promise<Member[]> {
     return (await this.request('GET', this.space(spaceId, '/members'), routes.listMembers.response)).members;
+  }
+
+  /**
+   * The org roster as this member sees it: the union of every space they are
+   * in (DMs included), deduped and sorted by displayName (api.ts listOrgMembers).
+   */
+  async listOrgMembers(): Promise<Member[]> {
+    return (await this.request('GET', routes.listOrgMembers.path, routes.listOrgMembers.response)).members;
   }
 
   async leaveSpace(spaceId: string): Promise<void> {
@@ -357,7 +433,7 @@ export class SpacesClient {
   async listStream(
     spaceId: string,
     opts?: { beforeOffset?: number; limit?: number },
-  ): Promise<{ messages: Message[]; topics: Topic[]; hasMore: boolean }> {
+  ): Promise<{ messages: Message[]; topics: Topic[]; hasMore: boolean; readOffset: number }> {
     return this.request('GET', this.space(spaceId, `/stream${this.windowQuery(opts)}`), routes.listStream.response);
   }
 
@@ -366,12 +442,66 @@ export class SpacesClient {
     spaceId: string,
     rootMessageId: string,
     opts?: { beforeOffset?: number; limit?: number },
-  ): Promise<{ root: Message; topic: Topic | null; messages: Message[]; hasMore: boolean }> {
+  ): Promise<{
+    root: Message;
+    topic: Topic | null;
+    messages: Message[];
+    hasMore: boolean;
+    readOffset: number | null;
+    following: boolean;
+  }> {
     return this.request(
       'GET',
       this.space(spaceId, `/threads/${encodeURIComponent(rootMessageId)}${this.windowQuery(opts)}`),
       routes.listThread.response,
     );
+  }
+
+  // --- read state -----------------------------------------------------------
+  // The org owns the cursors (offsets, per member); these are pass-throughs.
+
+  /** Advance the stream mark (no threadRootId) or a followed thread's. Monotone; null = not following. */
+  async markRead(spaceId: string, input: { threadRootId?: string; offset: number }): Promise<{ readOffset: number }> {
+    return this.request('POST', this.space(spaceId, '/read'), routes.markRead.response, input);
+  }
+
+  async followThread(
+    spaceId: string,
+    rootMessageId: string,
+    following: boolean,
+  ): Promise<{ following: boolean; readOffset: number }> {
+    return this.request(
+      'POST',
+      this.space(spaceId, `/threads/${encodeURIComponent(rootMessageId)}/follow`),
+      routes.followThread.response,
+      { following },
+    );
+  }
+
+  /** The unread snapshot: every space with its cursor, unread roots, and unread followed threads. */
+  async unread(): Promise<UnreadSnapshot> {
+    return this.request('GET', routes.unread.path, routes.unread.response);
+  }
+
+  /** Activity: everything that involves the member, newest first, cursor paged (layer 3, 2026-09-10). */
+  async activity(query: ActivityQueryInput = {}): Promise<ActivityPage> {
+    const params = new URLSearchParams();
+    if (query.kinds && query.kinds.length > 0) params.set('kinds', query.kinds.join(','));
+    if (query.spaceId !== undefined) params.set('spaceId', query.spaceId);
+    if (query.unread !== undefined) params.set('unread', String(query.unread));
+    if (query.cursor !== undefined) params.set('cursor', query.cursor);
+    if (query.limit !== undefined) params.set('limit', String(query.limit));
+    const qs = params.toString();
+    return this.request('GET', `${routes.activity.path}${qs ? `?${qs}` : ''}`, routes.activity.response);
+  }
+
+  /** Reactions through `at` read as seen in Activity. Monotone. */
+  async markActivitySeen(at: string): Promise<{ seenAt: string }> {
+    return this.request('POST', routes.markActivitySeen.path, routes.markActivitySeen.response, { at });
+  }
+
+  async readAll(input: { spaceId?: string } = {}): Promise<{ spaces: Array<{ spaceId: string; readOffset: number }>; threads: number; seenAt: string }> {
+    return this.request('POST', routes.readAll.path, routes.readAll.response, input);
   }
 
   /** A root (no threadRoot) or a reply (threadRoot) — never creates a topic. */

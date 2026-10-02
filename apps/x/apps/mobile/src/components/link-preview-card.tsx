@@ -2,7 +2,7 @@ import { Image } from 'expo-image';
 import { memo, useEffect, useState } from 'react';
 import { Linking, Pressable, Text, View, useWindowDimensions } from 'react-native';
 
-import { fetchLinkPreview, previewUrls, type LinkPreview } from '@/lib/spaces/link-preview';
+import { fetchLinkPreview, peekLinkPreview, previewUrls, type LinkPreview } from '@/lib/spaces/link-preview';
 import { useColors } from '@/theme/colors';
 
 // Slack-style unfurls under a message: gray accent bar, favicon + site name,
@@ -24,11 +24,11 @@ export const MessageLinkPreviews = memo(function MessageLinkPreviews({ body }: {
 function LinkPreviewCard({ url }: { url: string }) {
   const colors = useColors();
   const { width } = useWindowDimensions();
-  const [preview, setPreview] = useState<LinkPreview | null>(null);
+  const [preview, setPreview] = useState<LinkPreview | null>(() => peekLinkPreview(url) ?? null);
 
   useEffect(() => {
     let cancelled = false;
-    fetchLinkPreview(url).then((p) => !cancelled && setPreview(p));
+    fetchLinkPreview(url).then((p) => !cancelled && p && setPreview(p));
     return () => {
       cancelled = true;
     };

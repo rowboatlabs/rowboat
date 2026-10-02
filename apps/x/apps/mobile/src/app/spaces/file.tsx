@@ -68,7 +68,7 @@ export default function SpaceFileScreen() {
   const mono = Platform.select({ ios: 'Menlo', default: 'monospace' });
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: 16, paddingBottom: 48 }}>
+    <ScrollView contentInsetAdjustmentBehavior="automatic" style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: 16, paddingBottom: 48 }}>
       <Stack.Screen options={{ title: title ?? path }} />
       {error ? <Text style={{ fontSize: 13, color: colors.destructive }}>{error}</Text> : null}
       {content === null && imageUri === null && !error ? <ActivityIndicator style={{ marginTop: 32 }} /> : null}

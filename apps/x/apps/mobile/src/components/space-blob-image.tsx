@@ -1,6 +1,7 @@
 import { Image } from 'expo-image';
 import { useEffect, useState } from 'react';
-import { View, useWindowDimensions } from 'react-native';
+import { Modal, Pressable, ScrollView, StatusBar, View, useWindowDimensions } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useSpacesAccount } from '@/lib/spaces/account';
 import { useColors } from '@/theme/colors';
@@ -22,11 +23,17 @@ export function parseBlobLink(src: string): { host: string; spaceId: string; has
   return { host: m[1], spaceId: decodeURIComponent(m[2]), hash: m[3], dims };
 }
 
+// The last bearer seen, shared by every image: a remounted row (the list
+// recycles rows as you scroll) paints from expo-image's cache in the same
+// frame instead of flashing a grey box while a token is fetched again.
+let lastToken: string | null = null;
+
 export function SpaceBlobImage({ src }: { src: string }) {
   const colors = useColors();
   const account = useSpacesAccount();
   const { width: screenWidth } = useWindowDimensions();
-  const [token, setToken] = useState<string | null>(null);
+  const [token, setToken] = useState<string | null>(lastToken);
+  const [open, setOpen] = useState(false);
 
   const link = parseBlobLink(src);
 
@@ -35,7 +42,12 @@ export function SpaceBlobImage({ src }: { src: string }) {
     let cancelled = false;
     account
       .getAccessToken()
-      .then((t) => !cancelled && setToken(t))
+      .then((t) => {
+        lastToken = t;
+        // Same string → React skips the render; a rotated token just re-keys
+        // the request, and cacheKey still serves the bytes from cache.
+        if (!cancelled) setToken(t);
+      })
       .catch(() => {});
     return () => {
       cancelled = true;
@@ -45,7 +57,14 @@ export function SpaceBlobImage({ src }: { src: string }) {
 
   if (!link) {
     // Non-blob image (external URL) — plain render.
-    return <Image source={{ uri: src }} style={{ width: '100%', height: 200, borderRadius: 10, marginVertical: 6 }} contentFit="contain" />;
+    return (
+      <>
+        <Pressable onPress={() => setOpen(true)}>
+          <Image source={{ uri: src }} style={{ width: '100%', height: 200, borderRadius: 10, marginVertical: 6 }} contentFit="contain" />
+        </Pressable>
+        <ImageViewer visible={open} source={{ uri: src }} onClose={() => setOpen(false)} />
+      </>
+    );
   }
 
   // Message column ≈ screen minus avatar gutter + paddings; w/h hints give the
@@ -59,15 +78,62 @@ export function SpaceBlobImage({ src }: { src: string }) {
     return <View style={{ width, height, borderRadius: 10, marginVertical: 6, backgroundColor: colors.secondaryBackground }} />;
   }
 
+  const source = {
+    uri: `https://${link.host}/v1/spaces/${encodeURIComponent(link.spaceId)}/blobs/${link.hash}`,
+    headers: { authorization: `Bearer ${token}` },
+    // Content-addressed: the hash IS the bytes, whatever token fetched them.
+    cacheKey: link.hash,
+  };
   return (
-    <Image
-      source={{
-        uri: `https://${link.host}/v1/spaces/${encodeURIComponent(link.spaceId)}/blobs/${link.hash}`,
-        headers: { authorization: `Bearer ${token}` },
-      }}
-      style={{ width, height, borderRadius: 10, marginVertical: 6, backgroundColor: colors.secondaryBackground }}
-      contentFit="cover"
-      transition={120}
-    />
+    <>
+      <Pressable onPress={() => setOpen(true)}>
+        <Image
+          source={source}
+          style={{ width, height, borderRadius: 10, marginVertical: 6, backgroundColor: colors.secondaryBackground }}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          recyclingKey={link.hash}
+        />
+      </Pressable>
+      <ImageViewer visible={open} source={source} onClose={() => setOpen(false)} />
+    </>
+  );
+}
+
+// Full-screen viewer: black ground, pinch-to-zoom (the native scroll view's
+// zoom), tap or × to close — the Photos/iMessage lightbox.
+function ImageViewer({ visible, source, onClose }: { visible: boolean; source: { uri: string; headers?: Record<string, string> }; onClose: () => void }) {
+  const { width, height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <StatusBar hidden />
+      <View style={{ flex: 1, backgroundColor: '#000' }}>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ width, height }}
+          minimumZoomScale={1}
+          maximumZoomScale={4}
+          bouncesZoom
+          centerContent
+          showsVerticalScrollIndicator={false}
+          showsHorizontalScrollIndicator={false}
+        >
+          <Pressable onPress={onClose} style={{ width, height }}>
+            <Image source={source} style={{ width, height }} contentFit="contain" />
+          </Pressable>
+        </ScrollView>
+        <Pressable
+          onPress={onClose}
+          hitSlop={10}
+          style={{
+            position: 'absolute', top: insets.top + 8, right: 16, width: 34, height: 34, borderRadius: 17,
+            alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.18)',
+          }}
+        >
+          <Image source="sf:xmark" style={{ width: 14, height: 14 }} tintColor="#fff" />
+        </Pressable>
+      </View>
+    </Modal>
   );
 }
