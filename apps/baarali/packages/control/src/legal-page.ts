@@ -170,7 +170,7 @@ const DOCS: Record<Lang, Record<LegalDoc, Doc>> = {
         {
           id: 'securite',
           title: 'Sécurité',
-          blocks: [{ list: ['Connexion sans mot de passe, par un code à usage unique.', 'Clés d’appareil conservées uniquement sous forme d’empreinte, révocables une par une.', 'Espaces de travail séparés, sans adresse publique.', 'Échanges chiffrés (HTTPS) de bout en bout entre l’application et nos serveurs.'] }],
+          blocks: [{ list: ['Connexion par un code à usage unique, ou par un mot de passe choisi juste après un code et gardé seulement sous forme d’empreinte.', 'Clés d’appareil conservées uniquement sous forme d’empreinte, révocables une par une.', 'Espaces de travail séparés, sans adresse publique.', 'Échanges chiffrés (HTTPS) de bout en bout entre l’application et nos serveurs.'] }],
         },
         {
           id: 'droits',
@@ -204,7 +204,7 @@ const DOCS: Record<Lang, Record<LegalDoc, Doc>> = {
           blocks: [{ list: ['« Assistant » : le service Baarali, qui cherche, rédige, organise et crée pour vous.', '« Espace de travail » : l’environnement séparé où vivent votre travail et la mémoire de l’assistant.', '« Action engageante » : une action faite en votre nom vers l’extérieur, comme envoyer, publier ou payer.', '« Crédits médias » : les crédits qui paient les vidéos, voix et musiques.'] }],
         },
         { id: 'acces', title: 'Accès anticipé', blocks: ['Baarali est en accès anticipé. Le service évolue, peut changer ou s’interrompre ponctuellement. Nous faisons de notre mieux pour vous prévenir avant tout changement important.'] },
-        { id: 'compte', title: 'Votre compte', blocks: ['Baarali est ouvert à partir de 13 ans, avec l’accord d’un parent avant 18 ans. Vous vous connectez avec votre email ou votre téléphone, par un code à usage unique. Vous êtes responsable de ce qui se fait avec votre compte et de vos appareils connectés ; prévenez-nous si vous pensez qu’il est utilisé par quelqu’un d’autre.'] },
+        { id: 'compte', title: 'Votre compte', blocks: ['Baarali est ouvert à partir de 13 ans, avec l’accord d’un parent avant 18 ans. Vous vous connectez avec votre email ou votre téléphone, par un code à usage unique, ou avec le mot de passe que vous avez choisi. Vous êtes responsable de ce qui se fait avec votre compte et de vos appareils connectés ; prévenez-nous si vous pensez qu’il est utilisé par quelqu’un d’autre.'] },
         {
           id: 'accord',
           title: 'L’assistant et votre accord',
@@ -323,7 +323,7 @@ const DOCS: Record<Lang, Record<LegalDoc, Doc>> = {
             'No advertising cookies and no third-party analytics.',
           ],
         },
-        { id: 'securite', title: 'Security', blocks: [{ list: ['Sign-in without a password, with a one-time code.', 'Device keys kept only as a hash, revocable one by one.', 'Separate workspaces, with no public address.', 'Encrypted traffic (HTTPS) between the app and our servers.'] }] },
+        { id: 'securite', title: 'Security', blocks: [{ list: ['Sign-in with a one-time code, or a password chosen right after a code and kept only as a hash.', 'Device keys kept only as a hash, revocable one by one.', 'Separate workspaces, with no public address.', 'Encrypted traffic (HTTPS) between the app and our servers.'] }] },
         {
           id: 'droits',
           title: 'Your rights',
@@ -356,7 +356,7 @@ const DOCS: Record<Lang, Record<LegalDoc, Doc>> = {
           blocks: [{ list: ['“Assistant”: the Baarali service, which researches, writes, organizes and creates for you.', '“Workspace”: the separate environment where your work and the assistant’s memory live.', '“Binding action”: an action taken in your name towards the outside, such as sending, posting or paying.', '“Media credits”: the credits that pay for videos, voices and music.'] }],
         },
         { id: 'acces', title: 'Early access', blocks: ['Baarali is in early access. The service evolves, may change or be briefly interrupted. We do our best to warn you before any important change.'] },
-        { id: 'compte', title: 'Your account', blocks: ['Baarali is open from age 13, with a parent’s agreement under 18. You sign in with your email or phone, with a one-time code. You are responsible for what is done with your account and your connected devices; tell us if you think someone else is using it.'] },
+        { id: 'compte', title: 'Your account', blocks: ['Baarali is open from age 13, with a parent’s agreement under 18. You sign in with your email or phone, with a one-time code, or with the password you chose. You are responsible for what is done with your account and your connected devices; tell us if you think someone else is using it.'] },
         { id: 'accord', title: 'The assistant and your approval', blocks: ['Before any binding action, the assistant shows you what it is about to do and waits for your approval. You can decline or correct it.', { note: 'What you approve is done in your name and under your responsibility.' }] },
         { id: 'contenus', title: 'What it produces', blocks: ['Content produced for you belongs to you, subject to the rights of others. An AI can be wrong: check a result before you use it, especially for figures, law, health or money.'] },
         {

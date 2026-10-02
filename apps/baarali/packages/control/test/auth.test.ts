@@ -70,7 +70,9 @@ async function setup(opts: { social?: Partial<Record<SocialProvider, { clientId:
     browser(`/auth/v1${path}`, { method: 'POST', headers: { 'content-type': 'application/json', 'fly-client-ip': ip }, body: JSON.stringify(body) });
 
   const fetcher: client.CustomFetch = async (url, options) => app.request(url, options as RequestInit);
-  return { app, store, sender, browser, post, fetcher, db };
+  // A fresh browser: same server, no cookie.
+  const forgetCookies = () => jar.clear();
+  return { app, store, sender, browser, post, fetcher, db, forgetCookies };
 }
 
 /** Core's registration, then an authorization URL with PKCE. */
@@ -167,6 +169,69 @@ describe('signing the app in, as core does', () => {
   });
 });
 
+describe('a password, the person\'s choice', () => {
+  const EMAIL = 'awa@example.test';
+  // Better Auth's rate limit outlives each setup: every send from its own address.
+  let caller = 0;
+  async function signInByCode(post: (path: string, body: unknown, ip?: string) => Promise<Response>, sender: LogSender, email = EMAIL, oauth_query = '') {
+    const ip = `198.51.100.${++caller}`;
+    await post('/email-otp/send-verification-otp', { email, type: 'sign-in', oauth_query }, ip);
+    return post('/sign-in/email-otp', { email, otp: sender.sent.at(-1)!.code, oauth_query }, ip);
+  }
+
+  it('is chosen after a code, then signs the app in on its own', async () => {
+    const { post, sender, fetcher, browser, forgetCookies } = await setup();
+    expect((await signInByCode(post, sender)).status).toBe(200);
+    expect((await post('/password/choose', { password: 'karite-2026' })).status).toBe(200);
+
+    forgetCookies();
+    const { url } = await startAppSignIn(fetcher);
+    const oauth_query = queryOf(location(await browser(url.toString())));
+    const sent = sender.sent.length;
+    expect((await post('/sign-in/email', { email: EMAIL, password: 'nope-nope-nope', oauth_query })).status).toBe(401);
+    const signedIn = await post('/sign-in/email', { email: EMAIL, password: 'karite-2026', oauth_query });
+    expect(signedIn.status).toBe(200);
+    // The app's authorization resumes, as after a code; and no code was sent.
+    expect(new URL((await signedIn.json()).url, PUBLIC).pathname).toBe('/auth/v1/consent');
+    expect(sender.sent.length).toBe(sent);
+  });
+
+  it('is changed the same way when forgotten', async () => {
+    const { post, sender, forgetCookies } = await setup();
+    await signInByCode(post, sender);
+    await post('/password/choose', { password: 'premier-mot' });
+    forgetCookies();
+    await signInByCode(post, sender);
+    expect((await post('/password/choose', { password: 'second-mot' })).status).toBe(200);
+    forgetCookies();
+    expect((await post('/sign-in/email', { email: EMAIL, password: 'premier-mot' })).status).toBe(401);
+    expect((await post('/sign-in/email', { email: EMAIL, password: 'second-mot' })).status).toBe(200);
+  });
+
+  it('never makes an account from a password alone', async () => {
+    const { post, db } = await setup();
+    // Else anyone could put their password on an address before its owner signs in.
+    expect((await post('/sign-up/email', { email: 'victime@example.test', password: 'a-moi-maintenant', name: 'x' })).status).toBe(400);
+    const { rows } = await db.query<{ n: number }>("SELECT count(*)::int AS n FROM baarali.users WHERE email = 'victime@example.test'");
+    expect(rows[0].n).toBe(0);
+  });
+
+  it('is chosen only with a session just opened, and an email proved', async () => {
+    const { post, sender, db, forgetCookies } = await setup();
+    expect((await post('/password/choose', { password: 'sans-session' })).status).toBe(401);
+    await signInByCode(post, sender);
+    expect((await post('/password/choose', { password: 'court' })).status).toBe(400);
+    await db.query(`UPDATE baarali.sessions SET "createdAt" = now() - interval '20 minutes'`);
+    expect((await post('/password/choose', { password: 'trop-tard-2026' })).status).toBe(403);
+
+    // A phone account has no address of its own to sign in with.
+    forgetCookies();
+    await post('/phone-number/send-otp', { phoneNumber: '+22507000003' }, '198.51.100.250');
+    expect((await post('/phone-number/verify', { phoneNumber: '+22507000003', code: sender.sent.at(-1)!.code }, '198.51.100.250')).status).toBe(200);
+    expect((await post('/password/choose', { password: 'telephone-2026' })).status).toBe(403);
+  });
+});
+
 describe('codes by SMS', () => {
   it('signs in by phone with a code kept hashed', async () => {
     const { post, sender, db, store } = await setup();
@@ -223,6 +288,9 @@ describe('the sign-in page', () => {
     // Sign-up is the same door: the page says so (02/10/2026).
     expect(page).toContain('Se connecter ou créer un compte');
     expect(page).toContain('Il se crée à votre première connexion');
+    // A code or a password (02/10/2026).
+    expect(page).toContain('Se connecter avec un mot de passe');
+    expect(page).toContain('Pas encore de mot de passe, ou oublié ?');
   });
 });
 

@@ -148,7 +148,7 @@ const STRINGS = {
     howTitle: ['Prêt en ', 'deux minutes', '.'],
     how: [
       ['Installez l’app', 'Sur Mac ou sur Windows. Sur téléphone, bientôt.'],
-      ['Connectez-vous', 'Avec votre email, sans mot de passe : vous recevez un code. Votre espace se crée tout seul.'],
+      ['Connectez-vous', 'Avec votre email : un code reçu, ou votre mot de passe si vous en avez choisi un. Votre espace se crée tout seul.'],
       ['Demandez', 'Avec vos mots, en français ou en anglais. Il s’occupe du reste et vous montre où il en est.'],
     ],
     hereKicker: 'Pensé pour ici',
@@ -192,7 +192,7 @@ const STRINGS = {
     faqKicker: 'Questions',
     faqTitle: ['Ce qu’on ', 'nous demande', '.'],
     faq: [
-      ['Comment je me connecte ?', 'Dans l’app, sans mot de passe : vous recevez un code par email. Google, Apple et GitHub arrivent bientôt, puis le SMS.'],
+      ['Comment je me connecte ?', 'Dans l’app, avec un code reçu par email, ou avec le mot de passe que vous choisissez après ce code. Google, Apple et GitHub arrivent bientôt, puis le SMS.'],
       ['Faut-il une carte bancaire pour commencer ?', 'Non. Le forfait Découverte est gratuit : il suffit de votre email.'],
       ['Que se passe-t-il quand j’atteins ma limite ?', 'Vous attendez la fin de la fenêtre de 5 heures ou de la semaine, ou vous passez au forfait du dessus. Une réponse commencée n’est jamais coupée.'],
       ['Mes crédits médias expirent-ils ?', 'Non. Ils restent sur votre compte jusqu’à ce que vous les utilisiez.'],
@@ -336,7 +336,7 @@ const STRINGS = {
     howTitle: ['Ready in ', 'two minutes', '.'],
     how: [
       ['Install the app', 'On Mac or Windows. On your phone, soon.'],
-      ['Sign in', 'With your email, no password: you get a code. Your space is set up for you.'],
+      ['Sign in', 'With your email: a code we send, or your password if you chose one. Your space is set up for you.'],
       ['Ask', 'In your own words, in French or English. It takes care of the rest and shows you where it stands.'],
     ],
     hereKicker: 'Built for here',
@@ -380,7 +380,7 @@ const STRINGS = {
     faqKicker: 'Questions',
     faqTitle: ['What people ', 'ask us', '.'],
     faq: [
-      ['How do I sign in?', 'In the app, with no password: you get a code by email. Google, Apple and GitHub are coming soon, then SMS.'],
+      ['How do I sign in?', 'In the app, with a code we email you, or with the password you choose after that code. Google, Apple and GitHub are coming soon, then SMS.'],
       ['Do I need a card to start?', 'No. The Découverte plan is free: your email is enough.'],
       ['What happens when I reach my limit?', 'Wait for the 5-hour or weekly window to end, or move up a plan. An answer already started is never cut.'],
       ['Do my media credits expire?', 'No. They stay on your account until you use them.'],

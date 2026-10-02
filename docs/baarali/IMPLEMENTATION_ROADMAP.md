@@ -128,7 +128,7 @@ L'ordre des phases 4 à 8 est souple (**Latitude**). Chacune ne dépend que des 
 **But :** plusieurs vrais utilisateurs, chacun dans son instance, sans qu'aucun ne voie l'autre.
 
 - Connexion par code SMS : plafonds, anti-fraude, période de 72 h (sécurité §4). Fournisseur SMS derrière `SmsProvider`, **choisi après le banc de mesure** (fournisseurs §5.1) ; faux fournisseur en attendant.
-- Aussi par code email, Google, Apple et GitHub, sans mot de passe ; liaison seulement par email vérifié (archi §3.5, décidé le 01/10/2026).
+- Aussi par code email, Google, Apple et GitHub ; mot de passe facultatif, choisi après un code (02/10/2026) ; liaison seulement par email vérifié (archi §3.5, décidé le 01/10/2026).
 - Organisation personnelle à l'inscription, capacités (sécurité §5), sécurité au niveau des lignes (sécurité §13).
 - `InstanceHost` → Fly.io : création, réveil, veille, sauvegarde du volume.
 - Passerelle client → instance (sécurité §2), relais d'événements, projections, `usage_records`, plafond de coût des modèles.

@@ -1,9 +1,12 @@
 import { oauthProvider } from '@better-auth/oauth-provider';
-import { betterAuth, type BetterAuthOptions } from 'better-auth';
+import { betterAuth, type BetterAuthOptions, type BetterAuthPlugin } from 'better-auth';
+import { APIError, createAuthEndpoint, sessionMiddleware } from 'better-auth/api';
 import { getMigrations } from 'better-auth/db/migration';
 import { emailOTP, jwt, phoneNumber } from 'better-auth/plugins';
+import { z } from 'zod';
 import { checkPhoneCode, newCode, smsAllowed, storePhoneCode, takeSend, type CodeSender } from './codes.js';
 import type { Queryable } from './db.js';
+import { PASSWORD_MAX, PASSWORD_MIN } from './password-limits.js';
 import { html } from './html.js';
 import { consentPage, signInPage, type SignInMethods } from './sign-in-page.js';
 
@@ -60,6 +63,44 @@ const PHONE_EMAIL_DOMAIN = 'phone.baarali.invalid';
 const phoneEmail = (phone: string) => `${phone.replace(/\D/g, '')}@${PHONE_EMAIL_DOMAIN}`;
 export const realEmail = (email: string) => (email.endsWith(`@${PHONE_EMAIL_DOMAIN}`) ? null : email);
 
+/** A password is chosen right after a sign-in: its session must be this young. */
+export const PASSWORD_CHOICE_MS = 10 * 60_000;
+
+/**
+ * Choosing a password (02/10/2026, the founder's call: a password or a
+ * code, the person's choice). Only with a session just opened — by a code
+ * sent to the address, or a provider that vouched for it — so whoever sets
+ * it has shown the address is theirs. Creating an account with a password
+ * alone (/sign-up/email) stays closed: it would let anyone put their
+ * password on someone else's address before they ever sign in.
+ */
+function passwordChoice(): BetterAuthPlugin {
+  return {
+    id: 'baarali-password',
+    endpoints: {
+      choosePassword: createAuthEndpoint(
+        '/password/choose',
+        { method: 'POST', body: z.object({ password: z.string().min(PASSWORD_MIN).max(PASSWORD_MAX) }), use: [sessionMiddleware] },
+        async (ctx) => {
+          const { session, user } = ctx.context.session;
+          if (Date.now() - new Date(session.createdAt).getTime() > PASSWORD_CHOICE_MS) {
+            throw new APIError('FORBIDDEN', { message: 'Sign in again to choose a password.' });
+          }
+          // An address the person proved: never a phone account's placeholder.
+          if (!user.emailVerified || !realEmail(user.email)) throw new APIError('FORBIDDEN', { message: 'No verified email address.' });
+          const hash = await ctx.context.password.hash(ctx.body.password);
+          if (await ctx.context.internalAdapter.findCredentialAccount(user.id)) {
+            await ctx.context.internalAdapter.updatePassword(user.id, hash);
+          } else {
+            await ctx.context.internalAdapter.createAccount({ userId: user.id, providerId: 'credential', accountId: user.id, password: hash });
+          }
+          return ctx.json({ ok: true });
+        },
+      ),
+    },
+  };
+}
+
 function authOptions(deps: AuthDeps) {
   const socialProviders = Object.fromEntries(
     SOCIAL_PROVIDERS.flatMap((p) => (deps.social[p] ? [[p, { ...deps.social[p] }]] : [])),
@@ -73,8 +114,15 @@ function authOptions(deps: AuthDeps) {
     // Off by default already; written down so an upgrade cannot turn it on.
     telemetry: { enabled: false },
     trustedOrigins: [deps.publicUrl],
-    // No password, anywhere (decided 01/10/2026).
-    emailAndPassword: { enabled: false },
+    // Signing in with a password, once chosen after a code (passwordChoice);
+    // never an account made from a password alone.
+    emailAndPassword: {
+      enabled: true,
+      disableSignUp: true,
+      requireEmailVerification: true,
+      minPasswordLength: PASSWORD_MIN,
+      maxPasswordLength: PASSWORD_MAX,
+    },
     socialProviders,
     user: { modelName: 'users' },
     session: { modelName: 'sessions' },
@@ -95,6 +143,8 @@ function authOptions(deps: AuthDeps) {
         '/phone-number/send-otp': { window: 60, max: 3 },
         '/sign-in/email-otp': { window: 60, max: 10 },
         '/phone-number/verify': { window: 60, max: 10 },
+        '/sign-in/email': { window: 60, max: 10 },
+        '/password/choose': { window: 60, max: 10 },
       },
     },
     // Fly puts the caller's address here; without it every request looks
@@ -114,6 +164,7 @@ function authOptions(deps: AuthDeps) {
       // Spaces: Harbor accepts ES256 or RS256, not the EdDSA of the main key
       // (auth-oidc.ts, decided 02/10/2026).
       jwt({ jwks: { keyPairConfigs: [{ alg: 'ES256' }] } }),
+      passwordChoice(),
       emailOTP({
         otpLength: 6,
         expiresIn: 300,

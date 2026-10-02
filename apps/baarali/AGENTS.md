@@ -145,6 +145,8 @@ Une migration déployée ne se modifie jamais : on ajoute la suivante à `MIGRAT
 
 Le serveur complète deux choses dans les requêtes de l'app (`asAppRequest`, `src/auth.ts`) : `offline_access`, sans quoi le cœur n'aurait pas de jeton de rafraîchissement, et `application_type: native`, sans quoi la redirection vers `http://localhost` (bureau) ou `com.baarali.app.mobile:/oauth-callback` (téléphone, RFC 8252 §7.1) serait refusée.
 
+**Le mot de passe** est facultatif (02/10/2026) : la page de connexion propose code ou mot de passe, et un mot de passe ne se choisit qu'après un code, sur `POST /auth/v1/password/choose` (`passwordChoice`, `src/auth.ts`), avec une session de moins de 10 minutes. `/sign-up/email` reste fermé : pas de compte créé par mot de passe seul.
+
 **Les espaces.** Harbor vérifie un jeton seul, avec nos clés publiques (`apps/harbor/packages/server/src/auth-oidc.ts`) : il lui faut un JWT signé en ES256 ou RS256. Avec `BAARALI_SPACES_URL`, chaque demande d'autorisation reçoit cette ressource (RFC 8707) : le jeton devient un JWT dont l'audience la nomme, signé par une clé ES256 ajoutée pour lui (Harbor ne lit pas l'EdDSA de la clé principale), et porte l'email seulement s'il est vérifié. `test/spaces-token.test.ts` joue le téléphone, puis lit le jeton comme Harbor.
 
 ## Les tests de contrat

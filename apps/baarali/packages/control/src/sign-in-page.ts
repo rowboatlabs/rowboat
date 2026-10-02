@@ -3,6 +3,7 @@
 // nothing loaded from elsewhere: they must work on a slow phone connection.
 // Strings live in STRINGS until @baarali/i18n exists (roadmap phase 1).
 
+import { PASSWORD_MAX, PASSWORD_MIN } from './password-limits.js';
 import { FAVICON, logoTile, logoWord, LOGO_ALIVE_CSS, LOGO_ALIVE_JS, logoTileLive } from './logo.js';
 
 export interface SignInMethods {
@@ -18,7 +19,7 @@ const STRINGS = {
     title: 'Connexion à Baarali',
     // One door for both (02/10/2026): an account is created at its first sign-in.
     heading: 'Se connecter ou créer un compte',
-    lead: 'Pas encore de compte ? Il se crée à votre première connexion, gratuitement. Pas de mot de passe : on vous envoie un code.',
+    lead: 'Pas encore de compte ? Il se crée à votre première connexion, gratuitement.',
     continueWith: 'Continuer avec',
     or: 'ou',
     email: 'Adresse email',
@@ -29,6 +30,15 @@ const STRINGS = {
     codeSent: 'Si cette adresse ou ce numéro peut le recevoir, un code vient de partir. Il est valable 5 minutes.',
     signIn: 'Se connecter',
     otherMethod: 'Utiliser un autre moyen',
+    password: 'Mot de passe',
+    usePassword: 'Se connecter avec un mot de passe',
+    useCode: 'Recevoir un code à la place',
+    noPassword: 'Pas encore de mot de passe, ou oublié ?',
+    choosePassword: 'Choisir un mot de passe (facultatif)',
+    newPassword: 'Nouveau mot de passe',
+    passwordHint: 'Pour vous connecter ensuite sans code. 8 caractères au moins.',
+    shortPassword: 'Le mot de passe doit faire 8 caractères au moins.',
+    badPassword: 'Adresse ou mot de passe incorrect.',
     failed: 'Ça n’a pas marché. Vérifiez et réessayez.',
     tooMany: 'Trop d’essais. Patientez une minute.',
     none: 'Aucun moyen de connexion n’est ouvert pour le moment.',
@@ -43,7 +53,7 @@ const STRINGS = {
   en: {
     title: 'Sign in to Baarali',
     heading: 'Sign in or create an account',
-    lead: 'No account yet? It is created at your first sign-in, free. No password: we send you a code.',
+    lead: 'No account yet? It is created at your first sign-in, free.',
     continueWith: 'Continue with',
     or: 'or',
     email: 'Email address',
@@ -54,6 +64,15 @@ const STRINGS = {
     codeSent: 'If this address or number can receive it, a code is on its way. It is valid for 5 minutes.',
     signIn: 'Sign in',
     otherMethod: 'Use another method',
+    password: 'Password',
+    usePassword: 'Sign in with a password',
+    useCode: 'Get a code instead',
+    noPassword: 'No password yet, or forgot it?',
+    choosePassword: 'Choose a password (optional)',
+    newPassword: 'New password',
+    passwordHint: 'To sign in next time without a code. 8 characters at least.',
+    shortPassword: 'The password needs 8 characters at least.',
+    badPassword: 'Wrong email or password.',
     failed: 'That did not work. Check and try again.',
     tooMany: 'Too many attempts. Wait a minute.',
     none: 'No sign-in method is open right now.',
@@ -154,12 +173,15 @@ export function signInPage(opts: { methods: SignInMethods; lang: string | null; 
   const social = methods.social
     .map((p) => `<button type="button" data-provider="${escape(p)}">${escape(t.continueWith)} ${escape(PROVIDER_NAMES[p] ?? p)}</button>`)
     .join('\n');
+  // A password is an email's only (auth.ts passwordChoice): the phone form
+  // and its separator step aside while one is typed.
   const codeForms = [
     methods.email
-      ? `<form data-kind="email"><label for="email">${escape(t.email)}</label><input id="email" name="target" type="email" autocomplete="email" inputmode="email" required></form>`
+      ? `<form data-kind="email"><label for="email">${escape(t.email)}</label><input id="email" name="target" type="email" autocomplete="email" inputmode="email" required>` +
+        `<div class="stack" id="password-row" hidden><label for="password">${escape(t.password)}</label><input id="password" type="password" autocomplete="current-password" maxlength="${PASSWORD_MAX}"></div></form>`
       : '',
     methods.phone
-      ? `<form data-kind="phone"><label for="phone">${escape(t.phone)}</label><input id="phone" name="target" type="tel" autocomplete="tel" inputmode="tel" placeholder="+225 07 00 00 00 00" required><p class="hint">${escape(t.phoneHint)}</p></form>`
+      ? `<form data-kind="phone" data-code-only><label for="phone">${escape(t.phone)}</label><input id="phone" name="target" type="tel" autocomplete="tel" inputmode="tel" placeholder="+225 07 00 00 00 00" required><p class="hint">${escape(t.phoneHint)}</p></form>`
       : '',
   ].filter(Boolean);
   const any = social || codeForms.length > 0;
@@ -168,12 +190,19 @@ export function signInPage(opts: { methods: SignInMethods; lang: string | null; 
 ${any ? `<p>${escape(t.lead)}</p>` : `<p>${escape(t.none)}</p>`}
 ${social ? `<div class="stack">${social}</div>` : ''}
 ${social && codeForms.length ? `<div class="or">${escape(t.or)}</div>` : ''}
-<div class="stack" id="ask">${codeForms.join(`<div class="or">${escape(t.or)}</div>`)}
-${codeForms.length ? `<button class="primary" id="send" type="button">${escape(t.sendCode)}</button>` : ''}</div>
+<div class="stack" id="ask">${codeForms.join(`<div class="or" data-code-only>${escape(t.or)}</div>`)}
+${codeForms.length ? `<button class="primary" id="send" type="button">${escape(t.sendCode)}</button>` : ''}
+${methods.email ? `<button class="link" type="button" id="mode">${escape(t.usePassword)}</button>
+<button class="link" type="button" id="forgot" hidden>${escape(t.noPassword)}</button>` : ''}</div>
 <form id="verify" class="stack" hidden>
   <p>${escape(t.codeSent)}</p>
   <label for="code">${escape(t.code)}</label>
   <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required>
+  <div class="stack" id="choose-row" hidden>
+    <label for="new-password" id="choose-label">${escape(t.choosePassword)}</label>
+    <input id="new-password" type="password" autocomplete="new-password" maxlength="${PASSWORD_MAX}">
+    <p class="hint">${escape(t.passwordHint)}</p>
+  </div>
   <button class="primary" type="submit">${escape(t.signIn)}</button>
   <button class="link" type="button" id="back">${escape(t.otherMethod)}</button>
 </form>
@@ -183,7 +212,8 @@ ${codeForms.length ? `<button class="primary" id="send" type="button">${escape(t
   <a class="link" href="/">${escape(t.home)}</a>
 </div>`;
   const script = `
-const t = ${JSON.stringify({ failed: t.failed, tooMany: t.tooMany })};
+const t = ${JSON.stringify({ failed: t.failed, tooMany: t.tooMany, badPassword: t.badPassword, shortPassword: t.shortPassword, sendCode: t.sendCode, signIn: t.signIn, usePassword: t.usePassword, useCode: t.useCode, choosePassword: t.choosePassword, newPassword: t.newPassword })};
+const MIN = ${PASSWORD_MIN};
 // Opened from the app, a sign-in hands back the URL that resumes the app's
 // authorization. Opened alone, there is none: say it worked, instead of
 // leaving the form up for a second, refused, try (seen 01/10/2026).
@@ -194,7 +224,7 @@ function finish(data) {
   document.getElementById("done").hidden = false;
 }
 const error = document.getElementById("error");
-function fail(e) { error.textContent = e && e.status === 429 ? t.tooMany : t.failed; error.hidden = false; }
+function fail(e, message) { error.textContent = message || (e && e.status === 429 ? t.tooMany : t.failed); error.hidden = false; }
 for (const b of document.querySelectorAll("[data-provider]")) {
   b.addEventListener("click", async () => {
     b.disabled = true;
@@ -205,9 +235,37 @@ for (const b of document.querySelectorAll("[data-provider]")) {
 let target = null;
 const send = document.getElementById("send");
 const verify = document.getElementById("verify");
+const emailInput = document.getElementById("email");
+const passwordInput = document.getElementById("password");
+const chooseRow = document.getElementById("choose-row");
+const newPassword = document.getElementById("new-password");
+// "code": a code by email or SMS. "password": email and password.
+// mustChoose: the person asked to (re)set a password, the code step requires one.
+let mode = "code";
+let mustChoose = false;
+let signedIn = null;
+function setMode(next) {
+  mode = next;
+  error.hidden = true;
+  for (const el of document.querySelectorAll("[data-code-only]")) el.hidden = mode === "password";
+  document.getElementById("password-row").hidden = mode !== "password";
+  document.getElementById("forgot").hidden = mode !== "password";
+  document.getElementById("mode").textContent = mode === "password" ? t.useCode : t.usePassword;
+  send.textContent = mode === "password" ? t.signIn : t.sendCode;
+  (mode === "password" && emailInput.value.trim() ? passwordInput : emailInput).focus();
+}
+async function signInWithPassword() {
+  const email = emailInput.value.trim();
+  if (!email || !passwordInput.value) return;
+  send.disabled = true;
+  try { finish(await post("/sign-in/email", { email, password: passwordInput.value })); }
+  catch (e) { fail(e, e && e.status === 401 ? t.badPassword : ""); }
+  send.disabled = false;
+}
 async function ask() {
   error.hidden = true;
-  const filled = [...document.querySelectorAll("form[data-kind]")].find((f) => f.elements.target.value.trim());
+  if (mode === "password") return signInWithPassword();
+  const filled = [...document.querySelectorAll("form[data-kind]")].find((f) => !f.hidden && f.elements.target.value.trim());
   if (!filled) return;
   const id = filled.elements.target.value.trim();
   target = { kind: filled.dataset.kind, id: filled.dataset.kind === "phone" ? id.replace(/[\\s.-]/g, "") : id };
@@ -216,10 +274,21 @@ async function ask() {
     if (target.kind === "email") await post("/email-otp/send-verification-otp", { email: target.id, type: "sign-in" });
     else await post("/phone-number/send-otp", { phoneNumber: target.id });
     document.getElementById("ask").hidden = true;
+    // With an email, the code step may set a password too: optional, or
+    // required when that is what the person came for.
+    if (chooseRow) {
+      chooseRow.hidden = target.kind !== "email";
+      document.getElementById("choose-label").textContent = mustChoose ? t.newPassword : t.choosePassword;
+      newPassword.required = mustChoose;
+    }
     verify.hidden = false;
     document.getElementById("code").focus();
   } catch (e) { fail(e); }
   send.disabled = false;
+}
+if (document.getElementById("mode")) {
+  document.getElementById("mode").addEventListener("click", () => { mustChoose = false; setMode(mode === "password" ? "code" : "password"); });
+  document.getElementById("forgot").addEventListener("click", () => { mustChoose = true; setMode("code"); if (emailInput.value.trim()) ask(); });
 }
 if (send) send.addEventListener("click", ask);
 for (const f of document.querySelectorAll("form[data-kind]")) f.addEventListener("submit", (e) => { e.preventDefault(); ask(); });
@@ -227,14 +296,21 @@ verify.addEventListener("submit", async (e) => {
   e.preventDefault();
   error.hidden = true;
   const code = document.getElementById("code").value.trim();
+  const chosen = target.kind === "email" && newPassword ? newPassword.value : "";
+  if (chosen && chosen.length < MIN) return fail(null, t.shortPassword);
   try {
-    finish(target.kind === "email"
+    // Signed in once: a password that failed to save is retried, not the code.
+    signedIn = signedIn || (target.kind === "email"
       ? await post("/sign-in/email-otp", { email: target.id, otp: code })
       : await post("/phone-number/verify", { phoneNumber: target.id, code }));
+    if (chosen) await post("/password/choose", { password: chosen });
+    finish(signedIn);
   } catch (err) { fail(err); }
 });
 document.getElementById("back").addEventListener("click", () => {
   verify.hidden = true;
+  mustChoose = false;
+  signedIn = null;
   document.getElementById("ask").hidden = false;
 });`;
   return layout(lang, t.title, opts.nonce, body, script);

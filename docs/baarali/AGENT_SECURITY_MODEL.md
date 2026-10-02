@@ -108,7 +108,7 @@ H1, H9 et H12 sont de bonnes bases. H2 à H8, H10 et H11 se traitent **sans modi
 - **Le code par email** suit les mêmes règles : 6 chiffres, empreinte seulement, 5 min, 5 essais, 3 envois par adresse par heure et 10 par jour, plafonds par IP, même réponse que l'adresse existe ou non.
 - **Google, Apple et GitHub** : le jeton d'identité est vérifié côté serveur (signature, émetteur, audience, expiration), jamais côté client.
 - **Liaison de comptes** : un email ne relie deux identités que s'il est vérifié des deux côtés. Un numéro ne se lie jamais automatiquement.
-- **Aucun mot de passe** n'est demandé ni stocké.
+- **Le mot de passe est facultatif** (décidé le 02/10/2026, revient sur le 01/10) : il se choisit seulement dans les 10 minutes d'une connexion qui a prouvé l'adresse (code email, ou fournisseur qui la dit vérifiée), et ne se garde que sous forme d'empreinte (Better Auth). Aucun compte ne se crée par mot de passe seul (`/sign-up/email` fermé) : sinon n'importe qui poserait son mot de passe sur l'adresse d'un autre avant qu'il ne s'inscrive. Oublié, il se rechoisit de la même façon, après un code. 10 essais par minute et par IP.
 
 ### 4.2 Sessions
 

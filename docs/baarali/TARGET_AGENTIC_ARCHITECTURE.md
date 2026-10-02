@@ -171,7 +171,7 @@ Harbor reste inchangé et continue de servir les Spaces, les membres, le temps r
 | GitHub | OAuth ; seul l'email principal **vérifié** compte (`/user/emails`) | Les profils techniques |
 | Microsoft | OpenID Connect | Prévu, éteint tant qu'aucune demande ne le justifie |
 
-**Pas de mot de passe** (décidé le 01/10/2026). Un mot de passe se réutilise d'un site à l'autre, se vole, et sa réinitialisation passe de toute façon par l'email. Un code à usage unique ne laisse rien à voler. Les clés d'accès (*passkeys*) viendront ensuite (sécurité §4.3).
+**Le mot de passe, au choix de la personne** (décidé le 02/10/2026 ; le 01/10, il n'y en avait pas). Le code reste la porte d'entrée : un mot de passe ne se choisit qu'après un code, et sert ensuite à se connecter sans attendre d'email. Jamais de compte créé par mot de passe seul (sécurité §4.1). Les clés d'accès (*passkeys*) viendront ensuite (sécurité §4.3).
 
 **Un utilisateur, plusieurs identités** (`user_identities`, modèle §6.1) :
 
@@ -583,7 +583,7 @@ Contrainte connue : on privilégie le **managé**, pas de VPS à administrer soi
 
 | # | Question | État |
 |---|---|---|
-| 1 | Connexion | **Décidé 29/09 :** téléphone + code SMS (§3.5). **Décidé 01/10 :** aussi email + code, Google, Apple, GitHub ; pas de mot de passe ; liaison seulement par email vérifié ; Better Auth. Restent l'agrégateur SMS par pays et le service d'email. |
+| 1 | Connexion | **Décidé 29/09 :** téléphone + code SMS (§3.5). **Décidé 01/10 :** aussi email + code, Google, Apple, GitHub ; **02/10 :** mot de passe facultatif, choisi après un code ; liaison seulement par email vérifié ; Better Auth. Restent l'agrégateur SMS par pays et le service d'email. |
 | 2 | Hébergement des instances | **Décidé 29/09 :** mise en veille obligatoire. **Décidé 30/09 :** Fly.io, Paris, repli Northflank (§6). |
 | 3 | i18n des chaînes upstream | **Décidé 29/09 :** proposée d'abord à l'upstream (§3.12). |
 | 4 | Composio | **Décidé 29/09 :** désactivé en V1, MCP et connecteurs natifs à la place (§3.14). |
