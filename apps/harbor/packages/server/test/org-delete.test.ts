@@ -138,8 +138,8 @@ describe('deleting an org', () => {
     expect((await awa.get('/v1/health')).status).toBe(404);
     const listed = (await client(APEX, founder).get('/v1/orgs')).body.orgs.map((o: any) => o.id);
     expect(listed).toEqual([kept.id]);
-    // And its files' bytes are gone.
-    expect(await stores.get(org.id)!.has(blobHash(bytes))).toBe(false);
+    // And its files' bytes go, just after the answer.
+    await expect.poll(() => stores.get(org.id)!.has(blobHash(bytes))).toBe(false);
   });
 
   it('asks for the org name typed back', async () => {

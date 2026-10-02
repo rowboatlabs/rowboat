@@ -14,6 +14,7 @@ class FakeFly implements FlyApi {
   readonly calls: string[] = [];
   readonly machines = new Map<string, Machine & { config: MachineConfig }>();
   failCreateMachine = false;
+  failUpdate = false;
   private n = 0;
 
   async createVolume(app: string) {
@@ -35,6 +36,7 @@ class FakeFly implements FlyApi {
   }
   async updateMachine(_app: string, id: string, config: MachineConfig) {
     this.calls.push(`update ${id} ${config.image}`);
+    if (this.failUpdate) throw new FlyApiError(422, 'fly refused the update');
     // Fly launches a stopped or suspended machine on its new config.
     const machine = { ...this.machines.get(id)!, config, state: 'started' };
     this.machines.set(id, machine);
@@ -171,6 +173,19 @@ describe('Instances keys and reach', () => {
     expect(fly.calls).toEqual([`get ${record.machineId}`, `update ${record.machineId} ${CONFIG.image}`, `wait ${record.machineId}`]);
     expect((await store.instance(ME.id))!.image).toBe(CONFIG.image);
     expect(fly.machines.get(record.machineId!)!.config.env.BAARALI_SERVER_KEY).toBe(instances.serverKey(ME.id));
+  });
+
+  it('starts a sleeping machine as it is when Fly refuses the image update, and tries again next time', async () => {
+    const { store, fly, instances } = setup();
+    const record = await instances.ensure(ME);
+    const old = { ...record, image: 'registry.fly.io/baarali-instances:v1' };
+    await store.saveInstance(old);
+    fly.machines.get(record.machineId!)!.state = 'suspended';
+    fly.failUpdate = true;
+    fly.calls.length = 0;
+    await instances.wake(old);
+    expect(fly.calls).toEqual([`get ${record.machineId}`, `update ${record.machineId} ${CONFIG.image}`, `start ${record.machineId}`, `wait ${record.machineId}`]);
+    expect((await store.instance(ME.id))!.image).toBe(old.image);
   });
 
   it('asks Fly once for a burst of requests', async () => {

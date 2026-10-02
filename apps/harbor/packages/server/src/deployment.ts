@@ -156,11 +156,15 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
               runtimes.delete(org.id);
               for (const domain of org.domains) orgByDomain.delete(domain);
               if (!options.blobs || blobs.length === 0) return;
-              // After the commit: a byte left behind costs storage, never correctness.
+              // After the commit, and after the answer: the org is gone the
+              // moment its rows are; its bytes are cleanup, and a byte left
+              // behind costs storage, never correctness.
               const store = options.blobs(org.id);
-              for (const hash of blobs) {
-                await store.delete(hash).catch((err) => console.error(`[harbor] blob ${hash} of deleted ${org.id}:`, err));
-              }
+              void (async () => {
+                for (const hash of blobs) {
+                  await store.delete(hash).catch((err) => console.error(`[harbor] blob ${hash} of deleted ${org.id}:`, err));
+                }
+              })();
             },
             serviceFor: async (org) => {
               const runtime = await runtimeForOrg(org);

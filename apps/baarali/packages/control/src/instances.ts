@@ -185,8 +185,20 @@ export class Instances {
           // now, while nobody is using it — a running machine is never
           // restarted under its person; it waits for its next sleep, or for
           // a device to connect (ensure). Fly launches it with the update.
-          if (await this.outdated(record)) await this.moveToImage(record);
-          else await fly.start(app, id);
+          let moved = false;
+          if (await this.outdated(record)) {
+            // A refused update must not keep the person out: start it as it
+            // is, and the next wake tries the new image again.
+            moved = await this.moveToImage(record).then(
+              () => true,
+              (err) => {
+                if (err instanceof FlyApiError && err.status === 429) throw err;
+                console.error(`[instances] image update of ${id} failed; starting it as it is`, err);
+                return false;
+              },
+            );
+          }
+          if (!moved) await fly.start(app, id);
         }
         await fly.waitStarted(app, id, WAKE_TIMEOUT_S);
       }
