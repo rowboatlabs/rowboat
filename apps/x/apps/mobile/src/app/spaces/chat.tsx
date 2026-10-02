@@ -72,6 +72,26 @@ export default function SpaceChatScreen() {
   // from JS a frame late was the flicker.
   const atBottom = useRef(true);
   const dragging = useRef(false);
+  // Jump-to-latest button: shown once you're more than a screenful-ish up,
+  // with a dot when something new landed while you were away.
+  const [away, setAway] = useState(false);
+  const [newWhileAway, setNewWhileAway] = useState(false);
+  const awayRef = useRef(false);
+  const onScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, contentSize, layoutMeasurement, contentInset } = e.nativeEvent;
+    const gap = contentSize.height + (contentInset?.bottom ?? 0) - (contentOffset.y + layoutMeasurement.height);
+    const next = gap > 400;
+    if (next !== awayRef.current) {
+      awayRef.current = next;
+      setAway(next);
+      if (!next) setNewWhileAway(false);
+    }
+  }, []);
+  const jumpToLatest = useCallback(() => {
+    if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
+    atBottom.current = true;
+    listRef.current?.scrollToEnd({ animated: true });
+  }, []);
   const settle = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
     dragging.current = false;
     const { contentOffset, contentSize, layoutMeasurement, contentInset } = e.nativeEvent;
@@ -135,6 +155,7 @@ export default function SpaceChatScreen() {
         );
       }
       if (prev.some((m) => m.id === message.id)) return prev;
+      if (awayRef.current) setNewWhileAway(true);
       return [...prev, message];
     });
   }, []);
@@ -429,6 +450,8 @@ export default function SpaceChatScreen() {
           onMomentumScrollEnd={settle}
           onContentSizeChange={onContentSizeChange}
           onLayout={onViewportLayout}
+          onScroll={onScroll}
+          scrollEventThrottle={100}
         >
           {visible.map((m) => (
             <MessageRow
@@ -449,6 +472,26 @@ export default function SpaceChatScreen() {
         </ScrollView>
       )}
 
+      {away && positioned ? (
+        <View pointerEvents="box-none" style={{ height: 0, alignItems: 'flex-end', zIndex: 3 }}>
+          <Pressable
+            onPress={jumpToLatest}
+            hitSlop={8}
+            style={({ pressed }) => ({
+              position: 'absolute', right: 16, bottom: 10, width: 38, height: 38, borderRadius: 19,
+              alignItems: 'center', justifyContent: 'center',
+              backgroundColor: colors.background, borderWidth: 0.5, borderColor: colors.separator,
+              shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 8, shadowOffset: { width: 0, height: 2 },
+              opacity: pressed ? 0.7 : 1,
+            })}
+          >
+            <Image source="sf:arrow.down" style={{ width: 15, height: 15 }} tintColor={colors.label} />
+            {newWhileAway ? (
+              <View style={{ position: 'absolute', top: 1, right: 1, width: 10, height: 10, borderRadius: 5, backgroundColor: '#0a84ff', borderWidth: 1.5, borderColor: colors.background }} />
+            ) : null}
+          </Pressable>
+        </View>
+      ) : null}
       {messages !== null && visible.length > 0 && !positioned ? (
         <View pointerEvents="none" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' }}>
           <ActivityIndicator />
