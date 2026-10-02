@@ -5,7 +5,7 @@ import { MAIN, extract, extractMobile, missing, mobileBabel } from '../scripts/i
 import { __baaraliT, setLanguage } from '../src/i18n/mobile/runtime.js';
 import { FR } from '../src/i18n/fr.js';
 import { FR_MAIN, translateMenu } from '../src/i18n/main.js';
-import { compile, pickLang, translate } from '../src/i18n/translate.js';
+import { aboutPeople, compile, pickLang, translate } from '../src/i18n/translate.js';
 
 describe('the French dictionary', () => {
   // The guarantee asked for on 02/10/2026: no English left in the interface.
@@ -166,5 +166,21 @@ describe('the mobile app', () => {
     expect(__baaraliT('Something new upstream')).toBe('Something new upstream');
     setLanguage('en');
     expect(__baaraliT('Message #$1', ['general'])).toBe('Message #general');
+  });
+});
+
+describe('lines about people', () => {
+  it('say who came and went, names as written', () => {
+    expect(aboutPeople(FR, 'benewende.dev joined')).toBe('benewende.dev a rejoint l’espace');
+    expect(aboutPeople(FR, 'Awa Traoré left')).toBe('Awa Traoré a quitté l’espace');
+    expect(aboutPeople(FR, 'Awa added Moussa')).toBe('Awa a ajouté Moussa');
+    expect(aboutPeople(FR, 'Awa (via Baarali) removed Moussa')).toBe('Awa (via Baarali) a retiré Moussa');
+    expect(aboutPeople(FR, 'Moussa was removed')).toBe('Moussa ne fait plus partie de l’espace');
+  });
+
+  it('leave the rest of the interface to the other entries', () => {
+    expect(aboutPeople(FR, 'Settings')).toBeNull();
+    // Outside such a line, « 3 left » is still a count.
+    expect(translate(FR, '3 left')).toBe('3 restant(s)');
   });
 });

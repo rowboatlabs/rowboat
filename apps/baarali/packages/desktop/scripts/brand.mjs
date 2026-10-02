@@ -241,6 +241,8 @@ export function desktopPlan() {
         "if ('rowboat'.startsWith(q)) people.push({ id: 'rowboat', label: 'rowboat',",
         "if ('baarali'.startsWith(q)) people.push({ id: 'rowboat', label: 'baarali',",
       ),
+      // A line about people (« Awa joined »), translated with its names kept (i18n PEOPLE).
+      edit(`${renderer}/components/spaces/membership-line.tsx`, '<span className="min-w-0 truncate">{membershipLineText(', '<span className="min-w-0 truncate" data-baarali-people>{membershipLineText('),
       edit(`${renderer}/components/spaces/composer.tsx`, "attrs: { kind: 'rowboat', id: null, label: 'rowboat' }", "attrs: { kind: 'rowboat', id: null, label: 'baarali' }"),
       edit(`${renderer}/components/spaces/composer-editor.ts`, "getAttrs: () => ({ kind: 'rowboat', id: null, label: 'rowboat' })", "getAttrs: () => ({ kind: 'rowboat', id: null, label: 'baarali' })"),
     ],

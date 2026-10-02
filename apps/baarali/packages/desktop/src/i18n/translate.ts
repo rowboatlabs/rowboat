@@ -21,7 +21,16 @@ export interface Dictionary {
    * Each value is translated in turn when it is itself a known string.
    */
   templates: Record<string, string>;
+  /**
+   * Lines about people (`$1 joined`), where every value is a name and stays
+   * as written. Short and loose, they apply only inside an element marked
+   * PEOPLE (scripts/brand.mjs marks them), never on a title or a count.
+   */
+  people?: Record<string, string>;
 }
+
+/** The elements whose text is a line about people: see `Dictionary.people`. */
+export const PEOPLE = '[data-baarali-people]';
 
 /** Where people's own content is shown or typed: never translated. */
 export const CONTENT = [
@@ -90,6 +99,26 @@ function tail(dict: Dictionary, value: string): string {
   const m = /^(.*?)([,(]\s*)([A-Za-z][^,(]*)$/s.exec(value);
   const fr = m ? dict.exact[m[3].trim()] : undefined;
   return m && fr ? m[1] + m[2] + fr : value;
+}
+
+const compiledPeople = new WeakMap<Dictionary, Template[]>();
+
+/** The French of a line about people, its names kept as written; null when none matches. */
+export function aboutPeople(dict: Dictionary, text: string): string | null {
+  let list = compiledPeople.get(dict);
+  if (!list) {
+    list = compile({ exact: {}, templates: dict.people ?? {} });
+    compiledPeople.set(dict, list);
+  }
+  const core = text.trim();
+  for (const t of list) {
+    const m = t.re.exec(core);
+    if (!m) continue;
+    const out = t.fr.replace(/\$(\d+)/g, (_, i) => m[Number(i)] ?? '');
+    const at = text.indexOf(core);
+    return text.slice(0, at) + out + text.slice(at + core.length);
+  }
+  return null;
 }
 
 /** Strings already looked at, so each is matched against the templates once. */
@@ -165,8 +194,9 @@ function translateNode(dict: Dictionary, node: Node): void {
   if (node.nodeType === Node.TEXT_NODE) {
     const parent = node.parentElement;
     if (skip(parent)) return;
-    if (amongStrangers(dict, node, 'text')) return;
-    const fr = translate(dict, node.nodeValue ?? '', parent?.closest(CONTROLS) ? 'control' : 'text');
+    const people = parent?.closest(PEOPLE) ? aboutPeople(dict, node.nodeValue ?? '') : null;
+    if (people === null && amongStrangers(dict, node, 'text')) return;
+    const fr = people ?? translate(dict, node.nodeValue ?? '', parent?.closest(CONTROLS) ? 'control' : 'text');
     if (fr !== null && fr !== node.nodeValue) {
       node.nodeValue = fr;
       translated.add(node);

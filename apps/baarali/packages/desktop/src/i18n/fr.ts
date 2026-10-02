@@ -3109,6 +3109,15 @@ export const FR: Dictionary = {
     "useConnection must be used inside ConnectionProvider": "useConnection must be used inside ConnectionProvider",
     "useSpacesAccount outside SpacesAccountProvider": "useSpacesAccount outside SpacesAccountProvider"
   },
+  // Lines about people (apps/x renderer lib/spaces-membership.ts): the names
+  // stay as written. Neutral wording, a name says nothing of a gender.
+  people: {
+    "$1 joined": "$1 a rejoint l’espace",
+    "$1 left": "$1 a quitté l’espace",
+    "$1 added $2": "$1 a ajouté $2",
+    "$1 removed $2": "$1 a retiré $2",
+    "$1 was removed": "$1 ne fait plus partie de l’espace",
+  },
   templates: {
     "Failed to load chat: $1": "Impossible de charger la discussion : $1",
     "For longer turns, quick-tap $1 instead — talk hands-free, then tap again to send.": "Pour parler plus longtemps, appuyez brièvement sur $1 — parlez mains libres, puis appuyez à nouveau pour envoyer.",
