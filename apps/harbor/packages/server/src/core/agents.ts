@@ -22,6 +22,7 @@ export interface AgentConnectorHooks {
   verify(connection: string, secret: string): Promise<void>;
   save(agentId: string, secret: string, setBy: string): Promise<AgentCredential>;
   added(agent: Member): void;
+  createInstance(agent: Member, input: { name: string; monthlyBudgetUsd: number; autoSleep: boolean }): Promise<{ id: string; label: string }>;
 }
 
 export class Agents {
@@ -103,6 +104,34 @@ export class Agents {
     this.k.guardWrite();
     await this.hooks.verify(connection, secret);
     return this.hooks.save(agentId, secret, ctx.memberId);
+  }
+
+  /**
+   * Create an instance for a platform agent to run on (spec §8 Connectors,
+   * 2026-10-02): the owner only, like its credential, since it spends their
+   * platform balance. Where the connector then offers a choice of instance,
+   * the new one becomes the agent's default, so a mention without a pick (or
+   * another agent's hand-off) lands on it.
+   */
+  async createInstance(
+    ctx: ActorCtx,
+    agentId: string,
+    input: { name: string; monthlyBudgetUsd: number; autoSleep: boolean },
+  ): Promise<{ instance: { id: string; label: string }; defaults: InvocationOptionValues }> {
+    const agent = await this.agent(agentId);
+    enforce(canCreateAgentKey(await this.actor(ctx), agent));
+    if (!HARBOR_RUN_CONNECTIONS.includes(agent.agentConnection ?? '') || !this.hooks) {
+      throw new HarborError('invalid_request', 'only an agent Harbor reaches through a platform runs on an instance');
+    }
+    this.k.guardWrite();
+    const instance = await this.hooks.createInstance(agent, input);
+    let defaults = (await this.k.store.getAgentOptionDefaults(agentId)) ?? {};
+    const option = (await this.k.store.getAgentCapabilities(agentId))?.options.find((o) => o.key === 'instance');
+    if (option?.type === 'select' && option.choices.some((c) => c.id === instance.id)) {
+      defaults = { ...defaults, instance: instance.id };
+      await this.k.store.putAgentOptionDefaults(agentId, defaults, ctx.memberId, this.k.now());
+    }
+    return { instance, defaults };
   }
 
   /**

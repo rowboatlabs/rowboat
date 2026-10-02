@@ -3928,6 +3928,11 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), agentId: z.string(), secret: z.string() }),
     res: z.object({ credential: z.custom<SpacesTypes.AgentCredential>() }),
   },
+  // An instance for a platform agent to run on (Agent37, 2026-10-02): owner only.
+  'spaces:createAgentInstance': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), name: z.string(), monthlyBudgetUsd: z.number(), autoSleep: z.boolean() }),
+    res: z.object({ instance: z.object({ id: z.string(), label: z.string() }), defaults: z.record(z.string(), z.union([z.string(), z.boolean()])) }),
+  },
   'spaces:createAgentKey': {
     req: z.object({ orgId: z.string(), agentId: z.string() }),
     res: z.object({ key: z.custom<SpacesTypes.AgentKeySecret>() }),

@@ -364,6 +364,26 @@ export const routes = {
     request: z.object({ secret: z.string().min(1).max(512) }),
     response: z.object({ credential: AgentCredential }),
   },
+  /**
+   * Create an instance for a platform agent to run on (spec §8 Connectors,
+   * 2026-10-02): today Agent37's, on the agent's own Agent37 key. Owner only;
+   * app only, like the credential: it spends the owner's platform balance.
+   * The new instance becomes the agent's default where its connector offers
+   * a choice. A platform that creates nothing is `invalid_request`.
+   */
+  createAgentInstance: {
+    method: 'POST',
+    path: '/v1/agents/:agentId/instances',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({
+      name: z.string().trim().min(1).max(64),
+      /** The cap on the instance's managed model spend per month, in US dollars. */
+      monthlyBudgetUsd: z.number().min(0).max(10_000),
+      /** Sleep when idle (billing disk only), waking on the next mention. */
+      autoSleep: z.boolean().default(true),
+    }),
+    response: z.object({ instance: z.object({ id: z.string(), label: z.string() }), defaults: InvocationOptionValues }),
+  },
   /** Another key for an agent (rotation: create, switch, revoke the old one). Owner only. */
   createAgentKey: {
     method: 'POST',

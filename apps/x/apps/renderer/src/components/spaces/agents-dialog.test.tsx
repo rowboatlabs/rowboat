@@ -36,6 +36,7 @@ const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
             if (args.credential === 'rpl_refused') throw new Error('Replicas did not accept this key: Invalid or missing API key')
             return { agent: { ...hermes, id: 'new', displayName: args.displayName, agentKind: args.kind, agentConnection: args.connection }, key: { ...key('k9', 'new'), secret: NEW_KEY } }
         case 'spaces:setAgentCredential': return { credential: { hint: `…${args.secret!.slice(-4)}`, setBy: 'me', setAt: '2026-09-30T12:00:00Z' } }
+        case 'spaces:createAgentInstance': return { instance: { id: 'i9', label: `${args.name} (i9)` }, defaults: { instance: 'i9' } }
         case 'spaces:createAgentKey': return { key: { ...key('k2', args.agentId!), secret: ROTATED } }
         case 'spaces:revokeAgentKey': return { key: key(args.keyId!, args.agentId!, { revokedAt: '2026-09-29T11:00:00Z' }) }
         case 'spaces:getAgentCapabilities': return { capabilities: { stop: false, options: options[args.agentId!] ?? [] }, defaults: defaults[args.agentId!] ?? {} }
@@ -73,7 +74,7 @@ describe('AgentsDialog', () => {
         render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
         await screen.findByText('Hermes')
         fireEvent.click(screen.getByRole('button', { name: /Add agent/ }))
-        expect(setupsOffered()).toEqual(['Hermes', 'Replicas', 'Custom'])
+        expect(setupsOffered()).toEqual(['Hermes', 'Replicas', 'Agent37', 'Custom'])
         expect(screen.getByRole('radio', { name: 'Hermes' })).toHaveAttribute('aria-checked', 'true')
         // The name suggests the kind's own.
         expect(screen.getByLabelText('Agent name')).toHaveValue('Hermes')
@@ -235,6 +236,38 @@ describe('AgentsDialog', () => {
         expect(screen.getByText('ROWBOAT_AGENT_KEY')).toBeInTheDocument()
         expect(screen.getByText('Add it to a space')).toBeInTheDocument()
         expect(invoke).not.toHaveBeenCalledWith('spaces:openDirect', expect.anything())
+    })
+
+    it('adds an Agent37 agent: Hermes or OpenClaw, a name, and the Agent37 key; then the steps on the instance', async () => {
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        await screen.findByText('Hermes')
+        fireEvent.click(screen.getByRole('button', { name: /Add agent/ }))
+        fireEvent.click(screen.getByRole('radio', { name: 'Agent37' }))
+        const which = screen.getByRole('radiogroup', { name: 'Agent' })
+        expect(within(which).getAllByRole('radio').map((r) => r.getAttribute('aria-label'))).toEqual(['Hermes', 'OpenClaw'])
+        fireEvent.click(within(which).getByRole('radio', { name: 'OpenClaw' }))
+        expect(screen.getByLabelText('Agent name')).toHaveValue('OpenClaw')
+        expect(screen.getByRole('button', { name: 'Add agent' })).toBeDisabled()
+
+        fireEvent.change(screen.getByLabelText('Agent37 API key'), { target: { value: 'sk_live_ab12' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Add agent' }))
+        await screen.findByRole('heading', { name: 'Connect OpenClaw' })
+        expect(invoke).toHaveBeenCalledWith('spaces:addAgent', { orgId: 'org-1', displayName: 'OpenClaw', kind: 'openclaw', connection: 'agent37', credential: 'sk_live_ab12' })
+        // On the instance: OpenClaw's own commands, with our MCP server on the new key.
+        expect(screen.getByText('Give it the Spaces tools (recommended)')).toBeInTheDocument()
+        fireEvent.click(screen.getAllByRole('button', { name: /Copy/ })[0]!)
+        expect(vi.mocked(navigator.clipboard.writeText).mock.calls.at(-1)![0]).toBe(
+            `openclaw mcp add rowboat --url 'https://rowboat.example/mcp' --transport streamable-http --header 'Authorization: Bearer ${NEW_KEY}'`,
+        )
+        expect(screen.getByText('Restart the instance')).toBeInTheDocument()
+
+        // Optional: an instance for it, created on its Agent37 key, with a model budget and sleep.
+        expect(screen.getByLabelText('Instance name')).toHaveValue('rowboat-openclaw')
+        fireEvent.change(screen.getByLabelText('Monthly model budget'), { target: { value: '10' } })
+        fireEvent.click(screen.getByLabelText('Sleep when idle'))
+        fireEvent.click(screen.getByRole('button', { name: 'Create instance' }))
+        expect(await screen.findByText(/Created rowboat-openclaw \(i9\)/)).toBeInTheDocument()
+        expect(invoke).toHaveBeenCalledWith('spaces:createAgentInstance', { orgId: 'org-1', agentId: 'new', name: 'rowboat-openclaw', monthlyBudgetUsd: 10, autoSleep: false })
     })
 
     it('shows a Replicas agent’s key by its end, flags a rejected one, and lets its owner replace it', async () => {
