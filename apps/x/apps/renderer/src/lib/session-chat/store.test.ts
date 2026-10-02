@@ -102,10 +102,11 @@ class FakeClient implements SessionsClient {
 }
 
 function makeStore(
-  options: { scheduleEmit?: (flush: () => void) => () => void } = {}
+  options: { scheduleEmit?: (flush: () => void) => () => void; sentTurnGraceMs?: number } = {}
 ) {
   const client = new FakeClient()
   let emit: (event: TurnBusEvent) => void = () => undefined
+  let resync: () => void = () => undefined
   let subscribed = 0
   let unsubscribed = 0
   // Live delta subscriptions by turn id (multiset semantics not needed: the
@@ -123,6 +124,15 @@ function makeStore(
       }
     },
     subscribeSessionFeed: () => () => undefined,
+    subscribeResync: (listener) => {
+      resync = listener
+      return () => {
+        resync = () => undefined
+      }
+    },
+    // Past any test unless one asks: a sent turn is fetched only when the
+    // feed never brought it.
+    sentTurnGraceMs: options.sentTurnGraceMs ?? 60_000,
     subscribeDeltas: (turnId) => {
       deltaSubs.push(turnId)
       return () => {
@@ -145,6 +155,7 @@ function makeStore(
     store,
     disconnect,
     emit: (event: TurnBusEvent) => emit(event),
+    resync: () => resync(),
     deltaSubs,
     getSubscribed: () => subscribed,
     getUnsubscribed: () => unsubscribed,
@@ -481,6 +492,61 @@ describe('SessionChatStore', () => {
       store.getSnapshot().chatState?.conversation.filter(isChatMessage).map((m) => m.content),
     ).toEqual(['go', 'done'])
     disconnect2()
+  })
+})
+
+describe('SessionChatStore — a feed that drops', () => {
+  const tick = (ms = 5) => new Promise((resolve) => setTimeout(resolve, ms))
+  const said = (store: SessionChatStore) =>
+    store.getSnapshot().chatState?.conversation.filter(isChatMessage).map((m) => m.content)
+
+  it('shows a sent message whose turn the feed never brought', async () => {
+    const { client, store } = makeStore({ sentTurnGraceMs: 0 })
+    client.sessions.set(S1, sessionState(S1, []))
+    await store.setSession(S1)
+    client.turns.set('turn-next', [created('turn-next', S1, user('Bonjour'))])
+
+    await store.sendMessage(user('Bonjour'), { agent: { agentId: 'copilot' } })
+    await tick()
+    expect(said(store)).toEqual(['Bonjour'])
+  })
+
+  it('then takes the feed\'s own events for that turn without doubling it', async () => {
+    const { client, store, emit } = makeStore({ sentTurnGraceMs: 0 })
+    client.sessions.set(S1, sessionState(S1, []))
+    await store.setSession(S1)
+    client.turns.set('turn-next', [created('turn-next', S1, user('Bonjour'))])
+    await store.sendOrQueueMessage(user('Bonjour'), { agent: { agentId: 'copilot' } })
+    await tick()
+
+    emit(turnEvent(S1, 'turn-next', created('turn-next', S1, user('Bonjour'))))
+    emit(turnEvent(S1, 'turn-next', requested('turn-next', 0)))
+    emit(turnEvent(S1, 'turn-next', completed('turn-next', 0, assistantText('Salut'))))
+    expect(said(store)).toEqual(['Bonjour', 'Salut'])
+  })
+
+  it('leaves a turn the feed did bring to the feed', async () => {
+    const { client, store, emit } = makeStore({ sentTurnGraceMs: 0 })
+    client.sessions.set(S1, sessionState(S1, []))
+    await store.setSession(S1)
+    await store.sendMessage(user('Bonjour'), { agent: { agentId: 'copilot' } })
+    emit(turnEvent(S1, 'turn-next', created('turn-next', S1, user('Bonjour'))))
+    await tick()
+    expect(client.calls.filter((c) => c.method === 'getTurn')).toEqual([])
+    expect(said(store)).toEqual(['Bonjour'])
+  })
+
+  it('loads again when the link comes back, clearing the error the drop left', async () => {
+    const { client, store, resync } = makeStore()
+    await store.setSession(S1)
+    expect(store.getSnapshot().error).toMatch(/session not found/)
+
+    client.sessions.set(S1, sessionState(S1, ['turn-1']))
+    client.turns.set('turn-1', completedTurnLog('turn-1', S1, 'q1', 'a1'))
+    resync()
+    await tick()
+    expect(store.getSnapshot().error).toBeNull()
+    expect(said(store)).toEqual(['q1', 'a1'])
   })
 })
 

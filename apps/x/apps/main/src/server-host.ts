@@ -197,6 +197,26 @@ function createDesktopEventsClient(baseUrl: string, key: string): EventsClient {
   for (const channel of PUSH_CHANNELS) {
     events.on(channel, (payload) => broadcastToWindows(channel as ipc.SendChannels, payload as never));
   }
+  // Back after a drop — or a first connection that only came after failures,
+  // like an instance still waking: the windows catch up ('server:resync').
+  // A reconnect raises both signals below; they make one catch-up.
+  let dropped = false;
+  let pending: ReturnType<typeof setTimeout> | null = null;
+  const catchUp = () => {
+    if (pending) return;
+    pending = setTimeout(() => {
+      pending = null;
+      broadcastToWindows('server:resync', {});
+    }, 250);
+  };
+  events.onStatus((status) => {
+    if (status === 'disconnected') dropped = true;
+    else if (status === 'connected' && dropped) {
+      dropped = false;
+      catchUp();
+    }
+  });
+  events.onResync(catchUp);
   return events;
 }
 

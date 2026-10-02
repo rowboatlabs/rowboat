@@ -3699,6 +3699,14 @@ export const ipcSchemas = {
     req: CreditActivatedEventSchema,
     res: z.null(),
   },
+  // Main → renderer (Baarali, 02/10/2026): the link to the rowboat-server
+  // came back after a drop (a cloud instance waking or restarting, the
+  // network). What was pushed meanwhile reached nobody, and a restarted
+  // server forgot this window's live subscriptions: refetch, subscribe again.
+  'server:resync': {
+    req: z.object({}),
+    res: z.null(),
+  },
   // Redeem another user's invite (referral) code — both sides earn credits.
   'referral:claim': {
     req: z.object({ code: z.string() }),

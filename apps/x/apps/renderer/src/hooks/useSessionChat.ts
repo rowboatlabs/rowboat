@@ -28,6 +28,7 @@ const defaultDeps: SessionChatStoreDeps = {
   subscribeTurnFeed,
   subscribeSessionFeed,
   subscribeDeltas,
+  subscribeResync: (listener) => window.ipc.on('server:resync', () => listener()),
 }
 
 // Thin subscription over SessionChatStore — all logic (seeding, feed events,

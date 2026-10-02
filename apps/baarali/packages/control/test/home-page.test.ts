@@ -119,6 +119,12 @@ describe('the legal pages', () => {
 
 
 describe('the pricing page', () => {
+  it('is where the app\'s upgrade buttons land', async () => {
+    const res = await app.request('/?intent=upgrade');
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe('/tarifs');
+  });
+
   it('shows every plan in CFA francs and in euros, from the catalog', async () => {
     const res = await app.request('/tarifs');
     expect(res.status).toBe(200);

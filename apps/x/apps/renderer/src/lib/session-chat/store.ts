@@ -51,6 +51,12 @@ export interface SessionChatStoreDeps {
   // requestAnimationFrame + timeout race (see defaultScheduleEmit). Tests
   // inject a synchronous scheduler to keep assertions immediate.
   scheduleEmit?: (flush: () => void) => () => void
+  // Fires when the link to the server came back after a drop: whatever was
+  // pushed meanwhile reached nobody, so the session is fetched again.
+  subscribeResync?: (listener: () => void) => () => void
+  // How long a sent message may wait for its turn on the feed before the
+  // store fetches it itself (a feed that is down shows nothing otherwise).
+  sentTurnGraceMs?: number
 }
 
 // One flush per animation frame: an end-of-turn burst (model_call_completed
@@ -92,7 +98,10 @@ export class SessionChatStore {
   private readonly subscribeTurnFeed: (listener: (event: TurnBusEvent) => void) => () => void
   private readonly subscribeSessionFeed: (listener: (event: SessionBusEvent) => void) => () => void
   private readonly subscribeDeltas: (turnId: string) => () => void
+  private readonly subscribeResync: ((listener: () => void) => () => void) | null
+  private readonly sentTurnGraceMs: number
   private feedDisconnect: (() => void) | null = null
+  private resyncDisconnect: (() => void) | null = null
   private sessionFeedDisconnect: (() => void) | null = null
   private readonly listeners = new Set<() => void>()
   private readonly scheduleEmit: (flush: () => void) => () => void
@@ -131,6 +140,8 @@ export class SessionChatStore {
     this.subscribeTurnFeed = deps.subscribeTurnFeed
     this.subscribeSessionFeed = deps.subscribeSessionFeed
     this.subscribeDeltas = deps.subscribeDeltas
+    this.subscribeResync = deps.subscribeResync ?? null
+    this.sentTurnGraceMs = deps.sentTurnGraceMs ?? 1500
     this.scheduleEmit = deps.scheduleEmit ?? defaultScheduleEmit
   }
 
@@ -141,11 +152,14 @@ export class SessionChatStore {
     if (!this.feedDisconnect) {
       this.feedDisconnect = this.subscribeTurnFeed(this.onTurnEvent)
       this.sessionFeedDisconnect = this.subscribeSessionFeed(this.onSessionEvent)
+      this.resyncDisconnect = this.subscribeResync?.(this.resync) ?? null
       this.syncDeltas()
     }
     return () => {
       this.feedDisconnect?.()
       this.feedDisconnect = null
+      this.resyncDisconnect?.()
+      this.resyncDisconnect = null
       this.sessionFeedDisconnect?.()
       this.sessionFeedDisconnect = null
       this.syncDeltas()
@@ -197,7 +211,17 @@ export class SessionChatStore {
     this.syncDeltas()
     this.emit()
     if (sessionId === null) return
+    await this.load(sessionId, generation)
+  }
 
+  // The link to the server is back: refetch the open session in place — its
+  // turns, and an error the drop caused (a 503 while an instance woke).
+  private resync = (): void => {
+    if (this.sessionId === null) return
+    void this.load(this.sessionId, this.generation)
+  }
+
+  private async load(sessionId: string, generation: number): Promise<void> {
     try {
       const state = await this.client.get(sessionId)
       const [turns, queued] = await Promise.all([
@@ -207,10 +231,13 @@ export class SessionChatStore {
       ])
       if (generation !== this.generation) return
       const reduced = turns.map((turn) => reduceTurn(turn.events))
+      const latest = turns.length > 0 ? turns[turns.length - 1].events : null
+      if (latest?.[0]?.turnId !== this.latestEvents?.[0]?.turnId) this.overlay = emptyOverlay()
       this.priorTurns = reduced.slice(0, -1)
-      this.latestEvents = turns.length > 0 ? turns[turns.length - 1].events : null
+      this.latestEvents = latest
       this.queued = queued
       this.loading = false
+      this.error = null
       this.syncDeltas()
       this.emit()
     } catch (error) {
@@ -232,15 +259,11 @@ export class SessionChatStore {
     if (this.sessionId === null || event.sessionId !== this.sessionId) return
     const turnEvent = event.event
     if (isDurableTurnEvent(turnEvent) && event.offset !== undefined) {
-      if (turnEvent.type === 'turn_created') {
-        // A new turn started for this session: freeze the previous latest.
-        this.freezeLatest()
-        this.latestEvents = [turnEvent]
-        this.overlay = emptyOverlay()
-        this.syncDeltas()
-      } else if (this.latestEvents && this.latestEvents[0].turnId === event.turnId) {
+      if (this.latestEvents && this.latestEvents[0].turnId === event.turnId) {
         // Offset join against the local log: drop already-known events,
-        // append the contiguous next line, refetch on a gap.
+        // append the contiguous next line, refetch on a gap. A turn the
+        // store fetched itself (see sendMessage) gets its own turn_created
+        // back here, as a known event.
         if (event.offset <= this.latestEvents.length) {
           return
         }
@@ -250,6 +273,12 @@ export class SessionChatStore {
           void this.reloadTurn(event.turnId)
           return
         }
+      } else if (turnEvent.type === 'turn_created') {
+        // A new turn started for this session: freeze the previous latest.
+        this.freezeLatest()
+        this.latestEvents = [turnEvent]
+        this.overlay = emptyOverlay()
+        this.syncDeltas()
       } else {
         // An event for a turn we haven't seen (missed turn_created, e.g. the
         // feed attached mid-turn): reconcile by refetching that turn.
@@ -280,6 +309,8 @@ export class SessionChatStore {
     try {
       const turn = await this.client.getTurn(turnId)
       if (generation !== this.generation) return
+      // The feed may have moved past this snapshot while it was in flight.
+      if (this.latestEvents && this.latestEvents[0].turnId === turnId && this.latestEvents.length >= turn.events.length) return
       if (this.latestEvents && this.latestEvents[0].turnId !== turnId) {
         this.freezeLatest()
       }
@@ -299,7 +330,22 @@ export class SessionChatStore {
     config: SendMessageConfig,
   ): Promise<{ turnId: string }> => {
     if (!this.sessionId) throw new Error('No active session')
-    return this.client.sendMessage(this.sessionId, input, config)
+    const sent = await this.client.sendMessage(this.sessionId, input, config)
+    this.expectTurn(sent.turnId)
+    return sent
+  }
+
+  // The sent message shows through its turn's events on the feed. A feed
+  // that is down (a cloud instance waking, a dropped link) would leave it
+  // nowhere on screen: past a short grace, fetch the turn here.
+  private expectTurn(turnId: string): void {
+    const generation = this.generation
+    setTimeout(() => {
+      if (generation !== this.generation) return
+      if (this.latestEvents?.[0]?.turnId === turnId) return
+      if (this.priorTurns.some((turn) => turn.definition.turnId === turnId)) return
+      void this.reloadTurn(turnId)
+    }, this.sentTurnGraceMs)
   }
 
   // Deliver-ASAP send: never rejects for a busy session — the message queues
@@ -310,7 +356,9 @@ export class SessionChatStore {
     config: SendMessageConfig,
   ): Promise<{ queued: false; turnId: string } | { queued: true; queueId: string }> => {
     if (!this.sessionId) throw new Error('No active session')
-    return this.client.sendOrQueueMessage(this.sessionId, input, config)
+    const sent = await this.client.sendOrQueueMessage(this.sessionId, input, config)
+    if (!sent.queued) this.expectTurn(sent.turnId)
+    return sent
   }
 
   editQueued = async (

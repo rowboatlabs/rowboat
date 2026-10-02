@@ -22,12 +22,27 @@ export function createGate({ targetPort, targetHost = '127.0.0.1' }: GateOptions
       { host: targetHost, port: targetPort, method: req.method, path: req.url, headers: { ...req.headers, host: loopbackHost } },
       (up) => {
         res.writeHead(up.statusCode ?? 502, up.headers);
+        // The server gone mid-answer: so is the answer, rather than a caller
+        // left waiting on it for ever.
+        up.on('error', () => res.destroy());
+        up.on('close', () => {
+          if (!up.complete) res.destroy();
+        });
         up.pipe(res);
       },
     );
     upstream.on('error', () => {
-      if (!res.headersSent) res.writeHead(502, { 'content-type': 'application/json' });
+      if (res.headersSent) return void res.destroy();
+      res.writeHead(502, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: { code: 'instance_unavailable' } }));
+    });
+    // The caller hung up (an app giving up while the machine wakes): stop
+    // asking the server. Every stream's error is heard here — an unheard
+    // one would end this process, and the machine with it.
+    req.on('error', () => upstream.destroy());
+    res.on('error', () => upstream.destroy());
+    res.on('close', () => {
+      if (!res.writableFinished) upstream.destroy();
     });
     req.pipe(upstream);
   });

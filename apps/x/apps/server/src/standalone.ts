@@ -32,6 +32,14 @@ import { setTokenCipher as setGithubTokenCipher } from '@x/core/dist/apps/github
 // isolated ROWBOAT_WORKDIR.
 //
 
+// Core was written for Electron's main process, where a promise rejected
+// with no handler is logged and life goes on. Plain Node ends the process
+// on one instead — on a cloud instance, every device's connection with it
+// (Baarali, 02/10/2026). Same rule as Electron: say it, keep serving.
+process.on('unhandledRejection', (reason) => {
+  console.error('[server] unhandled rejection:', reason);
+});
+
 async function main(): Promise<void> {
   // The workdir lock is acquired by createRowboatServer itself — a live
   // Electron-hosted transport makes this boot fail loudly, as it must.

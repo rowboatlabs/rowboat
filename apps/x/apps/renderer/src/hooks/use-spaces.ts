@@ -232,36 +232,61 @@ export function useSpaceNames(orgId: string): ReadonlyMap<string, string> {
 // subscription in main.
 // ---------------------------------------------------------------------------
 
-const liveRefs = new Map<string, number>()
+const liveRefs = new Map<string, { orgId: string; spaceId: string; count: number }>()
+/** Watched spaces whose subscribe failed: asked again at the next catch-up. */
+const liveFailed = new Set<string>()
 
 function liveKey(orgId: string, spaceId: string): string {
     return `${orgId}/${spaceId}`
 }
 
+function subscribeLive(orgId: string, spaceId: string): void {
+    const key = liveKey(orgId, spaceId)
+    liveFailed.delete(key)
+    // Resume from the head we already hold (the unread snapshot's), so the
+    // gap between our last read and going live is replayed rather than
+    // lost; unknown = live-only, and the socket layer then learns its
+    // resume point from the server's acknowledgement.
+    const head = getSpaceReadState(orgId, spaceId)?.head
+    void window.ipc.invoke('spaces:subscribeSpace', { orgId, spaceId, ...(head ? { afterOffset: head } : {}) }).catch(() => {
+        // Org unreachable — REST fetches surface the error state. Not given
+        // up on (Baarali, 02/10/2026): a cloud instance still waking answers
+        // 503 here, and the space would stay deaf until the app restarts.
+        if (liveRefs.has(key)) liveFailed.add(key)
+    })
+}
+
+/**
+ * Subscribe again: every watched space after the link to the server came
+ * back (a restarted server holds none of them), else only those that failed.
+ * The host's registry makes a repeat subscribe harmless.
+ */
+function resubscribeLive(all: boolean): void {
+    for (const [key, { orgId, spaceId }] of liveRefs) {
+        if (all || liveFailed.has(key)) subscribeLive(orgId, spaceId)
+    }
+}
+
 export function acquireSpaceLive(orgId: string, spaceId: string): () => void {
     const key = liveKey(orgId, spaceId)
-    const count = liveRefs.get(key) ?? 0
-    liveRefs.set(key, count + 1)
-    if (count === 0) {
-        // Resume from the head we already hold (the unread snapshot's), so the
-        // gap between our last read and going live is replayed rather than
-        // lost; unknown = live-only, and the socket layer then learns its
-        // resume point from the server's acknowledgement.
-        const head = getSpaceReadState(orgId, spaceId)?.head
-        void window.ipc.invoke('spaces:subscribeSpace', { orgId, spaceId, ...(head ? { afterOffset: head } : {}) }).catch(() => {
-            // org unreachable — REST fetches surface the error state
-        })
+    const entry = liveRefs.get(key)
+    if (entry) entry.count += 1
+    else {
+        liveRefs.set(key, { orgId, spaceId, count: 1 })
+        subscribeLive(orgId, spaceId)
     }
     let released = false
     return () => {
         if (released) return
         released = true
-        const current = liveRefs.get(key) ?? 0
-        if (current <= 1) {
+        const current = liveRefs.get(key)
+        if (!current) return
+        if (current.count <= 1) {
             liveRefs.delete(key)
+            liveFailed.delete(key)
             void window.ipc.invoke('spaces:unsubscribeSpace', { orgId, spaceId }).catch(() => {})
         } else {
-            liveRefs.set(key, current - 1)
+            current.count -= 1
         }
     }
 }
@@ -390,9 +415,18 @@ function wireFeedBus(): void {
     if (feedBusWired) return
     feedBusWired = true
     if (typeof window !== 'undefined') {
-        window.addEventListener('focus', resyncListing)
+        window.addEventListener('focus', () => {
+            resyncListing()
+            resubscribeLive(false)
+        })
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible') resyncListing()
+        })
+        // The link to the rowboat-server is back after a drop: a restarted
+        // server forgot every subscription, and the listing may have moved.
+        window.ipc.on('server:resync', () => {
+            resubscribeLive(true)
+            resyncListing()
         })
         // A Rowboat sign-in or sign-out changes which managed orgs we hold
         // (one session, two uses): refetch the listing outright — the

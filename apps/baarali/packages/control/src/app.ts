@@ -63,7 +63,12 @@ export function createApp(deps: ControlDeps) {
 
   if (deps.home) {
     const home = deps.home;
-    app.get('/', (c) => html((nonce) => homePage(home, { lang: c.req.header('accept-language') ?? null, nonce })));
+    app.get('/', (c) => {
+      // The app's « Upgrade » buttons open `${appUrl}?intent=upgrade` (renderer
+      // sidebar, billing dialog, settings): the plans are what they came for.
+      if (c.req.query('intent') === 'upgrade') return c.redirect(PRICING_PATH, 302);
+      return html((nonce) => homePage(home, { lang: c.req.header('accept-language') ?? null, nonce }));
+    });
     app.get(PRICING_PATH, (c) => html((nonce) => pricingPage(home, { lang: c.req.header('accept-language') ?? null, nonce })));
     for (const doc of Object.keys(LEGAL_PATHS) as LegalDoc[]) {
       app.get(LEGAL_PATHS[doc], (c) => html((nonce) => legalPage(doc, { lang: c.req.header('accept-language') ?? null, nonce })));

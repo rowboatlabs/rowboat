@@ -31,6 +31,45 @@ describe('gate', () => {
     expect(res.status).toBe(502);
   });
 
+  // A request cut short on either side — the app giving up while the
+  // instance wakes, the server going down mid-answer — must cost that request
+  // only: an unheard stream error would take the whole machine down.
+  it('survives a caller that hangs up mid-answer, and a server that does', async () => {
+    let finish: (() => void) | null = null;
+    const target = await listen(http.createServer((req, res) => {
+      if (req.url === '/slow') {
+        res.writeHead(200, { 'content-type': 'text/plain' });
+        res.write('first');
+        finish = () => res.end('last');
+        return;
+      }
+      if (req.url === '/dies') {
+        res.writeHead(200, { 'content-type': 'text/plain' });
+        res.write('half');
+        setTimeout(() => res.socket?.destroy(), 20);
+        return;
+      }
+      res.end('ok');
+    }));
+    const gate = await listen(createGate({ targetPort: target }));
+
+    // The caller leaves after the first bytes, upload still open.
+    await new Promise<void>((resolve) => {
+      const s = net.connect(gate, '127.0.0.1', () => {
+        s.write('POST /slow HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n');
+      });
+      s.on('data', () => { s.destroy(); setTimeout(resolve, 50); });
+    });
+    (finish as (() => void) | null)?.();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const cut = await fetch(`http://127.0.0.1:${gate}/dies`).then((r) => r.text()).catch((e: unknown) => e);
+    expect(cut).toBeInstanceOf(Error);
+
+    const res = await fetch(`http://127.0.0.1:${gate}/health`);
+    expect(await res.text()).toBe('ok');
+  });
+
   it('replays a WebSocket handshake with a loopback Host and splices the sockets', async () => {
     let handshake = '';
     const target = http.createServer();

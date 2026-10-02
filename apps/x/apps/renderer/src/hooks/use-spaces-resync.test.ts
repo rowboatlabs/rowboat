@@ -25,6 +25,8 @@ const emit = (event: unknown) => {
     for (const l of feed.listeners) l(event)
 }
 const invoke = vi.fn()
+const ipcOn = new Map<string, (payload: unknown) => void>()
+const subscribes = () => invoke.mock.calls.filter(([c]) => c === 'spaces:subscribeSpace').length
 const listing = () => invoke.mock.calls.filter(([c]) => c === 'spaces:listSpaces').length
 const orgs = [{ id: 'org', name: 'Org', memberId: 'me', baseUrl: 'http://x', address: 'x' }]
 
@@ -40,7 +42,14 @@ beforeEach(() => {
         if (channel === 'spaces:subscribeSpace' || channel === 'spaces:unsubscribeSpace') return null
         throw new Error(`unexpected ${channel}`)
     })
-    ;(window as unknown as { ipc: unknown }).ipc = { invoke, on: () => () => {} }
+    ipcOn.clear()
+    ;(window as unknown as { ipc: unknown }).ipc = {
+        invoke,
+        on: (channel: string, listener: (payload: unknown) => void) => {
+            ipcOn.set(channel, listener)
+            return () => ipcOn.delete(channel)
+        },
+    }
 })
 afterEach(() => {
     vi.useRealTimers()
@@ -115,5 +124,35 @@ describe('listing resync', () => {
         })
         await boot()
         expect(invoke).toHaveBeenCalledWith('spaces:subscribeSpace', { orgId: 'org', spaceId: 's2' })
+    })
+
+    // A cloud instance (Baarali, 02/10/2026): its subscriptions live in its
+    // memory, and while it wakes it answers 503.
+    it('asks again for a subscribe refused while the server woke, at the next focus', async () => {
+        let refuse = true
+        const base = invoke.getMockImplementation()!
+        invoke.mockImplementation(async (channel: string, args: unknown) => {
+            if (channel === 'spaces:subscribeSpace' && refuse) throw new Error('rpc spaces:subscribeSpace failed with status 503')
+            return base(channel, args)
+        })
+        await boot()
+        expect(subscribes()).toBe(1)
+        refuse = false
+        window.dispatchEvent(new Event('focus'))
+        await vi.advanceTimersByTimeAsync(0)
+        expect(subscribes()).toBe(2)
+        window.dispatchEvent(new Event('focus')) // held now: not asked again
+        await vi.advanceTimersByTimeAsync(0)
+        expect(subscribes()).toBe(2)
+    })
+
+    it('subscribes every watched space again, and refetches the listing, when the link to the server is back', async () => {
+        await boot()
+        expect(subscribes()).toBe(1)
+        await vi.advanceTimersByTimeAsync(6_000)
+        ipcOn.get('server:resync')!({})
+        await vi.advanceTimersByTimeAsync(400)
+        expect(subscribes()).toBe(2)
+        expect(listing()).toBe(2)
     })
 })
