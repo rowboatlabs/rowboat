@@ -7,6 +7,7 @@ import { isAdmin, topUpMedia, type SoldPack } from './admin.js';
 import { asset } from './assets.js';
 import { AUTH_BASE_PATH, type BaaraliAuth } from './auth.js';
 import { homePage, type HomeData } from './home-page.js';
+import { PRICING_PATH, pricingPage } from './pricing-page.js';
 import { html } from './html.js';
 import { LEGAL_PATHS, legalPage, type LegalDoc } from './legal-page.js';
 import { GATEWAY_PATH, type Gateway } from './gateway.js';
@@ -58,6 +59,7 @@ export function createApp(deps: ControlDeps) {
   if (deps.home) {
     const home = deps.home;
     app.get('/', (c) => html((nonce) => homePage(home, { lang: c.req.header('accept-language') ?? null, nonce })));
+    app.get(PRICING_PATH, (c) => html((nonce) => pricingPage(home, { lang: c.req.header('accept-language') ?? null, nonce })));
     for (const doc of Object.keys(LEGAL_PATHS) as LegalDoc[]) {
       app.get(LEGAL_PATHS[doc], (c) => html((nonce) => legalPage(doc, { lang: c.req.header('accept-language') ?? null, nonce })));
     }

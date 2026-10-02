@@ -35,28 +35,40 @@ export const DISCOVERY_MODELS: ModelPolicy = {
   settings: { reasoning: { enabled: false } },
 };
 
-const prices = (eur: number, cfa: number) => [
-  { amount: eur * 100, currency: 'EUR' },
-  { amount: cfa, currency: 'XOF' },
-  { amount: cfa, currency: 'XAF' },
+// The CFA price is the euro's at the fixed parity, to the franc (decided
+// 01/10/2026: no rounding down, the owner wants the exact figure).
+const CFA_PER_EUR = 655.957;
+export const cfaOf = (eur: number) => Math.round(eur * CFA_PER_EUR);
+
+const prices = (eur: number) => [
+  { amount: Math.round(eur * 100), currency: 'EUR' },
+  { amount: cfaOf(eur), currency: 'XOF' },
+  { amount: cfaOf(eur), currency: 'XAF' },
 ];
+
+/**
+ * Paying a monthly plan for a year (decided 01/10/2026): 19 % off. Shown on
+ * the pricing page only until payment opens; whether the year keeps the
+ * month's usage is to settle against the margin before then.
+ */
+export const ANNUAL_DISCOUNT = 0.19;
 
 export const OFFERS: Offer[] = [
   // The cheapest tool-capable models only: about 150 calls a week at 0.05
   // cent each.
   { id: 'decouverte', category: 'free', displayName: 'Découverte', billing: { kind: 'free', weekBudgetUsd: 0.08 }, models: DISCOVERY_MODELS },
   // The prepaid week, for mobile money: LigdiCash has no recurring debit.
-  { id: 'semaine', category: 'starter', displayName: 'Semaine', billing: { kind: 'paid', period: 'week', prices: prices(5, 3300) } },
-  { id: 'essentiel', category: 'starter', displayName: 'Essentiel', billing: { kind: 'paid', period: 'month', prices: prices(20, 13000) } },
-  { id: 'pro-100', category: 'pro', displayName: 'Pro', billing: { kind: 'paid', period: 'month', prices: prices(100, 65000) } },
-  { id: 'pro-200', category: 'pro', displayName: 'Pro', billing: { kind: 'paid', period: 'month', prices: prices(200, 130000) } },
+  { id: 'semaine', category: 'starter', displayName: 'Semaine', billing: { kind: 'paid', period: 'week', prices: prices(5) } },
+  { id: 'essentiel', category: 'starter', displayName: 'Essentiel', billing: { kind: 'paid', period: 'month', prices: prices(20) } },
+  { id: 'pro-100', category: 'pro', displayName: 'Pro', billing: { kind: 'paid', period: 'month', prices: prices(100) } },
+  { id: 'pro-200', category: 'pro', displayName: 'Pro', billing: { kind: 'paid', period: 'month', prices: prices(200) } },
 ];
 
 // Media credit packs (decided 01/10/2026): small enough for mobile money,
 // the smallest one still a few voice-overs or a short video. The CFA price
-// is rounded under the euro's, as for the plans.
+// is the euro's at the fixed parity, as for the plans.
 export const MEDIA_PACKS: MediaPack[] = [
-  { id: 'medias-2', prices: prices(2, 1300) },
-  { id: 'medias-5', prices: prices(5, 3300) },
-  { id: 'medias-20', prices: prices(20, 13000) },
+  { id: 'medias-2', prices: prices(2) },
+  { id: 'medias-5', prices: prices(5) },
+  { id: 'medias-20', prices: prices(20) },
 ];

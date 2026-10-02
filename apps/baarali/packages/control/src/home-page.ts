@@ -115,6 +115,7 @@ const STRINGS = {
     proChoice: 'Choisissez votre niveau',
     payment: 'Paiement en ligne bientôt : Mobile Money et carte.',
     taxes: 'Prix hors taxes.',
+    compareAll: 'Comparer tous les forfaits →',
     mediaTitle: 'Crédits médias',
     mediaLead: 'Vidéos, voix et musique se paient avec des crédits, à part du forfait. Ils restent sur votre compte jusqu’à ce que vous les utilisiez. Une génération qui échoue est remboursée.',
     credits: 'crédits',
@@ -242,6 +243,7 @@ const STRINGS = {
     proChoice: 'Choose your level',
     payment: 'Online payment soon: mobile money and card.',
     taxes: 'Prices exclude taxes.',
+    compareAll: 'Compare every plan →',
     mediaTitle: 'Media credits',
     mediaLead: 'Videos, voices and music are paid with credits, separate from the plan. They stay on your account until you use them. A failed generation is refunded.',
     credits: 'credits',
@@ -283,7 +285,9 @@ const titled = ([a, em, b]: string[]) => `${escape(a)}<em>${escape(em)}</em>${es
 /** "20 €", "13 000 F CFA": whole amounts, the way people write them here. */
 export function formatPrice(price: Money, lang: Lang): string {
   const major = price.currency === 'EUR' ? price.amount / 100 : price.amount;
-  const n = new Intl.NumberFormat(lang === 'fr' ? 'fr-FR' : 'en-GB', { maximumFractionDigits: 2 }).format(major);
+  // Cents shown in full (16,20 €), or not at all (20 €).
+  const cents = Number.isInteger(major) ? 0 : 2;
+  const n = new Intl.NumberFormat(lang === 'fr' ? 'fr-FR' : 'en-GB', { minimumFractionDigits: cents, maximumFractionDigits: cents }).format(major);
   return price.currency === 'EUR' ? (lang === 'fr' ? `${n} €` : `€${n}`) : `${n} F CFA`;
 }
 
@@ -519,6 +523,7 @@ h1 em, h2 em { font-family:var(--serif); font-style:italic; font-weight:400; let
 .head { margin-bottom:52px; }
 .head-center { text-align:center; display:flex; flex-direction:column; align-items:center; }
 .fine { color:var(--muted); font-size:14px; margin:24px 0 0; }
+.fine .more { color:var(--blue-deep); font-weight:650; text-decoration:none; margin-left:8px; }
 
 /* Header */
 .top { position:sticky; top:env(safe-area-inset-top, 0px); z-index:20; background:var(--top-bg); backdrop-filter:saturate(1.6) blur(14px); -webkit-backdrop-filter:saturate(1.6) blur(14px); border-bottom:1px solid transparent; }
@@ -799,7 +804,7 @@ footer { background:var(--night); color:var(--night-muted); padding-block:64px 4
     <nav class="menu" aria-label="Baarali">
       <a href="#fonctions">${escape(t.nav.features)}</a>
       <a href="#etapes">${escape(t.nav.how)}</a>
-      <a href="#tarifs">${escape(t.nav.prices)}</a>
+      <a href="/tarifs">${escape(t.nav.prices)}</a>
       <a href="#questions">${escape(t.nav.faq)}</a>
     </nav>
     <div class="top-cta">
@@ -875,7 +880,7 @@ footer { background:var(--night); color:var(--night-muted); padding-block:64px 4
       <p class="sub">${escape(t.pricesLead)}</p>
     </div>
     <div class="plans">${others.map((o) => card(o)).join('')}${proCard}</div>
-    <p class="fine">${escape(t.taxes)}</p>
+    <p class="fine">${escape(t.taxes)} <a class="more" href="/tarifs">${escape(t.compareAll)}</a></p>
     <div class="media" aria-labelledby="media">
       <div><h3 id="media">${escape(t.mediaTitle)}</h3><p class="sub">${escape(t.mediaLead)}</p></div>
       <div><ul class="packs">${packs}</ul><p class="fine">${escape(t.examples)}</p></div>
@@ -913,7 +918,7 @@ footer { background:var(--night); color:var(--night-muted); padding-block:64px 4
         <h4>${escape(t.footerProduct)}</h4>
         <ul>
           <li><a href="#fonctions">${escape(t.nav.features)}</a></li>
-          <li><a href="#tarifs">${escape(t.nav.prices)}</a></li>
+          <li><a href="/tarifs">${escape(t.nav.prices)}</a></li>
           ${data.downloadBase ? `<li><a href="#telecharger">${escape(t.downloadKicker)}</a></li>` : ''}
           <li><a href="#questions">${escape(t.nav.faq)}</a></li>
         </ul>

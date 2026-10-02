@@ -550,7 +550,7 @@ footer a:hover { color:#fff; }
     <a class="brand" href="/">${logoTile(32)}${logoWord(25)}</a>
     <nav class="menu" aria-label="Baarali">
       <a href="/">${escape(t.home)}</a>
-      <a href="/#tarifs">${escape(t.prices)}</a>
+      <a href="/tarifs">${escape(t.prices)}</a>
       <button class="theme" type="button" aria-label="${escape(t.theme)}" title="${escape(t.theme)}">${SUN}${MOON}</button>
       <a class="btn" href="/auth/v1/sign-in">${escape(t.signIn)}</a>
     </nav>
