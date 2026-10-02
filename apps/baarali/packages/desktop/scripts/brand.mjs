@@ -331,6 +331,9 @@ export function mobilePlan() {
       // Our sign-in server takes a phone app's redirect only in the form of
       // RFC 8252 §7.1, its reverse-domain scheme (control src/auth.ts).
       edit(`${mobile}/src/lib/spaces/oauth.ts`, "export const REDIRECT_URI = 'rowboat://oauth-callback';", `export const REDIRECT_URI = '${MOBILE_ID}:/oauth-callback';`),
+      // A sign-in of its own, not Safari's: after « Se déconnecter », the next
+      // sign-in asks who you are instead of reopening the last account.
+      edit(`${mobile}/src/lib/spaces/oauth.ts`, 'WebBrowser.openAuthSessionAsync(authorize.toString(), REDIRECT_URI);', 'WebBrowser.openAuthSessionAsync(authorize.toString(), REDIRECT_URI, { preferEphemeralSession: true });'),
     ],
     copies: [
       ...['icon.png', 'splash-icon.png', 'android-icon-foreground.png', 'android-icon-monochrome.png', 'baarali-mark.png'].map((f) => [`assets/mobile/${f}`, `${mobile}/assets/images/${f}`]),

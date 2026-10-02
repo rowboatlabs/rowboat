@@ -108,6 +108,11 @@ describe('the mobile app', () => {
     expect(e.to).toBe("export const REDIRECT_URI = 'com.baarali.app.mobile:/oauth-callback';");
   });
 
+  it('asks who you are after a sign-out, rather than reusing Safari\'s session', () => {
+    const tos = mobilePlan().edits.filter((x) => x.file.endsWith('spaces/oauth.ts')).map((x) => x.to);
+    expect(tos.some((t) => t.includes('{ preferEphemeralSession: true }'))).toBe(true);
+  });
+
   // Decided 02/10/2026: no screen of the app may send a person to the upstream's servers.
   it('never reaches the upstream once branded', () => {
     const edits = mobilePlan().edits;
