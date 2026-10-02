@@ -151,8 +151,9 @@ const tabs: TabConfig[] = [
 
 // Spaces-only (2026-10-02, spaces-only flag PR): what Spaces and its @rowboat
 // agent use — the account, the agent's models, and the app itself. Connections,
-// MCP, code mode, phone/mobile channels and note tagging serve other sections.
-const SPACES_ONLY_TABS: ReadonlySet<ConfigTab> = new Set(["account", "models", "appearance", "shortcuts", "notifications", "help"])
+// MCP, code mode, phone/mobile channels and note tagging serve other sections;
+// Shortcuts holds only the hover (quick-ask) chord, which spaces-only never registers.
+const SPACES_ONLY_TABS: ReadonlySet<ConfigTab> = new Set(["account", "models", "appearance", "notifications", "help"])
 
 /** Sidebar nav grouping: identity first, capabilities, then app-level. */
 const NAV_SECTIONS: { label: string | null; ids: ConfigTab[] }[] = [

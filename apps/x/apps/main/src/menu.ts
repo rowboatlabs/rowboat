@@ -362,10 +362,11 @@ function rebuildMenu(): void {
       { label: "Report an Issue…", click: () => void shell.openExternal(`${REPO_URL}/issues/new`) },
       { label: "Release Notes", click: () => void shell.openExternal(`${REPO_URL}/releases`) },
       { type: "separator" },
-      {
+      // Spaces-only has no Shortcuts settings (only the hover chord lived there).
+      ...(spacesOnly ? [] : [{
         label: "Keyboard Shortcuts…",
         click: () => sendCommand({ command: "open-settings", tab: "shortcuts" }),
-      },
+      } as MenuItemConstructorOptions]),
       // ~/.rowboat — configs, caches, synced calendars; the place support
       // asks people to look, now one click away.
       { label: "Open Data Folder", click: () => void shell.openPath(WorkDir) },

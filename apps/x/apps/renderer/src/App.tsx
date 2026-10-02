@@ -5789,6 +5789,8 @@ function App() {
   }, [])
   notifyVoiceUnavailableRef.current = notifyVoiceUnavailable
   useEffect(() => {
+    // Spaces-only never registers the hover chord, so there is nothing to warn about.
+    if (SPACES_ONLY) return
     const timer = setTimeout(async () => {
       try {
         const s = await window.ipc.invoke('quickAsk:getShortcut', null)
