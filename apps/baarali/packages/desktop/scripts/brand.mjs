@@ -8,6 +8,7 @@
 //   node brand.mjs --yes            the desktop app: strings, names, icons, link to the instance
 //   node brand.mjs --yes --only core   the instance image: what the agent says of itself
 //   node brand.mjs --yes --only mobile the mobile app: name, icons, accent, French
+//   node brand.mjs --yes --only harbor the Spaces server image: its pages, in the visitor's language
 //
 // Every exact edit must find its anchor exactly once: when the upstream
 // changes one, the build fails here instead of shipping half a brand. The
@@ -362,6 +363,49 @@ export function mobilePlan() {
 }
 
 /**
+ * Harbor, the Spaces server we host (decided 02/10/2026). Its few pages and
+ * a new team's first file come from packages/spaces/src/pages.ts, in the
+ * visitor's language; the deep links keep `rowboat://`, the desktop app's
+ * own scheme (UPSTREAM.md §2, internal ids are never renamed).
+ */
+export function harborPlan() {
+  const server = 'apps/harbor/packages/server/src';
+  return {
+    edits: [
+      edit(
+        `${server}/http.ts`,
+        "import { HarborError } from './errors.js';",
+        "import { HarborError } from './errors.js';\nimport { invitePage as baaraliInvitePage, landingPage as baaraliLandingPage, withLanguage } from './baarali-pages.js';",
+      ),
+      edit(
+        `${server}/http.ts`,
+        '  const app = new Hono<Env>();',
+        "  const app = new Hono<Env>();\n  app.use('*', (c, next) => withLanguage(c.req.header('accept-language'), next));",
+      ),
+      edit(
+        `${server}/http.ts`,
+        '    return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Open in Rowboat</title>` +\n' +
+          '      `<style>body{font:15px/1.5 system-ui,sans-serif;margin:0;display:grid;place-items:center;min-height:100vh;color:#222;background:#fafafa}` +\n' +
+          '      `main{text-align:center;padding:2rem}a.b{display:inline-block;margin-top:1rem;padding:.6rem 1.1rem;border-radius:8px;background:#111;color:#fff;text-decoration:none}</style>` +\n' +
+          '      `<main><p>This link opens in Rowboat.</p><a class="b" href="${deep}">Open in Rowboat</a></main>` +\n' +
+          '      `<script>location.replace(${JSON.stringify(deep)})</script>`;',
+        '    return baaraliLandingPage(deep);',
+      ),
+      edit(`${server}/http.ts`, 'c.html(invitePage({ state: resolved.state }), 410)', 'c.html(baaraliInvitePage({ state: resolved.state }), 410)'),
+      edit(`${server}/http.ts`, "c.html(invitePage({ state: 'ok',", "c.html(baaraliInvitePage({ state: 'ok',"),
+      edit(
+        `${server}/apex.ts`,
+        "import { HarborError } from './errors.js';",
+        "import { HarborError } from './errors.js';\nimport { welcomeReadme as baaraliWelcome, withLanguage } from './baarali-pages.js';",
+      ),
+      edit(`${server}/apex.ts`, '  const app = new Hono();', "  const app = new Hono();\n  app.use('*', (c, next) => withLanguage(c.req.header('accept-language'), next));"),
+      edit(`${server}/apex.ts`, 'newContent: welcomeReadme(org.name),', 'newContent: baaraliWelcome(org.name),'),
+    ],
+    writes: [[`${server}/baarali-pages.ts`, fs.readFileSync(path.join(PKG, '../spaces/src/pages.ts'), 'utf8')]],
+  };
+}
+
+/**
  * Computes every change; throws on a missing anchor. Writes only with `write`.
  * @param {{ root?: string, only?: string, write?: boolean }} options
  * @returns {string[]}
@@ -373,6 +417,25 @@ export function apply({ root = ROOT, only, write = false }) {
   const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8').replace(/\r\n/g, '\n');
   const pending = new Map();
   const current = (rel) => (pending.has(rel) ? pending.get(rel) : read(rel));
+
+  if (only === 'harbor') {
+    const plan = harborPlan();
+    for (const e of plan.edits) {
+      const text = current(e.file);
+      const count = text.split(e.from).length - 1;
+      if (count !== 1) throw new Error(`brand: ${e.file}: expected the anchor once, found it ${count} times:\n${e.from}`);
+      pending.set(e.file, text.replace(e.from, () => e.to));
+    }
+    for (const [to, text] of plan.writes) {
+      changes.push(`write ${to}`);
+      if (write) fs.writeFileSync(path.join(root, to), text);
+    }
+    for (const [rel, text] of pending) {
+      changes.push(`edit ${rel}`);
+      if (write) fs.writeFileSync(path.join(root, rel), text);
+    }
+    return changes;
+  }
 
   if (only === 'mobile') {
     const plan = mobilePlan();

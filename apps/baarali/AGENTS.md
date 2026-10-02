@@ -6,6 +6,7 @@ Le code propre à Baarali : les packages `@baarali/*`. C'est un espace de travai
 |---|---|---|
 | `packages/control` | Le plan de contrôle : remplace le backend Rowboat Labs en servant les mêmes routes `/v1/*` | `TARGET_AGENTIC_ARCHITECTURE.md` §3.5 |
 | `packages/instance` | Le lanceur d'une instance : prépare le dossier de travail, démarre `rowboat-server` sur la boucle locale, ouvre le portier ; le serveur MCP `baarali-media` (vidéo, voix, musique) | `TARGET_AGENTIC_ARCHITECTURE.md` §3.1 et §3.5 |
+| `packages/spaces` | Les espaces d'équipe, hébergés chez nous (décidé le 02/10/2026) : l'image de Harbor (`apps/harbor`, intact), ses pages dans la langue du visiteur (`src/pages.ts`) | « Les espaces » ci-dessous |
 | `packages/desktop` | L'app de bureau Baarali : la marque appliquée au build (`scripts/brand.mjs`), l'icône, et le lien qui branche l'app sur l'instance du compte après la connexion (`src/cloud-link.ts`) | `TARGET_AGENTIC_ARCHITECTURE.md` §3.5 « Les instances », §3.13 |
 
 ## Dépendre de l'upstream
@@ -65,6 +66,7 @@ fly deploy --config apps/baarali/packages/instance/fly.toml --dockerfile apps/ba
 |---|---|---|
 | `warell-control` | Publique, **`https://app.baarali.com`** (aussi `https://warell-control.fly.dev`) | `OPENROUTER_API_KEY`, `BAARALI_INSTANCE_TOKEN`, `PIXAZO_API_KEY`, `BAARALI_ADMIN_TOKEN`, `BAARALI_GATEWAY_SECRET`, `FLY_API_TOKEN`, `BAARALI_INSTANCE_IMAGE` |
 | `warell-owner` | **Privée** (Flycast), disque `data` monté sur `/data` | `BAARALI_INSTANCE_TOKEN`, `BAARALI_SERVER_KEY` |
+| `baarali-spaces` | Publique, **`https://spaces.baarali.com`** et **`https://<équipe>.spaces.baarali.com`** | `DATABASE_URL` (Neon, sa propre base `baarali_spaces`), `AWS_ACCESS_KEY_ID` et `AWS_SECRET_ACCESS_KEY` (Tigris, posés par `fly storage create`) |
 | `baarali-instances` | **Privée** (Flycast). Une machine et un volume par compte, créés par le plan de contrôle, jamais par `fly deploy` | Aucun : chaque machine reçoit ses clés à sa création |
 
 Toutes se suspendent au repos et se réveillent à la requête suivante. Une instance n'a pas d'adresse publique : l'app l'atteint par la passerelle du plan de contrôle, `https://app.baarali.com/instance`, avec sa clé d'appareil. Pour une vérification à la main : `fly proxy 3221:80 warell-owner.flycast -a warell-owner`, puis `http://localhost:3221` avec la clé de l'instance.
@@ -82,6 +84,19 @@ fly secrets set BAARALI_INSTANCE_IMAGE=registry.fly.io/baarali-instances:vN -a w
 **Les noms des apps Fly** gardent l'ancien nom du produit (renommé Baarali le 01/10/2026) : Fly ne renomme pas une app, et en recréer une ferait migrer le disque de l'instance. Personne ne les voit : le public passe par `baarali.com`. Le dépôt GitHub `benewende-dev/warell` garde aussi son nom tant que `benewende-dev/baarali` est pris par l'ancien site.
 
 **DNS** : `baarali.com` est chez Hostinger. `@` (A + AAAA de `warell-control`), `www` et `app` (CNAME vers `warell-control.fly.dev`), plus les lignes d'envoi Resend (`resend._domainkey`, `send`, `rsend`) et `_dmarc`. Les certificats sont émis par Fly (`fly certs list -a warell-control`).
+
+## Les espaces
+
+Harbor (`apps/harbor`) est le serveur des espaces : canaux, fils, fichiers partagés, et l'agent de chacun qui y agit en son nom. On l'héberge nous-mêmes, jamais chez l'upstream (décidé le 02/10/2026). Il ne connaît aucun mot de passe : il vérifie seul les jetons de notre serveur de connexion (« La connexion » ci-dessous), et l'équipe d'une personne est retrouvée par son identifiant de compte.
+
+- **L'image** (`packages/spaces/Dockerfile`) construit Harbor tel quel, après `brand.mjs --only harbor` : ses pages (lien d'invitation, liens ouverts dans un navigateur) et le premier fichier d'une nouvelle équipe viennent de `packages/spaces/src/pages.ts`, en français ou en anglais selon la langue du navigateur ; une app qui ne dit rien reçoit du français.
+- **Les adresses** : `spaces.baarali.com` crée les équipes et les liste ; chaque équipe vit sur `<équipe>.spaces.baarali.com`. Il faut donc un certificat joker chez Fly et trois lignes DNS chez Hostinger (`spaces`, `*.spaces`, `_acme-challenge.spaces`).
+- **Les fichiers** vont chez Tigris (le stockage de Fly, compatible S3), seau `baarali-spaces-files`.
+- **Les apps** l'apprennent par `BAARALI_SPACES_URL` sur le plan de contrôle (`/v1/config`) ; l'app mobile, par son build (`EXPO_PUBLIC_SPACES_APEX`).
+
+```sh
+fly deploy --config apps/baarali/packages/spaces/fly.toml --dockerfile apps/baarali/packages/spaces/Dockerfile --remote-only --ha=false .
+```
 
 ## L'app de bureau
 

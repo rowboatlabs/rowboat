@@ -85,6 +85,17 @@ describe('the mobile app', () => {
     expect(eas).not.toMatch(/asc|submit/i);
   });
 
+  // Harbor, the Spaces server we host (02/10/2026): its pages come from
+  // packages/spaces/src/pages.ts. An upstream change to an anchor breaks here.
+  it('brands the Spaces server image', () => {
+    const changes = apply({ only: 'harbor', write: false });
+    expect(changes).toEqual([
+      'write apps/harbor/packages/server/src/baarali-pages.ts',
+      'edit apps/harbor/packages/server/src/http.ts',
+      'edit apps/harbor/packages/server/src/apex.ts',
+    ]);
+  });
+
   // Control's sign-in server takes a phone's redirect only as RFC 8252 §7.1
   // describes it (control src/auth.ts, asAppRequest): reverse-domain, no `//`.
   it('comes back from the sign-in by a redirect our server accepts', () => {

@@ -1,0 +1,36 @@
+# Harbor, our Spaces server, on Fly, Paris (decided 02/10/2026: we host
+# Spaces ourselves). Every team gets <slug>.spaces.baarali.com; the apex
+# creates teams and lists a person's. Sign-in is the control plane's
+# (https://app.baarali.com/auth/v1): Harbor only checks its tokens.
+# Secrets (fly secrets): DATABASE_URL (Neon, its own database), and
+# AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY from `fly storage create`.
+app = "baarali-spaces"
+primary_region = "cdg"
+
+[env]
+  HARBOR_MODE = "deployment"
+  APEX_DOMAIN = "spaces.baarali.com"
+  AUTH_ISSUER = "https://app.baarali.com/auth/v1"
+  BLOBS_S3_BUCKET = "baarali-spaces-files"
+  BLOBS_S3_ENDPOINT = "https://fly.storage.tigris.dev"
+  BLOBS_S3_REGION = "auto"
+  DATABASE_POOL_MAX = "5"
+  PORT = "4272"
+
+[http_service]
+  internal_port = 4272
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/healthz"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "20s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
