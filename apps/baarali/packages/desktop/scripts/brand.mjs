@@ -306,6 +306,19 @@ export function mobilePlan() {
       // The upstream's sailboat, its logo, becomes ours (tinted like a symbol).
       edit(`${mobile}/src/app/onboarding.tsx`, "    icon: 'sf:sailboat',", "    icon: require('../../assets/images/baarali-mark.png'),"),
       edit(`${mobile}/src/app/spaces/index.tsx`, '<Image source="sf:sailboat"', "<Image source={require('../../../assets/images/baarali-mark.png')}"),
+      // Never the upstream's Spaces fleet (decided 02/10/2026): Baarali has no
+      // Spaces server of its own yet (control /v1/config: spacesApexUrl null),
+      // so the app opens on « Connect your Mac » and Spaces says it is coming.
+      edit(`${mobile}/src/lib/spaces/account.tsx`, "process.env.EXPO_PUBLIC_SPACES_APEX ?? 'https://spaces.x.rowboatlabs.com';", "process.env.EXPO_PUBLIC_SPACES_APEX ?? '';"),
+      edit(
+        `${mobile}/src/lib/spaces/account.tsx`,
+        '    const issuer = await discoverIssuer(APEX_URL);',
+        "    if (!APEX_URL) throw new Error('Team spaces are coming to Baarali soon.');\n    const issuer = await discoverIssuer(APEX_URL);",
+      ),
+      edit(`${mobile}/src/app/index.tsx`, "import { ONBOARDED_KEY } from './onboarding';", "import { ONBOARDED_KEY } from './onboarding';\nimport { APEX_URL } from '@/lib/spaces/account';"),
+      edit(`${mobile}/src/app/index.tsx`, "<Redirect href={onboarded ? '/spaces' : '/onboarding'} />", "<Redirect href={onboarded ? (APEX_URL ? '/spaces' : '/pairing') : '/onboarding'} />"),
+      edit(`${mobile}/src/app/onboarding.tsx`, "import { useColors } from '@/theme/colors';", "import { useColors } from '@/theme/colors';\nimport { APEX_URL } from '@/lib/spaces/account';"),
+      edit(`${mobile}/src/app/onboarding.tsx`, "    router.replace('/spaces');", "    router.replace(APEX_URL ? '/spaces' : '/pairing');"),
     ],
     copies: [
       ...['icon.png', 'splash-icon.png', 'android-icon-foreground.png', 'android-icon-monochrome.png', 'baarali-mark.png'].map((f) => [`assets/mobile/${f}`, `${mobile}/assets/images/${f}`]),

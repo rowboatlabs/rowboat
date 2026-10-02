@@ -19,7 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire, registerHooks } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { ROOT, brandText } from './brand.mjs';
+import { ROOT, brandText, mobilePlan } from './brand.mjs';
 
 const require = createRequire(import.meta.url);
 const ts = require('typescript');
@@ -156,10 +156,14 @@ export function mobileBabel(root = MOBILE) {
 export function extractMobile(root = MOBILE) {
   const babel = mobileBabel(root);
   const plugin = require('../src/i18n/mobile/babel-plugin.cjs');
+  // The code as the build compiles it: with the brand's edits (new messages included).
+  const edits = mobilePlan().edits;
   const found = new Map();
   for (const file of walkFiles(root)) {
     const collect = new Set();
-    babel.transformSync(fs.readFileSync(file, 'utf8'), {
+    let code = fs.readFileSync(file, 'utf8');
+    for (const e of edits) if (path.join(ROOT, e.file) === file && code.includes(e.from)) code = code.replace(e.from, () => e.to);
+    babel.transformSync(code, {
       filename: file,
       babelrc: false,
       configFile: false,

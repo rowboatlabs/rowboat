@@ -9,6 +9,7 @@
 //   {`${n} files`}                    → {__baaraliT("$1 files", [n])}
 //   {busy ? 'Saving…' : 'Save'}       → each branch looked up
 //   Alert.alert('Title', 'Message')   → both looked up
+//   new Error('sign-in cancelled')    → its message too (screens show it)
 //
 // What it rewrites is exactly what `collect` lists, so the check
 // (scripts/i18n-extract.mjs) and the app can never disagree.
@@ -62,6 +63,13 @@ module.exports = function baaraliI18n({ types: t }, options = {}) {
     return null;
   }
 
+  /** A literal, a template, or each branch of `a ? 'x' : 'y'` / `a || 'x'`. */
+  function lookUp(e) {
+    if (e.isConditionalExpression()) return void [e.get('consequent'), e.get('alternate')].forEach(lookUp);
+    if (e.isLogicalExpression() && e.node.operator !== '&&') return void lookUp(e.get('right'));
+    if (swap(e, text(e.node))) used = !collect || used;
+  }
+
   /** Replace a node by its lookup, or record it. */
   function swap(p, found) {
     if (!found) return false;
@@ -106,24 +114,25 @@ module.exports = function baaraliI18n({ types: t }, options = {}) {
       // {`${n} files`}, {'Text'}, and the branches of {a ? 'x' : 'y'} / {a || 'x'}
       JSXExpressionContainer(p) {
         if (p.parentPath.isJSXAttribute() && !VISIBLE_ATTRS.has(p.parent.name.name)) return;
-        const visit = (e) => {
-          if (e.isConditionalExpression()) return void [e.get('consequent'), e.get('alternate')].forEach(visit);
-          if (e.isLogicalExpression() && e.node.operator !== '&&') return void visit(e.get('right'));
-          if (swap(e, text(e.node))) used = !collect || used;
-        };
-        visit(p.get('expression'));
+        lookUp(p.get('expression'));
       },
       // options={{ title: 'Chats' }}, rows: [{ label: 'Settings', sub: '…' }]
       ObjectProperty(p) {
         const key = t.isIdentifier(p.node.key) ? p.node.key.name : t.isStringLiteral(p.node.key) ? p.node.key.value : null;
         if (!key || !VISIBLE_KEYS.has(key)) return;
-        if (swap(p.get('value'), text(p.node.value))) used = !collect || used;
+        lookUp(p.get('value'));
+      },
+      // new Error('sign-in cancelled'): the screens show error.message as it is.
+      NewExpression(p) {
+        if (!t.isIdentifier(p.node.callee, { name: 'Error' })) return;
+        const arg = p.get('arguments')[0];
+        if (arg) lookUp(arg);
       },
       // Alert.alert('Title', 'Message', …)
       CallExpression(p) {
         const callee = p.get('callee');
         if (!callee.matchesPattern('Alert.alert') && !callee.matchesPattern('Alert.prompt')) return;
-        for (const arg of p.get('arguments').slice(0, 2)) if (swap(arg, text(arg.node))) used = !collect || used;
+        for (const arg of p.get('arguments').slice(0, 2)) lookUp(arg);
       },
   };
 

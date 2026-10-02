@@ -83,6 +83,20 @@ describe('the mobile app', () => {
     expect(eas).not.toMatch(/asc|submit/i);
   });
 
+  // Decided 02/10/2026: no screen of the app may send a person to the upstream's servers.
+  it('never reaches the upstream once branded', () => {
+    const edits = mobilePlan().edits;
+    const walk = (dir: string): string[] =>
+      fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(dir, e.name)) : /\.tsx?$/.test(e.name) && !/\.test\./.test(e.name) ? [path.join(dir, e.name)] : []));
+    for (const file of walk(path.join(ROOT, 'apps/x/apps/mobile/src'))) {
+      let code = fs.readFileSync(file, 'utf8');
+      for (const e of edits) if (path.join(ROOT, e.file) === file) code = code.replace(e.from, e.to);
+      // Comments may still describe the upstream; code may not call it.
+      const live = brandText(code).replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
+      expect(live, path.relative(ROOT, file)).not.toMatch(/rowboatlabs\.com/);
+    }
+  });
+
   it('imports the dictionary the way Metro resolves it', () => {
     const runtime = mobilePlan().writes.find(([to]) => to.endsWith('mobile/runtime.ts'))![1];
     expect(runtime).toContain("from '../fr';");

@@ -3096,7 +3096,18 @@ export const FR: Dictionary = {
     "Open the Baarali app on your Mac.": "Ouvrez l’app Baarali sur votre Mac.",
     "Plans, notes, and decisions live next to the conversation.": "Plans, notes et décisions vivent à côté de la conversation.",
     "Tap Scan below and point your phone at it.": "Touchez Scanner ci-dessous et visez-le avec votre téléphone.",
-    "Unpair": "Dissocier"
+    "Unpair": "Dissocier",
+    "Team spaces are coming to Baarali soon.": "Les espaces d’équipe arrivent bientôt sur Baarali.",
+    "authorization server does not support client registration": "le serveur de connexion n’accepte pas l’inscription de l’app",
+    "not signed in": "non connecté",
+    "sign-in cancelled": "connexion annulée",
+    "sign-in failed": "échec de la connexion",
+    "sign-in failed: no authorization code in callback": "échec de la connexion : code d’autorisation manquant",
+    "sign-in failed: state mismatch": "échec de la connexion : réponse inattendue",
+    "the Spaces server names no authorization server": "le serveur des espaces n’indique aucun serveur de connexion",
+    "the authorization server returned no refresh token": "le serveur de connexion n’a pas renvoyé de jeton de session",
+    "useConnection must be used inside ConnectionProvider": "useConnection must be used inside ConnectionProvider",
+    "useSpacesAccount outside SpacesAccountProvider": "useSpacesAccount outside SpacesAccountProvider"
   },
   templates: {
     "Failed to load chat: $1": "Impossible de charger la discussion : $1",
@@ -3440,6 +3451,15 @@ export const FR: Dictionary = {
     "Waiting $1d": "En attente depuis $1 j",
     "Error invoking remote method '$1': $2": "Erreur lors de l’appel '$1' : $2",
     "Message #$1": "Écrire dans #$1",
-    "response failed contract validation: $1": "réponse invalide : $1"
+    "response failed contract validation: $1": "réponse invalide : $1",
+    "authorization server metadata failed ($1)": "le serveur de connexion ne répond pas ($1)",
+    "blob fetch failed with $1": "échec du téléchargement du fichier ($1)",
+    "client registration failed ($1): $2": "échec de l’inscription de l’app ($1) : $2",
+    "metadata request failed ($1)": "le serveur ne répond pas ($1)",
+    "org list failed ($1)": "impossible de charger vos organisations ($1)",
+    "request failed with $1": "échec de la requête ($1)",
+    "sign-in denied: $1": "connexion refusée : $1",
+    "token request failed ($1): $2": "échec de la demande de jeton ($1) : $2",
+    "upload failed with $1": "échec de l’envoi ($1)"
   },
 };
