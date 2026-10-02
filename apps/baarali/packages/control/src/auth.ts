@@ -230,7 +230,16 @@ export interface BaaraliAuth {
   handle(req: Request): Promise<Response>;
   /** The user an access token from our OAuth server belongs to, or null. */
   userIdForAccessToken(token: string): Promise<string | null>;
+  /**
+   * A Spaces token for an account's user, for the account's cloud instance
+   * (its own token is ours alone; Spaces verify a JWT). Null: no Spaces
+   * server, or no sign-in user behind the account.
+   */
+  spacesTokenFor(accountId: string): Promise<{ token: string; expiresIn: number } | null>;
 }
+
+/** How long a traded Spaces token lives: the length of an access token. */
+export const SPACES_TOKEN_SECONDS = 15 * 60;
 
 export function createAuth(deps: AuthDeps): BaaraliAuth {
   const auth = betterAuth(authOptions(deps));
@@ -254,6 +263,30 @@ export function createAuth(deps: AuthDeps): BaaraliAuth {
         return html((nonce) => consentPage({ lang, nonce }));
       }
       return auth.handler(await asAppRequest(req, deps.spacesUrl));
+    },
+
+    async spacesTokenFor(accountId: string) {
+      if (!deps.spacesUrl) return null;
+      const { rows } = await deps.db.query<{ id: string; email: string | null; emailVerified: boolean | null; name: string | null }>(
+        `SELECT u.id, u.email, u."emailVerified", u.name FROM baarali.accounts a
+           JOIN baarali.users u ON u.id = coalesce(a.user_id, a.id)
+          WHERE a.id = $1`,
+        [accountId],
+      );
+      const user = rows[0];
+      if (!user) return null;
+      const now = Math.floor(deps.now() / 1000);
+      // Signed like the Spaces tokens of a sign-in (ES256, our issuer, the
+      // Spaces audience), so Spaces see the same person from the phone. The
+      // override picks the ES256 key for this call only; every key row
+      // carries its alg (Better Auth 1.7 writes it), so none is mistaken.
+      const { token } = await auth.api.signJWT({
+        body: {
+          payload: { sub: user.id, iat: now, exp: now + SPACES_TOKEN_SECONDS, iss: `${deps.publicUrl}${AUTH_BASE_PATH}`, aud: [deps.spacesUrl], ...spacesClaims(user) },
+          overrideOptions: { jwks: { keyPairConfig: { alg: 'ES256' } } },
+        },
+      });
+      return { token, expiresIn: SPACES_TOKEN_SECONDS };
     },
 
     async userIdForAccessToken(token: string): Promise<string | null> {

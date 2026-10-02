@@ -80,7 +80,7 @@ async function setup(spacesUrl?: string) {
     const meta = await (await fetcher(`${ISSUER}/.well-known/oauth-authorization-server`)).json();
     const registered = await fetcher(meta.registration_endpoint, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', 'fly-client-ip': ip },
       body: JSON.stringify({
         client_name: 'Baarali Mobile',
         redirect_uris: [REDIRECT],
@@ -112,7 +112,7 @@ async function setup(spacesUrl?: string) {
     return { clientId, tokens: (await res.json()) as { access_token: string; refresh_token: string; id_token: string } };
   }
 
-  return { app, fetcher, form, signInFromPhone };
+  return { app, db, store, fetcher, form, signInFromPhone };
 }
 
 /** auth-oidc.ts, step by step: metadata at the issuer, same issuer, its keys, ES256/RS256 only. */
@@ -159,6 +159,41 @@ describe('the tokens Spaces receive', () => {
     expect(() => decodeJwt(tokens.access_token)).toThrow();
     expect((await app.request('/v1/me', { headers: { authorization: `Bearer ${tokens.access_token}` } })).status).toBe(200);
     expect((await (await app.request('/v1/config')).json()).spacesApexUrl).toBeNull();
+  });
+});
+
+describe('the token a cloud instance trades', () => {
+  async function instanceOf(email: string, spacesUrl?: string) {
+    const ctx = await setup(spacesUrl);
+    const { tokens } = await ctx.signInFromPhone(email);
+    const me = await (await ctx.app.request('/v1/me', { headers: { authorization: `Bearer ${tokens.access_token}` } })).json();
+    await ctx.store.grantToken('inst-token', me.user.id);
+    const trade = () => ctx.app.request('/v1/spaces/token', { method: 'POST', headers: { authorization: 'Bearer inst-token' } });
+    return { ...ctx, me, tokens, trade };
+  }
+
+  it('is a Spaces token for the same person the phone signs in as', async () => {
+    const { fetcher, tokens, trade } = await instanceOf('awa@example.test', SPACES);
+    const res = await trade();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.expires_in).toBe(900);
+    const traded = await verifyAsHarbor(fetcher, body.access_token);
+    const phone = await verifyAsHarbor(fetcher, tokens.access_token);
+    expect(traded.sub).toBe(phone.sub);
+    expect(traded.email).toBe('awa@example.test');
+    expect(traded.aud).toEqual([SPACES]);
+    expect(decodeProtectedHeader(body.access_token).alg).toBe('ES256');
+  });
+
+  it('is refused without a token', async () => {
+    const { app } = await instanceOf('awa@example.test', SPACES);
+    expect((await app.request('/v1/spaces/token', { method: 'POST' })).status).toBe(401);
+  });
+
+  it('does not exist without a Spaces server', async () => {
+    const { trade } = await instanceOf('awa@example.test');
+    expect((await trade()).status).toBe(404);
   });
 });
 

@@ -16,6 +16,7 @@ const auth: BaaraliAuth = {
   methods: { email: true, phone: false, social: [] },
   handle: async () => new Response(null, { status: 404 }),
   userIdForAccessToken: async (t) => ({ 'at-me': ME.id, 'at-other': OTHER.id })[t] ?? null,
+  spacesTokenFor: async () => null,
 };
 
 const fly: FlyApi = {

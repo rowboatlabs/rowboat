@@ -37,6 +37,9 @@ const child = spawn(process.execPath, [required('ROWBOAT_SERVER_ENTRY')], {
     ROWBOAT_WORKDIR: workDir,
     ROWBOAT_SERVER_PORT: String(serverPort),
     API_URL: required('API_URL'),
+    // Spaces cannot verify the instance token: core trades it there (core
+    // auth/spaces-exchange.ts, control POST /v1/spaces/token).
+    BAARALI_SPACES_TOKEN_URL: `${required('API_URL').replace(/\/+$/, '')}/v1/spaces/token`,
     // The instance token is the session in oauth.json; the server needs no copy.
     BAARALI_INSTANCE_TOKEN: '',
     // Same for the server key: it reads it from its file.

@@ -105,6 +105,15 @@ export function createApp(deps: ControlDeps) {
   app.use('/v1/me', authed);
   app.use('/v1/llm/*', authed);
   app.use('/v1/media/*', authed);
+  app.use('/v1/spaces/*', authed);
+
+  // A cloud instance trades its token for a Spaces one (core
+  // auth/spaces-exchange.ts): Spaces verify only our signed JWTs.
+  app.post('/v1/spaces/token', async (c) => {
+    const traded = deps.auth && deps.spacesUrl ? await deps.auth.spacesTokenFor(c.get('account').id) : null;
+    if (!traded) return c.json({ error: { code: 'not_found' } }, 404);
+    return c.json({ access_token: traded.token, token_type: 'Bearer', expires_in: traded.expiresIn });
+  });
 
   // Same body as the Rowboat Labs /v1/me (core billing/billing.ts reads it).
   // Session → `daily`, week → `monthly`: see architecture §3.5.

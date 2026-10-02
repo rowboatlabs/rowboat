@@ -93,6 +93,7 @@ Harbor (`apps/harbor`) est le serveur des espaces : canaux, fils, fichiers parta
 - **Les adresses** : `spaces.baarali.com` crée les équipes et les liste ; chaque équipe vit sur `<équipe>.spaces.baarali.com`. Il faut donc un certificat joker chez Fly et trois lignes DNS chez Hostinger (`spaces`, `*.spaces`, `_acme-challenge.spaces`).
 - **Les fichiers** vont chez Tigris (le stockage de Fly, compatible S3), seau `baarali-spaces-files`.
 - **Les apps** l'apprennent par `BAARALI_SPACES_URL` sur le plan de contrôle (`/v1/config`) ; l'app mobile, par son build (`EXPO_PUBLIC_SPACES_APEX`).
+- **L'app Mac passe par l'instance**, dont le jeton n'est connu que du plan de contrôle. L'instance l'échange contre un jeton Espaces (JWT ES256, 15 min, même identifiant de compte que le téléphone) sur `POST /v1/spaces/token` : `BAARALI_SPACES_TOKEN_URL`, posée par `packages/instance/src/main.ts`, lue par core (`auth/spaces-exchange.ts`).
 
 ```sh
 fly deploy --config apps/baarali/packages/spaces/fly.toml --dockerfile apps/baarali/packages/spaces/Dockerfile --remote-only --ha=false .

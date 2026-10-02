@@ -3,6 +3,7 @@ import { IOAuthRepo, isAppSignIn, rowboatSession } from './repo.js';
 import { IClientRegistrationRepo } from './client-repo.js';
 import { getProviderConfig } from './providers.js';
 import * as oauthClient from './oauth-client.js';
+import { exchangeForSpaces } from './spaces-exchange.js';
 import { OAuthTokens } from './types.js';
 
 // The Rowboat session, and its two uses (2026-09-14). The `rowboat` provider
@@ -91,6 +92,9 @@ export async function getSessionAccessToken(opts?: { forceRefresh?: boolean }): 
     if (!session) {
         throw new Error('Sign in with your Rowboat account to use Spaces');
     }
+    // A cloud instance trades its never-expiring session for a Spaces token.
+    const exchange = process.env.BAARALI_SPACES_TOKEN_URL;
+    if (exchange) return exchangeForSpaces(exchange, await sessionToken(session.tokens), opts);
     return sessionToken(session.tokens, opts);
 }
 
