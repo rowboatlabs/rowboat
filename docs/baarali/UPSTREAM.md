@@ -25,7 +25,15 @@ Chaque ligne modifiée dans un fichier upstream est un conflit potentiel, **pour
 
 ### Ce qu'on ne renomme jamais
 
-Les identifiants internes restent ceux de Rowboat : packages `@x/*` et `@rowboat/*`, variables `ROWBOAT_*`, dossier `~/.rowboat` (configurable par `ROWBOAT_WORKDIR`), noms de workflows. Les renommer toucherait des milliers de lignes et rendrait chaque synchro conflictuelle. **La marque Baarali ne vit qu'à la surface visible par l'utilisateur**, via une couche de marque + i18n (à spécifier dans `TARGET_AGENTIC_ARCHITECTURE.md`).
+Les identifiants internes restent ceux de Rowboat : packages `@x/*` et `@rowboat/*`, variables `ROWBOAT_*`, dossier `~/.rowboat` (configurable par `ROWBOAT_WORKDIR`), noms de workflows. Les renommer toucherait des milliers de lignes et rendrait chaque synchro conflictuelle. **La marque Baarali ne vit qu'à la surface visible par l'utilisateur**, par deux couches appliquées à la fabrication, jamais dans le dépôt :
+
+- la marque, `apps/baarali/packages/desktop/scripts/brand.mjs`. Elle couvre :
+  - le nom ;
+  - les liens ;
+  - la mention que l'on tape pour appeler l'assistant, `@baarali` au lieu de `@rowboat`. L'ancre du protocole des espaces (`#rowboat`) reste inchangée ;
+  - ce que le cœur écrit dans un nouveau compte (premières tâches, planificateur) ;
+  - la règle de langue de l'agent ;
+- la traduction, `apps/baarali/packages/desktop/src/i18n/`. Son `i18n-extract.mjs --check` bloque toute version qui laisserait une phrase en anglais.
 
 Pourquoi c'est obligatoire, et pas seulement pratique : la licence Apache-2.0 ne donne **aucun droit sur la marque « Rowboat »** (§6). Le produit distribué doit donc s'appeler Baarali partout où l'utilisateur le voit. Voir [`/NOTICE`](../../NOTICE).
 

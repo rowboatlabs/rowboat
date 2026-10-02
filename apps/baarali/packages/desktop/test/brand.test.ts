@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { ROOT, apply, brandText } from '../scripts/brand.mjs';
+import { ROOT, apply, brandText, corePlan, desktopPlan } from '../scripts/brand.mjs';
 
 describe('brandText', () => {
   it('names the product Baarali and keeps every internal id', () => {
@@ -16,6 +16,14 @@ describe('brandText', () => {
   it('leaves the company alone and credits the upstream', () => {
     expect(brandText("name: 'Rowboat Labs'")).toBe("name: 'Rowboat Labs'");
     expect(brandText('Made by Rowboat Labs · Apache 2.0')).toBe('Made by OpenBaara · Built on Rowboat (Apache 2.0)');
+  });
+
+  it('names the handle @baarali, never a package nor the protocol anchor', () => {
+    expect(brandText('Ask @rowboat about this')).toBe('Ask @baarali about this');
+    expect(brandText('const RE = /(^|\\s)@rowboat\\b/i;')).toBe('const RE = /(^|\\s)@baarali\\b/i;');
+    expect(brandText('`[@rowboat](#rowboat) ${args}`')).toBe('`[@baarali](#rowboat) ${args}`');
+    expect(brandText("from '@rowboat/spaces-protocol'")).toBe("from '@rowboat/spaces-protocol'");
+    expect('@baarali'.length).toBe('@rowboat'.length);
   });
 
   it('points the links, the updater and the control plane at ours', () => {
@@ -46,13 +54,26 @@ describe('apply on this checkout', () => {
     expect(changes.length).toBeGreaterThan(0);
     expect(changes.every((c) => c.startsWith('edit apps/x/packages/core/src/'))).toBe(true);
   });
+
+  // Decided 02/10/2026: the agent answers in the person's language, and what
+  // the core writes into a new account (the first to-dos, the planner) is French.
+  it('gives the agent its language rule and the first account its French', () => {
+    const changes = apply({ only: 'core', write: false });
+    for (const file of ['runtime/assembly/compose-instructions.ts', 'todo/fileops.ts', 'todo/planner-task.ts']) {
+      expect(changes).toContain(`edit apps/x/packages/core/src/${file}`);
+    }
+    const [language] = corePlan().edits;
+    expect(language.to).toMatch(/^const USER_CONTEXT_SYSTEM_INSTRUCTIONS = `# Language\nReply in the language the user writes in/);
+    expect(language.to).not.toMatch(/`[^`]*`[^`]*# Hidden/);
+  });
 });
 
 describe('apply on a Windows checkout', () => {
   it('finds its anchors in CRLF files', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'brand-crlf-'));
     const main = 'apps/x/apps/main';
-    for (const rel of [`${main}/forge.config.cjs`, `${main}/src/main.ts`, `${main}/package.json`, 'apps/x/apps/renderer/src/main.tsx']) {
+    const edited = [...corePlan().edits, ...desktopPlan().edits].map((e) => e.file);
+    for (const rel of new Set([...edited, `${main}/package.json`])) {
       fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
       fs.writeFileSync(path.join(root, rel), fs.readFileSync(path.join(ROOT, rel), 'utf8').replace(/\r?\n/g, '\r\n'));
     }

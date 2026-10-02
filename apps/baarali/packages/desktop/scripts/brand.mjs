@@ -51,9 +51,15 @@ const LINKS = [
   ["'AI coworker with memory'", JSON.stringify(BRAND.description)],
 ];
 
+// The handle a person types to call the assistant (decided 02/10/2026):
+// `@baarali`, everywhere it is written, shown or recognised. Not a package
+// (`@rowboat/spaces-protocol`) nor the protocol's anchor (`#rowboat`), which
+// never says `@`. Same length as `@rowboat`, for code that counts it.
+const HANDLE = /@rowboat(?![\w/-])/g;
+
 /** The visible text of one source file, branded. */
 export function brandText(text) {
-  let out = text;
+  let out = text.replace(HANDLE, '@baarali');
   for (const [from, to] of LINKS) out = out.split(from).join(to);
   // Apache-2.0 §4: say where it comes from; the company is not ours to name as the maker.
   out = out.split('Made by Rowboat Labs · Apache 2.0').join(`Made by ${BRAND.publisher} · Built on Rowboat (Apache 2.0)`);
@@ -160,8 +166,45 @@ export function startBaaraliCloud(): void {
 }
 `;
 
+// What the agent says and seeds, in the core: the desktop app and the
+// instance image both run it (decided 02/10/2026).
+const LANGUAGE = `# Language
+Reply in the language the user writes in, and keep to it until they switch. Write it the way a fluent native speaker would: simple, natural and warm, never a word-for-word translation. Keep names, code, file paths and quoted text as they are. Everything you write for the user follows this rule: notes, to-do items, summaries, titles, drafts; an email reply follows the language of the email it answers. With no message to go by (a background or scheduled task), use the language of the user's recent notes and messages, or French when unclear.
+
+`;
+
+const TODO_SEED_FR = [
+  'const SEED = `- [ ] Ajoutez votre première tâche — tapez-la simplement ci-dessous',
+  '- [ ] @baarali présente-toi — que peux-tu faire pour moi ?',
+  '- [ ] Écartez ce dont vous ne voulez pas — survolez une ligne et touchez ✕ (elle passe dans « Fait et écarté » plus bas, restaurable)',
+  '`;',
+].join('\n');
+
+export function corePlan() {
+  const core = 'apps/x/packages/core/src';
+  return {
+    edits: [
+      edit(`${core}/runtime/assembly/compose-instructions.ts`, 'const USER_CONTEXT_SYSTEM_INSTRUCTIONS = `# Hidden User Context', `const USER_CONTEXT_SYSTEM_INSTRUCTIONS = \`${LANGUAGE.replace(/`/g, '\\`')}# Hidden User Context`),
+      // The first to-do list a person sees, written into their todo.md once.
+      edit(
+        `${core}/todo/fileops.ts`,
+        "const SEED = `- [ ] Add your first to-do — just type below\n- [ ] @rowboat introduce yourself — what can you do here?\n- [ ] Dismiss anything you don't want — hover a row and hit ✕ (it lands in Done & dismissed below, restorable)\n`;",
+        TODO_SEED_FR,
+      ),
+      // The planner's name; its doctrine stays the upstream's, which upgrades it.
+      edit(`${core}/todo/planner-task.ts`, "const PLANNER_NAME = 'Morning planner';", "const PLANNER_NAME = 'Planificateur du matin';"),
+      edit(
+        `${core}/todo/planner-task.ts`,
+        "items.find(t => t.name.toLowerCase().includes('planner') || t.slug.includes('planner'))",
+        "items.find(t => /planner|planificateur/.test(t.name.toLowerCase()) || /planner|planificateur/.test(t.slug))",
+      ),
+    ],
+  };
+}
+
 export function desktopPlan() {
   const main = 'apps/x/apps/main';
+  const renderer = 'apps/x/apps/renderer/src';
   return {
     edits: [
       edit(`${main}/forge.config.cjs`, "appBundleId: 'com.rowboat.app',", `appBundleId: '${BRAND.bundleId}',`),
@@ -188,6 +231,15 @@ export function desktopPlan() {
       // French (src/i18n/), first of all so dates are French from the start.
       edit('apps/x/apps/renderer/src/main.tsx', "import { StrictMode } from 'react'\n", "import './baarali-i18n/index.ts'\nimport { StrictMode } from 'react'\n"),
       edit(`${main}/src/main.ts`, 'import "./node-guard.js";\n', 'import "./node-guard.js";\nimport "./baarali-i18n-glue.js";\n'),
+      // The handle where the UI writes it without its @ (see HANDLE).
+      edit(`${renderer}/components/markdown-editor.tsx`, "if (query === 'rowboat') {", "if (query === 'baarali' || query === 'rowboat') {"),
+      edit(
+        `${renderer}/components/spaces/mention-autocomplete.tsx`,
+        "if ('rowboat'.startsWith(q)) people.push({ id: 'rowboat', label: 'rowboat',",
+        "if ('baarali'.startsWith(q)) people.push({ id: 'rowboat', label: 'baarali',",
+      ),
+      edit(`${renderer}/components/spaces/composer.tsx`, "attrs: { kind: 'rowboat', id: null, label: 'rowboat' }", "attrs: { kind: 'rowboat', id: null, label: 'baarali' }"),
+      edit(`${renderer}/components/spaces/composer-editor.ts`, "getAttrs: () => ({ kind: 'rowboat', id: null, label: 'rowboat' })", "getAttrs: () => ({ kind: 'rowboat', id: null, label: 'baarali' })"),
     ],
     copies: [
       ['assets/icon.icns', `${main}/icons/icon.icns`],
@@ -223,6 +275,13 @@ export function apply({ root = ROOT, only, write = false }) {
   const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8').replace(/\r\n/g, '\n');
   const pending = new Map();
   const current = (rel) => (pending.has(rel) ? pending.get(rel) : read(rel));
+
+  for (const e of corePlan().edits) {
+    const text = current(e.file);
+    const count = text.split(e.from).length - 1;
+    if (count !== 1) throw new Error(`brand: ${e.file}: expected the anchor once, found it ${count} times:\n${e.from}`);
+    pending.set(e.file, text.replace(e.from, () => e.to));
+  }
 
   if (only !== 'core') {
     const plan = desktopPlan();
