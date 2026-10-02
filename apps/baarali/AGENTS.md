@@ -71,7 +71,7 @@ fly deploy --config apps/baarali/packages/instance/fly.toml --dockerfile apps/ba
 
 Toutes se suspendent au repos et se réveillent à la requête suivante. Une instance n'a pas d'adresse publique : l'app l'atteint par la passerelle du plan de contrôle, `https://app.baarali.com/instance`, avec sa clé d'appareil. Pour une vérification à la main : `fly proxy 3221:80 warell-owner.flycast -a warell-owner`, puis `http://localhost:3221` avec la clé de l'instance.
 
-**Publier une nouvelle image d'instance.** On la construit dans l'app des instances sans rien y déployer, puis le plan de contrôle la reçoit. Chaque machine y passe à la prochaine connexion d'un de ses appareils :
+**Publier une nouvelle image d'instance.** On la construit dans l'app des instances sans rien y déployer, puis le plan de contrôle la reçoit. Chaque machine y passe à son prochain réveil (elle dormait : personne n'est coupé), ou à la prochaine connexion d'un de ses appareils. Une machine allumée n'est jamais redémarrée pour ça :
 
 ```sh
 fly deploy --config apps/baarali/packages/instance/fly.toml --dockerfile apps/baarali/packages/instance/Dockerfile \

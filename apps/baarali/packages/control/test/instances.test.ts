@@ -35,7 +35,8 @@ class FakeFly implements FlyApi {
   }
   async updateMachine(_app: string, id: string, config: MachineConfig) {
     this.calls.push(`update ${id} ${config.image}`);
-    const machine = { ...this.machines.get(id)!, config };
+    // Fly launches a stopped or suspended machine on its new config.
+    const machine = { ...this.machines.get(id)!, config, state: 'started' };
     this.machines.set(id, machine);
     return machine;
   }
@@ -150,6 +151,26 @@ describe('Instances keys and reach', () => {
     tick(31_000);
     await instances.wake(record);
     expect(fly.calls.at(-1)).toBe(`get ${record.machineId}`);
+  });
+
+  it('wakes a sleeping machine on the new image, and leaves a running one alone', async () => {
+    const { store, fly, instances, tick } = setup();
+    const record = await instances.ensure(ME);
+    const old = { ...record, image: 'registry.fly.io/baarali-instances:v1' };
+    await store.saveInstance(old);
+    // Running: never restarted under its person.
+    fly.calls.length = 0;
+    await instances.wake(old);
+    expect(fly.calls).toEqual([`get ${record.machineId}`]);
+    expect((await store.instance(ME.id))!.image).toBe(old.image);
+    // Asleep: woken on the new image, once.
+    tick(31_000);
+    fly.machines.get(record.machineId!)!.state = 'suspended';
+    fly.calls.length = 0;
+    await instances.wake(old);
+    expect(fly.calls).toEqual([`get ${record.machineId}`, `update ${record.machineId} ${CONFIG.image}`, `wait ${record.machineId}`]);
+    expect((await store.instance(ME.id))!.image).toBe(CONFIG.image);
+    expect(fly.machines.get(record.machineId!)!.config.env.BAARALI_SERVER_KEY).toBe(instances.serverKey(ME.id));
   });
 
   it('asks Fly once for a burst of requests', async () => {

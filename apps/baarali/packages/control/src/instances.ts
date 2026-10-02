@@ -169,17 +169,25 @@ export class Instances {
     // all of them, or Fly's rate limit (429) turns them all into errors.
     let pending = this.waking.get(id);
     if (!pending) {
-      pending = this.check(record.app, id, fly).finally(() => this.waking.delete(id));
+      pending = this.check(record, id, fly).finally(() => this.waking.delete(id));
       this.waking.set(id, pending);
     }
     return pending;
   }
 
-  private async check(app: string, id: string, fly: FlyApi): Promise<void> {
+  private async check(record: InstanceRecord, id: string, fly: FlyApi): Promise<void> {
+    const app = record.app;
     try {
       const machine = await fly.machine(app, id);
       if (machine.state !== 'started') {
-        if (machine.state !== 'starting') await fly.start(app, id);
+        if (machine.state !== 'starting') {
+          // Asleep on an old image (02/10/2026): wake it on the new one. Only
+          // now, while nobody is using it — a running machine is never
+          // restarted under its person; it waits for its next sleep, or for
+          // a device to connect (ensure). Fly launches it with the update.
+          if (await this.outdated(record)) await this.moveToImage(record);
+          else await fly.start(app, id);
+        }
         await fly.waitStarted(app, id, WAKE_TIMEOUT_S);
       }
     } catch (err) {
@@ -192,6 +200,22 @@ export class Instances {
       return;
     }
     this.awakeUntil.set(id, this.deps.now() + AWAKE_MS);
+  }
+
+  /** The stored record, not the caller's copy: another wake may have moved it already. */
+  private async outdated(record: InstanceRecord): Promise<boolean> {
+    const { config, store } = this.deps;
+    if (!config || !record.managed) return false;
+    const current = await store.instance(record.accountId);
+    return Boolean(current?.machineId && current.volumeId && current.image !== config.image);
+  }
+
+  private async moveToImage(record: InstanceRecord): Promise<void> {
+    const { fly, config, store } = this.deps;
+    const current = await store.instance(record.accountId);
+    if (!fly || !config || !current?.machineId || !current.volumeId) return;
+    await fly.updateMachine(current.app, current.machineId, this.machineConfig(current.accountId, current.volumeId, config));
+    await store.saveInstance({ ...current, image: config.image });
   }
 
   /** Over Flycast (private): an instance has no public address. */
