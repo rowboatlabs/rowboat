@@ -4,6 +4,7 @@ import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 
+import { JoinWithLink } from '@/components/join-with-link';
 import { useSpacesAccount, type SpacesOrg } from '@/lib/spaces/account';
 import { SpacesClient } from '@/lib/spaces/client';
 import type { Member, Space } from '@rowboat/spaces-protocol';
@@ -157,6 +158,8 @@ function OrgList() {
           </View>
         ) : null}
         {who ? <View style={{ height: 1, marginLeft: 44, backgroundColor: colors.separator }} /> : null}
+        <JoinWithLink />
+        <View style={{ height: 1, marginLeft: 44, backgroundColor: colors.separator }} />
         <Pressable
           onPress={() => void account.signOut()}
           style={({ pressed }) => ({

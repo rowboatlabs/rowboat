@@ -143,7 +143,8 @@ async function tokenRequest(endpoint: string, params: Record<string, string>): P
     error_description?: string;
   };
   if (!res.ok || !json.access_token) {
-    throw new Error(`token request failed (${res.status}): ${json.error_description ?? json.error ?? 'no access token'}`);
+    // The status rides along (2026-10-02): a 400/401 on a refresh is a dead session, not a passing failure.
+    throw Object.assign(new Error(`token request failed (${res.status}): ${json.error_description ?? json.error ?? 'no access token'}`), { status: res.status });
   }
   return {
     access: json.access_token,

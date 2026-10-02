@@ -88,10 +88,24 @@ export function SpacesAccountProvider({ children }: { children: ReactNode }) {
     if (!opts?.forceRefresh && !nearExpiry) return account.tokens.access;
     if (!refreshing.current) {
       refreshing.current = (async () => {
-        const tokens = await refreshTokens(account.issuer, account.clientId, account.tokens.refresh);
-        // Persisted before anyone uses it: the old refresh token just died.
-        await persist({ ...account, tokens });
-        return tokens;
+        try {
+          const tokens = await refreshTokens(account.issuer, account.clientId, account.tokens.refresh);
+          // Persisted before anyone uses it: the old refresh token just died.
+          await persist({ ...account, tokens });
+          return tokens;
+        } catch (err) {
+          // Refused for good (revoked, or the session is gone): back to the
+          // sign-in screen rather than the same red error on every screen.
+          const status = (err as { status?: number }).status;
+          if (status === 400 || status === 401) {
+            await persist(null);
+            void AsyncStorage.removeItem(ORGS_CACHE_KEY).catch(() => {});
+            setOrgs(null);
+            setOrgsError(null);
+            setStatus('signedOut');
+          }
+          throw err;
+        }
       })().finally(() => {
         refreshing.current = null;
       });
