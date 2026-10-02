@@ -6,3 +6,10 @@
 **/.env
 .git
 **/*.gif
+# Native and packaged builds made on a developer's machine (the simulator's
+# iOS project weighs over a gigabyte): no image uses them (02/10/2026).
+apps/x/apps/mobile/ios
+apps/x/apps/mobile/android
+**/.expo
+apps/x/apps/main/.package
+apps/x/apps/main/out
