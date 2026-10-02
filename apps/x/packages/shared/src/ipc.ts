@@ -3891,6 +3891,12 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string() }),
     res: z.object({ success: z.literal(true) }),
   },
+  // Delete a Baarali-hosted org for everyone (2026-10-02): admins only, the
+  // name typed back; the apex refuses anything else with its own message.
+  'spaces:deleteOrg': {
+    req: z.object({ orgId: z.string(), confirmName: z.string() }),
+    res: z.object({ success: z.literal(true) }),
+  },
   // Shared spaces by default; includeDirect adds the member's DMs (kind
   // 'direct') — opt-in on the wire so a pre-DM build never renders one as a space.
   'spaces:listSpaces': {

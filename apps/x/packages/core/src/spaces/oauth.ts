@@ -340,6 +340,32 @@ export async function createOrgOnDeployment(input: {
   throw new Error(failure);
 }
 
+/**
+ * Delete a managed org for everyone (Baarali, 2026-10-02): the apex's
+ * `DELETE /v1/orgs/:id`, admins only, with the org's name typed back. Only
+ * an org on the Baarali deployment — a foreign one is deleted by whoever
+ * runs it. The record itself is the caller's to remove, beside its
+ * subscriptions; other devices drop it at their next listing.
+ */
+export async function deleteOrgOnDeployment(input: { orgId: string; confirmName: string }): Promise<void> {
+  const record = getOrg(input.orgId);
+  if (!record) throw new Error(`unknown org ${input.orgId}`);
+  if (!record.serverOrgId || !(await isSessionBacked(record.auth))) {
+    throw new Error('Only a server hosted by Baarali can be deleted from the app');
+  }
+  const apex = await apexUrl();
+  const res = await fetch(`${apex}/v1/orgs/${encodeURIComponent(record.serverOrgId)}`, {
+    method: 'DELETE',
+    headers: { authorization: `Bearer ${await getSessionAccessToken()}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ confirmName: input.confirmName }),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { message?: string };
+    throw new Error(body.message ?? `server deletion failed (${res.status})`);
+  }
+  invalidateManagedOrgsSync();
+}
+
 /** Pre-auth resolution of a pasted invite link — what the join card shows. */
 export async function resolveInviteLink(url: string): Promise<{ baseUrl: string; token: string; resolved: ResolveInviteResult }> {
   const parsed = parseInviteLink(url);

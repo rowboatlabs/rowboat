@@ -83,7 +83,7 @@ oauthConnectBus.subscribe((event) => {
 
 type SpacesRpcChannel =
   | 'spaces:listOrgs' | 'spaces:addOrg' | 'spaces:resolveInviteLink' | 'spaces:joinInvite'
-  | 'spaces:signInOrg' | 'spaces:createOrg' | 'spaces:apexInfo' | 'spaces:removeOrg'
+  | 'spaces:signInOrg' | 'spaces:createOrg' | 'spaces:apexInfo' | 'spaces:removeOrg' | 'spaces:deleteOrg'
   | 'spaces:accountState' | 'spaces:signInRowboat' | 'spaces:addOrgByAddress'
   | 'spaces:listSpaces' | 'spaces:createSpace' | 'spaces:openDirect' | 'spaces:listMembers' | 'spaces:createInvite'
   | 'spaces:listOrgMembers' | 'spaces:renameSpace' | 'spaces:addMembers'
@@ -162,6 +162,13 @@ export const spacesRpcHandlers: SpacesHandlers = {
   },
 
   'spaces:removeOrg': async (args) => {
+    subscriptions.dropOrg(args.orgId);
+    await orgs.removeOrg(args.orgId);
+    return { success: true };
+  },
+
+  'spaces:deleteOrg': async (args) => {
+    await spacesOAuth.deleteOrgOnDeployment(args);
     subscriptions.dropOrg(args.orgId);
     await orgs.removeOrg(args.orgId);
     return { success: true };

@@ -291,6 +291,7 @@ export const RPC_CHANNELS = [
   'spaces:createOrg',
   'spaces:apexInfo',
   'spaces:removeOrg',
+  'spaces:deleteOrg',
   'spaces:listSpaces',
   'spaces:createSpace',
   'spaces:openDirect',

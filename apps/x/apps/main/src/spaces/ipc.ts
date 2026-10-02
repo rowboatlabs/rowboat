@@ -34,6 +34,7 @@ type SpacesHandlers = {
   'spaces:createOrg': InvokeHandler<'spaces:createOrg'>;
   'spaces:apexInfo': InvokeHandler<'spaces:apexInfo'>;
   'spaces:removeOrg': InvokeHandler<'spaces:removeOrg'>;
+  'spaces:deleteOrg': InvokeHandler<'spaces:deleteOrg'>;
   'spaces:listSpaces': InvokeHandler<'spaces:listSpaces'>;
   'spaces:createSpace': InvokeHandler<'spaces:createSpace'>;
   'spaces:renameSpace': InvokeHandler<'spaces:renameSpace'>;
@@ -208,6 +209,13 @@ export const spacesIpcHandlers: SpacesHandlers = {
   },
 
   'spaces:removeOrg': async (_event, args) => {
+    subscriptions.dropOrg(args.orgId);
+    await orgs.removeOrg(args.orgId);
+    return { success: true };
+  },
+
+  'spaces:deleteOrg': async (_event, args) => {
+    await spacesOAuth.deleteOrgOnDeployment(args);
     subscriptions.dropOrg(args.orgId);
     await orgs.removeOrg(args.orgId);
     return { success: true };

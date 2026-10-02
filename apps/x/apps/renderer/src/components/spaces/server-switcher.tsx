@@ -1,13 +1,15 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { orgUrl } from '@x/shared/dist/spaces.js'
 import { copySpacesLink } from '@/lib/spaces-copy-link'
-import { Bot, Check, ChevronsUpDown, Link as LinkIcon, LogIn, Plus, Trash2 } from 'lucide-react'
+import { Bot, Check, ChevronsUpDown, Link as LinkIcon, LogIn, Plus, Trash2, TriangleAlert } from 'lucide-react'
 import { OrgMonogram } from '@/components/spaces/atoms'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { serverLandingSpaceId } from '@/lib/spaces-navigation'
 import { openServerDialog } from '@/lib/server-dialog'
 import { AgentsDialog } from './agents-dialog'
+import { useOrgRoster } from '@/hooks/use-space-members'
+import { DeleteServerDialog } from './delete-server-dialog'
 import { RemoveServerDialog } from './remove-server-dialog'
 
 export function ServerSwitcher({ org, onOpenSpace, onMenuOpenChange }: {
@@ -19,6 +21,11 @@ export function ServerSwitcher({ org, onOpenSpace, onMenuOpenChange }: {
     const [menuOpen, setMenuOpen] = useState(false)
     const [confirmRemove, setConfirmRemove] = useState(false)
     const [agentsOpen, setAgentsOpen] = useState(false)
+    const [confirmDelete, setConfirmDelete] = useState(false)
+    // Deleting for everyone is an admin's act, on a server Baarali hosts (2026-10-02).
+    const spaceIds = useMemo(() => org.spaces.map((s) => s.id), [org.spaces])
+    const roster = useOrgRoster(org.id, spaceIds)
+    const canDelete = org.authKind === 'session' && roster.find((m) => m.id === org.memberId)?.role === 'admin'
     const openServer = (server: OrgWithSpaces, spaceId?: string) => {
         onOpenSpace(server.id, spaceId ?? serverLandingSpaceId(server))
     }
@@ -39,7 +46,7 @@ export function ServerSwitcher({ org, onOpenSpace, onMenuOpenChange }: {
                     <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" />
                 </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" sideOffset={4} className="w-64" onCloseAutoFocus={(event) => { if (confirmRemove || agentsOpen) event.preventDefault() }}>
+            <DropdownMenuContent align="start" sideOffset={4} className="w-64" onCloseAutoFocus={(event) => { if (confirmRemove || confirmDelete || agentsOpen) event.preventDefault() }}>
                 {orgs.map((server) => <DropdownMenuItem key={server.id}
                     onSelect={() => { if (server.id !== org.id) openServer(server) }}>
                     <OrgMonogram org={server} />
@@ -65,9 +72,16 @@ export function ServerSwitcher({ org, onOpenSpace, onMenuOpenChange }: {
                     setConfirmRemove(true)
                     onMenuOpenChange?.(true)
                 }}><Trash2 className="size-4" />Remove server</DropdownMenuItem>
+                {canDelete && <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={(event) => {
+                    event.preventDefault()
+                    setMenuOpen(false)
+                    setConfirmDelete(true)
+                    onMenuOpenChange?.(true)
+                }}><TriangleAlert className="size-4" />Delete server…</DropdownMenuItem>}
             </DropdownMenuContent>
         </DropdownMenu>
         <AgentsDialog org={org} open={agentsOpen} onOpenChange={(open) => { setAgentsOpen(open); onMenuOpenChange?.(open) }} />
+        <DeleteServerDialog org={org} open={confirmDelete} onOpenChange={(open) => { setConfirmDelete(open); onMenuOpenChange?.(open) }} onDeleted={() => void refresh()} />
         <RemoveServerDialog org={org} open={confirmRemove} onOpenChange={(open) => { setConfirmRemove(open); onMenuOpenChange?.(open) }} onRemoved={() => void refresh()} />
     </>
 }
