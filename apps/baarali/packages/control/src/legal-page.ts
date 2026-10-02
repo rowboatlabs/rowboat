@@ -477,7 +477,6 @@ a { color:inherit; }
 :root[data-theme="dark"] .theme .moon { display:block; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .theme .sun { display:none; } :root:not([data-theme="light"]) .theme .moon { display:block; } }
 .hero { position:relative; overflow:hidden; background:var(--mist); border-bottom:1px solid var(--line); padding-block:64px 0; }
-.hero::before { content:""; position:absolute; inset:-40% -10% auto auto; width:640px; height:640px; background:radial-gradient(circle, rgb(26 109 255 / .14), transparent 65%); pointer-events:none; }
 .hero .wrap { position:relative; }
 .kicker { display:inline-flex; align-items:center; gap:8px; margin:0 0 16px; font-size:13px; font-weight:650; letter-spacing:.08em; text-transform:uppercase; color:var(--blue-deep); }
 .kicker::before { content:""; width:6px; height:6px; border-radius:50%; background:var(--blue); }

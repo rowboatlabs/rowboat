@@ -449,7 +449,6 @@ h1 em, h2 em { font-family:inherit; font-style:normal; font-weight:inherit; lett
 .head.center .lead { margin-inline:auto; }
 /* Hero */
 .hero { position:relative; overflow:hidden; background:var(--mist); border-bottom:1px solid var(--line); padding-block:72px 120px; text-align:center; }
-.hero::before { content:""; position:absolute; inset:-50% 0 auto; margin:auto; width:900px; height:700px; background:radial-gradient(circle, rgb(26 109 255 / .16), transparent 62%); pointer-events:none; }
 .hero .wrap { position:relative; display:flex; flex-direction:column; align-items:center; }
 .hero .lead { margin-inline:auto; }
 .switch { display:flex; align-items:center; gap:12px; margin-top:32px; font-size:14px; color:var(--muted); flex-wrap:wrap; justify-content:center; }
