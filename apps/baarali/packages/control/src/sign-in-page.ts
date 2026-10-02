@@ -16,7 +16,9 @@ type Lang = 'fr' | 'en';
 const STRINGS = {
   fr: {
     title: 'Connexion à Baarali',
-    lead: 'Pas de mot de passe : on vous envoie un code.',
+    // One door for both (02/10/2026): an account is created at its first sign-in.
+    heading: 'Se connecter ou créer un compte',
+    lead: 'Pas encore de compte ? Il se crée à votre première connexion, gratuitement. Pas de mot de passe : on vous envoie un code.',
     continueWith: 'Continuer avec',
     or: 'ou',
     email: 'Adresse email',
@@ -40,7 +42,8 @@ const STRINGS = {
   },
   en: {
     title: 'Sign in to Baarali',
-    lead: 'No password: we send you a code.',
+    heading: 'Sign in or create an account',
+    lead: 'No account yet? It is created at your first sign-in, free. No password: we send you a code.',
     continueWith: 'Continue with',
     or: 'or',
     email: 'Email address',
@@ -161,7 +164,7 @@ export function signInPage(opts: { methods: SignInMethods; lang: string | null; 
   ].filter(Boolean);
   const any = social || codeForms.length > 0;
   const body = `
-<h1>${escape(t.title)}</h1>
+<h1>${escape(t.heading)}</h1>
 ${any ? `<p>${escape(t.lead)}</p>` : `<p>${escape(t.none)}</p>`}
 ${social ? `<div class="stack">${social}</div>` : ''}
 ${social && codeForms.length ? `<div class="or">${escape(t.or)}</div>` : ''}

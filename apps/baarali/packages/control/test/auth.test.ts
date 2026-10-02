@@ -220,6 +220,9 @@ describe('the sign-in page', () => {
     // The code form starts hidden, and the stylesheet must not show it anyway.
     expect(page).toContain('[hidden] { display: none !important; }');
     expect(page).toContain('Connexion à Baarali');
+    // Sign-up is the same door: the page says so (02/10/2026).
+    expect(page).toContain('Se connecter ou créer un compte');
+    expect(page).toContain('Il se crée à votre première connexion');
   });
 });
 
