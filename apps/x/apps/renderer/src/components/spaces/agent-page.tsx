@@ -3,6 +3,7 @@ import { KeyRound, Loader2 } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { CreateInstance } from '@/components/spaces/agent-instance'
 import { ConnectAgent } from '@/components/spaces/agent-setup'
 import { refreshAgentCapabilities } from '@/hooks/use-space-invocations'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
@@ -51,6 +52,9 @@ export function AgentPage({ org, listing, isAdmin, onChanged }: {
     const [secret, setSecret] = useState<string | null>(null)
     const [busy, setBusy] = useState(false)
     const [confirming, setConfirming] = useState<string | null>(null)
+    // A new instance changes the declared options and the defaults: reload them.
+    const [optionsVersion, setOptionsVersion] = useState(0)
+    const setup = setupFor(agent)
 
     const newKey = async () => {
         if (busy) return
@@ -83,7 +87,20 @@ export function AgentPage({ org, listing, isAdmin, onChanged }: {
 
     return (
         <div className="flex min-w-0 flex-col gap-6">
-            <DefaultsSection orgId={org.id} agent={agent} canEdit={mine} />
+            <DefaultsSection key={optionsVersion} orgId={org.id} agent={agent} canEdit={mine} />
+
+            {mine && setup.createsInstances && (
+                <Section title="Instance" note={`Where ${agent.displayName} runs. Use one you already have in ${PLATFORMS[agent.agentConnection ?? '']?.label ?? 'the platform'}, or create one here.`}>
+                    <CreateInstance
+                        orgId={org.id}
+                        agentId={agent.id}
+                        agentName={agent.displayName}
+                        agentKind={agent.agentKind}
+                        connection={agent.agentConnection}
+                        onCreated={() => setOptionsVersion((v) => v + 1)}
+                    />
+                </Section>
+            )}
 
             <Section
                 title="Setup"
@@ -93,7 +110,7 @@ export function AgentPage({ org, listing, isAdmin, onChanged }: {
                         : `A key is shown only once, when it is made. Where the steps say ${KEY_PLACEHOLDER}, use that key${mine ? ', or make a new one to fill them in' : ''}.`
                 }
             >
-                <ConnectAgent org={org} setup={setupFor(agent)} {...(agent.agentKind ? { agentKind: agent.agentKind } : {})} agentId={agent.id} agentName={agent.displayName} agentKey={secret ?? KEY_PLACEHOLDER} />
+                <ConnectAgent org={org} setup={setup} {...(agent.agentKind ? { agentKind: agent.agentKind } : {})} agentId={agent.id} agentName={agent.displayName} agentKey={secret ?? KEY_PLACEHOLDER} />
             </Section>
 
             <Section title="Keys" note="Each key lets whatever runs the agent act as it. Revoking one cuts that off at once.">

@@ -36,6 +36,7 @@ const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
             if (args.credential === 'rpl_refused') throw new Error('Replicas did not accept this key: Invalid or missing API key')
             return { agent: { ...hermes, id: 'new', displayName: args.displayName, agentKind: args.kind, agentConnection: args.connection }, key: { ...key('k9', 'new'), secret: NEW_KEY } }
         case 'spaces:setAgentCredential': return { credential: { hint: `…${args.secret!.slice(-4)}`, setBy: 'me', setAt: '2026-09-30T12:00:00Z' } }
+        case 'spaces:createAgentInstance': return { instance: { id: 'i9', label: `${args.name} (i9)` }, defaults: { instance: 'i9' } }
         case 'spaces:createAgentKey': return { key: { ...key('k2', args.agentId!), secret: ROTATED } }
         case 'spaces:revokeAgentKey': return { key: key(args.keyId!, args.agentId!, { revokedAt: '2026-09-29T11:00:00Z' }) }
         case 'spaces:getAgentCapabilities': return { capabilities: { stop: false, options: options[args.agentId!] ?? [] }, defaults: defaults[args.agentId!] ?? {} }
@@ -259,6 +260,14 @@ describe('AgentsDialog', () => {
             `openclaw mcp add rowboat --url 'https://rowboat.example/mcp' --transport streamable-http --header 'Authorization: Bearer ${NEW_KEY}'`,
         )
         expect(screen.getByText('Restart the instance')).toBeInTheDocument()
+
+        // Optional: an instance for it, created on its Agent37 key, with a model budget and sleep.
+        expect(screen.getByLabelText('Instance name')).toHaveValue('rowboat-openclaw')
+        fireEvent.change(screen.getByLabelText('Monthly model budget'), { target: { value: '10' } })
+        fireEvent.click(screen.getByLabelText('Sleep when idle'))
+        fireEvent.click(screen.getByRole('button', { name: 'Create instance' }))
+        expect(await screen.findByText(/Created rowboat-openclaw \(i9\)/)).toBeInTheDocument()
+        expect(invoke).toHaveBeenCalledWith('spaces:createAgentInstance', { orgId: 'org-1', agentId: 'new', name: 'rowboat-openclaw', monthlyBudgetUsd: 10, autoSleep: false })
     })
 
     it('shows a Replicas agent’s key by its end, flags a rejected one, and lets its owner replace it', async () => {

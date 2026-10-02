@@ -173,6 +173,13 @@ export class HarborService {
   setAgentCredential(ctx: ActorCtx, agentId: string, secret: string): Promise<AgentCredential> {
     return this.agents.setCredential(ctx, agentId, secret);
   }
+  createAgentInstance(
+    ctx: ActorCtx,
+    agentId: string,
+    input: { name: string; monthlyBudgetUsd: number; autoSleep: boolean },
+  ): Promise<{ instance: { id: string; label: string }; defaults: InvocationOptionValues }> {
+    return this.agents.createInstance(ctx, agentId, input);
+  }
   createAgentKey(ctx: ActorCtx, agentId: string): Promise<AgentKeySecret> {
     return this.agents.createKey(ctx, agentId);
   }

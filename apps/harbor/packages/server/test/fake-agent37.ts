@@ -172,6 +172,11 @@ export class FakeAgent37 {
 
     if (url.pathname === '/v1/instances') {
       if (req.headers.authorization !== `Bearer ${GOOD_KEY}`) return error(401, 'invalid_api_key');
+      if (req.method === 'POST') {
+        const created = { id: `new${this.instances.length + 1}`, name: (body?.name as string) ?? null, template: String(body?.template ?? 'agent37-hermes'), status: 'running' };
+        this.instances.push(created);
+        return json(201, created);
+      }
       return json(200, { data: this.instances });
     }
 

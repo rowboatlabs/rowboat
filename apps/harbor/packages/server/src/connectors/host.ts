@@ -4,7 +4,7 @@ import type { SpaceHub } from '../hub.js';
 import { assertSealingConfigured, credentialHint, seal, unseal } from '../sealing.js';
 import type { HarborService } from '../service.js';
 import type { Store } from '../store.js';
-import { PLATFORMS, type ConnectorEnv, type RunningConnector } from './platforms.js';
+import { PLATFORMS, type ConnectorEnv, type InstanceRequest, type RunningConnector } from './platforms.js';
 
 // Runs one org's connectors (spec §8 Connectors, 2026-09-30): one per agent
 // whose connection is a platform Harbor calls. Started at boot for every such
@@ -33,6 +33,17 @@ export class HostedConnectors {
     const credential = { hint: credentialHint(secret), setBy, setAt: this.deps.service.now() };
     await this.deps.store.putAgentCredential({ agentId, sealed: seal(secret, this.deps.orgId, agentId), ...credential });
     return credential;
+  }
+
+  /** Create an instance for a platform agent on its stored credential, then have its connector declare what that changes. */
+  async createInstance(agent: Member, input: InstanceRequest): Promise<{ id: string; label: string }> {
+    const platform = agent.agentConnection ? PLATFORMS[agent.agentConnection] : undefined;
+    if (!platform?.createInstance) throw new HarborError('invalid_request', `${agent.agentConnection ?? 'this'} agents run on nothing Rowboat can create`);
+    const stored = await this.deps.store.getAgentCredential(agent.id);
+    if (!stored) throw new HarborError('invalid_request', 'this agent has no platform key');
+    const instance = await platform.createInstance(unseal(stored.sealed, this.deps.orgId, agent.id), agent, input);
+    await this.running.get(agent.id)?.refresh?.();
+    return instance;
   }
 
   async startAll(): Promise<void> {

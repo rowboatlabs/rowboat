@@ -109,6 +109,11 @@ export class Agent37Connector implements RunningConnector {
     return this;
   }
 
+  /** Declare again now: an instance was just created, and the composer should offer it. */
+  async refresh(): Promise<void> {
+    await this.declare();
+  }
+
   async stop(): Promise<void> {
     this.stopped = true;
     this.shutdown.abort();
@@ -203,7 +208,7 @@ export class Agent37Connector implements RunningConnector {
     if (!instances) return undefined;
     const kind = this.kindLabel();
     if (instances.length === 0) {
-      await this.fail(invocation, `This Agent37 workspace has no ${kind} instance. Create one on agent37.com, then mention me again.`);
+      await this.fail(invocation, `This Agent37 workspace has no ${kind} instance. My owner can create one on my page in Agents (or on agent37.com); then mention me again.`);
       return undefined;
     }
     const picked = invocation.options?.instance;

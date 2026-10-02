@@ -267,6 +267,14 @@ export class SpacesClient {
     return (await this.request('PUT', `/v1/agents/${encodeURIComponent(agentId)}/credential`, routes.setAgentCredential.response, { secret })).credential;
   }
 
+  /** Create an instance for a platform agent to run on (owner only; Agent37, 2026-10-02). It becomes the agent's default. */
+  async createAgentInstance(
+    agentId: string,
+    input: { name: string; monthlyBudgetUsd: number; autoSleep: boolean },
+  ): Promise<{ instance: { id: string; label: string }; defaults: Record<string, string | boolean> }> {
+    return this.request('POST', `/v1/agents/${encodeURIComponent(agentId)}/instances`, routes.createAgentInstance.response, input);
+  }
+
   async createAgentKey(agentId: string): Promise<AgentKeySecret> {
     return (await this.request('POST', `/v1/agents/${encodeURIComponent(agentId)}/keys`, routes.createAgentKey.response)).key;
   }

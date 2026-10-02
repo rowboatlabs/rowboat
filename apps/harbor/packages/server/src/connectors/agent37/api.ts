@@ -91,9 +91,21 @@ export interface TurnRequest {
   metadata: Record<string, string>;
 }
 
+/** A new instance (https://www.agent37.com/docs/agents-api/instances): every field is optional on Agent37's side. */
+export interface InstanceCreate {
+  template: string;
+  name: string;
+  /** `budget.monthly_cap_micros`: managed model spend is refused past it, and it defaults to 0. */
+  monthlyCapMicros: number;
+  autoSleep: boolean;
+  metadata: Record<string, string>;
+}
+
 export interface Agent37Api {
   /** The workspace's instances, newest first. Also the cheap check of a key: there is no /me. */
   instances(): Promise<Agent37Instance[]>;
+  /** Create an instance; Agent37 answers once it is running (its agent boots moments later). */
+  createInstance(input: InstanceCreate): Promise<Agent37Instance>;
   /** The models one harness on an instance can run. */
   models(instanceId: string, agent: string): Promise<Agent37Model[]>;
   /** Start a turn and stream it, until the stream ends or `signal` aborts. */
@@ -179,6 +191,21 @@ export function agent37Api(key: string, base = AGENT37_API, instance: InstanceUr
     async instances() {
       const body = await call<{ data?: Array<{ id: string; name?: string | null; template?: string; status?: string }> }>(`${base}/v1/instances`, hosting, { timeoutMs: 30_000 });
       return (body.data ?? []).map((i) => ({ id: i.id, name: i.name ?? null, template: i.template ?? '', status: i.status ?? '' }));
+    },
+    async createInstance(input) {
+      const body = await call<{ id: string; name?: string | null; template?: string; status?: string }>(`${base}/v1/instances`, hosting, {
+        method: 'POST',
+        json: {
+          template: input.template,
+          name: input.name,
+          budget: { monthly_cap_micros: input.monthlyCapMicros },
+          auto_sleep: input.autoSleep,
+          metadata: input.metadata,
+        },
+        // Synchronous: it returns once the computer is up, which can take minutes when the instance moves hosts.
+        timeoutMs: 10 * 60_000,
+      });
+      return { id: body.id, name: body.name ?? null, template: body.template ?? input.template, status: body.status ?? '' };
     },
     async models(instanceId, harness) {
       const body = await call<{ data?: Array<{ id: string; label?: string }> }>(at(instanceId, `/v1/models?agent=${encodeURIComponent(harness)}`), agent);

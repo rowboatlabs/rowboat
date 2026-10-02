@@ -193,6 +193,40 @@ describe('the Agent37 connector', () => {
     fake.instances.pop();
   });
 
+  it('its owner creates an instance for it, which becomes its default; nobody else can', async () => {
+    const before = fake.instances.length;
+    const refused = await org.as('dev-harsh').post(`/v1/agents/${hermes.id}/instances`, { name: 'hermes-two', monthlyBudgetUsd: 5 });
+    expect(refused.status).toBe(403);
+    expect(fake.instances).toHaveLength(before);
+
+    const r = await org.as('dev-ramnique').post(`/v1/agents/${hermes.id}/instances`, { name: 'hermes-two', monthlyBudgetUsd: 5 });
+    expect(r.status).toBe(200);
+    const created = fake.instances.at(-1)!;
+    expect(r.body).toEqual({ instance: { id: created.id, label: `hermes-two (${created.id})` }, defaults: { instance: created.id } });
+    expect(fake.received.filter((x) => x.method === 'POST' && x.path === '/v1/instances').at(-1)!.body).toEqual({
+      template: 'agent37-hermes',
+      name: 'hermes-two',
+      budget: { monthly_cap_micros: 5_000_000 },
+      auto_sleep: true,
+      metadata: { rowboat_agent: hermes.id },
+    });
+    // The composer offers the choice at once, and a mention that picks nothing lands on the new instance.
+    const caps = (await org.as('dev-harsh').get(`/v1/agents/${hermes.id}/capabilities`)).body;
+    expect(caps.capabilities.options.map((o: { key: string }) => o.key)).toEqual(['instance', 'reasoning']);
+    const { invocations } = await org.post(`${mention(hermes)} hello from the new one`);
+    expect((await org.ended(invocations[0]!.id)).state).toBe('done');
+    expect(fake.responses().at(-1)!.path).toBe(`/i/${created.id}/v1/responses`);
+    fake.instances.splice(fake.instances.indexOf(created), 1);
+    await org.as('dev-ramnique').put(`/v1/agents/${hermes.id}/option-defaults`, { defaults: {} });
+  });
+
+  it('passes on Agent37’s reason when it will not create an instance', async () => {
+    fake.refuse = { status: 402, code: 'insufficient_balance', paths: /^\/v1\/instances$/ };
+    const r = await org.as('dev-ramnique').post(`/v1/agents/${hermes.id}/instances`, { name: 'broke', monthlyBudgetUsd: 1, autoSleep: false });
+    fake.refuse = undefined;
+    expect(r).toMatchObject({ status: 400, body: { message: expect.stringMatching(/Agent37 did not create the instance: insufficient_balance/) } });
+  });
+
   it('fails a turn Agent37 reports as failed, with its reason', async () => {
     fake.next = { error: { code: 'agent_error', message: 'the model provider is down' } };
     const { invocations } = await org.post(`${mention(hermes)} try this`);

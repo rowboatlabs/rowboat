@@ -36,6 +36,15 @@ export interface ConnectorEnv {
 
 export interface RunningConnector {
   stop(): Promise<void>;
+  /** Declare its capabilities again now, rather than at its next interval (after an instance is created). */
+  refresh?(): Promise<void>;
+}
+
+/** What the owner asks for when a platform creates an instance for its agent (routes.createAgentInstance). */
+export interface InstanceRequest {
+  name: string;
+  monthlyBudgetUsd: number;
+  autoSleep: boolean;
 }
 
 export interface ConnectorPlatform {
@@ -46,6 +55,12 @@ export interface ConnectorPlatform {
   verify(secret: string): Promise<void>;
   /** Run the connector for one agent until stopped. */
   start(env: ConnectorEnv): RunningConnector;
+  /**
+   * Create an instance for the agent to run on (2026-10-02), on its
+   * credential. Throws a HarborError('invalid_request') carrying the
+   * platform's reason on refusal. Absent = the platform creates nothing.
+   */
+  createInstance?(secret: string, agent: Member, input: InstanceRequest): Promise<{ id: string; label: string }>;
 }
 
 /** One entry per connection in HARBOR_RUN_CONNECTIONS. */

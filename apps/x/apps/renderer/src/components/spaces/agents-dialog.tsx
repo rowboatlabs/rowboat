@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { AgentPage } from '@/components/spaces/agent-page'
+import { CreateInstance } from '@/components/spaces/agent-instance'
 import { AgentLogo, ConnectAgent } from '@/components/spaces/agent-setup'
 import { MemberAvatar } from '@/components/spaces/atoms'
 import { refreshOrgRoster, useOrgRoster } from '@/hooks/use-space-members'
@@ -323,6 +324,18 @@ export function AgentsDialog({ org, open, onOpenChange }: {
                             icon={<AgentLogo logo={kindInfo(screen.kind).logo ?? agentSetup(screen.setupId).logo} className="size-5" />}
                         />
                         <Body>
+                            {agentSetup(screen.setupId).createsInstances && (
+                                <section className="mb-5 flex flex-col gap-2 rounded-lg border border-border p-3">
+                                    <h3 className="text-xs font-semibold text-foreground">Create an instance for it (optional)</h3>
+                                    <CreateInstance
+                                        orgId={org.id}
+                                        agentId={screen.agentId}
+                                        agentName={screen.agentName}
+                                        agentKind={screen.kind}
+                                        connection={agentSetup(screen.setupId).connection}
+                                    />
+                                </section>
+                            )}
                             <ConnectAgent
                                 org={org}
                                 setup={agentSetup(screen.setupId)}

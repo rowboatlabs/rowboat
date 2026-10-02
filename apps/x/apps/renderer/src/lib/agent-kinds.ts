@@ -121,6 +121,8 @@ export interface AgentSetup {
     credential?: { label: string; placeholder: string; note: string }
     /** Where the agent's side is documented. */
     docsUrl?: string
+    /** The platform can create an instance for the agent to run on (Agent37, 2026-10-02): its owner is offered one. */
+    createsInstances?: boolean
     /** Opens the owner's DM with the agent before setup, for `homeChannel`. */
     wantsHomeChannel?: boolean
     setup: (ctx: SetupContext) => SetupRoute[]
@@ -418,6 +420,7 @@ export const AGENT_SETUPS: readonly AgentSetup[] = [
             note: 'Harbor checks it with Agent37 and keeps it sealed. The key reaches every instance in its workspace, so make one just for Rowboat.',
         },
         docsUrl: 'https://www.agent37.com/docs/agents-api/concepts',
+        createsInstances: true,
         setup: agent37Setup,
     },
     {
