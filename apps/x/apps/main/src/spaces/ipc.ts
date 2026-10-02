@@ -5,6 +5,7 @@ import { ipc, spaces as spacesShared } from '@x/shared';
 import * as orgs from '@x/core/dist/spaces/orgs.js';
 import { SpaceSubscriptions } from '@x/core/dist/spaces/subscriptions.js';
 import * as blobCache from './blob-cache.js';
+import { readSpaceAsset } from './reads.js';
 import * as spacesOAuth from '@x/core/dist/spaces/oauth.js';
 import { oauthConnectBus } from '@x/core/dist/auth/connector-events.js';
 import { cancelScheduled, listScheduled, scheduleItem } from '@x/core/dist/spaces/scheduler.js';
@@ -327,7 +328,7 @@ export const spacesIpcHandlers: SpacesHandlers = {
   },
 
   'spaces:saveAsset': async (event, args) => {
-    const asset = await orgs.getClient(args.orgId).readAsset(args.spaceId, args.assetId);
+    const asset = await readSpaceAsset(args.orgId, args.spaceId, args.assetId);
     const win = BrowserWindow.fromWebContents(event.sender);
     const options = { defaultPath: path.basename(asset.path) };
     const result = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options);

@@ -10,6 +10,8 @@ import { RPC_CHANNELS } from './channels.js';
 import { createRowboatServer, type EventSources, type RowboatServer } from './server.js';
 import { WS_CLOSE_NO_HELLO, WS_CLOSE_UNAUTHORIZED } from './ws-hub.js';
 
+const BLOB_HASH = 'a'.repeat(64);
+
 type Listener<T> = (e: T) => void;
 
 function makeEmitter<T>() {
@@ -111,6 +113,10 @@ describe('rowboat-server transport', () => {
           throw new Error('traversal');
         }
         return path.join(workDir, rel);
+      },
+      getSpaceBlob: async (orgId, spaceId, hash) => {
+        if (orgId !== 'org-1' || spaceId !== 'space-1' || hash !== BLOB_HASH) throw new Error('unknown blob');
+        return { bytes: new TextEncoder().encode('karité'), mime: 'text/plain' };
       },
       serverVersion: 'test',
       port: 0, // let the OS pick a free port
@@ -219,6 +225,17 @@ describe('rowboat-server transport', () => {
 
     const missing = await fetch(`${base}/workspace/notes/nope.md`, authed());
     expect(missing.status).toBe(404);
+  });
+
+  it("serves a space file's bytes with auth, for a client whose core is remote", async () => {
+    const ok = await fetch(`${base}/spaces/blob/org-1/space-1/${BLOB_HASH}`, authed());
+    expect(ok.status).toBe(200);
+    expect(await ok.text()).toBe('karité');
+    expect(ok.headers.get('content-type')).toBe('text/plain');
+
+    expect((await fetch(`${base}/spaces/blob/org-1/space-1/${BLOB_HASH}`)).status).toBe(401);
+    expect((await fetch(`${base}/spaces/blob/org-2/space-1/${BLOB_HASH}`, authed())).status).toBe(404);
+    expect((await fetch(`${base}/spaces/blob/org-1/space-1/not-a-hash`, authed())).status).toBe(404);
   });
 
   it('closes unauthorized websockets with 4401', async () => {

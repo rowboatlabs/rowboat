@@ -12,6 +12,7 @@ import {
   createCoreEventSources,
   createCoreRpcHandlers,
   createRowboatServer,
+  getSpaceBlob,
   loadServerConfig,
   resolveWorkspacePath,
   rotateServerKey,
@@ -304,6 +305,7 @@ async function launchInProcess(): Promise<RowboatServer> {
       subscribeWorkspaceEvents: onWorkspaceChange,
     },
     resolveWorkspacePath,
+    getSpaceBlob,
     serverVersion: app.getVersion(),
   });
   current = server;

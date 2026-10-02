@@ -1637,3 +1637,9 @@ function subscribeFeedEvents(listener: (e: FeedEvent) => void): () => void {
 }
 
 export const resolveWorkspacePath = workspaceCore.resolveWorkspacePath;
+
+/** A space file's bytes through core's org registry and disk cache (GET /spaces/blob). */
+export async function getSpaceBlob(orgId: string, spaceId: string, hash: string) {
+  const blobCache = await import('@x/core/dist/spaces/blob-cache.js');
+  return blobCache.getBlob(orgId, spaceId, hash);
+}

@@ -11,6 +11,7 @@ import type { RpcHandlers } from './channels.js';
 import { loadServerConfig } from './config.js';
 import { acquireWorkdirLock } from './lock.js';
 import { createRpcRoutes } from './router.js';
+import { createSpacesBlobRoutes, type SpaceBlob } from './spaces-blob-route.js';
 import { createWorkspaceRoutes } from './workspace-route.js';
 import { createWsHub, type WsHub, type PushChannel } from './ws-hub.js';
 import { setCapabilityTransport } from './capabilities.js';
@@ -41,6 +42,8 @@ export interface RowboatServerOptions {
   handlers: RpcHandlers;
   events: EventSources;
   resolveWorkspacePath: (relPath: string) => string;
+  /** A space file's bytes, from core's org registry (GET /spaces/blob); absent: the route is not mounted. */
+  getSpaceBlob?: (orgId: string, spaceId: string, hash: string) => Promise<SpaceBlob>;
   serverVersion: string;
   /** Test overrides; production callers rely on config/server.json. */
   port?: number;
@@ -146,6 +149,7 @@ export async function createRowboatServer(opts: RowboatServerOptions): Promise<R
 
   app.route('/', createRpcRoutes(opts.handlers));
   app.route('/', createWorkspaceRoutes(opts.resolveWorkspacePath));
+  if (opts.getSpaceBlob) app.route('/', createSpacesBlobRoutes(opts.getSpaceBlob));
 
   const httpServer = createAdaptorServer({ fetch: app.fetch }) as HttpServer;
 

@@ -10,7 +10,7 @@ import container, {
   registerTextInsertService,
 } from '@x/core/dist/di/container.js';
 import type { ISessions } from '@x/core/dist/runtime/sessions/index.js';
-import { createCoreEventSources, createCoreRpcHandlers, resolveWorkspacePath } from './core-deps.js';
+import { createCoreEventSources, createCoreRpcHandlers, getSpaceBlob, resolveWorkspacePath } from './core-deps.js';
 import { startWorkspaceWatcher, subscribeWorkspaceEvents, subscribeKnowledgeEvents } from './workspace-watcher.js';
 import { prepareCoreData, initCoreServices } from '@x/core/dist/boot/services.js';
 import { createRowboatServer } from './server.js';
@@ -106,6 +106,7 @@ async function main(): Promise<void> {
     handlers: createCoreRpcHandlers({ sessionsIndexReady }),
     events: { ...createCoreEventSources(), subscribeWorkspaceEvents, subscribeKnowledgeEvents },
     resolveWorkspacePath,
+    getSpaceBlob,
     serverVersion: process.env.npm_package_version ?? '0.0.0',
   });
 

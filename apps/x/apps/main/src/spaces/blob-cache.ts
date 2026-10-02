@@ -3,6 +3,7 @@ import path from "node:path";
 import { nativeImage } from "electron";
 import { WorkDir } from "@x/core/dist/config/config.js";
 import * as blobCache from "@x/core/dist/spaces/blob-cache.js";
+import { serverHostMode, whenServerReady } from "../server-host.js";
 
 // Main's view of the space-blob cache. The content-addressed read-through
 // itself lives in core (spaces/blob-cache.ts) — shared with the agent's
@@ -22,9 +23,24 @@ function assertHash(hash: string): void {
 
 export type CachedBlob = blobCache.CachedBlob;
 
-/** The read-through: local cache first, the org (via the authed client) on a miss. */
+/**
+ * The read-through: local cache first, the org (via the authed client) on a
+ * miss. With a remote server (a Baarali cloud instance, 2026-10-02) the org
+ * registry is the server's, not this machine's: the bytes come from its
+ * /spaces/blob route, and Chromium keeps them (content-addressed, immutable).
+ */
 export async function getBlob(orgId: string, spaceId: string, hash: string): Promise<CachedBlob> {
-  return blobCache.getBlob(orgId, spaceId, hash);
+  if (serverHostMode() !== "remote") return blobCache.getBlob(orgId, spaceId, hash);
+  assertHash(hash);
+  const { baseUrl, key } = await whenServerReady();
+  const res = await fetch(`${baseUrl}/spaces/blob/${[orgId, spaceId, hash].map(encodeURIComponent).join("/")}`, {
+    headers: { authorization: `Bearer ${key}` },
+  });
+  if (!res.ok) throw new Error(`space blob ${hash} unavailable (${res.status})`);
+  return {
+    bytes: new Uint8Array(await res.arrayBuffer()),
+    mime: res.headers.get("content-type") ?? "application/octet-stream",
+  };
 }
 
 /**

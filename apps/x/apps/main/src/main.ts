@@ -25,6 +25,7 @@ import {
 } from "./ipc.js";
 import { disposeAllTerminals } from "@x/core/dist/terminal/terminal.js";
 import * as spaceBlobCache from "./spaces/blob-cache.js";
+import { listSpaceAssets as listSpaceAssetEntries, readSpaceAsset } from "./spaces/reads.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname } from "node:path";
 import { initUpdater } from "./updater.js";
@@ -49,7 +50,7 @@ import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import container, { registerBrowserControlService, registerNotificationService, registerScreenPointerService, registerTextInsertService } from "@x/core/dist/di/container.js";
 import { forwardRpc } from "./rpc-forwarder.js";
-import { bounceAllLive, getClient as getSpaceClient, listOrgs as listSpaceOrgs } from "@x/core/dist/spaces/orgs.js";
+import { bounceAllLive, listOrgs as listSpaceOrgs } from "@x/core/dist/spaces/orgs.js";
 import { parseOrgUrl } from "@x/shared/dist/spaces.js";
 import type { CodeModeManager } from "@x/core/dist/code-mode/acp/manager.js";
 import type { ISessions } from "@x/core/dist/runtime/sessions/index.js";
@@ -211,7 +212,7 @@ async function listSpaceAssets(orgId: string, spaceId: string): Promise<Array<{ 
   const key = `${orgId}/${spaceId}`;
   const hit = listingCache.get(key);
   if (hit && Date.now() - hit.at < 5_000) return hit.entries;
-  const entries = await getSpaceClient(orgId).listAssets(spaceId);
+  const entries = await listSpaceAssetEntries(orgId, spaceId);
   listingCache.set(key, { at: Date.now(), entries });
   return entries;
 }
@@ -272,17 +273,16 @@ function registerAppProtocol() {
         if (!orgId || !spaceId || !assetId || rest.some((part) => part.includes('/') || part.includes('\\'))) {
           return new Response("Not Found", { status: 404 });
         }
-        const client = getSpaceClient(orgId);
         // The document's own URL is <assetId>/<its path>, so the browser has
         // already resolved a page's relative references against its folder:
         // what arrives after the id is the referenced file's space-root path.
-        let asset = await client.readAsset(spaceId, assetId);
+        let asset = await readSpaceAsset(orgId, spaceId, assetId);
         const sub = path.posix.normalize(rest.join('/'));
         if (rest.length > 0 && sub !== asset.path) {
           if (sub === '.' || sub === '..' || sub.startsWith('../')) return new Response("Not Found", { status: 404 });
           const hit = (await listSpaceAssets(orgId, spaceId)).find((a) => a.path === sub);
           if (!hit) return new Response("Not Found", { status: 404 });
-          asset = await client.readAsset(spaceId, hit.id);
+          asset = await readSpaceAsset(orgId, spaceId, hit.id);
         }
         const blob = asset.blob ? await spaceBlobCache.getBlob(orgId, spaceId, asset.blob.hash) : null;
         const ext = path.extname(asset.path).toLowerCase();

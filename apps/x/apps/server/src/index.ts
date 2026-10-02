@@ -5,4 +5,4 @@ export { acquireWorkdirLock } from './lock.js';
 export { loadOrCreateServerKey, rotateServerKey, tokenMatches, extractBearer, SERVER_KEY_FILE } from './auth.js';
 export { loadServerConfig, saveServerConfig, ServerConfig, DEFAULT_PORT } from './config.js';
 export { buildPairingPayload, collectPairingUrls, type PairingPayload } from './pairing.js';
-export { createCoreRpcHandlers, createCoreEventSources, resolveWorkspacePath } from './core-deps.js';
+export { createCoreRpcHandlers, createCoreEventSources, getSpaceBlob, resolveWorkspacePath } from './core-deps.js';
