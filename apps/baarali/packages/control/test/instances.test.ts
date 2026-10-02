@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { FlyApi, Machine, MachineConfig } from '../src/fly.js';
+import { FlyApiError, type FlyApi, type Machine, type MachineConfig } from '../src/fly.js';
 import { Instances, InstanceUnavailable, type InstancesConfig } from '../src/instances.js';
 import { MemoryStore, hashToken, type Account, type Plan } from '../src/store.js';
 
@@ -150,5 +150,42 @@ describe('Instances keys and reach', () => {
     tick(31_000);
     await instances.wake(record);
     expect(fly.calls.at(-1)).toBe(`get ${record.machineId}`);
+  });
+
+  it('asks Fly once for a burst of requests', async () => {
+    const { fly, instances } = setup();
+    const record = await instances.ensure(ME);
+    fly.machines.get(record.machineId!)!.state = 'suspended';
+    fly.calls.length = 0;
+    await Promise.all(Array.from({ length: 20 }, () => instances.wake(record)));
+    expect(fly.calls).toEqual([`get ${record.machineId}`, `start ${record.machineId}`, `wait ${record.machineId}`]);
+  });
+
+  it('lets requests through when Fly refuses for its rate limit, and asks again later', async () => {
+    const { fly, instances, tick } = setup();
+    const record = await instances.ensure(ME);
+    const real = fly.machine.bind(fly);
+    let refuse = true;
+    fly.machine = async (app: string, id: string) => {
+      if (refuse) throw new FlyApiError(429, 'resource_exhausted: rate limit exceeded');
+      return real(app, id);
+    };
+    await expect(instances.wake(record)).resolves.toBeUndefined();
+    refuse = false;
+    fly.calls.length = 0;
+    await instances.wake(record);
+    expect(fly.calls).toEqual([]);
+    tick(6_000);
+    await instances.wake(record);
+    expect(fly.calls).toEqual([`get ${record.machineId}`]);
+  });
+
+  it('still fails on any other error from Fly', async () => {
+    const { fly, instances } = setup();
+    const record = await instances.ensure(ME);
+    fly.machine = async () => {
+      throw new FlyApiError(500, 'boom');
+    };
+    await expect(instances.wake(record)).rejects.toThrow('boom');
   });
 });

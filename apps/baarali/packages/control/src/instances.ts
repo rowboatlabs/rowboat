@@ -1,5 +1,5 @@
 import { createHmac } from 'node:crypto';
-import type { FlyApi, MachineConfig } from './fly.js';
+import { FlyApiError, type FlyApi, type MachineConfig } from './fly.js';
 import type { Account, ControlStore, InstanceRecord } from './store.js';
 
 // One instance per account (architecture §3.5 « Instances », decided
@@ -51,10 +51,14 @@ export interface InstancesDeps {
 const WAKE_TIMEOUT_S = 60;
 /** Autostop needs minutes of silence: a machine seen started this recently is still up. */
 const AWAKE_MS = 30_000;
+/** After a refusal of Fly's API, how long before asking it again. */
+const RATE_LIMITED_MS = 5_000;
 
 export class Instances {
   private readonly building = new Map<string, Promise<InstanceRecord>>();
   private readonly awakeUntil = new Map<string, number>();
+  /** The check under way per machine: a burst of requests shares one. */
+  private readonly waking = new Map<string, Promise<void>>();
 
   constructor(private readonly deps: InstancesDeps) {}
 
@@ -159,13 +163,35 @@ export class Instances {
   async wake(record: InstanceRecord): Promise<void> {
     const { fly } = this.deps;
     if (!record.managed || !record.machineId || !fly) return;
-    if ((this.awakeUntil.get(record.machineId) ?? 0) > this.deps.now()) return;
-    const machine = await fly.machine(record.app, record.machineId);
-    if (machine.state !== 'started') {
-      if (machine.state !== 'starting') await fly.start(record.app, record.machineId);
-      await fly.waitStarted(record.app, record.machineId, WAKE_TIMEOUT_S);
+    const id = record.machineId;
+    if ((this.awakeUntil.get(id) ?? 0) > this.deps.now()) return;
+    // An app opening sends dozens of requests at once: one look at Fly for
+    // all of them, or Fly's rate limit (429) turns them all into errors.
+    let pending = this.waking.get(id);
+    if (!pending) {
+      pending = this.check(record.app, id, fly).finally(() => this.waking.delete(id));
+      this.waking.set(id, pending);
     }
-    this.awakeUntil.set(record.machineId, this.deps.now() + AWAKE_MS);
+    return pending;
+  }
+
+  private async check(app: string, id: string, fly: FlyApi): Promise<void> {
+    try {
+      const machine = await fly.machine(app, id);
+      if (machine.state !== 'started') {
+        if (machine.state !== 'starting') await fly.start(app, id);
+        await fly.waitStarted(app, id, WAKE_TIMEOUT_S);
+      }
+    } catch (err) {
+      // Fly's API refuses for now: its private network still starts the
+      // machine on the request itself (autostart), so let it through, and
+      // ask again a little later rather than at once.
+      if (!(err instanceof FlyApiError && err.status === 429)) throw err;
+      console.warn(`[instances] Fly rate limit while waking ${id}; relying on autostart`);
+      this.awakeUntil.set(id, this.deps.now() + RATE_LIMITED_MS);
+      return;
+    }
+    this.awakeUntil.set(id, this.deps.now() + AWAKE_MS);
   }
 
   /** Over Flycast (private): an instance has no public address. */
