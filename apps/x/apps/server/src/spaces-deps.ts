@@ -86,6 +86,8 @@ type SpacesRpcChannel =
   | 'spaces:signInOrg' | 'spaces:createOrg' | 'spaces:apexInfo' | 'spaces:removeOrg'
   | 'spaces:accountState' | 'spaces:signInRowboat' | 'spaces:addOrgByAddress'
   | 'spaces:listSpaces' | 'spaces:createSpace' | 'spaces:openDirect' | 'spaces:listMembers' | 'spaces:createInvite'
+  | 'spaces:listOrgMembers' | 'spaces:renameSpace' | 'spaces:addMembers'
+  | 'spaces:listAgents' | 'spaces:addAgent' | 'spaces:createAgentKey' | 'spaces:revokeAgentKey'
   | 'spaces:resolveInvite' | 'spaces:acceptInvite' | 'spaces:listAssets' | 'spaces:createAsset' | 'spaces:moveAsset'
   | 'spaces:deleteAsset' | 'spaces:restoreAsset' | 'spaces:uploadBlob' | 'spaces:readAsset'
   | 'spaces:proposeChange' | 'spaces:assetHistory' | 'spaces:diff' | 'spaces:listTopics'
@@ -408,6 +410,16 @@ export const spacesRpcHandlers: SpacesHandlers = {
   'spaces:followThread': async (args) => orgs.getClient(args.orgId).followThread(args.spaceId, args.rootMessageId, args.following),
 
   'spaces:getUnread': async (args) => orgs.getClient(args.orgId).unread(),
+  // Org-level reads and admin acts: the org records live here, so a client
+  // whose own process holds none (a cloud instance's app) reaches them too.
+  'spaces:listOrgMembers': async (args) => ({ members: await orgs.getClient(args.orgId).listOrgMembers() }),
+  'spaces:renameSpace': async (args) => ({ space: await orgs.getClient(args.orgId).renameSpace(args.spaceId, args.name) }),
+  'spaces:addMembers': async (args) => ({ memberships: await orgs.getClient(args.orgId).addMembers(args.spaceId, args.memberIds) }),
+  'spaces:listAgents': async (args) => ({ agents: await orgs.getClient(args.orgId).listAgents() }),
+  'spaces:addAgent': async (args) => orgs.getClient(args.orgId).addAgent(args.displayName),
+  'spaces:createAgentKey': async (args) => ({ key: await orgs.getClient(args.orgId).createAgentKey(args.agentId) }),
+  'spaces:revokeAgentKey': async (args) => ({ key: await orgs.getClient(args.orgId).revokeAgentKey(args.agentId, args.keyId) }),
+
   'spaces:getActivity': async ({ orgId, ...query }) => orgs.getClient(orgId).activity(query),
   'spaces:markActivitySeen': async (args) => orgs.getClient(args.orgId).markActivitySeen(args.at),
   'spaces:readAll': async (args) => orgs.getClient(args.orgId).readAll(args.spaceId !== undefined ? { spaceId: args.spaceId } : {}),

@@ -334,6 +334,18 @@ export const RPC_CHANNELS = [
   'spaces:markRead',
   'spaces:followThread',
   'spaces:getUnread',
+  // Org-level reads and admin acts, and the activity feed: they read the org
+  // records, which live in this process — not in a client's own.
+  'spaces:listOrgMembers',
+  'spaces:renameSpace',
+  'spaces:addMembers',
+  'spaces:listAgents',
+  'spaces:addAgent',
+  'spaces:createAgentKey',
+  'spaces:revokeAgentKey',
+  'spaces:getActivity',
+  'spaces:markActivitySeen',
+  'spaces:readAll',
   // The scheduler: its tick runs in this process (initCoreServices) and reads
   // its file through an in-memory cache — so the writes must land here too,
   // or an item scheduled in main is invisible until the server restarts.
