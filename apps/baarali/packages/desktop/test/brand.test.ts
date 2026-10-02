@@ -79,8 +79,17 @@ describe('the mobile app', () => {
     expect(doc.expo.owner).toBeUndefined();
     expect(doc.expo.extra.eas).toBeUndefined();
     expect(JSON.stringify(doc)).not.toMatch(/Rowboat/);
+    // The sign-in comes back by the bundle id's scheme (oauth.ts below).
+    expect(doc.expo.scheme).toEqual(['baarali', 'com.baarali.app.mobile']);
     const eas = mobilePlan().writes.find(([to]) => to.endsWith('eas.json'))![1];
     expect(eas).not.toMatch(/asc|submit/i);
+  });
+
+  // Control's sign-in server takes a phone's redirect only as RFC 8252 §7.1
+  // describes it (control src/auth.ts, asAppRequest): reverse-domain, no `//`.
+  it('comes back from the sign-in by a redirect our server accepts', () => {
+    const e = mobilePlan().edits.find((x) => x.file.endsWith('spaces/oauth.ts'))!;
+    expect(e.to).toBe("export const REDIRECT_URI = 'com.baarali.app.mobile:/oauth-callback';");
   });
 
   // Decided 02/10/2026: no screen of the app may send a person to the upstream's servers.

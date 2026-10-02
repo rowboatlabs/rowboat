@@ -296,6 +296,9 @@ const MOBILE_PERMISSIONS = {
   },
 };
 
+/** The phone app's identifier, on both stores. */
+const MOBILE_ID = `${BRAND.bundleId}.mobile`;
+
 export function mobilePlan() {
   const mobile = 'apps/x/apps/mobile';
   return {
@@ -319,6 +322,9 @@ export function mobilePlan() {
       edit(`${mobile}/src/app/index.tsx`, "<Redirect href={onboarded ? '/spaces' : '/onboarding'} />", "<Redirect href={onboarded ? (APEX_URL ? '/spaces' : '/pairing') : '/onboarding'} />"),
       edit(`${mobile}/src/app/onboarding.tsx`, "import { useColors } from '@/theme/colors';", "import { useColors } from '@/theme/colors';\nimport { APEX_URL } from '@/lib/spaces/account';"),
       edit(`${mobile}/src/app/onboarding.tsx`, "    router.replace('/spaces');", "    router.replace(APEX_URL ? '/spaces' : '/pairing');"),
+      // Our sign-in server takes a phone app's redirect only in the form of
+      // RFC 8252 §7.1, its reverse-domain scheme (control src/auth.ts).
+      edit(`${mobile}/src/lib/spaces/oauth.ts`, "export const REDIRECT_URI = 'rowboat://oauth-callback';", `export const REDIRECT_URI = '${MOBILE_ID}:/oauth-callback';`),
     ],
     copies: [
       ...['icon.png', 'splash-icon.png', 'android-icon-foreground.png', 'android-icon-monochrome.png', 'baarali-mark.png'].map((f) => [`assets/mobile/${f}`, `${mobile}/assets/images/${f}`]),
@@ -341,9 +347,11 @@ export function mobilePlan() {
         delete expo.owner;
         expo.extra = { ...expo.extra };
         delete expo.extra.eas;
-        expo.ios = { ...expo.ios, bundleIdentifier: `${BRAND.bundleId}.mobile`, infoPlist: { ...expo.ios.infoPlist, ...MOBILE_PERMISSIONS.en } };
+        // `baarali://` for links, the bundle id for the sign-in's way back (oauth.ts).
+        expo.scheme = ['baarali', MOBILE_ID];
+        expo.ios = { ...expo.ios, bundleIdentifier: MOBILE_ID, infoPlist: { ...expo.ios.infoPlist, ...MOBILE_PERMISSIONS.en } };
         expo.locales = { fr: './baarali-locales/fr.json' };
-        const android = { ...expo.android, package: `${BRAND.bundleId}.mobile`, adaptiveIcon: { ...expo.android.adaptiveIcon, backgroundColor: '#1A6DFF' } };
+        const android = { ...expo.android, package: MOBILE_ID, adaptiveIcon: { ...expo.android.adaptiveIcon, backgroundColor: '#1A6DFF' } };
         delete android.adaptiveIcon.backgroundImage;
         expo.android = android;
         expo.plugins = expo.plugins.map((p) => (Array.isArray(p) && p[0] === 'expo-splash-screen' ? ['expo-splash-screen', { ...p[1], backgroundColor: '#0A0A0A', imageWidth: 140 }] : p));
