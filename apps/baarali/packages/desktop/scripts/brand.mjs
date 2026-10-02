@@ -124,22 +124,18 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { app, dialog } from 'electron';
+import { dialog } from 'electron';
 import { WorkDir } from '@x/core/dist/config/config.js';
 import { API_URL } from '@x/core/dist/config/env.js';
 import { connectRemoteServer, serverHostMode } from './server-host.js';
 import { broadcastReload } from './ipc.js';
 import { startCloudLink, type LinkProblem } from './baarali-cloud-link.js';
 
-const MESSAGES: Record<'fr' | 'en', Record<LinkProblem, string>> = {
-  fr: {
-    instances_full: "L'accès anticipé est complet pour le moment. Vous êtes connecté : votre espace sera ouvert dès qu'une place se libère.",
-    unavailable: "Votre espace Baarali ne répond pas pour le moment. Réessayez dans quelques minutes : déconnectez-vous puis reconnectez-vous.",
-  },
-  en: {
-    instances_full: 'Early access is full for now. You are signed in: your space opens as soon as a seat frees up.',
-    unavailable: 'Your Baarali space is not answering right now. Try again in a few minutes: sign out, then sign in again.',
-  },
+// In English, like every dialog of the app: the main process's French layer
+// (src/i18n/main.ts, FR_MAIN) translates them, and the release check reads them.
+const MESSAGES: Record<LinkProblem, string> = {
+  instances_full: 'Early access is full for now. You are signed in: your space opens as soon as a seat frees up.',
+  unavailable: 'Your Baarali space is not answering right now. Try again in a few minutes: sign out, then sign in again.',
 };
 
 export function startBaaraliCloud(): void {
@@ -151,8 +147,7 @@ export function startBaaraliCloud(): void {
     connect: connectRemoteServer,
     reload: () => setTimeout(() => broadcastReload(), 400),
     notify: (problem) => {
-      const lang = app.getLocale().startsWith('fr') ? 'fr' : 'en';
-      void dialog.showMessageBox({ type: 'info', message: 'Baarali', detail: MESSAGES[lang][problem] });
+      void dialog.showMessageBox({ type: 'info', message: 'Baarali', detail: MESSAGES[problem] });
     },
     deviceName: () => os.hostname().replace(/\\.local$/, ''),
     readFile: (file) => fsp.readFile(file, 'utf8'),
