@@ -67,8 +67,17 @@ async function writeJson(file: string, value: unknown): Promise<void> {
   await fs.writeFile(file, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 });
 }
 
+/** rowboat-server's lock in the workdir (apps/server/src/lock.ts LOCK_FILE). */
+export const SERVER_LOCK = 'server.lock';
+
 export async function seedWorkdir(opts: SeedOptions): Promise<void> {
   const config = path.join(opts.workDir, 'config');
+
+  // The server's lock (apps/server/src/lock.ts) outlives a machine stopped
+  // hard, and its pid can be some other process after the reboot: the
+  // server then refuses /data and the machine never comes back. Seeding
+  // runs once per boot, before the server, so any lock here is stale.
+  await fs.rm(path.join(opts.workDir, SERVER_LOCK), { force: true });
 
   // Loopback only: the gate is the one door (gate.ts).
   const serverFile = path.join(config, 'server.json');

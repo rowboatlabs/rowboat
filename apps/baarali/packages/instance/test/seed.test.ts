@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { MEDIA_SKILL, NEVER_EXPIRES, seedWorkdir } from '../src/seed.js';
+import { MEDIA_SKILL, NEVER_EXPIRES, SERVER_LOCK, seedWorkdir } from '../src/seed.js';
 
 async function tmp() { return fs.mkdtemp(path.join(os.tmpdir(), 'baarali-seed-')); }
 const read = async (dir: string, f: string) => JSON.parse(await fs.readFile(path.join(dir, 'config', f), 'utf8'));
@@ -19,6 +19,14 @@ describe('seedWorkdir', () => {
     expect(await read(dir, 'models.json')).toEqual({ version: 2, providers: {}, assistantModel: { provider: 'rowboat', model: 'deepseek/deepseek-v4.1-flash' } });
     expect((await fs.stat(path.join(dir, 'config', 'oauth.json'))).mode & 0o777).toBe(0o600);
     expect(await read(dir, 'note_creation.json')).toEqual({ strictness: 'medium', configured: false, onboardingComplete: true });
+  });
+
+  it('drops the lock a machine stopped hard left behind, so the server starts again', async () => {
+    const dir = await tmp();
+    // pid 1 is always alive: the server would take this lock for a live holder.
+    await fs.writeFile(path.join(dir, SERVER_LOCK), '1');
+    await seedWorkdir({ workDir: dir, instanceToken: 't', assistantModel: 'm' });
+    await expect(fs.access(path.join(dir, SERVER_LOCK))).rejects.toThrow();
   });
 
   it('writes the server key the control plane gives, and leaves the minted one otherwise', async () => {
