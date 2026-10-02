@@ -158,6 +158,54 @@ export class SpacesClient {
     return this.request('GET', routes.me.path, routes.me.response);
   }
 
+  // --- profile images (Harbor CONTRACT.md, 2026-10-02) -----------------------
+  // Paths are literal: this app's protocol copy predates the routes. An org
+  // that hasn't deployed them answers 404, which callers treat as "none".
+
+  private async imageCall(method: 'GET' | 'PUT' | 'DELETE', path: string, image?: { bytes: Uint8Array; mime: string }): Promise<unknown> {
+    const send = async (token: string) =>
+      this.fetchImpl(`${this.baseUrl}${path}`, {
+        method,
+        headers: { authorization: `Bearer ${token}`, ...(image ? { 'content-type': image.mime } : {}) },
+        ...(image ? { body: image.bytes as unknown as BodyInit } : {}),
+      });
+    let res = await send(await this.currentToken());
+    if (res.status === 401 && typeof this.token !== 'string') res = await send(await this.currentToken({ forceRefresh: true }));
+    const json = (await res.json().catch(() => undefined)) as unknown;
+    if (!res.ok) {
+      const parsed = (json ?? {}) as Partial<SpacesApiError>;
+      throw new SpacesRequestError(res.status, {
+        code: parsed.code ?? 'internal',
+        message: parsed.message ?? (res.status === 404 ? 'This org does not support profile images yet.' : `request failed with ${res.status}`),
+        retryable: parsed.retryable ?? false,
+      });
+    }
+    return json;
+  }
+
+  /** Your avatar on this org. */
+  async setAvatar(image: { bytes: Uint8Array; mime: string }): Promise<Member> {
+    return ((await this.imageCall('PUT', '/v1/me/avatar', image)) as { member: Member }).member;
+  }
+
+  async clearAvatar(): Promise<Member> {
+    return ((await this.imageCall('DELETE', '/v1/me/avatar')) as { member: Member }).member;
+  }
+
+  /** The org's logo URL, or undefined when none is set (or the org predates the route). */
+  async getOrgLogo(): Promise<string | undefined> {
+    return ((await this.imageCall('GET', '/v1/org/logo')) as { logoUrl?: string }).logoUrl;
+  }
+
+  /** Admins only (the org refuses anyone else). */
+  async setOrgLogo(image: { bytes: Uint8Array; mime: string }): Promise<string> {
+    return ((await this.imageCall('PUT', '/v1/org/logo', image)) as { logoUrl: string }).logoUrl;
+  }
+
+  async clearOrgLogo(): Promise<void> {
+    await this.imageCall('DELETE', '/v1/org/logo');
+  }
+
   // --- spaces & membership --------------------------------------------------
 
   /** Shared spaces by default; `includeDirect` adds the member's DMs (api.ts listSpaces). */

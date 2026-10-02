@@ -12,6 +12,7 @@ import { MessageLinkPreviews } from '@/components/link-preview-card';
 import { PollCard } from '@/components/poll-card';
 import { SpaceBlobImage } from '@/components/space-blob-image';
 import { EmojiPicker } from '@/components/emoji-picker';
+import { AuthedImage } from '@/components/avatar';
 import { BottomSheet } from '@/components/bottom-sheet';
 import { useColors } from '@/theme/colors';
 
@@ -146,12 +147,13 @@ export const MessageRow = memo(function MessageRow({
       <View
         style={{
           width: 34, height: 34, borderRadius: 8, borderCurve: 'continuous', marginTop: 2,
-          alignItems: 'center', justifyContent: 'center', backgroundColor: avatarColor(message.author.memberId, dark),
+          alignItems: 'center', justifyContent: 'center', backgroundColor: avatarColor(message.author.memberId, dark), overflow: 'hidden',
         }}
       >
         <Text style={{ fontSize: 15, fontWeight: '600', color: colors.label }}>
           {(name[0] ?? '?').toUpperCase()}
         </Text>
+        {member?.avatarUrl ? <AuthedImage url={member.avatarUrl} style={{ position: 'absolute', top: 0, left: 0, width: 34, height: 34 }} /> : null}
       </View>
       <View style={{ flex: 1 }}>
         <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6 }}>

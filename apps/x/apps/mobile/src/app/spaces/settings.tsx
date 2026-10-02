@@ -6,7 +6,9 @@ import * as WebBrowser from 'expo-web-browser';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 
+import { Avatar } from '@/components/avatar';
 import { useSpacesAccount } from '@/lib/spaces/account';
+import { useMyAvatar } from '@/lib/spaces/my-avatar';
 import { THEME_PREFS, getThemePref, setThemePref, type ThemePref } from '@/lib/theme-preference';
 import { useColors } from '@/theme/colors';
 
@@ -15,7 +17,9 @@ export default function SettingsScreen() {
   const colors = useColors();
   const account = useSpacesAccount();
   const [theme, setTheme] = useState<ThemePref | null>(null);
-  const name = account.orgs?.[0]?.displayName;
+  const me = account.orgs?.[0];
+  const name = me?.displayName;
+  const myAvatar = useMyAvatar(me);
   const version = Constants.expoConfig?.version ?? '';
   const build = Constants.expoConfig?.ios?.buildNumber;
 
@@ -37,8 +41,8 @@ export default function SettingsScreen() {
       {account.status === 'signedIn' ? (
         <Group radius={28 /* concentric: 8pt around a 40pt avatar */}>
           <Row first onPress={() => router.push('/spaces/account')}>
-            <View style={{ width: 40, height: 40, borderRadius: 20, marginLeft: -8, marginVertical: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: '#3b6fb6' }}>
-              <Text style={{ fontSize: 17, fontWeight: '600', color: '#ffffff' }}>{((name ?? '?')[0] ?? '?').toUpperCase()}</Text>
+            <View style={{ marginLeft: -8, marginVertical: 8 }}>
+              <Avatar id={me?.memberId ?? ''} name={name ?? '?'} size={40} url={myAvatar} />
             </View>
             <Text style={{ flex: 1, fontSize: 17, fontWeight: '600', color: colors.label }}>{name ?? 'Your account'}</Text>
             <Chevron />

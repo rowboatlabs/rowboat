@@ -1,14 +1,17 @@
 import { router, useFocusEffect } from 'expo-router';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
-import * as ImagePicker from 'expo-image-picker';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ActionSheetIOS, ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 
 import { useSpacesAccount, type SpacesOrg } from '@/lib/spaces/account';
 import { SpacesClient } from '@/lib/spaces/client';
 import type { Member, Space, UnreadSnapshot } from '@rowboat/spaces-protocol';
+import { Avatar, AuthedImage } from '@/components/avatar';
 import { StatusBanner } from '@/components/status-banner';
+import { friendlyError } from '@/lib/spaces/errors';
+import { useMyAvatar } from '@/lib/spaces/my-avatar';
+import { pickProfileImage } from '@/lib/spaces/profile-image';
 import { loadValue, peekValue, saveValue } from '@/lib/spaces/cache';
 import { isNetworkError } from '@/lib/spaces/errors';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -147,6 +150,7 @@ function OrgList() {
   }, []);
   const current = account.orgs?.find((o) => o.id === selectedId) ?? account.orgs?.[0];
   const who = current?.displayName ?? account.orgs?.[0]?.displayName;
+  const myAvatar = useMyAvatar(current);
 
 
   return (
@@ -181,7 +185,7 @@ function OrgList() {
       <Card>
         {who ? (
           <CardRow first onPress={() => router.push('/spaces/account')}>
-            <Avatar id={current?.memberId ?? who} name={who} size={28} />
+            <Avatar id={current?.memberId ?? who} name={who} size={28} url={myAvatar} />
             <Text numberOfLines={1} style={{ flex: 1, ...type.body, color: colors.label }}>{who}</Text>
             <Chevron />
           </CardRow>
@@ -437,7 +441,7 @@ function OrgCard({ org, onSwitch }: { org: SpacesOrg; onSwitch: () => void }) {
               const self = m.id === org.memberId;
               return (
                 <CardRow key={m.id} first={i === 0} disabled={openingDm !== null} dimmed={openingDm !== null && openingDm !== m.id} onPress={() => void openDm(m)}>
-                  <Avatar id={m.id} name={m.displayName} size={28} />
+                  <Avatar id={m.id} name={m.displayName} size={28} url={m.avatarUrl} />
                   <Text numberOfLines={1} style={{ flex: 1, ...type.body, fontWeight: badge.unread > 0 ? '600' : '400', color: colors.label }}>
                     {m.displayName}
                     {self ? <Text style={{ fontWeight: '400', color: colors.tertiaryLabel }}> (you)</Text> : null}
@@ -453,69 +457,84 @@ function OrgCard({ org, onSwitch }: { org: SpacesOrg; onSwitch: () => void }) {
   );
 }
 
-function hueOf(id: string): number {
-  let h = 0;
-  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
-  return ORG_HUES[h % ORG_HUES.length]!;
-}
-
 /**
- * The org's logo: a circle — its initial on the org tint, or a photo you
- * picked. Tap to choose or remove. The org server has no logo field yet, so
- * the photo is saved on this phone only (cache.ts value store, wiped on
- * sign-out) and teammates still see the initial.
+ * The org's logo: a circle — the org's picture when it has one (GET
+ * /v1/org/logo, shown to every member), else its initial on the org tint.
+ * Admins tap it to choose or remove one; the org refuses anyone else.
  */
 function OrgLogo({ org, size = 44, readOnly }: { org: SpacesOrg; size?: number; readOnly?: boolean }) {
   const colors = useColors();
-  const dark = colors.isDark;
-  const key = `orgLogo:${org.id}`;
+  const account = useSpacesAccount();
+  const key = `orgLogoUrl:${org.id}`;
   const [logo, setLogo] = useState<string | null>(() => peekValue<string | null>(key) ?? null);
+  const [busy, setBusy] = useState(false);
+  const client = useMemo(
+    () => new SpacesClient({ baseUrl: `https://${org.address}`, token: (opts) => account.getAccessToken(opts) }),
+    [org.address, account],
+  );
+  const apply = useCallback(
+    (url: string | null) => {
+      setLogo(url);
+      saveValue<string | null>(key, url);
+    },
+    [key],
+  );
   useEffect(() => {
-    void loadValue<string | null>(key).then((v) => v && setLogo(v));
-  }, [key]);
+    let cancelled = false;
+    void loadValue<string | null>(key).then((v) => !cancelled && v && setLogo((prev) => prev ?? v));
+    // 404 on an org without the route: keep the initial, say nothing.
+    client.getOrgLogo().then((url) => !cancelled && apply(url ?? null)).catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [client, key, apply]);
 
-  const choose = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.4, base64: true });
-    const asset = result.canceled ? null : result.assets[0];
-    if (!asset?.base64) return;
-    const uri = `data:${asset.mimeType ?? 'image/jpeg'};base64,${asset.base64}`;
-    setLogo(uri);
-    saveValue(key, uri);
+  const run = (work: () => Promise<void>) => {
+    setBusy(true);
+    work()
+      .catch((err) => Alert.alert("Couldn't update the logo", friendlyError(err)))
+      .finally(() => setBusy(false));
   };
-  const remove = () => {
-    setLogo(null);
-    saveValue<string | null>(key, null);
-  };
+  const choose = () =>
+    run(async () => {
+      const image = await pickProfileImage();
+      if (image) apply(await client.setOrgLogo(image));
+    });
+  const remove = () =>
+    run(async () => {
+      await client.clearOrgLogo();
+      apply(null);
+    });
   const onPress = () => {
     if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
     const options = logo ? ['Choose photo', 'Remove logo', 'Cancel'] : ['Choose photo', 'Cancel'];
     if (process.env.EXPO_OS !== 'ios') {
       Alert.alert('Org logo', undefined, [
-        { text: 'Choose photo', onPress: () => void choose() },
+        { text: 'Choose photo', onPress: choose },
         ...(logo ? [{ text: 'Remove logo', style: 'destructive' as const, onPress: remove }] : []),
         { text: 'Cancel', style: 'cancel' as const },
       ]);
       return;
     }
     ActionSheetIOS.showActionSheetWithOptions(
-      { title: 'Org logo', message: 'Saved on this phone only.', options, cancelButtonIndex: options.length - 1, destructiveButtonIndex: logo ? 1 : undefined },
+      { title: 'Org logo', message: 'Everyone in the org sees this.', options, cancelButtonIndex: options.length - 1, destructiveButtonIndex: logo ? 1 : undefined },
       (i) => {
-        if (i === 0) void choose();
+        if (i === 0) choose();
         else if (logo && i === 1) remove();
       },
     );
   };
 
-  const face = logo ? (
-    <Image source={{ uri: logo }} style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: colors.secondaryBackground }} contentFit="cover" />
-  ) : (
-    <View style={{ width: size, height: size, borderRadius: size / 2, alignItems: 'center', justifyContent: 'center', backgroundColor: orgTint(org.id, dark) }}>
+  const face = (
+    <View style={{ width: size, height: size, borderRadius: size / 2, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', backgroundColor: orgTint(org.id, colors.isDark), opacity: busy ? 0.5 : 1 }}>
       <Text style={{ fontSize: size * 0.43, fontWeight: '700', color: '#ffffff' }}>{(org.name[0] ?? '?').toUpperCase()}</Text>
+      {logo ? <AuthedImage url={logo} style={{ position: 'absolute', top: 0, left: 0, width: size, height: size }} /> : null}
     </View>
   );
-  if (readOnly) return face;
+  // Only admins can change it (Harbor policy.canSetOrgLogo).
+  if (readOnly || org.role !== 'admin') return face;
   return (
-    <Pressable onPress={onPress} hitSlop={6} style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}>
+    <Pressable disabled={busy} onPress={onPress} hitSlop={6} style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}>
       {face}
     </Pressable>
   );
@@ -563,25 +582,6 @@ function Glyph({ icon }: { icon: string }) {
   return (
     <View style={{ width: 28, alignItems: 'center' }}>
       <Image source={icon} style={{ width: 17, height: 17 }} tintColor={colors.secondaryLabel} />
-    </View>
-  );
-}
-
-/** Initial on a soft tint of the person's own hue. */
-function Avatar({ id, name, size }: { id: string; name: string; size: number }) {
-  const colors = useColors();
-  const dark = colors.isDark;
-  const hue = hueOf(id);
-  return (
-    <View
-      style={{
-        width: size, height: size, borderRadius: size / 2, alignItems: 'center', justifyContent: 'center',
-        backgroundColor: dark ? `hsl(${hue}, 32%, 26%)` : `hsl(${hue}, 62%, 90%)`,
-      }}
-    >
-      <Text style={{ fontSize: size * 0.43, fontWeight: '600', color: dark ? `hsl(${hue}, 70%, 82%)` : `hsl(${hue}, 48%, 34%)` }}>
-        {(name[0] ?? '?').toUpperCase()}
-      </Text>
     </View>
   );
 }

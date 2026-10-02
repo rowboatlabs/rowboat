@@ -2,9 +2,14 @@ import { router } from 'expo-router';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import { useState, type ReactNode } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActionSheetIOS, ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from 'react-native';
 
+import { Avatar } from '@/components/avatar';
 import { useSpacesAccount } from '@/lib/spaces/account';
+import { SpacesClient } from '@/lib/spaces/client';
+import { friendlyError } from '@/lib/spaces/errors';
+import { setMyAvatar, useMyAvatar } from '@/lib/spaces/my-avatar';
+import { pickProfileImage } from '@/lib/spaces/profile-image';
 import { useColors } from '@/theme/colors';
 
 // Account (iOS Settings shape): who you are, your orgs, notifications, sign
@@ -13,7 +18,45 @@ export default function AccountScreen() {
   const colors = useColors();
   const account = useSpacesAccount();
   const [deleting, setDeleting] = useState(false);
-  const name = account.orgs?.[0]?.displayName ?? 'Your account';
+  const me = account.orgs?.[0];
+  const name = me?.displayName ?? 'Your account';
+  const myAvatar = useMyAvatar(me);
+  const [savingPhoto, setSavingPhoto] = useState(false);
+
+  // Your photo is per org on the server; set it on every org you're in so
+  // you look the same everywhere.
+  const eachOrg = async (work: (client: SpacesClient) => Promise<{ avatarUrl?: string }>) => {
+    setSavingPhoto(true);
+    try {
+      for (const org of account.orgs ?? []) {
+        const client = new SpacesClient({ baseUrl: `https://${org.address}`, token: (opts) => account.getAccessToken(opts) });
+        setMyAvatar(org.id, (await work(client)).avatarUrl);
+      }
+    } catch (err) {
+      Alert.alert("Couldn't update your photo", friendlyError(err));
+    } finally {
+      setSavingPhoto(false);
+    }
+  };
+  const choosePhoto = async () => {
+    const image = await pickProfileImage().catch(() => null);
+    if (image) await eachOrg((client) => client.setAvatar(image));
+  };
+  const photoMenu = () => {
+    if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
+    const options = myAvatar ? ['Choose photo', 'Remove photo', 'Cancel'] : ['Choose photo', 'Cancel'];
+    if (process.env.EXPO_OS !== 'ios') {
+      void choosePhoto();
+      return;
+    }
+    ActionSheetIOS.showActionSheetWithOptions(
+      { options, cancelButtonIndex: options.length - 1, destructiveButtonIndex: myAvatar ? 1 : undefined },
+      (i) => {
+        if (i === 0) void choosePhoto();
+        else if (myAvatar && i === 1) void eachOrg((client) => client.clearAvatar());
+      },
+    );
+  };
 
   const confirmDelete = () => {
     if (process.env.EXPO_OS === 'ios') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -49,10 +92,13 @@ export default function AccountScreen() {
     >
       {/* Identity */}
       <View style={{ alignItems: 'center', gap: 10, paddingTop: 8 }}>
-        <View style={{ width: 72, height: 72, borderRadius: 36, alignItems: 'center', justifyContent: 'center', backgroundColor: '#3b6fb6' }}>
-          <Text style={{ fontSize: 30, fontWeight: '600', color: '#ffffff' }}>{(name[0] ?? '?').toUpperCase()}</Text>
-        </View>
+        <Pressable disabled={savingPhoto} onPress={photoMenu} style={({ pressed }) => ({ opacity: pressed || savingPhoto ? 0.6 : 1 })}>
+          <Avatar id={me?.memberId ?? ''} name={name} size={84} url={myAvatar} />
+        </Pressable>
         <Text style={{ fontSize: 22, fontWeight: '700', color: colors.label }}>{name}</Text>
+        <Pressable disabled={savingPhoto} onPress={photoMenu} hitSlop={8}>
+          <Text style={{ fontSize: 15, color: '#0a84ff' }}>{savingPhoto ? 'Saving…' : myAvatar ? 'Change photo' : 'Add photo'}</Text>
+        </Pressable>
       </View>
 
       {account.orgs?.length ? (
