@@ -104,7 +104,7 @@ Ce qui reste en anglais : l'interface upstream, jusqu'à `@baarali/i18n` (archi 
 
 ## Changer un prix ou une devise
 
-Tout est dans `packages/control/src/catalog.ts` : un prix en euros par forfait, le F CFA s'en déduit à la parité fixe (655,957, au franc près), et un taux par devise. La remise à l'année (`ANNUAL_DISCOUNT`, 19 %) ne s'affiche que sur `/tarifs` tant que le paiement n'est pas ouvert. Le budget se recalcule ; `test/pricing.test.ts` casse si la marge de 55 % ne tient plus dans une devise.
+Tout est dans `packages/control/src/catalog.ts` : un prix en euros par forfait, le F CFA s'en déduit à la parité fixe (655,957, au franc près), et un taux par devise. La remise à l'année (`ANNUAL_DISCOUNT`, 10 %) ne s'affiche que sur `/tarifs` tant que le paiement n'est pas ouvert. Le budget se recalcule ; `test/pricing.test.ts` casse si la marge de 55 % ne tient plus dans une devise.
 
 Les modèles de Découverte sont dans le même fichier (`DISCOVERY_MODELS`) : le premier est le défaut, les suivants prennent le relais. Avant d'en ajouter un, vérifier qu'il répond en français avec `reasoning: { enabled: false }` (archi §3.5, « Les modèles par forfait »).
 

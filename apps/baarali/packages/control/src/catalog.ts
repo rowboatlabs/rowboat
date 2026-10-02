@@ -47,11 +47,12 @@ const prices = (eur: number) => [
 ];
 
 /**
- * Paying a monthly plan for a year (decided 01/10/2026): 19 % off. Shown on
+ * Paying a monthly plan for a year (decided 01/10/2026): 10 % off. With the
+ * month's usage, the year keeps about 50 % instead of 55 % (19 % gave 45 %). Shown on
  * the pricing page only until payment opens; whether the year keeps the
  * month's usage is to settle against the margin before then.
  */
-export const ANNUAL_DISCOUNT = 0.19;
+export const ANNUAL_DISCOUNT = 0.1;
 
 export const OFFERS: Offer[] = [
   // The cheapest tool-capable models only: about 150 calls a week at 0.05

@@ -1,7 +1,7 @@
 import { ANNUAL_DISCOUNT } from './catalog.js';
 import { formatPrice, type HomeData } from './home-page.js';
 import { CONTACT, legalLinks } from './legal-page.js';
-import { FAVICON, logoTile, logoWord } from './logo.js';
+import { FAVICON, logoTile, logoWord, LOGO_ALIVE_CSS, LOGO_ALIVE_JS, logoTileLive } from './logo.js';
 import type { Money, Offer } from './pricing.js';
 import { pickLang } from './sign-in-page.js';
 
@@ -14,6 +14,9 @@ import { pickLang } from './sign-in-page.js';
 type Lang = 'fr' | 'en';
 
 export const PRICING_PATH = '/tarifs';
+
+/** "10", from the catalog: every mention of the yearly discount follows it. */
+const OFF = String(Math.round(ANNUAL_DISCOUNT * 100));
 
 const STRINGS = {
   fr: {
@@ -43,13 +46,13 @@ const STRINGS = {
     plans: {
       decouverte: { tag: 'Pour essayer', for: 'Pour découvrir Baarali sur de vraies tâches.', plus: 'Inclus', points: ['Des recherches sur le web, résumées avec leurs sources', 'Emails, devis et comptes rendus rédigés dans votre ton', 'Documents, tableaux et présentations prêts à envoyer', 'Votre accord avant chaque envoi ou publication', 'Les tâches longues en arrière-plan, et les routines', 'Une mémoire : vos clients, vos prix, vos habitudes', 'Vidéos, voix et musique avec des crédits médias', 'Les apps Mac et Windows', 'Des modèles rapides et économiques', 'Une utilisation limitée, renouvelée toutes les 5 h et chaque semaine'] },
       semaine: { tag: 'Sans engagement', for: 'Pour une semaine chargée, payée en Mobile Money.', plus: 'Tout Découverte, et :', points: ['Tous les modèles, dont les plus puissants', 'L’utilisation d’Essentiel pendant 7 jours', '25 fois l’utilisation de Découverte', 'Payé en Mobile Money, quand vous en avez besoin', 'Rien ne se renouvelle tout seul'] },
-      essentiel: { tag: 'Le quotidien', for: 'Pour s’en servir chaque jour, au travail ou chez soi.', plus: 'Tout Découverte, et :', points: ['Tous les modèles, dont les plus puissants', '25 fois l’utilisation de Découverte', 'Assez pour s’en servir tous les jours', 'De la marge pour les tâches longues', 'Au mois, ou à l’année avec 19 % de remise'] },
-      pro: { tag: 'Pour les gros besoins', for: 'Pour travailler toute la journée avec lui.', plus: 'Tout Essentiel, et :', points: ['Cinq ou dix fois l’utilisation d’Essentiel', 'Pour les tâches longues et les routines de chaque jour', 'Pour une personne qui délègue beaucoup', 'Les médias toujours avec des crédits', 'Au mois, ou à l’année avec 19 % de remise'] },
+      essentiel: { tag: 'Le quotidien', for: 'Pour s’en servir chaque jour, au travail ou chez soi.', plus: 'Tout Découverte, et :', points: ['Tous les modèles, dont les plus puissants', '25 fois l’utilisation de Découverte', 'Assez pour s’en servir tous les jours', 'De la marge pour les tâches longues', `Au mois, ou à l’année avec ${OFF} % de remise`] },
+      pro: { tag: 'Pour les gros besoins', for: 'Pour travailler toute la journée avec lui.', plus: 'Tout Essentiel, et :', points: ['Cinq ou dix fois l’utilisation d’Essentiel', 'Pour les tâches longues et les routines de chaque jour', 'Pour une personne qui délègue beaucoup', 'Les médias toujours avec des crédits', `Au mois, ou à l’année avec ${OFF} % de remise`] },
     } as Record<string, { tag: string; for: string; plus: string; points: string[] }>,
     period: 'Paiement',
     monthly: 'Au mois',
     yearly: 'À l’année',
-    save: '−19 %',
+    save: `−${OFF} %`,
     perMonthYear: 'par mois, à l’année',
     billedYear: (total: string, saved: string) => `${total} par an · ${saved} économisés`,
     weekOnly: 'À la semaine seulement',
@@ -101,7 +104,7 @@ const STRINGS = {
     },
     billingNone: 'Aucun',
     billingWeek: 'Chaque semaine, à la main',
-    billingMonth: 'Au mois ou à l’année (−19 %)',
+    billingMonth: `Au mois ou à l’année (−${OFF} %)`,
     modelsFast: 'Rapides et économiques',
     modelsAll: 'Tous',
     usageLimited: 'Limitée',
@@ -167,13 +170,13 @@ const STRINGS = {
     plans: {
       decouverte: { tag: 'To try it', for: 'To try Baarali on real tasks.', plus: 'Included', points: ['Web research, summed up with its sources', 'Emails, quotes and minutes written in your tone', 'Documents, spreadsheets and slides ready to send', 'Your approval before anything is sent or published', 'Long tasks in the background, and routines', 'A memory: your clients, your prices, your habits', 'Videos, voices and music with media credits', 'The Mac and Windows apps', 'Fast, low-cost models', 'Limited usage, renewed every 5 h and every week'] },
       semaine: { tag: 'No commitment', for: 'For a busy week, paid with mobile money.', plus: 'Everything in Découverte, and:', points: ['Every model, the most powerful included', 'The usage of Essentiel for 7 days', '25 times the usage of Découverte', 'Paid with mobile money, when you need it', 'Nothing renews on its own'] },
-      essentiel: { tag: 'Everyday', for: 'To use it every day, at work or at home.', plus: 'Everything in Découverte, and:', points: ['Every model, the most powerful included', '25 times the usage of Découverte', 'Enough to use it every day', 'Room for long tasks', 'Monthly, or yearly with 19% off'] },
-      pro: { tag: 'For heavy use', for: 'To work with it all day long.', plus: 'Everything in Essentiel, and:', points: ['Five or ten times the usage of Essentiel', 'For long tasks and daily routines', 'For someone who delegates a lot', 'Media still with credits', 'Monthly, or yearly with 19% off'] },
+      essentiel: { tag: 'Everyday', for: 'To use it every day, at work or at home.', plus: 'Everything in Découverte, and:', points: ['Every model, the most powerful included', '25 times the usage of Découverte', 'Enough to use it every day', 'Room for long tasks', `Monthly, or yearly with ${OFF}% off`] },
+      pro: { tag: 'For heavy use', for: 'To work with it all day long.', plus: 'Everything in Essentiel, and:', points: ['Five or ten times the usage of Essentiel', 'For long tasks and daily routines', 'For someone who delegates a lot', 'Media still with credits', `Monthly, or yearly with ${OFF}% off`] },
     } as Record<string, { tag: string; for: string; plus: string; points: string[] }>,
     period: 'Billing',
     monthly: 'Monthly',
     yearly: 'Yearly',
-    save: '−19%',
+    save: `−${OFF}%`,
     perMonthYear: 'per month, billed yearly',
     billedYear: (total: string, saved: string) => `${total} a year · ${saved} saved`,
     weekOnly: 'Weekly only',
@@ -225,7 +228,7 @@ const STRINGS = {
     },
     billingNone: 'None',
     billingWeek: 'Each week, by hand',
-    billingMonth: 'Monthly or yearly (−19%)',
+    billingMonth: `Monthly or yearly (−${OFF}%)`,
     modelsFast: 'Fast and low-cost',
     modelsAll: 'All',
     usageLimited: 'Limited',
@@ -407,11 +410,11 @@ try { if (localStorage.getItem("baarali-currency") === "eur") document.documentE
 </script>
 <style nonce="${opts.nonce}">
 @font-face { font-family:"Inter"; src:url(/assets/inter.woff2) format("woff2"); font-weight:400 800; font-display:swap; }
-@font-face { font-family:"Instrument Serif"; src:url(/assets/instrument-serif-italic.woff2) format("woff2"); font-style:italic; font-display:swap; }
+@font-face { font-family:"Source Serif 4"; src:url(/assets/source-serif-4.woff2) format("woff2"); font-weight:400 700; font-style:normal; font-display:swap; }
 /* The home page's palette and type (home-page.ts), in both themes. */
-:root { --paper:#ffffff; --mist:#f4f6fb; --surface:#ffffff; --line:#e6e8ef; --ink:#0a0a0a; --on-ink:#ffffff; --text:#2a2d36; --muted:#5d6271; --blue:#1a6dff; --blue-deep:#155eef; --blue-soft:#eaf1ff; --blue-line:#cfdcff; --top-bg:rgb(255 255 255 / .82); --night:#0a0a0a; --night-line:#26282f; --night-muted:#a3a7b3; --featured:#0a0a0a; --featured-line:#0a0a0a; --track:#e9ecf3; color-scheme:light; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --paper:#0b0c0f; --mist:#121318; --surface:#15161b; --line:#24262e; --ink:#f5f6f8; --on-ink:#0a0a0a; --text:#d3d5dc; --muted:#9a9fac; --blue:#4d8dff; --blue-deep:#1a6dff; --blue-soft:#14203a; --blue-line:#29437a; --top-bg:rgb(11 12 15 / .8); --night:#000000; --featured:#000000; --featured-line:#3a5ea8; --track:#23252d; color-scheme:dark; } }
-:root[data-theme="dark"] { --paper:#0b0c0f; --mist:#121318; --surface:#15161b; --line:#24262e; --ink:#f5f6f8; --on-ink:#0a0a0a; --text:#d3d5dc; --muted:#9a9fac; --blue:#4d8dff; --blue-deep:#1a6dff; --blue-soft:#14203a; --blue-line:#29437a; --top-bg:rgb(11 12 15 / .8); --night:#000000; --featured:#000000; --featured-line:#3a5ea8; --track:#23252d; color-scheme:dark; }
+:root { --paper:#ffffff; --mist:#f5f5f5; --surface:#ffffff; --line:#e7e7e7; --ink:#0d0d0d; --on-ink:#ffffff; --text:#2b2b2b; --muted:#5d5d5d; --blue:#1a6dff; --blue-deep:#155eef; --blue-soft:#eef3ff; --blue-line:#d3e0ff; --top-bg:rgb(255 255 255 / .85); --night:#f5f5f5; --night-line:#e7e7e7; --night-muted:#5d5d5d; --featured:#ffffff; --featured-line:#155eef; --track:#e5e5e5; --night-2:#ffffff; --surface-2:#fafafa; --dot:#e3e3e3; --skeleton:#e0e0e0; --hover-line:#cfcfcf; --glass:rgb(255 255 255 / .7); color-scheme:light; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --paper:#212121; --mist:#1a1a1a; --surface:#2a2a2a; --line:#333333; --ink:#ececec; --on-ink:#0d0d0d; --text:#d4d4d4; --muted:#a6a6a6; --blue:#4d8dff; --blue-deep:#1a6dff; --blue-soft:#1d2738; --blue-line:#2f4670; --top-bg:rgb(33 33 33 / .85); --night:#1a1a1a; --featured:#2a2a2a; --featured-line:#4d8dff; --track:#3a3a3a; --night-2:#2a2a2a; --night-line:#333333; --night-muted:#a6a6a6; --surface-2:#262626; --dot:#3a3a3a; --skeleton:#3a3a3a; --hover-line:#474747; --glass:rgb(42 42 42 / .7); color-scheme:dark; } }
+:root[data-theme="dark"] { --paper:#212121; --mist:#1a1a1a; --surface:#2a2a2a; --line:#333333; --ink:#ececec; --on-ink:#0d0d0d; --text:#d4d4d4; --muted:#a6a6a6; --blue:#4d8dff; --blue-deep:#1a6dff; --blue-soft:#1d2738; --blue-line:#2f4670; --top-bg:rgb(33 33 33 / .85); --night:#1a1a1a; --featured:#2a2a2a; --featured-line:#4d8dff; --track:#3a3a3a; --night-2:#2a2a2a; --night-line:#333333; --night-muted:#a6a6a6; --surface-2:#262626; --dot:#3a3a3a; --skeleton:#3a3a3a; --hover-line:#474747; --glass:rgb(42 42 42 / .7); color-scheme:dark; }
 * { box-sizing:border-box; }
 html { scroll-behavior:smooth; scroll-padding-top:88px; }
 body { margin:0; background:var(--paper); color:var(--text); font:16px/1.6 "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing:antialiased; }
@@ -435,10 +438,10 @@ a { color:inherit; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .theme .sun { display:none; } :root:not([data-theme="light"]) .theme .moon { display:block; } }
 .kicker { display:inline-flex; align-items:center; gap:8px; margin:0 0 14px; font-size:13px; font-weight:650; letter-spacing:.08em; text-transform:uppercase; color:var(--blue-deep); }
 .kicker::before { content:""; width:6px; height:6px; border-radius:50%; background:var(--blue); }
-h1, h2 { margin:0; color:var(--ink); letter-spacing:-.04em; font-weight:750; text-wrap:balance; }
+h1, h2 { font-family:"Source Serif 4", Georgia, serif; margin:0; color:var(--ink); letter-spacing:-.022em; font-weight:500; text-wrap:balance; }
 h1 { font-size:clamp(38px, 6vw, 66px); line-height:1.02; }
 h2 { font-size:clamp(30px, 4vw, 44px); line-height:1.08; }
-h1 em, h2 em { font-family:"Instrument Serif", Georgia, serif; font-style:italic; font-weight:400; letter-spacing:-.01em; color:var(--blue); }
+h1 em, h2 em { font-family:inherit; font-style:normal; font-weight:inherit; letter-spacing:inherit; color:var(--blue); }
 .lead { margin:16px 0 0; max-width:58ch; color:var(--muted); font-size:18px; }
 .section { padding-block:96px 0; }
 .head { max-width:720px; }
@@ -460,7 +463,7 @@ h1 em, h2 em { font-family:"Instrument Serif", Georgia, serif; font-style:italic
 .plans { position:relative; margin-top:-72px; display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:14px; align-items:start; }
 .plan { position:relative; display:flex; flex-direction:column; background:var(--surface); border:1px solid var(--line); border-radius:24px; padding:26px 24px; box-shadow:0 1px 2px rgb(10 20 40 / .04), 0 12px 32px -18px rgb(10 20 40 / .18); }
 .plan .tag { margin:0; font-size:13px; font-weight:650; color:var(--blue-deep); }
-.plan h3 { margin:8px 0 0; font-size:24px; letter-spacing:-.03em; color:var(--ink); }
+.plan h3 { font-family:"Source Serif 4", Georgia, serif; font-weight:500; margin:8px 0 0; font-size:28px; letter-spacing:-.015em; color:var(--ink); }
 .plan .for { margin:6px 0 0; font-size:14px; color:var(--muted); min-height:44px; }
 .price { display:flex; align-items:baseline; flex-wrap:wrap; gap:4px 8px; margin:18px 0 0; }
 .price strong { font-size:40px; line-height:1; letter-spacing:-.045em; color:var(--ink); font-variant-numeric:tabular-nums; white-space:nowrap; }
@@ -479,42 +482,42 @@ h1 em, h2 em { font-family:"Instrument Serif", Georgia, serif; font-style:italic
 .plan ul { list-style:none; margin:22px 0 0; padding:20px 0 0; border-top:1px solid var(--line); display:flex; flex-direction:column; gap:10px; font-size:14.5px; }
 .plan li { display:flex; gap:10px; }
 .plan li .ok { color:var(--blue); margin-top:2px; }
-.plan.featured { background:var(--featured); border-color:var(--featured-line); color:#d3d5dc; }
-.plan.featured h3, .plan.featured .price strong { color:#fff; }
-.plan.featured .tag, .plan.featured .usage { color:#8fb4ff; }
-.plan.featured .for, .plan.featured .alt, .plan.featured .price > span { color:#a3a7b3; }
-.plan.featured ul { border-color:#26282f; }
-.plan.featured li .ok { color:#8fb4ff; }
-.plan.featured .cta-off { background:#17181d; border-color:#2c2e36; color:#a3a7b3; }
+.plan.featured { background:var(--featured); border:2px solid var(--featured-line); color:var(--text); box-shadow:0 30px 60px -34px rgb(21 94 239 / .45); }
+.plan.featured h3, .plan.featured .price strong { color:var(--ink); }
+.plan.featured .tag, .plan.featured .usage { color:var(--blue); }
+.plan.featured .for, .plan.featured .alt, .plan.featured .price > span { color:var(--muted); }
+.plan.featured ul { border-color:var(--night-line); }
+.plan.featured li .ok { color:var(--blue); }
+.plan.featured .cta-off { background:var(--mist); border-color:var(--night-line); color:var(--muted); }
 .badge { position:absolute; top:-12px; left:24px; margin:0; background:var(--blue-deep); color:#fff; font-size:12.5px; font-weight:650; border-radius:999px; padding:4px 12px; }
 .fine { margin:20px 0 0; text-align:center; font-size:13.5px; color:var(--muted); }
 /* Monthly or yearly: a year shows only on the monthly plans. */
 .p-year, :root[data-period="year"] .p-month { display:none; }
 :root[data-period="year"] .p-year { display:block; }
 .note-y { margin:6px 0 0; font-size:13px; color:var(--blue-deep); font-weight:600; font-variant-numeric:tabular-nums; }
-.plan.featured .note-y { color:#8fb4ff; }
+.plan.featured .note-y { color:var(--blue); }
 .switches { display:flex; flex-wrap:wrap; justify-content:center; gap:12px 28px; margin-top:32px; }
 .switches .switch { margin-top:0; }
 .save { font-weight:700; font-size:12px; color:#fff; background:var(--blue-deep); border-radius:999px; padding:2px 7px; margin-left:4px; }
 .plus { margin:20px 0 0; padding-top:18px; border-top:1px solid var(--line); font-size:13px; font-weight:650; color:var(--ink); }
-.plan.featured .plus { color:#fff; border-color:#26282f; }
+.plan.featured .plus { color:var(--ink); border-color:var(--night-line); }
 .plan .plus + ul { margin-top:12px; padding-top:0; border-top:0; }
 /* Companies */
-.biz { margin-top:96px; background:var(--night); color:var(--night-muted); border-radius:32px; padding:56px 48px; }
-.biz h2 { color:#fff; }
-.biz h2 em { color:#8fb4ff; }
-.biz .kicker { color:#8fb4ff; }
-.biz .lead { color:#a3a7b3; }
+.biz { margin-top:96px; background:var(--night); border:1px solid var(--night-line); color:var(--night-muted); border-radius:32px; padding:56px 48px; }
+.biz h2 { color:var(--ink); }
+.biz h2 em { color:var(--blue); }
+.biz .kicker { color:var(--blue); }
+.biz .lead { color:var(--muted); }
 .biz-head { display:grid; grid-template-columns:minmax(0, 1fr) 260px; gap:40px; align-items:end; }
 .biz-side { display:flex; flex-direction:column; gap:10px; }
-.biz-price { margin:0; color:#fff; font-size:30px; font-weight:750; letter-spacing:-.03em; }
-.cta-white { background:#fff; color:#0a0a0a; margin:0; }
+.biz-price { margin:0; color:var(--ink); font-family:"Source Serif 4", Georgia, serif; font-size:32px; font-weight:500; letter-spacing:-.02em; }
+.cta-white { background:var(--blue-deep); color:#fff; margin:0; }
 .biz-mail { margin:0; font-size:13.5px; }
 .biz-for { list-style:none; margin:32px 0 0; padding:0; display:flex; flex-wrap:wrap; gap:8px; }
-.biz-for li { border:1px solid #2c2e36; border-radius:999px; padding:6px 14px; font-size:14px; color:#d3d5dc; }
-.biz-grid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:1px; margin-top:32px; background:#26282f; border:1px solid #26282f; border-radius:20px; overflow:hidden; }
-.biz-grid div { background:#111216; padding:22px; }
-.biz-grid b { display:block; color:#fff; font-size:16px; margin-bottom:4px; }
+.biz-for li { border:1px solid var(--night-line); border-radius:999px; padding:6px 14px; font-size:14px; color:var(--text); }
+.biz-grid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:1px; margin-top:32px; background:var(--night-line); border:1px solid var(--night-line); border-radius:20px; overflow:hidden; }
+.biz-grid div { background:var(--night-2); padding:22px; }
+.biz-grid b { display:block; color:var(--ink); font-size:16px; margin-bottom:4px; }
 .biz-grid p { margin:0; font-size:14.5px; line-height:1.55; }
 .biz-note { margin:20px 0 0; font-size:13.5px; }
 /* Usage */
@@ -539,7 +542,7 @@ h1 em, h2 em { font-family:"Instrument Serif", Georgia, serif; font-style:italic
 .gauge small { font-size:13px; color:var(--muted); }
 .steps { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:22px; counter-reset:s; }
 .steps li { display:grid; grid-template-columns:44px minmax(0, 1fr); gap:14px; counter-increment:s; }
-.steps li::before { content:counter(s, decimal-leading-zero); font-family:"Instrument Serif", Georgia, serif; font-style:italic; font-size:30px; line-height:1; color:var(--blue); }
+.steps li::before { content:counter(s, decimal-leading-zero); font-family:"Source Serif 4", Georgia, serif; font-size:30px; line-height:1; color:var(--blue); }
 .steps b { display:block; color:var(--ink); font-size:17px; margin-bottom:2px; }
 .steps p { margin:0; color:var(--muted); }
 /* Compare */
@@ -560,12 +563,12 @@ td .ok { color:var(--blue); }
 .packs strong { font-size:40px; letter-spacing:-.045em; line-height:1; color:var(--ink); font-variant-numeric:tabular-nums; }
 .packs .u { margin-top:4px; color:var(--muted); font-size:14px; }
 .packs .pp { margin-top:auto; padding-top:22px; font-weight:650; color:var(--ink); font-variant-numeric:tabular-nums; }
-.costs { background:var(--night); color:var(--night-muted); border-radius:20px; padding:22px 24px; }
-.costs h3 { margin:0 0 8px; color:#fff; font-size:17px; }
+.costs { background:var(--night); border:1px solid var(--night-line); color:var(--night-muted); border-radius:20px; padding:22px 24px; }
+.costs h3 { margin:0 0 8px; color:var(--ink); font-size:17px; }
 .costs ul { list-style:none; margin:0; padding:0; }
 .costs li { display:flex; justify-content:space-between; gap:12px; padding:11px 0; border-bottom:1px solid var(--night-line); font-size:14.5px; }
-.costs li b { color:#fff; font-variant-numeric:tabular-nums; white-space:nowrap; }
-.costs p { margin:14px 0 0; font-size:13.5px; color:#8fb4ff; }
+.costs li b { color:var(--ink); font-variant-numeric:tabular-nums; white-space:nowrap; }
+.costs p { margin:14px 0 0; font-size:13.5px; color:var(--blue); }
 /* Pay */
 .pay { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:14px; margin-top:40px; }
 .pay div { background:var(--surface); border:1px solid var(--line); border-radius:20px; padding:24px; }
@@ -587,17 +590,17 @@ td .ok { color:var(--blue); }
 .mail { margin:20px 0 0; color:var(--muted); font-size:15px; }
 .mail a { color:var(--blue-deep); font-weight:600; }
 /* Final */
-.final { margin-top:112px; background:var(--blue-deep); color:#dce8ff; border-radius:32px; padding:64px 40px; text-align:center; position:relative; overflow:hidden; }
-.final h2 { color:#fff; }
-.final h2 em { color:#fff; }
+.final { margin-top:112px; background:var(--night); border:1px solid var(--night-line); color:var(--muted); border-radius:32px; padding:64px 40px; text-align:center; position:relative; overflow:hidden; }
+.final h2 { color:var(--ink); }
+.final h2 em { color:var(--blue); }
 .final p { margin:14px auto 0; max-width:52ch; font-size:17px; }
-.final a { display:inline-flex; margin-top:28px; background:#fff; color:#0a0a0a; text-decoration:none; font-weight:650; border-radius:999px; padding:14px 24px; }
+.final a { display:inline-flex; margin-top:28px; background:var(--blue-deep); color:#fff; text-decoration:none; font-weight:650; border-radius:999px; padding:14px 24px; }
 footer { background:var(--night); color:var(--night-muted); margin-top:96px; padding-block:40px; font-size:14px; border-top:1px solid var(--night-line); }
 footer .wrap { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:16px; }
-footer .brand { color:#fff; }
+footer .brand { color:var(--ink); }
 footer nav { display:flex; flex-wrap:wrap; gap:18px; }
 footer a { text-decoration:none; }
-footer a:hover { color:#fff; }
+footer a:hover { color:var(--ink); }
 :focus-visible { outline:2px solid var(--blue); outline-offset:3px; border-radius:6px; }
 @media (max-width: 1040px) {
   .plans { grid-template-columns:repeat(2, minmax(0, 1fr)); }
@@ -614,12 +617,13 @@ footer a:hover { color:#fff; }
 }
 @media (max-width: 440px) { .menu .btn { display:none; } }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior:auto; } .faq summary::after, .bar i { transition:none; } .live, .feed li { animation:none; } }
+${LOGO_ALIVE_CSS}
 </style>
 </head>
 <body>
 <header class="top">
   <div class="wrap">
-    <a class="brand" href="/">${logoTile(32)}${logoWord(25)}</a>
+    <a class="brand" href="/">${logoTileLive(32)}${logoWord(25)}</a>
     <nav class="menu" aria-label="Baarali">
       <a href="/">${escape(t.home)}</a>
       <a href="${PRICING_PATH}" aria-current="page">${escape(t.prices)}</a>
@@ -779,6 +783,7 @@ for (const b of document.querySelectorAll(".levels button")) {
     for (const l of document.querySelectorAll(".level")) l.hidden = l.dataset.level !== b.dataset.level;
   });
 }
+${LOGO_ALIVE_JS}
 </script>
 </body>
 </html>`;

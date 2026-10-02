@@ -3,7 +3,7 @@
 // nothing loaded from elsewhere: they must work on a slow phone connection.
 // Strings live in STRINGS until @baarali/i18n exists (roadmap phase 1).
 
-import { FAVICON, logoTile, logoWord } from './logo.js';
+import { FAVICON, logoTile, logoWord, LOGO_ALIVE_CSS, LOGO_ALIVE_JS, logoTileLive } from './logo.js';
 
 export interface SignInMethods {
   email: boolean;
@@ -86,6 +86,7 @@ function layout(lang: Lang, title: string, nonce: string, body: string, script: 
 <style nonce="${nonce}">
 /* The home page's look (01/10/2026): its font, from this origin, and the brand blue. */
 @font-face { font-family:"Inter"; src:url(/assets/inter.woff2) format("woff2"); font-weight:400 800; font-display:swap; }
+@font-face { font-family:"Source Serif 4"; src:url(/assets/source-serif-4.woff2) format("woff2"); font-weight:400 700; font-style:normal; font-display:swap; }
 :root { --bg:#f4f6fb; --card:#ffffff; --ink:#0a0a0a; --muted:#5d6271; --line:#e1e4ec; --accent:#155eef; --on-accent:#ffffff; --error:#b42318; color-scheme: light; }
 @media (prefers-color-scheme: dark) { :root { --bg:#0b0c0f; --card:#15161b; --ink:#f5f6f8; --muted:#9a9fac; --line:#26282f; --accent:#1a6dff; --on-accent:#ffffff; --error:#f97066; color-scheme: dark; } }
 * { box-sizing: border-box; }
@@ -94,7 +95,7 @@ function layout(lang: Lang, title: string, nonce: string, body: string, script: 
 body { margin:0; min-height:100svh; display:grid; place-items:center; padding:24px 16px; background:var(--bg); color:var(--ink); font:16px/1.5 "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing:antialiased; }
 main { width:100%; max-width:400px; background:var(--card); border:1px solid var(--line); border-radius:22px; padding:32px 28px; box-shadow:0 30px 60px -40px rgb(10 10 10 / .35); display:grid; gap:16px; }
 .logo { display:flex; align-items:center; gap:8px; font-weight:800; font-size:18px; letter-spacing:-.02em; color:var(--ink); text-decoration:none; }
-h1 { margin:0; font-size:24px; letter-spacing:-.03em; line-height:1.25; text-wrap:balance; }
+h1 { margin:0; font-family:"Source Serif 4", Georgia, serif; font-weight:500; font-size:27px; letter-spacing:-.015em; line-height:1.25; text-wrap:balance; }
 p { margin:0; color:var(--muted); }
 form, .stack { display:grid; gap:10px; }
 label { font-size:14px; color:var(--muted); }
@@ -109,11 +110,12 @@ button:disabled { opacity:.6; cursor:default; }
 .hint { font-size:13px; }
 .error { color:var(--error); font-size:14px; }
 .link { border:none; padding:0; font-weight:400; text-decoration:underline; color:var(--muted); justify-self:start; }
+${LOGO_ALIVE_CSS}
 </style>
 </head>
 <body>
 <main>
-<a class="logo" href="/">${logoTile(30)}${logoWord(22)}</a>
+<a class="logo" href="/">${logoTileLive(30)}${logoWord(22)}</a>
 ${body}
 </main>
 <script nonce="${nonce}">
@@ -136,6 +138,7 @@ function follow(data) {
   if (data && typeof data.url === "string") location.assign(data.url);
 }
 ${script}
+${LOGO_ALIVE_JS}
 </script>
 </body>
 </html>`;

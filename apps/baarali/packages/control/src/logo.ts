@@ -31,6 +31,79 @@ export function logoWord(height: number): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-40 -748 2822 762" width="${width}" height="${height}" role="img" aria-label="Baarali"><g transform="scale(1 -1)"><path d="${WORD_INK}" fill="currentColor"/><path d="${WORD_DOT}" fill="${BLUE}"/></g></svg>`;
 }
 
+/**
+ * The tile, alive (decided 01/10/2026): the same drawing, with its parts named
+ * so LOGO_ALIVE_* can move them. It blinks, its eyes follow the pointer, it
+ * hops when hovered, and a page can make it look at something or hop.
+ */
+export function logoTileLive(size: number): string {
+  const face =
+    `<g class="lg-body"><path d="${BODY}" fill="#FFFFFF"/>` +
+    '<g class="lg-eyes"><g class="lg-lids"><circle cx="500" cy="324" r="12" fill="#0A0A0A"/><circle cx="554" cy="324" r="12" fill="#0A0A0A"/></g></g></g>' +
+    '<circle class="lg-foot" cx="460" cy="556" r="38" fill="#FFFFFF"/><circle class="lg-foot lg-foot-2" cx="552" cy="556" r="38" fill="#FFFFFF"/>';
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="${size}" height="${size}" class="logo-live" aria-hidden="true" focusable="false"><rect width="1024" height="1024" rx="230" fill="${BLUE}"/><g transform="translate(512 512) scale(1.7) translate(-505 -423)">${face}</g></svg>`;
+}
+
+/** The movements of logoTileLive, for the page's stylesheet. */
+export const LOGO_ALIVE_CSS = `
+.logo-live { overflow:visible; }
+.logo-live .lg-body, .logo-live .lg-foot, .logo-live .lg-lids { transform-box:fill-box; transform-origin:50% 100%; }
+.logo-live .lg-lids { transform-origin:50% 50%; animation:lg-blink 5.2s infinite; }
+.logo-live .lg-eyes { transition:transform .25s ease-out; }
+.logo-live.hop .lg-body { animation:lg-hop .6s cubic-bezier(.3,.7,.3,1); }
+.logo-live.hop .lg-foot { animation:lg-step .6s ease; }
+.logo-live.hop .lg-foot-2 { animation-delay:.08s; }
+@keyframes lg-blink { 0%, 93%, 100% { transform:scaleY(1); } 96% { transform:scaleY(.1); } }
+@keyframes lg-hop { 0%, 100% { transform:translateY(0) scaleY(1); } 18% { transform:translateY(0) scaleY(.86); } 45% { transform:translateY(-110px) scaleY(1.06); } 75% { transform:translateY(0) scaleY(.92); } }
+@keyframes lg-step { 0%, 100% { transform:translateY(0); } 45% { transform:translateY(-70px); } }
+@keyframes lg-breathe { 0%, 100% { transform:scaleY(1); } 50% { transform:scaleY(1.035) translateY(-4px); } }
+.logo-live .lg-body { animation:lg-breathe 3.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .logo-live .lg-lids, .logo-live .lg-body, .logo-live.hop .lg-body, .logo-live.hop .lg-foot { animation:none; } .logo-live .lg-eyes { transition:none; } }
+`;
+
+/**
+ * The behaviour of logoTileLive. Defines window.baarali.look(element|null)
+ * and window.baarali.hop(), for a page that wants it to react.
+ */
+export const LOGO_ALIVE_JS = `
+(() => {
+  const logos = [...document.querySelectorAll(".logo-live")];
+  if (!logos.length) return;
+  const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let target = null;
+  // Eyes toward a point on screen, at most 9 units of the drawing.
+  const look = (x, y) => {
+    for (const svg of logos) {
+      const r = svg.getBoundingClientRect();
+      const dx = x - (r.left + r.width / 2), dy = y - (r.top + r.height * .42);
+      const d = Math.hypot(dx, dy) || 1, k = Math.min(1, d / 220);
+      svg.querySelector(".lg-eyes").style.transform = "translate(" + (dx / d * 20 * k).toFixed(1) + "px," + (dy / d * 13 * k).toFixed(1) + "px)";
+    }
+  };
+  const hop = () => {
+    if (still) return;
+    for (const svg of logos) { svg.classList.remove("hop"); void svg.getBoundingClientRect(); svg.classList.add("hop"); }
+  };
+  if (!still) window.addEventListener("pointermove", (e) => { if (!target) look(e.clientX, e.clientY); }, { passive: true });
+  for (const svg of logos) {
+    svg.addEventListener("animationend", (e) => { if (e.animationName === "lg-hop") svg.classList.remove("hop"); });
+    (svg.closest("a") || svg).addEventListener("pointerenter", hop);
+  }
+  window.baarali = {
+    hop,
+    look: (el) => {
+      target = el;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      look(r.left + r.width / 2, r.top + r.height / 2);
+    },
+  };
+  // A hello once the page is shown, then a hop now and then.
+  setTimeout(hop, 700);
+  if (!still) setInterval(() => { if (!document.hidden) hop(); }, 7000);
+})();
+`;
+
 /** The tile as the tab's icon. */
 export const FAVICON = `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">${TILE}</svg>`)}`;
 

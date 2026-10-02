@@ -134,10 +134,10 @@ describe('the pricing page', () => {
     expect(page).not.toMatch(/href="[^"]*(checkout|pay)[^"]*"/);
   });
 
-  it('gives the year of a monthly plan at 19 % off, and the CFA price at the fixed parity', async () => {
+  it('gives the year of a monthly plan at 10 % off, and the CFA price at the fixed parity', async () => {
     const page = norm(await (await app.request('/tarifs')).text());
-    // Essentiel: 20 € a month = 13 119 F CFA; a year: 16,20 € a month, 194,40 € a year.
-    for (const price of ['13 119', '16,20 €', '194,40 €', '10 626']) expect(page).toContain(price);
+    // Essentiel: 20 € a month = 13 119 F CFA; a year: 18 € a month, 216 € a year, 11 807 F CFA a month.
+    for (const price of ['13 119', '18 €', '216 €', '11 807', '−10 %']) expect(page).toContain(price);
   });
 
   it('offers companies and institutions their own instance', async () => {

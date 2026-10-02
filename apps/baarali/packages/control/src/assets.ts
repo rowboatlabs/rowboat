@@ -7,8 +7,10 @@ import { readFileSync } from 'node:fs';
 
 const FILES: Record<string, string> = {
   'inter.woff2': 'font/woff2',
-  'instrument-serif-normal.woff2': 'font/woff2',
-  'instrument-serif-italic.woff2': 'font/woff2',
+  'source-serif-4.woff2': 'font/woff2',
+  // The faces of the example agents on the home page (from the old Baarali's
+  // clay portraits, decided 01/10/2026), served as agent-<name>.jpg.
+  ...Object.fromEntries(['adjoua', 'aminata', 'fatou', 'ibrahim', 'kofi', 'kouadio', 'mariama', 'moussa', 'youssoupha', 'zara'].map((n) => [`agent-${n}.jpg`, 'image/jpeg'])),
 };
 
 const cache = new Map<string, Uint8Array<ArrayBuffer>>();
@@ -19,7 +21,7 @@ export function asset(name: string): { body: Uint8Array<ArrayBuffer>; type: stri
   if (!type) return null;
   let body = cache.get(name);
   if (!body) {
-    body = new Uint8Array(readFileSync(new URL(`../public/${name}`, import.meta.url))) as Uint8Array<ArrayBuffer>;
+    body = new Uint8Array(readFileSync(new URL(`../public/${name.startsWith('agent-') ? `agents/${name.slice(6)}` : name}`, import.meta.url))) as Uint8Array<ArrayBuffer>;
     cache.set(name, body);
   }
   return { body, type };

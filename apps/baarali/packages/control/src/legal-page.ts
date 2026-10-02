@@ -1,4 +1,4 @@
-import { FAVICON, logoTile, logoWord } from './logo.js';
+import { FAVICON, logoTile, logoWord, LOGO_ALIVE_CSS, LOGO_ALIVE_JS, logoTileLive } from './logo.js';
 import { pickLang } from './sign-in-page.js';
 
 // The legal pages of baarali.com (decided 01/10/2026, before the first real
@@ -83,7 +83,7 @@ const DOCS: Record<Lang, Record<LegalDoc, Doc>> = {
         {
           id: 'logiciels',
           title: 'Logiciels libres',
-          blocks: ['Certaines parties de l’application reposent sur des logiciels libres, utilisés dans le respect de leurs licences respectives.', 'Les polices Inter et Instrument Serif sont distribuées sous licence SIL Open Font License 1.1.'],
+          blocks: ['Certaines parties de l’application reposent sur des logiciels libres, utilisés dans le respect de leurs licences respectives.', 'Les polices Inter, Source Serif 4 et Instrument Serif (dont le nom Baarali est dessiné) sont distribuées sous licence SIL Open Font License 1.1.'],
         },
         {
           id: 'responsabilite',
@@ -256,7 +256,7 @@ const DOCS: Record<Lang, Record<LegalDoc, Doc>> = {
             'The examples shown on the site (client names, quotes, messages) are fictional and for illustration.',
           ],
         },
-        { id: 'logiciels', title: 'Free software', blocks: ['Parts of the app rely on free software, used in accordance with their respective licences.', 'The Inter and Instrument Serif fonts are distributed under the SIL Open Font License 1.1.'] },
+        { id: 'logiciels', title: 'Free software', blocks: ['Parts of the app rely on free software, used in accordance with their respective licences.', 'The Inter, Source Serif 4 and Instrument Serif (from which the Baarali name is drawn) fonts are distributed under the SIL Open Font License 1.1.'] },
         { id: 'responsabilite', title: 'Liability', blocks: ['The information on the site is provided for guidance and may change. Prices exclude taxes. Links to third-party sites do not make us responsible for their content.'] },
         { id: 'contact', title: 'Write to us', blocks: [`For any question, or to report content: ${CONTACT}.`] },
       ],
@@ -454,11 +454,11 @@ try { const v = localStorage.getItem("baarali-theme"); if (v === "light" || v ==
 </script>
 <style nonce="${opts.nonce}">
 @font-face { font-family:"Inter"; src:url(/assets/inter.woff2) format("woff2"); font-weight:400 800; font-display:swap; }
-@font-face { font-family:"Instrument Serif"; src:url(/assets/instrument-serif-italic.woff2) format("woff2"); font-style:italic; font-display:swap; }
+@font-face { font-family:"Source Serif 4"; src:url(/assets/source-serif-4.woff2) format("woff2"); font-weight:400 700; font-style:normal; font-display:swap; }
 /* The home page's palette and type (home-page.ts), in both themes. */
-:root { --paper:#ffffff; --mist:#f4f6fb; --surface:#ffffff; --line:#e6e8ef; --ink:#0a0a0a; --on-ink:#ffffff; --text:#2a2d36; --muted:#5d6271; --blue:#1a6dff; --blue-deep:#155eef; --blue-soft:#eaf1ff; --blue-line:#cfdcff; --top-bg:rgb(255 255 255 / .82); --night:#0a0a0a; --night-line:#26282f; --night-muted:#a3a7b3; color-scheme:light; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --paper:#0b0c0f; --mist:#121318; --surface:#15161b; --line:#24262e; --ink:#f5f6f8; --on-ink:#0a0a0a; --text:#d3d5dc; --muted:#9a9fac; --blue:#4d8dff; --blue-deep:#1a6dff; --blue-soft:#14203a; --blue-line:#29437a; --top-bg:rgb(11 12 15 / .8); --night:#000000; color-scheme:dark; } }
-:root[data-theme="dark"] { --paper:#0b0c0f; --mist:#121318; --surface:#15161b; --line:#24262e; --ink:#f5f6f8; --on-ink:#0a0a0a; --text:#d3d5dc; --muted:#9a9fac; --blue:#4d8dff; --blue-deep:#1a6dff; --blue-soft:#14203a; --blue-line:#29437a; --top-bg:rgb(11 12 15 / .8); --night:#000000; color-scheme:dark; }
+:root { --paper:#ffffff; --mist:#f5f5f5; --surface:#ffffff; --line:#e7e7e7; --ink:#0d0d0d; --on-ink:#ffffff; --text:#2b2b2b; --muted:#5d5d5d; --blue:#1a6dff; --blue-deep:#155eef; --blue-soft:#eef3ff; --blue-line:#d3e0ff; --top-bg:rgb(255 255 255 / .85); --night:#f5f5f5; --night-line:#e7e7e7; --night-muted:#5d5d5d; --night-2:#ffffff; --surface-2:#fafafa; --dot:#e3e3e3; --skeleton:#e0e0e0; --hover-line:#cfcfcf; --glass:rgb(255 255 255 / .7); --track:#e5e5e5; --featured:#ffffff; --featured-line:#155eef; color-scheme:light; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --paper:#212121; --mist:#1a1a1a; --surface:#2a2a2a; --line:#333333; --ink:#ececec; --on-ink:#0d0d0d; --text:#d4d4d4; --muted:#a6a6a6; --blue:#4d8dff; --blue-deep:#1a6dff; --blue-soft:#1d2738; --blue-line:#2f4670; --top-bg:rgb(33 33 33 / .85); --night:#1a1a1a; --night-2:#2a2a2a; --night-line:#333333; --night-muted:#a6a6a6; --surface-2:#262626; --dot:#3a3a3a; --skeleton:#3a3a3a; --hover-line:#474747; --glass:rgb(42 42 42 / .7); --track:#3a3a3a; --featured:#2a2a2a; --featured-line:#4d8dff; color-scheme:dark; } }
+:root[data-theme="dark"] { --paper:#212121; --mist:#1a1a1a; --surface:#2a2a2a; --line:#333333; --ink:#ececec; --on-ink:#0d0d0d; --text:#d4d4d4; --muted:#a6a6a6; --blue:#4d8dff; --blue-deep:#1a6dff; --blue-soft:#1d2738; --blue-line:#2f4670; --top-bg:rgb(33 33 33 / .85); --night:#1a1a1a; --night-2:#2a2a2a; --night-line:#333333; --night-muted:#a6a6a6; --surface-2:#262626; --dot:#3a3a3a; --skeleton:#3a3a3a; --hover-line:#474747; --glass:rgb(42 42 42 / .7); --track:#3a3a3a; --featured:#2a2a2a; --featured-line:#4d8dff; color-scheme:dark; }
 * { box-sizing:border-box; }
 html { scroll-behavior:smooth; scroll-padding-top:96px; }
 body { margin:0; background:var(--paper); color:var(--text); font:16px/1.7 "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing:antialiased; }
@@ -481,8 +481,8 @@ a { color:inherit; }
 .hero .wrap { position:relative; }
 .kicker { display:inline-flex; align-items:center; gap:8px; margin:0 0 16px; font-size:13px; font-weight:650; letter-spacing:.08em; text-transform:uppercase; color:var(--blue-deep); }
 .kicker::before { content:""; width:6px; height:6px; border-radius:50%; background:var(--blue); }
-h1 { margin:0; color:var(--ink); font-size:clamp(38px, 6vw, 64px); line-height:1.02; letter-spacing:-.04em; font-weight:750; text-wrap:balance; }
-h1 em { font-family:"Instrument Serif", Georgia, serif; font-style:italic; font-weight:400; letter-spacing:-.01em; color:var(--blue); }
+h1 { font-family:"Source Serif 4", Georgia, serif; margin:0; color:var(--ink); font-size:clamp(38px, 6vw, 64px); line-height:1.04; letter-spacing:-.022em; font-weight:500; text-wrap:balance; }
+h1 em { font-family:inherit; font-style:normal; font-weight:inherit; letter-spacing:inherit; color:var(--blue); }
 .lead { margin:18px 0 0; max-width:60ch; color:var(--muted); font-size:18px; }
 .meta { display:flex; flex-wrap:wrap; gap:8px; margin:24px 0 0; padding:0; list-style:none; }
 .meta li { font-size:13px; font-weight:600; color:var(--muted); background:var(--surface); border:1px solid var(--line); border-radius:999px; padding:5px 12px; }
@@ -506,8 +506,8 @@ h1 em { font-family:"Instrument Serif", Georgia, serif; font-style:italic; font-
 article { max-width:72ch; }
 section { padding-bottom:40px; margin-bottom:40px; border-bottom:1px solid var(--line); }
 section:last-child { border-bottom:0; }
-h2 { display:flex; align-items:baseline; gap:14px; margin:0 0 16px; color:var(--ink); font-size:24px; letter-spacing:-.025em; }
-h2 span { font-family:"Instrument Serif", Georgia, serif; font-style:italic; font-weight:400; font-size:30px; color:var(--blue); font-variant-numeric:tabular-nums; }
+h2 { font-family:"Source Serif 4", Georgia, serif; font-weight:500; display:flex; align-items:baseline; gap:14px; margin:0 0 16px; color:var(--ink); font-size:26px; letter-spacing:-.015em; }
+h2 span { font-family:"Source Serif 4", Georgia, serif; font-weight:400; font-size:30px; color:var(--blue); font-variant-numeric:tabular-nums; }
 article p { margin:0 0 14px; }
 article ul { margin:0 0 14px; padding:0; list-style:none; display:flex; flex-direction:column; gap:8px; }
 article li { position:relative; padding-left:22px; }
@@ -519,16 +519,16 @@ th, td { text-align:left; vertical-align:top; padding:12px 14px; border-bottom:1
 thead th { background:var(--mist); color:var(--muted); font-size:12.5px; font-weight:650; letter-spacing:.04em; text-transform:uppercase; white-space:nowrap; }
 tbody th { color:var(--ink); font-weight:600; }
 tbody tr:last-child th, tbody tr:last-child td { border-bottom:0; }
-.ask { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:20px; background:var(--blue-deep); color:#fff; border-radius:24px; padding:32px 36px; margin:24px 0 0; }
-.ask h3 { margin:0 0 4px; font-size:24px; letter-spacing:-.025em; color:#fff; }
-.ask p { margin:0; color:#dce8ff; }
-.ask a { background:#fff; color:#0a0a0a; text-decoration:none; font-weight:650; border-radius:999px; padding:12px 20px; }
+.ask { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:20px; background:var(--night); border:1px solid var(--night-line); color:var(--text); border-radius:24px; padding:32px 36px; margin:24px 0 0; }
+.ask h3 { margin:0 0 4px; font-size:24px; letter-spacing:-.025em; color:var(--ink); }
+.ask p { margin:0; color:var(--muted); }
+.ask a { background:var(--blue-deep); color:#fff; text-decoration:none; font-weight:650; border-radius:999px; padding:12px 20px; }
 footer { background:var(--night); color:var(--night-muted); margin-top:88px; padding-block:40px; font-size:14px; border-top:1px solid var(--night-line); }
 footer .wrap { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:16px; }
-footer .brand { color:#fff; }
+footer .brand { color:var(--ink); }
 footer nav { display:flex; flex-wrap:wrap; gap:18px; }
 footer a { text-decoration:none; }
-footer a:hover { color:#fff; }
+footer a:hover { color:var(--ink); }
 :focus-visible { outline:2px solid var(--blue); outline-offset:3px; border-radius:6px; }
 @media (max-width: 920px) {
   .body { grid-template-columns:minmax(0, 1fr); gap:24px; }
@@ -542,12 +542,13 @@ footer a:hover { color:#fff; }
   .menu .btn { display:none; }
 }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior:auto; } }
+${LOGO_ALIVE_CSS}
 </style>
 </head>
 <body>
 <header class="top">
   <div class="wrap">
-    <a class="brand" href="/">${logoTile(32)}${logoWord(25)}</a>
+    <a class="brand" href="/">${logoTileLive(32)}${logoWord(25)}</a>
     <nav class="menu" aria-label="Baarali">
       <a href="/">${escape(t.home)}</a>
       <a href="/tarifs">${escape(t.prices)}</a>
@@ -601,6 +602,7 @@ const seen = new IntersectionObserver((entries) => {
   for (const e of entries) if (e.isIntersecting) for (const [id, a] of links) a.classList.toggle("on", id === e.target.id);
 }, { rootMargin: "-20% 0px -70% 0px" });
 for (const s of document.querySelectorAll("article section")) seen.observe(s);
+${LOGO_ALIVE_JS}
 </script>
 </body>
 </html>`;
