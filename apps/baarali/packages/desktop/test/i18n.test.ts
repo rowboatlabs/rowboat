@@ -176,6 +176,14 @@ describe('the mobile app', () => {
   });
 });
 
+describe("Activity's reason lines", () => {
+  it('read in French, a space name kept as written', () => {
+    expect(translate(FR, 'messaged you', 'text')).toBe('vous a écrit');
+    expect(translate(FR, 'mentioned you in #ventes', 'text')).toBe('vous a mentionné dans #ventes');
+    expect(translate(FR, 'reacted 👍 to your message in a thread in #general', 'text')).toBe('a réagi 👍 à votre message dans un fil de #general');
+  });
+});
+
 describe('lines about people', () => {
   it('say who came and went, names as written', () => {
     expect(aboutPeople(FR, 'benewende.dev joined')).toBe('benewende.dev a rejoint l’espace');
