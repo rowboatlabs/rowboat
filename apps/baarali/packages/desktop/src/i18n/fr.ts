@@ -3066,7 +3066,7 @@ export const FR: Dictionary = {
     "No spaces in this org yet.": "Aucun espace dans cette organisation pour l’instant.",
     "Nothing here yet": "Rien ici pour l’instant",
     "Off": "Désactivé",
-    "Open an invite link to join one.": "Ouvrez un lien d’invitation pour en rejoindre un.",
+    "Open an invite link to join one.": "Ouvrez un lien d’invitation pour en rejoindre une.",
     "Pair": "Associer",
     "Plans, notes, and decisions live as files next to the conversation — everyone (and every agent) reads the same page.": "Plans, notes et décisions vivent dans des fichiers à côté de la conversation — tout le monde (et chaque agent) lit la même page.",
     "Push notifications for messages, DMs, and mentions across your spaces.": "Notifications pour les messages, messages privés et mentions de vos espaces.",
