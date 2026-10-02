@@ -1,3 +1,4 @@
+import { projectSessionComposition } from '../code-mode/sessions/composition.js';
 import { markWorkspaceStarted } from '../code-mode/sessions/workspace-started.js';
 import path from "node:path";
 import { asClass, asFunction, asValue, createContainer, InjectionMode } from "awilix";
@@ -176,8 +177,7 @@ container.register({
                 const pins: Record<string, JsonValue> = {};
                 const meta = await codeSessionsRepo.get(sessionId).catch(() => null);
                 if (meta) {
-                    pins.codeMode = meta.agent;
-                    pins.codeCwd = meta.cwd;
+                    Object.assign(pins, projectSessionComposition(meta));
                 }
                 // Hot path (every turn) — the pointer is memory-cached in
                 // the module, and the import is static so the edge shows in

@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils'
 import { readAssistantPreference, writeAssistantPreference } from '@/lib/assistant-dock'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { ChatHeader } from '@/components/chat-header'
-import { CodeSessionHeader, type CodeSessionHeaderProps } from '@/components/code/code-session-header'
+import { CodeSessionControls, CodeSessionHeader, type CodeSessionHeaderProps } from '@/components/code/code-session-header'
 import { type PromptInputMessage, type Mention } from '@/components/ai-elements/prompt-input'
 import { FileCardProvider } from '@/contexts/file-card-context'
 import { TabBar, type ChatTab } from '@/components/tab-bar'
@@ -53,7 +53,7 @@ function getInitialPaneWidth(defaultWidth: number): number {
   }
 }
 
-interface ChatSidebarProps {
+export interface ChatSidebarProps {
   floating?: boolean
   keepMounted?: boolean
   onMinimize?: () => void
@@ -111,7 +111,7 @@ interface ChatSidebarProps {
   restoredSelectionForActive?: ModelSelection | null
   workDirByTab?: Record<string, string | null>
   /** Composer locks for runs bound to Code-section sessions (cwd + agent frozen). */
-  codeSessionLocks?: Record<string, { cwd: string; agent: 'claude' | 'codex' }>
+  codeSessionLocks?: Record<string, { cwd: string; agent: 'claude' | 'codex'; codeModeEnabled?: boolean }>
   /**
    * Set while a Rowboat-mode code session owns this pane: the chat is pinned to
    * the session, so the chat switcher / new-chat / history affordances hide.
@@ -529,7 +529,7 @@ export function ChatSidebar({
             {onCloseTab && <Button variant="ghost" size="icon" onClick={onCloseTab} className="titlebar-no-drag my-1 mr-1 size-8 shrink-0" aria-label="Close chat tab" title="Close tab — conversation stays in history"><X className="size-4" /></Button>}
           </header>
 
-          {codeSessionTabs ?? <div className="flex h-9 shrink-0 border-b border-border">
+          {codeSessionTabs ?? <div className="rowboat-header flex shrink-0 border-b border-border">
             <TabBar tabs={chatTabs} activeTabId={activeChatTabId} getTabId={(tab) => tab.id}
               getTabTitle={getChatTabTitle} onSwitchTab={onSwitchChatTab}
               onCloseTab={(id) => onCloseChatTabs([id])} onCloseTabs={onCloseChatTabs} layout="scroll" />
@@ -559,7 +559,7 @@ export function ChatSidebar({
                       activeIsReasoning={isReasoning}
                       onCodePermissionResponse={onCodePermissionResponse}
                       onComposioConnected={(slug) => onComposioConnected?.(slug, tab.id)}
-                      emptyStateVariant={pinnedToCodeSession ? 'code' : 'default'}
+                      emptyStateVariant={pinnedToCodeSession && pinnedToCodeSession.session.codeModeEnabled !== false ? 'code' : 'default'}
                       isCodeSession={!!(tab.runId && codeSessionLocks[tab.runId])}
                     />
                   )
@@ -572,6 +572,7 @@ export function ChatSidebar({
               <div className={cn('rowboat-composer-dock sticky bottom-0 z-10 bg-background pt-0 shadow-lg', floating ? 'pb-3' : 'pb-12')}>
                 <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t from-background to-transparent" />
                 <div className="mx-auto w-full max-w-4xl px-3">
+                  {pinnedToCodeSession && <CodeSessionControls {...pinnedToCodeSession} />}
                   {chatTabs.map((tab) => {
                     const isActive = tab.id === activeChatTabId && isOpen
                     return (

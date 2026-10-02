@@ -50,6 +50,9 @@ export function stripThreadRef(reason: string): string {
 }
 
 export interface ArtifactGroup {
+    /** The file's identity — what opening it and diffing it take. */
+    assetId: string
+    /** The file's path as of the newest change in the group (display only). */
     assetPath: string
     /** 0 when the thread created the file. */
     fromVersion: number
@@ -59,22 +62,23 @@ export interface ArtifactGroup {
     changeSets: spaces.ChangeSet[]
 }
 
-/** Change-sets made from this thread, grouped by file, newest group first. */
+/** Change-sets made from this thread, grouped by file (by asset id — a rename keeps the group), newest group first. */
 export function artifactsForThread(changeSets: spaces.ChangeSet[], threadRootId: string): ArtifactGroup[] {
     const mine = changeSets.filter((c) => (c.threadRootId ?? threadRefOf(c.reason)) === threadRootId)
-    const byPath = new Map<string, spaces.ChangeSet[]>()
+    const byId = new Map<string, spaces.ChangeSet[]>()
     for (const cs of mine) {
-        const list = byPath.get(cs.assetPath) ?? []
+        const list = byId.get(cs.assetId) ?? []
         list.push(cs)
-        byPath.set(cs.assetPath, list)
+        byId.set(cs.assetId, list)
     }
     const groups: ArtifactGroup[] = []
-    for (const [assetPath, list] of byPath) {
+    for (const [assetId, list] of byId) {
         list.sort((a, b) => a.committedAt.localeCompare(b.committedAt))
         const first = list[0]!
         const latest = list[list.length - 1]!
         groups.push({
-            assetPath,
+            assetId,
+            assetPath: latest.assetPath,
             fromVersion: first.baseVersion,
             toVersion: latest.resultVersion,
             latest,
@@ -92,18 +96,19 @@ export function artifactsForThread(changeSets: spaces.ChangeSet[], threadRootId:
 
 export function applyReaction(
     groups: spaces.ReactionGroup[] | undefined,
-    event: { emoji: string; memberId: string; action: 'added' | 'removed' },
+    event: { emoji: string; memberId: string; action: 'added' | 'removed'; offset?: number },
 ): spaces.ReactionGroup[] {
     const current = groups ?? []
     const existing = current.find((g) => g.emoji === event.emoji)
+    const position = event.offset === undefined ? {} : { lastOffset: Math.max(existing?.lastOffset ?? 0, event.offset) }
     if (event.action === 'added') {
-        if (existing?.memberIds.includes(event.memberId)) return current
-        if (!existing) return [...current, { emoji: event.emoji, memberIds: [event.memberId] }]
-        return current.map((g) => (g.emoji === event.emoji ? { ...g, memberIds: [...g.memberIds, event.memberId] } : g))
+        if (existing?.memberIds.includes(event.memberId)) return current.map((g) => g.emoji === event.emoji ? { ...g, ...position } : g)
+        if (!existing) return [...current, { emoji: event.emoji, memberIds: [event.memberId], ...position }]
+        return current.map((g) => (g.emoji === event.emoji ? { ...g, ...position, memberIds: [...g.memberIds, event.memberId] } : g))
     }
     if (!existing?.memberIds.includes(event.memberId)) return current
     return current
-        .map((g) => (g.emoji === event.emoji ? { ...g, memberIds: g.memberIds.filter((id) => id !== event.memberId) } : g))
+        .map((g) => (g.emoji === event.emoji ? { ...g, ...position, memberIds: g.memberIds.filter((id) => id !== event.memberId) } : g))
         .filter((g) => g.memberIds.length > 0)
 }
 

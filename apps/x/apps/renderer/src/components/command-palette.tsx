@@ -185,7 +185,7 @@ const NAV_HEADING: Record<PaletteScope, string> = {
   spaces: 'Spaces',
   chats: 'Chats',
   brain: 'Notes',
-  code: 'Code chats',
+  code: 'Project chats',
 }
 
 const PLACEHOLDER: Record<PaletteScope, string> = {
@@ -193,7 +193,7 @@ const PLACEHOLDER: Record<PaletteScope, string> = {
   spaces: 'Search spaces, people, and messages…',
   chats: 'Search chats…',
   brain: 'Search notes and files…',
-  code: 'Search code chats…',
+  code: 'Search project chats…',
 }
 
 const SCOPE_LABEL: Record<PaletteScope, string> = {
@@ -201,7 +201,7 @@ const SCOPE_LABEL: Record<PaletteScope, string> = {
   spaces: 'spaces',
   chats: 'chats',
   brain: 'Brain',
-  code: 'code chats',
+  code: 'project chats',
 }
 
 /**
@@ -226,25 +226,12 @@ function byRecency(a: NavItem, b: NavItem): number {
 }
 
 /** The Code section exists only with code mode on (the dock reads the same flag). */
-function useCodeModeEnabled(): boolean {
-  const [enabled, setEnabled] = useState(false)
-  useEffect(() => {
-    const load = () => {
-      window.ipc.invoke('codeMode:getConfig', null)
-        .then((r) => setEnabled(r.enabled))
-        .catch(() => setEnabled(false))
-    }
-    load()
-    window.addEventListener('code-mode-config-changed', load)
-    return () => window.removeEventListener('code-mode-config-changed', load)
-  }, [])
-  return enabled
-}
+
 
 export function CommandPalette({ open, onOpenChange, chats, notes, defaultScope, onNavigate }: CommandPaletteProps) {
   const { orgs } = useSpacesOrgs()
   const feedOf = useSpaceFeeds()
-  const codeMode = useCodeModeEnabled()
+  const codeMode = true
   const { sessions: codeSessions, projects } = useCodeSessions()
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -304,6 +291,17 @@ export function CommandPalette({ open, onOpenChange, chats, notes, defaultScope,
     for (const [orgId, members] of rosters) out.set(orgId, new Map(members.map((m) => [m.id, m.displayName])))
     return out
   }, [rosters])
+  // Each org's space names, for the `#Name` face of a space token in a snippet.
+  const spaceNames = useMemo(() => {
+    const out = new Map<string, ReadonlyMap<string, string>>()
+    for (const org of orgs) {
+      out.set(org.id, new Map([
+        ...org.spaces.map((s): [string, string] => [s.id, s.name]),
+        ...org.directs.map((d): [string, string] => [d.id, org.directLabels[d.id] ?? d.name]),
+      ]))
+    }
+    return out
+  }, [orgs])
 
   // When each space was last opened here. The log exposes a version, not a
   // value: bind the lookup to it so a visit yields a new lookup and the rows
@@ -465,7 +463,7 @@ export function CommandPalette({ open, onOpenChange, chats, notes, defaultScope,
             kind: 'code',
             icon: Code2,
             title: s.title,
-            subtitle: project ?? 'Code chat',
+            subtitle: project ?? 'Project chat',
             aside: formatFeedTime(at),
             dest: { kind: 'code-session', sessionId: s.id },
           },
@@ -535,7 +533,7 @@ export function CommandPalette({ open, onOpenChange, chats, notes, defaultScope,
         case 'brain':
           return [{ heading: 'Recent notes', rows: rows(['note'], 15) }]
         case 'code':
-          return [{ heading: 'Recent code chats', rows: rows(['code'], 15) }]
+          return [{ heading: 'Recent project chats', rows: rows(['code'], 15) }]
       }
     }
     return [{ heading: NAV_HEADING[scope], rows: rank(pool, q, scope === 'all' ? 10 : 20) }]
@@ -608,7 +606,7 @@ export function CommandPalette({ open, onOpenChange, chats, notes, defaultScope,
         icon: MessageSquare,
         title: hit.author.agentName ? `${author} · ${hit.author.agentName}` : author,
         subtitle: `${space.direct ? space.name : `#${space.name}`}${hit.topicTitle ? ` › ${hit.topicTitle}` : ''}`,
-        detail: highlight(resolveMentions(hit.snippet, roster), terms),
+        detail: highlight(resolveMentions(hit.snippet, roster, spaceNames.get(space.orgId)), terms),
         aside: formatFeedTime(hit.postedAt),
         dest: {
           kind: 'space',
@@ -634,14 +632,14 @@ export function CommandPalette({ open, onOpenChange, chats, notes, defaultScope,
     const files: Row[] = spaceHits.assets.map(({ space, hit }) => {
       const board = /\.excalidraw$/i.test(hit.path)
       return {
-        key: `asset:${space.orgId}/${space.spaceId}/${hit.path}`,
+        key: `asset:${space.orgId}/${space.spaceId}/${hit.id}`,
         kind: 'file',
         icon: board ? PenTool : FileText,
         title: <span className="font-mono text-[13px]">{highlight(hit.path, terms)}</span>,
         subtitle: space.direct ? space.name : `#${space.name}`,
         detail: hit.snippet ? highlight(hit.snippet, terms) : undefined,
         aside: formatFeedTime(hit.updatedAt),
-        dest: { kind: 'space', orgId: space.orgId, spaceId: space.spaceId, rail: board ? { kind: 'whiteboard', path: hit.path } : { kind: 'file', path: hit.path } },
+        dest: { kind: 'space', orgId: space.orgId, spaceId: space.spaceId, rail: board ? { kind: 'whiteboard', assetId: hit.id } : { kind: 'file', assetId: hit.id } },
       }
     })
     // A note already ranked by its title is not listed twice for its text;
@@ -687,9 +685,9 @@ export function CommandPalette({ open, onOpenChange, chats, notes, defaultScope,
       { heading: 'Files in spaces', rows: files },
       { heading: 'In notes', rows: noteHits },
       { heading: 'In chats', rows: transcripts },
-      { heading: 'In code chats', rows: codeTranscripts },
+      { heading: 'In project chats', rows: codeTranscripts },
     ].filter((g) => g.rows.length > 0)
-  }, [navGroups, spaceHits, rosterNames, content, terms, scope, codeIds])
+  }, [navGroups, spaceHits, rosterNames, spaceNames, content, terms, scope, codeIds])
 
   const groups = [...navGroups.filter((g) => g.rows.length > 0), ...contentGroups]
   const count = groups.reduce((n, g) => n + g.rows.length, 0)
@@ -716,7 +714,7 @@ export function CommandPalette({ open, onOpenChange, chats, notes, defaultScope,
         <DialogHeader className="sr-only">
           <DialogTitle>Search and go to</DialogTitle>
           <DialogDescription>
-            Jump to a section, space, person, discussion, chat, code chat, or note, or search across spaces, chats, and Brain.
+            Jump to a section, space, person, discussion, chat, project chat, or note, or search across spaces, chats, and Brain.
           </DialogDescription>
         </DialogHeader>
         <Command

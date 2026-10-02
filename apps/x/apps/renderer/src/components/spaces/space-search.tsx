@@ -3,9 +3,11 @@ import { FileText, Hash, MessageSquare, PenTool, Search } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { useDebounce } from '@/hooks/use-debounce'
 import { STREAM_READ_KEY } from '@/hooks/use-space-chat'
+import { useSpaceNames } from '@/hooks/use-spaces'
 import { cn } from '@/lib/utils'
 import { hasKind, parseSearchQuery } from '@/lib/spaces-corpus'
 import { requestJump } from '@/lib/spaces-jump'
+import { FIND_SEARCH_EVENT } from '@/lib/spaces-find'
 import { chord } from '@/lib/shortcut'
 import { formatFeedTime, resolveMentions } from '@/lib/spaces-presentation'
 import type { RailSelection } from '@/lib/spaces-selection'
@@ -52,11 +54,24 @@ const FILTERED_PAGE = 50
 
 export function SpaceSearch({ orgId, spaceId, selfMemberId, onNavigate, className }: Props) {
     const names = useMemberNames()
+    const spaceNames = useSpaceNames(orgId)
     const inputRef = useRef<HTMLInputElement>(null)
     const [query, setQuery] = useState('')
     const [focused, setFocused] = useState(false)
     const [results, setResults] = useState<spaces.SearchResults>(EMPTY)
     const [loading, setLoading] = useState(false)
+
+    // /find's "Search instead" (2026-09-24): the query arrives prefilled and
+    // focused, and the debounced fetch below takes it from there.
+    useEffect(() => {
+        const onFind = (e: Event) => {
+            const q = (e as CustomEvent<{ query?: string }>).detail?.query ?? ''
+            setQuery(q)
+            inputRef.current?.focus()
+        }
+        window.addEventListener(FIND_SEARCH_EVENT, onFind)
+        return () => window.removeEventListener(FIND_SEARCH_EVENT, onFind)
+    }, [])
     const debounced = useDebounce(query, 250)
 
     // ⌘⇧K focuses THIS search while a space pane exists. Capture on window
@@ -117,7 +132,7 @@ export function SpaceSearch({ orgId, spaceId, selfMemberId, onNavigate, classNam
     }, [debounced, orgId, spaceId])
 
     const words = parsed.terms
-    const mark = (text: string) => highlight(resolveMentions(text, names), words)
+    const mark = (text: string) => highlight(resolveMentions(text, names, spaceNames), words)
 
     const pick = (sel: RailSelection) => {
         onNavigate(sel)
@@ -195,8 +210,8 @@ export function SpaceSearch({ orgId, spaceId, selfMemberId, onNavigate, classNam
         ...assets.map((a): Item => {
             const board = /\.excalidraw$/i.test(a.path)
             return {
-                key: `a:${a.path}`,
-                pick: () => pick(board ? { kind: 'whiteboard', path: a.path } : { kind: 'file', path: a.path }),
+                key: `a:${a.id}`,
+                pick: () => pick(board ? { kind: 'whiteboard', assetId: a.id } : { kind: 'file', assetId: a.id }),
                 row: (
                     <>
                         {board

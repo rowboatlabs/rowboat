@@ -4,8 +4,8 @@ import {
     WhiteboardOpError,
     applyWhiteboardOps,
     nextFractionalIndex,
+    boardPathForName,
     parseWhiteboardSnapshot,
-    resolveBoardPath,
     serializeWhiteboardSnapshot,
     summarizeWhiteboard,
     type WbElement,
@@ -73,15 +73,15 @@ describe("snapshot parse / serialize", () => {
     });
 });
 
-describe("resolveBoardPath", () => {
-    it("maps names, file names and paths to the asset path; empty means the default board", () => {
-        expect(resolveBoardPath(undefined)).toBe("whiteboards/board.excalidraw");
-        expect(resolveBoardPath("  ")).toBe("whiteboards/board.excalidraw");
-        expect(resolveBoardPath("roadmap")).toBe("whiteboards/roadmap.excalidraw");
-        expect(resolveBoardPath("roadmap.excalidraw")).toBe("whiteboards/roadmap.excalidraw");
-        expect(resolveBoardPath("whiteboards/roadmap.excalidraw")).toBe("whiteboards/roadmap.excalidraw");
-        expect(resolveBoardPath("whiteboards/roadmap")).toBe("whiteboards/roadmap.excalidraw");
-        expect(resolveBoardPath("q3/plan")).toBe("whiteboards/q3-plan.excalidraw");
+describe("boardPathForName", () => {
+    it("maps names, file names and paths to the path a new board is created at; empty means the default board", () => {
+        expect(boardPathForName(undefined)).toBe("whiteboards/board.excalidraw");
+        expect(boardPathForName("  ")).toBe("whiteboards/board.excalidraw");
+        expect(boardPathForName("roadmap")).toBe("whiteboards/roadmap.excalidraw");
+        expect(boardPathForName("roadmap.excalidraw")).toBe("whiteboards/roadmap.excalidraw");
+        expect(boardPathForName("whiteboards/roadmap.excalidraw")).toBe("whiteboards/roadmap.excalidraw");
+        expect(boardPathForName("whiteboards/roadmap")).toBe("whiteboards/roadmap.excalidraw");
+        expect(boardPathForName("q3/plan")).toBe("whiteboards/q3-plan.excalidraw");
     });
 });
 

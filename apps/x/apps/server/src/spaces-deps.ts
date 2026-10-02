@@ -1,7 +1,9 @@
 import fs from 'node:fs/promises';
 import { ipc, spaces as spacesShared } from '@x/shared';
 import * as orgs from '@x/core/dist/spaces/orgs.js';
+import { SpaceSubscriptions } from '@x/core/dist/spaces/subscriptions.js';
 import * as spacesOAuth from '@x/core/dist/spaces/oauth.js';
+import { oauthConnectBus } from '@x/core/dist/auth/connector-events.js';
 import { cancelScheduled, listScheduled, scheduleItem } from '@x/core/dist/spaces/scheduler.js';
 import { invokeTopicAgent, stopTopicAgent, topicSessionId } from '@x/core/dist/spaces/topic-agent.js';
 import { onSpaceAgentActivity, startSpaceAgentActivity } from '@x/core/dist/spaces/agent-activity.js';
@@ -50,39 +52,47 @@ startSpaceNotifications();
 // consumer — see core/spaces/response-index.
 void startSpaceResponseIndex().catch((err) => console.error('[spaces] response index failed to start:', err));
 
-// Keyed by org/space; each entry remembers WHICH live client it subscribed
-// on. A re-auth (orgs.upsertOAuthOrg) closes and replaces the org's client —
-// a cached subscription on the dead instance would swallow live frames
-// forever while every later subscribeSpace call no-ops against the cache.
-const liveSubscriptions = new Map<string, { live: unknown; unsubscribe: () => void }>();
+// One core-level live subscription per (org, space), fanned out to every
+// client. The registry tracks each entry's resume point and re-subscribes
+// on a fresh client whenever core replaces an org's socket (core/spaces/
+// subscriptions) — a subscription left on the dead one would swallow frames.
+const subscriptions = new SpaceSubscriptions({ getLive: orgs.getLive, onRuntimeReset: orgs.onRuntimeReset });
 
 // Member-addressed frames (space_added) ride no space subscription — relay
 // them to every client as they arrive.
 orgs.onMemberFrame((orgId, frame) => emitSpacesEvent({ orgId, frame }));
 
-function orgSummary(record: orgs.OrgRecord): spacesShared.SpacesOrgSummary {
+async function orgSummary(record: orgs.OrgRecord): Promise<spacesShared.SpacesOrgSummary> {
   return {
     id: record.id,
     name: record.name,
     address: record.address,
     baseUrl: record.baseUrl,
     memberId: record.auth.memberId,
-    authKind: record.auth.kind,
-    ...(record.auth.kind === 'oauth' && record.auth.error ? { authError: record.auth.error } : {}),
+    ...(await orgs.describeOrgAuth(record)),
   };
 }
+
+const orgSummaries = (records: orgs.OrgRecord[]) => Promise.all(records.map(orgSummary));
+
+// A Rowboat sign-in or sign-out changes what the apex would list for us:
+// the next org listing re-syncs instead of trusting a recent one.
+oauthConnectBus.subscribe((event) => {
+  if (event.provider === 'rowboat') spacesOAuth.invalidateManagedOrgsSync();
+});
 
 type SpacesRpcChannel =
   | 'spaces:listOrgs' | 'spaces:addOrg' | 'spaces:resolveInviteLink' | 'spaces:joinInvite'
   | 'spaces:signInOrg' | 'spaces:createOrg' | 'spaces:apexInfo' | 'spaces:removeOrg'
+  | 'spaces:accountState' | 'spaces:signInRowboat' | 'spaces:addOrgByAddress'
   | 'spaces:listSpaces' | 'spaces:createSpace' | 'spaces:openDirect' | 'spaces:listMembers' | 'spaces:createInvite'
-  | 'spaces:resolveInvite' | 'spaces:acceptInvite' | 'spaces:listAssets' | 'spaces:moveAsset'
+  | 'spaces:resolveInvite' | 'spaces:acceptInvite' | 'spaces:listAssets' | 'spaces:createAsset' | 'spaces:moveAsset'
   | 'spaces:deleteAsset' | 'spaces:restoreAsset' | 'spaces:uploadBlob' | 'spaces:readAsset'
   | 'spaces:proposeChange' | 'spaces:assetHistory' | 'spaces:diff' | 'spaces:listTopics'
   | 'spaces:search'
-  | 'spaces:listStream' | 'spaces:listThread' | 'spaces:linkPreview' | 'spaces:postMessage' | 'spaces:createTopic'
+  | 'spaces:listStream' | 'spaces:getMessage' | 'spaces:listThread' | 'spaces:linkPreview' | 'spaces:postMessage' | 'spaces:createTopic'
   | 'spaces:manageTopic' | 'spaces:reactToMessage'
-  | 'spaces:deleteMessage' | 'spaces:editMessage' | 'spaces:votePoll' | 'spaces:endPoll'
+  | 'spaces:deleteMessage' | 'spaces:editMessage' | 'spaces:votePoll' | 'spaces:endPoll' | 'spaces:decideApproval'
   | 'spaces:invokeRowboat' | 'spaces:topicSession' | 'spaces:responseSession' | 'spaces:stopRowboat'
   | 'spaces:subscribeSpace' | 'spaces:unsubscribeSpace' | 'spaces:presence' | 'spaces:whiteboard'
   | 'spaces:bounceLive'
@@ -97,10 +107,25 @@ type SpacesHandlers = {
 };
 
 export const spacesRpcHandlers: SpacesHandlers = {
-  'spaces:listOrgs': async () => ({ orgs: orgs.listOrgs().map(orgSummary) }),
+  // The listing first makes the managed orgs match the apex (cheap when a
+  // sync ran moments ago; a failed sync keeps the cached records and logs).
+  'spaces:listOrgs': async () => {
+    await spacesOAuth.syncManagedOrgs({ maxAgeMs: 30_000 }).catch((err) => {
+      console.warn('[spaces] managed org sync failed:', err instanceof Error ? err.message : err);
+    });
+    return { orgs: await orgSummaries(orgs.listOrgs()) };
+  },
+
+  'spaces:accountState': async () => spacesOAuth.accountState(),
+
+  'spaces:signInRowboat': async () => ({ orgs: await orgSummaries(await spacesOAuth.signInForSpaces()) }),
+
+  'spaces:addOrgByAddress': async (args) => ({
+    org: await orgSummary(await spacesOAuth.addOrgByAddress({ address: args.address, openBrowser })),
+  }),
 
   'spaces:addOrg': async (args) => {
-    const org = orgSummary(await orgs.addDevOrg({ baseUrl: args.baseUrl, memberId: args.memberId }));
+    const org = await orgSummary(await orgs.addDevOrg({ baseUrl: args.baseUrl, memberId: args.memberId }));
     return { org };
   },
 
@@ -111,18 +136,18 @@ export const spacesRpcHandlers: SpacesHandlers = {
 
   'spaces:joinInvite': async (args) => {
     const { org, result } = await spacesOAuth.joinViaInviteLink({ url: args.url, openBrowser });
-    return { org: orgSummary(org), space: result.space };
+    return { org: await orgSummary(org), space: result.space };
   },
 
   'spaces:signInOrg': async (args) => {
     const record = orgs.getOrg(args.orgId);
     if (!record) throw new Error(`unknown org ${args.orgId}`);
     const updated = await spacesOAuth.signInOrg({ baseUrl: record.baseUrl, openBrowser, orgId: record.id });
-    return { org: orgSummary(updated) };
+    return { org: await orgSummary(updated) };
   },
 
   'spaces:createOrg': async (args) => {
-    const org = orgSummary(await spacesOAuth.createOrgOnDeployment({ name: args.name, openBrowser }));
+    const org = await orgSummary(await spacesOAuth.createOrgOnDeployment({ name: args.name, openBrowser }));
     return { org };
   },
 
@@ -135,12 +160,7 @@ export const spacesRpcHandlers: SpacesHandlers = {
   },
 
   'spaces:removeOrg': async (args) => {
-    for (const [key, entry] of liveSubscriptions) {
-      if (key.startsWith(`${args.orgId}/`)) {
-        entry.unsubscribe();
-        liveSubscriptions.delete(key);
-      }
-    }
+    subscriptions.dropOrg(args.orgId);
     await orgs.removeOrg(args.orgId);
     return { success: true };
   },
@@ -182,9 +202,18 @@ export const spacesRpcHandlers: SpacesHandlers = {
 
   // Namespace ops — the renderer is the human surface, so everything here is
   // 'direct' (agents move/delete through the org's MCP face, attributed there).
+  'spaces:createAsset': async (args) =>
+    orgs.getClient(args.orgId).createAsset(args.spaceId, {
+      path: args.input.path,
+      // Exactly one of the two variants (contract decision 1, amended).
+      ...(args.input.blob !== undefined ? { blob: args.input.blob } : { newContent: args.input.newContent ?? '' }),
+      ...(args.input.reason ? { reason: args.input.reason } : {}),
+      actingMode: 'direct',
+    }),
+
   'spaces:moveAsset': async (args) =>
     orgs.getClient(args.orgId).moveAsset(args.spaceId, {
-      fromPath: args.fromPath,
+      assetId: args.assetId,
       toPath: args.toPath,
       baseVersion: args.baseVersion,
       ...(args.reason ? { reason: args.reason } : {}),
@@ -193,14 +222,14 @@ export const spacesRpcHandlers: SpacesHandlers = {
 
   'spaces:deleteAsset': async (args) =>
     orgs.getClient(args.orgId).deleteAsset(args.spaceId, {
-      path: args.path,
+      assetId: args.assetId,
       baseVersion: args.baseVersion,
       ...(args.reason ? { reason: args.reason } : {}),
       actingMode: 'direct',
     }),
 
   'spaces:restoreAsset': async (args) =>
-    orgs.getClient(args.orgId).restoreAsset(args.spaceId, { path: args.path, actingMode: 'direct' }),
+    orgs.getClient(args.orgId).restoreAsset(args.spaceId, { assetId: args.assetId, actingMode: 'direct' }),
 
   // Upload phase 1. Pastes arrive as bytes; drag-drop / picker sends the
   // absolute path so big files never cross IPC. NOTE: the path is read on the
@@ -215,11 +244,11 @@ export const spacesRpcHandlers: SpacesHandlers = {
   },
 
   'spaces:readAsset': async (args) =>
-    orgs.getClient(args.orgId).readAsset(args.spaceId, args.path, args.version),
+    orgs.getClient(args.orgId).readAsset(args.spaceId, args.assetId, args.version),
 
   'spaces:proposeChange': async (args) =>
     orgs.getClient(args.orgId).proposeChange(args.spaceId, {
-      assetPath: args.input.assetPath,
+      assetId: args.input.assetId,
       baseVersion: args.input.baseVersion,
       // Exactly one of the two variants (contract decision 1, amended).
       ...(args.input.blob !== undefined ? { blob: args.input.blob } : { newContent: args.input.newContent ?? '' }),
@@ -229,14 +258,14 @@ export const spacesRpcHandlers: SpacesHandlers = {
 
   'spaces:assetHistory': async (args) => ({
     changeSets: await orgs.getClient(args.orgId).assetHistory(args.spaceId, {
-      ...(args.path !== undefined ? { path: args.path } : {}),
+      ...(args.assetId !== undefined ? { assetId: args.assetId } : {}),
       ...(args.beforeOffset !== undefined ? { beforeOffset: args.beforeOffset } : {}),
       ...(args.limit !== undefined ? { limit: args.limit } : {}),
     }),
   }),
 
   'spaces:diff': async (args) => ({
-    unified: await orgs.getClient(args.orgId).diff(args.spaceId, args.path, args.from, args.to),
+    unified: await orgs.getClient(args.orgId).diff(args.spaceId, args.assetId, args.from, args.to),
   }),
 
   'spaces:listTopics': async (args) => ({
@@ -253,12 +282,20 @@ export const spacesRpcHandlers: SpacesHandlers = {
   'spaces:listStream': async (args) =>
     orgs.getClient(args.orgId).listStream(args.spaceId, {
       ...(args.beforeOffset !== undefined ? { beforeOffset: args.beforeOffset } : {}),
+      ...(args.afterOffset !== undefined ? { afterOffset: args.afterOffset } : {}),
+      ...(args.aroundOffset !== undefined ? { aroundOffset: args.aroundOffset } : {}),
       ...(args.limit !== undefined ? { limit: args.limit } : {}),
     }),
+
+  'spaces:getMessage': async (args) => ({
+    message: await orgs.getClient(args.orgId).getMessage(args.spaceId, args.messageId),
+  }),
 
   'spaces:listThread': async (args) =>
     orgs.getClient(args.orgId).listThread(args.spaceId, args.rootMessageId, {
       ...(args.beforeOffset !== undefined ? { beforeOffset: args.beforeOffset } : {}),
+      ...(args.afterOffset !== undefined ? { afterOffset: args.afterOffset } : {}),
+      ...(args.aroundOffset !== undefined ? { aroundOffset: args.aroundOffset } : {}),
       ...(args.limit !== undefined ? { limit: args.limit } : {}),
     }),
 
@@ -270,6 +307,7 @@ export const spacesRpcHandlers: SpacesHandlers = {
       ...(args.anchorChangeSetId ? { anchorChangeSetId: args.anchorChangeSetId } : {}),
       body: args.body,
       ...(args.poll ? { poll: args.poll } : {}),
+      ...(args.agentOptions ? { agentOptions: args.agentOptions } : {}),
       actingMode: 'direct',
     }),
 
@@ -278,6 +316,7 @@ export const spacesRpcHandlers: SpacesHandlers = {
       ...(args.rootMessageId ? { rootMessageId: args.rootMessageId } : {}),
       title: args.title,
       ...(args.body ? { body: args.body } : {}),
+      ...(args.documentAssetId ? { documentAssetId: args.documentAssetId } : {}),
       actingMode: 'direct',
     }),
 
@@ -320,6 +359,14 @@ export const spacesRpcHandlers: SpacesHandlers = {
     }),
   }),
 
+  'spaces:decideApproval': async (args) => ({
+    approval: await orgs.getClient(args.orgId).decideApproval(args.spaceId, args.approvalId, {
+      decision: args.decision,
+      ...(args.note ? { note: args.note } : {}),
+      actingMode: 'direct',
+    }),
+  }),
+
   'spaces:invokeRowboat': async (args) => invokeTopicAgent(args),
 
   'spaces:topicSession': async (args) => ({
@@ -331,25 +378,12 @@ export const spacesRpcHandlers: SpacesHandlers = {
   'spaces:stopRowboat': async (args) => stopTopicAgent(args),
 
   'spaces:subscribeSpace': async (args) => {
-    const key = `${args.orgId}/${args.spaceId}`;
-    const live = orgs.getLive(args.orgId);
-    const cached = liveSubscriptions.get(key);
-    if (!cached || cached.live !== live) {
-      cached?.unsubscribe();
-      const unsubscribe = live.subscribe(
-        args.spaceId,
-        (frame) => emitSpacesEvent({ orgId: args.orgId, frame }),
-        args.afterOffset,
-      );
-      liveSubscriptions.set(key, { live, unsubscribe });
-    }
+    subscriptions.subscribe(args.orgId, args.spaceId, (frame) => emitSpacesEvent({ orgId: args.orgId, frame }), args.afterOffset);
     return { success: true };
   },
 
   'spaces:unsubscribeSpace': async (args) => {
-    const key = `${args.orgId}/${args.spaceId}`;
-    liveSubscriptions.get(key)?.unsubscribe();
-    liveSubscriptions.delete(key);
+    subscriptions.unsubscribe(args.orgId, args.spaceId);
     return { success: true };
   },
 

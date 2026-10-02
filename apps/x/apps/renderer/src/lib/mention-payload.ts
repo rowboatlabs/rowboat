@@ -37,6 +37,7 @@ export function splitMentions(mentions: Mention[] | undefined): {
           orgName: mention.orgName,
           spaceId: mention.spaceId,
           spaceName: mention.spaceName,
+          assetId: mention.assetId,
           path: mention.path,
           name: mention.displayName,
         })

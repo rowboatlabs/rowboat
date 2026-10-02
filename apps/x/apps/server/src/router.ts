@@ -40,10 +40,22 @@ export function createRpcRoutes(handlers: RpcHandlers): Hono {
       return c.json(ipc.validateResponse(channel, result) as object);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[server] rpc ${channel} failed:`, message);
+      // Only the message crosses the wire; the cause chain (an errno, a
+      // nested socket error) is worth its line here, where it dies otherwise.
+      const cause = err instanceof Error && err.cause !== undefined ? ` — cause: ${describeCause(err.cause)}` : '';
+      console.error(`[server] rpc ${channel} failed: ${message}${cause}`);
       return c.json({ error: { code: 'internal', message } }, 500);
     }
   });
 
   return app;
+}
+
+function describeCause(cause: unknown): string {
+  if (cause instanceof AggregateError) return cause.errors.map(describeCause).join('; ');
+  if (cause instanceof Error) {
+    const code = (cause as { code?: unknown }).code;
+    return typeof code === 'string' ? `${code} ${cause.message}`.trim() : cause.message;
+  }
+  return String(cause);
 }

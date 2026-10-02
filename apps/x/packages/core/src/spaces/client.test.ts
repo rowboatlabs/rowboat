@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { startHarbor, type RunningHarbor } from '@rowboat/harbor';
+import { PgStore, pgliteDb, startHarbor, type RunningHarbor } from '@rowboat/harbor';
 import { SpacesClient, SpacesRequestError } from './client.js';
 import { SpacesLive } from './live.js';
 
@@ -11,8 +11,23 @@ let harbor: RunningHarbor;
 let ramnique: SpacesClient;
 let gagan: SpacesClient;
 
+/** A harbor over its own in-process Postgres (PGlite) — the store the server's own tests run on; close() takes it down too. */
+async function startTestHarbor(options: Omit<Parameters<typeof startHarbor>[0], 'store'>): Promise<RunningHarbor> {
+  const db = await pgliteDb();
+  const store = new PgStore(db);
+  await store.init();
+  const started = await startHarbor({ ...options, store });
+  return {
+    ...started,
+    close: async () => {
+      await started.close();
+      await db.close();
+    },
+  };
+}
+
 beforeAll(async () => {
-  harbor = await startHarbor({
+  harbor = await startTestHarbor({
     orgName: 'Client Test Org',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
@@ -48,18 +63,20 @@ describe('SpacesClient', () => {
     expect((await gagan.listMembers(spaceId)).map((m) => m.id).sort()).toEqual(['gagan', 'ramnique']);
   });
 
-  it('propose → read → history → diff, with all three outcomes typed', async () => {
-    const created = await ramnique.proposeChange(spaceId, {
-      assetPath: 'notes.md',
-      baseVersion: 0,
+  it('create → propose → read → history → diff, with all three outcomes typed', async () => {
+    // Birth is the one path-shaped call; everything after addresses the id.
+    const born = await ramnique.createAsset(spaceId, {
+      path: 'notes.md',
       newContent: '# Notes\n- alpha\n',
       reason: 'start',
       actingMode: 'direct',
     });
-    expect(created.outcome).toBe('applied');
+    const notes = born.asset.id;
+    expect(born.asset).toMatchObject({ path: 'notes.md', version: 1 });
+    expect(born.changeSet.assetId).toBe(notes);
 
     const fresh = await gagan.proposeChange(spaceId, {
-      assetPath: 'notes.md',
+      assetId: notes,
       baseVersion: 1,
       newContent: '# Notes\n- alpha\n- beta\n',
       actingMode: 'direct',
@@ -67,7 +84,7 @@ describe('SpacesClient', () => {
     expect(fresh.outcome).toBe('applied');
 
     const stale = await ramnique.proposeChange(spaceId, {
-      assetPath: 'notes.md',
+      assetId: notes,
       baseVersion: 1,
       newContent: '# Notes (titled)\n- alpha\n',
       actingMode: 'direct',
@@ -78,7 +95,7 @@ describe('SpacesClient', () => {
     }
 
     const conflict = await gagan.proposeChange(spaceId, {
-      assetPath: 'notes.md',
+      assetId: notes,
       baseVersion: 1,
       newContent: '# Different title\n- alpha\n',
       actingMode: 'direct',
@@ -89,12 +106,16 @@ describe('SpacesClient', () => {
       expect(conflict.regions.length).toBeGreaterThan(0);
     }
 
-    const read = await ramnique.readAsset(spaceId, 'notes.md');
-    expect(read.version).toBe(3);
+    const read = await ramnique.readAsset(spaceId, notes);
+    expect(read).toMatchObject({ id: notes, path: 'notes.md', version: 3 });
     expect(read.recentHistory.length).toBe(3);
-    expect((await ramnique.assetHistory(spaceId, { path: 'notes.md' })).length).toBe(3);
-    expect(await ramnique.diff(spaceId, 'notes.md', 1, 3)).toContain('+# Notes (titled)');
-    expect((await ramnique.listAssets(spaceId)).map((e) => e.path)).toEqual(['notes.md']);
+    expect((await ramnique.assetHistory(spaceId, { assetId: notes })).length).toBe(3);
+    expect(await ramnique.diff(spaceId, notes, 1, 3)).toContain('+# Notes (titled)');
+    expect((await ramnique.listAssets(spaceId)).map((e) => [e.id, e.path])).toEqual([[notes, 'notes.md']]);
+    // A second file at a live path is refused — the path is a name, unique among the living.
+    await expect(
+      ramnique.createAsset(spaceId, { path: 'notes.md', newContent: 'dup\n', actingMode: 'direct' }),
+    ).rejects.toMatchObject({ code: 'invalid_request' });
   });
 
   it('feed round-trip: root into the stream, flat reply, promote + retitle', async () => {
@@ -130,9 +151,8 @@ describe('SpacesClient', () => {
 
   it('search returns categorized hits with mention expansion over the wire', async () => {
     await ramnique.postMessage(spaceId, { body: 'hey @gagan the quarterly numbers landed', actingMode: 'direct' });
-    await ramnique.proposeChange(spaceId, {
-      assetPath: 'finance/quarterly.md',
-      baseVersion: 0,
+    const quarterly = await ramnique.createAsset(spaceId, {
+      path: 'finance/quarterly.md',
       newContent: 'Quarterly numbers: all green.',
       actingMode: 'direct',
     });
@@ -140,7 +160,8 @@ describe('SpacesClient', () => {
     const results = await ramnique.search(spaceId, { q: 'quarterly' });
     expect(results.messages.length).toBe(1);
     expect(results.messages[0]!.snippet).toContain('quarterly numbers');
-    expect(results.assets.map((a) => a.path)).toContain('finance/quarterly.md');
+    // File hits carry the id — the discovery surface for every later call.
+    expect(results.assets.map((a) => [a.id, a.path])).toContainEqual([quarterly.asset.id, 'finance/quarterly.md']);
     expect(results.truncated.messages).toBe(false);
 
     // "gagan" is a display name — the hit is the @-mention of the member id.
@@ -168,20 +189,32 @@ describe('SpacesClient', () => {
     expect(older.hasMore).toBe(true);
   });
 
+  it('pages around and forward: the params reach the org and the window lands on the row', async () => {
+    const all = await ramnique.listStream(spaceId, { limit: 200 });
+    expect(all.messages.length).toBeGreaterThanOrEqual(3);
+    const target = all.messages[1]!;
+    const around = await ramnique.listStream(spaceId, { aroundOffset: target.offset, limit: 2 });
+    expect(around.messages.map((m) => m.id)).toEqual([all.messages[0]!.id, target.id]);
+    expect(around.hasMoreAfter).toBe(all.messages.length > 2);
+    const after = await ramnique.listStream(spaceId, { afterOffset: target.offset, limit: 200 });
+    expect(after.messages.map((m) => m.id)).toEqual(all.messages.slice(2).map((m) => m.id));
+    expect(after.hasMoreAfter).toBe(false);
+  });
+
   it('reactions toggle and fold into message reads', async () => {
     const started = await ramnique.postMessage(spaceId, { body: 'Reaction target', actingMode: 'direct' });
     const messageId = started.message.id;
 
     const one = await gagan.reactToMessage(spaceId, messageId, { emoji: '👍', action: 'add', actingMode: 'direct' });
-    expect(one.reactions).toEqual([{ emoji: '👍', memberIds: ['gagan'] }]);
+    expect(one.reactions).toEqual([{ emoji: '👍', memberIds: ['gagan'], lastOffset: expect.any(Number) }]);
     const two = await ramnique.reactToMessage(spaceId, messageId, { emoji: '👍', action: 'add', actingMode: 'direct' });
-    expect(two.reactions).toEqual([{ emoji: '👍', memberIds: ['gagan', 'ramnique'] }]);
+    expect(two.reactions).toEqual([{ emoji: '👍', memberIds: ['gagan', 'ramnique'], lastOffset: expect.any(Number) }]);
 
     const { messages } = await gagan.listStream(spaceId);
     expect(messages.find((m) => m.id === messageId)?.reactions).toEqual(two.reactions);
 
     const removed = await gagan.reactToMessage(spaceId, messageId, { emoji: '👍', action: 'remove', actingMode: 'direct' });
-    expect(removed.reactions).toEqual([{ emoji: '👍', memberIds: ['ramnique'] }]);
+    expect(removed.reactions).toEqual([{ emoji: '👍', memberIds: ['ramnique'], lastOffset: expect.any(Number) }]);
   });
 
   it('deletion tombstones the message: author-only, body gone from reads', async () => {
@@ -210,18 +243,16 @@ describe('SpacesClient', () => {
     expect(blob.size).toBe(bytes.byteLength);
     expect(blob.hash).toMatch(/^[0-9a-f]{64}$/);
 
-    const proposed = await ramnique.proposeChange(spaceId, {
-      assetPath: 'docs/spec.pdf',
-      baseVersion: 0,
+    const born = await ramnique.createAsset(spaceId, {
+      path: 'docs/spec.pdf',
       blob: blob.hash,
       reason: 'attach the spec',
       actingMode: 'direct',
     });
-    expect(proposed.outcome).toBe('applied');
-    if (proposed.outcome === 'applied') expect(proposed.changeSet.blob?.hash).toBe(blob.hash);
+    expect(born.changeSet.blob?.hash).toBe(blob.hash);
 
     const entries = await ramnique.listAssets(spaceId);
-    expect(entries.find((e) => e.path === 'docs/spec.pdf')?.blob?.mime).toBe('application/pdf');
+    expect(entries.find((e) => e.id === born.asset.id)?.blob?.mime).toBe('application/pdf');
 
     const fetched = await ramnique.fetchBlob(spaceId, blob.hash);
     expect(Buffer.from(fetched.bytes)).toEqual(Buffer.from(bytes));
@@ -231,31 +262,33 @@ describe('SpacesClient', () => {
     await expect(ramnique.fetchBlob(spaceId, 'f'.repeat(64))).rejects.toMatchObject({ code: 'not_found' });
   });
 
-  it('move → redirect-aware read → delete → trash listing → restore round-trip', async () => {
-    await ramnique.proposeChange(spaceId, {
-      assetPath: 'tmp/scratch.md', baseVersion: 0, newContent: 'scratch\n', actingMode: 'direct',
-    });
+  it('move → same-id read → delete → trash listing → restore round-trip', async () => {
+    const scratch = (await ramnique.createAsset(spaceId, {
+      path: 'tmp/scratch.md', newContent: 'scratch\n', actingMode: 'direct',
+    })).asset.id;
     const moved = await ramnique.moveAsset(spaceId, {
-      fromPath: 'tmp/scratch.md', toPath: 'notes/scratch.md', baseVersion: 1, reason: 'tidy', actingMode: 'direct',
+      assetId: scratch, toPath: 'notes/scratch.md', baseVersion: 1, reason: 'tidy', actingMode: 'direct',
     });
     expect(moved.outcome).toBe('moved');
-    if (moved.outcome === 'moved') expect(moved.changeSet).toMatchObject({ op: 'move', movedFrom: 'tmp/scratch.md' });
+    if (moved.outcome === 'moved') expect(moved.changeSet).toMatchObject({ op: 'move', assetId: scratch, assetPath: 'notes/scratch.md', movedFrom: 'tmp/scratch.md' });
 
-    // Old links answer with the file's CURRENT path — the client's redirect signal.
-    const read = await ramnique.readAsset(spaceId, 'tmp/scratch.md');
+    // The id is the identity: the same read answers with the file's CURRENT path.
+    const read = await ramnique.readAsset(spaceId, scratch);
     expect(read.path).toBe('notes/scratch.md');
 
     const deleted = await ramnique.deleteAsset(spaceId, {
-      path: 'notes/scratch.md', baseVersion: 1, reason: 'done with it', actingMode: 'direct',
+      assetId: scratch, baseVersion: 1, reason: 'done with it', actingMode: 'direct',
     });
     expect(deleted.outcome).toBe('deleted');
-    expect((await ramnique.listAssets(spaceId)).map((e) => e.path)).not.toContain('notes/scratch.md');
+    expect((await ramnique.listAssets(spaceId)).map((e) => e.id)).not.toContain(scratch);
     const trash = await ramnique.listAssets(spaceId, { includeDeleted: true });
-    expect(trash.find((e) => e.path === 'notes/scratch.md')?.state).toBe('deleted');
+    expect(trash.find((e) => e.id === scratch)).toMatchObject({ path: 'notes/scratch.md', state: 'deleted' });
+    // A trashed file is not readable — it must be restored first.
+    await expect(ramnique.readAsset(spaceId, scratch)).rejects.toMatchObject({ code: 'not_found' });
 
-    const restored = await ramnique.restoreAsset(spaceId, { path: 'notes/scratch.md', actingMode: 'direct' });
+    const restored = await ramnique.restoreAsset(spaceId, { assetId: scratch, actingMode: 'direct' });
     expect(restored.outcome).toBe('restored');
-    expect((await ramnique.readAsset(spaceId, 'notes/scratch.md')).content).toBe('scratch\n');
+    expect((await ramnique.readAsset(spaceId, scratch)).content).toBe('scratch\n');
   });
 
   it('direct messages: get-or-create from either side, hidden unless asked, fixed membership', async () => {
@@ -302,13 +335,14 @@ describe('SpacesClient.listOrgMembers', () => {
   }
 
   it('GETs /v1/members with the bearer and returns the members list', async () => {
+    // A server from before agent members (2026-09-29) sends no kind: everyone is a person.
     const members = [
       { id: 'gagan', displayName: 'Gagan', role: 'member' },
       { id: 'ramnique', displayName: 'Ramnique', role: 'member' },
     ];
     const { calls, fetchImpl } = fakeFetch({ members });
     const client = new SpacesClient({ baseUrl: 'http://org.test/', token: 'dev-ramnique', fetchImpl });
-    expect(await client.listOrgMembers()).toEqual(members);
+    expect(await client.listOrgMembers()).toEqual(members.map((m) => ({ ...m, kind: 'human' })));
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toBe('http://org.test/v1/members');
     expect(calls[0].init?.method).toBe('GET');
@@ -328,15 +362,47 @@ describe('SpacesClient.listOrgMembers', () => {
   });
 });
 
+describe('SpacesClient transport failures', () => {
+  // The dev-org-left-behind case (2026-09-14): an org whose Harbor is not
+  // running failed as a bare "fetch failed" with the errno dropped before it
+  // reached any log. The client owns naming the org and the cause.
+  it('names the org and the errno when nothing is listening', async () => {
+    const closed = await (async () => {
+      const { createServer } = await import('node:net');
+      const srv = createServer();
+      await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
+      const port = (srv.address() as { port: number }).port;
+      await new Promise<void>((r) => srv.close(() => r()));
+      return port;
+    })();
+    const client = new SpacesClient({ baseUrl: `http://127.0.0.1:${closed}`, token: 'dev-ramnique' });
+    const err = await client.listSpaces().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(SpacesRequestError);
+    expect(err).toMatchObject({ status: 0, code: 'unreachable', retryable: true });
+    expect((err as Error).message).toBe(`Rowboat org at http://127.0.0.1:${closed} is unreachable (ECONNREFUSED)`);
+  });
+
+  it('digs the code out of a nested cause and falls back to the deepest message', async () => {
+    const withCode = (async () => {
+      throw new TypeError('fetch failed', { cause: new AggregateError([Object.assign(new Error('connect ECONNREFUSED ::1:1'), { code: 'ECONNREFUSED' })]) });
+    }) as typeof fetch;
+    await expect(new SpacesClient({ baseUrl: 'http://org.test', token: 't', fetchImpl: withCode }).health()).rejects.toMatchObject({
+      code: 'unreachable',
+      message: 'Rowboat org at http://org.test is unreachable (ECONNREFUSED)',
+    });
+    const noCode = (async () => {
+      throw new TypeError('fetch failed', { cause: new Error('other side closed') });
+    }) as typeof fetch;
+    await expect(new SpacesClient({ baseUrl: 'http://org.test', token: 't', fetchImpl: noCode }).health()).rejects.toMatchObject({
+      message: 'Rowboat org at http://org.test is unreachable (other side closed)',
+    });
+  });
+});
+
 describe('SpacesLive', () => {
   it('replays from an offset, then goes live; resubscribes after the socket drops', async () => {
     const space = await ramnique.createSpace('Live Space');
-    await ramnique.proposeChange(space.id, {
-      assetPath: 'a.md',
-      baseVersion: 0,
-      newContent: 'a\n',
-      actingMode: 'direct',
-    });
+    const a = (await ramnique.createAsset(space.id, { path: 'a.md', newContent: 'a\n', actingMode: 'direct' })).asset.id;
 
     const live = new SpacesLive({ baseUrl: harbor.url, token: 'dev-ramnique' });
     const seen: Array<{ kind: string; offset?: number }> = [];
@@ -354,7 +420,7 @@ describe('SpacesLive', () => {
 
     // Live event arrives on the same subscription.
     await ramnique.proposeChange(space.id, {
-      assetPath: 'a.md',
+      assetId: a,
       baseVersion: 1,
       newContent: 'a\nb\n',
       actingMode: 'direct',
@@ -366,7 +432,7 @@ describe('SpacesLive', () => {
   });
 
   it('a member-addressed space_added frame reaches the other participant without any subscription', async () => {
-    await harbor.store.putMember({ id: 'harsh', displayName: 'Harsh', role: 'member' });
+    await harbor.store.putMember({ id: 'harsh', displayName: 'Harsh', role: 'member', kind: 'human' });
     const harsh = new SpacesLive({ baseUrl: harbor.url, token: 'dev-harsh' });
     const added: Array<{ spaceId: string; by: string }> = [];
     harsh.onMemberFrame((frame) => {
@@ -412,7 +478,7 @@ describe('SpacesLive liveness', () => {
   it('the watchdog bounces a silent socket and the stream resumes; new events still arrive', async () => {
     // A harbor whose heartbeat effectively never fires is the client's-eye
     // view of a half-open socket after sleep: OPEN, silent, no close coming.
-    const silent = await startHarbor({
+    const silent = await startTestHarbor({
       orgName: 'Silent Org',
       seedMembers: [{ id: 'ramnique', displayName: 'Ramnique' }],
       liveHeartbeatMs: 3_600_000,
@@ -420,7 +486,7 @@ describe('SpacesLive liveness', () => {
     try {
       const client = new SpacesClient({ baseUrl: silent.url, token: 'dev-ramnique' });
       const space = await client.createSpace('Liveness');
-      await client.proposeChange(space.id, { assetPath: 'a.md', baseVersion: 0, newContent: 'a\n', actingMode: 'direct' });
+      const a = (await client.createAsset(space.id, { path: 'a.md', newContent: 'a\n', actingMode: 'direct' })).asset.id;
 
       const live = new SpacesLive({
         baseUrl: silent.url,
@@ -439,7 +505,7 @@ describe('SpacesLive liveness', () => {
 
       // The resumed stream still carries new durable events (offset resume).
       const eventsBefore = frames.filter((f) => f.kind === 'event').length;
-      await client.proposeChange(space.id, { assetPath: 'a.md', baseVersion: 1, newContent: 'a\nb\n', actingMode: 'direct' });
+      await client.proposeChange(space.id, { assetId: a, baseVersion: 1, newContent: 'a\nb\n', actingMode: 'direct' });
       await waitFor(() => frames.filter((f) => f.kind === 'event').length > eventsBefore, 'event after bounce', 5000);
 
       live.close();

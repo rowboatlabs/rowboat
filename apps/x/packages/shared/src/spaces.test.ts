@@ -26,6 +26,14 @@ describe('decorateMentions / resolveMentions', () => {
     expect(resolveMentions(body, names)).toBe(`ping @Arjun Kumar and @Ghost and @here \`${tok(arjun.id, 'x')}\``);
   });
 
+  it('a space token renders as #Name from the listing, or its label when the reader is not in that space', () => {
+    const body = `see [#Old](#space:S1) and [#Hidden](#space:S2)`;
+    const spaceNames = new Map([['S1', 'General']]);
+    expect(decorateMentions(body, names, spaceNames)).toBe('see **#General** and **#Hidden**');
+    expect(resolveMentions(body, names, spaceNames)).toBe('see #General and #Hidden');
+    expect(resolveMentions(body, names)).toBe('see #Old and #Hidden');
+  });
+
   it('a bare @name or @id is prose and renders as typed', () => {
     expect(decorateMentions('@Arjun Kumar and @01M0F8S2MC8HYMF4MYWM61MR7B', names)).toBe('@Arjun Kumar and @01M0F8S2MC8HYMF4MYWM61MR7B');
     expect(resolveMentions('mail arjun@rowboat.com', names)).toBe('mail arjun@rowboat.com');

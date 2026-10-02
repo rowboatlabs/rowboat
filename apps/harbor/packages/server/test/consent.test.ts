@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { OidcAuthDriver } from '../src/auth-oidc.js';
-import { startHarbor } from '../src/server.js';
+import { startTestHarbor } from './helpers.js';
 
 // The consent page is config-gated glue (consent.ts): mounted only when an
 // oidc driver names an AS AND a publishable key is provided. The page's
@@ -11,21 +11,21 @@ const ISSUER = 'https://as.example/auth/v1';
 
 describe('login/consent page', () => {
   it('is NOT mounted under the dev driver', async () => {
-    const harbor = await startHarbor({ consent: { publishableKey: 'pk' } });
+    const harbor = await startTestHarbor({ consent: { publishableKey: 'pk' } });
     const res = await fetch(`${harbor.url}/oauth/consent`);
     expect(res.status).toBe(404);
     await harbor.close();
   });
 
   it('is NOT mounted without a publishable key', async () => {
-    const harbor = await startHarbor({ auth: new OidcAuthDriver({ issuer: ISSUER }) });
+    const harbor = await startTestHarbor({ auth: new OidcAuthDriver({ issuer: ISSUER }) });
     const res = await fetch(`${harbor.url}/oauth/consent`);
     expect(res.status).toBe(404);
     await harbor.close();
   });
 
   it('serves the page: AS config embedded, providers DERIVED from /settings', async () => {
-    const harbor = await startHarbor({
+    const harbor = await startTestHarbor({
       auth: new OidcAuthDriver({ issuer: ISSUER }),
       consent: { publishableKey: 'pk-test-123' },
       orgName: 'Rowboat <Labs>',

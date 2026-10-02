@@ -119,10 +119,10 @@ export async function initCoreServices(): Promise<void> {
   });
 
   // Scheduled sends + reminders: a persisted queue against the workdir,
-  // exactly this file's kind of service. Gated with the Spaces UI flag.
+  // exactly this file's kind of service.
   // (The client-side mention watcher that used to start here was removed
   // 2026-09-09 — notification policy is moving to the org.)
-  if (flags.spacesEnabled(process.env)) {
+  if (flags.spacesEnabled()) {
     startSpacesScheduler();
   }
 

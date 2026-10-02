@@ -2,10 +2,13 @@ import fs from "node:fs/promises";
 import makeWASocket, {
     DisconnectReason,
     areJidsSameUser,
+    fetchLatestBaileysVersion,
+    fetchLatestWaWebVersion,
     isJidGroup,
     jidDecode,
     useMultiFileAuthState,
 } from "baileys";
+import type { WAVersion } from "baileys";
 
 // WhatsApp transport via Baileys: the app links to the user's own WhatsApp
 // account as a linked device (QR pairing, same as WhatsApp Web) over an
@@ -18,10 +21,43 @@ import makeWASocket, {
 type WASocket = ReturnType<typeof makeWASocket>;
 
 const RECONNECT_DELAY_MS = 3000;
+const MAX_RECONNECT_DELAY_MS = 60_000;
+// WhatsApp closes the socket with this before issuing a QR when it does not
+// like the client version. It is not in Baileys' DisconnectReason enum.
+const STATUS_CONNECTION_FAILURE = 405;
+const VERSION_FETCH_TIMEOUT_MS = 10_000;
+const VERSION_TTL_MS = 6 * 60 * 60 * 1000;
 // Marks bridge-sent messages. In the self-chat our own replies come back on
 // messages.upsert like any other message; the marker (plus sent-id tracking)
 // keeps the bridge from answering itself in a loop.
 const REPLY_MARKER = "🤖 ";
+
+// Baileys pins a WA Web client version at publish time, and WhatsApp starts
+// rejecting a pin with a 405 once it ages out — the socket dies during
+// registration, before any QR, so pairing silently stops working. Resolve the
+// live version at connect time instead, cached so the reconnect loop does not
+// hammer the endpoint. Returning undefined leaves Baileys on its own pin.
+let cachedVersion: { version: WAVersion; fetchedAt: number } | null = null;
+
+async function resolveVersion(): Promise<WAVersion | undefined> {
+    if (cachedVersion && Date.now() - cachedVersion.fetchedAt < VERSION_TTL_MS) {
+        return cachedVersion.version;
+    }
+    // web.whatsapp.com is the source of truth; the Baileys-hosted list is a
+    // fallback for when that page's shape changes.
+    for (const fetchVersion of [fetchLatestWaWebVersion, fetchLatestBaileysVersion]) {
+        try {
+            const { version } = await fetchVersion({
+                signal: AbortSignal.timeout(VERSION_FETCH_TIMEOUT_MS),
+            });
+            cachedVersion = { version, fetchedAt: Date.now() };
+            return version;
+        } catch {
+            // try the next source
+        }
+    }
+    return cachedVersion?.version;
+}
 
 export interface WhatsAppTransportStatus {
     state: "starting" | "qr" | "connected" | "error" | "disabled";
@@ -73,11 +109,15 @@ export class WhatsAppTransport {
     // processing messages alongside its replacement.
     private generation = 0;
     private sentIds = new Set<string>();
+    // Consecutive closes without an intervening open. Drives reconnect backoff
+    // and decides when a retry loop is worth surfacing to the user.
+    private failures = 0;
 
     constructor(private readonly opts: WhatsAppTransportOptions) {}
 
     async start(): Promise<void> {
         this.stopped = false;
+        this.failures = 0;
         this.opts.onStatus({ state: "starting" });
         await this.connect();
     }
@@ -112,9 +152,13 @@ export class WhatsAppTransport {
     private async connect(): Promise<void> {
         if (this.stopped) return;
         const generation = ++this.generation;
-        const { state, saveCreds } = await useMultiFileAuthState(this.opts.authDir);
+        const [{ state, saveCreds }, version] = await Promise.all([
+            useMultiFileAuthState(this.opts.authDir),
+            resolveVersion(),
+        ]);
         if (this.stopped || generation !== this.generation) return;
         const sock = makeWASocket({
+            ...(version ? { version } : {}),
             auth: state,
             syncFullHistory: false,
             markOnlineOnConnect: false,
@@ -128,9 +172,13 @@ export class WhatsAppTransport {
         sock.ev.on("connection.update", (update) => {
             if (!isCurrent()) return;
             if (update.qr) {
+                // Reaching a QR means the handshake was accepted, so the socket
+                // cycling while the code goes unscanned is not a failure run.
+                this.failures = 0;
                 this.opts.onStatus({ state: "qr", qr: update.qr });
             }
             if (update.connection === "open") {
+                this.failures = 0;
                 const self = jidDecode(sock.user?.id ?? "")?.user;
                 this.opts.onStatus({ state: "connected", ...(self ? { self } : {}) });
             }
@@ -146,6 +194,29 @@ export class WhatsAppTransport {
                     });
                     return;
                 }
+                this.failures++;
+                if (statusCode === STATUS_CONNECTION_FAILURE) {
+                    // Most likely a client version WhatsApp no longer accepts,
+                    // so make the next attempt re-resolve rather than retry the
+                    // same rejected one until the TTL expires.
+                    cachedVersion = null;
+                }
+                // A single close is routine (WhatsApp cycles the socket); a run
+                // of them means pairing is stuck, and "Connecting…" forever
+                // tells the user nothing.
+                if (this.failures > 1) {
+                    this.opts.onStatus({
+                        state: "error",
+                        error:
+                            statusCode === STATUS_CONNECTION_FAILURE
+                                ? "WhatsApp refused the connection (405) - retrying."
+                                : `WhatsApp connection closed${statusCode ? ` (${statusCode})` : ""} - retrying.`,
+                    });
+                }
+                const delay = Math.min(
+                    RECONNECT_DELAY_MS * 2 ** (this.failures - 1),
+                    MAX_RECONNECT_DELAY_MS,
+                );
                 setTimeout(() => {
                     if (!isCurrent()) return;
                     this.connect().catch((error) => {
@@ -154,7 +225,7 @@ export class WhatsAppTransport {
                             error: error instanceof Error ? error.message : String(error),
                         });
                     });
-                }, RECONNECT_DELAY_MS);
+                }, delay);
             }
         });
 

@@ -35,6 +35,7 @@ const board = (name: string, spaceName = 'Design', org = 'rowboat'): BoardMentio
   orgName: org,
   spaceId: `space-${org}-${spaceName}`,
   spaceName,
+  assetId: `asset-${org}-${spaceName}-${name}`,
   path: `whiteboards/${name}.excalidraw`,
   name,
 })

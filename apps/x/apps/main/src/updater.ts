@@ -1,6 +1,7 @@
 import { app, autoUpdater, net, nativeImage, BrowserWindow } from "electron";
 import { capture } from "@x/core/dist/analytics/posthog.js";
 import type { ipc } from "@x/shared";
+import { setDockUpdateReady } from './dock-badge.js';
 
 export type UpdaterStatus = ipc.IPCChannels["updater:status"]["req"];
 
@@ -45,7 +46,7 @@ function showReadyBadge(): void {
   if (process.platform === "darwin") {
     // The window may be closed for days on macOS (app keeps running) — the
     // dock badge is the only surface that says "an update is waiting".
-    app.dock?.setBadge("1");
+    setDockUpdateReady();
   } else if (process.platform === "win32") {
     const badge = nativeImage.createFromDataURL(WIN_BADGE_DATA_URL);
     for (const win of BrowserWindow.getAllWindows()) {

@@ -6,8 +6,8 @@ import { RemoveServerDialog } from './remove-server-dialog'
 
 export function ServerOptionsMenu({ org, showArchived, onToggleArchived, onMenuOpenChange }: {
     org: { id: string; name: string }
-    showArchived: boolean
-    onToggleArchived: () => void
+    showArchived?: boolean
+    onToggleArchived?: () => void
     onMenuOpenChange: (open: boolean) => void
 }) {
     const { refresh } = useSpacesOrgs()
@@ -21,8 +21,8 @@ export function ServerOptionsMenu({ org, showArchived, onToggleArchived, onMenuO
                 </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" onCloseAutoFocus={(event) => { if (confirmRemove) event.preventDefault() }}>
-                <DropdownMenuItem onSelect={onToggleArchived}><Archive className="mr-2 size-3.5" />{showArchived ? 'Hide archived' : 'Show Archived'}</DropdownMenuItem>
-                <DropdownMenuSeparator />
+                {onToggleArchived && <><DropdownMenuItem onSelect={onToggleArchived}><Archive className="mr-2 size-3.5" />{showArchived ? 'Hide archived' : 'Show Archived'}</DropdownMenuItem>
+                <DropdownMenuSeparator /></>}
                 <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={(event) => {
                     event.preventDefault()
                     setMenuOpen(false)

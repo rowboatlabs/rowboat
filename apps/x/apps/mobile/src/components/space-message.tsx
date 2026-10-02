@@ -16,6 +16,14 @@ import { AuthedImage } from '@/components/avatar';
 import { BottomSheet } from '@/components/bottom-sheet';
 import { useColors } from '@/theme/colors';
 
+/** The contract's file link: https://<org>/s/<spaceId>/a/<assetId> (the label is the file's name at write time). */
+const ASSET_LINK_RE = /^https:\/\/([^/?#]+)\/s\/([^/?#]+)\/a\/([^/?#]+)$/;
+export function parseAssetLink(url: string): { host: string; spaceId: string; assetId: string; label: string } | null {
+  const m = ASSET_LINK_RE.exec(url);
+  if (!m) return null;
+  return { host: m[1]!, spaceId: m[2]!, assetId: decodeURIComponent(m[3]!), label: '' };
+}
+
 // Shared message presentation for the stream and thread screens: row, reaction
 // chips, long-press action sheet. All server calls stay in the screens — this
 // file only renders and calls back.
@@ -60,6 +68,7 @@ export const MessageRow = memo(function MessageRow({
   onVote,
   onRemoveVote,
   onEndPoll,
+  onOpenAsset,
 }: {
   message: Message;
   member?: Member;
@@ -78,6 +87,8 @@ export const MessageRow = memo(function MessageRow({
   onVote?: (message: Message, answerIds: number[]) => void;
   onRemoveVote?: (message: Message) => void;
   onEndPoll?: (message: Message) => void;
+  /** A tapped file link (https://<org>/s/<spaceId>/a/<assetId>) — the screen opens the file or hands it to the browser. */
+  onOpenAsset?: (link: { host: string; spaceId: string; assetId: string; label: string }) => void;
 }) {
   const colors = useColors();
   const dark = colors.isDark;
@@ -175,7 +186,17 @@ export const MessageRow = memo(function MessageRow({
           />
         ) : (
           <>
-            <ChatMarkdown extraRules={imageRule}>{body}</ChatMarkdown>
+            <ChatMarkdown
+              extraRules={imageRule}
+              onLinkPress={(url) => {
+                const link = parseAssetLink(url);
+                if (!link || !onOpenAsset) return true;
+                onOpenAsset(link);
+                return false;
+              }}
+            >
+              {body}
+            </ChatMarkdown>
             <MessageLinkPreviews body={message.body} />
           </>
         )}

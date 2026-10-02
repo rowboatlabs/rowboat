@@ -1,6 +1,7 @@
 import * as React from "react"
 import * as TooltipPrimitive from "@radix-ui/react-tooltip"
 
+import { useSectionVisible } from "@/lib/section-visibility"
 import { cn } from "@/lib/utils"
 
 function TooltipProvider({
@@ -38,6 +39,9 @@ function TooltipContent({
   children,
   ...props
 }: React.ComponentProps<typeof TooltipPrimitive.Content>) {
+  // Nothing portalled while the section is off-screen — see lib/section-visibility.
+  const sectionVisible = useSectionVisible()
+  if (!sectionVisible) return null
   return (
     <TooltipPrimitive.Portal>
       <TooltipPrimitive.Content

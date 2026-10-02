@@ -4,6 +4,7 @@ import type { ipc } from '@x/shared'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { useMemberNames } from '@/components/spaces/member-text'
 import { messageExcerpt } from '@/components/spaces/bookmarks'
+import { useSpaceNames } from '@/hooks/use-spaces'
 import { formatScheduleTime } from '@/lib/spaces-schedule'
 import { toast } from '@/lib/toast'
 
@@ -18,6 +19,7 @@ export function ScheduledDialog({ orgId, spaceId, onClose }: {
     onClose: () => void
 }) {
     const memberNames = useMemberNames()
+    const spaceNames = useSpaceNames(orgId)
     const [items, setItems] = useState<ScheduledRow[] | null>(null)
 
     useEffect(() => {
@@ -67,7 +69,7 @@ export function ScheduledDialog({ orgId, spaceId, onClose }: {
                                 <div className="text-[11px] text-muted-foreground">
                                     {item.kind === 'reminder' ? 'Reminder' : 'Sends'} · {formatScheduleTime(new Date(item.at))}
                                 </div>
-                                <div className="truncate text-sm">{messageExcerpt(item.body, memberNames)}</div>
+                                <div className="truncate text-sm">{messageExcerpt(item.body, memberNames, spaceNames)}</div>
                             </div>
                             <button
                                 type="button"

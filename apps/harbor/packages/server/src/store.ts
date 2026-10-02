@@ -1,6 +1,14 @@
 import type { ActivityKind } from '@rowboat/spaces-protocol';
 import type {
+  AgentCredential,
+  AgentKey,
   Attribution,
+  ConnectorCapabilities,
+  Approval,
+  ApprovalState,
+  Invocation,
+  InvocationOptionValues,
+  InvocationState,
   BlobInfo,
   ChangeSet,
   Member,
@@ -27,6 +35,19 @@ import type { SearchQuery } from './search.js';
  * product identity and a mutable property, unique among the living. Nothing
  * relocates on move/delete/restore; only these fields change.
  */
+/**
+ * One page of a message list, always returned oldest first. `beforeOffset`
+ * = the newest `limit` rows below it (paging back); `afterOffset` = the
+ * oldest `limit` rows above it (paging forward); neither = the newest
+ * `limit` rows. Both exclusive. The service composes an "around" window
+ * from one of each.
+ */
+export interface MessageWindow {
+  beforeOffset?: number;
+  afterOffset?: number;
+  limit?: number;
+}
+
 export interface AssetRecord {
   id: string;
   path: string;
@@ -48,7 +69,7 @@ export interface AssetVersionData {
  * per-community sidecar): bytes dedup per org in the BlobStore underneath,
  * but a blob is referencable and servable only in spaces it was uploaded to.
  */
-/** Notify level (PUSH_PLAN.md): what a member wants pushed, org-wide. */
+/** Notify level (push.ts): what a member wants pushed, org-wide. */
 export type PushLevel = 'off' | 'mentions' | 'dms' | 'all';
 
 export interface StoredSpaceBlob {
@@ -88,6 +109,17 @@ export function directKeyFor(participants: readonly string[]): string {
 }
 
 /** A durable, offsetted fact as stored — exactly what WS replay sends. */
+/** An agent key as stored: its metadata plus the SHA-256 of the secret (never the secret). */
+export interface StoredAgentKey extends AgentKey {
+  hash: string;
+}
+
+/** A platform credential as stored (spec §8 Connectors, 2026-09-30): what its owner sees, plus the sealed secret. */
+export interface StoredAgentCredential extends AgentCredential {
+  agentId: string;
+  sealed: string;
+}
+
 export interface StoredEvent {
   offset: number;
   at: string;
@@ -99,6 +131,7 @@ export interface StoredEvent {
  * per member+emoji, Slack semantics.
  */
 export interface StoredReaction {
+  offset: number;
   spaceId: string;
   messageId: string;
   emoji: string;
@@ -177,6 +210,14 @@ export interface Store {
   putMember(member: Member): Promise<void>;
   /** The whole org roster — operator-side reads only (the mentions backfill). */
   listAllMembers(): Promise<Member[]>;
+  /** A space's roster in join order — one statement (2026-09-22). */
+  listSpaceMembers(spaceId: string): Promise<Member[]>;
+  /**
+   * Every member who shares a space (DMs included) with `memberId`, plus the
+   * member themself — one statement (2026-09-22). The store answers the
+   * question; whether discovery is bounded this way is the core's rule
+   * (spaces.ts listOrgMembers; spec §5, open spaces).
+   */
 
   // identity mapping — (issuer, subject) → member (spec §4: the token proves
   // WHO; this table says which member that is). Written only by the invite
@@ -190,6 +231,7 @@ export interface Store {
   putSpace(space: Space): Promise<void>;
   getSpace(id: string): Promise<Space | undefined>;
   /** Shared spaces only unless `includeDirect` — the listing's compatibility posture (api.ts). */
+  browseSpaces(memberId: string): Promise<Array<{ space: Space; joined: boolean }>>;
   listSpacesFor(memberId: string, opts?: { includeDirect?: boolean }): Promise<Space[]>;
   /** Every space on the org, DMs included — operator-side reads only (the mentions backfill). */
   listAllSpaces(): Promise<Space[]>;
@@ -202,21 +244,23 @@ export interface Store {
   putMembership(membership: Membership): Promise<void>;
   deleteMembership(spaceId: string, memberId: string): Promise<void>;
 
-  // push (PUSH_PLAN.md): per-device Expo tokens, per-member notify level.
+  // push (push.ts): per-device Expo tokens, per-member notify level.
   // A token is org-scoped and unique; re-registering moves it to its member.
   putPushToken(memberId: string, token: string, updatedAt: string): Promise<void>;
+  /** Operator-side prune (push.ts): Expo names a dead device by token alone. */
   deletePushToken(token: string): Promise<void>;
+  /** A member forgetting one of THEIR devices — a token registered to someone else is left alone. */
+  deleteMemberPushToken(memberId: string, token: string): Promise<void>;
   listPushTokens(memberId: string): Promise<string[]>;
   setPushLevel(memberId: string, level: PushLevel): Promise<void>;
   /** Absent = the member never registered — treat as the default ('dms'). */
   getPushLevel(memberId: string): Promise<PushLevel | undefined>;
 
-  // assets — id-keyed (inode model); every version's data is kept; version 0
-  // reads as { content: '', blob: null }
+  // assets — id-keyed (the id IS the wire identity, 2026-09-14); every
+  // version's data is kept; version 0 reads as { content: '', blob: null }
   listAssets(spaceId: string, includeDeleted: boolean): Promise<AssetRecord[]>;
+  /** The live occupant of a path, if any — what create and move check before claiming a name. */
   getLiveAssetByPath(spaceId: string, path: string): Promise<AssetRecord | undefined>;
-  /** Most recently deleted asset whose path is `path` (the trash entry restore targets). */
-  getLatestDeletedByPath(spaceId: string, path: string): Promise<AssetRecord | undefined>;
   getAssetById(spaceId: string, assetId: string): Promise<AssetRecord | undefined>;
   /** Insert the assets row (its first version arrives via putAssetVersion). */
   createAsset(spaceId: string, record: AssetRecord): Promise<void>;
@@ -226,19 +270,14 @@ export interface Store {
   setAssetPath(spaceId: string, assetId: string, path: string, updatedAt: string): Promise<void>;
   setAssetState(spaceId: string, assetId: string, state: 'live' | 'deleted', updatedAt: string): Promise<void>;
 
-  // redirects — old paths forwarding to their asset (hot only while the asset is live)
-  putRedirect(spaceId: string, path: string, assetId: string, movedAt: string): Promise<void>;
-  getRedirect(spaceId: string, path: string): Promise<string | undefined>;
-  deleteRedirect(spaceId: string, path: string): Promise<void>;
-
   // uploaded blobs (space-scoped registry; bytes live in the BlobStore)
   /** First write wins — re-uploading the same bytes never changes the recorded mime/uploader. */
   putSpaceBlob(blob: StoredSpaceBlob): Promise<void>;
   getSpaceBlob(spaceId: string, hash: string): Promise<StoredSpaceBlob | undefined>;
 
-  // change log (append-only). assetId is the internal lineage key — never on
-  // the wire; it makes per-file history a filter instead of a chain walk.
-  appendChangeSet(changeSet: ChangeSet, assetId: string): Promise<void>;
+  // change log (append-only). ChangeSet.assetId is the lineage key: per-file
+  // history is a filter instead of a chain walk.
+  appendChangeSet(changeSet: ChangeSet): Promise<void>;
   getChangeSet(spaceId: string, id: string): Promise<ChangeSet | undefined>;
   /** Newest first. `assetId` filters to one file's lineage; `beforeOffset` pages backwards. */
   listChangeSets(
@@ -254,14 +293,11 @@ export interface Store {
   getTopicByRoot(spaceId: string, rootMessageId: string): Promise<Topic | undefined>;
   /**
    * Insert or update (retitle / archive flips) — the row is the whole object
-   * EXCEPT the document link, which only setTopicDocument writes (the wire
-   * shape carries a projected path, never the stored asset id).
+   * EXCEPT the document link, which only setTopicDocument writes.
    */
   putTopic(topic: Topic): Promise<void>;
-  /** Point the topic at one asset (by internal id) or clear it (null). Reads project the live path. */
+  /** Point the topic at one asset (by id) or clear it (null). Reads carry it as Topic.documentAssetId. */
   setTopicDocument(spaceId: string, topicId: string, assetId: string | null): Promise<void>;
-  /** The stored link itself (live or trashed asset alike) — what detach's idempotency reads. */
-  getTopicDocument(spaceId: string, topicId: string): Promise<string | undefined>;
   /** "Convert back to thread": the row goes, the messages never knew it existed. */
   deleteTopic(spaceId: string, topicId: string): Promise<void>;
   listTopics(spaceId: string, includeArchived: boolean): Promise<Topic[]>;
@@ -271,9 +307,9 @@ export interface Store {
    * opts: the NEWEST `limit` roots whose offset is below `beforeOffset`
    * (when given) — still returned oldest first.
    */
-  listStream(spaceId: string, opts?: { beforeOffset?: number; limit?: number }): Promise<Message[]>;
+  listStream(spaceId: string, opts?: MessageWindow): Promise<Message[]>;
   /** One flat thread's replies (threadRoot = rootMessageId), same window semantics as listStream. */
-  listThread(spaceId: string, rootMessageId: string, opts?: { beforeOffset?: number; limit?: number }): Promise<Message[]>;
+  listThread(spaceId: string, rootMessageId: string, opts?: MessageWindow): Promise<Message[]>;
   listMessagesBySpace(spaceId: string): Promise<Message[]>;
   appendMessage(message: Message): Promise<void>;
   /**
@@ -398,6 +434,66 @@ export interface Store {
   /** `offset` must be head+1 — the caller allocates inside the space lock. */
   appendEvent(spaceId: string, stored: StoredEvent): Promise<void>;
   listEventsAfter(spaceId: string, afterOffset: number): Promise<StoredEvent[]>;
+
+  // --- agent keys (spec §4 Agent members, 2026-09-29) ---
+  /** Agent members, by display name: every one, or those `ownerId` owns. */
+  listAgents(ownerId: string | null): Promise<Member[]>;
+  putAgentKey(key: StoredAgentKey): Promise<void>;
+  getAgentKey(id: string): Promise<StoredAgentKey | undefined>;
+  getAgentKeyByHash(hash: string): Promise<StoredAgentKey | undefined>;
+  listAgentKeys(agentIds: string[]): Promise<AgentKey[]>;
+  /** Stamp revocation once; a revoked key stays revoked at its first time. */
+  revokeAgentKey(id: string, at: string): Promise<void>;
+  /** Record use, at most once per `since` window, so authentication rarely writes. */
+  touchAgentKey(id: string, at: string, since: string): Promise<void>;
+
+  // --- connectors Harbor runs (spec §8 Connectors, 2026-09-30) ---
+  /** Agent members whose connection is one of these. */
+  listAgentsByConnection(connections: readonly string[]): Promise<Member[]>;
+  getAgentCredential(agentId: string): Promise<StoredAgentCredential | undefined>;
+  listAgentCredentials(agentIds: string[]): Promise<StoredAgentCredential[]>;
+  /** Set or replace an agent's credential; a replacement clears its rejection. */
+  putAgentCredential(credential: StoredAgentCredential): Promise<void>;
+  /** Mark it rejected by its platform; true only the first time, until it is replaced. */
+  rejectAgentCredential(agentId: string, at: string, reason: string): Promise<boolean>;
+  /** A connector's own record for one thread (its shape is the connector's). */
+  getConnectionThread(agentId: string, spaceId: string, threadRootId: string): Promise<unknown | undefined>;
+  putConnectionThread(agentId: string, spaceId: string, threadRootId: string, data: unknown, at: string): Promise<void>;
+
+  // --- invocations (spec §8 Invoking agent members, 2026-09-30) ---
+  /** A new invocation, with its triggering message's offset: the queue's order. */
+  insertInvocation(invocation: Invocation, messageOffset: number): Promise<void>;
+  /** Replace an existing invocation's state and object, by id. */
+  putInvocation(invocation: Invocation): Promise<void>;
+  getInvocation(id: string): Promise<Invocation | undefined>;
+  /** One agent's invocations in the given states, oldest first. */
+  listInvocationsForAgent(agentId: string, states: InvocationState[]): Promise<Invocation[]>;
+  /** One agent's invocations in one conversation, in the order their messages were posted. */
+  listConversationInvocations(agentId: string, spaceId: string, threadRootId: string): Promise<Invocation[]>;
+  /** A space's invocations (one thread's, when given), newest message first. */
+  listSpaceInvocations(spaceId: string, threadRootId: string | null, limit: number): Promise<Invocation[]>;
+  /** Whether two members share a shared (not direct) space. */
+  sharesSharedSpace(a: string, b: string): Promise<boolean>;
+
+  // --- approvals (spec §8 part 4, 2026-10-01) ---
+  insertApproval(approval: Approval): Promise<void>;
+  /** Replace an existing approval's state and object, by id. */
+  putApproval(approval: Approval): Promise<void>;
+  getApproval(id: string): Promise<Approval | undefined>;
+  getApprovalByRequest(invocationId: string, requestKey: string): Promise<Approval | undefined>;
+  /** An invocation's approvals in the given states, oldest first. */
+  listInvocationApprovals(invocationId: string, states: ApprovalState[]): Promise<Approval[]>;
+  /** One agent's decided approvals its connector has not confirmed applying, oldest first. */
+  listUnappliedDecisions(agentId: string): Promise<Approval[]>;
+  /** The approvals riding on these messages (their cards). */
+  listApprovalsForMessages(spaceId: string, messageIds: string[]): Promise<Approval[]>;
+  getAgentCapabilities(agentId: string): Promise<ConnectorCapabilities | undefined>;
+  /** The defaults an agent's owner set for its declared options (spec §8, 2026-10-01). */
+  getAgentOptionDefaults(agentId: string): Promise<InvocationOptionValues | undefined>;
+  putAgentOptionDefaults(agentId: string, defaults: InvocationOptionValues, by: string, at: string): Promise<void>;
+  putAgentCapabilities(agentId: string, capabilities: ConnectorCapabilities, at: string): Promise<void>;
+  /** Membership events with offset in (afterOffset, upToOffset], or to the head when upToOffset is null — the stream's join lines. */
+  listMembershipEvents(spaceId: string, afterOffset: number, upToOffset: number | null): Promise<StoredEvent[]>;
 
   // one-time passes (the mentions backfill): a ledger so a pass that rewrites
   // content runs exactly once per org, not on every boot

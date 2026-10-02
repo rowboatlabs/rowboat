@@ -1,4 +1,4 @@
-import { Extension, Node, mergeAttributes, type Editor } from '@tiptap/core'
+import { Extension, Node, mergeAttributes, type Editor, type Command } from '@tiptap/core'
 import { Fragment, Slice, type Mark, type Node as ProseMirrorNode, type NodeType, type Schema } from '@tiptap/pm/model'
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
 import StarterKit from '@tiptap/starter-kit'
@@ -60,36 +60,100 @@ function serializeHardBreak(
     }
 }
 
-/**
- * StarterKit owns the hardBreak node and doesn't re-export it, so the kit is
- * re-wrapped to hand that one extension the markdown spec above —
- * tiptap-markdown reads an extension's own spec before falling back to its
- * default, and everything else in the kit passes through untouched.
- */
+// 2026-09-29: Chat newlines are hard breaks; isolate code from surrounding
+// prose instead of letting the block command convert the entire paragraph.
+function chatCodeBlock(fallback: Command, attrs?: { language: string }): Command {
+    return (props) => {
+        const { state, tr, dispatch } = props
+        const { $from, $to, empty } = state.selection
+        if ($from.depth !== 1 || !$from.sameParent($to) || $from.parent.type.name !== 'paragraph') {
+            return fallback(props)
+        }
+        const paragraph = $from.parent
+        let from = $from.parentOffset
+        let to = $to.parentOffset
+        if (empty) {
+            let lineStart = 0
+            let lineEnd = paragraph.content.size
+            let hasBreak = false
+            paragraph.forEach((child, offset) => {
+                if (child.type.name !== 'hardBreak') return
+                hasBreak = true
+                if (offset < from) lineStart = offset + child.nodeSize
+                else if (lineEnd === paragraph.content.size) lineEnd = offset
+            })
+            if (hasBreak) {
+                from = lineStart
+                to = lineEnd
+            }
+        }
+        const code = paragraph.textBetween(from, to, '\n', '\n')
+        let before = paragraph.content.cut(0, from)
+        let after = paragraph.content.cut(to)
+        if (before.lastChild?.type.name === 'hardBreak') before = before.cut(0, before.size - 1)
+        if (after.firstChild?.type.name === 'hardBreak') after = after.cut(1)
+        const blocks: ProseMirrorNode[] = []
+        if (before.size) blocks.push(paragraph.copy(before))
+        const codeAt = $from.before() + blocks.reduce((size, node) => size + node.nodeSize, 0)
+        blocks.push(state.schema.nodes.codeBlock!.create(attrs, code ? state.schema.text(code) : null))
+        if (after.size) blocks.push(paragraph.copy(after))
+        if (dispatch) {
+            tr.replaceWith($from.before(), $from.after(), blocks)
+            tr.setSelection(TextSelection.create(tr.doc, codeAt + 1 + code.length))
+            tr.setStoredMarks([])
+        }
+        return true
+    }
+}
+
+// 2026-09-29: Override the kit-owned nodes so chat line boundaries and
+// Markdown serialization agree without registering duplicate extensions.
 const ChatStarterKit = StarterKit.extend({
     addExtensions() {
         return (this.parent?.() ?? []).map((extension) =>
             extension.name === 'hardBreak'
                 ? extension.extend({ addStorage: () => ({ markdown: { serialize: serializeHardBreak, parse: {} } }) })
-                : extension,
+                : extension.name === 'codeBlock'
+                    ? extension.extend({
+                        addCommands() {
+                            const parent = this.parent!()
+                            return {
+                                ...parent,
+                                toggleCodeBlock: (attrs) => chatCodeBlock(parent.toggleCodeBlock!(attrs), attrs),
+                            }
+                        },
+                    })
+                    : extension,
         )
     },
 })
 
-type MentionKind = 'member' | 'here' | 'rowboat'
+type MentionKind = 'member' | 'space' | 'here' | 'rowboat'
 
-function refOf(attrs: { kind: MentionKind; id: string | null; label: string }): MentionRef {
-    if (attrs.kind === 'member') return { kind: 'member', id: attrs.id ?? '', label: attrs.label }
+interface MentionAttrs {
+    kind: MentionKind
+    id: string | null
+    label: string
+}
+
+function refOf(attrs: MentionAttrs): MentionRef {
+    if (attrs.kind === 'member' || attrs.kind === 'space') return { kind: attrs.kind, id: attrs.id ?? '', label: attrs.label }
     return { kind: attrs.kind }
+}
+
+/** The pill's text: `#Name` for a space reference, `@Name` for a person, `@here` / `@rowboat` for the fixed addresses. */
+function pillText(attrs: MentionAttrs): string {
+    if (attrs.kind === 'space') return `#${attrs.label}`
+    return `@${attrs.kind === 'member' ? attrs.label : attrs.kind}`
 }
 
 /**
  * A mention as ONE node (the Discord/Slack composer shape): an inline atom
  * carrying kind + id + label, rendered as a pill, deleted in one backspace,
  * serialized to the wire's link token (`[@Name](#member:<id>)`, `[@here](#here)`,
- * `[@rowboat](#rowboat)` — protocol mentions.ts) and parsed back from it, so
- * drafts, seeds, and the inline edit box round-trip. The autocomplete inserts
- * it; nothing ever rewrites typed text into an address.
+ * `[@rowboat](#rowboat)`, `[#Name](#space:<id>)` — protocol mentions.ts) and
+ * parsed back from it, so drafts, seeds, and the inline edit box round-trip.
+ * The autocomplete inserts it; nothing ever rewrites typed text into an address.
  */
 export const MentionNode = Node.create({
     name: 'mention',
@@ -117,6 +181,15 @@ export const MentionNode = Node.create({
                     return id ? { kind: 'member', id, label: (a.textContent ?? '').replace(/^@/, '') } : false
                 },
             },
+            {
+                tag: 'a[href^="#space:"]',
+                priority: 1001,
+                getAttrs: (el) => {
+                    const a = el as HTMLAnchorElement
+                    const id = decodeURIComponent((a.getAttribute('href') ?? '').slice('#space:'.length))
+                    return id ? { kind: 'space', id, label: (a.textContent ?? '').replace(/^#/, '') } : false
+                },
+            },
             { tag: 'a[href="#here"]', priority: 1001, getAttrs: () => ({ kind: 'here', id: null, label: 'here' }) },
             { tag: 'a[href="#rowboat"]', priority: 1001, getAttrs: () => ({ kind: 'rowboat', id: null, label: 'rowboat' }) },
             {
@@ -131,28 +204,26 @@ export const MentionNode = Node.create({
         ]
     },
     renderHTML({ node, HTMLAttributes }) {
-        const attrs = node.attrs as { kind: MentionKind; id: string | null; label: string }
-        const label = attrs.kind === 'member' ? attrs.label : attrs.kind
+        const attrs = node.attrs as MentionAttrs
         return [
             'span',
             mergeAttributes(HTMLAttributes, {
                 'data-mention': attrs.kind,
                 'data-id': attrs.id ?? '',
-                'data-label': label,
+                'data-label': pillText(attrs).slice(1),
                 class: 'composer-mention',
             }),
-            `@${label}`,
+            pillText(attrs),
         ]
     },
     renderText({ node }) {
-        const attrs = node.attrs as { kind: MentionKind; label: string }
-        return `@${attrs.kind === 'member' ? attrs.label : attrs.kind}`
+        return pillText(node.attrs as MentionAttrs)
     },
     addStorage() {
         return {
             markdown: {
                 serialize(state: { write(text: string): void }, node: ProseMirrorNode) {
-                    state.write(mentionToken(refOf(node.attrs as { kind: MentionKind; id: string | null; label: string })))
+                    state.write(mentionToken(refOf(node.attrs as MentionAttrs)))
                 },
                 parse: {
                     // handled by markdown-it (a link) + parseHTML above
@@ -459,7 +530,8 @@ const CodeFences = Extension.create({
 export function composerExtensions(getPlaceholder: () => string) {
     return [
         ChatStarterKit.configure({ link: false }),
-        Link.configure({ openOnClick: false, autolink: true }),
+        // 2026-09-29: Typing after a pasted link must start ordinary text.
+        Link.extend({ inclusive: false }).configure({ openOnClick: false, autolink: true }),
         MentionNode,
         // Pasted GIF/image links become the image itself (matches what the
         // message will show); serializes back to ![](url).

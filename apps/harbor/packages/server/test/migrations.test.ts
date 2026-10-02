@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { migrate, MIGRATIONS } from '../src/migrations.js';
 import { PgStore } from '../src/pg-store.js';
-import { pgliteDb } from './pglite.js';
+import { pgliteDb } from '../src/sql-pglite.js';
 
 // The migration ladder: fresh databases climb it from the bottom; databases
 // from the pre-migration era (bootstrap-style schema, no schema_migrations
@@ -21,6 +21,25 @@ describe('schema migrations', () => {
     );
     expect(cols.map((c) => c.column_name)).toContain('role');
     await db.close();
+  });
+
+  it('backfills the latest add offset for existing reactions', async () => {
+    const db = await pgliteDb();
+    try {
+      await migrate(db);
+      await db.query(`alter table reactions drop column stream_offset`);
+      await db.query(`delete from schema_migrations where id = '021-reaction-read-offsets'`);
+      const by = { memberId: 'reader', actingMode: 'direct' };
+      await db.query(`insert into reactions (space_id, message_id, emoji, member_id, attribution, at)
+        values ('space', 'message', '✅', 'reader', $1::jsonb, '2026-09-15T10:00:00Z')`, [JSON.stringify(by)]);
+      for (const [offset, action] of [[11, 'added'], [12, 'removed'], [13, 'added']] as const) {
+        await db.query(`insert into events (space_id, stream_offset, at, event) values ('space', $1, '2026-09-15T10:00:00Z', $2::jsonb)`,
+          [offset, JSON.stringify({ type: 'reaction', action, reaction: { messageId: 'message', emoji: '✅', by } })]);
+      }
+      await migrate(db);
+      const rows = await db.query<{ stream_offset: string | number }>('select stream_offset from reactions');
+      expect(Number(rows[0]!.stream_offset)).toBe(13);
+    } finally { await db.close(); }
   });
 
   it('is idempotent — a second run applies nothing and changes nothing', async () => {
@@ -66,6 +85,11 @@ describe('schema migrations', () => {
     await message('msg-r1', 't-renamed', 'original opener text', 6);
     await message('reply-r1', 't-renamed', 'renamed reply', 7);
     await message('msg-g2', 't-gen', 'hello world', 8);
+    // The file those change-sets belong to: 007 backfills change_sets.asset_id
+    // by path join, and 020 then binds it NOT NULL — an orphan row would refuse
+    // the ladder, so the legacy world must be self-consistent.
+    await db.query(`insert into assets (space_id, path, version, updated_at) values ('s1', 'roadmap.md', 1, '2026-08-20T11:00:00Z')`);
+    await db.query(`insert into asset_versions (space_id, path, version, content) values ('s1', 'roadmap.md', 1, '# Roadmap')`);
     const changeSet = (id: string, reason: string | null, offset: number) =>
       db.query(
         `insert into change_sets (id, space_id, asset_path, base_version, result_version, attribution, reason, committed_at, stream_offset)
@@ -94,6 +118,14 @@ describe('schema migrations', () => {
     // Provenance: the topic id became the thread's root (via 004's suffix parse).
     expect((await store.getChangeSet('s1', 'cs-suffixed'))?.threadRootId).toBe('msg-parent');
     expect((await store.getChangeSet('s1', 'cs-plain'))?.threadRootId).toBeUndefined();
+    // 007 minted the file's id; 020 made it the change-set's wire lineage key
+    // and stamped it into the stored `change` events (none here — the legacy
+    // world predates the event log; the column binding is the assertion).
+    const asset = await store.getLiveAssetByPath('s1', 'roadmap.md');
+    expect(asset?.id).toBeTruthy();
+    expect((await store.getChangeSet('s1', 'cs-plain'))?.assetId).toBe(asset!.id);
+    const tables = await db.query<{ table_name: string }>(`select table_name from information_schema.tables where table_name = 'asset_redirects'`);
+    expect(tables).toEqual([]);
     // The container key is gone from messages.
     const cols = await db.query<{ column_name: string }>(
       `select column_name from information_schema.columns where table_name = 'messages'`,
@@ -117,7 +149,38 @@ describe('schema migrations', () => {
     // The legacy row survived and picked up the role default via 002.
     const store = new PgStore(db);
     const member = await store.getMember('ramnique');
-    expect(member).toEqual({ id: 'ramnique', displayName: 'Ramnique', role: 'member' });
+    expect(member).toEqual({ id: 'ramnique', displayName: 'Ramnique', role: 'member', kind: 'human' });
     await db.close();
+  });
+});
+
+describe('open-space migration', () => {
+  it('keeps legacy spaces private and preserves membership/content, then enforces visibility constraints', async () => {
+    const db = await pgliteDb();
+    try {
+      await db.query('create table schema_migrations (id text primary key, applied_at text not null)');
+      for (const migration of MIGRATIONS.filter((m) => m.id !== '023-open-spaces')) {
+        for (const statement of migration.statements) await db.query(statement);
+        await db.query('insert into schema_migrations values ($1, $2)', [migration.id, '2026-09-22T00:00:00Z']);
+      }
+      await db.query(`insert into spaces (id, name, created_at, kind, direct_key) values
+        ('legacy-shared', 'Legacy', '2026-09-22T00:00:00Z', 'shared', null),
+        ('legacy-direct', 'Direct', '2026-09-22T00:00:00Z', 'direct', '["a","b"]')`);
+      await db.query(`insert into memberships (space_id, member_id, joined_at) values ('legacy-shared', 'a', '2026-09-22T00:00:00Z')`);
+      await db.query(`insert into events (space_id, stream_offset, at, event) values ('legacy-shared', 1, '2026-09-22T00:00:00Z', '{"legacy":"content"}')`);
+      const memberships = await db.query('select * from memberships');
+      const events = await db.query('select * from events');
+      await migrate(db);
+      expect(await db.query('select id, visibility from spaces order by id')).toEqual([
+        { id: 'legacy-direct', visibility: 'private' }, { id: 'legacy-shared', visibility: 'private' },
+      ]);
+      expect(await db.query('select * from memberships')).toEqual(memberships);
+      expect(await db.query('select * from events')).toEqual(events);
+      await expect(db.query("update spaces set visibility = 'open' where id = 'legacy-direct'")).rejects.toThrow();
+      await expect(db.query("update spaces set visibility = 'public' where id = 'legacy-shared'")).rejects.toThrow();
+      await db.query("update spaces set visibility = 'open' where id = 'legacy-shared'");
+      await migrate(db);
+      expect(await db.query("select visibility from spaces where id = 'legacy-shared'")).toEqual([{ visibility: 'open' }]);
+    } finally { await db.close(); }
   });
 });

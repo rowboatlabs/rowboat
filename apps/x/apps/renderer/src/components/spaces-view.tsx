@@ -2,44 +2,52 @@ import '@/styles/spaces.css'
 import { ThreadResizeHandle, THREAD_DEFAULT_WIDTH, THREAD_MIN_WIDTH, THREAD_DIVIDER_WIDTH, STREAM_MIN_WIDTH } from '@/components/spaces/thread-resize-handle'
 import { getViewerType } from '@/lib/file-types'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Link as LinkIcon, Loader2, MoreHorizontal, PenTool, Plus, Users } from 'lucide-react'
+import { Check, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Link as LinkIcon, Loader2, MoreHorizontal, PenTool, Plus, UserPlus, Users } from 'lucide-react'
 import { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { AddOrgDialog, MemberAvatar, MemberProfilePopover, OrgMonogram } from '@/components/spaces/atoms'
+import { AgentBadge, MemberAvatar, MemberProfilePopover, OrgMonogram } from '@/components/spaces/atoms'
+import { openServerDialog } from '@/lib/server-dialog'
 import { BookmarksPopover } from '@/components/spaces/bookmarks'
 import { FileColumn, TrashDialog, UploadFilesDialog } from '@/components/spaces/files-tab'
 import { GeneralStream } from '@/components/spaces/general-stream'
 import { ScheduledDialog } from '@/components/spaces/scheduled-dialog'
+import { AddMembersDialog } from '@/components/spaces/add-members-dialog'
+import { SpaceInvocationsProvider } from '@/components/spaces/invocation-lines'
+import { useSpaceInvocations } from '@/hooks/use-space-invocations'
 import { SelectionCopy } from '@/components/spaces/selection-copy'
 import { ServerSwitcher } from '@/components/spaces/server-switcher'
-import { ServerOptionsMenu } from '@/components/spaces/server-options-menu'
 import { ServerSpaceNavigation } from '@/components/spaces-sidebar-section'
 import { ActivityView, type ActivityTarget } from '@/components/spaces/activity-view'
+import { SpaceRailSections } from '@/components/spaces/space-rail-sections'
 import { SpaceRail } from '@/components/spaces/space-rail'
+import { SpaceContentTabs } from '@/components/spaces/space-content-tabs'
+import { SpaceDiscussionsView } from '@/components/spaces/space-discussions-view'
+import { SpaceFilesView } from '@/components/spaces/space-files-view'
 import { SpaceSearch } from '@/components/spaces/space-search'
 import { railKey, type RailSelection } from '@/lib/spaces-selection'
 import { ThreadPane } from '@/components/spaces/thread-pane'
 import { STREAM_READ_KEY, useSpacePresence, useStream } from '@/hooks/use-space-chat'
-import { refreshMembers, useSpaceMembers } from '@/hooks/use-space-members'
-import { findSpace, useSpaceFeed, useSpaceLive, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
+import { refreshMembers, useOrgRoster, useSpaceMembers } from '@/hooks/use-space-members'
+import { findSpace, refreshSpacesAccountState, refreshSpacesOrgs, useSpaceFeed, useSpaceLive, useSpaceNames, useSpacesAccountState, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
+import { noteListingFromEntries } from '@/hooks/use-space-boards'
 import { directAvatarId, directLabel, isSelfDirect } from '@/lib/spaces-direct'
 import { requestJump } from '@/lib/spaces-jump'
 import { chord } from '@/lib/shortcut'
 import { SpaceMembersProvider, SpaceProfilesProvider } from '@/components/spaces/member-text'
-import { AttachmentColumn, SpaceNavProvider, SpaceRefsProvider } from '@/components/spaces/space-markdown'
+import { AttachmentColumn, SpaceAssetsProvider, SpaceNavProvider, SpaceRefsProvider } from '@/components/spaces/space-markdown'
 import { artifactsForThread, threadLabelOf } from '@/lib/spaces-conventions'
 import { isUnreadChange, resolveMentions } from '@/lib/spaces-presentation'
 import { getSpaceReadState, markStreamRead, markThreadRead, useStreamReadOffset } from '@/lib/spaces-read-state'
 import { toast } from '@/lib/toast'
+import { copySpacesLink } from '@/lib/spaces-copy-link'
 import { cn } from '@/lib/utils'
 import * as analytics from '@/lib/analytics'
 
-export { AddOrgDialog, OrgMonogram } from '@/components/spaces/atoms'
+export { OrgMonogram } from '@/components/spaces/atoms'
 
 // Spaces — two columns, derived from what is open. A space lands on the
 // chat (the stream, or a thread) full width. Opening a file or board from
@@ -78,17 +86,25 @@ const COLUMN_ANIM_MS = 220
 const DIVIDER_W = 6
 
 /**
- * A column in motion: `width` is what it grows to (enter) or shrinks from
- * (exit). An exiting doc keeps rendering its path until the slide is done.
+ * What the right column holds: a file or board by ASSET ID, or a message
+ * attachment by its blob URL (app://space-blob/…). Null = closed.
  */
-type ColumnAnim = { column: 'chat' | 'doc'; phase: 'enter' | 'exit'; width: number; docPath: string | null }
+type DocKey = string | null
+
+/**
+ * A column in motion: `width` is what it grows to (enter) or shrinks from
+ * (exit). An exiting doc keeps rendering its key until the slide is done.
+ */
+type ColumnAnim = { column: 'chat' | 'doc'; phase: 'enter' | 'exit'; width: number; docKey: DocKey }
 
 /**
  * Per-space column memory for this app session: switch to another space and
  * back, and the doc column (and whether the chat sat beside it) is as you
  * left it. Not persisted — a relaunch lands on the chat, clean.
  */
-const columnMemory = new Map<string, { docPath: string | null; chatOpen: boolean }>()
+const columnMemory = new Map<string, { docKey: DocKey; docIsBoard: boolean; chatOpen: boolean }>()
+
+const isAttachmentKey = (key: string) => key.startsWith('app://space-blob/')
 
 // The whiteboard is heavy (the Excalidraw editor); it loads as its own chunk
 // the first time a board opens, never inflating the main renderer bundle.
@@ -119,9 +135,24 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
      */
     active?: boolean
 }) {
-    const { orgs, loading, refresh } = useSpacesOrgs()
-    const [addOrgOpen, setAddOrgOpen] = useState(false)
-    const [emptyShowArchived, setEmptyShowArchived] = useState(false)
+    const { orgs, loading } = useSpacesOrgs()
+    // No Rowboat session → the empty state offers the sign-in first (one
+    // session, two uses): one browser trip lists every managed org.
+    const account = useSpacesAccountState()
+    const [signingIn, setSigningIn] = useState(false)
+    const signInRowboat = async () => {
+        setSigningIn(true)
+        try {
+            const { orgs: signedIn } = await window.ipc.invoke('spaces:signInRowboat', null)
+            refreshSpacesAccountState()
+            await refreshSpacesOrgs()
+            if (signedIn.length === 0) toast('Signed in — no servers yet. Create one or join with an invite link.', 'success')
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Sign-in failed', 'error')
+        } finally {
+            setSigningIn(false)
+        }
+    }
 
     const selectedOrg = selection ? (orgs.find((o) => o.id === selection.orgId) ?? null) : null
     const selectedSpace = selection && selectedOrg ? (findSpace(selectedOrg, selection.spaceId) ?? null) : null
@@ -160,6 +191,7 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
                 onSwitchSpace={onSwitchSpace}
                 onOpenSession={onOpenSession}
                 onOpenActivity={onOpenActivity}
+                onOpenMessage={onOpenMessage}
                 active={active}
             />
         )
@@ -171,14 +203,16 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
                 <ServerSwitcher org={selectedOrg} onOpenSpace={onSwitchSpace} />
             </header>
             <div className="flex min-h-0 flex-1">
-            <aside className="w-64 shrink-0 overflow-y-auto border-r border-border bg-[var(--rowboat-panel-soft)] p-2">
-                <div className="flex h-8 items-center">
+            <aside className="w-64 shrink-0 border-r border-border bg-[var(--rowboat-panel-soft)]">
+                <SpaceRailSections orgId={selectedOrg.id} active={active} activityActive={selection?.view === 'activity'}
+                    onOpenMessage={onOpenMessage} onOpenActivity={onOpenActivity}>
+                <div className="flex h-8 shrink-0 items-center px-2">
                     <span className="flex-1 px-1 text-[13px] font-semibold text-muted-foreground">Spaces</span>
-                    <ServerOptionsMenu org={selectedOrg} showArchived={emptyShowArchived} onToggleArchived={() => setEmptyShowArchived((value) => !value)} onMenuOpenChange={() => {}} />
                 </div>
-                <ServerSpaceNavigation org={selectedOrg} spaceId="" onOpenSpace={onSwitchSpace} onOpenActivity={onOpenActivity}
-                    activityActive={selection?.view === 'activity'}
-                    onOpenDiscussion={() => {}} activeDiscussionCount={0} renderActiveDiscussions={() => null} />
+                <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+                    <ServerSpaceNavigation org={selectedOrg} spaceId="" onOpenSpace={onSwitchSpace} showDiscussions={false} />
+                </div>
+                </SpaceRailSections>
             </aside>
             {selection?.view === 'activity' && onOpenMessage ? (
                 <ActivityView org={selectedOrg} active={active} onOpenMessage={onOpenMessage} />
@@ -204,9 +238,20 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
                             Spaces are where your team talks every day — and where the files you decide on live. Your agent and
                             your teammates&apos; agents work in them with you.
                         </p>
-                        <Button size="sm" className="mt-4" onClick={() => setAddOrgOpen(true)}>
-                            <Plus className="size-4 mr-1" /> Add a server
-                        </Button>
+                        {account && !account.hasSession ? (
+                            <div className="mt-4 flex flex-col items-center gap-2">
+                                <Button size="sm" onClick={() => void signInRowboat()} disabled={signingIn}>
+                                    {signingIn ? <Loader2 className="size-4 mr-1 animate-spin" /> : null} Sign in with Rowboat
+                                </Button>
+                                <button type="button" className="text-xs text-muted-foreground hover:underline" onClick={() => openServerDialog({ kind: 'join' })}>
+                                    Have an invite link or a server address?
+                                </button>
+                            </div>
+                        ) : (
+                            <Button size="sm" className="mt-4" onClick={() => openServerDialog({ kind: 'create' })}>
+                                <Plus className="size-4 mr-1" /> Add a server
+                            </Button>
+                        )}
                     </>
                 ) : (
                     <>
@@ -219,7 +264,6 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
                     </>
                 )}
             </div>
-            <AddOrgDialog open={addOrgOpen} onOpenChange={setAddOrgOpen} onAdded={() => void refresh()} />
         </div>
     )
 }
@@ -228,7 +272,7 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
 // One space: header across the top, then the space rail | the selected thing
 // ---------------------------------------------------------------------------
 
-function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSession, onOpenActivity, active = true }: {
+function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSession, onOpenActivity, onOpenMessage, active = true }: {
     org: OrgWithSpaces
     space: spaces.Space
     selection: RailSelection
@@ -236,11 +280,19 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     /** The quick switcher can land on another space entirely. */
     onSwitchSpace: (orgId: string, spaceId: string, selection?: RailSelection) => void
     onOpenActivity?: (orgId: string) => void
+    onOpenMessage?: (target: ActivityTarget) => void
     onOpenSession?: (sessionId: string) => void
     /** False while the Spaces view is kept mounted but hidden. */
     active?: boolean
 }) {
     const [entries, setEntries] = useState<spaces.SpacesAssetEntry[]>([])
+    const [filesLoaded, setFilesLoaded] = useState(false)
+    const [filesError, setFilesError] = useState<string | null>(null)
+    const collectionOpen = selection.kind === 'discussions' || selection.kind === 'files'
+    const entryById = useMemo(() => new Map(entries.map((e) => [e.id, e])), [entries])
+    // The org listing (module store): resolves a canonical link's org address
+    // + space to an org this install is in.
+    const { orgs } = useSpacesOrgs()
     // Local-only empty folders: folders are key prefixes, so an empty one has
     // nothing to store — it lives here until its first file lands (then the
     // real entries carry it and it's pruned), or until removed.
@@ -254,8 +306,23 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     const readOffset = useStreamReadOffset(org.id, space.id)
     // The roster comes from the module store (cached, hydrated in render) so
     // names resolve in the same first frame as the stream's cached tail.
+    // `members` is THIS space's roster — membership: header avatars, invites,
+    // presence. Names and profiles reach past it to the whole org (this
+    // roster winning on identity), so a chip for someone mentioned from
+    // another space still reads as a person here.
     const members = useSpaceMembers(org.id, space.id)
-    const memberNames = useMemo(() => new Map(members.map((m) => [m.id, m.displayName])), [members])
+    // Agent invocations (Harbor spec §8): the lines under messages that invoked an agent.
+    const invocationsByMessage = useSpaceInvocations(org.id, space.id)
+    const orgSpaceIds = useMemo(() => org.spaces.map((s) => s.id), [org.spaces])
+    const orgRoster = useOrgRoster(org.id, orgSpaceIds)
+    const profiles = useMemo(() => {
+        const byId = new Map(orgRoster.map((m) => [m.id, m]))
+        for (const m of members) byId.set(m.id, m)
+        return [...byId.values()]
+    }, [orgRoster, members])
+    const memberNames = useMemo(() => new Map(profiles.map((m) => [m.id, m.displayName])), [profiles])
+    const selfIsAdmin = profiles.find((m) => m.id === org.memberId)?.role === 'admin'
+    const spaceNames = useSpaceNames(org.id)
     // A direct message is this same pane with a two-person roster: named by
     // the other person, no invites.
     const isDirect = space.kind === 'direct'
@@ -276,9 +343,15 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
             .then((assetsRes) => {
                 if (cancelled) return
                 setEntries(assetsRes.entries)
+                setFilesLoaded(true)
+                setFilesError(null)
+                // The listing store (the @ menus, open-board context) reads this listing too.
+                noteListingFromEntries(org.id, space.id, assetsRes.entries)
             })
-            .catch(() => {
-                // org unreachable; panes show their own error states
+            .catch((error) => {
+                if (cancelled) return
+                setFilesLoaded(true)
+                setFilesError(error instanceof Error ? error.message : 'Could not load files')
             })
         return () => {
             cancelled = true
@@ -313,6 +386,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         try {
             const result = await window.ipc.invoke('spaces:createInvite', { orgId: org.id, spaceId: space.id })
             await navigator.clipboard.writeText(result.link)
+            analytics.spacesInviteLinkCopied()
             toast('Invite link copied to clipboard', 'success')
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not create an invite', 'error')
@@ -331,29 +405,34 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         for (const [root, t] of state?.threads ?? []) if (t.following) markThreadRead(org.id, space.id, root, t.lastReplyOffset)
     }
 
-    const unreadPaths = useMemo(
-        // Boards are excluded: their saves are throttled snapshots, not reading
-        // material — the boards rail is their surface, not the files tree.
-        () => new Set(feed.changeSets.filter((c) => isUnreadChange(c, readOffset, org.memberId) && !spaces.isWhiteboardPath(c.assetPath)).map((c) => c.assetPath)),
+    // Files (by id) changed by someone else since the read mark. Boards are
+    // excluded: their saves are throttled snapshots, not reading material —
+    // the boards rail is their surface, not the files tree.
+    const unreadAssetIds = useMemo(
+        () => new Set(feed.changeSets.filter((c) => isUnreadChange(c, readOffset, org.memberId) && !spaces.isWhiteboardPath(c.assetPath)).map((c) => c.assetId)),
         [feed.changeSets, readOffset, org.memberId],
     )
 
     // ------------------------------------------------------------------
     // Columns. The chat (stream or thread) sits on the left; an open file or
-    // board on the right. `docPath` = what the right column holds (null =
+    // board on the right. `docKey` = what the right column holds (null =
     // closed); `chatOpen` = whether the left one is showing beside it. What
     // renders is derived below — two columns only when both are open AND
     // the pane is wide enough.
     // ------------------------------------------------------------------
     const memoryKey = `${org.id}/${space.id}`
-    const [docPath, setDocPath] = useState<string | null>(() => {
-        if (selection.kind === 'file' || selection.kind === 'whiteboard' || selection.kind === 'attachment') return selection.path
-        return columnMemory.get(memoryKey)?.docPath ?? null
+    const [docKey, setDocKey] = useState<DocKey>(() => {
+        if (selection.kind === 'file' || selection.kind === 'whiteboard') return selection.assetId
+        if (selection.kind === 'attachment') return selection.src
+        return columnMemory.get(memoryKey)?.docKey ?? null
     })
+    // Whether the remembered key is a board — known synchronously, so a
+    // remembered board never mounts as a file column while the listing loads.
+    const [docIsBoard, setDocIsBoard] = useState<boolean>(() => selection.kind === 'whiteboard' || (columnMemory.get(memoryKey)?.docIsBoard ?? false))
     const [chatOpen, setChatOpen] = useState(() => selection.kind === 'attachment' || (columnMemory.get(memoryKey)?.chatOpen ?? true))
     useEffect(() => {
-        columnMemory.set(memoryKey, { docPath, chatOpen })
-    }, [memoryKey, docPath, chatOpen])
+        columnMemory.set(memoryKey, { docKey, docIsBoard, chatOpen })
+    }, [memoryKey, docKey, chatOpen])
     // The chat/files rail: docked by default (persisted), or a sliver at the
     // edge that peeks the rail as a drawer on hover — see SpaceRail. (The
     // shell sidebar contracts to the dock while in Spaces, so this rail is
@@ -387,7 +466,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // the doc shows when open; both = two columns. Narrow: one column — the
     // doc if open, else the chat.
     const twoFits = paneWidth >= SPLIT_FLOOR
-    const docOpen = docPath !== null
+    const docOpen = docKey !== null
     const showChat = twoFits ? chatOpen || !docOpen : !docOpen
     const showDoc = docOpen
     const split = showChat && showDoc
@@ -464,25 +543,25 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     }, [])
     const chatRef = useRef<HTMLDivElement | null>(null)
     const docRef = useRef<HTMLElement | null>(null)
-    const [layout, setLayout] = useState<{ docOpen: boolean; showChat: boolean; docPath: string | null; anim: ColumnAnim | null }>({ docOpen, showChat, docPath, anim: null })
+    const [layout, setLayout] = useState<{ docOpen: boolean; showChat: boolean; docKey: DocKey; anim: ColumnAnim | null }>({ docOpen, showChat, docKey, anim: null })
     if (layout.docOpen !== docOpen || layout.showChat !== showChat) {
         let anim: ColumnAnim | null = null
         if (!reducedMotion) {
             const columnsWidth = columnsRef.current?.clientWidth ?? paneWidth
             if (layout.docOpen !== docOpen) {
                 anim = docOpen
-                    ? { column: 'doc', phase: 'enter', width: showChat ? docWidthEff : columnsWidth, docPath }
+                    ? { column: 'doc', phase: 'enter', width: showChat ? docWidthEff : columnsWidth, docKey }
                     // The DOM still shows the old layout mid-render: the live width is the start.
-                    : { column: 'doc', phase: 'exit', width: docRef.current?.clientWidth ?? docWidthEff, docPath: layout.docPath }
+                    : { column: 'doc', phase: 'exit', width: docRef.current?.clientWidth ?? docWidthEff, docKey: layout.docKey }
             } else {
                 anim = showChat
-                    ? { column: 'chat', phase: 'enter', width: Math.max(0, columnsWidth - docWidthEff - DIVIDER_W), docPath }
-                    : { column: 'chat', phase: 'exit', width: chatRef.current?.clientWidth ?? 0, docPath }
+                    ? { column: 'chat', phase: 'enter', width: Math.max(0, columnsWidth - docWidthEff - DIVIDER_W), docKey }
+                    : { column: 'chat', phase: 'exit', width: chatRef.current?.clientWidth ?? 0, docKey }
             }
         }
-        setLayout({ docOpen, showChat, docPath, anim })
-    } else if (layout.docPath !== docPath) {
-        setLayout((l) => ({ ...l, docPath }))
+        setLayout({ docOpen, showChat, docKey, anim })
+    } else if (layout.docKey !== docKey) {
+        setLayout((l) => ({ ...l, docKey }))
     }
     const anim = layout.anim
     useEffect(() => {
@@ -494,7 +573,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     const docAnim = anim?.column === 'doc' ? anim : null
     // What is in the tree: the logical state, plus whatever is still sliding out
     // (or, narrow, the chat being pushed out by an entering doc).
-    const docRender = docPath ?? (docAnim?.phase === 'exit' ? docAnim.docPath : null)
+    const docRender = docKey ?? (docAnim?.phase === 'exit' ? docAnim.docKey : null)
     const chatRender = showChat || chatAnim?.phase === 'exit' || docAnim?.phase === 'enter'
     const columnStyle = (a: ColumnAnim): React.CSSProperties => ({
         ['--rb-col-w' as string]: `${a.width}px`,
@@ -505,33 +584,71 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // right; anything from Chat reopens the left — and, narrow, closes the
     // doc so the chat actually shows.
     const placeSelection = (next: RailSelection) => {
-        if (next.kind === 'file' || next.kind === 'whiteboard' || next.kind === 'attachment') {
-            if (next.kind === 'attachment') setChatOpen(true)
-            setDocPath(next.path)
+        if (next.kind === 'discussions' || next.kind === 'files') return
+        if (next.kind === 'file' || next.kind === 'whiteboard') {
+            setDocKey(next.assetId)
+            setDocIsBoard(next.kind === 'whiteboard' || spaces.isWhiteboardPath(entryById.get(next.assetId)?.path ?? ''))
+        } else if (next.kind === 'attachment') {
+            setChatOpen(true)
+            setDocKey(next.src)
         } else {
             setChatOpen(true)
-            if (!twoFits) setDocPath(null)
+            if (!twoFits) setDocKey(null)
         }
     }
 
+    /**
+     * A brand-new file (born here, or the tree's "+ New file"): the org hands
+     * back the record, the listing learns it before the refetch, the listing
+     * store follows, and the caller opens it by id.
+     */
+    const createFile = async (input: spaces.SpacesCreateInput): Promise<spaces.SpacesAssetEntry> => {
+        const { asset } = await window.ipc.invoke('spaces:createAsset', { orgId: org.id, spaceId: space.id, input })
+        setEntries((prev) => {
+            const next = [...prev.filter((e) => e.id !== asset.id), asset]
+            noteListingFromEntries(org.id, space.id, next)
+            return next
+        })
+        return asset
+    }
+
     // ------------------------------------------------------------------
-    // Whiteboard: a board is what the right column holds when the path is
-    // whiteboards/<name>.excalidraw — reached from the rail, the header
-    // button (⌘4, the most recent board; created on its first save when
-    // none exists yet), an artifact link, a deep link, or history. It must
-    // never render as raw JSON in the document pane.
+    // Whiteboard: a board is what the right column holds when the open asset's
+    // path is whiteboards/<name>.excalidraw — reached from the rail, the
+    // header button (⌘4, the most recent board; the default board is created
+    // when none exists yet), an artifact link, a deep link, or history. It
+    // must never render as raw JSON in the document pane.
     // ------------------------------------------------------------------
-    const boardPath = docRender && spaces.isWhiteboardPath(docRender) ? docRender : null
-    const isWhiteboard = !!docPath && spaces.isWhiteboardPath(docPath)
+    const directWith = space.kind === 'direct' ? space.participants?.find((p) => p !== org.memberId) : undefined
+    const spaceRefs = useMemo(
+        () => ({ orgId: org.id, orgAddress: org.address, spaceId: space.id, ...(directWith ? { directWith } : {}) }),
+        [org.id, org.address, space.id, directWith],
+    )
+    const isBoardKey = (key: string | null): key is string => {
+        if (!key || isAttachmentKey(key)) return false
+        const entry = entryById.get(key)
+        // A just-created or remembered board can beat the listing: the
+        // selection, or the column memory, says what it is.
+        return entry ? spaces.isWhiteboardPath(entry.path) : (selection.kind === 'whiteboard' && selection.assetId === key) || (key === docKey && docIsBoard)
+    }
+    const boardId = isBoardKey(docRender) ? docRender : null
+    const isWhiteboard = isBoardKey(docKey)
     const boards = entries.filter((e) => spaces.isWhiteboardPath(e.path) && !e.state)
     const toggleWhiteboard = () => {
         if (isWhiteboard) {
             closeDoc()
-        } else {
-            const recent = [...boards].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
-            onSelect({ kind: 'whiteboard', path: recent?.path ?? spaces.DEFAULT_WHITEBOARD_PATH })
-            analytics.spacesTabViewed('whiteboard')
+            return
         }
+        analytics.spacesTabViewed('whiteboard')
+        const recent = [...boards].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
+        if (recent) {
+            onSelect({ kind: 'whiteboard', assetId: recent.id })
+            return
+        }
+        // No board yet: the default one is born now, then opens.
+        createFile({ path: spaces.DEFAULT_WHITEBOARD_PATH, newContent: spaces.EMPTY_WHITEBOARD_CONTENT, reason: 'new whiteboard' })
+            .then((asset) => select({ kind: 'whiteboard', assetId: asset.id }))
+            .catch((err) => toast(err instanceof Error ? err.message : 'Could not create the board', 'error'))
     }
     toggleWhiteboardRef.current = toggleWhiteboard
     /**
@@ -541,13 +658,14 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
      * still survives navigating away. A taken name just opens that board.
      */
     const createBoard = (path: string) => {
-        select({ kind: 'whiteboard', path })
-        if (entries.some((e) => e.path === path && !e.state)) return
-        void window.ipc.invoke('spaces:proposeChange', {
-            orgId: org.id,
-            spaceId: space.id,
-            input: { assetPath: path, baseVersion: 0, newContent: spaces.EMPTY_WHITEBOARD_CONTENT, reason: 'new whiteboard' },
-        }).catch(() => {}) // org unreachable — the pane's own first save creates it instead
+        const existing = entries.find((e) => e.path === path && !e.state)
+        if (existing) {
+            select({ kind: 'whiteboard', assetId: existing.id })
+            return
+        }
+        createFile({ path, newContent: spaces.EMPTY_WHITEBOARD_CONTENT, reason: 'new whiteboard' })
+            .then((asset) => select({ kind: 'whiteboard', assetId: asset.id }))
+            .catch((err) => toast(err instanceof Error ? err.message : 'Could not create the board', 'error'))
     }
 
     /** The rail's lock: docked ⇄ edge sliver (the rail peeks on hover by itself). */
@@ -561,14 +679,67 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // rail stays where it is — it is a sidebar, not a flyout.
     const select = (next: RailSelection) => {
         onSelect(next)
-        analytics.spacesTabViewed(next.kind === 'general' ? 'general' : (next.kind === 'file' || next.kind === 'attachment') ? 'files' : next.kind === 'whiteboard' ? 'whiteboard' : 'topics')
+        analytics.spacesTabViewed(next.kind === 'general' ? 'general' : (next.kind === 'file' || next.kind === 'files' || next.kind === 'attachment') ? 'files' : next.kind === 'whiteboard' ? 'whiteboard' : 'topics')
         placeSelection(next)
     }
-    const openFile = (path: string) => select({ kind: 'file', path })
+    const openFile = (assetId: string) => select({ kind: 'file', assetId })
+    /**
+     * The tree's "+ New file": the file is born empty at the typed path (the
+     * org refuses an occupied one, so a name already in use just opens that
+     * file) and opens by id, ready to edit.
+     */
+    const createNamedFile = (path: string) => {
+        const existing = entries.find((e) => e.path === path && !e.state)
+        if (existing) {
+            openFile(existing.id)
+            return
+        }
+        createFile({ path, newContent: '', reason: 'new file' })
+            .then((asset) => openFile(asset.id))
+            .catch((err) => toast(err instanceof Error ? err.message : 'Could not create the file', 'error'))
+    }
+    /** A canonical link into another space the reader is in: the org address names the org, App does the navigation. */
+    const resolveSpace = (orgAddress: string, spaceId: string): string | null => {
+        const target = orgs.find((o) => o.address === orgAddress)
+        return target && findSpace(target, spaceId) ? target.id : null
+    }
+    const openSpaceFile = (orgId: string, spaceId: string, assetId: string) => {
+        if (orgId === org.id && spaceId === space.id) openFile(assetId)
+        else onSwitchSpace(orgId, spaceId, { kind: 'file', assetId })
+    }
+    const resolveOrg = (orgAddress: string): string | null => orgs.find((o) => o.address === orgAddress)?.id ?? null
+    /** A person link or the popover's Message action: the org creates the DM on first use, the listing learns it, then it opens. */
+    const openDirect = (orgId: string, memberId: string) => {
+        void window.ipc.invoke('spaces:openDirect', { orgId, memberId })
+            .then(async ({ space: dm }) => {
+                await refreshSpacesOrgs()
+                if (dm.id !== space.id) onSwitchSpace(orgId, dm.id)
+            })
+            .catch((err) => toast(err instanceof Error ? err.message : 'Could not open the conversation', 'error'))
+    }
+    /** A message link: read the message to learn its thread, then land on it — here, or in the space it lives in. */
+    const openMessage = (orgId: string, spaceId: string, messageId: string) => {
+        void window.ipc.invoke('spaces:getMessage', { orgId, spaceId, messageId })
+            .then(({ message }) => {
+                const rootId = message.threadRoot ?? STREAM_READ_KEY
+                if (orgId === org.id && spaceId === space.id) {
+                    navigateToMessage(rootId, messageId, message.offset)
+                    return
+                }
+                requestJump({ topicId: rootId, messageId, offset: message.offset })
+                onSwitchSpace(orgId, spaceId, rootId === STREAM_READ_KEY ? { kind: 'general' } : { kind: 'thread', rootMessageId: rootId })
+            })
+            .catch((err) => toast(err instanceof Error ? err.message : 'Could not open the message', 'error'))
+    }
+    /** A space chip: this space's lands on its stream; another's opens there. */
+    const openSpace = (orgId: string, spaceId: string) => {
+        if (orgId === org.id && spaceId === space.id) select({ kind: 'general' })
+        else onSwitchSpace(orgId, spaceId)
+    }
 
-    /** Search / pinned / saved landings: open the surface, then scroll + flash. */
-    const navigateToMessage = (rootMessageId: string, messageId: string) => {
-        requestJump({ topicId: rootMessageId, messageId })
+    /** Search / pinned / saved landings: open the surface, then scroll + flash (the offset, when held, spares the pane a lookup). */
+    const navigateToMessage = (rootMessageId: string, messageId: string, offset?: number) => {
+        requestJump({ topicId: rootMessageId, messageId, ...(offset !== undefined ? { offset } : {}) })
         // STREAM_READ_KEY stands for the stream itself; anything else is a thread.
         if (rootMessageId === STREAM_READ_KEY) select({ kind: 'general' })
         else select({ kind: 'thread', rootMessageId })
@@ -587,17 +758,19 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     }, [selKey])
 
     // A discussion's linked file opens beside it (2026-09-11). The org
-    // projects the link as the file's CURRENT live path, so whatever lands
-    // here exists. Once per visit: closing the column marks the thread as
-    // dismissed until the reader leaves it (closeDoc); a different file they
-    // open themselves is never fought — this only fires when the selection
-    // or the link itself changes, and only where two columns fit (narrow,
-    // the chat wins, as everywhere). The stream copy is read first: it is
-    // the one a local attach updates before the feed refetches.
+    // projects the link as an asset id (even while the file is in Trash —
+    // then the listing does not have it, and nothing opens). Once per visit:
+    // closing the column marks the thread as dismissed until the reader
+    // leaves it (closeDoc); a different file they open themselves is never
+    // fought — this only fires when the selection or the link itself
+    // changes, and only where two columns fit (narrow, the chat wins, as
+    // everywhere). The stream copy is read first: it is the one a local
+    // attach updates before the feed refetches.
     const selectedThreadRoot = selection.kind === 'thread' ? selection.rootMessageId : null
-    const linkedDocPath = selectedThreadRoot
-        ? (stream.topicsByRoot.get(selectedThreadRoot) ?? feed.topics.find((t) => t.rootMessageId === selectedThreadRoot))?.documentPath ?? null
+    const linkedAssetId = selectedThreadRoot
+        ? (stream.topicsByRoot.get(selectedThreadRoot) ?? feed.topics.find((t) => t.rootMessageId === selectedThreadRoot))?.documentAssetId ?? null
         : null
+    const linkedDocId = linkedAssetId && entryById.get(linkedAssetId)?.state !== 'deleted' && entryById.has(linkedAssetId) ? linkedAssetId : null
     const linkedDocDismissedRef = useRef<string | null>(null)
     useEffect(() => {
         // Leaving the dismissed thread — for the stream or another thread —
@@ -607,22 +780,23 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         }
     }, [selection.kind, selectedThreadRoot])
     useEffect(() => {
-        if (!selectedThreadRoot || !linkedDocPath || !twoFits) return
+        if (!selectedThreadRoot || !linkedDocId || !twoFits) return
         if (linkedDocDismissedRef.current === selectedThreadRoot) return
-        setDocPath((open) => (open === linkedDocPath ? open : linkedDocPath))
+        setDocKey((open) => (open === linkedDocId ? open : linkedDocId))
         setChatOpen(true)
-        // Keyed on the thread and the link — not on docPath, which the
+        // Keyed on the thread and the link — not on docKey, which the
         // reader moves freely once the column is open.
-    }, [selectedThreadRoot, linkedDocPath, twoFits])
+    }, [selectedThreadRoot, linkedDocId, twoFits])
 
     // The last closed file — the header chip reopens it beside the chat.
-    const [lastDoc, setLastDoc] = useState<{ path: string; fromThreadRootId?: string } | null>(null)
+    const [lastDoc, setLastDoc] = useState<{ assetId: string; fromThreadRootId?: string } | null>(null)
+    const lastDocEntry = lastDoc ? entryById.get(lastDoc.assetId) : undefined
 
-    // The document in the right column (a board renders through boardPath instead).
-    const centerPath = docRender && !spaces.isWhiteboardPath(docRender) ? docRender : null
+    // The document in the right column (a board renders through boardId, an attachment through its URL).
+    const centerAssetId = docRender && !isAttachmentKey(docRender) && !boardId ? docRender : null
 
     /** Open a file from inside a thread — the file view gets a crumb back to it. */
-    const openFileFromThread = (rootMessageId: string) => (path: string) => select({ kind: 'file', path, fromThreadRootId: rootMessageId })
+    const openFileFromThread = (rootMessageId: string) => (assetId: string) => select({ kind: 'file', assetId, fromThreadRootId: rootMessageId })
 
 
     const selfName = memberNames.get(org.memberId) ?? org.memberId
@@ -657,13 +831,14 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // the header chip can bring it back. Closing the left column just hides
     // it; the doc takes the width.
     function closeDoc() {
-        if (selection.kind === 'file' && !spaces.isWhiteboardPath(selection.path)) {
-            setLastDoc({ path: selection.path, fromThreadRootId: selection.fromThreadRootId })
+        // A board reached as a file (an artifact link) is still a board: no "Reopen" chip.
+        if (selection.kind === 'file' && !isBoardKey(selection.assetId)) {
+            setLastDoc({ assetId: selection.assetId, fromThreadRootId: selection.fromThreadRootId })
         }
         // Closing beside a discussion is a choice: its linked file stays
         // closed until the reader leaves and comes back.
         if (chatRootId) linkedDocDismissedRef.current = chatRootId
-        setDocPath(null)
+        setDocKey(null)
         setChatOpen(true)
         if (selection.kind === 'file' || selection.kind === 'whiteboard' || selection.kind === 'attachment') {
             onSelect(chatRootId ? { kind: 'thread', rootMessageId: chatRootId } : { kind: 'general' })
@@ -671,7 +846,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     }
     const closeChat = () => setChatOpen(false)
     const reopenDoc = () => {
-        if (lastDoc) select({ kind: 'file', path: lastDoc.path, fromThreadRootId: lastDoc.fromThreadRootId })
+        if (lastDoc) select({ kind: 'file', assetId: lastDoc.assetId, fromThreadRootId: lastDoc.fromThreadRootId })
     }
 
     // Crumb for a file opened from a thread: the discussion's goal, else the
@@ -680,21 +855,24 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     const crumbTopic = crumbRootId ? feed.topics.find((t) => t.rootMessageId === crumbRootId) : undefined
     const crumbRoot = crumbRootId ? stream.messages.find((m) => m.id === crumbRootId) : undefined
     const crumbLabelRaw = crumbTopic?.title ?? (crumbRoot ? threadLabelOf(crumbRoot.body) : crumbRootId ? 'Back to thread' : null)
-    const crumbLabel = crumbLabelRaw === null ? null : resolveMentions(crumbLabelRaw, memberNames)
+    const crumbLabel = crumbLabelRaw === null ? null : resolveMentions(crumbLabelRaw, memberNames, spaceNames)
 
     // Files picked (rail Upload button) or dropped on the tree, awaiting the
     // upload confirmation. Default to Space files; choosing a folder is optional.
     const [uploadFiles, setUploadFiles] = useState<File[] | null>(null)
     const [trashOpen, setTrashOpen] = useState(false)
+    const [addMembersOpen, setAddMembersOpen] = useState(false)
 
     return (
-        <SpaceMembersProvider members={memberNames}>
-        <SpaceProfilesProvider members={members} here={hereSet} selfId={org.memberId}>
-        <SpaceRefsProvider refs={{ orgId: org.id, orgAddress: org.address, spaceId: space.id }}>
-        <SpaceNavProvider onOpenFile={openFile} onOpenAttachment={(src, name) => {
+        <SpaceMembersProvider members={memberNames} spaceNames={spaceNames}>
+        <SpaceProfilesProvider members={profiles} here={hereSet} selfId={org.memberId}>
+        <SpaceRefsProvider refs={spaceRefs}>
+        <SpaceInvocationsProvider byMessage={invocationsByMessage} orgId={org.id} selfId={org.memberId} isAdmin={selfIsAdmin}>
+        <SpaceAssetsProvider entries={entries}>
+        <SpaceNavProvider onOpenFile={openFile} onOpenSpaceFile={openSpaceFile} onOpenSpace={openSpace} onOpenMessage={openMessage} onOpenDirect={openDirect} resolveOrg={resolveOrg} resolveSpace={resolveSpace} onOpenAttachment={(src, name) => {
             const url = new URL(src)
             url.searchParams.set('name', name)
-            select({ kind: 'attachment', path: url.href, ...(chatRootId ? { fromThreadRootId: chatRootId } : {}) })
+            select({ kind: 'attachment', src: url.href, ...(chatRootId ? { fromThreadRootId: chatRootId } : {}) })
         }}>
         <div className="spaces-surface relative flex-1 min-h-0 flex flex-col">
             {/* One per pane — covers the stream and thread panes alike. */}
@@ -702,11 +880,12 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
             <header className="spaces-header flex shrink-0 items-center gap-2 border-b border-border">
                 <ServerSwitcher org={org} onOpenSpace={onSwitchSpace} />
                 <span aria-hidden="true" className="shrink-0 text-muted-foreground/50">/</span>
-                {/* The space breadcrumb retains its identity hover card. */}
-                <HoverCard openDelay={200} closeDelay={150}>
-                    <HoverCardTrigger asChild>
+                {/* Click to keep the identity card and its copy actions open. */}
+                <Popover>
+                    <PopoverTrigger asChild>
                         <button
                             type="button"
+                            aria-label={isDirect ? 'Conversation details' : 'Space details'}
                             className="flex h-9 min-w-0 max-w-[320px] shrink items-center gap-2 rounded-md pl-1 pr-2 hover:bg-accent/60 data-[state=open]:bg-accent/60"
                         >
                             <span className={cn('flex min-w-0 items-center', isDirect ? 'gap-1.5' : 'gap-0.5')}>
@@ -716,8 +895,8 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                 <h1 className="truncate text-[15px] font-semibold">{spaceTitle}</h1>
                             </span>
                         </button>
-                    </HoverCardTrigger>
-                    <HoverCardContent align="start" sideOffset={4} className="w-80 px-5 pb-5 pt-6">
+                    </PopoverTrigger>
+                    <PopoverContent align="start" sideOffset={4} className="w-80 px-5 pb-5 pt-6">
                         {/* "About this space", in the shape of About This Mac: the
                             org's mark as the hero, the space as the title, then a
                             label/value table — what you're looking at, who it
@@ -750,16 +929,47 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                             <dt className="text-right font-medium">Member id</dt>
                             <dd className="min-w-0"><CopyLine text={org.memberId} title="Copy your member id" className="font-mono text-xs" /></dd>
                         </dl>
-                    </HoverCardContent>
-                </HoverCard>
+                        <div className="mt-4 flex flex-col gap-1 border-t border-border pt-3">
+                            <Button variant="ghost" size="sm" className="justify-start" onClick={() => void copySpacesLink(spaces.spaceUrl(org.address, space.id))}>
+                                <LinkIcon className="size-3.5" /> {isDirect ? 'Copy conversation link' : 'Copy space link'}
+                            </Button>
+                            {isDirect && (
+                                <Button variant="ghost" size="sm" className="justify-start" onClick={() => void copySpacesLink(spaces.memberUrl(org.address, directOtherId))}>
+                                    <LinkIcon className="size-3.5" /> Copy member link
+                                </Button>
+                            )}
+                            <Button variant="ghost" size="sm" className="justify-start" onClick={() => void copySpacesLink(spaces.orgUrl(org.address))}>
+                                <LinkIcon className="size-3.5" /> Copy server link
+                            </Button>
+                        </div>
+                    </PopoverContent>
+                </Popover>
 
                 {/* Centre: search gets the room. */}
                 <div className="flex min-w-0 flex-1 justify-center px-2">
                     <SpaceSearch orgId={org.id} spaceId={space.id} selfMemberId={org.memberId} onNavigate={select} className="w-full max-w-[480px]" />
                 </div>
 
-                {/* Right: members as one pill (a dot when anyone is here — the
-                    roster says who), then the tools. */}
+                {/* Right: Invite (a DM's membership is fixed — nobody to
+                    invite), members as one pill (a dot when anyone is here —
+                    the roster says who), then the tools. */}
+                {!isDirect && (
+                    <Popover>
+                        <PopoverTrigger asChild>
+                            <button
+                                type="button"
+                                title={`Invite someone to #${space.name}`}
+                                className="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-border px-2 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground data-[state=open]:bg-accent/60 data-[state=open]:text-foreground"
+                            >
+                                <UserPlus className="size-3.5" />
+                                <span>Invite</span>
+                            </button>
+                        </PopoverTrigger>
+                        <PopoverContent align="end" className="w-96 p-3">
+                            <InviteLinkPanel orgId={org.id} spaceId={space.id} spaceName={space.name} />
+                        </PopoverContent>
+                    </Popover>
+                )}
                 <Popover>
                     <PopoverTrigger asChild>
                         <button
@@ -785,13 +995,14 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                     <MemberProfilePopover key={m.id} id={m.id}>
                                         <button type="button" className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-accent/60">
                                             <span className="relative shrink-0">
-                                                <MemberAvatar id={m.id} name={m.displayName} size="md" />
+                                                <MemberAvatar id={m.id} name={m.displayName} size="md" agent={m.kind === 'agent'} agentKind={m.agentKind} />
                                                 {isHere && <span className="absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-[var(--rowboat-success)] ring-2 ring-popover" />}
                                             </span>
                                             <span className="min-w-0 flex-1 truncate text-sm">
                                                 {m.displayName}
                                                 {m.id === org.memberId && <span className="text-muted-foreground"> (you)</span>}
                                             </span>
+                                            {m.kind === 'agent' && <AgentBadge agentKind={m.agentKind} agentConnection={m.agentConnection} />}
                                             {m.role === 'admin' && (
                                                 <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] font-medium text-muted-foreground">admin</span>
                                             )}
@@ -801,9 +1012,16 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                 )
                             })}
                         </div>
-                        {/* A DM's membership is fixed — there is nobody to invite. */}
+                        {/* A DM's membership is fixed — there is nobody to add or invite. */}
                         {!isDirect && (
                             <div className="mt-1 border-t border-border pt-1">
+                                <button
+                                    type="button"
+                                    onClick={() => setAddMembersOpen(true)}
+                                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+                                >
+                                    <UserPlus className="size-3.5" /> Add people
+                                </button>
                                 <button
                                     type="button"
                                     onClick={() => void invite()}
@@ -822,15 +1040,15 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                     topics={feed.topics}
                     onNavigate={navigateToMessage}
                 />
-                {!docOpen && lastDoc && entries.some((e) => e.path === lastDoc.path) && (
+                {!docOpen && lastDocEntry && !lastDocEntry.state && (
                     <button
                         type="button"
                         onClick={reopenDoc}
-                        title={`Reopen ${lastDoc.path} beside the conversation`}
+                        title={`Reopen ${lastDocEntry.path} beside the conversation`}
                         className="inline-flex h-6 max-w-[14rem] items-center gap-1.5 rounded-md border border-border bg-background px-2 text-xs text-muted-foreground hover:bg-accent/50 hover:text-foreground"
                     >
                         <FileText className="size-3 shrink-0" />
-                        <span className="truncate font-mono text-[11px]">{lastDoc.path.split('/').pop()}</span>
+                        <span className="truncate font-mono text-[11px]">{lastDocEntry.path.split('/').pop()}</span>
                         <Columns2 className="size-3 shrink-0" />
                     </button>
                 )}
@@ -867,37 +1085,35 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
 
             <div ref={paneRef} className="flex-1 min-h-0 flex">
                 <SpaceRail
+                    onOpenMessage={onOpenMessage}
+                    active={active}
                     onOpenActivity={onOpenActivity}
                     org={org}
                     onOpenSpace={(orgId, spaceId) => {
                         if (orgId === org.id && spaceId === space.id) select({ kind: 'general' })
                         else onSwitchSpace(orgId, spaceId)
                     }}
-                    onOpenDiscussion={(spaceId, next) => {
-                        if (spaceId === space.id) select(next)
-                        else onSwitchSpace(org.id, spaceId, next)
-                    }}
-                    orgId={org.id}
                     spaceId={space.id}
-                    selfMemberId={org.memberId}
-                    stream={stream}
-                    topics={feed.topics}
-                    changeSets={feed.changeSets}
-                    entries={entries}
-                    draftFolders={draftFolders}
-                    presence={presence}
-                    unreadPaths={unreadPaths}
-                    selection={selection}
-                    onSelect={select}
-                    onCreateFile={openFile}
-                    onCreateBoard={createBoard}
-                    onUploadFiles={setUploadFiles}
-                    onOpenTrash={() => setTrashOpen(true)}
-                    onAddFolder={addFolder}
-                    onRemoveFolder={removeFolder}
                     open={railOpen}
                     onTogglePin={toggleRailPin}
                 />
+                <div className="flex min-w-0 min-h-0 flex-1 flex-col">
+                    <SpaceContentTabs orgId={org.id} orgAddress={org.address} spaceId={space.id} direct={isDirect} topics={feed.topics}
+                        entries={entries} unreadAssetIds={unreadAssetIds} selection={selection} memberNames={memberNames}
+                        spaceNames={spaceNames} onSelect={select} topicsLoaded={feed.loaded} filesLoaded={filesLoaded} filesError={filesError} />
+                    {selection.kind === 'discussions' && <SpaceDiscussionsView orgId={org.id} orgAddress={org.address} spaceId={space.id}
+                        topics={feed.topics} direct={isDirect} loaded={feed.loaded} memberNames={memberNames} spaceNames={spaceNames}
+                        presence={presence} onOpen={(rootMessageId) => select({ kind: 'thread', rootMessageId })} />}
+                    {selection.kind === 'files' && <>
+                        {filesError && <div role="alert" className="flex items-center gap-3 px-5 py-2 text-xs text-destructive">
+                            Could not refresh files. <button type="button" className="underline" onClick={() => setRefreshTick((tick) => tick + 1)}>Retry</button>
+                        </div>}
+                        {!filesLoaded && <p className="px-5 py-2 text-xs text-muted-foreground">Loading files…</p>}
+                        <SpaceFilesView orgId={org.id} orgAddress={org.address} spaceId={space.id} entries={entries} draftFolders={draftFolders}
+                            unreadAssetIds={unreadAssetIds} selection={selection} onSelect={select} onCreateFile={createNamedFile}
+                            onCreateBoard={createBoard} onUploadFiles={setUploadFiles} onOpenTrash={() => setTrashOpen(true)}
+                            onAddFolder={addFolder} onRemoveFolder={removeFolder} />
+                    </>}
                 {/* The columns. Chat on the left — the stream, or an open
                     thread beside it when there is room. The stream never
                     unmounts while the space is open — a thread, or a doc
@@ -905,7 +1121,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                     the right holds a file or a board. Both keep fixed tree
                     positions (the divider slot stays in the array) so going
                     one ⇄ two columns never remounts either surface. */}
-                <div ref={columnsRef} className="flex flex-1 min-w-0 min-h-0">
+                <div ref={columnsRef} className={cn('flex-1 min-w-0 min-h-0', collectionOpen ? 'hidden' : 'flex')}>
                 <div
                     ref={chatRef}
                     style={chatAnim ? columnStyle(chatAnim) : undefined}
@@ -920,14 +1136,13 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                             space={space}
                             stream={stream}
                             presence={presence}
-                            members={members}
                             memberNames={memberNames}
-                            entries={entries}
                             onOpenThread={(id) => select({ kind: 'thread', rootMessageId: id })}
                             onOpenSession={onOpenSession}
                             onClose={split ? closeChat : undefined}
-                            visible={active && showChat && (!chatRootId || threadBesideStream)}
+                            visible={active && !collectionOpen && showChat && (!chatRootId || threadBesideStream)}
                             composeActive={!chatRootId}
+                            showHeader={threadBesideStream || split || !!stream.error}
                         />
                     </div>
                     {threadBesideStream && (
@@ -950,7 +1165,6 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                 changeSets={feed.changeSets}
                                 entries={entries}
                                 presence={presence}
-                                members={members}
                                 memberNames={memberNames}
                                 refreshTick={refreshTick}
                                 showBack={!threadBesideStream}
@@ -963,7 +1177,8 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                 artifactsRailOpen={artifactsRailOpen}
                                 onToggleArtifactsRail={toggleArtifactsRail}
                                 onFolding={setFolding}
-                                visible={active && showChat}
+                                onOpenThread={(id) => select({ kind: 'thread', rootMessageId: id })}
+                                visible={active && !collectionOpen && showChat}
                             />
                         </section>
                     ) : null}
@@ -987,14 +1202,14 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                         style={docAnim ? columnStyle(docAnim) : split && !anim ? { width: docWidthEff } : undefined}
                         className={cn('min-w-0 min-h-0 flex', docAnim || (split && !anim) ? 'shrink-0 overflow-hidden' : 'flex-1')}
                     >
-                    <div style={docAnim ? { width: docAnim.width } : undefined} className={cn('flex min-w-0 min-h-0', docAnim ? 'shrink-0' : 'flex-1', !split && !boardPath && 'justify-center')}>
-                        {docRender.startsWith('app://space-blob/') ? (
-                            <AttachmentColumn key={docRender} src={docRender} onDismiss={closeDoc} onSaved={(path) => {
+                    <div style={docAnim ? { width: docAnim.width } : undefined} className={cn('flex min-w-0 min-h-0', docAnim ? 'shrink-0' : 'flex-1', !split && !boardId && 'justify-center')}>
+                        {isAttachmentKey(docRender) ? (
+                            <AttachmentColumn key={docRender} src={docRender} onDismiss={closeDoc} onSaved={(saved) => {
                                 setRefreshTick((tick) => tick + 1)
-                                select({ kind: 'file', path, ...(chatRootId ? { fromThreadRootId: chatRootId } : {}) })
+                                select({ kind: 'file', assetId: saved.assetId, ...(chatRootId ? { fromThreadRootId: chatRootId } : {}) })
                             }} />
-                        ) : boardPath ? (
-                            // Keyed by path so switching boards remounts a fresh collab session.
+                        ) : boardId ? (
+                            // Keyed by id so switching boards remounts a fresh collab session (a rename does not).
                             <Suspense
                                 fallback={
                                     <div className="flex-1 flex items-center justify-center gap-2 text-sm text-muted-foreground">
@@ -1003,38 +1218,41 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                 }
                             >
                                 <WhiteboardPane
-                                    key={boardPath}
+                                    key={boardId}
                                     org={org}
                                     space={space}
-                                    boardId={boardPath}
+                                    boardId={boardId}
                                     memberNames={memberNames}
-                                    active={active}
-                                    boards={boards.map((b) => b.path)}
-                                    onSelectBoard={(path) => select({ kind: 'whiteboard', path })}
+                                    active={active && !collectionOpen}
+                                    boards={boards.map((b) => ({ id: b.id, path: b.path }))}
+                                    onSelectBoard={(assetId) => select({ kind: 'whiteboard', assetId })}
                                     onCreateBoard={createBoard}
                                     onClose={closeDoc}
                                 />
                             </Suspense>
-                        ) : centerPath ? (
+                        ) : centerAssetId ? (
                             <div
-                                className={cn('flex min-w-0 min-h-0 flex-1', !split && !getViewerType(centerPath) && 'mx-auto max-w-[880px]')}
+                                className={cn('flex min-w-0 min-h-0 flex-1', !split && !getViewerType(entryById.get(centerAssetId)?.path ?? '') && 'mx-auto max-w-[880px]')}
                                 // Beside the stream the markdown editor steps its headings
                                 // down to the compact scale (see editor.css).
                                 data-split-pane={split ? '' : undefined}
                             >
                                 <FileColumn
-                                    key={centerPath}
+                                    key={centerAssetId}
                                     org={org}
                                     space={space}
-                                    path={centerPath}
+                                    assetId={centerAssetId}
                                     entries={entries}
                                     memberNames={memberNames}
                                     refreshTick={refreshTick}
                                     onChanged={() => setRefreshTick((t) => t + 1)}
-                                    onRenamed={openFile}
-                                    onRedirect={openFile}
                                     onOpenFile={openFile}
-                                    onDeleted={() => { setDocPath(null); select({ kind: 'general' }) }}
+                                    onOpenSpaceFile={(orgAddress, spaceId, assetId) => {
+                                        const orgId = resolveSpace(orgAddress, spaceId)
+                                        if (orgId) openSpaceFile(orgId, spaceId, assetId)
+                                        else toast('That file is in a space you are not in', 'error')
+                                    }}
+                                    onDeleted={() => { setDocKey(null); select({ kind: 'general' }) }}
                                     crumb={selection.kind === 'file' && crumbRootId && crumbLabel ? {
                                         label: crumbLabel,
                                         // Back to the thread means back to the conversation alone.
@@ -1048,8 +1266,12 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                     </aside>
                 ) : null}
                 </div>
+                </div>
             </div>
             {scheduledOpen && <ScheduledDialog orgId={org.id} spaceId={space.id} onClose={() => setScheduledOpen(false)} />}
+            {!isDirect && (
+                <AddMembersDialog org={org} space={space} members={members} open={addMembersOpen} onOpenChange={setAddMembersOpen} />
+            )}
             {trashOpen && (
                 <TrashDialog org={org} space={space} onClose={() => { setTrashOpen(false); setRefreshTick((t) => t + 1) }} />
             )}
@@ -1065,9 +1287,118 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
             )}
         </div>
         </SpaceNavProvider>
+        </SpaceAssetsProvider>
+        </SpaceInvocationsProvider>
         </SpaceRefsProvider>
         </SpaceProfilesProvider>
         </SpaceMembersProvider>
+    )
+}
+
+type InviteLinkState =
+    | { kind: 'loading' }
+    | { kind: 'ready'; link: string }
+    | { kind: 'error'; message: string }
+
+/** How much of the link's end stays visible when it is too long: enough of the token to recognise. */
+const INVITE_LINK_TAIL = 10
+
+/**
+ * The link as plain monospace text, no box — a box says "type here". Too
+ * long for the line, it truncates in the MIDDLE: the head gives way (an
+ * ellipsis at its end) while the last characters stay put, so the token's
+ * end is always there to recognise. The DOM holds the whole URL, so a click,
+ * a drag or a copy carries all of it, not just what happens to be visible.
+ */
+function InviteLinkText({ link }: { link: string }) {
+    const head = link.slice(0, -INVITE_LINK_TAIL)
+    const tail = link.slice(-INVITE_LINK_TAIL)
+    const selectAll = (el: HTMLElement) => {
+        const selection = window.getSelection()
+        if (!selection) return
+        const range = document.createRange()
+        range.selectNodeContents(el)
+        selection.removeAllRanges()
+        selection.addRange(range)
+    }
+    return (
+        <span
+            title={link}
+            onClick={(e) => selectAll(e.currentTarget)}
+            className="block w-full cursor-text select-text whitespace-nowrap font-mono text-xs leading-6"
+        >
+            {/* The head is an inline block (not a flex item) on purpose: block-level
+                pieces would put a line break between them in copied text. Its
+                width comes from spaces.css (.spaces-invite-link-head). */}
+            <span
+                className="spaces-invite-link-head inline-block overflow-hidden text-ellipsis align-bottom"
+                style={{ '--tail': `${INVITE_LINK_TAIL}ch` } as React.CSSProperties}
+            >{head}</span><span>{tail}</span>
+        </span>
+    )
+}
+
+/**
+ * The header's Invite popover: the link as selectable text, a Copy button
+ * that says "Copied" for a beat, and one line on who the link admits. A link
+ * is minted each time the popover opens (its content mounts fresh), so there
+ * is nothing stale to hand out.
+ */
+function InviteLinkPanel({ orgId, spaceId, spaceName }: { orgId: string; spaceId: string; spaceName: string }) {
+    const [state, setState] = useState<InviteLinkState>({ kind: 'loading' })
+    const [copy, setCopy] = useState<'idle' | 'copied' | 'failed'>('idle')
+    const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+    useEffect(() => () => { if (timer.current) clearTimeout(timer.current) }, [])
+
+    useEffect(() => {
+        let cancelled = false
+        window.ipc.invoke('spaces:createInvite', { orgId, spaceId }).then(
+            (result) => { if (!cancelled) setState({ kind: 'ready', link: result.link }) },
+            (err: unknown) => {
+                if (cancelled) return
+                setState({ kind: 'error', message: err instanceof Error ? err.message : 'Could not create an invite' })
+            },
+        )
+        return () => { cancelled = true }
+    }, [orgId, spaceId])
+
+    const copyLink = (link: string) =>
+        navigator.clipboard.writeText(link).then(
+            () => {
+                analytics.spacesInviteLinkCopied()
+                setCopy('copied')
+                if (timer.current) clearTimeout(timer.current)
+                timer.current = setTimeout(() => setCopy('idle'), 1000)
+            },
+            () => setCopy('failed'),
+        )
+
+    const link = state.kind === 'ready' ? state.link : ''
+    return (
+        <div className="flex flex-col gap-2">
+            {state.kind === 'ready'
+                ? <InviteLinkText link={state.link} />
+                : <span className="block font-mono text-xs leading-6 text-muted-foreground">{state.kind === 'loading' ? 'Creating link…' : 'No link'}</span>}
+            <div className="flex items-center justify-between gap-3">
+                {state.kind === 'error'
+                    ? <p className="text-xs text-destructive">{state.message}</p>
+                    : copy === 'failed'
+                        ? <p className="text-xs text-destructive">Could not copy. Select the link above and copy it instead.</p>
+                        : <p className="text-xs text-muted-foreground">Anyone with it can join #{spaceName} on Rowboat.</p>}
+                <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={state.kind !== 'ready'}
+                    onClick={() => void copyLink(link)}
+                    className="min-w-24 rounded-md"
+                >
+                    {copy === 'copied'
+                        ? <><Check className="size-3.5 text-[var(--rowboat-success)]" /> Copied</>
+                        : 'Copy link'}
+                </Button>
+            </div>
+        </div>
     )
 }
 

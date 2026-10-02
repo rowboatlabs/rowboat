@@ -1,7 +1,10 @@
 import { z } from 'zod';
 import { BlobInfo } from './blob.js';
 import {
+  Asset,
   ChangeSet,
+  CreateAsset,
+  CreateAssetResult,
   DeleteAssetResult,
   MoveAssetResult,
   ProposeChange,
@@ -9,8 +12,8 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { ActingMode, Attribution, Member, Message, ReactionEmoji, Space, SpaceKind, Topic } from './core.js';
-import { AssetPath, AssetVersion, BlobHash, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
+import { ActingMode, AgentCredential, AgentKey, AgentKeySecret, AgentListing, Attribution, Member, Membership, Message, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic } from './core.js';
+import { AssetId, AssetPath, BlobHash, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 import {
   AcceptInvite,
   AcceptInviteResult,
@@ -19,6 +22,9 @@ import {
   ResolveInvite,
   ResolveInviteResult,
 } from './invite.js';
+import { StreamEvent } from './events.js';
+import { Approval, ApprovalClose, ApprovalDecision, ApprovalId, ApprovalRequest } from './approval.js';
+import { ConnectorCapabilities, Invocation, InvocationId, InvocationOptionValues, InvocationUpdate } from './invocation.js';
 import { SearchKind, SearchResults } from './search.js';
 
 // The render face (spec §9): REST + the live stream in events.ts. Member token
@@ -60,6 +66,14 @@ const NewMessage = z.object({
   poll: NewPoll.optional(),
   actingMode: ActingMode,
   agentName: z.string().max(64).optional(),
+  /**
+   * Options picked for agents this message mentions (spec §8 Invocation
+   * options), keyed by the agent's member id. They land on that agent's
+   * invocation, uninterpreted; values for an agent the message does not
+   * invoke are ignored (it invokes the agents it mentions, and in a DM with
+   * an agent, that agent: spec §8, 2026-09-30).
+   */
+  agentOptions: z.record(MemberId, InvocationOptionValues).optional(),
 });
 
 /**
@@ -144,7 +158,8 @@ export const ActivityItem = z.object({
   /**
    * Message kinds: the message is past your stream mark (a root) or your
    * thread mark (a reply) — reading in place clears it, one read-state
-   * truth. Reactions: after your activity-seen mark (`markActivitySeen`).
+   * truth. Reactions use their event offsets against that same mark.
+   * Legacy activity-seen timestamps remain honored for older clients.
    */
   unread: z.boolean(),
 });
@@ -200,7 +215,7 @@ export const routes = {
     response: z.object({ space: Space, created: z.boolean() }),
   },
   /**
-   * Push notifications (2026-09-07, PUSH_PLAN.md): a member's device
+   * Push notifications (2026-09-07; CONTRACT.md, the push bullet): a member's device
    * registers its Expo push token and the member's notify level in one
    * idempotent call — the phone re-registers on every start and on every
    * preference change. Level is per MEMBER (all their devices); tokens are
@@ -223,10 +238,21 @@ export const routes = {
     request: z.object({ token: z.string().min(1).max(200) }),
     response: z.object({ ok: z.literal(true) }),
   },
+  browseSpaces: {
+    method: 'GET',
+    path: '/v1/spaces/browse',
+    response: z.object({ spaces: z.array(z.object({ space: Space, joined: z.boolean() })) }),
+  },
+  joinSpace: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/join',
+    params: z.object({ spaceId: SpaceId }),
+    response: z.object({ space: Space, membership: Membership }),
+  },
   createSpace: {
     method: 'POST',
     path: '/v1/spaces',
-    request: z.object({ name: z.string().min(1).max(128) }),
+    request: z.object({ name: z.string().min(1).max(128), visibility: SpaceVisibility.default('private') }),
     response: z.object({ space: Space }),
   },
   /**
@@ -249,13 +275,195 @@ export const routes = {
     response: z.object({ members: z.array(Member) }),
   },
   /**
-   * The org roster as THIS member may see it (2026-09-09): the union of the
-   * rosters of every space (DMs included) the caller belongs to, deduped,
-   * sorted by display name. Discovery is bounded by shared membership on
-   * purpose — you can only find people you already share a space with — so
-   * no admin-only directory and no privacy surface beyond what listMembers
-   * already exposes per space. Both faces use it: the app's "New message"
-   * picker and the agent's `list_members` resolve a name to a memberId here.
+   * Agent members and their keys (spec §4 Agent members, 2026-09-29). Render
+   * face only: a key is a secret, and a secret never passes through a tool.
+   * listAgents answers with the agents the caller manages — their own, or
+   * every agent for an admin.
+   */
+  listAgents: {
+    method: 'GET',
+    path: '/v1/agents',
+    response: z.object({ agents: z.array(AgentListing) }),
+  },
+  /**
+   * Add an agent: the caller becomes its owner and gets its first key, the
+   * one time the secret is shown. `kind` and `connection` must be a pair in
+   * AGENT_PAIRS (2026-09-30; absent = custom/contract, as before). A platform
+   * connection (HARBOR_RUN_CONNECTIONS) needs the platform's `credential`,
+   * which Harbor checks with the platform before anything is created, and
+   * seals; any other connection takes none.
+   */
+  createAgent: {
+    method: 'POST',
+    path: '/v1/agents',
+    request: z.object({
+      displayName: z.string().trim().min(1).max(128),
+      kind: z.string().min(1).max(32).default('custom'),
+      connection: z.string().min(1).max(32).default('contract'),
+      credential: z.string().min(1).max(512).optional(),
+    }),
+    response: z.object({ agent: Member, key: AgentKeySecret }),
+  },
+  /**
+   * Replace a platform agent's credential (spec §8 Connectors, 2026-09-30).
+   * Owner only; checked with the platform before it is saved; clears a
+   * rejection. Render face only, like keys: a secret never passes through a tool.
+   */
+  setAgentCredential: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/credential',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ secret: z.string().min(1).max(512) }),
+    response: z.object({ credential: AgentCredential }),
+  },
+  /** Another key for an agent (rotation: create, switch, revoke the old one). Owner only. */
+  createAgentKey: {
+    method: 'POST',
+    path: '/v1/agents/:agentId/keys',
+    params: z.object({ agentId: MemberId }),
+    response: z.object({ key: AgentKeySecret }),
+  },
+  /** Revoke a key: the owner, or an admin — the off switch. Idempotent. */
+  revokeAgentKey: {
+    method: 'POST',
+    path: '/v1/agents/:agentId/keys/:keyId/revoke',
+    params: z.object({ agentId: MemberId, keyId: z.string().min(1).max(64) }),
+    response: z.object({ key: AgentKey }),
+  },
+  /**
+   * The connector's operations (spec §8 Invoking agent members, 2026-09-30):
+   * called on an agent's own key, about that agent's invocations only. Not
+   * tools for the model — the connector acknowledges and reports; the agent
+   * acts through the ordinary routes and tools.
+   */
+  listAgentInvocations: {
+    method: 'GET',
+    path: '/v1/agent/invocations',
+    /** `approvals`: decisions on the agent's approvals it has not yet confirmed applying (spec §8 part 4). */
+    response: z.object({ invocations: z.array(Invocation), approvals: z.array(Approval).default([]) }),
+  },
+  acknowledgeInvocation: {
+    method: 'POST',
+    path: '/v1/agent/invocations/:invocationId/ack',
+    params: z.object({ invocationId: InvocationId }),
+    response: z.object({ invocation: Invocation }),
+  },
+  updateInvocation: {
+    method: 'POST',
+    path: '/v1/agent/invocations/:invocationId/update',
+    params: z.object({ invocationId: InvocationId }),
+    request: InvocationUpdate,
+    response: z.object({ invocation: Invocation }),
+  },
+  /**
+   * Raise an approval on one of the agent's working invocations (spec §8
+   * part 4, 2026-10-01): posts the agent's card in the invocation's thread,
+   * with the approval riding on it, and shows the invocation waiting. Raising
+   * the same requestKey again returns the first.
+   */
+  requestApproval: {
+    method: 'POST',
+    path: '/v1/agent/invocations/:invocationId/approvals',
+    params: z.object({ invocationId: InvocationId }),
+    request: ApprovalRequest,
+    response: z.object({ approval: Approval, message: Message }),
+  },
+  /** The connector passed a decision to its agent: it leaves the listing. Idempotent. */
+  applyApproval: {
+    method: 'POST',
+    path: '/v1/agent/approvals/:approvalId/applied',
+    params: z.object({ approvalId: ApprovalId }),
+    response: z.object({ approval: Approval }),
+  },
+  /** The connector closes an approval its agent no longer waits on (it expired, or the turn went). A settled one is returned as it is. */
+  closeApproval: {
+    method: 'POST',
+    path: '/v1/agent/approvals/:approvalId/close',
+    params: z.object({ approvalId: ApprovalId }),
+    request: ApprovalClose,
+    response: z.object({ approval: Approval }),
+  },
+  declareCapabilities: {
+    method: 'POST',
+    path: '/v1/agent/capabilities',
+    request: ConnectorCapabilities,
+    response: z.object({ capabilities: ConnectorCapabilities }),
+  },
+  /**
+   * What an agent's connector declared — the composer's options, whether Stop
+   * is offered — and the defaults its owner set for those options, which the
+   * composer shows preselected (spec §8, 2026-10-01). Any org member.
+   */
+  getAgentCapabilities: {
+    method: 'GET',
+    path: '/v1/agents/:agentId/capabilities',
+    params: z.object({ agentId: MemberId }),
+    response: z.object({ capabilities: ConnectorCapabilities, defaults: InvocationOptionValues.default({}) }),
+  },
+  /**
+   * Set an agent's option defaults (spec §8 Invocation options, 2026-10-01):
+   * its owner only, for options its connector declared, each a declared
+   * choice or a toggle's value. Replaces them all; `{}` clears them. Harbor
+   * fills them into an invocation whose invoker picked none. App only.
+   */
+  setAgentOptionDefaults: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/option-defaults',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ defaults: InvocationOptionValues }),
+    response: z.object({ defaults: InvocationOptionValues }),
+  },
+  /** A space's invocations, newest first (a thread's, with threadRootId): the working indicators and refused lines. */
+  listInvocations: {
+    method: 'GET',
+    path: '/v1/spaces/:spaceId/invocations',
+    params: z.object({ spaceId: SpaceId }),
+    query: z.object({ threadRootId: MessageId.optional() }),
+    response: z.object({ invocations: z.array(Invocation) }),
+  },
+  /**
+   * Decide an approval (spec §8 part 4): any person who can see it, acting
+   * directly. Never an agent and never a tool, so a person's assistant cannot
+   * either. The first decision wins; a deny may carry a note to the model.
+   */
+  decideApproval: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/approvals/:approvalId/decide',
+    params: z.object({ spaceId: SpaceId, approvalId: ApprovalId }),
+    request: ApprovalDecision.extend({ actingMode: ActingMode }),
+    response: z.object({ approval: Approval }),
+  },
+  /** Cancel a queued invocation (its invoker), or stop a running one (its invoker or an admin, when the connector can stop). */
+  cancelInvocation: {
+    method: 'POST',
+    path: '/v1/invocations/:invocationId/cancel',
+    params: z.object({ invocationId: InvocationId }),
+    response: z.object({ invocation: Invocation }),
+  },
+  /**
+   * Add existing org members, people or agents, to a shared space the caller
+   * is in (spec §4 Roles, 2026-09-29). Each one added gets a `joined` event
+   * with `by`, and a `space_added` frame. Anyone already in is a no-op;
+   * `memberships` answers for every id asked, in the order asked.
+   */
+  addMembers: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/members',
+    params: z.object({ spaceId: SpaceId }),
+    request: z.object({
+      memberIds: z.array(MemberId).min(1).max(100),
+      actingMode: ActingMode,
+      agentName: z.string().max(64).optional(),
+    }),
+    response: z.object({ memberships: z.array(Membership) }),
+  },
+  /**
+   * The org roster: every member of the org, people and agents, sorted by
+   * display name (spec §5 answer 4, built 2026-09-29 — inside one org the org
+   * is the trust boundary, as inside one Slack workspace). Until then it was
+   * bounded to people sharing a space with the caller. Both faces use it: the
+   * app's pickers (New message, Add people, mentions) and the agent's
+   * `list_members` resolve a name to a memberId here.
    */
   listOrgMembers: {
     method: 'GET',
@@ -290,45 +498,40 @@ export const routes = {
   },
 
   // --- assets --------------------------------------------------------------
+  /**
+   * Files are addressed by id (2026-09-14, Google-Docs style): every call
+   * below takes an assetId that came from a listing, a create, a search hit,
+   * or a link. The path is a display property on the record — the tree's
+   * label — changed only by moveAsset and named only by createAsset, the one
+   * call that runs before an id exists. Namespace ops are property updates
+   * (history and bytes never move); only content edits bump versions; each
+   * op appends one attributed change-set (op: move|delete|restore) and its
+   * feed event. Deleted files freeze in place, listable via includeDeleted,
+   * restorable while their path is free among the living.
+   */
   listAssets: {
     method: 'GET',
     path: '/v1/spaces/:spaceId/assets',
     params: z.object({ spaceId: SpaceId }),
-    /** Default = live files only (today's shape, unchanged). includeDeleted adds the trash. */
+    /** Default = live files only. includeDeleted adds the trash. */
     query: z.object({ includeDeleted: z.coerce.boolean().optional() }),
-    response: z.object({
-      entries: z.array(
-        z.object({
-          path: AssetPath,
-          version: AssetVersion,
-          updatedAt: z.iso.datetime(),
-          /** Present when the head version is binary. Folders are display: clients group paths on `/`. */
-          blob: BlobInfo.optional(),
-          /** Present only on trash entries (includeDeleted); absent = live. */
-          state: z.literal('deleted').optional(),
-        }),
-      ),
-    }),
+    response: z.object({ entries: z.array(Asset) }),
   },
-  /**
-   * Namespace ops (2026-08-26): the path is the product's identity, but
-   * storage keys on an internal per-asset id (the inode model), so these are
-   * property updates — history and bytes never move. Only content edits bump
-   * versions; each op appends one attributed change-set (op: move|delete|
-   * restore) and its feed event. Old paths keep a redirect: reads follow it
-   * (the result's `path` says where the file lives now); proposes refuse with
-   * a pointer. Deleted files freeze in place, listable via includeDeleted,
-   * restorable while their path is free; a fresh create over a deleted path
-   * starts a new lineage and never blocks.
-   */
+  createAsset: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/assets',
+    params: z.object({ spaceId: SpaceId }),
+    request: CreateAsset,
+    response: CreateAssetResult, // occupied path = invalid_request
+  },
   moveAsset: {
     method: 'POST',
     path: '/v1/spaces/:spaceId/assets/move',
     params: z.object({ spaceId: SpaceId }),
     request: z.object({
-      fromPath: AssetPath,
+      assetId: AssetId,
       toPath: AssetPath,
-      /** Version of fromPath you last read — stale = conflict, same discipline as propose. */
+      /** Version you last read — stale = conflict, same discipline as propose. */
       baseVersion: z.number().int().positive(),
       reason: z.string().max(1_000).optional(),
       threadRootId: MessageId.optional(),
@@ -342,7 +545,7 @@ export const routes = {
     path: '/v1/spaces/:spaceId/assets/delete',
     params: z.object({ spaceId: SpaceId }),
     request: z.object({
-      path: AssetPath,
+      assetId: AssetId,
       baseVersion: z.number().int().positive(),
       reason: z.string().max(1_000).optional(),
       threadRootId: MessageId.optional(),
@@ -356,8 +559,8 @@ export const routes = {
     path: '/v1/spaces/:spaceId/assets/restore',
     params: z.object({ spaceId: SpaceId }),
     request: z.object({
-      /** The trash entry's path (most recently deleted wins if several share it). */
-      path: AssetPath,
+      /** A trash entry's id (listAssets includeDeleted). */
+      assetId: AssetId,
       reason: z.string().max(1_000).optional(),
       actingMode: ActingMode,
       agentName: z.string().max(64).optional(),
@@ -366,10 +569,9 @@ export const routes = {
   },
   readAsset: {
     method: 'GET',
-    path: '/v1/spaces/:spaceId/asset',
-    params: z.object({ spaceId: SpaceId }),
+    path: '/v1/spaces/:spaceId/assets/:assetId',
+    params: z.object({ spaceId: SpaceId, assetId: AssetId }),
     query: z.object({
-      path: AssetPath,
       /** Omit for the current version; set for time-travel reads. */
       version: z.coerce.number().int().positive().optional(),
     }),
@@ -387,7 +589,7 @@ export const routes = {
     path: '/v1/spaces/:spaceId/history',
     params: z.object({ spaceId: SpaceId }),
     query: z.object({
-      path: AssetPath.optional(), // omit for the whole space's change log
+      assetId: AssetId.optional(), // omit for the whole space's change log
       beforeOffset: z.coerce.number().int().nonnegative().optional(),
       limit: z.coerce.number().int().positive().max(200).optional(),
     }),
@@ -398,7 +600,7 @@ export const routes = {
     path: '/v1/spaces/:spaceId/diff',
     params: z.object({ spaceId: SpaceId }),
     query: z.object({
-      path: AssetPath,
+      assetId: AssetId,
       from: z.coerce.number().int().nonnegative(),
       to: z.coerce.number().int().positive(),
     }),
@@ -457,20 +659,42 @@ export const routes = {
    * cursor (no timestamp ties). `topics` carries the rows annotating this
    * page's roots — the stream's badge decoration, one batched fetch.
    */
+  /**
+   * Windows (2026-09-14, load-around): a page is the NEWEST `limit` rows by
+   * default. `beforeOffset` pages back (rows below it), `afterOffset` pages
+   * forward (rows above it), and `aroundOffset` lands on a row — up to half
+   * the limit on each side of it, the row itself included when it exists in
+   * this window's set. At most one of the three. `hasMore` says whether older
+   * rows exist below the page; `hasMoreAfter` whether newer ones exist above
+   * it (always false for the newest page). A client that lands on an old
+   * row and pages both ways is Zulip's anchor / Discord's `around`; the
+   * offset is the space's event offset every message already carries.
+   */
   listStream: {
     method: 'GET',
     path: '/v1/spaces/:spaceId/stream',
     params: z.object({ spaceId: SpaceId }),
     query: z.object({
       beforeOffset: z.coerce.number().int().positive().optional(),
+      afterOffset: z.coerce.number().int().nonnegative().optional(),
+      aroundOffset: z.coerce.number().int().positive().optional(),
       limit: z.coerce.number().int().positive().max(200).optional(),
     }),
     response: z.object({
       messages: z.array(Message),
       topics: z.array(Topic),
       hasMore: z.boolean(),
+      /** Newer rows exist above this page. Optional on the wire so a client reading an older org treats absence as false. */
+      hasMoreAfter: z.boolean().optional(),
       /** The caller's stream mark (0 = never marked) — the New divider's anchor. */
       readOffset: StreamOffset,
+      /**
+       * The log events the page shows as lines between its messages, oldest
+       * first (2026-09-29): membership in v1. Each belongs to the page
+       * holding the next message after it; the newest page also takes those
+       * after its newest message. Absent from older orgs.
+       */
+      events: z.array(StreamEvent).default([]),
     }),
   },
   /**
@@ -485,6 +709,8 @@ export const routes = {
     params: z.object({ spaceId: SpaceId, rootMessageId: MessageId }),
     query: z.object({
       beforeOffset: z.coerce.number().int().positive().optional(),
+      afterOffset: z.coerce.number().int().nonnegative().optional(),
+      aroundOffset: z.coerce.number().int().positive().optional(),
       limit: z.coerce.number().int().positive().max(200).optional(),
     }),
     response: z.object({
@@ -492,10 +718,22 @@ export const routes = {
       topic: Topic.nullable(),
       messages: z.array(Message),
       hasMore: z.boolean(),
+      hasMoreAfter: z.boolean().optional(),
       /** The caller's mark in this thread, followed or not; null = never read nor followed. */
       readOffset: StreamOffset.nullable(),
       following: z.boolean(),
     }),
+  },
+  /**
+   * One message by id, live-folded (reactions, poll votes) — what a message
+   * link resolves through: a reply names its thread via `threadRoot`, so the
+   * app can land in the thread and scroll to it.
+   */
+  getMessage: {
+    method: 'GET',
+    path: '/v1/spaces/:spaceId/messages/:messageId',
+    params: z.object({ spaceId: SpaceId, messageId: MessageId }),
+    response: z.object({ message: Message }),
   },
   /**
    * Post a message: a stream root (no threadRoot) or a reply (threadRoot).
@@ -508,7 +746,8 @@ export const routes = {
     path: '/v1/spaces/:spaceId/messages',
     params: z.object({ spaceId: SpaceId }),
     request: NewMessage,
-    response: z.object({ message: Message }),
+    /** `invocations`: the agents this message invoked, or refused to (spec §8) — absent from older orgs. */
+    response: z.object({ message: Message, invocations: z.array(Invocation).default([]) }),
   },
   /**
    * Author-only tombstone (the content plane is role-flat, so deleter ==
@@ -621,8 +860,8 @@ export const routes = {
         rootMessageId: MessageId.optional(),
         title: z.string().min(1).max(256),
         body: z.string().min(1).max(65_536).optional(),
-        /** Attach a space file at birth (a live asset path; moved paths resolve). */
-        documentPath: AssetPath.optional(),
+        /** Attach a space file at birth (a live asset's id). */
+        documentAssetId: AssetId.optional(),
         actingMode: ActingMode,
         agentName: z.string().max(64).optional(),
       })
@@ -637,7 +876,7 @@ export const routes = {
    * One-row lifecycle ops on the annotation — none can touch a message.
    * `remove` deletes the row ("convert back to thread"); the conversation
    * stays in the stream untouched, and re-promoting later is lossless.
-   * `attach_document` links one live space file (Topic.documentPath) —
+   * `attach_document` links one live space file (Topic.documentAssetId) —
    * replacing any earlier link; `detach_document` clears it. Both are
    * idempotent (no event when nothing changes).
    */
@@ -650,7 +889,7 @@ export const routes = {
       z.object({ action: z.literal('archive'), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
       z.object({ action: z.literal('unarchive'), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
       z.object({ action: z.literal('remove'), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
-      z.object({ action: z.literal('attach_document'), path: AssetPath, actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+      z.object({ action: z.literal('attach_document'), assetId: AssetId, actingMode: ActingMode, agentName: z.string().max(64).optional() }),
       z.object({ action: z.literal('detach_document'), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
     ]),
     response: z.object({ topic: Topic }),
@@ -714,7 +953,7 @@ export const routes = {
    * paged (the first time-ordered cross-space pager — `cursor` is opaque,
    * from the previous page's `nextCursor`). `kinds` narrows to a
    * comma-separated subset; `spaceId` to one space; `unread=true` to what
-   * the read marks (and the activity-seen mark, for reactions) say is unread.
+   * the conversation read marks say is unread (legacy reaction seen marks are also honored).
    */
   activity: {
     method: 'GET',

@@ -26,7 +26,7 @@ export interface WorkingSetItem {
     lastActivityAt: string
     /** When this install last opened it (epoch ms); null = never. */
     lastVisitedAt: number | null
-    /** The server's landing channel — first in the deterministic backfill. */
+    /** The server's default channel — first in the deterministic backfill. */
     isDefault?: boolean
     /** DMs: the face the row wears. */
     avatarId?: string
@@ -62,8 +62,10 @@ export function serverItems(
         label: (space: spaces.Space) => string
     },
 ): WorkingSetItem[] {
-    // The first shared space is the server's landing channel: every "open this
-    // server" path in the app lands there.
+    // The first shared space is the server's default channel: where "open this
+    // server" lands before the reader has been anywhere in it (after that the
+    // visit record decides — see serverLandingSpaceId), and the anchor the
+    // cold backfill below starts from.
     const channels = org.spaces.map((space, index): WorkingSetItem => ({
         id: space.id,
         kind: 'channel',

@@ -147,7 +147,7 @@ function buildStaticInstructions(composioEnabled: boolean, catalog: string, code
     // Spaces (the team's own workspace on a Rowboat org): one nudge, the
     // skill carries the rest and attaches the whole toolset on load.
     const spacesBlock = spacesConnected
-        ? `\n**Spaces (the team's workspace, connected):** For ANY ask about a space, a DM, a teammate's message, "message/DM <person>", "what did the team say about …", "post/reply in <space>", or "push/add … to <space>" — your FIRST action MUST be \`loadSkill('spaces')\`. It attaches the spaces tools; do not answer "I can't reach the team" without loading it.\n`
+        ? `\n**Spaces (the team's workspace, connected):** For ANY ask about a space, a DM, a teammate's message, a space file, "message/DM <person>", "what did the team say about …", "post/reply in <space>", or "push/add … to <space>" — your FIRST action MUST be \`loadSkill('spaces')\`. It attaches the spaces tools; do not answer "I can't reach the team" without loading it.\n`
         : '';
 
     const slackToolPriority = slackConnected

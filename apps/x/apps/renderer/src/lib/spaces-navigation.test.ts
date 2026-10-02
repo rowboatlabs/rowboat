@@ -1,12 +1,52 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
-import { resolveSpacesLocation } from './spaces-navigation'
+import { parseSpacesLink, resolveSpacesLocation, serverLandingSpaceId } from './spaces-navigation'
+import { noteSpaceVisit, resetSpaceVisitsForTest } from './spaces-visits'
 
 const orgs = [
     { id: 'first', spaces: [{ id: 'main' }], directs: [] },
     { id: 'second', spaces: [{ id: 'founders' }, { id: 'design' }], directs: [{ id: 'dm' }] },
     { id: 'empty', spaces: [], directs: [] },
 ] as unknown as OrgWithSpaces[]
+
+// The landing reads the visit record, so every test starts on a server this
+// install has never been in.
+beforeEach(() => {
+    window.localStorage.clear()
+    resetSpaceVisitsForTest()
+})
+
+describe('opening a server', () => {
+    it('lands on the default channel before the reader has been anywhere in it', () => {
+        expect(serverLandingSpaceId(orgs[1])).toBe('founders')
+    })
+
+    it('returns to the channel it was left in', () => {
+        noteSpaceVisit('second', 'founders', 1000)
+        noteSpaceVisit('second', 'design', 2000)
+        expect(serverLandingSpaceId(orgs[1])).toBe('design')
+    })
+
+    it('returns to a DM just as readily as a channel', () => {
+        noteSpaceVisit('second', 'design', 1000)
+        noteSpaceVisit('second', 'dm', 2000)
+        expect(serverLandingSpaceId(orgs[1])).toBe('dm')
+    })
+
+    it('reads only its own server', () => {
+        noteSpaceVisit('first', 'main', 3000)
+        expect(serverLandingSpaceId(orgs[1])).toBe('founders')
+    })
+
+    it('falls back to the default channel when the room it remembers is gone', () => {
+        noteSpaceVisit('second', 'archived', 2000)
+        expect(serverLandingSpaceId(orgs[1])).toBe('founders')
+    })
+
+    it('has nowhere to land on an empty server', () => {
+        expect(serverLandingSpaceId(orgs[2])).toBe('')
+    })
+})
 
 describe('returning to Spaces', () => {
     it.each(['design', 'dm'])('restores the saved location %s instead of the first server', (spaceId) => {
@@ -17,11 +57,25 @@ describe('returning to Spaces', () => {
     })
     it.each([
         { kind: 'thread', rootMessageId: 'msg1' },
-        { kind: 'file', path: 'notes/plan.md', fromThreadRootId: 'msg1' },
-        { kind: 'whiteboard', path: 'whiteboards/sketch.excalidraw' },
+        { kind: 'file', assetId: '01HXAMPLEASSET0000000000A1', fromThreadRootId: 'msg1' },
+        { kind: 'whiteboard', assetId: '01HXAMPLEASSET0000000000B2' },
+        { kind: 'attachment', src: 'app://space-blob/second/design/abc?name=x.pdf', fromThreadRootId: 'msg1' },
     ] as const)('reopens what was open inside the space (%j)', (rail) => {
         expect(resolveSpacesLocation(orgs, { orgId: 'second', spaceId: 'design', rail }))
             .toEqual({ orgId: 'second', spaceId: 'design', rail })
+    })
+    // Files and boards were named by PATH before 2026-09-14; a stored rail
+    // from then must land on the stream, never reach the org as a path.
+    it.each([
+        { kind: 'file', path: 'notes/plan.md', fromThreadRootId: 'msg1' },
+        { kind: 'whiteboard', path: 'whiteboards/sketch.excalidraw' },
+        { kind: 'attachment', path: 'app://space-blob/second/design/abc' },
+        { kind: 'file' },
+        { kind: 'bogus', assetId: 'x' },
+        'file:notes/plan.md',
+    ])('degrades a legacy or malformed rail to the stream (%j)', (rail) => {
+        expect(resolveSpacesLocation(orgs, { orgId: 'second', spaceId: 'design', rail }))
+            .toEqual({ orgId: 'second', spaceId: 'design' })
     })
     it('leaves the rail behind when the saved space is gone', () => {
         expect(resolveSpacesLocation(orgs, { orgId: 'second', spaceId: 'removed', rail: { kind: 'thread', rootMessageId: 'msg1' } }))
@@ -43,5 +97,25 @@ describe('returning to Spaces', () => {
     })
     it('returns no location before joining the first server', () => {
         expect(resolveSpacesLocation([], null)).toBeNull()
+    })
+})
+
+describe('org link landings → app deep links', () => {
+    it('reads the org address and whichever target the landing named', () => {
+        expect(parseSpacesLink('rowboat://open?type=spaces&org=acme.rowboat.space')).toEqual({ orgAddress: 'acme.rowboat.space' })
+        expect(parseSpacesLink('rowboat://open?type=spaces&spaceId=S1&org=acme.rowboat.space')).toEqual({ orgAddress: 'acme.rowboat.space', spaceId: 'S1' })
+        expect(parseSpacesLink('rowboat://open?type=spaces&spaceId=S1&messageId=M1&org=acme.rowboat.space')).toEqual({ orgAddress: 'acme.rowboat.space', spaceId: 'S1', messageId: 'M1' })
+        // The /join landing: an invite to join, not a place to go.
+        expect(parseSpacesLink('rowboat://open?type=spaces&org=acme.rowboat.space&invite=t0k3n')).toEqual({ orgAddress: 'acme.rowboat.space', inviteToken: 't0k3n' })
+        expect(parseSpacesLink('rowboat://open?type=spaces&spaceId=S1&assetId=A%2Fx&org=acme.rowboat.space')).toEqual({ orgAddress: 'acme.rowboat.space', spaceId: 'S1', assetId: 'A/x' })
+        expect(parseSpacesLink('rowboat://open?type=spaces&memberId=google%7C1&org=acme.rowboat.space')).toEqual({ orgAddress: 'acme.rowboat.space', memberId: 'google|1' })
+        // The trailing-slash authority form some OS handlers hand over.
+        expect(parseSpacesLink('rowboat://open/?type=spaces&spaceId=S1&org=acme.rowboat.space')).toEqual({ orgAddress: 'acme.rowboat.space', spaceId: 'S1' })
+    })
+
+    it('leaves orgId links (notifications) and every other deep link to the plain parser', () => {
+        expect(parseSpacesLink('rowboat://open?type=spaces&orgId=org&spaceId=S1')).toBeNull()
+        expect(parseSpacesLink('rowboat://open?type=file&path=knowledge/a.md')).toBeNull()
+        expect(parseSpacesLink('https://acme.rowboat.space/s/S1')).toBeNull()
     })
 })

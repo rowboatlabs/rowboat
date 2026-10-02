@@ -2,7 +2,7 @@ import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View, type LayoutChangeEvent, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, Text, View, type LayoutChangeEvent, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useHeaderHeight } from 'expo-router/react-navigation';
@@ -388,6 +388,19 @@ export default function SpaceChatScreen() {
   );
   const linkFor = useCallback((message: Message) => `https://${org}/s/${space}/m/${message.id}`, [org, space]);
 
+  // A file link in a message: this org's files open in the file screen (by
+  // id, so a rename never breaks it); any other host goes to the browser.
+  const openAssetLink = useCallback(
+    (link: { host: string; spaceId: string; assetId: string }) => {
+      if (link.host !== org) {
+        void Linking.openURL(`https://${link.host}/s/${link.spaceId}/a/${link.assetId}`);
+        return;
+      }
+      router.push({ pathname: '/spaces/file', params: { org, space: link.spaceId, assetId: link.assetId, path: '', title: 'File', mime: '' } });
+    },
+    [org],
+  );
+
   const openThread = useCallback(
     (message: Message) => {
       seedThreadRoot(org, space, message);
@@ -467,6 +480,7 @@ export default function SpaceChatScreen() {
               onVote={vote}
               onRemoveVote={removeVote}
               onEndPoll={endPoll}
+              onOpenAsset={openAssetLink}
             />
           ))}
         </ScrollView>

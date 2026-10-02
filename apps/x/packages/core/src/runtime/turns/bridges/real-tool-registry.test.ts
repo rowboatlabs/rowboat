@@ -234,12 +234,22 @@ describe("RealToolRegistry", () => {
                 ask,
                 subflow: [],
             });
-            // A permission resolution in the stream leaves a durable marker.
+            // A decision in the stream is NOT what pairs an ask off: this one is
+            // the answer to cpr-1 and the marker below is what records it, but an
+            // automatic decision publishes the same stream event with no ask
+            // behind it (2026-09-23).
             await ctx.publish({
                 runId: "turn-1",
                 type: "code-run-event",
                 toolCallId: "tc-1",
                 event: resolution,
+                subflow: [],
+            });
+            await ctx.publish({
+                runId: "turn-1",
+                type: "code-run-permission-resolved",
+                toolCallId: "tc-1",
+                requestId: "cpr-1",
                 subflow: [],
             });
             await ctx.publish({
@@ -256,9 +266,35 @@ describe("RealToolRegistry", () => {
         await tool.execute({}, ctx);
         expect(ctx.progress).toEqual([
             { kind: "code-run-permission-request", requestId: "cpr-1", ask },
-            { kind: "code-run-permission-resolved" },
+            { kind: "code-run-permission-resolved", requestId: "cpr-1" },
             { kind: "code-run-events", events: [chunk, resolution] },
         ]);
+    });
+
+    it("leaves nothing durable for an automatic permission decision", async () => {
+        // The auto path never publishes a request, so its decision must not
+        // leave a resolution either: a marker with nothing to pair off used to
+        // cancel out a LATER ask and hide its card (2026-09-23).
+        const autoResolution = {
+            type: "permission",
+            ask: { toolCallId: "x", title: "read file", kind: "read", isRead: true },
+            decision: "allow_once",
+            auto: true,
+        } as const;
+        const { registry } = makeRegistry(async ({ ctx }) => {
+            await ctx.publish({
+                runId: "turn-1",
+                type: "code-run-event",
+                toolCallId: "tc-1",
+                event: autoResolution,
+                subflow: [],
+            });
+            return "done";
+        });
+        const tool = (await registry.resolve(descriptor())) as SyncRuntimeTool;
+        const ctx = makeCtx();
+        await tool.execute({}, ctx);
+        expect(ctx.progress).toEqual([]);
     });
 
     it("wires the abort signal to the registry's force-kill path", async () => {

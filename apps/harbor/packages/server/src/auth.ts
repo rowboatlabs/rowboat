@@ -1,4 +1,5 @@
 import type { Member } from '@rowboat/spaces-protocol';
+import { AGENT_KEY_PREFIX, hashAgentKey } from './agent-keys.js';
 import { HarborError } from './errors.js';
 import type { Store } from './store.js';
 
@@ -39,6 +40,114 @@ export interface AuthDriver {
   metadata?(): { authorizationServers: string[] } | undefined;
 }
 
+/**
+ * A driver bound to one org's store — what the faces receive. They
+ * authenticate and resolve; the store never reaches them, so the service is
+ * the only door to data by construction (CONTRACT.md "one core, three doors").
+ */
+export interface OrgAuth {
+  authenticate(authorization: string | undefined, queryToken?: string | null): Promise<AuthIdentity>;
+  resolveMember(identity: AuthIdentity): Promise<Member>;
+  /** RFC 9728 metadata; undefined under the dev driver (no AS). */
+  metadata(): { authorizationServers: string[] } | undefined;
+}
+
+export function bindAuth(driver: AuthDriver, store: Store): OrgAuth {
+  return {
+    authenticate: async (authorization, queryToken) => {
+      // Agent keys (spec §4 Agent members, 2026-09-29) are the org's own
+      // credential, checked ahead of any driver: an rbk_ bearer is never a
+      // JWT or a dev token, and every face (REST, live, MCP) gets agents
+      // through this one door.
+      const bearer = bearerOf(authorization, queryToken);
+      if (bearer?.startsWith(AGENT_KEY_PREFIX)) {
+        const key = await store.getAgentKeyByHash(hashAgentKey(bearer));
+        if (!key || key.revokedAt) throw new HarborError('unauthorized', 'unknown or revoked agent key');
+        return { iss: AGENT_KEY_ISSUER, sub: key.id };
+      }
+      return driver.authenticate(authorization, queryToken);
+    },
+    resolveMember: (identity) =>
+      identity.iss === AGENT_KEY_ISSUER ? resolveAgentKey(store, identity.sub) : driver.resolveMember(store, identity),
+    metadata: () => driver.metadata?.(),
+  };
+}
+
+/** The issuer an agent key's identity carries: not a URL, so no IdP's `iss` can ever equal it. */
+export const AGENT_KEY_ISSUER = 'harbor:agent-key';
+
+/** How often a key's last use is recorded: a busy agent writes at most this often. */
+const TOUCH_EVERY_MS = 60 * 60 * 1000;
+
+function bearerOf(authorization: string | undefined, queryToken?: string | null): string | undefined {
+  if (authorization?.startsWith('Bearer ')) return authorization.slice('Bearer '.length);
+  return queryToken ?? undefined;
+}
+
+/** A key id → its agent, re-checked (revoked since authenticate, or no longer an agent → unauthorized). */
+async function resolveAgentKey(store: Store, keyId: string): Promise<Member> {
+  const key = await store.getAgentKey(keyId);
+  const agent = key && !key.revokedAt ? await store.getMember(key.agentId) : undefined;
+  if (!key || !agent || agent.kind !== 'agent') throw new HarborError('unauthorized', 'unknown or revoked agent key');
+  const now = new Date();
+  await store.touchAgentKey(key.id, now.toISOString(), new Date(now.getTime() - TOUCH_EVERY_MS).toISOString());
+  return agent;
+}
+
+/** What a request's credentials resolve to on an org. */
+export interface Principal {
+  identity: AuthIdentity;
+  member: Member;
+}
+
+export interface RequestCredentials {
+  authorization: string | undefined;
+  /** The WS face's substitute for the header (browsers cannot set headers on upgrades). */
+  queryToken?: string | null;
+}
+
+/**
+ * The two-step dance every face runs, in one place: bearer → identity →
+ * member of THIS org. Throws the driver's HarborErrors (unauthorized,
+ * not_a_member). `allowUnmapped` is for the one route whose caller may be
+ * authenticated-but-not-yet-a-member — accept-invite — where the identity
+ * comes back with no member instead of not_a_member.
+ */
+export async function authenticateRequest(auth: OrgAuth, credentials: RequestCredentials): Promise<Principal>;
+export async function authenticateRequest(
+  auth: OrgAuth,
+  credentials: RequestCredentials,
+  opts: { allowUnmapped: true },
+): Promise<{ identity: AuthIdentity; member?: Member }>;
+export async function authenticateRequest(
+  auth: OrgAuth,
+  credentials: RequestCredentials,
+  opts?: { allowUnmapped: true },
+): Promise<{ identity: AuthIdentity; member?: Member }> {
+  const identity = await auth.authenticate(credentials.authorization, credentials.queryToken);
+  try {
+    return { identity, member: await auth.resolveMember(identity) };
+  } catch (err) {
+    if (opts?.allowUnmapped && err instanceof HarborError && err.code === 'not_a_member') return { identity };
+    throw err;
+  }
+}
+
+// --- RFC 9728, spelled once for every face -------------------------------------
+
+/** The 401's pointer at the resource metadata, so MCP-style clients find the OAuth dance mechanically. */
+export function wwwAuthenticate(origin: string): string {
+  return `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource"`;
+}
+
+/** The protected-resource metadata document: the org (or the apex) names its authorization server(s). */
+export function protectedResourceMetadata(
+  origin: string,
+  authorizationServers: string[],
+): { resource: string; authorization_servers: string[]; bearer_methods_supported: string[] } {
+  return { resource: origin, authorization_servers: authorizationServers, bearer_methods_supported: ['header'] };
+}
+
 // --- dev driver --------------------------------------------------------------
 
 export const DEV_ISSUER = 'dev';
@@ -58,7 +167,7 @@ export function parseDevToken(authorization: string | undefined, queryToken?: st
 export async function ensureMember(store: Store, memberId: string): Promise<Member> {
   const existing = await store.getMember(memberId);
   if (existing) return existing;
-  const member: Member = { id: memberId, displayName: prettify(memberId), role: 'member' };
+  const member: Member = { id: memberId, displayName: prettify(memberId), role: 'member', kind: 'human' };
   await store.putMember(member);
   return member;
 }

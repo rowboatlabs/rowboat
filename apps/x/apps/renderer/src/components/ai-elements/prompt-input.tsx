@@ -129,7 +129,8 @@ export type BoardMention = {
   orgName: string;
   spaceId: string;
   spaceName: string;
-  path: string;         // whiteboards/<name>.excalidraw
+  assetId: string;      // the board's asset id — what the whiteboard tools take
+  path: string;         // whiteboards/<name>.excalidraw (display)
   displayName: string;  // the board's name
 };
 
@@ -1130,6 +1131,7 @@ export const PromptInputTextarea = ({
             orgName: target.orgName,
             spaceId: target.spaceId,
             spaceName: target.spaceName,
+            assetId: target.assetId,
             path: target.path,
             displayName,
           });

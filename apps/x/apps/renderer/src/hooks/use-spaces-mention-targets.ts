@@ -38,7 +38,7 @@ export function useSpacesMentionTargets(): SpacesMentionTargets {
       for (const space of org.spaces) {
         spaces.push({ kind: 'space', orgId: org.id, orgName: org.name, spaceId: space.id, name: space.name })
         for (const board of boardsByOrg.get(org.id)?.get(space.id) ?? []) {
-          boards.push({ kind: 'board', orgId: org.id, orgName: org.name, spaceId: space.id, spaceName: space.name, path: board.path, name: board.name })
+          boards.push({ kind: 'board', orgId: org.id, orgName: org.name, spaceId: space.id, spaceName: space.name, assetId: board.id, path: board.path, name: board.name })
         }
       }
       for (const member of rosters.get(org.id) ?? []) {

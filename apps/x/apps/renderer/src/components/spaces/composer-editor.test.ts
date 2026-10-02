@@ -23,6 +23,11 @@ afterEach(() => {
     editors = []
 })
 
+/** A Backspace keydown at the caret — ProseMirror deletes an atom before the caret itself (no native editing in jsdom). */
+function backspace(editor: Editor): void {
+    editor.view.dom.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', keyCode: 8, bubbles: true, cancelable: true }))
+}
+
 describe('markdown round trip', () => {
     const cases: [string, string][] = [
         ['plain text', 'hello world'],
@@ -43,6 +48,7 @@ describe('markdown round trip', () => {
         ['member mention token', '[@Ada Lovelace](#member:01HADA) can you look?'],
         ['here token', 'standup [@here](#here)'],
         ['rowboat token', '[@rowboat](#rowboat) summarise this'],
+        ['space token', 'see [#General](#space:01HSPACEGENERAL0000000000) for that'],
     ]
     it.each(cases)('%s', (_name, md) => {
         expect(composerMarkdown(makeEditor(md))).toBe(md)
@@ -105,6 +111,29 @@ describe('formatting commands produce wire markdown', () => {
         expect(composerMarkdown(editor)).toBe(body)
     })
 
+    it('a space token is ONE atom node showing #Name, serialized back to the same token', () => {
+        const body = 'moved to [#General](#space:01HSPACEGENERAL0000000000) today'
+        const editor = makeEditor(body)
+        const mentions: Array<{ kind: string; id: string | null; label: string }> = []
+        editor.state.doc.descendants((node) => {
+            if (node.type.name === 'mention') mentions.push(node.attrs as { kind: string; id: string | null; label: string })
+        })
+        expect(mentions).toEqual([{ kind: 'space', id: '01HSPACEGENERAL0000000000', label: 'General' }])
+        expect(editor.view.dom.querySelector('[data-mention="space"]')?.textContent).toBe('#General')
+        expect(composerMarkdown(editor)).toBe(body)
+    })
+
+    it('a space pill goes in one backspace, like a member pill', () => {
+        const spacePill = makeEditor('see [#General](#space:01HSPACEGENERAL0000000000)')
+        spacePill.commands.focus('end')
+        backspace(spacePill)
+        expect(composerMarkdown(spacePill)).toBe('see ')
+        const memberPill = makeEditor('hey [@Ada](#member:01HADA)')
+        memberPill.commands.focus('end')
+        backspace(memberPill)
+        expect(composerMarkdown(memberPill)).toBe('hey ')
+    })
+
     it('Shift+Enter serializes as a newline, never a backslash escape', () => {
         const e = makeEditor('one')
         e.chain().focus('end').setHardBreak().insertContent({ type: 'text', text: 'two' }).run()
@@ -143,6 +172,67 @@ const pasteEvent = () => new Event('paste') as unknown as ClipboardEvent
 const nodeNames = (e: Editor) => e.state.doc.content.content.map((n) => n.type.name)
 /** Keystrokes at the caret. (Any transaction lets StarterKit's TrailingNode add its empty paragraph after a trailing block.) */
 const type = (e: Editor, text: string) => e.view.dispatch(e.state.tr.insertText(text))
+
+describe('formatting boundaries', () => {
+    it.each(['text', 'html'])('typing after a pasted %s link stays outside the link', (format) => {
+        const e = makeEditor('')
+        e.commands.focus('end')
+        if (format === 'text') e.view.pasteText('https://example.com', pasteEvent())
+        else e.view.pasteHTML('<a href="https://example.com">docs</a>', pasteEvent())
+        type(e, ' normal text')
+        expect(e.state.doc.firstChild!.lastChild!.marks).toEqual([])
+        expect(e.view.dom.querySelector('a')?.textContent).toBe(format === 'text' ? 'https://example.com' : 'docs')
+    })
+
+    it('editing inside a link preserves its formatting', () => {
+        const e = makeEditor('[docs](https://example.com)')
+        e.commands.setTextSelection(3)
+        type(e, 'X')
+        expect(composerMarkdown(e)).toBe('[doXcs](https://example.com)')
+    })
+
+    it('opens an empty code block after prose and allows prose after it', () => {
+        const e = makeEditor('intro')
+        e.chain().focus('end').toggleCodeBlock().run()
+        type(e, 'code')
+        e.commands.exitCode()
+        type(e, 'after')
+        expect(composerMarkdown(e)).toBe('intro\n\n```\ncode\n```\n\nafter')
+    })
+
+    it('formats only the current line after Shift+Enter', () => {
+        const e = makeEditor('intro')
+        e.chain().focus('end').setHardBreak().run()
+        type(e, 'code')
+        e.commands.toggleCodeBlock()
+        expect(composerMarkdown(e)).toBe('intro\n\n```\ncode\n```')
+        e.commands.toggleCodeBlock()
+        expect(composerMarkdown(e)).toBe('intro\n\ncode')
+    })
+
+    it('opens an empty code block on a blank line after Shift+Enter', () => {
+        const e = makeEditor('intro')
+        e.chain().focus('end').setHardBreak().toggleCodeBlock().run()
+        type(e, 'code')
+        expect(composerMarkdown(e)).toBe('intro\n\n```\ncode\n```')
+    })
+
+    it('the code block shortcut preserves prose above and below the current line', () => {
+        const e = makeEditor('**intro**\ncode\n*after*')
+        e.commands.setTextSelection(9)
+        e.commands.keyboardShortcut('Mod-Alt-Shift-c')
+        expect(composerMarkdown(e)).toBe('**intro**\n\n```\ncode\n```\n\n*after*')
+    })
+
+    it('converts selected text while preserving surrounding prose', () => {
+        const e = makeEditor('intro\ncode\nafter')
+        e.commands.setTextSelection({ from: 7, to: 11 })
+        e.commands.toggleCodeBlock()
+        expect(composerMarkdown(e)).toBe('intro\n\n```\ncode\n```\n\nafter')
+        e.commands.undo()
+        expect(composerMarkdown(e)).toBe('intro\ncode\nafter')
+    })
+})
 
 describe('fenced code', () => {
     it('a plain-text paste with a fence becomes a code block — lines, blank lines and the language kept, the prose around it literal', () => {

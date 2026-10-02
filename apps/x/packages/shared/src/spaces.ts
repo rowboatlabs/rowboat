@@ -2,14 +2,30 @@ import { z } from 'zod';
 import { addressesRowboat, mapMentionTokens, mentionsAsText } from '@rowboat/spaces-protocol';
 import type {
   AcceptInviteResult,
+  AgentCredential,
+  AgentKey,
+  AgentKeySecret,
+  AgentListing,
+  Asset,
+  ConnectorCapabilities,
+  Approval,
+  ApprovalChoice,
+  ApprovalState,
+  Invocation,
+  InvocationOption,
+  InvocationOptionValues,
+  InvocationState,
   BlobInfo,
   ChangeSet,
+  CreateAssetResult,
   DeleteAssetResult,
   MoveAssetResult,
   RestoreAssetResult,
   ConflictRegion,
   CreateInviteResult,
   Member,
+  Membership,
+  MembershipEvent,
   Message,
   Poll,
   PollAnswer,
@@ -23,6 +39,7 @@ import type {
   ResolveInviteResult,
   SearchKind,
   SearchResults,
+  StreamEvent,
   MessageSearchHit,
   TopicSearchHit,
   AssetSearchHit,
@@ -46,14 +63,30 @@ import type {
 
 export type {
   AcceptInviteResult,
+  AgentCredential,
+  AgentKey,
+  AgentKeySecret,
+  AgentListing,
+  Asset,
+  ConnectorCapabilities,
+  Approval,
+  ApprovalChoice,
+  ApprovalState,
+  Invocation,
+  InvocationOption,
+  InvocationOptionValues,
+  InvocationState,
   BlobInfo,
   ChangeSet,
+  CreateAssetResult,
   DeleteAssetResult,
   MoveAssetResult,
   RestoreAssetResult,
   ConflictRegion,
   CreateInviteResult,
   Member,
+  Membership,
+  MembershipEvent,
   Message,
   Poll,
   PollAnswer,
@@ -67,6 +100,7 @@ export type {
   ResolveInviteResult,
   SearchKind,
   SearchResults,
+  StreamEvent,
   MessageSearchHit,
   TopicSearchHit,
   AssetSearchHit,
@@ -107,13 +141,16 @@ export const SpacesOrgSummary = z.object({
   baseUrl: z.string(),
   /** Who we are on this org (org-scoped identity, spec §4). */
   memberId: z.string(),
-  authKind: z.enum(['dev', 'oauth']),
-  /** Present = the org needs a re-login (refresh dead). Visible and gentle, never silent. */
+  /** `session` = a managed org riding the Rowboat account session (one session, two uses — 2026-09-14). */
+  authKind: z.enum(['dev', 'oauth', 'session']),
+  /** Present = the org needs a re-login (refresh dead, or no Rowboat session). Visible and gentle, never silent. */
   authError: z.string().optional(),
 });
 export type SpacesOrgSummary = z.infer<typeof SpacesOrgSummary>;
 
+/** A space file as listings describe it: the id is what every operation takes; the path is its display name (tree label). */
 export interface SpacesAssetEntry {
+  id: string;
   path: string;
   version: number;
   updatedAt: string;
@@ -129,8 +166,12 @@ export interface SpacesStreamPage {
   topics: Topic[];
   /** Older roots exist below the returned window (listStream is windowed, newest-first). */
   hasMore: boolean;
+  /** Newer roots exist above it — only after an around / after page; absent on an older org. */
+  hasMoreAfter?: boolean;
   /** The caller's stream mark (0 = never marked) — the New divider's anchor. */
   readOffset: number;
+  /** Join and leave lines between the page's messages (2026-09-29); empty from an older org. */
+  events: StreamEvent[];
 }
 
 /** One flat thread: the root, its annotation (null = a plain thread), windowed replies. */
@@ -139,6 +180,7 @@ export interface SpacesThreadPage {
   topic: Topic | null;
   messages: Message[];
   hasMore: boolean;
+  hasMoreAfter?: boolean;
   /** The caller's mark in this thread; null = not following (no mark is kept). */
   readOffset: number | null;
   following: boolean;
@@ -146,6 +188,8 @@ export interface SpacesThreadPage {
 
 export interface SpacesPostResult {
   message: Message;
+  /** The agents the message invoked, or was refused to (Harbor spec §8, 2026-09-30); absent from older orgs. */
+  invocations?: Invocation[];
 }
 
 /** Promote (rootMessageId) or post + annotate (body) — exactly one of the two. */
@@ -160,8 +204,8 @@ export type SpacesManageTopicAction =
   | { action: 'archive' }
   | { action: 'unarchive' }
   | { action: 'remove' }
-  /** Link one live space file as what the discussion is about (replaces any earlier link). */
-  | { action: 'attach_document'; path: string }
+  /** Link one live space file (by id) as what the discussion is about (replaces any earlier link). */
+  | { action: 'attach_document'; assetId: string }
   | { action: 'detach_document' };
 
 /**
@@ -170,11 +214,19 @@ export type SpacesManageTopicAction =
  * org's MCP face, never through this IPC surface.
  */
 export interface SpacesProposeInput {
-  assetPath: string;
+  assetId: string;
   baseVersion: number;
   /** Text variant. Exactly one of newContent / blob (contract decision 1, amended). */
   newContent?: string;
   /** Binary variant: the hash of bytes already uploaded via spaces:uploadBlob. */
+  blob?: string;
+  reason?: string;
+}
+
+/** Birth: the one call that names a file by path (it has no id yet). Exactly one of newContent / blob. */
+export interface SpacesCreateInput {
+  path: string;
+  newContent?: string;
   blob?: string;
   reason?: string;
 }
@@ -299,8 +351,15 @@ export {
   parseMentions,
   relabelMentions,
   MENTION_TOKEN_RE,
+  // The org link grammar (protocol ids.ts): builders and the one parser.
+  orgUrl,
+  spaceUrl,
+  assetUrl,
+  messageUrl,
+  memberUrl,
+  parseOrgUrl,
 } from '@rowboat/spaces-protocol';
-export type { MentionRef, MentionStamps } from '@rowboat/spaces-protocol';
+export type { MentionRef, MentionStamps, OrgLink } from '@rowboat/spaces-protocol';
 
 /** Does the body deliberately address @rowboat — a token, never the bare word (spec §8)? */
 export function containsRowboatAddress(body: string): boolean {
@@ -309,17 +368,21 @@ export function containsRowboatAddress(body: string): boolean {
 
 /**
  * For markdown surfaces without the chip renderer (the phone): tokens become
- * "**@Name**". Ids resolve through the roster; an id the roster no longer
- * knows keeps the token's label.
+ * "**@Name**" / "**#Space**". Ids resolve through the roster (and the space
+ * listing, when given); an id the maps no longer know keeps the token's label.
  */
-export function decorateMentions(body: string, memberNames: ReadonlyMap<string, string>): string {
-  return mapMentionTokens(body, (ref) => `**@${ref.kind === 'member' ? (memberNames.get(ref.id) ?? ref.label) : ref.kind}**`);
+export function decorateMentions(body: string, memberNames: ReadonlyMap<string, string>, spaceNames?: ReadonlyMap<string, string>): string {
+  return mapMentionTokens(body, (ref) => {
+    if (ref.kind === 'member') return `**@${memberNames.get(ref.id) ?? ref.label}**`;
+    if (ref.kind === 'space') return `**#${spaceNames?.get(ref.id) ?? ref.label}**`;
+    return `**@${ref.kind}**`;
+  });
 }
 
 /**
  * For plain-text surfaces (titles, crumbs, quotes, forwards, copied text,
- * notification bodies): tokens become "@Name", no markup.
+ * notification bodies): tokens become "@Name" / "#Space", no markup.
  */
-export function resolveMentions(body: string, memberNames: ReadonlyMap<string, string>): string {
-  return mentionsAsText(body, memberNames);
+export function resolveMentions(body: string, memberNames: ReadonlyMap<string, string>, spaceNames?: ReadonlyMap<string, string>): string {
+  return mentionsAsText(body, memberNames, spaceNames);
 }

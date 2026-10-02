@@ -34,7 +34,7 @@ const clients: Record<string, mcpState> = {};
 async function effectiveServers(): Promise<z.infer<typeof McpServerConfig>["mcpServers"]> {
     const repo = container.resolve<IMcpConfigRepo>('mcpConfigRepo');
     const { mcpServers } = await repo.getConfig();
-    return { ...mcpServers, ...spacesMcpServers() };
+    return { ...mcpServers, ...(await spacesMcpServers()) };
 }
 
 async function getClient(serverName: string): Promise<Client> {

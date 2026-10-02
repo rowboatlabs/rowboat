@@ -26,6 +26,9 @@ importers:
       '@aws-sdk/s3-request-presigner':
         specifier: ^3.1116.0
         version: 3.1116.0
+      '@electric-sql/pglite':
+        specifier: ^0.5.5
+        version: 0.5.5
       '@hono/node-server':
         specifier: ^1.14.0
         version: 1.19.17(hono@4.13.2)
@@ -57,9 +60,6 @@ importers:
         specifier: 4.2.1
         version: 4.2.1
     devDependencies:
-      '@electric-sql/pglite':
-        specifier: ^0.5.5
-        version: 0.5.5
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3

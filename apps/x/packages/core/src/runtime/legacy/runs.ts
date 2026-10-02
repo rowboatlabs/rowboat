@@ -49,7 +49,7 @@ export async function createMessage(runId: string, message: UserMessageContentTy
     try {
         const sessionMeta = await container.resolve<ICodeSessionsRepo>('codeSessionsRepo').get(runId);
         if (sessionMeta) {
-            codeMode = sessionMeta.agent;
+            codeMode = sessionMeta.codeModeEnabled === false ? undefined : sessionMeta.agent;
             codeCwd = sessionMeta.cwd;
             codePolicy = sessionMeta.policy;
         }

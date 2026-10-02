@@ -37,8 +37,34 @@ it('creates a worktree immediately without prompting for a branch', async () => 
   const invoke = vi.fn().mockResolvedValue({ session: { id: 'new' } })
   Object.assign(window, { ipc: { invoke } })
   render(<CodeView />)
-  fireEvent.click(screen.getByRole('button', { name: 'New worktree in Project' }))
-  await waitFor(() => expect(invoke).toHaveBeenCalledWith('codeSession:create', { projectId: 'p', agent: 'claude', isolation: 'worktree' }))
+  fireEvent.click(screen.getByRole('button', { name: 'New thread in Project' }))
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith('codeSession:create', { projectId: 'p', agent: 'claude', isolation: 'worktree', codeModeEnabled: true }))
   expect(screen.queryByRole('dialog')).toBeNull()
   expect(invoke).not.toHaveBeenCalledWith('codeProject:branches', expect.anything())
+})
+
+it('opens non-git directories in place with Code off', async () => {
+  projects.push({ project: { id: 'p', path: '/documents', name: 'Project', addedAt: '2026-09-01T00:00:00Z' },
+    git: { isGitRepo: false, hasCommits: false, branch: null, dirtyCount: 0, root: null, subpath: null } })
+  const invoke = vi.fn().mockResolvedValue({ session: { id: 'new' } })
+  Object.assign(window, { ipc: { invoke } })
+  render(<CodeView />)
+  fireEvent.click(screen.getByRole('button', { name: 'New thread in Project' }))
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith('codeSession:create', { projectId: 'p', agent: 'claude', isolation: 'in-repo', codeModeEnabled: false }))
+})
+
+it('opens a directory from an old Projects link and restores its existing session', async () => {
+  const row: ProjectRow = { project: { id: 'p', path: '/documents', name: 'Project', addedAt: '2026-09-01T00:00:00Z' },
+    git: { isGitRepo: false, hasCommits: false, branch: null, dirtyCount: 0, root: null, subpath: null } }
+  const session: CodeSession = { id: 's1', title: 'Existing chat', projectId: 'p', agent: 'claude', cwd: '/documents', createdAt: '2026-09-01T00:00:00Z', codeModeEnabled: false }
+  sessions.push(session)
+  const invoke = vi.fn(async (channel: string) => channel === 'codeProject:add' ? row : { sessions: [session] })
+  Object.assign(window, { ipc: { invoke } })
+  const selected = vi.fn()
+  const consumed = vi.fn()
+  render(<CodeView focusProjectPath="knowledge/Workspace/Documents" onProjectFocusConsumed={consumed} onSessionSelected={selected} />)
+  await waitFor(() => expect(selected).toHaveBeenLastCalledWith({ session, status: 'idle' }))
+  expect(invoke).toHaveBeenCalledWith('codeProject:add', { path: 'knowledge/Workspace/Documents' })
+  expect(invoke).not.toHaveBeenCalledWith('codeSession:create', expect.anything())
+  expect(consumed).toHaveBeenCalled()
 })

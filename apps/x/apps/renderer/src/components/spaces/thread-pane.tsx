@@ -1,15 +1,17 @@
 import { MESSAGE_PROSE } from '@/components/spaces/message-prose'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
-import { Anchor, Archive, ArchiveRestore, ArrowLeft, ArrowUp, Bell, BellOff, Bot, FileText, Loader2, MessageSquareOff, MoreHorizontal, Maximize2, Minimize2, Paperclip, Pencil, ShieldAlert, Square, Tag, Unlink, X } from 'lucide-react'
+import { Anchor, Archive, ArchiveRestore, ArrowDown, ArrowLeft, ArrowUp, Bell, BellOff, Bot, FileText, Link as LinkIcon, Loader2, MessageSquareOff, MoreHorizontal, Maximize2, Minimize2, Paperclip, Pencil, ShieldAlert, Square, Tag, Unlink, X } from 'lucide-react'
 import type { spaces } from '@x/shared'
+import { messageUrl } from '@x/shared/dist/spaces.js'
+import { copySpacesLink } from '@/lib/spaces-copy-link'
 import { Button } from '@/components/ui/button'
 import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { ArtifactsSummary } from '@/components/spaces/artifacts'
 import { AttachDocumentDialog } from '@/components/spaces/attach-document-dialog'
-import { MemberAvatar, MemberProfilePopover } from '@/components/spaces/atoms'
+import { AgentMark, MemberAvatar, MemberProfilePopover } from '@/components/spaces/atoms'
 import { Composer, type AgentOptions } from '@/components/spaces/composer'
 import { ForwardDialog } from '@/components/spaces/forward-dialog'
 import { MemberName, MemberText } from '@/components/spaces/member-text'
@@ -19,10 +21,21 @@ import type { ChatMessage, SpacePresence } from '@/hooks/use-space-chat'
 import { buildPendingMessage, getThreadSnapshot, ingestTopic, putThreadSnapshot, removeTopicByRoot, updateStreamMessage, usePresenceSender } from '@/hooks/use-space-chat'
 import { useTopicAgentPermissionWait } from '@/hooks/use-topic-agent-permission'
 import { useSpaceAgentActivity } from '@/lib/spaces-agent-activity'
-import type { OrgWithSpaces } from '@/hooks/use-spaces'
+import { useSpaceNames, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { subscribeComposeInsert } from '@/lib/spaces-compose'
+import {
+    clearStagedThreadDraft, peekStagedReply, releaseStagedThreadDraft, stageThreadDraft, subscribeStagedThreadDraft, threadDraftKey, useStagedThreadDraft,
+} from '@/lib/spaces-thread-draft'
+import { AUTO_TOAST, collectRouteCandidates, routeDraft, routeThreadLabel } from '@/lib/spaces-auto-route'
+import { agentOptionsPayload, postStreamMessage } from '@/lib/spaces-post'
+import { noteInvocations } from '@/hooks/use-space-invocations'
+import { getStreamState, jumpToLatest } from '@/hooks/use-space-chat'
+import { AutoBanner } from '@/components/spaces/auto-banner'
+import { FindBanner } from '@/components/spaces/find-banner'
+// The Spaces toast queue has no renderer; sonner is what the person sees.
+import { toast as notify } from 'sonner'
 import { applyReaction, artifactsForThread, isContinuation, mergeMessages, threadLabelOf } from '@/lib/spaces-conventions'
-import { consumeJump, scrollToMessage, subscribeJump } from '@/lib/spaces-jump'
+import { consumeJump, jumpFailureMessage, resolveJumpOffset, scrollToMessage, subscribeJump, type JumpAnchor } from '@/lib/spaces-jump'
 import { PollDialogHost } from '@/components/spaces/poll-dialog'
 import { applyPollVote, myPollVotes, postPoll } from '@/lib/spaces-poll'
 import { attributionLabel, formatFeedTime, resolveMentions, shortId } from '@/lib/spaces-presentation'
@@ -47,8 +60,8 @@ const NEW_LINGER_MS = 5_000
 const NEW_FADE_MS = 800
 
 export function ThreadPane({
-    org, space, rootMessageId, rootFromStream, topicFromStream, changeSets, entries, presence, members, memberNames, refreshTick,
-    showBack, onBack, expanded = false, onToggleExpanded, onCloseColumn, onOpenFile, onOpenSession, artifactsRailOpen, onToggleArtifactsRail, onFolding, visible = true,
+    org, space, rootMessageId, rootFromStream, topicFromStream, changeSets, entries, presence, memberNames, refreshTick,
+    showBack, onBack, expanded = false, onToggleExpanded, onCloseColumn, onOpenFile, onOpenSession, onOpenThread, artifactsRailOpen, onToggleArtifactsRail, onFolding, visible = true,
 }: {
     org: OrgWithSpaces
     space: spaces.Space
@@ -60,7 +73,6 @@ export function ThreadPane({
     changeSets: spaces.ChangeSet[]
     entries: spaces.SpacesAssetEntry[]
     presence: SpacePresence
-    members: spaces.Member[]
     memberNames: Map<string, string>
     refreshTick: number
     showBack: boolean
@@ -69,8 +81,11 @@ export function ThreadPane({
     onToggleExpanded?: () => void
     /** Set while a doc column sits beside the chat: closes the chat column, the doc takes the width. */
     onCloseColumn?: () => void
-    onOpenFile: (path: string) => void
+    /** Opens a file of this space by asset id (beside the thread, with a crumb back). */
+    onOpenFile: (assetId: string) => void
     onOpenSession?: (sessionId: string) => void
+    /** Opens another thread of this space (Auto's "try another thread" re-stages the reply there). */
+    onOpenThread?: (rootMessageId: string) => void
     /** Whether the artifacts rail is showing; the summary line under the opener toggles it. */
     artifactsRailOpen: boolean
     onToggleArtifactsRail: () => void
@@ -91,6 +106,22 @@ export function ThreadPane({
     const [loaded, setLoaded] = useState(!!seeded && !seeded.partial)
     const [hasMore, setHasMore] = useState(seeded?.hasMore ?? false)
     const [loadingOlder, setLoadingOlder] = useState(false)
+    // DETACHED: a jump landed on a reply the newest page did not hold, and
+    // the window is the page around it — newer replies exist above it. The
+    // bottom pin is off, the bottom edge pages forward, live replies are
+    // counted for the pill instead of merged, and a send snaps back first.
+    // The ref is for the async continuations (refetches, pages in flight).
+    const [hasMoreAfter, setHasMoreAfterState] = useState(false)
+    const hasMoreAfterRef = useRef(false)
+    const setDetached = (next: boolean) => {
+        hasMoreAfterRef.current = next
+        setHasMoreAfterState(next)
+    }
+    /** Replies above a detached window (the pill's count); null = more than a page — unknown. */
+    const [newerCount, setNewerCount] = useState<number | null>(0)
+    const loadingNewerRef = useRef(false)
+    /** Bumped whenever a page REPLACES the window: a page fetched for the window that left must not merge into the new one. */
+    const windowGenRef = useRef(0)
     // The deepest (oldest) offset any fetch has reached — a refetch of the
     // newest page must not reset hasMore after the reader paged further back.
     // Starts at the cache's depth: hasMore above describes exactly that.
@@ -104,12 +135,93 @@ export function ThreadPane({
     /** Composer prefill (quote-reply, mention-from-profile); a new nonce re-applies it. */
     const [seed, setSeed] = useState<{ text: string; nonce: number; append?: boolean } | null>(null)
     const { onType } = usePresenceSender(org.id, space.id, rootMessageId, visible)
+    // The plain-text faces (quotes, titles, copies) name a space token by its current name.
+    const spaceNames = useSpaceNames(org.id)
 
     // The profile popover's "Mention" lands in whichever composer is visible.
     useEffect(() => {
         if (!visible) return
         return subscribeComposeInsert((insert) => setSeed({ text: insert.text, nonce: Date.now(), append: true }))
     }, [visible])
+    // Auto (Preview) staged a reply for THIS thread while the pane was already
+    // up: seed it in. A pane mounting fresh reads it off the stored draft.
+    const draftKey = threadDraftKey(org.id, space.id, rootMessageId)
+    useEffect(() => {
+        return subscribeStagedThreadDraft((staged) => {
+            if (staged.draftKey === draftKey) setSeed({ text: staged.text, nonce: Date.now(), append: true })
+        })
+    }, [draftKey])
+
+    // The banner above the composer while a routed reply is staged here: the
+    // corrections. Each reads the reply as it stands now (edits included) off
+    // the composer's stored draft, and taking it back seeds the editor with
+    // whatever was drafted here before.
+    const staged = useStagedThreadDraft(draftKey)
+    const [correcting, setCorrecting] = useState(false)
+    const takeBack = () => {
+        const released = releaseStagedThreadDraft(draftKey)
+        setSeed({ text: released?.before ?? '', nonce: Date.now() })
+        return released
+    }
+    const postToStreamInstead = async () => {
+        if (correcting) return
+        const text = peekStagedReply(draftKey)
+        if (!text) {
+            clearStagedThreadDraft(draftKey)
+            return
+        }
+        setCorrecting(true)
+        try {
+            // A detached stream window has no tail for the row to land on.
+            if (getStreamState(org.id, space.id).hasMoreAfter) await jumpToLatest(org.id, space.id)
+        } catch (err) {
+            notify.error('Could not reach the stream', { ...AUTO_TOAST, description: err instanceof Error ? err.message : 'Try again' })
+            setCorrecting(false)
+            return
+        }
+        takeBack()
+        postStreamMessage(org, space, text)
+        setCorrecting(false)
+        notify.success('Posted to the stream', AUTO_TOAST)
+        onBack()
+    }
+    const tryAnotherThread = async () => {
+        if (!staged || correcting) return
+        const text = peekStagedReply(draftKey)
+        if (!text) {
+            clearStagedThreadDraft(draftKey)
+            return
+        }
+        const rejected = [...staged.rejected, rootMessageId]
+        const candidates = collectRouteCandidates(org.id, space.id, getStreamState(org.id, space.id), memberNames, spaceNames)
+            .filter((c) => !rejected.includes(c.rootMessageId))
+        if (candidates.length === 0) {
+            notify.info('No other thread to try', { ...AUTO_TOAST, description: 'Send it here, or post it to the stream instead.' })
+            return
+        }
+        setCorrecting(true)
+        try {
+            const authorName = memberNames.get(org.memberId)
+            const outcome = await routeDraft({ spaceName: space.name, draft: text, ...(authorName ? { authorName } : {}), candidates })
+            if (outcome.destination === 'thread' && outcome.threadRootId) {
+                const next = outcome.threadRootId
+                takeBack()
+                stageThreadDraft(org.id, space.id, next, text, { rejected })
+                notify.info(`Auto picked “${routeThreadLabel(org.id, space.id, next, memberNames, spaceNames)}” instead`, AUTO_TOAST)
+                onOpenThread?.(next)
+                return
+            }
+            // Nothing else fits: no surprise post. The banner stays for the
+            // person to send here or post to the stream.
+            notify.info(outcome.reason === 'error' ? `Auto could not decide: ${outcome.error}` : 'No other thread fits', {
+                ...AUTO_TOAST,
+                description: 'Send it here, or post it to the stream instead.',
+            })
+        } finally {
+            setCorrecting(false)
+        }
+    }
+    const keepAsDraft = () => clearStagedThreadDraft(draftKey)
     // A ref, not an effect dep: visibility flips must not refetch the thread.
     const visibleRef = useRef(visible)
     visibleRef.current = visible
@@ -151,14 +263,48 @@ export function ThreadPane({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [visible, org.id, space.id, rootMessageId])
 
+    // The messages as the refetch below sees them: a detached window's newest row is where its count starts.
+    const messagesRef = useRef(messages)
+    messagesRef.current = messages
+    /** A newest page landed (the refetch, the snap back to latest): everything on it but the replies. */
+    const noteNewestPage = (res: spaces.SpacesThreadPage) => {
+        setRoot(res.root)
+        setTopic(res.topic)
+        // Keep the stream's copy of the chip data current too.
+        updateStreamMessage(org.id, space.id, res.root)
+        if (res.topic) ingestTopic(org.id, space.id, res.topic)
+        // The org's word on this thread for us: following + mark. It
+        // arms the New line when nothing did yet, then reading starts.
+        setNewSince((current) => current ?? (res.following && res.readOffset ? res.readOffset : null))
+        noteThread(org.id, space.id, rootMessageId, {
+            following: res.following,
+            readOffset: res.readOffset,
+            ...(res.root.lastReplyOffset !== undefined ? { lastReplyOffset: res.root.lastReplyOffset } : {}),
+        })
+    }
     useEffect(() => {
         let cancelled = false
+        // Detached: the newest page cannot merge into a window that floats
+        // below it, so the refetch asks for what lies ABOVE the window
+        // instead — the pill's count (exact within a page), with the root
+        // and topic refreshed off the same response. Live replies reach the
+        // pane this way (every event ticks); they stay out of the window.
+        const detachedAt = hasMoreAfterRef.current ? newestOffset(messagesRef.current, 0) : null
+        const gen = windowGenRef.current
         void window.ipc
-            .invoke('spaces:listThread', { orgId: org.id, spaceId: space.id, rootMessageId })
+            .invoke('spaces:listThread', {
+                orgId: org.id, spaceId: space.id, rootMessageId, ...(detachedAt !== null ? { afterOffset: detachedAt } : {}),
+            })
             .then((res) => {
                 if (cancelled) return
-                setRoot(res.root)
-                setTopic(res.topic)
+                // A jump landed while this page was in flight: not this window's —
+                // neither its rows nor its count.
+                if (gen !== windowGenRef.current) return
+                noteNewestPage(res)
+                if (detachedAt !== null) {
+                    setNewerCount(res.hasMoreAfter ? null : res.messages.length)
+                    return
+                }
                 // A refetch merges (older loaded pages stay put) and must not
                 // eat optimistic sends: pending/failed rows the response
                 // doesn't already contain are carried over.
@@ -174,50 +320,45 @@ export function ThreadPane({
                     setHasMore(res.hasMore)
                 }
                 setLoaded(true)
-                // Keep the stream's copy of the chip data current too.
-                updateStreamMessage(org.id, space.id, res.root)
-                if (res.topic) ingestTopic(org.id, space.id, res.topic)
-                // The org's word on this thread for us: following + mark. It
-                // arms the New line when nothing did yet, then reading starts.
-                setNewSince((current) => current ?? (res.following && res.readOffset ? res.readOffset : null))
-                noteThread(org.id, space.id, rootMessageId, {
-                    following: res.following,
-                    readOffset: res.readOffset,
-                    ...(res.root.lastReplyOffset !== undefined ? { lastReplyOffset: res.root.lastReplyOffset } : {}),
-                })
                 if (visibleRef.current) markThreadRead(org.id, space.id, rootMessageId, newestOffset(res.messages, res.root.offset))
             })
             .catch(() => {})
         return () => {
             cancelled = true
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [org.id, space.id, rootMessageId, refreshTick])
     // Write the settled thread back to the cache: the next open (and live
     // replies arriving while it is closed) paints from it, no round trip.
+    // Never a detached window — the cache is the tail.
     useEffect(() => {
-        if (!loaded || !root) return
+        if (!loaded || !root || hasMoreAfter) return
         putThreadSnapshot(org.id, space.id, rootMessageId, {
             root,
             topic,
             messages: messages.filter((m) => !m.pending && !m.failed),
             hasMore,
         })
-    }, [org.id, space.id, rootMessageId, loaded, root, topic, messages, hasMore])
+    }, [org.id, space.id, rootMessageId, loaded, root, topic, messages, hasMore, hasMoreAfter])
     // Refetches that landed while hidden left the thread unread on purpose —
     // becoming visible again is the moment the reader actually sees them.
+    // Marks only advance, so a detached window never regresses one, and
+    // paging forward (or snapping back) moves it on.
     useEffect(() => {
         if (visible && loaded && root) markThreadRead(org.id, space.id, rootMessageId, newestOffset(messages, root.offset))
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [visible, loaded, org.id, space.id, rootMessageId, messages.length])
+    }, [visible, loaded, org.id, space.id, rootMessageId, messages.length, hasMoreAfter])
 
     const loadOlderReplies = async () => {
         const oldest = messages.find((m) => !m.pending && !m.failed)
         if (!oldest || loadingOlder) return
         setLoadingOlder(true)
+        const gen = windowGenRef.current
         try {
             const res = await window.ipc.invoke('spaces:listThread', {
                 orgId: org.id, spaceId: space.id, rootMessageId, beforeOffset: oldest.offset,
             })
+            if (gen !== windowGenRef.current) return
             setMessages((prev) => mergeMessages(prev, res.messages))
             oldestLoadedRef.current = res.messages[0]?.offset ?? oldestLoadedRef.current
             setHasMore(res.hasMore)
@@ -225,6 +366,50 @@ export function ThreadPane({
             toast(err instanceof Error ? err.message : 'Could not load earlier replies', 'error')
         } finally {
             setLoadingOlder(false)
+        }
+    }
+    /** Scroll-down pagination while detached: the page above the window, appended; reaching the head re-attaches. */
+    const loadNewerReplies = async () => {
+        const newest = newestOffset(messages, 0)
+        if (!hasMoreAfter || loadingNewerRef.current || newest === 0) return
+        loadingNewerRef.current = true
+        const gen = windowGenRef.current
+        try {
+            const res = await window.ipc.invoke('spaces:listThread', {
+                orgId: org.id, spaceId: space.id, rootMessageId, afterOffset: newest,
+            })
+            if (gen !== windowGenRef.current) return
+            setMessages((prev) => mergeMessages(prev, res.messages))
+            const more = res.hasMoreAfter ?? false
+            setDetached(more)
+            if (!more) setNewerCount(0)
+        } catch {
+            // The next scroll to the edge retries.
+        } finally {
+            loadingNewerRef.current = false
+        }
+    }
+    // The detached pill's action: the newest page replaces the window and
+    // the bottom pin takes over again. Sends go through here first — an
+    // optimistic reply belongs at the tail the reader would otherwise not see.
+    const [snapping, setSnapping] = useState(false)
+    const snapToLatest = async () => {
+        if (!hasMoreAfterRef.current) return
+        setSnapping(true)
+        try {
+            const res = await window.ipc.invoke('spaces:listThread', { orgId: org.id, spaceId: space.id, rootMessageId })
+            windowGenRef.current += 1
+            noteNewestPage(res)
+            setMessages(res.messages)
+            oldestLoadedRef.current = res.messages[0]?.offset ?? null
+            setHasMore(res.hasMore)
+            setDetached(false)
+            setNewerCount(0)
+            parkedTopRef.current = null
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not load the latest replies', 'error')
+        } finally {
+            setSnapping(false)
         }
     }
 
@@ -236,36 +421,74 @@ export function ThreadPane({
     // While blocked, the amber pill replaces the own-agent spinner.
     const spinningAgents = permissionWait.length > 0 ? workingAgents.filter((id) => id !== org.memberId) : workingAgents
 
-    // Jump-to-message (search, pinned, saved): a pending jump wins over the
-    // bottom pin for the commit it lands in — the pin effect checks the ref,
-    // which clears a tick later (after that commit's effects ran).
-    const pendingJumpRef = useRef<string | null>(null)
+    // Jump-to-message (search, pinned, saved, a link): a pending jump wins
+    // over the bottom pin for the commit it lands in — the pin effect checks
+    // the ref, which clears a tick later (after that commit's effects ran).
+    // A reply the loaded window lacks is fetched ONCE, around its offset (the
+    // page replaces the window, detached when newer replies exist above it);
+    // a window that still lacks it after that is a real miss — give up.
+    const pendingJumpRef = useRef<{ anchor: JumpAnchor; sought: boolean; settled: boolean } | null>(null)
     const [jumpNonce, setJumpNonce] = useState(0)
     useEffect(() => {
         if (!visible) return
         const attempt = () => {
-            const mid = consumeJump(rootMessageId)
-            if (!mid) return
-            pendingJumpRef.current = mid
+            const anchor = consumeJump(rootMessageId)
+            if (!anchor) return
+            pendingJumpRef.current = { anchor, sought: false, settled: false }
             setJumpNonce((n) => n + 1)
         }
         attempt()
         return subscribeJump(attempt)
     }, [visible, rootMessageId])
     useLayoutEffect(() => {
-        const mid = pendingJumpRef.current
-        if (!mid) return
+        const jump = pendingJumpRef.current
+        if (!jump) return
         const el = scrollRef.current
         if (!el) return
-        const landed = scrollToMessage(el, mid)
-        // The landing spot is the reader's own now — the tail pin lets go.
-        if (landed) parkedTopRef.current = el.scrollTop
-        if (landed || loaded) {
-            // Landed — or the window is loaded and the row just isn't in it.
+        const done = () => {
             setTimeout(() => {
-                pendingJumpRef.current = null
+                if (pendingJumpRef.current === jump) pendingJumpRef.current = null
             }, 0)
         }
+        if (scrollToMessage(el, jump.anchor.messageId)) {
+            // The landing spot is the reader's own now — the tail pin lets go.
+            parkedTopRef.current = el.scrollTop
+            done()
+            return
+        }
+        if (!loaded) return
+        if (jump.settled) {
+            // The org sent the window around it and the row still isn't rendered: deleted, or not a reply here.
+            if (messages.some((m) => m.id === jump.anchor.messageId)) toast('That message is no longer here', 'info')
+            done()
+            return
+        }
+        if (jump.sought) return
+        jump.sought = true
+        void (async () => {
+            try {
+                const offset = await resolveJumpOffset(org.id, space.id, jump.anchor)
+                const res = await window.ipc.invoke('spaces:listThread', {
+                    orgId: org.id, spaceId: space.id, rootMessageId, aroundOffset: offset,
+                })
+                if (pendingJumpRef.current !== jump) return
+                windowGenRef.current += 1
+                noteNewestPage(res)
+                // The page REPLACES the window; optimistic rows belong to the tail and come back with it.
+                setMessages(res.messages)
+                oldestLoadedRef.current = res.messages[0]?.offset ?? null
+                setHasMore(res.hasMore)
+                setDetached(res.hasMoreAfter ?? false)
+                setNewerCount(0)
+                jump.settled = true
+                setJumpNonce((n) => n + 1)
+            } catch (err) {
+                if (pendingJumpRef.current !== jump) return
+                toast(jumpFailureMessage(err), 'info')
+                pendingJumpRef.current = null
+            }
+        })()
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [jumpNonce, loaded, messages.length])
 
     // Opening lands on the newest replies: the bottom, pinned before paint (a
@@ -296,10 +519,11 @@ export function ThreadPane({
     }, [])
     const pinBottom = () => {
         const el = scrollRef.current
-        if (el && parkedTopRef.current === null && !pendingJumpRef.current) el.scrollTop = el.scrollHeight
+        if (el && parkedTopRef.current === null && !pendingJumpRef.current && !hasMoreAfterRef.current) el.scrollTop = el.scrollHeight
     }
     const typingCount = presence.typing.get(rootMessageId)?.length ?? 0
-    useLayoutEffect(pinBottom, [loaded, root?.id, messages.length, spinningAgents.length, permissionWait.length, typingCount])
+    // hasMoreAfter: re-attaching (the snap back to latest) pins the head page's bottom.
+    useLayoutEffect(pinBottom, [loaded, root?.id, messages.length, spinningAgents.length, permissionWait.length, typingCount, hasMoreAfter])
     useEffect(() => {
         const el = scrollRef.current
         const content = contentRef.current
@@ -395,13 +619,24 @@ export function ThreadPane({
     // pending), confirm — or fail into a retry/discard row — in the
     // background. The composer never waits on the round trip.
     const post = async (body: string, agent?: AgentOptions) => {
+        // Sending settles a routed reply: whatever leaves this box is the person's own.
+        clearStagedThreadDraft(draftKey)
+        if (hasMoreAfterRef.current) {
+            await snapToLatest()
+            // The snap toasts its own failure; a reply must not land in an old window.
+            if (hasMoreAfterRef.current) return
+        }
         const pending = buildPendingMessage(space.id, org.memberId, body, rootMessageId)
         setMessages((prev) => [...prev, pending])
         void window.ipc
-            .invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body })
+            .invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body, ...agentOptionsPayload(agent) })
             .then((result) => {
+                noteInvocations(org.id, space.id, result.invocations)
                 setMessages((prev) => {
                     const rest = prev.filter((m) => m.id !== pending.id)
+                    // A jump landed while the send was in flight: the reply lives
+                    // above the detached window, where the pill's count finds it.
+                    if (hasMoreAfterRef.current) return rest
                     return rest.some((m) => m.id === result.message.id) ? rest : [...rest, result.message].sort((a, b) => a.offset - b.offset)
                 })
                 // Replying follows the thread and reads it up to our reply (the org's rule); mirror it.
@@ -410,7 +645,15 @@ export function ThreadPane({
                 maybeInvokeRowboat(org, space, { rootMessageId, label: threadLabel }, result.message.id, body, agent)
             })
             .catch(() => {
-                setMessages((prev) => prev.map((m) => (m.id === pending.id ? { ...m, pending: false, failed: true } : m)))
+                setMessages((prev) => {
+                    // A jump swept the row away meanwhile: say so rather than lose the words.
+                    if (!prev.some((m) => m.id === pending.id)) {
+                        const flat = body.replace(/\s+/g, ' ').trim()
+                        toast(`Could not send: “${flat.length > 60 ? `${flat.slice(0, 59)}…` : flat}”`, 'error')
+                        return prev
+                    }
+                    return prev.map((m) => (m.id === pending.id ? { ...m, pending: false, failed: true } : m))
+                })
             })
     }
 
@@ -421,11 +664,11 @@ export function ThreadPane({
     const discardFailed = (message: spaces.Message) => setMessages((prev) => prev.filter((m) => m.id !== message.id))
 
     // Fold = a visible ask to your own agent, posted in the thread, then invoked.
-    const fold = async (path: string) => {
+    const fold = async (file: { assetId: string; path: string }) => {
         setFolding(true)
         onFolding?.(true)
         try {
-            const body = `[@rowboat](#rowboat) fold this thread’s decision into \`${path}\` — keep the file’s structure and put it under the right section. End your change reason with “· thread:${rootMessageId}”.`
+            const body = `[@rowboat](#rowboat) fold this thread’s decision into \`${file.path}\` (assetId ${file.assetId}) — keep the file’s structure and put it under the right section. End your change reason with “· thread:${rootMessageId}”.`
             const result = await window.ipc.invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body })
             echo(result.message)
             noteThread(org.id, space.id, rootMessageId, { following: true, readOffset: result.message.offset, lastReplyOffset: result.message.offset })
@@ -465,7 +708,7 @@ export function ThreadPane({
     // composer — plain markdown on the wire; image embeds drop, names not ids.
     const quoteReply = (message: spaces.Message) => {
         const name = memberNames.get(message.author.memberId) ?? message.author.memberId
-        const text = resolveMentions(message.body, memberNames).replace(/!\[[^\]]*\]\([^)]*\)/g, '').trim()
+        const text = resolveMentions(message.body, memberNames, spaceNames).replace(/!\[[^\]]*\]\([^)]*\)/g, '').trim()
         if (!text) return
         const quote = text.split('\n').map((l) => `> ${l}`).join('\n')
         setSeed({ text: `${quote}\n> — ${name}\n\n`, nonce: Date.now() })
@@ -486,6 +729,7 @@ export function ThreadPane({
     const openPollRef = useRef<(() => void) | null>(null)
     const createPoll = async (input: spaces.SpacesNewPollInput) => {
         try {
+            if (hasMoreAfterRef.current) await snapToLatest()
             const { message: posted } = await postPoll({ orgId: org.id, spaceId: space.id, rootMessageId, input })
             echo(posted)
             noteThread(org.id, space.id, rootMessageId, { following: true, readOffset: posted.offset, lastReplyOffset: posted.offset })
@@ -703,11 +947,15 @@ export function ThreadPane({
         }
         rows.push(
             <MessageRow
+                orgId={org.id}
+                visible={visible}
                 key={message.id}
                 message={message}
                 memberNames={memberNames}
+                spaceNames={spaceNames}
                 continuation={isContinuation(prev, message)}
                 selfMemberId={org.memberId}
+                onCopyLink={(m) => void copySpacesLink(messageUrl(org.address, space.id, m.id))}
                 onReact={(m, emoji) => void toggleReaction(m, emoji)}
                 onDelete={(m) => void deleteMessage(m)}
                 onEdit={(m, body) => void editMessage(m, body)}
@@ -766,17 +1014,23 @@ export function ThreadPane({
                         </>
                     )}
                 </span>
-                {topic?.documentPath && (
-                    <button
-                        type="button"
-                        onClick={() => onOpenFile(topic.documentPath!)}
-                        title={`Open ${topic.documentPath} beside this discussion`}
-                        className="inline-flex h-6 max-w-[12rem] shrink-0 items-center gap-1 rounded-md border border-border bg-background px-1.5 text-[11px] text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-                    >
-                        <FileText className="size-3 shrink-0" />
-                        <span className="truncate font-mono">{topic.documentPath.split('/').pop()}</span>
-                    </button>
-                )}
+                {topic?.documentAssetId && (() => {
+                    // The org projects the link as an id even while the file is
+                    // in Trash; the live listing says whether it can open.
+                    const linked = entries.find((e) => e.id === topic.documentAssetId && e.state !== 'deleted')
+                    return (
+                        <button
+                            type="button"
+                            disabled={!linked}
+                            onClick={() => onOpenFile(topic.documentAssetId!)}
+                            title={linked ? `Open ${linked.path} beside this discussion` : 'The linked file is in Trash'}
+                            className="inline-flex h-6 max-w-[12rem] shrink-0 items-center gap-1 rounded-md border border-border bg-background px-1.5 text-[11px] text-muted-foreground hover:bg-accent/50 hover:text-foreground disabled:opacity-60 disabled:hover:bg-background"
+                        >
+                            <FileText className="size-3 shrink-0" />
+                            <span className="truncate font-mono">{linked ? linked.path.split('/').pop() : 'linked file'}</span>
+                        </button>
+                    )
+                })()}
                 <span className="flex-1" />
                 {hasSession && onOpenSession && (
                     // Persistent, unlike the working chip: the conversation the
@@ -803,15 +1057,19 @@ export function ThreadPane({
                         <Button variant="ghost" size="icon" aria-label="Thread options" className="size-8 shrink-0 text-muted-foreground"><MoreHorizontal className="size-4" /></Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
+                        <DropdownMenuItem onSelect={() => void copySpacesLink(messageUrl(org.address, space.id, rootMessageId))}>
+                            <LinkIcon className="size-3.5 mr-2" /> Copy link
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
                         {topic ? (
                             <>
                                 <DropdownMenuItem onClick={() => setEditingTitle(topic.title)}>
                                     <Pencil className="size-3.5 mr-2" /> Rename
                                 </DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => setAttaching(true)}>
-                                    <Paperclip className="size-3.5 mr-2" /> {topic.documentPath ? 'Change linked file…' : 'Link a file…'}
+                                    <Paperclip className="size-3.5 mr-2" /> {topic.documentAssetId ? 'Change linked file…' : 'Link a file…'}
                                 </DropdownMenuItem>
-                                {topic.documentPath && (
+                                {topic.documentAssetId && (
                                     <DropdownMenuItem onClick={() => void manage({ action: 'detach_document' })}>
                                         <Unlink className="size-3.5 mr-2" /> Unlink file
                                     </DropdownMenuItem>
@@ -879,7 +1137,12 @@ export function ThreadPane({
                     const el = e.currentTarget
                     const fromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
                     const userScroll = pointerDownRef.current || performance.now() - userScrollAtRef.current < 250
-                    if (fromBottom < 8) {
+                    if (hasMoreAfter) {
+                        // The window's bottom is not the tail: every position
+                        // is the reader's own, and the bottom edge pages forward.
+                        parkedTopRef.current = el.scrollTop
+                        if (fromBottom < 80) void loadNewerReplies()
+                    } else if (fromBottom < 8) {
                         // At the bottom = following the tail.
                         parkedTopRef.current = null
                     } else if (userScroll || parkedTopRef.current !== null) {
@@ -898,7 +1161,7 @@ export function ThreadPane({
                 {anchorChange && (
                     <button
                         type="button"
-                        onClick={() => onOpenFile(anchorChange.assetPath)}
+                        onClick={() => onOpenFile(anchorChange.assetId)}
                         className="mb-2 flex w-full items-start gap-2.5 rounded-lg border border-border bg-muted/30 px-3 py-2 text-left hover:border-foreground/20"
                     >
                         <Anchor className="mt-1 size-3.5 shrink-0 text-muted-foreground" />
@@ -925,6 +1188,7 @@ export function ThreadPane({
                                 <MemberProfilePopover id={root.author.memberId}>
                                     <button type="button" className="cursor-pointer text-[15px] font-bold hover:underline">{parentName}</button>
                                 </MemberProfilePopover>
+                                <AgentMark id={root.author.memberId} />
                                 {root.author.actingMode !== 'direct' && (
                                     <span className="text-muted-foreground">via {root.author.agentName ?? 'agent'}</span>
                                 )}
@@ -947,7 +1211,7 @@ export function ThreadPane({
                     railOpen={artifactsRailOpen}
                     onToggleRail={onToggleArtifactsRail}
                     entries={entries}
-                    onFold={(path) => void fold(path)}
+                    onFold={(file) => void fold(file)}
                     folding={folding}
                 />
 
@@ -1024,16 +1288,29 @@ export function ThreadPane({
                     {newCount} new — jump to unread
                 </button>
             )}
+            {hasMoreAfter && (
+                // Detached: the newest replies are not in the window at all —
+                // the pill fetches them, with what arrived since when known.
+                <button
+                    type="button"
+                    onClick={() => void snapToLatest()}
+                    disabled={snapping}
+                    className="absolute bottom-3 left-1/2 z-20 inline-flex -translate-x-1/2 animate-in fade-in slide-in-from-bottom-2 items-center gap-1.5 rounded-full border-none bg-[var(--rowboat-raised)] px-3 py-1 text-xs font-medium shadow-[var(--rowboat-shadow-soft)] hover:bg-accent disabled:opacity-60"
+                >
+                    {newerCount ? `Jump to latest · ${newerCount} new` : 'Jump to latest'}
+                    <ArrowDown className="size-3" />
+                </button>
+            )}
             </div>
 
             {attaching && topic && (
                 <AttachDocumentDialog
                     entries={entries}
-                    current={topic.documentPath}
+                    current={topic.documentAssetId}
                     onClose={() => setAttaching(false)}
-                    onPick={(path) => {
+                    onPick={(assetId) => {
                         setAttaching(false)
-                        if (path !== topic.documentPath) void manage({ action: 'attach_document', path })
+                        if (assetId !== topic.documentAssetId) void manage({ action: 'attach_document', assetId })
                     }}
                 />
             )}
@@ -1041,11 +1318,30 @@ export function ThreadPane({
                 <ForwardDialog org={org} space={space} message={forwarding} memberNames={memberNames} onClose={() => setForwarding(null)} />
             )}
             <PollDialogHost openRef={openPollRef} onSubmit={createPoll} />
+            <FindBanner
+                orgId={org.id}
+                spaceId={space.id}
+                pane={{ pane: 'thread', rootMessageId }}
+                nav={{ openThread: (id) => onOpenThread?.(id), openStream: onBack }}
+            />
+            {staged && (
+                <AutoBanner
+                    message="Auto put this reply here."
+                    busy={correcting}
+                    actions={[
+                        { label: 'Post to the stream instead', onClick: () => void postToStreamInstead() },
+                        { label: 'Try another thread', onClick: () => void tryAnotherThread() },
+                    ]}
+                    onDismiss={keepAsDraft}
+                    dismissTitle="Looks right: keep it here as a draft"
+                />
+            )}
             <Composer
                 placeholder="Reply…"
                 busy={false}
                 onSend={post}
                 onSchedule={async (body, at) => {
+                    clearStagedThreadDraft(draftKey)
                     await window.ipc.invoke('spaces:schedule', {
                         orgId: org.id, spaceId: space.id, threadRootId: rootMessageId, body, at: at.toISOString(), kind: 'message',
                     })
@@ -1055,16 +1351,21 @@ export function ThreadPane({
                 onType={onType}
                 seed={seed}
                 autoFocus
-                members={members}
-                entries={entries}
-                selfMemberId={org.memberId}
-                draftKey={`${org.id}/${space.id}/${rootMessageId}`}
+                draftKey={draftKey}
                 commands={[
                     {
                         name: 'fold',
                         args: '<file>',
                         hint: 'Ask your Rowboat to fold this thread into a file',
-                        run: (args) => void fold(args),
+                        run: (args) => {
+                            const name = args.trim()
+                            const file = entries.find((e) => e.state !== 'deleted' && (e.path === name || e.path.endsWith(`/${name}`)))
+                            if (!file) {
+                                toast(`No file named ${name} in this space`, 'error')
+                                return
+                            }
+                            void fold({ assetId: file.id, path: file.path })
+                        },
                     },
                     topic
                         ? {
@@ -1118,6 +1419,7 @@ export function ThreadPane({
                             try {
                                 const result = await window.ipc.invoke('spaces:createInvite', { orgId: org.id, spaceId: space.id })
                                 await navigator.clipboard.writeText(result.link)
+                                analytics.spacesInviteLinkCopied()
                                 toast('Invite link copied to clipboard', 'success')
                             } catch (err) {
                                 toast(err instanceof Error ? err.message : 'Could not create an invite', 'error')

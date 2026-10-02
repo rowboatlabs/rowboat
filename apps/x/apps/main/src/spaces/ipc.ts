@@ -3,8 +3,10 @@ import path from 'node:path';
 import { BrowserWindow, dialog, shell } from 'electron';
 import { ipc, spaces as spacesShared } from '@x/shared';
 import * as orgs from '@x/core/dist/spaces/orgs.js';
+import { SpaceSubscriptions } from '@x/core/dist/spaces/subscriptions.js';
 import * as blobCache from './blob-cache.js';
 import * as spacesOAuth from '@x/core/dist/spaces/oauth.js';
+import { oauthConnectBus } from '@x/core/dist/auth/connector-events.js';
 import { cancelScheduled, listScheduled, scheduleItem } from '@x/core/dist/spaces/scheduler.js';
 import { invokeTopicAgent, stopTopicAgent, topicSessionId } from '@x/core/dist/spaces/topic-agent.js';
 import { onSpaceAgentActivity, startSpaceAgentActivity } from '@x/core/dist/spaces/agent-activity.js';
@@ -26,12 +28,21 @@ type SpacesHandlers = {
   'spaces:resolveInviteLink': InvokeHandler<'spaces:resolveInviteLink'>;
   'spaces:joinInvite': InvokeHandler<'spaces:joinInvite'>;
   'spaces:signInOrg': InvokeHandler<'spaces:signInOrg'>;
+  'spaces:accountState': InvokeHandler<'spaces:accountState'>;
+  'spaces:signInRowboat': InvokeHandler<'spaces:signInRowboat'>;
+  'spaces:addOrgByAddress': InvokeHandler<'spaces:addOrgByAddress'>;
   'spaces:createOrg': InvokeHandler<'spaces:createOrg'>;
   'spaces:apexInfo': InvokeHandler<'spaces:apexInfo'>;
   'spaces:removeOrg': InvokeHandler<'spaces:removeOrg'>;
   'spaces:listSpaces': InvokeHandler<'spaces:listSpaces'>;
   'spaces:createSpace': InvokeHandler<'spaces:createSpace'>;
   'spaces:renameSpace': InvokeHandler<'spaces:renameSpace'>;
+  'spaces:addMembers': InvokeHandler<'spaces:addMembers'>;
+  'spaces:listAgents': InvokeHandler<'spaces:listAgents'>;
+  'spaces:addAgent': InvokeHandler<'spaces:addAgent'>;
+  'spaces:setAgentCredential': InvokeHandler<'spaces:setAgentCredential'>;
+  'spaces:createAgentKey': InvokeHandler<'spaces:createAgentKey'>;
+  'spaces:revokeAgentKey': InvokeHandler<'spaces:revokeAgentKey'>;
   'spaces:openDirect': InvokeHandler<'spaces:openDirect'>;
   'spaces:listMembers': InvokeHandler<'spaces:listMembers'>;
   'spaces:listOrgMembers': InvokeHandler<'spaces:listOrgMembers'>;
@@ -39,11 +50,13 @@ type SpacesHandlers = {
   'spaces:resolveInvite': InvokeHandler<'spaces:resolveInvite'>;
   'spaces:acceptInvite': InvokeHandler<'spaces:acceptInvite'>;
   'spaces:listAssets': InvokeHandler<'spaces:listAssets'>;
+  'spaces:createAsset': InvokeHandler<'spaces:createAsset'>;
   'spaces:moveAsset': InvokeHandler<'spaces:moveAsset'>;
   'spaces:deleteAsset': InvokeHandler<'spaces:deleteAsset'>;
   'spaces:restoreAsset': InvokeHandler<'spaces:restoreAsset'>;
   'spaces:uploadBlob': InvokeHandler<'spaces:uploadBlob'>;
   'spaces:saveBlob': InvokeHandler<'spaces:saveBlob'>;
+  'spaces:saveAsset': InvokeHandler<'spaces:saveAsset'>;
   'spaces:saveImageUrl': InvokeHandler<'spaces:saveImageUrl'>;
   'spaces:linkPreview': InvokeHandler<'spaces:linkPreview'>;
   'spaces:readAsset': InvokeHandler<'spaces:readAsset'>;
@@ -53,8 +66,13 @@ type SpacesHandlers = {
   'spaces:listTopics': InvokeHandler<'spaces:listTopics'>;
   'spaces:search': InvokeHandler<'spaces:search'>;
   'spaces:listStream': InvokeHandler<'spaces:listStream'>;
+  'spaces:getMessage': InvokeHandler<'spaces:getMessage'>;
   'spaces:listThread': InvokeHandler<'spaces:listThread'>;
   'spaces:postMessage': InvokeHandler<'spaces:postMessage'>;
+  'spaces:listInvocations': InvokeHandler<'spaces:listInvocations'>;
+  'spaces:cancelInvocation': InvokeHandler<'spaces:cancelInvocation'>;
+  'spaces:getAgentCapabilities': InvokeHandler<'spaces:getAgentCapabilities'>;
+  'spaces:setAgentOptionDefaults': InvokeHandler<'spaces:setAgentOptionDefaults'>;
   'spaces:createTopic': InvokeHandler<'spaces:createTopic'>;
   'spaces:manageTopic': InvokeHandler<'spaces:manageTopic'>;
   'spaces:reactToMessage': InvokeHandler<'spaces:reactToMessage'>;
@@ -62,6 +80,7 @@ type SpacesHandlers = {
   'spaces:editMessage': InvokeHandler<'spaces:editMessage'>;
   'spaces:votePoll': InvokeHandler<'spaces:votePoll'>;
   'spaces:endPoll': InvokeHandler<'spaces:endPoll'>;
+  'spaces:decideApproval': InvokeHandler<'spaces:decideApproval'>;
   'spaces:invokeRowboat': InvokeHandler<'spaces:invokeRowboat'>;
   'spaces:topicSession': InvokeHandler<'spaces:topicSession'>;
   'spaces:responseSession': InvokeHandler<'spaces:responseSession'>;
@@ -82,17 +101,24 @@ type SpacesHandlers = {
   'spaces:readAll': InvokeHandler<'spaces:readAll'>;
 };
 
-function orgSummary(record: orgs.OrgRecord): spacesShared.SpacesOrgSummary {
+async function orgSummary(record: orgs.OrgRecord): Promise<spacesShared.SpacesOrgSummary> {
   return {
     id: record.id,
     name: record.name,
     address: record.address,
     baseUrl: record.baseUrl,
     memberId: record.auth.memberId,
-    authKind: record.auth.kind,
-    ...(record.auth.kind === 'oauth' && record.auth.error ? { authError: record.auth.error } : {}),
+    ...(await orgs.describeOrgAuth(record)),
   };
 }
+
+const orgSummaries = (records: orgs.OrgRecord[]) => Promise.all(records.map(orgSummary));
+
+// A Rowboat sign-in or sign-out changes what the apex would list for us:
+// the next org listing re-syncs instead of trusting a recent one.
+oauthConnectBus.subscribe((event) => {
+  if (event.provider === 'rowboat') spacesOAuth.invalidateManagedOrgsSync();
+});
 
 const openBrowser = (url: string) => shell.openExternal(url);
 
@@ -122,10 +148,10 @@ function broadcastSpacesEvent(event: spacesShared.SpacesBusEvent): void {
 }
 
 // One core-level live subscription per (org, space), fanned out to all windows.
-// The renderer's afterOffset drives replay on first subscribe; core's
-// SpacesLive owns reconnect + resume from the last seen offset after that.
-// Each entry remembers WHICH live client it subscribed on (see subscribeSpace).
-const liveSubscriptions = new Map<string, { live: unknown; unsubscribe: () => void }>();
+// The renderer's afterOffset drives replay on first subscribe; after that the
+// registry tracks each entry's resume point and re-subscribes on a fresh
+// client whenever core replaces an org's socket (core/spaces/subscriptions).
+const subscriptions = new SpaceSubscriptions({ getLive: orgs.getLive, onRuntimeReset: orgs.onRuntimeReset });
 
 /**
  * Spaces IPC handlers, exported as a plain object and spread into the main
@@ -135,10 +161,25 @@ const liveSubscriptions = new Map<string, { live: unknown; unsubscribe: () => vo
  * agents write through the org's MCP face).
  */
 export const spacesIpcHandlers: SpacesHandlers = {
-  'spaces:listOrgs': async () => ({ orgs: orgs.listOrgs().map(orgSummary) }),
+  // The listing first makes the managed orgs match the apex (cheap when a
+  // sync ran moments ago; a failed sync keeps the cached records and logs).
+  'spaces:listOrgs': async () => {
+    await spacesOAuth.syncManagedOrgs({ maxAgeMs: 30_000 }).catch((err) => {
+      console.warn('[spaces] managed org sync failed:', err instanceof Error ? err.message : err);
+    });
+    return { orgs: await orgSummaries(orgs.listOrgs()) };
+  },
+
+  'spaces:accountState': async () => spacesOAuth.accountState(),
+
+  'spaces:signInRowboat': async () => ({ orgs: await orgSummaries(await spacesOAuth.signInForSpaces()) }),
+
+  'spaces:addOrgByAddress': async (_event, args) => ({
+    org: await orgSummary(await spacesOAuth.addOrgByAddress({ address: args.address, openBrowser })),
+  }),
 
   'spaces:addOrg': async (_event, args) => {
-    const org = orgSummary(await orgs.addDevOrg({ baseUrl: args.baseUrl, memberId: args.memberId }));
+    const org = await orgSummary(await orgs.addDevOrg({ baseUrl: args.baseUrl, memberId: args.memberId }));
     return { org };
   },
 
@@ -149,18 +190,18 @@ export const spacesIpcHandlers: SpacesHandlers = {
 
   'spaces:joinInvite': async (_event, args) => {
     const { org, result } = await spacesOAuth.joinViaInviteLink({ url: args.url, openBrowser });
-    return { org: orgSummary(org), space: result.space };
+    return { org: await orgSummary(org), space: result.space };
   },
 
   'spaces:signInOrg': async (_event, args) => {
     const record = orgs.getOrg(args.orgId);
     if (!record) throw new Error(`unknown org ${args.orgId}`);
     const updated = await spacesOAuth.signInOrg({ baseUrl: record.baseUrl, openBrowser, orgId: record.id });
-    return { org: orgSummary(updated) };
+    return { org: await orgSummary(updated) };
   },
 
   'spaces:createOrg': async (_event, args) => {
-    const org = orgSummary(await spacesOAuth.createOrgOnDeployment({ name: args.name, openBrowser }));
+    const org = await orgSummary(await spacesOAuth.createOrgOnDeployment({ name: args.name, openBrowser }));
     return { org };
   },
 
@@ -173,12 +214,7 @@ export const spacesIpcHandlers: SpacesHandlers = {
   },
 
   'spaces:removeOrg': async (_event, args) => {
-    for (const [key, entry] of liveSubscriptions) {
-      if (key.startsWith(`${args.orgId}/`)) {
-        entry.unsubscribe();
-        liveSubscriptions.delete(key);
-      }
-    }
+    subscriptions.dropOrg(args.orgId);
     await orgs.removeOrg(args.orgId);
     return { success: true };
   },
@@ -196,6 +232,16 @@ export const spacesIpcHandlers: SpacesHandlers = {
   'spaces:renameSpace': async (_event, args) => ({
     space: await orgs.getClient(args.orgId).renameSpace(args.spaceId, args.name),
   }),
+
+  'spaces:addMembers': async (_event, args) => ({
+    memberships: await orgs.getClient(args.orgId).addMembers(args.spaceId, args.memberIds),
+  }),
+
+  'spaces:listAgents': async (_event, args) => ({ agents: await orgs.getClient(args.orgId).listAgents() }),
+  'spaces:addAgent': async (_event, { orgId, ...input }) => orgs.getClient(orgId).addAgent(input),
+  'spaces:setAgentCredential': async (_event, args) => ({ credential: await orgs.getClient(args.orgId).setAgentCredential(args.agentId, args.secret) }),
+  'spaces:createAgentKey': async (_event, args) => ({ key: await orgs.getClient(args.orgId).createAgentKey(args.agentId) }),
+  'spaces:revokeAgentKey': async (_event, args) => ({ key: await orgs.getClient(args.orgId).revokeAgentKey(args.agentId, args.keyId) }),
 
   'spaces:openDirect': async (_event, args) => {
     const result = await orgs.getClient(args.orgId).openDirect(args.memberId);
@@ -228,9 +274,18 @@ export const spacesIpcHandlers: SpacesHandlers = {
 
   // Namespace ops — the renderer is the human surface, so everything here is
   // 'direct' (agents move/delete through the org's MCP face, attributed there).
+  'spaces:createAsset': async (_event, args) =>
+    orgs.getClient(args.orgId).createAsset(args.spaceId, {
+      path: args.input.path,
+      // Exactly one of the two variants (contract decision 1, amended).
+      ...(args.input.blob !== undefined ? { blob: args.input.blob } : { newContent: args.input.newContent ?? '' }),
+      ...(args.input.reason ? { reason: args.input.reason } : {}),
+      actingMode: 'direct',
+    }),
+
   'spaces:moveAsset': async (_event, args) =>
     orgs.getClient(args.orgId).moveAsset(args.spaceId, {
-      fromPath: args.fromPath,
+      assetId: args.assetId,
       toPath: args.toPath,
       baseVersion: args.baseVersion,
       ...(args.reason ? { reason: args.reason } : {}),
@@ -239,14 +294,14 @@ export const spacesIpcHandlers: SpacesHandlers = {
 
   'spaces:deleteAsset': async (_event, args) =>
     orgs.getClient(args.orgId).deleteAsset(args.spaceId, {
-      path: args.path,
+      assetId: args.assetId,
       baseVersion: args.baseVersion,
       ...(args.reason ? { reason: args.reason } : {}),
       actingMode: 'direct',
     }),
 
   'spaces:restoreAsset': async (_event, args) =>
-    orgs.getClient(args.orgId).restoreAsset(args.spaceId, { path: args.path, actingMode: 'direct' }),
+    orgs.getClient(args.orgId).restoreAsset(args.spaceId, { assetId: args.assetId, actingMode: 'direct' }),
 
   // Upload phase 1. Pastes arrive as bytes; drag-drop / picker sends the
   // absolute path (via electronUtils.getPathForFile) so big files never cross
@@ -270,6 +325,19 @@ export const spacesIpcHandlers: SpacesHandlers = {
     return { saved: true, path: result.filePath };
   },
 
+  'spaces:saveAsset': async (event, args) => {
+    const asset = await orgs.getClient(args.orgId).readAsset(args.spaceId, args.assetId);
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const options = { defaultPath: path.basename(asset.path) };
+    const result = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options);
+    if (result.canceled || !result.filePath) return { saved: false };
+    const bytes = asset.blob
+      ? (await blobCache.getBlob(args.orgId, args.spaceId, asset.blob.hash)).bytes
+      : Buffer.from(asset.content, 'utf8');
+    await fs.writeFile(result.filePath, bytes);
+    return { saved: true, path: result.filePath };
+  },
+
   // External image save: dialog first (a cancel never downloads), then main
   // fetches the bytes — the renderer cannot cross-origin. https only.
   'spaces:saveImageUrl': async (event, args) => {
@@ -288,11 +356,11 @@ export const spacesIpcHandlers: SpacesHandlers = {
   'spaces:linkPreview': async (_event, args) => ({ preview: await fetchLinkPreview(args.url) }),
 
   'spaces:readAsset': async (_event, args) =>
-    orgs.getClient(args.orgId).readAsset(args.spaceId, args.path, args.version),
+    orgs.getClient(args.orgId).readAsset(args.spaceId, args.assetId, args.version),
 
   'spaces:proposeChange': async (_event, args) =>
     orgs.getClient(args.orgId).proposeChange(args.spaceId, {
-      assetPath: args.input.assetPath,
+      assetId: args.input.assetId,
       baseVersion: args.input.baseVersion,
       // Exactly one of the two variants (contract decision 1, amended).
       ...(args.input.blob !== undefined ? { blob: args.input.blob } : { newContent: args.input.newContent ?? '' }),
@@ -302,14 +370,14 @@ export const spacesIpcHandlers: SpacesHandlers = {
 
   'spaces:assetHistory': async (_event, args) => ({
     changeSets: await orgs.getClient(args.orgId).assetHistory(args.spaceId, {
-      ...(args.path !== undefined ? { path: args.path } : {}),
+      ...(args.assetId !== undefined ? { assetId: args.assetId } : {}),
       ...(args.beforeOffset !== undefined ? { beforeOffset: args.beforeOffset } : {}),
       ...(args.limit !== undefined ? { limit: args.limit } : {}),
     }),
   }),
 
   'spaces:diff': async (_event, args) => ({
-    unified: await orgs.getClient(args.orgId).diff(args.spaceId, args.path, args.from, args.to),
+    unified: await orgs.getClient(args.orgId).diff(args.spaceId, args.assetId, args.from, args.to),
   }),
 
   'spaces:listTopics': async (_event, args) => ({
@@ -326,12 +394,20 @@ export const spacesIpcHandlers: SpacesHandlers = {
   'spaces:listStream': async (_event, args) =>
     orgs.getClient(args.orgId).listStream(args.spaceId, {
       ...(args.beforeOffset !== undefined ? { beforeOffset: args.beforeOffset } : {}),
+      ...(args.afterOffset !== undefined ? { afterOffset: args.afterOffset } : {}),
+      ...(args.aroundOffset !== undefined ? { aroundOffset: args.aroundOffset } : {}),
       ...(args.limit !== undefined ? { limit: args.limit } : {}),
     }),
+
+  'spaces:getMessage': async (_event, args) => ({
+    message: await orgs.getClient(args.orgId).getMessage(args.spaceId, args.messageId),
+  }),
 
   'spaces:listThread': async (_event, args) =>
     orgs.getClient(args.orgId).listThread(args.spaceId, args.rootMessageId, {
       ...(args.beforeOffset !== undefined ? { beforeOffset: args.beforeOffset } : {}),
+      ...(args.afterOffset !== undefined ? { afterOffset: args.afterOffset } : {}),
+      ...(args.aroundOffset !== undefined ? { aroundOffset: args.aroundOffset } : {}),
       ...(args.limit !== undefined ? { limit: args.limit } : {}),
     }),
 
@@ -341,14 +417,30 @@ export const spacesIpcHandlers: SpacesHandlers = {
       ...(args.anchorChangeSetId ? { anchorChangeSetId: args.anchorChangeSetId } : {}),
       body: args.body,
       ...(args.poll ? { poll: args.poll } : {}),
+      ...(args.agentOptions ? { agentOptions: args.agentOptions } : {}),
       actingMode: 'direct',
     }),
+
+  'spaces:listInvocations': async (_event, args) => ({
+    invocations: await orgs.getClient(args.orgId).listInvocations(args.spaceId, args.threadRootId),
+  }),
+  'spaces:cancelInvocation': async (_event, args) => ({
+    invocation: await orgs.getClient(args.orgId).cancelInvocation(args.invocationId),
+  }),
+  'spaces:setAgentOptionDefaults': async (_event, args) => ({
+    defaults: await orgs.getClient(args.orgId).setAgentOptionDefaults(args.agentId, args.defaults),
+  }),
+
+  'spaces:getAgentCapabilities': async (_event, args) => ({
+    ...(await orgs.getClient(args.orgId).getAgentCapabilities(args.agentId)),
+  }),
 
   'spaces:createTopic': async (_event, args) =>
     orgs.getClient(args.orgId).createTopic(args.spaceId, {
       ...(args.rootMessageId ? { rootMessageId: args.rootMessageId } : {}),
       title: args.title,
       ...(args.body ? { body: args.body } : {}),
+      ...(args.documentAssetId ? { documentAssetId: args.documentAssetId } : {}),
       actingMode: 'direct',
     }),
 
@@ -387,6 +479,14 @@ export const spacesIpcHandlers: SpacesHandlers = {
 
   'spaces:endPoll': async (_event, args) => ({
     message: await orgs.getClient(args.orgId).endPoll(args.spaceId, args.messageId, {
+      actingMode: 'direct',
+    }),
+  }),
+
+  'spaces:decideApproval': async (_event, args) => ({
+    approval: await orgs.getClient(args.orgId).decideApproval(args.spaceId, args.approvalId, {
+      decision: args.decision,
+      ...(args.note ? { note: args.note } : {}),
       actingMode: 'direct',
     }),
   }),
@@ -435,27 +535,12 @@ export const spacesIpcHandlers: SpacesHandlers = {
   },
 
   'spaces:subscribeSpace': async (_event, args) => {
-    const key = `${args.orgId}/${args.spaceId}`;
-    const live = orgs.getLive(args.orgId);
-    const cached = liveSubscriptions.get(key);
-    // Instance check: a re-auth (upsertOAuthOrg) replaces the org's live
-    // client; a subscription cached on the dead one would eat frames forever.
-    if (!cached || cached.live !== live) {
-      cached?.unsubscribe();
-      const unsubscribe = live.subscribe(
-        args.spaceId,
-        (frame) => broadcastSpacesEvent({ orgId: args.orgId, frame }),
-        args.afterOffset,
-      );
-      liveSubscriptions.set(key, { live, unsubscribe });
-    }
+    subscriptions.subscribe(args.orgId, args.spaceId, (frame) => broadcastSpacesEvent({ orgId: args.orgId, frame }), args.afterOffset);
     return { success: true };
   },
 
   'spaces:unsubscribeSpace': async (_event, args) => {
-    const key = `${args.orgId}/${args.spaceId}`;
-    liveSubscriptions.get(key)?.unsubscribe();
-    liveSubscriptions.delete(key);
+    subscriptions.unsubscribe(args.orgId, args.spaceId);
     return { success: true };
   },
 

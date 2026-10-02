@@ -1,18 +1,17 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { MemoryStore } from '../src/memory-store.js';
 import type { Notification } from '../src/notify.js';
 import { PushSender, levelAllows } from '../src/push.js';
-import { startHarbor, type RunningHarbor } from '../src/server.js';
-import { restClient } from './helpers.js';
+import type { RunningHarbor } from '../src/server.js';
+import { freshStore, restClient, startTestHarbor } from './helpers.js';
 import type { Message, Space } from '@rowboat/spaces-protocol';
 
-// Push notifications (PUSH_PLAN.md): the phone half of delivery. The
+// Push notifications (CONTRACT.md, the push bullet): the phone half of delivery. The
 // decision is notify.ts's (notify.test.ts); this pins the level gate, the
 // author-free fan-out to Expo tokens, dead-token pruning and wire-level
-// registration — against MemoryStore with a mocked Expo endpoint.
+// registration — against the store with a mocked Expo endpoint.
 
 const space = (kind: 'shared' | 'direct'): Space =>
-  ({ id: '01HZZZZZZZZZZZZZZZZZZZZZZZ', name: 'general', createdAt: new Date().toISOString(), kind }) as Space;
+  ({ id: '01HZZZZZZZZZZZZZZZZZZZZZZZ', name: 'general', createdAt: new Date().toISOString(), kind, visibility: 'private' }) as Space;
 
 const msg = (author = 'harsh'): Message =>
   ({
@@ -47,11 +46,11 @@ describe('levels', () => {
 
 describe('PushSender.send', () => {
   async function setup(level: 'off' | 'mentions' | 'dms' | 'all' | null) {
-    const store = new MemoryStore();
+    const store = (await freshStore()).store;
     const s = space('shared');
     await store.putSpace(s);
     for (const id of ['harsh', 'gagan']) {
-      await store.putMember({ id, displayName: id[0]!.toUpperCase() + id.slice(1), role: 'member' });
+      await store.putMember({ id, displayName: id[0]!.toUpperCase() + id.slice(1), role: 'member', kind: 'human' });
       await store.putMembership({ spaceId: s.id, memberId: id, joinedAt: new Date().toISOString() });
     }
     await store.putPushToken('gagan', 'ExponentPushToken[g1]', new Date().toISOString());
@@ -88,10 +87,10 @@ describe('PushSender.send', () => {
   });
 
   it('prunes DeviceNotRegistered tokens from tickets', async () => {
-    const store = new MemoryStore();
+    const store = (await freshStore()).store;
     const s = space('shared');
     await store.putSpace(s);
-    await store.putMember({ id: 'gagan', displayName: 'Gagan', role: 'member' });
+    await store.putMember({ id: 'gagan', displayName: 'Gagan', role: 'member', kind: 'human' });
     await store.putMembership({ spaceId: s.id, memberId: 'gagan', joinedAt: new Date().toISOString() });
     await store.putPushToken('gagan', 'ExponentPushToken[dead]', new Date().toISOString());
     await store.setPushLevel('gagan', 'all');
@@ -106,7 +105,7 @@ describe('PushSender.send', () => {
 describe('wire registration', () => {
   let harbor: RunningHarbor;
   beforeAll(async () => {
-    harbor = await startHarbor({
+    harbor = await startTestHarbor({
       orgName: 'Rowboat Labs',
       seedMembers: [{ id: 'gagan', displayName: 'Gagan' }],
     });
@@ -127,5 +126,15 @@ describe('wire registration', () => {
     expect(un.body).toEqual({ ok: true });
     const bad = await gagan.post('/v1/push/register', { token: '', level: 'all' });
     expect(bad.status).toBe(400);
+  });
+
+  it("unregistering a token you do not own is a no-op — only the device's member can forget it", async () => {
+    const gagan = restClient(harbor, 'dev-gagan');
+    const harsh = restClient(harbor, 'dev-harsh');
+    await gagan.post('/v1/push/register', { token: 'ExponentPushToken[g]', level: 'all' });
+    expect((await harsh.post('/v1/push/unregister', { token: 'ExponentPushToken[g]' })).body).toEqual({ ok: true });
+    expect(await harbor.store.listPushTokens('gagan')).toEqual(['ExponentPushToken[g]']);
+    await gagan.post('/v1/push/unregister', { token: 'ExponentPushToken[g]' });
+    expect(await harbor.store.listPushTokens('gagan')).toEqual([]);
   });
 });

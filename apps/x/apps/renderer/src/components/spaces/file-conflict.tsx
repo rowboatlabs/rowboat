@@ -2,7 +2,14 @@ import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 
 type Choice = 'keep' | 'replace' | 'cancel'
-type Conflict = { path: string; version: number; changed: boolean }
+/** A live file already at the wanted path: its id + version are what "Replace" proposes against. */
+type Conflict = { path: string; assetId: string; version: number; changed: boolean }
+
+/** The saved file: the id every later operation takes, the path it landed at (display). */
+export interface SavedSpaceFile {
+    assetId: string
+    path: string
+}
 
 export function availableCopyPath(path: string, occupied: ReadonlySet<string>): string {
     const slash = path.lastIndexOf('/')
@@ -16,7 +23,12 @@ export function availableCopyPath(path: string, occupied: ReadonlySet<string>): 
     }
 }
 
-/** Both upload entry points use the same explicit, version-checked decisions. */
+/**
+ * Both upload entry points use the same explicit, version-checked decisions.
+ * A new file is born through createAsset (paths are unique among the living,
+ * so a collision is path-shaped); replacing an existing one is a propose
+ * against that file's id at the version the user approved.
+ */
 export function useSpaceFileSave(orgId: string, spaceId: string) {
     const [conflict, setConflict] = useState<Conflict | null>(null)
     const pending = useRef<((choice: Choice) => void) | null>(null)
@@ -32,13 +44,14 @@ export function useSpaceFileSave(orgId: string, spaceId: string) {
         setConflict(value)
     })
     const list = async () => (await window.ipc.invoke('spaces:listAssets', { orgId, spaceId })).entries.filter((entry) => entry.state !== 'deleted')
-    const save = async ({ path, getBlob, reason }: { path: string; getBlob: () => Promise<string>; reason: string }): Promise<string | null> => {
+    const save = async ({ path, getBlob, reason }: { path: string; getBlob: () => Promise<string>; reason: string }): Promise<SavedSpaceFile | null> => {
         const entries = await list()
         const occupied = new Set(entries.map((entry) => entry.path))
         const existing = entries.find((entry) => entry.path === path)
-        let collision: Conflict | null = existing ? { path, version: existing.version, changed: false } : null
+        let collision: Conflict | null = existing ? { path, assetId: existing.id, version: existing.version, changed: false } : null
         let destination = path
-        let baseVersion = 0
+        /** Set = replace this file at this version; unset = create a new one at `destination`. */
+        let replace: { assetId: string; baseVersion: number } | null = null
         let hash: string | undefined
         for (;;) {
             if (collision) {
@@ -46,22 +59,39 @@ export function useSpaceFileSave(orgId: string, spaceId: string) {
                 if (choice === 'cancel') return null
                 if (choice === 'replace') {
                     // Pin to the version the user approved, never a refreshed head.
-                    baseVersion = collision.version
+                    replace = { assetId: collision.assetId, baseVersion: collision.version }
                 } else {
                     occupied.add(collision.path)
                     for (const entry of await list()) occupied.add(entry.path)
                     destination = availableCopyPath(path, occupied)
-                    baseVersion = 0
+                    replace = null
                 }
             }
             hash ??= await getBlob()
-            const result = await window.ipc.invoke('spaces:proposeChange', {
-                orgId, spaceId,
-                input: { assetPath: destination, baseVersion, blob: hash, reason },
-            })
-            if (result.outcome !== 'conflict') return destination
-            collision = { path: destination, version: result.currentVersion, changed: true }
-            // A concurrent write requires a new decision, including for numbered copies.
+            if (replace) {
+                const result = await window.ipc.invoke('spaces:proposeChange', {
+                    orgId, spaceId,
+                    input: { assetId: replace.assetId, baseVersion: replace.baseVersion, blob: hash, reason },
+                })
+                if (result.outcome !== 'conflict') return { assetId: replace.assetId, path: destination }
+                collision = { path: destination, assetId: replace.assetId, version: result.currentVersion, changed: true }
+                // A concurrent write requires a new decision, including for numbered copies.
+                continue
+            }
+            try {
+                const created = await window.ipc.invoke('spaces:createAsset', {
+                    orgId, spaceId,
+                    input: { path: destination, blob: hash, reason },
+                })
+                return { assetId: created.asset.id, path: created.asset.path }
+            } catch (err) {
+                // The org refuses an occupied path. The listing says whether that
+                // is what happened (someone landed a file here since the check)
+                // — then it is a collision to decide on, not a failure.
+                const occupant = (await list().catch(() => [] as Awaited<ReturnType<typeof list>>)).find((entry) => entry.path === destination)
+                if (!occupant) throw err
+                collision = { path: destination, assetId: occupant.id, version: occupant.version, changed: true }
+            }
         }
     }
     return { save, conflict, choose }

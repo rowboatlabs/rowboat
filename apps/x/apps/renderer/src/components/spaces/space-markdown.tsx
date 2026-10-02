@@ -1,8 +1,9 @@
-import { FileConflictNotice, useSpaceFileSave } from './file-conflict'
+import { FileConflictNotice, useSpaceFileSave, type SavedSpaceFile } from './file-conflict'
 import { createContext, memo, useContext, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode } from 'react'
+import type { spaces } from '@x/shared'
 import { BlobPreview } from '@/components/spaces/blob-preview'
 import { Streamdown } from 'streamdown'
-import { Eye, FileDown, FilePlus2, FileText, Loader2, X } from 'lucide-react'
+import { Eye, FileDown, FilePlus2, FileText, Loader2, MessageSquare, X } from 'lucide-react'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -12,13 +13,21 @@ import { isTrustedDomain, linkDomain, trustDomain } from '@/lib/trusted-domains'
 import { userMessageRemarkPlugins } from '@/lib/markdown-render'
 import { toast } from '@/lib/toast'
 import { MemberProfilePopover } from '@/components/spaces/atoms'
+import { SpaceNavContext, SpaceRefsContext, SpaceRefsProvider, useSpaceNav, useSpaceRefs, type SpaceNav } from '@/components/spaces/space-nav'
+export { SpaceRefsProvider, useSpaceNav, useSpaceRefs, type SpaceNav }
 import { useMemberNames, useSpaceProfiles } from '@/components/spaces/member-text'
+import { findSpace, useSpacesOrgs } from '@/hooks/use-spaces'
 import {
     imageDimsFromUrl,
     parseAssetWireUrl,
     parseBlobAppUrl,
     parseSpaceFileAppUrl,
     parseSpaceMemberAppUrl,
+    parseSpacePathAppUrl,
+    parseMemberWireUrl,
+    parseMessageWireUrl,
+    parseSpaceRefAppUrl,
+    parseSpaceWireUrl,
     resolveSpaceLink,
     rewriteBlobLinks,
     rewriteFileLinks,
@@ -28,38 +37,71 @@ import {
     ROWBOAT_APP_URL,
     type SpaceRefs,
 } from '@/lib/spaces-presentation'
+import { isInviteUrl, openServerDialog } from '@/lib/server-dialog'
 
 // The one markdown renderer for space bodies (messages, thread parents).
 // Three responsibilities layered over Streamdown, all space-specific:
 //   1. mentions — the wire's link tokens (protocol mentions.ts) rewrite to
-//      app://space-member/<id> pre-parse and render as chips keyed on the ID,
-//      the name coming from the members context (never from the label),
+//      app://space-member/<id> (a person) or app://space-ref/<id> (a space)
+//      pre-parse and render as chips keyed on the ID, the name coming from
+//      the members context or the reader's own org listing (never from the
+//      label); the contract's canonical …/s/<spaceId> link is the same chip,
 //   2. blobs — the org's canonical https blob links rewrite to app://space-blob
 //      (served by main through the content-addressed cache), images render
 //      inline, non-image blob links render as a preview card, and
-//   3. file links — a relative link in a message points at a space file
-//      (resolved from the root; plain markdown on the wire), as does the
-//      contract's canonical …/f/<path> form; both open in the file pane.
+//   3. file links — the contract's canonical …/a/<assetId> form names a file
+//      by id (any space; this one opens in the file pane, another one
+//      navigates there, one the reader is not in renders muted), and a
+//      relative link in a message resolves through the space's listing
+//      (path → id, from the root; plain markdown on the wire).
 // Every message-rendering path goes through here — fix it once.
 
-const SpaceRefsContext = createContext<SpaceRefs | null>(null)
-
-/** Mounted once per space pane, beside SpaceMembersProvider. */
-export function SpaceRefsProvider({ refs, children }: { refs: SpaceRefs; children: ReactNode }) {
-    return <SpaceRefsContext.Provider value={refs}>{children}</SpaceRefsContext.Provider>
+/** The space's live listing, indexed both ways: relative links resolve path → id; links by id show their path. */
+export interface SpaceAssetsIndex {
+    byPath: ReadonlyMap<string, spaces.SpacesAssetEntry>
+    byId: ReadonlyMap<string, spaces.SpacesAssetEntry>
 }
 
-export function useSpaceRefs(): SpaceRefs | null {
-    return useContext(SpaceRefsContext)
+const EMPTY_ASSETS: SpaceAssetsIndex = { byPath: new Map(), byId: new Map() }
+const SpaceAssetsContext = createContext<SpaceAssetsIndex>(EMPTY_ASSETS)
+
+/** Mounted beside SpaceRefsProvider with the pane's listing — so anchors resolve synchronously, at render time. */
+export function SpaceAssetsProvider({ entries, children }: { entries: readonly spaces.SpacesAssetEntry[]; children: ReactNode }) {
+    // The pane refetches the listing on every live event, usually landing an
+    // equal array; every message body memoizes on this index, so it must only
+    // change when an id, path, or trash state actually did.
+    const signature = entries.map((e) => `${e.id}\u0000${e.path}\u0000${e.state ?? ''}`).join('\n')
+    const latest = useRef(entries)
+    latest.current = entries
+    const index = useMemo<SpaceAssetsIndex>(() => {
+        const live = latest.current.filter((e) => e.state !== 'deleted')
+        return { byPath: new Map(live.map((e) => [e.path, e])), byId: new Map(live.map((e) => [e.id, e])) }
+    }, [signature])
+    return <SpaceAssetsContext.Provider value={index}>{children}</SpaceAssetsContext.Provider>
+}
+
+export function useSpaceAssets(): SpaceAssetsIndex {
+    return useContext(SpaceAssetsContext)
 }
 
 const AttachmentNavContext = createContext<((src: string, name: string) => void) | null>(null)
 
-const SpaceNavContext = createContext<((path: string) => void) | null>(null)
 
-/** Mounted beside SpaceRefsProvider — lets any rendered file link open the file pane. */
-export function SpaceNavProvider({ onOpenFile, onOpenAttachment, children }: { onOpenFile: (path: string) => void; onOpenAttachment?: (src: string, name: string) => void; children: ReactNode }) {
-    return <SpaceNavContext.Provider value={onOpenFile}><AttachmentNavContext.Provider value={onOpenAttachment ?? null}>{children}</AttachmentNavContext.Provider></SpaceNavContext.Provider>
+/** Mounted beside SpaceRefsProvider — lets every org link in rendered markdown open what it names: a file, a space, a message, a person's DM. */
+export function SpaceNavProvider({ onOpenFile, onOpenSpaceFile, onOpenSpace, onOpenMessage, onOpenDirect, resolveOrg, resolveSpace, onOpenAttachment, children }: SpaceNav & { onOpenAttachment?: (src: string, name: string) => void; children: ReactNode }) {
+    const nav = useMemo<SpaceNav>(
+        () => ({
+            onOpenFile,
+            ...(onOpenSpaceFile ? { onOpenSpaceFile } : {}),
+            ...(onOpenSpace ? { onOpenSpace } : {}),
+            ...(onOpenMessage ? { onOpenMessage } : {}),
+            ...(onOpenDirect ? { onOpenDirect } : {}),
+            ...(resolveOrg ? { resolveOrg } : {}),
+            ...(resolveSpace ? { resolveSpace } : {}),
+        }),
+        [onOpenFile, onOpenSpaceFile, onOpenSpace, onOpenMessage, onOpenDirect, resolveOrg, resolveSpace],
+    )
+    return <SpaceNavContext.Provider value={nav}><AttachmentNavContext.Provider value={onOpenAttachment ?? null}>{children}</AttachmentNavContext.Provider></SpaceNavContext.Provider>
 }
 
 /** Attachments preview on tap; saving to space files keeps the original link intact. */
@@ -220,7 +262,7 @@ function tileStyle(dims: { width: number; height: number } | null): CSSPropertie
  * already in the org's blob store; saving is one proposeChange referencing
  * the hash. Duplicate names use the same explicit choices as direct uploads.
  */
-function SaveToSpaceDialog({ src, suggestedName, onSaved, onClose }: { src: string; suggestedName?: string; onSaved?: (path: string) => void; onClose: () => void }) {
+function SaveToSpaceDialog({ src, suggestedName, onSaved, onClose }: { src: string; suggestedName?: string; onSaved?: (saved: SavedSpaceFile) => void; onClose: () => void }) {
     const parsed = parseBlobAppUrl(src)
     const suggested = (() => {
         try {
@@ -241,10 +283,10 @@ function SaveToSpaceDialog({ src, suggestedName, onSaved, onClose }: { src: stri
         setSaving(true)
         setError(null)
         try {
-            const savedPath = await fileSave.save({ path: cleaned, getBlob: async () => parsed.hash, reason: 'saved from chat' })
-            if (!savedPath) { onClose(); return }
+            const saved = await fileSave.save({ path: cleaned, getBlob: async () => parsed.hash, reason: 'saved from chat' })
+            if (!saved) { onClose(); return }
             toast('Saved to space files', 'success')
-            onSaved?.(savedPath)
+            onSaved?.(saved)
             onClose()
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Could not save to space files')
@@ -549,6 +591,9 @@ const spaceComponents: StreamdownComponents = {
     a: SpaceAnchor,
 }
 
+/** The blue chip — a person who is not you, or a space; one class so the two read as the same kind of thing. */
+const CHIP_CLASS = 'rounded-[4px] px-[3px] py-px font-medium bg-[var(--stream-mention-wash)] text-[var(--stream-link)]'
+
 /**
  * A mention chip, keyed on the ID the token carries — the name is the roster's
  * current one, never the label (two members with the same name can no longer
@@ -560,12 +605,7 @@ function MentionChip({ memberId, broadcast, fallback }: { memberId?: string; bro
     const { selfId } = useSpaceProfiles()
     const label = broadcast ? `@${broadcast}` : `@${(memberId !== undefined ? names.get(memberId) : undefined) ?? fallback.replace(/^@/, '')}`
     const addressesMe = broadcast === 'here' || (!!selfId && memberId === selfId)
-    const chip = cn(
-        'rounded-[4px] px-[3px] py-px font-medium',
-        addressesMe
-            ? 'bg-[var(--stream-you-wash)] text-[var(--stream-you-ink)]'
-            : 'bg-[var(--stream-mention-wash)] text-[var(--stream-link)]',
-    )
+    const chip = addressesMe ? 'rounded-[4px] px-[3px] py-px font-medium bg-[var(--stream-you-wash)] text-[var(--stream-you-ink)]' : CHIP_CLASS
     // @here and @rowboat address the room and your agent — no profile to open.
     if (broadcast || memberId === undefined || !names.has(memberId)) {
         return <strong className={chip}>{label}</strong>
@@ -579,37 +619,173 @@ function MentionChip({ memberId, broadcast, fallback }: { memberId?: string; bro
     )
 }
 
+/**
+ * A space reference as a `#Name` chip, keyed on the space's ID: the name is
+ * the reader's own listing's (a shared space by name, a DM by the other
+ * person's), never the token's label. Clicking opens the space. A space the
+ * reader is not in — not in their listing — is not theirs to open: the label
+ * renders muted, the way a file link into such a space does. `orgAddress`
+ * comes with a canonical https link; a token is read on the pane's own org.
+ */
+function SpaceChip({ spaceId, orgAddress, fallback }: { spaceId: string; orgAddress?: string; fallback: string }) {
+    const refs = useContext(SpaceRefsContext)
+    const nav = useContext(SpaceNavContext)
+    const { orgs } = useSpacesOrgs()
+    const org = orgAddress !== undefined ? orgs.find((o) => o.address === orgAddress) : orgs.find((o) => o.id === refs?.orgId)
+    const space = org ? findSpace(org, spaceId) : undefined
+    if (!org || !space) {
+        // A bare canonical URL is its own label; anything else reads as a #name.
+        const muted = /^https:\/\//.test(fallback) ? fallback : `#${fallback.replace(/^#/, '')}`
+        return <span title="Not available to you" className="text-muted-foreground">{muted}</span>
+    }
+    const label = `#${org.directLabels[space.id] ?? space.name}`
+    if (!nav?.onOpenSpace) return <strong className={CHIP_CLASS}>{label}</strong>
+    return (
+        <button type="button" onClick={() => nav.onOpenSpace?.(org.id, space.id)} title="Open space" className={cn(CHIP_CLASS, 'cursor-pointer hover:brightness-95 dark:hover:brightness-110')}>
+            {label}
+        </button>
+    )
+}
+
+/**
+ * The contract's link to a person (https://<org>/u/<memberId>): an @Name
+ * chip that opens the DM with them. Distinct from a mention token — a link
+ * never addresses anyone — but drawn the same way, so a person reads the
+ * same everywhere. The name comes from the roster; the label is a hint.
+ */
+function PersonLinkChip({ orgAddress, memberId, fallback }: { orgAddress: string; memberId: string; fallback: string }) {
+    const refs = useContext(SpaceRefsContext)
+    const nav = useContext(SpaceNavContext)
+    const names = useMemberNames()
+    // A bare pasted URL is its own label — never a name; the id stands in.
+    const hint = /^https:\/\//.test(fallback) ? memberId : fallback.replace(/^@/, '')
+    const orgId = orgAddress === refs?.orgAddress ? refs.orgId : (nav?.resolveOrg?.(orgAddress) ?? null)
+    if (!orgId) return <span title="Not available to you" className="text-muted-foreground">{`@${hint}`}</span>
+    const name = `@${names.get(memberId) ?? hint}`
+    if (!nav?.onOpenDirect) return <strong className={CHIP_CLASS}>{name}</strong>
+    return (
+        <button type="button" onClick={() => nav.onOpenDirect?.(orgId, memberId)} title="Message them" className={cn(CHIP_CLASS, 'cursor-pointer hover:brightness-95 dark:hover:brightness-110')}>
+            {name}
+        </button>
+    )
+}
+
+/** The contract's link to a message ("Copy link"): a chip that jumps to it, in this space or another the reader is in. */
+function MessageLinkChip({ orgAddress, spaceId, messageId, children }: { orgAddress: string; spaceId: string; messageId: string; children?: ReactNode }) {
+    const refs = useContext(SpaceRefsContext)
+    const nav = useContext(SpaceNavContext)
+    const orgId = orgAddress === refs?.orgAddress && spaceId === refs.spaceId ? refs.orgId : (nav?.resolveSpace?.(orgAddress, spaceId) ?? null)
+    const label = plainLabel(children)
+    const text = label && !/^https:\/\//.test(label) ? label : 'message'
+    if (!orgId || !nav?.onOpenMessage) {
+        return (
+            <span title="Not available to you" className="inline-flex max-w-full items-baseline gap-1 align-baseline text-muted-foreground underline decoration-dotted underline-offset-2">
+                <MessageSquare className="size-3 shrink-0 self-center" />
+                <span className="truncate">{text}</span>
+            </span>
+        )
+    }
+    return (
+        <button
+            type="button"
+            onClick={() => nav.onOpenMessage?.(orgId, spaceId, messageId)}
+            title="Go to message"
+            className="inline-flex max-w-full items-baseline gap-1 align-baseline text-primary underline underline-offset-2 hover:opacity-80"
+        >
+            <MessageSquare className="size-3 shrink-0 self-center" />
+            <span className="truncate">{text}</span>
+        </button>
+    )
+}
+
+/** A link into a space file: open (by id) here or in another space, or muted when it leads nowhere the reader can go. */
+type FileLinkTarget =
+    | { kind: 'open'; assetId: string; title: string }
+    | { kind: 'elsewhere'; orgId: string; spaceId: string; assetId: string }
+    | { kind: 'muted'; title: string }
+
+/**
+ * What a file-shaped href leads to. Canonical https asset links name an id in
+ * any space; app://space-file is the render form of a resolved relative link;
+ * app://space-path a relative link the listing did not know at rewrite time
+ * (tried once more here — the listing may have landed since); a bare relative
+ * href (a renderer without the rewrite pass) resolves the same way.
+ */
+function fileLinkTarget(url: string, refs: SpaceRefs | null, assets: SpaceAssetsIndex, nav: SpaceNav | null): FileLinkTarget | null {
+    const byId = (assetId: string): FileLinkTarget => ({ kind: 'open', assetId, title: assets.byId.get(assetId)?.path ?? assetId })
+    const byPath = (path: string): FileLinkTarget => {
+        const entry = assets.byPath.get(path)
+        return entry ? byId(entry.id) : { kind: 'muted', title: `No file at ${path}` }
+    }
+    const wire = parseAssetWireUrl(url)
+    if (wire) {
+        if (refs && wire.orgAddress === refs.orgAddress && wire.spaceId === refs.spaceId) return byId(wire.assetId)
+        const orgId = nav?.resolveSpace?.(wire.orgAddress, wire.spaceId) ?? null
+        return orgId ? { kind: 'elsewhere', orgId, spaceId: wire.spaceId, assetId: wire.assetId } : { kind: 'muted', title: 'Not available to you' }
+    }
+    const app = parseSpaceFileAppUrl(url)
+    if (app) return byId(app.assetId)
+    const dangling = parseSpacePathAppUrl(url)
+    if (dangling) return byPath(dangling.path)
+    const relative = resolveSpaceLink(url, '')
+    return relative ? byPath(relative) : null
+}
+
 function SpaceAnchor({ href, children }: ComponentProps<'a'>) {
     const refs = useContext(SpaceRefsContext)
-    const openFile = useContext(SpaceNavContext)
+    const nav = useContext(SpaceNavContext)
+    const assets = useContext(SpaceAssetsContext)
     const url = typeof href === 'string' ? href : ''
     // Mention tokens arrive here as app links (rewriteMentionLinks) — chips, by id.
     const mentionId = parseSpaceMemberAppUrl(url)
     if (mentionId !== null) return <MentionChip memberId={mentionId} fallback={plainLabel(children) ?? mentionId} />
     if (url === HERE_APP_URL) return <MentionChip broadcast="here" fallback="@here" />
     if (url === ROWBOAT_APP_URL) return <MentionChip broadcast="rowboat" fallback="@rowboat" />
+    const spaceRefId = parseSpaceRefAppUrl(url)
+    if (spaceRefId !== null) return <SpaceChip spaceId={spaceRefId} fallback={plainLabel(children) ?? spaceRefId} />
+    const person = parseMemberWireUrl(url)
+    if (person) return <PersonLinkChip orgAddress={person.orgAddress} memberId={person.memberId} fallback={plainLabel(children) ?? person.memberId} />
+    const messageLink = parseMessageWireUrl(url)
+    if (messageLink) return <MessageLinkChip {...messageLink}>{children}</MessageLinkChip>
+    const spaceWire = parseSpaceWireUrl(url)
+    if (spaceWire) return <SpaceChip spaceId={spaceWire.spaceId} orgAddress={spaceWire.orgAddress} fallback={plainLabel(children) ?? spaceWire.spaceId} />
+    // An invite link pasted into a message joins from right here — no browser
+    // round trip through the org's landing page.
+    if (isInviteUrl(url)) {
+        return (
+            <button type="button" onClick={() => openServerDialog({ kind: 'join', inviteUrl: url })} title="Join with this invite" className="inline-flex max-w-full items-baseline gap-1 align-baseline text-primary underline underline-offset-2 hover:opacity-80">
+                <span className="truncate">{children}</span>
+            </button>
+        )
+    }
     if (url.startsWith('app://space-blob/')) {
         return <BlobLinkCard href={url}>{children}</BlobLinkCard>
     }
-    // A relative link in a message is a file link (resolved from the space
-    // root — rewritten pre-parse to app://space-file so Streamdown's URL
-    // hardening doesn't strip it); the contract's canonical asset URL for
-    // this space opens the same way.
-    const filePath = parseSpaceFileAppUrl(url)?.path
-        ?? resolveSpaceLink(url, '')
-        ?? (refs ? parseAssetWireUrl(url, refs) : null)
+    const target = fileLinkTarget(url, refs, assets, nav)
     // A pasted GIF/image address shows the picture, not the URL — but only
     // when the link IS its own text; a labelled [link](url) stays a link.
     // No <a> wrapper: the failure fallback is itself the link.
-    if (!filePath && plainLabel(children) === url && isDirectImageUrl(url)) {
+    if (!target && plainLabel(children) === url && isDirectImageUrl(url)) {
         return <ExternalImage src={url} alt="" />
     }
-    if (filePath && openFile) {
+    if (target?.kind === 'muted' || (target && target.kind === 'elsewhere' && !nav?.onOpenSpaceFile) || (target?.kind === 'open' && !nav)) {
+        const title = target.kind === 'muted' ? target.title : 'Not available here'
+        return (
+            <span title={title} className="inline-flex max-w-full items-baseline gap-1 align-baseline text-muted-foreground underline decoration-dotted underline-offset-2">
+                <FileText className="size-3 shrink-0 self-center" />
+                <span className="truncate">{children}</span>
+            </span>
+        )
+    }
+    if (target && nav) {
+        const open = target.kind === 'open'
+            ? () => nav.onOpenFile(target.assetId)
+            : () => nav.onOpenSpaceFile?.(target.orgId, target.spaceId, target.assetId)
         return (
             <button
                 type="button"
-                onClick={() => openFile(filePath)}
-                title={filePath}
+                onClick={open}
+                title={target.kind === 'open' ? target.title : 'Open in its space'}
                 className="inline-flex max-w-full items-baseline gap-1 align-baseline text-primary underline underline-offset-2 hover:opacity-80"
             >
                 <FileText className="size-3 shrink-0 self-center" />
@@ -625,14 +801,17 @@ function SpaceAnchor({ href, children }: ComponentProps<'a'>) {
 // markdown stands (the chips read the members context themselves).
 export const SpaceMarkdown = memo(function SpaceMarkdown({ body, className }: { body: string; className?: string }) {
     const refs = useContext(SpaceRefsContext)
+    const assets = useContext(SpaceAssetsContext)
     const text = useMemo(() => {
         const withBlobs = refs ? rewriteBlobLinks(body, refs) : body
-        const withFiles = refs ? rewriteFileLinks(withBlobs, refs) : withBlobs
+        // Relative links resolve through the listing (path → id) here, at
+        // render time; the listing changes rarely, so re-rendering on it is cheap.
+        const withFiles = refs ? rewriteFileLinks(withBlobs, refs, (path) => assets.byPath.get(path)?.id ?? null) : withBlobs
         // Pre-separator messages joined text and images in one paragraph —
         // normalize so every message gets text above, a clean tile row below.
         // Mentions last: their app links must never look like file links.
         return rewriteMentionLinks(separateImageParagraphs(withFiles))
-    }, [body, refs])
+    }, [body, refs, assets])
     return (
         <div className={cn(className)}>
             <MessageImageGallery key={text}>
@@ -648,7 +827,7 @@ export const SpaceMarkdown = memo(function SpaceMarkdown({ body, className }: { 
 
 
 /** Attachment content occupies the same document column as saved space files. */
-export function AttachmentColumn({ src, onDismiss, onSaved }: { src: string; onDismiss: () => void; onSaved: (path: string) => void }) {
+export function AttachmentColumn({ src, onDismiss, onSaved }: { src: string; onDismiss: () => void; onSaved: (saved: SavedSpaceFile) => void }) {
     const name = new URL(src).searchParams.get('name') || 'Attachment'
     const [saveOpen, setSaveOpen] = useState(false)
     const [downloading, setDownloading] = useState(false)

@@ -14,10 +14,13 @@ const org = { id: 'org', address: 'spaces.example.com' } as OrgWithSpaces
 const space = { id: '01ARZ3NDEKTSV4RRFFQ69G5FAV', name: 'Team' } as spaces.Space
 const hash = 'a'.repeat(64)
 
+const ASSET_ID = '01HXAMPLEASSET0000000000A1'
+
 function changeSet(over: Partial<spaces.ChangeSet> & { resultVersion: number }): spaces.ChangeSet {
     return {
         id: `cs-${over.resultVersion}-${over.op ?? 'edit'}`,
         spaceId: space.id,
+        assetId: ASSET_ID,
         assetPath: 'notes.md',
         baseVersion: over.resultVersion - 1,
         attribution: { memberId: 'm1', actingMode: 'direct' },
@@ -45,13 +48,21 @@ beforeEach(() => {
     responses = []
     invoke.mockReset().mockImplementation(async (channel: string, args: Record<string, unknown>) => {
         if (channel === 'spaces:readAsset') {
+            // Reads are by id; the record carries the display path.
+            if (args.assetId !== ASSET_ID) throw new Error('no such asset')
             const version = (args.version as number | undefined) ?? head
             const data = versions[version]
             if (!data) throw new Error(`no version ${version}`)
-            return { path: args.path, content: data.content, ...(data.blob ? { blob: data.blob } : {}), version, recentHistory: history }
+            return { id: ASSET_ID, path: 'notes.md', content: data.content, ...(data.blob ? { blob: data.blob } : {}), version, recentHistory: history }
         }
-        if (channel === 'spaces:assetHistory') return { changeSets: history }
-        if (channel === 'spaces:diff') return { unified: '--- a\n+++ b\n' }
+        if (channel === 'spaces:assetHistory') {
+            if (args.assetId !== ASSET_ID) throw new Error('no such asset')
+            return { changeSets: history }
+        }
+        if (channel === 'spaces:diff') {
+            if (args.assetId !== ASSET_ID) throw new Error('no such asset')
+            return { unified: '--- a\n+++ b\n' }
+        }
         if (channel === 'spaces:proposeChange') {
             proposals.push(args.input as spaces.SpacesProposeInput)
             if (responses.length) {
@@ -86,7 +97,7 @@ describe('restoring from the history panel', () => {
             <FileColumn
                 org={org}
                 space={space}
-                path="notes.md"
+                assetId={ASSET_ID}
                 memberNames={new Map([['m1', 'Ada']])}
                 refreshTick={0}
                 onChanged={vi.fn()}
@@ -103,7 +114,8 @@ describe('restoring from the history panel', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Restore v2' }))
         await waitFor(() => expect(proposals).toHaveLength(1))
         // v2's content, proposed against the head — a new version, not a rewind.
-        expect(proposals[0]).toMatchObject({ assetPath: 'notes.md', baseVersion: 3, newContent: 'second', reason: 'restore to v2' })
+        expect(proposals[0]).toMatchObject({ assetId: ASSET_ID, baseVersion: 3, newContent: 'second', reason: 'restore to v2' })
+        expect(proposals[0]).not.toHaveProperty('assetPath')
         await waitFor(() => expect(toasts.at(-1)).toEqual({ message: 'Restored v2 - now v4', kind: 'success' }))
     })
 
@@ -121,7 +133,7 @@ describe('restoring from the history panel', () => {
 
     it('offers the same restore from the diff it was inspected in', async () => {
         render(
-            <FileColumn org={org} space={space} path="notes.md" memberNames={new Map()} refreshTick={0} onChanged={vi.fn()} />,
+            <FileColumn org={org} space={space} assetId={ASSET_ID} memberNames={new Map()} refreshTick={0} onChanged={vi.fn()} />,
         )
         fireEvent.click(await screen.findByRole('button', { name: /History/ }))
         // The row body opens the diff; the diff offers the same going-back action.
@@ -135,7 +147,7 @@ describe('restoring from the history panel', () => {
     it('keeps an op change-set out of the diff’s restore action too', async () => {
         history = [changeSet({ resultVersion: 3 }), changeSet({ resultVersion: 2, baseVersion: 2, op: 'move', movedFrom: 'old.md' }), changeSet({ resultVersion: 1, baseVersion: 0 })]
         render(
-            <FileColumn org={org} space={space} path="notes.md" memberNames={new Map()} refreshTick={0} onChanged={vi.fn()} />,
+            <FileColumn org={org} space={space} assetId={ASSET_ID} memberNames={new Map()} refreshTick={0} onChanged={vi.fn()} />,
         )
         fireEvent.click(await screen.findByRole('button', { name: /History/ }))
         fireEvent.click(await screen.findByText('moved from old.md'))
@@ -152,6 +164,7 @@ describe('RestoreVersionDialog', () => {
             <RestoreVersionDialog
                 orgId={org.id}
                 spaceId={space.id}
+                assetId={ASSET_ID}
                 path={path}
                 version={version}
                 currentVersion={currentVersion}
@@ -167,7 +180,7 @@ describe('RestoreVersionDialog', () => {
         const { confirm } = open()
         confirm()
         await waitFor(() => expect(proposals).toHaveLength(1))
-        expect(proposals[0]).toMatchObject({ assetPath: 'notes.md', baseVersion: 3, blob: hash })
+        expect(proposals[0]).toMatchObject({ assetId: ASSET_ID, baseVersion: 3, blob: hash })
         expect(proposals[0].newContent).toBeUndefined()
     })
 

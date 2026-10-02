@@ -8,10 +8,8 @@ import {
   ArrowUpRight,
   Bot,
   ChevronRight,
-  Code2,
   FileText,
   Folder,
-  Globe,
   AlertTriangle,
   LayoutGrid,
   ListTodo,
@@ -84,6 +82,9 @@ import { isOutOfCredits, CREDIT_EXHAUSTED_EVENT, CREDIT_REPLENISHED_EVENT } from
 import { SettingsDialog } from "@/components/settings-dialog"
 import { SidebarCreditRewards } from "@/components/sidebar-credit-rewards"
 import { SpacesSidebarSection } from "@/components/spaces-sidebar-section"
+import { useCodeSessions } from "@/components/code/use-code-sessions"
+import { useUnreadCodeSessions } from "@/components/code/session-read-state"
+import { UnreadBadge } from "@/components/spaces/unread-badge"
 import { SPACES_ENABLED } from "@/lib/feature-flags"
 import type { SpaceSelection } from "@/components/spaces-view"
 import { MascotFaceIcon } from "@/components/talking-head"
@@ -203,6 +204,7 @@ type SidebarContentPanelProps = {
   activeSpace?: SpaceSelection
   onOpenAgent?: (slug: string) => void
   recentRuns?: { id: string; title?: string; createdAt: string; modifiedAt?: string }[]
+  onOpenAssistant?: () => void
   onOpenRun?: (runId: string) => void
   /** Persist a custom chat title (sessions:setTitle) and refresh the runs list. */
   onRenameRun?: (runId: string, title: string) => void
@@ -212,7 +214,6 @@ type SidebarContentPanelProps = {
   onOpenEmail?: (threadId?: string) => void
   onOpenHome?: () => void
   onNewChat?: () => void
-  onToggleBrowser?: () => void
   onVoiceNoteCreated?: (path: string) => void
   /** Starts the mascot-guided product tour. */
   onStartTour?: () => void
@@ -454,22 +455,20 @@ export function SidebarContentPanel({
   knowledgeActions,
   bgTaskSummaries = [],
   onOpenMeetings,
-  onOpenCode,
   onOpenBgTasks,
   onOpenApps,
   onOpenApp,
-  onOpenSpaces,
   onOpenSpace,
-  activeSpace = null,
+  activeSpace,
   recentRuns = [],
   onOpenRun,
+  onOpenAssistant,
   onRenameRun,
   onDeleteRun,
   onOpenChatHistory,
   onOpenEmail,
   onOpenHome,
   onNewChat,
-  onToggleBrowser,
   onVoiceNoteCreated,
   onStartTour,
   activeNav,
@@ -478,6 +477,10 @@ export function SidebarContentPanel({
   onToggleMeetingRecording,
   ...props
 }: SidebarContentPanelProps) {
+  const { sessions: projectSessions, statusOf: projectSessionStatusOf } = useCodeSessions()
+  const hasWorkingProjectSession = projectSessions.some((session) => projectSessionStatusOf(session.id) === 'working')
+  const unreadProjectSessions = useUnreadCodeSessions()
+  const unreadProjectCount = projectSessions.filter((session) => unreadProjectSessions.has(session.id)).length
   const [hasOauthError, setHasOauthError] = useState(false)
   const [showOauthAlert, setShowOauthAlert] = useState(true)
   const [connectionsSettingsOpen, setConnectionsSettingsOpen] = useState(false)
@@ -498,22 +501,6 @@ export function SidebarContentPanel({
   const [emailThreads, setEmailThreads] = useState<SidebarEmailThread[]>([])
   const [meetings, setMeetings] = useState<UpcomingMeeting[]>([])
   const [chatsExpanded, setChatsExpanded] = useState(true)
-  // The Code section only makes sense with a coding agent available — same
-  // flag the chat composer's code chip uses (auto-on when Claude Code or
-  // Codex is installed + signed in; explicit toggle in settings wins).
-  const [codeModeEnabled, setCodeModeEnabled] = useState(false)
-
-  useEffect(() => {
-    const load = () => {
-      window.ipc.invoke('codeMode:getConfig', null)
-        .then((r) => setCodeModeEnabled(r.enabled))
-        .catch(() => setCodeModeEnabled(false))
-    }
-    load()
-    window.addEventListener('code-mode-config-changed', load)
-    return () => window.removeEventListener('code-mode-config-changed', load)
-  }, [])
-
   useEffect(() => {
     let cancelled = false
     const loadEmail = async () => {
@@ -674,23 +661,6 @@ export function SidebarContentPanel({
     onRenameRun?.(chatId, title)
   }, [renameDraft, recentChats, onRenameRun])
 
-  // Workspace count for the Projects sublabel — top-level dir children of
-  // knowledge/Workspace (matches the Projects rail).
-  const workspaceCount = React.useMemo(() => {
-    const find = (nodes: TreeNode[]): TreeNode | null => {
-      for (const n of nodes) {
-        if (n.path === 'knowledge/Workspace') return n
-        if (n.kind === 'dir' && n.children?.length) {
-          const found = find(n.children)
-          if (found) return found
-        }
-      }
-      return null
-    }
-    const node = find(tree)
-    return node?.children?.filter((c) => c.kind === 'dir').length ?? 0
-  }, [tree])
-
   // "Updated 4m ago" sublabel under Knowledge, based on the most recently
   // modified note. Recomputed in an effect (not during render) and ticked so
   // the relative time stays fresh.
@@ -848,7 +818,7 @@ export function SidebarContentPanel({
         <div className="h-8" />
       </SidebarHeader>
       <SidebarContent className="gap-0">
-        {/* Ordered to mirror the dock: Assistant, Spaces, then the
+        {/* Ordered to mirror the dock: Assistant, Projects, Spaces, then the
             destinations, then Chats. Same glyphs as the dock tiles. */}
         <SidebarGroup className="flex flex-col pb-0">
           <SidebarGroupContent>
@@ -857,7 +827,8 @@ export function SidebarContentPanel({
                 <SidebarMenuButton
                   isActive={activeNav === 'assistant'}
                   onClick={() => {
-                    if (lastChat && onOpenRun) onOpenRun(lastChat.id)
+                    if (onOpenAssistant) onOpenAssistant()
+                    else if (lastChat && onOpenRun) onOpenRun(lastChat.id)
                     else onNewChat?.()
                   }}
                 >
@@ -865,14 +836,29 @@ export function SidebarContentPanel({
                   <span className="flex-1 truncate">Assistant</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  data-tour-id="nav-workspaces"
+                  isActive={activeNav === 'workspaces' || activeNav === 'code'}
+                  onClick={() => knowledgeActions.openWorkspaceAt()}
+                >
+                  <Folder className="size-4 shrink-0" />
+                  <span className="flex-1 truncate">Projects</span>
+                  {hasWorkingProjectSession && (
+                    <span role="status" aria-label="Project session working" className="code-working-dot size-2 shrink-0 rounded-full bg-[var(--rowboat-git)]" />
+                  )}
+                  <UnreadBadge badge={{ unread: unreadProjectCount, forYou: unreadProjectCount }} direct />
+                </SidebarMenuButton>
+              </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {/* Spaces returns to the last active server and space. */}
+        {/* Server shortcuts under the Spaces heading. */}
         {SPACES_ENABLED && (
           <>
-            <SpacesSidebarSection active={activeNav === 'spaces'} activeSpace={activeSpace} onOpenSpaces={() => onOpenSpaces?.()} onOpenSpace={(orgId, spaceId) => onOpenSpace?.(orgId, spaceId)} />
+            <SpacesSidebarSection active={activeNav === 'spaces'} activeSpace={activeSpace}
+              onOpenSpace={(orgId, spaceId) => onOpenSpace?.(orgId, spaceId)} />
             <div className="mx-3 my-2 border-t border-border" />
           </>
         )}
@@ -983,14 +969,6 @@ export function SidebarContentPanel({
                   </div>
                 ) : null}
               </SidebarMenuItem>
-              {codeModeEnabled && (
-                <SidebarMenuItem>
-                  <SidebarMenuButton data-tour-id="nav-code" isActive={activeNav === 'code'} onClick={onOpenCode}>
-                    <Code2 className="size-4 shrink-0" />
-                    <span className="flex-1 truncate">Code</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              )}
               <SidebarMenuItem>
                 <SidebarMenuButton
                   data-tour-id="nav-knowledge"
@@ -1020,22 +998,6 @@ export function SidebarContentPanel({
             <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton
-                  data-tour-id="nav-workspaces"
-                  isActive={activeNav === 'workspaces'}
-                  onClick={() => knowledgeActions.openWorkspaceAt()}
-                  className="h-auto items-start py-1"
-                >
-                  <Folder className="mt-0.5 size-4 shrink-0" />
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate">Projects</span>
-                    <span className="truncate text-[11px] text-muted-foreground">
-                      {workspaceCount === 0 ? 'No projects' : `${workspaceCount} project${workspaceCount === 1 ? '' : 's'}`}
-                    </span>
-                  </div>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
                   data-tour-id="nav-agents"
                   isActive={activeNav === 'agents'}
                   onClick={onOpenBgTasks}
@@ -1055,14 +1017,6 @@ export function SidebarContentPanel({
                   </div>
                 </SidebarMenuButton>
               </SidebarMenuItem>
-              {onToggleBrowser && (
-                <SidebarMenuItem>
-                  <SidebarMenuButton onClick={onToggleBrowser}>
-                    <Globe className="size-4 shrink-0" />
-                    <span className="flex-1 truncate">Browser</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              )}
               <SidebarMenuItem>
                 <SidebarMenuButton
                   data-tour-id="nav-apps"

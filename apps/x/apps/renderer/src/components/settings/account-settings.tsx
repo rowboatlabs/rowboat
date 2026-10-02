@@ -57,6 +57,10 @@ export function AccountSettings({ dialogOpen }: AccountSettingsProps) {
   const [connectionLoading, setConnectionLoading] = useState(true)
   const [disconnecting, setDisconnecting] = useState(false)
   const [connecting, setConnecting] = useState(false)
+  // A Rowboat session that exists only for Spaces (one session, two uses):
+  // the app reads as logged out, and logging in here is a flag flip — no
+  // browser trip — so the copy says so.
+  const [spacesOnlySession, setSpacesOnlySession] = useState(false)
   const appUrl = useRowboatConfig()?.appUrl ?? null
   const { billing, isLoading: billingLoading, refresh: refreshBilling } = useBilling(isRowboatConnected)
   const currentPlan = billing ? getBillingPlanData(billing.catalog, billing.subscriptionPlanId) : null
@@ -68,6 +72,8 @@ export function AccountSettings({ dialogOpen }: AccountSettingsProps) {
       const result = await window.ipc.invoke('oauth:getState', null)
       const connected = result.config?.rowboat?.connected ?? false
       setIsRowboatConnected(connected)
+      const account = await window.ipc.invoke('spaces:accountState', null).catch(() => null)
+      setSpacesOnlySession(!!account && account.hasSession && !account.appSignedIn)
     } catch {
       setIsRowboatConnected(false)
     } finally {
@@ -149,7 +155,11 @@ export function AccountSettings({ dialogOpen }: AccountSettingsProps) {
         </div>
         <div className="text-center space-y-1">
           <p className="text-sm font-medium">Not logged in</p>
-          <p className="text-xs text-muted-foreground">Log in to your Rowboat account to access premium features</p>
+          <p className="text-xs text-muted-foreground">
+            {spacesOnlySession
+              ? 'Your Rowboat account is connected for Spaces. Log in to use it for premium features too.'
+              : 'Log in to your Rowboat account to access premium features'}
+          </p>
         </div>
         <Button onClick={handleConnect} disabled={connecting}>
           {connecting ? <Loader2 className="size-4 animate-spin mr-2" /> : null}

@@ -5,6 +5,12 @@
 #   HARBOR_MODE=deployment  DATABASE_URL  APEX_DOMAIN  AUTH_ISSUER
 #   AUTH_PUBLISHABLE_KEY (consent page)  PORT (set by the platform)
 #   DATABASE_POOL_MAX (optional; pg pool ceiling, default 10)
+#   HARBOR_INTERNAL_KEY (optional; bearer for GET /internal/stats — this
+#     instance's live counters; the once-a-minute log line prints regardless)
+#   HARBOR_INTEGRATION_KEY (optional; 64 hex characters, `openssl rand -hex 32`,
+#     sealing platform agents' keys such as Replicas's — without it, such
+#     agents can't be added. Rotate with HARBOR_INTEGRATION_KEY_ID and
+#     HARBOR_INTEGRATION_PREVIOUS_KEYS, a JSON map of old ids to old keys)
 
 FROM node:22-slim AS build
 RUN corepack enable

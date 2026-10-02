@@ -1,20 +1,16 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { mcpTools, type Member, type Message, type Space } from '@rowboat/spaces-protocol';
-import { PgStore } from '../src/pg-store.js';
-import { startHarbor, type HarborOptions, type RunningHarbor } from '../src/server.js';
-import type { SqlDb } from '../src/sql.js';
-import { agentClient, restClient } from './helpers.js';
-import { pgliteDb } from './pglite.js';
+import type { RunningHarbor } from '../src/server.js';
+import { agentClient, restClient, startTestHarbor } from './helpers.js';
 
 // Agent-face parity (2026-09-09): every member operation the render face has
 // is projected as an MCP tool, and an agent's act IS the member's act,
-// attributed by mode. Through a real MCP client, on both stores. Every
+// attributed by mode. Through a real MCP client. Every
 // structured output is checked against the tool's own output schema so the
 // projection cannot drift from the protocol contract.
 
 let harbor: RunningHarbor;
-let sqlDb: SqlDb | undefined;
 let spaceId: string;
 let dmWithGagan: string;
 let ramnique: ReturnType<typeof restClient>;
@@ -40,8 +36,8 @@ async function refused(client: Client, name: string, args: Record<string, unknow
   return JSON.parse((result.content as Array<{ text: string }>)[0]!.text) as { code: string; message: string };
 }
 
-async function startForStore(kind: 'memory' | 'postgres'): Promise<void> {
-  const options: HarborOptions = {
+async function start(): Promise<void> {
+  harbor = await startTestHarbor({
     orgName: 'Rowboat Labs',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
@@ -49,14 +45,7 @@ async function startForStore(kind: 'memory' | 'postgres'): Promise<void> {
       { id: 'gagan', displayName: 'Gagan' },
       { id: 'loner', displayName: 'Loner' }, // shares no space with anyone
     ],
-  };
-  if (kind === 'postgres') {
-    sqlDb = await pgliteDb();
-    const store = new PgStore(sqlDb);
-    await store.init();
-    options.store = store;
-  }
-  harbor = await startHarbor(options);
+  });
   ramnique = restClient(harbor, 'dev-ramnique');
   gagan = restClient(harbor, 'dev-gagan');
   const harsh = restClient(harbor, 'dev-harsh');
@@ -70,40 +59,39 @@ async function startForStore(kind: 'memory' | 'postgres'): Promise<void> {
   harshAgent = await agentClient(harbor, 'dev-harsh', { agentName: 'Claude' });
 }
 
-describe.each([['memory'], ['postgres']] as const)('agent face parity (%s store)', (storeKind) => {
+describe('agent face parity', () => {
   beforeAll(async () => {
-    await startForStore(storeKind);
+    await start();
   });
 
   afterAll(async () => {
     await ramAgent.close();
     await harshAgent.close();
     await harbor.close();
-    await sqlDb?.close();
-    sqlDb = undefined;
   });
 
-  it("whoami is the token's member — the same row /v1/me serves", async () => {
-    const { member } = await call<{ member: Member }>(ramAgent, 'whoami');
+  it("whoami is the token's member — the same row /v1/me serves — plus the org's name and address", async () => {
+    const { member, org } = await call<{ member: Member; org: { name: string; address: string } }>(ramAgent, 'whoami');
     expect(member).toMatchObject({ id: 'ramnique', displayName: 'Ramnique', role: 'member' });
     expect(member).toEqual((await ramnique.get('/v1/me')).body.member);
+    expect(org).toEqual({ name: harbor.service.org.name, address: harbor.service.org.address });
     const other = await call<{ member: Member }>(harshAgent, 'whoami');
     expect(other.member.id).toBe('harsh');
   });
 
-  it('list_members without spaceId is the union of shared rosters, DMs included, and nothing more', async () => {
+  it('list_members without spaceId is the whole org roster, the same for everyone (2026-09-29)', async () => {
+    const everyone = ['gagan', 'harsh', 'loner', 'ramnique'];
     const mine = await call<{ members: Member[] }>(ramAgent, 'list_members');
-    // Sorted by display name, case-insensitively; the caller is present.
-    expect(mine.members.map((m) => m.id)).toEqual(['gagan', 'harsh', 'ramnique']);
-    expect(mine.members.map((m) => m.id)).not.toContain('loner');
-    // Discovery is bounded by shared membership: harsh shares no space with gagan.
+    // Sorted by display name, case-insensitively.
+    expect(mine.members.map((m) => m.id)).toEqual(everyone);
+    // harsh shares no space with gagan, and still finds him.
     const harshs = await call<{ members: Member[] }>(harshAgent, 'list_members');
-    expect(harshs.members.map((m) => m.id)).toEqual(['harsh', 'ramnique']);
-    // A member of nothing still sees themself.
+    expect(harshs.members.map((m) => m.id)).toEqual(everyone);
+    // A member of nothing finds everyone too.
     const lonerAgent = await agentClient(harbor, 'dev-loner');
     try {
       const alone = await call<{ members: Member[] }>(lonerAgent, 'list_members');
-      expect(alone.members.map((m) => m.id)).toEqual(['loner']);
+      expect(alone.members.map((m) => m.id)).toEqual(everyone);
     } finally {
       await lonerAgent.close();
     }
@@ -153,12 +141,12 @@ describe.each([['memory'], ['postgres']] as const)('agent face parity (%s store)
 
     const renamed = await call<{ space: Space }>(harshAgent, 'rename_space', { spaceId: id, name: 'Agent-made (v2)' });
     expect(renamed.space).toMatchObject({ id, name: 'Agent-made (v2)' });
-    const events = await harbor.service.eventsAfter(id, 0);
+    const events = await harbor.store.listEventsAfter(id, 0);
     const rename = events.find((e) => e.event.type === 'space_renamed')!;
     expect((rename.event as any).by).toEqual({ memberId: 'harsh', actingMode: 'agent', agentName: 'Claude' });
     // Identical name: no-op, no second event.
     await call<{ space: Space }>(harshAgent, 'rename_space', { spaceId: id, name: 'Agent-made (v2)' });
-    expect((await harbor.service.eventsAfter(id, 0)).filter((e) => e.event.type === 'space_renamed')).toHaveLength(1);
+    expect((await harbor.store.listEventsAfter(id, 0)).filter((e) => e.event.type === 'space_renamed')).toHaveLength(1);
 
     // Non-members cannot rename.
     expect((await refused(ramAgent, 'rename_space', { spaceId: id, name: 'Nope' })).code).toBe('forbidden');
@@ -201,7 +189,7 @@ describe.each([['memory'], ['postgres']] as const)('agent face parity (%s store)
     const edited = await call<{ message: Message }>(ramAgent, 'edit_message', { spaceId, messageId, body: 'the quicker fix' });
     expect(edited.message).toMatchObject({ id: messageId, body: 'the quicker fix' });
     expect(edited.message.editedAt).toBeTruthy();
-    const events = await harbor.service.eventsAfter(spaceId, 0);
+    const events = await harbor.store.listEventsAfter(spaceId, 0);
     const edit = events.find((e) => e.event.type === 'message_edited')!;
     expect((edit.event as any).edit.by).toEqual({ memberId: 'ramnique', actingMode: 'agent', agentName: 'Rowboat' });
 
@@ -218,13 +206,13 @@ describe.each([['memory'], ['postgres']] as const)('agent face parity (%s store)
     const posted = await call<{ messageId: string }>(harshAgent, 'post_message', { spaceId, body: 'shipped SSO' });
     const messageId = posted.messageId;
     const added = await call<{ message: Message }>(ramAgent, 'react', { spaceId, messageId, emoji: '🎉', action: 'add' });
-    expect(added.message.reactions).toEqual([{ emoji: '🎉', memberIds: ['ramnique'] }]);
-    const events = await harbor.service.eventsAfter(spaceId, 0);
+    expect(added.message.reactions).toEqual([{ emoji: '🎉', memberIds: ['ramnique'], lastOffset: expect.any(Number) }]);
+    const events = await harbor.store.listEventsAfter(spaceId, 0);
     const reaction = events.filter((e) => e.event.type === 'reaction').at(-1)!;
     expect((reaction.event as any).reaction.by).toEqual({ memberId: 'ramnique', actingMode: 'agent', agentName: 'Rowboat' });
     // Re-adding is a no-op; the render face sees the same fold.
     await call<{ message: Message }>(ramAgent, 'react', { spaceId, messageId, emoji: '🎉', action: 'add' });
-    expect((await harbor.service.eventsAfter(spaceId, 0)).filter((e) => e.event.type === 'reaction')).toHaveLength(events.filter((e) => e.event.type === 'reaction').length);
+    expect((await harbor.store.listEventsAfter(spaceId, 0)).filter((e) => e.event.type === 'reaction')).toHaveLength(events.filter((e) => e.event.type === 'reaction').length);
     const removed = await call<{ message: Message }>(ramAgent, 'react', { spaceId, messageId, emoji: '🎉', action: 'remove' });
     expect(removed.message.reactions).toEqual([]);
     // A tombstone takes no new reactions.
@@ -261,7 +249,7 @@ describe.each([['memory'], ['postgres']] as const)('agent face parity (%s store)
     const ended = await call<{ message: Message }>(ramAgent, 'end_poll', { spaceId, messageId });
     expect(ended.message.poll?.endedAt).toBeTruthy();
     expect(ended.message.poll?.votes).toEqual([{ answerId: 2, memberIds: ['harsh'] }]);
-    const events = await harbor.service.eventsAfter(spaceId, 0);
+    const events = await harbor.store.listEventsAfter(spaceId, 0);
     const end = events.find((e) => e.event.type === 'poll_ended')!;
     expect((end.event as any).end.by).toEqual({ memberId: 'ramnique', actingMode: 'agent', agentName: 'Rowboat' });
     // Sealed: no more votes; ending again is a no-op.
@@ -272,38 +260,51 @@ describe.each([['memory'], ['postgres']] as const)('agent face parity (%s store)
     expect((await refused(ramAgent, 'edit_message', { spaceId, messageId, body: 'x' })).code).toBe('invalid_request');
   });
 
-  it('read_asset {version}, diff, asset_history, and restore_asset after delete_asset', async () => {
-    const v1 = await call<{ outcome: string }>(ramAgent, 'propose_change', {
-      spaceId, path: 'notes/sso.md', baseVersion: 0, newContent: '# SSO\n- scope\n', reason: 'start',
-    });
-    expect(v1.outcome).toBe('applied');
+  it('create_asset, read_asset {version}, diff, asset_history, and restore_asset after delete_asset — all by id', async () => {
+    const born = await call<{ asset: { id: string; path: string; version: number }; changeSet: { assetId: string; assetPath: string } }>(
+      ramAgent, 'create_asset', { spaceId, path: 'notes/sso.md', newContent: '# SSO\n- scope\n', reason: 'start' },
+    );
+    expect(born.asset).toMatchObject({ path: 'notes/sso.md', version: 1 });
+    expect(born.changeSet).toMatchObject({ assetId: born.asset.id, assetPath: 'notes/sso.md' });
+    const assetId = born.asset.id;
+    // The same file the render face lists, id and all.
+    const listed = (await ramnique.get(`/v1/spaces/${spaceId}/assets`)).body.entries as Array<{ id: string; path: string }>;
+    expect(listed.find((e) => e.path === 'notes/sso.md')?.id).toBe(assetId);
+    // A live file at that path: birth refuses, propose is the way.
+    expect((await refused(ramAgent, 'create_asset', { spaceId, path: 'notes/sso.md', newContent: 'x', reason: 'dup' })).code).toBe('invalid_request');
+
     const v2 = await call<{ outcome: string }>(ramAgent, 'propose_change', {
-      spaceId, path: 'notes/sso.md', baseVersion: 1, newContent: '# SSO\n- scope\n- SAML vs OIDC\n', reason: 'expand',
+      spaceId, assetId, baseVersion: 1, newContent: '# SSO\n- scope\n- SAML vs OIDC\n', reason: 'expand',
     });
     expect(v2.outcome).toBe('applied');
 
     // Time travel.
-    const current = await call<{ content: string; version: number }>(ramAgent, 'read_asset', { spaceId, path: 'notes/sso.md' });
-    expect(current).toMatchObject({ version: 2, content: '# SSO\n- scope\n- SAML vs OIDC\n' });
+    const current = await call<{ id: string; path: string; content: string; version: number }>(ramAgent, 'read_asset', { spaceId, assetId });
+    expect(current).toMatchObject({ id: assetId, path: 'notes/sso.md', version: 2, content: '# SSO\n- scope\n- SAML vs OIDC\n' });
     const older = await call<{ content: string; version: number; recentHistory: unknown[] }>(ramAgent, 'read_asset', {
-      spaceId, path: 'notes/sso.md', version: 1,
+      spaceId, assetId, version: 1,
     });
     expect(older).toMatchObject({ version: 1, content: '# SSO\n- scope\n' });
     expect(older.recentHistory).toHaveLength(1);
-    expect((await refused(ramAgent, 'read_asset', { spaceId, path: 'notes/sso.md', version: 9 })).code).toBe('not_found');
+    expect((await refused(ramAgent, 'read_asset', { spaceId, assetId, version: 9 })).code).toBe('not_found');
 
-    const { unified } = await call<{ unified: string }>(ramAgent, 'diff', { spaceId, path: 'notes/sso.md', from: 1, to: 2 });
+    const { unified } = await call<{ unified: string }>(ramAgent, 'diff', { spaceId, assetId, from: 1, to: 2 });
     expect(unified).toContain('+- SAML vs OIDC');
     expect(unified).not.toContain('-- scope');
 
     const deleted = await call<{ outcome: string }>(harshAgent, 'delete_asset', {
-      spaceId, path: 'notes/sso.md', baseVersion: 2, reason: 'superseded',
+      spaceId, assetId, baseVersion: 2, reason: 'superseded',
     });
     expect(deleted.outcome).toBe('deleted');
-    expect((await refused(ramAgent, 'read_asset', { spaceId, path: 'notes/sso.md' })).code).toBe('not_found');
+    expect((await refused(ramAgent, 'read_asset', { spaceId, assetId })).code).toBe('not_found');
+    // Trashed: gone from the listing, still in Trash under the same id.
+    const spaces = await call<{ spaces: Array<{ id: string; assets: Array<{ id: string }> }> }>(ramAgent, 'list_spaces');
+    expect(spaces.spaces.find((s) => s.id === spaceId)!.assets.map((a) => a.id)).not.toContain(assetId);
+    const trash = (await ramnique.get(`/v1/spaces/${spaceId}/assets?includeDeleted=true`)).body.entries as Array<{ id: string; state?: string }>;
+    expect(trash.find((e) => e.id === assetId)?.state).toBe('deleted');
 
     const restored = await call<{ outcome: string; version: number; changeSet: { op?: string; attribution: unknown; reason?: string } }>(
-      ramAgent, 'restore_asset', { spaceId, path: 'notes/sso.md', reason: 'deleted by mistake' },
+      ramAgent, 'restore_asset', { spaceId, assetId, reason: 'deleted by mistake' },
     );
     expect(restored.outcome).toBe('restored');
     expect(restored.version).toBe(2);
@@ -312,21 +313,24 @@ describe.each([['memory'], ['postgres']] as const)('agent face parity (%s store)
       reason: 'deleted by mistake',
       attribution: { memberId: 'ramnique', actingMode: 'agent', agentName: 'Rowboat' },
     });
-    const back = await call<{ content: string; version: number }>(ramAgent, 'read_asset', { spaceId, path: 'notes/sso.md' });
-    expect(back).toMatchObject({ version: 2, content: '# SSO\n- scope\n- SAML vs OIDC\n' });
-    // Nothing left in Trash at that path — the live file occupies it.
-    expect((await refused(ramAgent, 'restore_asset', { spaceId, path: 'notes/sso.md', reason: 'again' })).code).toBe('not_found');
+    const back = await call<{ id: string; content: string; version: number }>(ramAgent, 'read_asset', { spaceId, assetId });
+    expect(back).toMatchObject({ id: assetId, version: 2, content: '# SSO\n- scope\n- SAML vs OIDC\n' });
+    // Not in Trash any more — restoring a live file is a bad request, not a missing one.
+    expect((await refused(ramAgent, 'restore_asset', { spaceId, assetId, reason: 'again' })).code).toBe('invalid_request');
+    // An id nobody ever minted is simply unknown.
+    expect((await refused(ramAgent, 'restore_asset', { spaceId, assetId: 'never-was', reason: 'again' })).code).toBe('not_found');
 
     // History: per file (newest first, across the delete/restore) and whole space.
-    const file = await call<{ changeSets: Array<{ op?: string; reason?: string }> }>(ramAgent, 'asset_history', { spaceId, path: 'notes/sso.md' });
+    const file = await call<{ changeSets: Array<{ assetId: string; op?: string; reason?: string }> }>(ramAgent, 'asset_history', { spaceId, assetId });
     expect(file.changeSets.map((c) => c.op ?? 'edit')).toEqual(['restore', 'delete', 'edit', 'edit']);
     expect(file.changeSets.map((c) => c.reason)).toEqual(['deleted by mistake', 'superseded', 'expand', 'start']);
+    expect(new Set(file.changeSets.map((c) => c.assetId))).toEqual(new Set([assetId]));
     const space = await call<{ changeSets: unknown[] }>(ramAgent, 'asset_history', { spaceId });
     expect(space.changeSets.length).toBeGreaterThanOrEqual(file.changeSets.length);
-    const page = await call<{ changeSets: unknown[] }>(ramAgent, 'asset_history', { spaceId, path: 'notes/sso.md', limit: 2 });
+    const page = await call<{ changeSets: unknown[] }>(ramAgent, 'asset_history', { spaceId, assetId, limit: 2 });
     expect(page.changeSets).toHaveLength(2);
-    expect(await harbor.service.assetHistory({ memberId: 'ramnique' }, spaceId, { path: 'notes/sso.md' })).toEqual(file.changeSets);
-    // An unknown path has no lineage: empty, not an error.
-    expect((await call<{ changeSets: unknown[] }>(ramAgent, 'asset_history', { spaceId, path: 'never/was.md' })).changeSets).toEqual([]);
+    expect(await harbor.service.assetHistory({ memberId: 'ramnique' }, spaceId, { assetId })).toEqual(file.changeSets);
+    // An unknown id has no lineage: empty, not an error.
+    expect((await call<{ changeSets: unknown[] }>(ramAgent, 'asset_history', { spaceId, assetId: 'never-was' })).changeSets).toEqual([]);
   });
 });

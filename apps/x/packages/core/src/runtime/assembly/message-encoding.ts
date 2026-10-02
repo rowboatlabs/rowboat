@@ -35,8 +35,8 @@ function formatUserMessageContextForLlm(userMessageContext: z.infer<typeof UserM
         } else if (userMessageContext.middlePane.kind === 'whiteboard') {
             const wb = userMessageContext.middlePane;
             sections.push(
-                `Middle pane:\nState: whiteboard\nBoard: ${wb.path} in space "${wb.spaceName}" on org "${wb.orgName}" (spaceId: ${wb.spaceId}; pass org: "${wb.orgName}")\n` +
-                    'The user is looking at this shared board. "the board" / "here" / "add a box" means this one: whiteboard-read it (spaceId + board path above), then whiteboard-draw.',
+                `Middle pane:\nState: whiteboard\nBoard: ${wb.path} (boardId: ${wb.assetId ?? 'unknown — find it in list_spaces by path'}) in space "${wb.spaceName}" on org "${wb.orgName}" (spaceId: ${wb.spaceId}; pass org: "${wb.orgName}")\n` +
+                    'The user is looking at this shared board. "the board" / "here" / "add a box" means this one: whiteboard-read it (spaceId + boardId above), then whiteboard-draw.',
             );
         } else {
             sections.push(`Middle pane:\nState: browser\nURL: ${userMessageContext.middlePane.url}\nTitle: ${userMessageContext.middlePane.title}`);
@@ -70,7 +70,7 @@ function formatSpaceMentions(mentions: NonNullable<z.infer<typeof UserMessageCon
                 ? `space:${m.orgId}/${m.spaceId}`
                 : m.kind === 'member'
                   ? `member:${m.orgId}/${m.memberId}`
-                  : `board:${m.orgId}/${m.spaceId}/${m.path}`;
+                  : `board:${m.orgId}/${m.spaceId}/${m.assetId}`;
         if (seen.has(key)) continue;
         seen.add(key);
         if (m.kind === 'space') {
@@ -82,8 +82,8 @@ function formatSpaceMentions(mentions: NonNullable<z.infer<typeof UserMessageCon
             );
         } else {
             lines.push(
-                `- @${m.name} = whiteboard "${m.name}" (board: ${m.path}) in space "${m.spaceName}" on org "${m.orgName}" (spaceId: ${m.spaceId}; ` +
-                    'whiteboard-read / whiteboard-draw with this spaceId and board)',
+                `- @${m.name} = whiteboard "${m.name}" (${m.path}; boardId: ${m.assetId ?? 'unknown — find it in list_spaces by path'}) in space "${m.spaceName}" on org "${m.orgName}" (spaceId: ${m.spaceId}; ` +
+                    'whiteboard-read / whiteboard-draw with this spaceId and boardId)',
             );
         }
     }

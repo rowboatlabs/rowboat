@@ -2,6 +2,7 @@ import * as React from "react"
 import * as ContextMenuPrimitive from "@radix-ui/react-context-menu"
 import { CheckIcon, ChevronRightIcon, CircleIcon } from "lucide-react"
 
+import { useSectionVisible } from "@/lib/section-visibility"
 import { cn } from "@/lib/utils"
 
 function ContextMenu({
@@ -95,6 +96,9 @@ function ContextMenuContent({
   className,
   ...props
 }: React.ComponentProps<typeof ContextMenuPrimitive.Content>) {
+  // Nothing portalled while the section is off-screen — see lib/section-visibility.
+  const sectionVisible = useSectionVisible()
+  if (!sectionVisible) return null
   return (
     <ContextMenuPrimitive.Portal>
       <ContextMenuPrimitive.Content

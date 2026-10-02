@@ -17,7 +17,7 @@ import { mapMentionTokens, type Member } from '@rowboat/spaces-protocol';
  * text, never a fallback: a write path that forgets it fails the NOT NULL.
  */
 export function searchTextFor(text: string): string {
-  return mapMentionTokens(text, (ref) => (ref.kind === 'member' ? ref.id : ref.kind));
+  return mapMentionTokens(text, (ref) => (ref.kind === 'member' || ref.kind === 'space' ? ref.id : ref.kind));
 }
 
 /**
@@ -92,33 +92,6 @@ export function toTsQueryString(q: SearchQuery): string {
 /** ILIKE patterns for path matching (one per term), LIKE metacharacters escaped. */
 export function toPathPatterns(q: SearchQuery): string[] {
   return q.terms.map((t) => `%${t.text.replace(/([\\%_])/g, '\\$1')}%`);
-}
-
-/**
- * Plain-TS matcher — the memory store's search and the snippet locator share
- * it. Word-boundary semantics approximate the tsvector's: a term matches at
- * the start of an alphanumeric run (so "deploy" hits "deploying" via prefix
- * but "ploy" never hits "deploy").
- */
-export function matchesTerm(haystackLower: string, term: SearchTerm): boolean {
-  const candidates = [term.text, ...term.alts];
-  return candidates.some((c) => {
-    let idx = haystackLower.indexOf(c);
-    while (idx !== -1) {
-      const before = idx === 0 ? '' : haystackLower[idx - 1]!;
-      const boundaryBefore = !/[\p{L}\p{N}_]/u.test(before);
-      const after = haystackLower[idx + c.length] ?? '';
-      const boundaryAfter = term.prefix || c !== term.text || !/[\p{L}\p{N}_]/u.test(after);
-      if (boundaryBefore && boundaryAfter) return true;
-      idx = haystackLower.indexOf(c, idx + 1);
-    }
-    return false;
-  });
-}
-
-export function matchesAllTerms(haystack: string, q: SearchQuery): boolean {
-  const lower = haystack.toLowerCase();
-  return q.terms.every((t) => matchesTerm(lower, t));
 }
 
 /**

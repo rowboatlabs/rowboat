@@ -17,6 +17,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1116.0",
     "@aws-sdk/s3-request-presigner": "^3.1116.0",
+    "@electric-sql/pglite": "^0.5.5",
     "@hono/node-server": "^1.14.0",
     "@modelcontextprotocol/sdk": "^1.25.1",
     "@rowboat/spaces-protocol": "workspace:*",
@@ -29,7 +30,6 @@
     "zod": "4.2.1"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.5.5",
     "@types/node": "^24.0.0",
     "@types/pg": "^8.21.0",
     "@types/ws": "^8.18.1",

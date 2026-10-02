@@ -3,9 +3,10 @@ import { EMPTY_WHITEBOARD_CONTENT } from "@x/shared/dist/spaces.js";
 import { WHITEBOARD_TOOL_NAMES, whiteboardTools } from "./whiteboard.js";
 import { parseWhiteboardSnapshot, serializeWhiteboardSnapshot, type WbElement } from "../../../spaces/whiteboard.js";
 
-// The tools compose the org's agent face — read_asset, propose_change,
-// list_spaces — through the same executeTool hop the projected spaces tools
-// use. These tests stand in for the org with a scripted MCP server.
+// The tools compose the org's agent face — read_asset / propose_change by
+// asset id, create_asset for a board's birth, list_spaces for ids — through
+// the same executeTool hop the projected spaces tools use. These tests stand
+// in for the org with a scripted MCP server.
 
 const ORG = { id: "org-1", name: "Rowboat", address: "rowboat.spaces.test" };
 const SPACE = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
@@ -78,12 +79,20 @@ describe("catalog shape", () => {
     });
 });
 
+const BOARD = "01BOARDDEFAULT000000000000";
+const ROADMAP = "01BOARDROADMAP000000000000";
+const asset = (id: string, path: string, version: number) => ({ id, path, version, updatedAt: "" });
+const listing = (assets: Array<ReturnType<typeof asset>>) =>
+    ok({ spaces: [{ id: SPACE, name: "Design", kind: "shared", memberCount: 3, assets }] });
+
 describe("whiteboard-read", () => {
-    it("reads the default board and returns the summary with ids and bounds", async () => {
+    it("reads the default board — resolved to its id from the listing — and returns the summary with ids and bounds", async () => {
         org({
+            list_spaces: () => listing([asset("01README", "README.md", 4), asset(BOARD, "whiteboards/board.excalidraw", 7)]),
             read_asset: (args) => {
-                expect(args).toEqual({ spaceId: SPACE, path: "whiteboards/board.excalidraw" });
+                expect(args).toEqual({ spaceId: SPACE, assetId: BOARD });
                 return ok({
+                    id: BOARD,
                     path: "whiteboards/board.excalidraw",
                     content: boardWith([rect("a", 0), rect("b", 300)]),
                     version: 7,
@@ -94,7 +103,8 @@ describe("whiteboard-read", () => {
         const result = (await read.execute({ spaceId: SPACE })) as Record<string, unknown>;
         expect(result).toMatchObject({
             success: true,
-            board: "whiteboards/board.excalidraw",
+            boardId: BOARD,
+            path: "whiteboards/board.excalidraw",
             name: "board",
             version: 7,
             empty: false,
@@ -105,18 +115,19 @@ describe("whiteboard-read", () => {
         expect((result.shapes as unknown[]).map((s) => (s as { id: string }).id)).toEqual(["a", "b"]);
     });
 
-    it("resolves a board by name and reads a blob-backed snapshot through the cache", async () => {
+    it("reads a board by id straight away (no listing) and reads a blob-backed snapshot through the cache", async () => {
         getBlob.mockResolvedValue({ bytes: new TextEncoder().encode(boardWith([rect("big", 0)])), mime: "application/json" });
         org({
             read_asset: (args) => {
-                expect(args.path).toBe("whiteboards/roadmap.excalidraw");
-                return ok({ path: args.path, content: "", blob: { hash: "c".repeat(64), size: 10, mime: "application/json" }, version: 2, recentHistory: [] });
+                expect(args).toEqual({ spaceId: SPACE, assetId: ROADMAP });
+                return ok({ id: ROADMAP, path: "whiteboards/roadmap.excalidraw", content: "", blob: { hash: "c".repeat(64), size: 10, mime: "application/json" }, version: 2, recentHistory: [] });
             },
         });
-        const result = (await read.execute({ spaceId: SPACE, board: "roadmap" })) as Record<string, unknown>;
-        expect(result.success).toBe(true);
+        const result = (await read.execute({ spaceId: SPACE, boardId: ROADMAP })) as Record<string, unknown>;
+        expect(result).toMatchObject({ success: true, boardId: ROADMAP, name: "roadmap", path: "whiteboards/roadmap.excalidraw" });
         expect(getBlob).toHaveBeenCalledWith(ORG.id, SPACE, "c".repeat(64));
         expect((result.shapes as unknown[])).toHaveLength(1);
+        expect(calls().map((c) => c.tool)).toEqual(["read_asset"]);
     });
 
     // A missing board is the normal state of a fresh space, not an error: an
@@ -124,75 +135,73 @@ describe("whiteboard-read", () => {
     // shell commands instead of drawing (dogfood, 2026-09-12).
     it("answers a fresh space with a successful 'does not exist yet, draw creates it'", async () => {
         org({
-            read_asset: () => mcpError("not_found", "no such asset"),
-            list_spaces: () => ok({ spaces: [{ id: SPACE, name: "Notes", kind: "direct", memberCount: 1, assets: [{ path: "README.md", version: 1, updatedAt: "" }] }] }),
+            list_spaces: () => listing([asset("01README", "README.md", 1)]),
         });
         const result = (await read.execute({ spaceId: SPACE })) as Record<string, unknown>;
         expect(result).toMatchObject({
             success: true,
             exists: false,
             empty: true,
-            board: "whiteboards/board.excalidraw",
+            path: "whiteboards/board.excalidraw",
             name: "board",
             boards: [],
         });
         expect(result.error).toBeUndefined();
+        expect(result.boardId).toBeUndefined();
         expect(result.next).toMatch(/no boards yet.*whiteboard-draw creates "board" on the first draw/);
+        expect(calls().some((c) => c.tool === "read_asset")).toBe(false);
     });
 
-    it("names the boards the space has when the one asked for does not exist", async () => {
+    it("names the boards the space has, with their ids, when the id asked for does not exist", async () => {
         org({
             read_asset: () => mcpError("not_found", "no such asset"),
             list_spaces: () =>
                 ok({
                     spaces: [
-                        { id: "other", name: "Other", kind: "shared", memberCount: 1, assets: [{ path: "whiteboards/x.excalidraw", version: 1, updatedAt: "" }] },
+                        { id: "other", name: "Other", kind: "shared", memberCount: 1, assets: [asset("01X", "whiteboards/x.excalidraw", 1)] },
                         {
                             id: SPACE,
                             name: "Design",
                             kind: "shared",
                             memberCount: 3,
-                            assets: [
-                                { path: "README.md", version: 4, updatedAt: "" },
-                                { path: "whiteboards/roadmap.excalidraw", version: 9, updatedAt: "" },
-                                { path: "whiteboards/board.excalidraw", version: 2, updatedAt: "" },
-                            ],
+                            assets: [asset("01README", "README.md", 4), asset(ROADMAP, "whiteboards/roadmap.excalidraw", 9), asset(BOARD, "whiteboards/board.excalidraw", 2)],
                         },
                     ],
                 }),
         });
-        const result = (await read.execute({ spaceId: SPACE, board: "launch" })) as Record<string, unknown>;
-        expect(result).toMatchObject({ success: true, exists: false, empty: true, name: "launch", board: "whiteboards/launch.excalidraw" });
+        const result = (await read.execute({ spaceId: SPACE, boardId: "01STALE" })) as Record<string, unknown>;
+        expect(result).toMatchObject({ success: true, exists: false, empty: true, boardId: "01STALE" });
         expect(result.next).toBe(
-            'No board "launch" here yet; whiteboard-draw creates it on the first draw. To draw on an existing board instead, pass board: one of "roadmap", "board".',
+            `No board with boardId "01STALE" here. This space's boards: "roadmap" (boardId ${ROADMAP}), "board" (boardId ${BOARD}) — pass one of those boardIds, or whiteboard-draw with a name to create a new board.`,
         );
         expect(result.boards).toEqual([
-            { path: "whiteboards/roadmap.excalidraw", name: "roadmap", version: 9 },
-            { path: "whiteboards/board.excalidraw", name: "board", version: 2 },
+            { id: ROADMAP, path: "whiteboards/roadmap.excalidraw", name: "roadmap", version: 9 },
+            { id: BOARD, path: "whiteboards/board.excalidraw", name: "board", version: 2 },
         ]);
     });
 
     it("surfaces other org errors and non-board files plainly", async () => {
         org({ read_asset: () => mcpError("forbidden", "not a member") });
-        expect(await read.execute({ spaceId: SPACE })).toEqual({ success: false, error: "not a member" });
+        expect(await read.execute({ spaceId: SPACE, boardId: BOARD })).toEqual({ success: false, error: "not a member" });
 
-        org({ read_asset: () => ok({ path: "whiteboards/board.excalidraw", content: "# a markdown file", version: 1, recentHistory: [] }) });
-        const result = (await read.execute({ spaceId: SPACE })) as { success: boolean; error: string };
+        org({ read_asset: () => ok({ id: BOARD, path: "whiteboards/board.excalidraw", content: "# a markdown file", version: 1, recentHistory: [] }) });
+        const result = (await read.execute({ spaceId: SPACE, boardId: BOARD })) as { success: boolean; error: string };
         expect(result.success).toBe(false);
-        expect(result.error).toMatch(/not a whiteboard snapshot/);
+        expect(result.error).toMatch(/whiteboards\/board\.excalidraw is not a whiteboard snapshot/);
     });
 });
 
 describe("whiteboard-draw", () => {
-    it("creates the board on first draw: base version 0, single-line snapshot, the reason as given", async () => {
+    it("creates the board on first draw: create_asset at the default path with a single-line snapshot, the reason as given", async () => {
         let stored: string | undefined;
         org({
-            read_asset: () => mcpError("not_found", "no such asset"),
-            propose_change: (args) => {
+            list_spaces: () => listing([asset("01README", "README.md", 1)]),
+            create_asset: (args) => {
                 stored = args.newContent as string;
-                expect(args).toMatchObject({ spaceId: SPACE, path: "whiteboards/board.excalidraw", baseVersion: 0, reason: "sketched the flow" });
+                expect(args).toMatchObject({ spaceId: SPACE, path: "whiteboards/board.excalidraw", reason: "sketched the flow" });
                 expect(args.blob).toBeUndefined();
-                return ok({ outcome: "applied", version: 1, changeSet: {} });
+                expect(args.assetId).toBeUndefined();
+                return ok({ asset: asset(BOARD, "whiteboards/board.excalidraw", 1), changeSet: {} });
             },
         });
         const result = (await draw.execute({
@@ -207,7 +216,9 @@ describe("whiteboard-draw", () => {
         expect(result).toMatchObject({
             success: true,
             created: true,
-            board: "whiteboards/board.excalidraw",
+            boardId: BOARD,
+            path: "whiteboards/board.excalidraw",
+            name: "board",
             version: 1,
             updated: [],
             deleted: [],
@@ -224,30 +235,36 @@ describe("whiteboard-draw", () => {
         // shape + label, shape + label, arrow + label
         expect(elements).toHaveLength(6);
         expect(elements.every((e) => typeof e.index === "string" && e.version === 1 || e.version === 2)).toBe(true);
+        expect(calls().map((c) => c.tool)).toEqual(["list_spaces", "create_asset"]);
     });
 
-    it("draws onto an existing board without touching what is there", async () => {
+    it("draws onto an existing board by id without touching what is there", async () => {
         const existing = [rect("theirs", 0, { version: 9, versionNonce: 42, index: "a3", customData: { keep: true } })];
         let stored: WbElement[] = [];
         org({
-            read_asset: () => ok({ path: "whiteboards/board.excalidraw", content: boardWith(existing), version: 4, recentHistory: [] }),
+            read_asset: (args) => {
+                expect(args).toEqual({ spaceId: SPACE, assetId: BOARD });
+                return ok({ id: BOARD, path: "whiteboards/board.excalidraw", content: boardWith(existing), version: 4, recentHistory: [] });
+            },
             propose_change: (args) => {
-                expect(args.baseVersion).toBe(4);
+                expect(args).toMatchObject({ spaceId: SPACE, assetId: BOARD, baseVersion: 4, reason: "added a step" });
+                expect(args.path).toBeUndefined();
                 stored = parseWhiteboardSnapshot(args.newContent as string)!;
                 return ok({ outcome: "applied", version: 5, changeSet: {} });
             },
         });
-        const result = (await draw.execute({ spaceId: SPACE, reason: "added a step", ops: [{ op: "add", id: "mine", shape: "rectangle", text: "Mine", rightOf: "theirs" }] })) as Record<string, unknown>;
-        expect(result).toMatchObject({ success: true, created: false, version: 5 });
+        const result = (await draw.execute({ spaceId: SPACE, boardId: BOARD, reason: "added a step", ops: [{ op: "add", id: "mine", shape: "rectangle", text: "Mine", rightOf: "theirs" }] })) as Record<string, unknown>;
+        expect(result).toMatchObject({ success: true, created: false, boardId: BOARD, path: "whiteboards/board.excalidraw", name: "board", version: 5 });
         expect(stored.find((e) => e.id === "theirs")).toEqual(existing[0]);
         expect(stored.find((e) => e.id === "mine")).toMatchObject({ x: 180, index: "a4" });
+        expect(calls().map((c) => c.tool)).toEqual(["read_asset", "propose_change"]);
     });
 
     it("re-applies the same ops over the current scene after a conflict, then succeeds", async () => {
         const proposals: Array<Record<string, unknown>> = [];
         const theirs = rect("theirs", 500, { index: "a0" });
         org({
-            read_asset: () => ok({ path: "whiteboards/board.excalidraw", content: EMPTY_WHITEBOARD_CONTENT, version: 1, recentHistory: [] }),
+            read_asset: () => ok({ id: BOARD, path: "whiteboards/board.excalidraw", content: EMPTY_WHITEBOARD_CONTENT, version: 1, recentHistory: [] }),
             propose_change: (args, nth) => {
                 proposals.push(args);
                 if (nth === 0) {
@@ -256,7 +273,7 @@ describe("whiteboard-draw", () => {
                 return ok({ outcome: "applied", version: 3, changeSet: {} });
             },
         });
-        const result = (await draw.execute({ spaceId: SPACE, reason: "r", ops: [{ op: "add", id: "mine", shape: "text", text: "hi", x: 0, y: 0 }] })) as Record<string, unknown>;
+        const result = (await draw.execute({ spaceId: SPACE, boardId: BOARD, reason: "r", ops: [{ op: "add", id: "mine", shape: "text", text: "hi", x: 0, y: 0 }] })) as Record<string, unknown>;
         expect(result).toMatchObject({ success: true, version: 3, counts: { shapes: 1, texts: 1 } });
         expect(proposals).toHaveLength(2);
         expect(proposals[0]!.baseVersion).toBe(1);
@@ -269,41 +286,51 @@ describe("whiteboard-draw", () => {
 
     it("gives up after repeated conflicts without writing", async () => {
         org({
-            read_asset: () => ok({ path: "whiteboards/board.excalidraw", content: EMPTY_WHITEBOARD_CONTENT, version: 1, recentHistory: [] }),
+            read_asset: () => ok({ id: BOARD, path: "whiteboards/board.excalidraw", content: EMPTY_WHITEBOARD_CONTENT, version: 1, recentHistory: [] }),
             propose_change: (_args, nth) => ok({ outcome: "conflict", currentVersion: 10 + nth, currentContent: EMPTY_WHITEBOARD_CONTENT, regions: [], recentHistory: [] }),
         });
-        const result = (await draw.execute({ spaceId: SPACE, reason: "r", ops: [{ op: "add", shape: "text", text: "hi" }] })) as { success: boolean; error: string };
+        const result = (await draw.execute({ spaceId: SPACE, boardId: BOARD, reason: "r", ops: [{ op: "add", shape: "text", text: "hi" }] })) as { success: boolean; error: string };
         expect(result.success).toBe(false);
         expect(result.error).toMatch(/kept changing/);
         expect(calls().filter((c) => c.tool === "propose_change")).toHaveLength(3);
     });
 
-    it("writes nothing when an op is invalid, and says which", async () => {
+    it("writes nothing when an op is invalid, and says which — on an existing board and on a new one", async () => {
         org({
-            read_asset: () => ok({ path: "whiteboards/board.excalidraw", content: boardWith([rect("a", 0)]), version: 1, recentHistory: [] }),
+            read_asset: () => ok({ id: BOARD, path: "whiteboards/board.excalidraw", content: boardWith([rect("a", 0)]), version: 1, recentHistory: [] }),
             propose_change: () => {
                 throw new Error("must not propose");
             },
         });
-        const result = (await draw.execute({ spaceId: SPACE, reason: "r", ops: [{ op: "connect", from: "a", to: "zzz" }] })) as { success: boolean; error: string };
+        const result = (await draw.execute({ spaceId: SPACE, boardId: BOARD, reason: "r", ops: [{ op: "connect", from: "a", to: "zzz" }] })) as { success: boolean; error: string };
         expect(result.success).toBe(false);
         expect(result.error).toContain('no element "zzz"');
         expect(calls().some((c) => c.tool === "propose_change")).toBe(false);
+
+        org({
+            list_spaces: () => listing([]),
+            create_asset: () => {
+                throw new Error("must not create");
+            },
+        });
+        const fresh = (await draw.execute({ spaceId: SPACE, name: "launch", reason: "r", ops: [{ op: "connect", from: "a", to: "b" }] })) as { success: boolean; error: string };
+        expect(fresh.success).toBe(false);
+        expect(calls().some((c) => c.tool === "create_asset")).toBe(false);
     });
 
     it("reports a merged outcome from what the org actually stored", async () => {
         const merged = boardWith([rect("a", 0), rect("b", 300)]);
         org({
-            read_asset: () => ok({ path: "whiteboards/board.excalidraw", content: boardWith([rect("a", 0)]), version: 1, recentHistory: [] }),
+            read_asset: () => ok({ id: BOARD, path: "whiteboards/board.excalidraw", content: boardWith([rect("a", 0)]), version: 1, recentHistory: [] }),
             propose_change: () => ok({ outcome: "merged", version: 2, mergedContent: merged, changeSet: {} }),
         });
-        const result = (await draw.execute({ spaceId: SPACE, reason: "r", ops: [{ op: "add", shape: "text", text: "hi" }] })) as Record<string, unknown>;
+        const result = (await draw.execute({ spaceId: SPACE, boardId: BOARD, reason: "r", ops: [{ op: "add", shape: "text", text: "hi" }] })) as Record<string, unknown>;
         expect(result).toMatchObject({ success: true, version: 2, counts: { shapes: 2, texts: 0 } });
     });
 
     it("falls back to a blob version for a snapshot past the text cap", async () => {
         org({
-            read_asset: () => ok({ path: "whiteboards/board.excalidraw", content: EMPTY_WHITEBOARD_CONTENT, version: 1, recentHistory: [] }),
+            read_asset: () => ok({ id: BOARD, path: "whiteboards/board.excalidraw", content: EMPTY_WHITEBOARD_CONTENT, version: 1, recentHistory: [] }),
             propose_change: (args) => {
                 expect(args.newContent).toBeUndefined();
                 expect(args.blob).toBe("b".repeat(64));
@@ -312,7 +339,7 @@ describe("whiteboard-draw", () => {
         });
         // 1,000 free-text elements of ~1KB each comfortably exceed 900KB.
         const ops = Array.from({ length: 1000 }, (_, i) => ({ op: "add" as const, shape: "text" as const, text: `${i} ${"x".repeat(950)}`, x: 0, y: i * 40 }));
-        const result = (await draw.execute({ spaceId: SPACE, reason: "r", ops })) as Record<string, unknown>;
+        const result = (await draw.execute({ spaceId: SPACE, boardId: BOARD, reason: "r", ops })) as Record<string, unknown>;
         expect(result.success).toBe(true);
         expect(uploadBlob).toHaveBeenCalledTimes(1);
         const [spaceId, bytes, meta] = uploadBlob.mock.calls[0] as unknown as [string, Uint8Array, { declaredMime: string }];
@@ -321,18 +348,43 @@ describe("whiteboard-draw", () => {
         expect(meta).toEqual({ declaredMime: "application/json" });
     });
 
-    it("draws on a named board", async () => {
+    it("creates a named board that does not exist yet, at whiteboards/<name>.excalidraw", async () => {
         org({
-            read_asset: (args) => {
+            list_spaces: () => listing([asset(BOARD, "whiteboards/board.excalidraw", 2)]),
+            create_asset: (args) => {
                 expect(args.path).toBe("whiteboards/launch.excalidraw");
-                return mcpError("not_found", "");
-            },
-            propose_change: (args) => {
-                expect(args.path).toBe("whiteboards/launch.excalidraw");
-                return ok({ outcome: "applied", version: 1, changeSet: {} });
+                return ok({ asset: asset("01LAUNCH", "whiteboards/launch.excalidraw", 1), changeSet: {} });
             },
         });
-        const result = (await draw.execute({ spaceId: SPACE, board: "launch", reason: "r", ops: [{ op: "add", shape: "text", text: "hi" }] })) as Record<string, unknown>;
-        expect(result).toMatchObject({ success: true, name: "launch", created: true });
+        const result = (await draw.execute({ spaceId: SPACE, name: "launch", reason: "r", ops: [{ op: "add", shape: "text", text: "hi" }] })) as Record<string, unknown>;
+        expect(result).toMatchObject({ success: true, boardId: "01LAUNCH", name: "launch", path: "whiteboards/launch.excalidraw", created: true, version: 1 });
+    });
+
+    it("draws by name on a board that already exists, resolving its id from the listing", async () => {
+        org({
+            list_spaces: () => listing([asset("01LAUNCH", "whiteboards/launch.excalidraw", 3)]),
+            read_asset: (args) => {
+                expect(args.assetId).toBe("01LAUNCH");
+                return ok({ id: "01LAUNCH", path: "whiteboards/launch.excalidraw", content: EMPTY_WHITEBOARD_CONTENT, version: 3, recentHistory: [] });
+            },
+            propose_change: (args) => {
+                expect(args).toMatchObject({ assetId: "01LAUNCH", baseVersion: 3 });
+                return ok({ outcome: "applied", version: 4, changeSet: {} });
+            },
+        });
+        const result = (await draw.execute({ spaceId: SPACE, name: "launch", reason: "r", ops: [{ op: "add", shape: "text", text: "hi" }] })) as Record<string, unknown>;
+        expect(result).toMatchObject({ success: true, boardId: "01LAUNCH", name: "launch", created: false, version: 4 });
+        expect(calls().some((c) => c.tool === "create_asset")).toBe(false);
+    });
+
+    it("refuses an unknown boardId and names the boards the space has", async () => {
+        org({
+            read_asset: () => mcpError("not_found", "no such asset"),
+            list_spaces: () => listing([asset(ROADMAP, "whiteboards/roadmap.excalidraw", 9)]),
+        });
+        const result = (await draw.execute({ spaceId: SPACE, boardId: "01STALE", reason: "r", ops: [{ op: "add", shape: "text", text: "hi" }] })) as { success: boolean; error: string };
+        expect(result.success).toBe(false);
+        expect(result.error).toBe(`No board with boardId "01STALE" in this space. Its boards: "roadmap" (boardId ${ROADMAP}). To start a new board, pass name instead of boardId.`);
+        expect(calls().some((c) => c.tool === "propose_change" || c.tool === "create_asset")).toBe(false);
     });
 });

@@ -5,7 +5,8 @@
   --spaces-avatar: 36px;
   --spaces-control: 32px;
   --spaces-reaction: 28px;
-  --spaces-header: 56px;
+  /* The app-wide section header height (App.css); Spaces set the standard. */
+  --spaces-header: var(--rowboat-header);
   --spaces-pane-header: 48px;
   --spaces-radius: 8px;
   --spaces-hover: color-mix(in srgb, var(--foreground) 4%, var(--background));
@@ -27,7 +28,83 @@
   min-height: var(--spaces-control);
 }
 
+/* The invite link's head: everything but the tail (--tail, set inline), cut
+   with an ellipsis. Rounded DOWN to whole characters so the ellipsis lands
+   flush against the tail — text-overflow stops at the last glyph that fits
+   and would otherwise leave a sub-character gap. Monospace, so 1ch = 1 glyph;
+   the half pixel keeps sub-pixel rounding from failing the last glyph's fit. */
+.spaces-invite-link-head {
+  max-width: calc(100% - var(--tail));
+  max-width: calc(round(down, calc(100% - var(--tail)), 1ch) + 0.5px);
+}
+
 .spaces-navigation { background: var(--rowboat-panel-soft); }
+
+/* Content navigation is a thin strip; previews overlay rather than resize it. */
+.spaces-content-tabs {
+  display: flex;
+  flex-shrink: 0;
+  align-items: stretch;
+  gap: 16px;
+  min-height: 36px;
+  padding-inline: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.spaces-content-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 2px;
+  border-bottom: 2px solid transparent;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.spaces-content-tab:hover { color: var(--foreground); }
+.spaces-content-tab.is-selected { color: var(--foreground); border-bottom-color: var(--foreground); }
+.spaces-content-tab:focus-visible,
+.spaces-content-menu button:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.spaces-content-menu-row {
+  display: flex;
+  width: 100%;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 4px;
+  text-align: left;
+  font-size: 13px;
+  cursor: pointer;
+}
+.spaces-content-menu-row:hover, .spaces-content-menu-all:hover { background: var(--accent); }
+.spaces-content-menu-all {
+  width: 100%;
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+  padding: 9px 8px 5px;
+  text-align: left;
+  font-size: 12px;
+  cursor: pointer;
+}
+.spaces-content-menu[data-state="open"] { animation: spaces-menu-reveal 100ms ease-out; }
+.spaces-content-menu[data-state="closed"] { animation: none; }
+@keyframes spaces-menu-reveal {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.spaces-collection-filter { padding: 4px 8px; border-radius: 4px; font-size: 12px; color: var(--muted-foreground); cursor: pointer; }
+.spaces-collection-filter[aria-pressed="true"], .spaces-collection-filter:hover { color: var(--foreground); background: var(--accent); }
+.spaces-files-view { --spaces-pane-header: 40px; }
+@media (max-width: 520px) {
+  .spaces-content-tabs { gap: 8px; padding-inline: 8px; }
+  .spaces-content-tab { gap: 4px; }
+  .spaces-content-tab > svg:first-child { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spaces-content-menu[data-state="open"] { animation: none; }
+}
 .spaces-message-list { scroll-padding-block: 24px; }
 .spaces-message {
   gap: 12px;
@@ -60,6 +137,7 @@
 .spaces-reaction-add { min-width: var(--spaces-reaction); padding-inline: 5px; }
 .spaces-reply-link { min-height: 28px; }
 .spaces-day-divider { padding: 16px var(--spaces-gutter) 8px; }
+.spaces-membership-line { padding-inline: var(--spaces-gutter); }
 .spaces-thread-root { padding: 8px var(--spaces-gutter); }
 .spaces-thread-root > div > div:first-child { flex-wrap: wrap; }
 .spaces-composer-dock { padding: 12px 16px 16px; }

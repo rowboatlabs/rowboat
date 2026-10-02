@@ -94,8 +94,8 @@ export default function SpaceSearchScreen() {
       {results?.assets.length ? <Section label="Files" /> : null}
       {results?.assets.map((hit) => (
         <Pressable
-          key={hit.path}
-          onPress={() => router.push({ pathname: '/spaces/file', params: { org, space, path: hit.path, title: hit.path.split('/').pop() ?? hit.path } })}
+          key={hit.id}
+          onPress={() => router.push({ pathname: '/spaces/file', params: { org, space, assetId: hit.id, path: hit.path, title: hit.path.split('/').pop() ?? hit.path, mime: hit.blob?.mime ?? '' } })}
           style={({ pressed }) => ({
             flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 8, paddingHorizontal: 8, paddingVertical: 10,
             borderRadius: 10, borderCurve: 'continuous', backgroundColor: pressed ? colors.secondaryBackground : 'transparent',

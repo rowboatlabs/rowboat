@@ -1,9 +1,11 @@
 import { z } from 'zod';
-import { AssetPath, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
+import { Approval } from './approval.js';
+import { AssetId, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 
 // Core objects shared by both faces. Every act in a space belongs to a member
-// (spec §2, principle 4); attribution carries the acting mode, never a separate
-// "bot" identity.
+// (spec §2, principle 4); attribution carries the acting mode. An agent that
+// acts as itself is a member of kind 'agent' (2026-09-29), never a label on
+// someone else's attribution.
 
 export const ActingMode = z.enum(['direct', 'agent', 'scheduled']);
 export type ActingMode = z.infer<typeof ActingMode>;
@@ -23,14 +25,96 @@ export type Attribution = z.infer<typeof Attribution>;
 export const MemberRole = z.enum(['admin', 'member']);
 export type MemberRole = z.infer<typeof MemberRole>;
 
+/**
+ * What a member IS (spec §4 Agent members, 2026-09-29): a person, or an agent
+ * that is a member in its own right and acts as itself. Fixed at creation.
+ * Distinct from `actingMode: 'agent'`, which is a person's own agent acting
+ * as that person.
+ */
+export const MemberKind = z.enum(['human', 'agent']);
+export type MemberKind = z.infer<typeof MemberKind>;
+
 export const Member = z.object({
   id: MemberId,
   /** Display-only, org-scoped, not unique. Attribution keys on `id`, never on names. */
   displayName: z.string().min(1).max(128),
   avatarUrl: z.string().url().optional(),
   role: MemberRole.default('member'),
+  /** Absent from servers before 2026-09-29, whose members are all people. */
+  kind: MemberKind.default('human'),
+  /**
+   * An agent's owner (spec §4 Agent members, 2026-09-29): the person who
+   * added it and alone holds its keys. Absent for people.
+   */
+  ownerId: MemberId.optional(),
+  /**
+   * What an agent is underneath, and the path Harbor takes to reach it (spec
+   * §4 Agent members, amended 2026-09-30). Set for every agent, absent for
+   * people, fixed at creation. Open strings on the wire: a kind this client
+   * doesn't know is drawn as a generic agent. AGENT_PAIRS is what Harbor accepts.
+   */
+  agentKind: z.string().min(1).max(32).optional(),
+  agentConnection: z.string().min(1).max(32).optional(),
 });
 export type Member = z.infer<typeof Member>;
+
+/**
+ * The (kind, connection) pairs Harbor accepts when an agent is added (spec §4
+ * Agent members, 2026-09-30). What Harbor does for an agent is looked up from
+ * its pair, never stored: a pair whose connection is in HARBOR_RUN_CONNECTIONS
+ * gets a connector Harbor runs; any other waits for whoever holds the agent's
+ * key. A new pair is a line here, never a migration.
+ */
+export const REPLICAS_CODING_AGENTS = ['claude-code', 'codex', 'cursor', 'opencode', 'pi', 'muse-code'] as const;
+export const AGENT_PAIRS: ReadonlyArray<{ kind: string; connection: string }> = [
+  { kind: 'custom', connection: 'contract' },
+  { kind: 'hermes', connection: 'plugin' },
+  ...REPLICAS_CODING_AGENTS.map((kind) => ({ kind, connection: 'replicas' })),
+];
+/** Connections whose connector Harbor runs, calling the platform with a credential it holds (spec §8 Connectors). */
+export const HARBOR_RUN_CONNECTIONS: readonly string[] = ['replicas'];
+
+export function isAgentPair(kind: string, connection: string): boolean {
+  return AGENT_PAIRS.some((pair) => pair.kind === kind && pair.connection === connection);
+}
+
+/**
+ * A credential an agent member presents as itself (spec §4, 2026-09-29): a
+ * bearer secret the org stores only as a hash. The secret is shown once, at
+ * creation (AgentKeySecret); every other read is this metadata.
+ */
+export const AgentKey = z.object({
+  id: z.string().min(1).max(64),
+  agentId: MemberId,
+  createdBy: MemberId,
+  createdAt: z.iso.datetime(),
+  lastUsedAt: z.iso.datetime().optional(),
+  revokedAt: z.iso.datetime().optional(),
+});
+export type AgentKey = z.infer<typeof AgentKey>;
+
+/** A key at the one moment its secret exists outside the agent: the response that created it. */
+export const AgentKeySecret = AgentKey.extend({ secret: z.string().startsWith('rbk_') });
+export type AgentKeySecret = z.infer<typeof AgentKeySecret>;
+
+/**
+ * The platform credential Harbor holds for an agent it reaches through that
+ * platform (spec §8 Connectors, 2026-09-30), as its owner sees it: only its
+ * last characters. The secret is sealed and never read back. `rejectedAt` is
+ * set when the platform refused it, and cleared when it is replaced.
+ */
+export const AgentCredential = z.object({
+  hint: z.string().max(16),
+  setBy: MemberId,
+  setAt: z.iso.datetime(),
+  rejectedAt: z.iso.datetime().optional(),
+  rejectedReason: z.string().max(280).optional(),
+});
+export type AgentCredential = z.infer<typeof AgentCredential>;
+
+/** An agent with its keys, as the Agents screen lists them, and its platform credential when Harbor runs its connector. */
+export const AgentListing = z.object({ agent: Member, keys: z.array(AgentKey), credential: AgentCredential.optional() });
+export type AgentListing = z.infer<typeof AgentListing>;
 
 /**
  * What a space IS at the org level (direct messages, 2026-09-07). `shared` =
@@ -44,6 +128,9 @@ export type Member = z.infer<typeof Member>;
 export const SpaceKind = z.enum(['shared', 'direct']);
 export type SpaceKind = z.infer<typeof SpaceKind>;
 
+export const SpaceVisibility = z.enum(['private', 'open']);
+export type SpaceVisibility = z.infer<typeof SpaceVisibility>;
+
 export const Space = z.object({
   id: SpaceId,
   /**
@@ -54,6 +141,8 @@ export const Space = z.object({
   name: z.string().min(1).max(128),
   createdAt: z.iso.datetime(),
   kind: SpaceKind.default('shared'),
+  /** Old payloads and existing spaces stay private (spec §5, 2026-09-22). */
+  visibility: SpaceVisibility.default('private'),
   /**
    * Direct spaces only: the fixed member set, sorted — the DM's identity.
    * Absent on shared spaces. ONE element = the member's self-DM (notes to
@@ -94,13 +183,12 @@ export const Topic = z.object({
   archived: z.boolean(),
   /**
    * The one file this discussion is about (2026-09-11): a space asset the
-   * UI opens beside the thread. Stored as the asset's internal id, so a
-   * rename keeps the link; PROJECTED here as the asset's CURRENT live path
-   * at read time — absent when nothing is attached and while the file sits
-   * in the trash (a restore brings it back, nothing to clean up). Set via
-   * createTopic.documentPath or manageTopic attach_document/detach_document.
+   * UI opens beside the thread, by id — a rename never touches the link, and
+   * a trashed file is simply an id the live listing does not know until it
+   * is restored. Set via createTopic.documentAssetId or manageTopic
+   * attach_document/detach_document.
    */
-  documentPath: AssetPath.optional(),
+  documentAssetId: AssetId.optional(),
 });
 export type Topic = z.infer<typeof Topic>;
 
@@ -143,6 +231,8 @@ export type Reaction = z.infer<typeof Reaction>;
 export const ReactionGroup = z.object({
   emoji: ReactionEmoji,
   memberIds: z.array(MemberId).min(1),
+  /** Latest reaction event represented by this group; absent on older servers. */
+  lastOffset: StreamOffset.optional(),
 });
 export type ReactionGroup = z.infer<typeof ReactionGroup>;
 
@@ -295,6 +385,13 @@ export const Message = z.object({
    * the poll along with the body.
    */
   poll: Poll.optional(),
+  /**
+   * Present on an agent's approval card (spec §8 part 4, 2026-10-01), folded
+   * to its current state wherever messages are read; `approval` space events
+   * carry each change. `body` keeps a text rendering for clients that cannot
+   * show the card.
+   */
+  approval: Approval.optional(),
   /**
    * Who this message addresses — STAMPED by the org at post and edit from the
    * body's mention tokens (mentions.ts), never from names, and only ids that

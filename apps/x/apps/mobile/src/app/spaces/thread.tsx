@@ -1,8 +1,8 @@
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, Text, View } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useHeaderHeight } from 'expo-router/react-navigation';
@@ -14,7 +14,7 @@ import { spaces } from '@x/shared';
 import { ChatMarkdown } from '@/components/markdown';
 import { MessageLinkPreviews } from '@/components/link-preview-card';
 import { SpaceBlobImage } from '@/components/space-blob-image';
-import { MessageActionSheet, MessageRow, applyReaction } from '@/components/space-message';
+import { MessageActionSheet, MessageRow, applyReaction, parseAssetLink } from '@/components/space-message';
 import { SpaceComposer, type SpaceComposerHandle } from '@/components/space-composer';
 import { PollCard, applyPollVote } from '@/components/poll-card';
 import { setActiveSpace } from '@/lib/push';
@@ -161,6 +161,19 @@ export default function SpaceThreadScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- connect once per screen after first load
   }, [replies === null, org, space, root]);
 
+
+  // A file link in a message: this org's files open in the file screen (by
+  // id, so a rename never breaks it); any other host goes to the browser.
+  const openAssetLink = useCallback(
+    (link: { host: string; spaceId: string; assetId: string }) => {
+      if (link.host !== org) {
+        void Linking.openURL(`https://${link.host}/s/${link.spaceId}/a/${link.assetId}`);
+        return;
+      }
+      router.push({ pathname: '/spaces/file', params: { org, space: link.spaceId, assetId: link.assetId, path: '', title: 'File', mime: '' } });
+    },
+    [org],
+  );
 
   const send = async (body: string) => {
     if (sending) return;
@@ -340,6 +353,7 @@ export default function SpaceThreadScreen() {
               onVote={vote}
               onRemoveVote={removeVote}
               onEndPoll={endPoll}
+              onOpenAsset={openAssetLink}
             />
           ) : null}
           {rootMessage && visibleReplies !== null ? (
@@ -366,7 +380,7 @@ export default function SpaceThreadScreen() {
           {/* Root painted from the stream; replies still on their way. */}
           {rootMessage && replies === null && !error ? <ActivityIndicator style={{ marginTop: 16 }} /> : null}
           {visibleReplies?.map((m) => (
-            <MessageRow key={m.id} message={m} member={members.get(m.author.memberId)} memberNames={memberNames} me={me} onToggleReaction={toggleReaction} onLongPress={(m) => { setReactionsOnly(false); setActionMessage(m); }}
+            <MessageRow key={m.id} message={m} member={members.get(m.author.memberId)} memberNames={memberNames} me={me} onToggleReaction={toggleReaction} onLongPress={(m) => { setReactionsOnly(false); setActionMessage(m); }} onOpenAsset={openAssetLink}
               onAddReaction={(m) => { setReactionsOnly(true); setActionMessage(m); }} onVote={vote} onRemoveVote={removeVote} onEndPoll={endPoll} />
           ))}
         </ScrollView>
@@ -403,7 +417,7 @@ export default function SpaceThreadScreen() {
 
 // The root, Slack-style: 40pt avatar, bold name with the timestamp UNDER it,
 // full-size body, then reaction pills + the always-on emoji+ pill.
-function RootMessage({ message, member, memberNames, me, onToggleReaction, onLongPress, onAddReaction, onVote, onRemoveVote, onEndPoll }: {
+function RootMessage({ message, member, memberNames, me, onToggleReaction, onLongPress, onAddReaction, onVote, onRemoveVote, onEndPoll, onOpenAsset }: {
   message: Message;
   member?: Member;
   memberNames: ReadonlyMap<string, string>;
@@ -414,6 +428,7 @@ function RootMessage({ message, member, memberNames, me, onToggleReaction, onLon
   onVote: (message: Message, answerIds: number[]) => void;
   onRemoveVote: (message: Message) => void;
   onEndPoll: (message: Message) => void;
+  onOpenAsset?: (link: { host: string; spaceId: string; assetId: string; label: string }) => void;
 }) {
   const colors = useColors();
   const name = member?.displayName ?? message.author.memberId;
@@ -458,7 +473,17 @@ function RootMessage({ message, member, memberNames, me, onToggleReaction, onLon
         <PollCard message={message} poll={message.poll} me={me} onVote={onVote} onRemoveVote={onRemoveVote} onEndPoll={onEndPoll} />
       ) : (
         <>
-          <ChatMarkdown extraRules={imageRule}>{body}</ChatMarkdown>
+          <ChatMarkdown
+            extraRules={imageRule}
+            onLinkPress={(url) => {
+              const link = parseAssetLink(url);
+              if (!link || !onOpenAsset) return true;
+              onOpenAsset(link);
+              return false;
+            }}
+          >
+            {body}
+          </ChatMarkdown>
           <MessageLinkPreviews body={message.body} />
         </>
       )}

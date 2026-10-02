@@ -497,7 +497,7 @@ export const MIGRATIONS: Migration[] = [
     ],
   },
   {
-    // Push notifications (PUSH_PLAN.md): device tokens + member levels.
+    // Push notifications (CONTRACT.md, the push bullet): device tokens + member levels.
     id: '015-push',
     statements: [
       `create table if not exists push_tokens (
@@ -612,6 +612,251 @@ export const MIGRATIONS: Migration[] = [
       // "which discussions are about this file" from the file's side.
       `alter table topics add column if not exists document_asset_id text`,
       `create index if not exists topics_document on topics (space_id, document_asset_id) where document_asset_id is not null`,
+    ],
+  },
+  {
+    id: '020-asset-ids-canonical',
+    statements: [
+      // Asset ids on the wire (2026-09-14): the id every operation addresses
+      // is the one 007 minted; the path is a display property. Redirects
+      // existed only because paths were addresses — a moved file kept
+      // answering at its old name. By id a move changes nothing an address
+      // depends on, so the table goes. The change log's lineage column is
+      // now a wire field (ChangeSet.assetId), so it binds NOT NULL, and the
+      // stored `change` events on the log gain it too (replay must parse).
+      `drop table if exists asset_redirects`,
+      // 007 filled asset_id by joining paths; a change-set whose path never
+      // matched an asset row (none are expected, but a bind must not fail a
+      // deploy) gets one minted lineage id per (space, path) so history stays
+      // coherent and the column can bind.
+      `update change_sets c set asset_id = o.id
+        from (select space_id, asset_path, gen_random_uuid()::text as id
+              from change_sets where asset_id is null group by space_id, asset_path) o
+        where c.space_id = o.space_id and c.asset_path = o.asset_path and c.asset_id is null`,
+      `alter table change_sets alter column asset_id set not null`,
+      `update events e set event = jsonb_set(e.event, '{changeSet,assetId}', to_jsonb(c.asset_id))
+        from change_sets c
+        where e.space_id = c.space_id
+          and e.event->>'type' = 'change'
+          and e.event->'changeSet'->>'id' = c.id
+          and e.event->'changeSet'->>'assetId' is null`,
+    ],
+  },
+  {
+    id: '021-reaction-read-offsets',
+    statements: [
+      `alter table reactions add column if not exists stream_offset int not null default 0`,
+      // Recover existing reactions' positions from their durable add events.
+      `update reactions r set stream_offset = e.last_offset from (
+        select space_id, event->'reaction'->>'messageId' as message_id,
+          event->'reaction'->>'emoji' as emoji, event->'reaction'->'by'->>'memberId' as member_id,
+          max(stream_offset) as last_offset
+        from events where event->>'type' = 'reaction' and event->>'action' = 'added'
+        group by space_id, event->'reaction'->>'messageId', event->'reaction'->>'emoji', event->'reaction'->'by'->>'memberId'
+      ) e where r.space_id = e.space_id and r.message_id = e.message_id and r.emoji = e.emoji and r.member_id = e.member_id`,
+    ],
+  },
+  {
+    id: '022-hygiene',
+    statements: [
+      // The five enum-shaped text columns get the database's own guard. Zod
+      // covers the wire, but migrations and backfills write SQL straight past
+      // it. Existing rows are validated as each constraint lands — a bad
+      // legacy row fails the deploy loudly instead of surfacing later as a
+      // row nothing knows how to render.
+      `alter table members add constraint members_role_check check (role in ('admin', 'member'))`,
+      `alter table spaces add constraint spaces_kind_check check (kind in ('shared', 'direct'))`,
+      `alter table assets add constraint assets_state_check check (state in ('live', 'deleted'))`,
+      `alter table change_sets add constraint change_sets_op_check check (op is null or op in ('move', 'delete', 'restore'))`,
+      `alter table push_prefs add constraint push_prefs_level_check check (level in ('off', 'mentions', 'dms', 'all'))`,
+      // The author as a column. Seven hot queries filtered on
+      // author->>'memberId' — a per-row jsonb extraction with no index and no
+      // statistics. A stored generated column (the body_tsv technique) is
+      // computed by Postgres for every existing row right here and on every
+      // later write, so no code path can forget it, and it indexes.
+      // Attribution.memberId is required, so NOT NULL holds.
+      `alter table messages add column if not exists author_member_id text generated always as (author->>'memberId') stored not null`,
+      `create index if not exists messages_space_author on messages (space_id, author_member_id)`,
+      // The one member-keyed table without an org (015 gave push its own):
+      // member ids are org-scoped, and the schema now says so.
+      `alter table activity_seen add column if not exists org_id text not null default 'org-default'`,
+      `alter table activity_seen drop constraint activity_seen_pkey`,
+      `alter table activity_seen add primary key (org_id, member_id)`,
+    ],
+  },
+  {
+    id: '023-open-spaces',
+    statements: [
+      `alter table spaces add column visibility text not null default 'private'`,
+      `alter table spaces add constraint spaces_visibility_check check (visibility in ('private', 'open'))`,
+      `alter table spaces add constraint spaces_direct_private_check check (kind <> 'direct' or visibility = 'private')`,
+    ],
+  },
+  {
+    id: '024-agent-members',
+    statements: [
+      // Agent members (spec §4, 2026-09-29). Every existing row is a person.
+      `alter table members add column kind text not null default 'human'`,
+      `alter table members add constraint members_kind_check check (kind in ('human', 'agent'))`,
+      // Admin powers are membership and policy; an agent holding them could
+      // add itself to spaces past the people who invoke it. Held here, not
+      // only in code, because seeds and backfills write SQL directly.
+      `alter table members add constraint members_agent_not_admin_check check (kind = 'human' or role = 'member')`,
+    ],
+  },
+  {
+    // 025 was reserved for PR #1130's replicas-threads, which the 2026-09-30
+    // redesign on the agent contract replaced (028); the gap stays.
+    id: '026-agent-keys',
+    statements: [
+      // An agent's owner (spec §4 Agent members, 2026-09-29): the person who
+      // added it. Null for people. (Replicas was to be org-owned; the
+      // 2026-09-30 redesign gave every agent an owner.)
+      `alter table members add column owner_id text`,
+      `alter table members add constraint members_owner_agent_check check (owner_id is null or kind = 'agent')`,
+      // Keys stored as a SHA-256 of the secret, never the secret: a 256-bit
+      // random token needs no slow hash, and a leaked table grants nothing.
+      `create table agent_keys (
+        org_id text not null,
+        id text not null,
+        agent_id text not null,
+        hash text not null,
+        created_by text not null,
+        created_at text not null,
+        last_used_at text,
+        revoked_at text,
+        primary key (org_id, id),
+        foreign key (org_id, agent_id) references members(org_id, id)
+      )`,
+      `create unique index agent_keys_hash on agent_keys (hash)`,
+      `create index agent_keys_agent on agent_keys (org_id, agent_id)`,
+    ],
+  },
+  {
+    // Agent invocations (spec §8 Invoking agent members, 2026-09-30). The
+    // object lives in `data` (protocol Invocation); the columns are what the
+    // queue and the listings query on. One invocation per (message, agent):
+    // the unique index makes a replayed post a no-op. The queue runs in the
+    // order the messages were posted — `message_offset`, the space's log
+    // order, allocated under the space lock — never by a machine's clock,
+    // which can disagree across Harbor instances.
+    id: '027-invocations',
+    statements: [
+      `create table invocations (
+        org_id text not null,
+        id text not null,
+        agent_id text not null,
+        space_id text not null,
+        thread_root_id text not null,
+        message_id text not null,
+        message_offset int not null,
+        state text not null,
+        created_at text not null,
+        data jsonb not null,
+        primary key (org_id, id)
+      )`,
+      `alter table invocations add constraint invocations_state_check
+        check (state in ('queued', 'pending', 'working', 'waiting', 'done', 'failed', 'cancelled', 'refused'))`,
+      `create unique index invocations_message_agent on invocations (org_id, message_id, agent_id)`,
+      `create index invocations_agent_state on invocations (org_id, agent_id, state)`,
+      `create index invocations_conversation on invocations (space_id, thread_root_id, message_offset)`,
+      `create table agent_capabilities (
+        org_id text not null,
+        agent_id text not null,
+        data jsonb not null,
+        updated_at text not null,
+        primary key (org_id, agent_id)
+      )`,
+    ],
+  },
+  {
+    // What an agent is and how Harbor reaches it, and what a connector Harbor
+    // runs keeps (spec §4 Agent members and §8 Connectors, 2026-09-30: the
+    // Replicas redesign on the agent contract). Open strings: which pairs are
+    // valid is AGENT_PAIRS in the protocol, so a new pair needs no migration.
+    id: '028-agent-connections',
+    statements: [
+      `alter table members add column agent_kind text`,
+      `alter table members add column agent_connection text`,
+      `update members set agent_kind = 'custom', agent_connection = 'contract' where kind = 'agent'`,
+      `alter table members add constraint members_agent_connection_check check (
+        (kind = 'agent' and agent_kind is not null and agent_connection is not null)
+        or (kind = 'human' and agent_kind is null and agent_connection is null)
+      )`,
+      // A platform's key, which Harbor presents, so sealed rather than hashed
+      // (sealing.ts), unlike agent_keys. One per agent; replacing it clears a rejection.
+      `create table agent_connection_credentials (
+        org_id text not null,
+        agent_id text not null,
+        sealed text not null,
+        hint text not null,
+        set_by text not null,
+        set_at text not null,
+        rejected_at text,
+        rejected_reason text,
+        primary key (org_id, agent_id),
+        foreign key (org_id, agent_id) references members(org_id, id)
+      )`,
+      // A connector's record per thread (its platform session, how far
+      // delivery reached, what is in flight), for follow-ups and restart
+      // recovery. `data` is the connector's own shape.
+      `create table agent_connection_threads (
+        org_id text not null,
+        agent_id text not null,
+        space_id text not null,
+        thread_root_id text not null,
+        data jsonb not null,
+        updated_at text not null,
+        primary key (org_id, agent_id, space_id, thread_root_id),
+        foreign key (org_id, agent_id) references members(org_id, id)
+      )`,
+    ],
+  },
+  {
+    // Approvals (spec §8 part 4, 2026-10-01): an agent's request for a
+    // person's OK, its own record on an invocation. `data` is the whole
+    // Approval; the columns are what the queries need. One per request key
+    // per invocation, so a connector raising it again gets the first back.
+    id: '029-approvals',
+    statements: [
+      `create table approvals (
+        org_id text not null,
+        id text not null,
+        invocation_id text not null,
+        agent_id text not null,
+        space_id text not null,
+        message_id text not null,
+        request_key text not null,
+        state text not null,
+        applied boolean not null default false,
+        created_at text not null,
+        data jsonb not null,
+        primary key (org_id, id)
+      )`,
+      `alter table approvals add constraint approvals_state_check
+        check (state in ('open', 'allowed', 'denied', 'expired', 'cancelled'))`,
+      `create unique index approvals_request on approvals (org_id, invocation_id, request_key)`,
+      `create index approvals_agent_state on approvals (org_id, agent_id, state)`,
+      `create index approvals_message on approvals (space_id, message_id)`,
+      // The card's approval as raised rides its message row, as a poll does.
+      `alter table messages add column approval jsonb`,
+    ],
+  },
+  {
+    // An agent's option defaults, set by its owner (spec §8 Invocation
+    // options, 2026-10-01): kept apart from agent_capabilities, which its
+    // connector rewrites whenever it declares, so a reconnect never loses them.
+    id: '030-agent-option-defaults',
+    statements: [
+      `create table agent_option_defaults (
+        org_id text not null,
+        agent_id text not null,
+        data jsonb not null,
+        set_by text not null,
+        set_at text not null,
+        primary key (org_id, agent_id),
+        foreign key (org_id, agent_id) references members(org_id, id)
+      )`,
     ],
   },
 ];

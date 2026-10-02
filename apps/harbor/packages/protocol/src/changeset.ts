@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { BlobInfo } from './blob.js';
 import { Attribution, ActingMode } from './core.js';
-import { AssetPath, AssetVersion, BlobHash, ChangeSetId, MessageId, SpaceId, StreamOffset } from './ids.js';
+import { AssetId, AssetPath, AssetVersion, BlobHash, ChangeSetId, MessageId, SpaceId, StreamOffset } from './ids.js';
 
 // Decision 1 (CONTRACT.md): a proposal is full new content against a declared
 // base version; the org performs a line-level three-way merge. No operation
@@ -13,10 +13,31 @@ import { AssetPath, AssetVersion, BlobHash, ChangeSetId, MessageId, SpaceId, Str
 // only the populated field differs. Binary staleness never merges: a stale
 // binary base (or a binary head) is conflict-or-replace, never a three-way.
 
+/**
+ * A file, as every listing, read, search hit, and create result describes it
+ * (2026-09-14): the id is the identity every operation addresses; the path is
+ * its display name and tree position, changed only by moveAsset. Folders are
+ * display: clients group paths on `/`.
+ */
+export const Asset = z.object({
+  id: AssetId,
+  path: AssetPath,
+  version: AssetVersion,
+  updatedAt: z.iso.datetime(),
+  /** Present when the head version is binary. */
+  blob: BlobInfo.optional(),
+  /** Present only on trash entries (listAssets includeDeleted); absent = live. */
+  state: z.literal('deleted').optional(),
+});
+export type Asset = z.infer<typeof Asset>;
+
 /** The durable record of one applied change (spec §6). Content is fetched via read/history/diff, not carried here. */
 export const ChangeSet = z.object({
   id: ChangeSetId,
   spaceId: SpaceId,
+  /** The file this change belongs to — the lineage key history filters on. */
+  assetId: AssetId,
+  /** The file's path WHEN the change committed: a point-in-time record for rendering history, never an address. */
   assetPath: AssetPath,
   /** 0 means the change created the asset. */
   baseVersion: z.number().int().nonnegative(),
@@ -42,9 +63,9 @@ export const ChangeSet = z.object({
 export type ChangeSet = z.infer<typeof ChangeSet>;
 
 export const ProposeChange = z.object({
-  assetPath: AssetPath,
-  /** Version the proposer last read. 0 = create; stale values trigger merge or conflict. */
-  baseVersion: z.number().int().nonnegative(),
+  assetId: AssetId,
+  /** Version the proposer last read; stale values trigger merge or conflict. New files are born via createAsset. */
+  baseVersion: z.number().int().positive(),
   /** Text variant: full desired content (inline cap 1MB — over that, or non-UTF-8, attach a blob instead). */
   newContent: z.string().max(1_048_576).optional(),
   /** Binary variant: the address of bytes already uploaded to this space (uploadBlob). Exactly one of newContent/blob. */
@@ -60,6 +81,35 @@ export const ProposeChange = z.object({
   }
 });
 export type ProposeChange = z.infer<typeof ProposeChange>;
+
+/**
+ * Birth (2026-09-14): the one operation that addresses a file by name, because
+ * the file has no id yet. The path must be free among the living (the trash
+ * never blocks a name); the result carries the new id every later call uses.
+ */
+export const CreateAsset = z.object({
+  path: AssetPath,
+  /** Text variant: full content (inline cap 1MB — over that, or non-UTF-8, attach a blob instead). */
+  newContent: z.string().max(1_048_576).optional(),
+  /** Binary variant: the address of bytes already uploaded to this space (uploadBlob). Exactly one of newContent/blob. */
+  blob: BlobHash.optional(),
+  reason: z.string().max(1_000).optional(),
+  threadRootId: MessageId.optional(),
+  actingMode: ActingMode,
+  agentName: z.string().max(64).optional(),
+}).superRefine((v, ctx) => {
+  if ((v.newContent === undefined) === (v.blob === undefined)) {
+    ctx.addIssue({ code: 'custom', message: 'exactly one of newContent or blob' });
+  }
+});
+export type CreateAsset = z.infer<typeof CreateAsset>;
+
+/** Occupied path = invalid_request. Never a conflict: nothing existed to be stale against. */
+export const CreateAssetResult = z.object({
+  asset: Asset,
+  changeSet: ChangeSet,
+});
+export type CreateAssetResult = z.infer<typeof CreateAssetResult>;
 
 /**
  * The reason-suffix convention, owned here so both faces parse it identically:
@@ -151,7 +201,7 @@ export const DeleteAssetResult = z.discriminatedUnion('outcome', [
 ]);
 export type DeleteAssetResult = z.infer<typeof DeleteAssetResult>;
 
-/** Restore never conflicts (the file is frozen while deleted); occupied paths refuse as errors. */
+/** Restore never conflicts (the file is frozen while deleted); an occupied path refuses as an error. */
 export const RestoreAssetResult = z.object({
   outcome: z.literal('restored'),
   changeSet: ChangeSet,
@@ -161,6 +211,8 @@ export type RestoreAssetResult = z.infer<typeof RestoreAssetResult>;
 
 /** Read is bundled with recent history everywhere (spec §6: read-before-write is mechanical fact). */
 export const ReadAssetResult = z.object({
+  id: AssetId,
+  /** The file's current path — display only (a rename changes it, the id does not). */
   path: AssetPath,
   /** '' for binary versions — the bytes live behind getBlob, addressed by `blob.hash`. */
   content: z.string(),

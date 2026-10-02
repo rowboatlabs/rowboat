@@ -9,12 +9,9 @@ import {
   type Message,
 } from '@rowboat/spaces-protocol';
 import { legacyToTokens } from '../src/mentions-backfill.js';
-import { PgStore } from '../src/pg-store.js';
 import { searchTextFor } from '../src/search.js';
-import { startHarbor, type HarborOptions, type RunningHarbor } from '../src/server.js';
-import type { SqlDb } from '../src/sql.js';
-import { agentClient, callStructured, restClient } from './helpers.js';
-import { pgliteDb } from './pglite.js';
+import type { RunningHarbor } from '../src/server.js';
+import { agentClient, callStructured, restClient, startTestHarbor } from './helpers.js';
 
 // Mentions (2026-09-10, protocol mentions.ts): one grammar — link tokens with
 // the id in the href — and one parser. The org STAMPS who a message addresses
@@ -25,6 +22,7 @@ import { pgliteDb } from './pglite.js';
 // through the ordinary edit path as the author.
 
 const tok = (id: string, label = id) => mentionToken({ kind: 'member', id, label });
+const sp = (id: string, label = id) => mentionToken({ kind: 'space', id, label });
 
 describe('the grammar', () => {
   it('parses tokens, dedupes ids, and treats tokens inside code as cites', () => {
@@ -50,6 +48,21 @@ describe('the grammar', () => {
 
   it('the search text collapses tokens to bare keys so labels and "member" never index', () => {
     expect(searchTextFor(`ask ${tok('ramnique', 'Ramnique Singh')} about [@here](#here)`)).toBe('ask ramnique about here');
+    expect(searchTextFor(`see ${sp('S1', 'General')}`)).toBe('see S1');
+  });
+
+  it('a space token refers, never addresses: it stamps nothing, relabels from the listing, and flattens to #Name', () => {
+    expect(sp('S1', 'General')).toBe('[#General](#space:S1)');
+    expect(sp('S1', '')).toBe('[#S1](#space:S1)');
+    const body = `look at ${sp('S1', 'Old Name')} and ${sp('S2', 'Secret')} with ${tok('harsh', 'Harsh')}`;
+    expect(parseMentions(body)).toEqual({ members: ['harsh'], here: false, rowboat: false });
+    const spaceNames = new Map([['S1', 'General']]);
+    expect(relabelMentions(body, new Map(), spaceNames)).toBe(`look at ${sp('S1', 'General')} and ${sp('S2', 'Secret')} with ${tok('harsh', 'Harsh')}`);
+    expect(mentionsAsText(body, new Map(), spaceNames)).toBe('look at #General and #Secret with @Harsh');
+    expect(mentionsAsText(body, new Map())).toBe('look at #Old Name and #Secret with @Harsh');
+    // The sigil and the href kind must agree — a mismatch is prose.
+    expect(parseMentions('[#x](#member:harsh) [@y](#space:S1)')).toEqual({ members: [], here: false, rowboat: false });
+    expect(mapMentionTokens('[#x](#member:harsh) [@y](#space:S1)', () => 'T')).toBe('[#x](#member:harsh) [@y](#space:S1)');
   });
 
   it('the backfill rewrites the pre-token spelling for known ids only, punctuation intact, idempotently', () => {
@@ -62,14 +75,13 @@ describe('the grammar', () => {
 });
 
 let harbor: RunningHarbor;
-let sqlDb: SqlDb | undefined;
 let ramnique: ReturnType<typeof restClient>;
 let harsh: ReturnType<typeof restClient>;
 let arjun: ReturnType<typeof restClient>;
 let main: string;
 
-async function startForStore(kind: 'memory' | 'postgres'): Promise<void> {
-  const options: HarborOptions = {
+async function start(): Promise<void> {
+  harbor = await startTestHarbor({
     orgName: 'Rowboat Labs',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
@@ -78,14 +90,7 @@ async function startForStore(kind: 'memory' | 'postgres'): Promise<void> {
       { id: 'gagan', displayName: 'Gagan' },
     ],
     seedSpaces: [{ name: 'Main', creator: 'ramnique' }],
-  };
-  if (kind === 'postgres') {
-    sqlDb = await pgliteDb();
-    const store = new PgStore(sqlDb);
-    await store.init();
-    options.store = store;
-  }
-  harbor = await startHarbor(options);
+  });
   ramnique = restClient(harbor, 'dev-ramnique');
   harsh = restClient(harbor, 'dev-harsh');
   arjun = restClient(harbor, 'dev-arjun');
@@ -111,17 +116,15 @@ async function unreadOf(client: ReturnType<typeof restClient>) {
     | undefined;
 }
 
-describe.each([['memory'], ['postgres']] as const)('mentions (%s store)', (storeKind) => {
+describe('mentions', () => {
   let root: Message;
 
   beforeAll(async () => {
-    await startForStore(storeKind);
+    await start();
   });
 
   afterAll(async () => {
     await harbor.close();
-    await sqlDb?.close();
-    sqlDb = undefined;
   });
 
   it('stamps only tokens naming space members; a bare name or a non-member id is prose', async () => {
@@ -163,7 +166,7 @@ describe.each([['memory'], ['postgres']] as const)('mentions (%s store)', (store
     expect(edited.body.message).toMatchObject({ mentions: ['arjun'], editedAt: expect.any(String) });
     expect((await arjun.get(`/v1/spaces/${main}/threads/${m.id}`)).body.following).toBe(true);
     expect((await unreadOf(arjun))!.unreadMentions).toBeGreaterThan(0);
-    const events = await harbor.service.eventsAfter(main, 0);
+    const events = await harbor.store.listEventsAfter(main, 0);
     const edit = events.map((e) => e.event).find((e) => e.type === 'message_edited' && e.edit.messageId === m.id);
     expect(edit).toMatchObject({ edit: { mentions: ['arjun'] } });
 
@@ -183,18 +186,21 @@ describe.each([['memory'], ['postgres']] as const)('mentions (%s store)', (store
     expect(JSON.stringify(byKeyword.body.messages)).not.toContain(m.id);
   });
 
-  it('the agent face re-resolves every label from the roster', async () => {
-    const m = await post(harsh, `for ${tok('ramnique', 'Whoever')} and ${tok('ghost', 'Ghost')}`);
+  it('the agent face re-resolves every label from the roster, and space tokens from the reader\'s own listing', async () => {
+    const other = (await ramnique.post('/v1/spaces', { name: 'Private' })).body.space.id as string;
+    const m = await post(harsh, `for ${tok('ramnique', 'Whoever')} and ${tok('ghost', 'Ghost')} — see ${sp(main, 'Stale')} and ${sp(other, 'Hidden')}`);
+    expect(m).toMatchObject({ mentions: ['ramnique'] });
     const client: Client = await agentClient(harbor, 'dev-arjun');
     const thread = await callStructured<{ root: Message }>(client, 'read_thread', { spaceId: main, rootMessageId: m.id });
-    expect(thread.root.body).toBe(`for ${tok('ramnique', 'Ramnique')} and ${tok('ghost', 'Ghost')}`);
+    // Arjun is in Mentions but not Private: the first relabels, the second keeps its label.
+    expect(thread.root.body).toBe(`for ${tok('ramnique', 'Ramnique')} and ${tok('ghost', 'Ghost')} — see ${sp(main, 'Mentions')} and ${sp(other, 'Hidden')}`);
     const stream = await callStructured<{ messages: Message[] }>(client, 'read_stream', { spaceId: main });
     expect(stream.messages.find((x) => x.id === m.id)!.body).toContain(tok('ramnique', 'Ramnique'));
     await client.close();
   });
 
   it('the backfill rewrites the pre-token spelling through the edit path as the author, once', async () => {
-    const head = await harbor.service.headOffset(main);
+    const head = await harbor.store.head(main);
     const legacy: Message = {
       id: '01J8ZZZZZZZZZZZZZZZZZZZZZA',
       spaceId: main,
@@ -221,16 +227,16 @@ describe.each([['memory'], ['postgres']] as const)('mentions (%s store)', (store
     expect(after).toMatchObject({ mentions: ['ramnique'], mentionsHere: true, editedAt: expect.any(String) });
     expect((await harbor.store.getTopic(main, topic.body.topic.id))!.title).toBe(`ask ${tok('ramnique', 'Ramnique')}`);
     // The log says the author edited it, and replay serves the new spelling.
-    const events = await harbor.service.eventsAfter(main, head + 1);
+    const events = await harbor.store.listEventsAfter(main, head + 1);
     expect(events.map((e) => e.event.type)).toEqual(['topic', 'message_edited', 'topic']);
     const edit = events.find((e) => e.event.type === 'message_edited')!.event as Extract<(typeof events)[number]['event'], { type: 'message_edited' }>;
     expect(edit.edit.by).toEqual({ memberId: 'harsh', actingMode: 'direct' });
-    const stored = (await harbor.service.eventsAfter(main, head)).find((e) => e.offset === head + 1)!.event as Extract<(typeof events)[number]['event'], { type: 'message' }>;
+    const stored = (await harbor.store.listEventsAfter(main, head)).find((e) => e.offset === head + 1)!.event as Extract<(typeof events)[number]['event'], { type: 'message' }>;
     expect(stored.message.body).toBe(after.body);
     expect(stored.message.mentions).toEqual(['ramnique']);
 
     expect(await harbor.service.migrateMentions({ force: true })).toEqual({ messages: 0, titles: 0, restamped: 0 });
     expect(await harbor.service.migrateMentions()).toEqual({ messages: 0, titles: 0, restamped: 0 }); // the ledger: never again
-    expect((await harbor.service.eventsAfter(main, head + 1)).length).toBe(3);
+    expect((await harbor.store.listEventsAfter(main, head + 1)).length).toBe(3);
   });
 });

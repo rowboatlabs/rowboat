@@ -2,7 +2,14 @@ import type { ActivityKind, Attribution } from '@rowboat/spaces-protocol';
 import type { ActivityQuery, ActivityRow } from './store.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type {
+  AgentKey,
   BlobInfo,
+  ConnectorCapabilities,
+  Approval,
+  ApprovalState,
+  Invocation,
+  InvocationOptionValues,
+  InvocationState,
   ChangeSet,
   Member,
   Membership,
@@ -14,15 +21,18 @@ import type {
 } from '@rowboat/spaces-protocol';
 import { migrate } from './migrations.js';
 import { sortActivity } from './activity-sort.js';
-import { extractSearchText, matchesAllTerms, searchTextFor, snippetAround, toPathPatterns, toTsQueryString, type SearchQuery } from './search.js';
+import { extractSearchText, searchTextFor, snippetAround, toPathPatterns, toTsQueryString, type SearchQuery } from './search.js';
 import type { SqlDb, SqlExecutor } from './sql.js';
-import { type PushLevel,
+import {
+  type MessageWindow, type PushLevel,
   directKeyFor,
   type AssetRecord,
   type AssetSearchRow,
   type AssetVersionData,
   type MessageSearchRow,
   type Store,
+  type StoredAgentCredential,
+  type StoredAgentKey,
   type StoredEvent,
   type StoredInvite,
   type StoredPollVote,
@@ -50,6 +60,54 @@ interface MemberRow {
   display_name: string;
   avatar_url: string | null;
   role: Member['role'];
+  kind: Member['kind'];
+  owner_id: string | null;
+  agent_kind: string | null;
+  agent_connection: string | null;
+}
+
+interface AgentKeyRow {
+  id: string;
+  agent_id: string;
+  hash: string;
+  created_by: string;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
+
+function rowToAgentKey(r: AgentKeyRow): StoredAgentKey {
+  return {
+    id: r.id,
+    agentId: r.agent_id,
+    hash: r.hash,
+    createdBy: r.created_by,
+    createdAt: r.created_at,
+    ...(r.last_used_at !== null ? { lastUsedAt: r.last_used_at } : {}),
+    ...(r.revoked_at !== null ? { revokedAt: r.revoked_at } : {}),
+  };
+}
+
+interface AgentCredentialRow {
+  agent_id: string;
+  sealed: string;
+  hint: string;
+  set_by: string;
+  set_at: string;
+  rejected_at: string | null;
+  rejected_reason: string | null;
+}
+
+function rowToAgentCredential(r: AgentCredentialRow): StoredAgentCredential {
+  return {
+    agentId: r.agent_id,
+    sealed: r.sealed,
+    hint: r.hint,
+    setBy: r.set_by,
+    setAt: r.set_at,
+    ...(r.rejected_at !== null ? { rejectedAt: r.rejected_at } : {}),
+    ...(r.rejected_reason !== null ? { rejectedReason: r.rejected_reason } : {}),
+  };
 }
 
 function rowToMember(r: MemberRow): Member {
@@ -58,6 +116,10 @@ function rowToMember(r: MemberRow): Member {
     displayName: r.display_name,
     ...(r.avatar_url !== null ? { avatarUrl: r.avatar_url } : {}),
     role: r.role,
+    kind: r.kind,
+    ...(r.owner_id !== null ? { ownerId: r.owner_id } : {}),
+    ...(r.agent_kind !== null ? { agentKind: r.agent_kind } : {}),
+    ...(r.agent_connection !== null ? { agentConnection: r.agent_connection } : {}),
   };
 }
 
@@ -66,6 +128,7 @@ interface SpaceRow {
   name: string;
   created_at: string;
   kind: Space['kind'];
+  visibility: Space['visibility'];
   direct_key: string | null;
 }
 
@@ -75,6 +138,7 @@ function rowToSpace(r: SpaceRow): Space {
     name: r.name,
     createdAt: r.created_at,
     kind: r.kind,
+    visibility: r.visibility,
     ...(r.kind === 'direct' && r.direct_key !== null ? { participants: JSON.parse(r.direct_key) as string[] } : {}),
   };
 }
@@ -82,6 +146,7 @@ function rowToSpace(r: SpaceRow): Space {
 interface ChangeSetRow {
   id: string;
   space_id: string;
+  asset_id: string;
   asset_path: string;
   base_version: number;
   result_version: number;
@@ -99,6 +164,7 @@ function rowToChangeSet(r: ChangeSetRow): ChangeSet {
   return {
     id: r.id,
     spaceId: r.space_id,
+    assetId: r.asset_id,
     assetPath: r.asset_path,
     baseVersion: r.base_version,
     resultVersion: r.result_version,
@@ -121,18 +187,11 @@ interface TopicRow {
   created_by: Topic['createdBy'];
   created_at: string;
   archived: boolean;
-  /** Projected by TOPIC_SELECT: the linked asset's current path, null unless it is live. */
-  document_path: string | null;
+  /** The linked file's id (migration 019), null when nothing is attached. */
+  document_asset_id: string | null;
 }
 
-/**
- * Every topic read goes through this projection: the row plus the linked
- * document's CURRENT live path (migration 019). A trashed file projects
- * null — the link is kept on the row and comes back on restore.
- */
-const TOPIC_SELECT = `select t.*, a.path as document_path
-  from topics t
-  left join assets a on a.space_id = t.space_id and a.id = t.document_asset_id and a.state = 'live'`;
+const TOPIC_SELECT = `select t.* from topics t`;
 
 function rowToTopic(r: TopicRow): Topic {
   return {
@@ -143,7 +202,7 @@ function rowToTopic(r: TopicRow): Topic {
     createdBy: r.created_by,
     createdAt: r.created_at,
     archived: r.archived,
-    ...(r.document_path !== null && r.document_path !== undefined ? { documentPath: r.document_path } : {}),
+    ...(r.document_asset_id !== null && r.document_asset_id !== undefined ? { documentAssetId: r.document_asset_id } : {}),
   };
 }
 
@@ -161,6 +220,7 @@ interface MessageRow {
   deleted_at: string | null;
   edited_at: string | null;
   poll: Poll | null;
+  approval?: Approval | null;
   stream_offset: number;
   mentions: string[] | null;
   mentions_here: boolean | null;
@@ -186,6 +246,8 @@ function rowToMessage(r: MessageRow): Message {
     reactions: [],
     // The poll definition rides the row; live votes fold in on reads too.
     ...(r.poll !== null && r.poll !== undefined ? { poll: r.poll } : {}),
+    // An approval card's approval as raised; the current one folds in on reads (spec §8 part 4).
+    ...(r.approval !== null && r.approval !== undefined ? { approval: r.approval } : {}),
     mentions: r.mentions ?? [],
     mentionsHere: r.mentions_here ?? false,
     mentionsRowboat: r.mentions_rowboat ?? false,
@@ -193,6 +255,7 @@ function rowToMessage(r: MessageRow): Message {
 }
 
 interface ReactionRow {
+  stream_offset: number | string;
   space_id: string;
   message_id: string;
   emoji: string;
@@ -202,6 +265,7 @@ interface ReactionRow {
 
 function rowToReaction(r: ReactionRow): StoredReaction {
   return {
+    offset: Number(r.stream_offset),
     spaceId: r.space_id,
     messageId: r.message_id,
     emoji: r.emoji,
@@ -306,11 +370,22 @@ export class PgStore implements Store {
     });
   }
 
+  /**
+   * One transaction for an org-level write that spans this store and the
+   * caller's own statements (directory.ts createOrg, 2026-09-22): the
+   * store's executor is bound to it — withSpaceLock's trick without the
+   * space lock — and the same transaction is handed to the caller, so
+   * everything commits or nothing does.
+   */
+  async transaction<T>(fn: (tx: SqlExecutor) => Promise<T>): Promise<T> {
+    return this.db.withTransaction((tx) => this.als.run(tx, () => fn(tx)));
+  }
+
   // --- members ---------------------------------------------------------------
 
   async getMember(id: string): Promise<Member | undefined> {
     const rows = await this.sql.query<MemberRow>(
-      'select id, display_name, avatar_url, role from members where org_id = $1 and id = $2',
+      'select id, display_name, avatar_url, role, kind, owner_id, agent_kind, agent_connection from members where org_id = $1 and id = $2',
       [this.orgId, id],
     );
     return rows[0] ? rowToMember(rows[0]) : undefined;
@@ -318,23 +393,38 @@ export class PgStore implements Store {
 
   async listAllMembers(): Promise<Member[]> {
     const rows = await this.sql.query<MemberRow>(
-      'select id, display_name, avatar_url, role from members where org_id = $1 order by id',
+      'select id, display_name, avatar_url, role, kind, owner_id, agent_kind, agent_connection from members where org_id = $1 order by id',
       [this.orgId],
     );
     return rows.map(rowToMember);
   }
 
+  async listSpaceMembers(spaceId: string): Promise<Member[]> {
+    const rows = await this.sql.query<MemberRow>(
+      `select m.id, m.display_name, m.avatar_url, m.role, m.kind, m.owner_id, m.agent_kind, m.agent_connection from memberships ms
+       join members m on m.org_id = $1 and m.id = ms.member_id
+       where ms.space_id = $2
+       order by ms.joined_at, ms.member_id`,
+      [this.orgId, spaceId],
+    );
+    return rows.map(rowToMember);
+  }
+
   async putMember(member: Member): Promise<void> {
+    // Kind, owner, and an agent's kind and connection are written once and
+    // never updated: a person never becomes an agent or back, ownership has no
+    // transfer yet, and reaching an agent another way is a new agent (spec §4
+    // Agent members, 2026-09-29 and 2026-09-30).
     await this.sql.query(
-      `insert into members (org_id, id, display_name, avatar_url, role) values ($1, $2, $3, $4, $5)
+      `insert into members (org_id, id, display_name, avatar_url, role, kind, owner_id, agent_kind, agent_connection) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        on conflict (org_id, id) do update set display_name = excluded.display_name, avatar_url = excluded.avatar_url, role = excluded.role`,
-      [this.orgId, member.id, member.displayName, member.avatarUrl ?? null, member.role],
+      [this.orgId, member.id, member.displayName, member.avatarUrl ?? null, member.role, member.kind, member.ownerId ?? null, member.agentKind ?? null, member.agentConnection ?? null],
     );
   }
 
   async getMemberByIdentity(iss: string, sub: string): Promise<Member | undefined> {
     const rows = await this.sql.query<MemberRow>(
-      `select m.id, m.display_name, m.avatar_url, m.role from member_identities mi
+      `select m.id, m.display_name, m.avatar_url, m.role, m.kind, m.owner_id, m.agent_kind, m.agent_connection from member_identities mi
        join members m on m.org_id = mi.org_id and m.id = mi.member_id
        where mi.org_id = $1 and mi.iss = $2 and mi.sub = $3`,
       [this.orgId, iss, sub],
@@ -357,7 +447,7 @@ export class PgStore implements Store {
     // same direct_key trips the partial unique index (migration 014) and
     // raises — the service treats that as "lost the race, re-read".
     await this.sql.query(
-      `insert into spaces (org_id, id, name, created_at, kind, direct_key) values ($1, $2, $3, $4, $5, $6)
+      `insert into spaces (org_id, id, name, created_at, kind, visibility, direct_key) values ($1, $2, $3, $4, $5, $6, $7)
        on conflict (id) do update set name = excluded.name`,
       [
         this.orgId,
@@ -365,6 +455,7 @@ export class PgStore implements Store {
         space.name,
         space.createdAt,
         space.kind,
+        space.visibility,
         space.kind === 'direct' ? directKeyFor(space.participants ?? []) : null,
       ],
     );
@@ -374,15 +465,26 @@ export class PgStore implements Store {
     // Org-scoped on purpose: this is what makes a foreign org's space ids
     // (and invite tokens, which resolve through here) not_found.
     const rows = await this.sql.query<SpaceRow>(
-      'select id, name, created_at, kind, direct_key from spaces where org_id = $1 and id = $2',
+      'select id, name, created_at, kind, visibility, direct_key from spaces where org_id = $1 and id = $2',
       [this.orgId, id],
     );
     return rows[0] ? rowToSpace(rows[0]) : undefined;
   }
 
+  async browseSpaces(memberId: string): Promise<Array<{ space: Space; joined: boolean }>> {
+    const rows = await this.sql.query<SpaceRow & { joined: boolean }>(
+      `select s.id, s.name, s.created_at, s.kind, s.visibility, s.direct_key,
+        exists (select 1 from memberships m where m.space_id = s.id and m.member_id = $2) as joined
+       from spaces s where s.org_id = $1 and s.kind = 'shared' and s.visibility = 'open'
+       order by lower(s.name), s.id`,
+      [this.orgId, memberId],
+    );
+    return rows.map((r) => ({ space: rowToSpace(r), joined: r.joined }));
+  }
+
   async listSpacesFor(memberId: string, opts: { includeDirect?: boolean } = {}): Promise<Space[]> {
     const rows = await this.sql.query<SpaceRow>(
-      `select s.id, s.name, s.created_at, s.kind, s.direct_key from spaces s
+      `select s.id, s.name, s.created_at, s.kind, s.visibility, s.direct_key from spaces s
        join memberships m on m.space_id = s.id
        where s.org_id = $1 and m.member_id = $2 and ($3::boolean or s.kind <> 'direct')
        order by s.created_at, s.id`,
@@ -393,7 +495,7 @@ export class PgStore implements Store {
 
   async listAllSpaces(): Promise<Space[]> {
     const rows = await this.sql.query<SpaceRow>(
-      'select id, name, created_at, kind, direct_key from spaces where org_id = $1 order by created_at, id',
+      'select id, name, created_at, kind, visibility, direct_key from spaces where org_id = $1 order by created_at, id',
       [this.orgId],
     );
     return rows.map(rowToSpace);
@@ -401,7 +503,7 @@ export class PgStore implements Store {
 
   async getDirectSpace(directKey: string): Promise<Space | undefined> {
     const rows = await this.sql.query<SpaceRow>(
-      `select id, name, created_at, kind, direct_key from spaces
+      `select id, name, created_at, kind, visibility, direct_key from spaces
        where org_id = $1 and kind = 'direct' and direct_key = $2`,
       [this.orgId, directKey],
     );
@@ -439,7 +541,7 @@ export class PgStore implements Store {
     await this.sql.query('delete from memberships where space_id = $1 and member_id = $2', [spaceId, memberId]);
   }
 
-  // --- push (PUSH_PLAN.md) ---------------------------------------------------
+  // --- push (CONTRACT.md, the push bullet) -----------------------------------
 
   async putPushToken(memberId: string, token: string, updatedAt: string): Promise<void> {
     await this.sql.query(
@@ -451,6 +553,14 @@ export class PgStore implements Store {
 
   async deletePushToken(token: string): Promise<void> {
     await this.sql.query('delete from push_tokens where org_id = $1 and token = $2', [this.orgId, token]);
+  }
+
+  async deleteMemberPushToken(memberId: string, token: string): Promise<void> {
+    await this.sql.query('delete from push_tokens where org_id = $1 and member_id = $2 and token = $3', [
+      this.orgId,
+      memberId,
+      token,
+    ]);
   }
 
   async listPushTokens(memberId: string): Promise<string[]> {
@@ -505,15 +615,6 @@ export class PgStore implements Store {
   async getLiveAssetByPath(spaceId: string, path: string): Promise<AssetRecord | undefined> {
     const rows = await this.sql.query<AssetRow>(
       `${this.assetSelect} where a.space_id = $1 and a.path = $2 and a.state = 'live'`,
-      [spaceId, path],
-    );
-    return rows[0] ? this.assetRow(rows[0]) : undefined;
-  }
-
-  async getLatestDeletedByPath(spaceId: string, path: string): Promise<AssetRecord | undefined> {
-    const rows = await this.sql.query<AssetRow>(
-      `${this.assetSelect} where a.space_id = $1 and a.path = $2 and a.state = 'deleted'
-       order by a.updated_at desc limit 1`,
       [spaceId, path],
     );
     return rows[0] ? this.assetRow(rows[0]) : undefined;
@@ -582,28 +683,6 @@ export class PgStore implements Store {
     ]);
   }
 
-  // --- redirects -------------------------------------------------------------
-
-  async putRedirect(spaceId: string, path: string, assetId: string, movedAt: string): Promise<void> {
-    await this.sql.query(
-      `insert into asset_redirects (space_id, path, asset_id, moved_at) values ($1, $2, $3, $4)
-       on conflict (space_id, path) do update set asset_id = excluded.asset_id, moved_at = excluded.moved_at`,
-      [spaceId, path, assetId, movedAt],
-    );
-  }
-
-  async getRedirect(spaceId: string, path: string): Promise<string | undefined> {
-    const rows = await this.sql.query<{ asset_id: string }>(
-      'select asset_id from asset_redirects where space_id = $1 and path = $2',
-      [spaceId, path],
-    );
-    return rows[0]?.asset_id;
-  }
-
-  async deleteRedirect(spaceId: string, path: string): Promise<void> {
-    await this.sql.query('delete from asset_redirects where space_id = $1 and path = $2', [spaceId, path]);
-  }
-
   // --- uploaded blobs --------------------------------------------------------
 
   async putSpaceBlob(blob: StoredSpaceBlob): Promise<void> {
@@ -642,14 +721,14 @@ export class PgStore implements Store {
 
   // --- change log ------------------------------------------------------------
 
-  async appendChangeSet(changeSet: ChangeSet, assetId: string): Promise<void> {
+  async appendChangeSet(changeSet: ChangeSet): Promise<void> {
     await this.sql.query(
       `insert into change_sets (id, space_id, asset_id, asset_path, base_version, result_version, attribution, reason, thread_root_id, blob, op, moved_from, committed_at, stream_offset)
        values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10::jsonb, $11, $12, $13, $14)`,
       [
         changeSet.id,
         changeSet.spaceId,
-        assetId,
+        changeSet.assetId,
         changeSet.assetPath,
         changeSet.baseVersion,
         changeSet.resultVersion,
@@ -706,14 +785,6 @@ export class PgStore implements Store {
     await this.sql.query('update topics set document_asset_id = $3 where space_id = $1 and id = $2', [spaceId, topicId, assetId]);
   }
 
-  async getTopicDocument(spaceId: string, topicId: string): Promise<string | undefined> {
-    const rows = await this.sql.query<{ document_asset_id: string | null }>(
-      'select document_asset_id from topics where space_id = $1 and id = $2',
-      [spaceId, topicId],
-    );
-    return rows[0]?.document_asset_id ?? undefined;
-  }
-
   async putTopic(topic: Topic): Promise<void> {
     await this.sql.query(
       `insert into topics (id, space_id, root_message_id, title, created_by, created_at, archived, search_text)
@@ -763,25 +834,33 @@ export class PgStore implements Store {
   }
 
   /** Shared window shape: NEWEST `limit` rows below `beforeOffset`, returned oldest first. */
-  private async windowMessages(where: string, params: unknown[], opts?: { beforeOffset?: number; limit?: number }): Promise<Message[]> {
+  private async windowMessages(where: string, params: unknown[], opts?: MessageWindow): Promise<Message[]> {
     if (opts?.beforeOffset !== undefined) {
       params.push(opts.beforeOffset);
       where += ` and stream_offset < $${params.length}`;
     }
+    if (opts?.afterOffset !== undefined) {
+      params.push(opts.afterOffset);
+      where += ` and stream_offset > $${params.length}`;
+    }
     let sql = `select * from messages where ${where} order by stream_offset`;
     if (opts?.limit !== undefined) {
       params.push(opts.limit);
-      sql = `select * from (select * from messages where ${where} order by stream_offset desc limit $${params.length}) w order by stream_offset`;
+      // Paging forward takes the OLDEST rows above the edge; every other page the newest below it.
+      sql =
+        opts.afterOffset !== undefined
+          ? `select * from messages where ${where} order by stream_offset limit $${params.length}`
+          : `select * from (select * from messages where ${where} order by stream_offset desc limit $${params.length}) w order by stream_offset`;
     }
     const rows = await this.sql.query<MessageRow>(sql, params);
     return rows.map(rowToMessage);
   }
 
-  async listStream(spaceId: string, opts?: { beforeOffset?: number; limit?: number }): Promise<Message[]> {
+  async listStream(spaceId: string, opts?: MessageWindow): Promise<Message[]> {
     return this.windowMessages('space_id = $1 and thread_root is null', [spaceId], opts);
   }
 
-  async listThread(spaceId: string, rootMessageId: string, opts?: { beforeOffset?: number; limit?: number }): Promise<Message[]> {
+  async listThread(spaceId: string, rootMessageId: string, opts?: MessageWindow): Promise<Message[]> {
     return this.windowMessages('space_id = $1 and thread_root = $2', [spaceId, rootMessageId], opts);
   }
 
@@ -844,8 +923,8 @@ export class PgStore implements Store {
 
   async appendMessage(message: Message): Promise<void> {
     await this.sql.query(
-      `insert into messages (id, space_id, thread_root, author, body, posted_at, stream_offset, reply_count, last_reply_at, anchor_change_set_id, poll, mentions, mentions_here, mentions_rowboat, search_text)
-       values ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14, $15)`,
+      `insert into messages (id, space_id, thread_root, author, body, posted_at, stream_offset, reply_count, last_reply_at, anchor_change_set_id, poll, mentions, mentions_here, mentions_rowboat, search_text, approval)
+       values ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14, $15, $16::jsonb)`,
       [
         message.id,
         message.spaceId,
@@ -862,6 +941,7 @@ export class PgStore implements Store {
         message.mentionsHere,
         message.mentionsRowboat,
         searchTextFor(message.body),
+        message.approval ? JSON.stringify(message.approval) : null,
       ],
     );
   }
@@ -911,7 +991,7 @@ export class PgStore implements Store {
 
   async markMessageDeleted(spaceId: string, messageId: string, deletedAt: string): Promise<void> {
     await this.sql.query(
-      `update messages set body = '', deleted_at = $3, poll = null, mentions = '[]'::jsonb, mentions_here = false, mentions_rowboat = false, search_text = ''
+      `update messages set body = '', deleted_at = $3, poll = null, approval = null, mentions = '[]'::jsonb, mentions_here = false, mentions_rowboat = false, search_text = ''
        where space_id = $1 and id = $2`,
       [spaceId, messageId, deletedAt],
     );
@@ -920,7 +1000,7 @@ export class PgStore implements Store {
     // Redact the stored message event too — replay must never resurrect the
     // body (nor a poll, which is content the same way).
     await this.sql.query(
-      `update events set event = jsonb_set(event, '{message}', ((event->'message') #- '{poll}') || jsonb_build_object(
+      `update events set event = jsonb_set(event, '{message}', ((event->'message') #- '{poll}' #- '{approval}') || jsonb_build_object(
          'body', '', 'deletedAt', $3::text, 'mentions', '[]'::jsonb, 'mentionsHere', false, 'mentionsRowboat', false))
        where space_id = $1 and event->>'type' = 'message' and event->'message'->>'id' = $2`,
       [spaceId, messageId, deletedAt],
@@ -944,10 +1024,10 @@ export class PgStore implements Store {
 
   async putReaction(reaction: StoredReaction): Promise<void> {
     await this.sql.query(
-      `insert into reactions (space_id, message_id, emoji, member_id, attribution, at)
-       values ($1, $2, $3, $4, $5::jsonb, $6)
-       on conflict (space_id, message_id, emoji, member_id) do update set attribution = excluded.attribution, at = excluded.at`,
-      [reaction.spaceId, reaction.messageId, reaction.emoji, reaction.by.memberId, JSON.stringify(reaction.by), reaction.at],
+      `insert into reactions (space_id, message_id, emoji, member_id, attribution, at, stream_offset)
+       values ($1, $2, $3, $4, $5::jsonb, $6, $7)
+       on conflict (space_id, message_id, emoji, member_id) do update set attribution = excluded.attribution, at = excluded.at, stream_offset = excluded.stream_offset`,
+      [reaction.spaceId, reaction.messageId, reaction.emoji, reaction.by.memberId, JSON.stringify(reaction.by), reaction.at, reaction.offset],
     );
   }
 
@@ -1143,7 +1223,7 @@ export class PgStore implements Store {
     const rows = await this.sql.query<{ n: number }>(
       `select count(*)::int as n from messages
        where space_id = $1 and thread_root is null and deleted_at is null
-         and stream_offset > $2 and author->>'memberId' <> $3`,
+         and stream_offset > $2 and author_member_id <> $3`,
       [spaceId, afterOffset, memberId],
     );
     return rows[0]?.n ?? 0;
@@ -1153,7 +1233,7 @@ export class PgStore implements Store {
     const rows = await this.sql.query<{ n: number }>(
       `select count(*)::int as n from messages
        where space_id = $1 and thread_root is null and deleted_at is null
-         and stream_offset > $2 and author->>'memberId' <> $3
+         and stream_offset > $2 and author_member_id <> $3
          and (mentions_here or mentions @> $4::jsonb)`,
       [spaceId, afterOffset, memberId, JSON.stringify([memberId])],
     );
@@ -1186,7 +1266,7 @@ export class PgStore implements Store {
              join spaces s on s.id = m.space_id
              left join space_read_marks r on r.space_id = m.space_id and r.member_id = $1
              left join thread_read_marks t on t.space_id = m.space_id and t.root_message_id = m.thread_root and t.member_id = $1
-            where m.space_id = any($3::text[]) and m.deleted_at is null and m.author->>'memberId' <> $1
+            where m.space_id = any($3::text[]) and m.deleted_at is null and m.author_member_id <> $1
          ) x
          where x.kind is not null
            and ($4::text[] is null or x.kind = any($4::text[]))
@@ -1206,17 +1286,20 @@ export class PgStore implements Store {
         `select * from (
            select r.space_id, r.message_id, r.emoji, max(r.at) as at,
                   json_agg(r.attribution order by r.at desc) as actors,
-                  max(r.at) > coalesce((select seen_at from activity_seen where member_id = $1), '') as unread
+                  bool_or(r.stream_offset > coalesce(case when m.thread_root is null
+                    then (select read_offset from space_read_marks where space_id = r.space_id and member_id = $1)
+                    else (select read_offset from thread_read_marks where space_id = r.space_id and root_message_id = m.thread_root and member_id = $1)
+                  end, 0) and r.at > coalesce((select seen_at from activity_seen where org_id = $7 and member_id = $1), '')) as unread
              from reactions r
              join messages m on m.space_id = r.space_id and m.id = r.message_id
-            where r.space_id = any($2::text[]) and r.member_id <> $1 and m.deleted_at is null and m.author->>'memberId' = $1
+            where r.space_id = any($2::text[]) and r.member_id <> $1 and m.deleted_at is null and m.author_member_id = $1
             group by r.space_id, r.message_id, r.emoji
          ) x
          where (not $3::boolean or x.unread)
            and ($4::text is null or x.at < $4 or (x.at = $4 and ('r:' || x.message_id || ':' || x.emoji) < $5))
          order by x.at desc, x.message_id desc, x.emoji desc
          limit $6`,
-        [memberId, q.spaceIds, q.unreadOnly, q.before?.at ?? null, q.before?.id ?? null, q.limit],
+        [memberId, q.spaceIds, q.unreadOnly, q.before?.at ?? null, q.before?.id ?? null, q.limit, this.orgId],
       );
       for (const r of rows) {
         const message = await this.getMessage(r.space_id, r.message_id);
@@ -1240,7 +1323,7 @@ export class PgStore implements Store {
          join messages r on r.space_id = m.space_id and r.id = m.thread_root
          left join thread_read_marks t on t.space_id = m.space_id and t.root_message_id = m.thread_root and t.member_id = $1
         where m.space_id = any($2::text[]) and m.thread_root is not null and m.deleted_at is null
-          and m.author->>'memberId' <> $1
+          and m.author_member_id <> $1
           and (m.mentions @> $3::jsonb or m.mentions_here or s.kind = 'direct' or t.following)
         group by m.space_id, m.thread_root, r.last_reply_offset
        on conflict (space_id, root_message_id, member_id) do update set
@@ -1253,16 +1336,19 @@ export class PgStore implements Store {
   }
 
   async getActivitySeenAt(memberId: string): Promise<string | undefined> {
-    const rows = await this.sql.query<{ seen_at: string }>('select seen_at from activity_seen where member_id = $1', [memberId]);
+    const rows = await this.sql.query<{ seen_at: string }>(
+      'select seen_at from activity_seen where org_id = $1 and member_id = $2',
+      [this.orgId, memberId],
+    );
     return rows[0]?.seen_at;
   }
 
   async advanceActivitySeenAt(memberId: string, at: string): Promise<string> {
     const rows = await this.sql.query<{ seen_at: string }>(
-      `insert into activity_seen (member_id, seen_at) values ($1, $2)
-       on conflict (member_id) do update set seen_at = greatest(activity_seen.seen_at, excluded.seen_at)
+      `insert into activity_seen (org_id, member_id, seen_at) values ($1, $2, $3)
+       on conflict (org_id, member_id) do update set seen_at = greatest(activity_seen.seen_at, excluded.seen_at)
        returning seen_at`,
-      [memberId, at],
+      [this.orgId, memberId, at],
     );
     return rows[0]!.seen_at;
   }
@@ -1288,11 +1374,11 @@ export class PgStore implements Store {
                 (select count(*)::int from messages m
                   where m.space_id = t.space_id and m.thread_root = t.root_message_id
                     and m.deleted_at is null and m.stream_offset > t.read_offset
-                    and m.author->>'memberId' <> t.member_id) as unread_replies,
+                    and m.author_member_id <> t.member_id) as unread_replies,
                 (select count(*)::int from messages m
                   where m.space_id = t.space_id and m.thread_root = t.root_message_id
                     and m.deleted_at is null and m.stream_offset > t.read_offset
-                    and m.author->>'memberId' <> t.member_id
+                    and m.author_member_id <> t.member_id
                     and (m.mentions_here or m.mentions @> jsonb_build_array(t.member_id))) as unread_mentions
            from thread_read_marks t
            join messages r on r.space_id = t.space_id and r.id = t.root_message_id
@@ -1348,6 +1434,311 @@ export class PgStore implements Store {
     const rows = await this.sql.query<{ stream_offset: number; at: string; event: StoredEvent['event'] }>(
       'select stream_offset, at, event from events where space_id = $1 and stream_offset > $2 order by stream_offset',
       [spaceId, afterOffset],
+    );
+    return rows.map((r) => ({ offset: r.stream_offset, at: r.at, event: r.event }));
+  }
+
+  // --- agent keys ------------------------------------------------------------
+
+  async listAgents(ownerId: string | null): Promise<Member[]> {
+    const rows = await this.sql.query<MemberRow>(
+      `select id, display_name, avatar_url, role, kind, owner_id, agent_kind, agent_connection from members
+       where org_id = $1 and kind = 'agent' and ($2::text is null or owner_id = $2)
+       order by lower(display_name), id`,
+      [this.orgId, ownerId],
+    );
+    return rows.map(rowToMember);
+  }
+
+  async putAgentKey(key: StoredAgentKey): Promise<void> {
+    await this.sql.query(
+      `insert into agent_keys (org_id, id, agent_id, hash, created_by, created_at) values ($1, $2, $3, $4, $5, $6)`,
+      [this.orgId, key.id, key.agentId, key.hash, key.createdBy, key.createdAt],
+    );
+  }
+
+  async getAgentKey(id: string): Promise<StoredAgentKey | undefined> {
+    const rows = await this.sql.query<AgentKeyRow>('select * from agent_keys where org_id = $1 and id = $2', [this.orgId, id]);
+    return rows[0] ? rowToAgentKey(rows[0]) : undefined;
+  }
+
+  async getAgentKeyByHash(hash: string): Promise<StoredAgentKey | undefined> {
+    const rows = await this.sql.query<AgentKeyRow>('select * from agent_keys where org_id = $1 and hash = $2', [this.orgId, hash]);
+    return rows[0] ? rowToAgentKey(rows[0]) : undefined;
+  }
+
+  async listAgentKeys(agentIds: string[]): Promise<AgentKey[]> {
+    if (agentIds.length === 0) return [];
+    const rows = await this.sql.query<AgentKeyRow>(
+      'select * from agent_keys where org_id = $1 and agent_id = any($2::text[]) order by created_at, id',
+      [this.orgId, agentIds],
+    );
+    return rows.map((r) => {
+      const { hash: _hash, ...key } = rowToAgentKey(r);
+      return key;
+    });
+  }
+
+  async revokeAgentKey(id: string, at: string): Promise<void> {
+    await this.sql.query('update agent_keys set revoked_at = coalesce(revoked_at, $3) where org_id = $1 and id = $2', [this.orgId, id, at]);
+  }
+
+  async touchAgentKey(id: string, at: string, since: string): Promise<void> {
+    await this.sql.query(
+      'update agent_keys set last_used_at = $3 where org_id = $1 and id = $2 and (last_used_at is null or last_used_at < $4)',
+      [this.orgId, id, at, since],
+    );
+  }
+
+  // --- invocations -------------------------------------------------------------
+
+  async insertInvocation(invocation: Invocation, messageOffset: number): Promise<void> {
+    await this.sql.query(
+      `insert into invocations (org_id, id, agent_id, space_id, thread_root_id, message_id, message_offset, state, created_at, data)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [
+        this.orgId,
+        invocation.id,
+        invocation.agentId,
+        invocation.conversation.spaceId,
+        invocation.conversation.threadRootId,
+        invocation.trigger.messageId,
+        messageOffset,
+        invocation.state,
+        invocation.createdAt,
+        JSON.stringify(invocation),
+      ],
+    );
+  }
+
+  async putInvocation(invocation: Invocation): Promise<void> {
+    await this.sql.query('update invocations set state = $3, data = $4 where org_id = $1 and id = $2', [
+      this.orgId,
+      invocation.id,
+      invocation.state,
+      JSON.stringify(invocation),
+    ]);
+  }
+
+  async getInvocation(id: string): Promise<Invocation | undefined> {
+    const rows = await this.sql.query<{ data: Invocation }>('select data from invocations where org_id = $1 and id = $2', [this.orgId, id]);
+    return rows[0]?.data;
+  }
+
+  async listInvocationsForAgent(agentId: string, states: InvocationState[]): Promise<Invocation[]> {
+    const rows = await this.sql.query<{ data: Invocation }>(
+      'select data from invocations where org_id = $1 and agent_id = $2 and state = any($3::text[]) order by created_at, id',
+      [this.orgId, agentId, states],
+    );
+    return rows.map((r) => r.data);
+  }
+
+  async listConversationInvocations(agentId: string, spaceId: string, threadRootId: string): Promise<Invocation[]> {
+    const rows = await this.sql.query<{ data: Invocation }>(
+      `select data from invocations
+       where space_id = $1 and thread_root_id = $2 and org_id = $3 and agent_id = $4
+       order by message_offset, id`,
+      [spaceId, threadRootId, this.orgId, agentId],
+    );
+    return rows.map((r) => r.data);
+  }
+
+  async listSpaceInvocations(spaceId: string, threadRootId: string | null, limit: number): Promise<Invocation[]> {
+    const rows = await this.sql.query<{ data: Invocation }>(
+      `select data from invocations
+       where space_id = $1 and org_id = $2 and ($3::text is null or thread_root_id = $3)
+       order by message_offset desc, id desc limit $4`,
+      [spaceId, this.orgId, threadRootId, limit],
+    );
+    return rows.map((r) => r.data);
+  }
+
+  // --- approvals (spec §8 part 4, 2026-10-01) ------------------------------------
+
+  async insertApproval(approval: Approval): Promise<void> {
+    await this.sql.query(
+      `insert into approvals (org_id, id, invocation_id, agent_id, space_id, message_id, request_key, state, applied, created_at, data)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [
+        this.orgId,
+        approval.id,
+        approval.invocationId,
+        approval.agentId,
+        approval.conversation.spaceId,
+        approval.messageId,
+        approval.requestKey,
+        approval.state,
+        approval.appliedAt !== undefined,
+        approval.createdAt,
+        JSON.stringify(approval),
+      ],
+    );
+  }
+
+  async putApproval(approval: Approval): Promise<void> {
+    await this.sql.query('update approvals set state = $3, applied = $4, data = $5 where org_id = $1 and id = $2', [
+      this.orgId,
+      approval.id,
+      approval.state,
+      approval.appliedAt !== undefined,
+      JSON.stringify(approval),
+    ]);
+  }
+
+  async getApproval(id: string): Promise<Approval | undefined> {
+    const rows = await this.sql.query<{ data: Approval }>('select data from approvals where org_id = $1 and id = $2', [this.orgId, id]);
+    return rows[0]?.data;
+  }
+
+  async getApprovalByRequest(invocationId: string, requestKey: string): Promise<Approval | undefined> {
+    const rows = await this.sql.query<{ data: Approval }>(
+      'select data from approvals where org_id = $1 and invocation_id = $2 and request_key = $3',
+      [this.orgId, invocationId, requestKey],
+    );
+    return rows[0]?.data;
+  }
+
+  async listInvocationApprovals(invocationId: string, states: ApprovalState[]): Promise<Approval[]> {
+    const rows = await this.sql.query<{ data: Approval }>(
+      'select data from approvals where org_id = $1 and invocation_id = $2 and state = any($3::text[]) order by created_at, id',
+      [this.orgId, invocationId, states],
+    );
+    return rows.map((r) => r.data);
+  }
+
+  async listUnappliedDecisions(agentId: string): Promise<Approval[]> {
+    const rows = await this.sql.query<{ data: Approval }>(
+      `select data from approvals where org_id = $1 and agent_id = $2 and state in ('allowed', 'denied') and not applied
+       order by created_at, id`,
+      [this.orgId, agentId],
+    );
+    return rows.map((r) => r.data);
+  }
+
+  async listApprovalsForMessages(spaceId: string, messageIds: string[]): Promise<Approval[]> {
+    if (messageIds.length === 0) return [];
+    const rows = await this.sql.query<{ data: Approval }>(
+      'select data from approvals where space_id = $1 and org_id = $2 and message_id = any($3::text[])',
+      [spaceId, this.orgId, messageIds],
+    );
+    return rows.map((r) => r.data);
+  }
+
+  async sharesSharedSpace(a: string, b: string): Promise<boolean> {
+    const rows = await this.sql.query<{ shares: boolean }>(
+      `select exists (
+         select 1 from memberships ma
+         join memberships mb on mb.space_id = ma.space_id
+         join spaces s on s.id = ma.space_id
+         where s.org_id = $1 and s.kind = 'shared' and ma.member_id = $2 and mb.member_id = $3
+       ) as shares`,
+      [this.orgId, a, b],
+    );
+    return rows[0]?.shares === true;
+  }
+
+  async getAgentCapabilities(agentId: string): Promise<ConnectorCapabilities | undefined> {
+    const rows = await this.sql.query<{ data: ConnectorCapabilities }>(
+      'select data from agent_capabilities where org_id = $1 and agent_id = $2',
+      [this.orgId, agentId],
+    );
+    return rows[0]?.data;
+  }
+
+  async getAgentOptionDefaults(agentId: string): Promise<InvocationOptionValues | undefined> {
+    const rows = await this.sql.query<{ data: InvocationOptionValues }>(
+      'select data from agent_option_defaults where org_id = $1 and agent_id = $2',
+      [this.orgId, agentId],
+    );
+    return rows[0]?.data;
+  }
+
+  async putAgentOptionDefaults(agentId: string, defaults: InvocationOptionValues, by: string, at: string): Promise<void> {
+    await this.sql.query(
+      `insert into agent_option_defaults (org_id, agent_id, data, set_by, set_at) values ($1, $2, $3, $4, $5)
+       on conflict (org_id, agent_id) do update set data = excluded.data, set_by = excluded.set_by, set_at = excluded.set_at`,
+      [this.orgId, agentId, JSON.stringify(defaults), by, at],
+    );
+  }
+
+  async putAgentCapabilities(agentId: string, capabilities: ConnectorCapabilities, at: string): Promise<void> {
+    await this.sql.query(
+      `insert into agent_capabilities (org_id, agent_id, data, updated_at) values ($1, $2, $3, $4)
+       on conflict (org_id, agent_id) do update set data = excluded.data, updated_at = excluded.updated_at`,
+      [this.orgId, agentId, JSON.stringify(capabilities), at],
+    );
+  }
+
+  // --- connectors Harbor runs (spec §8 Connectors, 2026-09-30) ---
+
+  async listAgentsByConnection(connections: readonly string[]): Promise<Member[]> {
+    if (connections.length === 0) return [];
+    const rows = await this.sql.query<MemberRow>(
+      `select id, display_name, avatar_url, role, kind, owner_id, agent_kind, agent_connection from members
+       where org_id = $1 and kind = 'agent' and agent_connection = any($2::text[]) order by id`,
+      [this.orgId, [...connections]],
+    );
+    return rows.map(rowToMember);
+  }
+  async getAgentCredential(agentId: string): Promise<StoredAgentCredential | undefined> {
+    const rows = await this.sql.query<AgentCredentialRow>(
+      `select agent_id, sealed, hint, set_by, set_at, rejected_at, rejected_reason from agent_connection_credentials
+       where org_id = $1 and agent_id = $2`,
+      [this.orgId, agentId],
+    );
+    return rows[0] ? rowToAgentCredential(rows[0]) : undefined;
+  }
+  async listAgentCredentials(agentIds: string[]): Promise<StoredAgentCredential[]> {
+    if (agentIds.length === 0) return [];
+    const rows = await this.sql.query<AgentCredentialRow>(
+      `select agent_id, sealed, hint, set_by, set_at, rejected_at, rejected_reason from agent_connection_credentials
+       where org_id = $1 and agent_id = any($2::text[])`,
+      [this.orgId, agentIds],
+    );
+    return rows.map(rowToAgentCredential);
+  }
+  async putAgentCredential(credential: StoredAgentCredential): Promise<void> {
+    await this.sql.query(
+      `insert into agent_connection_credentials (org_id, agent_id, sealed, hint, set_by, set_at) values ($1, $2, $3, $4, $5, $6)
+       on conflict (org_id, agent_id) do update set sealed = excluded.sealed, hint = excluded.hint, set_by = excluded.set_by,
+         set_at = excluded.set_at, rejected_at = null, rejected_reason = null`,
+      [this.orgId, credential.agentId, credential.sealed, credential.hint, credential.setBy, credential.setAt],
+    );
+  }
+  async rejectAgentCredential(agentId: string, at: string, reason: string): Promise<boolean> {
+    const rows = await this.sql.query<{ agent_id: string }>(
+      `update agent_connection_credentials set rejected_at = $3, rejected_reason = $4
+       where org_id = $1 and agent_id = $2 and rejected_at is null returning agent_id`,
+      [this.orgId, agentId, at, reason.slice(0, 280)],
+    );
+    return rows.length > 0;
+  }
+  async getConnectionThread(agentId: string, spaceId: string, threadRootId: string): Promise<unknown | undefined> {
+    const rows = await this.sql.query<{ data: unknown }>(
+      'select data from agent_connection_threads where org_id = $1 and agent_id = $2 and space_id = $3 and thread_root_id = $4',
+      [this.orgId, agentId, spaceId, threadRootId],
+    );
+    return rows[0]?.data;
+  }
+  async putConnectionThread(agentId: string, spaceId: string, threadRootId: string, data: unknown, at: string): Promise<void> {
+    await this.sql.query(
+      `insert into agent_connection_threads (org_id, agent_id, space_id, thread_root_id, data, updated_at) values ($1, $2, $3, $4, $5, $6)
+       on conflict (org_id, agent_id, space_id, thread_root_id) do update set data = excluded.data, updated_at = excluded.updated_at`,
+      [this.orgId, agentId, spaceId, threadRootId, JSON.stringify(data), at],
+    );
+  }
+
+  // A range scan on the primary key, filtered in the row. Unindexed on
+  // purpose (2026-09-29): a page's range is small unless its window spans a
+  // long, reply-heavy stretch; the trigger for a partial index on the type is
+  // a slow stream load.
+  async listMembershipEvents(spaceId: string, afterOffset: number, upToOffset: number | null): Promise<StoredEvent[]> {
+    const rows = await this.sql.query<{ stream_offset: number; at: string; event: StoredEvent['event'] }>(
+      `select stream_offset, at, event from events
+       where space_id = $1 and stream_offset > $2 and ($3::int is null or stream_offset <= $3)
+         and event->>'type' = 'membership'
+       order by stream_offset`,
+      [spaceId, afterOffset, upToOffset],
     );
     return rows.map((r) => ({ offset: r.stream_offset, at: r.at, event: r.event }));
   }

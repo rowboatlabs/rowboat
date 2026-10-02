@@ -9,13 +9,11 @@ import type { TTSState } from '@/hooks/useVoiceTTS'
 import { cn } from '@/lib/utils'
 import tourClipWelcome from '@/assets/tour/welcome.mp3'
 import tourClipSpaces from '@/assets/tour/spaces.mp3'
-import tourClipHome from '@/assets/tour/home.mp3'
 import tourClipEmail from '@/assets/tour/email.mp3'
 import tourClipMeetings from '@/assets/tour/meetings.mp3'
 import tourClipCode from '@/assets/tour/code.mp3'
 import tourClipKnowledge from '@/assets/tour/knowledge.mp3'
 import tourClipAgents from '@/assets/tour/agents.mp3'
-import tourClipApps from '@/assets/tour/apps.mp3'
 import tourClipWorkspaces from '@/assets/tour/workspaces.mp3'
 import tourClipChats from '@/assets/tour/chats.mp3'
 import tourClipComposer from '@/assets/tour/composer.mp3'
@@ -87,14 +85,6 @@ const TOUR_STEPS: TourStep[] = [
     text: 'Record or join meetings and get transcripts and notes automatically. Prep briefs show up before your calls, too.',
   },
   {
-    id: 'code',
-    targetId: 'nav-code',
-    navigate: 'code',
-    hat: 'hardhat',
-    title: 'Code',
-    text: 'Code runs coding agents like Claude Code and Codex on your repos. Every session is a chat on its own worktree, with the diff, files, and a terminal one click away.',
-  },
-  {
     id: 'knowledge',
     targetId: 'nav-knowledge',
     navigate: 'knowledge',
@@ -103,21 +93,14 @@ const TOUR_STEPS: TourStep[] = [
     title: 'Brain',
     text: 'Brain is your knowledge base. Notes, files, and everything Rowboat learns for you, all connected and searchable.',
   },
-  {
-    id: 'home',
-    targetId: 'nav-home',
-    navigate: 'home',
-    title: 'Todo',
-    text: 'Todo is one rolling list of what needs doing. Mention @rowboat on any line to hand it off, and my receipt lands right under the item when it is done.',
-    voiceText: 'Todo is one rolling list of what needs doing. Mention at-rowboat on any line to hand it off, and my receipt lands right under the item when it is done.',
-  },
+
   {
     id: 'workspaces',
     targetId: 'nav-workspaces',
     navigate: 'workspaces',
     hat: 'explorer',
     title: 'Projects',
-    text: 'Projects keep local files and related chats together. Pick a chat in the rail to work with Rowboat, or open a file alongside it.',
+    text: 'Open a folder in Projects and organize conversations into threads. Git projects start in a worktree with Harness enabled. Switch agents, models, and reasoning effort beside the chat input, or turn Harness off to chat with Rowboat.',
   },
   {
     id: 'agents',
@@ -128,13 +111,7 @@ const TOUR_STEPS: TourStep[] = [
     title: 'Background agents',
     text: 'Background agents work on schedules. They keep your Brain fresh and take care of recurring tasks while you row elsewhere.',
   },
-  {
-    id: 'apps',
-    targetId: 'nav-apps',
-    navigate: 'apps',
-    title: 'Apps',
-    text: 'Apps are mini-apps you build right here in Rowboat. They get the same tools and integrations I do, and you can share them with other people. Just ask for one in chat.',
-  },
+
   {
     id: 'chats',
     targetId: 'nav-chats',
@@ -162,13 +139,11 @@ const TOUR_STEPS: TourStep[] = [
 const TOUR_CLIPS: Record<string, string> = {
   welcome: tourClipWelcome,
   spaces: tourClipSpaces,
-  home: tourClipHome,
   email: tourClipEmail,
   meetings: tourClipMeetings,
   code: tourClipCode,
   knowledge: tourClipKnowledge,
   agents: tourClipAgents,
-  apps: tourClipApps,
   workspaces: tourClipWorkspaces,
   chats: tourClipChats,
   composer: tourClipComposer,

@@ -81,6 +81,8 @@ function hydrateMembers(k: string): void {
 }
 
 async function loadMembers(orgId: string, spaceId: string): Promise<void> {
+    // A composer mounted outside a space pane has no refs — nothing to ask for.
+    if (!orgId || !spaceId) return
     const k = key(orgId, spaceId)
     if (membersLoading.has(k)) return
     membersLoading.add(k)
@@ -110,13 +112,20 @@ export function prefetchMembers(orgId: string, spaceId: string): void {
 /**
  * Refetch on live activity. The pane's tick fires on EVERY event (and on
  * resubscribe), so this throttles: membership changes ride the next quiet
- * moment, not every message in a burst.
+ * moment, not every message in a burst. `force` skips the throttle for a
+ * change this member just made (Add people), which must show at once.
  */
-export function refreshMembers(orgId: string, spaceId: string): void {
+export function refreshMembers(orgId: string, spaceId: string, opts: { force?: boolean } = {}): void {
     const k = key(orgId, spaceId)
-    if (Date.now() - (lastLoadedAt.get(k) ?? 0) >= REFRESH_MIN_MS) void loadMembers(orgId, spaceId)
+    const due = (at: number | undefined) => opts.force || Date.now() - (at ?? 0) >= REFRESH_MIN_MS
+    if (due(lastLoadedAt.get(k))) void loadMembers(orgId, spaceId)
     // Membership changes in any space change who is in the org's directory too.
-    if (Date.now() - (lastLoadedAt.get(orgKey(orgId)) ?? 0) >= REFRESH_MIN_MS) void loadOrgRoster(orgId, [])
+    if (due(lastLoadedAt.get(orgKey(orgId)))) void loadOrgRoster(orgId, [])
+}
+
+/** Refetch the org roster now: a change this member just made (a new agent) must show in the pickers at once. */
+export function refreshOrgRoster(orgId: string): void {
+    void loadOrgRoster(orgId, [])
 }
 
 /** The union of whatever per-space rosters are already in, A–Z. */
@@ -127,6 +136,7 @@ function unionOfRosters(orgId: string, spaceIds: readonly string[]): spaces.Memb
 }
 
 async function loadOrgRoster(orgId: string, spaceIds: readonly string[]): Promise<void> {
+    if (!orgId) return
     const k = orgKey(orgId)
     if (membersLoading.has(k)) return
     membersLoading.add(k)
@@ -174,10 +184,10 @@ export function useSelfDisplayName(orgId: string, memberId: string, spaceIds: re
 }
 
 /**
- * Everyone your person shares a space with on this org, A–Z — the people a
- * DM can be opened with. The org computes it (GET /v1/members: the union of
- * your space rosters, DMs included, deduped — Discord's "people you share a
- * server with" rule, by construction rather than policy). Cached per org
+ * Everyone on this org, people and agents, A–Z (GET /v1/members: the whole
+ * org since 2026-09-29, Slack's workspace-wide member list; it was the
+ * people you share a space with before) — who a DM can be opened with, who
+ * Add people offers, who a mention can name. Cached per org
  * like the per-space rosters, so the picker's first frame is already full;
  * refreshed on mount and, throttled, on live activity (refreshMembers).
  * `spaceIds` only feeds the fallback for an org that does not serve the route.
