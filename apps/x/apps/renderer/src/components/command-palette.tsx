@@ -44,7 +44,7 @@ import {
   type CrossSpaceResults,
   type SpaceRef,
 } from '@/lib/command-palette/spaces-search'
-import { SPACES_ENABLED } from '@/lib/feature-flags'
+import { SPACES_ENABLED, SPACES_ONLY } from '@/lib/feature-flags'
 import { chord } from '@/lib/shortcut'
 import { formatFeedTime, resolveMentions } from '@/lib/spaces-presentation'
 import { spaceVisitedAt, useSpaceVisitsVersion } from '@/lib/spaces-visits'
@@ -261,7 +261,8 @@ export function CommandPalette({ open, onOpenChange, chats, notes, defaultScope,
   }, [open])
 
   const scopes = useMemo(
-    () => PALETTE_SCOPES.filter((s) => (s.key === 'spaces' ? SPACES_ENABLED : s.key === 'code' ? codeMode : true)),
+    // Spaces-only (2026-10-02, spaces-only flag PR): All and Spaces, nothing local.
+    () => PALETTE_SCOPES.filter((s) => (SPACES_ONLY ? s.key === 'all' || s.key === 'spaces' : s.key === 'spaces' ? SPACES_ENABLED : s.key === 'code' ? codeMode : true)),
     [codeMode],
   )
   const cycleScope = useCallback((step: 1 | -1) => {
@@ -335,6 +336,7 @@ export function CommandPalette({ open, onOpenChange, chats, notes, defaultScope,
     for (const s of PALETTE_SECTIONS) {
       if (s.key === 'spaces' && !SPACES_ENABLED) continue
       if (s.key === 'code' && !codeMode) continue
+      if (SPACES_ONLY && s.key !== 'spaces' && s.key !== 'settings') continue
       items.push({
         texts: [s.label, ...s.keywords],
         priority: 0,
@@ -554,8 +556,8 @@ export function CommandPalette({ open, onOpenChange, chats, notes, defaultScope,
         setSearching(false)
         return
       }
-      const wantNotes = scope === 'all' || scope === 'brain'
-      const wantTranscripts = scope === 'all' || scope === 'chats' || scope === 'code'
+      const wantNotes = !SPACES_ONLY && (scope === 'all' || scope === 'brain')
+      const wantTranscripts = !SPACES_ONLY && (scope === 'all' || scope === 'chats' || scope === 'code')
       const wantSpaces = SPACES_ENABLED && (scope === 'all' || scope === 'spaces')
       const types: Array<'knowledge' | 'chat'> = [
         ...(wantNotes ? ['knowledge' as const] : []),

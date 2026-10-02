@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { cn, compactPath, parentPath } from "@/lib/utils"
-import { SPACES_ENABLED } from "@/lib/feature-flags"
+import { SPACES_ENABLED, SPACES_ONLY } from "@/lib/feature-flags"
 import * as analytics from "@/lib/analytics"
 import { useTheme } from "@/contexts/theme-context"
 import { toast } from "sonner"
@@ -148,6 +148,11 @@ const tabs: TabConfig[] = [
     description: "Get help and support",
   },
 ]
+
+// Spaces-only (2026-10-02, spaces-only flag PR): what Spaces and its @rowboat
+// agent use — the account, the agent's models, and the app itself. Connections,
+// MCP, code mode, phone/mobile channels and note tagging serve other sections.
+const SPACES_ONLY_TABS: ReadonlySet<ConfigTab> = new Set(["account", "models", "appearance", "shortcuts", "notifications", "help"])
 
 /** Sidebar nav grouping: identity first, capabilities, then app-level. */
 const NAV_SECTIONS: { label: string | null; ids: ConfigTab[] }[] = [
@@ -1563,7 +1568,10 @@ const ALL_NOTIFICATION_CATEGORIES: { key: NotificationCategoryKey; label: string
 
 // With Spaces dark, its notification category stays out of the settings UI
 // (the scheduler that emits it is gated on the same flag where core runs).
-const NOTIFICATION_CATEGORIES = ALL_NOTIFICATION_CATEGORIES.filter((cat) => SPACES_ENABLED || cat.key !== "space_mention")
+// Spaces-only keeps Spaces' own and the @rowboat agent's approval requests.
+const NOTIFICATION_CATEGORIES = ALL_NOTIFICATION_CATEGORIES.filter((cat) => SPACES_ONLY
+  ? cat.key === "space_mention" || cat.key === "agent_permission"
+  : SPACES_ENABLED || cat.key !== "space_mention")
 
 function NotificationSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const [categories, setCategories] = useState<Record<NotificationCategoryKey, boolean> | null>(null)
@@ -1949,17 +1957,19 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
   // with the dialog open, leaving the Models tab on the signed-in section.
   const { isRowboatConnected: rowboatConnected } = useModels()
 
-  // Reset to the requested default tab each time the dialog is opened
-  useEffect(() => {
-    if (open) {
-      setActiveTab(defaultTab)
-      analytics.settingsOpened(defaultTab)
-    }
-  }, [open, defaultTab])
-
   // Hybrid mode: the Models tab is shown in both modes — signed-in users can
   // pick gateway models AND bring their own providers/models alongside.
-  const visibleTabs = tabs
+  const visibleTabs = SPACES_ONLY ? tabs.filter((t) => SPACES_ONLY_TABS.has(t.id)) : tabs
+
+  // Reset to the requested default tab each time the dialog is opened (one
+  // spaces-only hides falls back to Account).
+  useEffect(() => {
+    if (open) {
+      const tab = SPACES_ONLY && !SPACES_ONLY_TABS.has(defaultTab) ? "account" : defaultTab
+      setActiveTab(tab)
+      analytics.settingsOpened(tab)
+    }
+  }, [open, defaultTab])
 
   const activeTabConfig = visibleTabs.find((t) => t.id === activeTab) ?? visibleTabs[0]
   const isJsonTab = activeTab === "mcp" || activeTab === "security"

@@ -2,6 +2,7 @@ import * as React from "react"
 import { CheckCircle2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { Step } from "./use-onboarding-state"
+import { SPACES_ONLY } from "@/lib/feature-flags"
 
 // Keep one sequence for account and API-key setup so users can revisit
 // Providers to add models after either login (2026-09-22, ChatGPT onboarding).
@@ -18,7 +19,8 @@ interface StepIndicatorProps {
 }
 
 export function StepIndicator({ currentStep }: StepIndicatorProps) {
-  const steps = STEPS
+  // Spaces-only skips Connect and Code (see handleNext).
+  const steps = SPACES_ONLY ? STEPS.filter(s => s.step !== 2 && s.step !== 3) : STEPS
   const currentIndex = steps.findIndex(s => s.step === currentStep)
 
   return (

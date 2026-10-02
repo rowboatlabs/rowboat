@@ -51,6 +51,7 @@ import container, { registerBrowserControlService, registerNotificationService, 
 import { forwardRpc } from "./rpc-forwarder.js";
 import { bounceAllLive, getClient as getSpaceClient, listOrgs as listSpaceOrgs } from "@x/core/dist/spaces/orgs.js";
 import { parseOrgUrl } from "@x/shared/dist/spaces.js";
+import { flags } from "@x/shared";
 import type { CodeModeManager } from "@x/core/dist/code-mode/acp/manager.js";
 import type { ISessions } from "@x/core/dist/runtime/sessions/index.js";
 import { browserViewManager, BROWSER_PARTITION } from "./browser/view.js";
@@ -671,7 +672,10 @@ app.whenReady().then(async () => {
   // whatever app the user is in. The app window owns the call engine it
   // relays to — if the user closed that window, the summon recreates it
   // hidden so the shortcut keeps working from anywhere.
-  initQuickAsk({
+  // Spaces-only (2026-10-02, spaces-only flag PR): no quick-ask, no Apps
+  // server, no meeting detection — none of them has a surface in that app.
+  const spacesOnly = flags.spacesOnly(process.env);
+  if (!spacesOnly) initQuickAsk({
     ensureAppWindow: () => {
       if (!mainWindow || mainWindow.isDestroyed()) createWindow({ startHidden: true });
     },
@@ -683,7 +687,7 @@ app.whenReady().then(async () => {
   // every app iframe hit connection-refused (blank app) for the first ~10s of
   // each launch. Route registration and the token cipher are synchronous;
   // the listen itself is fire-and-forget.
-  if (!childServerMode()) registerAppsHostApi();
+  if (!childServerMode() && !spacesOnly) registerAppsHostApi();
   // GitHub publish token at rest: encrypt via the OS keychain when available
   // (core stays electron-free; the cipher is injected here).
   setGithubTokenCipher({
@@ -741,7 +745,7 @@ app.whenReady().then(async () => {
   // running-app scan produce "Meeting detected" events; the popup asks
   // before anything records. Clicking "Take Notes" routes into the same
   // renderer flow as the calendar notification.
-  initMeetingPopup({
+  if (!spacesOnly) initMeetingPopup({
     onTakeNotes: (meeting) => {
       showApp();
       // The user may have started recording between popup and click —
@@ -763,7 +767,7 @@ app.whenReady().then(async () => {
       win.webContents.send("app:takeMeetingNotes", payload);
     },
   });
-  initMeetingDetection({
+  if (!spacesOnly) initMeetingDetection({
     helperPath: path.join(__dirname, "mic-monitor"),
     onDetected: (meeting) => showMeetingPopup(meeting),
     // Call ended while recording (meeting app released the mic) — the

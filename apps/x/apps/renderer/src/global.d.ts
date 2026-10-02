@@ -39,6 +39,7 @@ declare global {
     };
     featureFlags?: {
       spaces: boolean;
+      spacesOnly: boolean;
     };
   }
 }

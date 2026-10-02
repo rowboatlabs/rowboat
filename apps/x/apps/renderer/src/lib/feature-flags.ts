@@ -4,3 +4,8 @@
 // where no preload ran; there, every flag is off.
 
 export const SPACES_ENABLED: boolean = window.featureFlags?.spaces === true;
+
+// Spaces as the whole product (2026-10-02, spaces-only flag PR): the Spaces
+// rail replaces the app sidebar, every other section routes to Spaces, and
+// settings keep only what Spaces and its @rowboat agent use.
+export const SPACES_ONLY: boolean = window.featureFlags?.spacesOnly === true;
