@@ -4,6 +4,7 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
+import { SPACES_ONLY } from "@/lib/feature-flags"
 import { TYPESAFE_CONFIG_EVENT, setTagSuggestionsEnabled, useTagSuggestionsEnabled } from "@/lib/spaces-auto-route"
 
 // Jev (TypeSafe) under Settings > Models > Decision Models (2026-09-23; it
@@ -72,8 +73,9 @@ export function JevSettings({ dialogOpen }: { dialogOpen: boolean }) {
   return (
     <div className="space-y-2">
       <p className="text-xs text-muted-foreground">
-        Jev is TypeSafe's System One model: it answers typed questions rather than chat, so it does not appear in the
-        model pickers above. A key adds an Auto toggle beside @rowboat in a space's composer, which lets Jev decide
+        {SPACES_ONLY
+          ? "Jev is TypeSafe's System One model: it answers typed questions rather than chat. A key adds an Auto toggle to a space's composer, which lets Jev decide"
+          : "Jev is TypeSafe's System One model: it answers typed questions rather than chat, so it does not appear in the model pickers above. A key adds an Auto toggle beside @rowboat in a space's composer, which lets Jev decide"}{" "}
         whether a message starts something new or replies to an open thread, and a /find command that jumps to the
         message you describe. Without a key, nothing changes. Get a key from{" "}
         <a

@@ -15,7 +15,7 @@ import './App.css'
 import z from 'zod';
 import { CheckIcon, LoaderIcon, PanelLeftIcon, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon, SquarePen, MessageSquare } from 'lucide-react';
 import { cn, compactPath, parentPath } from '@/lib/utils';
-import { SPACES_ENABLED } from '@/lib/feature-flags';
+import { SPACES_ENABLED, SPACES_ONLY } from '@/lib/feature-flags';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
 import { AssistantWorkspace } from './components/assistant/assistant-workspace';
 import { ASSISTANT_LAYOUT_KEY, chatLocation, defaultWindowSize, restoreAssistantLayout, useAssistantLayout, type ChatLocation } from './lib/assistant-layout';
@@ -947,7 +947,8 @@ function App() {
   const [isLiveNotesOpen, setIsLiveNotesOpen] = useState(false)
   const [isBgTasksOpen, setIsBgTasksOpen] = useState(false)
   const [isAppsOpen, setIsAppsOpen] = useState(false)
-  const [isSpacesOpen, setIsSpacesOpen] = useState(false)
+  // Spaces-only lands on Spaces, and Spaces is all there is to land on.
+  const [isSpacesOpen, setIsSpacesOpen] = useState(SPACES_ONLY)
   // The space open in the Spaces view (org + space); the sidebar highlights it.
   const [spaceSelection, setSpaceSelection] = useState<SpaceSelection>(null)
   // Remember the last space opened (any route in) — the ⌥Tab switcher lands
@@ -1026,7 +1027,10 @@ function App() {
   const [titlebarControlsWidthPx, setTitlebarControlsWidthPx] = useState(
     (isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0) + TITLEBAR_TOGGLE_MARGIN_LEFT_PX + 3 * 32,
   )
-  const collapsedLeftPaddingPx = Math.max(12, titlebarControlsWidthPx + 8 - DOCK_GUTTER_PX)
+  // Spaces-only has no toggle cluster and no gutter: clear the traffic lights.
+  const collapsedLeftPaddingPx = SPACES_ONLY
+    ? Math.max(12, (isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0) + 8)
+    : Math.max(12, titlebarControlsWidthPx + 8 - DOCK_GUTTER_PX)
   // Expanded panel vs. collapsed dock — the collapse button swaps between
   // them; the choice persists per machine.
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
@@ -1495,7 +1499,8 @@ function App() {
     const run = async () => {
       try {
         const result = await window.ipc.invoke('migration:check-composio-google', null)
-        if (result.shouldShow) {
+        // Spaces-only connects no Google account to migrate.
+        if (result.shouldShow && !SPACES_ONLY) {
           setShowComposioGoogleMigration(true)
         }
       } catch (error) {
@@ -4897,7 +4902,8 @@ function App() {
     setIsLiveNotesOpen(false)
     setIsBgTasksOpen(false)
     setIsAppsOpen(false)
-    setIsSpacesOpen(false)
+    // Spaces-only: nothing may fall through to the full-screen Assistant.
+    setIsSpacesOpen(SPACES_ONLY)
     setIsEmailOpen(false)
     setIsKnowledgeViewOpen(false)
     setIsChatHistoryOpen(false)
@@ -5257,6 +5263,9 @@ function App() {
   // which used to live outside this system as a sentinel tab), applying a
   // view can never strand a stale section on screen.
   const applyViewState = useCallback(async (view: ViewState) => {
+    // Spaces-only: a stale history entry or deep link to any other section
+    // lands on Spaces instead.
+    if (SPACES_ONLY && view.type !== 'spaces') view = { type: 'spaces' }
     // Whether this navigation ENTERS Spaces (vs a click within it) — read
     // before closeAllSections resets the flag.
     closeAllSections()
@@ -5367,6 +5376,10 @@ function App() {
   applyViewStateRef.current = applyViewState
 
   const navigateToView = useCallback(async (nextView: ViewState) => {
+    // Spaces-only (2026-10-02, spaces-only flag PR): every route into another
+    // section (palette, menus, shortcuts, notifications, deep links) is a
+    // no-op, so none of them leaves a history entry either.
+    if (SPACES_ONLY && nextView.type !== 'spaces') return
     const current = currentViewStateRef.current
     if (current.type === 'workspace' && nextView.type === 'file') {
       nextView = { ...current, filePath: nextView.path }
@@ -5407,6 +5420,8 @@ function App() {
   }, [navigateToView])
 
   const moveAssistantChat = useCallback((id: string, location: ChatLocation) => {
+    // Spaces-only has no Assistant page to move a chat onto.
+    if (SPACES_ONLY && location === 'assistant') return
     const tab = chatTabsRef.current.find((entry) => entry.id === id)
     if (!tab) return
     // Moving the Assistant page's chat out leaves a fresh one behind (placed
@@ -5453,6 +5468,8 @@ function App() {
   // Cmd+L hides the sidebar without closing its chat. The same tab and session
   // return when it is reopened, just as the Assistant page does after navigation.
   const toggleChatSidebar = useCallback(() => {
+    // Spaces-only has no chat at all (2026-10-02, spaces-only flag PR).
+    if (SPACES_ONLY) return
     if (assistantLayout.sidebar && assistantLayout.sidebarVisible) dispatchAssistantLayout({ type: 'hide-sidebar' })
     else if (assistantLayout.sidebar) {
       dispatchAssistantLayout({ type: 'show-sidebar' })
@@ -5771,6 +5788,8 @@ function App() {
   }, [])
   notifyVoiceUnavailableRef.current = notifyVoiceUnavailable
   useEffect(() => {
+    // Spaces-only never registers the hover chord, so there is nothing to warn about.
+    if (SPACES_ONLY) return
     const timer = setTimeout(async () => {
       try {
         const s = await window.ipc.invoke('quickAsk:getShortcut', null)
@@ -6233,6 +6252,7 @@ function App() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'n') {
+        if (SPACES_ONLY) return
         e.preventDefault()
         handleNewChatTab()
       }
@@ -6396,7 +6416,8 @@ function App() {
     }
     analytics.onboardingCompleted()
     setShowOnboarding(false)
-    if (opts?.startTour) {
+    // The tour walks sections spaces-only doesn't have.
+    if (opts?.startTour && !SPACES_ONLY) {
       window.setTimeout(() => setTourActive(true), 400)
     }
   }, [])
@@ -6594,6 +6615,8 @@ function App() {
   const menuCommandRef = useRef<(cmd: ipc.IPCChannels['menu:command']['req']) => void>(() => {})
   useEffect(() => {
     menuCommandRef.current = (cmd) => {
+      // Spaces-only: its menu never offers these, but a stale chord still could.
+      if (SPACES_ONLY && (cmd.command === 'new-chat' || cmd.command === 'new-note' || cmd.command === 'new-presentation' || cmd.command === 'toggle-browser')) return
       switch (cmd.command) {
         case 'new-chat':
           handleNewChatTab()
@@ -7329,14 +7352,17 @@ function App() {
               collapsed = the slim icon rail. The collapse button (fixed
               top-left) swaps between them; the gutter padding clears the
               rail when it's showing. */}
+          {/* Spaces-only (2026-10-02, spaces-only flag PR): neither form
+              renders — the Spaces rail is the sidebar. */}
           <SidebarProvider
-            open={sidebarOpen}
+            open={SPACES_ONLY ? false : sidebarOpen}
             onOpenChange={handleSidebarOpenChange}
             style={{
-              paddingLeft: sidebarOpen ? 0 : DOCK_GUTTER_PX,
+              paddingLeft: sidebarOpen || SPACES_ONLY ? 0 : DOCK_GUTTER_PX,
               transition: 'padding-left 200ms linear',
             }}
           >
+            {!SPACES_ONLY && <>
             <SidebarContentPanel
               {...sidebarNavProps}
               onSelectFile={toggleExpand}
@@ -7350,6 +7376,7 @@ function App() {
               {...sidebarNavProps}
               switcherOnly={sidebarOpen}
             />
+            </>}
             <SidebarInset
               className={cn(
                 "min-h-0 min-w-0",
@@ -7448,7 +7475,7 @@ function App() {
                     <TooltipContent side="bottom">New chat</TooltipContent>
                   </Tooltip>
                 )}
-                {!assistantLayout.sidebarVisible && (
+                {!assistantLayout.sidebarVisible && !SPACES_ONLY && (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
@@ -7681,7 +7708,8 @@ function App() {
                     // space (or thread) and lands on the row.
                     onOpenMessage={(target) => void navigateToView({ type: 'spaces', ...target })}
                     onOpenActivity={openActivity}
-                    onOpenSession={openAssistantRun}
+                    // Spaces-only has no @rowboat, so no agent session to open.
+                    onOpenSession={SPACES_ONLY ? undefined : openAssistantRun}
                   />
                 </div>
                 </KeepAliveSection>
@@ -8151,7 +8179,7 @@ function App() {
                 icon rail (the traffic lights are wider than the rail, so the
                 band must be one uninterrupted surface — the rail itself starts
                 below it) and keeps that corner draggable. */}
-            {!sidebarOpen && (
+            {!sidebarOpen && !SPACES_ONLY && (
               <div
                 aria-hidden="true"
                 className="titlebar-drag-region fixed left-0 top-0 z-20 h-10 border-b border-border bg-background"
@@ -8160,20 +8188,22 @@ function App() {
             )}
             {/* Sidebar toggle — always present (both directions), rendered
                 last so its no-drag region paints over the drag regions. */}
+            {!SPACES_ONLY && <>
             <FixedSidebarToggle
               leftInsetPx={isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0}
               onNewChat={handleNewChatTab}
               onWidthChange={setTitlebarControlsWidthPx}
             />
             <MenuSidebarToggleBridge />
+            </>}
           </SidebarProvider>
         </div>
         <CommandPalette
           open={isSearchOpen}
           onOpenChange={(o) => { setIsSearchOpen(o); if (!o) setSearchDefaultScope(undefined) }}
           defaultScope={searchDefaultScope}
-          chats={chatRuns}
-          notes={paletteNotes}
+          chats={SPACES_ONLY ? [] : chatRuns}
+          notes={SPACES_ONLY ? [] : paletteNotes}
           onNavigate={handlePaletteNavigate}
         />
       </SidebarSectionProvider>
@@ -8227,7 +8257,8 @@ function App() {
           void window.ipc.invoke('oauth:connect', { provider: 'google' })
         }}
       />
-      {!showOnboarding && (
+      {/* Spaces-only has no models to recommend. */}
+      {!showOnboarding && !SPACES_ONLY && (
         <ModelRecommendationUpdateModal
           update={recommendationUpdate}
           onClose={() => setRecommendationUpdate(null)}

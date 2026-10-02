@@ -1,6 +1,7 @@
 import { MESSAGE_PROSE } from '@/components/spaces/message-prose'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
+import { SPACES_ONLY } from '@/lib/feature-flags'
 import { Anchor, Archive, ArchiveRestore, ArrowDown, ArrowLeft, ArrowUp, Bell, BellOff, Bot, FileText, Link as LinkIcon, Loader2, MessageSquareOff, MoreHorizontal, Maximize2, Minimize2, Paperclip, Pencil, ShieldAlert, Square, Tag, Unlink, X } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { messageUrl } from '@x/shared/dist/spaces.js'
@@ -12,7 +13,7 @@ import {
 import { ArtifactsSummary } from '@/components/spaces/artifacts'
 import { AttachDocumentDialog } from '@/components/spaces/attach-document-dialog'
 import { AgentMark, MemberAvatar, MemberProfilePopover } from '@/components/spaces/atoms'
-import { Composer, type AgentOptions } from '@/components/spaces/composer'
+import { Composer, type AgentOptions, type SlashCommand } from '@/components/spaces/composer'
 import { ForwardDialog } from '@/components/spaces/forward-dialog'
 import { MemberName, MemberText } from '@/components/spaces/member-text'
 import { SpaceMarkdown } from '@/components/spaces/space-markdown'
@@ -1353,7 +1354,8 @@ export function ThreadPane({
                 autoFocus
                 draftKey={draftKey}
                 commands={[
-                    {
+                    // Spaces-only: folding asks your Rowboat, which isn't there.
+                    ...(SPACES_ONLY ? [] : [{
                         name: 'fold',
                         args: '<file>',
                         hint: 'Ask your Rowboat to fold this thread into a file',
@@ -1366,7 +1368,7 @@ export function ThreadPane({
                             }
                             void fold({ assetId: file.id, path: file.path })
                         },
-                    },
+                    } satisfies SlashCommand]),
                     topic
                         ? {
                               name: 'rename',

@@ -1,4 +1,5 @@
 import { app, Menu, Tray, nativeImage } from "electron";
+import { flags } from "@x/shared";
 import {
   getQuickAskShortcutState,
   onQuickAskShortcutChanged,
@@ -155,7 +156,12 @@ function stopWaveAnimation(): void {
 
 function rebuildMenu(): void {
   if (!tray) return;
-  const menu = Menu.buildFromTemplate([
+  // Spaces-only (2026-10-02, spaces-only flag PR): open and quit, nothing else.
+  const menu = Menu.buildFromTemplate(flags.spacesOnly(process.env) ? [
+    { label: "Open Rowboat", click: () => actions?.openApp() },
+    { type: "separator" },
+    { label: "Quit Rowboat", click: () => app.quit() },
+  ] : [
     { label: "Open Rowboat", click: () => actions?.openApp() },
     // Permanent discoverability for the global quick-ask shortcut — the
     // accelerator renders next to the label (display only; the real binding

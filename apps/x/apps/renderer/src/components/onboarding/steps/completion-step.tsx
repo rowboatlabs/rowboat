@@ -2,6 +2,7 @@ import { ArrowLeft, Loader2 } from "lucide-react"
 import { motion } from "motion/react"
 import { Button } from "@/components/ui/button"
 import type { OnboardingState } from "../use-onboarding-state"
+import { SPACES_ONLY } from "@/lib/feature-flags"
 
 import { CompletionSpaceName, useCompletionSpace } from "./completion-space"
 
@@ -28,7 +29,7 @@ export function CompletionStep({ state }: CompletionStepProps) {
         </h2>
         {space.needed && (
           <p className="text-base text-muted-foreground leading-relaxed">
-            A place for your team and their Rowboat assistants to work together.
+            {SPACES_ONLY ? "A place for your team to work together." : "A place for your team and their Rowboat assistants to work together."}
           </p>
         )}
       </motion.div>
@@ -44,22 +45,22 @@ export function CompletionStep({ state }: CompletionStepProps) {
         </div>
       )}
 
-      {/* CTAs */}
-      <div className="w-full border-t pt-5 mt-2 mb-4">
+      {/* CTAs. Spaces-only has no tour: one button. */}
+      {!SPACES_ONLY && <div className="w-full border-t pt-5 mt-2 mb-4">
         <p className="text-sm text-muted-foreground">
           Take a quick tour or jump right in.
         </p>
         <p className="mt-2 text-xs text-muted-foreground">
           🔊 The tour includes narration. Sound on!
         </p>
-      </div>
+      </div>}
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.7 }}
-        className="grid w-full grid-cols-1 sm:grid-cols-2 gap-2"
+        className={SPACES_ONLY ? "grid w-full grid-cols-1 gap-2" : "grid w-full grid-cols-1 sm:grid-cols-2 gap-2"}
       >
-        <Button
+        {!SPACES_ONLY && <Button
           onClick={() => void space.complete(handleCompleteWithTour)}
           disabled={disabled || (!!space.error && !space.needed)}
           size="lg"
@@ -67,14 +68,15 @@ export function CompletionStep({ state }: CompletionStepProps) {
         >
           {space.busy && <Loader2 className="size-4 animate-spin mr-2" />}
           Take a 1-min tour
-        </Button>
+        </Button>}
         <Button
           onClick={() => void space.complete(handleComplete)}
           disabled={disabled || (!!space.error && !space.needed)}
-          variant="outline"
+          variant={SPACES_ONLY ? "default" : "outline"}
           size="lg"
           className="w-full h-12 text-base font-medium"
         >
+          {SPACES_ONLY && space.busy && <Loader2 className="size-4 animate-spin mr-2" />}
           Start using Rowboat
         </Button>
       </motion.div>

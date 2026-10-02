@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import { useChatGPT } from "@/hooks/useChatGPT"
 import { OpenAIIcon } from "../provider-icons"
 import type { OnboardingState } from "../use-onboarding-state"
+import { SPACES_ONLY } from "@/lib/feature-flags"
 
 interface WelcomeStepProps {
   state: OnboardingState
@@ -15,11 +16,13 @@ export function WelcomeStep({ state }: WelcomeStepProps) {
 
   const isConnecting = rowboatState.isConnecting || chatgpt.isSigningIn
   const canContinue = rowboatState.isConnected || chatgpt.status.signedIn
-  const accounts = [
+  // Spaces-only (2026-10-02, spaces-only flag PR): no agent, so no models —
+  // the Rowboat account is only the identity Spaces signs in with.
+  const allAccounts = [
     {
       id: "rowboat",
       name: "Rowboat",
-      description: "Free plan included. Models from OpenAI, Anthropic, Google and more.",
+      description: SPACES_ONLY ? "The account your spaces sign in with." : "Free plan included. Models from OpenAI, Anthropic, Google and more.",
       icon: <img src="/logo-only.png" alt="" className="size-7" />,
       connected: rowboatState.isConnected,
       loading: state.providersLoading || rowboatState.isLoading,
@@ -37,6 +40,7 @@ export function WelcomeStep({ state }: WelcomeStepProps) {
       signIn: chatgpt.signIn,
     },
   ]
+  const accounts = SPACES_ONLY ? allAccounts.filter(a => a.id === "rowboat") : allAccounts
 
   return (
     <div className="flex flex-col items-center justify-center text-center flex-1">
@@ -65,7 +69,7 @@ export function WelcomeStep({ state }: WelcomeStepProps) {
         className="inline-flex items-center gap-2 rounded-full border bg-muted/50 px-3.5 py-1.5 text-xs font-medium text-muted-foreground mb-6"
       >
         <span className="size-1.5 rounded-full bg-[var(--rowboat-success)] animate-pulse" />
-        The multiplayer personal assistant for work
+        {SPACES_ONLY ? "Where your team works together" : "The multiplayer personal assistant for work"}
       </motion.div>
       <motion.p
         initial={{ opacity: 0 }}
@@ -73,7 +77,9 @@ export function WelcomeStep({ state }: WelcomeStepProps) {
         transition={{ delay: 0.3 }}
         className="text-base text-muted-foreground leading-relaxed max-w-sm mb-6"
       >
-        Rowboat connects to your work, builds a knowledge graph, and works alongside your team and their assistants. Private and on your machine.
+        {SPACES_ONLY
+          ? "Spaces are where your team talks every day, and where the files you decide on live."
+          : "Rowboat connects to your work, builds a knowledge graph, and works alongside your team and their assistants. Private and on your machine."}
       </motion.p>
 
       <motion.div
@@ -83,7 +89,7 @@ export function WelcomeStep({ state }: WelcomeStepProps) {
         className="w-full max-w-lg space-y-3"
       >
         <p className="text-sm text-muted-foreground mb-4">
-          Sign in to get started. Connect both for more models.
+          {SPACES_ONLY ? "Sign in with your Rowboat account to get started." : "Sign in to get started. Connect both for more models."}
         </p>
         {accounts.map(account => (
           <div key={account.id} className="rounded-xl border bg-muted/20 p-4 text-left">
@@ -126,7 +132,8 @@ export function WelcomeStep({ state }: WelcomeStepProps) {
           <Button
             onClick={() => {
               state.setOnboardingPath(rowboatState.isConnected ? "rowboat" : "chatgpt")
-              state.setCurrentStep(2)
+              // Spaces-only goes straight to Done, which creates the first space.
+              state.setCurrentStep(SPACES_ONLY ? 4 : 2)
             }}
             disabled={isConnecting}
             size="lg"
@@ -137,8 +144,8 @@ export function WelcomeStep({ state }: WelcomeStepProps) {
         )}
       </motion.div>
 
-      {/* BYOK link */}
-      <motion.div
+      {/* BYOK link — models only, so not in spaces-only */}
+      {!SPACES_ONLY && <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.5 }}
@@ -154,7 +161,7 @@ export function WelcomeStep({ state }: WelcomeStepProps) {
         >
           I want to bring my own API key
         </button>
-      </motion.div>
+      </motion.div>}
     </div>
   )
 }
