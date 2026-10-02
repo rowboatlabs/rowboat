@@ -16,7 +16,7 @@ const app = createApp({
 });
 
 describe('the download section', () => {
-  const base = 'https://github.com/benewende-dev/warell/releases/latest/download';
+  const base = 'https://github.com/benewende-dev/baarali/releases/latest/download';
   const withDownloads = createApp({
     store: new MemoryStore(new Map(), plans), openRouterKey: 'or', publicUrl: 'https://app.baarali.test', appName: 'Baarali',
     mediaPacks: packs, home: { offers: OFFERS, weekCredits: {}, packs, downloadBase: base },

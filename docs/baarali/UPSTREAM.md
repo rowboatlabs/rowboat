@@ -6,10 +6,10 @@ Baarali est un fork de [`rowboatlabs/rowboat`](https://github.com/rowboatlabs/ro
 
 | Remote | URL | Rôle |
 |---|---|---|
-| `origin` | `benewende-dev/warell` (ex-`benewende-dev/rowboat`, renommé le 29/09/2026) | Notre dépôt. `main` = Baarali. |
+| `origin` | `benewende-dev/baarali` (ex-`benewende-dev/rowboat`, puis `warell` le 29/09/2026, `baarali` le 02/10/2026) | Notre dépôt. `main` = Baarali. |
 | `upstream` | `rowboatlabs/rowboat` | Lecture seule : push désactivé (`git remote set-url --push upstream DISABLED`). |
 
-Le renommage n'a pas cassé le lien de fork, et GitHub redirige l'ancienne URL. Mettre à jour un clone existant : `git remote set-url origin https://github.com/benewende-dev/warell.git`.
+Le renommage n'a pas cassé le lien de fork, et GitHub redirige l'ancienne URL. Mettre à jour un clone existant : `git remote set-url origin https://github.com/benewende-dev/baarali.git`.
 
 ## 2. La règle d'or : on ajoute, on n'édite pas
 

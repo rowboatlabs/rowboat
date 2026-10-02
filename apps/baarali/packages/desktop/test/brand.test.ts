@@ -28,8 +28,8 @@ describe('brandText', () => {
 
   it('points the links, the updater and the control plane at ours', () => {
     expect(brandText("'https://api.x.rowboatlabs.com'")).toBe("'https://app.baarali.com'");
-    expect(brandText('const REPO = "rowboatlabs/rowboat";')).toBe('const REPO = "benewende-dev/warell";');
-    expect(brandText('https://github.com/rowboatlabs/rowboat/releases')).toBe('https://github.com/benewende-dev/warell/releases');
+    expect(brandText('const REPO = "rowboatlabs/rowboat";')).toBe('const REPO = "benewende-dev/baarali";');
+    expect(brandText('https://github.com/rowboatlabs/rowboat/releases')).toBe('https://github.com/benewende-dev/baarali/releases');
     expect(brandText('mailto:contact@rowboatlabs.com')).toBe('mailto:contact@baarali.com');
     expect(brandText('href="https://www.rowboatlabs.com/privacy-policy"')).toBe('href="https://baarali.com/"');
   });

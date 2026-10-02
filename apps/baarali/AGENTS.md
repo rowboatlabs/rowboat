@@ -81,7 +81,7 @@ fly secrets set BAARALI_INSTANCE_IMAGE=registry.fly.io/baarali-instances:vN -a w
 
 **Le portier.** `rowboat-server` refuse tout `Host` qui n'est pas un nom de la machine (protection contre le *DNS rebinding*). Le portier (`packages/instance/src/gate.ts`) réécrit le `Host` vers la boucle locale ; la clé porteur du serveur reste exigée. Ainsi aucun fichier upstream ne change.
 
-**Les noms des apps Fly** gardent l'ancien nom du produit (renommé Baarali le 01/10/2026) : Fly ne renomme pas une app, et en recréer une ferait migrer le disque de l'instance. Personne ne les voit : le public passe par `baarali.com`. Le dépôt GitHub `benewende-dev/warell` garde aussi son nom tant que `benewende-dev/baarali` est pris par l'ancien site.
+**Les noms des apps Fly** gardent l'ancien nom du produit (renommé Baarali le 01/10/2026) : Fly ne renomme pas une app, et en recréer une ferait migrer le disque de l'instance. Personne ne les voit : le public passe par `baarali.com`. Le dépôt GitHub, lui, s'appelle `benewende-dev/baarali` depuis le 02/10/2026 (ex-`benewende-dev/warell`, l'ancien site étant devenu `benewende-dev/wenastudio`), et le clone `~/baarali`.
 
 **DNS** : `baarali.com` est chez Hostinger. `@` (A + AAAA de `warell-control`), `www` et `app` (CNAME vers `warell-control.fly.dev`), plus les lignes d'envoi Resend (`resend._domainkey`, `send`, `rsend`) et `_dmarc`. Les certificats sont émis par Fly (`fly certs list -a warell-control`).
 

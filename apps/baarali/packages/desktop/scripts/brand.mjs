@@ -26,7 +26,7 @@ export const BRAND = {
   name: 'Baarali',
   apiUrl: 'https://app.baarali.com',
   site: 'https://baarali.com/',
-  repo: 'benewende-dev/warell',
+  repo: 'benewende-dev/baarali',
   contact: 'contact@baarali.com',
   bundleId: 'com.baarali.app',
   description: "L'assistant qui agit pour vous",
