@@ -1,5 +1,5 @@
 import { useFileViewerSource } from './file-viewer-source'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { ExternalLinkIcon, FileTextIcon, Loader2Icon } from 'lucide-react'
 
 interface PdfFileViewerProps {
@@ -10,11 +10,12 @@ type State = 'loading' | 'ready' | 'error'
 
 export function PdfFileViewer({ path }: PdfFileViewerProps) {
   const source = useFileViewerSource()
-  const [state, setState] = useState<State>('loading')
-
-  useEffect(() => {
-    setState('loading')
-  }, [path])
+  // The state belongs to the file it was reached for: another path starts
+  // loading at once. Not reset by an effect, which could run after the
+  // frame's own load event and leave "Loading PDF…" over a loaded PDF.
+  const [shown, setShown] = useState<{ path: string; state: State }>({ path, state: 'loading' })
+  const state: State = shown.path === path ? shown.state : 'loading'
+  const setState = (next: State) => setShown({ path, state: next })
 
   const src = source.url(path)
 
