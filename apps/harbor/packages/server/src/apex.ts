@@ -36,6 +36,11 @@ export interface ApexDeps {
    * that will serve it, and its runtime is warm before its first request.
    */
   serviceFor(org: OrgConfig): Promise<HarborService>;
+  /**
+   * After an org is deleted: drop what the deployment keeps of it in memory
+   * (its runtime, its domains) and remove its files' bytes.
+   */
+  forgetOrg(org: OrgConfig, blobs: string[]): Promise<void>;
   /** e.g. spaces.rowboatlabs.com — org domains are `<slug>.<apexDomain>`. */
   apexDomain: string;
   /** The deployment's AS — every created org pins this issuer. */
@@ -127,6 +132,29 @@ export function buildApexApp(deps: ApexDeps): Hono {
     const identity = await deps.auth.authenticate(c.req.header('authorization'));
     // One statement over the identity table, whatever the number of orgs on the deployment (2026-09-22).
     return c.json({ orgs: await deps.directory.listOrgsForIdentity(identity.iss, identity.sub) });
+  });
+
+  /**
+   * Delete an org (Baarali, 2026-10-02): its admins only, and only with the
+   * org's name typed back as `confirmName` — the act cannot be undone, so a
+   * stray click must not be enough. An org the caller is not in is unknown to
+   * them (404), never a refusal that confirms it exists.
+   */
+  app.delete('/v1/orgs/:id', async (c) => {
+    const identity = await deps.auth.authenticate(c.req.header('authorization'));
+    const id = c.req.param('id');
+    const mine = (await deps.directory.listOrgsForIdentity(identity.iss, identity.sub)).find((o) => o.id === id);
+    if (!mine) throw new HarborError('not_found', 'no such org');
+    if (mine.role !== 'admin') throw new HarborError('forbidden', 'only an admin can delete this org');
+    const body = (await c.req.json().catch(() => ({}))) as { confirmName?: unknown };
+    if (typeof body.confirmName !== 'string' || body.confirmName.trim() !== mine.name) {
+      throw new HarborError('invalid_request', "confirmName must be the org's name");
+    }
+    const org = await deps.directory.getById(id);
+    if (!org) throw new HarborError('not_found', 'no such org');
+    const { blobs } = await deps.directory.deleteOrg(id);
+    await deps.forgetOrg(org, blobs);
+    return c.json({ deleted: { id, name: org.name } });
   });
 
   return app;

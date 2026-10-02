@@ -55,6 +55,36 @@ interface OrgRow {
   domains: string[];
 }
 
+/** Every space-keyed table: rows of an org's spaces, deleted before the spaces themselves. */
+export const SPACE_TABLES = [
+  'asset_search',
+  'asset_versions',
+  'assets',
+  'change_sets',
+  'events',
+  'invites',
+  'memberships',
+  'messages',
+  'poll_votes',
+  'reactions',
+  'space_blobs',
+  'space_read_marks',
+  'thread_read_marks',
+  'topics',
+] as const;
+
+/** Every org-keyed table, in an order the foreign keys accept. */
+export const ORG_TABLES = [
+  'agent_keys',
+  'activity_seen',
+  'push_prefs',
+  'push_tokens',
+  'member_identities',
+  'spaces',
+  'members',
+  'org_domains',
+] as const;
+
 const ulid = monotonicFactory();
 
 /** The org rows with their domains folded in: one statement whatever the count (2026-09-22). */
@@ -110,6 +140,36 @@ export class OrgDirectory {
       ...(input.allowedEmailDomains ? { allowedEmailDomains: input.allowedEmailDomains } : {}),
       domains,
     };
+  }
+
+  /**
+   * Delete an org and everything in it, in ONE transaction (Baarali,
+   * 2026-10-02): its spaces' logs, files, messages and marks, its members and
+   * their identities, its domains, its backfill ledger rows, then the org.
+   * The tables are named, not discovered: `org-delete.test.ts` fails the day
+   * a migration adds an org- or space-keyed table this list forgets. Returns
+   * the blob hashes the org held — the bytes live outside the database, in
+   * the org's own blob prefix, and are the caller's to remove after commit.
+   */
+  async deleteOrg(id: string): Promise<{ blobs: string[] }> {
+    const store = new PgStore(this.db, id);
+    return store.transaction(async (tx) => {
+      const blobs = await tx.query<{ hash: string }>(
+        // Every stored file is registered here first (a blob is servable only in the space it was uploaded to).
+        'select distinct hash from space_blobs where space_id in (select id from spaces where org_id = $1)',
+        [id],
+      );
+      for (const table of SPACE_TABLES) {
+        await tx.query(`delete from ${table} where space_id in (select id from spaces where org_id = $1)`, [id]);
+      }
+      // agent_keys first: its foreign key points at members.
+      for (const table of ORG_TABLES) await tx.query(`delete from ${table} where org_id = $1`, [id]);
+      await tx.query(`delete from schema_migrations where id like 'backfill:%' and right(id, char_length($1) + 1) = ':' || $1`, [
+        id,
+      ]);
+      await tx.query('delete from orgs where id = $1', [id]);
+      return { blobs: blobs.map((b) => b.hash) };
+    });
   }
 
   async getByDomain(domain: string): Promise<OrgConfig | undefined> {

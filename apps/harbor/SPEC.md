@@ -229,6 +229,8 @@ An org is a **logical origin, not a machine**: internally a stable org record, e
 
 The admin surface follows the house API pattern: Harbor exposes `/internal/*` (bearer-key, server-to-server: org provisioning, limits, metrics) alongside the member-facing faces of §9; self-hosters use the same admin API for their own operations. It is control-plane-facing and sits outside the member-protocol stabilization promise.
 
+**Amended 2026-10-02 (Baarali) — deleting an org.** An org's admins delete it on the apex face, beside creating it: the org's name typed back is the confirmation, and the org goes whole — its spaces, files, members and domains — in one act. A member of the org who is not an admin cannot; nobody outside it learns it existed.
+
 **Flagship IdP:** Rowboat-managed orgs authenticate members with Rowboat accounts (the existing Supabase auth) as their IdP — one instance of the general contract, not a privileged path. A client already signed into a Rowboat account gets a near-one-click join on managed orgs; a free account is never a paid requirement. Self-hosted orgs bring their own IdP.
 
 **Latitude:** where Harbor incubates (an open package in the rowboat monorepo, per house TS/Hono conventions, is the pragmatic start; extraction to `rowboatlabs/harbor` with a one-command self-host path when third-party hosting is announced).

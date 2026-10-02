@@ -152,6 +152,16 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
             apexDomain,
             issuer: options.issuer,
             ...(options.consentPublishableKey ? { consentPublishableKey: options.consentPublishableKey } : {}),
+            forgetOrg: async (org, blobs) => {
+              runtimes.delete(org.id);
+              for (const domain of org.domains) orgByDomain.delete(domain);
+              if (!options.blobs || blobs.length === 0) return;
+              // After the commit: a byte left behind costs storage, never correctness.
+              const store = options.blobs(org.id);
+              for (const hash of blobs) {
+                await store.delete(hash).catch((err) => console.error(`[harbor] blob ${hash} of deleted ${org.id}:`, err));
+              }
+            },
             serviceFor: async (org) => {
               const runtime = await runtimeForOrg(org);
               if (!runtime) throw new HarborError('internal', 'the new org has no runtime on this deployment');
