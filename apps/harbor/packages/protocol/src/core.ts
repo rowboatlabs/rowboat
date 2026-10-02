@@ -73,9 +73,11 @@ export const AGENT_PAIRS: ReadonlyArray<{ kind: string; connection: string }> = 
   { kind: 'hermes', connection: 'plugin' },
   ...REPLICAS_CODING_AGENTS.map((kind) => ({ kind, connection: 'replicas' })),
   ...AGENT37_AGENTS.map((kind) => ({ kind, connection: 'agent37' })),
+  // Capy runs its own coding agent (2026-10-02): the kind is the platform's.
+  { kind: 'capy', connection: 'capy' },
 ];
 /** Connections whose connector Harbor runs, calling the platform with a credential it holds (spec §8 Connectors). */
-export const HARBOR_RUN_CONNECTIONS: readonly string[] = ['replicas', 'agent37'];
+export const HARBOR_RUN_CONNECTIONS: readonly string[] = ['replicas', 'agent37', 'capy'];
 
 export function isAgentPair(kind: string, connection: string): boolean {
   return AGENT_PAIRS.some((pair) => pair.kind === kind && pair.connection === connection);

@@ -1,5 +1,7 @@
 import agent37Logo from '@/assets/agents/agent37/logo.png'
 import agent37LogoDark from '@/assets/agents/agent37/logo-dark.png'
+import capyLogo from '@/assets/agents/capy/logo.png'
+import capyLogoDark from '@/assets/agents/capy/logo-dark.png'
 import claudeCodeLogo from '@/assets/agents/claude-code/logo.png'
 import claudeCodeLogoDark from '@/assets/agents/claude-code/logo-dark.png'
 import codexLogo from '@/assets/agents/codex/logo.png'
@@ -41,6 +43,7 @@ export interface Logo {
 export const KINDS: Record<string, { label: string; logo?: Logo }> = {
     hermes: { label: 'Hermes', logo: { light: hermesLogo, dark: hermesLogoDark } },
     openclaw: { label: 'OpenClaw', logo: { light: openclawLogo, dark: openclawLogoDark } },
+    capy: { label: 'Capy', logo: { light: capyLogo, dark: capyLogoDark } },
     'claude-code': { label: 'Claude Code', logo: { light: claudeCodeLogo, dark: claudeCodeLogoDark } },
     codex: { label: 'Codex', logo: { light: codexLogo, dark: codexLogoDark } },
     cursor: { label: 'Cursor', logo: { light: cursorLogo, dark: cursorLogoDark } },
@@ -55,17 +58,18 @@ export const KINDS: Record<string, { label: string; logo?: Logo }> = {
 export const PLATFORMS: Record<string, { label: string; logo?: Logo }> = {
     replicas: { label: 'Replicas', logo: { light: replicasLogo, dark: replicasLogoDark } },
     agent37: { label: 'Agent37', logo: { light: agent37Logo, dark: agent37LogoDark } },
+    capy: { label: 'Capy', logo: { light: capyLogo, dark: capyLogoDark } },
 }
 
 export function kindInfo(kind: string | undefined): { label: string; logo?: Logo } {
     return (kind && KINDS[kind]) || { label: 'Agent' }
 }
 
-/** "Hermes", "Claude Code · via Replicas", or "Agent". */
+/** "Hermes", "Claude Code · via Replicas", or "Agent". A platform that is its own agent (Capy) reads once. */
 export function agentLabel(kind: string | undefined, connection: string | undefined): string {
     const platform = connection ? PLATFORMS[connection] : undefined
     const what = kindInfo(kind).label
-    return platform ? `${what} · via ${platform.label}` : what
+    return platform && platform.label !== what ? `${what} · via ${platform.label}` : what
 }
 
 /** Something to paste, with Copy. `secret` values read as their ends on screen and copy whole. */
@@ -376,6 +380,44 @@ function agent37Setup({ orgUrl, agentKey, kind }: SetupContext): SetupRoute[] {
     ]
 }
 
+// Capy (2026-10-02): Harbor runs the connector, so connecting is the Capy key on the Add screen,
+// ideally a service user's (https://docs.capy.ai/api-reference/authentication). What's left in Capy
+// is optional and per project: our MCP server (Settings → MCP servers, https://docs.capy.ai/integrations/mcp),
+// the two variables for downloading attachments (https://docs.capy.ai/secrets), and the
+// rowboat-spaces skill as a Drive skill (https://docs.capy.ai/skills). As for Replicas, the MCP
+// server acts as this agent for everyone in the project, so one project per Rowboat agent.
+function capySetup({ orgUrl, agentKey }: SetupContext): SetupRoute[] {
+    return [
+        {
+            id: 'capy',
+            label: 'Capy',
+            steps: [
+                {
+                    title: 'Give it the Spaces tools (optional)',
+                    note: 'In Capy, open the project this agent will use, then Settings → MCP servers → New MCP server: key rowboat, available to the project, HTTP, with this header. It acts as this agent for everyone in the project.',
+                    values: [
+                        { label: 'URL', text: `${orgUrl}/mcp` },
+                        { label: 'Header: Authorization', text: `Bearer ${agentKey}`, secret: true },
+                    ],
+                },
+                {
+                    title: 'Let it download attachments (optional)',
+                    note: 'On the same project’s Environment variables page, add these as shared variables.',
+                    values: [
+                        { label: 'ROWBOAT_URL', text: orgUrl },
+                        { label: 'ROWBOAT_AGENT_KEY', text: agentKey, secret: true },
+                    ],
+                },
+                {
+                    title: 'Teach it Spaces (optional)',
+                    note: 'Add the rowboat-spaces skill to the project’s Drive as skills/rowboat-spaces/SKILL.md. It teaches the agent how to behave in Spaces: mentions, hand-offs, threads.',
+                    values: [{ label: 'SKILL.md', text: `https://raw.githubusercontent.com/${SKILL_REPO}/main/skills/rowboat-spaces/SKILL.md` }],
+                },
+            ],
+        },
+    ]
+}
+
 export const AGENT_SETUPS: readonly AgentSetup[] = [
     {
         id: 'hermes',
@@ -422,6 +464,22 @@ export const AGENT_SETUPS: readonly AgentSetup[] = [
         docsUrl: 'https://www.agent37.com/docs/agents-api/concepts',
         createsInstances: true,
         setup: agent37Setup,
+    },
+    {
+        id: 'capy',
+        label: 'Capy',
+        description: 'Capy’s coding agent, on your Capy organization',
+        logo: { light: capyLogo, dark: capyLogoDark },
+        connection: 'capy',
+        kinds: ['capy'],
+        defaultName: 'Capy',
+        credential: {
+            label: 'Capy API key',
+            placeholder: 'Paste a capy_ key from Capy → Settings → API',
+            note: 'Harbor checks it with Capy and keeps it sealed. A service user’s key is best: its threads and spend are its own.',
+        },
+        docsUrl: 'https://docs.capy.ai/api-reference/authentication',
+        setup: capySetup,
     },
     {
         id: 'custom',

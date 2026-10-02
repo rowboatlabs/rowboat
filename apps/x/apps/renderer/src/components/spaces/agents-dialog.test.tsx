@@ -74,7 +74,7 @@ describe('AgentsDialog', () => {
         render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
         await screen.findByText('Hermes')
         fireEvent.click(screen.getByRole('button', { name: /Add agent/ }))
-        expect(setupsOffered()).toEqual(['Hermes', 'Replicas', 'Agent37', 'Custom'])
+        expect(setupsOffered()).toEqual(['Hermes', 'Replicas', 'Agent37', 'Capy', 'Custom'])
         expect(screen.getByRole('radio', { name: 'Hermes' })).toHaveAttribute('aria-checked', 'true')
         // The name suggests the kind's own.
         expect(screen.getByLabelText('Agent name')).toHaveValue('Hermes')
@@ -268,6 +268,25 @@ describe('AgentsDialog', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Create instance' }))
         expect(await screen.findByText(/Created rowboat-openclaw \(i9\)/)).toBeInTheDocument()
         expect(invoke).toHaveBeenCalledWith('spaces:createAgentInstance', { orgId: 'org-1', agentId: 'new', name: 'rowboat-openclaw', monthlyBudgetUsd: 10, autoSleep: false })
+    })
+
+    it('adds a Capy agent: a name and the Capy key, then the optional steps in its project', async () => {
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        await screen.findByText('Hermes')
+        fireEvent.click(screen.getByRole('button', { name: /Add agent/ }))
+        fireEvent.click(screen.getByRole('radio', { name: 'Capy' }))
+        // Capy is its own agent: no kind to pick.
+        expect(screen.queryByRole('radiogroup', { name: 'Agent' })).toBeNull()
+        expect(screen.getByLabelText('Agent name')).toHaveValue('Capy')
+        fireEvent.change(screen.getByLabelText('Capy API key'), { target: { value: 'capy_live_ab12' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Add agent' }))
+        await screen.findByRole('heading', { name: 'Connect Capy' })
+        expect(invoke).toHaveBeenCalledWith('spaces:addAgent', { orgId: 'org-1', displayName: 'Capy', kind: 'capy', connection: 'capy', credential: 'capy_live_ab12' })
+        expect(screen.getByText('Give it the Spaces tools (optional)')).toBeInTheDocument()
+        expect(screen.getByText('https://rowboat.example/mcp')).toBeInTheDocument()
+        expect(screen.getByText('Teach it Spaces (optional)')).toBeInTheDocument()
+        // Capy makes a machine per thread: there is no instance to create.
+        expect(screen.queryByRole('button', { name: 'Create instance' })).toBeNull()
     })
 
     it('shows a Replicas agent’s key by its end, flags a rejected one, and lets its owner replace it', async () => {
