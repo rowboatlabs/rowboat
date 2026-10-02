@@ -53,6 +53,12 @@ export function SpacesAccountProvider({ children }: { children: ReactNode }) {
   const [orgs, setOrgs] = useState<SpacesOrg[] | null>(null);
   const [orgsError, setOrgsError] = useState<string | null>(null);
   const accountRef = useRef<StoredAccount | null>(null);
+  // One refresh at a time (Baarali, 2026-10-02): the authorization server
+  // rotates the refresh token on use, so two callers refreshing together —
+  // the org list, each org's client, the live socket, all at launch — spend
+  // the same token twice, and every one after the first fails "invalid
+  // refresh token". The others wait for the one under way.
+  const refreshing = useRef<Promise<SpacesTokens> | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -80,9 +86,17 @@ export function SpacesAccountProvider({ children }: { children: ReactNode }) {
     if (!account) throw new Error('not signed in');
     const nearExpiry = account.tokens.expiresAt - Date.now() < 60_000;
     if (!opts?.forceRefresh && !nearExpiry) return account.tokens.access;
-    const tokens = await refreshTokens(account.issuer, account.clientId, account.tokens.refresh);
-    await persist({ ...account, tokens });
-    return tokens.access;
+    if (!refreshing.current) {
+      refreshing.current = (async () => {
+        const tokens = await refreshTokens(account.issuer, account.clientId, account.tokens.refresh);
+        // Persisted before anyone uses it: the old refresh token just died.
+        await persist({ ...account, tokens });
+        return tokens;
+      })().finally(() => {
+        refreshing.current = null;
+      });
+    }
+    return (await refreshing.current).access;
   }, [persist]);
 
   const refreshOrgs = useCallback(async () => {
