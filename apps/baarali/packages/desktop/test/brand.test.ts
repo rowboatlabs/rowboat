@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { ROOT, apply, brandText, corePlan, desktopPlan } from '../scripts/brand.mjs';
+import { ROOT, apply, brandText, corePlan, desktopPlan, mobilePlan } from '../scripts/brand.mjs';
 
 describe('brandText', () => {
   it('names the product Baarali and keeps every internal id', () => {
@@ -65,6 +65,28 @@ describe('apply on this checkout', () => {
     const [language] = corePlan().edits;
     expect(language.to).toMatch(/^const USER_CONTEXT_SYSTEM_INSTRUCTIONS = `# Language\nReply in the language the user writes in/);
     expect(language.to).not.toMatch(/`[^`]*`[^`]*# Hidden/);
+  });
+});
+
+describe('the mobile app', () => {
+  it('brands it without the upstream Expo account or store keys', () => {
+    const changes = apply({ only: 'mobile', write: false });
+    expect(changes).toContain('edit apps/x/apps/mobile/app.json');
+    expect(changes).toContain('write apps/x/apps/mobile/babel.config.js');
+    const doc = mobilePlan().json.update(JSON.parse(fs.readFileSync(path.join(ROOT, 'apps/x/apps/mobile/app.json'), 'utf8')));
+    expect(doc.expo.name).toBe('Baarali');
+    expect(doc.expo.ios.bundleIdentifier).toBe('com.baarali.app.mobile');
+    expect(doc.expo.owner).toBeUndefined();
+    expect(doc.expo.extra.eas).toBeUndefined();
+    expect(JSON.stringify(doc)).not.toMatch(/Rowboat/);
+    const eas = mobilePlan().writes.find(([to]) => to.endsWith('eas.json'))![1];
+    expect(eas).not.toMatch(/asc|submit/i);
+  });
+
+  it('imports the dictionary the way Metro resolves it', () => {
+    const runtime = mobilePlan().writes.find(([to]) => to.endsWith('mobile/runtime.ts'))![1];
+    expect(runtime).toContain("from '../fr';");
+    expect(runtime).not.toMatch(/from '[^']+\.js'/);
   });
 });
 

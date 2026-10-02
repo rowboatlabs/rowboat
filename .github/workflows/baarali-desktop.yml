@@ -72,14 +72,6 @@ jobs:
             }
           "
 
-      # No release with English left in it (decided 02/10/2026): a string the
-      # French dictionary lacks stops the build here, never the installed app.
-      - name: Check the French
-        shell: bash
-        run: |
-          (cd apps/baarali && pnpm install --frozen-lockfile)
-          node apps/baarali/packages/desktop/scripts/i18n-extract.mjs --check
-
       - name: Apply the Baarali brand
         run: node apps/baarali/packages/desktop/scripts/brand.mjs --yes
 
@@ -107,6 +99,15 @@ jobs:
       - name: Install apps/x
         run: pnpm install --frozen-lockfile
         working-directory: apps/x
+
+      # No release with English left in it (decided 02/10/2026): a string the
+      # French dictionary lacks stops the build here, never the installed app.
+      # After apps/x's install: the mobile app's strings are read with its Babel.
+      - name: Check the French
+        shell: bash
+        run: |
+          (cd apps/baarali && pnpm install --frozen-lockfile)
+          node apps/baarali/packages/desktop/scripts/i18n-extract.mjs --check
 
       - name: Make the installers
         shell: bash

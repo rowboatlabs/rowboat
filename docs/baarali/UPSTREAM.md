@@ -33,7 +33,10 @@ Les identifiants internes restent ceux de Rowboat : packages `@x/*` et `@rowboat
   - la mention que l'on tape pour appeler l'assistant, `@baarali` au lieu de `@rowboat`. L'ancre du protocole des espaces (`#rowboat`) reste inchangée ;
   - ce que le cœur écrit dans un nouveau compte (premières tâches, planificateur) ;
   - la règle de langue de l'agent ;
-- la traduction, `apps/baarali/packages/desktop/src/i18n/`. Son `i18n-extract.mjs --check` bloque toute version qui laisserait une phrase en anglais.
+- la traduction, `apps/baarali/packages/desktop/src/i18n/`. Son `i18n-extract.mjs --check` bloque toute version qui laisserait une phrase en anglais. Elle couvre :
+  - l'écran du bureau, par une couche qui observe la page ;
+  - les menus ;
+  - l'app mobile, par un module de compilation (`src/i18n/mobile/`). Ce module est branché par `brand.mjs --only mobile`, qui donne aussi au mobile son nom, ses icônes et son accent bleu, et le retire du compte Expo de l'upstream.
 
 Pourquoi c'est obligatoire, et pas seulement pratique : la licence Apache-2.0 ne donne **aucun droit sur la marque « Rowboat »** (§6). Le produit distribué doit donc s'appeler Baarali partout où l'utilisateur le voit. Voir [`/NOTICE`](../../NOTICE).
 

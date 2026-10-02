@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { MAIN, extract, missing } from '../scripts/i18n-extract.mjs';
+import { createRequire } from 'node:module';
+import path from 'node:path';
+import { MAIN, extract, extractMobile, missing, mobileBabel } from '../scripts/i18n-extract.mjs';
+import { __baaraliT, setLanguage } from '../src/i18n/mobile/runtime.js';
 import { FR } from '../src/i18n/fr.js';
 import { FR_MAIN, translateMenu } from '../src/i18n/main.js';
 import { compile, pickLang, translate } from '../src/i18n/translate.js';
@@ -15,6 +18,11 @@ describe('the French dictionary', () => {
 
   it('translates the menus, the tray and the dialogs too', () => {
     const lacking = missing(extract(MAIN), FR_MAIN);
+    expect(lacking, `not translated yet:\n${lacking.join('\n')}`).toEqual([]);
+  });
+
+  it('translates the mobile app too', () => {
+    const lacking = missing(extractMobile(), FR);
     expect(lacking, `not translated yet:\n${lacking.join('\n')}`).toEqual([]);
   });
 
@@ -94,5 +102,69 @@ describe('pickLang', () => {
     expect(pickLang('fr', 'en-US')).toBe('fr');
     expect(pickLang(null, 'fr-CI')).toBe('fr');
     expect(pickLang(null, 'en-US')).toBe('en');
+  });
+});
+
+describe('the mobile app', () => {
+  const plugin = createRequire(import.meta.url)('../src/i18n/mobile/babel-plugin.cjs');
+  const runtime = path.resolve('/app/src/baarali-i18n/mobile/runtime.ts');
+  const compile = (code: string, filename = '/app/src/app/screen.tsx') =>
+    mobileBabel().transformSync(code, { filename, babelrc: false, configFile: false, parserOpts: { plugins: ['jsx', 'typescript'] }, plugins: [[plugin, { runtime }]] }).code as string;
+
+  it('looks up what a screen shows, and only that', () => {
+    const out = compile(`const s = <View><Text>Pair your phone</Text><TextInput placeholder="Message Baarali" /><Text style={{ color: 'red' }}>{\`\${n} files\`}</Text></View>;`);
+    expect(out).toContain('import { __baaraliT } from "../baarali-i18n/mobile/runtime";');
+    expect(out).toContain('__baaraliT("Pair your phone")');
+    expect(out).toContain('placeholder={__baaraliT("Message Baarali")}');
+    expect(out).toContain('__baaraliT("$1 files", [n])');
+    expect(out).toContain("color: 'red'");
+  });
+
+  it('keeps the spaces React renders around the words', () => {
+    expect(compile('const s = <Text>Hello <B>you</B></Text>;')).toContain('{__baaraliT("Hello")} <B>');
+  });
+
+  it('leaves the other plugins of the build their work in a library', () => {
+    // A library's file, compiled with a plugin of its own after this one.
+    const seen: string[] = [];
+    const after = () => ({ visitor: { Identifier(p: { node: { name: string } }) { seen.push(p.node.name); } } });
+    mobileBabel().transformSync('const answer = 42;', { filename: '/app/node_modules/x/index.ts', babelrc: false, configFile: false, plugins: [[plugin, { runtime }], after] });
+    expect(seen).toContain('answer');
+  });
+
+  it('looks up before the React Compiler moves the words out of the JSX', () => {
+    // Like the compiler: on entering the program, `cond ? 'a' : 'b'` leaves the JSX for a variable.
+    const compiler = ({ types: t }: { types: any }) => ({
+      visitor: {
+        Program: {
+          enter(p: any) {
+            p.traverse({
+              JSXExpressionContainer(c: any) {
+                if (!c.get('expression').isConditionalExpression()) return;
+                const id = c.scope.generateUidIdentifier('t');
+                c.getStatementParent().insertBefore(t.variableDeclaration('const', [t.variableDeclarator(id, c.node.expression)]));
+                c.get('expression').replaceWith(id);
+              },
+            });
+          },
+        },
+      },
+    });
+    const out = mobileBabel().transformSync("const f = (last) => <Text>{last ? 'Get started' : 'Continue'}</Text>;", { filename: '/app/src/app/screen.tsx', babelrc: false, configFile: false, parserOpts: { plugins: ['jsx', 'typescript'] }, plugins: [[plugin, { runtime }], compiler] }).code as string;
+    expect(out).toContain('__baaraliT("Continue")');
+  });
+
+  it('leaves libraries and this layer alone', () => {
+    expect(compile('const s = <Text>Pair your phone</Text>;', '/app/node_modules/x/index.tsx')).not.toContain('__baaraliT');
+    expect(compile('const s = <Text>Pair your phone</Text>;', '/app/src/baarali-i18n/x.tsx')).not.toContain('__baaraliT');
+  });
+
+  it('answers in the phone’s language, the English when the dictionary has nothing', () => {
+    setLanguage('fr');
+    expect(__baaraliT('Message Baarali')).toBe('Écrire à Baarali');
+    expect(__baaraliT('Message #$1', ['general'])).toBe('Écrire dans #general');
+    expect(__baaraliT('Something new upstream')).toBe('Something new upstream');
+    setLanguage('en');
+    expect(__baaraliT('Message #$1', ['general'])).toBe('Message #general');
   });
 });

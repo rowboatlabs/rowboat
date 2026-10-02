@@ -140,6 +140,42 @@ export function extract(root = RENDERER) {
   return found;
 }
 
+/** The mobile app (React Native): its screens are rewritten by src/i18n/mobile/babel-plugin.cjs. */
+export const MOBILE = path.join(ROOT, 'apps/x/apps/mobile/src');
+
+/**
+ * The mobile app's strings, as the plugin itself finds them: what it
+ * rewrites is what is checked. Babel comes with the mobile app's Expo.
+ */
+export function mobileBabel(root = MOBILE) {
+  const mobileRequire = createRequire(path.join(root, '..', 'package.json'));
+  const fromExpo = createRequire(mobileRequire.resolve('expo/package.json'));
+  return createRequire(fromExpo.resolve('babel-preset-expo'))('@babel/core');
+}
+
+export function extractMobile(root = MOBILE) {
+  const babel = mobileBabel(root);
+  const plugin = require('../src/i18n/mobile/babel-plugin.cjs');
+  const found = new Map();
+  for (const file of walkFiles(root)) {
+    const collect = new Set();
+    babel.transformSync(fs.readFileSync(file, 'utf8'), {
+      filename: file,
+      babelrc: false,
+      configFile: false,
+      code: false,
+      parserOpts: { plugins: ['jsx', 'typescript'] },
+      plugins: [[plugin, { collect }]],
+    });
+    for (const raw of collect) {
+      const s = brandText(raw);
+      if (!found.has(s)) found.set(s, { files: new Set(), kinds: new Set(['mobile']) });
+      found.get(s).files.add(path.relative(ROOT, file));
+    }
+  }
+  return found;
+}
+
 /** The strings the French dictionary lacks: a template for text with values, an exact entry otherwise. */
 export function missing(found, dict) {
   return [...found.keys()].filter((s) => !(/\$\d/.test(s) ? s in dict.templates : s in dict.exact));
@@ -165,8 +201,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const { FR } = await import('../src/i18n/fr.ts');
     const { FR_MAIN } = await import('../src/i18n/main.ts');
     let lacking = [];
-    for (const [where, root, dict] of [['the renderer', RENDERER, FR], ['the main process', MAIN, FR_MAIN]]) {
-      const strings = extract(root);
+    for (const [where, strings, dict] of [['the renderer', extract(RENDERER), FR], ['the main process', extract(MAIN), FR_MAIN], ['the mobile app', extractMobile(), FR]]) {
       const gaps = missing(strings, dict);
       console.log(`${strings.size} strings in ${where}, ${strings.size - gaps.length} translated, ${gaps.length} not yet.`);
       if (process.argv.includes('--missing') || process.argv.includes('--check')) {
