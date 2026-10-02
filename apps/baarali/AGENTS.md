@@ -46,6 +46,7 @@ OPENROUTER_API_KEY=<clé> BAARALI_PLAN_ID=essentiel PORT=8787 pnpm start
 | `FLY_API_TOKEN`, `BAARALI_INSTANCE_IMAGE` | Créer les instances : un jeton limité à l'app des instances (`fly tokens create deploy -a baarali-instances`) et l'image à y lancer. Absents : seule l'instance du propriétaire est joignable |
 | `BAARALI_INSTANCES_APP`, `BAARALI_INSTANCES_REGION`, `BAARALI_MAX_INSTANCES` | Défauts : `baarali-instances`, `cdg`, `20` |
 | `BAARALI_OWNER_INSTANCE_APP` | L'app Fly de l'instance du propriétaire (phase 0, `warell-owner`), atteinte sans être modifiée |
+| `BAARALI_SPACES_URL` | Notre serveur des espaces (Harbor, `apps/harbor`), décidé le 02/10/2026 : nous les hébergeons nous-mêmes. Servi dans `/v1/config` (`spacesApexUrl`), et seulement avec `BAARALI_AUTH_SECRET`. Absent : les apps n'affichent pas les espaces |
 | `BAARALI_DEV_CODES` | `1` en développement seulement : les codes email et SMS s'écrivent dans le journal. Sans lui et sans vrai fournisseur, ni l'email ni le SMS ne sont proposés |
 | `PORT` | Défaut : 8080 |
 
@@ -126,7 +127,9 @@ Une migration déployée ne se modifie jamais : on ajoute la suivante à `MIGRAT
 
 `test/auth.test.ts` joue la connexion **comme le cœur la joue** : même `openid-client`, découverte à la même adresse, enregistrement dynamique avec les mêmes métadonnées, PKCE, puis `/v1/me` avec le jeton. Si l'upstream change sa façon de se connecter, c'est ce test qui doit casser.
 
-Le serveur complète deux choses dans les requêtes de l'app (`asAppRequest`, `src/auth.ts`) : `offline_access`, sans quoi le cœur n'aurait pas de jeton de rafraîchissement, et `application_type: native`, sans quoi la redirection vers `http://localhost` serait refusée.
+Le serveur complète deux choses dans les requêtes de l'app (`asAppRequest`, `src/auth.ts`) : `offline_access`, sans quoi le cœur n'aurait pas de jeton de rafraîchissement, et `application_type: native`, sans quoi la redirection vers `http://localhost` (bureau) ou `com.baarali.app.mobile:/oauth-callback` (téléphone, RFC 8252 §7.1) serait refusée.
+
+**Les espaces.** Harbor vérifie un jeton seul, avec nos clés publiques (`apps/harbor/packages/server/src/auth-oidc.ts`) : il lui faut un JWT signé en ES256 ou RS256. Avec `BAARALI_SPACES_URL`, chaque demande d'autorisation reçoit cette ressource (RFC 8707) : le jeton devient un JWT dont l'audience la nomme, signé par une clé ES256 ajoutée pour lui (Harbor ne lit pas l'EdDSA de la clé principale), et porte l'email seulement s'il est vérifié. `test/spaces-token.test.ts` joue le téléphone, puis lit le jeton comme Harbor.
 
 ## Les tests de contrat
 

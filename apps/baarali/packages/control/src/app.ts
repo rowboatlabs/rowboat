@@ -31,6 +31,11 @@ export type ControlDeps = ProxyDeps & {
   /** One instance per account and the door to it; unset: no device can connect. */
   instances?: Instances;
   gateway?: Gateway;
+  /**
+   * Our Spaces server (Harbor), told to the apps by /v1/config. Only with
+   * the sign-in server: Harbor trusts the tokens it signs, no others.
+   */
+  spacesUrl?: string;
 };
 
 type Env = { Variables: { account: Account } };
@@ -73,7 +78,7 @@ export function createApp(deps: ControlDeps) {
 
   // Unauthenticated, like the Rowboat Labs route: core reads it before login.
   app.get('/v1/config', async (c) =>
-    c.json(buildApiConfig({ publicUrl: deps.publicUrl }, await deps.store.plans())),
+    c.json(buildApiConfig({ publicUrl: deps.publicUrl, spacesUrl: deps.auth ? deps.spacesUrl : undefined }, await deps.store.plans())),
   );
 
   // Where core looks for its OAuth server (`${supabaseUrl}/auth/v1`).

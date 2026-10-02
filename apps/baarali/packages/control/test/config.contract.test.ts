@@ -16,4 +16,11 @@ describe('GET /v1/config body', () => {
     expect(body.supabaseUrl).toBe('https://control.example.test');
     expect(JSON.stringify(body)).not.toContain('rowboatlabs.com');
   });
+
+  it('names our own Spaces server once there is one, and none before', () => {
+    expect(buildApiConfig({ publicUrl: 'https://control.example.test' }).spacesApexUrl).toBeNull();
+    const body = buildApiConfig({ publicUrl: 'https://control.example.test', spacesUrl: 'https://spaces.example.test/' });
+    expect(() => RowboatApiConfig.parse(body)).not.toThrow();
+    expect(body.spacesApexUrl).toBe('https://spaces.example.test');
+  });
 });

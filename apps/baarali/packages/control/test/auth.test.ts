@@ -27,7 +27,7 @@ beforeAll(async () => {
   await pg.waitReady;
 }, 60_000);
 
-async function setup(opts: { social?: Partial<Record<SocialProvider, { clientId: string; clientSecret: string }>> } = {}) {
+async function setup(opts: { social?: Partial<Record<SocialProvider, { clientId: string; clientSecret: string }>>; spacesUrl?: string } = {}) {
   const db = pgliteDb(pg);
   await db.query('DROP SCHEMA IF EXISTS baarali CASCADE');
   await migrate(db);
@@ -43,6 +43,7 @@ async function setup(opts: { social?: Partial<Record<SocialProvider, { clientId:
     social: opts.social ?? {},
     onUserCreated: (u) => store.upsertAccount({ id: u.id, email: u.email, planId: 'decouverte', createdAt: u.createdAt }),
     now: Date.now,
+    spacesUrl: opts.spacesUrl,
   };
   await migrateAuth(deps);
   const auth = createAuth(deps);
@@ -104,8 +105,10 @@ const location = (res: Response) => new URL(res.headers.get('location') ?? '', P
 const queryOf = (u: URL) => u.search.slice(1);
 
 describe('signing the app in, as core does', () => {
-  it('registers, signs in by email code, consents, and calls /v1/me', async () => {
-    const { browser, post, fetcher, sender, app } = await setup();
+  // With Spaces on, every app asks for their resource too (spaces-token.test.ts):
+  // core's sign-in must not notice.
+  it.each([['', undefined], [' with Spaces on', 'https://spaces.control.test']])('registers, signs in by email code, consents, and calls /v1/me%s', async (_, spacesUrl) => {
+    const { browser, post, fetcher, sender, app } = await setup({ spacesUrl });
     const { config, verifier, state, url } = await startAppSignIn(fetcher);
 
     const toLogin = await browser(url.toString());

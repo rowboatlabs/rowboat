@@ -43,6 +43,8 @@ const owner: Account = {
 };
 
 const instanceToken = required('BAARALI_INSTANCE_TOKEN');
+// Our Spaces server (apps/harbor, AGENTS.md « Les espaces »); unset: no Spaces.
+const spacesUrl = process.env.BAARALI_SPACES_URL?.replace(/\/+$/, '') || undefined;
 let store: ControlStore;
 let auth: BaaraliAuth | undefined;
 if (process.env.DATABASE_URL) {
@@ -83,6 +85,7 @@ if (process.env.DATABASE_URL) {
       social,
       onUserCreated: (u) => pgStore.upsertAccount({ id: u.id, email: u.email, planId: 'decouverte', createdAt: u.createdAt }),
       now: Date.now,
+      spacesUrl,
     };
     await migrateAuth(authDeps);
     auth = createAuth(authDeps);
@@ -159,6 +162,7 @@ const app = createApp({
   auth,
   instances,
   gateway,
+  spacesUrl,
   fetch: globalThis.fetch,
   now: Date.now,
 });

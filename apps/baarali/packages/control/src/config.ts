@@ -8,6 +8,8 @@ export type ApiConfig = z.infer<typeof RowboatApiConfig>;
 export interface ControlSettings {
   /** Public URL of this control plane, without a trailing slash. */
   publicUrl: string;
+  /** Our Spaces server (Harbor), once deployed; unset: the apps hide Spaces. */
+  spacesUrl?: string;
 }
 
 /**
@@ -19,7 +21,9 @@ export interface ControlSettings {
  *   control plane is that issuer (architecture §3.5, login by phone).
  * - `websocketApiUrl` stays empty until the voice phase (roadmap phase 8):
  *   core then fails voice with an explicit error instead of calling Rowboat.
- * - `spacesApexUrl` is null: no managed Spaces fleet in V1.
+ * - `spacesApexUrl` is our own Harbor (apps/harbor) once it is deployed,
+ *   null before: the apps never reach the Rowboat Labs fleet (decided
+ *   02/10/2026: we host Spaces ourselves).
  * - `billing.plans` keeps the upstream shape: `monthlyCredits` carries the
  *   week budget and `dailyCredits` the session budget (architecture §3.5,
  *   quota decided 30/09/2026). The upstream field holds one price, in
@@ -31,7 +35,7 @@ export function buildApiConfig(settings: ControlSettings, plans: Plan[] = []): A
     appUrl: base,
     websocketApiUrl: '',
     supabaseUrl: base,
-    spacesApexUrl: null,
+    spacesApexUrl: settings.spacesUrl ? settings.spacesUrl.replace(/\/+$/, '') : null,
     billing: {
       plans: plans.map((plan) => ({
         id: plan.id,

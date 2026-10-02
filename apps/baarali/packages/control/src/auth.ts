@@ -43,6 +43,12 @@ export interface AuthDeps {
   /** A new person: their account is created on Découverte (architecture §3.5). */
   onUserCreated: (user: { id: string; email: string | null; createdAt: number }) => Promise<void>;
   now: () => number;
+  /**
+   * The Spaces server's address (Harbor, apps/harbor), when we host one. Its
+   * access tokens must be JWTs it verifies alone against our keys (Harbor
+   * auth-oidc.ts): this resource is what makes them so.
+   */
+  spacesUrl?: string;
 }
 
 /**
@@ -104,8 +110,10 @@ function authOptions(deps: AuthDeps) {
       },
     },
     plugins: [
-      // Signs the ID tokens the OAuth server issues.
-      jwt(),
+      // Signs the ID tokens, and with a key in ES256 the access tokens of
+      // Spaces: Harbor accepts ES256 or RS256, not the EdDSA of the main key
+      // (auth-oidc.ts, decided 02/10/2026).
+      jwt({ jwks: { keyPairConfigs: [{ alg: 'ES256' }] } }),
       emailOTP({
         otpLength: 6,
         expiresIn: 300,
@@ -143,9 +151,27 @@ function authOptions(deps: AuthDeps) {
         clientRegistrationAllowedScopes: SCOPES,
         // Security §4.2: a short access token, a rotating refresh token.
         accessTokenExpiresIn: 15 * 60,
+        // Every app may ask for Spaces: our own server, and clients
+        // registered before it existed must keep signing in.
+        ...(deps.spacesUrl
+          ? { resources: [{ identifier: deps.spacesUrl, signingAlgorithm: 'ES256' as const }], resourceSeedMode: 'merge' as const, enforcePerClientResources: false }
+          : {}),
+        // Who is speaking, for Harbor (auth-oidc.ts): an email only once
+        // verified, since a space may admit people by their email's domain,
+        // and no name when it is only the phone number of a phone sign-up.
+        customAccessTokenClaims: ({ user }) => spacesClaims(user),
       }),
     ],
   } satisfies BetterAuthOptions;
+}
+
+export function spacesClaims(user: { email?: unknown; emailVerified?: unknown; name?: unknown } | null | undefined): Record<string, string> {
+  if (!user) return {};
+  const claims: Record<string, string> = {};
+  const email = typeof user.email === 'string' ? realEmail(user.email) : null;
+  if (email && user.emailVerified === true) claims.email = email;
+  if (typeof user.name === 'string' && user.name.trim() && !/^\+?[\d\s]+$/.test(user.name.trim())) claims.name = user.name.trim();
+  return claims;
 }
 
 /**
@@ -159,7 +185,7 @@ function authOptions(deps: AuthDeps) {
  *   receiving the code on a loopback port (RFC 8252), so it is native when
  *   every redirect URI is such a loopback one.
  */
-async function asAppRequest(req: Request): Promise<Request> {
+async function asAppRequest(req: Request, spacesUrl?: string): Promise<Request> {
   const url = new URL(req.url);
   const add = (scope: string | null) => {
     const scopes = new Set((scope ?? '').split(' ').filter(Boolean));
@@ -168,6 +194,7 @@ async function asAppRequest(req: Request): Promise<Request> {
   };
   if (req.method === 'GET' && url.pathname === `${AUTH_BASE_PATH}/oauth2/authorize` && url.searchParams.get('response_type') === 'code') {
     url.searchParams.set('scope', add(url.searchParams.get('scope')));
+    if (spacesUrl && !url.searchParams.has('resource')) url.searchParams.set('resource', spacesUrl);
     return new Request(url, req);
   }
   if (req.method === 'POST' && url.pathname === `${AUTH_BASE_PATH}/oauth2/register`) {
@@ -177,7 +204,10 @@ async function asAppRequest(req: Request): Promise<Request> {
       if (grants.includes('refresh_token')) body.scope = add(typeof body.scope === 'string' ? body.scope : null);
       const uris = Array.isArray(body.redirect_uris) ? body.redirect_uris : [];
       const loopback = (u: unknown) => typeof u === 'string' && /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?\//.test(u);
-      if (body.application_type === undefined && uris.length > 0 && uris.every(loopback)) body.application_type = 'native';
+      // The phone app comes back through its own reverse-domain scheme, the
+      // form RFC 8252 §7.1 allows (com.baarali.app.mobile:/oauth-callback).
+      const appScheme = (u: unknown) => typeof u === 'string' && /^[a-z][a-z0-9+-]*(\.[a-z0-9+-]+)+:\/(?!\/)/i.test(u);
+      if (body.application_type === undefined && uris.length > 0 && uris.every((u) => loopback(u) || appScheme(u))) body.application_type = 'native';
       return new Request(url, { method: 'POST', headers: req.headers, body: JSON.stringify(body) });
     }
   }
@@ -223,7 +253,7 @@ export function createAuth(deps: AuthDeps): BaaraliAuth {
       if (req.method === 'GET' && url.pathname === `${AUTH_BASE_PATH}/consent`) {
         return html((nonce) => consentPage({ lang, nonce }));
       }
-      return auth.handler(await asAppRequest(req));
+      return auth.handler(await asAppRequest(req, deps.spacesUrl));
     },
 
     async userIdForAccessToken(token: string): Promise<string | null> {
