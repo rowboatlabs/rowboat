@@ -149,10 +149,12 @@ const tabs: TabConfig[] = [
   },
 ]
 
-// Spaces-only (2026-10-02, spaces-only flag PR): what Spaces and its @rowboat
-// agent use — the account, the agent's models, and the app itself. Connections,
-// MCP, code mode, phone/mobile channels and note tagging serve other sections;
-// Shortcuts holds only the hover (quick-ask) chord, which spaces-only never registers.
+// Spaces-only (2026-10-02, spaces-only flag PR): what Spaces uses — the
+// account, the app itself, and under Models only Jev, the decision model
+// behind the composer's Auto toggle (there is no @rowboat to pick models for).
+// Connections, MCP, code mode, phone/mobile channels and note tagging serve
+// other sections; Shortcuts holds only the hover (quick-ask) chord, which
+// spaces-only never registers.
 const SPACES_ONLY_TABS: ReadonlySet<ConfigTab> = new Set(["account", "models", "appearance", "notifications", "help"])
 
 /** Sidebar nav grouping: identity first, capabilities, then app-level. */
@@ -1569,9 +1571,9 @@ const ALL_NOTIFICATION_CATEGORIES: { key: NotificationCategoryKey; label: string
 
 // With Spaces dark, its notification category stays out of the settings UI
 // (the scheduler that emits it is gated on the same flag where core runs).
-// Spaces-only keeps Spaces' own and the @rowboat agent's approval requests.
+// Spaces-only keeps Spaces' own and nothing else.
 const NOTIFICATION_CATEGORIES = ALL_NOTIFICATION_CATEGORIES.filter((cat) => SPACES_ONLY
-  ? cat.key === "space_mention" || cat.key === "agent_permission"
+  ? cat.key === "space_mention"
   : SPACES_ENABLED || cat.key !== "space_mention")
 
 function NotificationSettings({ dialogOpen }: { dialogOpen: boolean }) {
@@ -2100,7 +2102,7 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
               <h3 className="text-lg font-semibold tracking-tight">{activeTabConfig.label}</h3>
               <p className="text-sm text-muted-foreground mt-1">
                 {activeTab === "models"
-                  ? "Choose the models Rowboat uses for chat and background work."
+                  ? SPACES_ONLY ? "The decision model behind the Spaces composer's Auto toggle." : "Choose the models Rowboat uses for chat and background work."
                   : activeTabConfig.description}
               </p>
             </div>
@@ -2140,6 +2142,7 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
                 // the Assistant model + per-task overrides, then provider
                 // (credential) management below.
                 <div className="space-y-8">
+                  {!SPACES_ONLY && <>
                   <ModelSelectionSection dialogOpen={open} />
                   <Separator />
                   <div className="space-y-2">
@@ -2152,14 +2155,18 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
                     <ProvidersSection dialogOpen={open} />
                   </div>
                   <Separator />
+                  </>}
                   {/* Decision models (2026-09-23): models that return typed
                       judgments, not chat. They never enter the pickers above,
                       so they get their own section rather than a provider row. */}
                   <div className="space-y-2">
+                    {/* Spaces-only: the tab header already says this, and there are no pickers above. */}
+                    {!SPACES_ONLY && <>
                     <h4 className="text-sm font-semibold">Decision Models</h4>
                     <p className="text-xs text-muted-foreground">
                       Models that answer typed questions for features like the Spaces composer's Auto toggle. They are not chat models and do not appear in the pickers above.
                     </p>
+                    </>}
                     <div className="space-y-2">
                       <span className="text-[13px] text-muted-foreground">Jev (TypeSafe)</span>
                       <JevSettings dialogOpen={open} />

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Bot, ChevronDown, ChevronRight, FileText, Loader2, PanelRightClose } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
+import { SPACES_ONLY } from '@/lib/feature-flags'
 import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
@@ -94,7 +95,7 @@ export function ArtifactsRail({ org, space, groups, memberNames, working, entrie
                 <span className="whitespace-nowrap text-[13px] text-muted-foreground">Files changed here</span>
                 <span className="text-xs text-muted-foreground">{groups.length === 0 ? 'none yet' : groups.length}</span>
                 <span className="flex-1" />
-                <FoldIntoFileButton entries={entries} onPick={onFold} busy={folding} />
+                {!SPACES_ONLY && <FoldIntoFileButton entries={entries} onPick={onFold} busy={folding} />}
                 <button type="button" title="Hide" onClick={onCollapse} className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground">
                     <PanelRightClose className="size-3.5" />
                 </button>
@@ -102,7 +103,7 @@ export function ArtifactsRail({ org, space, groups, memberNames, working, entrie
             <div className="flex flex-1 min-h-0 flex-col gap-1.5 overflow-y-auto px-2.5 pt-2.5 pb-2">
                 {groups.length === 0 && !working && (
                     <div className="rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
-                        Nothing changed from this topic yet. Ask @rowboat to fold a decision into a file, or pick one above.
+                        {SPACES_ONLY ? 'Nothing changed from this topic yet.' : 'Nothing changed from this topic yet. Ask @rowboat to fold a decision into a file, or pick one above.'}
                     </div>
                 )}
                 {groups.map((g) => (
@@ -175,7 +176,7 @@ export function ArtifactsSummary({ groups, working, railOpen, onToggleRail, entr
                 {working && <Loader2 className="size-3 shrink-0 animate-spin" />}
                 {railOpen ? <ChevronRight className="size-3 shrink-0 rotate-180" /> : <ChevronRight className="size-3 shrink-0" />}
             </button>
-            {groups.length === 0 && <FoldIntoFileButton entries={entries} onPick={onFold} busy={folding} />}
+            {groups.length === 0 && !SPACES_ONLY && <FoldIntoFileButton entries={entries} onPick={onFold} busy={folding} />}
         </div>
     )
 }

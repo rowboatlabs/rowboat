@@ -3,7 +3,6 @@ import { toast } from "sonner"
 import { ModelSelector, providerDisplayNames, type ModelRef, type ModelSelection } from "@/components/model-selector"
 import { useModels, type ModelPickerGroup } from "@/hooks/use-models"
 import { TASK_SLOTS, type TaskKey } from "@/components/settings/task-slots"
-import { SPACES_ONLY } from "@/lib/feature-flags"
 
 // The unified model-selection surface (signed-in and BYOK alike): ONE
 // required Assistant model plus per-task overrides that default to
@@ -27,12 +26,6 @@ interface ImageProviderEntry {
   models: string[]
 }
 
-
-// Spaces-only (2026-10-02, spaces-only flag PR): the slots @rowboat's turns
-// still reach — the subagents it spawns and its auto-approval checks. Space
-// sessions are titled by their thread, and the other tasks don't run.
-const SPACES_ONLY_TASKS: ReadonlySet<TaskKey> = new Set(["subagent", "autoPermissionDecision"])
-const VISIBLE_TASK_SLOTS = SPACES_ONLY ? TASK_SLOTS.filter((slot) => SPACES_ONLY_TASKS.has(slot.key)) : TASK_SLOTS
 
 function refLabel(ref: ModelRef): string {
   return `${providerDisplayNames[ref.provider] || ref.provider} · ${ref.model}`
@@ -161,7 +154,7 @@ export function ModelSelectionSection({ dialogOpen }: { dialogOpen: boolean }) {
             )}
           </h4>
           <p className="text-xs text-muted-foreground mt-0.5">
-            {SPACES_ONLY ? "Used by @rowboat in your spaces, and for any task without its own model selection." : "Used for chat and for any task without its own model selection."}
+            Used for chat and for any task without its own model selection.
           </p>
         </div>
         <ModelSelector
@@ -187,7 +180,7 @@ export function ModelSelectionSection({ dialogOpen }: { dialogOpen: boolean }) {
           </p>
         </div>
         <div className="grid grid-cols-2 gap-x-4 gap-y-4">
-          {VISIBLE_TASK_SLOTS.map(({ key, label, description }) => {
+          {TASK_SLOTS.map(({ key, label, description }) => {
             const override = taskModels[key] ?? null
             const inheritText = key === "subagent"
               ? "Uses the spawning chat's model"

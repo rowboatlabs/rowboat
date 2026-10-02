@@ -279,9 +279,7 @@ export function useOnboardingState(open: boolean, onComplete: (opts?: { startTou
     if (currentStep === 0) {
       setCurrentStep(1)
     } else if (currentStep === 1) {
-      // Spaces-only (2026-10-02, spaces-only flag PR): no accounts to connect
-      // and no code mode — Providers goes straight to Done.
-      setCurrentStep(SPACES_ONLY ? 4 : 2)
+      setCurrentStep(2)
     } else if (currentStep === 2) {
       setCurrentStep(3)
     } else if (currentStep === 3) {
@@ -298,7 +296,8 @@ export function useOnboardingState(open: boolean, onComplete: (opts?: { startTou
     } else if (currentStep === 3) {
       setCurrentStep(2)
     } else if (currentStep === 4) {
-      setCurrentStep(SPACES_ONLY ? 1 : 3)
+      // Spaces-only (2026-10-02, spaces-only flag PR): Done follows Welcome.
+      setCurrentStep(SPACES_ONLY ? 0 : 3)
     }
   }, [currentStep, onboardingPath])
 

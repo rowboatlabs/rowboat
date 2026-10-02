@@ -29,7 +29,7 @@ export function CompletionStep({ state }: CompletionStepProps) {
         </h2>
         {space.needed && (
           <p className="text-base text-muted-foreground leading-relaxed">
-            A place for your team and their Rowboat assistants to work together.
+            {SPACES_ONLY ? "A place for your team to work together." : "A place for your team and their Rowboat assistants to work together."}
           </p>
         )}
       </motion.div>

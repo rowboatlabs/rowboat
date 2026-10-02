@@ -5468,14 +5468,13 @@ function App() {
   // Cmd+L hides the sidebar without closing its chat. The same tab and session
   // return when it is reopened, just as the Assistant page does after navigation.
   const toggleChatSidebar = useCallback(() => {
+    // Spaces-only has no chat at all (2026-10-02, spaces-only flag PR).
+    if (SPACES_ONLY) return
     if (assistantLayout.sidebar && assistantLayout.sidebarVisible) dispatchAssistantLayout({ type: 'hide-sidebar' })
     else if (assistantLayout.sidebar) {
       dispatchAssistantLayout({ type: 'show-sidebar' })
       switchChatTab(assistantLayout.sidebar)
     }
-    // Spaces-only: the sidebar only ever holds an @rowboat thread's session,
-    // opened from the space; it never starts a chat of its own.
-    else if (SPACES_ONLY) return
     else if (isFullScreenChat && assistantLayout.assistant) moveAssistantChat(assistantLayout.assistant, 'sidebar')
     else newChatAt('sidebar')
   }, [assistantLayout.sidebar, assistantLayout.sidebarVisible, assistantLayout.assistant, isFullScreenChat, switchChatTab, moveAssistantChat, newChatAt, dispatchAssistantLayout])
@@ -7476,7 +7475,7 @@ function App() {
                     <TooltipContent side="bottom">New chat</TooltipContent>
                   </Tooltip>
                 )}
-                {!assistantLayout.sidebarVisible && (!SPACES_ONLY || assistantLayout.sidebar) && (
+                {!assistantLayout.sidebarVisible && !SPACES_ONLY && (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
@@ -7709,9 +7708,8 @@ function App() {
                     // space (or thread) and lands on the row.
                     onOpenMessage={(target) => void navigateToView({ type: 'spaces', ...target })}
                     onOpenActivity={openActivity}
-                    // Spaces-only: an @rowboat session (and its approvals)
-                    // opens beside the space — there is no Assistant page.
-                    onOpenSession={SPACES_ONLY ? openRunInSidebar : openAssistantRun}
+                    // Spaces-only has no @rowboat, so no agent session to open.
+                    onOpenSession={SPACES_ONLY ? undefined : openAssistantRun}
                   />
                 </div>
                 </KeepAliveSection>
@@ -8259,7 +8257,8 @@ function App() {
           void window.ipc.invoke('oauth:connect', { provider: 'google' })
         }}
       />
-      {!showOnboarding && (
+      {/* Spaces-only has no models to recommend. */}
+      {!showOnboarding && !SPACES_ONLY && (
         <ModelRecommendationUpdateModal
           update={recommendationUpdate}
           onClose={() => setRecommendationUpdate(null)}

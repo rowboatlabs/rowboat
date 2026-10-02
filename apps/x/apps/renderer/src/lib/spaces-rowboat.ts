@@ -3,6 +3,7 @@ import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { containsRowboatAddress } from '@/lib/spaces-mentions'
 import { toast } from '@/lib/toast'
 import * as analytics from '@/lib/analytics'
+import { SPACES_ONLY } from '@/lib/feature-flags'
 
 // ---------------------------------------------------------------------------
 // @rowboat trigger (spec §8): a posted message that genuinely addresses
@@ -27,7 +28,9 @@ export function maybeInvokeRowboat(
     body: string,
     options?: RowboatTurnOptions,
 ): void {
-    if (!containsRowboatAddress(body)) return
+    // Spaces-only (2026-10-02, spaces-only flag PR) has no @rowboat: an
+    // address someone types is just text.
+    if (SPACES_ONLY || !containsRowboatAddress(body)) return
     void window.ipc
         .invoke('spaces:invokeRowboat', {
             orgId: org.id,

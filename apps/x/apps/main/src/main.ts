@@ -616,8 +616,9 @@ app.whenReady().then(async () => {
   // Warm the models.dev catalog cache (single writer; refreshed every 24h
   // while the app runs). Every consumer — catalog listings, the reasoning
   // capability gate — reads the on-disk cache only. Best-effort: failures
-  // leave any existing cache in use and never block boot.
-  startModelsDevRefresh();
+  // leave any existing cache in use and never block boot. Spaces-only has no
+  // models to describe.
+  if (!flags.spacesOnly(process.env)) startModelsDevRefresh();
 
   // PostHog identify() is idempotent — call it on every startup so existing
   // signed-in installs (and every cold start of v0.3.4+) get re-identified.

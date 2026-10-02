@@ -5,6 +5,7 @@ import type { EditorView } from '@tiptap/pm/view'
 import { uploadInputFor } from '@/lib/spaces-upload'
 import { ArrowUp, BarChart3, Clock, Eye, FileText, Loader2, LoaderIcon, Mic, Paperclip, Route, Send, ShieldCheck, Square, Terminal, X as XIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { SPACES_ONLY } from '@/lib/feature-flags'
 import { Button } from '@/components/ui/button'
 import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -363,7 +364,8 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     // --- slash commands ------------------------------------------------------
     // "/name" (no space yet) filters the menu; "/name args" pins the matched
     // command's usage hint above the box; Enter runs it via send().
-    const allCommands: CommandEntry[] = [ASK_COMMAND, ...commands]
+    // Spaces-only has no @rowboat, so no /ask.
+    const allCommands: CommandEntry[] = SPACES_ONLY ? commands : [ASK_COMMAND, ...commands]
     const cmdMenuMatch = /^\/([a-zA-Z]*)$/.exec(draft)
     const cmdQuery = cmdMenuMatch?.[1]?.toLowerCase() ?? null
     const cmdCandidates = cmdQuery !== null ? allCommands.filter((c) => c.name.startsWith(cmdQuery)) : []
@@ -410,7 +412,8 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     }
 
     // --- send ----------------------------------------------------------------
-    const mentioned = containsRowboatAddress(draft)
+    // Spaces-only: an @rowboat address invokes nothing, so it carries no options.
+    const mentioned = !SPACES_ONLY && containsRowboatAddress(draft)
 
     /**
      * Per-turn agent options — @rowboat's whenever the outgoing text addresses
@@ -419,7 +422,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     const agentOptionsFor = (text: string): AgentOptions | undefined => {
         const mentionedIds = new Set(mentionedMemberIds(text))
         const members = Object.fromEntries(Object.entries(memberOptions).filter(([id]) => mentionedIds.has(id)))
-        const rowboat = containsRowboatAddress(text)
+        const rowboat = !SPACES_ONLY && containsRowboatAddress(text)
         if (!rowboat && Object.keys(members).length === 0) return undefined
         return {
             ...(rowboat
@@ -949,7 +952,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                                 <BarChart3 className="size-4" />
                             </button>
                         )}
-                        <button
+                        {!SPACES_ONLY && <button
                             type="button"
                             onClick={insertRowboatChip}
                             title="Address your Rowboat — it acts only when asked"
@@ -959,7 +962,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                             )}
                         >
                             @rowboat
-                        </button>
+                        </button>}
                         {autoRoute && (
                             <>
                                 <button

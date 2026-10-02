@@ -19,8 +19,8 @@ interface StepIndicatorProps {
 }
 
 export function StepIndicator({ currentStep }: StepIndicatorProps) {
-  // Spaces-only skips Connect and Code (see handleNext).
-  const steps = SPACES_ONLY ? STEPS.filter(s => s.step !== 2 && s.step !== 3) : STEPS
+  // Spaces-only is Welcome then Done (see WelcomeStep's Continue).
+  const steps = SPACES_ONLY ? STEPS.filter(s => s.step === 0 || s.step === 4) : STEPS
   const currentIndex = steps.findIndex(s => s.step === currentStep)
 
   return (
