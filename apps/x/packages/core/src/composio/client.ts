@@ -25,15 +25,31 @@ import { API_URL } from "../config/env.js";
 const COMPOSIO_BASE_URL = 'https://backend.composio.dev/api/v3';
 const CONFIG_FILE = path.join(WorkDir, 'config', 'composio.json');
 
+/**
+ * Through the account's api, when signed in and the api serves Composio.
+ * Baarali's does not in V1 (`composio: false` in /v1/config, 2026-10-02):
+ * then only a key of the user's own reaches Composio, directly, and with
+ * none Composio is simply not configured — never a call that answers 404.
+ */
+async function viaAccount(): Promise<boolean> {
+    if (!(await isSignedIn())) return false;
+    try {
+        const { getRemoteConfig } = await import("../config/remote-config.js");
+        return (await getRemoteConfig()).composio;
+    } catch {
+        return false;
+    }
+}
+
 async function getBaseUrl(): Promise<string> {
-    if (await isSignedIn()) {
+    if (await viaAccount()) {
         return `${API_URL}/v1/composio`;
     }
     return COMPOSIO_BASE_URL;
 }
 
 async function getAuthHeaders(): Promise<Record<string, string>> {
-    if (await isSignedIn()) {
+    if (await viaAccount()) {
         const token = await getAccessToken();
         return { 'Authorization': `Bearer ${token}` };
     }
@@ -100,7 +116,7 @@ export function setApiKey(apiKey: string): void {
  * Check if Composio is configured
  */
 export async function isConfigured(): Promise<boolean> {
-    if (await isSignedIn()) return true;
+    if (await viaAccount()) return true;
     return !!getApiKey();
 }
 

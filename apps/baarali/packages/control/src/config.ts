@@ -24,6 +24,9 @@ export interface ControlSettings {
  * - `spacesApexUrl` is our own Harbor (apps/harbor) once it is deployed,
  *   null before: the apps never reach the Rowboat Labs fleet (decided
  *   02/10/2026: we host Spaces ourselves).
+ * - `composio: false`: `/v1/composio` is off in V1 (TARGET_AGENTIC_ARCHITECTURE
+ *   « Désactivé en V1 »), so the apps never call a route that answers 404;
+ *   a user's own Composio key still works.
  * - `billing.plans` keeps the upstream shape: `monthlyCredits` carries the
  *   week budget and `dailyCredits` the session budget (architecture §3.5,
  *   quota decided 30/09/2026). The upstream field holds one price, in
@@ -36,6 +39,7 @@ export function buildApiConfig(settings: ControlSettings, plans: Plan[] = []): A
     websocketApiUrl: '',
     supabaseUrl: base,
     spacesApexUrl: settings.spacesUrl ? settings.spacesUrl.replace(/\/+$/, '') : null,
+    composio: false,
     billing: {
       plans: plans.map((plan) => ({
         id: plan.id,

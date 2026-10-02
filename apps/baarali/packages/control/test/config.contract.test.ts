@@ -17,6 +17,10 @@ describe('GET /v1/config body', () => {
     expect(JSON.stringify(body)).not.toContain('rowboatlabs.com');
   });
 
+  it('says Composio is not served, so the apps never call /v1/composio', () => {
+    expect(buildApiConfig({ publicUrl: 'https://control.example.test' }).composio).toBe(false);
+  });
+
   it('names our own Spaces server once there is one, and none before', () => {
     expect(buildApiConfig({ publicUrl: 'https://control.example.test' }).spacesApexUrl).toBeNull();
     const body = buildApiConfig({ publicUrl: 'https://control.example.test', spacesUrl: 'https://spaces.example.test/' });

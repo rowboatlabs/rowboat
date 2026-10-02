@@ -441,7 +441,7 @@ Chaque appel à `API_URL` (audit §11) trouve son remplaçant, **fonction par fo
 | `/v1/me` | Identité du plan de contrôle. |
 | `/v1/llm`, `/v1/llm/models` | OpenRouter directement, avec la clé détenue par le plan de contrôle. |
 | `/v1/search/exa` | Recherche via le plan de contrôle (Exa ou autre, clé chez nous). |
-| `/v1/composio` | **Désactivé en V1.** Les intégrations V1 passent par les connecteurs natifs de Rowboat (Gmail, agendas) et par MCP. Composio se réévalue quand le besoin d'intégrations nombreuses apparaît (§8). |
+| `/v1/composio` | **Désactivé en V1.** Les intégrations V1 passent par les connecteurs natifs de Rowboat (Gmail, agendas) et par MCP. Composio se réévalue quand le besoin d'intégrations nombreuses apparaît (§8). `/v1/config` le dit (`composio: false`, 02/10/2026) : l'app ne l'appelle plus, seule une clé Composio de l'utilisateur l'active. |
 | `/v1/voice/text-to-speech/` | Mandataire TTS dans le plan de contrôle. |
 | `/v1/google-oauth/claim-picked` | OAuth Google géré par le plan de contrôle (fin du retour sur `localhost` en cloud). |
 | `/v1/billing/*`, `/v1/referral` | Budgets et usage Baarali ; parrainage hors V1. |

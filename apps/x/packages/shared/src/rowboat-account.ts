@@ -26,6 +26,10 @@ export const RowboatApiConfig = z.object({
   // Rowboat Spaces managed apex (org creation) — null/absent until a spaces
   // fleet exists for the environment behind API_URL
   spacesApexUrl: z.string().nullable().optional(),
+  // Whether the api proxies Composio (`/v1/composio`). Absent = it does, as
+  // the Rowboat Labs backend always has; an api that does not serve it says
+  // false, and the app then needs the user's own key (Baarali, 2026-10-02).
+  composio: z.boolean().optional(),
   billing: BillingCatalogSchema,
   // first-time-action reward catalog (non-archived entries); optional so the
   // app keeps working against API deployments that predate it — the rewards

@@ -21,6 +21,8 @@ interface RemoteConfig {
     websocketApiUrl: string;
     /** Rowboat Spaces managed apex (org creation) — null until a fleet exists for this environment. */
     spacesApexUrl: string | null;
+    /** Whether the api proxies Composio (`/v1/composio`); absent means it does. */
+    composio: boolean;
 }
 
 let _cached: Promise<RemoteConfig> | null = null;
@@ -40,6 +42,7 @@ async function fetchRemoteConfig(): Promise<RemoteConfig> {
         supabaseUrl: body.supabaseUrl ?? "",
         websocketApiUrl: body.websocketApiUrl ?? "",
         spacesApexUrl: body.spacesApexUrl ?? null,
+        composio: body.composio !== false,
     };
 }
 

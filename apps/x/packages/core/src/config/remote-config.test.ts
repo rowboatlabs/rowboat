@@ -45,4 +45,11 @@ describe("the api's config", () => {
         await expect(getRemoteConfig()).rejects.toThrow("502");
         expect((await getRemoteConfig()).appUrl).toBe("https://app.test");
     });
+
+    it("reads Composio as served unless the api says otherwise", async () => {
+        serve({ appUrl: "https://app.test" });
+        expect((await (await load()).getRemoteConfig()).composio).toBe(true);
+        serve({ appUrl: "https://app.test", composio: false });
+        expect((await (await load()).getRemoteConfig()).composio).toBe(false);
+    });
 });
