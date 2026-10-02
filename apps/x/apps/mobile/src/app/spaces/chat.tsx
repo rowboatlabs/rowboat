@@ -17,6 +17,11 @@ import { setActiveSpace } from '@/lib/push';
 import { useSpacesAccount } from '@/lib/spaces/account';
 import { STREAM_CACHE_LIMIT, loadRoster, loadValue, peekRoster, peekValue, saveRoster, saveValue, seedThreadRoot } from '@/lib/spaces/cache';
 import { StatusBanner } from '@/components/status-banner';
+import { fetchLinkPreview, peekLinkPreview, previewUrls } from '@/lib/spaces/link-preview';
+
+/** Rows whose link cards must be in before a channel is revealed, and how long we'll wait. */
+const TAIL_ROWS = 8;
+const TAIL_WAIT_MS = 700;
 import { SpacesClient } from '@/lib/spaces/client';
 import { SpacesLive } from '@/lib/spaces/live';
 import { useColors } from '@/theme/colors';
@@ -57,19 +62,20 @@ export default function SpaceChatScreen() {
   //  - maintainVisibleContentPosition keeps your place when rows above you
   //    grow (late link cards/images) — the old flicker.
   const [positioned, setPositioned] = useState(false);
+  const revealing = useRef(false);
+  const messagesRef = useRef<Message[] | null>(null);
   // "Follow the bottom" is YOUR intent, decided only when a drag settles —
   // never by programmatic or keep-position scrolls (those fooled it before).
-  // While following, keep-position is OFF (it would pin the top of what's
-  // visible and leave a growing last message cut off); it switches on only
-  // once you've scrolled up, to hold your place there.
+  // Keep-position (maintainVisibleContentPosition) is always on: when rows
+  // ABOVE the viewport change height — a first open lands a dozen link cards
+  // in ~1.5s — iOS corrects the offset natively in the same frame. Doing it
+  // from JS a frame late was the flicker.
   const atBottom = useRef(true);
-  const [following, setFollowing] = useState(true);
   const dragging = useRef(false);
   const settle = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
     dragging.current = false;
     const { contentOffset, contentSize, layoutMeasurement, contentInset } = e.nativeEvent;
     atBottom.current = contentSize.height + (contentInset?.bottom ?? 0) - (contentOffset.y + layoutMeasurement.height) < 80;
-    setFollowing(atBottom.current);
   }, []);
   // After layout commits (a frame later), not mid-layout.
   const toEnd = useCallback(() => {
@@ -78,8 +84,18 @@ export default function SpaceChatScreen() {
   const onContentSizeChange = useCallback(() => {
     if (!positioned) {
       toEnd();
-      // Reveal two frames later, once the jump has landed.
-      requestAnimationFrame(() => requestAnimationFrame(() => setPositioned(true)));
+      if (revealing.current) return;
+      revealing.current = true;
+      // Reveal once the last screenful's link cards are in (they'd grow rows
+      // you're looking at), capped so a slow site can't hold the screen.
+      const urls = (messagesRef.current ?? []).slice(-TAIL_ROWS).flatMap((m) => previewUrls(m.body)).filter((u) => peekLinkPreview(u) === undefined);
+      const settled = urls.length ? Promise.race([Promise.allSettled(urls.map((u) => fetchLinkPreview(u))), new Promise((r) => setTimeout(r, TAIL_WAIT_MS))]) : Promise.resolve();
+      void settled.then(() =>
+        requestAnimationFrame(() => {
+          listRef.current?.scrollToEnd({ animated: false });
+          requestAnimationFrame(() => setPositioned(true));
+        }),
+      );
       return;
     }
     if (atBottom.current && !dragging.current) toEnd();
@@ -141,7 +157,7 @@ export default function SpaceChatScreen() {
         });
       }
     });
-    client
+    const rosterReq = client
       .listMembers(space)
       .then((memberList) => {
         if (cancelled) return;
@@ -151,7 +167,10 @@ export default function SpaceChatScreen() {
       .catch(() => {});
     client
       .listStream(space)
-      .then((stream) => {
+      .then(async (stream) => {
+        // Names first: rows painted with raw member ids reflow when the
+        // roster lands (a visible jump on a first open).
+        await rosterReq;
         if (cancelled) return;
         const freshLast = stream.messages.at(-1)?.offset ?? 0;
         // Keep anything live delivered after the server's snapshot.
@@ -174,6 +193,7 @@ export default function SpaceChatScreen() {
   // Newest first for the inverted list: row 0 sits at the bottom, so content
   // that grows later (link cards, images) pushes history UP, never the view.
   // Deleted messages vanish (Slack) unless replies still hang off them.
+  messagesRef.current = messages;
   const visible = useMemo(() => messages?.filter((m) => !m.deletedAt || m.replyCount > 0) ?? [], [messages]);
 
   // Live: one socket for this screen's lifetime, replay from the last offset
@@ -229,7 +249,6 @@ export default function SpaceChatScreen() {
       foldMessage(message);
       // Your own message: always land on it, wherever you were scrolled.
       atBottom.current = true;
-      setFollowing(true);
       requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -404,7 +423,7 @@ export default function SpaceChatScreen() {
           alwaysBounceVertical
           style={{ flex: 1, opacity: positioned ? 1 : 0 }}
           contentContainerStyle={{ paddingVertical: 12 }}
-          maintainVisibleContentPosition={following ? undefined : { minIndexForVisible: 0 }}
+          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
           onScrollBeginDrag={() => { dragging.current = true; }}
           onScrollEndDrag={settle}
           onMomentumScrollEnd={settle}
@@ -429,6 +448,12 @@ export default function SpaceChatScreen() {
           ))}
         </ScrollView>
       )}
+
+      {messages !== null && visible.length > 0 && !positioned ? (
+        <View pointerEvents="none" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator />
+        </View>
+      ) : null}
 
       {/* Composer */}
       <View style={{ paddingTop: 8, paddingBottom: keyboardVisible ? 16 : insets.bottom + 10 }}>
