@@ -120,6 +120,13 @@ describe('the mobile app', () => {
     expect(out).toContain("color: 'red'");
   });
 
+  it('looks up the words inside a template that has none of its own', () => {
+    const out = compile("const s = <Text>{n ? ` · ${n.length} ${n.length === 1 ? 'space' : 'spaces'}` : ''}</Text>;");
+    expect(out).toContain('__baaraliT("space")');
+    expect(out).toContain('__baaraliT("spaces")');
+    expect(out).toContain(' · ${n.length}');
+  });
+
   it('keeps the spaces React renders around the words', () => {
     expect(compile('const s = <Text>Hello <B>you</B></Text>;')).toContain('{__baaraliT("Hello")} <B>');
   });

@@ -3059,6 +3059,8 @@ export const FR: Dictionary = {
     "Get started": "Commencer",
     "Mac chat": "Discussion Mac",
     "Member": "Membre",
+    "space": "espace",
+    "spaces": "espaces",
     "Mention @baarali in any message and your agent picks it up — summarize a thread, draft a doc, fold in a decision.": "Mentionnez @baarali dans n’importe quel message et votre agent s’en charge — résumer un fil, rédiger un document, consigner une décision.",
     "Mentions only": "Mentions seulement",
     "Message Baarali": "Écrire à Baarali",

@@ -67,6 +67,8 @@ module.exports = function baaraliI18n({ types: t }, options = {}) {
   function lookUp(e) {
     if (e.isConditionalExpression()) return void [e.get('consequent'), e.get('alternate')].forEach(lookUp);
     if (e.isLogicalExpression() && e.node.operator !== '&&') return void lookUp(e.get('right'));
+    // ` · ${n} ${n === 1 ? 'space' : 'spaces'}`: no words of its own, words in its values (2026-10-02).
+    if (e.isTemplateLiteral() && !text(e.node)) return void e.get('expressions').forEach(lookUp);
     if (swap(e, text(e.node))) used = !collect || used;
   }
 
