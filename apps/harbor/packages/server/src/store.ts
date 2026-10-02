@@ -84,6 +84,17 @@ export interface StoredSpaceBlob {
   uploadedAt: string;
 }
 
+/** An image the whole org may read (core/images.ts): an avatar or the logo. */
+export interface StoredOrgImage {
+  hash: string;
+  size: number;
+  mime: string;
+  width?: number;
+  height?: number;
+  uploadedBy: string;
+  uploadedAt: string;
+}
+
 export interface StoredInvite {
   token: string;
   spaceId: string;
@@ -274,6 +285,15 @@ export interface Store {
   /** First write wins — re-uploading the same bytes never changes the recorded mime/uploader. */
   putSpaceBlob(blob: StoredSpaceBlob): Promise<void>;
   getSpaceBlob(spaceId: string, hash: string): Promise<StoredSpaceBlob | undefined>;
+
+  // profile images (org-scoped registry; bytes live in the BlobStore)
+  /** First write wins, as putSpaceBlob. */
+  putOrgImage(image: StoredOrgImage): Promise<void>;
+  getOrgImage(hash: string): Promise<StoredOrgImage | undefined>;
+  /** The org's logo hash, or undefined when none is set. */
+  getOrgLogo(): Promise<string | undefined>;
+  /** null clears it. */
+  setOrgLogo(hash: string | null, by: string, at: string): Promise<void>;
 
   // change log (append-only). ChangeSet.assetId is the lineage key: per-file
   // history is a filter instead of a chain walk.

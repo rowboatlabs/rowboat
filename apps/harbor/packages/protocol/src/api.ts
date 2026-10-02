@@ -184,6 +184,54 @@ export const routes = {
     path: '/v1/me',
     response: z.object({ member: Member }),
   },
+  // --- profile images (2026-10-02) -------------------------------------------
+  /**
+   * Your own avatar. The body is the image itself (PNG, JPEG, WebP or GIF,
+   * at most 1 MiB; the org sniffs the bytes and ignores the content-type).
+   * The member comes back with `avatarUrl` set: an absolute URL on this org
+   * that any member may read with their bearer (getImage). Clients send a
+   * small square; the org never resizes.
+   */
+  setAvatar: {
+    method: 'PUT',
+    path: '/v1/me/avatar',
+    response: z.object({ member: Member }),
+  },
+  /** Back to the initial. Idempotent. */
+  clearAvatar: {
+    method: 'DELETE',
+    path: '/v1/me/avatar',
+    response: z.object({ member: Member }),
+  },
+  /** The org's logo, or nothing when none is set. Any member. */
+  getOrgLogo: {
+    method: 'GET',
+    path: '/v1/org/logo',
+    response: z.object({ logoUrl: z.string().url().optional() }),
+  },
+  /** Set the org's logo — admins only. Same body rules as setAvatar. */
+  setOrgLogo: {
+    method: 'PUT',
+    path: '/v1/org/logo',
+    response: z.object({ logoUrl: z.string().url() }),
+  },
+  /** Remove the org's logo — admins only. Idempotent. */
+  clearOrgLogo: {
+    method: 'DELETE',
+    path: '/v1/org/logo',
+    response: z.object({ logoUrl: z.string().url().optional() }),
+  },
+  /**
+   * An avatar's or logo's bytes: a stream or a 302 to a short-lived presigned
+   * URL, exactly as getBlob. Readable by every member of the org; hash-keyed,
+   * so cacheable forever.
+   */
+  getImage: {
+    method: 'GET',
+    path: '/v1/images/:hash',
+    params: z.object({ hash: BlobHash }),
+    response: z.never(),
+  },
   // --- spaces & membership -------------------------------------------------
   /**
    * The spaces you are a member of. Default = SHARED spaces only (today's

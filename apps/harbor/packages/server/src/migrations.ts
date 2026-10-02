@@ -859,6 +859,31 @@ export const MIGRATIONS: Migration[] = [
       )`,
     ],
   },
+  {
+    // Profile images (2026-10-02): the hashes this org serves to all of its
+    // members (avatars, the logo) — the org-wide counterpart of space_blobs —
+    // and the one logo an org has. An avatar's URL rides members.avatar_url.
+    id: '031-profile-images',
+    statements: [
+      `create table org_images (
+        org_id text not null,
+        hash text not null,
+        size bigint not null,
+        mime text not null,
+        width integer,
+        height integer,
+        uploaded_by text not null,
+        uploaded_at text not null,
+        primary key (org_id, hash)
+      )`,
+      `create table org_logos (
+        org_id text primary key,
+        hash text not null,
+        set_by text not null,
+        set_at text not null
+      )`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

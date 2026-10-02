@@ -2,6 +2,7 @@ import type { z } from 'zod';
 import type { BlobStore } from './blobs.js';
 import { Agents, type AgentConnectorHooks } from './core/agents.js';
 import { Assets } from './core/assets.js';
+import { Images } from './core/images.js';
 import { Feed } from './core/feed.js';
 import { approvalCardBody } from './core/approval-card.js';
 import { Invocations } from './core/invocations.js';
@@ -72,6 +73,7 @@ export class HarborService {
   private readonly k: Kernel;
   private readonly spaces: Spaces;
   private readonly assets: Assets;
+  private readonly images: Images;
   private readonly feed: Feed;
   private readonly readState: ReadState;
   private readonly agents: Agents;
@@ -89,6 +91,7 @@ export class HarborService {
     this.k = new Kernel(store, hub, org);
     this.spaces = new Spaces(this.k);
     this.assets = new Assets(this.k, blobs);
+    this.images = new Images(this.k, blobs);
     this.invocations = new Invocations(this.k);
     this.feed = new Feed(this.k, this.assets, notifier, this.invocations);
     this.readState = new ReadState(this.k, this.spaces, this.feed);
@@ -280,6 +283,24 @@ export class HarborService {
     opts: { declaredSha256: string; declaredMime?: string },
   ): Promise<BlobInfo> {
     return this.assets.uploadBlob(ctx, spaceId, bytes, opts);
+  }
+  setAvatar(ctx: ActorCtx, bytes: Uint8Array, origin: string): Promise<Member> {
+    return this.images.setAvatar(ctx, bytes, origin);
+  }
+  clearAvatar(ctx: ActorCtx): Promise<Member> {
+    return this.images.clearAvatar(ctx);
+  }
+  orgLogoUrl(ctx: ActorCtx, origin: string): Promise<string | undefined> {
+    return this.images.orgLogoUrl(ctx, origin);
+  }
+  setOrgLogo(ctx: ActorCtx, bytes: Uint8Array, origin: string): Promise<{ logoUrl: string }> {
+    return this.images.setOrgLogo(ctx, bytes, origin);
+  }
+  clearOrgLogo(ctx: ActorCtx): Promise<Record<string, never>> {
+    return this.images.clearOrgLogo(ctx);
+  }
+  getImage(ctx: ActorCtx, hash: string): Promise<{ blob: BlobInfo; url?: string; bytes?: Uint8Array }> {
+    return this.images.getImage(ctx, hash);
   }
   downloadBlob(
     ctx: ActorCtx,

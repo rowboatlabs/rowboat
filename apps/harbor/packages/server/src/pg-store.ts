@@ -38,6 +38,7 @@ import {
   type StoredPollVote,
   type StoredReaction,
   type StoredSpaceBlob,
+  type StoredOrgImage,
   type ThreadReadMark,
   type UnreadThreadRow,
 } from './store.js';
@@ -691,6 +692,53 @@ export class PgStore implements Store {
       `insert into space_blobs (space_id, hash, size, mime, width, height, uploaded_by, uploaded_at)
        values ($1, $2, $3, $4, $5, $6, $7, $8) on conflict (space_id, hash) do nothing`,
       [blob.spaceId, blob.hash, blob.size, blob.mime, blob.width ?? null, blob.height ?? null, blob.uploadedBy, blob.uploadedAt],
+    );
+  }
+
+  async putOrgImage(image: StoredOrgImage): Promise<void> {
+    await this.sql.query(
+      `insert into org_images (org_id, hash, size, mime, width, height, uploaded_by, uploaded_at)
+       values ($1, $2, $3, $4, $5, $6, $7, $8) on conflict (org_id, hash) do nothing`,
+      [this.orgId, image.hash, image.size, image.mime, image.width ?? null, image.height ?? null, image.uploadedBy, image.uploadedAt],
+    );
+  }
+
+  async getOrgImage(hash: string): Promise<StoredOrgImage | undefined> {
+    const rows = await this.sql.query<{
+      hash: string;
+      size: number | string;
+      mime: string;
+      width: number | null;
+      height: number | null;
+      uploaded_by: string;
+      uploaded_at: string;
+    }>('select * from org_images where org_id = $1 and hash = $2', [this.orgId, hash]);
+    const r = rows[0];
+    if (!r) return undefined;
+    return {
+      hash: r.hash,
+      size: Number(r.size),
+      mime: r.mime,
+      ...(r.width !== null && r.height !== null ? { width: Number(r.width), height: Number(r.height) } : {}),
+      uploadedBy: r.uploaded_by,
+      uploadedAt: r.uploaded_at,
+    };
+  }
+
+  async getOrgLogo(): Promise<string | undefined> {
+    const rows = await this.sql.query<{ hash: string }>('select hash from org_logos where org_id = $1', [this.orgId]);
+    return rows[0]?.hash;
+  }
+
+  async setOrgLogo(hash: string | null, by: string, at: string): Promise<void> {
+    if (hash === null) {
+      await this.sql.query('delete from org_logos where org_id = $1', [this.orgId]);
+      return;
+    }
+    await this.sql.query(
+      `insert into org_logos (org_id, hash, set_by, set_at) values ($1, $2, $3, $4)
+       on conflict (org_id) do update set hash = excluded.hash, set_by = excluded.set_by, set_at = excluded.set_at`,
+      [this.orgId, hash, by, at],
     );
   }
 
