@@ -2,7 +2,7 @@ import http from 'node:http';
 import net from 'node:net';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createGate } from '../src/gate.js';
+import { appRoute, createGate } from '../src/gate.js';
 
 const servers: http.Server[] = [];
 afterEach(() => { for (const s of servers.splice(0)) s.close(); });
@@ -94,5 +94,28 @@ describe('gate', () => {
     });
     expect(echoed).toContain('101 Switching Protocols');
     expect(handshake).toBe(`127.0.0.1:${targetPort}|Bearer k`);
+  });
+
+  it('opens an app to the key holder only, under the app\'s own Host', async () => {
+    const seen: { url?: string; headers: http.IncomingHttpHeaders }[] = [];
+    const appsServer = await listen(http.createServer((req, res) => { seen.push({ url: req.url, headers: req.headers }); res.end('app'); }));
+    const target = await listen(http.createServer((_req, res) => res.end('server')));
+    const gate = await listen(createGate({ targetPort: target, apps: { port: appsServer, serverKey: () => 'k' } }));
+    const denied = await fetch(`http://127.0.0.1:${gate}/_apps/finance-tracker/`, { headers: { authorization: 'Bearer nope' } });
+    expect(denied.status).toBe(401);
+    const res = await fetch(`http://127.0.0.1:${gate}/_apps/finance-tracker/_rowboat/data?x=1`, { headers: { authorization: 'Bearer k' } });
+    expect(await res.text()).toBe('app');
+    expect(seen[0].url).toBe('/_rowboat/data?x=1');
+    expect(seen[0].headers.host).toBe(`finance-tracker.apps.localhost:${appsServer}`);
+    expect(seen[0].headers.authorization).toBeUndefined();
+    // Everything else still goes to the server.
+    expect(await (await fetch(`http://127.0.0.1:${gate}/health`)).text()).toBe('server');
+  });
+
+  it('reads an app path, and nothing that is not one', () => {
+    expect(appRoute('/_apps/stock')).toEqual({ folder: 'stock', path: '/' });
+    expect(appRoute('/_apps/stock?x=1')).toEqual({ folder: 'stock', path: '/?x=1' });
+    expect(appRoute('/_apps/Bad_Name/')).toBeNull();
+    expect(appRoute('/rpc/sessions:list')).toBeNull();
   });
 });

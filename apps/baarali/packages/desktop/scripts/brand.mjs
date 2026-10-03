@@ -130,6 +130,7 @@ import { API_URL } from '@x/core/dist/config/env.js';
 import { connectRemoteServer, serverHostMode } from './server-host.js';
 import { broadcastReload } from './ipc.js';
 import { startCloudLink, type LinkProblem } from './baarali-cloud-link.js';
+import { startAppsRelay } from './baarali-apps-relay.js';
 
 // In English, like every dialog of the app: the main process's French layer
 // (src/i18n/main.ts, FR_MAIN) translates them, and the release check reads them.
@@ -138,13 +139,40 @@ const MESSAGES: Record<LinkProblem, string> = {
   unavailable: 'Your Baarali space is not answering right now. Try again in a few minutes: sign out, then sign in again.',
 };
 
+// The instance the app is joined to, as server-host.ts saved it (config/client.json).
+function savedRemote(): { url: string; key: string } | null {
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(WorkDir, 'config', 'client.json'), 'utf8'));
+    const r = raw.remoteServer;
+    return r && r.url && r.token ? { url: r.url, key: r.token } : null;
+  } catch {
+    return null;
+  }
+}
+
+// The apps of the account open on this computer through the gateway
+// (src/apps-relay.ts), from the moment the app is joined to its instance.
+let appsRelay: { close: () => void } | null = null;
+function ensureAppsRelay(): void {
+  if (appsRelay || serverHostMode() !== 'remote') return;
+  appsRelay = startAppsRelay({
+    target: () => (serverHostMode() === 'remote' ? savedRemote() : null),
+    log: (message) => console.log(message),
+  });
+}
+
 export function startBaaraliCloud(): void {
   const oauthFile = path.join(WorkDir, 'config', 'oauth.json');
+  ensureAppsRelay();
   startCloudLink({
     apiUrl: API_URL,
     oauthFile,
     mode: serverHostMode,
-    connect: connectRemoteServer,
+    connect: async (url, key) => {
+      const result = await connectRemoteServer(url, key);
+      if (result.success) ensureAppsRelay();
+      return result;
+    },
     reload: () => setTimeout(() => broadcastReload(), 400),
     notify: (problem) => {
       void dialog.showMessageBox({ type: 'info', message: 'Baarali', detail: MESSAGES[problem] });
@@ -261,6 +289,7 @@ export function desktopPlan() {
       ['assets/install-loading.gif', `${main}/icons/install-loading.gif`],
       ['assets/logo-only.png', 'apps/x/apps/renderer/public/logo-only.png'],
       ['src/cloud-link.ts', `${main}/src/baarali-cloud-link.ts`],
+      ['src/apps-relay.ts', `${main}/src/baarali-apps-relay.ts`],
       ['src/baarali-theme.css', 'apps/x/apps/renderer/src/baarali-theme.css'],
       // The site's fonts, read by baarali-theme.css (03/10/2026).
       ...['inter.woff2', 'source-serif-4.woff2'].map((f) => [`assets/fonts/${f}`, `apps/x/apps/renderer/src/baarali-fonts/${f}`]),

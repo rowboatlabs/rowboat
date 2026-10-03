@@ -1,5 +1,6 @@
 import http from 'node:http';
 import net from 'node:net';
+import { timingSafeEqual } from 'node:crypto';
 
 // The instance's only door (roadmap phase 0, 30/09/2026). rowboat-server
 // listens on loopback and rejects any Host that is not one of the machine's
@@ -12,14 +13,52 @@ import net from 'node:net';
 export interface GateOptions {
   targetPort: number;
   targetHost?: string;
+  /**
+   * The apps of the account, opened on a computer (03/10/2026): `/_apps/<folder>/…`
+   * goes to the apps server (core apps/constants.ts, port 3210) under the
+   * app's own Host, once the bearer matches the server key. The apps server
+   * checks no key of its own: the gate does it for it.
+   */
+  apps?: { port: number; serverKey: () => string | null };
 }
 
-export function createGate({ targetPort, targetHost = '127.0.0.1' }: GateOptions): http.Server {
+/** `/_apps/finance-tracker/index.html?x=1` → the folder and the app's own path. */
+export function appRoute(url: string | undefined): { folder: string; path: string } | null {
+  const m = /^\/_apps\/([a-z0-9]+(?:-[a-z0-9]+)*)([/?][^]*)?$/.exec(url ?? '');
+  if (!m) return null;
+  const rest = m[2] ?? '/';
+  return { folder: m[1], path: rest.startsWith('?') ? `/${rest}` : rest };
+}
+
+function sameKey(given: string | undefined, expected: string | null): boolean {
+  const m = /^Bearer\s+(.+)$/i.exec(given ?? '');
+  if (!m || !expected) return false;
+  const a = Buffer.from(m[1].trim());
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+export function createGate({ targetPort, targetHost = '127.0.0.1', apps }: GateOptions): http.Server {
   const loopbackHost = `${targetHost}:${targetPort}`;
 
   const server = http.createServer((req, res) => {
+    let port = targetPort;
+    let path = req.url;
+    let headers: http.IncomingHttpHeaders = { ...req.headers, host: loopbackHost };
+    const app = apps ? appRoute(req.url) : null;
+    if (apps && app) {
+      if (!sameKey(req.headers.authorization, apps.serverKey())) {
+        res.writeHead(401, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: { code: 'unauthorized' } }));
+        return;
+      }
+      port = apps.port;
+      path = app.path;
+      headers = { ...req.headers, host: `${app.folder}.apps.localhost:${apps.port}` };
+      delete headers.authorization;
+    }
     const upstream = http.request(
-      { host: targetHost, port: targetPort, method: req.method, path: req.url, headers: { ...req.headers, host: loopbackHost } },
+      { host: targetHost, port, method: req.method, path, headers },
       (up) => {
         res.writeHead(up.statusCode ?? 502, up.headers);
         // The server gone mid-answer: so is the answer, rather than a caller

@@ -1,4 +1,6 @@
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { createGate } from './gate.js';
@@ -47,7 +49,16 @@ const child = spawn(process.execPath, [required('ROWBOAT_SERVER_ENTRY')], {
   },
 });
 
-const gate = createGate({ targetPort: serverPort });
+// The server key, as seeded (seed.ts): what the gateway sends for the apps too.
+const keyFile = path.join(workDir, 'server-key');
+const serverKey = (): string | null => {
+  try {
+    return readFileSync(keyFile, 'utf8').trim() || null;
+  } catch {
+    return null;
+  }
+};
+const gate = createGate({ targetPort: serverPort, apps: { port: 3210, serverKey } });
 const port = Number(process.env.PORT ?? '8080');
 gate.listen(port, '0.0.0.0', () => console.log(`[instance] gate on :${port} → 127.0.0.1:${serverPort}`));
 
