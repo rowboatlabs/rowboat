@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { say } from '@/lib/say'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -539,11 +540,15 @@ export function ProductTour({
         setArrived(true)
         soundsRef.current?.bump()
         cancelSpeechRef.current()
-        const clip = TOUR_CLIPS[step.id]
+        // Baarali: the bundled clips are English; in another language the
+        // step is spoken from its translated text instead.
+        const words = step.voiceText ?? step.text
+        const spoken = say(words)
+        const clip = spoken === words ? TOUR_CLIPS[step.id] : undefined
         if (clip) {
           speakUrlRef.current(clip)
         } else if (ttsAvailableRef.current) {
-          speakRef.current(step.voiceText ?? step.text)
+          speakRef.current(spoken)
         }
         if (stepIndex === TOUR_STEPS.length - 1) {
           setConfettiOn(true)

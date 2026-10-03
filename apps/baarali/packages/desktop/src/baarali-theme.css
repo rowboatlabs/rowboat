@@ -72,3 +72,50 @@ html.dark {
   [data-sidebar="menu-button"]:focus-visible > svg,
   [data-sidebar="menu-button"]:active > svg { transform: none; }
 }
+
+/* The site's type (03/10/2026): Inter for everything, Source Serif 4 for a
+ * page's title, as on baarali.com (control public/, OFL in assets/fonts).
+ * Bundled with the app, so it reads the same offline. People's notes keep
+ * the same face; code stays monospace. */
+@font-face {
+  font-family: "Inter";
+  src: url("./baarali-fonts/inter.woff2") format("woff2");
+  font-weight: 400 800;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Source Serif 4";
+  src: url("./baarali-fonts/source-serif-4.woff2") format("woff2");
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+html:root {
+  --baarali-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  --baarali-serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+}
+html body,
+html .font-sans,
+html .tiptap-editor .ProseMirror {
+  font-family: var(--baarali-sans);
+}
+html h1:not(.prose *, .ProseMirror *, [data-streamdown] *) {
+  font-family: var(--baarali-serif);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+/* No sparkles (03/10/2026, the founder's call): the star reads « made by AI ».
+ * A button keeps its words; a slot that only held the star keeps its room. */
+svg.lucide-sparkles,
+svg.lucide-sparkle,
+svg.lucide-wand-sparkles {
+  display: none;
+}
+svg.lucide-sparkles.shrink-0 {
+  display: block;
+  visibility: hidden;
+}
+div:has(> svg.lucide-sparkles:only-child) {
+  display: none;
+}

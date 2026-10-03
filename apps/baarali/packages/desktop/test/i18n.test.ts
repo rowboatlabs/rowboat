@@ -56,6 +56,19 @@ describe('translate', () => {
     expect(translate(FR, 'Manage your Rowboat account')).toBe('Gérer votre compte Baarali');
   });
 
+  it('finds a to-do line written with the old handle', () => {
+    expect(translate(FR, '@rowboat introduce yourself — what can you do here?')).toBe('@baarali présente-toi : que peux-tu faire ici ?');
+  });
+
+  it('translates a duration in days inside a sentence', () => {
+    expect(translate(FR, 'Week: 79% left · renews in 3 d 9 h', 'control')).toBe('Semaine : 79 % restants · renouvelée dans 3 j 9 h');
+  });
+
+  it('writes no long dash in the French', () => {
+    const dashed = Object.values({ ...FR.exact, ...FR.templates }).filter((v) => /\S —|— \S/.test(v));
+    expect(dashed).toEqual([]);
+  });
+
   it('leaves alone what it does not know', () => {
     expect(translate(FR, 'Réunion avec Awa')).toBeNull();
     expect(translate(FR, '42')).toBeNull();

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { Loader2, User, CreditCard, LogOut, ExternalLink } from "lucide-react"
+import { Loader2, User, CreditCard, LogOut, ExternalLink, Check, Gauge, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   AlertDialog,
@@ -16,18 +16,26 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Separator } from "@/components/ui/separator"
 import { useBilling } from "@/hooks/useBilling"
-import { UsagePanel } from "@/components/settings/usage-panel"
 import { useRowboatConfig } from "@/hooks/use-rowboat-config"
 import { CreditRewards } from "@/components/settings/credit-rewards"
 import { toast } from "sonner"
-import { getBillingPlanData } from "@x/shared/dist/billing.js"
+import { getBillingPlanData, type BillingUsageBucket, type PlanOffer } from "@x/shared/dist/billing.js"
 import { openPlans } from '@/lib/plans-window'
 
 interface AccountSettingsProps {
   dialogOpen: boolean
+  /** Opens Settings › Usage, where the limits are told in full. */
+  onOpenUsage?: () => void
 }
 
-export function AccountSettings({ dialogOpen }: AccountSettingsProps) {
+const usedPct = (b: BillingUsageBucket) =>
+  b.sanctionedCredits > 0 ? Math.min(100, Math.max(0, Math.round((b.usedCredits / b.sanctionedCredits) * 100))) : 0
+
+/** "BE" for benewende.dev@…: the avatar's letters. */
+const initials = (email: string | null | undefined) =>
+  (email ?? '').split('@')[0].replace(/[^a-zA-Z0-9]/g, '').slice(0, 2).toUpperCase() || '?'
+
+export function AccountSettings({ dialogOpen, onOpenUsage }: AccountSettingsProps) {
   const [isRowboatConnected, setIsRowboatConnected] = useState(false)
   const [connectionLoading, setConnectionLoading] = useState(true)
   const [disconnecting, setDisconnecting] = useState(false)
@@ -46,6 +54,19 @@ export function AccountSettings({ dialogOpen }: AccountSettingsProps) {
     setBillingLoadedAt(Date.now())
   }
   const currentPlan = billing ? getBillingPlanData(billing.catalog, billing.subscriptionPlanId) : null
+  // Baarali (03/10/2026): what the plan includes, worded like the pricing
+  // page (control /v1/plans), so the account says what one pays for.
+  const [offers, setOffers] = useState<PlanOffer[] | null>(null)
+  useEffect(() => {
+    if (!dialogOpen) return
+    let live = true
+    void window.ipc.invoke('billing:getPlans', { lang: 'fr' }).then(
+      (result) => live && setOffers(result?.plans ?? null),
+      () => live && setOffers(null),
+    )
+    return () => { live = false }
+  }, [dialogOpen])
+  const offer = offers?.find((o) => o.levels.some((l) => l.id === billing?.subscriptionPlanId)) ?? null
   const hasPaidSubscription = currentPlan?.category === 'starter' || currentPlan?.category === 'pro'
 
   const checkConnection = useCallback(async () => {
@@ -162,14 +183,16 @@ export function AccountSettings({ dialogOpen }: AccountSettingsProps) {
       {/* Profile Section */}
       <div className="space-y-4">
         <div className="flex items-center gap-4">
-          <div className="flex size-12 items-center justify-center rounded-full bg-primary/10">
-            <User className="size-6 text-primary" />
+          <div className="flex size-12 shrink-0 items-center justify-center rounded-full bg-primary text-base font-semibold text-primary-foreground">
+            {initials(billing?.userEmail)}
           </div>
-          <div className="space-y-0.5">
-            <p className="text-sm font-medium">
+          <div className="min-w-0 space-y-0.5">
+            <p className="truncate text-sm font-medium">
               {billing?.userEmail ?? 'Loading...'}
             </p>
-            <p className="text-xs text-muted-foreground">Rowboat Account</p>
+            <p className="text-xs text-muted-foreground">
+              Rowboat Account{currentPlan ? ` · ${currentPlan.displayName}` : ''}
+            </p>
           </div>
         </div>
       </div>
@@ -213,8 +236,34 @@ export function AccountSettings({ dialogOpen }: AccountSettingsProps) {
                 {!billing.subscriptionPlanId ? 'Subscribe' : currentPlan?.category === 'free' ? 'Upgrade' : 'Change plan'}
               </Button>
             </div>
-            {/* Baarali: what is left, with live countdowns (settings/usage-panel.tsx). */}
-            <UsagePanel billing={billing} loadedAt={billingLoadedAt} onRefresh={() => refreshBilling()} refreshing={billingLoading} />
+            {offer && (
+              <div className="space-y-1.5 border-t pt-3">
+                <p className="text-xs font-medium text-muted-foreground">{offer.for}</p>
+                <ul className="space-y-1">
+                  {offer.points.map((point) => (
+                    <li key={point} className="flex gap-2 text-[13px]">
+                      <Check className="mt-0.5 size-3.5 shrink-0 text-primary" />
+                      <span>{point}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {/* Baarali: the limits in short; Settings › Usage tells them in full. */}
+            <button
+              type="button"
+              onClick={onOpenUsage}
+              className="flex w-full items-center gap-3 rounded-md border-t pt-3 text-left"
+            >
+              <Gauge className="size-4 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1 text-[13px] tabular-nums">
+                {`Session ${billing.daily.resetsAt && Date.parse(billing.daily.resetsAt) > billingLoadedAt ? usedPct(billing.daily) : 0}% · Week ${usedPct(billing.monthly)}% used`}
+              </span>
+              <span className="flex items-center gap-0.5 text-xs text-primary">
+                See usage
+                <ChevronRight className="size-3.5" />
+              </span>
+            </button>
           </div>
         ) : (
           <p className="text-xs text-muted-foreground">Unable to load plan details</p>

@@ -126,11 +126,12 @@ function openLink(link: TodoLink, onOpenNote: (path: string) => void) {
 // Render @rowboat mentions as chips, [label](target) links as buttons, and
 // light inline markdown (**bold**, `code`) inside a read-only text row.
 function TextWithMentions({ text, onOpenLink }: { text: string; onOpenLink?: (link: TodoLink) => void }) {
-  const parts = text.split(/(@rowboat|\[[^\]]+\]\([^)]+\)|\*\*[^*\n]+\*\*|`[^`\n]+`)/i)
+  // Baarali: a line written before the rename still says the old handle.
+  const parts = text.split(/(@(?:rowboat|baarali)\b|\[[^\]]+\]\([^)]+\)|\*\*[^*\n]+\*\*|`[^`\n]+`)/i)
   return (
     <>
       {parts.map((part, i) => {
-        if (/^@rowboat$/i.test(part)) {
+        if (/^@(?:rowboat|baarali)$/i.test(part)) {
           return (
             <span key={i} className="inline-flex items-center gap-0.5 rounded bg-primary/10 px-1 text-primary">
               <Bot className="size-3" />

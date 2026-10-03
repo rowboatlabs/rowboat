@@ -129,7 +129,9 @@ export function translate(dict: Dictionary, text: string, place: Place = 'text',
   const core = text.trim();
   if (!core || !/[A-Za-z]/.test(core)) return null;
   // The build names the product Baarali (scripts/brand.mjs); a text it missed still matches.
-  let out: string | null = dict.exact[core] ?? dict.exact[core.replace(/\bRowboat\b/g, 'Baarali')] ?? null;
+  // So does a line a person's list kept from before (`@rowboat introduce yourself`).
+  const branded = core.replace(/\bRowboat\b/g, 'Baarali').replace(/@(?:rowboat)\b/gi, '@baarali');
+  let out: string | null = dict.exact[core] ?? dict.exact[branded] ?? null;
   const key = `${place}\u0000${core}`;
   if (out === null && seen.has(key)) out = seen.get(key) ?? null;
   else if (out === null) {
@@ -139,7 +141,8 @@ export function translate(dict: Dictionary, text: string, place: Place = 'text',
       const values = m.slice(1);
       if (!allowed(t, values, place)) continue;
       // A value can itself be English the code wrote (`, including you`).
-      const inner = values.map((v) => (depth < 2 && /[A-Za-z]{2}/.test(v) ? translate(dict, v, 'attr', depth + 1) ?? tail(dict, v) : v));
+      // A duration (`3 d 9 h`) is one too, though it has no word in it.
+      const inner = values.map((v) => (depth < 2 && (/[A-Za-z]{2}/.test(v) || /^\d+ d \d+ h$/.test(v)) ? translate(dict, v, 'attr', depth + 1) ?? tail(dict, v) : v));
       out = t.fr.replace(/\$(\d+)/g, (_, i) => inner[Number(i) - 1] ?? '');
       break;
     }

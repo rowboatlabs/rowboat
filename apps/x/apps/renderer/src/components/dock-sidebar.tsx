@@ -934,7 +934,7 @@ export function DockSidebar({
       ...(onOpenRun || onNewChat ? [
         {
           item: {
-            key: 'assistant', label: 'Chat with Baarali', icon: MascotFaceIcon as unknown as LucideIcon,
+            key: 'assistant', label: 'Chat', icon: MascotFaceIcon as unknown as LucideIcon,
             status: 'Rowboat assistant',
             running: activeNav === 'assistant',
             onClick: () => {

@@ -1,4 +1,5 @@
 import { startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { say } from '@/lib/say'
 import { ArrowDown, ArrowUp, Loader2, X } from 'lucide-react'
 import type { autoRoute, spaces } from '@x/shared'
 import { mentionToken, messageUrl } from '@x/shared/dist/spaces.js'
@@ -1122,7 +1123,7 @@ export function GeneralStream({
                 />
             )}
             <Composer
-                placeholder={`Message ${space.name} — @rowboat to ask your agent`}
+                placeholder={say(`Message ${space.name} — @rowboat to ask your agent`)}
                 busy={routing}
                 draftKey={memoryKey}
                 onSend={post}

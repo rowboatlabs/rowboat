@@ -5,6 +5,7 @@ import * as React from "react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   AppWindow,
+  MessagesSquare,
   ArrowUpRight,
   ChevronDown,
   CalendarClock,
@@ -88,7 +89,7 @@ import { useUnreadCodeSessions } from "@/components/code/session-read-state"
 import { UnreadBadge } from "@/components/spaces/unread-badge"
 import { SPACES_ENABLED } from "@/lib/feature-flags"
 import type { SpaceSelection } from "@/components/spaces-view"
-import { MascotFaceIcon } from "@/components/talking-head"
+import { BaaraliLogo } from "@/components/baarali-logo"
 import { extractConferenceLink } from "@/lib/calendar-event"
 import { useBilling } from "@/hooks/useBilling"
 import { toast } from "@/lib/toast"
@@ -486,6 +487,7 @@ export function SidebarContentPanel({
   const [hasOauthError, setHasOauthError] = useState(false)
   const [showOauthAlert, setShowOauthAlert] = useState(true)
   const [connectionsSettingsOpen, setConnectionsSettingsOpen] = useState(false)
+  const [usageSettingsOpen, setUsageSettingsOpen] = useState(false)
   const [openConnectionsAfterClose, setOpenConnectionsAfterClose] = useState(false)
   const connectorsButtonRef = useRef<HTMLButtonElement | null>(null)
   const [isRowboatConnected, setIsRowboatConnected] = useState(false)
@@ -507,7 +509,9 @@ export function SidebarContentPanel({
   const [moreOpen, setMoreOpen] = useState(() => {
     try { return window.localStorage.getItem('baarali.sidebar.more') === '1' } catch { return false }
   })
-  const showMore = moreOpen || activeNav === 'knowledge'
+  // Connectors, Apps and the Library fold under « More » (03/10/2026); it
+  // opens by itself on one of their pages, or when an account needs attention.
+  const showMore = moreOpen || activeNav === 'knowledge' || activeNav === 'apps' || hasOauthError
   const toggleMore = () => {
     const next = !showMore
     setMoreOpen(next)
@@ -831,6 +835,10 @@ export function SidebarContentPanel({
         {/* Just clears the traffic lights + fixed toggle row (voice note and
             compose live up there now); nav starts right below. */}
         <div className="h-8" />
+        {/* The brand, as on the site, then the chat a row lower (03/10/2026). */}
+        <div className="px-2 pb-2 pt-1">
+          <BaaraliLogo />
+        </div>
       </SidebarHeader>
       <SidebarContent className="gap-0">
         {/* Ordered to mirror the dock: Assistant, Projects, Spaces, then the
@@ -847,10 +855,8 @@ export function SidebarContentPanel({
                     else onNewChat?.()
                   }}
                 >
-                  <span className="-ml-0.5 flex size-5 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
-                    <MascotFaceIcon className="size-3.5" />
-                  </span>
-                  <span className="flex-1 truncate font-medium">Chat with Baarali</span>
+                  <MessagesSquare className="size-4 shrink-0" />
+                  <span className="flex-1 truncate font-medium" data-no-translate>Chat</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
@@ -1013,23 +1019,6 @@ export function SidebarContentPanel({
                   </div>
                 </SidebarMenuButton>
               </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton ref={connectorsButtonRef} data-tour-id="nav-connectors" onClick={() => setConnectionsSettingsOpen(true)}>
-                  <Plug className="size-4 shrink-0" />
-                  <span className="flex-1 truncate">Connectors</span>
-                  {hasOauthError && <AlertTriangle aria-label="A connected account needs attention" className="size-3.5 shrink-0 text-amber-500/90" />}
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  data-tour-id="nav-apps"
-                  isActive={activeNav === 'apps'}
-                  onClick={onOpenApps}
-                >
-                  <Blocks className="size-4 shrink-0" />
-                  <span className="flex-1 truncate">Apps</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
               {pinnedApps.map(({ folder, name }) => (
                 <SidebarMenuItem key={folder}>
                   <ContextMenu>
@@ -1056,6 +1045,23 @@ export function SidebarContentPanel({
               </SidebarMenuItem>
               {showMore && (
                 <>
+              <SidebarMenuItem>
+                <SidebarMenuButton ref={connectorsButtonRef} data-tour-id="nav-connectors" onClick={() => setConnectionsSettingsOpen(true)}>
+                  <Plug className="size-4 shrink-0" />
+                  <span className="flex-1 truncate">Connectors</span>
+                  {hasOauthError && <AlertTriangle aria-label="A connected account needs attention" className="size-3.5 shrink-0 text-amber-500/90" />}
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  data-tour-id="nav-apps"
+                  isActive={activeNav === 'apps'}
+                  onClick={onOpenApps}
+                >
+                  <Blocks className="size-4 shrink-0" />
+                  <span className="flex-1 truncate">Apps</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
                   data-tour-id="nav-knowledge"
@@ -1285,7 +1291,7 @@ export function SidebarContentPanel({
             </div>
           )
         }
-        return <SessionGauge billing={billing} upgradeLabel={upgradeLabel} />
+        return <SessionGauge billing={billing} upgradeLabel={upgradeLabel} onOpenUsage={() => setUsageSettingsOpen(true)} />
       })() : null}
       {/* Sign in CTA */}
       {!isRowboatConnected && (
@@ -1371,6 +1377,7 @@ export function SidebarContentPanel({
         open={connectionsSettingsOpen}
         onOpenChange={setConnectionsSettingsOpen}
       />
+      <SettingsDialog defaultTab="usage" open={usageSettingsOpen} onOpenChange={setUsageSettingsOpen} />
       <SyncStatusBar />
       <SidebarRail />
     </Sidebar>

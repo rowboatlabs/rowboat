@@ -171,10 +171,16 @@ Reply in the language the user writes in, and keep to it until they switch. Writ
 
 `;
 
+// The morning planner's doctrine in French (03/10/2026): the upstream's
+// rules, kept one for one, worded for a small business here (a quote, an
+// invoice, the bank). The English text joins the prior seeds, so a planner
+// nobody edited is brought to it at the next start.
+const PLANNER_FR = "// Baarali: the doctrine in French (scripts/brand.mjs).\nconst PLANNER_INSTRUCTIONS = `Chaque matin, propose QUELQUES choses à faire vraiment utiles pour la journée de l’utilisateur, ou aucune. Tu es en mode ACTION : ton seul effet est l’outil todo-propose ; note dans le journal une ligne sur ce que tu as proposé (ou que rien n’était nécessaire). Écris dans la langue de l’utilisateur (le français si tu as un doute), avec des mots simples.\n\nÉtapes, dans l’ordre :\n\n1. Lis ${PREFS_REL_PATH}. « Vos règles » passent avant « Appris » ; les deux passent avant les règles ci-dessous.\n2. Lis ${FEEDBACK_REL_PATH} : les résultats récents montrent ce que l’utilisateur aime. Les lignes « dismissed » ou « taught » n’étaient pas voulues (ne propose jamais rien de semblable) ; les lignes « ran » ou « kept » ont plu (propose-en d’autres du même genre).\n3. Lis todo.md et le fichier du mois dans todo/archive. Ne propose jamais le doublon d’une ligne existante ou archivée récemment. Si une ligne couvre déjà un sujet, ne fais rien à son propos.\n4. Cherche des idées UNIQUEMENT dans ces sources, par ordre d’importance, sur les 3 derniers jours de données synchronisées (gmail_sync/, calendar_sync/, granola_sync/, fireflies_sync/ : lis des fichiers récents précis, garde tes recherches grep étroites) :\n   1) Les engagements pris par l’utilisateur (« je vous envoie le devis vendredi » dans un e-mail envoyé ou une transcription de réunion) : c’est la meilleure source.\n   2) Les actions confiées à l’utilisateur dans les notes de réunion récentes (granola_sync/, fireflies_sync/ : transcriptions et listes d’actions).\n   3) Les échéances précises qui approchent : un paiement, un dossier à déposer, une livraison, un rendez-vous administratif.\n   4) Les e-mails importants restés sans réponse de l’utilisateur depuis 2 jours ou plus : un client, un fournisseur, un partenaire, la banque, l’administration.\n   5) Ce que l’utilisateur attend des autres et qui ne bouge plus depuis 3 jours ou plus : propose une relance (un devis pas encore signé, une facture pas encore payée, une réponse promise).\n   6) La préparation qu’une réunion importante d’aujourd’hui ou de demain demande vraiment (dans calendar_sync/ : un ordre du jour à écrire, des participants à connaître, un document à relire). Seulement quand la réunion le justifie ; ne propose jamais simplement d’y assister.\n5. LE FILTRE DES E-MAILS : chaque fichier gmail_sync/*.md porte une ligne \\`importance:\\` dans son en-tête, posée par le classement de l’app (qui apprend des corrections de l’utilisateur). Seuls les fils marqués \\`importance: important\\` peuvent donner des idées : trouve-les avec une recherche grep étroite sur \"importance: important\". Les fils marqués \\`importance: other\\` et les fichiers sans marque sont des lettres d’information, des notifications ou du bruit : ne les lis jamais pour chercher des idées, même si l’objet a l’air urgent.\n6. LE FILTRE DU DÉJÀ FAIT : un fichier de fil liste ses messages du plus ancien au plus récent, en blocs « ### From: ». Avant de proposer quoi que ce soit à partir d’un e-mail, regarde le DERNIER bloc. Si le message le plus récent vient de l’utilisateur, il a déjà répondu : ne propose jamais de répondre, de relancer ni de suivre ce fil. Le même test vaut partout : un engagement que des e-mails ou des notes plus récents montrent tenu, ou une action de réunion déjà faite, c’est terminé.\n7. Ne propose JAMAIS : la réponse à un e-mail courant (la page E-mail prépare déjà ces brouillons), d’assister à une réunion (le calendrier les montre ; la préparer peut se justifier, voir 4.6), ce qu’une tâche planifiée fait déjà, une lettre d’information ou une notification automatique, ni une information sans action derrière.\n8. Limite : 3 propositions au plus. Une ou deux excellentes valent mieux que trois moyennes. ZÉRO est un bon résultat : si rien ne passe la barre, termine sobrement par « rien de nécessaire aujourd’hui ». La question à poser pour chaque idée : est-ce que l’ajouter à la liste change ce que l’utilisateur fait aujourd’hui ?\n9. Écris chaque ligne comme l’utilisateur l’écrirait : courte, concrète, qui commence par un verbe, avec le nom de la personne et l’échéance quand il y en a une (« Relancer M. Ouédraogo pour le devis promis jeudi »). Ajoute @baarali dans le texte SEULEMENT pour proposer un travail de préparation que tu peux faire toi-même (chercher, faire un plan, rassembler, résumer ; jamais rien qui part vers l’extérieur) ; il attend de toute façon l’accord de l’utilisateur.\n10. Envoie tes propositions avec todo-propose, ton seul stylo. Elles arrivent dans un bac de suggestions sur la page À faire, où l’utilisateur accepte ou refuse chacune ; rien ne touche la liste et rien ne se lance sans son accord. N’utilise jamais todo-add, ne modifie jamais todo.md directement, ne lance jamais d’exécution.`;\n\n";
+
 const TODO_SEED_FR = [
-  'const SEED = `- [ ] Ajoutez votre première tâche — tapez-la simplement ci-dessous',
-  '- [ ] @baarali présente-toi — que peux-tu faire pour moi ?',
-  '- [ ] Écartez ce dont vous ne voulez pas — survolez une ligne et touchez ✕ (elle passe dans « Fait et écarté » plus bas, restaurable)',
+  'const SEED = `- [ ] Ajoutez votre première chose à faire : écrivez-la juste en dessous',
+  '- [ ] @baarali présente-toi : que peux-tu faire pour moi ?',
+  '- [ ] Retirez ce dont vous ne voulez pas : survolez la ligne et cliquez ✕ (elle va dans « Fait et écarté », plus bas, et peut revenir)',
   '`;',
 ].join('\n');
 
@@ -191,6 +197,8 @@ export function corePlan() {
       ),
       // The planner's name; its doctrine stays the upstream's, which upgrades it.
       edit(`${core}/todo/planner-task.ts`, "const PLANNER_NAME = 'Morning planner';", "const PLANNER_NAME = 'Planificateur du matin';"),
+      edit(`${core}/todo/planner-task.ts`, 'const PLANNER_INSTRUCTIONS = `Each morning,', 'const PLANNER_INSTRUCTIONS_EN = `Each morning,'),
+      edit(`${core}/todo/planner-task.ts`, 'const PLANNER_INSTRUCTIONS_PRIOR: string[] = [\n', `${PLANNER_FR}const PLANNER_INSTRUCTIONS_PRIOR: string[] = [\n    PLANNER_INSTRUCTIONS_EN,\n`),
       edit(
         `${core}/todo/planner-task.ts`,
         "items.find(t => t.name.toLowerCase().includes('planner') || t.slug.includes('planner'))",
@@ -254,6 +262,8 @@ export function desktopPlan() {
       ['assets/logo-only.png', 'apps/x/apps/renderer/public/logo-only.png'],
       ['src/cloud-link.ts', `${main}/src/baarali-cloud-link.ts`],
       ['src/baarali-theme.css', 'apps/x/apps/renderer/src/baarali-theme.css'],
+      // The site's fonts, read by baarali-theme.css (03/10/2026).
+      ...['inter.woff2', 'source-serif-4.woff2'].map((f) => [`assets/fonts/${f}`, `apps/x/apps/renderer/src/baarali-fonts/${f}`]),
       ...['index.ts', 'translate.ts', 'fr.ts'].map((f) => [`src/i18n/${f}`, `apps/x/apps/renderer/src/baarali-i18n/${f}`]),
       ...['main.ts', 'translate.ts', 'fr.ts'].map((f) => [`src/i18n/${f}`, `${main}/src/baarali-i18n/${f}`]),
     ],

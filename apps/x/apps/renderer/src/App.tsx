@@ -809,9 +809,17 @@ function FixedSidebarToggle({
     observer.observe(el)
     return () => observer.disconnect()
   }, [onWidthChange])
+  // Baarali (03/10/2026): with the sidebar open, the buttons sit close
+  // together at its right edge, as in the first Baarali; folded, they follow
+  // the traffic lights.
+  const expanded = state !== 'collapsed'
   return (
-    <div ref={rootRef} className="fixed left-0 top-0 z-50 flex h-10 items-center gap-2" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-      <div aria-hidden="true" className="h-10 shrink-0" style={{ width: leftInsetPx }} />
+    <div
+      ref={rootRef}
+      className={cn('fixed left-0 top-0 z-50 flex h-10 items-center gap-0.5', expanded && 'pr-2')}
+      style={{ WebkitAppRegion: 'no-drag', ...(expanded ? { width: 'var(--sidebar-width)' } : {}) } as React.CSSProperties}
+    >
+      <div aria-hidden="true" className={cn('h-10 shrink-0', expanded && 'flex-1')} style={{ minWidth: leftInsetPx, WebkitAppRegion: 'drag' } as React.CSSProperties} />
       <button
         type="button"
         onClick={toggleSidebar}

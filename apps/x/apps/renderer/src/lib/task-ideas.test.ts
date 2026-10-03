@@ -18,8 +18,8 @@ describe('task ideas', () => {
     expect(say(TASK_IDEAS[0].prompt)).toBe('Chaque matin à 7 h…')
   })
 
-  it('has six ideas, each with a title, a when and a prompt', () => {
-    expect(TASK_IDEAS).toHaveLength(6)
+  it('has eight ideas, each with a title, a when and a prompt', () => {
+    expect(TASK_IDEAS).toHaveLength(8)
     for (const i of TASK_IDEAS) expect(i.title && i.when && i.prompt.length > 40).toBeTruthy()
   })
 })
