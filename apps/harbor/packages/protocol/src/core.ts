@@ -70,9 +70,12 @@ export const AGENT_PAIRS: ReadonlyArray<{ kind: string; connection: string }> = 
   { kind: 'custom', connection: 'contract' },
   { kind: 'hermes', connection: 'plugin' },
   ...REPLICAS_CODING_AGENTS.map((kind) => ({ kind, connection: 'replicas' })),
+  // Integrations (2026-10-03): the service's own API, called on a command, its kind and connection one name.
+  { kind: 'posthog', connection: 'posthog' },
+  { kind: 'cal', connection: 'cal' },
 ];
 /** Connections whose connector Harbor runs, calling the platform with a credential it holds (spec §8 Connectors). */
-export const HARBOR_RUN_CONNECTIONS: readonly string[] = ['replicas'];
+export const HARBOR_RUN_CONNECTIONS: readonly string[] = ['replicas', 'posthog', 'cal'];
 
 export function isAgentPair(kind: string, connection: string): boolean {
   return AGENT_PAIRS.some((pair) => pair.kind === kind && pair.connection === connection);
@@ -112,8 +115,20 @@ export const AgentCredential = z.object({
 });
 export type AgentCredential = z.infer<typeof AgentCredential>;
 
-/** An agent with its keys, as the Agents screen lists them, and its platform credential when Harbor runs its connector. */
-export const AgentListing = z.object({ agent: Member, keys: z.array(AgentKey), credential: AgentCredential.optional() });
+/**
+ * Where a platform agent's alerts land (spec §8 Alerts, 2026-10-03): the
+ * service posts to a secret address, and the agent posts what it says into
+ * this space. The address is shown once, when it is set; the org keeps its hash.
+ */
+export const AgentHook = z.object({
+  spaceId: SpaceId,
+  setBy: MemberId,
+  setAt: z.iso.datetime(),
+});
+export type AgentHook = z.infer<typeof AgentHook>;
+
+/** An agent with its keys, as the Agents screen lists them, and its platform credential and alert hook when Harbor runs its connector. */
+export const AgentListing = z.object({ agent: Member, keys: z.array(AgentKey), credential: AgentCredential.optional(), hook: AgentHook.optional() });
 export type AgentListing = z.infer<typeof AgentListing>;
 
 /**

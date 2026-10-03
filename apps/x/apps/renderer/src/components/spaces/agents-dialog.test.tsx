@@ -13,12 +13,14 @@ const person = (id: string, displayName: string, role: 'admin' | 'member' = 'mem
 const hermes = { id: 'hermes', displayName: 'Hermes', role: 'member', kind: 'agent', ownerId: 'me', agentKind: 'hermes', agentConnection: 'plugin' } as spaces.Member
 const scout = { id: 'scout', displayName: 'Scout', role: 'member', kind: 'agent', ownerId: 'harsh', agentKind: 'custom', agentConnection: 'contract' } as spaces.Member
 const claude = { id: 'claude', displayName: 'Claude', role: 'member', kind: 'agent', ownerId: 'me', agentKind: 'claude-code', agentConnection: 'replicas' } as spaces.Member
+const cal = { id: 'cal', displayName: 'Cal', role: 'member', kind: 'agent', ownerId: 'me', agentKind: 'cal', agentConnection: 'cal' } as spaces.Member
 const key = (id: string, agentId: string, extra: Partial<spaces.AgentKey> = {}): spaces.AgentKey =>
     ({ id, agentId, createdBy: 'me', createdAt: '2026-09-29T10:00:00Z', ...extra })
 const org = { id: 'org-1', name: 'Rowboat Labs', baseUrl: 'https://rowboat.example', spaces: [], directs: [], memberId: 'me' } as unknown as OrgWithSpaces
 
 // Real keys are long: on screen they read as their ends, and Copy copies them whole.
 const NEW_KEY = 'rbk_LXNtIBXAl77aMYBiJ2Z2qesaySzSrqaJCbspX72zz9U'
+const HOOK_URL = 'https://rowboat.example/v1/hooks/cal/rbh_H00kH00kH00kH00kH00kH00kH00kH00kH00kH00kH00'
 const ROTATED = 'rbk_R0tat3dR0tat3dR0tat3dR0tat3dR0tat3dR0tat3d'
 
 let roster: spaces.Member[]
@@ -39,6 +41,8 @@ const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
         case 'spaces:createAgentKey': return { key: { ...key('k2', args.agentId!), secret: ROTATED } }
         case 'spaces:revokeAgentKey': return { key: key(args.keyId!, args.agentId!, { revokedAt: '2026-09-29T11:00:00Z' }) }
         case 'spaces:getAgentCapabilities': return { capabilities: { stop: false, options: options[args.agentId!] ?? [] }, defaults: defaults[args.agentId!] ?? {} }
+        case 'spaces:setAgentHook': return { hook: { spaceId: args.spaceId, setBy: 'me', setAt: '2026-10-03T10:00:00Z' }, url: HOOK_URL }
+        case 'spaces:clearAgentHook': return {}
         case 'spaces:setAgentOptionDefaults': return { defaults: (args as unknown as { defaults: Record<string, string | boolean> }).defaults }
     }
     throw new Error(`unexpected ${channel}`)
@@ -73,7 +77,7 @@ describe('AgentsDialog', () => {
         render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
         await screen.findByText('Hermes')
         fireEvent.click(screen.getByRole('button', { name: /Add agent/ }))
-        expect(setupsOffered()).toEqual(['Hermes', 'Replicas', 'Custom'])
+        expect(setupsOffered()).toEqual(['Hermes', 'Replicas', 'PostHog', 'Cal.com', 'Custom'])
         expect(screen.getByRole('radio', { name: 'Hermes' })).toHaveAttribute('aria-checked', 'true')
         // The name suggests the kind's own.
         expect(screen.getByLabelText('Agent name')).toHaveValue('Hermes')
@@ -250,6 +254,37 @@ describe('AgentsDialog', () => {
         fireEvent.change(screen.getByLabelText('New Replicas key'), { target: { value: 'rpl_live_cd34' } })
         fireEvent.click(screen.getByRole('button', { name: 'Save' }))
         await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:setAgentCredential', { orgId: 'org-1', agentId: 'claude', secret: 'rpl_live_cd34' }))
+    })
+
+    it('adds a Cal.com agent on its key, and says how to use it', async () => {
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        await screen.findByText('Hermes')
+        fireEvent.click(screen.getByRole('button', { name: /Add agent/ }))
+        fireEvent.click(screen.getByRole('radio', { name: 'Cal.com' }))
+        expect(screen.getByLabelText('Agent name')).toHaveValue('Cal')
+        fireEvent.change(screen.getByLabelText('Cal.com API key'), { target: { value: 'cal_live_ab12' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Add agent' }))
+        await screen.findByRole('heading', { name: 'Connect Cal' })
+        expect(invoke).toHaveBeenCalledWith('spaces:addAgent', { orgId: 'org-1', displayName: 'Cal', kind: 'cal', connection: 'cal', credential: 'cal_live_ab12' })
+        expect(screen.getByText(/such as @Cal today/)).toBeInTheDocument()
+    })
+
+    it('lets the owner send an integration’s alerts to a space, shows the address once, and turns them off', async () => {
+        const withSpaces = { ...org, spaces: [{ id: 'S1', name: 'growth' }] } as unknown as OrgWithSpaces
+        listing = [{ agent: cal, keys: [key('k5', 'cal')], credential: { hint: '…ab12', setBy: 'me', setAt: '2026-10-03T09:00:00Z' } }]
+        render(<AgentsDialog org={withSpaces} open onOpenChange={vi.fn()} />)
+        await screen.findByText('Cal')
+        expect(screen.getByText(/^Cal\.com · Yours · 1 key/)).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: /Cal/ }))
+        fireEvent.change(await screen.findByLabelText('Space for alerts'), { target: { value: 'S1' } })
+        listing = [{ ...listing[0]!, hook: { spaceId: 'S1', setBy: 'me', setAt: '2026-10-03T10:00:00Z' } }]
+        fireEvent.click(screen.getByRole('button', { name: 'Get address' }))
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:setAgentHook', { orgId: 'org-1', agentId: 'cal', spaceId: 'S1' }))
+        fireEvent.click(await screen.findByRole('button', { name: `Copy URL` }))
+        expect(vi.mocked(navigator.clipboard.writeText)).toHaveBeenCalledWith(HOOK_URL)
+        expect(screen.getByText(/only time this address is shown/)).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Turn alerts off' }))
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:clearAgentHook', { orgId: 'org-1', agentId: 'cal' }))
     })
 
     it('revokes on a second click', async () => {

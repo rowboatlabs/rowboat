@@ -43,12 +43,17 @@ export const KINDS: Record<string, { label: string; logo?: Logo }> = {
     pi: { label: 'Pi', logo: { light: piLogo, dark: piLogoDark } },
     // Meta publishes no mark for Muse Code (2026-09-30): the generic one until it does.
     'muse-code': { label: 'Muse Code' },
+    // Integrations (2026-10-03) show the generic mark until their official ones are added.
+    posthog: { label: 'PostHog' },
+    cal: { label: 'Cal.com' },
     custom: { label: 'Agent' },
 }
 
 /** Platforms Harbor calls on an agent's behalf: named after the kind ("via Replicas"). */
 export const PLATFORMS: Record<string, { label: string; logo?: Logo }> = {
     replicas: { label: 'Replicas', logo: { light: replicasLogo, dark: replicasLogoDark } },
+    posthog: { label: 'PostHog' },
+    cal: { label: 'Cal.com' },
 }
 
 export function kindInfo(kind: string | undefined): { label: string; logo?: Logo } {
@@ -59,7 +64,8 @@ export function kindInfo(kind: string | undefined): { label: string; logo?: Logo
 export function agentLabel(kind: string | undefined, connection: string | undefined): string {
     const platform = connection ? PLATFORMS[connection] : undefined
     const what = kindInfo(kind).label
-    return platform ? `${what} · via ${platform.label}` : what
+    // An integration is its own platform: "PostHog", not "PostHog · via PostHog".
+    return platform && platform.label !== what ? `${what} · via ${platform.label}` : what
 }
 
 /** Something to paste, with Copy. `secret` values read as their ends on screen and copy whole. */
@@ -114,6 +120,8 @@ export interface AgentSetup {
     docsUrl?: string
     /** Opens the owner's DM with the agent before setup, for `homeChannel`. */
     wantsHomeChannel?: boolean
+    /** The service can post alerts through the agent (Harbor spec §8 Alerts): where its address goes, on the agent's page. */
+    alerts?: { note: string }
     setup: (ctx: SetupContext) => SetupRoute[]
 }
 
@@ -296,6 +304,27 @@ function replicasSetup({ orgUrl, agentKey }: SetupContext): SetupRoute[] {
     ]
 }
 
+// An integration (Harbor spec §8 Integrations, 2026-10-03) needs nothing on the service's side
+// beyond its key: it answers commands, and alerts are set up on its page.
+function integrationSetup(name: string, example: string): () => SetupRoute[] {
+    return () => [
+        {
+            id: 'commands',
+            label: 'Commands',
+            steps: [
+                {
+                    title: 'Ask it what it can do',
+                    note: `Mention it with help for its commands, such as @${name} ${example}. It calls the service's API with your key and replies in the thread.`,
+                },
+                {
+                    title: 'Send its alerts to a space (optional)',
+                    note: "On this agent's page, under Alerts, pick a space it is in and copy the address it gives you into the service's webhook settings.",
+                },
+            ],
+        },
+    ]
+}
+
 export const AGENT_SETUPS: readonly AgentSetup[] = [
     {
         id: 'hermes',
@@ -324,6 +353,42 @@ export const AGENT_SETUPS: readonly AgentSetup[] = [
         },
         docsUrl: 'https://docs.replicas.dev/features/environments',
         setup: replicasSetup,
+    },
+    {
+        id: 'posthog',
+        label: 'PostHog',
+        description: 'Your PostHog project: event counts, HogQL, insights, flags and alerts',
+        connection: 'posthog',
+        kinds: ['posthog'],
+        defaultName: 'PostHog',
+        credential: {
+            label: 'PostHog personal API key',
+            placeholder: 'phx_… (self-hosted: https://your-posthog phx_…)',
+            note: 'Settings → Personal API keys, with read access to user, query, insight and feature flag. Harbor checks it with PostHog and keeps it sealed.',
+        },
+        docsUrl: 'https://posthog.com/docs/api',
+        alerts: {
+            note: 'In PostHog, Data pipelines → Destinations → New → HTTP Webhook, with this as the URL. Send it from an alert, or any event. A body of {"text": "…"} is posted as written.',
+        },
+        setup: integrationSetup('PostHog', 'count signup 30'),
+    },
+    {
+        id: 'cal',
+        label: 'Cal.com',
+        description: 'Your Cal.com calendar: bookings, links, open times, booking and cancelling',
+        connection: 'cal',
+        kinds: ['cal'],
+        defaultName: 'Cal',
+        credential: {
+            label: 'Cal.com API key',
+            placeholder: 'cal_live_…',
+            note: 'Settings → Developer → API keys. The agent acts as you, in your time zone. Harbor checks it with Cal.com and keeps it sealed.',
+        },
+        docsUrl: 'https://cal.com/docs/api-reference/v2/introduction',
+        alerts: {
+            note: 'In Cal.com, Settings → Developer → Webhooks → New, with this as the Subscriber URL and the booking events you want. Ping test posts a hello.',
+        },
+        setup: integrationSetup('Cal', 'today'),
     },
     {
         id: 'custom',
