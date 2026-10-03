@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { MEDIA_SKILL, NEVER_EXPIRES, SERVER_LOCK, seedWorkdir } from '../src/seed.js';
+import { BUILD_COMMANDS, CORE_ALLOWED_COMMANDS, MEDIA_SKILL, NEVER_EXPIRES, SERVER_LOCK, seedWorkdir } from '../src/seed.js';
 
 async function tmp() { return fs.mkdtemp(path.join(os.tmpdir(), 'baarali-seed-')); }
 const read = async (dir: string, f: string) => JSON.parse(await fs.readFile(path.join(dir, 'config', f), 'utf8'));
@@ -86,5 +86,41 @@ describe('seedWorkdir', () => {
     await seedWorkdir({ workDir: dir, instanceToken: 't', assistantModel: 'm', mediaServer });
     expect(Object.keys((await read(dir, 'mcp.json')).mcpServers as object)).toEqual(['baarali-media']);
     await expect(fs.access(path.join(dir, 'skills', 'warell-media'))).rejects.toThrow();
+  });
+
+  it('lets the Chat build a project without asking each time, and keeps the person\'s own commands', async () => {
+    const dir = await tmp();
+    await seedWorkdir({ workDir: dir, instanceToken: 't', assistantModel: 'm' });
+    const first = await read(dir, 'security.json');
+    expect(first).toEqual(expect.arrayContaining([...CORE_ALLOWED_COMMANDS, ...BUILD_COMMANDS]));
+    expect(first).not.toContain('rm');
+    await fs.writeFile(path.join(dir, 'config', 'security.json'), JSON.stringify(['ls', 'ffmpeg']));
+    await seedWorkdir({ workDir: dir, instanceToken: 't', assistantModel: 'm' });
+    const again = await read(dir, 'security.json');
+    expect(again).toEqual(expect.arrayContaining(['ls', 'ffmpeg', 'git', 'npm', 'python3']));
+  });
+
+  it('gives a chat turn room for a real project, once', async () => {
+    const dir = await tmp();
+    await seedWorkdir({ workDir: dir, instanceToken: 't', assistantModel: 'm' });
+    expect(await read(dir, 'turn_limits.json')).toEqual({ maxModelCalls: 50, chatMaxModelCalls: 150 });
+    await fs.writeFile(path.join(dir, 'config', 'turn_limits.json'), JSON.stringify({ maxModelCalls: 20 }));
+    await seedWorkdir({ workDir: dir, instanceToken: 't', assistantModel: 'm' });
+    expect(await read(dir, 'turn_limits.json')).toEqual({ maxModelCalls: 20 });
+  });
+
+  it('makes HOME on the volume with a git identity, keeping one already there', async () => {
+    const dir = await tmp();
+    const before = process.env.HOME;
+    process.env.HOME = path.join(dir, 'home');
+    try {
+      await seedWorkdir({ workDir: dir, instanceToken: 't', assistantModel: 'm' });
+      expect(await fs.readFile(path.join(dir, 'home', '.gitconfig'), 'utf8')).toContain('name = Baarali');
+      await fs.writeFile(path.join(dir, 'home', '.gitconfig'), '[user]\n\tname = Awa\n');
+      await seedWorkdir({ workDir: dir, instanceToken: 't', assistantModel: 'm' });
+      expect(await fs.readFile(path.join(dir, 'home', '.gitconfig'), 'utf8')).toContain('Awa');
+    } finally {
+      process.env.HOME = before;
+    }
   });
 });

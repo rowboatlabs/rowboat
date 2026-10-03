@@ -39,9 +39,16 @@ RUN cd apps/baarali && pnpm install --frozen-lockfile --filter @baarali/instance
  && pnpm --filter @baarali/instance build
 
 FROM node:22-bookworm-slim
+# The Chat builds projects here (03/10/2026): git and Python beside Node.
+# HOME on the volume: git's identity, caches and an engine's sign-in
+# survive a restart, like the work itself.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git python3 python3-pip python3-venv ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production \
     ROWBOAT_WORKDIR=/data \
     ROWBOAT_SERVER_ENTRY=/app/server/rowboat-server.cjs \
+    HOME=/data/home \
     PORT=8080
 WORKDIR /app
 COPY --from=build /src/apps/x/apps/server/dist-headless ./server

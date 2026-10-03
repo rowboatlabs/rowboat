@@ -145,4 +145,64 @@ export async function seedWorkdir(opts: SeedOptions): Promise<void> {
       assistantModel: { provider: 'rowboat', model: opts.assistantModel },
     });
   }
+
+  // The Chat codes on this machine, which is the account's alone (03/10/2026):
+  // building and checking a project runs these without asking each time.
+  // Anything else (rm, an unknown tool) still asks. The person's own
+  // additions are kept; ours come back if removed, on every boot.
+  const securityFile = path.join(config, 'security.json');
+  let security: unknown = null;
+  try {
+    security = JSON.parse(await fs.readFile(securityFile, 'utf8'));
+  } catch {
+    // none yet: core's defaults, then ours
+  }
+  const current: string[] = Array.isArray(security)
+    ? security.filter((c): c is string => typeof c === 'string')
+    : security && typeof security === 'object' && Array.isArray((security as { allowedCommands?: unknown }).allowedCommands)
+      ? ((security as { allowedCommands: unknown[] }).allowedCommands.filter((c): c is string => typeof c === 'string'))
+      : CORE_ALLOWED_COMMANDS;
+  const allowed = [...new Set([...current, ...BUILD_COMMANDS])];
+  if (allowed.length !== current.length || security === null) {
+    await writeJson(
+      securityFile,
+      Array.isArray(security) || security === null ? allowed : { ...(security as Record<string, unknown>), allowedCommands: allowed },
+    );
+  }
+
+  // HOME lives on the volume (Dockerfile): created on the first boot, with a
+  // git identity so the Chat's commits work; one the person set is kept.
+  const home = process.env.HOME;
+  if (home && home.startsWith(opts.workDir)) {
+    await fs.mkdir(home, { recursive: true });
+    const gitconfig = path.join(home, '.gitconfig');
+    try {
+      await fs.access(gitconfig);
+    } catch {
+      await fs.writeFile(gitconfig, '[user]\n\tname = Baarali\n\temail = baarali@localhost\n[init]\n\tdefaultBranch = main\n');
+    }
+  }
+
+  // Room for a real project in one message: 150 model calls in a chat turn
+  // instead of 50 (the quota still counts every one). Set once; a limit the
+  // person chose is theirs.
+  const limitsFile = path.join(config, 'turn_limits.json');
+  if (!(await readJson(limitsFile))) {
+    await writeJson(limitsFile, { maxModelCalls: 50, chatMaxModelCalls: 150 });
+  }
 }
+
+/** core config/security.ts DEFAULT_ALLOW_LIST, used when the file does not exist yet. */
+export const CORE_ALLOWED_COMMANDS = [
+  'agent-slack', 'awk', 'basename', 'cat', 'cut', 'date', 'df', 'diff', 'dirname', 'du', 'echo', 'env', 'file',
+  'find', 'grep', 'head', 'hostname', 'jq', 'ls', 'printenv', 'printf', 'pwd', 'readlink', 'realpath', 'sort',
+  'stat', 'tail', 'tree', 'uname', 'uniq', 'wc', 'which', 'whoami', 'yq',
+];
+
+/** What building and checking a project takes (git, node, python and the plain file tools). */
+export const BUILD_COMMANDS = [
+  'git', 'node', 'npm', 'npx', 'pnpm', 'yarn', 'corepack', 'tsc', 'vite',
+  'python', 'python3', 'pip', 'pip3',
+  'mkdir', 'touch', 'cp', 'mv', 'ln', 'sed', 'tee', 'xargs', 'tar', 'unzip', 'zip', 'gzip', 'gunzip',
+  'cd', 'test', 'true', 'false', 'sleep', 'chmod', 'curl', 'wget', 'base64', 'sha256sum', 'md5sum',
+];
