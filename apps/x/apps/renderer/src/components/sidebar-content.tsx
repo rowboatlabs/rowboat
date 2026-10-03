@@ -5,6 +5,7 @@ import * as React from "react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   AppWindow,
+  NotebookPen,
   MessagesSquare,
   ArrowUpRight,
   ChevronDown,
@@ -198,6 +199,8 @@ type SidebarContentPanelProps = {
   onOpenCode?: () => void
   onOpenBgTasks?: () => void
   onOpenApps?: () => void
+  /** Baarali: the Prompts page (03/10/2026). */
+  onOpenPrompts?: () => void
   /** Open a specific app (pinned in the sidebar) inside the Apps view. */
   onOpenApp?: (folder: string) => void
   /** Open one space (org + space) in the Spaces view. */
@@ -221,7 +224,7 @@ type SidebarContentPanelProps = {
   /** Starts the mascot-guided product tour. */
   onStartTour?: () => void
   /** Which primary destination is currently active, for nav highlighting. */
-  activeNav?: 'assistant' | 'home' | 'email' | 'meetings' | 'code' | 'knowledge' | 'agents' | 'apps' | 'spaces' | 'workspaces' | null
+  activeNav?: 'assistant' | 'home' | 'email' | 'meetings' | 'code' | 'knowledge' | 'agents' | 'apps' | 'prompts' | 'spaces' | 'workspaces' | null
   /** Live meeting recording state, so the recording row can show its indicator/stop. */
   meetingRecordingState?: 'idle' | 'connecting' | 'recording' | 'stopping'
   recordingMeetingSource?: string | null
@@ -460,6 +463,7 @@ export function SidebarContentPanel({
   onOpenMeetings,
   onOpenBgTasks,
   onOpenApps,
+  onOpenPrompts,
   onOpenApp,
   onOpenSpace,
   activeSpace,
@@ -511,7 +515,7 @@ export function SidebarContentPanel({
   })
   // Connectors, Apps and the Library fold under « More » (03/10/2026); it
   // opens by itself on one of their pages, or when an account needs attention.
-  const showMore = moreOpen || activeNav === 'knowledge' || activeNav === 'apps' || hasOauthError
+  const showMore = moreOpen || activeNav === 'knowledge' || activeNav === 'apps' || activeNav === 'prompts' || hasOauthError
   const toggleMore = () => {
     const next = !showMore
     setMoreOpen(next)
@@ -1060,6 +1064,12 @@ export function SidebarContentPanel({
                 >
                   <Blocks className="size-4 shrink-0" />
                   <span className="flex-1 truncate">Apps</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton isActive={activeNav === 'prompts'} onClick={onOpenPrompts}>
+                  <NotebookPen className="size-4 shrink-0" />
+                  <span className="flex-1 truncate">Prompts</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>

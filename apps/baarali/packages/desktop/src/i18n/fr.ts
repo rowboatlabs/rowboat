@@ -3275,7 +3275,32 @@ export const FR: Dictionary = {
     "Generation": "Génération",
     "credits": "crédits",
     "Orange Money": "Orange Money",
-    "Moov Money": "Moov Money"
+    "Moov Money": "Moov Money",
+    // Page Prompts (03/10/2026)
+    "Prompts": "Prompts",
+    "Ready-made requests, and a workshop to write your own.": "Des demandes prêtes à l’emploi, et un atelier pour écrire les vôtres.",
+    "Workshop": "Atelier",
+    "My prompts": "Mes prompts",
+    "Search for a prompt…": "Rechercher un prompt…",
+    "Favorites": "Favoris",
+    "No prompt here yet.": "Aucun prompt ici pour l’instant.",
+    "Remove from favorites": "Retirer des favoris",
+    "Add to favorites": "Ajouter aux favoris",
+    "What is in [brackets] is yours to fill in before sending.": "Ce qui est entre [crochets] est à remplir avant d’envoyer.",
+    "What you want to create": "Ce que vous voulez créer",
+    "Level": "Niveau",
+    "With a bigger plan": "Avec un forfait supérieur",
+    "Describe what you want to get. Baarali turns it into a precise prompt, says why it works and suggests two other angles.": "Décrivez ce que vous voulez obtenir. Baarali en fait un prompt précis, explique pourquoi il marche et propose deux autres angles.",
+    "Improving…": "Amélioration…",
+    "The prompt could not be improved. Try again in a moment.": "Le prompt n’a pas pu être amélioré. Réessayez dans un instant.",
+    "Use in a chat": "Utiliser dans un chat",
+    "Save in My prompts": "Enregistrer dans Mes prompts",
+    "Saved in My prompts": "Enregistré dans Mes prompts",
+    "Describe what you want to get…": "Décrivez ce que vous voulez obtenir…",
+    "What you save from the Workshop arrives here.": "Ce que vous enregistrez depuis l’Atelier arrive ici.",
+    "Improved prompt": "Prompt amélioré",
+    "Why it works": "Pourquoi ça marche",
+    "Two variants": "Deux variantes"
 
   },
   // Lines about people (apps/x renderer lib/spaces-membership.ts): the names
