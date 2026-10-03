@@ -836,14 +836,14 @@ export function SidebarContentPanel({
             compose live up there now); nav starts right below. */}
         <div className="h-8" />
         {/* The brand, as on the site, then the chat a row lower (03/10/2026). */}
-        <div className="px-2 pb-2 pt-1">
+        <div className="px-2 pb-4 pt-1">
           <BaaraliLogo />
         </div>
       </SidebarHeader>
       <SidebarContent className="gap-0">
         {/* Ordered to mirror the dock: Assistant, Projects, Spaces, then the
             destinations, then Chats. Same glyphs as the dock tiles. */}
-        <SidebarGroup className="flex flex-col pb-0">
+        <SidebarGroup className="flex flex-col pb-0 pt-2">
           <SidebarGroupContent>
             <SidebarMenu>
               <SidebarMenuItem>

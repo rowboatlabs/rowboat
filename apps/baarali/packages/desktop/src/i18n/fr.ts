@@ -86,7 +86,7 @@ export const FR: Dictionary = {
     "Failed to update Slack settings": "Échec de la mise à jour des réglages Slack",
     "Slack disabled": "Slack désactivé",
     "Slack enabled": "Slack activé",
-    "Assistant": "Assistant",
+    "Assistant": "Chat",
     "Go back": "Retour",
     "Go forward": "Suivant",
     "New chat": "Nouvelle discussion",
@@ -3146,7 +3146,7 @@ export const FR: Dictionary = {
     "Installed from a link": "Installée depuis un lien",
     "IN SIDEBAR": "DANS LA BARRE",
     "What it will be able to do": "Ce qu’elle pourra faire",
-    "Nothing beyond itself: it reaches none of your accounts and does not use your AI.": "Rien en dehors d’elle-même : elle n’accède à aucun de vos comptes et n’utilise pas votre IA.",
+    "Nothing beyond itself: it reaches none of your accounts and does not use your AI.": "Elle fonctionne toute seule : elle ne lit aucun de vos comptes et ne consomme pas votre forfait.",
     "It comes with agents that run on a schedule. They start off; you turn them on if you want:": "Elle arrive avec des agents qui travaillent à heure fixe. Ils sont éteints au départ ; vous les allumez si vous voulez :",
     "You can remove it at any time from My apps.": "Vous pouvez la désinstaller à tout moment depuis Mes apps.",
     "Other apps from the community": "Autres apps de la communauté",
@@ -3249,7 +3249,11 @@ export const FR: Dictionary = {
     "Images, videos and voices are separate": "Images, vidéos et voix à part",
     "They are paid with media credits, which these limits do not touch.": "Elles se paient en crédits médias, que ces limites ne touchent pas.",
     "Log in to your account to see your usage.": "Connectez-vous à votre compte pour voir votre utilisation.",
-    "See usage": "Voir l’utilisation"
+    "See usage": "Voir l’utilisation",
+    // Retouches v7 (03/10/2026)
+    "Ready-made ideas": "Idées prêtes à l’emploi",
+    "Pick one: Baarali fills in the task, you adjust it, then create it.": "Choisissez-en une : Baarali remplit la tâche, vous l’ajustez, puis vous la créez.",
+    "Your list. Write @baarali before a line to hand it to the assistant.": "Votre liste. Écrivez @baarali devant une ligne pour la confier à Baarali."
 
   },
   // Lines about people (apps/x renderer lib/spaces-membership.ts): the names

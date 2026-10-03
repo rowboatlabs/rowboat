@@ -65,6 +65,8 @@ Une ligne s'ajoute dans le même commit que la modification, et disparaît dans 
 | `apps/x/apps/renderer/src/components/product-tour.tsx` | Dans une autre langue que l'anglais, la visite parle le texte traduit au lieu des enregistrements anglais (`lib/say.ts`) | La visite parlait anglais sous des bulles en français | 03/10/2026 |
 | `apps/x/apps/renderer/src/components/spaces/general-stream.tsx` | Le texte d'invite du champ de message passe par `say()` | L'éditeur l'affiche par CSS, que la couche de traduction ne voit pas : il restait en anglais | 03/10/2026 |
 | `apps/x/apps/renderer/src/components/todo-view.tsx` | Une ligne écrite avec l'ancien nom (`@rowboat`) s'affiche avec la pastille Baarali | Les listes créées avant le renommage montraient « @rowboat » en clair | 03/10/2026 |
+| `apps/x/apps/renderer/src/components/bg-tasks-view.tsx` | Les idées prêtes à l'emploi aussi sur la page (`task-ideas-gallery.tsx`) ; un clic ouvre « Nouvelle tâche » avec l'idée écrite | Le fondateur cherchait les idées de la maquette validée : elles n'étaient que derrière « Nouvelle tâche » (03/10/2026) | 03/10/2026 |
+| `apps/x/apps/renderer/src/components/todo-view.tsx` (bis) | Une phrase sous le titre : à quoi sert la liste, et @baarali | Maquette validée (02/10/2026) | 03/10/2026 |
 
 **La marque n'est pas une divergence.** Elle ne touche aucun fichier du dépôt : elle s'applique à la copie d'un build, en CI ou dans l'image d'instance (`apps/baarali/packages/desktop/scripts/brand.mjs`, décidé le 01/10/2026). Ses ancres dans les fichiers upstream sont vérifiées par un test à chaque PR.
 

@@ -74,7 +74,7 @@ html.dark {
 }
 
 /* The site's type (03/10/2026): Inter for everything, Source Serif 4 for a
- * page's title, as on baarali.com (control public/, OFL in assets/fonts).
+ * page's title (its h1, or a big welcome line), as on baarali.com (control public/, OFL in assets/fonts).
  * Bundled with the app, so it reads the same offline. People's notes keep
  * the same face; code stays monospace. */
 @font-face {
@@ -99,7 +99,8 @@ html .font-sans,
 html .tiptap-editor .ProseMirror {
   font-family: var(--baarali-sans);
 }
-html h1:not(.prose *, .ProseMirror *, [data-streamdown] *) {
+html h1:not(.prose *, .ProseMirror *, [data-streamdown] *),
+html :is(.text-2xl, .text-3xl).font-semibold:not(.prose *, .ProseMirror *, [data-streamdown] *) {
   font-family: var(--baarali-serif);
   font-weight: 500;
   letter-spacing: -0.02em;

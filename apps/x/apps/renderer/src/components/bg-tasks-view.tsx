@@ -20,6 +20,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/component
 import { BgTaskMenuItems } from '@/components/bg-task-menu-items'
 import { BgTaskCard } from '@/components/bg-task-card'
 import { TASK_IDEAS, say } from '@/lib/task-ideas'
+import { TaskIdeasGallery } from '@/components/task-ideas-gallery'
 import {
     Dialog,
     DialogContent,
@@ -315,10 +316,13 @@ function NewTaskDialog({
     onClose,
     onCreated,
     onCreateWithCopilot,
+    initialDescription,
 }: {
     open: boolean
     onClose: () => void
     onCreated: (slug: string) => void
+    /** Baarali: an idea picked on the page fills the field (03/10/2026). */
+    initialDescription?: string
     /**
      * Optional Copilot hand-off. When provided, the dialog opens in
      * free-form "describe" mode and the user can punt to Copilot with a
@@ -340,14 +344,14 @@ function NewTaskDialog({
     useEffect(() => {
         if (open) {
             setMode(copilotEnabled ? 'describe' : 'manual')
-            setDescription('')
+            setDescription(initialDescription ?? '')
             setName('')
             setInstructions('')
             setTriggers(undefined)
             setProjectId(undefined)
             setProjectName(undefined)
         }
-    }, [open, copilotEnabled])
+    }, [open, copilotEnabled, initialDescription])
 
     // Switch into the coding preset: prefill name/instructions/trigger once.
     const enterCodingMode = () => {
@@ -1752,6 +1756,9 @@ export interface BgTasksViewProps {
 }
 
 export function BgTasksView({ onCreateWithCopilot, onEditWithCopilot, initialSlug, slugVersion }: BgTasksViewProps = {}) {
+    // Baarali: the idea picked in the gallery, handed to the new-task dialog.
+    const [ideaPrefill, setIdeaPrefill] = useState<string | undefined>(undefined)
+    const startFromIdea = (prompt: string) => { setIdeaPrefill(say(prompt)); setShowNewDialog(true) }
     const [items, setItems] = useState<BackgroundTaskSummary[]>([])
     const [selectedSlug, setSelectedSlug] = useState<string | null>(initialSlug ?? null)
     // Version-guarded: the view is kept alive in an <Activity> while hidden
@@ -1919,16 +1926,19 @@ export function BgTasksView({ onCreateWithCopilot, onEditWithCopilot, initialSlu
                         <p className="text-sm text-muted-foreground">{error}</p>
                     </div>
                 ) : items.length === 0 ? (
-                    <div className="flex h-full flex-col items-center justify-center gap-3 px-8 text-center">
-                        <div className="rounded-full bg-muted p-3">
-                            <ListChecks className="size-6 text-muted-foreground" />
+                    <div className="flex flex-col gap-8 pt-6">
+                        <div className="flex flex-col items-center gap-3 px-8 text-center">
+                            <div className="rounded-full bg-muted p-3">
+                                <ListChecks className="size-6 text-muted-foreground" />
+                            </div>
+                            <p className="text-sm text-muted-foreground">
+                                No background tasks yet.
+                            </p>
+                            <Button size="sm" onClick={() => setShowNewDialog(true)}>
+                                <Plus className="size-3" /> Create your first task
+                            </Button>
                         </div>
-                        <p className="text-sm text-muted-foreground">
-                            No background tasks yet.
-                        </p>
-                        <Button size="sm" onClick={() => setShowNewDialog(true)}>
-                            <Plus className="size-3" /> Create your first task
-                        </Button>
+                        <TaskIdeasGallery onPick={startFromIdea} />
                     </div>
                 ) : (
                     <div className="flex flex-col gap-2.5">
@@ -1987,6 +1997,7 @@ export function BgTasksView({ onCreateWithCopilot, onEditWithCopilot, initialSlu
                                 </ContextMenu>
                             )
                         })}
+                        <TaskIdeasGallery onPick={startFromIdea} />
                     </div>
                 )}
                 </div>
@@ -1994,7 +2005,8 @@ export function BgTasksView({ onCreateWithCopilot, onEditWithCopilot, initialSlu
 
             <NewTaskDialog
                 open={showNewDialog}
-                onClose={() => setShowNewDialog(false)}
+                initialDescription={ideaPrefill}
+                onClose={() => { setShowNewDialog(false); setIdeaPrefill(undefined) }}
                 onCreated={(slug) => {
                     setShowNewDialog(false)
                     void load()
