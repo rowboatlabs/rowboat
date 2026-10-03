@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { say } from '@/lib/say'
 import { ArrowUpRight, Bot, Check, ChevronDown, FileText, ListPlus, Loader2, MessageCircle, Plus, RotateCcw, Sparkles, Square, Trash2, X } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { toast } from 'sonner'
@@ -567,12 +568,14 @@ function ItemRow({ item, isRunning, needsApproval = null, commentOpen, sessionId
           </div>
         ) : (
           <div
-            onClick={() => { if (!item.checked) { setDraft(item.text); setEditing(true) } }}
+            // Baarali: a line kept from before the translation (the first-run
+            // examples) opens in the person's language, and is saved so.
+            onClick={() => { if (!item.checked) { setDraft(say(item.text)); setEditing(true) } }}
             onKeyDown={(e) => {
               if (e.target !== e.currentTarget) return
               if ((e.key === 'Enter' || e.key === ' ') && !item.checked) {
                 e.preventDefault()
-                setDraft(item.text)
+                setDraft(say(item.text))
                 setEditing(true)
               }
             }}

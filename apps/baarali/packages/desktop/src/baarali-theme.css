@@ -140,3 +140,18 @@ html.dark .rowboat-chat-input:focus-within {
 html.dark [data-sidebar="sidebar"] {
   border-right: 1px solid rgba(255, 255, 255, 0.06);
 }
+
+/* The Spaces heading is a title, not a menu row: its icon moves like the
+ * others' all the same (03/10/2026). */
+[data-tour-id="nav-spaces"] > svg {
+  stroke-width: 1.75;
+  color: var(--muted-foreground);
+  transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+[data-tour-id="nav-spaces"]:hover > svg {
+  transform: translateY(-1px) scale(1.12);
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-tour-id="nav-spaces"] > svg { transition: none; }
+  [data-tour-id="nav-spaces"]:hover > svg { transform: none; }
+}
