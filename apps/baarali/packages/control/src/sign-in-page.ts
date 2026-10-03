@@ -79,6 +79,10 @@ const STRINGS = {
     allow: 'Autoriser',
     deny: 'Refuser',
     done: 'Vous êtes connecté',
+    accountTitle: 'Continuer avec ce compte ?',
+    accountBody: 'Vous êtes connecté en tant que',
+    continueAs: 'Continuer',
+    switchAccount: 'Changer de compte',
     doneBody: 'Votre compte Baarali est prêt. Ouvrez l’application Baarali pour continuer.',
   },
   en: {
@@ -142,6 +146,10 @@ const STRINGS = {
     allow: 'Allow',
     deny: 'Deny',
     done: 'You are signed in',
+    accountTitle: 'Continue with this account?',
+    accountBody: 'You are signed in as',
+    continueAs: 'Continue',
+    switchAccount: 'Use another account',
     doneBody: 'Your Baarali account is ready. Open the Baarali app to continue.',
   },
 } satisfies Record<Lang, Record<string, string | Record<string, string | string[]>>>;
@@ -210,6 +218,9 @@ ${body}
 // Better Auth signs the authorization request into this page's query; it
 // comes back with every call so the flow resumes once the person is in.
 const oauthQuery = location.search.slice(1);
+// The admin console sends people here with #admin: a fragment, since the
+// query is the signed authorization request and anything else in it is refused.
+const forAdmin = location.hash === "#admin";
 async function post(path, body) {
   const res = await fetch("/auth/v1" + path, {
     method: "POST",
@@ -291,6 +302,8 @@ function finish(data) {
   duo.act("nod");
   duo.say(s.done[0], s.done[1]);
   if (data && typeof data.url === "string") return setTimeout(() => follow(data), 900);
+  // Opened by the admin console (/admin): back to it once signed in.
+  if (forAdmin) return setTimeout(() => location.assign("/admin"), 600);
   document.querySelector("h1").textContent = t.done;
   for (const el of document.querySelectorAll("main > :not(h1):not(#done):not(.duo-stage)")) el.hidden = true;
   document.getElementById("done").hidden = false;
@@ -306,7 +319,7 @@ function fail(e, line) {
 for (const b of document.querySelectorAll("[data-provider]")) {
   b.addEventListener("click", async () => {
     b.disabled = true;
-    try { follow(await post("/sign-in/social", { provider: b.dataset.provider, callbackURL: "/auth/v1/sign-in" })); }
+    try { follow(await post("/sign-in/social", { provider: b.dataset.provider, callbackURL: forAdmin ? "/admin" : "/auth/v1/sign-in" })); }
     catch (e) { fail(e); b.disabled = false; }
   });
 }
@@ -464,6 +477,40 @@ document.getElementById("back").addEventListener("click", () => {
 });
 setTimeout(() => duo.say(s.hello[0], s.hello[1]), 500);`;
   return layout(lang, t.title, opts.nonce, body, script, { header: duoStage(), css: DUO_CSS, js: DUO_JS });
+}
+
+/**
+ * Shown when the app asks to sign in while this browser already holds a
+ * session (03/10/2026): before, the app was signed in to that account
+ * without a word, and nobody could pick another one.
+ */
+export function selectAccountPage(opts: { who: string; lang: string | null; nonce: string }): string {
+  const lang = pickLang(opts.lang);
+  const t = STRINGS[lang];
+  const body = `
+<h1>${escape(t.accountTitle)}</h1>
+<p>${escape(t.accountBody)} <strong>${escape(opts.who)}</strong></p>
+<div class="stack">
+  <button class="primary" id="continue" type="button">${escape(t.continueAs)}</button>
+  <button id="switch" type="button">${escape(t.switchAccount)}</button>
+</div>
+<p class="error" id="error" role="alert" hidden></p>`;
+  const script = `
+const error = document.getElementById("error");
+const failed = () => { error.textContent = ${JSON.stringify(t.failed)}; error.hidden = false; };
+document.getElementById("continue").addEventListener("click", async () => {
+  try { follow(await post("/oauth2/continue", { selected: true })); } catch { failed(); }
+});
+// Signed out, then the sign-in page with the same signed request: the app
+// gets whichever account signs in there.
+document.getElementById("switch").addEventListener("click", async () => {
+  try {
+    const res = await fetch("/auth/v1/sign-out", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: "{}" });
+    if (!res.ok) throw new Error("failed");
+    location.assign("/auth/v1/sign-in?" + oauthQuery);
+  } catch { failed(); }
+});`;
+  return layout(lang, t.accountTitle, opts.nonce, body, script);
 }
 
 export function consentPage(opts: { lang: string | null; nonce: string }): string {

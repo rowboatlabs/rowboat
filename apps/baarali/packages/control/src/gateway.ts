@@ -54,9 +54,11 @@ const json = (status: number, code: string) =>
 export function createGateway(deps: GatewayDeps) {
   const touched = new Map<string, number>();
 
-  async function resolve(key: string | null): Promise<{ device: Device; target: InstanceTarget } | 'unauthorized' | 'no_instance'> {
+  async function resolve(key: string | null): Promise<{ device: Device; target: InstanceTarget } | 'unauthorized' | 'suspended' | 'no_instance'> {
     const device = key ? await deps.store.deviceByKey(key) : null;
     if (!device) return 'unauthorized';
+    // Suspended from the admin console (03/10/2026): the instance stays asleep.
+    if ((await deps.store.account(device.accountId))?.suspendedAt) return 'suspended';
     const record = await deps.store.instance(device.accountId);
     if (!record || (record.managed && !record.machineId)) return 'no_instance';
     await deps.instances.wake(record);
@@ -86,6 +88,7 @@ export function createGateway(deps: GatewayDeps) {
       return json(503, 'instance_waking');
     }
     if (found === 'unauthorized') return json(401, 'unauthorized');
+    if (found === 'suspended') return json(403, 'account_suspended');
     if (found === 'no_instance') return json(409, 'no_instance');
     const { target } = found;
 
@@ -134,6 +137,7 @@ export function createGateway(deps: GatewayDeps) {
     resolve(keyFrom(req.headers.authorization, url)).then(
       (found) => {
         if (found === 'unauthorized') return refuse('401 Unauthorized');
+        if (found === 'suspended') return refuse('403 Forbidden');
         if (found === 'no_instance') return refuse('409 Conflict');
         const { target } = found;
         const upstream = net.connect(target.port, target.host, () => {

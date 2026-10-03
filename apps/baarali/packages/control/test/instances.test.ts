@@ -46,6 +46,10 @@ class FakeFly implements FlyApi {
     this.calls.push(`start ${id}`);
     this.machines.get(id)!.state = 'started';
   }
+  async restart(_app: string, id: string) {
+    this.calls.push(`restart ${id}`);
+    this.machines.get(id)!.state = 'started';
+  }
   async waitStarted(_app: string, id: string) {
     this.calls.push(`wait ${id}`);
   }

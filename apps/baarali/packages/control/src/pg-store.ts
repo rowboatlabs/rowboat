@@ -3,6 +3,8 @@ import type { QuotaState } from './quota.js';
 import {
   hashToken,
   type Account,
+  type AccountSummary,
+  type AdminLogEntry,
   type ControlStore,
   type Device,
   type InstanceRecord,
@@ -27,7 +29,10 @@ interface AccountRow {
   email: string | null;
   plan_id: string;
   created_at: Date;
+  suspended_at: Date | null;
 }
+
+const ACCOUNT_COLUMNS = 'a.id, a.email, a.plan_id, a.created_at, a.suspended_at';
 
 interface DeviceRow {
   id: string;
@@ -49,7 +54,13 @@ const toDevice = (r: DeviceRow): Device => ({
   revokedAt: ms(r.revoked_at),
 });
 
-const toAccount = (r: AccountRow): Account => ({ id: r.id, email: r.email, planId: r.plan_id, createdAt: r.created_at.getTime() });
+const toAccount = (r: AccountRow): Account => ({
+  id: r.id,
+  email: r.email,
+  planId: r.plan_id,
+  createdAt: r.created_at.getTime(),
+  ...(r.suspended_at ? { suspendedAt: r.suspended_at.getTime() } : {}),
+});
 
 async function balanceOf(q: Queryable, accountId: string): Promise<number> {
   const { rows } = await q.query<{ balance: unknown }>(
@@ -101,7 +112,7 @@ export class PgStore implements ControlStore {
 
   async accountByToken(token: string) {
     const { rows } = await this.db.query<AccountRow>(
-      `SELECT a.id, a.email, a.plan_id, a.created_at FROM baarali.access_tokens t
+      `SELECT ${ACCOUNT_COLUMNS} FROM baarali.access_tokens t
        JOIN baarali.accounts a ON a.id = t.account_id WHERE t.token_hash = $1`,
       [hashToken(token)],
     );
@@ -109,7 +120,7 @@ export class PgStore implements ControlStore {
   }
 
   async account(id: string) {
-    const { rows } = await this.db.query<AccountRow>('SELECT id, email, plan_id, created_at FROM baarali.accounts WHERE id = $1', [id]);
+    const { rows } = await this.db.query<AccountRow>(`SELECT ${ACCOUNT_COLUMNS} FROM baarali.accounts a WHERE a.id = $1`, [id]);
     return rows[0] ? toAccount(rows[0]) : null;
   }
 
@@ -184,8 +195,8 @@ export class PgStore implements ControlStore {
 
   async accountForUser(userId: string) {
     const { rows } = await this.db.query<AccountRow>(
-      `SELECT id, email, plan_id, created_at FROM baarali.accounts WHERE user_id = $1 OR id = $1
-       ORDER BY (user_id IS NOT NULL AND user_id = $1) DESC LIMIT 1`,
+      `SELECT ${ACCOUNT_COLUMNS} FROM baarali.accounts a WHERE a.user_id = $1 OR a.id = $1
+       ORDER BY (a.user_id IS NOT NULL AND a.user_id = $1) DESC LIMIT 1`,
       [userId],
     );
     return rows[0] ? toAccount(rows[0]) : null;
@@ -267,5 +278,64 @@ export class PgStore implements ControlStore {
       );
       return 'applied';
     });
+  }
+
+  async listAccounts(since: number): Promise<AccountSummary[]> {
+    const { rows } = await this.db.query<AccountRow & {
+      session_start: Date | null; session_used: unknown; week_start: Date | null; week_used: unknown;
+      last_active: Date | string | null; recent: unknown; media: unknown;
+    }>(
+      `SELECT ${ACCOUNT_COLUMNS}, q.session_start, q.session_used, q.week_start, q.week_used,
+              (SELECT max(u.at) FROM baarali.usage_records u WHERE u.account_id = a.id) AS last_active,
+              (SELECT COALESCE(sum(u.credits), 0) FROM baarali.usage_records u WHERE u.account_id = a.id AND u.at >= $1) AS recent,
+              (SELECT COALESCE(sum(l.credits), 0) FROM baarali.media_ledger l WHERE l.account_id = a.id) AS media
+         FROM baarali.accounts a
+         LEFT JOIN baarali.quota_states q ON q.account_id = a.id
+        ORDER BY a.created_at DESC, a.id`,
+      [new Date(since)],
+    );
+    return rows.map((r) => ({
+      account: toAccount(r),
+      quota: r.week_start
+        ? { sessionStart: ms(r.session_start), sessionUsed: num(r.session_used), weekStart: r.week_start.getTime(), weekUsed: num(r.week_used) }
+        : null,
+      mediaBalance: num(r.media),
+      lastActiveAt: r.last_active === null ? null : new Date(r.last_active).getTime(),
+      recentCredits: num(r.recent),
+    }));
+  }
+
+  async setPlan(accountId: string, planId: string) {
+    const { rows } = await this.db.query('UPDATE baarali.accounts SET plan_id = $2 WHERE id = $1 RETURNING id', [accountId, planId]);
+    return rows.length > 0;
+  }
+
+  async setSuspended(accountId: string, at: number | null) {
+    const { rows } = await this.db.query('UPDATE baarali.accounts SET suspended_at = $2 WHERE id = $1 RETURNING id', [accountId, date(at)]);
+    return rows.length > 0;
+  }
+
+  async allInstances(): Promise<InstanceRecord[]> {
+    const { rows } = await this.db.query<{ account_id: string; app: string; machine_id: string | null; volume_id: string | null; image: string | null; managed: boolean }>(
+      'SELECT account_id, app, machine_id, volume_id, image, managed FROM baarali.instances ORDER BY created_at',
+    );
+    return rows.map((r) => ({ accountId: r.account_id, app: r.app, machineId: r.machine_id, volumeId: r.volume_id, image: r.image, managed: r.managed }));
+  }
+
+  async appendAdminLog(e: AdminLogEntry) {
+    await this.db.query(
+      'INSERT INTO baarali.admin_log (at, actor, action, account_id, detail) VALUES ($1, $2, $3, $4, $5)',
+      [new Date(e.at), e.actor, e.action, e.accountId, e.detail],
+    );
+  }
+
+  async adminLog(limit: number, accountId?: string): Promise<AdminLogEntry[]> {
+    const { rows } = await this.db.query<{ at: Date | string; actor: string; action: string; account_id: string | null; detail: string }>(
+      `SELECT at, actor, action, account_id, detail FROM baarali.admin_log
+        WHERE $2::text IS NULL OR account_id = $2
+        ORDER BY at DESC, id DESC LIMIT $1`,
+      [limit, accountId ?? null],
+    );
+    return rows.map((r) => ({ at: new Date(r.at).getTime(), actor: r.actor, action: r.action, accountId: r.account_id, detail: r.detail }));
   }
 }

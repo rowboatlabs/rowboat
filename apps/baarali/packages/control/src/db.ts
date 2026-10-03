@@ -159,6 +159,25 @@ export const MIGRATIONS: string[] = [
   );
   CREATE INDEX devices_account ON baarali.devices (account_id);
   `,
+  // 4 — the admin console (decided 03/10/2026): an account can be suspended
+  // (its tokens stop opening /v1), and every console action is written down,
+  // append only like the media ledger.
+  `
+  ALTER TABLE baarali.accounts ADD COLUMN suspended_at timestamptz;
+
+  CREATE TABLE baarali.admin_log (
+    id bigserial PRIMARY KEY,
+    at timestamptz NOT NULL,
+    actor text NOT NULL,
+    action text NOT NULL,
+    account_id text,
+    detail text NOT NULL DEFAULT ''
+  );
+  CREATE INDEX admin_log_at ON baarali.admin_log (at);
+  CREATE INDEX admin_log_account ON baarali.admin_log (account_id, at);
+  CREATE TRIGGER admin_log_append_only BEFORE UPDATE OR DELETE ON baarali.admin_log
+    FOR EACH ROW EXECUTE FUNCTION baarali.refuse_change();
+  `,
 ];
 
 /** Brings the schema up to date. Safe on several machines at once: the lock serializes them. */

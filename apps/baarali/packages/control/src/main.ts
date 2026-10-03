@@ -159,6 +159,8 @@ const app = createApp({
     downloadBase: process.env.BAARALI_DOWNLOAD_BASE || undefined,
   },
   adminTokenHash: process.env.BAARALI_ADMIN_TOKEN ? hashToken(process.env.BAARALI_ADMIN_TOKEN) : undefined,
+  // The admin console (/admin): these emails, once verified, and only with the sign-in server.
+  adminEmails: (process.env.BAARALI_ADMIN_EMAILS ?? '').split(',').map((e) => e.trim().toLowerCase()).filter(Boolean),
   auth,
   instances,
   gateway,

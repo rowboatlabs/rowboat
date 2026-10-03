@@ -13,6 +13,8 @@ export interface Account {
   email: string | null;
   planId: string;
   createdAt: number;
+  /** Set while the account is suspended from the admin console: its tokens open nothing. */
+  suspendedAt?: number;
 }
 
 export interface Plan {
@@ -107,6 +109,28 @@ export interface Device {
   revokedAt: number | null;
 }
 
+/** One action taken from the admin console, kept for good (decided 03/10/2026). */
+export interface AdminLogEntry {
+  at: number;
+  /** Who acted: the admin's email, or `token` for the operator token. */
+  actor: string;
+  action: string;
+  accountId: string | null;
+  /** What changed, in words the console shows as is. */
+  detail: string;
+}
+
+/** An account as the admin console lists it. */
+export interface AccountSummary {
+  account: Account;
+  quota: QuotaState | null;
+  mediaBalance: number;
+  /** The last model call, or null when there was none. */
+  lastActiveAt: number | null;
+  /** Credits the account's model calls cost since the `since` asked for. */
+  recentCredits: number;
+}
+
 /**
  * Persistence seam. Phase 0 runs the in-memory store; the Postgres one, in
  * the `baarali` schema with its own migration ladder (UPSTREAM.md §2), comes
@@ -144,21 +168,41 @@ export interface ControlStore {
   touchDevice(id: string, at: number): Promise<void>;
   /** Only the account's own device; false when there is none to revoke. */
   revokeDevice(accountId: string, id: string, at: number): Promise<boolean>;
+  /** Every account, newest first, with `recentCredits` counted from `since`. */
+  listAccounts(since: number): Promise<AccountSummary[]>;
+  /** False when there is no such account. */
+  setPlan(accountId: string, planId: string): Promise<boolean>;
+  /** `at` suspends, null lifts it; false when there is no such account. */
+  setSuspended(accountId: string, at: number | null): Promise<boolean>;
+  allInstances(): Promise<InstanceRecord[]>;
+  appendAdminLog(entry: AdminLogEntry): Promise<void>;
+  /** Newest first; with `accountId`, that account's entries only. */
+  adminLog(limit: number, accountId?: string): Promise<AdminLogEntry[]>;
 }
 
 export class MemoryStore implements ControlStore {
   readonly usage: UsageRecord[] = [];
   readonly ledger: MediaLedgerEntry[] = [];
+  readonly log: AdminLogEntry[] = [];
   private readonly states = new Map<string, QuotaState>();
   private readonly jobs = new Map<string, MediaJob>();
   private readonly instances = new Map<string, InstanceRecord>();
   private readonly deviceList: Array<Device & { keyHash: string }> = [];
 
-  /** `tokens` maps a token HASH (hashToken) to its account. */
+  private readonly tokens: Map<string, Account>;
+
+  /** `tokens` maps a token HASH (hashToken) to its account; the accounts are copied, so a change stays here. */
   constructor(
-    private readonly tokens: Map<string, Account>,
+    tokens: Map<string, Account>,
     private readonly catalog: Plan[],
-  ) {}
+  ) {
+    const copies = new Map<string, Account>();
+    this.tokens = new Map([...tokens].map(([hash, a]) => {
+      const copy = copies.get(a.id) ?? { ...a };
+      copies.set(a.id, copy);
+      return [hash, copy];
+    }));
+  }
 
   async accountByToken(token: string) {
     return this.tokens.get(hashToken(token)) ?? null;
@@ -249,5 +293,62 @@ export class MemoryStore implements ControlStore {
     if (!found) return false;
     found.revokedAt = at;
     return true;
+  }
+  /** One entry per account, though several tokens may point to it. */
+  private accounts(): Account[] {
+    const byId = new Map<string, Account>();
+    for (const a of this.tokens.values()) if (!byId.has(a.id)) byId.set(a.id, a);
+    return [...byId.values()];
+  }
+  async listAccounts(since: number): Promise<AccountSummary[]> {
+    const summaries = await Promise.all(
+      this.accounts().map(async (account) => {
+        const calls = this.usage.filter((u) => u.accountId === account.id);
+        return {
+          account: { ...account },
+          quota: this.states.get(account.id) ?? null,
+          mediaBalance: await this.mediaBalance(account.id),
+          lastActiveAt: calls.length ? Math.max(...calls.map((u) => u.at)) : null,
+          recentCredits: calls.filter((u) => u.at >= since).reduce((sum, u) => sum + u.credits, 0),
+        };
+      }),
+    );
+    return summaries.sort((a, b) => b.account.createdAt - a.account.createdAt);
+  }
+  // Every token of the account sees the change: they share its record.
+  private update(accountId: string, change: (a: Account) => void): boolean {
+    let found = false;
+    for (const a of this.tokens.values()) {
+      if (a.id === accountId) {
+        change(a);
+        found = true;
+      }
+    }
+    return found;
+  }
+  async setPlan(accountId: string, planId: string) {
+    return this.update(accountId, (a) => {
+      a.planId = planId;
+    });
+  }
+  async setSuspended(accountId: string, at: number | null) {
+    return this.update(accountId, (a) => {
+      if (at === null) delete a.suspendedAt;
+      else a.suspendedAt = at;
+    });
+  }
+  async allInstances() {
+    return [...this.instances.values()].map((r) => ({ ...r }));
+  }
+  async appendAdminLog(entry: AdminLogEntry) {
+    this.log.push({ ...entry });
+  }
+  async adminLog(limit: number, accountId?: string) {
+    return this.log
+      .map((e, i) => ({ e, i }))
+      .filter(({ e }) => accountId === undefined || e.accountId === accountId)
+      .sort((a, b) => b.e.at - a.e.at || b.i - a.i)
+      .slice(0, limit)
+      .map(({ e }) => ({ ...e }));
   }
 }

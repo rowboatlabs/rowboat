@@ -17,6 +17,7 @@ const auth: BaaraliAuth = {
   handle: async () => new Response(null, { status: 404 }),
   userIdForAccessToken: async (t) => ({ 'at-me': ME.id, 'at-other': OTHER.id })[t] ?? null,
   spacesTokenFor: async () => null,
+  sessionUser: async () => null,
 };
 
 const fly: FlyApi = {
@@ -25,6 +26,7 @@ const fly: FlyApi = {
   machine: async (_app, id) => ({ id, state: 'started', config: { image: 'img' } }),
   updateMachine: async (_app, id, config) => ({ id, state: 'started', config }),
   start: async () => {},
+  restart: async () => {},
   waitStarted: async () => {},
 };
 

@@ -8,7 +8,7 @@ import { checkPhoneCode, newCode, smsAllowed, storePhoneCode, takeSend, type Cod
 import type { Queryable } from './db.js';
 import { PASSWORD_MAX, PASSWORD_MIN } from './password-limits.js';
 import { html } from './html.js';
-import { consentPage, signInPage, type SignInMethods } from './sign-in-page.js';
+import { consentPage, selectAccountPage, signInPage, type SignInMethods } from './sign-in-page.js';
 
 // The sign-in server (architecture §3.5 "Comptes et connexion", decided
 // 01/10/2026). Core already looks for an OAuth 2.1 server at
@@ -194,6 +194,9 @@ function authOptions(deps: AuthDeps) {
       oauthProvider({
         loginPage: `${AUTH_BASE_PATH}/sign-in`,
         consentPage: `${AUTH_BASE_PATH}/consent`,
+        // A session already open in this browser: ask before using it, so
+        // the person can pick another account (03/10/2026).
+        selectAccount: { page: `${AUTH_BASE_PATH}/select-account`, shouldRedirect: async () => true },
         scopes: SCOPES,
         // Core registers itself, without an initial token (core auth/oauth-client.ts).
         allowDynamicClientRegistration: true,
@@ -287,6 +290,15 @@ export interface BaaraliAuth {
    * server, or no sign-in user behind the account.
    */
   spacesTokenFor(accountId: string): Promise<{ token: string; expiresIn: number } | null>;
+  /** Who this browser is signed in as (its session cookie), for the admin console; null when nobody. */
+  sessionUser(headers: Headers): Promise<SessionUser | null>;
+}
+
+export interface SessionUser {
+  id: string;
+  /** null for a phone sign-up, whose stand-in address is not a real one. */
+  email: string | null;
+  emailVerified: boolean;
 }
 
 /** How long a traded Spaces token lives: the length of an access token. */
@@ -313,6 +325,14 @@ export function createAuth(deps: AuthDeps): BaaraliAuth {
       if (req.method === 'GET' && url.pathname === `${AUTH_BASE_PATH}/consent`) {
         return html((nonce) => consentPage({ lang, nonce }));
       }
+      if (req.method === 'GET' && url.pathname === `${AUTH_BASE_PATH}/select-account`) {
+        const session = await auth.api.getSession({ headers: req.headers }).catch(() => null);
+        // The session ended in between: the sign-in page, same signed request.
+        if (!session) return Response.redirect(`${deps.publicUrl}${AUTH_BASE_PATH}/sign-in${url.search}`, 302);
+        const user = session.user as { email: string; phoneNumber?: string | null; name?: string | null };
+        const who = realEmail(user.email) ?? user.phoneNumber ?? user.name ?? '';
+        return html((nonce) => selectAccountPage({ who, lang, nonce }));
+      }
       return auth.handler(await asAppRequest(req, deps.spacesUrl));
     },
 
@@ -338,6 +358,12 @@ export function createAuth(deps: AuthDeps): BaaraliAuth {
         },
       });
       return { token, expiresIn: SPACES_TOKEN_SECONDS };
+    },
+
+    async sessionUser(headers: Headers): Promise<SessionUser | null> {
+      const session = await auth.api.getSession({ headers }).catch(() => null);
+      if (!session) return null;
+      return { id: session.user.id, email: realEmail(session.user.email), emailVerified: Boolean(session.user.emailVerified) };
     },
 
     async userIdForAccessToken(token: string): Promise<string | null> {

@@ -38,6 +38,7 @@ OPENROUTER_API_KEY=<clé> BAARALI_PLAN_ID=essentiel PORT=8787 pnpm start
 | `BAARALI_ACCOUNT_ID`, `BAARALI_ACCOUNT_EMAIL`, `BAARALI_ACCOUNT_CREATED_AT` | Le compte du propriétaire ; la semaine est ancrée à sa date de création |
 | `PIXAZO_API_KEY` | Facultative : sans elle, `/v1/media` répond 503 et le texte marche quand même |
 | `BAARALI_ADMIN_TOKEN` | Facultatif : le jeton de l'opérateur pour `/v1/admin/*` (recharges de crédits médias à la main). Absent : ces routes répondent 404 |
+| `BAARALI_ADMIN_EMAILS` | Facultatif : les adresses, séparées par des virgules, qui ouvrent la console d'admin (`/admin`, archi §3.5 « La console d'admin »), une fois vérifiées et seulement avec `BAARALI_AUTH_SECRET`. Absent : la console répond 404 |
 | `BAARALI_OWNER_MEDIA_CREDITS` | Crédits médias offerts au propriétaire, une seule fois en Postgres (référence `owner-grant`) ; en mémoire, à chaque démarrage |
 | `DATABASE_URL` | Postgres (schéma `baarali`, migrations au démarrage, `src/db.ts`). Absente : tout reste en mémoire et s'oublie à l'arrêt de la machine. Chez Neon (choisi le 01/10/2026), l'adresse **directe**, pas celle du pooler (`-pooler` dans l'hôte) : le pooler en mode transaction perd le `search_path` et les verrous de migration |
 | `RESEND_API_KEY`, `EMAIL_FROM` | Les codes par email, par Resend (choisi le 01/10/2026). `EMAIL_FROM` sur un domaine vérifié chez Resend, sinon l'envoi est refusé ou part en indésirable |
@@ -64,7 +65,7 @@ fly deploy --config apps/baarali/packages/instance/fly.toml --dockerfile apps/ba
 
 | App | Exposition | Secrets (`fly secrets`) |
 |---|---|---|
-| `warell-control` | Publique, **`https://app.baarali.com`** (aussi `https://warell-control.fly.dev`) | `OPENROUTER_API_KEY`, `BAARALI_INSTANCE_TOKEN`, `PIXAZO_API_KEY`, `BAARALI_ADMIN_TOKEN`, `BAARALI_GATEWAY_SECRET`, `FLY_API_TOKEN`, `BAARALI_INSTANCE_IMAGE` |
+| `warell-control` | Publique, **`https://app.baarali.com`** (aussi `https://warell-control.fly.dev`) | `OPENROUTER_API_KEY`, `BAARALI_INSTANCE_TOKEN`, `PIXAZO_API_KEY`, `BAARALI_ADMIN_TOKEN`, `BAARALI_ADMIN_EMAILS`, `BAARALI_GATEWAY_SECRET`, `FLY_API_TOKEN`, `BAARALI_INSTANCE_IMAGE` |
 | `warell-owner` | **Privée** (Flycast), disque `data` monté sur `/data` | `BAARALI_INSTANCE_TOKEN`, `BAARALI_SERVER_KEY` |
 | `baarali-spaces` | Publique, **`https://spaces.baarali.com`** et **`https://<équipe>.spaces.baarali.com`** | `DATABASE_URL` (Neon, sa propre base `baarali_spaces`), `AWS_ACCESS_KEY_ID` et `AWS_SECRET_ACCESS_KEY` (Tigris, posés par `fly storage create`) |
 | `baarali-instances` | **Privée** (Flycast). Une machine et un volume par compte, créés par le plan de contrôle, jamais par `fly deploy` | Aucun : chaque machine reçoit ses clés à sa création |

@@ -91,6 +91,11 @@ async function startAppSignIn(fetcher: client.CustomFetch) {
     { [client.customFetch]: fetcher },
   );
   config[client.customFetch] = fetcher;
+  return authorizeAgain(config);
+}
+
+/** Another sign-in by the same registered app, as after signing out. */
+async function authorizeAgain(config: client.Configuration) {
   const verifier = client.randomPKCECodeVerifier();
   const state = client.randomState();
   const url = client.buildAuthorizationUrl(config, {
@@ -161,6 +166,48 @@ describe('signing the app in, as core does', () => {
     const body = await res.json();
     expect(body.url).toBeUndefined();
     expect(await store.account(body.user.id)).toMatchObject({ planId: 'decouverte' });
+  });
+
+  // 03/10/2026: a session already open in the browser used to sign the app
+  // in to that account without a word.
+  it('asks before using a session already open, and lets the person switch', async () => {
+    const { browser, post, fetcher, sender, app } = await setup();
+    // Its own address: the sends are capped per IP across the file.
+    const ip = '203.0.113.42';
+    const signIn = async (email: string, oauth_query: string) => {
+      await post('/email-otp/send-verification-otp', { email, type: 'sign-in', oauth_query }, ip);
+      return post('/sign-in/email-otp', { email, otp: sender.sent.at(-1)!.code, oauth_query }, ip);
+    };
+    const finish = async (next: URL, flow: Awaited<ReturnType<typeof startAppSignIn>>) => {
+      // Consent is asked once per app: after that, straight back to it.
+      const callback = next.pathname === '/auth/v1/consent'
+        ? new URL((await (await post('/oauth2/consent', { accept: true, oauth_query: queryOf(next) })).json()).url, PUBLIC)
+        : next;
+      const tokens = await client.authorizationCodeGrant(flow.config, callback, { pkceCodeVerifier: flow.verifier, expectedState: flow.state });
+      const me = await app.request('/v1/me', { headers: { authorization: `Bearer ${tokens.access_token}` } });
+      return ((await me.json()) as { user: { email: string } }).user.email;
+    };
+
+    // A first sign-in goes straight on: nobody to choose.
+    const first = await startAppSignIn(fetcher);
+    const signedIn = await signIn('awa@example.test', queryOf(location(await browser(first.url.toString()))));
+    expect(await finish(new URL((await signedIn.json()).url, PUBLIC), first)).toBe('awa@example.test');
+
+    // The next one, same browser: the page names the account and asks.
+    const again = await authorizeAgain(first.config);
+    const ask = location(await browser(again.url.toString()));
+    expect(ask.pathname).toBe('/auth/v1/select-account');
+    expect(await (await browser(ask.toString())).text()).toContain('awa@example.test');
+    const kept = await post('/oauth2/continue', { selected: true, oauth_query: queryOf(ask) });
+    expect(kept.status).toBe(200);
+    expect(await finish(new URL((await kept.json()).url, PUBLIC), again)).toBe('awa@example.test');
+
+    // « Changer de compte »: signed out, then whoever signs in gets the app.
+    const third = await authorizeAgain(first.config);
+    const ask3 = location(await browser(third.url.toString()));
+    expect((await post('/sign-out', {})).status).toBe(200);
+    const other = await signIn('moussa@example.test', queryOf(ask3));
+    expect(await finish(new URL((await other.json()).url, PUBLIC), third)).toBe('moussa@example.test');
   });
 
   it('refuses /v1 to a made-up token', async () => {

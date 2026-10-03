@@ -154,6 +154,54 @@ describe.each([
       status: 200, credits: 12345, estimated: false, useCase: 'chat', agentName: 'copilot',
     });
   });
+
+  // The admin console (03/10/2026).
+  it('lists every account once, with its activity counted from a date', async () => {
+    const store = await make();
+    const call = (at: number, credits: number) => store.appendUsage({
+      accountId: ME.id, at, path: '/chat/completions', model: 'm', requestedModel: null,
+      status: 200, credits, estimated: false, useCase: 'chat', agentName: 'copilot',
+    });
+    await call(T0 + 10, 100);
+    await call(T0 + 20, 50);
+    await store.applyMediaEntry({ accountId: ME.id, at: T0, kind: 'topup', credits: 7, reference: 'r' });
+    const list = await store.listAccounts(T0 + 15);
+    expect(list.map((s) => s.account.id)).toEqual([ME.id, OTHER.id]);
+    expect(list[0]).toMatchObject({ account: ME, quota: null, mediaBalance: 7, lastActiveAt: T0 + 20, recentCredits: 50 });
+    expect(list[1]).toMatchObject({ account: OTHER, mediaBalance: 0, lastActiveAt: null, recentCredits: 0 });
+  });
+
+  it('changes a plan and suspends, seen through the account\'s token', async () => {
+    const store = await make();
+    expect(await store.setPlan(ME.id, 'pro')).toBe(true);
+    expect(await store.setPlan('acc_nobody', 'pro')).toBe(false);
+    expect((await store.accountByToken('tok-me'))?.planId).toBe('pro');
+    expect(await store.setSuspended(ME.id, T0 + 5)).toBe(true);
+    expect((await store.accountByToken('tok-me'))?.suspendedAt).toBe(T0 + 5);
+    expect((await store.accountForUser(ME.id))?.suspendedAt).toBe(T0 + 5);
+    await store.setSuspended(ME.id, null);
+    expect(await store.account(ME.id)).toEqual({ ...ME, planId: 'pro' });
+  });
+
+  it('keeps the console journal, newest first, per account if asked', async () => {
+    const store = await make();
+    await store.appendAdminLog({ at: T0, actor: 'a@x', action: 'plan', accountId: ME.id, detail: 'A → B' });
+    await store.appendAdminLog({ at: T0, actor: 'a@x', action: 'credits', accountId: OTHER.id, detail: '+5' });
+    await store.appendAdminLog({ at: T0 + 1, actor: 'token', action: 'suspend', accountId: ME.id, detail: 'x' });
+    expect((await store.adminLog(10)).map((e) => e.action)).toEqual(['suspend', 'credits', 'plan']);
+    expect((await store.adminLog(1)).map((e) => e.action)).toEqual(['suspend']);
+    expect(await store.adminLog(10, ME.id)).toEqual([
+      { at: T0 + 1, actor: 'token', action: 'suspend', accountId: ME.id, detail: 'x' },
+      { at: T0, actor: 'a@x', action: 'plan', accountId: ME.id, detail: 'A → B' },
+    ]);
+  });
+
+  it('lists every instance', async () => {
+    const store = await make();
+    const record = { accountId: ME.id, app: 'baarali-instances', machineId: 'm1', volumeId: 'v1', image: 'img:1', managed: true };
+    await store.saveInstance(record);
+    expect(await store.allInstances()).toEqual([record]);
+  });
 });
 
 describe('linking an account to a sign-in', () => {
@@ -212,5 +260,14 @@ describe('migrations', () => {
     await store.applyMediaEntry({ accountId: ME.id, at: T0, kind: 'topup', credits: 10, reference: 'p' });
     await expect(db.query('UPDATE baarali.media_ledger SET credits = 1000 WHERE reference = $1', ['p'])).rejects.toThrow(/append only/);
     await expect(db.query('DELETE FROM baarali.media_ledger WHERE reference = $1', ['p'])).rejects.toThrow(/append only/);
+  });
+
+  it('keep the console journal append only', async () => {
+    const db = await freshDb();
+    await migrate(db);
+    const store = new PgStore(db, [PLAN]);
+    await store.appendAdminLog({ at: T0, actor: 'a@x', action: 'plan', accountId: null, detail: 'A → B' });
+    await expect(db.query("UPDATE baarali.admin_log SET detail = 'rien'")).rejects.toThrow(/append only/);
+    await expect(db.query('DELETE FROM baarali.admin_log')).rejects.toThrow(/append only/);
   });
 });

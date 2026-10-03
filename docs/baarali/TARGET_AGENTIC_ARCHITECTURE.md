@@ -192,6 +192,8 @@ Harbor reste inchangé et continue de servir les Spaces, les membres, le temps r
 
 Ses tables vont dans le schéma `baarali`. Nos règles s'ajoutent par ses points d'extension : liaison seulement par email vérifié, période de 72 h, indicatifs ouverts au SMS.
 
+**Une session déjà ouverte ne connecte jamais l'app en silence** (décidé le 03/10/2026). Quand le navigateur est déjà connecté, la page « Continuer avec ce compte ? » nomme le compte et propose « Changer de compte ». Ce bouton ferme la session du navigateur et rouvre la page de connexion avec la même demande d'autorisation. Avant, l'app prenait le compte du navigateur sans rien demander, et personne ne pouvait en choisir un autre.
+
 **Latitude :** l'envoi des SMS et des emails passe par un `CommunicationProvider` (§3.8), jamais par un fournisseur codé en dur. En développement, un faux fournisseur écrit le code dans le journal. Le choix de l'agrégateur SMS se fait par pays, sur deux critères : la délivrabilité réelle dans chacun des 7 pays, et le coût par message. Voir `WEST_AFRICA_PROVIDER_ARCHITECTURE.md`. Les mêmes plafonds valent pour l'email : par adresse, par IP, avec une expiration courte et un nombre d'essais borné.
 
 **L'ordre de construction :**
@@ -306,6 +308,21 @@ Décidé le 30/09/2026. La vidéo, la voix et la musique passent par **Pixazo**,
 - le jeton est lu dans `oauth.json` : `mcp.json` ne contient aucun secret.
 
 **Sur le fil, on garde le schéma de l'upstream** (§3.14) : `GET /v1/me` porte la session dans le compartiment `daily` et la semaine dans `monthly`, et `usageDay` donne l'heure de remise à zéro de la session. Les libellés de l'écran d'usage upstream (« jour », « mois ») sont donc faux jusqu'à ce que la couche de marque et d'i18n (§3.12) les remplace : c'est accepté pour la phase 0, où seul le propriétaire utilise l'app.
+
+#### La console d'admin
+
+**Décidée le 03/10/2026, sur `app.baarali.com/admin`.** Elle n'existe que si `BAARALI_ADMIN_EMAILS` liste au moins une adresse. On s'y connecte comme dans l'app, et seule une adresse de cette liste, **vérifiée**, l'ouvre. Toute autre personne connectée voit « Accès réservé » et peut changer de compte ; sans session, on est envoyé à la page de connexion, qui ramène à la console. Le jeton de l'opérateur (`BAARALI_ADMIN_TOKEN`) ouvre aussi ses routes JSON (`/admin/api/*`), pour les scripts.
+
+- **Ce qu'on y fait :** changer le forfait d'un client ; lui offrir des crédits médias (au plus 10 000 par geste) ; remettre sa session de 5 h à zéro ; suspendre ou rétablir son compte ; réveiller, mettre à jour ou redémarrer son instance.
+- **Une offre de crédits suit la règle des recharges** : une recharge telle qu'elle est vendue, ou un montant libre. Avec une référence de paiement, le même paiement n'ajoute qu'une fois ; sans référence, chaque geste est un don à part.
+- **Une instance en échec passe en tête** de « Ce qui demande ton attention » ; chaque machine a un lien vers ses journaux sur le tableau de bord de Fly.
+- **Les deux niveaux Pro s'appellent « Pro » et « Pro max »** dans la console : ils ont le même nom dans le catalogue, le plus cher devient « Pro max ».
+- **Un compte suspendu n'ouvre plus rien** : ni `/v1` (403 `account_suspended`), quel que soit son jeton, ni son instance par la passerelle. Rien n'est servi, rien n'est dépensé.
+- **Le coût réel des modèles** (crédits des 7 derniers jours, en dollars et en F CFA) ne se voit que dans la console, jamais dans l'app d'un client.
+- **Chaque action est écrite dans un journal** (`admin_log`), avec qui l'a faite. Ce journal est en ajout seul, comme celui des médias : un déclencheur refuse toute modification et toute suppression.
+- **Un cookie seul ne change rien.** Une écriture exige un en-tête que seule la page de la console envoie : un autre site ne peut pas le poser sans notre accord CORS.
+
+Les notifications, les codes promo, le parrainage et les annonces viendront dans les PR suivantes.
 
 ### 3.6 La vérification : exécuté ≠ vérifié
 

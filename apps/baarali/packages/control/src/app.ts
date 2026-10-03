@@ -4,6 +4,7 @@ import { createMiddleware } from 'hono/factory';
 import { buildApiConfig } from './config.js';
 import { proxyLlm, type ProxyDeps } from './llm-proxy.js';
 import { isAdmin, topUpMedia, type SoldPack } from './admin.js';
+import { mountAdminConsole } from './admin-console.js';
 import { asset } from './assets.js';
 import { AUTH_BASE_PATH, type BaaraliAuth } from './auth.js';
 import { homePage, type HomeData } from './home-page.js';
@@ -24,6 +25,8 @@ export type ControlDeps = ProxyDeps & {
   mediaPacks: SoldPack[];
   /** SHA-256 of the operator token; unset: /v1/admin answers 404. */
   adminTokenHash?: string;
+  /** Who may open the admin console (/admin), lowercase; empty or unset: it does not exist. */
+  adminEmails?: string[];
   /** The home page with the prices (baarali.com); unset: `/` answers 404. */
   home?: HomeData;
   /** The sign-in server; unset: only instance tokens open /v1 (phase 0). */
@@ -106,6 +109,8 @@ export function createApp(deps: ControlDeps) {
     const token = bearer(c.req.header('authorization'));
     const account = token ? await accountFor(token) : null;
     if (!account) return c.json({ error: { code: 'unauthorized' } }, 401);
+    // Suspended from the admin console: nothing is served, nothing is spent.
+    if (account.suspendedAt) return c.json({ error: { code: 'account_suspended' } }, 403);
     c.set('account', account);
     await next();
   });
@@ -175,6 +180,7 @@ export function createApp(deps: ControlDeps) {
       const userId = token ? await auth.userIdForAccessToken(token) : null;
       const account = userId ? await deps.store.accountForUser(userId) : null;
       if (!account) return c.json({ error: { code: 'unauthorized' } }, 401);
+      if (account.suspendedAt) return c.json({ error: { code: 'account_suspended' } }, 403);
       c.set('account', account);
       await next();
     });
@@ -217,6 +223,16 @@ export function createApp(deps: ControlDeps) {
     app.all(GATEWAY_PATH, (c) => gateway.http(c.req.raw));
     app.all(`${GATEWAY_PATH}/*`, (c) => gateway.http(c.req.raw));
   }
+
+  mountAdminConsole(app, {
+    store: deps.store,
+    auth: deps.auth,
+    adminEmails: deps.adminEmails ?? [],
+    adminTokenHash: deps.adminTokenHash,
+    mediaPacks: deps.mediaPacks,
+    instances: deps.instances,
+    now: deps.now,
+  });
 
   app.post('/v1/admin/media-credits', async (c) => {
     if (!isAdmin({ ...deps, packs: deps.mediaPacks }, bearer(c.req.header('authorization')))) {

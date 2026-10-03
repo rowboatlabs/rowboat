@@ -33,6 +33,8 @@ export interface FlyApi {
   machine(app: string, id: string): Promise<Machine>;
   updateMachine(app: string, id: string, config: MachineConfig): Promise<Machine>;
   start(app: string, id: string): Promise<void>;
+  /** Stops and starts it again: what is in memory is gone, the volume stays. */
+  restart(app: string, id: string): Promise<void>;
   /** Resolves once the machine is started, or throws after `timeoutS` (60 at most). */
   waitStarted(app: string, id: string, timeoutS: number): Promise<void>;
 }
@@ -85,6 +87,10 @@ export class FlyMachines implements FlyApi {
 
   async start(app: string, id: string) {
     await this.call('POST', `/apps/${app}/machines/${id}/start`);
+  }
+
+  async restart(app: string, id: string) {
+    await this.call('POST', `/apps/${app}/machines/${id}/restart`);
   }
 
   async waitStarted(app: string, id: string, timeoutS: number) {

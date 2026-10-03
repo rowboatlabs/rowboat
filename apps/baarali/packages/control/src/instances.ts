@@ -230,6 +230,38 @@ export class Instances {
     await store.saveInstance({ ...current, image: config.image });
   }
 
+  /** The image new and updated instances run; null without Fly. */
+  get currentImage(): string | null {
+    return this.deps.config?.image ?? null;
+  }
+
+  /**
+   * What Fly says of the machine, for the admin console; null when the
+   * control plane does not run it (the owner's hand-deployed instance) or
+   * has no Fly access.
+   */
+  async machineState(record: InstanceRecord): Promise<{ state: string; image: string } | null> {
+    const { fly } = this.deps;
+    if (!fly || !record.managed || !record.machineId) return null;
+    const machine = await fly.machine(record.app, record.machineId);
+    return { state: machine.state, image: machine.config.image };
+  }
+
+  /** From the admin console: onto the current image now, even if someone is using it. */
+  async updateNow(record: InstanceRecord): Promise<boolean> {
+    if (!(await this.outdated(record))) return false;
+    await this.moveToImage(record);
+    return true;
+  }
+
+  /** From the admin console: a fresh start, e.g. after a stuck run. */
+  async restart(record: InstanceRecord): Promise<void> {
+    const { fly } = this.deps;
+    if (!fly || !record.managed || !record.machineId) throw new InstanceUnavailable('off');
+    this.awakeUntil.delete(record.machineId);
+    await fly.restart(record.app, record.machineId);
+  }
+
   /** Over Flycast (private): an instance has no public address. */
   target(record: InstanceRecord): InstanceTarget {
     return {
