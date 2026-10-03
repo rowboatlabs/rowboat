@@ -1,7 +1,7 @@
 // Loaded first by the renderer's entry (one line added by scripts/brand.mjs):
 // the app in the person's language. French when the app or the system says so.
 import { FR } from './fr.js';
-import { frenchDates, pickLang, startTranslation } from './translate.js';
+import { frenchDates, pickLang, startTranslation, translate } from './translate.js';
 
 let saved: string | null = null;
 try {
@@ -17,6 +17,9 @@ if (lang === 'fr') {
   const start = () => {
     try {
       frenchDates();
+      // For text the page writes into a field (a field's value is not a text
+      // node the layer sees): the renderer asks here, English when absent.
+      (window as { __baaraliText?: (text: string) => string }).__baaraliText = (text) => translate(FR, text, 'attr') ?? text;
       startTranslation(FR);
     } catch (err) {
       console.error('[i18n] translation disabled', err);

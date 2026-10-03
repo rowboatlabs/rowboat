@@ -15,6 +15,7 @@ Une ligne s'ajoute dans le même commit que la modification, et disparaît dans 
 | `apps/x/apps/renderer/src/components/dock-sidebar.tsx` | Rail replié dans le même ordre, mêmes icônes (groupe de personnes, horloge, livre) | Même raison | 02/10/2026 |
 | `apps/x/apps/renderer/src/components/spaces-sidebar-section.tsx` | Icône d'un groupe de personnes, titre au ton des autres entrées | Les deux bulles se confondaient avec les discussions | 02/10/2026 |
 | `apps/x/apps/renderer/src/App.tsx` | Une loupe (⌘K) au bout des boutons du haut, et plus d'espace entre eux | Demandé par le fondateur (02/10/2026) | 02/10/2026 |
+| `apps/x/apps/renderer/src/components/bg-tasks-view.tsx` | La liste devient des cartes (`bg-task-card.tsx`) : ce que fait la tâche, l'horaire en mots et en GMT (`lib/schedule-words.ts`), « Lancer » visible, la raison d'un échec ; la fenêtre « Nouvelle tâche » propose 6 idées (`lib/task-ideas.ts`) et garde le modèle des développeurs en bas | Le tableau montrait le nom de fichier et une expression cron ; le seul modèle servait aux développeurs (maquette validée le 02/10/2026) | 02/10/2026 |
 
 **La marque n'est pas une divergence.** Elle ne touche aucun fichier du dépôt : elle s'applique à la copie d'un build, en CI ou dans l'image d'instance (`apps/baarali/packages/desktop/scripts/brand.mjs`, décidé le 01/10/2026). Ses ancres dans les fichiers upstream sont vérifiées par un test à chaque PR.
 

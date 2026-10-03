@@ -1134,7 +1134,7 @@ export const FR: Dictionary = {
     "No output yet. Click": "Pas encore de résultat. Cliquez sur",
     "No runs yet. Click": "Aucune exécution pour l’instant. Cliquez sur",
     "No triggers = manual-only.": "Sans déclencheur = manuel uniquement.",
-    "Persistent agents that fire on a schedule or in response to events. Toggle a task inactive to pause it.": "Des agents permanents qui se déclenchent selon un calendrier ou en réponse à des événements. Rendez une tâche inactive pour la mettre en pause.",
+    "Persistent agents that fire on a schedule or in response to events. Toggle a task inactive to pause it.": "Baarali les fait pour vous, à l’heure prévue ou quand quelque chose arrive. Éteignez-en une pour la mettre en pause.",
     "Prefilled to fire when a meeting's notes become available. Adjust if you want.": "Préréglé pour se déclencher quand les notes d’une réunion sont disponibles. Ajustez si vous voulez.",
     "Provider": "Fournisseur",
     "Rendered": "Rendu",
@@ -3194,7 +3194,35 @@ export const FR: Dictionary = {
     "Scheduled tasks": "Tâches planifiées",
     "Connectors": "Connecteurs",
     "A connected account needs attention": "Un compte connecté demande votre attention",
-    "Less": "Moins"
+    "Less": "Moins",
+    // Scheduled tasks: the cards and the new-task ideas (02/10/2026).
+    "Suggests up to three to-dos each morning, from your important emails and your meetings. Nothing is added without your OK.": "Propose jusqu’à trois choses à faire chaque matin, tirées de vos e-mails importants et de vos réunions. Rien n’est ajouté sans votre accord.",
+    "Describe what the task should do, and when. For example: every morning at 7, sum up my unread emails in one paragraph, with the list of what I need to do.": "Décrivez ce que la tâche doit faire, et quand. Par exemple : chaque matin à 7 h, résume mes e-mails non lus en un paragraphe, avec la liste de ce que je dois faire.",
+    "Or start from an idea": "Ou partez d’une idée",
+    "For developers: coding from meetings →": "Pour les développeurs : coder à partir des réunions →",
+    "Every hour": "Toutes les heures",
+    "When something it watches for happens": "Quand ce qu’elle surveille arrive",
+    "Only when you run it": "Seulement quand vous la lancez",
+    "Morning planner": "Planificateur du matin",
+    "Morning summary": "Résumé du matin",
+    "Every day · Email, calendar": "Chaque jour · E-mail, agenda",
+    "Every morning at 7, sum up my unread emails and today's meetings in five lines, with what I should do first.": "Chaque matin à 7 h, résume mes e-mails non lus et mes réunions du jour en cinq lignes, avec ce que je dois faire en premier.",
+    "Prepare my meetings": "Préparer mes réunions",
+    "Every evening · Calendar": "Chaque soir · Agenda",
+    "Every evening at 6, prepare tomorrow's meetings: who will be there, what we said last time, and the questions to ask.": "Chaque soir à 18 h, prépare mes réunions du lendemain : qui sera là, ce qu’on s’est dit la dernière fois, et les questions à poser.",
+    "Meeting minutes": "Compte rendu de réunion",
+    "After each meeting": "Après chaque réunion",
+    "When a meeting's notes are ready, write short minutes: the decisions, who does what, and by when.": "Quand les notes d’une réunion sont prêtes, écris un compte rendu court : les décisions, qui fait quoi, et pour quand.",
+    "Important emails": "E-mails importants",
+    "Each email · Email": "À chaque e-mail · E-mail",
+    "When a client or a partner writes to me, sum up the message and prepare a draft reply, without sending it.": "Quand un client ou un partenaire m’écrit, résume son message et prépare un brouillon de réponse, sans l’envoyer.",
+    "Keep watch on a topic": "Veille sur un sujet",
+    "Every week · Web": "Chaque semaine · Web",
+    "Every Friday at 9, search the web for what was said this week about [my sector, my competitors] and sum it up with the sources.": "Chaque vendredi à 9 h, cherche sur le web ce qui s’est dit cette semaine sur [mon secteur, mes concurrents] et fais-m’en un résumé avec les sources.",
+    "Weekly review": "Bilan de la semaine",
+    "Every Friday · To-do": "Chaque vendredi · À faire",
+    "Every Friday at 5 pm, review my week: what got done, what is left on my to-do list, and what is stuck.": "Chaque vendredi à 17 h, fais le bilan de ma semaine : ce qui a été fait, ce qui reste dans À faire, et ce qui bloque."
+
   },
   // Lines about people (apps/x renderer lib/spaces-membership.ts): the names
   // stay as written. Neutral wording, a name says nothing of a gender.
@@ -3578,6 +3606,20 @@ export const FR: Dictionary = {
     "Your $1 account": "Votre compte $1",
     "$1 agents included": "$1 agents inclus",
     "Read and act on your $1 account": "Lire et agir sur votre compte $1",
-    "Resets in $1": "Repart à zéro dans $1"
+    "Resets in $1": "Repart à zéro dans $1",
+    "Every $1 minutes": "Toutes les $1 minutes",
+    "Every $1 hours": "Toutes les $1 heures",
+    "Every day at $1 GMT": "Chaque jour à $1 GMT",
+    "Weekdays at $1 GMT": "En semaine à $1 GMT",
+    "Every day between $1 and $2 GMT": "Chaque jour entre $1 et $2 GMT",
+    "$1 times a day": "$1 fois par jour",
+    "Every Monday at $1 GMT": "Chaque lundi à $1 GMT",
+    "Every Tuesday at $1 GMT": "Chaque mardi à $1 GMT",
+    "Every Wednesday at $1 GMT": "Chaque mercredi à $1 GMT",
+    "Every Thursday at $1 GMT": "Chaque jeudi à $1 GMT",
+    "Every Friday at $1 GMT": "Chaque vendredi à $1 GMT",
+    "Every Saturday at $1 GMT": "Chaque samedi à $1 GMT",
+    "Every Sunday at $1 GMT": "Chaque dimanche à $1 GMT"
+
   },
 };
