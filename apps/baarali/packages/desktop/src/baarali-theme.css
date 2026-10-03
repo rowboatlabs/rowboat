@@ -120,3 +120,23 @@ svg.lucide-sparkles.shrink-0 {
 div:has(> svg.lucide-sparkles:only-child) {
   display: none;
 }
+
+/* Night (03/10/2026, the founder's call): the whole window in the sidebar's
+ * black, so the app reads as one surface. The composer stays apart: a
+ * raised grey with a visible edge, brighter when one types. A hairline
+ * keeps the sidebar's edge. */
+html.dark {
+  --background: #171717;
+  --rowboat-raised: #262626;
+  --rowboat-wash: #2c2c2c;
+}
+html.dark .rowboat-chat-input {
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.45);
+}
+html.dark .rowboat-chat-input:focus-within {
+  border-color: rgba(77, 141, 255, 0.45);
+}
+html.dark [data-sidebar="sidebar"] {
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+}

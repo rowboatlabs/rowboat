@@ -1,5 +1,5 @@
 import { SearchMenu, SearchMenuItems } from '@/components/search-menu'
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   ArrowUp,
@@ -16,13 +16,16 @@ import {
   FolderCog,
   FolderOpen,
   ImagePlus,
+  Library,
   ListTodo,
   LoaderIcon,
   MessageCircle,
   Lock,
   Mic,
   MoreHorizontal,
+  Paperclip,
   PictureInPicture2,
+  Plug,
   Plus,
   ShieldCheck,
   Square,
@@ -63,6 +66,11 @@ import { toast } from 'sonner'
 import * as quickAskShortcut from '@x/shared/src/quick-ask-shortcut.js'
 import { useQuickAskShortcut } from '@/hooks/use-quick-ask-shortcut'
 import { isMac } from '@/lib/shortcut'
+// Loaded when first opened: the settings bring the whole app's state with them.
+const SettingsDialog = lazy(() => import('@/components/settings-dialog').then((m) => ({ default: m.SettingsDialog })))
+
+/** What « Documents » lets one pick in the composer's + menu (Baarali). */
+const DOCUMENT_TYPES = '.pdf,.doc,.docx,.odt,.rtf,.txt,.md,.xls,.xlsx,.ods,.csv,.ppt,.pptx,.odp'
 
 export type StagedAttachment = {
   id: string
@@ -321,6 +329,14 @@ function ChatInputInner({
   }, [attachments, draftKey])
   const [focusNonce, setFocusNonce] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // Baarali: the file picker filtered to what the menu item names ('' = any file).
+  const pickFiles = useCallback((accept: string) => {
+    const input = fileInputRef.current
+    if (!input) return
+    input.accept = accept
+    input.click()
+  }, [])
+  const [connectorsOpen, setConnectorsOpen] = useState(false)
   const canSubmit = (Boolean(message.trim()) || attachments.length > 0)
     && (allowSubmitWhileProcessing || !isProcessing)
 
@@ -729,6 +745,11 @@ function ChatInputInner({
           })}
         </div>
       )}
+      {connectorsOpen && (
+        <Suspense fallback={null}>
+          <SettingsDialog defaultTab="connections" open={connectorsOpen} onOpenChange={setConnectorsOpen} />
+        </Suspense>
+      )}
       <input
         ref={fileInputRef}
         type="file"
@@ -845,10 +866,29 @@ function ChatInputInner({
           </Tooltip>
           <DropdownMenuContent align="start" className="w-72 max-w-[calc(100vw-2rem)] p-2">
             <div className="rounded-[14px] border border-border/80 bg-background p-1">
-              <DropdownMenuItem onSelect={() => fileInputRef.current?.click()} className="h-9 rounded-[9px] px-2.5">
+              {/* Baarali (03/10/2026): what one can join, said plainly; then the
+                  Library's notes (the @ menu) and the connected accounts. */}
+              <DropdownMenuItem onSelect={() => pickFiles('image/*')} className="h-9 rounded-[9px] px-2.5">
                 <ImagePlus className="size-4" />
-                <span>Add files or photos</span>
+                <span>Photos and images</span>
               </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => pickFiles(DOCUMENT_TYPES)} className="h-9 rounded-[9px] px-2.5">
+                <FileText className="size-4" />
+                <span>Documents (PDF, Word, Excel…)</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => pickFiles('')} className="h-9 rounded-[9px] px-2.5">
+                <Paperclip className="size-4" />
+                <span>Any file</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => controller.textInput.setInput(`${message}${message && !message.endsWith(' ') ? ' ' : ''}@`)} className="h-9 rounded-[9px] px-2.5">
+                <Library className="size-4" />
+                <span>A note from the Library</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setConnectorsOpen(true)} className="h-9 rounded-[9px] px-2.5">
+                <Plug className="size-4" />
+                <span>Connectors</span>
+              </DropdownMenuItem>
+              <div className="my-1 h-px bg-border/60" />
 
               {/* A bound code session pins the directory — show it, no controls. */}
               {isCodeLocked ? (

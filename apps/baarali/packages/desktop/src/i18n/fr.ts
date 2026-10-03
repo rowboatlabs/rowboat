@@ -3300,7 +3300,12 @@ export const FR: Dictionary = {
     "What you save from the Workshop arrives here.": "Ce que vous enregistrez depuis l’Atelier arrive ici.",
     "Improved prompt": "Prompt amélioré",
     "Why it works": "Pourquoi ça marche",
-    "Two variants": "Deux variantes"
+    "Two variants": "Deux variantes",
+    // Menu + du composer (03/10/2026)
+    "Photos and images": "Photos et images",
+    "Documents (PDF, Word, Excel…)": "Documents (PDF, Word, Excel…)",
+    "Any file": "Un autre fichier",
+    "A note from the Library": "Une note de la Bibliothèque"
 
   },
   // Lines about people (apps/x renderer lib/spaces-membership.ts): the names

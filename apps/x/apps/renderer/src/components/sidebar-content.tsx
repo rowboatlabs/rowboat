@@ -1049,13 +1049,17 @@ export function SidebarContentPanel({
               </SidebarMenuItem>
               {showMore && (
                 <>
+              {/* Connectors moved to the composer's + menu (03/10/2026); an account
+                  that needs attention still shows here, until it is fixed. */}
+              {hasOauthError && (
               <SidebarMenuItem>
                 <SidebarMenuButton ref={connectorsButtonRef} data-tour-id="nav-connectors" onClick={() => setConnectionsSettingsOpen(true)}>
                   <Plug className="size-4 shrink-0" />
                   <span className="flex-1 truncate">Connectors</span>
-                  {hasOauthError && <AlertTriangle aria-label="A connected account needs attention" className="size-3.5 shrink-0 text-amber-500/90" />}
+                  <AlertTriangle aria-label="A connected account needs attention" className="size-3.5 shrink-0 text-amber-500/90" />
                 </SidebarMenuButton>
               </SidebarMenuItem>
+              )}
               <SidebarMenuItem>
                 <SidebarMenuButton
                   data-tour-id="nav-apps"
