@@ -59,6 +59,7 @@ export const RPC_CHANNELS = [
   'bg-task:listRunIds',
   'billing:getInfo',
   'billing:getPlans',
+  'billing:getMedia',
   'credits:getState',
   'notifications:getSettings',
   'turnLimits:getSettings',

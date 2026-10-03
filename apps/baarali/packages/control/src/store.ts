@@ -73,6 +73,15 @@ export interface MediaLedgerEntry {
  */
 export type LedgerResult = 'applied' | 'duplicate' | 'insufficient';
 
+/** A ledger entry as its owner reads it: a charge names the model it paid for (03/10/2026). */
+export interface MediaHistoryEntry {
+  at: number;
+  kind: MediaLedgerEntry['kind'];
+  credits: number;
+  /** The model of the generation a charge or a refund belongs to; null for a top-up. */
+  model: string | null;
+}
+
 /**
  * Where an account's instance lives on Fly (architecture §3.5 « Instances »).
  * `managed`: created by the control plane, which also updates its image; the
@@ -116,6 +125,8 @@ export interface ControlStore {
   mediaBalance(accountId: string): Promise<number>;
   /** Atomic: the balance check and the write happen together, so two charges never both spend the same credits. */
   applyMediaEntry(entry: MediaLedgerEntry): Promise<LedgerResult>;
+  /** The account's latest ledger entries, newest first. */
+  mediaHistory(accountId: string, limit: number): Promise<MediaHistoryEntry[]>;
   /** Lets `token` act as the account. Kept hashed only. */
   grantToken(token: string, accountId: string): Promise<void>;
   /** The account a signed-in user acts as: the one linked to them, else the one they created. */
@@ -186,6 +197,15 @@ export class MemoryStore implements ControlStore {
     if (balance + entry.credits < 0) return 'insufficient';
     this.ledger.push(entry);
     return 'applied';
+  }
+  async mediaHistory(accountId: string, limit: number): Promise<MediaHistoryEntry[]> {
+    const modelOf = (ref: string) => [...this.jobs.values()].find((j) => j.chargeRef === ref)?.model ?? null;
+    return this.ledger
+      .filter((e) => e.accountId === accountId)
+      .map((e, i) => ({ e, i }))
+      .sort((a, b) => b.e.at - a.e.at || b.i - a.i)
+      .slice(0, limit)
+      .map(({ e }) => ({ at: e.at, kind: e.kind, credits: e.credits, model: e.kind === 'topup' ? null : modelOf(e.reference) }));
   }
   async grantToken(token: string, accountId: string) {
     const account = await this.account(accountId);

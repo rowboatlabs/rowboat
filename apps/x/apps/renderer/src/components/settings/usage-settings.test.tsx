@@ -46,6 +46,22 @@ describe('UsageView', () => {
     expect(screen.queryByText('Bonus credits')).toBeNull()
   })
 
+  it('shows the media credits, what they went to and the packs', () => {
+    const media = {
+      balance: 120,
+      history: [{ at: '2026-10-03T10:12:00Z', kind: 'charge' as const, credits: -4, media: 'image', model: 'Seedream' }],
+      packs: [{ id: 'medias-5', credits: 150, prices: [{ amount: 500, currency: 'EUR' }, { amount: 3280, currency: 'XOF' }] }],
+      costs: [{ kind: 'image', name: 'Seedream', credits: 4 }],
+    }
+    render(<UsageView billing={billing()} media={media} loadedAt={Date.now()} onRefresh={() => {}} refreshing={false} />)
+    expect(screen.getByText('120')).toBeTruthy()
+    expect(screen.getByText('Image · Seedream')).toBeTruthy()
+    expect(screen.getByText('-4')).toBeTruthy()
+    expect(screen.getByText('5 €')).toBeTruthy()
+    expect(screen.getByText('Coming soon')).toBeTruthy()
+    expect(screen.getByText('4 credits')).toBeTruthy()
+  })
+
   it('refreshes on demand', () => {
     const refresh = vi.fn()
     render(<UsageView billing={billing()} loadedAt={Date.now()} onRefresh={refresh} refreshing={false} />)

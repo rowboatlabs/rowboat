@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { CalendarDays, Clock, Gift, ImageIcon, Loader2, RefreshCw } from 'lucide-react'
-import type { BillingInfo, BillingUsageBucket } from '@x/shared/dist/billing.js'
+import type { BillingInfo, BillingUsageBucket, MediaCredits } from '@x/shared/dist/billing.js'
+import { MediaCreditsPanel } from '@/components/settings/media-credits'
 import { getBillingPlanData } from '@x/shared/dist/billing.js'
 import { Button } from '@/components/ui/button'
 import { useBilling } from '@/hooks/useBilling'
@@ -63,8 +64,10 @@ function Rule({ icon: Icon, title, text }: { icon: React.ElementType; title: str
   )
 }
 
-export function UsageView({ billing, loadedAt, onRefresh, refreshing }: {
+export function UsageView({ billing, media, loadedAt, onRefresh, refreshing }: {
   billing: BillingInfo
+  /** Media credits (control /v1/media); null while unknown or when none are served. */
+  media?: MediaCredits | null
   loadedAt: number
   onRefresh: () => void
   refreshing: boolean
@@ -126,6 +129,8 @@ export function UsageView({ billing, loadedAt, onRefresh, refreshing }: {
         </button>
       </div>
 
+      {media && <div className="mt-4"><MediaCreditsPanel media={media} /></div>}
+
       <div className="mt-4 space-y-3 rounded-lg bg-muted/40 p-4">
         <h4 className="text-sm font-semibold">How the limits work</h4>
         <Rule icon={Clock} title="A session lasts 5 hours"
@@ -151,10 +156,22 @@ export function UsageSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const { billing, isLoading, refresh } = useBilling(connected === true)
   // When the numbers on screen were fetched: « Last updated » counts from it.
   const [loadedAt, setLoadedAt] = useState(() => Date.now())
+  const [media, setMedia] = useState<MediaCredits | null>(null)
   const reload = useCallback(async () => {
-    await refresh()
+    const [, nextMedia] = await Promise.all([
+      refresh(),
+      window.ipc.invoke('billing:getMedia', null).catch(() => null),
+    ])
+    setMedia(nextMedia)
     setLoadedAt(Date.now())
   }, [refresh])
+  // The media credits once the page opens; the minute refresh brings them again.
+  useEffect(() => {
+    if (!dialogOpen || connected !== true) return
+    let live = true
+    void window.ipc.invoke('billing:getMedia', null).then((next) => live && setMedia(next), () => {})
+    return () => { live = false }
+  }, [dialogOpen, connected])
   // Fresh numbers every minute while the page is open.
   useEffect(() => {
     if (!dialogOpen || connected !== true) return
@@ -175,5 +192,5 @@ export function UsageSettings({ dialogOpen }: { dialogOpen: boolean }) {
   if (!billing) {
     return <p className="py-12 text-center text-sm text-muted-foreground">Unable to load plan details</p>
   }
-  return <UsageView billing={billing} loadedAt={loadedAt} onRefresh={() => void reload()} refreshing={isLoading} />
+  return <UsageView billing={billing} media={media} loadedAt={loadedAt} onRefresh={() => void reload()} refreshing={isLoading} />
 }

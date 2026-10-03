@@ -83,6 +83,19 @@ describe.each([
     expect(await store.mediaBalance(OTHER.id)).toBe(0);
   });
 
+  it('tells its owner what the credits went to, newest first', async () => {
+    const store = await make();
+    await store.applyMediaEntry({ accountId: ME.id, at: T0, kind: 'topup', credits: 71, reference: 'pay-1' });
+    await store.saveMediaJob({ id: 'px1', accountId: ME.id, model: 'lyria', credits: 5, chargeRef: 'c1', status: 'completed', url: null, refunded: false });
+    await store.applyMediaEntry({ accountId: ME.id, at: T0 + 1000, kind: 'charge', credits: -5, reference: 'c1' });
+    await store.applyMediaEntry({ accountId: OTHER.id, at: T0 + 2000, kind: 'topup', credits: 9, reference: 'pay-2' });
+    expect(await store.mediaHistory(ME.id, 10)).toEqual([
+      { at: T0 + 1000, kind: 'charge', credits: -5, model: 'lyria' },
+      { at: T0, kind: 'topup', credits: 71, model: null },
+    ]);
+    expect(await store.mediaHistory(ME.id, 1)).toHaveLength(1);
+  });
+
   it('lets only one of two simultaneous charges spend the same credits', async () => {
     const store = await make();
     await store.applyMediaEntry({ accountId: ME.id, at: T0, kind: 'topup', credits: 50, reference: 'pay' });

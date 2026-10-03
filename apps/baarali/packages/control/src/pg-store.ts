@@ -8,6 +8,7 @@ import {
   type InstanceRecord,
   type LedgerResult,
   type MediaJob,
+  type MediaHistoryEntry,
   type MediaLedgerEntry,
   type Plan,
   type UsageRecord,
@@ -166,6 +167,19 @@ export class PgStore implements ControlStore {
 
   async mediaBalance(accountId: string) {
     return balanceOf(this.db, accountId);
+  }
+
+  async mediaHistory(accountId: string, limit: number): Promise<MediaHistoryEntry[]> {
+    const { rows } = await this.db.query<{ at: Date | string; kind: MediaHistoryEntry['kind']; credits: number; model: string | null }>(
+      `SELECT l.at, l.kind, l.credits, j.model
+         FROM baarali.media_ledger l
+         LEFT JOIN baarali.media_jobs j ON l.kind <> 'topup' AND j.charge_ref = l.reference
+        WHERE l.account_id = $1
+        ORDER BY l.at DESC, l.id DESC
+        LIMIT $2`,
+      [accountId, limit],
+    );
+    return rows.map((r) => ({ at: new Date(r.at).getTime(), kind: r.kind, credits: num(r.credits), model: r.model ?? null }));
   }
 
   async accountForUser(userId: string) {

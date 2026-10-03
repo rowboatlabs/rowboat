@@ -151,7 +151,7 @@ import { invalidateKnowledgeIndex } from '@x/core/dist/knowledge/knowledge_index
 import { versionHistory, voice } from '@x/core';
 import { classifySchedule, processRowboatInstruction } from '@x/core/dist/knowledge/inline_tasks.js';
 import { editSlide, generateDeckOutline, generateSlide } from '@x/core/dist/knowledge/deck_outline.js';
-import { getBillingInfo, getPlanOffers } from '@x/core/dist/billing/billing.js';
+import { getBillingInfo, getMediaCredits, getPlanOffers } from '@x/core/dist/billing/billing.js';
 import { claimReferralCode, getCreditsState, maybeActivateCredit, subscribeCreditActivations } from '@x/core/dist/billing/credits.js';
 import { summarizeMeeting } from '@x/core/dist/knowledge/summarize_meeting.js';
 import { getAccessToken } from '@x/core/dist/auth/tokens.js';
@@ -3183,6 +3183,9 @@ export function setupIpcHandlers() {
     },
     'billing:getPlans': async (_event, args) => {
       return await getPlanOffers(args.lang);
+    },
+    'billing:getMedia': async () => {
+      return await getMediaCredits();
     },
     // First-time-action credit rewards
     'credits:getState': async () => {

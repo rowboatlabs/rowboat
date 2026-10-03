@@ -12,7 +12,7 @@ import { html } from './html.js';
 import { LEGAL_PATHS, legalPage, type LegalDoc } from './legal-page.js';
 import { GATEWAY_PATH, type Gateway } from './gateway.js';
 import { InstanceUnavailable, type Instances } from './instances.js';
-import { createGeneration, getGeneration, listMediaModels, mediaBalance } from './media-route.js';
+import { createGeneration, getGeneration, listMediaModels, mediaBalance, mediaHistory } from './media-route.js';
 import { advance, budgetsForWeek, gauges, initialState } from './quota.js';
 import { hashToken, type Account } from './store.js';
 
@@ -160,6 +160,7 @@ export function createApp(deps: ControlDeps) {
 
   app.get('/v1/media/models', (c) => listMediaModels(deps, c.get('account')));
   app.get('/v1/media/balance', (c) => mediaBalance(deps, c.get('account')));
+  app.get('/v1/media/history', (c) => mediaHistory(deps, c.get('account')));
   app.get('/v1/media/packs', (c) => c.json({ data: deps.mediaPacks }));
   app.post('/v1/media/generations', (c) => createGeneration(deps, c.get('account'), c.req.raw));
   app.get('/v1/media/generations/:id', (c) => getGeneration(deps, c.get('account'), c.req.param('id')));

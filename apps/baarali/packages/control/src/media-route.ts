@@ -50,6 +50,21 @@ export async function mediaBalance(deps: MediaDeps, account: Account): Promise<R
   return Response.json({ credits: await deps.store.mediaBalance(account.id) });
 }
 
+/** What the credits went to (03/10/2026): the latest entries, each with the kind of media it paid for. */
+export async function mediaHistory(deps: MediaDeps, account: Account): Promise<Response> {
+  const entries = await deps.store.mediaHistory(account.id, 50);
+  const kindOf = (model: string | null) => MEDIA_MODELS.find((m) => m.id === model);
+  return Response.json({
+    data: entries.map((e) => ({
+      at: new Date(e.at).toISOString(),
+      kind: e.kind,
+      credits: e.credits,
+      media: kindOf(e.model)?.kind ?? null,
+      model: kindOf(e.model)?.displayName ?? null,
+    })),
+  });
+}
+
 export async function createGeneration(deps: MediaDeps, account: Account, req: Request): Promise<Response> {
   if (!deps.pixazoKey) return error(503, 'media_unavailable', 'Media generation is not configured');
 

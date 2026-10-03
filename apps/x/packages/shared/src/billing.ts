@@ -108,3 +108,32 @@ export const PlanOffersSchema = z.object({
   plans: z.array(PlanOfferSchema),
 });
 export type PlanOffers = z.infer<typeof PlanOffersSchema>;
+
+// Media credits as the usage page shows them (Baarali, 03/10/2026): the
+// balance, what it went to, the packs on sale and what each model costs,
+// from the control plane's /v1/media routes. Null when it serves none.
+export const MediaHistoryEntrySchema = z.object({
+  at: z.string(),
+  kind: z.enum(['topup', 'charge', 'refund']),
+  credits: z.number(),
+  /** image, video, speech, music; null for a top-up. */
+  media: z.string().nullable(),
+  model: z.string().nullable(),
+});
+export type MediaHistoryEntry = z.infer<typeof MediaHistoryEntrySchema>;
+
+export const MediaPackSchema = z.object({
+  id: z.string(),
+  credits: z.number(),
+  /** In minor units: cents for EUR, francs for XOF. */
+  prices: z.array(z.object({ amount: z.number(), currency: z.string() })),
+});
+export type MediaPack = z.infer<typeof MediaPackSchema>;
+
+export const MediaCreditsSchema = z.object({
+  balance: z.number(),
+  history: z.array(MediaHistoryEntrySchema),
+  packs: z.array(MediaPackSchema),
+  costs: z.array(z.object({ kind: z.string(), name: z.string(), credits: z.number() })),
+});
+export type MediaCredits = z.infer<typeof MediaCreditsSchema>;

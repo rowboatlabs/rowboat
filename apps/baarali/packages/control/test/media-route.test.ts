@@ -120,6 +120,14 @@ describe('/v1/media', () => {
     expect((await (await call('/v1/media/packs')).json()).data[0]).toMatchObject({ id: 'medias-5', credits: 203 });
   });
 
+  it('tells what the credits went to, with the kind of media', async () => {
+    const { generate, call } = setup(() => json({ request_id: 'job1' }));
+    await generate({ model: 'veo-fast', prompt: 'Un marché', duration: 4 });
+    const { data } = await (await call('/v1/media/history')).json();
+    expect(data[0]).toMatchObject({ kind: 'charge', credits: -40, media: 'video', model: 'Veo 3.1 Fast' });
+    expect(data[1]).toMatchObject({ kind: 'topup', credits: 1000, media: null, model: null });
+  });
+
   it('lists the models with their kind and durations', async () => {
     const { call } = setup(() => json({}));
     const { data } = await (await call('/v1/media/models')).json();

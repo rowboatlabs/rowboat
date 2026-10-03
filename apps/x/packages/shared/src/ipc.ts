@@ -27,7 +27,7 @@ import { AutoRouteDecision, AutoRouteRequest } from './auto-route.js';
 import { FindRequest, FindResult } from './find.js';
 import { AppSummarySchema, RegistryRecordSchema, RowboatAppManifestSchema } from './rowboat-app.js';
 import { BrowserStateSchema, DisplayMediaRequestSchema, HttpAuthRequestSchema } from './browser-control.js';
-import { BillingInfoSchema, PlanOffersSchema } from './billing.js';
+import { BillingInfoSchema, MediaCreditsSchema, PlanOffersSchema } from './billing.js';
 import { CreditActivatedEventSchema, CreditsStateSchema, ReferralClaimResultSchema } from './credits.js';
 import { GmailThreadSchema } from './blocks.js';
 import { PermissionDecision, ApprovalPolicy, CodingAgent, type CodeRunFeedEvent } from './code-mode.js';
@@ -3692,6 +3692,11 @@ export const ipcSchemas = {
   'billing:getPlans': {
     req: z.object({ lang: z.enum(['fr', 'en']) }),
     res: PlanOffersSchema.nullable(),
+  },
+  // Media credits: balance, history, packs, costs (Baarali, 03/10/2026).
+  'billing:getMedia': {
+    req: z.null(),
+    res: MediaCreditsSchema.nullable(),
   },
   // First-time-action credit rewards (see shared/src/credits.ts)
   'credits:getState': {

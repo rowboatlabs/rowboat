@@ -3255,7 +3255,27 @@ export const FR: Dictionary = {
     "Pick one: Baarali fills in the task, you adjust it, then create it.": "Choisissez-en une : Baarali remplit la tâche, vous l’ajustez, puis vous la créez.",
     "Your list. Write @baarali before a line to hand it to the assistant.": "Votre liste. Écrivez @baarali devant une ligne pour la confier à Baarali.",
     // Anneau d’utilisation (03/10/2026)
-    "Plan usage limits": "Limites d’utilisation du forfait"
+    "Plan usage limits": "Limites d’utilisation du forfait",
+    // Crédits médias (03/10/2026)
+    "Media credits": "Crédits médias",
+    "For images, videos and voices. They do not expire and do not touch your session or your week.": "Pour les images, les vidéos et les voix. Ils ne périment pas et ne touchent ni à votre session ni à votre semaine.",
+    "No media credits used yet.": "Aucun crédit média utilisé pour l’instant.",
+    "Show all history": "Tout l’historique",
+    "Top up": "Recharger",
+    "Pay with": "Payer avec",
+    "Card": "Carte",
+    "Payment is not open yet. Until then, credits are added by hand.": "Le paiement n’est pas encore ouvert. En attendant, les crédits sont ajoutés à la main.",
+    "Coming soon": "Bientôt",
+    "What each thing costs": "Ce que coûte chaque chose",
+    "Messages, summaries, emails, scheduled tasks": "Messages, résumés, e-mails, tâches planifiées",
+    "Count in the session and the week": "Comptent dans la session et la semaine",
+    "Music": "Musique",
+    "Top-up": "Recharge",
+    "Refund": "Remboursement",
+    "Generation": "Génération",
+    "credits": "crédits",
+    "Orange Money": "Orange Money",
+    "Moov Money": "Moov Money"
 
   },
   // Lines about people (apps/x renderer lib/spaces-membership.ts): the names
@@ -3676,7 +3696,9 @@ export const FR: Dictionary = {
     "Yesterday $1": "Hier $1",
     "Last reply $1": "Dernière réponse $1",
     "$1 GMT": "$1 GMT",
-    "Plan usage limits · $1": "Limites du forfait · $1"
+    "Plan usage limits · $1": "Limites du forfait · $1",
+    "$1 to $2 credits": "$1 à $2 crédits",
+    "$1 F CFA": "$1 F CFA"
 
   },
 };
