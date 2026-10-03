@@ -12,6 +12,7 @@ import {
   type CreateInviteResult,
   type AgentKey,
   type AgentCredential,
+  type AgentHook,
   type AgentKeySecret,
   type AgentListing,
   type ConnectorCapabilities,
@@ -159,7 +160,7 @@ export class SpacesClient {
   }
 
   private async request<S extends z.ZodType>(
-    method: 'GET' | 'POST' | 'PUT',
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
     path: string,
     responseSchema: S,
     body?: unknown,
@@ -265,6 +266,15 @@ export class SpacesClient {
   /** Replace a platform agent's credential (owner only); Harbor checks it with the platform first. */
   async setAgentCredential(agentId: string, secret: string): Promise<AgentCredential> {
     return (await this.request('PUT', `/v1/agents/${encodeURIComponent(agentId)}/credential`, routes.setAgentCredential.response, { secret })).credential;
+  }
+
+  /** Point a platform agent's alerts at a space; the address is returned this once (api.ts setAgentHook). */
+  async setAgentHook(agentId: string, spaceId: string): Promise<{ hook: AgentHook; url: string }> {
+    return this.request('PUT', `/v1/agents/${encodeURIComponent(agentId)}/hook`, routes.setAgentHook.response, { spaceId });
+  }
+
+  async clearAgentHook(agentId: string): Promise<void> {
+    await this.request('DELETE', `/v1/agents/${encodeURIComponent(agentId)}/hook`, routes.clearAgentHook.response);
   }
 
   async createAgentKey(agentId: string): Promise<AgentKeySecret> {

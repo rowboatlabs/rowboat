@@ -68,6 +68,7 @@ export async function buildOrgRuntime(input: OrgRuntimeInput): Promise<OrgRuntim
     verify: (connection, secret) => connectors.verify(connection, secret),
     save: (agentId, secret, setBy) => connectors.save(agentId, secret, setBy),
     added: (agent) => connectors.ensure(agent),
+    alert: (connection, payload) => connectors.alert(connection, payload),
   });
   await connectors.startAll();
   const auth = bindAuth(input.auth, store);

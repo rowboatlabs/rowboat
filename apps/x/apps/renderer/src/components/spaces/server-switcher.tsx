@@ -53,7 +53,7 @@ export function ServerSwitcher({ org, onOpenSpace, onMenuOpenChange }: {
                     setMenuOpen(false)
                     setAgentsOpen(true)
                     onMenuOpenChange?.(true)
-                }}><Bot className="size-4" /> Agents</DropdownMenuItem>
+                }}><Bot className="size-4" /> Agents and bots</DropdownMenuItem>
                 <DropdownMenuSeparator />
                 {/* The dialogs are hosted once in App (lib/server-dialog.ts); a finished one lands in the new server itself. */}
                 <DropdownMenuItem onSelect={() => openServerDialog({ kind: 'create' })}><Plus className="size-4" /> Create a server</DropdownMenuItem>
