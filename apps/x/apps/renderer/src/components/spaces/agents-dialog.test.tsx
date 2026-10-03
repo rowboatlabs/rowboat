@@ -77,7 +77,7 @@ describe('AgentsDialog', () => {
         render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
         await screen.findByText('Hermes')
         fireEvent.click(screen.getByRole('button', { name: /Add agent/ }))
-        expect(setupsOffered()).toEqual(['Hermes', 'Replicas', 'PostHog', 'Cal.com', 'Custom'])
+        expect(setupsOffered()).toEqual(['Hermes', 'Replicas', 'Custom'])
         expect(screen.getByRole('radio', { name: 'Hermes' })).toHaveAttribute('aria-checked', 'true')
         // The name suggests the kind's own.
         expect(screen.getByLabelText('Agent name')).toHaveValue('Hermes')
@@ -256,28 +256,35 @@ describe('AgentsDialog', () => {
         await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:setAgentCredential', { orgId: 'org-1', agentId: 'claude', secret: 'rpl_live_cd34' }))
     })
 
-    it('adds a Cal.com agent on its key, and says how to use it', async () => {
+    it('adds a Cal.com bot on its key, under Add bot, and says how to use it', async () => {
         render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
         await screen.findByText('Hermes')
-        fireEvent.click(screen.getByRole('button', { name: /Add agent/ }))
+        fireEvent.click(screen.getByRole('button', { name: /Add bot/ }))
+        expect(screen.getByRole('heading', { name: 'Add a bot' })).toBeInTheDocument()
+        expect(within(screen.getByRole('radiogroup', { name: 'Which service' })).getAllByRole('radio').map((r) => r.getAttribute('aria-label'))).toEqual(['PostHog', 'Cal.com'])
         fireEvent.click(screen.getByRole('radio', { name: 'Cal.com' }))
-        expect(screen.getByLabelText('Agent name')).toHaveValue('Cal')
+        expect(screen.getByLabelText('Bot name')).toHaveValue('Cal')
         fireEvent.change(screen.getByLabelText('Cal.com API key'), { target: { value: 'cal_live_ab12' } })
-        fireEvent.click(screen.getByRole('button', { name: 'Add agent' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Add bot' }))
         await screen.findByRole('heading', { name: 'Connect Cal' })
         expect(invoke).toHaveBeenCalledWith('spaces:addAgent', { orgId: 'org-1', displayName: 'Cal', kind: 'cal', connection: 'cal', credential: 'cal_live_ab12' })
         expect(screen.getByText(/such as @Cal today/)).toBeInTheDocument()
     })
 
-    it('lets the owner send an integration’s alerts to a space, shows the address once, and turns them off', async () => {
+    it('lets the owner send a bot’s alerts to a space, shows the address once, and turns them off', async () => {
         const withSpaces = { ...org, spaces: [{ id: 'S1', name: 'growth' }] } as unknown as OrgWithSpaces
-        listing = [{ agent: cal, keys: [key('k5', 'cal')], credential: { hint: '…ab12', setBy: 'me', setAt: '2026-10-03T09:00:00Z' } }]
+        listing = [
+            { agent: hermes, keys: [key('k1', 'hermes')] },
+            { agent: cal, keys: [key('k5', 'cal')], credential: { hint: '…ab12', setBy: 'me', setAt: '2026-10-03T09:00:00Z' } },
+        ]
         render(<AgentsDialog org={withSpaces} open onOpenChange={vi.fn()} />)
         await screen.findByText('Cal')
-        expect(screen.getByText(/^Cal\.com · Yours · 1 key/)).toBeInTheDocument()
+        // Bots are listed apart from agents, and labelled as bots.
+        expect(within(screen.getByRole('region', { name: 'Agents' })).getByText('Hermes')).toBeInTheDocument()
+        expect(within(screen.getByRole('region', { name: 'Bots' })).getByText('Cal.com bot · Yours · 1 key')).toBeInTheDocument()
         fireEvent.click(screen.getByRole('button', { name: /Cal/ }))
         fireEvent.change(await screen.findByLabelText('Space for alerts'), { target: { value: 'S1' } })
-        listing = [{ ...listing[0]!, hook: { spaceId: 'S1', setBy: 'me', setAt: '2026-10-03T10:00:00Z' } }]
+        listing = [listing[0]!, { ...listing[1]!, hook: { spaceId: 'S1', setBy: 'me', setAt: '2026-10-03T10:00:00Z' } }]
         fireEvent.click(screen.getByRole('button', { name: 'Get address' }))
         await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:setAgentHook', { orgId: 'org-1', agentId: 'cal', spaceId: 'S1' }))
         fireEvent.click(await screen.findByRole('button', { name: `Copy URL` }))

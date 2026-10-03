@@ -9,7 +9,7 @@ import { AgentLogo, ConnectAgent } from '@/components/spaces/agent-setup'
 import { MemberAvatar } from '@/components/spaces/atoms'
 import { refreshOrgRoster, useOrgRoster } from '@/hooks/use-space-members'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
-import { AGENT_SETUPS, agentLabel, agentSetup, kindInfo, setupFor, type AgentSetup } from '@/lib/agent-kinds'
+import { AGENT_SETUPS, agentLabel, agentSetup, isBot, kindInfo, setupFor, type AgentSetup } from '@/lib/agent-kinds'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 
@@ -25,10 +25,14 @@ import { cn } from '@/lib/utils'
 // Custom); connecting it with its new key, by the steps its setup gives; and
 // its page (agent-page.tsx): its option defaults, its setup steps any time
 // after, its keys, and a platform agent's key (Replicas) with Replace.
+//
+// Bots (2026-10-03, Arjun): PostHog and Cal.com run a service's commands, as
+// Slack bots do, so the list shows them apart and Add bot offers them; Add
+// agent offers the rest. To Harbor both are agent members.
 
 type Screen =
     | { name: 'list' }
-    | { name: 'add' }
+    | { name: 'add'; bot: boolean }
     | { name: 'connect'; agentId: string; agentName: string; secret: string; setupId: string; kind: string }
     | { name: 'agent'; agentId: string }
 
@@ -131,8 +135,10 @@ export function AgentsDialog({ org, open, onOpenChange }: {
     const [nameEdited, setNameEdited] = useState(false)
     const [credential, setCredential] = useState('')
     const [addError, setAddError] = useState<string | null>(null)
-    // Until the person picks, the first way to connect, and its first kind.
-    const setup = AGENT_SETUPS.find((k) => k.id === chosen) ?? AGENT_SETUPS[0]!
+    // Add bot offers the bots, Add agent the rest; until the person picks, the first, and its first kind.
+    const addingBot = screen.name === 'add' && screen.bot
+    const offered = AGENT_SETUPS.filter((k) => (k.bot === true) === addingBot)
+    const setup = offered.find((k) => k.id === chosen) ?? offered[0]!
     const kind = chosenKind && setup.kinds.includes(chosenKind) ? chosenKind : setup.kinds[0]!
     // The name suggests the setup's own, or the kind's, until the person types one.
     const shownName = nameEdited ? name : setup.defaultName || kindInfo(kind).label
@@ -154,14 +160,14 @@ export function AgentsDialog({ org, open, onOpenChange }: {
         void load()
     }, [open, load])
 
-    const startAdding = () => {
+    const startAdding = (bot: boolean) => {
         setChosen(null)
         setChosenKind(null)
         setName('')
         setNameEdited(false)
         setCredential('')
         setAddError(null)
-        setScreen({ name: 'add' })
+        setScreen({ name: 'add', bot })
     }
 
     // A refused platform key shows under its field, not as a toast: nothing was created.
@@ -183,7 +189,7 @@ export function AgentsDialog({ org, open, onOpenChange }: {
             await load()
             setScreen({ name: 'connect', agentId: agent.id, agentName: agent.displayName, secret: key.secret, setupId: setup.id, kind })
         } catch (err) {
-            setAddError(err instanceof Error ? err.message : 'Could not add the agent')
+            setAddError(err instanceof Error ? err.message : `Could not add the ${addingBot ? 'bot' : 'agent'}`)
         } finally {
             setBusy(false)
         }
@@ -195,50 +201,65 @@ export function AgentsDialog({ org, open, onOpenChange }: {
             <DialogContent className={cn('grid-cols-[minmax(0,1fr)] gap-0 overflow-hidden p-0', screen.name === 'connect' || screen.name === 'agent' ? 'sm:max-w-2xl' : 'sm:max-w-xl')}>
                 {screen.name === 'list' && (
                     <>
-                        <Header title={`Agents in ${org.name}`} description="Agents are members with their own key. Add one, connect what runs it, then add it to spaces." />
+                        <Header
+                            title={`Agents and bots in ${org.name}`}
+                            description="Agents work things out for themselves; bots run a service's commands. Each is a member with its own key: add one, connect it, then add it to spaces."
+                        />
                         <Body>
                             {agents === null ? (
                                 <div className="flex items-center gap-2 py-6 text-xs text-muted-foreground"><Loader2 className="size-3.5 animate-spin" /> Loading agents…</div>
                             ) : agents.length === 0 ? (
                                 <div className="flex flex-col items-center gap-2 py-8 text-center">
                                     <Bot className="size-6 text-muted-foreground" />
-                                    <div className="text-sm font-medium">{isAdmin ? 'No agents in this server yet' : 'You have no agents yet'}</div>
-                                    <div className="max-w-xs text-xs text-muted-foreground">Add one to connect Hermes, a coding agent in Replicas, or anything that speaks the agent contract.</div>
+                                    <div className="text-sm font-medium">{isAdmin ? 'No agents or bots in this server yet' : 'You have no agents or bots yet'}</div>
+                                    <div className="max-w-xs text-xs text-muted-foreground">Add an agent to connect Hermes, a coding agent in Replicas, or anything that speaks the agent contract, or a bot for PostHog or Cal.com.</div>
                                 </div>
                             ) : (
-                                <ul className="-mx-2 flex flex-col">
-                                    {agents.map(({ agent, keys, credential }) => {
-                                        const mine = agent.ownerId === org.memberId
-                                        const live = keys.filter((k) => !k.revokedAt)
-                                        return (
-                                            <li key={agent.id}>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setScreen({ name: 'agent', agentId: agent.id })}
-                                                    className="flex w-full items-center gap-3 rounded-lg px-2 py-2.5 text-left hover:bg-accent"
-                                                >
-                                                    <MemberAvatar id={agent.id} name={agent.displayName} size="md" agent agentKind={agent.agentKind} />
-                                                    <div className="min-w-0 flex-1">
-                                                        <div className="truncate text-sm font-medium">{agent.displayName}</div>
-                                                        <div className="truncate text-[11px] text-muted-foreground">
-                                                            {agentLabel(agent.agentKind, agent.agentConnection)}
-                                                            {' · '}
-                                                            {agent.ownerId ? (mine ? 'Yours' : `Owned by ${names.get(agent.ownerId) ?? 'another member'}`) : 'Managed by admins'}
-                                                            {' · '}
-                                                            {live.length === 0 ? 'no active keys' : live.length === 1 ? '1 key' : `${live.length} keys`}
-                                                            {credential?.rejectedAt && <span className="text-destructive">{' · '}Key rejected</span>}
-                                                        </div>
-                                                    </div>
-                                                    <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
-                                                </button>
-                                            </li>
-                                        )
-                                    })}
-                                </ul>
+                                <div className="flex flex-col gap-3">
+                                    {([['Agents', agents.filter((a) => !isBot(a.agent.agentKind))], ['Bots', agents.filter((a) => isBot(a.agent.agentKind))]] as const).map(([heading, group]) =>
+                                        group.length === 0 ? null : (
+                                            <section key={heading} aria-label={heading}>
+                                                <h3 className="mb-1 text-[11px] font-medium text-muted-foreground">{heading}</h3>
+                                                <ul className="-mx-2 flex flex-col">
+                                                    {group.map(({ agent, keys, credential }) => {
+                                                        const mine = agent.ownerId === org.memberId
+                                                        const live = keys.filter((k) => !k.revokedAt)
+                                                        return (
+                                                            <li key={agent.id}>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setScreen({ name: 'agent', agentId: agent.id })}
+                                                                    className="flex w-full items-center gap-3 rounded-lg px-2 py-2.5 text-left hover:bg-accent"
+                                                                >
+                                                                    <MemberAvatar id={agent.id} name={agent.displayName} size="md" agent agentKind={agent.agentKind} />
+                                                                    <div className="min-w-0 flex-1">
+                                                                        <div className="truncate text-sm font-medium">{agent.displayName}</div>
+                                                                        <div className="truncate text-[11px] text-muted-foreground">
+                                                                            {agentLabel(agent.agentKind, agent.agentConnection)}
+                                                                            {' · '}
+                                                                            {agent.ownerId ? (mine ? 'Yours' : `Owned by ${names.get(agent.ownerId) ?? 'another member'}`) : 'Managed by admins'}
+                                                                            {' · '}
+                                                                            {live.length === 0 ? 'no active keys' : live.length === 1 ? '1 key' : `${live.length} keys`}
+                                                                            {credential?.rejectedAt && <span className="text-destructive">{' · '}Key rejected</span>}
+                                                                        </div>
+                                                                    </div>
+                                                                    <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                                                                </button>
+                                                            </li>
+                                                        )
+                                                    })}
+                                                </ul>
+                                            </section>
+                                        ),
+                                    )}
+                                </div>
                             )}
                         </Body>
                         <Footer>
-                            <Button size="sm" onClick={startAdding}>
+                            <Button size="sm" variant="outline" onClick={() => startAdding(true)}>
+                                <Plus className="size-3.5" /> Add bot
+                            </Button>
+                            <Button size="sm" onClick={() => startAdding(false)}>
                                 <Plus className="size-3.5" /> Add agent
                             </Button>
                         </Footer>
@@ -253,10 +274,14 @@ export function AgentsDialog({ org, open, onOpenChange }: {
                             if (ready) void add()
                         }}
                     >
-                        <Header title="Add an agent" description="Choose what runs it. The steps to connect it come next." onBack={() => setScreen({ name: 'list' })} />
+                        <Header
+                            title={addingBot ? 'Add a bot' : 'Add an agent'}
+                            description={addingBot ? 'Choose the service. It answers commands with your key for it.' : 'Choose what runs it. The steps to connect it come next.'}
+                            onBack={() => setScreen({ name: 'list' })}
+                        />
                         <Body>
-                            <div role="radiogroup" aria-label="How it connects" className="grid grid-cols-2 gap-2">
-                                {AGENT_SETUPS.map((k) => (
+                            <div role="radiogroup" aria-label={addingBot ? 'Which service' : 'How it connects'} className="grid grid-cols-2 gap-2">
+                                {offered.map((k) => (
                                     <SetupTile
                                         key={k.id}
                                         setup={k}
@@ -278,7 +303,7 @@ export function AgentsDialog({ org, open, onOpenChange }: {
                                         setName(e.target.value)
                                     }}
                                     placeholder="e.g. Scout"
-                                    aria-label="Agent name"
+                                    aria-label={addingBot ? 'Bot name' : 'Agent name'}
                                     className="h-9 text-sm"
                                     maxLength={128}
                                     autoFocus
@@ -309,7 +334,7 @@ export function AgentsDialog({ org, open, onOpenChange }: {
                             <Button type="button" size="sm" variant="ghost" onClick={() => setScreen({ name: 'list' })}>Cancel</Button>
                             <Button type="submit" size="sm" disabled={!ready || busy}>
                                 {busy && <Loader2 className="size-3.5 animate-spin" />}
-                                Add agent
+                                {addingBot ? 'Add bot' : 'Add agent'}
                             </Button>
                         </Footer>
                     </form>
