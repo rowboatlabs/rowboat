@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { sessionResetText, timeLeft, weekResetText } from './usage-reset'
+import { sessionCountdown, sessionResetText, timeLeft, weekResetText } from './usage-reset'
 
 // 2 Oct 2026, 16:34 GMT — whatever the test machine's own time zone.
 const NOW = Date.parse('2026-10-02T16:34:00Z')
@@ -23,5 +23,13 @@ describe('usage reset times', () => {
   it('names the day the week renews', () => {
     expect(weekResetText('2026-10-06T01:45:00Z')).toBe('Renews mardi 6 oct. at 01:45 GMT')
     expect(weekResetText(undefined)).toBeUndefined()
+  })
+})
+
+describe('the sidebar countdown', () => {
+  it('says how long the session still runs, or that it has not started', () => {
+    expect(sessionCountdown('2026-10-02T19:42:00Z', NOW)).toBe('Resets in 3 h 08')
+    expect(sessionCountdown(undefined, NOW)).toBe('Starts with your next message')
+    expect(sessionCountdown('2026-10-02T16:00:00Z', NOW)).toBe('Starts with your next message')
   })
 })

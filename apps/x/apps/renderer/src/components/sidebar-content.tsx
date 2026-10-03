@@ -6,9 +6,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   AppWindow,
   ArrowUpRight,
-  Bot,
+  ChevronDown,
+  Clock,
+  Library,
   ChevronRight,
-  FileText,
   Folder,
   AlertTriangle,
   LayoutGrid,
@@ -38,7 +39,6 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import {
   Sidebar,
@@ -95,6 +95,7 @@ import { getBillingPlanData } from "@x/shared/dist/billing.js"
 import { ServiceEvent } from "@x/shared/src/service-events.js"
 import z from "zod"
 import { openPlans } from '@/lib/plans-window'
+import { SessionGauge } from '@/components/sidebar-session-gauge'
 
 interface TreeNode {
   path: string
@@ -500,6 +501,17 @@ export function SidebarContentPanel({
   const [emailThreads, setEmailThreads] = useState<SidebarEmailThread[]>([])
   const [meetings, setMeetings] = useState<UpcomingMeeting[]>([])
   const [chatsExpanded, setChatsExpanded] = useState(true)
+  // Baarali: « More » folds what is opened rarely (the Library); it stays
+  // open while the Library is the page shown, and remembers the choice.
+  const [moreOpen, setMoreOpen] = useState(() => {
+    try { return window.localStorage.getItem('baarali.sidebar.more') === '1' } catch { return false }
+  })
+  const showMore = moreOpen || activeNav === 'knowledge'
+  const toggleMore = () => {
+    const next = !showMore
+    setMoreOpen(next)
+    try { window.localStorage.setItem('baarali.sidebar.more', next ? '1' : '0') } catch { /* private mode */ }
+  }
   useEffect(() => {
     let cancelled = false
     const loadEmail = async () => {
@@ -834,22 +846,10 @@ export function SidebarContentPanel({
                     else onNewChat?.()
                   }}
                 >
-                  <MascotFaceIcon className="size-4 shrink-0" />
-                  <span className="flex-1 truncate">Assistant</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  data-tour-id="nav-workspaces"
-                  isActive={activeNav === 'workspaces' || activeNav === 'code'}
-                  onClick={() => knowledgeActions.openWorkspaceAt()}
-                >
-                  <Folder className="size-4 shrink-0" />
-                  <span className="flex-1 truncate">Projects</span>
-                  {hasWorkingProjectSession && (
-                    <span role="status" aria-label="Project session working" className="code-working-dot size-2 shrink-0 rounded-full bg-[var(--rowboat-git)]" />
-                  )}
-                  <UnreadBadge badge={{ unread: unreadProjectCount, forYou: unreadProjectCount }} direct />
+                  <span className="-ml-0.5 flex size-5 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
+                    <MascotFaceIcon className="size-3.5" />
+                  </span>
+                  <span className="flex-1 truncate font-medium">Chat with Baarali</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
@@ -972,51 +972,23 @@ export function SidebarContentPanel({
                 ) : null}
               </SidebarMenuItem>
               <SidebarMenuItem>
-                <SidebarMenuButton
-                  data-tour-id="nav-knowledge"
-                  isActive={activeNav === 'knowledge'}
-                  onClick={() => knowledgeActions.openKnowledgeView()}
-                  className={knowledgeUpdatedLabel ? 'h-auto items-start py-1' : undefined}
-                >
-                  <FileText className={cn('size-4 shrink-0', knowledgeUpdatedLabel && 'mt-0.5')} />
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate">Brain</span>
-                    {knowledgeUpdatedLabel && (
-                      <span className="truncate text-[11px] text-muted-foreground">{knowledgeUpdatedLabel}</span>
-                    )}
-                  </div>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
                 <SidebarMenuButton data-tour-id="nav-home" isActive={activeNav === 'home'} onClick={onOpenHome}>
                   <ListTodo className="size-4 shrink-0" />
                   <span className="flex-1 truncate">Todo</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
-            </SidebarMenu>
-
-            <div className="mx-3 my-2 border-t border-border" />
-
-            <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton
-                  data-tour-id="nav-agents"
-                  isActive={activeNav === 'agents'}
-                  onClick={onOpenBgTasks}
-                  className={bgAgentsLabel ? 'h-auto items-start py-1' : undefined}
+                  data-tour-id="nav-workspaces"
+                  isActive={activeNav === 'workspaces' || activeNav === 'code'}
+                  onClick={() => knowledgeActions.openWorkspaceAt()}
                 >
-                  <Bot className={cn('size-4 shrink-0', bgAgentsLabel && 'mt-0.5')} />
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate">Background agents</span>
-                    {bgAgentsLabel && (
-                      <span className={cn(
-                        'truncate text-[11px]',
-                        bgTaskSummaries.some((t) => t.lastRunError) ? 'text-destructive' : 'text-muted-foreground',
-                      )}>
-                        {bgAgentsLabel}
-                      </span>
-                    )}
-                  </div>
+                  <Folder className="size-4 shrink-0" />
+                  <span className="flex-1 truncate">Projects</span>
+                  {hasWorkingProjectSession && (
+                    <span role="status" aria-label="Project session working" className="code-working-dot size-2 shrink-0 rounded-full bg-[var(--rowboat-git)]" />
+                  )}
+                  <UnreadBadge badge={{ unread: unreadProjectCount, forYou: unreadProjectCount }} direct />
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
@@ -1047,6 +1019,60 @@ export function SidebarContentPanel({
                   </ContextMenu>
                 </SidebarMenuItem>
               ))}
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  data-tour-id="nav-agents"
+                  isActive={activeNav === 'agents'}
+                  onClick={onOpenBgTasks}
+                  className={bgAgentsLabel ? 'h-auto items-start py-1' : undefined}
+                >
+                  <Clock className={cn('size-4 shrink-0', bgAgentsLabel && 'mt-0.5')} />
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate">Scheduled tasks</span>
+                    {bgAgentsLabel && (
+                      <span className={cn(
+                        'truncate text-[11px]',
+                        bgTaskSummaries.some((t) => t.lastRunError) ? 'text-destructive' : 'text-muted-foreground',
+                      )}>
+                        {bgAgentsLabel}
+                      </span>
+                    )}
+                  </div>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton ref={connectorsButtonRef} data-tour-id="nav-connectors" onClick={() => setConnectionsSettingsOpen(true)}>
+                  <Plug className="size-4 shrink-0" />
+                  <span className="flex-1 truncate">Connectors</span>
+                  {hasOauthError && <AlertTriangle aria-label="A connected account needs attention" className="size-3.5 shrink-0 text-amber-500/90" />}
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton data-tour-id={showMore ? undefined : 'nav-knowledge'} onClick={() => toggleMore()} className="text-muted-foreground" aria-expanded={showMore}>
+                  <ChevronDown className={cn('size-4 shrink-0 transition-transform', showMore && 'rotate-180')} />
+                  <span className="flex-1 truncate">{showMore ? 'Less' : 'More'}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              {showMore && (
+                <>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  data-tour-id="nav-knowledge"
+                  isActive={activeNav === 'knowledge'}
+                  onClick={() => knowledgeActions.openKnowledgeView()}
+                  className={knowledgeUpdatedLabel ? 'h-auto items-start py-1' : undefined}
+                >
+                  <Library className={cn('size-4 shrink-0', knowledgeUpdatedLabel && 'mt-0.5')} />
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate">Library</span>
+                    {knowledgeUpdatedLabel && (
+                      <span className="truncate text-[11px] text-muted-foreground">{knowledgeUpdatedLabel}</span>
+                    )}
+                  </div>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+                </>
+              )}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -1258,31 +1284,7 @@ export function SidebarContentPanel({
             </div>
           )
         }
-        return (
-          <div className="px-3 py-2">
-            <div className="flex items-center justify-between rounded-lg border border-sidebar-border bg-sidebar-accent/20 px-3 py-2">
-              <div className="min-w-0">
-                <span className="text-xs font-medium capitalize text-sidebar-foreground">
-                  {currentBillingPlan?.displayName ?? (billing.subscriptionPlanId ? 'Unknown' : 'No plan')}
-                </span>
-                {billing.subscriptionStatus === 'trialing' && billing.trialExpiresAt && (() => {
-                  const days = Math.max(0, Math.ceil((new Date(billing.trialExpiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
-                  return (
-                    <p className="text-[10px] text-sidebar-foreground/60">
-                      {days === 0 ? 'Trial expires today' : days === 1 ? '1 day left' : `${days} days left`}
-                    </p>
-                  )
-                })()}
-              </div>
-              <button
-                onClick={() => openPlans()}
-                className="shrink-0 rounded-md bg-sidebar-foreground/10 px-2.5 py-1 text-[11px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-foreground/20"
-              >
-                {upgradeLabel}
-              </button>
-            </div>
-          </div>
-        )
+        return <SessionGauge billing={billing} upgradeLabel={upgradeLabel} />
       })() : null}
       {/* Sign in CTA */}
       {!isRowboatConnected && (
@@ -1296,87 +1298,72 @@ export function SidebarContentPanel({
           </button>
         </div>
       )}
-      {/* Bottom actions */}
+      {/* Bottom: who is signed in, the tour and the settings (Baarali, 02/10/2026). */}
       <div className="border-t border-border px-2 py-2">
-        <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-2">
-            <button
-              ref={connectorsButtonRef}
-              onClick={() => setConnectionsSettingsOpen(true)}
-              className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
-            >
-              <Plug className="size-4" />
-              <span>Connect Accounts</span>
-            </button>
-            {hasOauthError && (
-              <AlertDialog
-                open={showOauthAlert}
-                onOpenChange={setShowOauthAlert}
-              >
-                <AlertDialogTrigger asChild>
-                  <button
-                    type="button"
-                    className="inline-flex items-center"
-                    aria-label="OAuth connection issues"
-                  >
-                    <AlertTriangle className="size-3 text-amber-500/90 animate-pulse" />
-                  </button>
-                </AlertDialogTrigger>
-                <AlertDialogContent
-                  onCloseAutoFocus={(event) => {
-                    event.preventDefault()
-                    if (openConnectionsAfterClose) {
-                      setOpenConnectionsAfterClose(false)
-                      setConnectionsSettingsOpen(true)
-                    }
-                    connectorsButtonRef.current?.focus()
-                  }}
-                >
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Reconnect your accounts</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      One or more connected accounts need attention. Open Connected accounts
-                      to review the status and reconnect if needed.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel
-                      onClick={() => {
-                        setOpenConnectionsAfterClose(false)
-                        setShowOauthAlert(false)
-                      }}
-                    >
-                      Dismiss
-                    </AlertDialogCancel>
-                    <AlertDialogAction
-                      onClick={() => {
-                        setOpenConnectionsAfterClose(true)
-                        setShowOauthAlert(false)
-                      }}
-                    >
-                      View connected accounts
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            )}
+        <div className="flex items-center gap-2 px-1">
+          <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary text-[11px] font-bold uppercase text-primary-foreground">
+            {(billing?.userEmail ?? '?').slice(0, 2)}
+          </span>
+          <div className="min-w-0 flex-1 leading-tight">
+            <div className="truncate text-xs font-medium text-sidebar-foreground">{billing?.userEmail ?? ''}</div>
+            {currentBillingPlan?.displayName && <div className="truncate text-[11px] text-muted-foreground">{currentBillingPlan.displayName}</div>}
           </div>
           {onStartTour && (
-            <button
-              onClick={onStartTour}
-              className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
-            >
+            <button type="button" onClick={onStartTour} aria-label="Take a tour" title="Take a tour"
+              className="flex size-7 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground">
               <MascotFaceIcon className="size-4" />
-              <span>Take a tour</span>
             </button>
           )}
           <SettingsDialog>
-            <button className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors">
+            <button type="button" aria-label="Settings" title="Settings"
+              className="flex size-7 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground">
               <Settings className="size-4" />
-              <span>Settings</span>
             </button>
           </SettingsDialog>
         </div>
+        {hasOauthError && (
+          <AlertDialog
+            open={showOauthAlert}
+            onOpenChange={setShowOauthAlert}
+          >
+            <AlertDialogContent
+              onCloseAutoFocus={(event) => {
+                event.preventDefault()
+                if (openConnectionsAfterClose) {
+                  setOpenConnectionsAfterClose(false)
+                  setConnectionsSettingsOpen(true)
+                }
+                connectorsButtonRef.current?.focus()
+              }}
+            >
+              <AlertDialogHeader>
+                <AlertDialogTitle>Reconnect your accounts</AlertDialogTitle>
+                <AlertDialogDescription>
+                  One or more connected accounts need attention. Open Connected accounts
+                  to review the status and reconnect if needed.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel
+                  onClick={() => {
+                    setOpenConnectionsAfterClose(false)
+                    setShowOauthAlert(false)
+                  }}
+                >
+                  Dismiss
+                </AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => {
+                    setOpenConnectionsAfterClose(true)
+                    setShowOauthAlert(false)
+                  }}
+                >
+                  View connected accounts
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        )}
       </div>
       <SettingsDialog
         defaultTab="connections"

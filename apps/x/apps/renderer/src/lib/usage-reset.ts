@@ -28,3 +28,10 @@ export function weekResetText(resetsAt: string | undefined): string | undefined 
   if (!Number.isFinite(end)) return undefined
   return `Renews ${day.format(end)} at ${clock.format(end)} GMT`
 }
+
+/** The sidebar's short line: "Resets in 3 h 08", or not open yet. */
+export function sessionCountdown(resetsAt: string | undefined, now: number = Date.now()): string {
+  const end = resetsAt ? Date.parse(resetsAt) : NaN
+  if (!Number.isFinite(end) || end <= now) return 'Starts with your next message'
+  return `Resets in ${timeLeft(end - now)}`
+}

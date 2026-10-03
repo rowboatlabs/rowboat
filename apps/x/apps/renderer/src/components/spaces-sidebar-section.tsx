@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Bell, ChevronRight, CornerDownRight, Hash, MessagesSquare, Pencil, Plus } from 'lucide-react'
+import { Bell, ChevronRight, CornerDownRight, Hash, Pencil, Plus, Users } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { SidebarGroup, SidebarGroupContent, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar'
 import {
@@ -45,8 +45,8 @@ export function SpacesSidebarSection({ active, activeSpace, onOpenSpace }: {
     return <SidebarGroup className="pt-0">
         <SidebarGroupContent>
             <div data-tour-id="nav-spaces" className="flex h-8 items-center gap-2.5 px-2.5">
-                <MessagesSquare className="size-4 shrink-0 text-muted-foreground" />
-                <h2 className="flex-1 text-sm font-medium text-muted-foreground">Spaces</h2>
+                <Users className="size-4 shrink-0 text-sidebar-foreground" />
+                <h2 className="flex-1 text-sm text-sidebar-foreground">Spaces</h2>
                 <button type="button" aria-label="Add server" title="Add server"
                     className="flex size-5 shrink-0 items-center justify-center text-muted-foreground transition-colors hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
                     onClick={() => setAddingServer(true)}>

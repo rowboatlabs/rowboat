@@ -8,8 +8,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Bell,
   AppWindow,
   ArrowUpRight,
-  Bot,
-  FileText,
+  Clock,
+  Library,
   FilePlus,
   Folder,
   History,
@@ -30,6 +30,7 @@ import { Bell,
   Square,
   SquarePen,
   Trash2,
+  Users,
   Video,
   type LucideIcon,
 } from "lucide-react"
@@ -932,7 +933,7 @@ export function DockSidebar({
       ...(onOpenRun || onNewChat ? [
         {
           item: {
-            key: 'assistant', label: 'Assistant', icon: MascotFaceIcon as unknown as LucideIcon,
+            key: 'assistant', label: 'Chat with Baarali', icon: MascotFaceIcon as unknown as LucideIcon,
             status: 'Rowboat assistant',
             running: activeNav === 'assistant',
             onClick: () => {
@@ -944,16 +945,9 @@ export function DockSidebar({
           },
         },
       ] : []),
-      {
-        item: {
-          key: 'workspaces', label: 'Projects', icon: Folder, tourId: 'nav-workspaces',
-          running: activeNav === 'workspaces' || activeNav === 'code',
-          onClick: () => { closeFlyouts(); knowledgeActions.openWorkspaceAt() },
-        },
-      },
       ...(SPACES_ENABLED && (!switcherOnly || totalSpaces > 0) ? [{
         item: {
-          key: 'spaces', label: 'Spaces', icon: MessagesSquare, tourId: 'nav-spaces',
+          key: 'spaces', label: 'Spaces', icon: Users, tourId: 'nav-spaces',
           notification: spacesNotification.unread > 0
             ? (spacesNotification.forYou > 0 ? 'alert' as const : 'muted' as const)
             : undefined,
@@ -998,28 +992,16 @@ export function DockSidebar({
       },
       {
         item: {
-          key: 'brain', label: 'Brain', icon: FileText, tourId: 'nav-knowledge',
-          status: knowledgeUpdatedLabel ?? undefined,
-          running: activeNav === 'knowledge',
-          onClick: () => { closeFlyouts(); knowledgeActions.openKnowledgeView() },
-        },
-      },
-      {
-        item: {
           key: 'home', label: 'Todo', icon: ListTodo, tourId: 'nav-home',
           running: activeNav === 'home',
           onClick: () => { closeFlyouts(); onOpenHome?.() },
         },
       },
-      { sep: true },
       {
         item: {
-          key: 'agents', label: 'Background agents', switcherLabel: 'Agents', icon: Bot, tourId: 'nav-agents',
-          badge: bgAgentsFailed ? '!' : undefined,
-          status: bgAgentsLabel ?? undefined,
-          statusAlert: bgAgentsFailed,
-          running: activeNav === 'agents',
-          onClick: () => { closeFlyouts(); onOpenBgTasks?.() },
+          key: 'workspaces', label: 'Projects', icon: Folder, tourId: 'nav-workspaces',
+          running: activeNav === 'workspaces' || activeNav === 'code',
+          onClick: () => { closeFlyouts(); knowledgeActions.openWorkspaceAt() },
         },
       },
       {
@@ -1037,6 +1019,24 @@ export function DockSidebar({
           onClick: () => { closeFlyouts(); onOpenApp?.(folder) },
         },
       })),
+      {
+        item: {
+          key: 'agents', label: 'Scheduled tasks', switcherLabel: 'Scheduled tasks', icon: Clock, tourId: 'nav-agents',
+          badge: bgAgentsFailed ? '!' : undefined,
+          status: bgAgentsLabel ?? undefined,
+          statusAlert: bgAgentsFailed,
+          running: activeNav === 'agents',
+          onClick: () => { closeFlyouts(); onOpenBgTasks?.() },
+        },
+      },
+      {
+        item: {
+          key: 'brain', label: 'Library', icon: Library, tourId: 'nav-knowledge',
+          status: knowledgeUpdatedLabel ?? undefined,
+          running: activeNav === 'knowledge',
+          onClick: () => { closeFlyouts(); knowledgeActions.openKnowledgeView() },
+        },
+      },
       { sep: true },
       {
         item: {

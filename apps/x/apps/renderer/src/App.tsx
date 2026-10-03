@@ -13,7 +13,7 @@ import { RunEvent } from '@x/shared/src/runs.js';
 import type { ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
-import { CheckIcon, LoaderIcon, PanelLeftIcon, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon, SquarePen, MessageSquare } from 'lucide-react';
+import { CheckIcon, LoaderIcon, PanelLeftIcon, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon, SquarePen, MessageSquare, Search } from 'lucide-react';
 import { cn, compactPath, parentPath } from '@/lib/utils';
 import { SPACES_ENABLED } from '@/lib/feature-flags';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
@@ -791,10 +791,12 @@ function parseDeepLink(input: string): ViewState | null {
 function FixedSidebarToggle({
   leftInsetPx,
   onNewChat,
+  onSearch,
   onWidthChange,
 }: {
   leftInsetPx: number
   onNewChat?: () => void
+  onSearch?: () => void
   onWidthChange?: (px: number) => void
 }) {
   const { toggleSidebar, state } = useSidebar()
@@ -808,7 +810,7 @@ function FixedSidebarToggle({
     return () => observer.disconnect()
   }, [onWidthChange])
   return (
-    <div ref={rootRef} className="fixed left-0 top-0 z-50 flex h-10 items-center gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+    <div ref={rootRef} className="fixed left-0 top-0 z-50 flex h-10 items-center gap-2" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
       <div aria-hidden="true" className="h-10 shrink-0" style={{ width: leftInsetPx }} />
       <button
         type="button"
@@ -835,6 +837,17 @@ function FixedSidebarToggle({
           state, and this cluster is the one control group present on every
           view, sidebar expanded or docked. */}
       <CaffeinateToggle />
+      {onSearch && (
+        <button
+          type="button"
+          onClick={onSearch}
+          className="flex h-7 w-7 items-center justify-center rounded-md text-primary hover:bg-accent transition-colors"
+          aria-label="Search"
+          title="Search (⌘K)"
+        >
+          <Search className="size-[17px]" strokeWidth={1.5} />
+        </button>
+      )}
     </div>
   )
 }
@@ -8164,6 +8177,7 @@ function App() {
             <FixedSidebarToggle
               leftInsetPx={isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0}
               onNewChat={handleNewChatTab}
+              onSearch={() => setIsSearchOpen(true)}
               onWidthChange={setTitlebarControlsWidthPx}
             />
             <MenuSidebarToggleBridge />
