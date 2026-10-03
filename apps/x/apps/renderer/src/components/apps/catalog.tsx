@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { BadgeCheck, Bot, Download, Link2, RefreshCw, Search, ShieldAlert, Star } from 'lucide-react'
+import { AppCard } from '@/components/apps/app-card'
+import { FICHES, SHELVES, accessOf, capabilityLine, fallbackIcon, type Shelf } from '@/components/apps/fiches'
 import type { rowboatApp } from '@x/shared'
-import { themeForIndex, patternFor } from '@/components/apps/card-theme'
+import { themeForIndex } from '@/components/apps/card-theme'
 import { ModelSelector } from '@/components/model-selector'
 
 // Catalog tab (spec §14): search the registry, install with the D18 capability
@@ -17,11 +19,6 @@ type Preview = {
   url?: string // set for URL installs
 }
 
-function capabilityDescription(cap: string): string {
-  if (cap === 'llm') return 'use your AI models (spends your tokens)'
-  if (cap === 'copilot') return 'run the copilot agent on your behalf (tools + your knowledge)'
-  return `read and act on your ${cap} through your connected account`
-}
 
 /** D18 disclosure dialog: every declared capability + bundled agent, explicit confirm. */
 function InstallConfirmDialog({ preview, busy, onConfirm, onCancel }: {
@@ -32,32 +29,35 @@ function InstallConfirmDialog({ preview, busy, onConfirm, onCancel }: {
 }) {
   const caps = preview.capabilities ?? []
   const agents = preview.agents ?? []
+  const fiche = preview.name ? FICHES[preview.name] : undefined
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="w-full max-w-md rounded-2xl border-none bg-popover p-5 shadow-[var(--rowboat-shadow)]">
-        <div className="mb-1 text-base font-semibold">Install {preview.name} v{preview.version}?</div>
-        {preview.description && <p className="mb-3 text-sm text-muted-foreground">{preview.description}</p>}
+        <div className="mb-1 text-base font-semibold">{`Install the app “${fiche?.title ?? preview.name}”?`}</div>
+        {(fiche?.summary ?? preview.description) && <p className="mb-3 text-sm text-muted-foreground">{fiche?.summary ?? preview.description}</p>}
 
         <div className="mb-3 rounded-lg border border-border bg-muted/30 p-3 text-sm">
           <div className="mb-1.5 flex items-center gap-1.5 font-medium">
-            <ShieldAlert className="size-4 text-amber-500" /> This app will be able to:
+            <ShieldAlert className="size-4 text-amber-500" /> What it will be able to do
           </div>
           {caps.length === 0 ? (
-            <p className="text-muted-foreground">Nothing — it declares no capabilities (no tools, LLM, or copilot access).</p>
+            <p className="text-muted-foreground">Nothing beyond itself: it reaches none of your accounts and does not use your AI.</p>
           ) : (
             <ul className="list-inside list-disc space-y-0.5 text-muted-foreground">
-              {caps.map((c) => <li key={c}><span className="font-medium text-foreground">{c}</span>: {capabilityDescription(c)}</li>)}
+              {caps.map((c) => <li key={c}>{capabilityLine(c)}</li>)}
             </ul>
           )}
           {agents.length > 0 && (
             <div className="mt-2">
-              <div className="font-medium">Bundled background agents (installed disabled):</div>
+              <div className="font-medium">It comes with agents that run on a schedule. They start off; you turn them on if you want:</div>
               <ul className="list-inside list-disc text-muted-foreground">
                 {agents.map((a) => <li key={a}>{a}</li>)}
               </ul>
             </div>
           )}
         </div>
+
+        <p className="mb-3 text-xs text-muted-foreground">You can remove it at any time from My apps.</p>
 
         {preview.updateSource === 'none' && (
           <p className="mb-3 text-xs text-amber-600 dark:text-amber-400">Installed from a direct URL — updates will be unavailable.</p>
@@ -135,6 +135,8 @@ export function CatalogTab({ onInstalled }: { onInstalled: (folder: string) => v
   const [records, setRecords] = useState<rowboatApp.RegistryRecord[]>([])
   const [stale, setStale] = useState(false)
   const [query, setQuery] = useState('')
+  const [shelf, setShelf] = useState<Shelf | null>(null)
+  const [showOthers, setShowOthers] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [preview, setPreview] = useState<Preview | null>(null)
   const [busy, setBusy] = useState(false)
@@ -211,6 +213,60 @@ export function CatalogTab({ onInstalled }: { onInstalled: (folder: string) => v
   // Rank by stars (unknown counts sink), name as the stable tiebreak.
   const ranked = [...records].sort((a, b) =>
     ((stars[b.repo] ?? -1) - (stars[a.repo] ?? -1)) || a.name.localeCompare(b.name))
+
+  // Baarali: the apps we have a fiche for come first, by shelf; the others
+  // wait under a link, and a search reaches every one of them.
+  const searching = query.trim().length > 0
+  const shown = searching ? ranked : ranked.filter((r) => FICHES[r.name] && (shelf === null || FICHES[r.name].shelf === shelf))
+  const others = searching ? [] : ranked.filter((r) => !FICHES[r.name])
+
+  const renderCard = (r: rowboatApp.RegistryRecord, i: number) => {
+    const fiche = FICHES[r.name]
+    const installedFolder = installedByName.get(r.name)
+    const open = () => (installedFolder ? onInstalled(installedFolder) : void startInstall(r.name))
+    return (
+      <AppCard
+        key={r.name}
+        theme={themeForIndex(i)}
+        icon={fiche?.icon ?? fallbackIcon}
+        title={fiche?.title ?? r.name}
+        by={<>by {r.owner}</>}
+        summary={fiche?.summary ?? (r.description || 'No description.')}
+        access={fiche ? accessOf(fiche.capabilities, fiche.agents) : []}
+        onOpen={open}
+        corner={
+          <>
+            {installedFolder && <span className="ma-badge">INSTALLED</span>}
+            <button type="button"
+              title={starred[r.repo] ? 'Unstar on GitHub' : 'Star on GitHub'}
+              onClick={(e) => { e.stopPropagation(); void toggleStar(r.repo) }}
+              className={`flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium hover:bg-foreground/10 ${starred[r.repo] ? 'text-amber-500' : 'text-muted-foreground'}`}>
+              <Star className={`size-3.5 ${starred[r.repo] ? 'fill-current' : ''}`} />
+              {stars[r.repo] ?? '—'}
+            </button>
+          </>
+        }
+        footer={
+          <>
+            <span className="ma-lastrun">{fiche ? '' : r.repo}</span>
+            {installedFolder ? (
+              <button type="button" title="Installed — open it"
+                onClick={(e) => { e.stopPropagation(); onInstalled(installedFolder) }}
+                className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-[var(--rowboat-success)] hover:bg-[var(--rowboat-success)]/10">
+                <BadgeCheck className="size-4" /> Open
+              </button>
+            ) : (
+              <button type="button"
+                onClick={(e) => { e.stopPropagation(); void startInstall(r.name) }}
+                className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm font-medium hover:bg-accent">
+                <Download className="size-4" /> Install
+              </button>
+            )}
+          </>
+        }
+      />
+    )
+  }
 
   const startInstall = async (name: string) => {
     setError(null)
@@ -320,59 +376,33 @@ export function CatalogTab({ onInstalled }: { onInstalled: (folder: string) => v
           {query ? 'No apps match your search.' : 'No apps in the catalog yet — be the first to publish one.'}
         </div>
       ) : (
-        <div className="ma-grid">
-          {ranked.map((r, i) => {
-            const theme = themeForIndex(i)
-            const installedFolder = installedByName.get(r.name)
-            return (
-              <div
-                key={r.name}
-                role="button"
-                tabIndex={0}
-                onClick={() => installedFolder ? onInstalled(installedFolder) : void startInstall(r.name)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault()
-                    if (installedFolder) onInstalled(installedFolder)
-                    else void startInstall(r.name)
-                  }
-                }}
-                className={`ma-card ma-pat-${patternFor(r.name)}`}
-                style={{ '--accent': theme.accent, '--glow': theme.glow } as React.CSSProperties}
-              >
-                <div className="ma-top">
-                  {installedFolder && <span className="ma-badge">INSTALLED</span>}
-                  <button type="button"
-                    title={starred[r.repo] ? 'Unstar on GitHub' : 'Star on GitHub'}
-                    onClick={(e) => { e.stopPropagation(); void toggleStar(r.repo) }}
-                    className={`flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium hover:bg-foreground/10 ${starred[r.repo] ? 'text-amber-500' : 'text-muted-foreground'}`}>
-                    <Star className={`size-3.5 ${starred[r.repo] ? 'fill-current' : ''}`} />
-                    {stars[r.repo] ?? '—'}
-                  </button>
+        <>
+          {!query.trim() && (
+            <div className="fc-shelves">
+              <button type="button" className={`fc-shelf${shelf === null ? ' on' : ''}`} onClick={() => setShelf(null)}>All</button>
+              {SHELVES.map((x) => (
+                <button key={x.id} type="button" className={`fc-shelf${shelf === x.id ? ' on' : ''}`} onClick={() => setShelf(x.id)}>{x.label}</button>
+              ))}
+            </div>
+          )}
+          <div className="ma-grid">
+            {shown.map((r, i) => renderCard(r, i))}
+          </div>
+          {others.length > 0 && !query.trim() && (
+            showOthers ? (
+              <>
+                <div className="fc-section">Other apps from the community</div>
+                <div className="ma-grid">
+                  {others.map((r, i) => renderCard(r, shown.length + i))}
                 </div>
-                <div className="ma-title">{r.name}</div>
-                <div className="ma-owner">by {r.owner}</div>
-                <div className="ma-desc">{r.description || 'No description.'}</div>
-                <div className="ma-footer">
-                  <span className="ma-lastrun">{r.repo}</span>
-                  {installedFolder ? (
-                    <button type="button" title="Installed — open it"
-                      onClick={(e) => { e.stopPropagation(); onInstalled(installedFolder) }}
-                      className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-[var(--rowboat-success)] hover:bg-[var(--rowboat-success)]/10">
-                      <BadgeCheck className="size-4" /> Open
-                    </button>
-                  ) : (
-                    <button type="button"
-                      onClick={(e) => { e.stopPropagation(); void startInstall(r.name) }}
-                      className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm font-medium hover:bg-accent">
-                      <Download className="size-4" /> Install
-                    </button>
-                  )}
-                </div>
-              </div>
+              </>
+            ) : (
+              <button type="button" className="fc-more" onClick={() => setShowOthers(true)}>
+                {`Show ${others.length} more apps, not translated yet`}
+              </button>
             )
-          })}
-        </div>
+          )}
+        </>
       )}
 
       {urlDialog && (

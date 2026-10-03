@@ -9,6 +9,8 @@ Une ligne s'ajoute dans le même commit que la modification, et disparaît dans 
 | `apps/x/packages/core/src/models/gateway.ts` | `listGatewayModels` garde le `name` du catalogue de la passerelle | Le sélecteur montrait l'identifiant brut (`deepseek/deepseek-v4.1-flash`) ; le plan de contrôle sert des noms lisibles (archi §3.5) | 30/09/2026 |
 | `apps/x/apps/renderer/src/hooks/use-models.ts` (+ son test) | Ajoute `namesByKey` à l'instantané | Même raison : le nom suit le modèle jusqu'au sélecteur | 30/09/2026 |
 | `apps/x/apps/renderer/src/components/model-selector.tsx` | Affiche et cherche par le nom quand il existe, l'identifiant sinon | Même raison | 30/09/2026 |
+| `apps/x/apps/renderer/src/components/apps/catalog.tsx` | Cartes par `AppCard` et fiches (`fiches.ts`) : nom clair, à quoi l'app sert, ses accès ; rayons ; les apps sans fiche derrière un lien ; fenêtre d'installation en mots simples | Le catalogue montrait un nom de paquet, une phrase anglaise et un chemin GitHub ; une personne ne savait ni à quoi l'app sert ni ce qu'elle touche avant d'installer | 02/10/2026 |
+| `apps/x/apps/renderer/src/components/apps/apps-view.tsx` | « Mes apps » passe par la même `AppCard`, avec les accès lus dans le manifeste | Même raison | 02/10/2026 |
 
 **La marque n'est pas une divergence.** Elle ne touche aucun fichier du dépôt : elle s'applique à la copie d'un build, en CI ou dans l'image d'instance (`apps/baarali/packages/desktop/scripts/brand.mjs`, décidé le 01/10/2026). Ses ancres dans les fichiers upstream sont vérifiées par un test à chaque PR.
 

@@ -3,7 +3,9 @@ import { PanelLeft, PanelLeftClose, Plus, RefreshCw } from 'lucide-react'
 import type { rowboatApp } from '@x/shared'
 import { AppFrame } from '@/components/apps/app-frame'
 import { CatalogTab } from '@/components/apps/catalog'
-import { themeForIndex, patternFor } from '@/components/apps/card-theme'
+import { themeForIndex } from '@/components/apps/card-theme'
+import { AppCard, FICHE_CSS } from '@/components/apps/app-card'
+import { FICHES, accessOf, fallbackIcon } from '@/components/apps/fiches'
 import { getPinnedApps, onPinnedAppsChanged, pinApp, unpinApp } from '@/lib/pinned-apps'
 import {
   ContextMenu,
@@ -137,32 +139,36 @@ function Card({ app, index, onOpen, isPinned, onTogglePin }: {
   isPinned: boolean
   onTogglePin: () => void
 }) {
-  const theme = themeForIndex(index)
-  const pattern = patternFor(app.folder)
   const invalid = app.status === 'invalid'
+  const fiche = FICHES[app.install?.name ?? app.manifest?.name ?? '']
+  const owner = app.install?.repo?.split('/')[0]
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <button
-          type="button"
-          onClick={onOpen}
-          title={invalid ? app.manifestError : undefined}
-          className={`ma-card ma-pat-${pattern}`}
-          style={{ '--accent': theme.accent, '--glow': theme.glow } as React.CSSProperties}
-        >
-          <div className="ma-top">
-            {invalid && <span className="ma-badge err">INVALID</span>}
-            <span className={`ma-badge${app.kind === 'installed' ? '' : ' off'}`}>
-              {app.kind === 'installed' ? 'INSTALLED' : 'LOCAL'}
-            </span>
-          </div>
-          <div className="ma-title">{app.manifest?.name ?? app.folder}</div>
-          <div className="ma-desc">{invalid ? (app.manifestError ?? 'Invalid manifest') : (app.manifest?.description || 'No description yet.')}</div>
-          <div className="ma-footer">
-            <span className="ma-source">v{app.manifest?.version ?? '?'}</span>
-            <span className="ma-lastrun">{app.folder}</span>
-          </div>
-        </button>
+        <div>
+          <AppCard
+            theme={themeForIndex(index)}
+            icon={fiche?.icon ?? fallbackIcon}
+            title={fiche?.title ?? app.manifest?.name ?? app.folder}
+            by={app.kind === 'installed' ? (owner ? <>by {owner}</> : 'Installed from a link') : 'Made on this account'}
+            summary={invalid ? (app.manifestError ?? 'Invalid manifest') : (fiche?.summary ?? (app.manifest?.description || 'No description yet.'))}
+            access={invalid ? [] : accessOf(app.manifest?.capabilities ?? [], app.agentSlugs.length)}
+            label={invalid ? app.manifestError : undefined}
+            onOpen={onOpen}
+            corner={
+              <>
+                {invalid && <span className="ma-badge err">INVALID</span>}
+                {isPinned && <span className="ma-badge off">IN SIDEBAR</span>}
+              </>
+            }
+            footer={
+              <>
+                <span className="ma-lastrun">v{app.manifest?.version ?? '?'}</span>
+                <span className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground">Open</span>
+              </>
+            }
+          />
+        </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
         <ContextMenuItem onClick={onTogglePin}>
@@ -238,6 +244,7 @@ export function AppsView({ initialAppFolder, initialVersion, onNewApp }: {
   return (
     <div className="ma-page">
       <style>{CARD_CSS}</style>
+      <style>{FICHE_CSS}</style>
       <div className="ma-inner">
         <h1 className="ma-h1">Apps</h1>
         <p className="ma-sub">Apps that live inside Rowboat, powered by your agents and integrations.</p>
