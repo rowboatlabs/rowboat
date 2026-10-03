@@ -115,7 +115,19 @@ export class SpacesClient {
         },
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       });
-    let res = await send(auth ? await this.currentToken() : undefined);
+    const firstToken = auth ? await this.currentToken() : undefined;
+    let res: Response;
+    try {
+      res = await send(firstToken);
+    } catch (err) {
+      // A kept-alive socket that died in the background fails the first
+      // request after resume ("The network connection was lost"). Reads are
+      // safe to repeat, so try once more; writes surface the error — the
+      // caller decides (see send.ts for messages).
+      if (method !== 'GET') throw err;
+      await new Promise((r) => setTimeout(r, 400));
+      res = await send(firstToken);
+    }
     // One forced-refresh retry on 401 when the token source is live (an
     // access token can be revoked before its expiry says so).
     if (res.status === 401 && auth && typeof this.token !== 'string') {

@@ -20,6 +20,8 @@ import { PollCard, applyPollVote } from '@/components/poll-card';
 import { setActiveSpace } from '@/lib/push';
 import { useSpacesAccount } from '@/lib/spaces/account';
 import { StatusBanner } from '@/components/status-banner';
+import { isNetworkError } from '@/lib/spaces/errors';
+import { postMessageReliably } from '@/lib/spaces/send';
 import { loadRoster, loadThread, peekRoster, peekThread, saveRoster, saveThread } from '@/lib/spaces/cache';
 import { SpacesClient } from '@/lib/spaces/client';
 import { SpacesLive } from '@/lib/spaces/live';
@@ -175,15 +177,17 @@ export default function SpaceThreadScreen() {
     [org],
   );
 
-  const send = async (body: string) => {
-    if (sending) return;
+  const send = async (body: string): Promise<boolean> => {
+    if (sending) return false;
     setSending(true);
     try {
-      const { message } = await client.postMessage(space, { body, threadRoot: root, actingMode: 'direct' });
+      const message = await postMessageReliably(client, space, { body, threadRoot: root }, me);
       setReplies((prev) => (prev && !prev.some((m) => m.id === message.id) ? [...prev, message] : prev));
       scrollToNewest();
+      return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (!isNetworkError(err)) setError(err instanceof Error ? err.message : String(err));
+      return false;
     } finally {
       setSending(false);
     }
@@ -210,9 +214,17 @@ export default function SpaceThreadScreen() {
   const quote = useCallback((message: Message) => composerRef.current?.quote(spaces.resolveMentions(message.body, memberNames)), [memberNames]);
   const beginEdit = useCallback((message: Message) => composerRef.current?.beginEdit(message.id, message.body), []);
   const saveEdit = useCallback(
-    (id: string, body: string) => {
-      client.editMessage(space, id, { body, actingMode: 'direct' }).then(patchBoth).catch((err) => setError(err instanceof Error ? err.message : String(err)));
-    },
+    (id: string, body: string) =>
+      client.editMessage(space, id, { body, actingMode: 'direct' }).then(
+        (m) => {
+          patchBoth(m);
+          return true;
+        },
+        (err) => {
+          if (!isNetworkError(err)) setError(err instanceof Error ? err.message : String(err));
+          return false;
+        },
+      ),
     [client, space, patchBoth],
   );
   const confirmDelete = useCallback(
@@ -394,7 +406,7 @@ export default function SpaceThreadScreen() {
           members={[...members.values()]}
           me={me}
           sending={sending}
-          onSend={(body) => void send(body)}
+          onSend={send}
           onPickMedia={uploadMedia}
           onEdit={saveEdit}
         />

@@ -71,11 +71,12 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
   members: Member[];
   me: string;
   sending: boolean;
-  onSend: (body: string) => void;
+  /** Resolve false when the send failed — the composer puts the draft back. */
+  onSend: (body: string) => Promise<boolean> | boolean | void;
   /** Upload a picked photo/video and return the markdown to insert (absent = no + button). */
   onPickMedia?: (file: { uri: string; mime: string; name: string }) => Promise<string>;
   /** Save an edit begun with beginEdit (absent = editing unsupported). */
-  onEdit?: (id: string, body: string) => void;
+  onEdit?: (id: string, body: string) => Promise<boolean> | boolean | void;
 }>(function SpaceComposer({ placeholder, members, me, sending, onSend, onPickMedia, onEdit }, ref) {
   const colors = useColors();
   const inputRef = useRef<TextInput>(null);
@@ -110,6 +111,8 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
   };
 
   const [editing, setEditing] = useState<string | null>(null);
+  /** The last send failed and its draft is back in the box. */
+  const [failed, setFailed] = useState(false);
 
   useImperativeHandle(
     ref,
@@ -171,13 +174,32 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
     if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
     Keyboard.dismiss();
     const editingId = editing;
+    // Clear at once (it feels sent), but hold the draft: if the send fails
+    // it goes back in the box instead of vanishing (2026-10-03).
+    const draft = { text, picked, attachments };
+    setFailed(false);
     setEditing(null);
     setText('');
     setPicked(new Map());
     setAttachments([]);
     setInputKey((k) => k + 1);
-    if (editingId && onEdit) onEdit(editingId, body);
-    else onSend(body);
+    void Promise.resolve(editingId && onEdit ? onEdit(editingId, body) : onSend(body))
+      .catch(() => false)
+      .then((ok) => {
+        if (ok !== false) return;
+        setFailed(true);
+        // Don't clobber anything typed while the send was in flight.
+        let restored = false;
+        setText((now) => {
+          if (now.length > 0) return now;
+          restored = true;
+          return draft.text;
+        });
+        setPicked((now) => (now.size > 0 ? now : draft.picked));
+        setAttachments((now) => (now.length > 0 ? now : draft.attachments));
+        if (editingId) setEditing((now) => now ?? editingId);
+        if (restored) setInputKey((k) => k + 1);
+      });
   };
 
   // Picked mentions read as pills: bold spans inside the field.
@@ -225,6 +247,12 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
             </Pressable>
           ))}
         </ScrollView>
+      ) : null}
+      {failed ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 18, paddingBottom: 6 }}>
+          <Image source="sf:exclamationmark.circle" style={{ width: 13, height: 13 }} tintColor={colors.destructive} />
+          <Text style={{ flex: 1, fontSize: 13, color: colors.destructive }}>Not sent. Check your connection and try again.</Text>
+        </View>
       ) : null}
       {/* Slack's composer card: field on top, toolbar below (@ · send). */}
       <View

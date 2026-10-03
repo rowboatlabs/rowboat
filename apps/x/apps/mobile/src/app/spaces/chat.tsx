@@ -17,6 +17,8 @@ import { setActiveSpace } from '@/lib/push';
 import { useSpacesAccount } from '@/lib/spaces/account';
 import { STREAM_CACHE_LIMIT, loadRoster, loadValue, peekRoster, peekValue, saveRoster, saveValue, seedThreadRoot } from '@/lib/spaces/cache';
 import { StatusBanner } from '@/components/status-banner';
+import { isNetworkError } from '@/lib/spaces/errors';
+import { postMessageReliably } from '@/lib/spaces/send';
 import { fetchLinkPreview, peekLinkPreview, previewUrls } from '@/lib/spaces/link-preview';
 
 /** Rows whose link cards must be in before a channel is revealed, and how long we'll wait. */
@@ -262,17 +264,20 @@ export default function SpaceChatScreen() {
   }, [messages === null, org, space]);
 
 
-  const send = async (body: string) => {
-    if (sending) return;
+  const send = async (body: string): Promise<boolean> => {
+    if (sending) return false;
     setSending(true);
     try {
-      const { message } = await client.postMessage(space, { body, actingMode: 'direct' });
+      const message = await postMessageReliably(client, space, { body }, me);
       foldMessage(message);
       // Your own message: always land on it, wherever you were scrolled.
       atBottom.current = true;
       requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
+      return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      // Offline is said by the composer ("Not sent"); anything else is the org's words.
+      if (!isNetworkError(err)) setError(err instanceof Error ? err.message : String(err));
+      return false;
     } finally {
       setSending(false);
     }
@@ -366,9 +371,17 @@ export default function SpaceChatScreen() {
   const quote = useCallback((message: Message) => composerRef.current?.quote(spaces.resolveMentions(message.body, memberNames)), [memberNames]);
   const beginEdit = useCallback((message: Message) => composerRef.current?.beginEdit(message.id, message.body), []);
   const saveEdit = useCallback(
-    (id: string, body: string) => {
-      client.editMessage(space, id, { body, actingMode: 'direct' }).then(replaceMessage).catch((err) => setError(err instanceof Error ? err.message : String(err)));
-    },
+    (id: string, body: string) =>
+      client.editMessage(space, id, { body, actingMode: 'direct' }).then(
+        (m) => {
+          replaceMessage(m);
+          return true;
+        },
+        (err) => {
+          if (!isNetworkError(err)) setError(err instanceof Error ? err.message : String(err));
+          return false;
+        },
+      ),
     [client, space, replaceMessage],
   );
   const confirmDelete = useCallback(
@@ -520,7 +533,7 @@ export default function SpaceChatScreen() {
           members={[...members.values()]}
           me={me}
           sending={sending}
-          onSend={(body) => void send(body)}
+          onSend={send}
           onPickMedia={uploadMedia}
           onEdit={saveEdit}
         />

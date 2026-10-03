@@ -2,7 +2,7 @@
 // as a fetch TypeError ("Network request failed") or a timeout/abort; server
 // errors keep their own message.
 
-const NETWORK = /network request failed|internet connection appears to be offline|offline|timed? ?out|aborted|failed to fetch|could not connect/i;
+const NETWORK = /network request failed|network connection was lost|fetch failed|internet connection appears to be offline|offline|timed? ?out|aborted|failed to fetch|could not connect|cannot connect|hostname could not be found|data connection/i;
 
 export function isNetworkError(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err ?? '');
