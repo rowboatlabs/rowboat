@@ -30,6 +30,16 @@ describe('the download section', () => {
     expect(page).toContain('href="#telecharger"');
   });
 
+  it('leads nowhere near sign-in once the app can be downloaded: the account lives in the app', async () => {
+    for (const path of ['/', '/tarifs', '/mentions-legales', '/confidentialite', '/conditions']) {
+      const res = await withDownloads.request(path);
+      expect(res.status, path).toBe(200);
+      const page = await res.text();
+      expect(page, path).not.toContain('/auth/v1/sign-in');
+      expect(page, path).toContain('#telecharger');
+    }
+  });
+
   it('offers the account only while there is nothing to download', async () => {
     const page = await (await app.request('/')).text();
     expect(page).not.toContain('telecharger');

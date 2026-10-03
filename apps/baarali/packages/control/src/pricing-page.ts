@@ -41,6 +41,7 @@ const STRINGS = {
     proChoice: 'Choisissez votre niveau',
     usage: (x: string) => `Utilisation ×${x} par rapport à Essentiel`,
     start: 'Créer mon compte gratuit',
+    getApp: 'Télécharger l’app',
     soon: 'Paiement bientôt disponible',
     // What each plan changes; what Baarali does is the same on every plan
     // (only the models and the usage differ, catalog.ts).
@@ -170,6 +171,7 @@ const STRINGS = {
     proChoice: 'Choose your level',
     usage: (x: string) => `×${x} the usage of Essentiel`,
     start: 'Create my free account',
+    getApp: 'Get the app',
     soon: 'Payment coming soon',
     plans: {
       decouverte: { tag: 'To try it', for: 'To try Baarali on real tasks.', plus: 'Included', points: ['Web research, summed up with its sources', 'Emails, quotes and minutes written in your tone', 'Documents, spreadsheets and slides ready to send', 'Your approval before anything is sent or published', 'Long tasks in the background, and routines', 'A memory: your clients, your prices, your habits', 'Videos, voices and music with media credits', 'The Mac and Windows apps', 'Fast, low-cost models', 'Limited usage, renewed every 5 h and every week'] },
@@ -357,6 +359,12 @@ export function pricingPage(data: HomeData, opts: { lang: string | null; nonce: 
   const lang: Lang = pickLang(opts.lang);
   const t = STRINGS[lang];
 
+  // The site is a showcase (decided 02/10/2026): once the app can be
+  // downloaded, the account is made there, and no link here leads to sign-in.
+  const account = (nav: boolean) =>
+    data.downloadBase
+      ? `<a${nav ? ' class="btn"' : ''} href="/#telecharger">${escape(t.getApp)}</a>`
+      : `<a${nav ? ' class="btn"' : ''} href="/auth/v1/sign-in">${escape(nav ? t.signIn : t.start)}</a>`;
   const base = data.weekCredits.essentiel || 1;
   const ratio = (id: string) => {
     const r = (data.weekCredits[id] ?? 0) / base;
@@ -392,7 +400,7 @@ export function pricingPage(data: HomeData, opts: { lang: string | null; nonce: 
       <h3>${escape(offer.displayName)}</h3>
       <p class="for">${escape(copy.for)}</p>
       ${extra || priceBlock(offer)}
-      ${offer.billing.kind === 'free' ? `<a class="cta cta-blue" href="/auth/v1/sign-in">${escape(t.start)}</a>` : `<p class="cta cta-off" aria-disabled="true">${escape(t.soon)}</p>`}
+      ${offer.billing.kind === 'free' ? (data.downloadBase ? `<a class="cta cta-blue" href="/#telecharger">${escape(t.getApp)}</a>` : `<a class="cta cta-blue" href="/auth/v1/sign-in">${escape(t.start)}</a>`) : `<p class="cta cta-off" aria-disabled="true">${escape(t.soon)}</p>`}
       <p class="plus">${escape(copy.plus)}</p>
       <ul>${copy.points.map((p) => `<li>${CHECK}${escape(p)}</li>`).join('')}</ul>
     </article>`;
@@ -676,7 +684,7 @@ ${LOGO_ALIVE_CSS}
       <a href="${PRICING_PATH}" aria-current="page">${escape(t.prices)}</a>
       <a href="#questions">${escape(t.questions)}</a>
       <button class="theme" type="button" aria-label="${escape(t.theme)}" title="${escape(t.theme)}">${SUN}${MOON}</button>
-      <a class="btn" href="/auth/v1/sign-in">${escape(t.signIn)}</a>
+      ${account(true)}
     </nav>
   </div>
 </header>
@@ -752,7 +760,7 @@ ${LOGO_ALIVE_CSS}
   <div class="final">
     <h2>${titled(t.finalTitle)}</h2>
     <p>${escape(t.finalLead)}</p>
-    <a href="/auth/v1/sign-in">${escape(t.start)}</a>
+    ${account(false)}
   </div>
 </div>
 </main>

@@ -73,7 +73,7 @@ export function createApp(deps: ControlDeps) {
     // The same plans, for the app's own window (no browser: the account lives in the app).
     app.get('/v1/plans', (c) => c.json(planOffers(home, c.req.query('lang') ?? c.req.header('accept-language') ?? null)));
     for (const doc of Object.keys(LEGAL_PATHS) as LegalDoc[]) {
-      app.get(LEGAL_PATHS[doc], (c) => html((nonce) => legalPage(doc, { lang: c.req.header('accept-language') ?? null, nonce })));
+      app.get(LEGAL_PATHS[doc], (c) => html((nonce) => legalPage(doc, { lang: c.req.header('accept-language') ?? null, nonce, downloads: Boolean(home.downloadBase) })));
     }
     app.get('/assets/:name', (c) => {
       const file = asset(c.req.param('name'));

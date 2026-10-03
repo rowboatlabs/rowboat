@@ -553,7 +553,7 @@ export function homePage(data: HomeData, opts: { lang: string | null; nonce: str
       <h3>${escape(offer.displayName)}</h3>
       ${extra || priceBlock(offer)}
       <ul>${copy.points.map((p) => `<li>${icon('check')}${escape(p)}</li>`).join('')}</ul>
-      ${offer.billing.kind === 'free' ? `<a class="btn btn-blue" href="/auth/v1/sign-in">${escape(t.start)}</a>` : `<p class="note">${escape(t.payment)}</p>`}
+      ${offer.billing.kind === 'free' ? (data.downloadBase ? `<a class="btn btn-blue" href="#telecharger">${escape(t.download)}</a>` : `<a class="btn btn-blue" href="/auth/v1/sign-in">${escape(t.start)}</a>`) : `<p class="note">${escape(t.payment)}</p>`}
     </article>`;
   };
 
@@ -1075,7 +1075,7 @@ ${LOGO_ALIVE_CSS}
     </nav>
     <div class="top-cta">
       <button class="theme" type="button" aria-label="${escape(t.theme)}" title="${escape(t.theme)}">${icon('sun', 'sun')}${icon('moon', 'moon')}</button>
-      <a class="btn btn-line" href="/auth/v1/sign-in">${escape(t.navSignIn)}</a>
+      ${data.downloadBase ? '' : `<a class="btn btn-line" href="/auth/v1/sign-in">${escape(t.navSignIn)}</a>`}
       ${primary.replace('btn btn-blue', 'btn btn-ink')}
     </div>
   </div>
@@ -1303,8 +1303,10 @@ ${LOGO_ALIVE_CSS}
       <div>
         <h4>${escape(t.footerAccount)}</h4>
         <ul>
-          <li><a href="/auth/v1/sign-in">${escape(t.navSignIn)}</a></li>
-          <li><a href="/auth/v1/sign-in">${escape(t.footerCreate)}</a></li>
+          ${data.downloadBase
+            ? `<li><a href="#telecharger">${escape(t.download)}</a></li>`
+            : `<li><a href="/auth/v1/sign-in">${escape(t.navSignIn)}</a></li>
+          <li><a href="/auth/v1/sign-in">${escape(t.footerCreate)}</a></li>`}
           <li><a href="mailto:${CONTACT}">${CONTACT}</a></li>
         </ul>
       </div>
