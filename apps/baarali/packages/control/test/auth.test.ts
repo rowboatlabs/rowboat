@@ -286,8 +286,14 @@ describe('the sign-in page', () => {
     expect(page).toContain('[hidden] { display: none !important; }');
     expect(page).toContain('Connexion à Baarali');
     // Sign-up is the same door: the page says so (02/10/2026).
-    expect(page).toContain('Se connecter ou créer un compte');
-    expect(page).toContain('Il se crée à votre première connexion');
+    expect(page).toContain('Content de vous revoir');
+    expect(page).toContain('ou créez votre compte');
+    // The two above the form, who guide and say the errors (sign-in-duo.ts).
+    expect(page).toContain('class="duo-stage"');
+    expect(page).toContain('Hmm, il est où le @\u00a0?');
+    expect(page).toContain('Ce code ne marche pas');
+    // The site is a showcase: nothing sends the person back there.
+    expect(page).not.toContain('Retour à l’accueil');
     // A code or a password (02/10/2026).
     expect(page).toContain('Se connecter avec un mot de passe');
     expect(page).toContain('Pas encore de mot de passe, ou oublié ?');

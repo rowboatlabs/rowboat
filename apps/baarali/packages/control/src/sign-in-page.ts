@@ -4,6 +4,7 @@
 // Strings live in STRINGS until @baarali/i18n exists (roadmap phase 1).
 
 import { PASSWORD_MAX, PASSWORD_MIN } from './password-limits.js';
+import { DUO_CSS, DUO_JS, duoStage } from './sign-in-duo.js';
 import { FAVICON, logoTile, logoWord, LOGO_ALIVE_CSS, LOGO_ALIVE_JS, logoTileLive } from './logo.js';
 
 export interface SignInMethods {
@@ -18,8 +19,39 @@ const STRINGS = {
   fr: {
     title: 'Connexion à Baarali',
     // One door for both (02/10/2026): an account is created at its first sign-in.
-    heading: 'Se connecter ou créer un compte',
-    lead: 'Pas encore de compte ? Il se crée à votre première connexion, gratuitement.',
+    heading: 'Content de vous revoir',
+    lead: 'Connectez-vous, ou créez votre compte : c’est gratuit.',
+    emailPlaceholder: 'nom@exemple.com',
+    passwordPlaceholder: '8 caractères au moins',
+    // The two above the form (sign-in-duo.ts): [first, second] voice.
+    duo: {
+      hello: ['Bonjour 👋', 'On vous attendait'],
+      emailEmpty: ['Ah, vous revoilà !', 'Allez-y, on regarde 👀'],
+      noAt: ['Hmm, il est où le @ ?', 'Une adresse en a toujours un, comme nom@exemple.com'],
+      noEnd: ['Presque…', 'Il manque la fin, comme .com ou .ci'],
+      emailOk: 'Ça, c’est une vraie adresse ! ✓',
+      thenCode: 'Cliquez, on vous envoie un code ✉️',
+      thenPassword: 'Le mot de passe, maintenant 🔐',
+      notLooking: ['On ne regarde pas 🙈', 'Promis, les yeux fermés'],
+      more: ['Encore $n caractère', 'Encore $n caractères'],
+      atLeast: '8 au moins, continuez !',
+      passwordOk: ['Parfait 👍', 'Appuyez sur Se connecter 🙌'],
+      wrongPassword: ['Hmm, ça ne correspond pas', 'Vérifiez l’adresse, ou recevez un code à la place'],
+      phoneEmpty: ['Votre numéro ?', 'Avec l’indicatif, comme +225 07…'],
+      phonePrefix: ['Il manque l’indicatif', 'Commencez par +, comme +226 ou +225'],
+      phoneOk: ['Bon numéro ✓', 'Cliquez, on vous envoie un code par SMS 📱'],
+      sentEmail: ['Le code est parti ✉️', 'Regardez vos emails, même les indésirables'],
+      sentSms: ['Le code est parti 📱', 'Il arrive par SMS'],
+      digits: ['Encore $n chiffre', 'Encore $n chiffres'],
+      codeOk: ['Les 6 y sont 👍', 'Appuyez sur Se connecter'],
+      wrongCode: ['Ce code ne marche pas', 'Il vaut 5 minutes. Besoin d’un autre ? Utilisez un autre moyen.'],
+      forgot: ['Pas de souci', 'Un code d’abord, puis vous choisissez votre mot de passe'],
+      choose: ['Choisissez-en un bon 🔐', '8 caractères au moins, on ne regarde pas'],
+      chooseShort: ['Un peu court', '8 caractères au moins pour le mot de passe'],
+      tooMany: ['Doucement 😅', 'Trop d’essais : patientez une minute'],
+      failed: ['Ça n’a pas marché', 'Vérifiez votre connexion et réessayez'],
+      done: ['Bienvenue ! 🎉', 'On vous ramène dans l’app'],
+    },
     continueWith: 'Continuer avec',
     or: 'ou',
     email: 'Adresse email',
@@ -48,12 +80,41 @@ const STRINGS = {
     deny: 'Refuser',
     done: 'Vous êtes connecté',
     doneBody: 'Votre compte Baarali est prêt. Ouvrez l’application Baarali pour continuer.',
-    home: 'Retour à l’accueil',
   },
   en: {
     title: 'Sign in to Baarali',
-    heading: 'Sign in or create an account',
-    lead: 'No account yet? It is created at your first sign-in, free.',
+    heading: 'Good to see you',
+    lead: 'Sign in, or create your account: it is free.',
+    emailPlaceholder: 'name@example.com',
+    passwordPlaceholder: '8 characters at least',
+    duo: {
+      hello: ['Hello 👋', 'We were waiting for you'],
+      emailEmpty: ['Oh, it’s you!', 'Type away, we’re watching 👀'],
+      noAt: ['Hmm, where’s the @?', 'Emails always have one, like name@example.com'],
+      noEnd: ['Almost…', 'The end is missing, like .com'],
+      emailOk: 'That’s a real email! ✓',
+      thenCode: 'Click, we’ll send you a code ✉️',
+      thenPassword: 'Password next 🔐',
+      notLooking: ['We’re not looking 🙈', 'Promise, eyes closed'],
+      more: ['$n more character', '$n more characters'],
+      atLeast: '8 at least, keep going!',
+      passwordOk: ['Perfect 👍', 'Hit Sign in 🙌'],
+      wrongPassword: ['Hmm, that doesn’t match', 'Check the email, or get a code instead'],
+      phoneEmpty: ['Your number?', 'With the country code, like +225 07…'],
+      phonePrefix: ['The country code is missing', 'Start with +, like +226 or +225'],
+      phoneOk: ['Good number ✓', 'Click, we’ll text you a code 📱'],
+      sentEmail: ['Code sent ✉️', 'Check your inbox, spam included'],
+      sentSms: ['Code sent 📱', 'It comes by text message'],
+      digits: ['$n more digit', '$n more digits'],
+      codeOk: ['All 6 are there 👍', 'Hit Sign in'],
+      wrongCode: ['That code doesn’t work', 'It lasts 5 minutes. Need another? Use another method.'],
+      forgot: ['No worries', 'A code first, then you choose your password'],
+      choose: ['Pick a good one 🔐', '8 characters at least, we’re not looking'],
+      chooseShort: ['A bit short', '8 characters at least for the password'],
+      tooMany: ['Easy 😅', 'Too many tries: wait a minute'],
+      failed: ['That didn’t work', 'Check your connection and try again'],
+      done: ['Welcome! 🎉', 'Taking you back to the app'],
+    },
     continueWith: 'Continue with',
     or: 'or',
     email: 'Email address',
@@ -82,9 +143,8 @@ const STRINGS = {
     deny: 'Deny',
     done: 'You are signed in',
     doneBody: 'Your Baarali account is ready. Open the Baarali app to continue.',
-    home: 'Back to home',
   },
-} satisfies Record<Lang, Record<string, string>>;
+} satisfies Record<Lang, Record<string, string | Record<string, string | string[]>>>;
 
 const PROVIDER_NAMES: Record<string, string> = { google: 'Google', apple: 'Apple', github: 'GitHub', microsoft: 'Microsoft' };
 
@@ -96,7 +156,7 @@ export function pickLang(acceptLanguage: string | null): Lang {
 const escape = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
-function layout(lang: Lang, title: string, nonce: string, body: string, script: string): string {
+function layout(lang: Lang, title: string, nonce: string, body: string, script: string, extra: { header?: string; css?: string; js?: string } = {}): string {
   return `<!doctype html>
 <html lang="${lang}">
 <head>
@@ -132,12 +192,17 @@ button:disabled { opacity:.6; cursor:default; }
 .hint { font-size:13px; }
 .error { color:var(--error); font-size:14px; }
 .link { border:none; padding:0; font-weight:400; text-decoration:underline; color:var(--muted); justify-self:start; }
+/* Said by the two above the form; kept for a screen reader. */
+.sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+.lead { text-align:center; margin-top:-8px; }
+${extra.header ? 'h1 { text-align:center; }' : ''}
 ${LOGO_ALIVE_CSS}
+${extra.css ?? ''}
 </style>
 </head>
 <body>
 <main>
-<a class="logo" href="/">${logoTileLive(30)}${logoWord(22)}</a>
+${extra.header ?? `<a class="logo" href="/">${logoTileLive(30)}${logoWord(22)}</a>`}
 ${body}
 </main>
 <script nonce="${nonce}">
@@ -159,6 +224,7 @@ async function post(path, body) {
 function follow(data) {
   if (data && typeof data.url === "string") location.assign(data.url);
 }
+${extra.js ?? ''}
 ${script}
 ${LOGO_ALIVE_JS}
 </script>
@@ -177,8 +243,8 @@ export function signInPage(opts: { methods: SignInMethods; lang: string | null; 
   // and its separator step aside while one is typed.
   const codeForms = [
     methods.email
-      ? `<form data-kind="email"><label for="email">${escape(t.email)}</label><input id="email" name="target" type="email" autocomplete="email" inputmode="email" required>` +
-        `<div class="stack" id="password-row" hidden><label for="password">${escape(t.password)}</label><input id="password" type="password" autocomplete="current-password" maxlength="${PASSWORD_MAX}"></div></form>`
+      ? `<form data-kind="email"><label for="email">${escape(t.email)}</label><input id="email" name="target" type="email" autocomplete="email" inputmode="email" placeholder="${escape(t.emailPlaceholder)}" required>` +
+        `<div class="stack" id="password-row" hidden><label for="password">${escape(t.password)}</label><input id="password" type="password" autocomplete="current-password" maxlength="${PASSWORD_MAX}" placeholder="${escape(t.passwordPlaceholder)}"></div></form>`
       : '',
     methods.phone
       ? `<form data-kind="phone" data-code-only><label for="phone">${escape(t.phone)}</label><input id="phone" name="target" type="tel" autocomplete="tel" inputmode="tel" placeholder="+225 07 00 00 00 00" required><p class="hint">${escape(t.phoneHint)}</p></form>`
@@ -187,44 +253,56 @@ export function signInPage(opts: { methods: SignInMethods; lang: string | null; 
   const any = social || codeForms.length > 0;
   const body = `
 <h1>${escape(t.heading)}</h1>
-${any ? `<p>${escape(t.lead)}</p>` : `<p>${escape(t.none)}</p>`}
+${any ? `<p class="lead">${escape(t.lead)}</p>` : `<p class="lead">${escape(t.none)}</p>`}
 ${social ? `<div class="stack">${social}</div>` : ''}
 ${social && codeForms.length ? `<div class="or">${escape(t.or)}</div>` : ''}
 <div class="stack" id="ask">${codeForms.join(`<div class="or" data-code-only>${escape(t.or)}</div>`)}
-${codeForms.length ? `<button class="primary" id="send" type="button">${escape(t.sendCode)}</button>` : ''}
+${codeForms.length ? `<button class="primary" id="send" type="button" disabled>${escape(t.sendCode)}</button>` : ''}
 ${methods.email ? `<button class="link" type="button" id="mode">${escape(t.usePassword)}</button>
 <button class="link" type="button" id="forgot" hidden>${escape(t.noPassword)}</button>` : ''}</div>
 <form id="verify" class="stack" hidden>
   <p>${escape(t.codeSent)}</p>
   <label for="code">${escape(t.code)}</label>
-  <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required>
+  <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="••••••" required>
   <div class="stack" id="choose-row" hidden>
     <label for="new-password" id="choose-label">${escape(t.choosePassword)}</label>
     <input id="new-password" type="password" autocomplete="new-password" maxlength="${PASSWORD_MAX}">
     <p class="hint">${escape(t.passwordHint)}</p>
   </div>
-  <button class="primary" type="submit">${escape(t.signIn)}</button>
+  <button class="primary" id="check" type="submit" disabled>${escape(t.signIn)}</button>
   <button class="link" type="button" id="back">${escape(t.otherMethod)}</button>
 </form>
-<p class="error" id="error" role="alert" hidden></p>
+<p class="sr" id="error" role="alert"></p>
 <div id="done" class="stack" hidden>
   <p>${escape(t.doneBody)}</p>
-  <a class="link" href="/">${escape(t.home)}</a>
 </div>`;
   const script = `
-const t = ${JSON.stringify({ failed: t.failed, tooMany: t.tooMany, badPassword: t.badPassword, shortPassword: t.shortPassword, sendCode: t.sendCode, signIn: t.signIn, usePassword: t.usePassword, useCode: t.useCode, choosePassword: t.choosePassword, newPassword: t.newPassword })};
+const t = ${JSON.stringify({ failed: t.failed, tooMany: t.tooMany, badPassword: t.badPassword, shortPassword: t.shortPassword, sendCode: t.sendCode, signIn: t.signIn, usePassword: t.usePassword, useCode: t.useCode, choosePassword: t.choosePassword, newPassword: t.newPassword, done: t.done })};
+const s = ${JSON.stringify(t.duo)};
 const MIN = ${PASSWORD_MIN};
+// The two of them (sign-in-duo.ts) say each step, and each error, aloud;
+// the hidden #error says it again for a screen reader.
+const duo = window.duo || { say() {}, act() {}, shut() {}, watch() {} };
+const plural = (n, one, many) => (n > 1 ? many : one).replace("$n", n);
 // Opened from the app, a sign-in hands back the URL that resumes the app's
 // authorization. Opened alone, there is none: say it worked, instead of
 // leaving the form up for a second, refused, try (seen 01/10/2026).
 function finish(data) {
-  if (data && typeof data.url === "string") return follow(data);
-  document.querySelector("h1").textContent = ${JSON.stringify(t.done)};
-  for (const el of document.querySelectorAll("main > :not(h1):not(#done)")) el.hidden = true;
+  duo.act("nod");
+  duo.say(s.done[0], s.done[1]);
+  if (data && typeof data.url === "string") return setTimeout(() => follow(data), 900);
+  document.querySelector("h1").textContent = t.done;
+  for (const el of document.querySelectorAll("main > :not(h1):not(#done):not(.duo-stage)")) el.hidden = true;
   document.getElementById("done").hidden = false;
 }
 const error = document.getElementById("error");
-function fail(e, message) { error.textContent = message || (e && e.status === 429 ? t.tooMany : t.failed); error.hidden = false; }
+// A refusal: the two say what to do, with a shake.
+function fail(e, line) {
+  const said = line || (e && e.status === 429 ? s.tooMany : s.failed);
+  error.textContent = said.join(" ");
+  duo.act("shake");
+  duo.say(said[0], said[1], { err: true });
+}
 for (const b of document.querySelectorAll("[data-provider]")) {
   b.addEventListener("click", async () => {
     b.disabled = true;
@@ -236,34 +314,78 @@ let target = null;
 const send = document.getElementById("send");
 const verify = document.getElementById("verify");
 const emailInput = document.getElementById("email");
+const phoneInput = document.getElementById("phone");
 const passwordInput = document.getElementById("password");
 const chooseRow = document.getElementById("choose-row");
 const newPassword = document.getElementById("new-password");
+const codeInput = document.getElementById("code");
+const check = document.getElementById("check");
 // "code": a code by email or SMS. "password": email and password.
 // mustChoose: the person asked to (re)set a password, the code step requires one.
 let mode = "code";
 let mustChoose = false;
 let signedIn = null;
+const emailOk = (v) => /^[^\\s@]+@[^\\s@]+\\.[a-z]{2,}$/i.test(v);
+const phoneOk = (v) => /^\\+[1-9][\\d\\s.-]{7,18}$/.test(v);
+function ready() {
+  if (!send) return;
+  const email = emailInput ? emailInput.value.trim() : "";
+  const phone = phoneInput && mode === "code" ? phoneInput.value.trim() : "";
+  send.disabled = mode === "password"
+    ? !(emailOk(email) && passwordInput.value.length >= MIN)
+    : !(emailOk(email) || phoneOk(phone));
+}
+function onEmail() {
+  const v = emailInput.value.trim();
+  duo.watch(emailInput);
+  if (!v) duo.say(s.emailEmpty[0], s.emailEmpty[1]);
+  else if (!v.includes("@")) duo.say(s.noAt[0], s.noAt[1]);
+  else if (!emailOk(v)) duo.say(s.noEnd[0], s.noEnd[1]);
+  else duo.say(s.emailOk, mode === "password" ? s.thenPassword : s.thenCode);
+  ready();
+}
+function onPassword() {
+  const v = passwordInput.value;
+  if (!v) duo.say(s.notLooking[0], s.notLooking[1]);
+  else if (v.length < MIN) duo.say(plural(MIN - v.length, s.more[0], s.more[1]), s.atLeast);
+  else duo.say(s.passwordOk[0], s.passwordOk[1]);
+  ready();
+}
+function onPhone() {
+  const v = phoneInput.value.trim();
+  duo.watch(phoneInput);
+  if (!v) duo.say(s.phoneEmpty[0], s.phoneEmpty[1]);
+  else if (!v.startsWith("+")) duo.say(s.phonePrefix[0], s.phonePrefix[1]);
+  else if (phoneOk(v)) duo.say(s.phoneOk[0], s.phoneOk[1]);
+  ready();
+}
+if (emailInput) { emailInput.addEventListener("focus", onEmail); emailInput.addEventListener("input", onEmail); }
+if (phoneInput) { phoneInput.addEventListener("focus", onPhone); phoneInput.addEventListener("input", onPhone); }
+if (passwordInput) {
+  passwordInput.addEventListener("focus", () => { duo.shut(true); onPassword(); });
+  passwordInput.addEventListener("blur", () => duo.shut(false));
+  passwordInput.addEventListener("input", onPassword);
+}
 function setMode(next) {
   mode = next;
-  error.hidden = true;
+  error.textContent = "";
   for (const el of document.querySelectorAll("[data-code-only]")) el.hidden = mode === "password";
   document.getElementById("password-row").hidden = mode !== "password";
   document.getElementById("forgot").hidden = mode !== "password";
   document.getElementById("mode").textContent = mode === "password" ? t.useCode : t.usePassword;
   send.textContent = mode === "password" ? t.signIn : t.sendCode;
-  (mode === "password" && emailInput.value.trim() ? passwordInput : emailInput).focus();
+  (mode === "password" && emailOk(emailInput.value.trim()) ? passwordInput : emailInput).focus();
+  ready();
 }
 async function signInWithPassword() {
   const email = emailInput.value.trim();
-  if (!email || !passwordInput.value) return;
+  if (!emailOk(email) || passwordInput.value.length < MIN) return;
   send.disabled = true;
   try { finish(await post("/sign-in/email", { email, password: passwordInput.value })); }
-  catch (e) { fail(e, e && e.status === 401 ? t.badPassword : ""); }
-  send.disabled = false;
+  catch (e) { fail(e, e && e.status === 401 ? s.wrongPassword : null); ready(); }
 }
 async function ask() {
-  error.hidden = true;
+  error.textContent = "";
   if (mode === "password") return signInWithPassword();
   const filled = [...document.querySelectorAll("form[data-kind]")].find((f) => !f.hidden && f.elements.target.value.trim());
   if (!filled) return;
@@ -282,38 +404,66 @@ async function ask() {
       newPassword.required = mustChoose;
     }
     verify.hidden = false;
-    document.getElementById("code").focus();
+    codeInput.focus();
+    duo.act("hop");
+    const sent = target.kind === "email" ? s.sentEmail : s.sentSms;
+    duo.say(sent[0], sent[1]);
   } catch (e) { fail(e); }
-  send.disabled = false;
-}
-if (document.getElementById("mode")) {
-  document.getElementById("mode").addEventListener("click", () => { mustChoose = false; setMode(mode === "password" ? "code" : "password"); });
-  document.getElementById("forgot").addEventListener("click", () => { mustChoose = true; setMode("code"); if (emailInput.value.trim()) ask(); });
+  ready();
 }
 if (send) send.addEventListener("click", ask);
 for (const f of document.querySelectorAll("form[data-kind]")) f.addEventListener("submit", (e) => { e.preventDefault(); ask(); });
+if (document.getElementById("mode")) {
+  document.getElementById("mode").addEventListener("click", () => { mustChoose = false; setMode(mode === "password" ? "code" : "password"); });
+  document.getElementById("forgot").addEventListener("click", () => {
+    mustChoose = true;
+    setMode("code");
+    duo.say(s.forgot[0], s.forgot[1]);
+    if (emailOk(emailInput.value.trim())) ask();
+  });
+}
+codeInput.addEventListener("input", () => {
+  codeInput.value = codeInput.value.replace(/\\D/g, "").slice(0, 6);
+  duo.watch(codeInput);
+  const left = 6 - codeInput.value.length;
+  check.disabled = left > 0;
+  if (left > 0 && left < 6) duo.say(plural(left, s.digits[0], s.digits[1]), "");
+  else if (left === 0) duo.say(s.codeOk[0], s.codeOk[1]);
+});
+if (newPassword) {
+  newPassword.addEventListener("focus", () => { duo.shut(true); duo.say(s.choose[0], s.choose[1]); });
+  newPassword.addEventListener("blur", () => duo.shut(false));
+}
 verify.addEventListener("submit", async (e) => {
   e.preventDefault();
-  error.hidden = true;
-  const code = document.getElementById("code").value.trim();
+  error.textContent = "";
+  const code = codeInput.value.trim();
   const chosen = target.kind === "email" && newPassword ? newPassword.value : "";
-  if (chosen && chosen.length < MIN) return fail(null, t.shortPassword);
+  if (chosen && chosen.length < MIN) return fail(null, s.chooseShort);
+  check.disabled = true;
   try {
     // Signed in once: a password that failed to save is retried, not the code.
-    signedIn = signedIn || (target.kind === "email"
-      ? await post("/sign-in/email-otp", { email: target.id, otp: code })
-      : await post("/phone-number/verify", { phoneNumber: target.id, code }));
+    try {
+      signedIn = signedIn || (target.kind === "email"
+        ? await post("/sign-in/email-otp", { email: target.id, otp: code })
+        : await post("/phone-number/verify", { phoneNumber: target.id, code }));
+    } catch (err) { throw Object.assign(err, { wrongCode: err.status >= 400 && err.status < 429 }); }
     if (chosen) await post("/password/choose", { password: chosen });
     finish(signedIn);
-  } catch (err) { fail(err); }
+  } catch (err) {
+    fail(err, err && err.wrongCode ? s.wrongCode : null);
+    check.disabled = codeInput.value.length !== 6;
+  }
 });
 document.getElementById("back").addEventListener("click", () => {
   verify.hidden = true;
   mustChoose = false;
   signedIn = null;
   document.getElementById("ask").hidden = false;
-});`;
-  return layout(lang, t.title, opts.nonce, body, script);
+  if (emailInput) emailInput.focus();
+});
+setTimeout(() => duo.say(s.hello[0], s.hello[1]), 500);`;
+  return layout(lang, t.title, opts.nonce, body, script, { header: duoStage(), css: DUO_CSS, js: DUO_JS });
 }
 
 export function consentPage(opts: { lang: string | null; nonce: string }): string {
