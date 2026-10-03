@@ -16,42 +16,15 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Separator } from "@/components/ui/separator"
 import { useBilling } from "@/hooks/useBilling"
+import { UsagePanel } from "@/components/settings/usage-panel"
 import { useRowboatConfig } from "@/hooks/use-rowboat-config"
 import { CreditRewards } from "@/components/settings/credit-rewards"
 import { toast } from "sonner"
-import { getBillingPlanData, type BillingUsageBucket } from "@x/shared/dist/billing.js"
-import { sessionResetText, weekResetText } from '@/lib/usage-reset'
+import { getBillingPlanData } from "@x/shared/dist/billing.js"
 import { openPlans } from '@/lib/plans-window'
 
 interface AccountSettingsProps {
   dialogOpen: boolean
-}
-
-function CreditUsageBar({ label, bucket, helper }: {
-  label: string
-  bucket: BillingUsageBucket
-  helper?: string
-}) {
-  const pct = bucket.sanctionedCredits > 0
-    ? Math.min(100, Math.max(0, Math.round((bucket.usedCredits / bucket.sanctionedCredits) * 100)))
-    : 0
-
-  return (
-    <div className="space-y-1.5">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-xs font-medium text-muted-foreground">{label}</p>
-          {helper ? <p className="text-[11px] text-muted-foreground">{helper}</p> : null}
-        </div>
-        <p className="shrink-0 text-xs font-medium tabular-nums">
-          {pct}%
-        </p>
-      </div>
-      <div className="h-2 overflow-hidden rounded-full bg-muted">
-        <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />
-      </div>
-    </div>
-  )
 }
 
 export function AccountSettings({ dialogOpen }: AccountSettingsProps) {
@@ -65,6 +38,13 @@ export function AccountSettings({ dialogOpen }: AccountSettingsProps) {
   const [spacesOnlySession, setSpacesOnlySession] = useState(false)
   const appUrl = useRowboatConfig()?.appUrl ?? null
   const { billing, isLoading: billingLoading, refresh: refreshBilling } = useBilling(isRowboatConnected)
+  // When the numbers on screen were fetched: « Last updated » counts from it.
+  const [billingLoadedAt, setBillingLoadedAt] = useState(() => Date.now())
+  const [seenBilling, setSeenBilling] = useState(billing)
+  if (billing !== seenBilling) {
+    setSeenBilling(billing)
+    setBillingLoadedAt(Date.now())
+  }
   const currentPlan = billing ? getBillingPlanData(billing.catalog, billing.subscriptionPlanId) : null
   const hasPaidSubscription = currentPlan?.category === 'starter' || currentPlan?.category === 'pro'
 
@@ -233,15 +213,8 @@ export function AccountSettings({ dialogOpen }: AccountSettingsProps) {
                 {!billing.subscriptionPlanId ? 'Subscribe' : currentPlan?.category === 'free' ? 'Upgrade' : 'Change plan'}
               </Button>
             </div>
-            <div className="space-y-3 border-t pt-3">
-              {/* Baarali's windows: a week and a 5-hour session (lib/usage-reset.ts). */}
-              <CreditUsageBar label="This week" bucket={billing.monthly} helper={weekResetText(billing.monthly.resetsAt)} />
-              <CreditUsageBar
-                label="5-hour session"
-                bucket={billing.daily}
-                helper={sessionResetText(billing.daily.resetsAt)}
-              />
-            </div>
+            {/* Baarali: what is left, with live countdowns (settings/usage-panel.tsx). */}
+            <UsagePanel billing={billing} loadedAt={billingLoadedAt} onRefresh={() => refreshBilling()} refreshing={billingLoading} />
           </div>
         ) : (
           <p className="text-xs text-muted-foreground">Unable to load plan details</p>

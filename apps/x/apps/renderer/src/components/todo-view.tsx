@@ -1745,9 +1745,6 @@ export function TodoView({ onOpenNote, onOpenInChat, onFocusComposer, composer, 
               }}
             />
 
-            <div className="text-[11px] text-muted-foreground/60">
-              Saved to <code className="rounded bg-muted px-1">~/.rowboat/todo.md</code> — done items archive to <code className="rounded bg-muted px-1">todo/archive/</code>.
-            </div>
           </div>
         </div>
       </div>

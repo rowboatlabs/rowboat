@@ -87,7 +87,7 @@ export type Place = 'attr' | 'text' | 'control';
 function allowed(t: Template, values: string[], place: Place): boolean {
   if (!t.loose || place === 'attr') return true;
   if (values.every((v) => /^[\d\s.,:+\-–/%]*$/.test(v))) return true;
-  // On a button, a name (`Connect OpenAI`), never a phrase (`Add your first to-do`).
+  // On a button, a name (`Connect OpenAI`), never a phrase (`Add your first idea`).
   return place === 'control' && values.every((v) => !/\s/.test(v.trim()));
 }
 

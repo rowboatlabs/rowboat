@@ -2204,8 +2204,8 @@ export const FR: Dictionary = {
     "Accept suggestion": "Accepter la suggestion",
     "Add a step… mention @baarali to hand it off": "Ajouter une étape… mentionnez @baarali pour la confier",
     "Add a sub-task": "Ajouter une sous-tâche",
-    "Add a to-do": "Ajouter une tâche",
-    "Add a to-do… @baarali hands it off": "Ajouter une tâche… @baarali la confie à l’assistant",
+    "Add a to-do": "Ajouter à la liste",
+    "Add a to-do… @baarali hands it off": "Ajouter… @baarali la confie à l’assistant",
     "Add task": "Ajouter une tâche",
     "Add to your list": "Ajouter à votre liste",
     "All steps done — check it off?": "Toutes les étapes sont faites — la cocher ?",
@@ -2218,7 +2218,7 @@ export const FR: Dictionary = {
     "Baarali won't re-suggest this one.": "Baarali ne la suggérera plus.",
     "Bring this back onto the list": "Remettre dans la liste",
     "Changed since you last looked": "Modifié depuis votre dernier passage",
-    "Clear done": "Effacer les tâches faites",
+    "Clear done": "Effacer ce qui est fait",
     "Decline suggestion": "Refuser la suggestion",
     "Decline — Baarali learns from this": "Refuser — Baarali en tient compte",
     "Delete forever": "Supprimer définitivement",
@@ -2227,8 +2227,8 @@ export const FR: Dictionary = {
     "Don't suggest things like this": "Ne plus suggérer ce genre de chose",
     "Done & dismissed ·": "Fait et écarté ·",
     "Expand": "Déplier",
-    "New to-do": "Nouvelle tâche",
-    "New to-do — press N": "Nouvelle tâche — appuyez sur N",
+    "New to-do": "Ajouter",
+    "New to-do — press N": "Ajouter — touche N",
     "Noted — rule added to todo/preferences.md": "Noté — règle ajoutée à todo/preferences.md",
     "Nothing new worth suggesting": "Rien de nouveau à suggérer",
     "Off by default. The ✦ Suggest button always works; suggestions wait for your accept either way.": "Désactivé par défaut. Le bouton ✦ Suggérer marche toujours ; les suggestions attendent votre accord dans tous les cas.",
@@ -2245,9 +2245,9 @@ export const FR: Dictionary = {
     "Suggestion run failed": "La recherche de suggestions a échoué",
     "Suggestion settings": "Réglages des suggestions",
     "Suggestions waiting for your accept — jump to them": "Des suggestions attendent votre accord — y aller",
-    "Tasks": "Tâches",
+    "Tasks": "Ma liste",
     "Tell @baarali something about this…": "Dites quelque chose à l’assistant à ce sujet…",
-    "Todos": "Tâches",
+    "Todos": "À faire",
     "approve in chat": "approuver dans la discussion",
     "assign": "attribuer",
     "delete": "supprimer",
@@ -3221,7 +3221,12 @@ export const FR: Dictionary = {
     "Every Friday at 9, search the web for what was said this week about [my sector, my competitors] and sum it up with the sources.": "Chaque vendredi à 9 h, cherche sur le web ce qui s’est dit cette semaine sur [mon secteur, mes concurrents] et fais-m’en un résumé avec les sources.",
     "Weekly review": "Bilan de la semaine",
     "Every Friday · To-do": "Chaque vendredi · À faire",
-    "Every Friday at 5 pm, review my week: what got done, what is left on my to-do list, and what is stuck.": "Chaque vendredi à 17 h, fais le bilan de ma semaine : ce qui a été fait, ce qui reste dans À faire, et ce qui bloque."
+    "Every Friday at 5 pm, review my week: what got done, what is left on my to-do list, and what is stuck.": "Chaque vendredi à 17 h, fais le bilan de ma semaine : ce qui a été fait, ce qui reste dans À faire, et ce qui bloque.",
+    // The to-do list the app writes on the first run (core todo/fileops.ts SEED), and the usage panel (02/10/2026).
+    "Add your first to-do — just type below": "Ajoutez votre première chose à faire : écrivez-la juste en dessous",
+    "introduce yourself — what can you do here?": "présente-toi : que peux-tu faire ici ?",
+    "Dismiss anything you don't want — hover a row and hit ✕ (it lands in Done & dismissed below, restorable)": "Retirez ce dont vous ne voulez pas : survolez la ligne et cliquez ✕ (elle va dans « Fait et écarté », plus bas, et peut revenir)",
+    "Last updated: just now": "Dernière mise à jour : à l’instant"
 
   },
   // Lines about people (apps/x renderer lib/spaces-membership.ts): the names
@@ -3619,7 +3624,13 @@ export const FR: Dictionary = {
     "Every Thursday at $1 GMT": "Chaque jeudi à $1 GMT",
     "Every Friday at $1 GMT": "Chaque vendredi à $1 GMT",
     "Every Saturday at $1 GMT": "Chaque samedi à $1 GMT",
-    "Every Sunday at $1 GMT": "Chaque dimanche à $1 GMT"
+    "Every Sunday at $1 GMT": "Chaque dimanche à $1 GMT",
+    "$1 d $2 h": "$1 j $2 h",
+    "Renews $1 at $2 GMT (in $3)": "Se renouvelle $1 à $2 GMT (dans $3)",
+    "You have $1% of your session and $2% of your week left.": "Il vous reste $1 % de votre session et $2 % de votre semaine.",
+    "Your session starts with your next message. $1% of your week is left.": "Votre session commence avec votre prochain message. Il vous reste $1 % de votre semaine.",
+    "$1% used": "$1 % utilisés",
+    "Last updated: $1 min ago": "Dernière mise à jour : il y a $1 min"
 
   },
 };

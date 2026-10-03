@@ -8,10 +8,11 @@ export const USAGE_TIME_ZONE = 'Africa/Abidjan'
 const clock = new Intl.DateTimeFormat('fr-FR', { timeZone: USAGE_TIME_ZONE, hour: '2-digit', minute: '2-digit' })
 const day = new Intl.DateTimeFormat('fr-FR', { timeZone: USAGE_TIME_ZONE, weekday: 'long', day: 'numeric', month: 'short' })
 
-/** "3 h 08", "45 min", "1 min". */
+/** "2 d 5 h", "3 h 08", "45 min", "1 min". */
 export function timeLeft(ms: number): string {
   const minutes = Math.max(1, Math.ceil(ms / 60_000))
   if (minutes < 60) return `${minutes} min`
+  if (minutes >= 24 * 60) return `${Math.floor(minutes / 1440)} d ${Math.floor((minutes % 1440) / 60)} h`
   return `${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, '0')}`
 }
 
@@ -22,11 +23,18 @@ export function sessionResetText(resetsAt: string | undefined, now: number = Dat
   return `Resets at ${clock.format(end)} GMT (in ${timeLeft(end - now)})`
 }
 
-/** The week: the day and time it renews. */
-export function weekResetText(resetsAt: string | undefined): string | undefined {
+/** The week: the day and time it renews, and how long until then. */
+export function weekResetText(resetsAt: string | undefined, now: number = Date.now()): string | undefined {
   const end = resetsAt ? Date.parse(resetsAt) : NaN
   if (!Number.isFinite(end)) return undefined
-  return `Renews ${day.format(end)} at ${clock.format(end)} GMT`
+  if (end <= now) return `Renews ${day.format(end)} at ${clock.format(end)} GMT`
+  return `Renews ${day.format(end)} at ${clock.format(end)} GMT (in ${timeLeft(end - now)})`
+}
+
+/** What is left, said in one sentence at the top of the usage panel. */
+export function usageHeadline(sessionLeftPct: number, weekLeftPct: number, sessionOpen: boolean): string {
+  if (!sessionOpen) return `Your session starts with your next message. ${weekLeftPct}% of your week is left.`
+  return `You have ${sessionLeftPct}% of your session and ${weekLeftPct}% of your week left.`
 }
 
 /** The sidebar's short line: "Resets in 3 h 08", or not open yet. */

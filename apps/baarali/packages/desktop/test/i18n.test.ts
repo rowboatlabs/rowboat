@@ -71,13 +71,18 @@ describe('translate', () => {
     expect(translate(FR, '👍, 3 reactions, Awa, including you', 'attr')).toBe('👍, 3 réactions, Awa, y compris vous');
   });
 
+  it('translates the to-do list the app writes on the first run, not the ones people write', () => {
+    expect(translate(FR, 'Add your first to-do — just type below')).toBe('Ajoutez votre première chose à faire : écrivez-la juste en dessous');
+    expect(translate(FR, 'Call the bank — before noon')).toBeNull();
+  });
+
   it('never applies a short template to a title a person wrote', () => {
     // « Open questions » could be a note: as plain text it stays as written.
     expect(translate(FR, 'Open questions', 'text')).toBeNull();
     expect(translate(FR, 'Open questions', 'attr')).toBe('Ouvrir questions');
     expect(translate(FR, 'Connect OpenAI', 'control')).toBe('Connecter OpenAI');
     // Even on a button, a phrase someone wrote is not a name.
-    expect(translate(FR, 'Add your first to-do — just type below', 'control')).toBeNull();
+    expect(translate(FR, 'Add your first idea — just type below', 'control')).toBeNull();
     // Numbers are never someone's words.
     expect(translate(FR, '12 files', 'text')).toBe('12 fichiers');
   });
