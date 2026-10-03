@@ -12,7 +12,8 @@
  * 02/10/2026: the upstream's primary is black by day, white by night — the
  * send button, the main buttons, checks — and its own messages sat in a
  * black bubble: the app read black and white. The primary is the brand
- * blue in both themes; one's own messages sit on a light wash of it.
+ * blue in both themes, and one's own messages sit in it, like the send
+ * button (02/10/2026, the founder's call over a lighter wash).
  */
 
 html:root {
@@ -20,8 +21,8 @@ html:root {
   --primary-foreground: #ffffff;
   --sidebar-primary: #1a6dff;
   --sidebar-primary-foreground: #ffffff;
-  --rowboat-bubble: #e8f0ff;
-  --rowboat-bubble-foreground: #0d0d0d;
+  --rowboat-bubble: #1a6dff;
+  --rowboat-bubble-foreground: #ffffff;
   --ring: #1a6dff;
   --sidebar-ring: #1a6dff;
   --sidebar-accent: rgba(26, 109, 255, 0.1);
@@ -34,8 +35,8 @@ html.dark {
   --primary-foreground: #ffffff;
   --sidebar-primary: #1a6dff;
   --sidebar-primary-foreground: #ffffff;
-  --rowboat-bubble: #1d2738;
-  --rowboat-bubble-foreground: #ececec;
+  --rowboat-bubble: #1a6dff;
+  --rowboat-bubble-foreground: #ffffff;
   --ring: #4d8dff;
   --sidebar-ring: #4d8dff;
   --sidebar-accent: rgba(77, 141, 255, 0.16);

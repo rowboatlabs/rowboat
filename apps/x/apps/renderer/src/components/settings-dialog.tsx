@@ -2046,7 +2046,7 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
       >
         <div className="flex h-full overflow-hidden">
           {/* Sidebar */}
-          <div className="w-48 border-r bg-muted/30 p-2 flex flex-col">
+          <div className="w-48 border-r bg-muted/30 p-2 flex flex-col min-h-0 overflow-y-auto">
             <div className="px-2 pt-3.5 pb-3 mb-2">
               <h2 className="font-semibold text-base tracking-tight">Settings</h2>
             </div>

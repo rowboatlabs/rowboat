@@ -185,7 +185,7 @@ export function OrgMonogram({ org, size = 'md', className }: {
     return (
         <span
             title={org.address}
-            className={cn('inline-flex shrink-0 items-center justify-center bg-foreground text-background font-bold leading-none select-none', dims, className)}
+            className={cn('inline-flex shrink-0 items-center justify-center bg-primary text-primary-foreground font-bold leading-none select-none', dims, className)}
         >
             {orgMonogram(org)}
         </span>
