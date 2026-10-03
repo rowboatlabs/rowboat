@@ -10,7 +10,7 @@ import {
 import { Button } from "@/components/ui/button"
 import type { BillingErrorMatch } from "@/lib/billing-error"
 import * as analytics from "@/lib/analytics"
-import { useRowboatConfig } from "@/hooks/use-rowboat-config"
+import { openPlans } from '@/lib/plans-window'
 
 interface BillingErrorDialogProps {
   open: boolean
@@ -19,8 +19,6 @@ interface BillingErrorDialogProps {
 }
 
 export function BillingErrorDialog({ open, match, onOpenChange }: BillingErrorDialogProps) {
-  const appUrl = useRowboatConfig()?.appUrl ?? null
-
   useEffect(() => {
     if (open && match) analytics.billingErrorShown(match.kind)
   }, [open, match])
@@ -29,7 +27,7 @@ export function BillingErrorDialog({ open, match, onOpenChange }: BillingErrorDi
 
   const handleUpgrade = () => {
     analytics.billingUpgradeClicked(match.kind)
-    if (appUrl) window.open(`${appUrl}?intent=upgrade`)
+    openPlans()
     onOpenChange(false)
   }
 
@@ -44,7 +42,7 @@ export function BillingErrorDialog({ open, match, onOpenChange }: BillingErrorDi
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Dismiss
           </Button>
-          <Button onClick={handleUpgrade} disabled={!appUrl}>
+          <Button onClick={handleUpgrade}>
             {match.cta}
           </Button>
         </DialogFooter>

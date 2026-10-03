@@ -2,6 +2,7 @@ import { ANNUAL_DISCOUNT } from './catalog.js';
 import { formatPrice, type HomeData } from './home-page.js';
 import { CONTACT, legalLinks } from './legal-page.js';
 import { FAVICON, logoTile, logoWord, LOGO_ALIVE_CSS, LOGO_ALIVE_JS, logoTileLive } from './logo.js';
+import type { PlanOffer, PlanOfferLevel, PlanOffers } from '@x/shared/dist/billing.js';
 import type { Money, Offer } from './pricing.js';
 import { pickLang } from './sign-in-page.js';
 
@@ -131,6 +132,9 @@ const STRINGS = {
       ['F CFA ou euros', 'Des prix fixes dans les deux monnaies, jamais recalculés au taux du jour.'],
     ],
     paySoon: 'Le paiement en ligne arrive bientôt. D’ici là, le forfait Découverte est ouvert à tous.',
+    // The app's window of plans (planOffers).
+    appLead: 'Votre utilisation se renouvelle toutes les 5 heures et chaque semaine. Changez quand vous voulez.',
+    appFoot: 'Prix hors taxes. Le paiement en ligne arrive bientôt, Mobile Money compris.',
     faqKicker: 'Questions',
     faqTitle: ['Ce qu’on ', 'nous demande', '.'],
     faq: [
@@ -255,6 +259,8 @@ const STRINGS = {
       ['CFA francs or euros', 'Fixed prices in both currencies, never recomputed at the day’s rate.'],
     ],
     paySoon: 'Online payment is coming soon. Until then, the Découverte plan is open to everyone.',
+    appLead: 'Your usage renews every 5 hours and every week. Change plans whenever you want.',
+    appFoot: 'Prices exclude taxes. Online payment is coming soon, mobile money included.',
     faqKicker: 'Questions',
     faqTitle: ['What people ', 'ask us', '.'],
     faq: [
@@ -304,6 +310,48 @@ const PAY_ICONS = [
   '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="5.5" width="19" height="13" rx="2.5"/><path d="M2.5 10h19M6.5 15h4"/></svg>',
   '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/><path d="M15 9.2c-.6-1-1.7-1.6-3-1.6-1.7 0-3 1-3 2.3 0 3 6 1.5 6 4.3 0 1.3-1.3 2.3-3 2.3-1.3 0-2.5-.6-3-1.6M12 6v1.6M12 16.4V18"/></svg>',
 ];
+
+const usageRatio = (data: HomeData, id: string) => {
+  const r = (data.weekCredits[id] ?? 0) / (data.weekCredits.essentiel || 1);
+  return r >= 2 ? String(Math.round(r)) : '1';
+};
+
+/**
+ * The plans for the app's own window (GET /v1/plans): this page's words and
+ * prices, as data, so the app and the site never say two things.
+ */
+export function planOffers(data: HomeData, acceptLanguage: string | null): PlanOffers {
+  const lang: Lang = pickLang(acceptLanguage);
+  const t = STRINGS[lang];
+  const written = (prices: Money[]) => {
+    const xof = priceOf(prices, 'XOF');
+    const eur = priceOf(prices, 'EUR');
+    return xof && eur ? { xof: formatPrice(xof, lang), eur: formatPrice(eur, lang) } : null;
+  };
+  const level = (offer: Offer, label: string | null, note: string | null): PlanOfferLevel =>
+    offer.billing.kind === 'free'
+      ? { id: offer.id, label, price: null, per: t.forever, note }
+      : { id: offer.id, label, price: written(offer.billing.prices), per: offer.billing.period === 'week' ? t.perWeek : t.perMonth, note };
+  const copy = (offer: Offer) => t.plans[offer.id] ?? t.plans.pro;
+  const plan = (offer: Offer, levels: PlanOfferLevel[]): PlanOffer => ({
+    id: offer.id,
+    name: offer.displayName,
+    tag: copy(offer).tag,
+    for: copy(offer).for,
+    plus: copy(offer).plus,
+    points: copy(offer).points,
+    featured: offer.id === 'essentiel',
+    free: offer.billing.kind === 'free',
+    levels,
+  });
+  const yearNote = lang === 'fr' ? `${t.yearly} : ${t.save}` : `${t.yearly}: ${t.save}`;
+  const pros = data.offers.filter((o) => o.category === 'pro');
+  const plans = data.offers
+    .filter((o) => o.category !== 'pro')
+    .map((o) => plan(o, [level(o, null, o.billing.kind === 'paid' ? (o.billing.period === 'week' ? t.weekOnly : yearNote) : null)]));
+  if (pros.length) plans.push(plan(pros[0], pros.map((o) => level(o, `×${usageRatio(data, o.id)}`, t.usage(usageRatio(data, o.id))))));
+  return { lang, lead: t.appLead, soon: t.soon, foot: t.appFoot, plans };
+}
 
 export function pricingPage(data: HomeData, opts: { lang: string | null; nonce: string }): string {
   const lang: Lang = pickLang(opts.lang);

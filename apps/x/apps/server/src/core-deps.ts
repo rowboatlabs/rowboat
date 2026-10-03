@@ -44,7 +44,7 @@ import { getPlannerConfig } from '@x/core/dist/todo/planner-task.js';
 import { readTodo, listArchived as listTodoArchived } from '@x/core/dist/todo/fileops.js';
 import type { HomeThreadsTracker } from '@x/core/dist/home/threads.js';
 import { fetchTask, listTasks, readRunIds as readTaskRunIds, createTask, patchTask, deleteTask } from '@x/core/dist/background-tasks/fileops.js';
-import { getBillingInfo } from '@x/core/dist/billing/billing.js';
+import { getBillingInfo, getPlanOffers } from '@x/core/dist/billing/billing.js';
 import * as versionHistory from '@x/core/dist/knowledge/version_history.js';
 import { editSlide, generateDeckOutline, generateSlide } from '@x/core/dist/knowledge/deck_outline.js';
 import { invalidateCopilotInstructionsCache } from '@x/core/dist/runtime/assembly/copilot/instructions.js';
@@ -332,6 +332,7 @@ export function createCoreRpcHandlers(opts?: { sessionsIndexReady?: Promise<void
       return { runIds };
     },
     'billing:getInfo': async () => getBillingInfo(),
+    'billing:getPlans': async (args) => getPlanOffers(args.lang),
     'credits:getState': async () => getCreditsState(),
     'notifications:getSettings': async () => loadNotificationSettings(),
     'turnLimits:getSettings': async () => loadTurnLimitsSettings(),

@@ -90,11 +90,11 @@ import type { SpaceSelection } from "@/components/spaces-view"
 import { MascotFaceIcon } from "@/components/talking-head"
 import { extractConferenceLink } from "@/lib/calendar-event"
 import { useBilling } from "@/hooks/useBilling"
-import { useRowboatConfig } from "@/hooks/use-rowboat-config"
 import { toast } from "@/lib/toast"
 import { getBillingPlanData } from "@x/shared/dist/billing.js"
 import { ServiceEvent } from "@x/shared/src/service-events.js"
 import z from "zod"
+import { openPlans } from '@/lib/plans-window'
 
 interface TreeNode {
   path: string
@@ -492,7 +492,6 @@ export function SidebarContentPanel({
   const outOfCreditsRef = useRef(false)
   const creditPopoverAutoShownRef = useRef(false)
   const [loggingIn, setLoggingIn] = useState(false)
-  const appUrl = useRowboatConfig()?.appUrl ?? null
   const { billing, refresh: refreshBilling } = useBilling(isRowboatConnected)
   const currentBillingPlan = billing ? getBillingPlanData(billing.catalog, billing.subscriptionPlanId) : null
 
@@ -1221,7 +1220,7 @@ export function SidebarContentPanel({
                     </button>
                   </PopoverTrigger>
                   <button
-                    onClick={() => appUrl && window.open(`${appUrl}?intent=upgrade`)}
+                    onClick={() => openPlans()}
                     className="shrink-0 rounded-md bg-sidebar-foreground/10 px-2.5 py-1 text-[11px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-foreground/20"
                   >
                     {upgradeLabel}
@@ -1249,7 +1248,7 @@ export function SidebarContentPanel({
                     Upgrade your plan to continue using all features.
                   </p>
                   <button
-                    onClick={() => { appUrl && window.open(`${appUrl}?intent=upgrade`); setCreditPopoverOpen(false) }}
+                    onClick={() => { openPlans(); setCreditPopoverOpen(false) }}
                     className="mt-3 w-full rounded-md bg-red-500 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-red-600"
                   >
                     Upgrade now
@@ -1276,7 +1275,7 @@ export function SidebarContentPanel({
                 })()}
               </div>
               <button
-                onClick={() => appUrl && window.open(`${appUrl}?intent=upgrade`)}
+                onClick={() => openPlans()}
                 className="shrink-0 rounded-md bg-sidebar-foreground/10 px-2.5 py-1 text-[11px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-foreground/20"
               >
                 {upgradeLabel}

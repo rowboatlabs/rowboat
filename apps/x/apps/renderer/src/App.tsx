@@ -80,6 +80,7 @@ import { AboutDialog } from "@/components/about-dialog"
 import { Button } from "@/components/ui/button"
 import { Toaster } from "@/components/ui/sonner"
 import { UpdateCard } from "@/components/update-card"
+import { PlansDialog } from '@/components/plans-dialog'
 import { BillingErrorDialog } from "@/components/billing-error-dialog"
 import { CreditCelebration } from "@/components/credit-celebration"
 import { matchBillingError, type BillingErrorMatch } from "@/lib/billing-error"
@@ -8186,6 +8187,8 @@ function App() {
         onOpenChange={setBillingErrorOpen}
       />
       <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} />
+      {/* Every "Upgrade" opens this, not the site (lib/plans-window.ts). */}
+      <PlansDialog />
       {/* The one host for Create / Join a server (lib/server-dialog.ts): whatever
           opened it, a finished dialog lands in the org — the joined space, or
           the server's landing space. */}

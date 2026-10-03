@@ -65,3 +65,46 @@ export function getBillingPlanData(
   if (!planId) return null;
   return catalog.plans.find((plan) => plan.id === planId) ?? null;
 }
+
+// The plans as Baarali's pricing page shows them, for the app to show the
+// same in its own window (Baarali, 02/10/2026: the account lives in the
+// app, the site is a showcase). Served by the control plane at /v1/plans,
+// already worded and priced in the person's language: the app displays.
+export const PlanOfferLevelSchema = z.object({
+  /** The catalog plan id (BillingCatalogPlan.id). */
+  id: z.string(),
+  /** Short name of the level, when a plan has several (Pro: "×5", "×10"). */
+  label: z.string().nullable(),
+  /** The price, written, in each currency; null for a free plan. */
+  price: z.object({ xof: z.string(), eur: z.string() }).nullable(),
+  /** "par semaine", "par mois", "pour toujours". */
+  per: z.string(),
+  /** A line under the price, or null. */
+  note: z.string().nullable(),
+});
+export type PlanOfferLevel = z.infer<typeof PlanOfferLevelSchema>;
+
+export const PlanOfferSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  tag: z.string(),
+  for: z.string(),
+  plus: z.string(),
+  points: z.array(z.string()),
+  /** The plan the page sets apart. */
+  featured: z.boolean(),
+  free: z.boolean(),
+  levels: z.array(PlanOfferLevelSchema).min(1),
+});
+export type PlanOffer = z.infer<typeof PlanOfferSchema>;
+
+export const PlanOffersSchema = z.object({
+  lang: z.enum(['fr', 'en']),
+  lead: z.string(),
+  /** What a paid plan's button says while payment is not open. */
+  soon: z.string(),
+  /** Taxes and payment, under the plans. */
+  foot: z.string(),
+  plans: z.array(PlanOfferSchema),
+});
+export type PlanOffers = z.infer<typeof PlanOffersSchema>;

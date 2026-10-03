@@ -88,6 +88,7 @@ import { useRowboatConfig } from "@/hooks/use-rowboat-config"
 import { getBillingPlanData } from "@x/shared/dist/billing.js"
 import { ServiceEvent } from "@x/shared/src/service-events.js"
 import z from "zod"
+import { openPlans } from '@/lib/plans-window'
 
 // The app's left navigation collapsed to a slim icon rail (Notion/Linear
 // style): a full-height strip of the same monochrome glyphs the panel sidebar
@@ -1259,7 +1260,7 @@ export function DockSidebar({
             <ContextMenuSeparator />
             {isRowboatConnected ? (
               appUrl && (
-                <ContextMenuItem onClick={() => window.open(`${appUrl}?intent=upgrade`)}>
+                <ContextMenuItem onClick={() => openPlans()}>
                   <ArrowUpRight className="mr-2 size-3.5" />
                   {outOfCredits
                     ? 'Out of credits · Upgrade'

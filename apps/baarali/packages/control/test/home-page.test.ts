@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { PlanOffersSchema } from '@x/shared/dist/billing.js';
 import { createApp } from '../src/app.js';
 import { ASSUMPTIONS, MEDIA_PACKS, OFFERS } from '../src/catalog.js';
 import { formatPrice } from '../src/home-page.js';
@@ -117,6 +118,33 @@ describe('the legal pages', () => {
   });
 });
 
+
+describe('the plans, for the app', () => {
+  it('are the pricing page\'s, as data the app shows in its own window', async () => {
+    const res = await app.request('/v1/plans?lang=fr');
+    expect(res.status).toBe(200);
+    const offers = PlanOffersSchema.parse(await res.json());
+    expect(offers.plans.map((p) => p.name)).toEqual(['Découverte', 'Semaine', 'Essentiel', 'Pro']);
+    const [free, week, essentiel, pro] = offers.plans;
+    expect(free.free).toBe(true);
+    expect(free.levels[0].price).toBeNull();
+    expect(norm(week.levels[0].price!.xof)).toBe('3 280 F CFA');
+    expect(norm(week.levels[0].price!.eur)).toBe('5 €');
+    expect(week.levels[0].per).toBe('par semaine');
+    expect(essentiel.featured).toBe(true);
+    expect(pro.levels.map((l) => l.id)).toEqual(['pro-100', 'pro-200']);
+    expect(pro.levels.map((l) => l.label)).toEqual(['×5', '×10']);
+    expect(offers.soon).toBe('Paiement bientôt disponible');
+    // Never what a plan costs us.
+    expect(JSON.stringify(offers)).not.toMatch(/weekBudget|usd|marginRate|weekCredits/i);
+  });
+
+  it('answer in English when asked', async () => {
+    const offers = PlanOffersSchema.parse(await (await app.request('/v1/plans', { headers: { 'accept-language': 'en-GB' } })).json());
+    expect(offers.lang).toBe('en');
+    expect(offers.plans[1].levels[0].per).toBe('per week');
+  });
+});
 
 describe('the pricing page', () => {
   it('is where the app\'s upgrade buttons land', async () => {

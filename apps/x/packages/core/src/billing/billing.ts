@@ -1,6 +1,6 @@
 import { getAccessToken } from '../auth/tokens.js';
 import { API_URL } from '../config/env.js';
-import type { BillingInfo, BillingPlanId } from '@x/shared/dist/billing.js';
+import { PlanOffersSchema, type BillingInfo, type BillingPlanId, type PlanOffers } from '@x/shared/dist/billing.js';
 import { getRowboatConfig } from '../config/rowboat.js';
 
 export async function getBillingInfo(): Promise<BillingInfo> {
@@ -55,4 +55,19 @@ export async function getBillingInfo(): Promise<BillingInfo> {
       availableCredits: body.billing.usage.store?.availableCredits ?? 0,
     },
   };
+}
+
+/**
+ * The plans as Baarali's pricing page words them (control GET /v1/plans),
+ * for the app's own window. Null when the API serves none (an upstream
+ * deployment) or cannot be reached: the window says so.
+ */
+export async function getPlanOffers(lang: 'fr' | 'en'): Promise<PlanOffers | null> {
+  try {
+    const response = await fetch(`${API_URL}/v1/plans?lang=${lang}`);
+    if (!response.ok) return null;
+    return PlanOffersSchema.parse(await response.json());
+  } catch {
+    return null;
+  }
 }

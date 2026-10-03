@@ -11,6 +11,17 @@ import type { Dictionary } from "./translate.js";
 
 export const FR: Dictionary = {
   exact: {
+    // The plans window (renderer components/plans-dialog.tsx, 02/10/2026).
+    "Plans": "Forfaits",
+    "Your usage renews every 5 hours and every week.": "Votre utilisation se renouvelle toutes les 5 heures et chaque semaine.",
+    "Currency": "Devise",
+    "CFA francs": "F CFA",
+    "Euros": "Euros",
+    "Your plan": "Votre forfait",
+    "Current plan": "Forfait actuel",
+    "Included": "Inclus",
+    "Loading plans…": "Chargement des forfaits…",
+    "The plans could not be loaded. Check your connection and try again.": "Les forfaits n’ont pas pu être chargés. Vérifiez votre connexion et réessayez.",
     "including you": "y compris vous",
     "and you'll need to pick a new Assistant model": "et vous devrez choisir un nouveau modèle pour l’Assistant",
     "Baarali": "Baarali",
@@ -3141,6 +3152,7 @@ export const FR: Dictionary = {
     "$1 was removed": "$1 ne fait plus partie de l’espace",
   },
   templates: {
+    "This week: $1% used": "Cette semaine : $1 % utilisés",
     "Resets at $1 GMT (in $2)": "Repart à zéro à $1 GMT (dans $2)",
     "Renews $1 at $2 GMT": "Se renouvelle $1 à $2 GMT",
     "$1 min": "$1 min",

@@ -21,6 +21,7 @@ import { CreditRewards } from "@/components/settings/credit-rewards"
 import { toast } from "sonner"
 import { getBillingPlanData, type BillingUsageBucket } from "@x/shared/dist/billing.js"
 import { sessionResetText, weekResetText } from '@/lib/usage-reset'
+import { openPlans } from '@/lib/plans-window'
 
 interface AccountSettingsProps {
   dialogOpen: boolean
@@ -228,7 +229,7 @@ export function AccountSettings({ dialogOpen }: AccountSettingsProps) {
                   <p className="text-xs text-muted-foreground">Subscribe to access AI features</p>
                 )}
               </div>
-              <Button variant="outline" size="sm" onClick={() => appUrl && window.open(`${appUrl}?intent=upgrade`)}>
+              <Button variant="outline" size="sm" onClick={() => openPlans()}>
                 {!billing.subscriptionPlanId ? 'Subscribe' : currentPlan?.category === 'free' ? 'Upgrade' : 'Change plan'}
               </Button>
             </div>
