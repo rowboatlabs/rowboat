@@ -97,7 +97,7 @@ import { getBillingPlanData } from "@x/shared/dist/billing.js"
 import { ServiceEvent } from "@x/shared/src/service-events.js"
 import z from "zod"
 import { openPlans } from '@/lib/plans-window'
-import { SessionGauge } from '@/components/sidebar-session-gauge'
+import { UsagePopover } from '@/components/sidebar-session-gauge'
 
 interface TreeNode {
   path: string
@@ -843,7 +843,7 @@ export function SidebarContentPanel({
       <SidebarContent className="gap-0">
         {/* Ordered to mirror the dock: Assistant, Projects, Spaces, then the
             destinations, then Chats. Same glyphs as the dock tiles. */}
-        <SidebarGroup className="flex flex-col pb-0 pt-2">
+        <SidebarGroup className="flex flex-col pb-2 pt-2">
           <SidebarGroupContent>
             <SidebarMenu>
               <SidebarMenuItem>
@@ -1291,7 +1291,8 @@ export function SidebarContentPanel({
             </div>
           )
         }
-        return <SessionGauge billing={billing} upgradeLabel={upgradeLabel} onOpenUsage={() => setUsageSettingsOpen(true)} />
+        // Otherwise the usage is a ring in the bottom row (UsagePopover), not a block.
+        return null
       })() : null}
       {/* Sign in CTA */}
       {!isRowboatConnected && (
@@ -1315,6 +1316,14 @@ export function SidebarContentPanel({
             <div className="truncate text-xs font-medium text-sidebar-foreground">{billing?.userEmail ?? ''}</div>
             {currentBillingPlan?.displayName && <div className="truncate text-[11px] text-muted-foreground">{currentBillingPlan.displayName}</div>}
           </div>
+          {isRowboatConnected && billing && (
+            <UsagePopover
+              billing={billing}
+              planName={currentBillingPlan?.displayName ?? null}
+              upgradeLabel={!billing.subscriptionPlanId || currentBillingPlan?.category === 'free' || currentBillingPlan?.category === 'starter' ? 'Upgrade' : 'Manage'}
+              onOpenUsage={() => setUsageSettingsOpen(true)}
+            />
+          )}
           {onStartTour && (
             <button type="button" onClick={onStartTour} aria-label="Take a tour" title="Take a tour"
               className="flex size-7 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground">

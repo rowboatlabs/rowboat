@@ -1,13 +1,18 @@
 import { useEffect, useState } from 'react'
-import type { BillingInfo } from '@x/shared/dist/billing.js'
+import { ChevronRight } from 'lucide-react'
+import type { BillingInfo, BillingUsageBucket } from '@x/shared/dist/billing.js'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { openPlans } from '@/lib/plans-window'
-import { sessionCountdown, weekShortText } from '@/lib/usage-reset'
+import { sessionCountdown, weekResetText } from '@/lib/usage-reset'
 
-// The bottom of the sidebar (Baarali, 02/10/2026): how much of the 5-hour
-// session is spent and when it starts over, counting down by itself, then
-// what is left of the week (03/10/2026); a click opens Settings › Usage. The
-// upgrade pill wraps under the text when the sidebar is narrow instead of
-// writing over the plan's name, which the upstream row did.
+// The usage, as a ring at the bottom of the sidebar (Baarali, 03/10/2026):
+// the block that sat there took room the founder wanted back. The ring shows
+// the session spent; a click opens what the block said, and a little more:
+// the plan's limits, the session and the week with when they start over,
+// the way to the usage page and to a bigger plan.
+
+const usedPct = (b: BillingUsageBucket) =>
+  b.sanctionedCredits > 0 ? Math.min(100, Math.max(0, Math.round((b.usedCredits / b.sanctionedCredits) * 100))) : 0
 
 /** Now, again every 30 seconds: enough for a countdown in minutes. */
 function useNow(everyMs = 30_000): number {
@@ -19,38 +24,74 @@ function useNow(everyMs = 30_000): number {
   return now
 }
 
-export function SessionGauge({ billing, upgradeLabel, onOpenUsage }: { billing: BillingInfo; upgradeLabel: string; onOpenUsage?: () => void }) {
-  const now = useNow()
-  const { usedCredits, sanctionedCredits, resetsAt } = billing.daily
-  const open = !!resetsAt && Date.parse(resetsAt) > now
-  const pct = open && sanctionedCredits > 0 ? Math.min(100, Math.round((usedCredits / sanctionedCredits) * 100)) : 0
-  const week = billing.monthly.sanctionedCredits > 0
-    ? Math.min(100, Math.round((billing.monthly.usedCredits / billing.monthly.sanctionedCredits) * 100))
-    : 0
+/** A ring filled to `pct`, red once nearly spent. */
+function Ring({ pct }: { pct: number }) {
+  const r = 7
+  const c = 2 * Math.PI * r
   return (
-    <div className="px-3 py-2">
-      <div className="rounded-lg border border-sidebar-border bg-sidebar-accent/20 px-3 py-2">
-        <button type="button" onClick={onOpenUsage} title="Usage" className="block w-full text-left">
-          <div className="flex items-center justify-between gap-2 text-xs text-sidebar-foreground">
-            <span className="truncate">5-hour session</span>
-            <span className="shrink-0 tabular-nums">{`${pct}%`}</span>
-          </div>
-          <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-sidebar-foreground/10">
-            <div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${pct}%` }} />
-          </div>
-          <div className="mt-1.5 text-[11px] leading-snug text-muted-foreground tabular-nums">{sessionCountdown(resetsAt, now)}</div>
-          <div className="text-[11px] leading-snug text-muted-foreground tabular-nums">{weekShortText(100 - week, billing.monthly.resetsAt, now)}</div>
+    <svg viewBox="0 0 18 18" className="size-[18px] -rotate-90" aria-hidden="true">
+      <circle cx="9" cy="9" r={r} fill="none" stroke="currentColor" strokeOpacity="0.2" strokeWidth="2.2" />
+      <circle
+        cx="9" cy="9" r={r} fill="none" strokeWidth="2.2" strokeLinecap="round"
+        className={pct >= 90 ? 'stroke-destructive' : 'stroke-primary'}
+        strokeDasharray={c} strokeDashoffset={c * (1 - pct / 100)}
+      />
+    </svg>
+  )
+}
+
+function Line({ label, right, pct }: { label: string; right: string; pct: number }) {
+  return (
+    <div className="space-y-1.5 py-2">
+      <div className="flex items-baseline justify-between gap-3 text-[13px]">
+        <span className="truncate">{label}</span>
+        <span className="shrink-0 tabular-nums text-muted-foreground">{right}</span>
+      </div>
+      <div className="h-1 overflow-hidden rounded-full bg-foreground/10">
+        <div className={`h-full rounded-full ${pct >= 90 ? 'bg-destructive' : 'bg-primary'}`} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  )
+}
+
+export function UsagePopover({ billing, planName, upgradeLabel, onOpenUsage }: {
+  billing: BillingInfo
+  planName: string | null
+  upgradeLabel: string
+  onOpenUsage?: () => void
+}) {
+  const now = useNow()
+  const open = !!billing.daily.resetsAt && Date.parse(billing.daily.resetsAt) > now
+  const session = open ? usedPct(billing.daily) : 0
+  const week = usedPct(billing.monthly)
+  const weekWhen = weekResetText(billing.monthly.resetsAt, now)
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button type="button" aria-label="Usage" title="Usage"
+          className="flex size-7 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground">
+          <Ring pct={session} />
         </button>
-        <div className="mt-1.5 flex flex-wrap items-center justify-end gap-x-2 gap-y-1.5">
-          <button
-            type="button"
-            onClick={() => openPlans()}
-            className="rounded-full bg-primary px-2.5 py-0.5 text-[11px] font-medium text-primary-foreground transition-opacity hover:opacity-90"
-          >
+      </PopoverTrigger>
+      <PopoverContent side="top" align="start" className="w-80 p-3">
+        <button type="button" onClick={onOpenUsage}
+          className="flex w-full items-center justify-between gap-2 pb-1 text-left text-[12.5px] text-muted-foreground hover:text-foreground">
+          <span className="truncate">{planName ? `Plan usage limits · ${planName}` : 'Plan usage limits'}</span>
+          <ChevronRight className="size-3.5 shrink-0" />
+        </button>
+        <Line label="5-hour session" right={`${session}%`} pct={session} />
+        <p className="-mt-1 pb-1 text-[11.5px] tabular-nums text-muted-foreground">{sessionCountdown(billing.daily.resetsAt, now)}</p>
+        <div className="border-t" />
+        <Line label="This week" right={`${week}%`} pct={week} />
+        {weekWhen && <p className="-mt-1 pb-1 text-[11.5px] tabular-nums text-muted-foreground">{weekWhen}</p>}
+        <div className="mt-2 flex items-center justify-between gap-2 border-t pt-3">
+          <button type="button" onClick={onOpenUsage} className="text-[12.5px] text-primary hover:underline">See usage</button>
+          <button type="button" onClick={() => openPlans()}
+            className="rounded-full bg-primary px-3 py-1 text-[12px] font-medium text-primary-foreground transition-opacity hover:opacity-90">
             {upgradeLabel}
           </button>
         </div>
-      </div>
-    </div>
+      </PopoverContent>
+    </Popover>
   )
 }

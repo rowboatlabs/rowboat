@@ -3253,7 +3253,9 @@ export const FR: Dictionary = {
     // Retouches v7 (03/10/2026)
     "Ready-made ideas": "Idées prêtes à l’emploi",
     "Pick one: Baarali fills in the task, you adjust it, then create it.": "Choisissez-en une : Baarali remplit la tâche, vous l’ajustez, puis vous la créez.",
-    "Your list. Write @baarali before a line to hand it to the assistant.": "Votre liste. Écrivez @baarali devant une ligne pour la confier à Baarali."
+    "Your list. Write @baarali before a line to hand it to the assistant.": "Votre liste. Écrivez @baarali devant une ligne pour la confier à Baarali.",
+    // Anneau d’utilisation (03/10/2026)
+    "Plan usage limits": "Limites d’utilisation du forfait"
 
   },
   // Lines about people (apps/x renderer lib/spaces-membership.ts): the names
@@ -3673,7 +3675,8 @@ export const FR: Dictionary = {
     "$1 credits": "$1 crédits",
     "Yesterday $1": "Hier $1",
     "Last reply $1": "Dernière réponse $1",
-    "$1 GMT": "$1 GMT"
+    "$1 GMT": "$1 GMT",
+    "Plan usage limits · $1": "Limites du forfait · $1"
 
   },
 };
