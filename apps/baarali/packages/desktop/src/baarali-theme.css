@@ -43,3 +43,32 @@ html.dark {
   --sidebar-accent-foreground: #8fb4ff;
   --rowboat-link: #6f9fff;
 }
+
+/* The sidebar's icons, as the first Baarali drew them (02/10/2026): bare,
+ * soft grey at rest, blue only on the row you are on, and lifted a pixel
+ * under the pointer. The label stays at full ink, which keeps the list
+ * readable at a glance. */
+[data-sidebar="menu-button"] > svg {
+  stroke-width: 1.75;
+  transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.3, 1), color 0.18s ease;
+}
+/* An icon that already says something in colour (a recording, in red) keeps it. */
+[data-sidebar="menu-button"] > svg:not([class*="text-"]) {
+  color: var(--muted-foreground);
+}
+[data-sidebar="menu-button"][data-active="true"] > svg:not([class*="text-"]) {
+  color: var(--primary);
+}
+[data-sidebar="menu-button"]:hover > svg,
+[data-sidebar="menu-button"]:focus-visible > svg {
+  transform: translateY(-1px) scale(1.12);
+}
+[data-sidebar="menu-button"]:active > svg {
+  transform: translateY(0) scale(0.96);
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-sidebar="menu-button"] > svg { transition: none; }
+  [data-sidebar="menu-button"]:hover > svg,
+  [data-sidebar="menu-button"]:focus-visible > svg,
+  [data-sidebar="menu-button"]:active > svg { transform: none; }
+}

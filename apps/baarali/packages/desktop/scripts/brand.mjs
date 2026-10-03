@@ -239,6 +239,11 @@ export function desktopPlan() {
       // A line about people (« Awa joined »), translated with its names kept (i18n PEOPLE).
       edit(`${renderer}/components/spaces/membership-line.tsx`, '<span className="min-w-0 truncate">{membershipLineText(', '<span className="min-w-0 truncate" data-baarali-people>{membershipLineText('),
       edit(`${renderer}/components/spaces/composer.tsx`, "attrs: { kind: 'rowboat', id: null, label: 'rowboat' }", "attrs: { kind: 'rowboat', id: null, label: 'baarali' }"),
+      // The assistant's mark is Baarali's B, eyes cut out so they take the
+      // colour behind (the blue tile of « Discuter avec Baarali »).
+      edit(`${renderer}/components/talking-head.tsx`, '      <g transform="translate(12 12) scale(0.0245) translate(-497 -489)" strokeWidth="61">\n        <path d="M 158 487 C 330 330, 620 180, 837 148 C 820 480, 640 720, 498 830 Q 550 720, 569 623 C 560 540, 450 440, 352 413 Q 250 440, 158 487 Z" />\n      </g>', '      <g transform="translate(12 12) scale(0.064) translate(-505 -422)" fill="currentColor" stroke="none">\n        <path fillRule="evenodd" d="M450 250H502C574 250 612 280 612 322C612 345 602 360 590 368Q584 373 590 378C612 388 626 408 626 436C626 476 590 502 512 502H450C413 502 384 473 384 436V316C384 279 413 250 450 250ZM478 330a22 22 0 1 0 44 0a22 22 0 1 0 -44 0ZM534 330a22 22 0 1 0 44 0a22 22 0 1 0 -44 0Z" />\n        <path d="M422 556a38 38 0 1 0 76 0a38 38 0 1 0 -76 0ZM514 556a38 38 0 1 0 76 0a38 38 0 1 0 -76 0Z" />\n      </g>'),
+      // The handle on a to-do handed to the assistant.
+      edit(`${renderer}/components/todo-view.tsx`, '<Bot className="size-3" />\n              rowboat\n', '<Bot className="size-3" />\n              baarali\n'),
       edit(`${renderer}/components/spaces/composer-editor.ts`, "getAttrs: () => ({ kind: 'rowboat', id: null, label: 'rowboat' })", "getAttrs: () => ({ kind: 'rowboat', id: null, label: 'baarali' })"),
     ],
     copies: [

@@ -8,13 +8,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Bell,
   AppWindow,
   ArrowUpRight,
-  Clock,
+  CalendarClock,
+  SquareCheckBig,
+  FolderKanban,
+  Blocks,
+  MessageCircle,
   Library,
   FilePlus,
-  Folder,
   History,
-  LayoutGrid,
-  ListTodo,
   LogIn,
   Mail,
   MessageSquare,
@@ -992,21 +993,31 @@ export function DockSidebar({
       },
       {
         item: {
-          key: 'home', label: 'Todo', icon: ListTodo, tourId: 'nav-home',
+          key: 'home', label: 'Todo', icon: SquareCheckBig, tourId: 'nav-home',
           running: activeNav === 'home',
           onClick: () => { closeFlyouts(); onOpenHome?.() },
         },
       },
       {
         item: {
-          key: 'workspaces', label: 'Projects', icon: Folder, tourId: 'nav-workspaces',
+          key: 'workspaces', label: 'Projects', icon: FolderKanban, tourId: 'nav-workspaces',
           running: activeNav === 'workspaces' || activeNav === 'code',
           onClick: () => { closeFlyouts(); knowledgeActions.openWorkspaceAt() },
         },
       },
       {
         item: {
-          key: 'apps', label: 'Apps', icon: LayoutGrid, tourId: 'nav-apps',
+          key: 'agents', label: 'Scheduled tasks', switcherLabel: 'Scheduled tasks', icon: CalendarClock, tourId: 'nav-agents',
+          badge: bgAgentsFailed ? '!' : undefined,
+          status: bgAgentsLabel ?? undefined,
+          statusAlert: bgAgentsFailed,
+          running: activeNav === 'agents',
+          onClick: () => { closeFlyouts(); onOpenBgTasks?.() },
+        },
+      },
+      {
+        item: {
+          key: 'apps', label: 'Apps', icon: Blocks, tourId: 'nav-apps',
           running: activeNav === 'apps',
           onClick: () => { closeFlyouts(); onOpenApps?.() },
         },
@@ -1021,16 +1032,6 @@ export function DockSidebar({
       })),
       {
         item: {
-          key: 'agents', label: 'Scheduled tasks', switcherLabel: 'Scheduled tasks', icon: Clock, tourId: 'nav-agents',
-          badge: bgAgentsFailed ? '!' : undefined,
-          status: bgAgentsLabel ?? undefined,
-          statusAlert: bgAgentsFailed,
-          running: activeNav === 'agents',
-          onClick: () => { closeFlyouts(); onOpenBgTasks?.() },
-        },
-      },
-      {
-        item: {
           key: 'brain', label: 'Library', icon: Library, tourId: 'nav-knowledge',
           status: knowledgeUpdatedLabel ?? undefined,
           running: activeNav === 'knowledge',
@@ -1040,7 +1041,7 @@ export function DockSidebar({
       { sep: true },
       {
         item: {
-          key: 'chats', label: 'Chats', icon: MessageSquare, tourId: 'nav-chats',
+          key: 'chats', label: 'Chats', icon: MessageCircle, tourId: 'nav-chats',
           running: chatsOpen,
           // Tile click opens the flyout; the switcher lands on all chats.
           onClick: () => { setSpacesOpen(false); setChatsOpen((v) => !v) },

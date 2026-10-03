@@ -2788,7 +2788,7 @@ export const FR: Dictionary = {
     "Navigation target cannot be empty.": "La destination ne peut pas être vide.",
     "Needs your input": "Attend votre réponse",
     "Never run": "Jamais exécuté",
-    "No active agents": "Aucun agent actif",
+    "No active agents": "Aucune tâche active",
     "No active browser tab is open.": "Aucun onglet actif n’est ouvert.",
     "No active discussions. Turn a message thread into a discussion to give a topic its own place.": "Aucun échange actif. Transformez un fil de messages en échange pour donner sa place à un sujet.",
     "No active run for this note": "Aucune exécution en cours pour cette note",
@@ -3226,7 +3226,9 @@ export const FR: Dictionary = {
     "Add your first to-do — just type below": "Ajoutez votre première chose à faire : écrivez-la juste en dessous",
     "introduce yourself — what can you do here?": "présente-toi : que peux-tu faire ici ?",
     "Dismiss anything you don't want — hover a row and hit ✕ (it lands in Done & dismissed below, restorable)": "Retirez ce dont vous ne voulez pas : survolez la ligne et cliquez ✕ (elle va dans « Fait et écarté », plus bas, et peut revenir)",
-    "Last updated: just now": "Dernière mise à jour : à l’instant"
+    "Last updated: just now": "Dernière mise à jour : à l’instant",
+    // The first to-do list, as the app wrote it before it was French (02/10/2026).
+    "@rowboat introduce yourself — what can you do here?": "@baarali présente-toi : que peux-tu faire ici ?"
 
   },
   // Lines about people (apps/x renderer lib/spaces-membership.ts): the names
@@ -3630,7 +3632,11 @@ export const FR: Dictionary = {
     "You have $1% of your session and $2% of your week left.": "Il vous reste $1 % de votre session et $2 % de votre semaine.",
     "Your session starts with your next message. $1% of your week is left.": "Votre session commence avec votre prochain message. Il vous reste $1 % de votre semaine.",
     "$1% used": "$1 % utilisés",
-    "Last updated: $1 min ago": "Dernière mise à jour : il y a $1 min"
+    "Last updated: $1 min ago": "Dernière mise à jour : il y a $1 min",
+    "$1 active": "$1 actives",
+    "$1 active · Last run $2": "$1 actives · dernière $2",
+    "No active agents · Last run $1": "Aucune tâche active · dernière $1",
+    "$1 failed · Needs review": "$1 en échec · à vérifier"
 
   },
 };

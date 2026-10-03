@@ -7,13 +7,13 @@ import {
   AppWindow,
   ArrowUpRight,
   ChevronDown,
-  Clock,
+  CalendarClock,
   Library,
   ChevronRight,
-  Folder,
+  FolderKanban,
   AlertTriangle,
-  LayoutGrid,
-  ListTodo,
+  Blocks,
+  SquareCheckBig,
   Mic,
   MoreVertical,
   PanelLeftClose,
@@ -23,7 +23,8 @@ import {
   Plug,
   LoaderIcon,
   Mail,
-  MessageSquare,
+  MessageCircle,
+  Compass,
   Settings,
   Square,
   Video,
@@ -973,7 +974,7 @@ export function SidebarContentPanel({
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton data-tour-id="nav-home" isActive={activeNav === 'home'} onClick={onOpenHome}>
-                  <ListTodo className="size-4 shrink-0" />
+                  <SquareCheckBig className="size-4 shrink-0" />
                   <span className="flex-1 truncate">Todo</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
@@ -983,7 +984,7 @@ export function SidebarContentPanel({
                   isActive={activeNav === 'workspaces' || activeNav === 'code'}
                   onClick={() => knowledgeActions.openWorkspaceAt()}
                 >
-                  <Folder className="size-4 shrink-0" />
+                  <FolderKanban className="size-4 shrink-0" />
                   <span className="flex-1 truncate">Projects</span>
                   {hasWorkingProjectSession && (
                     <span role="status" aria-label="Project session working" className="code-working-dot size-2 shrink-0 rounded-full bg-[var(--rowboat-git)]" />
@@ -993,11 +994,39 @@ export function SidebarContentPanel({
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
+                  data-tour-id="nav-agents"
+                  isActive={activeNav === 'agents'}
+                  onClick={onOpenBgTasks}
+                  className={bgAgentsLabel ? 'h-auto items-start py-1' : undefined}
+                >
+                  <CalendarClock className={cn('size-4 shrink-0', bgAgentsLabel && 'mt-0.5')} />
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate">Scheduled tasks</span>
+                    {bgAgentsLabel && (
+                      <span className={cn(
+                        'truncate text-[11px]',
+                        bgTaskSummaries.some((t) => t.lastRunError) ? 'text-destructive' : 'text-muted-foreground',
+                      )}>
+                        {bgAgentsLabel}
+                      </span>
+                    )}
+                  </div>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton ref={connectorsButtonRef} data-tour-id="nav-connectors" onClick={() => setConnectionsSettingsOpen(true)}>
+                  <Plug className="size-4 shrink-0" />
+                  <span className="flex-1 truncate">Connectors</span>
+                  {hasOauthError && <AlertTriangle aria-label="A connected account needs attention" className="size-3.5 shrink-0 text-amber-500/90" />}
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
                   data-tour-id="nav-apps"
                   isActive={activeNav === 'apps'}
                   onClick={onOpenApps}
                 >
-                  <LayoutGrid className="size-4 shrink-0" />
+                  <Blocks className="size-4 shrink-0" />
                   <span className="flex-1 truncate">Apps</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
@@ -1019,34 +1048,6 @@ export function SidebarContentPanel({
                   </ContextMenu>
                 </SidebarMenuItem>
               ))}
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  data-tour-id="nav-agents"
-                  isActive={activeNav === 'agents'}
-                  onClick={onOpenBgTasks}
-                  className={bgAgentsLabel ? 'h-auto items-start py-1' : undefined}
-                >
-                  <Clock className={cn('size-4 shrink-0', bgAgentsLabel && 'mt-0.5')} />
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate">Scheduled tasks</span>
-                    {bgAgentsLabel && (
-                      <span className={cn(
-                        'truncate text-[11px]',
-                        bgTaskSummaries.some((t) => t.lastRunError) ? 'text-destructive' : 'text-muted-foreground',
-                      )}>
-                        {bgAgentsLabel}
-                      </span>
-                    )}
-                  </div>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton ref={connectorsButtonRef} data-tour-id="nav-connectors" onClick={() => setConnectionsSettingsOpen(true)}>
-                  <Plug className="size-4 shrink-0" />
-                  <span className="flex-1 truncate">Connectors</span>
-                  {hasOauthError && <AlertTriangle aria-label="A connected account needs attention" className="size-3.5 shrink-0 text-amber-500/90" />}
-                </SidebarMenuButton>
-              </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton data-tour-id={showMore ? undefined : 'nav-knowledge'} onClick={() => toggleMore()} className="text-muted-foreground" aria-expanded={showMore}>
                   <ChevronDown className={cn('size-4 shrink-0 transition-transform', showMore && 'rotate-180')} />
@@ -1102,7 +1103,7 @@ export function SidebarContentPanel({
                     <SidebarMenuItem key={chat.id}>
                       {renamingChatId === chat.id ? (
                         <div className="flex h-8 items-center gap-2 rounded-md px-2">
-                          <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
+                          <MessageCircle className="size-4 shrink-0 text-muted-foreground" />
                           <input
                             autoFocus
                             value={renameDraft}
@@ -1130,7 +1131,7 @@ export function SidebarContentPanel({
                             onRequestDelete={onDeleteRun ? () => setDeleteChatTarget({ id: chat.id, title: chat.title || '(Untitled chat)' }) : undefined}
                           >
                             <SidebarMenuButton onClick={() => onOpenRun?.(chat.id)} className={onRenameRun ? 'pr-7' : undefined}>
-                              <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
+                              <MessageCircle className="size-4 shrink-0 text-muted-foreground" />
                               <span className="flex-1 truncate">{chat.title || '(Untitled chat)'}</span>
                               {pinnedChatIds.includes(chat.id) && (
                                 <Pin className="size-3 shrink-0 text-muted-foreground/70 transition-opacity group-hover/menu-item:opacity-0" />
@@ -1311,7 +1312,7 @@ export function SidebarContentPanel({
           {onStartTour && (
             <button type="button" onClick={onStartTour} aria-label="Take a tour" title="Take a tour"
               className="flex size-7 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground">
-              <MascotFaceIcon className="size-4" />
+              <Compass className="size-4" />
             </button>
           )}
           <SettingsDialog>
