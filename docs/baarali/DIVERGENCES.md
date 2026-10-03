@@ -72,6 +72,7 @@ Une ligne s'ajoute dans le même commit que la modification, et disparaît dans 
 | `apps/x/apps/renderer/src/App.tsx` (bis), `components/sidebar-content.tsx`, `components/dock-sidebar.tsx` | Une page « Prompts » (`prompts-view.tsx`, `lib/prompt-library.*`) : vue `prompts`, entrée sous « Plus » ; « Utiliser » préremplit un chat | Maquette validée par le fondateur (03/10/2026), d'après le Studio de prompts du premier Baarali | 03/10/2026 |
 | `apps/x/apps/renderer/src/components/chat-input-with-mentions.tsx` | Le menu « + » : photos et images, documents (PDF, Word, Excel…), autre fichier, une note de la Bibliothèque (@), Connecteurs | Demandé par le fondateur (03/10/2026) : joindre plus facilement, et Connecteurs quitte la barre | 03/10/2026 |
 | `apps/x/apps/renderer/src/components/sidebar-content.tsx` (ter) | Connecteurs n'apparaît plus dans la barre que si un compte demande attention | Même demande : faire de la place | 03/10/2026 |
+| `apps/x/apps/renderer/src/components/sidebar-content.tsx` (quater) | Plus de pli « Plus / Moins » : toutes les pages sont visibles | Demandé par le fondateur (03/10/2026) : la barre a de la place | 03/10/2026 |
 
 **La marque n'est pas une divergence.** Elle ne touche aucun fichier du dépôt : elle s'applique à la copie d'un build, en CI ou dans l'image d'instance (`apps/baarali/packages/desktop/scripts/brand.mjs`, décidé le 01/10/2026). Ses ancres dans les fichiers upstream sont vérifiées par un test à chaque PR.
 

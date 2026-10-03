@@ -60,8 +60,8 @@
     {
       "id": "tasks",
       "name": {
-        "fr": "Tâches planifiées",
-        "en": "Scheduled tasks"
+        "fr": "Routines",
+        "en": "Routines"
       },
       "icon": "CalendarClock"
     }
@@ -420,8 +420,8 @@
     {
       "id": "tasks",
       "name": {
-        "fr": "Tâches planifiées",
-        "en": "Scheduled tasks"
+        "fr": "Routines",
+        "en": "Routines"
       },
       "hint": {
         "fr": "Ce que Baarali refait seul",

@@ -8,7 +8,6 @@ import {
   NotebookPen,
   MessagesSquare,
   ArrowUpRight,
-  ChevronDown,
   CalendarClock,
   Library,
   ChevronRight,
@@ -508,19 +507,6 @@ export function SidebarContentPanel({
   const [emailThreads, setEmailThreads] = useState<SidebarEmailThread[]>([])
   const [meetings, setMeetings] = useState<UpcomingMeeting[]>([])
   const [chatsExpanded, setChatsExpanded] = useState(true)
-  // Baarali: « More » folds what is opened rarely (the Library); it stays
-  // open while the Library is the page shown, and remembers the choice.
-  const [moreOpen, setMoreOpen] = useState(() => {
-    try { return window.localStorage.getItem('baarali.sidebar.more') === '1' } catch { return false }
-  })
-  // Connectors, Apps and the Library fold under « More » (03/10/2026); it
-  // opens by itself on one of their pages, or when an account needs attention.
-  const showMore = moreOpen || activeNav === 'knowledge' || activeNav === 'apps' || activeNav === 'prompts' || hasOauthError
-  const toggleMore = () => {
-    const next = !showMore
-    setMoreOpen(next)
-    try { window.localStorage.setItem('baarali.sidebar.more', next ? '1' : '0') } catch { /* private mode */ }
-  }
   useEffect(() => {
     let cancelled = false
     const loadEmail = async () => {
@@ -1041,14 +1027,8 @@ export function SidebarContentPanel({
                   </ContextMenu>
                 </SidebarMenuItem>
               ))}
-              <SidebarMenuItem>
-                <SidebarMenuButton data-tour-id={showMore ? undefined : 'nav-knowledge'} onClick={() => toggleMore()} className="text-muted-foreground" aria-expanded={showMore}>
-                  <ChevronDown className={cn('size-4 shrink-0 transition-transform', showMore && 'rotate-180')} />
-                  <span className="flex-1 truncate">{showMore ? 'Less' : 'More'}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              {showMore && (
-                <>
+              {/* Baarali (03/10/2026): no « More » fold any longer; the sidebar has
+                  room for every page since Connectors and the usage left it. */}
               {/* Connectors moved to the composer's + menu (03/10/2026); an account
                   that needs attention still shows here, until it is fixed. */}
               {hasOauthError && (
@@ -1092,8 +1072,6 @@ export function SidebarContentPanel({
                   </div>
                 </SidebarMenuButton>
               </SidebarMenuItem>
-                </>
-              )}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

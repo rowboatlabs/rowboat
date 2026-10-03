@@ -870,19 +870,19 @@ function ChatInputInner({
                   Library's notes (the @ menu) and the connected accounts. */}
               <DropdownMenuItem onSelect={() => pickFiles('image/*')} className="h-9 rounded-[9px] px-2.5">
                 <ImagePlus className="size-4" />
-                <span>Photos and images</span>
+                <span>Images</span>
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => pickFiles(DOCUMENT_TYPES)} className="h-9 rounded-[9px] px-2.5">
                 <FileText className="size-4" />
-                <span>Documents (PDF, Word, Excel…)</span>
+                <span>Documents</span>
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => pickFiles('')} className="h-9 rounded-[9px] px-2.5">
                 <Paperclip className="size-4" />
-                <span>Any file</span>
+                <span>Files</span>
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => controller.textInput.setInput(`${message}${message && !message.endsWith(' ') ? ' ' : ''}@`)} className="h-9 rounded-[9px] px-2.5">
                 <Library className="size-4" />
-                <span>A note from the Library</span>
+                <span>Notes</span>
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => setConnectorsOpen(true)} className="h-9 rounded-[9px] px-2.5">
                 <Plug className="size-4" />
