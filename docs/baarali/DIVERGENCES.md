@@ -7,6 +7,7 @@ Une ligne s'ajoute dans le même commit que la modification, et disparaît dans 
 | Fichier upstream | Changement | Pourquoi | Depuis |
 |---|---|---|---|
 | `apps/x/packages/core/src/models/gateway.ts` | `listGatewayModels` garde le `name` du catalogue de la passerelle | Le sélecteur montrait l'identifiant brut (`deepseek/deepseek-v4.1-flash`) ; le plan de contrôle sert des noms lisibles (archi §3.5) | 30/09/2026 |
+| `apps/x/packages/core/src/models/catalog.ts` | La liste de la passerelle expire après 5 min (`GATEWAY_TTL_MS`), les autres restent en cache jusqu'à un changement de clé | La liste suit le forfait du compte, qui change sans changer de clé : passé en Pro, on gardait les 2 modèles de Découverte | 03/10/2026 |
 | `apps/x/apps/renderer/src/hooks/use-models.ts` (+ son test) | Ajoute `namesByKey` à l'instantané | Même raison : le nom suit le modèle jusqu'au sélecteur | 30/09/2026 |
 | `apps/x/apps/renderer/src/components/model-selector.tsx` | Affiche et cherche par le nom quand il existe, l'identifiant sinon | Même raison | 30/09/2026 |
 | `apps/x/apps/renderer/src/components/apps/catalog.tsx` | Cartes par `AppCard` et fiches (`fiches.ts`) : nom clair, à quoi l'app sert, ses accès ; rayons ; les apps sans fiche derrière un lien ; fenêtre d'installation en mots simples | Le catalogue montrait un nom de paquet, une phrase anglaise et un chemin GitHub ; une personne ne savait ni à quoi l'app sert ni ce qu'elle touche avant d'installer | 02/10/2026 |

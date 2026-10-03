@@ -89,6 +89,11 @@ const AIGATEWAY_DEFAULT_BASE_URL = "https://ai-gateway.vercel.sh/v1";
 // every catalog build in between.
 const ERROR_RETRY_MS = 30_000;
 
+// BAARALI(03/10/2026): the gateway's list follows the account's plan, which
+// changes without any credential changing (an upgrade, an admin change).
+// Cached for good, a Découverte list outlived the move to Pro: it expires.
+const GATEWAY_TTL_MS = 5 * 60_000;
+
 interface CacheEntry {
     fingerprint: string;
     fetchedAt: number;
@@ -207,7 +212,10 @@ async function resolveProviderEntry(
     const fingerprint = fingerprintOf(provider);
     const cached = cache.get(provider.id);
     if (!forceRefresh && cached && cached.fingerprint === fingerprint) {
-        const fresh = cached.status === "ok" || Date.now() - cached.fetchedAt < ERROR_RETRY_MS;
+        const age = Date.now() - cached.fetchedAt;
+        const fresh = cached.status === "ok"
+            ? provider.id !== "rowboat" || age < GATEWAY_TTL_MS
+            : age < ERROR_RETRY_MS;
         if (fresh) return cached;
     }
     const pending = inFlight.get(provider.id);

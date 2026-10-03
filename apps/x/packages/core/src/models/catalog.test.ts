@@ -165,6 +165,24 @@ describe('getModelCatalog', () => {
     expect(lastCall.flavor).toBe('ollama');
   });
 
+  it('lets the gateway list expire: it follows the plan, which changes without new credentials', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(Date.UTC(2026, 9, 3, 20, 0, 0));
+      mocks.isSignedIn.mockResolvedValue(true);
+
+      await getModelCatalog();
+      await getModelCatalog();
+      expect(mocks.listGatewayModels).toHaveBeenCalledTimes(1);
+
+      vi.setSystemTime(Date.UTC(2026, 9, 3, 20, 6, 0));
+      await getModelCatalog();
+      expect(mocks.listGatewayModels).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('caches failures briefly so every catalog build does not re-pay the fetch timeout', async () => {
     serveConfig({ ollama: { baseURL: 'http://localhost:11434' } });
     mocks.listModelsForProvider.mockRejectedValue(new Error('down'));
