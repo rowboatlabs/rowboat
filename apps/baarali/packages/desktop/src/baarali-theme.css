@@ -8,9 +8,20 @@
  * (baarali.com). The upstream's own neutrals stay, white and light greys by
  * day, the anthracite by night; only the blue becomes the brand's, as the
  * accent: focus rings, links, the selected row of the sidebar.
+ *
+ * 02/10/2026: the upstream's primary is black by day, white by night — the
+ * send button, the main buttons, checks — and its own messages sat in a
+ * black bubble: the app read black and white. The primary is the brand
+ * blue in both themes; one's own messages sit on a light wash of it.
  */
 
 html:root {
+  --primary: #1a6dff;
+  --primary-foreground: #ffffff;
+  --sidebar-primary: #1a6dff;
+  --sidebar-primary-foreground: #ffffff;
+  --rowboat-bubble: #e8f0ff;
+  --rowboat-bubble-foreground: #0d0d0d;
   --ring: #1a6dff;
   --sidebar-ring: #1a6dff;
   --sidebar-accent: rgba(26, 109, 255, 0.1);
@@ -19,6 +30,12 @@ html:root {
 }
 
 html.dark {
+  --primary: #1a6dff;
+  --primary-foreground: #ffffff;
+  --sidebar-primary: #1a6dff;
+  --sidebar-primary-foreground: #ffffff;
+  --rowboat-bubble: #1d2738;
+  --rowboat-bubble-foreground: #ececec;
   --ring: #4d8dff;
   --sidebar-ring: #4d8dff;
   --sidebar-accent: rgba(77, 141, 255, 0.16);

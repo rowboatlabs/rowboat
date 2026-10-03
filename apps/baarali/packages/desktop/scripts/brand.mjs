@@ -308,8 +308,11 @@ export function mobilePlan() {
       edit(`${mobile}/src/theme/colors.ts`, "  accent: '#000000',\n  onAccent: '#ffffff',", "  accent: '#1a6dff',\n  onAccent: '#ffffff',"),
       edit(`${mobile}/src/theme/colors.ts`, "  accent: '#ffffff',\n  onAccent: '#000000',", "  accent: '#4d8dff',\n  onAccent: '#ffffff',"),
       // The upstream's sailboat, its logo, becomes ours (tinted like a symbol).
-      edit(`${mobile}/src/app/onboarding.tsx`, "    icon: 'sf:sailboat',", "    icon: require('../../assets/images/baarali-mark.png'),"),
-      edit(`${mobile}/src/app/spaces/index.tsx`, '<Image source="sf:sailboat"', "<Image source={require('../../../assets/images/baarali-mark.png')}"),
+      // The mark as it is, the blue tile (02/10/2026): drawn in one tint, it
+      // read black by day and white by night.
+      edit(`${mobile}/src/app/onboarding.tsx`, "    icon: 'sf:sailboat',", "    icon: require('../../assets/images/baarali-tile.png'),"),
+      edit(`${mobile}/src/app/onboarding.tsx`, '<Image source={slide.icon} style={{ width: 64, height: 64, marginBottom: 8 }} tintColor={colors.label} />', "<Image source={slide.icon} style={{ width: 64, height: 64, marginBottom: 8 }} tintColor={typeof slide.icon === 'string' ? colors.label : undefined} />"),
+      edit(`${mobile}/src/app/spaces/index.tsx`, '<Image source="sf:sailboat" style={{ width: 48, height: 48 }} tintColor={colors.label} />', "<Image source={require('../../../assets/images/baarali-tile.png')} style={{ width: 48, height: 48 }} />"),
       // Never the upstream's Spaces fleet: ours (decided 02/10/2026,
       // packages/spaces). A build with EXPO_PUBLIC_SPACES_APEX empty opens on
       // « Connect your Mac » and Spaces says it is coming.
@@ -331,7 +334,7 @@ export function mobilePlan() {
       edit(`${mobile}/src/lib/spaces/oauth.ts`, 'WebBrowser.openAuthSessionAsync(authorize.toString(), REDIRECT_URI);', 'WebBrowser.openAuthSessionAsync(authorize.toString(), REDIRECT_URI, { preferEphemeralSession: true });'),
     ],
     copies: [
-      ...['icon.png', 'splash-icon.png', 'android-icon-foreground.png', 'android-icon-monochrome.png', 'baarali-mark.png'].map((f) => [`assets/mobile/${f}`, `${mobile}/assets/images/${f}`]),
+      ...['icon.png', 'splash-icon.png', 'android-icon-foreground.png', 'android-icon-monochrome.png', 'baarali-mark.png', 'baarali-tile.png'].map((f) => [`assets/mobile/${f}`, `${mobile}/assets/images/${f}`]),
       ['src/i18n/mobile/babel-plugin.cjs', `${mobile}/baarali-i18n/babel-plugin.cjs`],
     ],
     writes: [
