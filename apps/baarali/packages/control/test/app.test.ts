@@ -167,7 +167,8 @@ describe('/v1/llm proxy', () => {
   it('lets the model catalog through, unmetered, with its query', async () => {
     const { call, seen, store } = setup(() => json({ data: [{ id: 'a/b' }] }));
     const res = await call('/v1/llm/models?output_modalities=image');
-    expect(await res.json()).toEqual({ data: [{ id: 'a/b' }] });
+    // With what the picker needs beside the id (model-access.ts).
+    expect(await res.json()).toEqual({ data: [{ id: 'a/b', baarali: { vendor: 'a', vendorName: 'A', vendorRank: 0, strength: 'Polyvalent', recommended: false } }] });
     expect(seen[0].url).toBe('https://openrouter.ai/api/v1/models?output_modalities=image');
     expect(store.usage).toHaveLength(0);
   });
@@ -209,7 +210,8 @@ describe('/v1/llm on a plan with a model policy (Découverte)', () => {
 
   it('shows only its models in the catalog', async () => {
     const { call } = setup(() => json({ data: [{ id: first }, { id: 'anthropic/claude-opus-4.7' }, { id: second }] }), 'free');
-    expect(await (await call('/v1/llm/models')).json()).toEqual({ data: [{ id: first }, { id: second }] });
+    const { data } = (await (await call('/v1/llm/models')).json()) as { data: Array<{ id: string }> };
+    expect(data.map((m) => m.id)).toEqual([first, second]);
   });
 
   it('leaves paid plans free to pick any model', async () => {

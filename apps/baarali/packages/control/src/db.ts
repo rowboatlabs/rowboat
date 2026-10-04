@@ -178,6 +178,19 @@ export const MIGRATIONS: string[] = [
   CREATE TRIGGER admin_log_append_only BEFORE UPDATE OR DELETE ON baarali.admin_log
     FOR EACH ROW EXECUTE FUNCTION baarali.refuse_change();
   `,
+  // 5 — the models each plan sees, set from the admin console (decided
+  // 03/10/2026). A row exists once the owner touched the model.
+  `
+  CREATE TABLE baarali.model_settings (
+    model_id text PRIMARY KEY,
+    enabled boolean NOT NULL,
+    min_plan text,
+    recommended boolean NOT NULL DEFAULT false,
+    strength text,
+    free_rank integer,
+    updated_at timestamptz NOT NULL
+  );
+  `,
 ];
 
 /** Brings the schema up to date. Safe on several machines at once: the lock serializes them. */

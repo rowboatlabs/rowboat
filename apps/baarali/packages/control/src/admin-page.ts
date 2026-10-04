@@ -85,6 +85,40 @@ input[type=search] { flex:1; min-width:180px; }
 .sub { font:500 11px "Inter", sans-serif; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); margin:20px 0 8px; }
 .toast { position:fixed; left:50%; bottom:24px; transform:translateX(-50%); background:var(--ink); color:var(--paper); padding:8px 14px; border-radius:10px; font-size:13px; z-index:9; }
 .code { font:500 13px ui-monospace, Menlo, monospace; color:var(--ink); background:var(--mist); padding:1px 6px; border-radius:5px; }
+.tabs { display:flex; gap:4px; border-bottom:1px solid var(--line); margin-bottom:16px; flex-wrap:wrap; }
+.tabs button { all:unset; cursor:pointer; padding:8px 12px; color:var(--muted); border-bottom:2px solid transparent; margin-bottom:-1px; }
+.tabs button[aria-selected="true"] { color:var(--ink); border-color:var(--ink); font-weight:500; }
+.vendor { border:1px solid var(--line); border-radius:12px; margin-bottom:10px; overflow:hidden; }
+.vendor > header { display:flex; align-items:center; gap:10px; padding:10px 14px; cursor:pointer; flex-wrap:wrap; }
+.vendor > header:hover { background:var(--mist); }
+.vendor > header b { color:var(--ink); }
+.vendor > header .right { margin-left:auto; }
+.mrow { display:flex; align-items:center; gap:10px; padding:8px 14px; border-top:1px solid var(--line); flex-wrap:wrap; }
+.mrow .nm { flex:1; min-width:180px; }
+.mrow .nm b { display:block; color:var(--ink); font-weight:500; }
+.mrow .nm small { color:var(--muted); font:12px ui-monospace, Menlo, monospace; overflow-wrap:anywhere; }
+.mrow select { padding:4px 8px; font-size:12px; }
+.sw { width:30px; height:18px; border-radius:99px; background:var(--line); position:relative; flex:none; cursor:pointer; border:0; padding:0; }
+.sw::after { content:""; position:absolute; top:2px; left:2px; width:14px; height:14px; border-radius:50%; background:#fff; transition:left .15s; }
+.sw[aria-pressed="true"] { background:var(--blue); }
+.sw[aria-pressed="true"]::after { left:14px; }
+.star { all:unset; cursor:pointer; color:var(--line); font-size:16px; width:18px; text-align:center; }
+.star[aria-pressed="true"] { color:var(--warn); }
+.picker { border:1px solid var(--line); border-radius:14px; background:var(--paper); box-shadow:0 12px 32px rgb(0 0 0 / .12); padding:6px; max-height:520px; overflow:auto; }
+.picker .ttl { font-size:11px; letter-spacing:.05em; text-transform:uppercase; color:var(--muted); padding:6px 10px; }
+.picker .grp { position:sticky; top:-6px; background:var(--paper); font-size:11px; font-weight:600; color:var(--muted); padding:8px 10px 4px; }
+.picker .opt { display:flex; align-items:center; gap:8px; padding:7px 10px; border-radius:10px; }
+.picker .opt.locked { opacity:.5; }
+.picker .opt b { display:block; color:var(--ink); font-weight:600; font-size:13px; }
+.picker .opt small { display:block; color:var(--muted); font-size:11px; }
+.picker .opt .pill { margin-left:auto; }
+.sticky { position:sticky; top:16px; align-self:start; }
+.order { display:flex; gap:4px; margin-left:auto; }
+.toolbar.spaced { margin-top:12px; }
+.grow { flex:1; }
+.nowrap { white-space:nowrap; }
+.push { margin-left:auto; }
+.picker .opt .mark { width:16px; flex:none; }
 @media (max-width:820px) {
   .shell { grid-template-columns:minmax(0,1fr); }
   aside { border-right:0; border-bottom:1px solid var(--line); flex-direction:row; flex-wrap:wrap; padding:12px 16px; }
@@ -141,6 +175,7 @@ export function adminPage(opts: { nonce: string; admin: string }): string {
     <button data-v="apercu" aria-current="true">Vue d'ensemble</button>
     <button data-v="clients">Clients <span class="count" id="n-clients"></span></button>
     <button data-v="instances">Instances <span class="count" id="n-instances"></span></button>
+    <button data-v="modeles">Modèles <span class="count" id="n-models"></span></button>
     <h6>Garder la trace</h6>
     <button data-v="journal">Journal</button>
   </nav>
@@ -184,6 +219,42 @@ export function adminPage(opts: { nonce: string; admin: string }): string {
       <thead><tr><th>Client</th><th>État</th><th>Version</th><th>Machine</th><th></th></tr></thead>
       <tbody id="instances"></tbody>
     </table></div></section>
+  </div>
+
+  <div data-p="modeles" hidden>
+    <div class="head"><div><h1>Modèles</h1><p>Ce que tes clients peuvent choisir dans le Chat, forfait par forfait. Un changement arrive dans leur liste en moins d'une minute.</p></div>
+      <div class="actions"><button class="btn" data-reload>Actualiser</button></div></div>
+    <div class="tabs" id="mtabs" role="tablist">
+      <button role="tab" data-t="editeurs" aria-selected="true">Par éditeur</button>
+      <button role="tab" data-t="decouverte" aria-selected="false">Découverte</button>
+      <button role="tab" data-t="tous" aria-selected="false" id="t-all">Tous</button>
+    </div>
+    <div class="grid2">
+      <div>
+        <div class="toolbar" id="m-filters">
+          <input type="search" id="mq" placeholder="Chercher un modèle, un éditeur…">
+          <select id="mf"><option value="">Tous les modèles</option><option value="open">Ouverts</option><option value="off">Masqués</option><option value="reco">Conseillés</option><option value="new">Jamais réglés</option></select>
+        </div>
+        <div data-tp="editeurs"><div id="vendors"></div></div>
+        <div data-tp="decouverte" hidden>
+          <section class="card"><h2>Les modèles du forfait gratuit</h2>
+            <p class="muted" id="free-note"></p>
+            <div class="list" id="free-list"></div>
+            <div class="toolbar spaced"><select id="free-add" class="grow"></select><button class="btn" id="free-add-go" type="button">Ajouter</button></div>
+            <div class="toolbar"><button class="btn primary" id="free-save" type="button">Enregistrer l'ordre</button></div>
+          </section>
+        </div>
+        <div data-tp="tous" hidden>
+          <section class="card"><div class="tablewrap"><table>
+            <thead><tr><th></th><th>Modèle</th><th>Éditeur</th><th>Point fort</th><th>Dès</th><th>$ / 1 M (entrée · sortie)</th></tr></thead>
+            <tbody id="all-models"></tbody></table></div></section>
+        </div>
+      </div>
+      <section class="card sticky"><h2>Aperçu dans l'app <select id="pv" class="push"></select></h2>
+        <div class="picker" id="picker"></div>
+        <p class="muted">Rangé par éditeur. Les modèles « Conseillé » passent en tête de leur éditeur ; ceux d'un forfait au-dessus restent visibles, avec un cadenas et le forfait qui les ouvre.</p>
+      </section>
+    </div>
   </div>
 
   <div data-p="journal" hidden>
@@ -276,7 +347,7 @@ function bar(p) {
 }
 
 // Navigation, remembered in the address (#clients…).
-const views = ["apercu", "clients", "instances", "journal"];
+const views = ["apercu", "clients", "instances", "modeles", "journal"];
 function show(v) {
   if (!views.includes(v)) v = "apercu";
   for (const s of document.querySelectorAll("[data-p]")) s.hidden = s.dataset.p !== v;
@@ -300,6 +371,7 @@ async function load(v) {
     if (v === "clients") await loadClients();
     if (v === "instances") await loadInstances();
     if (v === "journal") await loadJournal();
+    if (v === "modeles") await loadModels();
   } catch (e) { if (e.message !== "signed out") toast("Chargement impossible. Réessaie."); }
 }
 
@@ -437,6 +509,129 @@ async function loadInstances() {
     );
   }) : [el("tr", {}, el("td", { colspan: "5", class: "empty" }, "Aucune instance."))]));
 }
+
+// Models (decided 03/10/2026): the owner's settings over OpenRouter's catalog.
+let M = null;
+let freeDraft = [];
+const openVendors = new Set();
+const strengthName = (m) => M.strengths[m.strength || m.deduced];
+const usd = (n) => (n === null ? "?" : fr.format(n));
+async function loadModels() {
+  M = await get("/models");
+  const all = M.vendors.flatMap((v) => v.models);
+  $("n-models").textContent = all.filter((m) => m.enabled).length + " / " + all.length;
+  $("t-all").textContent = "Tous · " + all.length;
+  if (openVendors.size === 0) for (const v of M.vendors.slice(0, 2)) openVendors.add(v.id);
+  freeDraft = M.free.slice();
+  const pv = $("pv");
+  if (!pv.options.length) for (const p of M.plans) pv.append(el("option", { value: p.id }, p.name));
+  renderModels();
+  await loadPreview();
+}
+function keep(m) {
+  const q = $("mq").value.trim().toLowerCase();
+  const f = $("mf").value;
+  return (!q || (m.name + " " + m.id).toLowerCase().includes(q)) &&
+    (!f || (f === "open" && m.enabled) || (f === "off" && !m.enabled) || (f === "reco" && m.recommended) || (f === "new" && !m.configured));
+}
+async function setModels(ids, set, done) {
+  try { await send("/models", { ids, set }); toast(done); await loadModels(); }
+  catch (e) { toast(e.message); }
+}
+function paidPlans() { return M.plans.filter((p) => !p.free); }
+function modelRow(m) {
+  const sw = el("button", { class: "sw", type: "button", "aria-pressed": String(m.enabled), title: m.enabled ? "Visible chez les clients : cliquer pour masquer" : "Masqué : cliquer pour l'ouvrir",
+    onclick: () => setModels([m.id], { enabled: !m.enabled }, m.enabled ? "Modèle masqué" : "Modèle ouvert") });
+  const star = el("button", { class: "star", type: "button", "aria-pressed": String(m.recommended), title: "Conseillé : passe en tête de son éditeur",
+    onclick: () => setModels([m.id], { recommended: !m.recommended }, m.recommended ? "Plus conseillé" : "Conseillé") }, "★");
+  const strength = el("select", { title: "Point fort, écrit sous le nom", onchange: (e) => setModels([m.id], { strength: e.target.value || null }, "Point fort changé") },
+    el("option", { value: "" }, M.strengths[m.deduced] + " (auto)"),
+    ...Object.entries(M.strengths).map(([k, v]) => el("option", { value: k }, v)));
+  strength.value = m.strength || "";
+  const plans = paidPlans();
+  const min = el("select", { title: "Le forfait qui l'ouvre", onchange: (e) => setModels([m.id], { minPlan: e.target.value || null }, "Forfait changé") },
+    ...plans.map((p, i) => el("option", { value: i === 0 ? "" : p.id }, "dès " + p.name)));
+  min.value = m.minPlan && m.minPlan !== plans[0].id ? m.minPlan : "";
+  const free = m.free >= 0 ? el("span", { class: "pill ok" }, "Découverte") : null;
+  return el("div", { class: "mrow" }, sw, star,
+    el("span", { class: "nm" }, el("b", {}, m.name, " ", free), el("small", {}, m.id + " · ", el("span", { class: "nowrap" }, usd(m.price.prompt) + " $ / " + usd(m.price.completion) + " $"))),
+    strength, min);
+}
+function renderModels() {
+  $("vendors").replaceChildren(...M.vendors.map((v) => {
+    const shown = v.models.filter(keep);
+    if (!shown.length) return null;
+    const on = v.models.filter((m) => m.enabled).length;
+    const allOn = on === v.models.length;
+    const searching = $("mq").value.trim() !== "" || $("mf").value !== "";
+    const expanded = searching || openVendors.has(v.id);
+    const header = el("header", { onclick: (e) => { if (e.target.closest("button")) return; if (openVendors.has(v.id)) openVendors.delete(v.id); else openVendors.add(v.id); renderModels(); } },
+      el("b", {}, v.name), el("span", { class: "muted" }, on + " / " + v.models.length + " ouverts"),
+      el("span", { class: "right" }, el("button", { class: "btn", type: "button",
+        onclick: () => setModels(v.models.map((m) => m.id), { enabled: !allOn }, (allOn ? "Masqués : " : "Ouverts : ") + v.name) }, allOn ? "Tout masquer" : "Tout ouvrir")));
+    return el("div", { class: "vendor" }, header, expanded ? el("div", {}, ...shown.map(modelRow)) : null);
+  }).filter(Boolean));
+  const plans = paidPlans();
+  const all = M.vendors.flatMap((v) => v.models.map((m) => ({ ...m, vendor: v.name }))).filter(keep);
+  $("all-models").replaceChildren(...all.map((m) => el("tr", {},
+    el("td", {}, el("button", { class: "sw", type: "button", "aria-pressed": String(m.enabled), onclick: () => setModels([m.id], { enabled: !m.enabled }, m.enabled ? "Modèle masqué" : "Modèle ouvert") })),
+    el("td", {}, m.name), el("td", {}, m.vendor), el("td", {}, strengthName(m)),
+    el("td", {}, (plans.find((p) => p.id === m.minPlan) || plans[0]).name),
+    el("td", { class: "num" }, usd(m.price.prompt) + " · " + usd(m.price.completion)))));
+  renderFree();
+}
+function renderFree() {
+  const byId = new Map(M.vendors.flatMap((v) => v.models).map((m) => [m.id, m]));
+  $("free-note").textContent = (M.freeFromCode ? "La liste du code, tant que tu n'en as pas enregistré une. " : "") +
+    "Le premier est celui par défaut ; les suivants prennent le relais s'il ne répond pas. Choisis des modèles économiques : le budget gratuit est petit.";
+  const move = (i, d) => { const j = i + d; if (j < 0 || j >= freeDraft.length) return; [freeDraft[i], freeDraft[j]] = [freeDraft[j], freeDraft[i]]; renderFree(); };
+  $("free-list").replaceChildren(...freeDraft.map((id, i) => {
+    const m = byId.get(id);
+    return el("div", { class: "it" }, el("span", { class: i === 0 ? "pill blue" : "pill" }, String(i + 1)),
+      el("p", {}, el("b", {}, m ? m.name : id), i === 0 ? " · par défaut" : " · relais", el("br"),
+        el("small", {}, id + (m ? " · " + usd(m.price.prompt) + " $ / " + usd(m.price.completion) + " $ le million" : " · absent du catalogue"))),
+      el("span", { class: "order" },
+        el("button", { class: "btn", type: "button", title: "Monter", onclick: () => move(i, -1) }, "↑"),
+        el("button", { class: "btn", type: "button", title: "Descendre", onclick: () => move(i, 1) }, "↓"),
+        el("button", { class: "btn danger", type: "button", title: "Retirer", onclick: () => { freeDraft.splice(i, 1); renderFree(); } }, "Retirer")));
+  }));
+  const cheap = [...byId.values()].filter((m) => !freeDraft.includes(m.id) && m.price.completion !== null)
+    .sort((a, b) => a.price.completion - b.price.completion).slice(0, 80);
+  $("free-add").replaceChildren(el("option", { value: "" }, "Ajouter un modèle (les moins chers d'abord)…"),
+    ...cheap.map((m) => el("option", { value: m.id }, m.name + " · " + usd(m.price.completion) + " $ / M en sortie")));
+}
+$("free-add-go").addEventListener("click", () => { const id = $("free-add").value; if (id) { freeDraft.push(id); renderFree(); } });
+$("free-save").addEventListener("click", async (e) => {
+  const b = e.currentTarget;
+  b.disabled = true;
+  try { await send("/models/free", { ids: freeDraft }); toast("Découverte enregistré"); await loadModels(); }
+  catch (err) { toast(err.message); }
+  finally { b.disabled = false; }
+});
+for (const id of ["mq", "mf"]) $(id).addEventListener("input", () => M && renderModels());
+$("mtabs").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  for (const x of document.querySelectorAll("#mtabs button")) x.setAttribute("aria-selected", String(x === b));
+  for (const p of document.querySelectorAll("[data-tp]")) p.hidden = p.dataset.tp !== b.dataset.t;
+  $("m-filters").hidden = b.dataset.t === "decouverte";
+});
+async function loadPreview() {
+  const r = await get("/models/preview?plan=" + encodeURIComponent($("pv").value));
+  const items = [el("div", { class: "ttl" }, "Modèle de la conversation")];
+  for (const g of r.groups) {
+    items.push(el("div", { class: "grp" }, g.name));
+    for (const m of g.models) {
+      const lock = m.baarali.unlock;
+      items.push(el("div", { class: lock ? "opt locked" : "opt" }, el("span", { class: "mark" }, lock ? "🔒" : m.id === r.default ? "✓" : ""),
+        el("span", {}, el("b", {}, m.name), el("small", {}, m.baarali.strength + (lock ? " · dès " + lock : ""))),
+        m.baarali.recommended && !lock ? el("span", { class: "pill blue" }, "Conseillé") : null));
+    }
+  }
+  if (!r.groups.length) items.push(el("p", { class: "empty" }, "Aucun modèle pour ce forfait."));
+  $("picker").replaceChildren(...items);
+}
+$("pv").addEventListener("change", () => loadPreview().catch(() => toast("Aperçu impossible")));
 
 async function loadJournal() {
   const r = await get("/journal");

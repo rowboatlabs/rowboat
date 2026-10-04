@@ -1,3 +1,4 @@
+import type { ModelSetting } from './model-access.js';
 import { createHash } from 'node:crypto';
 import type { ModelPolicy } from './models.js';
 import type { Money } from './pricing.js';
@@ -137,6 +138,10 @@ export interface AccountSummary {
  * with the first multi-user deployment.
  */
 export interface ControlStore {
+  /** Every model the owner set up in the console (model-access.ts). */
+  modelSettings(): Promise<ModelSetting[]>;
+  /** Creates or replaces each one, in one go. */
+  saveModelSettings(settings: ModelSetting[], at: number): Promise<void>;
   accountByToken(token: string): Promise<Account | null>;
   account(id: string): Promise<Account | null>;
   plan(planId: string): Promise<Plan | null>;
@@ -184,6 +189,7 @@ export class MemoryStore implements ControlStore {
   readonly usage: UsageRecord[] = [];
   readonly ledger: MediaLedgerEntry[] = [];
   readonly log: AdminLogEntry[] = [];
+  private readonly models = new Map<string, ModelSetting>();
   private readonly states = new Map<string, QuotaState>();
   private readonly jobs = new Map<string, MediaJob>();
   private readonly instances = new Map<string, InstanceRecord>();
@@ -336,6 +342,12 @@ export class MemoryStore implements ControlStore {
       if (at === null) delete a.suspendedAt;
       else a.suspendedAt = at;
     });
+  }
+  async modelSettings() {
+    return [...this.models.values()].map((s) => ({ ...s }));
+  }
+  async saveModelSettings(settings: ModelSetting[]) {
+    for (const s of settings) this.models.set(s.modelId, { ...s });
   }
   async allInstances() {
     return [...this.instances.values()].map((r) => ({ ...r }));

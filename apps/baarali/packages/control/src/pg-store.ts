@@ -1,3 +1,4 @@
+import { isStrength, type ModelSetting } from './model-access.js';
 import type { Db, Queryable } from './db.js';
 import type { QuotaState } from './quota.js';
 import {
@@ -324,6 +325,35 @@ export class PgStore implements ControlStore {
       'SELECT account_id, app, machine_id, volume_id, image, managed FROM baarali.instances ORDER BY created_at',
     );
     return rows.map((r) => ({ accountId: r.account_id, app: r.app, machineId: r.machine_id, volumeId: r.volume_id, image: r.image, managed: r.managed }));
+  }
+
+  async modelSettings(): Promise<ModelSetting[]> {
+    const { rows } = await this.db.query<{ model_id: string; enabled: boolean; min_plan: string | null; recommended: boolean; strength: string | null; free_rank: number | null }>(
+      'SELECT model_id, enabled, min_plan, recommended, strength, free_rank FROM baarali.model_settings',
+    );
+    return rows.map((r) => ({
+      modelId: r.model_id,
+      enabled: r.enabled,
+      minPlan: r.min_plan,
+      recommended: r.recommended,
+      strength: isStrength(r.strength) ? r.strength : null,
+      freeRank: r.free_rank,
+    }));
+  }
+
+  async saveModelSettings(settings: ModelSetting[], at: number) {
+    if (!settings.length) return;
+    await this.db.transaction(async (q) => {
+      for (const s of settings) {
+        await q.query(
+          `INSERT INTO baarali.model_settings (model_id, enabled, min_plan, recommended, strength, free_rank, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
+           ON CONFLICT (model_id) DO UPDATE SET enabled = EXCLUDED.enabled, min_plan = EXCLUDED.min_plan,
+             recommended = EXCLUDED.recommended, strength = EXCLUDED.strength, free_rank = EXCLUDED.free_rank, updated_at = EXCLUDED.updated_at`,
+          [s.modelId, s.enabled, s.minPlan, s.recommended, s.strength, s.freeRank, new Date(at)],
+        );
+      }
+    });
   }
 
   async appendAdminLog(e: AdminLogEntry) {

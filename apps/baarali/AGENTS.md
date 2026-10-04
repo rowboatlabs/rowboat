@@ -124,7 +124,7 @@ Ce qui reste en anglais : l'interface upstream, jusqu'à `@baarali/i18n` (archi 
 
 Tout est dans `packages/control/src/catalog.ts` : un prix en euros par forfait, le F CFA s'en déduit à la parité fixe (655,957, au franc près), et un taux par devise. La remise à l'année (`ANNUAL_DISCOUNT`, 10 %) ne s'affiche que sur `/tarifs` tant que le paiement n'est pas ouvert. Le budget se recalcule ; `test/pricing.test.ts` casse si la marge de 55 % ne tient plus dans une devise.
 
-Les modèles de Découverte sont dans le même fichier (`DISCOVERY_MODELS`) : le premier est le défaut, les suivants prennent le relais. Avant d'en ajouter un, vérifier qu'il répond en français avec `reasoning: { enabled: false }` (archi §3.5, « Les modèles par forfait »).
+Les modèles se règlent dans la console d'admin, onglet Modèles (archi §3.5, « Les modèles par forfait ») : visibles ou masqués, le forfait qui les ouvre, « Conseillé », leur point fort, et la liste de Découverte. `DISCOVERY_MODELS` (`catalog.ts`) n'est que la liste de Découverte tant que la console n'en a pas enregistré une. Avant d'ajouter un modèle à Découverte, vérifier qu'il répond en français avec `reasoning: { enabled: false }`.
 
 Les médias sont dans `packages/control/src/media.ts` : un modèle = un chemin Pixazo, un corps et un prix. Un prix se relit sur `pixazo.ai/models/<famille>`, et on garde le prix normal quand une promotion court (archi §3.5, « Les médias »). Ils se paient en crédits médias, vendus en recharges (`MEDIA_PACKS` dans `catalog.ts`). `test/pricing.test.ts` casse si une recharge ne garde plus 55 %.
 

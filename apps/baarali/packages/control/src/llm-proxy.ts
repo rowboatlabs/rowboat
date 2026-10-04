@@ -1,4 +1,5 @@
-import { applyPolicy, presentCatalog } from './models.js';
+import { fitCall, planLabeler, presentFor } from './model-access.js';
+import { ModelCatalog } from './model-catalog.js';
 import type { Account, ControlStore } from './store.js';
 import {
   admit,
@@ -27,6 +28,8 @@ export interface ProxyDeps {
   fetch: typeof fetch;
   now: () => number;
   upstreamBase?: string;
+  /** The console's model settings; unset: read from the store on each call. */
+  models?: ModelCatalog;
 }
 
 async function currentState(store: ControlStore, account: Account): Promise<QuotaState> {
@@ -107,12 +110,18 @@ export async function proxyLlm(deps: ProxyDeps, account: Account, req: Request):
 
   const plan = await deps.store.plan(account.planId);
   if (!plan) return errorResponse(403, { code: 'no_plan', message: 'Account has no active plan' });
+  const catalog = await (deps.models ?? new ModelCatalog(deps.store, deps.now, 0)).get();
+  const label = planLabeler(catalog.plans);
+  const planName = (id: string) => {
+    const p = catalog.plans.find((x) => x.id === id);
+    return p ? label(p) : id;
+  };
 
   // Reads (the model catalog) cost nothing and are not metered.
   if (req.method === 'GET' || req.method === 'HEAD') {
     const upstream = await deps.fetch(target, { method: req.method, headers });
     if (subpath === '/models' && req.method === 'GET' && upstream.ok) {
-      const filtered = presentCatalog(plan.models, await upstream.text());
+      const filtered = presentFor(catalog, plan, await upstream.text(), planName);
       if (filtered === null) return errorResponse(502, { code: 'upstream_invalid', message: 'Unexpected model catalog' });
       return new Response(filtered, { status: 200, headers: passHeaders(upstream) });
     }
@@ -122,8 +131,8 @@ export async function proxyLlm(deps: ProxyDeps, account: Account, req: Request):
   // Checked before the quota: a refused call must not open a session.
   let raw = await req.text();
   let requestedModel: string | null = null;
-  if (plan.models) {
-    const fitted = applyPolicy(plan.models, subpath, raw);
+  const fitted = fitCall(catalog, plan, subpath, raw);
+  if (fitted) {
     if (!fitted.ok) return errorResponse(fitted.status, { code: fitted.code, message: fitted.message });
     raw = fitted.body;
     requestedModel = fitted.requested !== fitted.served ? fitted.requested : null;

@@ -12,11 +12,18 @@ import { MemoryStore, hashToken, type Account, type Plan } from '../src/store.js
 // action changes, and the journal that keeps every one of them.
 
 const T0 = Date.UTC(2026, 9, 3, 8, 0, 0);
-const FREE: Plan = { id: 'decouverte', category: 'free', displayName: 'Découverte', weekCredits: 1_000_000, monthlyPrices: [], models: null };
+const FREE: Plan = { id: 'decouverte', category: 'free', displayName: 'Découverte', weekCredits: 1_000_000, monthlyPrices: [], models: { models: ['deepseek/flash'], settings: { reasoning: { enabled: false } } } };
 const PRO100: Plan = { id: 'pro-100', category: 'pro', displayName: 'Pro', weekCredits: 25_000_000, monthlyPrices: [{ amount: 10000, currency: 'EUR' }], models: null };
 const PRO: Plan = { id: 'pro-200', category: 'pro', displayName: 'Pro', weekCredits: 50_000_000, monthlyPrices: [{ amount: 20000, currency: 'EUR' }], models: null };
 const OWNER: Account = { id: 'acc_owner', email: 'boss@example.test', planId: 'decouverte', createdAt: T0 };
 const AWA: Account = { id: 'acc_awa', email: 'awa@example.test', planId: 'decouverte', createdAt: T0 + 1000 };
+
+const UPSTREAM = [
+  { id: 'openai/gpt-6', name: 'OpenAI: GPT-6', pricing: { prompt: '0.000002', completion: '0.00001' } },
+  { id: 'deepseek/flash', name: 'DeepSeek: Flash', pricing: { prompt: '0.0000001', completion: '0.0000004' } },
+  { id: 'anthropic/opus', name: 'Anthropic: Claude Opus', pricing: { prompt: '0.000015', completion: '0.000075' } },
+  { id: 'anthropic/sonnet', name: 'Anthropic: Claude Sonnet', pricing: { prompt: '0.000003', completion: '0.000015' } },
+];
 
 // The browser's session, played by a cookie naming who is signed in.
 const SESSIONS: Record<string, SessionUser> = {
@@ -68,7 +75,11 @@ function setup(opts: { adminEmails?: string[]; noAuth?: boolean } = {}) {
     instances,
     gateway: createGateway({ store, instances, now: () => clock, fetch: globalThis.fetch }),
     now: () => clock,
-    fetch: globalThis.fetch,
+    // OpenRouter, played here: its model list, priced per token.
+    fetch: (async (url: string) => {
+      if (String(url).endsWith('/models')) return Response.json({ data: UPSTREAM });
+      return new Response('{}');
+    }) as typeof fetch,
   });
   const as = (who: string | null, path: string, init: RequestInit & { write?: boolean } = {}) =>
     app.request(path, {
@@ -269,5 +280,65 @@ describe('instances from the console', () => {
     expect(calls).toContain('restart m_awa');
     expect((await post('boss', '/admin/api/instances/acc_nobody/wake')).status).toBe(404);
     expect((await store.adminLog(10, AWA.id)).map((e) => e.action)).toEqual(['instance-restart', 'instance-update']);
+  });
+});
+
+describe('models from the console', () => {
+  type Listed = { vendors: Array<{ id: string; name: string; models: Array<Record<string, unknown>> }>; free: string[]; freeFromCode: boolean };
+  type Preview = { default: string | null; groups: Array<{ name: string; models: Array<{ id: string; baarali: { unlock?: string; recommended: boolean } }> }> };
+  const preview = async (as: ReturnType<typeof setup>['as'], plan: string) => (await (await as('boss', `/admin/api/models/preview?plan=${plan}`)).json()) as Preview;
+
+  it('lists OpenRouter\'s models by vendor, in the vendors\' order, priced per million', async () => {
+    const { as } = setup();
+    const r = (await (await as('boss', '/admin/api/models')).json()) as Listed;
+    expect(r.vendors.map((v) => v.name)).toEqual(['Anthropic', 'OpenAI', 'DeepSeek']);
+    expect(r.vendors[0].models[0]).toMatchObject({
+      id: 'anthropic/opus', name: 'Claude Opus', configured: false, enabled: true, minPlan: null, deduced: 'puissant', free: -1,
+      price: { prompt: 15, completion: 75 },
+    });
+    expect(r).toMatchObject({ free: ['deepseek/flash'], freeFromCode: true });
+  });
+
+  it('closes a model to the plans below its minimum, padlocked, and writes it down', async () => {
+    const { as, post, store } = setup();
+    expect((await post('boss', '/admin/api/models', { ids: ['anthropic/opus'], set: { minPlan: 'pro-200', recommended: true } })).status).toBe(200);
+    const pro = await preview(as, 'pro-100');
+    const opus = pro.groups[0].models.find((m) => m.id === 'anthropic/opus');
+    expect(opus?.baarali).toMatchObject({ unlock: 'Pro max', recommended: true });
+    // A padlocked model comes last in its vendor's group.
+    expect(pro.groups[0].models.map((m) => m.id)).toEqual(['anthropic/sonnet', 'anthropic/opus']);
+    expect((await preview(as, 'pro-200')).default).toBe('anthropic/opus');
+    expect((await store.adminLog(1))[0]).toMatchObject({ action: 'models', detail: 'anthropic/opus : conseillé, dès Pro max' });
+  });
+
+  it('reaches the apps\' list at once, and their calls', async () => {
+    const { post, app } = setup();
+    await post('boss', '/admin/api/models', { ids: ['anthropic/opus', 'anthropic/sonnet'], set: { enabled: false } });
+    const listed = await app.request('/v1/llm/models', { headers: { authorization: 'Bearer tok-awa' } });
+    const { data } = (await listed.json()) as { data: Array<{ id: string }> };
+    expect(data.map((m) => m.id)).toEqual(['deepseek/flash']);
+  });
+
+  it('refuses a minimum that is not a paid plan, or an unknown strength, or no model', async () => {
+    const { post } = setup();
+    expect((await post('boss', '/admin/api/models', { ids: ['anthropic/opus'], set: { minPlan: 'decouverte' } })).status).toBe(400);
+    expect((await post('boss', '/admin/api/models', { ids: ['anthropic/opus'], set: { strength: 'magique' } })).status).toBe(400);
+    expect((await post('boss', '/admin/api/models', { ids: [], set: { enabled: false } })).status).toBe(400);
+    expect((await post('boss', '/admin/api/models', { ids: ['anthropic/opus'], set: {} })).status).toBe(400);
+  });
+
+  it('sets Découverte\'s list and its order, and takes out what left it', async () => {
+    const { as, post } = setup();
+    await post('boss', '/admin/api/models/free', { ids: ['openai/gpt-6', 'deepseek/flash'] });
+    let r = (await (await as('boss', '/admin/api/models')).json()) as Listed;
+    expect(r).toMatchObject({ free: ['openai/gpt-6', 'deepseek/flash'], freeFromCode: false });
+    await post('boss', '/admin/api/models/free', { ids: ['deepseek/flash'] });
+    r = (await (await as('boss', '/admin/api/models')).json()) as Listed;
+    expect(r.free).toEqual(['deepseek/flash']);
+    const free = await preview(as, 'decouverte');
+    expect(free.default).toBe('deepseek/flash');
+    // gpt-6 was set up: Découverte sees it padlocked, open from the first paid plan.
+    expect(free.groups.flatMap((g) => g.models).find((m) => m.id === 'openai/gpt-6')?.baarali.unlock).toBe('Pro');
+    expect((await post('boss', '/admin/api/models/free', { ids: [] })).status).toBe(400);
   });
 });

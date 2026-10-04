@@ -260,12 +260,22 @@ Ce que la marge de 55 % paie encore : l'hébergement de l'instance, le plan de c
 
 #### Les modèles par forfait
 
-Décidé le 30/09/2026. Les forfaits payants appellent n'importe quel modèle, dans leur quota. **Découverte** n'appelle que sa liste (`DISCOVERY_MODELS`, `catalog.ts`), testée en français le même jour : **DeepSeek V4.1 Flash** par défaut, au choix du propriétaire, puis **GPT-6 Luna** si le premier échoue. Le plan de contrôle applique la liste (`models.ts`) :
+Décidé le 30/09/2026, réglable depuis la console d'admin depuis le 03/10/2026 (`model-access.ts`, onglet Modèles, sur le modèle du catalogue de wenastudio).
+
+**Ce que le propriétaire règle, modèle par modèle** : visible ou masqué, le forfait payant à partir duquel il s'ouvre, « Conseillé » (en tête de son éditeur), et son point fort (Polyvalent, Puissant, Raisonnement, Codage, Recherche web, Analyse d'images, Rapide ; déduit de l'identifiant tant qu'il n'est pas posé). On ouvre ou masque d'un geste toute la gamme d'un éditeur. Un réglage vit dans `baarali.model_settings` (migration 5) et arrive aux sélecteurs en moins d'une minute.
+
+**Un modèle jamais réglé reste ouvert aux forfaits payants** et hors de Découverte : le jour du déploiement, personne ne perd un modèle.
+
+**Ce que voit chaque forfait** (`GET /v1/llm/models`) : un modèle masqué n'apparaît pas ; un modèle d'un forfait au-dessus reste visible, **avec un cadenas et le forfait qui l'ouvre** (« dès Pro max »), choix du propriétaire du 03/10/2026, et ne s'appelle pas. Chaque modèle porte `baarali` : son éditeur, son point fort, « Conseillé », et `unlock` s'il est verrouillé. Le défaut du forfait vient en premier, puisque le cœur choisit le premier modèle listé pour une installation neuve. Découverte voit sa liste, et en cadenas les seuls modèles réglés : les centaines d'autres noieraient la liste gratuite.
+
+**Un appel vers un modèle que le forfait n'ouvre pas est remplacé, pas refusé** : par le premier modèle « Conseillé » ouvert au forfait, dans l'ordre des éditeurs, sinon par le défaut de Découverte. Même raison que pour Découverte ci-dessous.
+
+**Découverte** n'appelle que sa liste, réglée dans la console (l'ordre compte : le premier est le défaut). Tant qu'aucune n'est enregistrée, c'est celle du code (`DISCOVERY_MODELS`, `catalog.ts`), testée en français le 30/09/2026 : **DeepSeek V4.1 Flash** par défaut, au choix du propriétaire, puis **GPT-6 Luna** si le premier échoue. Le plan de contrôle applique la liste :
 
 - un modèle hors liste est **remplacé** par le défaut, pas refusé : le travail de fond du cœur (notes, titres, connaissances) demande ses propres modèles et doit continuer de tourner ;
 - chaque appel part avec la liste entière dans `models`, pour qu'OpenRouter passe au suivant si l'un tombe, et avec la **réflexion coupée** : sans elle, DeepSeek dépense les jetons de la réponse à réfléchir et ne rend rien ;
 - la génération d'images et les autres routes que `/chat/completions` sont **refusées** (403 `not_in_plan`) avant le quota, sans ouvrir de session ;
-- le catalogue `GET /v1/llm/models` ne montre que la liste, pour que le sélecteur ne propose rien qui serait remplacé ;
+- le catalogue `GET /v1/llm/models` ne montre que la liste ouverte, pour que le sélecteur ne propose rien qui serait remplacé ;
 - l'enregistrement d'usage garde le modèle demandé à côté du modèle servi.
 
 L'instance part sur DeepSeek V4.1 Flash quel que soit le forfait (`BAARALI_ASSISTANT_MODEL` le change) ; un choix déjà fait dans l'app n'est jamais écrasé.

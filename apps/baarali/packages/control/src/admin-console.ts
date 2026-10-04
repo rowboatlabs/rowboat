@@ -6,6 +6,22 @@ import { adminPage, deniedPage } from './admin-page.js';
 import { AUTH_BASE_PATH, type BaaraliAuth } from './auth.js';
 import { ASSUMPTIONS, OFFERS } from './catalog.js';
 import { html } from './html.js';
+import {
+  compareVendors,
+  deduceStrength,
+  isFreePlan,
+  isStrength,
+  planLabeler,
+  presentFor,
+  STRENGTHS,
+  vendorName,
+  vendorOf,
+  pickerGroups,
+  type ModelSetting,
+  type PickerModel,
+} from './model-access.js';
+import type { ModelCatalog, UpstreamModels } from './model-catalog.js';
+import { displayName } from './models.js';
 import { WEEKS_PER_MONTH } from './pricing.js';
 import type { Instances } from './instances.js';
 import { advance, budgetsForWeek, gauges, initialState, WEEK_MS } from './quota.js';
@@ -26,7 +42,20 @@ export interface ConsoleDeps {
   adminTokenHash?: string;
   mediaPacks: SoldPack[];
   instances?: Instances;
+  models: ModelCatalog;
+  upstreamModels: UpstreamModels;
   now: () => number;
+}
+
+/** One write touches this many models at most: a whole vendor fits, a slip does not empty the catalog. */
+export const MAX_MODELS_PER_WRITE = 500;
+
+const blank = (modelId: string): ModelSetting => ({ modelId, enabled: true, minPlan: null, recommended: false, strength: null, freeRank: null });
+
+/** OpenRouter prices a token in dollars; the console reads them per million. */
+function perMillion(v: unknown): number | null {
+  const n = typeof v === 'string' ? Number(v) : typeof v === 'number' ? v : NaN;
+  return Number.isFinite(n) && n >= 0 ? Math.round(n * 1e6 * 100) / 100 : null;
 }
 
 /** Who is acting: an admin's email, or `token` for the operator token. */
@@ -72,18 +101,6 @@ export function clientRow(s: AccountSummary, plan: Plan | null, now: number, lab
     mediaBalance: s.mediaBalance,
     lastActiveAt: s.lastActiveAt,
     cost: costOf(s.recentCredits),
-  };
-}
-
-/**
- * Two Pro levels share a display name: the dearer one is « Pro max », the
- * owner's word for it (03/10/2026). Any other plan keeps its name.
- */
-export function planLabeler(plans: Plan[]): (plan: Plan) => string {
-  const eur = (p: Plan) => p.monthlyPrices.find((m) => m.currency === 'EUR')?.amount ?? 0;
-  return (plan) => {
-    const twins = plans.filter((p) => p.displayName === plan.displayName);
-    return twins.length > 1 && eur(plan) === Math.max(...twins.map(eur)) ? `${plan.displayName} max` : plan.displayName;
   };
 }
 
@@ -306,6 +323,143 @@ export function mountAdminConsole(app: Hono<any>, deps: ConsoleDeps): void {
       }
     });
   }
+
+  // The models (decided 03/10/2026): OpenRouter's catalog, the owner's
+  // settings over it, and what each plan's picker then shows.
+  const upstream = async () => {
+    const parsed = JSON.parse(await deps.upstreamModels.get()) as { data?: unknown };
+    if (!Array.isArray(parsed.data)) throw new Error('unexpected catalog');
+    return parsed.data.filter((m): m is { id: string; name?: unknown; pricing?: { prompt?: unknown; completion?: unknown } } =>
+      !!m && typeof m === 'object' && typeof (m as { id?: unknown }).id === 'string');
+  };
+
+  app.get('/admin/api/models', async (c) => {
+    const actor = await api(c, false);
+    if (actor instanceof Response) return actor;
+    let list;
+    try {
+      list = await upstream();
+    } catch (err) {
+      console.error('[admin] OpenRouter catalog unreadable', err);
+      return c.json({ error: { code: 'upstream_failed', message: 'Le catalogue OpenRouter ne répond pas' } }, 502);
+    }
+    deps.models.clear();
+    const catalog = await deps.models.get();
+    const label = planLabeler(catalog.plans);
+    const byVendor = new Map<string, unknown[]>();
+    const known = new Set(list.map((m) => m.id));
+    for (const m of list) {
+      const s = catalog.settings.get(m.id);
+      const vendor = vendorOf(m.id);
+      byVendor.set(vendor, [...(byVendor.get(vendor) ?? []), {
+        id: m.id,
+        name: typeof m.name === 'string' ? displayName(m.name) : m.id,
+        configured: Boolean(s),
+        enabled: s?.enabled ?? true,
+        minPlan: s?.minPlan ?? null,
+        recommended: s?.recommended ?? false,
+        strength: s?.strength ?? null,
+        deduced: deduceStrength(m.id),
+        free: catalog.free.indexOf(m.id),
+        price: { prompt: perMillion(m.pricing?.prompt), completion: perMillion(m.pricing?.completion) },
+      }]);
+    }
+    const vendors = [...byVendor.entries()]
+      .sort(([a], [b]) => compareVendors(a, b))
+      .map(([id, models]) => ({ id, name: vendorName(id), models }));
+    return c.json({
+      plans: catalog.plans.map((p) => ({ id: p.id, name: label(p), free: isFreePlan(p) })),
+      strengths: STRENGTHS,
+      free: catalog.free,
+      // Découverte's list as the code sets it, until the console sets one.
+      freeFromCode: ![...catalog.settings.values()].some((s) => s.freeRank !== null),
+      // Settings for models OpenRouter no longer lists: kept, shown apart.
+      gone: [...catalog.settings.keys()].filter((id) => !known.has(id)),
+      vendors,
+    });
+  });
+
+  app.post('/admin/api/models', async (c) => {
+    const actor = await api(c, true);
+    if (actor instanceof Response) return actor;
+    const b = await body(c);
+    const ids = Array.isArray(b.ids) ? [...new Set(b.ids.filter((x): x is string => typeof x === 'string' && x.includes('/')))] : [];
+    const set = b.set && typeof b.set === 'object' && !Array.isArray(b.set) ? (b.set as Record<string, unknown>) : {};
+    if (ids.length === 0 || ids.length > MAX_MODELS_PER_WRITE) {
+      return c.json({ error: { code: 'invalid_request', message: `ids: 1 to ${MAX_MODELS_PER_WRITE} models` } }, 400);
+    }
+    const catalog = await deps.models.get();
+    const paid = catalog.plans.filter((p) => !isFreePlan(p)).map((p) => p.id);
+    const change: Partial<ModelSetting> = {};
+    if (typeof set.enabled === 'boolean') change.enabled = set.enabled;
+    if (typeof set.recommended === 'boolean') change.recommended = set.recommended;
+    if ('minPlan' in set) {
+      if (set.minPlan !== null && !(typeof set.minPlan === 'string' && paid.includes(set.minPlan))) {
+        return c.json({ error: { code: 'invalid_request', message: `minPlan: null or one of ${paid.join(', ')}` } }, 400);
+      }
+      change.minPlan = set.minPlan as string | null;
+    }
+    if ('strength' in set) {
+      if (set.strength !== null && !isStrength(set.strength)) return c.json({ error: { code: 'invalid_request', message: 'Unknown strength' } }, 400);
+      change.strength = set.strength;
+    }
+    if (Object.keys(change).length === 0) return c.json({ error: { code: 'invalid_request', message: 'Nothing to change' } }, 400);
+    const settings = ids.map((id) => ({ ...(catalog.settings.get(id) ?? blank(id)), ...change, modelId: id }));
+    await store.saveModelSettings(settings, deps.now());
+    deps.models.clear();
+    const label = planLabeler(catalog.plans);
+    const words = [
+      change.enabled !== undefined ? (change.enabled ? 'ouvert' : 'masqué') : null,
+      change.recommended !== undefined ? (change.recommended ? 'conseillé' : 'plus conseillé') : null,
+      change.minPlan !== undefined ? `dès ${change.minPlan ? label(catalog.plans.find((p) => p.id === change.minPlan)!) : 'tout forfait payant'}` : null,
+      change.strength !== undefined ? `point fort : ${change.strength ? STRENGTHS[change.strength] : 'automatique'}` : null,
+    ].filter(Boolean).join(', ');
+    await log(actor, 'models', null, `${ids.length === 1 ? ids[0] : `${ids.length} modèles`} : ${words}`);
+    return c.json({ saved: settings.length });
+  });
+
+  // Découverte's list, in order: the first is the default, the others take over.
+  app.post('/admin/api/models/free', async (c) => {
+    const actor = await api(c, true);
+    if (actor instanceof Response) return actor;
+    const raw = (await body(c)).ids;
+    const ids = Array.isArray(raw) ? [...new Set(raw.filter((x): x is string => typeof x === 'string' && x.includes('/')))] : [];
+    if (ids.length === 0 || ids.length > 10) {
+      return c.json({ error: { code: 'invalid_request', message: 'Découverte needs 1 to 10 models' } }, 400);
+    }
+    const catalog = await deps.models.get();
+    const leaving = [...catalog.settings.values()].filter((s) => s.freeRank !== null && !ids.includes(s.modelId));
+    const settings = [
+      ...leaving.map((s) => ({ ...s, freeRank: null })),
+      ...ids.map((id, i) => ({ ...(catalog.settings.get(id) ?? blank(id)), modelId: id, enabled: true, freeRank: i })),
+    ];
+    await store.saveModelSettings(settings, deps.now());
+    deps.models.clear();
+    await log(actor, 'models-free', null, `Découverte : ${ids.join(', ')}`);
+    return c.json({ free: ids });
+  });
+
+  // Exactly what one plan's picker receives (/v1/llm/models).
+  app.get('/admin/api/models/preview', async (c) => {
+    const actor = await api(c, false);
+    if (actor instanceof Response) return actor;
+    const catalog = await deps.models.get();
+    const plan = catalog.plans.find((p) => p.id === c.req.query('plan'));
+    if (!plan) return c.json({ error: { code: 'invalid_request', message: 'Unknown plan' } }, 400);
+    const label = planLabeler(catalog.plans);
+    let shown: string | null;
+    try {
+      shown = presentFor(catalog, plan, await deps.upstreamModels.get(), (id) => {
+        const p = catalog.plans.find((x) => x.id === id);
+        return p ? label(p) : id;
+      });
+    } catch {
+      shown = null;
+    }
+    if (shown === null) return c.json({ error: { code: 'upstream_failed', message: 'Le catalogue OpenRouter ne répond pas' } }, 502);
+    const { data } = JSON.parse(shown) as { data: PickerModel[] };
+    return c.json({ default: data[0]?.id ?? null, groups: pickerGroups(data) });
+  });
 
   app.get('/admin/api/journal', async (c) => {
     const actor = await api(c, false);

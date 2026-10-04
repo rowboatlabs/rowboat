@@ -196,6 +196,17 @@ describe.each([
     ]);
   });
 
+  it('keeps the model settings, replaced whole on a second save', async () => {
+    const store = await make();
+    expect(await store.modelSettings()).toEqual([]);
+    const opus = { modelId: 'anthropic/opus', enabled: true, minPlan: 'pro', recommended: true, strength: 'puissant' as const, freeRank: null };
+    const flash = { modelId: 'deepseek/flash', enabled: true, minPlan: null, recommended: false, strength: null, freeRank: 0 };
+    await store.saveModelSettings([opus, flash], T0);
+    await store.saveModelSettings([{ ...opus, enabled: false, recommended: false }], T0 + 1);
+    const byId = Object.fromEntries((await store.modelSettings()).map((s) => [s.modelId, s]));
+    expect(byId).toEqual({ 'anthropic/opus': { ...opus, enabled: false, recommended: false }, 'deepseek/flash': flash });
+  });
+
   it('lists every instance', async () => {
     const store = await make();
     const record = { accountId: ME.id, app: 'baarali-instances', machineId: 'm1', volumeId: 'v1', image: 'img:1', managed: true };

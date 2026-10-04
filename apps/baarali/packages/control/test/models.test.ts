@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyPolicy, displayName, presentCatalog, type ModelPolicy } from '../src/models.js';
+import { applyPolicy, displayName, type ModelPolicy } from '../src/models.js';
 
 const policy: ModelPolicy = { models: ['a/one', 'b/two'], settings: { reasoning: { enabled: false } } };
 
@@ -17,23 +17,6 @@ describe('applyPolicy', () => {
   it('refuses a body that is not a JSON object', () => {
     expect(applyPolicy(policy, '/chat/completions', 'nope')).toMatchObject({ ok: false, status: 400 });
     expect(applyPolicy(policy, '/chat/completions', '[]')).toMatchObject({ ok: false, status: 400 });
-  });
-});
-
-describe('presentCatalog', () => {
-  it('drops the vendor prefix from names, and keeps everything else', () => {
-    const raw = JSON.stringify({ data: [{ id: 'a/one', name: 'Alpha: One Mini', context_length: 8 }, { id: 'z/zed' }] });
-    expect(JSON.parse(presentCatalog(null, raw)!)).toEqual({ data: [{ id: 'a/one', name: 'One Mini', context_length: 8 }, { id: 'z/zed' }] });
-  });
-
-  it('keeps only the policy models', () => {
-    const raw = JSON.stringify({ data: [{ id: 'a/one' }, { id: 'z/zed' }, { id: 'b/two' }] });
-    expect(JSON.parse(presentCatalog(policy, raw)!).data.map((m: { id: string }) => m.id)).toEqual(['a/one', 'b/two']);
-  });
-
-  it('returns null on a catalog it cannot read', () => {
-    expect(presentCatalog(policy, '{"nodata":1}')).toBeNull();
-    expect(presentCatalog(null, 'x')).toBeNull();
   });
 });
 

@@ -2,7 +2,8 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import { createMiddleware } from 'hono/factory';
 import { buildApiConfig } from './config.js';
-import { proxyLlm, type ProxyDeps } from './llm-proxy.js';
+import { OPENROUTER_BASE, proxyLlm, type ProxyDeps } from './llm-proxy.js';
+import { ModelCatalog, UpstreamModels } from './model-catalog.js';
 import { isAdmin, topUpMedia, type SoldPack } from './admin.js';
 import { mountAdminConsole } from './admin-console.js';
 import { asset } from './assets.js';
@@ -60,6 +61,8 @@ const publicDevice = (d: { id: string; name: string; createdAt: number; lastSeen
 });
 
 export function createApp(deps: ControlDeps) {
+  // One cache of the console's model settings, for the proxy and the console (model-catalog.ts).
+  const models = deps.models ?? new ModelCatalog(deps.store, deps.now);
   const app = new Hono<Env>();
 
   app.get('/health', (c) => c.json({ ok: true }));
@@ -161,7 +164,7 @@ export function createApp(deps: ControlDeps) {
     });
   });
 
-  app.all('/v1/llm/*', (c) => proxyLlm(deps, c.get('account'), c.req.raw));
+  app.all('/v1/llm/*', (c) => proxyLlm({ ...deps, models }, c.get('account'), c.req.raw));
 
   app.get('/v1/media/models', (c) => listMediaModels(deps, c.get('account')));
   app.get('/v1/media/balance', (c) => mediaBalance(deps, c.get('account')));
@@ -231,6 +234,11 @@ export function createApp(deps: ControlDeps) {
     adminTokenHash: deps.adminTokenHash,
     mediaPacks: deps.mediaPacks,
     instances: deps.instances,
+    models,
+    upstreamModels: new UpstreamModels(
+      () => deps.fetch(`${deps.upstreamBase ?? OPENROUTER_BASE}/models`, { headers: { authorization: `Bearer ${deps.openRouterKey}` } }),
+      deps.now,
+    ),
     now: deps.now,
   });
 
