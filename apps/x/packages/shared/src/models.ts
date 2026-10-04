@@ -107,3 +107,56 @@ export const LlmModelConfig = z.object({
   // background run competes with the chat for the same hardware.
   deferBackgroundTasks: z.boolean().optional(),
 });
+
+// BAARALI(03/10/2026): a model's place in the picker, as the control plane
+// sends it on /v1/llm/models (apps/baarali control model-access.ts).
+export const BaaraliModelMeta = z.object({
+  vendor: z.string(),
+  vendorName: z.string(),
+  vendorRank: z.number(),
+  strength: z.string(),
+  recommended: z.boolean(),
+  // The plan that opens it; set: shown with a padlock, not selectable.
+  unlock: z.string().optional(),
+});
+export type BaaraliModelMeta = z.infer<typeof BaaraliModelMeta>;
+
+/**
+ * BAARALI(03/10/2026): a picker's models sorted by vendor, as the control
+ * plane describes them (apps/baarali control model-access.ts, pickerGroups):
+ * one section per vendor in the catalog's order; inside, « Conseillé » first,
+ * then what the plan opens, then what it padlocks, each by name. Items
+ * without a description go last, in a section with an empty vendor. null when
+ * none is described (another provider): the picker keeps its own layout.
+ */
+export function vendorSections<T>(
+  items: T[],
+  metaOf: (item: T) => BaaraliModelMeta | undefined,
+  nameOf: (item: T) => string,
+): Array<{ vendor: string; name: string; items: T[] }> | null {
+  if (!items.some((i) => metaOf(i))) return null;
+  const sections = new Map<string, { rank: number; name: string; items: T[] }>();
+  const rest: T[] = [];
+  for (const item of items) {
+    const meta = metaOf(item);
+    if (!meta) {
+      rest.push(item);
+      continue;
+    }
+    const section = sections.get(meta.vendor) ?? { rank: meta.vendorRank, name: meta.vendorName, items: [] };
+    section.items.push(item);
+    sections.set(meta.vendor, section);
+  }
+  const place = (item: T) => {
+    const meta = metaOf(item)!;
+    return meta.unlock ? 2 : meta.recommended ? 0 : 1;
+  };
+  const sorted = [...sections.entries()]
+    .sort(([, a], [, b]) => a.rank - b.rank)
+    .map(([vendor, s]) => ({
+      vendor,
+      name: s.name,
+      items: [...s.items].sort((a, b) => place(a) - place(b) || nameOf(a).localeCompare(nameOf(b))),
+    }));
+  return rest.length ? [...sorted, { vendor: '', name: '', items: rest }] : sorted;
+}

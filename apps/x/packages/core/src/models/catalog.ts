@@ -1,5 +1,6 @@
 import z from "zod";
 import { LlmModelConfig, LlmProvider } from "@x/shared/dist/models.js";
+import type { BaaraliModelMeta } from "@x/shared/dist/models.js";
 import { isSignedIn } from "../account/account.js";
 import { getChatGPTStatus } from "../auth/chatgpt-auth.js";
 import container from "../di/container.js";
@@ -25,6 +26,8 @@ export interface CatalogModelEntry {
     name?: string;
     /** models.dev "supports reasoning" flag; absent = unknown. */
     reasoning?: boolean;
+    /** BAARALI(03/10/2026): the picker's vendor group, strength and padlock (gateway only). */
+    baarali?: BaaraliModelMeta;
 }
 
 export interface CatalogProviderEntry {

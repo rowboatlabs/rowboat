@@ -11,6 +11,11 @@ import type { Dictionary } from "./translate.js";
 
 export const FR: Dictionary = {
   exact: {
+    // The model picker sorted by vendor (renderer model-selector.tsx, mobile
+    // model-picker.tsx, 03/10/2026): a padlocked model names the plan that opens it.
+    "Recommended": "Conseillé",
+    "· from": "· dès",
+    "Other models": "Autres modèles",
     // The plans window (renderer components/plans-dialog.tsx, 02/10/2026).
     "Plans": "Forfaits",
     "Your usage renews every 5 hours and every week.": "Votre utilisation se renouvelle toutes les 5 heures et chaque semaine.",

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { Brain, Check, ChevronDown } from 'lucide-react'
+import { Brain, Check, ChevronDown, Lock } from 'lucide-react'
 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/command'
 import { useModels, type ModelPickerGroup, type ModelRef, type ModelSelection } from '@/hooks/use-models'
 import { cn } from '@/lib/utils'
+import { vendorSections } from '@x/shared/dist/models.js'
 
 export type { ModelRef, ModelSelection } from '@/hooks/use-models'
 
@@ -222,7 +223,7 @@ export function ModelSelector({
   lockedModel = null,
   effortSelectable = false,
 }: ModelSelectorProps) {
-  const { groups: catalogGroups, reasoningByKey, defaultModel: catalogDefault, catalogByProvider, refresh, namesByKey = {} } = useModels()
+  const { groups: catalogGroups, reasoningByKey, defaultModel: catalogDefault, catalogByProvider, refresh, namesByKey = {}, metaByKey = {} } = useModels()
   // BAARALI(30/09/2026): the catalog's display name when it has one, else the id.
   const nameOf = (provider: string, model: string) => namesByKey[`${provider}/${model}`]
   const allGroups = groupsProp ?? catalogGroups
@@ -472,6 +473,9 @@ export function ModelSelector({
     // expiry still takes effect without needing to re-enter the row.
     const canEffort = effortSelectable && reasoningByKey[key] === true
     const isSelected = selectedKey === key
+    // BAARALI(03/10/2026): a model a higher plan opens stays in sight, padlocked.
+    const meta = metaByKey[key]
+    const locked = Boolean(meta?.unlock)
     const onHover = canEffort
       ? (e: ReactMouseEvent<HTMLDivElement>) => {
           if (inGraceArea(e.clientX, e.clientY)) return
@@ -490,6 +494,7 @@ export function ModelSelector({
       <CommandItem
         key={key}
         value={key}
+        disabled={locked}
         onSelect={() => select({ provider: providerId, model })}
         onMouseEnter={onHover}
         onMouseMove={onHover}
@@ -502,8 +507,22 @@ export function ModelSelector({
             }
           : undefined}
       >
-        <Check className={cn('size-3.5 shrink-0', isSelected ? 'opacity-100' : 'opacity-0')} />
-        <span className="truncate">{nameOf(providerId, model) ?? model}</span>
+        {locked
+          ? <Lock className="size-3.5 shrink-0 text-muted-foreground" />
+          : <Check className={cn('size-3.5 shrink-0', isSelected ? 'opacity-100' : 'opacity-0')} />}
+        {meta ? (
+          <span className="flex min-w-0 flex-col">
+            <span className="truncate">{nameOf(providerId, model) ?? model}</span>
+            <span className="truncate text-xs text-muted-foreground">
+              {meta.strength}{meta.unlock && <> · from {meta.unlock}</>}
+            </span>
+          </span>
+        ) : (
+          <span className="truncate">{nameOf(providerId, model) ?? model}</span>
+        )}
+        {meta?.recommended && !locked && (
+          <span className="ml-auto shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">Recommended</span>
+        )}
         {isSelected && canEffort && shownEffort !== '' && (
           <span className="shrink-0 text-xs text-muted-foreground">
             {REASONING_EFFORT_OPTIONS.find((o) => o.value === shownEffort)?.short}
@@ -512,6 +531,19 @@ export function ModelSelector({
         {secondary && <span className="ml-auto shrink-0 text-xs text-muted-foreground">{secondary}</span>}
       </CommandItem>
     )
+  }
+
+  // BAARALI(03/10/2026): a provider's rows, under a heading per vendor when
+  // the catalog describes them (the gateway); as they come otherwise.
+  const renderModelRows = (providerId: string, models: string[]) => {
+    const sections = vendorSections(models, (m) => metaByKey[`${providerId}/${m}`], (m) => nameOf(providerId, m) ?? m)
+    if (!sections) return models.map((m) => renderModelItem(providerId, m))
+    return sections.flatMap((s) => [
+      <div key={`vendor:${s.vendor}`} className="sticky top-0 z-10 bg-popover px-2 pb-1 pt-2 text-xs font-medium text-muted-foreground">
+        {s.vendor ? s.name : 'Other models'}
+      </div>,
+      ...s.items.map((m) => renderModelItem(providerId, m)),
+    ])
   }
 
   // The floating effort panel. Portalled to <body> (PopoverContent clips);
@@ -751,7 +783,7 @@ export function ModelSelector({
                         {renderSentinelItem()}
                         {standaloneDefault && standaloneDefault.provider === activeGroup.id &&
                           renderModelItem(standaloneDefault.provider, standaloneDefault.model)}
-                        {activeGroup.models.map((m) => renderModelItem(activeGroup.id, m))}
+                        {renderModelRows(activeGroup.id, activeGroup.models)}
                         {activeGroup.status === 'error' && renderErrorItem(activeGroup)}
                         {activeGroup.status === 'ok' && activeGroup.models.length === 0 && (
                           <div className="px-2 py-1.5 text-xs text-muted-foreground">
@@ -800,7 +832,7 @@ export function ModelSelector({
                       if (visibleModels.length === 0 && !showError) return null
                       return (
                         <CommandGroup key={g.id} heading={providerDisplayNames[g.flavor] || g.flavor}>
-                          {visibleModels.map((m) => renderModelItem(g.id, m))}
+                          {renderModelRows(g.id, visibleModels)}
                           {showError && renderErrorItem(g)}
                         </CommandGroup>
                       )

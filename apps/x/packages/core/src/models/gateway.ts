@@ -4,6 +4,7 @@ import { getAccessToken } from '../auth/tokens.js';
 import { getCurrentUseCase } from '../analytics/use_case.js';
 import { API_URL } from '../config/env.js';
 import { annotateReasoningFlags } from './models-dev.js';
+import { BaaraliModelMeta } from '@x/shared/dist/models.js';
 
 // Exported for transport-level verification; production passes this directly
 // to the Rowboat OpenRouter provider.
@@ -34,6 +35,7 @@ type ProviderSummary = {
         name?: string;
         release_date?: string;
         reasoning?: boolean;
+        baarali?: BaaraliModelMeta;
     }>;
 };
 
@@ -45,11 +47,15 @@ export async function listGatewayModels(): Promise<{ providers: ProviderSummary[
     if (!response.ok) {
         throw new Error(`Gateway /v1/models failed: ${response.status}`);
     }
-    const body = await response.json() as { data: Array<{ id: string; name?: string }> };
+    const body = await response.json() as { data: Array<{ id: string; name?: string; baarali?: unknown }> };
     // The gateway returns bare "vendor/model" ids; the models.dev cache
     // supplies the reasoning capability the composer's effort control needs.
     // BAARALI(30/09/2026): keep the gateway's display name, for the picker.
-    const models = await annotateReasoningFlags(body.data.map((m) => ({ id: m.id, ...(m.name ? { name: m.name } : {}) })));
+    // BAARALI(03/10/2026): and its place in the picker (vendor, padlock), when well formed.
+    const models = await annotateReasoningFlags(body.data.map((m) => {
+        const baarali = BaaraliModelMeta.safeParse(m.baarali);
+        return { id: m.id, ...(m.name ? { name: m.name } : {}), ...(baarali.success ? { baarali: baarali.data } : {}) };
+    }));
     return {
         providers: [{
             id: 'rowboat',

@@ -4,7 +4,7 @@ import { DeckOutline, DeckOutlineSlide, EditSlideRequest, GenerateDeckOutlineReq
 import { RelPath, Encoding, Stat, DirEntry, ReaddirOptions, ReadFileResult, WorkspaceChangeEvent, WriteFileOptions, WriteFileResult, RemoveOptions } from './workspace.js';
 import { ListToolsResponse } from './mcp.js';
 import { AskHumanResponsePayload, CreateRunOptions, Run, ListRunsResponse, ToolPermissionAuthorizePayload } from './runs.js';
-import { LlmProvider, ModelRef, ModelSelection, ReasoningEffort } from './models.js';
+import { BaaraliModelMeta, LlmProvider, ModelRef, ModelSelection, ReasoningEffort } from './models.js';
 import { AgentScheduleConfig, AgentScheduleEntry } from './agent-schedule.js';
 import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
@@ -48,6 +48,7 @@ import {
     type SpacesThreadPage,
 } from './spaces.js';
 import type * as SpacesTypes from './spaces.js';
+
 
 // ============================================================================
 // Runtime Validation Schemas (Single Source of Truth)
@@ -930,6 +931,9 @@ export const ipcSchemas = {
           // models.dev "supports reasoning/extended thinking" flag; absent =
           // unknown. Gates the composer's reasoning-effort control.
           reasoning: z.boolean().optional(),
+          // BAARALI(03/10/2026): what the picker shows beside the name, from
+          // the control plane's catalog (vendor group, strength, padlock).
+          baarali: BaaraliModelMeta.optional(),
         })),
       })),
       // The effective runtime default (what runs when nothing is picked),

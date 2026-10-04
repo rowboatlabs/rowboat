@@ -1,6 +1,8 @@
 import * as SecureStore from 'expo-secure-store';
 import { useCallback, useEffect, useState } from 'react';
 
+import type { models } from '@x/shared';
+
 import { useConnection } from './connection';
 
 // The model catalog + the user's pick. Same source as the desktop's picker
@@ -16,7 +18,8 @@ export interface ModelChoice {
 export interface ProviderModels {
   id: string;
   flavor: string;
-  models: { id: string; name?: string }[];
+  // BAARALI(03/10/2026): `baarali` places the model in the picker (vendor, padlock).
+  models: { id: string; name?: string; baarali?: models.BaaraliModelMeta }[];
 }
 
 const STORE_KEY = 'rowboat.model.v1';
@@ -39,7 +42,7 @@ export function useModels() {
     setLoading(true);
     try {
       const result = (await rpc.call('models:list', null)) as {
-        providers: { id: string; flavor: string; status: string; models: { id: string; name?: string }[] }[];
+        providers: { id: string; flavor: string; status: string; models: ProviderModels['models'] }[];
         defaultModel: { provider: string; model: string } | null;
       };
       setProviders(

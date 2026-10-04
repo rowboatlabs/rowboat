@@ -1,4 +1,5 @@
 import { useMemo, useSyncExternalStore } from 'react'
+import type { BaaraliModelMeta } from '@x/shared/dist/models.js'
 
 export interface ModelRef {
   provider: string
@@ -47,6 +48,9 @@ export interface ModelsSnapshot {
   // BAARALI(30/09/2026): display names ("provider/model" → name) when the
   // catalog has one; the picker falls back to the id.
   namesByKey: Record<string, string>
+  // BAARALI(03/10/2026): the picker's vendor group, strength and padlock
+  // ("provider/model" → meta), from the control plane's catalog.
+  metaByKey: Record<string, BaaraliModelMeta>
 }
 
 export interface UseModelsResult extends ModelsSnapshot {
@@ -67,6 +71,7 @@ const EMPTY_SNAPSHOT: ModelsSnapshot = {
   isRowboatConnected: false,
   catalogByProvider: {},
   namesByKey: {},
+  metaByKey: {},
 }
 
 // Module-level store: every mounted consumer shares one snapshot and one
@@ -93,6 +98,7 @@ async function buildSnapshot(refreshProvider?: string): Promise<ModelsSnapshot> 
   const reasoningByKey: Record<string, boolean> = {}
   const catalogByProvider: Record<string, string[]> = {}
   const namesByKey: Record<string, string> = {}
+  const metaByKey: Record<string, BaaraliModelMeta> = {}
   const groups: ModelPickerGroup[] = []
 
   for (const p of catalog.providers) {
@@ -103,6 +109,7 @@ async function buildSnapshot(refreshProvider?: string): Promise<ModelsSnapshot> 
         reasoningByKey[`${p.id}/${m.id}`] = m.reasoning
       }
       if (m.name) namesByKey[`${p.id}/${m.id}`] = m.name
+      if (m.baarali) metaByKey[`${p.id}/${m.id}`] = m.baarali
     }
     groups.push({
       id: p.id,
@@ -136,6 +143,7 @@ async function buildSnapshot(refreshProvider?: string): Promise<ModelsSnapshot> 
     isRowboatConnected: catalog.providers.some((p) => p.id === 'rowboat'),
     catalogByProvider,
     namesByKey,
+    metaByKey,
   }
 }
 
