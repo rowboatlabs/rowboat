@@ -5,6 +5,8 @@
 // session to `${workDir}/config/oauth.json`. As soon as a session appears,
 // this asks the control plane for a device key, then switches the app to
 // remote mode on the gateway, with the upstream's own `connectRemoteServer`.
+// Signing out detaches the app from the instance, so the next sign-in joins
+// the instance of the account signed in (03/10/2026, see `staysOnDevice`).
 // No upstream file changes: the Baarali build copies this file into
 // apps/x/apps/main/src and calls `startCloudLink` once (scripts/brand.mjs).
 // It may only import Node's builtins, for it compiles in main's project.
@@ -19,6 +21,8 @@ export interface CloudLinkDeps {
   mode: () => HostMode;
   /** server-host.ts `connectRemoteServer`. */
   connect: (url: string, key: string) => Promise<{ success: boolean; error?: string }>;
+  /** server-host.ts `disconnectRemoteServer`: back to the app's own server. */
+  disconnect: () => Promise<{ success: boolean; error?: string }>;
   /** ipc.ts `broadcastReload`: every window describes the old server until reloaded. */
   reload: () => void;
   /** Tells the person what blocks; the link waits for the next sign-in. */
@@ -61,6 +65,33 @@ export function sessionFrom(raw: string): Session | null {
   }
 }
 
+/**
+ * True only when oauth.json was read whole and holds no `rowboat` session:
+ * the person signed out. A file being rewritten, or missing, is not that.
+ */
+export function signedOut(raw: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) && sessionFrom(raw) === null;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether an IPC call stays in this app instead of going to the instance.
+ * Joined to an instance, the upstream forwards the sign-in calls there too,
+ * so signing in or out replaced the instance's own session with the
+ * person's: the app and its instance could then act for two accounts, one
+ * spending the other's plan (seen 03/10/2026). Baarali's sign-in is the
+ * device's: it stays here, and the link follows it. Other providers (Google,
+ * Microsoft...) stay with the instance, which runs their syncs.
+ */
+export function staysOnDevice(channel: string, args: unknown, mode: HostMode): boolean {
+  if (mode !== 'remote' || (channel !== 'oauth:connect' && channel !== 'oauth:disconnect')) return false;
+  return typeof args === 'object' && args !== null && (args as { provider?: unknown }).provider === 'rowboat';
+}
+
 export function startCloudLink(deps: CloudLinkDeps): () => void {
   // Each session is tried once: a refusal waits for the next sign-in, it
   // does not loop on every write of the file.
@@ -98,20 +129,36 @@ export function startCloudLink(deps: CloudLinkDeps): () => void {
     deps.notify('unavailable');
   }
 
+  // Signed out: the instance stays the account's, the app leaves it.
+  async function detach(): Promise<void> {
+    const result = await deps.disconnect().catch((err: unknown) => ({ success: false, error: err instanceof Error ? err.message : String(err) }));
+    if (!result.success) {
+      deps.log(`[baarali] could not leave the instance: ${result.error ?? 'unknown'}`);
+      return;
+    }
+    deps.log('[baarali] signed out: left the instance');
+    deps.reload();
+  }
+
   async function check(): Promise<void> {
     if (busy) {
-      // A sign-in during a link is looked at once it is over.
+      // A sign-in or out during a link or a detach is looked at once it is over.
       again = true;
       return;
     }
-    if (stopped || deps.mode() === 'remote') return;
-    const session = sessionFrom(await deps.readFile(deps.oauthFile).catch(() => ''));
-    if (!session || tried.has(session.accessToken)) return;
-    // An expired session is refreshed by core, which writes the file again.
-    if (session.expiresAt !== null && session.expiresAt * 1000 <= deps.now()) return;
-    tried.add(session.accessToken);
+    if (stopped) return;
     busy = true;
     try {
+      const raw = await deps.readFile(deps.oauthFile).catch(() => '');
+      if (deps.mode() === 'remote') {
+        if (signedOut(raw)) await detach();
+        return;
+      }
+      const session = sessionFrom(raw);
+      if (!session || tried.has(session.accessToken)) return;
+      // An expired session is refreshed by core, which writes the file again.
+      if (session.expiresAt !== null && session.expiresAt * 1000 <= deps.now()) return;
+      tried.add(session.accessToken);
       await link(session);
     } catch (err) {
       deps.log(`[baarali] link failed: ${err instanceof Error ? err.message : String(err)}`);

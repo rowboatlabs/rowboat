@@ -42,6 +42,7 @@ describe('apply on this checkout', () => {
     const changes = apply({ write: false });
     expect(changes).toContain('edit apps/x/apps/main/forge.config.cjs');
     expect(changes).toContain('edit apps/x/apps/main/src/main.ts');
+    expect(changes).toContain('edit apps/x/apps/main/src/ipc.ts');
     expect(changes).toContain('edit apps/x/apps/main/package.json');
     expect(changes).toContain('edit apps/x/packages/core/src/config/env.ts');
     expect(changes).toContain('edit apps/x/apps/main/src/updater.ts');

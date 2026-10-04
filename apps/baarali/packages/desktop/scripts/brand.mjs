@@ -127,7 +127,7 @@ import path from 'node:path';
 import { dialog } from 'electron';
 import { WorkDir } from '@x/core/dist/config/config.js';
 import { API_URL } from '@x/core/dist/config/env.js';
-import { connectRemoteServer, serverHostMode } from './server-host.js';
+import { connectRemoteServer, disconnectRemoteServer, serverHostMode } from './server-host.js';
 import { broadcastReload } from './ipc.js';
 import { startCloudLink, type LinkProblem } from './baarali-cloud-link.js';
 import { startAppsRelay } from './baarali-apps-relay.js';
@@ -173,6 +173,7 @@ export function startBaaraliCloud(): void {
       if (result.success) ensureAppsRelay();
       return result;
     },
+    disconnect: disconnectRemoteServer,
     reload: () => setTimeout(() => broadcastReload(), 400),
     notify: (problem) => {
       void dialog.showMessageBox({ type: 'info', message: 'Baarali', detail: MESSAGES[problem] });
@@ -271,6 +272,17 @@ export function desktopPlan() {
         `${main}/src/main.ts`,
         "  startServerHost().catch((error) => {\n    console.error('[server-host] failed to start rowboat-server:', error);\n  });",
         "  startServerHost().catch((error) => {\n    console.error('[server-host] failed to start rowboat-server:', error);\n  });\n  startBaaraliCloud();",
+      ),
+      // Baarali's sign-in stays on the device, never the instance (src/cloud-link.ts staysOnDevice).
+      edit(
+        `${main}/src/ipc.ts`,
+        "import { forwardRpc, shouldForwardChannel } from './rpc-forwarder.js';\n",
+        "import { forwardRpc, shouldForwardChannel } from './rpc-forwarder.js';\nimport { staysOnDevice } from './baarali-cloud-link.js';\nimport { serverHostMode } from './server-host.js';\n",
+      ),
+      edit(
+        `${main}/src/ipc.ts`,
+        '      const result = forwarded ? await forwardRpc(channel, args) : await handler(event, args);',
+        '      const result = forwarded && !staysOnDevice(channel, args, serverHostMode()) ? await forwardRpc(channel, args) : await handler(event, args);',
       ),
       // The brand's colours, loaded after App.css (src/baarali-theme.css).
       edit('apps/x/apps/renderer/src/main.tsx', "import App from './App.tsx'\n", "import App from './App.tsx'\nimport './baarali-theme.css'\n"),

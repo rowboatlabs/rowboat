@@ -62,6 +62,8 @@ Quatre zones (archi §2). Ce tableau dit **qui s'authentifie auprès de qui, ave
 - est gardée en empreinte seulement ;
 - se révoque seule, depuis la liste des appareils, sans toucher les autres ni la clé de l'instance.
 
+**La connexion reste celle de l'appareil (03/10/2026).** Relié à son instance, l'upstream lui transmettait aussi la connexion au compte : une reconnexion avec un autre compte donnait la session de la personne à l'instance d'un autre compte, qui consommait alors son forfait. L'app garde maintenant cette connexion pour elle, et se détache de l'instance quand on se déconnecte ; l'instance garde son propre jeton.
+
 Dix appareils actifs au plus par compte. La passerelle retire les en-têtes de routage de Fly envoyés par l'appareil : c'est elle seule qui choisit la machine.
 
 ## 3. Ce qu'on hérite de Rowboat

@@ -109,10 +109,13 @@ Le dépôt garde les fichiers de l'upstream tels quels. **La marque s'applique �
 - les liens (site, dépôt des mises à jour, contact) ;
 - `API_URL` par défaut, `https://app.baarali.com` ;
 - le lien vers l'instance : `src/cloud-link.ts`, copié dans `main` et démarré par une ligne.
+- la connexion au compte Baarali reste sur l'appareil : `ipc.ts` ne la transmet pas à l'instance (`staysOnDevice` dans `src/cloud-link.ts`).
 
 Le script refuse d'écrire sans `--yes`. Chaque ancre doit se trouver exactement une fois : si l'upstream en change une, `test/brand.test.ts` casse sur la PR de synchro. L'image d'instance applique la même marque à `core` seulement (`--only core`), pour que l'agent se présente comme Baarali.
 
 **Ce que fait l'app après la connexion.** L'accueil upstream connecte le compte, ce qui écrit `config/oauth.json`. Le lien voit la session, demande une clé d'appareil (`POST /v1/devices`), puis passe l'app en mode distant sur la passerelle et recharge les fenêtres. La première fois, l'instance est créée et démarre : le lien réessaie pendant environ une minute.
+
+**Se déconnecter détache l'app de l'instance** (03/10/2026). En mode distant, l'upstream transmet aussi la connexion à l'instance : se reconnecter y remplaçait la session de l'instance par celle de la personne, et l'app et son instance pouvaient agir pour deux comptes. La connexion Baarali reste donc sur l'appareil ; quand elle disparaît de `config/oauth.json`, le lien quitte l'instance (`disconnectRemoteServer`), et la connexion suivante rejoint l'instance du compte connecté. Un fichier en cours de réécriture ne compte pas comme une déconnexion.
 
 **Publier une version** : Actions › `baarali-desktop` › *Run workflow*, avec la version (`0.1.0`). Le workflow fait un brouillon de release `v0.1.0` : Mac arm64 et Intel, Windows. On le vérifie, puis on le publie. Le site pointe vers `releases/latest/download/` : `Baarali-mac-arm64.dmg`, `Baarali-mac-intel.dmg`, `Baarali-windows-setup.exe`. Les mises à jour automatiques passent par update.electronjs.org, qui lit ces releases.
 
