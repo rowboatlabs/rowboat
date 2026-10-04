@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { Loader2, User, CreditCard, LogOut, ExternalLink, Check, Gauge, ChevronRight } from "lucide-react"
+import { Loader2, User, CreditCard, LogOut, ExternalLink, Check, Gauge, ChevronRight, ShieldCheck } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   AlertDialog,
@@ -302,6 +302,32 @@ export function AccountSettings({ dialogOpen, onOpenUsage }: AccountSettingsProp
       </div>
 
       <Separator />
+
+      {/* BAARALI(03/10/2026): the admin console, for an admin's account only (control /v1/me). */}
+      {billing?.adminUrl && (
+        <>
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="size-4 text-muted-foreground" />
+              <h4 className="text-sm font-medium">Admin console</h4>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Clients, plans, models and instances, in your browser.
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => billing.adminUrl && window.open(billing.adminUrl)}
+              className="gap-1.5"
+            >
+              <ExternalLink className="size-3" />
+              Open the console
+            </Button>
+          </div>
+
+          <Separator />
+        </>
+      )}
 
       {/* Log Out Section */}
       <div className="space-y-3">

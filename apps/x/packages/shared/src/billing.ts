@@ -46,6 +46,8 @@ export type BillingStoreBucket = z.infer<typeof BillingStoreBucketSchema>;
 export const BillingInfoSchema = z.object({
   userEmail: z.string().nullable(),
   userId: z.string().nullable(),
+  // BAARALI(03/10/2026): the admin console, for an admin's account only.
+  adminUrl: z.string().nullable().optional(),
   subscriptionPlanId: BillingPlanIdSchema.nullable(),
   subscriptionStatus: z.string().nullable(),
   trialExpiresAt: z.string().nullable(),

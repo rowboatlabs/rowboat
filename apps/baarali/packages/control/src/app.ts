@@ -145,8 +145,12 @@ export function createApp(deps: ControlDeps) {
       usedCredits,
       availableCredits,
     });
+    // An admin's app links to the console (03/10/2026): only a hint, the
+    // console itself checks the signed-in, verified email again.
+    const admin = !!account.email && (deps.adminEmails ?? []).includes(account.email.toLowerCase());
     return c.json({
       user: { id: account.id, email: account.email },
+      ...(admin ? { admin: { url: `${deps.publicUrl}/admin` } } : {}),
       billing: {
         planId: plan ? plan.id : null,
         status: plan ? 'active' : null,

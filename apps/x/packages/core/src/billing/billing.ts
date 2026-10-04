@@ -17,6 +17,8 @@ export async function getBillingInfo(): Promise<BillingInfo> {
       id: string;
       email: string;
     };
+    // BAARALI(03/10/2026): sent for an admin's account only.
+    admin?: { url?: unknown };
     billing: {
       planId: BillingPlanId | null;
       status: string | null;
@@ -45,6 +47,7 @@ export async function getBillingInfo(): Promise<BillingInfo> {
   return {
     userEmail: body.user.email ?? null,
     userId: body.user.id ?? null,
+    adminUrl: typeof body.admin?.url === 'string' ? body.admin.url : null,
     subscriptionPlanId: body.billing.planId,
     subscriptionStatus: body.billing.status,
     trialExpiresAt: body.billing.trialExpiresAt ?? null,

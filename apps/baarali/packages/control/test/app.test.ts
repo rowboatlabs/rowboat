@@ -14,7 +14,7 @@ const owner: Account = { id: 'acc', email: 'owner@example.test', planId: 'p', cr
 
 interface Seen { url: string; init: RequestInit }
 
-function setup(respond: (seen: Seen) => Response | Promise<Response>, planId = 'p') {
+function setup(respond: (seen: Seen) => Response | Promise<Response>, planId = 'p', adminEmails: string[] = []) {
   const store = new MemoryStore(new Map([[hashToken(TOKEN), { ...owner, planId }]]), [plan, freePlan]);
   const seen: Seen[] = [];
   let clock = T0;
@@ -24,6 +24,7 @@ function setup(respond: (seen: Seen) => Response | Promise<Response>, planId = '
     publicUrl: 'https://control.example.test',
     appName: 'Baarali',
     mediaPacks: [],
+    adminEmails,
     now: () => clock,
     fetch: (async (url: string, init: RequestInit) => {
       const s = { url: String(url), init };
@@ -87,6 +88,13 @@ describe('GET /v1/me (contract)', () => {
     // When each window starts over, for the app to say it.
     expect(daily.resetsAt).toBe(new Date(T0 + SESSION_MS).toISOString());
     expect(monthly.resetsAt).toBe(new Date(T0 + WEEK_MS).toISOString());
+  });
+
+  it('points an admin, and only an admin, to the console', async () => {
+    const admin = await (await setup(() => json({}), 'p', ['owner@example.test']).call('/v1/me')).json();
+    expect(admin.admin).toEqual({ url: 'https://control.example.test/admin' });
+    const client = await (await setup(() => json({}), 'p', ['boss@example.test']).call('/v1/me')).json();
+    expect(client.admin).toBeUndefined();
   });
 
   it('gives no end to a session not open yet', async () => {
