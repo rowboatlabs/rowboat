@@ -342,3 +342,28 @@ describe('models from the console', () => {
     expect((await post('boss', '/admin/api/models/free', { ids: [] })).status).toBe(400);
   });
 });
+
+describe('Pixazo\'s models from the console', () => {
+  type Media = { models: Array<{ id: string; kind: string; enabled: boolean; minPlan: string | null; recommended: boolean; credits: number; openFor: string[] }> };
+
+  it('lists the code\'s media models, open to every plan until set', async () => {
+    const { as } = setup();
+    const r = (await (await as('boss', '/admin/api/media-models')).json()) as Media;
+    expect(r.models.map((m) => m.kind)).toEqual(expect.arrayContaining(['video', 'speech', 'music']));
+    expect(r.models.find((m) => m.id === 'veo-fast')).toMatchObject({ enabled: true, minPlan: null, recommended: false, credits: 80, openFor: ['decouverte', 'pro-100', 'pro-200'] });
+  });
+
+  it('opens one from a plan up, recommends it, and writes it down', async () => {
+    const { as, post, store } = setup();
+    expect((await post('boss', '/admin/api/media-models', { ids: ['veo'], set: { minPlan: 'pro-200', recommended: true } })).status).toBe(200);
+    const r = (await (await as('boss', '/admin/api/media-models')).json()) as Media;
+    expect(r.models.find((m) => m.id === 'veo')).toMatchObject({ minPlan: 'pro-200', recommended: true, openFor: ['pro-200'] });
+    expect((await store.adminLog(1))[0]).toMatchObject({ action: 'media-models', detail: 'Pixazo veo : conseillé, dès Pro max' });
+  });
+
+  it('refuses an unknown model or plan', async () => {
+    const { post } = setup();
+    expect((await post('boss', '/admin/api/media-models', { ids: ['sora'], set: { enabled: false } })).status).toBe(400);
+    expect((await post('boss', '/admin/api/media-models', { ids: ['veo'], set: { minPlan: 'platine' } })).status).toBe(400);
+  });
+});

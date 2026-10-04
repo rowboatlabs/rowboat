@@ -8,6 +8,7 @@ import {
   fitCall,
   planLabeler,
   presentFor,
+  mediaOpen,
   vendorOf,
   type ModelSetting,
 } from '../src/model-access.js';
@@ -142,6 +143,24 @@ describe('the catalog as a plan\'s picker shows it', () => {
   it('returns null on a catalog it cannot read', () => {
     expect(presentFor(c, WEEK, 'not json', name)).toBeNull();
     expect(presentFor(c, WEEK, '{"models":[]}', name)).toBeNull();
+  });
+});
+
+describe('Pixazo\'s models', () => {
+  const media = (id: string, s: Partial<ModelSetting>) => setting(`media:${id}`, s);
+
+  it('opens a model never set to every plan, Découverte included', () => {
+    const c = catalogOf(PLANS, []);
+    expect(mediaOpen(c, FREE, 'veo')).toBe(true);
+  });
+
+  it('closes a hidden model, and one below its minimum', () => {
+    const c = catalogOf(PLANS, [media('veo', { enabled: false }), media('veo-fast', { minPlan: 'pro-100' }), media('lyria', { minPlan: 'gone' })]);
+    expect(mediaOpen(c, MAX, 'veo')).toBe(false);
+    expect(mediaOpen(c, WEEK, 'veo-fast')).toBe(false);
+    expect(mediaOpen(c, PRO, 'veo-fast')).toBe(true);
+    // A minimum no plan carries any more opens nothing.
+    expect(mediaOpen(c, MAX, 'lyria')).toBe(false);
   });
 });
 

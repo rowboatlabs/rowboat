@@ -42,7 +42,7 @@ tools: [listMcpTools, executeMcpTool]
 
 Generations run on the \`${MEDIA_SERVER_NAME}\` MCP server, through \`executeMcpTool\`.
 
-1. If you do not know the models yet, call \`list_models\`. Defaults: video \`seedance-mini\` (cheapest), \`veo-fast\` when the user wants higher quality, \`veo\` only when they ask for the best; voice \`gemini-voice\`; music \`lyria\` (\`lyria-pro\` for a full, polished song).
+1. Call \`list_models\` first: it lists only the models this user's plan may use. Prefer the one marked \`recommended\` for the kind asked. Otherwise: video \`seedance-mini\` (cheapest), \`veo-fast\` when the user wants higher quality, \`veo\` only when they ask for the best; voice \`gemini-voice\`; music \`lyria\` (\`lyria-pro\` for a full, polished song). Use only a listed model; if \`generate\` answers \`not_in_plan\`, pick another listed one.
 2. Call \`generate\` with \`model\` and \`prompt\`. For a voice, \`prompt\` is the exact text to read, in the user's language. For a video, write a vivid visual description; pass \`duration\` or \`aspect_ratio: "9:16"\` (phone/story format) only when the user asks.
 3. Tell the user it has started and usually takes 1 to 5 minutes, then call \`check\` with the id, again and again while it says it is still running.
 4. When ready, show the saved path to the user in a \`\`\`filepath code block.

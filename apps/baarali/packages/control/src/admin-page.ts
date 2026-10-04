@@ -228,6 +228,7 @@ export function adminPage(opts: { nonce: string; admin: string }): string {
       <button role="tab" data-t="editeurs" aria-selected="true">Par éditeur</button>
       <button role="tab" data-t="decouverte" aria-selected="false">Découverte</button>
       <button role="tab" data-t="tous" aria-selected="false" id="t-all">Tous</button>
+      <button role="tab" data-t="medias" aria-selected="false">Médias · Pixazo</button>
     </div>
     <div class="grid2">
       <div>
@@ -244,15 +245,19 @@ export function adminPage(opts: { nonce: string; admin: string }): string {
             <div class="toolbar"><button class="btn primary" id="free-save" type="button">Enregistrer l'ordre</button></div>
           </section>
         </div>
+        <div data-tp="medias" hidden>
+          <p class="muted">Pixazo ne publie pas la liste de ses modèles : chacun s'ajoute dans le code (<span class="code">media.ts</span>) avec sa requête et son prix, puis apparaît ici. Ils se paient en crédits médias : tous les forfaits peuvent en ouvrir, Découverte compris.</p>
+          <div id="media-models"></div>
+        </div>
         <div data-tp="tous" hidden>
           <section class="card"><div class="tablewrap"><table>
             <thead><tr><th></th><th>Modèle</th><th>Éditeur</th><th>Point fort</th><th>Dès</th><th>$ / 1 M (entrée · sortie)</th></tr></thead>
             <tbody id="all-models"></tbody></table></div></section>
         </div>
       </div>
-      <section class="card sticky"><h2>Aperçu dans l'app <select id="pv" class="push"></select></h2>
+      <section class="card sticky"><h2 id="pv-title">Aperçu dans l'app <select id="pv" class="push"></select></h2>
         <div class="picker" id="picker"></div>
-        <p class="muted">Rangé par éditeur. Les modèles « Conseillé » passent en tête de leur éditeur ; ceux d'un forfait au-dessus restent visibles, avec un cadenas et le forfait qui les ouvre.</p>
+        <p class="muted" id="pv-note">Rangé par éditeur. Les modèles « Conseillé » passent en tête de leur éditeur ; ceux d'un forfait au-dessus restent visibles, avec un cadenas et le forfait qui les ouvre.</p>
       </section>
     </div>
   </div>
@@ -614,7 +619,13 @@ $("mtabs").addEventListener("click", (e) => {
   if (!b) return;
   for (const x of document.querySelectorAll("#mtabs button")) x.setAttribute("aria-selected", String(x === b));
   for (const p of document.querySelectorAll("[data-tp]")) p.hidden = p.dataset.tp !== b.dataset.t;
-  $("m-filters").hidden = b.dataset.t === "decouverte";
+  $("m-filters").hidden = b.dataset.t === "decouverte" || b.dataset.t === "medias";
+  mediaTab = b.dataset.t === "medias";
+  $("pv-title").firstChild.textContent = mediaTab ? "Ce que l'agent peut générer " : "Aperçu dans l'app ";
+  $("pv-note").textContent = mediaTab
+    ? "L'agent ne voit que les médias ouverts au forfait, et prend le « Conseillé » de chaque type quand on ne lui en demande pas un autre."
+    : PICKER_NOTE;
+  if (mediaTab) loadMedia().catch(() => toast("Chargement impossible")); else loadPreview().catch(() => toast("Aperçu impossible"));
 });
 async function loadPreview() {
   const r = await get("/models/preview?plan=" + encodeURIComponent($("pv").value));
@@ -631,7 +642,56 @@ async function loadPreview() {
   if (!r.groups.length) items.push(el("p", { class: "empty" }, "Aucun modèle pour ce forfait."));
   $("picker").replaceChildren(...items);
 }
-$("pv").addEventListener("change", () => loadPreview().catch(() => toast("Aperçu impossible")));
+$("pv").addEventListener("change", () => (mediaTab ? Promise.resolve(renderMediaPreview()) : loadPreview()).catch(() => toast("Aperçu impossible")));
+
+// Pixazo (03/10/2026): media.ts is the catalog; the console opens, closes, recommends.
+let mediaTab = false;
+const PICKER_NOTE = $("pv-note").textContent;
+let MD = null;
+async function loadMedia() {
+  MD = await get("/media-models");
+  renderMedia();
+}
+async function setMedia(ids, set, done) {
+  try { await send("/media-models", { ids, set }); toast(done); await loadMedia(); }
+  catch (e) { toast(e.message); }
+}
+function renderMedia() {
+  const kinds = Object.keys(MD.kinds);
+  $("media-models").replaceChildren(...kinds.map((k) => {
+    const list = MD.models.filter((m) => m.kind === k);
+    if (!list.length) return null;
+    return el("div", { class: "vendor" }, el("header", {}, el("b", {}, MD.kinds[k]), el("span", { class: "muted" }, list.filter((m) => m.enabled).length + " / " + list.length + " ouverts")),
+      el("div", {}, ...list.map((m) => {
+        const min = el("select", { title: "Le forfait qui l'ouvre", onchange: (e) => setMedia([m.id], { minPlan: e.target.value || null }, "Forfait changé") },
+          el("option", { value: "" }, "Tous les forfaits"), ...MD.plans.slice(1).map((p) => el("option", { value: p.id }, "dès " + p.name)));
+        min.value = m.minPlan || "";
+        return el("div", { class: "mrow" },
+          el("button", { class: "sw", type: "button", "aria-pressed": String(m.enabled), title: m.enabled ? "Proposé à l'agent : cliquer pour masquer" : "Masqué : cliquer pour l'ouvrir",
+            onclick: () => setMedia([m.id], { enabled: !m.enabled }, m.enabled ? "Modèle masqué" : "Modèle ouvert") }),
+          el("button", { class: "star", type: "button", "aria-pressed": String(m.recommended), title: "Conseillé : celui que l'agent préfère pour ce type",
+            onclick: () => setMedia([m.id], { recommended: !m.recommended }, m.recommended ? "Plus conseillé" : "Conseillé") }, "★"),
+          el("span", { class: "nm" }, el("b", {}, m.name), el("small", {}, m.id + " · ", el("span", { class: "nowrap" }, m.credits + " crédits (" + fr.format(m.usd) + " $) par défaut"))),
+          min);
+      })));
+  }).filter(Boolean));
+  renderMediaPreview();
+}
+function renderMediaPreview() {
+  if (!MD) return;
+  const plan = $("pv").value;
+  const items = [el("div", { class: "ttl" }, "list_models")];
+  for (const k of Object.keys(MD.kinds)) {
+    const open = MD.models.filter((m) => m.kind === k && m.openFor.includes(plan));
+    if (!open.length) continue;
+    items.push(el("div", { class: "grp" }, MD.kinds[k]));
+    for (const m of open) items.push(el("div", { class: "opt" }, el("span", { class: "mark" }, ""),
+      el("span", {}, el("b", {}, m.name), el("small", {}, m.credits + " crédits par défaut")),
+      m.recommended ? el("span", { class: "pill blue" }, "Conseillé") : null));
+  }
+  if (items.length === 1) items.push(el("p", { class: "empty" }, "Aucun média pour ce forfait."));
+  $("picker").replaceChildren(...items);
+}
 
 async function loadJournal() {
   const r = await get("/journal");

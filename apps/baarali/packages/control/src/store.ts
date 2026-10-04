@@ -346,7 +346,7 @@ export class MemoryStore implements ControlStore {
   async modelSettings() {
     return [...this.models.values()].map((s) => ({ ...s }));
   }
-  async saveModelSettings(settings: ModelSetting[]) {
+  async saveModelSettings(settings: ModelSetting[], _at?: number) {
     for (const s of settings) this.models.set(s.modelId, { ...s });
   }
   async allInstances() {

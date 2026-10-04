@@ -17,11 +17,14 @@ import {
   vendorName,
   vendorOf,
   pickerGroups,
+  mediaKey,
+  mediaOpen,
   type ModelSetting,
   type PickerModel,
 } from './model-access.js';
 import type { ModelCatalog, UpstreamModels } from './model-catalog.js';
 import { displayName } from './models.js';
+import { MEDIA_MODELS, mediaCredits } from './media.js';
 import { WEEKS_PER_MONTH } from './pricing.js';
 import type { Instances } from './instances.js';
 import { advance, budgetsForWeek, gauges, initialState, WEEK_MS } from './quota.js';
@@ -459,6 +462,73 @@ export function mountAdminConsole(app: Hono<any>, deps: ConsoleDeps): void {
     if (shown === null) return c.json({ error: { code: 'upstream_failed', message: 'Le catalogue OpenRouter ne répond pas' } }, 502);
     const { data } = JSON.parse(shown) as { data: PickerModel[] };
     return c.json({ default: data[0]?.id ?? null, groups: pickerGroups(data) });
+  });
+
+  // Pixazo's models (03/10/2026): media.ts is their catalog, since Pixazo
+  // lists none; the console opens, closes and recommends them.
+  const MEDIA_KINDS = { video: 'Vidéo', speech: 'Voix', music: 'Musique' } as const;
+
+  app.get('/admin/api/media-models', async (c) => {
+    const actor = await api(c, false);
+    if (actor instanceof Response) return actor;
+    deps.models.clear();
+    const catalog = await deps.models.get();
+    const label = planLabeler(catalog.plans);
+    return c.json({
+      plans: catalog.plans.map((p) => ({ id: p.id, name: label(p) })),
+      kinds: MEDIA_KINDS,
+      models: MEDIA_MODELS.map((m) => {
+        const s = catalog.settings.get(mediaKey(m.id));
+        const credits = mediaCredits(m, { model: m.id, prompt: 'x' });
+        return {
+          id: m.id,
+          kind: m.kind,
+          name: m.displayName,
+          ...(m.durations ? { durations: m.durations } : {}),
+          configured: Boolean(s),
+          enabled: s?.enabled ?? true,
+          minPlan: s?.minPlan ?? null,
+          recommended: s?.recommended ?? false,
+          // The default request: what the agent quotes first.
+          credits,
+          usd: Math.round(m.costUsd({ model: m.id, prompt: 'x' }) * 1000) / 1000,
+          openFor: catalog.plans.filter((p) => mediaOpen(catalog, p, m.id)).map((p) => p.id),
+        };
+      }),
+    });
+  });
+
+  app.post('/admin/api/media-models', async (c) => {
+    const actor = await api(c, true);
+    if (actor instanceof Response) return actor;
+    const b = await body(c);
+    const known = new Set(MEDIA_MODELS.map((m) => m.id));
+    const ids = Array.isArray(b.ids) ? [...new Set(b.ids.filter((x): x is string => typeof x === 'string' && known.has(x)))] : [];
+    const set = b.set && typeof b.set === 'object' && !Array.isArray(b.set) ? (b.set as Record<string, unknown>) : {};
+    if (ids.length === 0) return c.json({ error: { code: 'invalid_request', message: `ids: some of ${[...known].join(', ')}` } }, 400);
+    const catalog = await deps.models.get();
+    const change: Partial<ModelSetting> = {};
+    if (typeof set.enabled === 'boolean') change.enabled = set.enabled;
+    if (typeof set.recommended === 'boolean') change.recommended = set.recommended;
+    if ('minPlan' in set) {
+      // Every plan may open a media model, Découverte included: credits pay for it.
+      if (set.minPlan !== null && !(typeof set.minPlan === 'string' && catalog.plans.some((p) => p.id === set.minPlan))) {
+        return c.json({ error: { code: 'invalid_request', message: 'minPlan: null or a plan id' } }, 400);
+      }
+      change.minPlan = set.minPlan as string | null;
+    }
+    if (Object.keys(change).length === 0) return c.json({ error: { code: 'invalid_request', message: 'Nothing to change' } }, 400);
+    const settings = ids.map((id) => ({ ...(catalog.settings.get(mediaKey(id)) ?? blank(mediaKey(id))), ...change, modelId: mediaKey(id) }));
+    await store.saveModelSettings(settings, deps.now());
+    deps.models.clear();
+    const label = planLabeler(catalog.plans);
+    const words = [
+      change.enabled !== undefined ? (change.enabled ? 'ouvert' : 'masqué') : null,
+      change.recommended !== undefined ? (change.recommended ? 'conseillé' : 'plus conseillé') : null,
+      change.minPlan !== undefined ? `dès ${change.minPlan ? label(catalog.plans.find((p) => p.id === change.minPlan)!) : 'tout forfait'}` : null,
+    ].filter(Boolean).join(', ');
+    await log(actor, 'media-models', null, `Pixazo ${ids.join(', ')} : ${words}`);
+    return c.json({ saved: settings.length });
   });
 
   app.get('/admin/api/journal', async (c) => {

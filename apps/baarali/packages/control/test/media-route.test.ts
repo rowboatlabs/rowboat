@@ -131,7 +131,24 @@ describe('/v1/media', () => {
   it('lists the models with their kind and durations', async () => {
     const { call } = setup(() => json({}));
     const { data } = await (await call('/v1/media/models')).json();
-    expect(data.find((m: { id: string }) => m.id === 'veo-fast')).toEqual({ id: 'veo-fast', kind: 'video', name: 'Veo 3.1 Fast', durations: [8, 4, 6], credits: 80 });
+    expect(data.find((m: { id: string }) => m.id === 'veo-fast')).toEqual({ id: 'veo-fast', kind: 'video', name: 'Veo 3.1 Fast', durations: [8, 4, 6], credits: 80, recommended: false });
+  });
+
+  // The console's settings (03/10/2026): a hidden model is neither listed nor
+  // generated, uncharged; « Conseillé » tells the agent which to prefer.
+  it('lists and generates only what the console opens', async () => {
+    const { call, generate, store, seen } = setup(() => json({ request_id: 'j' }));
+    const media = (id: string, s: Partial<{ enabled: boolean; recommended: boolean }>) =>
+      ({ modelId: `media:${id}`, enabled: true, minPlan: null, recommended: false, strength: null, freeRank: null, ...s });
+    await store.saveModelSettings([media('veo', { enabled: false }), media('veo-fast', { recommended: true })], T0);
+    const { data } = await (await call('/v1/media/models')).json();
+    expect(data.map((m: { id: string }) => m.id)).not.toContain('veo');
+    expect(data.find((m: { id: string }) => m.id === 'veo-fast').recommended).toBe(true);
+    const refused = await generate({ model: 'veo', prompt: 'x' });
+    expect(refused.status).toBe(403);
+    expect((await refused.json()).error.code).toBe('not_in_plan');
+    expect(seen).toHaveLength(0);
+    expect(await balance(store)).toBe(1000);
   });
 
   it('refuses a bad request before charging', async () => {

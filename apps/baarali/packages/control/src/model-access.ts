@@ -287,3 +287,25 @@ export function pickerGroups<T extends PickerModel>(models: T[]): Array<{ vendor
       models: [...list].sort((a, b) => rank(a) - rank(b) || (a.name ?? a.id).localeCompare(b.name ?? b.id)),
     }));
 }
+
+/**
+ * Pixazo's models (video, speech, music) under the same settings (decided
+ * 03/10/2026), keyed `media:<id>`: Pixazo lists no models, so the catalog is
+ * media.ts, each model with its own request adapter. Paid from media
+ * credits, so every plan may open one, Découverte included. A model never
+ * set is open to all, as before the console. No padlock: only the agent
+ * reads this list, and it has no use for what it cannot call.
+ */
+export const mediaKey = (id: string) => `media:${id}`;
+
+export function mediaOpen(c: Catalog, plan: Plan, id: string): boolean {
+  const s = c.settings.get(mediaKey(id));
+  if (!s) return true;
+  if (!s.enabled) return false;
+  if (s.minPlan === null) return true;
+  const rank = (planId: string) => c.plans.findIndex((p) => p.id === planId);
+  // A minimum no plan carries any more opens nothing, rather than everything.
+  return rank(s.minPlan) >= 0 && rank(s.minPlan) <= rank(plan.id);
+}
+
+export const mediaRecommended = (c: Catalog, id: string) => c.settings.get(mediaKey(id))?.recommended ?? false;

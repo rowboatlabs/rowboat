@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { CREDITS_PER_DOLLAR } from '@x/shared/dist/billing.js';
 import { MEDIA_MODELS, mediaCredits, parseMediaRequest } from './media.js';
+import { mediaOpen, mediaRecommended } from './model-access.js';
+import { ModelCatalog } from './model-catalog.js';
 import type { Account, ControlStore, MediaJob } from './store.js';
 
 // /v1/media: video, speech and music through Pixazo (architecture §3.5 "Les
@@ -12,6 +14,8 @@ export const PIXAZO_BASE = 'https://gateway.pixazo.ai';
 
 export interface MediaDeps {
   store: ControlStore;
+  /** The console's settings (model-access.ts); unset: read from the store on each call. */
+  models?: ModelCatalog;
   /** Unset: media is off and every route answers 503. */
   pixazoKey?: string;
   fetch: typeof fetch;
@@ -28,19 +32,25 @@ function pixazoHeaders(key: string): Record<string, string> {
   return { 'content-type': 'application/json', 'cache-control': 'no-cache', 'ocp-apim-subscription-key': key };
 }
 
+const catalogOf = (deps: MediaDeps) => (deps.models ?? new ModelCatalog(deps.store, deps.now, 0)).get();
+
 /**
  * Every plan, Découverte included: credits are paid for before they are
- * spent, so they need no budget from the plan (decided 01/10/2026).
- * `credits` is the price of the model's default request.
+ * spent, so they need no budget from the plan (decided 01/10/2026). Only
+ * what the console opens to the plan (03/10/2026); `recommended` is the one
+ * to prefer for its kind. `credits` is the price of the model's default request.
  */
 export async function listMediaModels(deps: MediaDeps, account: Account): Promise<Response> {
-  const data = deps.pixazoKey
-    ? MEDIA_MODELS.map((m) => ({
+  const catalog = await catalogOf(deps);
+  const plan = catalog.plans.find((p) => p.id === account.planId);
+  const data = deps.pixazoKey && plan
+    ? MEDIA_MODELS.filter((m) => mediaOpen(catalog, plan, m.id)).map((m) => ({
         id: m.id,
         kind: m.kind,
         name: m.displayName,
         ...(m.durations ? { durations: m.durations } : {}),
         credits: mediaCredits(m, { model: m.id, prompt: 'x' }),
+        recommended: mediaRecommended(catalog, m.id),
       }))
     : [];
   return Response.json({ data, balance: await deps.store.mediaBalance(account.id) });
@@ -77,6 +87,12 @@ export async function createGeneration(deps: MediaDeps, account: Account, req: R
   const parsed = parseMediaRequest(raw);
   if (!parsed.ok) return error(400, 'invalid_request', parsed.message);
   const { model, req: media } = parsed;
+  // Refused, not replaced: a media request names what it wants and its price.
+  const catalog = await catalogOf(deps);
+  const plan = catalog.plans.find((p) => p.id === account.planId);
+  if (!plan || !mediaOpen(catalog, plan, model.id)) {
+    return error(403, 'not_in_plan', 'This model is not open to this plan; list_models gives those that are');
+  }
 
   const credits = mediaCredits(model, media);
   const at = deps.now();

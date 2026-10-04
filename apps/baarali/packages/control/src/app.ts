@@ -166,11 +166,11 @@ export function createApp(deps: ControlDeps) {
 
   app.all('/v1/llm/*', (c) => proxyLlm({ ...deps, models }, c.get('account'), c.req.raw));
 
-  app.get('/v1/media/models', (c) => listMediaModels(deps, c.get('account')));
+  app.get('/v1/media/models', (c) => listMediaModels({ ...deps, models }, c.get('account')));
   app.get('/v1/media/balance', (c) => mediaBalance(deps, c.get('account')));
   app.get('/v1/media/history', (c) => mediaHistory(deps, c.get('account')));
   app.get('/v1/media/packs', (c) => c.json({ data: deps.mediaPacks }));
-  app.post('/v1/media/generations', (c) => createGeneration(deps, c.get('account'), c.req.raw));
+  app.post('/v1/media/generations', (c) => createGeneration({ ...deps, models }, c.get('account'), c.req.raw));
   app.get('/v1/media/generations/:id', (c) => getGeneration(deps, c.get('account'), c.req.param('id')));
 
   // Devices (security §2): only a signed-in person adds one, with the
