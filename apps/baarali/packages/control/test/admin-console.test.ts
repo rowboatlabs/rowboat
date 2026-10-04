@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { adminPage, deniedPage } from '../src/admin-page.js';
 import { createApp } from '../src/app.js';
+import { selectAccountPage } from '../src/sign-in-page.js';
 import type { BaaraliAuth, SessionUser } from '../src/auth.js';
 import type { FlyApi, MachineConfig } from '../src/fly.js';
 import { createGateway } from '../src/gateway.js';
@@ -31,7 +33,7 @@ const auth: BaaraliAuth = {
   sessionUser: async (headers) => SESSIONS[headers.get('cookie')?.match(/session=(\w+)/)?.[1] ?? ''] ?? null,
 };
 
-function setup(opts: { adminEmails?: string[] } = {}) {
+function setup(opts: { adminEmails?: string[]; noAuth?: boolean } = {}) {
   const calls: string[] = [];
   const fly: FlyApi = {
     createVolume: async () => ({ id: 'vol_1' }),
@@ -62,7 +64,7 @@ function setup(opts: { adminEmails?: string[] } = {}) {
     mediaPacks: [{ id: 'medias-2', credits: 71, prices: [{ amount: 200, currency: 'EUR' }] }],
     adminTokenHash: hashToken('operator-token'),
     adminEmails: opts.adminEmails ?? ['boss@example.test'],
-    auth,
+    auth: opts.noAuth ? undefined : auth,
     instances,
     gateway: createGateway({ store, instances, now: () => clock, fetch: globalThis.fetch }),
     now: () => clock,
@@ -117,6 +119,12 @@ describe('who opens the console', () => {
     }
   });
 
+  it('has no page without the sign-in server, only the token\'s JSON routes', async () => {
+    const { as } = setup({ noAuth: true });
+    expect((await as(null, '/admin')).status).toBe(404);
+    expect((await as(null, '/admin/api/clients', { headers: { authorization: 'Bearer operator-token' } })).status).toBe(200);
+  });
+
   it('opens the JSON routes to the operator token too, for scripts', async () => {
     const { as } = setup();
     const res = await as(null, '/admin/api/clients', { headers: { authorization: 'Bearer operator-token' } });
@@ -130,6 +138,17 @@ describe('who opens the console', () => {
     expect(res.status).toBe(403);
     expect((await store.account(AWA.id))?.planId).toBe('decouverte');
   });
+});
+
+// The scripts live in TypeScript template strings, where one backslash too
+// few changes a regex or breaks the whole page: each must still compile.
+it('serves page scripts that compile', () => {
+  const pages = [adminPage({ nonce: 'n', admin: 'a@x' }), deniedPage({ nonce: 'n', who: null }), selectAccountPage({ who: 'a@x', lang: null, nonce: 'n' })];
+  for (const html of pages) {
+    const script = html.match(/<script nonce="n">([\s\S]*?)<\/script>/)?.[1];
+    expect(script).toBeTruthy();
+    expect(() => new Function(script!)).not.toThrow();
+  }
 });
 
 describe('what the console changes', () => {
@@ -169,6 +188,18 @@ describe('what the console changes', () => {
     expect(await store.mediaBalance(AWA.id)).toBe(60);
     for (const credits of [0, -5, 2.5, 10_001, '50']) expect((await give({ credits })).status).toBe(400);
     expect((await store.adminLog(10, AWA.id)).map((e) => e.detail)).toEqual(['+5 crédits médias', '+5 crédits médias', '+50 crédits médias · OM-123']);
+  });
+
+  it('credits one receipt once, whether it came by the console or the operator route', async () => {
+    const { post, as, store } = setup();
+    const route = await as(null, '/v1/admin/media-credits', {
+      method: 'POST',
+      headers: { authorization: 'Bearer operator-token' },
+      body: JSON.stringify({ account_id: AWA.id, pack: 'medias-2', reference: 'OM-777' }),
+    });
+    expect(await route.json()).toMatchObject({ added: 71 });
+    expect(await (await post('boss', `/admin/api/clients/${AWA.id}/credits`, { credits: 71, reference: 'OM-777' })).json()).toMatchObject({ added: 0, duplicate: true });
+    expect(await store.mediaBalance(AWA.id)).toBe(71);
   });
 
   it('resets the 5-hour session and leaves the week as it was', async () => {

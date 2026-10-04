@@ -359,7 +359,9 @@ function renderClients() {
 }
 for (const id of ["q", "f-plan", "f-state"]) $(id).addEventListener("input", renderClients);
 $("csv").addEventListener("click", () => {
-  const cell = (v) => '"' + String(v ?? "").replace(/"/g, '""') + '"';
+  // A cell starting with = + - @ would run as a formula in a spreadsheet: an
+  // email is typed by its owner, so it is defused with a leading quote.
+  const cell = (v) => { let t = String(v ?? ""); if (/^[-=+@]/.test(t)) t = "'" + t; return '"' + t.replace(/"/g, '""') + '"'; };
   const lines = [["email", "forfait", "inscrit le", "session %", "semaine %", "crédits médias", "coût 7 j (F CFA)", "dernière activité"].map(cell).join(";")];
   for (const c of clients) lines.push([c.email || c.id, c.planName, new Date(c.createdAt).toISOString().slice(0, 10), c.session, c.week, c.mediaBalance, c.cost.xof, c.lastActiveAt ? new Date(c.lastActiveAt).toISOString() : ""].map(cell).join(";"));
   const url = URL.createObjectURL(new Blob(["\\ufeff" + lines.join("\\n")], { type: "text/csv" }));

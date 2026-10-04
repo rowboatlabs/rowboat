@@ -100,6 +100,8 @@ export function mountAdminConsole(app: Hono<any>, deps: ConsoleDeps): void {
 
   // The page: signed in as an admin, or sent to sign in, or told no.
   app.get('/admin', async (c) => {
+    // Without the sign-in server nobody can sign in: only the operator token's JSON routes remain.
+    if (!deps.auth) return c.notFound();
     const who = await sessionAdmin(c);
     if (!who) return c.redirect(`${AUTH_BASE_PATH}/sign-in#admin`, 302);
     if (!('actor' in who)) return html((nonce) => deniedPage({ nonce, who: who.who }));
@@ -227,8 +229,10 @@ export function mountAdminConsole(app: Hono<any>, deps: ConsoleDeps): void {
       return c.json({ error: { code: 'invalid_request', message: `credits: a whole number from 1 to ${MAX_GIFT_CREDITS}` } }, 400);
     }
     // A payment reference makes a second click on the same payment harmless.
+    // It is the receipt as is, like /v1/admin/media-credits and the payment
+    // rail to come: one receipt credits once, whichever way it came in.
     const given = typeof b.reference === 'string' ? b.reference.trim().slice(0, 80) : '';
-    const reference = given ? `admin:${given}` : `admin:gift-${randomUUID()}`;
+    const reference = given || `admin:gift-${randomUUID()}`;
     const result = await store.applyMediaEntry({ accountId: id, at: deps.now(), kind: 'topup', credits, reference });
     if (result === 'applied') await log(actor, 'credits', id, `+${credits} crédits médias${given ? ` · ${given}` : ''}`);
     return c.json({ added: result === 'applied' ? credits : 0, duplicate: result === 'duplicate', balance: await store.mediaBalance(id) });

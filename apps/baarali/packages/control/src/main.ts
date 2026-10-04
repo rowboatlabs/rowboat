@@ -61,7 +61,8 @@ if (process.env.DATABASE_URL) {
   const db = poolDb(pool);
   console.log(`[control] ${await migrate(db)} migration(s) applied`);
   const pgStore = new PgStore(db, plans);
-  // An existing account keeps its creation date: its weeks stay anchored there.
+  // An existing account keeps its creation date (its weeks stay anchored
+  // there) and its plan: BAARALI_PLAN_ID only seeds it, the console changes it.
   await pgStore.upsertAccount(owner);
   await pgStore.grantToken(instanceToken, owner.id);
   store = pgStore;

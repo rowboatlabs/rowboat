@@ -262,6 +262,17 @@ describe('migrations', () => {
     await expect(db.query('DELETE FROM baarali.media_ledger WHERE reference = $1', ['p'])).rejects.toThrow(/append only/);
   });
 
+  it('keep an account\'s plan when it is upserted again, as at every boot', async () => {
+    const db = await freshDb();
+    await migrate(db);
+    const store = new PgStore(db, [PLAN]);
+    await store.upsertAccount(ME);
+    await store.setPlan(ME.id, 'pro');
+    // The owner's account at the next boot, BAARALI_PLAN_ID unchanged.
+    await store.upsertAccount({ ...ME, email: 'new@example.test' });
+    expect(await store.account(ME.id)).toEqual({ ...ME, email: 'new@example.test', planId: 'pro' });
+  });
+
   it('keep the console journal append only', async () => {
     const db = await freshDb();
     await migrate(db);

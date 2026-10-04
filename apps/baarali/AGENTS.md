@@ -34,7 +34,7 @@ OPENROUTER_API_KEY=<clé> BAARALI_PLAN_ID=essentiel PORT=8787 pnpm start
 | `BAARALI_PUBLIC_URL` | URL publique du plan de contrôle, servie dans `/v1/config` |
 | `BAARALI_INSTANCE_TOKEN` | Jeton porteur de l'instance (phase 0 : un seul propriétaire) ; gardé en empreinte SHA-256 |
 | `OPENROUTER_API_KEY` | Ne sort jamais du plan de contrôle |
-| `BAARALI_PLAN_ID` | Forfait du propriétaire, pris dans `src/catalog.ts` (budgets calculés depuis les prix, archi §3.5). Défaut : `essentiel` |
+| `BAARALI_PLAN_ID` | Forfait du propriétaire, pris dans `src/catalog.ts` (budgets calculés depuis les prix, archi §3.5). Défaut : `essentiel`. Avec Postgres, il ne sert qu'à la création du compte : ensuite, le forfait se change dans la console d'admin, et un redémarrage ne le défait pas |
 | `BAARALI_ACCOUNT_ID`, `BAARALI_ACCOUNT_EMAIL`, `BAARALI_ACCOUNT_CREATED_AT` | Le compte du propriétaire ; la semaine est ancrée à sa date de création |
 | `PIXAZO_API_KEY` | Facultative : sans elle, `/v1/media` répond 503 et le texte marche quand même |
 | `BAARALI_ADMIN_TOKEN` | Facultatif : le jeton de l'opérateur pour `/v1/admin/*` (recharges de crédits médias à la main). Absent : ces routes répondent 404 |

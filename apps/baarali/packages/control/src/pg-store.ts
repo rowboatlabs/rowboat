@@ -76,11 +76,15 @@ export class PgStore implements ControlStore {
     private readonly catalog: Plan[],
   ) {}
 
-  /** Creates or updates an account; its plan follows the latest call. */
+  /**
+   * Creates an account, or updates its email. The plan is set at creation
+   * only: afterwards the admin console owns it (03/10/2026), and a restart
+   * must not undo a change made there.
+   */
   async upsertAccount(account: Account): Promise<void> {
     await this.db.query(
       `INSERT INTO baarali.accounts (id, email, plan_id, created_at) VALUES ($1, $2, $3, $4)
-       ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, plan_id = EXCLUDED.plan_id`,
+       ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email`,
       [account.id, account.email, account.planId, new Date(account.createdAt)],
     );
   }
