@@ -167,6 +167,7 @@ export function startBaaraliCloud(): void {
   startCloudLink({
     apiUrl: API_URL,
     oauthFile,
+    linkFile: path.join(WorkDir, 'config', 'baarali-link.json'),
     mode: serverHostMode,
     connect: async (url, key) => {
       const result = await connectRemoteServer(url, key);
@@ -180,6 +181,7 @@ export function startBaaraliCloud(): void {
     },
     deviceName: () => os.hostname().replace(/\\.local$/, ''),
     readFile: (file) => fsp.readFile(file, 'utf8'),
+    writeFile: (file, data) => fsp.writeFile(file, data, { mode: 0o600 }),
     watch: (file, onChange) => {
       // Polling: the upstream rewrites the file whole, which fs.watch loses on some systems.
       fs.watchFile(file, { interval: 1000 }, onChange);

@@ -77,6 +77,7 @@ Une ligne s'ajoute dans le même commit que la modification, et disparaît dans 
 | `apps/x/apps/renderer/src/components/sidebar-content.tsx` (ter) | Connecteurs n'apparaît plus dans la barre que si un compte demande attention | Même demande : faire de la place | 03/10/2026 |
 | `apps/x/apps/renderer/src/components/sidebar-content.tsx` (quater) | Plus de pli « Plus / Moins » : toutes les pages sont visibles | Demandé par le fondateur (03/10/2026) : la barre a de la place | 03/10/2026 |
 | `apps/x/packages/shared/src/billing.ts`, `core/src/billing/billing.ts`, `apps/renderer/src/components/settings/account-settings.tsx` (bis) | `adminUrl` : /v1/me donne l'adresse de la console au seul compte admin ; Paramètres › Compte affiche alors « Console d'admin » | Demandé par le fondateur (03/10/2026) : ouvrir la console depuis l'app. La console revérifie elle-même l'e-mail connecté | 03/10/2026 |
+| `apps/x/apps/renderer/src/App.tsx` (ter) | Au démarrage, les discussions des onglets rouverts sont vérifiées ; une que le serveur n'a pas s'ouvre comme une nouvelle discussion (`lib/missing-chats.ts`) | Vu le 04/10/2026 : après un changement de compte, l'app rouvrait une discussion de l'ancienne instance et affichait « session not found » | 04/10/2026 |
 
 **La marque n'est pas une divergence.** Elle ne touche aucun fichier du dépôt : elle s'applique à la copie d'un build, en CI ou dans l'image d'instance (`apps/baarali/packages/desktop/scripts/brand.mjs`, décidé le 01/10/2026). Ses ancres dans les fichiers upstream sont vérifiées par un test à chaque PR.
 

@@ -20,6 +20,7 @@ import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown
 import { AssistantWorkspace } from './components/assistant/assistant-workspace';
 import { ASSISTANT_LAYOUT_KEY, chatLocation, defaultWindowSize, restoreAssistantLayout, useAssistantLayout, type ChatLocation } from './lib/assistant-layout';
 import { ASSISTANT_TABS_KEY, createAssistantTab, readAssistantPreference, restoreAssistantTabs, writeAssistantPreference } from './lib/assistant-dock';
+import { forgetSessions, missingSessions } from './lib/missing-chats';
 import { useSessionChat } from '@/hooks/useSessionChat';
 import { subscribeSessionFeed } from '@/lib/session-chat/feed';
 import { queuedMessageText } from './components/chat-session';
@@ -4764,9 +4765,25 @@ function App() {
     }
   }, [cancelRecordingIfActive, loadRun])
 
+  // BAARALI(04/10/2026): the reopened tabs' chats are looked up once first; a
+  // chat the server does not have opens as a new chat (lib/missing-chats.ts).
+  const missingAtStartRef = useRef<Promise<Set<string>> | null>(null)
   useEffect(() => {
-    const initialTab = chatTabsRef.current.find((tab) => tab.id === activeChatTabIdRef.current)
-    if (initialTab?.runId) activateAssistantTab(initialTab)
+    missingAtStartRef.current ??= missingSessions(
+      chatTabsRef.current.map((tab) => tab.runId),
+      (sessionId) => window.ipc.invoke('sessions:get', { sessionId }),
+    )
+    let live = true
+    void missingAtStartRef.current.then((missing) => {
+      if (!live) return
+      if (chatTabsRef.current.some((tab) => tab.runId && missing.has(tab.runId))) {
+        chatTabsRef.current = forgetSessions(chatTabsRef.current, missing)
+        setChatTabs(chatTabsRef.current)
+      }
+      const initialTab = chatTabsRef.current.find((tab) => tab.id === activeChatTabIdRef.current)
+      if (initialTab?.runId) activateAssistantTab(initialTab)
+    })
+    return () => { live = false }
   }, [activateAssistantTab])
 
   const addAssistantTab = useCallback((initialSelection?: ModelSelection | null, activate = true) => {
