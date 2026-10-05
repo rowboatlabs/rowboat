@@ -93,10 +93,16 @@ export default function SpaceChatScreen() {
   const jumpToLatest = useCallback(() => {
     if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
     atBottom.current = true;
+    programmaticUntil.current = Date.now() + 800;
     listRef.current?.scrollToEnd({ animated: true });
   }, []);
+  // Our own scrolls end with a momentum-end event too; only a finger's
+  // scroll may change whether we're following the bottom.
+  const programmaticUntil = useRef(0);
   const settle = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const byHand = dragging.current || Date.now() > programmaticUntil.current;
     dragging.current = false;
+    if (!byHand) return;
     const { contentOffset, contentSize, layoutMeasurement, contentInset } = e.nativeEvent;
     atBottom.current = contentSize.height + (contentInset?.bottom ?? 0) - (contentOffset.y + layoutMeasurement.height) < 80;
   }, []);
@@ -272,8 +278,15 @@ export default function SpaceChatScreen() {
       const message = await postMessageReliably(client, space, { body }, me);
       foldMessage(message);
       // Your own message: always land on it, wherever you were scrolled.
+      // (2026-10-05) The old animated scroll started BEFORE the new row was
+      // laid out, aimed at the old end, and kept running over the follow-up
+      // jump — the message stayed just below the fold until you re-entered.
+      // Now: follow the bottom, and scroll once the row exists.
       atBottom.current = true;
-      requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
+      dragging.current = false;
+      programmaticUntil.current = Date.now() + 800;
+      setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 60);
+      setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 250);
       return true;
     } catch (err) {
       // Offline is said by the composer ("Not sent"); anything else is the org's words.

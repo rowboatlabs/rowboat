@@ -19,6 +19,7 @@ import { SpaceComposer, type SpaceComposerHandle } from '@/components/space-comp
 import { PollCard, applyPollVote } from '@/components/poll-card';
 import { setActiveSpace } from '@/lib/push';
 import { useSpacesAccount } from '@/lib/spaces/account';
+import { AuthedImage } from '@/components/avatar';
 import { StatusBanner } from '@/components/status-banner';
 import { friendlyError, isNetworkError } from '@/lib/spaces/errors';
 import { blobLinkName, openBlobFile } from '@/lib/spaces/open-blob';
@@ -66,6 +67,16 @@ export default function SpaceThreadScreen() {
   // for the newest reply, so land at the bottom and stay there while replies
   // and previews load — until you scroll yourself. Opened by tapping a
   // message, a thread lands on its root as before.
+  // The bell's answer: a line that says what tapping it just did.
+  const [note, setNote] = useState<string | null>(null);
+  const noteTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const flashNote = useCallback((text: string) => {
+    setNote(text);
+    if (noteTimer.current) clearTimeout(noteTimer.current);
+    noteTimer.current = setTimeout(() => setNote(null), 2200);
+  }, []);
+  useEffect(() => () => { if (noteTimer.current) clearTimeout(noteTimer.current); }, []);
+
   const pinLatest = useRef(params.focus === 'latest');
   const [revealed, setRevealed] = useState(params.focus !== 'latest');
   const onThreadContentSize = useCallback(() => {
@@ -76,7 +87,8 @@ export default function SpaceThreadScreen() {
     });
   }, []);
   const scrollToNewest = useCallback(() => {
-    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
+    // After the new row is laid out — an earlier scroll aims at the old end.
+    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 120);
   }, []);
 
   if (lastOffset.current === undefined && initial?.messages) {
@@ -362,10 +374,14 @@ export default function SpaceThreadScreen() {
                   if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
                   const next = !following;
                   setFollowing(next);
-                  client.followThread(space, root, next).catch(() => setFollowing(!next));
+                  flashNote(next ? 'Following — you’ll be notified of new replies' : 'Unfollowed — no notifications for this thread');
+                  client.followThread(space, root, next).catch(() => {
+                    setFollowing(!next);
+                    flashNote('Couldn’t change that. Try again.');
+                  });
                 }}
               >
-                <Image source={following ? 'sf:bell.fill' : 'sf:bell'} style={{ width: 20, height: 20 }} tintColor={colors.label} />
+                <Image source={following ? 'sf:bell.fill' : 'sf:bell.slash'} style={{ width: 20, height: 20 }} contentFit="contain" tintColor={following ? colors.label : colors.tertiaryLabel} />
               </Pressable>
             ),
         }}
@@ -433,6 +449,14 @@ export default function SpaceThreadScreen() {
           ))}
         </ScrollView>
       )}
+
+      {note ? (
+        <View pointerEvents="none" style={{ position: 'absolute', top: headerHeight + 8, left: 0, right: 0, alignItems: 'center', zIndex: 5 }}>
+          <View style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16, backgroundColor: colors.label }}>
+            <Text style={{ fontSize: 13, fontWeight: '500', color: colors.background }}>{note}</Text>
+          </View>
+        </View>
+      ) : null}
 
       {/* Composer */}
       <View style={{ paddingTop: 8, paddingBottom: keyboardVisible ? 16 : insets.bottom + 10 }}>
@@ -508,10 +532,11 @@ function RootMessage({ message, member, memberNames, me, onToggleReaction, onLon
         <View
           style={{
             width: 40, height: 40, borderRadius: 10, borderCurve: 'continuous',
-            alignItems: 'center', justifyContent: 'center', backgroundColor: colors.secondaryBackground,
+            alignItems: 'center', justifyContent: 'center', backgroundColor: colors.secondaryBackground, overflow: 'hidden',
           }}
         >
           <Text style={{ fontSize: 17, fontWeight: '600', color: colors.label }}>{(name[0] ?? '?').toUpperCase()}</Text>
+          {member?.avatarUrl ? <AuthedImage url={member.avatarUrl} style={{ position: 'absolute', top: 0, left: 0, width: 40, height: 40 }} /> : null}
         </View>
         <View>
           <Text style={{ fontSize: 16, fontWeight: '700', color: colors.label }}>{name}</Text>
