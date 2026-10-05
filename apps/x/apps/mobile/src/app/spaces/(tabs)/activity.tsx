@@ -9,6 +9,7 @@ import { spaces } from '@x/shared';
 import { useSpacesAccount, type SpacesOrg } from '@/lib/spaces/account';
 import { SpacesClient } from '@/lib/spaces/client';
 import { Avatar } from '@/components/avatar';
+import { HeaderAvatar } from '@/components/header-avatar';
 import { StatusBanner } from '@/components/status-banner';
 import { useParentHeader } from '@/lib/use-parent-header';
 import { useColors } from '@/theme/colors';
@@ -102,7 +103,9 @@ export default function ActivityScreen() {
         <Pressable hitSlop={10} disabled={clearing} onPress={() => void markAllRead()} style={{ opacity: clearing ? 0.5 : 1, paddingHorizontal: 6 }}>
           <Text style={{ ...type.body, color: colors.label }}>Mark all read</Text>
         </Pressable>
-      ) : null,
+      ) : (
+        <HeaderAvatar />
+      ),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- markAllRead is recreated each render; its inputs are the deps below
     [anyUnread, clearing, colors.label, account.orgs],
   );
