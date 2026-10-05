@@ -2520,6 +2520,12 @@ export function setupIpcHandlers() {
       });
       return { paths: result.canceled ? [] : result.filePaths };
     },
+    // BAARALI(05/10/2026): the core here reads the computer, the paths serve
+    // as they are; the Baarali build copies them to the instance when joined
+    // to it (apps/baarali/packages/desktop/src/to-instance.ts).
+    'files:toInstance': async (_event, args) => {
+      return { paths: args.paths, skipped: [] };
+    },
     // Knowledge version history handlers
     'knowledge:history': async (_event, args) => {
       const commits = await versionHistory.getFileHistory(args.path);

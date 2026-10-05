@@ -63,6 +63,7 @@ import {
 } from '@/components/ai-elements/prompt-input'
 import { useSpacesMentionTargets } from '@/hooks/use-spaces-mention-targets'
 import { toast } from 'sonner'
+import { toInstance } from '@/lib/to-instance'
 import * as quickAskShortcut from '@x/shared/src/quick-ask-shortcut.js'
 import { useQuickAskShortcut } from '@/hooks/use-quick-ask-shortcut'
 import { isMac } from '@/lib/shortcut'
@@ -484,17 +485,19 @@ function ChatInputInner({
       } catch (err) {
         console.error('Failed to resolve Workspace path; falling back to current workDir', err)
       }
-      const { path: chosen } = await window.ipc.invoke('dialog:openDirectory', {
+      const { path: picked } = await window.ipc.invoke('dialog:openDirectory', {
         title: 'Choose work directory',
         defaultPath,
       })
-      if (!chosen) return
+      if (!picked) return
+      // BAARALI(05/10/2026): copied to the Baarali space first when joined to it.
+      const [chosen] = await toInstance([picked], 'projects')
       onWorkDirChange?.(chosen)
       await rememberWorkDir(chosen)
       toast.success(`Work directory set: ${chosen}`)
     } catch (err) {
       console.error('Failed to set work directory', err)
-      toast.error('Failed to set work directory')
+      toast.error(err instanceof Error && err.message ? err.message : 'Failed to set work directory')
     }
   }, [workDir, onWorkDirChange, rememberWorkDir, isCodeLocked])
 
@@ -607,9 +610,12 @@ function ChatInputInner({
         }
         const mime = result.mimeType || getMimeFromExtension(getExtension(filePath))
         const image = isImageMime(mime)
+        // BAARALI(05/10/2026): the agent reads the file where the core runs:
+        // copied to the Baarali space first when joined to it.
+        const [readable] = await toInstance([filePath], 'attachments')
         newAttachments.push({
           id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          path: filePath,
+          path: readable,
           filename: getFileDisplayName(filePath),
           mimeType: mime,
           isImage: image,
@@ -618,7 +624,7 @@ function ChatInputInner({
         })
       } catch (err) {
         console.error('Failed to read file:', filePath, err)
-        toast.error(`Failed to read: ${getFileDisplayName(filePath)}`)
+        toast.error(err instanceof Error && /Baarali space/.test(err.message) ? err.message : `Failed to read: ${getFileDisplayName(filePath)}`)
       }
     }
     if (newAttachments.length > 0) {

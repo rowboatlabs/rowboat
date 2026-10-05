@@ -3,6 +3,7 @@ import { FolderOpen, Plus } from 'lucide-react'
 import { codeWorkspaceKey, type CodeSession, type CodeSessionStatus } from '@x/shared/src/code-sessions.js'
 import type { CodingAgent } from '@x/shared/src/code-mode.js'
 import { toast } from 'sonner'
+import { toInstance } from '@/lib/to-instance'
 import { Button } from '@/components/ui/button'
 import {
   AlertDialog,
@@ -126,9 +127,10 @@ export function CodeView({
 
   const handleAddProject = useCallback(async () => {
     const res = await window.ipc.invoke('dialog:openDirectory', { title: 'Choose a project folder' })
-    const dir = res.path
-    if (!dir) return
+    if (!res.path) return
     try {
+      // BAARALI(05/10/2026): copied to the Baarali space first when joined to it.
+      const [dir] = await toInstance([res.path], 'projects')
       const added = await window.ipc.invoke('codeProject:add', { path: dir })
       await refresh()
       // Use the returned row directly: the refreshed React snapshot may not

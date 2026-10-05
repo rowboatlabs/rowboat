@@ -3437,7 +3437,13 @@ export const FR: Dictionary = {
     "Your team’s messages": "Les messages de votre équipe",
     "Your tools": "Vos outils",
     "Your work assistant. It handles your emails, prepares your documents and does the tasks you hand over.": "Votre assistant de travail. Il s’occupe de vos e-mails, prépare vos documents et fait les tâches que vous lui confiez.",
-    "Your work is kept in your private, encrypted space, on all your devices.": "Votre travail est rangé dans votre espace privé et chiffré, sur tous vos appareils."
+    "Your work is kept in your private, encrypted space, on all your devices.": "Votre travail est rangé dans votre espace privé et chiffré, sur tous vos appareils.",
+    // Files and folders sent to the Baarali space (05/10/2026), with the main process's refusals.
+    "A large file was left on your computer (25 MB at most per file).": "Un fichier trop lourd est resté sur votre ordinateur (25 Mo au maximum par fichier).",
+    "Sending the file to your Baarali space…": "Envoi du fichier vers votre espace Baarali…",
+    "Sending the folder to your Baarali space…": "Envoi du dossier vers votre espace Baarali…",
+    "This file is too big to send to your Baarali space (25 MB at most).": "Ce fichier est trop lourd pour votre espace Baarali (25 Mo au maximum).",
+    "This folder is too big to send to your Baarali space: more than 3000 files or 100 MB. Choose a smaller folder.": "Ce dossier est trop lourd pour votre espace Baarali : plus de 3 000 fichiers ou 100 Mo. Choisissez un dossier plus petit."
 
   },
   // Lines about people (apps/x renderer lib/spaces-membership.ts): the names
@@ -3863,7 +3869,9 @@ export const FR: Dictionary = {
     "$1 F CFA": "$1 F CFA",
     // Baarali's onboarding (04/10/2026).
     "All set, $1": "Tout est prêt, $1",
-    "Over to you, $1": "À vous de jouer, $1"
+    "Over to you, $1": "À vous de jouer, $1",
+    // Files sent to the Baarali space (05/10/2026).
+    "$1 large files were left on your computer (25 MB at most per file).": "$1 fichiers trop lourds sont restés sur votre ordinateur (25 Mo au maximum par fichier)."
 
   },
 };

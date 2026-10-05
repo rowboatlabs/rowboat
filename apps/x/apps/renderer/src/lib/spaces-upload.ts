@@ -6,8 +6,19 @@
  */
 export async function uploadInputFor(file: File): Promise<{ bytes?: string; filePath?: string }> {
   const filePath = window.electronUtils?.getPathForFile?.(file)
-  if (filePath) return { filePath }
+  if (filePath && !(await coreIsRemote())) return { filePath }
   return { bytes: arrayBufferToBase64(await file.arrayBuffer()) }
+}
+
+// BAARALI(05/10/2026): joined to its Baarali space, the core runs there and
+// cannot read the computer's paths: the bytes go instead. Asked once.
+let remote: Promise<boolean> | null = null
+function coreIsRemote(): Promise<boolean> {
+  remote ??= window.ipc
+    .invoke('server:getConnection', null)
+    .then((c) => c.mode === 'remote')
+    .catch(() => false)
+  return remote
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {

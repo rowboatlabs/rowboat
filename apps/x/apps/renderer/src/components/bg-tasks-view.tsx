@@ -41,6 +41,7 @@ import {
 import { useBackgroundTaskAgentStatus } from '@/hooks/use-bg-task-agent-status'
 import { formatRelativeTime } from '@/lib/relative-time'
 import { toast } from '@/lib/toast'
+import { toInstance } from '@/lib/to-instance'
 import * as analytics from '@/lib/analytics'
 import type { ConversationItem } from '@/lib/chat-conversation'
 import { fetchAgentRunTranscript } from '@/lib/agent-transcript'
@@ -365,8 +366,9 @@ function NewTaskDialog({
         setAddingProject(true)
         try {
             const res = await window.ipc.invoke('dialog:openDirectory', { title: 'Choose the repository for this task' })
-            const dir = res.path
-            if (!dir) return
+            if (!res.path) return
+            // BAARALI(05/10/2026): copied to the Baarali space first when joined to it.
+            const [dir] = await toInstance([res.path], 'projects')
             const added = await window.ipc.invoke('codeProject:add', { path: dir })
             if (!added.git?.isGitRepo) {
                 toast('That folder is not a git repository — coding tasks need one.', 'error')

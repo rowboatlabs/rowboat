@@ -2623,6 +2623,20 @@ export const ipcSchemas = {
       paths: z.array(z.string()),
     }),
   },
+  // BAARALI(05/10/2026): files and folders picked on the computer, made
+  // readable where the core runs (client-local, never forwarded). Joined to
+  // its instance, the Baarali build copies them there (Projects/,
+  // Attachments/) and answers the copies' paths; otherwise the same paths.
+  'files:toInstance': {
+    req: z.object({
+      paths: z.array(z.string()),
+      into: z.enum(['projects', 'attachments']),
+    }),
+    res: z.object({
+      paths: z.array(z.string()),
+      skipped: z.array(z.string()),
+    }),
+  },
   // Knowledge version history channels
   'knowledge:history': {
     req: z.object({ path: RelPath }),
