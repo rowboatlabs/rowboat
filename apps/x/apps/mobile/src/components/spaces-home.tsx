@@ -1,4 +1,4 @@
-import { Stack, router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
@@ -8,11 +8,10 @@ import { useSpacesAccount, type SpacesOrg } from '@/lib/spaces/account';
 import { SpacesClient } from '@/lib/spaces/client';
 import type { Member, Space, UnreadSnapshot } from '@rowboat/spaces-protocol';
 import { Avatar, AuthedImage } from '@/components/avatar';
-import { SPACES_TAB_BAR_HEIGHT, SpacesTabBar, type SpacesTab } from '@/components/spaces-tab-bar';
 import { StatusBanner } from '@/components/status-banner';
-import ActivityScreen from '@/app/spaces/activity';
 import { friendlyError } from '@/lib/spaces/errors';
 import { useMyAvatar } from '@/lib/spaces/my-avatar';
+import { useParentHeader } from '@/lib/use-parent-header';
 import { pickProfileImage } from '@/lib/spaces/profile-image';
 import { loadValue, peekValue, saveValue } from '@/lib/spaces/cache';
 import { isNetworkError } from '@/lib/spaces/errors';
@@ -24,7 +23,9 @@ import { type } from '@/theme/type';
 // Spaces home: signed out → one sign-in button; signed in → the user's orgs as
 // inset-grouped cards (iOS Settings shape): org identity header, hairline-
 // separated space rows, account footer.
-export default function SpacesScreen() {
+export type SpacesTabKey = 'home' | 'dms' | 'more' | 'search';
+
+export function SpacesTab({ tab }: { tab: SpacesTabKey }) {
   const account = useSpacesAccount();
   const colors = useColors();
 
@@ -36,7 +37,7 @@ export default function SpacesScreen() {
     );
   }
   if (account.status === 'signedOut') return <SignIn />;
-  return <OrgList />;
+  return <OrgList tab={tab} />;
 }
 
 function SignIn() {
@@ -132,7 +133,7 @@ function FeatureRow({ icon, title, detail }: { icon: string; title: string; deta
   );
 }
 
-function OrgList() {
+function OrgList({ tab }: { tab: SpacesTabKey }) {
   const account = useSpacesAccount();
   const colors = useColors();
   const [refreshing, setRefreshing] = useState(false);
@@ -155,27 +156,20 @@ function OrgList() {
   const myAvatar = useMyAvatar(current);
 
 
-  // EXPERIMENT (2026-10-05): Slack's bottom bar — Home, DMs, Activity, More,
-  // and a separate search button. Tabs are state on this screen, so pushing a
-  // channel still covers the bar, as in Slack.
-  const [tab, setTab] = useState<SpacesTab>('home');
+  // One screen per tab of the Spaces bar ((tabs)/_layout.tsx): Home, DMs,
+  // More, and the search tab — a jump list over spaces and people.
   const [query, setQuery] = useState('');
-  const TITLES: Record<SpacesTab, string> = { home: 'Spaces', dms: 'Direct messages', activity: 'Activity', more: 'More', search: 'Search' };
-  const bottomPad = SPACES_TAB_BAR_HEIGHT + 56;
+  const TITLES: Record<SpacesTabKey, string> = { home: 'Spaces', dms: 'Direct messages', more: 'More', search: 'Search' };
+  useParentHeader(TITLES[tab]);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.groupedBackground }}>
-      {/* Activity sets its own header button; every other tab clears it (the bell lives in the bar now). */}
-      <Stack.Screen options={tab === 'activity' ? { title: TITLES[tab] } : { title: TITLES[tab], headerRight: () => null }} />
-      {tab === 'activity' ? (
-        <ActivityScreen embedded bottomPad={bottomPad} />
-      ) : (
         <ScrollView
           style={{ flex: 1 }}
           contentInsetAdjustmentBehavior="automatic"
           keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: bottomPad, gap: 24 }}
+          contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 32, gap: 24 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} />}
         >
           <StatusBanner error={account.orgsError} onRetry={() => void refresh()} />
@@ -254,8 +248,6 @@ function OrgList() {
             </View>
           ) : null}
         </ScrollView>
-      )}
-      <SpacesTabBar tab={tab} onChange={setTab} />
       <OrgSwitcher
         visible={switching}
         orgs={account.orgs ?? []}

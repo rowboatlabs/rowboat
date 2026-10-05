@@ -1,4 +1,4 @@
-import { Stack, router } from 'expo-router';
+import { Stack } from 'expo-router';
 import { DrawerActions } from 'expo-router/react-navigation';
 import { Pressable, useColorScheme } from 'react-native';
 import { Image } from 'expo-image';
@@ -20,8 +20,9 @@ export default function SpacesLayout() {
         scrollEdgeEffects: { top: 'soft' },
       }}
     >
+      {/* The tabs (Home, DMs, Activity, More, search) share this header; the focused tab sets its title and right button. */}
       <Stack.Screen
-        name="index"
+        name="(tabs)"
         options={({ navigation }) => ({
           title: 'Spaces',
           headerLeft: () => (
@@ -29,14 +30,8 @@ export default function SpacesLayout() {
               <Image source="sf:line.3.horizontal" style={{ width: 22, height: 22 }} tintColor={tint} />
             </Pressable>
           ),
-          headerRight: () => (
-            <Pressable onPress={() => router.push('/spaces/activity')} hitSlop={10}>
-              <Image source="sf:bell" style={{ width: 21, height: 21 }} tintColor={tint} />
-            </Pressable>
-          ),
         })}
       />
-      <Stack.Screen name="activity" options={{ title: 'Activity', headerBackButtonDisplayMode: 'minimal' }} />
       {/* Title set by the screen from its params; native back chevron, no label. */}
       <Stack.Screen name="chat" options={{ title: '', headerBackButtonDisplayMode: 'minimal' }} />
       <Stack.Screen name="thread" options={{ title: 'Thread', headerBackButtonDisplayMode: 'minimal' }} />

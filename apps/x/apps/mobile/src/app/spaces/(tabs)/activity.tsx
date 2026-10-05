@@ -1,4 +1,4 @@
-import { Stack, router } from 'expo-router';
+import { router } from 'expo-router';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -10,6 +10,7 @@ import { useSpacesAccount, type SpacesOrg } from '@/lib/spaces/account';
 import { SpacesClient } from '@/lib/spaces/client';
 import { Avatar } from '@/components/avatar';
 import { StatusBanner } from '@/components/status-banner';
+import { useParentHeader } from '@/lib/use-parent-header';
 import { useColors } from '@/theme/colors';
 import { type } from '@/theme/type';
 
@@ -34,7 +35,7 @@ interface Row {
   names: Record<string, string>;
 }
 
-export default function ActivityScreen({ embedded, bottomPad }: { embedded?: boolean; bottomPad?: number } = {}) {
+export default function ActivityScreen() {
   const colors = useColors();
   const account = useSpacesAccount();
   const [rows, setRows] = useState<Row[] | null>(null);
@@ -94,6 +95,19 @@ export default function ActivityScreen({ embedded, bottomPad }: { embedded?: boo
     }
   };
 
+  // The tabs share the stack's header: this tab names it and owns its button.
+  const headerRight = useCallback(
+    () =>
+      anyUnread ? (
+        <Pressable hitSlop={10} disabled={clearing} onPress={() => void markAllRead()} style={{ opacity: clearing ? 0.5 : 1, paddingHorizontal: 6 }}>
+          <Text style={{ ...type.body, color: colors.label }}>Mark all read</Text>
+        </Pressable>
+      ) : null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- markAllRead is recreated each render; its inputs are the deps below
+    [anyUnread, clearing, colors.label, account.orgs],
+  );
+  useParentHeader('Activity', headerRight);
+
   // Grouped by day, like a notification list: Today, Yesterday, Earlier.
   const groups = useMemo(() => {
     const out: { label: string; rows: Row[] }[] = [];
@@ -110,7 +124,7 @@ export default function ActivityScreen({ embedded, bottomPad }: { embedded?: boo
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.groupedBackground }}
       contentInsetAdjustmentBehavior="automatic"
-      contentContainerStyle={{ paddingTop: 8, paddingBottom: embedded ? (bottomPad ?? 24) : 24, gap: 20 }}
+      contentContainerStyle={{ paddingTop: 8, paddingBottom: 32, gap: 20 }}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
@@ -121,16 +135,6 @@ export default function ActivityScreen({ embedded, bottomPad }: { embedded?: boo
         />
       }
     >
-      <Stack.Screen
-        options={{
-          headerRight: () =>
-            anyUnread ? (
-              <Pressable hitSlop={10} disabled={clearing} onPress={() => void markAllRead()} style={{ opacity: clearing ? 0.5 : 1, paddingHorizontal: 6 }}>
-                <Text style={{ ...type.body, color: colors.label }}>Mark all read</Text>
-              </Pressable>
-            ) : null,
-        }}
-      />
       {/* Filters: the selected one is filled, the rest sit on the card colour. */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}>
         {FILTERS.map((f) => {
