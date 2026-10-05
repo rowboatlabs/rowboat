@@ -8,8 +8,10 @@ import { spaces } from '@x/shared';
 
 import { useSpacesAccount, type SpacesOrg } from '@/lib/spaces/account';
 import { SpacesClient } from '@/lib/spaces/client';
+import { Avatar } from '@/components/avatar';
 import { StatusBanner } from '@/components/status-banner';
 import { useColors } from '@/theme/colors';
+import { type } from '@/theme/type';
 
 // Activity (desktop activity-view.tsx for parity): everything that involves
 // you across every space — mentions, @here, DMs, replies in threads you
@@ -92,11 +94,23 @@ export default function ActivityScreen({ embedded, bottomPad }: { embedded?: boo
     }
   };
 
+  // Grouped by day, like a notification list: Today, Yesterday, Earlier.
+  const groups = useMemo(() => {
+    const out: { label: string; rows: Row[] }[] = [];
+    for (const row of visible ?? []) {
+      const label = dayLabel(row.item.at);
+      const last = out.at(-1);
+      if (last && last.label === label) last.rows.push(row);
+      else out.push({ label, rows: [row] });
+    }
+    return out;
+  }, [visible]);
+
   return (
     <ScrollView
-      style={{ flex: 1, backgroundColor: colors.background }}
+      style={{ flex: 1, backgroundColor: colors.groupedBackground }}
       contentInsetAdjustmentBehavior="automatic"
-      contentContainerStyle={{ paddingTop: 8, paddingBottom: embedded ? (bottomPad ?? 24) : 24 }}
+      contentContainerStyle={{ paddingTop: 8, paddingBottom: embedded ? (bottomPad ?? 24) : 24, gap: 20 }}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
@@ -111,14 +125,14 @@ export default function ActivityScreen({ embedded, bottomPad }: { embedded?: boo
         options={{
           headerRight: () =>
             anyUnread ? (
-              <Pressable hitSlop={10} disabled={clearing} onPress={() => void markAllRead()} style={{ opacity: clearing ? 0.5 : 1 }}>
-                <Text style={{ fontSize: 15, color: colors.label }}>Mark all read</Text>
+              <Pressable hitSlop={10} disabled={clearing} onPress={() => void markAllRead()} style={{ opacity: clearing ? 0.5 : 1, paddingHorizontal: 6 }}>
+                <Text style={{ ...type.body, color: colors.label }}>Mark all read</Text>
               </Pressable>
             ) : null,
         }}
       />
-      {/* Slack's filter chips */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 8, paddingBottom: 8 }}>
+      {/* Filters: the selected one is filled, the rest sit on the card colour. */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}>
         {FILTERS.map((f) => {
           const on = f.key === filter;
           return (
@@ -128,12 +142,9 @@ export default function ActivityScreen({ embedded, bottomPad }: { embedded?: boo
                 if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
                 setFilter(f.key);
               }}
-              style={{
-                paddingHorizontal: 14, paddingVertical: 7, borderRadius: 16,
-                backgroundColor: on ? colors.label : colors.secondaryBackground,
-              }}
+              style={{ height: 34, paddingHorizontal: 14, borderRadius: 17, justifyContent: 'center', backgroundColor: on ? colors.label : colors.card }}
             >
-              <Text style={{ fontSize: 14, fontWeight: '600', color: on ? colors.background : colors.label }}>{f.label}</Text>
+              <Text style={{ ...type.caption, fontWeight: '600', color: on ? colors.background : colors.secondaryLabel }}>{f.label}</Text>
             </Pressable>
           );
         })}
@@ -141,38 +152,37 @@ export default function ActivityScreen({ embedded, bottomPad }: { embedded?: boo
       <StatusBanner error={error} offlineText="You're offline. Activity will update when you're back online." onRetry={() => void load()} />
       {rows === null && !error ? <ActivityIndicator style={{ marginTop: 32 }} /> : null}
       {visible?.length === 0 ? (
-        <View style={{ alignItems: 'center', marginTop: 72, gap: 8 }}>
-          <Image source="sf:bell.slash" style={{ width: 32, height: 32 }} tintColor={colors.tertiaryLabel} />
-          <Text style={{ fontSize: 15, fontWeight: '600', color: colors.secondaryLabel }}>You're all caught up</Text>
-          <Text style={{ fontSize: 13, color: colors.tertiaryLabel }}>Mentions, replies and reactions show up here.</Text>
+        <View style={{ alignItems: 'center', marginTop: 56, gap: 6, paddingHorizontal: 32 }}>
+          <Image source="sf:bell.slash" style={{ width: 30, height: 30, marginBottom: 6 }} tintColor={colors.tertiaryLabel} />
+          <Text style={{ ...type.bodyStrong, color: colors.label }}>You're all caught up</Text>
+          <Text style={{ ...type.caption, textAlign: 'center', color: colors.tertiaryLabel }}>Mentions, replies and reactions show up here.</Text>
         </View>
       ) : null}
-      {visible?.map((row, i) => (
-        <ActivityRow key={`${row.org.id}:${row.item.id}`} row={row} first={i === 0} onPress={() => open(row)} />
+      {groups.map((group) => (
+        <View key={group.label} style={{ gap: 8, paddingHorizontal: 16 }}>
+          <Text style={{ ...type.section, color: colors.secondaryLabel, paddingHorizontal: 16 }}>{group.label}</Text>
+          <View style={{ borderRadius: 20, borderCurve: 'continuous', overflow: 'hidden', backgroundColor: colors.card }}>
+            {group.rows.map((row, i) => (
+              <ActivityRow key={`${row.org.id}:${row.item.id}`} row={row} first={i === 0} onPress={() => open(row)} />
+            ))}
+          </View>
+        </View>
       ))}
     </ScrollView>
   );
-}
-
-// Deterministic avatar tint (the chat rows' trick).
-const HUES = [211, 32, 145, 262, 90, 340, 174, 20];
-function avatarColor(id: string, dark: boolean): string {
-  let h = 0;
-  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
-  return `hsl(${HUES[h % HUES.length]}, 45%, ${dark ? 32 : 82}%)`;
 }
 
 const KIND_ICON: Record<ActivityItem['kind'], string> = {
   mention: 'sf:at',
   here: 'sf:megaphone',
   dm: 'sf:envelope',
-  reply: 'sf:bubble.left.and.bubble.right',
+  reply: 'sf:arrowshape.turn.up.left',
   reaction: 'sf:face.smiling',
 };
 
+/** One activity: who, when, what they did and where, then the words. */
 function ActivityRow({ row, first, onPress }: { row: Row; first: boolean; onPress: () => void }) {
   const colors = useColors();
-  const dark = colors.isDark;
   const { item, names } = row;
   const nameMap = useMemo(() => new Map(Object.entries(names)), [names]);
   const actorId = item.actors[0]?.memberId ?? '';
@@ -182,49 +192,47 @@ function ActivityRow({ row, first, onPress }: { row: Row; first: boolean; onPres
   const where = item.spaceKind === 'direct' ? 'Direct message' : `#${item.spaceName}`;
   const headline =
     item.kind === 'reaction'
-      ? `Reacted ${item.emoji ?? ''} to your message`
+      ? `Reacted ${item.emoji ?? ''}`
       : item.kind === 'reply'
-        ? 'Replied in thread'
+        ? 'Replied in a thread'
         : item.kind === 'here'
           ? 'Mentioned everyone'
           : item.kind === 'dm'
-            ? 'Sent you a message'
+            ? 'Messaged you'
             : 'Mentioned you';
   const excerpt = plainText(spaces.resolveMentions(item.message.body, nameMap));
 
   return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => ({
-        flexDirection: 'row', gap: 12, paddingHorizontal: 16, paddingVertical: 12,
-        borderTopWidth: first ? 0 : 0.5, borderTopColor: colors.separator,
-        backgroundColor: pressed ? colors.secondaryBackground : item.unread ? (dark ? 'rgba(10,132,255,0.06)' : 'rgba(10,132,255,0.05)') : 'transparent',
-      })}
-    >
-      <View
-        style={{
-          width: 40, height: 40, borderRadius: 10, borderCurve: 'continuous',
-          alignItems: 'center', justifyContent: 'center', backgroundColor: avatarColor(actorId, dark),
-        }}
-      >
-        <Text style={{ fontSize: 17, fontWeight: '600', color: colors.label }}>{(actor[0] ?? '?').toUpperCase()}</Text>
-      </View>
-      <View style={{ flex: 1, gap: 3 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          <Image source={KIND_ICON[item.kind]} style={{ width: 12, height: 12 }} tintColor={colors.tertiaryLabel} />
-          <Text numberOfLines={1} style={{ flex: 1, fontSize: 12, color: colors.tertiaryLabel }}>
-            {headline} · {where}
+    <Pressable onPress={onPress} style={({ pressed }) => ({ backgroundColor: pressed ? colors.secondaryBackground : 'transparent' })}>
+      {first ? null : <View style={{ height: 0.5, marginLeft: 62, backgroundColor: colors.separator }} />}
+      <View style={{ flexDirection: 'row', gap: 12, paddingHorizontal: 14, paddingVertical: 12 }}>
+        <Avatar id={actorId} name={actor} size={36} />
+        <View style={{ flex: 1, gap: 2 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Text numberOfLines={1} style={{ flex: 1, ...type.body, fontWeight: item.unread ? '700' : '600', color: colors.label }}>{who}</Text>
+            <Text style={{ ...type.caption, color: colors.tertiaryLabel, fontVariant: ['tabular-nums'] }}>{timeAgo(item.at)}</Text>
+            {item.unread ? <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#0a84ff' }} /> : null}
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+            <Image source={KIND_ICON[item.kind]} style={{ width: 12, height: 12 }} contentFit="contain" tintColor={colors.tertiaryLabel} />
+            <Text numberOfLines={1} style={{ flex: 1, ...type.caption, color: colors.tertiaryLabel }}>
+              {headline} · {where}
+            </Text>
+          </View>
+          <Text numberOfLines={2} style={{ ...type.body, lineHeight: 21, paddingTop: 2, color: item.unread ? colors.label : colors.secondaryLabel }}>
+            {excerpt || '(attachment)'}
           </Text>
-          <Text style={{ fontSize: 12, color: colors.tertiaryLabel }}>{timeAgo(item.at)}</Text>
         </View>
-        <Text numberOfLines={1} style={{ fontSize: 15, fontWeight: item.unread ? '700' : '600', color: colors.label }}>{who}</Text>
-        <Text numberOfLines={2} style={{ fontSize: 15, lineHeight: 20, color: item.unread ? colors.label : colors.secondaryLabel }}>
-          {excerpt || '(attachment)'}
-        </Text>
       </View>
-      {item.unread ? <View style={{ width: 8, height: 8, borderRadius: 4, marginTop: 4, backgroundColor: '#0a84ff' }} /> : null}
     </Pressable>
   );
+}
+
+/** Today, Yesterday, or Earlier — by the phone's calendar day. */
+function dayLabel(iso: string): string {
+  const start = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((start(new Date()) - start(new Date(iso))) / 86_400_000);
+  return days <= 0 ? 'Today' : days === 1 ? 'Yesterday' : 'Earlier';
 }
 
 /** Markdown → one line of plain text for a preview row. */
