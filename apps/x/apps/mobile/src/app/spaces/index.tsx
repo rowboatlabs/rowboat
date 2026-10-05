@@ -1,14 +1,16 @@
-import { router, useFocusEffect } from 'expo-router';
+import { Stack, router, useFocusEffect } from 'expo-router';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { ActionSheetIOS, ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
+import { ActionSheetIOS, ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, View, TextInput } from 'react-native';
 
 import { useSpacesAccount, type SpacesOrg } from '@/lib/spaces/account';
 import { SpacesClient } from '@/lib/spaces/client';
 import type { Member, Space, UnreadSnapshot } from '@rowboat/spaces-protocol';
 import { Avatar, AuthedImage } from '@/components/avatar';
+import { SPACES_TAB_BAR_HEIGHT, SpacesTabBar, type SpacesTab } from '@/components/spaces-tab-bar';
 import { StatusBanner } from '@/components/status-banner';
+import ActivityScreen from '@/app/spaces/activity';
 import { friendlyError } from '@/lib/spaces/errors';
 import { useMyAvatar } from '@/lib/spaces/my-avatar';
 import { pickProfileImage } from '@/lib/spaces/profile-image';
@@ -153,49 +155,107 @@ function OrgList() {
   const myAvatar = useMyAvatar(current);
 
 
-  return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: colors.groupedBackground }}
-      contentInsetAdjustmentBehavior="automatic"
-      contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 40, gap: 24 }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} />}
-    >
-      <StatusBanner error={account.orgsError} onRetry={() => void refresh()} />
-      {account.orgs === null && !account.orgsError ? <ActivityIndicator style={{ marginTop: 48 }} /> : null}
-      {current ? <OrgCard key={current.id} org={current} onSwitch={() => setSwitching(true)} /> : null}
-      {account.orgs?.length === 0 && !account.orgsError ? (
-        <View style={{ alignItems: 'center', marginTop: 56, gap: 10 }}>
-          <View style={{ width: 72, height: 72, borderRadius: 22, borderCurve: 'continuous', alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background }}>
-            <Image source="sf:person.2" style={{ width: 32, height: 32 }} tintColor={colors.secondaryLabel} />
-          </View>
-          <Text style={{ ...type.title, color: colors.label }}>No orgs yet</Text>
-          <Text style={{ ...type.body, lineHeight: 22, textAlign: 'center', color: colors.secondaryLabel, paddingHorizontal: 24 }}>
-            Ask a teammate for an invite link to join their space.
-          </Text>
-          <Pressable
-            onPress={() => router.push('/spaces/join')}
-            style={({ pressed }) => ({ marginTop: 8, paddingHorizontal: 22, paddingVertical: 13, borderRadius: 14, borderCurve: 'continuous', backgroundColor: colors.label, opacity: pressed ? 0.7 : 1 })}
-          >
-            <Text style={{ ...type.bodyStrong, color: colors.background }}>Join with a link</Text>
-          </Pressable>
-        </View>
-      ) : null}
+  // EXPERIMENT (2026-10-05): Slack's bottom bar — Home, DMs, Activity, More,
+  // and a separate search button. Tabs are state on this screen, so pushing a
+  // channel still covers the bar, as in Slack.
+  const [tab, setTab] = useState<SpacesTab>('home');
+  const [query, setQuery] = useState('');
+  const TITLES: Record<SpacesTab, string> = { home: 'Spaces', dms: 'Direct messages', activity: 'Activity', more: 'More', search: 'Search' };
+  const bottomPad = SPACES_TAB_BAR_HEIGHT + 56;
 
-      {/* You + the one way in */}
-      <Card>
-        {who ? (
-          <CardRow first onPress={() => router.push('/spaces/account')}>
-            <Avatar id={current?.memberId ?? who} name={who} size={28} url={myAvatar} />
-            <Text numberOfLines={1} style={{ flex: 1, ...type.body, color: colors.label }}>{who}</Text>
-            <Chevron />
-          </CardRow>
-        ) : null}
-        <CardRow first={!who} onPress={() => router.push('/spaces/join')}>
-          <Glyph icon="sf:link" />
-          <Text style={{ flex: 1, ...type.body, color: colors.label }}>Join with an invite link</Text>
-          <Chevron />
-        </CardRow>
-      </Card>
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.groupedBackground }}>
+      {/* Activity sets its own header button; every other tab clears it (the bell lives in the bar now). */}
+      <Stack.Screen options={tab === 'activity' ? { title: TITLES[tab] } : { title: TITLES[tab], headerRight: () => null }} />
+      {tab === 'activity' ? (
+        <ActivityScreen embedded bottomPad={bottomPad} />
+      ) : (
+        <ScrollView
+          style={{ flex: 1 }}
+          contentInsetAdjustmentBehavior="automatic"
+          keyboardDismissMode="on-drag"
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: bottomPad, gap: 24 }}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} />}
+        >
+          <StatusBanner error={account.orgsError} onRetry={() => void refresh()} />
+          {account.orgs === null && !account.orgsError ? <ActivityIndicator style={{ marginTop: 48 }} /> : null}
+
+          {tab === 'search' ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, borderRadius: 14, borderCurve: 'continuous', backgroundColor: colors.card }}>
+              <Image source="sf:magnifyingglass" style={{ width: 16, height: 16 }} tintColor={colors.tertiaryLabel} />
+              <TextInput
+                autoFocus
+                value={query}
+                onChangeText={setQuery}
+                placeholder="Jump to a space or person"
+                placeholderTextColor={colors.tertiaryLabel}
+                autoCorrect={false}
+                clearButtonMode="while-editing"
+                style={{ flex: 1, paddingVertical: 12, ...type.body, color: colors.label }}
+              />
+            </View>
+          ) : null}
+
+          {tab === 'more' ? (
+            <>
+              <Card>
+                {who ? (
+                  <CardRow first onPress={() => router.push('/spaces/account')}>
+                    <Avatar id={current?.memberId ?? who} name={who} size={28} url={myAvatar} />
+                    <Text numberOfLines={1} style={{ flex: 1, ...type.body, color: colors.label }}>{who}</Text>
+                    <Chevron />
+                  </CardRow>
+                ) : null}
+                <CardRow first={!who} onPress={() => router.push('/spaces/settings')}>
+                  <Glyph icon="sf:gearshape" />
+                  <Text style={{ flex: 1, ...type.body, color: colors.label }}>Settings</Text>
+                  <Chevron />
+                </CardRow>
+              </Card>
+              <Card>
+                <CardRow first onPress={() => router.push('/spaces/join')}>
+                  <Glyph icon="sf:link" />
+                  <Text style={{ flex: 1, ...type.body, color: colors.label }}>Join with an invite link</Text>
+                  <Chevron />
+                </CardRow>
+                <CardRow onPress={() => router.push('/pairing')}>
+                  <Glyph icon="sf:laptopcomputer" />
+                  <Text style={{ flex: 1, ...type.body, color: colors.label }}>Connect your Mac</Text>
+                  <Chevron />
+                </CardRow>
+              </Card>
+            </>
+          ) : current ? (
+            <OrgCard
+              key={current.id}
+              org={current}
+              onSwitch={() => setSwitching(true)}
+              mode={tab === 'dms' ? 'dms' : tab === 'search' ? 'search' : 'home'}
+              query={tab === 'search' ? query : ''}
+            />
+          ) : null}
+
+          {account.orgs?.length === 0 && !account.orgsError && tab !== 'more' ? (
+            <View style={{ alignItems: 'center', marginTop: 56, gap: 10 }}>
+              <View style={{ width: 72, height: 72, borderRadius: 22, borderCurve: 'continuous', alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background }}>
+                <Image source="sf:person.2" style={{ width: 32, height: 32 }} tintColor={colors.secondaryLabel} />
+              </View>
+              <Text style={{ ...type.title, color: colors.label }}>No orgs yet</Text>
+              <Text style={{ ...type.body, lineHeight: 22, textAlign: 'center', color: colors.secondaryLabel, paddingHorizontal: 24 }}>
+                Ask a teammate for an invite link to join their space.
+              </Text>
+              <Pressable
+                onPress={() => router.push('/spaces/join')}
+                style={({ pressed }) => ({ marginTop: 8, paddingHorizontal: 22, paddingVertical: 13, borderRadius: 14, borderCurve: 'continuous', backgroundColor: colors.label, opacity: pressed ? 0.7 : 1 })}
+              >
+                <Text style={{ ...type.bodyStrong, color: colors.background }}>Join with a link</Text>
+              </Pressable>
+            </View>
+          ) : null}
+        </ScrollView>
+      )}
+      <SpacesTabBar tab={tab} onChange={setTab} />
       <OrgSwitcher
         visible={switching}
         orgs={account.orgs ?? []}
@@ -207,7 +267,7 @@ function OrgList() {
         }}
         onClose={() => setSwitching(false)}
       />
-    </ScrollView>
+    </View>
   );
 }
 
@@ -263,7 +323,7 @@ function orgTint(id: string, dark: boolean): string {
   return `hsl(${ORG_HUES[h % ORG_HUES.length]}, 50%, ${dark ? 34 : 40}%)`;
 }
 
-function OrgCard({ org, onSwitch }: { org: SpacesOrg; onSwitch: () => void }) {
+function OrgCard({ org, onSwitch, mode = 'home', query = '' }: { org: SpacesOrg; onSwitch: () => void; mode?: 'home' | 'dms' | 'search'; query?: string }) {
   const account = useSpacesAccount();
   const colors = useColors();
   const dark = colors.isDark;
@@ -371,9 +431,15 @@ function OrgCard({ org, onSwitch }: { org: SpacesOrg; onSwitch: () => void }) {
   }, [members, org.memberId]);
 
   const people = orgMembers.length;
+  // Search is a jump list: spaces and people whose names contain the query.
+  const q = query.trim().toLowerCase();
+  const shownSpaces = mode === 'dms' ? null : mode === 'search' && q ? (spaces?.filter((s) => s.name.toLowerCase().includes(q)) ?? null) : spaces;
+  const shownMembers = mode === 'search' && q ? orgMembers.filter((m) => m.displayName.toLowerCase().includes(q)) : orgMembers;
 
   return (
     <View style={{ gap: 24 }}>
+      {mode === 'home' ? (
+        <>
       {/* Org identity: a plain card — tile, name, one quiet line of facts. */}
       <Card radius={32 /* near-concentric with the 44pt logo and its 14pt inset */}>
         <Pressable
@@ -397,16 +463,18 @@ function OrgCard({ org, onSwitch }: { org: SpacesOrg; onSwitch: () => void }) {
           <Image source="sf:chevron.up.chevron.down" style={{ width: 11, height: 15 }} tintColor={colors.tertiaryLabel} />
         </Pressable>
       </Card>
+        </>
+      ) : null}
 
       <StatusBanner error={error} />
       {spaces === null && !error ? <ActivityIndicator style={{ alignSelf: 'center', marginVertical: 16 }} /> : null}
 
       {/* Spaces */}
-      {spaces !== null ? (
+      {shownSpaces !== null && (mode !== 'search' || shownSpaces.length > 0) ? (
         <View style={{ gap: 8 }}>
           <SectionLabel text="Spaces" />
           <Card>
-            {spaces.map((space, i) => {
+            {shownSpaces.map((space, i) => {
               const badge = badgeFor(space.id, false);
               return (
                 <CardRow
@@ -420,7 +488,7 @@ function OrgCard({ org, onSwitch }: { org: SpacesOrg; onSwitch: () => void }) {
                 </CardRow>
               );
             })}
-            {spaces.length === 0 ? (
+            {shownSpaces.length === 0 ? (
               <Text style={{ ...type.body, color: colors.tertiaryLabel, padding: 14 }}>No spaces in this org yet.</Text>
             ) : null}
           </Card>
@@ -431,11 +499,11 @@ function OrgCard({ org, onSwitch }: { org: SpacesOrg; onSwitch: () => void }) {
           `direct` space — openDirect is get-or-create, idempotent). Your own
           row opens the self-DM: notes to self, on the org, for every device
           and your agent. */}
-      {orgMembers.length > 0 ? (
+      {shownMembers.length > 0 ? (
         <View style={{ gap: 8 }}>
           <SectionLabel text="Direct messages" />
           <Card>
-            {orgMembers.map((m, i) => {
+            {shownMembers.map((m, i) => {
               const dm = dmWith(m.id);
               const badge = dm ? badgeFor(dm.id, true) : { unread: 0, forYou: 0 };
               const self = m.id === org.memberId;
@@ -452,6 +520,9 @@ function OrgCard({ org, onSwitch }: { org: SpacesOrg; onSwitch: () => void }) {
             })}
           </Card>
         </View>
+      ) : null}
+      {mode === 'search' && q && (shownSpaces?.length ?? 0) === 0 && shownMembers.length === 0 ? (
+        <Text style={{ ...type.body, textAlign: 'center', color: colors.tertiaryLabel, paddingTop: 24 }}>No spaces or people match “{query.trim()}”</Text>
       ) : null}
     </View>
   );

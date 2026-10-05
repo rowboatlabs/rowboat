@@ -32,7 +32,7 @@ interface Row {
   names: Record<string, string>;
 }
 
-export default function ActivityScreen() {
+export default function ActivityScreen({ embedded, bottomPad }: { embedded?: boolean; bottomPad?: number } = {}) {
   const colors = useColors();
   const account = useSpacesAccount();
   const [rows, setRows] = useState<Row[] | null>(null);
@@ -96,7 +96,7 @@ export default function ActivityScreen() {
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
       contentInsetAdjustmentBehavior="automatic"
-      contentContainerStyle={{ paddingTop: 8, paddingBottom: 24 }}
+      contentContainerStyle={{ paddingTop: 8, paddingBottom: embedded ? (bottomPad ?? 24) : 24 }}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
