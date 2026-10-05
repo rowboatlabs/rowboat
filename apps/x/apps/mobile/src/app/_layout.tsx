@@ -143,7 +143,7 @@ function PushNavigator() {
       if (!org || !spaceId) return;
       const base = { org: org.address, space: spaceId, me: org.memberId };
       router.push({ pathname: '/spaces/chat', params: base });
-      if (threadRootId) router.push({ pathname: '/spaces/thread', params: { ...base, root: threadRootId, title: 'Thread' } });
+      if (threadRootId) router.push({ pathname: '/spaces/thread', params: { ...base, root: threadRootId, title: 'Thread', focus: 'latest' } });
     };
     const sub = Notifications.addNotificationResponseReceivedListener((r) => open(r.notification.request.content.data as Record<string, unknown>));
     // Cold start from a notification.

@@ -37,7 +37,7 @@ export default function SpaceThreadScreen() {
   // The header is see-through (soft scroll edge): content insets itself.
   const headerHeight = useHeaderHeight();
   const account = useSpacesAccount();
-  const params = useLocalSearchParams<{ org: string; space: string; root: string; title: string; me: string }>();
+  const params = useLocalSearchParams<{ org: string; space: string; root: string; title: string; me: string; focus?: string }>();
   const { org, space, root, me } = params;
 
   const client = useMemo(
@@ -62,6 +62,19 @@ export default function SpaceThreadScreen() {
   const lastOffset = useRef<number | undefined>(undefined);
   // Land on the root (what you tapped). Scroll down only for a reply that
   // arrives live or that you send — never because a refresh swapped the list.
+  // Opened from a notification or an Activity reply (focus=latest): you came
+  // for the newest reply, so land at the bottom and stay there while replies
+  // and previews load — until you scroll yourself. Opened by tapping a
+  // message, a thread lands on its root as before.
+  const pinLatest = useRef(params.focus === 'latest');
+  const [revealed, setRevealed] = useState(params.focus !== 'latest');
+  const onThreadContentSize = useCallback(() => {
+    if (!pinLatest.current) return;
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollToEnd({ animated: false });
+      requestAnimationFrame(() => setRevealed(true));
+    });
+  }, []);
   const scrollToNewest = useCallback(() => {
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
   }, []);
@@ -364,11 +377,13 @@ export default function SpaceThreadScreen() {
       ) : (
         <ScrollView
           ref={scrollRef}
+          onContentSizeChange={onThreadContentSize}
+          onScrollBeginDrag={() => { pinLatest.current = false; }}
           contentInsetAdjustmentBehavior="automatic"
           keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="handled"
           alwaysBounceVertical
-          style={{ flex: 1 }}
+          style={{ flex: 1, opacity: revealed ? 1 : 0 }}
           contentContainerStyle={{ paddingVertical: 12 }}
         >
           <StatusBanner error={error} offlineText={replies ? "You're offline. Showing saved replies." : "You're offline. Replies will load when you're back online."} />

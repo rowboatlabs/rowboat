@@ -84,7 +84,7 @@ export default function ActivityScreen() {
     if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
     const base = { org: row.org.address, space: row.item.spaceId, me: row.org.memberId, title: row.item.spaceName };
     if (row.item.threadRootId) {
-      router.push({ pathname: '/spaces/thread', params: { ...base, root: row.item.threadRootId } });
+      router.push({ pathname: '/spaces/thread', params: { ...base, root: row.item.threadRootId, focus: 'latest' } });
     } else if (row.item.kind === 'reaction' || row.item.message.replyCount > 0) {
       router.push({ pathname: '/spaces/thread', params: { ...base, root: row.item.message.id } });
     } else {
