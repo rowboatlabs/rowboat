@@ -517,7 +517,8 @@ async function loadInstances() {
 }
 
 // Disk and backups (05/10/2026): Fly snapshots each disk once a day.
-const gb = (n) => fr.format(Math.round(n * 10) / 10) + " Go";
+// Under 1 GB in MB, so a few files do not read as an empty disk.
+const gb = (n) => (n < 1 ? fr.format(n > 0 ? Math.max(1, Math.round(n * 1000)) : 0) + " Mo" : fr.format(Math.round(n * 10) / 10) + " Go");
 function diskCell(d, target) {
   if (!d) return el("small", { class: "muted" }, "—");
   const size = (d.usedGb === null ? "" : gb(d.usedGb) + " / ") + gb(d.sizeGb);
