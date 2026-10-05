@@ -40,6 +40,7 @@ SplashScreen.preventAutoHideAsync();
 // (pairing, note view) stacks on top.
 export default function RootLayout() {
   const colorScheme = useColorScheme();
+  const palette = colorScheme === 'dark' ? darkColors : lightColors;
   const { width } = useWindowDimensions();
   // Nothing else hides the native splash — without this the release build
   // sits on the logo forever (Expo Go masks it).
@@ -57,11 +58,19 @@ export default function RootLayout() {
           <Drawer
             drawerContent={(props) => <DrawerContent {...props} />}
             screenOptions={{
-              drawerType: 'slide',
-              drawerStyle: { width: 300 },
+              // 'front': the panel slides OVER the page, so its rounded corners
+              // show the real (dimmed) page behind them. With 'slide' the
+              // panel sits beside the page and the corners expose the root's
+              // ground instead — a faint square around the curve.
+              drawerType: 'front',
+              drawerStyle: {
+                width: 300, overflow: 'hidden', backgroundColor: palette.background,
+                borderTopRightRadius: 28, borderBottomRightRadius: 28, borderCurve: 'continuous',
+              },
               // A generous swipe zone (~30% of the screen) opens the drawer;
               // pushed screens keep their own edge back-gesture.
               swipeEdgeWidth: width * 0.3,
+              overlayColor: 'rgba(0,0,0,0.35)',
               headerShadowVisible: false,
               headerTintColor: colorScheme === 'dark' ? '#ffffff' : '#000000',
             }}
