@@ -274,7 +274,10 @@ export function fitCall(c: Catalog, plan: Plan, path: string, raw: string, known
     return null;
   }
   const requested = typeof body.model === 'string' ? body.model : null;
-  if (!requested || (accessFor(c, plan, requested).kind === 'open' && stillListed(known, requested))) return null;
+  // An image call names an image model, which OpenRouter's main list may
+  // leave out (openai/gpt-image-1): never taken for withdrawn.
+  const image = Array.isArray(body.modalities) && body.modalities.includes('image');
+  if (!requested || (accessFor(c, plan, requested).kind === 'open' && (image || stillListed(known, requested)))) return null;
   const served = defaultModel(c, plan);
   if (!served) return { ok: false, status: 403, code: 'not_in_plan', message: 'This plan does not include this model' };
   // OpenRouter's own fallbacks could name the closed model again.

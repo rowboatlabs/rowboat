@@ -114,6 +114,8 @@ describe('a call fitted to the plan', () => {
     expect(fitCall(c, MAX, '/chat/completions', body('x-ai/gone-alpha'), known)).toMatchObject({ ok: true, requested: 'x-ai/gone-alpha', served: 'anthropic/sonnet' });
     expect(fitCall(c, MAX, '/chat/completions', body('deepseek/flash:online'), known)).toBeNull();
     expect(fitCall(c, MAX, '/chat/completions', body('~anthropic/sonnet-latest'), known)).toBeNull();
+    // An image model the main list leaves out is not withdrawn.
+    expect(fitCall(c, MAX, '/chat/completions', body('openai/gpt-image-1', { modalities: ['image', 'text'] }), known)).toBeNull();
     // The list never read: nothing rerouted for it.
     expect(fitCall(c, MAX, '/chat/completions', body('x-ai/gone-alpha'), null)).toBeNull();
   });
