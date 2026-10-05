@@ -49,7 +49,7 @@ describe('BaaraliOnboarding', () => {
     fireEvent.click(screen.getByText('I already have an account'))
     await waitFor(() => expect(calls.some(([c, a]) => c === 'oauth:connect' && (a as { provider: string }).provider === 'rowboat')).toBe(true))
     expect(JSON.parse(store.get(STORAGE_KEY)!).returning).toBe(true)
-    expect(screen.getByText('Finish signing in in your browser, then come back here.')).toBeTruthy()
+    expect(screen.getByText('Sign in in the window that opened. Closed it? Click again.')).toBeTruthy()
   })
 
   it('picks up where it was after the reload that joins the instance', async () => {

@@ -104,14 +104,14 @@ function WelcomeStep({ signedIn, connecting, onSignIn, onContinue }: { signedIn:
           <Button size="lg" className="h-12 text-base" onClick={onContinue}>Continue</Button>
         ) : (
           <>
-            <Button size="lg" className="h-12 text-base" disabled={connecting} onClick={() => onSignIn(false)}>
-              {connecting ? <Loader2 className="size-4 animate-spin" /> : 'Create my account'}
-            </Button>
-            <Button size="lg" variant="outline" className="h-12 text-base" disabled={connecting} onClick={() => onSignIn(true)}>I already have an account</Button>
+            {/* Enabled while signing in: a sign-in window closed by mistake opens again. */}
+            <Button size="lg" className="h-12 text-base" onClick={() => onSignIn(false)}>Create my account</Button>
+            <Button size="lg" variant="outline" className="h-12 text-base" onClick={() => onSignIn(true)}>I already have an account</Button>
           </>
         )}
-        <p role="status" className="text-center text-xs text-muted-foreground">
-          {connecting ? 'Finish signing in in your browser, then come back here.' : 'Free to start. Sign-in opens in your browser.'}
+        <p role="status" className="flex items-center justify-center gap-2 text-center text-xs text-muted-foreground">
+          {connecting && <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />}
+          {connecting ? 'Sign in in the window that opened. Closed it? Click again.' : 'Free to start.'}
         </p>
       </div>
     </div>
