@@ -27,8 +27,34 @@ export interface Machine {
   config: { image: string };
 }
 
+/** https://fly.io/docs/machines/api/volumes-resource/ ; the block counts only while attached. */
+export interface Volume {
+  id: string;
+  size_gb: number;
+  block_size?: number;
+  blocks?: number;
+  blocks_free?: number;
+  /** Days a daily snapshot is kept (Fly: 5 by default, 60 at most). */
+  snapshot_retention?: number;
+  auto_backup_enabled?: boolean;
+}
+
+export interface VolumeOpts {
+  name: string;
+  region: string;
+  sizeGb: number;
+  /** Days each daily snapshot is kept. */
+  backupDays: number;
+}
+
 export interface FlyApi {
-  createVolume(app: string, opts: { name: string; region: string; sizeGb: number }): Promise<{ id: string }>;
+  createVolume(app: string, opts: VolumeOpts): Promise<{ id: string }>;
+  volume(app: string, id: string): Promise<Volume>;
+  /** Grows only. `needs_restart`: the machine sees the new size at its next boot. */
+  extendVolume(app: string, id: string, sizeGb: number): Promise<{ needs_restart: boolean }>;
+  setBackups(app: string, id: string, days: number): Promise<void>;
+  /** Newest first is not promised: sort by `created_at`. */
+  snapshots(app: string, id: string): Promise<Array<{ id: string; created_at: string }>>;
   createMachine(app: string, opts: { region: string; config: MachineConfig }): Promise<Machine>;
   machine(app: string, id: string): Promise<Machine>;
   updateMachine(app: string, id: string, config: MachineConfig): Promise<Machine>;
@@ -69,8 +95,31 @@ export class FlyMachines implements FlyApi {
     return (text ? JSON.parse(text) : {}) as T;
   }
 
-  createVolume(app: string, { name, region, sizeGb }: { name: string; region: string; sizeGb: number }) {
-    return this.call<{ id: string }>('POST', `/apps/${app}/volumes`, { name, region, size_gb: sizeGb, encrypted: true });
+  createVolume(app: string, { name, region, sizeGb, backupDays }: VolumeOpts) {
+    return this.call<{ id: string }>('POST', `/apps/${app}/volumes`, {
+      name,
+      region,
+      size_gb: sizeGb,
+      encrypted: true,
+      auto_backup_enabled: true,
+      snapshot_retention: backupDays,
+    });
+  }
+
+  volume(app: string, id: string) {
+    return this.call<Volume>('GET', `/apps/${app}/volumes/${id}`);
+  }
+
+  extendVolume(app: string, id: string, sizeGb: number) {
+    return this.call<{ needs_restart: boolean }>('PUT', `/apps/${app}/volumes/${id}/extend`, { size_gb: sizeGb });
+  }
+
+  async setBackups(app: string, id: string, days: number) {
+    await this.call('PUT', `/apps/${app}/volumes/${id}`, { auto_backup_enabled: true, snapshot_retention: days });
+  }
+
+  snapshots(app: string, id: string) {
+    return this.call<Array<{ id: string; created_at: string }>>('GET', `/apps/${app}/volumes/${id}/snapshots`);
   }
 
   createMachine(app: string, { region, config }: { region: string; config: MachineConfig }) {

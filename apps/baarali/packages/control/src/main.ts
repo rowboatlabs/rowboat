@@ -126,6 +126,8 @@ if (process.env.BAARALI_GATEWAY_SECRET) {
           image,
           apiUrl: publicUrl,
           maxInstances: Number(process.env.BAARALI_MAX_INSTANCES ?? '20'),
+          diskGb: Number(process.env.BAARALI_INSTANCE_DISK_GB ?? '10'),
+          backupDays: Number(process.env.BAARALI_INSTANCE_BACKUP_DAYS ?? '14'),
         }
       : undefined;
   instances = new Instances({

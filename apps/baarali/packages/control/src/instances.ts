@@ -17,6 +17,19 @@ export interface InstancesConfig {
   apiUrl: string;
   /** Early access: no new instance beyond this many. */
   maxInstances: number;
+  /** Each instance's disk. A smaller one grows at its next wake; none shrinks. */
+  diskGb: number;
+  /** Fly snapshots each disk daily; each snapshot is kept this many days (60 at most). */
+  backupDays: number;
+}
+
+/** What the admin console shows of an instance's disk. */
+export interface DiskState {
+  sizeGb: number;
+  /** null while the disk is not attached: Fly counts blocks only then. */
+  usedGb: number | null;
+  backupDays: number | null;
+  lastBackupAt: string | null;
 }
 
 export type InstanceProblem = 'off' | 'full';
@@ -59,6 +72,8 @@ export class Instances {
   private readonly awakeUntil = new Map<string, number>();
   /** The check under way per machine: a burst of requests shares one. */
   private readonly waking = new Map<string, Promise<void>>();
+  /** Disks already at the configured size and backups, since this process started. */
+  private readonly settledDisks = new Set<string>();
 
   constructor(private readonly deps: InstancesDeps) {}
 
@@ -110,15 +125,18 @@ export class Instances {
     await store.saveInstance(record);
     await store.grantToken(this.instanceToken(account.id), account.id);
     if (!record.volumeId) {
-      const volume = await fly.createVolume(record.app, { name: 'data', region: config.region, sizeGb: 1 });
+      const volume = await fly.createVolume(record.app, { name: 'data', region: config.region, sizeGb: config.diskGb, backupDays: config.backupDays });
       record = { ...record, volumeId: volume.id };
       await store.saveInstance(record);
+      this.settledDisks.add(volume.id);
     }
     const machineConfig = this.machineConfig(account.id, record.volumeId!, config);
     if (!record.machineId) {
       const machine = await fly.createMachine(record.app, { region: config.region, config: machineConfig });
       record = { ...record, machineId: machine.id, image: config.image };
     } else {
+      // The update boots it again: a grown disk is seen whole.
+      await this.settleDisk(record);
       await fly.updateMachine(record.app, record.machineId, machineConfig);
       record = { ...record, image: config.image };
     }
@@ -181,12 +199,14 @@ export class Instances {
       const machine = await fly.machine(app, id);
       if (machine.state !== 'started') {
         if (machine.state !== 'starting') {
-          // Asleep on an old image (02/10/2026): wake it on the new one. Only
-          // now, while nobody is using it — a running machine is never
-          // restarted under its person; it waits for its next sleep, or for
-          // a device to connect (ensure). Fly launches it with the update.
+          // Asleep on an old image (02/10/2026), or on a disk just grown
+          // (05/10/2026): boot it afresh. Only now, while nobody is using it
+          // — a running machine is never restarted under its person; it
+          // waits for its next sleep, or for a device to connect (ensure).
+          // Fly launches it with the update.
           let moved = false;
-          if (await this.outdated(record)) {
+          const grown = await this.settleDisk(record);
+          if (grown || (await this.outdated(record))) {
             // A refused update must not keep the person out: start it as it
             // is, and the next wake tries the new image again.
             moved = await this.moveToImage(record).then(
@@ -222,12 +242,62 @@ export class Instances {
     return Boolean(current?.machineId && current.volumeId && current.image !== config.image);
   }
 
+  /**
+   * Grows the disk to the configured size and keeps its backups the
+   * configured days, once per disk and process. True when the machine must
+   * boot again to see the new size. A refusal is logged, never blocking:
+   * the person gets their instance, the next wake tries again.
+   */
+  private async settleDisk(record: InstanceRecord): Promise<boolean> {
+    const { fly, config, store } = this.deps;
+    const current = await store.instance(record.accountId);
+    const id = current?.volumeId;
+    if (!fly || !config || !current?.managed || !id || this.settledDisks.has(id)) return false;
+    try {
+      const volume = await fly.volume(current.app, id);
+      let grown = false;
+      const before = volume.size_gb;
+      if (before < config.diskGb) {
+        const res = await fly.extendVolume(current.app, id, config.diskGb);
+        console.log(`[instances] disk ${id}: ${before} GB -> ${config.diskGb} GB`);
+        grown = res.needs_restart;
+      }
+      if (volume.auto_backup_enabled !== true || volume.snapshot_retention !== config.backupDays) {
+        await fly.setBackups(current.app, id, config.backupDays);
+      }
+      this.settledDisks.add(id);
+      return grown;
+    } catch (err) {
+      console.error(`[instances] disk ${id} not settled; trying again at the next wake`, err);
+      return false;
+    }
+  }
+
+  /** For the admin console; null when the control plane does not run the instance. */
+  async diskState(record: InstanceRecord): Promise<DiskState | null> {
+    const { fly } = this.deps;
+    if (!fly || !record.managed || !record.volumeId) return null;
+    const [volume, snapshots] = await Promise.all([
+      fly.volume(record.app, record.volumeId),
+      fly.snapshots(record.app, record.volumeId).catch(() => []),
+    ]);
+    const { blocks, blocks_free: free, block_size: size } = volume;
+    const usedGb = blocks && free !== undefined && size ? ((blocks - free) * size) / 1e9 : null;
+    const last = snapshots.map((s) => s.created_at).sort().at(-1) ?? null;
+    return { sizeGb: volume.size_gb, usedGb, backupDays: volume.auto_backup_enabled === false ? 0 : (volume.snapshot_retention ?? null), lastBackupAt: last };
+  }
+
   private async moveToImage(record: InstanceRecord): Promise<void> {
     const { fly, config, store } = this.deps;
     const current = await store.instance(record.accountId);
     if (!fly || !config || !current?.machineId || !current.volumeId) return;
     await fly.updateMachine(current.app, current.machineId, this.machineConfig(current.accountId, current.volumeId, config));
     await store.saveInstance({ ...current, image: config.image });
+  }
+
+  /** The size every managed disk is brought to; null without Fly. */
+  get diskGb(): number | null {
+    return this.deps.config?.diskGb ?? null;
   }
 
   /** The image new and updated instances run; null without Fly. */

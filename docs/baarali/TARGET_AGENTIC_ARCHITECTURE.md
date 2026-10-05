@@ -213,6 +213,7 @@ Les vrais envois (agrégateur SMS, service d'email) et les applications OAuth ch
 - **La passerelle** sert le mode distant de l'app upstream à `https://app.baarali.com/instance` : RPC, fichiers de l'espace de travail et WebSocket des événements. Elle réveille la machine si elle dort, puis relaie avec la clé de l'instance. Elle répond elle-même à `/instance/health`, que l'app interroge avant d'envoyer sa clé.
 - **La mise à jour** suit la connexion d'un appareil : une machine sur une image plus ancienne que `BAARALI_INSTANCE_IMAGE` y passe à ce moment-là, jamais au milieu d'une session.
 - **Accès anticipé** : au plus `BAARALI_MAX_INSTANCES` instances (20 par défaut). Au-delà, l'app reçoit `instances_full`.
+- **Le disque** (décidé le 05/10/2026) : 10 Go par instance (`BAARALI_INSTANCE_DISK_GB`). Fly en prend un instantané chaque jour, gardé 14 jours (`BAARALI_INSTANCE_BACKUP_DAYS`). Un disque plus petit, comme ceux de 1 Go créés avant, est agrandi quand sa machine dort, puis elle redémarre à neuf au réveil pour voir sa nouvelle taille ; jamais sous la personne qui s'en sert. La console admin montre la place prise et la dernière sauvegarde.
 - **Le plan de contrôle tourne sur une seule machine** : deux appareils qui se connectent ensemble obtiennent la même instance grâce à un verrou en mémoire. Le jour où il en a plusieurs, ce verrou passe en base.
 
 #### Le quota d'utilisation
@@ -547,7 +548,7 @@ Le trafic d'Afrique de l'Ouest entre chez Fly **en Europe** dans tous les cas : 
 | | Prix |
 |---|---|
 | Instance 2 Go éveillée | 12,13 $ par 30 jours, soit 0,017 $ de l'heure |
-| Instance endormie | stockage seulement : volume 1 Go à 0,15 $/mois, plus le disque système de la Machine à 0,15 $/Go/mois |
+| Instance endormie | stockage seulement : volume de 10 Go à 0,15 $/Go/mois (1,50 $/mois), plus le disque système de la Machine à 0,15 $/Go/mois, plus ses instantanés, facturés au Go stocké |
 | Plan de contrôle 256 Mo éveillé en continu | 2,21 $ par 30 jours |
 | Trafic sortant (Europe) | 0,02 $/Go |
 

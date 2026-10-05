@@ -216,7 +216,7 @@ export function adminPage(opts: { nonce: string; admin: string }): string {
     <div class="head"><div><h1>Instances</h1><p>Une machine par client. Elles dorment quand personne ne s'en sert.</p></div>
       <div class="actions"><span class="pill" id="current-image"></span><button class="btn" data-reload>Actualiser</button></div></div>
     <section class="card"><div class="tablewrap"><table>
-      <thead><tr><th>Client</th><th>État</th><th>Version</th><th>Machine</th><th></th></tr></thead>
+      <thead><tr><th>Client</th><th>État</th><th>Version</th><th>Disque</th><th>Machine</th><th></th></tr></thead>
       <tbody id="instances"></tbody>
     </table></div></section>
   </div>
@@ -508,11 +508,23 @@ async function loadInstances() {
       el("td", {}, i.email || i.accountId),
       el("td", {}, el("span", { class: "pill " + tone }, word)),
       el("td", {}, (i.image || "?") + (i.outdated ? " · à mettre à jour" : "")),
+      el("td", {}, diskCell(i.disk, r.diskGb)),
       el("td", {}, el("span", { class: "code" }, i.machineId || i.app)),
       el("td", {}, i.managed ? el("span", { class: "toolbar" }, action(i, "wake", "Réveiller"), i.outdated ? action(i, "update", "Mettre à jour") : null, action(i, "restart", "Redémarrer"),
         i.logsUrl ? el("a", { class: "btn", href: i.logsUrl, target: "_blank", rel: "noopener noreferrer" }, "Journaux") : null) : el("small", { class: "muted" }, "déployée à la main")),
     );
-  }) : [el("tr", {}, el("td", { colspan: "5", class: "empty" }, "Aucune instance."))]));
+  }) : [el("tr", {}, el("td", { colspan: "6", class: "empty" }, "Aucune instance."))]));
+}
+
+// Disk and backups (05/10/2026): Fly snapshots each disk once a day.
+const gb = (n) => fr.format(Math.round(n * 10) / 10) + " Go";
+function diskCell(d, target) {
+  if (!d) return el("small", { class: "muted" }, "—");
+  const size = (d.usedGb === null ? "" : gb(d.usedGb) + " / ") + gb(d.sizeGb);
+  const grows = target && d.sizeGb < target ? " · passe à " + gb(target) + " au prochain réveil" : "";
+  const backups = d.backupDays === 0 ? "sans sauvegarde"
+    : "sauvegardes " + (d.backupDays ?? "?") + " j" + (d.lastBackupAt ? " · dernière le " + new Date(d.lastBackupAt).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : " · aucune encore");
+  return el("span", {}, size + grows, el("br"), el("small", { class: "muted" }, backups));
 }
 
 // Models (decided 03/10/2026): the owner's settings over OpenRouter's catalog.

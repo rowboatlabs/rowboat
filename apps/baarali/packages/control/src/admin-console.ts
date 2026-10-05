@@ -291,7 +291,9 @@ export function mountAdminConsole(app: Hono<any>, deps: ConsoleDeps): void {
     const data = await Promise.all(
       records.map(async (r) => {
         // One machine Fly cannot describe must not hide the others.
-        const live = deps.instances ? await deps.instances.machineState(r).catch(() => 'unknown' as const) : null;
+        const [live, disk] = deps.instances
+          ? await Promise.all([deps.instances.machineState(r).catch(() => 'unknown' as const), deps.instances.diskState(r).catch(() => null)])
+          : [null, null];
         return {
           accountId: r.accountId,
           email: accounts.find((a) => a.account.id === r.accountId)?.account.email ?? null,
@@ -303,10 +305,11 @@ export function mountAdminConsole(app: Hono<any>, deps: ConsoleDeps): void {
           image: imageLabel(r.image),
           outdated: Boolean(current && r.managed && r.image !== current),
           state: live === 'unknown' ? 'unknown' : (live?.state ?? null),
+          disk,
         };
       }),
     );
-    return c.json({ currentImage: imageLabel(current), data });
+    return c.json({ currentImage: imageLabel(current), diskGb: deps.instances?.diskGb ?? null, data });
   });
 
   for (const action of ['wake', 'update', 'restart'] as const) {
