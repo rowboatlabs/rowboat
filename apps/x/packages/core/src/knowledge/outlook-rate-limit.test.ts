@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
-    IN_REQUEST_RETRY_CAP_MS,
     IN_REQUEST_RETRY_FALLBACK_MS,
     isRateLimitStatus,
     noteOutlookRateLimit,
