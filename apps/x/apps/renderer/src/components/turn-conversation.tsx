@@ -22,6 +22,7 @@ import { ChatMessageAttachments } from '@/components/chat-message-attachments'
 import { BillingErrorNotice } from '@/components/billing-error-notice'
 import { TokenUsageMenu } from '@/components/token-usage-menu'
 import { matchBillingError } from '@/lib/billing-error'
+import { shownSteps } from '@/lib/chat-steps'
 import { wikiLabel } from '@/lib/wiki-links'
 import { streamdownComponents, userMessageRemarkPlugins } from '@/lib/markdown-render'
 import { useSmoothedText } from '@/hooks/useSmoothedText'
@@ -408,7 +409,8 @@ export function TurnConversation({
   return (
     <div className={cn('flex w-full flex-col gap-8', className)}>
       {groupConversationItems(
-        items,
+        // BAARALI(05/10/2026): the agent's backstage stays out of the chat (lib/chat-steps.ts).
+        shownSteps(items),
         // Only an interactive permission card (ask or denial) breaks a
         // tool out of a group — auto-approved calls group fine, since
         // their approval renders as a shield glyph on the row itself.
