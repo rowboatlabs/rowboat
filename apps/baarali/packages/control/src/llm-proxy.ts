@@ -1,5 +1,5 @@
 import { fitCall, planLabeler, presentFor } from './model-access.js';
-import { ModelCatalog } from './model-catalog.js';
+import { ModelCatalog, type UpstreamModels } from './model-catalog.js';
 import type { Account, ControlStore } from './store.js';
 import {
   admit,
@@ -30,6 +30,8 @@ export interface ProxyDeps {
   upstreamBase?: string;
   /** The console's model settings; unset: read from the store on each call. */
   models?: ModelCatalog;
+  /** OpenRouter's list, to send a withdrawn model to the default; unset: every model passes. */
+  upstreamModels?: UpstreamModels;
 }
 
 async function currentState(store: ControlStore, account: Account): Promise<QuotaState> {
@@ -121,7 +123,9 @@ export async function proxyLlm(deps: ProxyDeps, account: Account, req: Request):
   if (req.method === 'GET' || req.method === 'HEAD') {
     const upstream = await deps.fetch(target, { method: req.method, headers });
     if (subpath === '/models' && req.method === 'GET' && upstream.ok) {
-      const filtered = presentFor(catalog, plan, await upstream.text(), planName);
+      const body = await upstream.text();
+      const filtered = presentFor(catalog, plan, body, planName);
+      if (filtered !== null) deps.upstreamModels?.remember(body);
       if (filtered === null) return errorResponse(502, { code: 'upstream_invalid', message: 'Unexpected model catalog' });
       return new Response(filtered, { status: 200, headers: passHeaders(upstream) });
     }
@@ -131,7 +135,7 @@ export async function proxyLlm(deps: ProxyDeps, account: Account, req: Request):
   // Checked before the quota: a refused call must not open a session.
   let raw = await req.text();
   let requestedModel: string | null = null;
-  const fitted = fitCall(catalog, plan, subpath, raw);
+  const fitted = fitCall(catalog, plan, subpath, raw, deps.upstreamModels?.knownIds());
   if (fitted) {
     if (!fitted.ok) return errorResponse(fitted.status, { code: fitted.code, message: fitted.message });
     raw = fitted.body;

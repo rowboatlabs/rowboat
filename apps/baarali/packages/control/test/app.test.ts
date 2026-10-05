@@ -228,4 +228,19 @@ describe('/v1/llm on a plan with a model policy (Découverte)', () => {
     expect(sent(seen[0]).model).toBe('anthropic/claude-opus-4.7');
     expect(sent(seen[0]).models).toBeUndefined();
   });
+  it('sends a paid plan\'s model OpenRouter withdrew to the default, once the app has read the list', async () => {
+    const { call, seen, store } = setup((s) =>
+      s.url.endsWith('/models') ? json({ data: [{ id: first }, { id: 'anthropic/claude-opus-4.7' }] }) : json({ usage: { cost: 0.0001 } }),
+    );
+    await call('/v1/llm/chat/completions', chat({ model: 'x-ai/withdrawn-alpha' }));
+    // The list not read yet: the call goes as it came.
+    expect(sent(seen[0]).model).toBe('x-ai/withdrawn-alpha');
+    // OpenRouter's own models are closed until the owner opens one.
+    await call('/v1/llm/chat/completions', chat({ model: 'openrouter/space-bunny-alpha' }));
+    expect(sent(seen[1]).model).toBe(first);
+    await call('/v1/llm/models');
+    await call('/v1/llm/chat/completions', chat({ model: 'x-ai/withdrawn-alpha' }));
+    expect(sent(seen.at(-1)!).model).toBe(first);
+    expect(store.usage.at(-1)).toMatchObject({ model: first, requestedModel: 'x-ai/withdrawn-alpha' });
+  });
 });

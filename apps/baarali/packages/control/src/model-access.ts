@@ -73,6 +73,23 @@ export function vendorName(vendor: string): string {
 }
 
 /** Sorts vendor ids: the known order first, then by name, routers last. */
+/**
+ * A model the owner never touched is open to the paid plans, except
+ * OpenRouter's own (05/10/2026): its routers pick another model behind the
+ * person's back, and its « mystery » models are previews that vanish within
+ * weeks and often keep what they are sent. The owner may still open one.
+ */
+export const openUntouched = (modelId: string) => !ROUTERS.has(vendorOf(modelId));
+
+/**
+ * Whether OpenRouter still lists a model; true when the list is unknown.
+ * Variants (`:free`, `:online`, `:nitro`) count as their model.
+ */
+export function stillListed(known: Set<string> | null | undefined, modelId: string): boolean {
+  if (!known) return true;
+  return known.has(modelId) || known.has(modelId.split(':')[0]) || modelId.startsWith('~');
+}
+
 export function compareVendors(a: string, b: string): number {
   const rank = (v: string): [number, number, string] => {
     const i = VENDOR_ORDER.indexOf(v);
@@ -145,7 +162,7 @@ export function catalogOf(plans: Plan[], settings: ModelSetting[]): Catalog {
 
 export function accessFor(c: Catalog, plan: Plan, modelId: string): Access {
   const s = c.settings.get(modelId);
-  if (s && !s.enabled) return { kind: 'hidden' };
+  if (s ? !s.enabled : !openUntouched(modelId)) return { kind: 'hidden' };
   const firstPaid = c.plans.find((p) => !isFreePlan(p));
   if (isFreePlan(plan)) {
     if (c.free.includes(modelId)) return { kind: 'open' };
@@ -240,10 +257,11 @@ export function policyFor(c: Catalog, plan: Plan): ModelPolicy | null {
 
 /**
  * One call, fitted to the plan: Découverte by its policy; a paid plan's
- * chat call naming a model it does not open goes to the plan's default.
- * null: the call goes out as it came.
+ * chat call naming a model it does not open, or one OpenRouter no longer
+ * lists (`known`, 05/10/2026: a preview withdrawn while still chosen in an
+ * app), goes to the plan's default. null: the call goes out as it came.
  */
-export function fitCall(c: Catalog, plan: Plan, path: string, raw: string): PolicyResult | null {
+export function fitCall(c: Catalog, plan: Plan, path: string, raw: string, known?: Set<string> | null): PolicyResult | null {
   const policy = policyFor(c, plan);
   if (policy) return applyPolicy(policy, path, raw);
   if (path !== '/chat/completions') return null;
@@ -256,7 +274,7 @@ export function fitCall(c: Catalog, plan: Plan, path: string, raw: string): Poli
     return null;
   }
   const requested = typeof body.model === 'string' ? body.model : null;
-  if (!requested || accessFor(c, plan, requested).kind === 'open') return null;
+  if (!requested || (accessFor(c, plan, requested).kind === 'open' && stillListed(known, requested))) return null;
   const served = defaultModel(c, plan);
   if (!served) return { ok: false, status: 403, code: 'not_in_plan', message: 'This plan does not include this model' };
   // OpenRouter's own fallbacks could name the closed model again.

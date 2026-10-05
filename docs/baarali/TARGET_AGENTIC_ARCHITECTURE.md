@@ -265,7 +265,7 @@ Décidé le 30/09/2026, réglable depuis la console d'admin depuis le 03/10/2026
 
 **Ce que le propriétaire règle, modèle par modèle** : visible ou masqué, le forfait payant à partir duquel il s'ouvre, « Conseillé » (en tête de son éditeur), et son point fort (Polyvalent, Puissant, Raisonnement, Codage, Recherche web, Analyse d'images, Rapide ; déduit de l'identifiant tant qu'il n'est pas posé). On ouvre ou masque d'un geste toute la gamme d'un éditeur. Un réglage vit dans `baarali.model_settings` (migration 5) et arrive aux sélecteurs en moins d'une minute.
 
-**Un modèle jamais réglé reste ouvert aux forfaits payants** et hors de Découverte : le jour du déploiement, personne ne perd un modèle.
+**Un modèle jamais réglé reste ouvert aux forfaits payants** et hors de Découverte : le jour du déploiement, personne ne perd un modèle. **Sauf ceux d'OpenRouter lui-même** (`openrouter/…`, 05/10/2026) : ses routeurs choisissent un autre modèle à la place de la personne, et ses modèles « mystère » sont des avant-premières qui disparaissent en quelques semaines et gardent souvent ce qu'on leur envoie. Ils restent masqués tant que le propriétaire ne les ouvre pas. **Un modèle qu'OpenRouter ne liste plus**, encore choisi dans une app, part vers le modèle par défaut du forfait au lieu d'échouer ; le plan de contrôle connaît la liste par la dernière lecture du sélecteur des apps.
 
 **Ce que voit chaque forfait** (`GET /v1/llm/models`) : un modèle masqué n'apparaît pas ; un modèle d'un forfait au-dessus reste visible, **avec un cadenas et le forfait qui l'ouvre** (« dès Pro max »), choix du propriétaire du 03/10/2026, et ne s'appelle pas. Chaque modèle porte `baarali` : son éditeur, son point fort, « Conseillé », et `unlock` s'il est verrouillé. Le défaut du forfait vient en premier, puisque le cœur choisit le premier modèle listé pour une installation neuve. Découverte voit sa liste, et en cadenas les seuls modèles réglés : les centaines d'autres noieraient la liste gratuite.
 
@@ -318,6 +318,8 @@ Décidé le 30/09/2026. La vidéo, la voix et la musique passent par **Pixazo**,
 - le skill se charge quand on demande une vidéo, une voix ou une musique, et n'attache que les outils MCP existants (`listMcpTools`, `executeMcpTool`), qui gardent leur demande d'accord avant chaque appel ;
 - le serveur expose trois outils : `list_models`, `generate` et `check`. Le client MCP du cœur abandonne au bout de 60 s, alors qu'une voix prend déjà plus d'une minute. `generate` rend donc la main tout de suite, et `check` attend au plus 45 s par appel. L'agent rappelle `check` jusqu'à ce que le fichier soit enregistré dans `generated_media/` ;
 - le jeton est lu dans `oauth.json` : `mcp.json` ne contient aucun secret.
+
+**Les images** (05/10/2026) ne passent pas par ce serveur : l'outil `generate-image` du cœur les fait. Aucun skill de l'upstream ne l'attache, donc l'agent chargeait toute la boîte à outils (76 outils), puis cherchait dans `baarali-media` et s'y bloquait. L'instance pose donc un deuxième skill disque, `skills/baarali-images/SKILL.md`, qui n'attache que `generate-image`.
 
 **Sur le fil, on garde le schéma de l'upstream** (§3.14) : `GET /v1/me` porte la session dans le compartiment `daily` et la semaine dans `monthly`, et `usageDay` donne l'heure de remise à zéro de la session. Les libellés de l'écran d'usage upstream (« jour », « mois ») sont donc faux jusqu'à ce que la couche de marque et d'i18n (§3.12) les remplace : c'est accepté pour la phase 0, où seul le propriétaire utilise l'app.
 
