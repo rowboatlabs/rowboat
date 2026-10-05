@@ -1,8 +1,9 @@
 import { Image } from 'expo-image';
+import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
 import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Keyboard, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActionSheetIOS, ActivityIndicator, Alert, Keyboard, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import type { Member } from '@rowboat/spaces-protocol';
 import { mentionToken } from '@rowboat/spaces-protocol';
 
@@ -89,7 +90,38 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
   const [inputKey, setInputKey] = useState(0);
   // Picked media rides as thumbnails above the field (iMessage/Slack); the
   // wire markdown joins the body only on send.
-  const [attachments, setAttachments] = useState<{ key: string; uri: string; md: string; video: boolean }[]>([]);
+  const [attachments, setAttachments] = useState<{ key: string; uri: string; md: string; video: boolean; file?: string }[]>([]);
+
+  // "+" → photos and videos, or any file (2026-10-05).
+  const openAttachMenu = () => {
+    if (!onPickMedia || uploading) return;
+    if (process.env.EXPO_OS !== 'ios') {
+      void pickMedia();
+      return;
+    }
+    ActionSheetIOS.showActionSheetWithOptions({ options: ['Photo or video', 'File', 'Cancel'], cancelButtonIndex: 2 }, (i) => {
+      if (i === 0) void pickMedia();
+      else if (i === 1) void pickFile();
+    });
+  };
+
+  const pickFile = async () => {
+    if (!onPickMedia || uploading) return;
+    const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: false });
+    const asset = result.canceled ? null : result.assets[0];
+    if (!asset) return;
+    setUploading(true);
+    try {
+      const mime = asset.mimeType ?? 'application/octet-stream';
+      const md = await onPickMedia({ uri: asset.uri, mime, name: asset.name });
+      const image = mime.startsWith('image/');
+      setAttachments((prev) => [...prev, { key: `${Date.now()}`, uri: asset.uri, md, video: false, ...(image ? {} : { file: asset.name }) }]);
+    } catch (err) {
+      Alert.alert("Couldn't attach the file", err instanceof Error ? err.message : String(err));
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const pickMedia = async () => {
     if (!onPickMedia || uploading) return;
@@ -276,8 +308,15 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
         {attachments.length > 0 ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingTop: 10, paddingBottom: 2 }}>
             {attachments.map((a) => (
-              <View key={a.key} style={{ width: 64, height: 64 }}>
-                <Image source={{ uri: a.uri }} style={{ width: 64, height: 64, borderRadius: 10 }} contentFit="cover" />
+              <View key={a.key} style={{ width: a.file ? 150 : 64, height: 64 }}>
+                {a.file ? (
+                  <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 10, borderRadius: 10, borderCurve: 'continuous', backgroundColor: colors.background, borderWidth: 0.5, borderColor: colors.separator }}>
+                    <Image source="sf:doc" style={{ width: 18, height: 22 }} tintColor={colors.secondaryLabel} />
+                    <Text numberOfLines={2} style={{ flex: 1, fontSize: 13, color: colors.label }}>{a.file}</Text>
+                  </View>
+                ) : (
+                  <Image source={{ uri: a.uri }} style={{ width: 64, height: 64, borderRadius: 10 }} contentFit="cover" />
+                )}
                 {a.video ? (
                   <View style={{ position: 'absolute', inset: 0, alignItems: 'center', justifyContent: 'center' }}>
                     <Image source="sf:play.circle.fill" style={{ width: 22, height: 22 }} tintColor="#ffffff" />
@@ -314,7 +353,7 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
             <Pressable
               hitSlop={8}
               disabled={uploading}
-              onPress={() => void pickMedia()}
+              onPress={openAttachMenu}
               style={{
                 width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center',
                 backgroundColor: colors.isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)',

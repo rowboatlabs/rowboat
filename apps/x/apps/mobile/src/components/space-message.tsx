@@ -10,7 +10,7 @@ import { spaces } from '@x/shared';
 import { ChatMarkdown } from '@/components/markdown';
 import { MessageLinkPreviews } from '@/components/link-preview-card';
 import { PollCard } from '@/components/poll-card';
-import { SpaceBlobImage } from '@/components/space-blob-image';
+import { SpaceBlobImage, parseBlobLink } from '@/components/space-blob-image';
 import { EmojiPicker } from '@/components/emoji-picker';
 import { AuthedImage } from '@/components/avatar';
 import { BottomSheet } from '@/components/bottom-sheet';
@@ -69,6 +69,7 @@ export const MessageRow = memo(function MessageRow({
   onRemoveVote,
   onEndPoll,
   onOpenAsset,
+  onOpenBlob,
 }: {
   message: Message;
   member?: Member;
@@ -89,6 +90,8 @@ export const MessageRow = memo(function MessageRow({
   onEndPoll?: (message: Message) => void;
   /** A tapped file link (https://<org>/s/<spaceId>/a/<assetId>) — the screen opens the file or hands it to the browser. */
   onOpenAsset?: (link: { host: string; spaceId: string; assetId: string; label: string }) => void;
+  /** A tapped attachment (https://<org>/s/<spaceId>/b/<hash>?name=…) — the screen downloads and opens it. */
+  onOpenBlob?: (link: { host: string; spaceId: string; hash: string; url: string }) => void;
 }) {
   const colors = useColors();
   const dark = colors.isDark;
@@ -189,6 +192,11 @@ export const MessageRow = memo(function MessageRow({
             <ChatMarkdown
               extraRules={imageRule}
               onLinkPress={(url) => {
+                const blob = parseBlobLink(url);
+                if (blob && onOpenBlob) {
+                  onOpenBlob({ ...blob, url });
+                  return false;
+                }
                 const link = parseAssetLink(url);
                 if (!link || !onOpenAsset) return true;
                 onOpenAsset(link);

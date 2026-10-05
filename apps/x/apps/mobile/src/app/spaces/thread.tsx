@@ -13,14 +13,15 @@ import { spaces } from '@x/shared';
 
 import { ChatMarkdown } from '@/components/markdown';
 import { MessageLinkPreviews } from '@/components/link-preview-card';
-import { SpaceBlobImage } from '@/components/space-blob-image';
+import { SpaceBlobImage, parseBlobLink } from '@/components/space-blob-image';
 import { MessageActionSheet, MessageRow, applyReaction, parseAssetLink } from '@/components/space-message';
 import { SpaceComposer, type SpaceComposerHandle } from '@/components/space-composer';
 import { PollCard, applyPollVote } from '@/components/poll-card';
 import { setActiveSpace } from '@/lib/push';
 import { useSpacesAccount } from '@/lib/spaces/account';
 import { StatusBanner } from '@/components/status-banner';
-import { isNetworkError } from '@/lib/spaces/errors';
+import { friendlyError, isNetworkError } from '@/lib/spaces/errors';
+import { blobLinkName, openBlobFile } from '@/lib/spaces/open-blob';
 import { postMessageReliably } from '@/lib/spaces/send';
 import { loadRoster, loadThread, peekRoster, peekThread, saveRoster, saveThread } from '@/lib/spaces/cache';
 import { SpacesClient } from '@/lib/spaces/client';
@@ -164,6 +165,24 @@ export default function SpaceThreadScreen() {
   }, [replies === null, org, space, root]);
 
 
+  // A tapped attachment: this org's files download with the bearer and open
+  // in the share sheet (Quick Look, Save to Files); other hosts go to the browser.
+  const [openingFile, setOpeningFile] = useState(false);
+  const openBlobLink = useCallback(
+    (link: { host: string; spaceId: string; hash: string; url: string }) => {
+      if (link.host !== org) {
+        void Linking.openURL(link.url);
+        return;
+      }
+      if (openingFile) return;
+      setOpeningFile(true);
+      openBlobFile(client, link.spaceId, link.hash, blobLinkName(link.url, 'file'))
+        .catch((err) => Alert.alert("Couldn't open the file", friendlyError(err, "You're offline. Try again when you're back online.")))
+        .finally(() => setOpeningFile(false));
+    },
+    [client, org, openingFile],
+  );
+
   // A file link in a message: this org's files open in the file screen (by
   // id, so a rename never breaks it); any other host goes to the browser.
   const openAssetLink = useCallback(
@@ -256,7 +275,9 @@ export default function SpaceThreadScreen() {
         qs.set('h', String(blob.height));
       }
       const link = `https://${org}/s/${space}/b/${blob.hash}?${qs.toString()}`;
-      return blob.mime.startsWith('image/') ? `![${file.name}](${link})` : `[${file.name}](${link})`;
+      // Brackets in a file name would end the markdown label early.
+      const label = file.name.replace(/[\[\]]/g, '_');
+      return blob.mime.startsWith('image/') ? `![${label}](${link})` : `[${label}](${link})`;
     },
     [client, org, space],
   );
@@ -365,7 +386,7 @@ export default function SpaceThreadScreen() {
               onVote={vote}
               onRemoveVote={removeVote}
               onEndPoll={endPoll}
-              onOpenAsset={openAssetLink}
+              onOpenAsset={openAssetLink} onOpenBlob={openBlobLink}
             />
           ) : null}
           {rootMessage && visibleReplies !== null ? (
@@ -392,7 +413,7 @@ export default function SpaceThreadScreen() {
           {/* Root painted from the stream; replies still on their way. */}
           {rootMessage && replies === null && !error ? <ActivityIndicator style={{ marginTop: 16 }} /> : null}
           {visibleReplies?.map((m) => (
-            <MessageRow key={m.id} message={m} member={members.get(m.author.memberId)} memberNames={memberNames} me={me} onToggleReaction={toggleReaction} onLongPress={(m) => { setReactionsOnly(false); setActionMessage(m); }} onOpenAsset={openAssetLink}
+            <MessageRow key={m.id} message={m} member={members.get(m.author.memberId)} memberNames={memberNames} me={me} onToggleReaction={toggleReaction} onLongPress={(m) => { setReactionsOnly(false); setActionMessage(m); }} onOpenAsset={openAssetLink} onOpenBlob={openBlobLink}
               onAddReaction={(m) => { setReactionsOnly(true); setActionMessage(m); }} onVote={vote} onRemoveVote={removeVote} onEndPoll={endPoll} />
           ))}
         </ScrollView>
@@ -429,7 +450,7 @@ export default function SpaceThreadScreen() {
 
 // The root, Slack-style: 40pt avatar, bold name with the timestamp UNDER it,
 // full-size body, then reaction pills + the always-on emoji+ pill.
-function RootMessage({ message, member, memberNames, me, onToggleReaction, onLongPress, onAddReaction, onVote, onRemoveVote, onEndPoll, onOpenAsset }: {
+function RootMessage({ message, member, memberNames, me, onToggleReaction, onLongPress, onAddReaction, onVote, onRemoveVote, onEndPoll, onOpenAsset, onOpenBlob }: {
   message: Message;
   member?: Member;
   memberNames: ReadonlyMap<string, string>;
@@ -441,6 +462,7 @@ function RootMessage({ message, member, memberNames, me, onToggleReaction, onLon
   onRemoveVote: (message: Message) => void;
   onEndPoll: (message: Message) => void;
   onOpenAsset?: (link: { host: string; spaceId: string; assetId: string; label: string }) => void;
+  onOpenBlob?: (link: { host: string; spaceId: string; hash: string; url: string }) => void;
 }) {
   const colors = useColors();
   const name = member?.displayName ?? message.author.memberId;
@@ -488,6 +510,11 @@ function RootMessage({ message, member, memberNames, me, onToggleReaction, onLon
           <ChatMarkdown
             extraRules={imageRule}
             onLinkPress={(url) => {
+              const blob = parseBlobLink(url);
+              if (blob && onOpenBlob) {
+                onOpenBlob({ ...blob, url });
+                return false;
+              }
               const link = parseAssetLink(url);
               if (!link || !onOpenAsset) return true;
               onOpenAsset(link);

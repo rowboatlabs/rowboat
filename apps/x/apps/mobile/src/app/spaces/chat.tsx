@@ -17,7 +17,8 @@ import { setActiveSpace } from '@/lib/push';
 import { useSpacesAccount } from '@/lib/spaces/account';
 import { STREAM_CACHE_LIMIT, loadRoster, loadValue, peekRoster, peekValue, saveRoster, saveValue, seedThreadRoot } from '@/lib/spaces/cache';
 import { StatusBanner } from '@/components/status-banner';
-import { isNetworkError } from '@/lib/spaces/errors';
+import { friendlyError, isNetworkError } from '@/lib/spaces/errors';
+import { blobLinkName, openBlobFile } from '@/lib/spaces/open-blob';
 import { postMessageReliably } from '@/lib/spaces/send';
 import { fetchLinkPreview, peekLinkPreview, previewUrls } from '@/lib/spaces/link-preview';
 
@@ -363,7 +364,9 @@ export default function SpaceChatScreen() {
         qs.set('h', String(blob.height));
       }
       const link = `https://${org}/s/${space}/b/${blob.hash}?${qs.toString()}`;
-      return blob.mime.startsWith('image/') ? `![${file.name}](${link})` : `[${file.name}](${link})`;
+      // Brackets in a file name would end the markdown label early.
+      const label = file.name.replace(/[\[\]]/g, '_');
+      return blob.mime.startsWith('image/') ? `![${label}](${link})` : `[${label}](${link})`;
     },
     [client, org, space],
   );
@@ -400,6 +403,24 @@ export default function SpaceChatScreen() {
     [client, space, replaceMessage],
   );
   const linkFor = useCallback((message: Message) => `https://${org}/s/${space}/m/${message.id}`, [org, space]);
+
+  // A tapped attachment: this org's files download with the bearer and open
+  // in the share sheet (Quick Look, Save to Files); other hosts go to the browser.
+  const [openingFile, setOpeningFile] = useState(false);
+  const openBlobLink = useCallback(
+    (link: { host: string; spaceId: string; hash: string; url: string }) => {
+      if (link.host !== org) {
+        void Linking.openURL(link.url);
+        return;
+      }
+      if (openingFile) return;
+      setOpeningFile(true);
+      openBlobFile(client, link.spaceId, link.hash, blobLinkName(link.url, 'file'))
+        .catch((err) => Alert.alert("Couldn't open the file", friendlyError(err, "You're offline. Try again when you're back online.")))
+        .finally(() => setOpeningFile(false));
+    },
+    [client, org, openingFile],
+  );
 
   // A file link in a message: this org's files open in the file screen (by
   // id, so a rename never breaks it); any other host goes to the browser.
@@ -494,6 +515,7 @@ export default function SpaceChatScreen() {
               onRemoveVote={removeVote}
               onEndPoll={endPoll}
               onOpenAsset={openAssetLink}
+              onOpenBlob={openBlobLink}
             />
           ))}
         </ScrollView>
