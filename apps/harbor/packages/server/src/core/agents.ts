@@ -1,4 +1,4 @@
-import { HARBOR_RUN_CONNECTIONS, isAgentPair, type AgentCredential, type AgentKey, type AgentKeySecret, type AgentListing, type InvocationOptionValues, type Member } from '@rowboat/spaces-protocol';
+import { HARBOR_RUN_CONNECTIONS, INSTANCE_CONNECTIONS, isAgentPair, type AgentCredential, type AgentKey, type AgentKeySecret, type AgentListing, type InvocationOptionValues, type Member } from '@rowboat/spaces-protocol';
 import { hashAgentKey, mintAgentKeySecret } from '../agent-keys.js';
 import { HarborError } from '../errors.js';
 import { agentsManagedBy, canAddAgent, canCreateAgentKey, canRevokeAgentKey, enforce } from '../policy.js';
@@ -18,8 +18,14 @@ import type { Spaces } from './spaces.js';
 // the rules: who may set it, and that only a platform agent has one.
 
 /** What the connector host does for agent creation. Absent = this org runs no connectors. */
+/** What a platform credential is checked against: the agent's kind and, for an instance connection, its instance. */
+export interface CredentialTarget {
+  kind: string;
+  instance?: string;
+}
+
 export interface AgentConnectorHooks {
-  verify(connection: string, secret: string): Promise<void>;
+  verify(connection: string, secret: string, target: CredentialTarget): Promise<void>;
   save(agentId: string, secret: string, setBy: string): Promise<AgentCredential>;
   added(agent: Member): void;
 }
@@ -68,7 +74,7 @@ export class Agents {
    */
   async add(
     ctx: ActorCtx,
-    input: { displayName: string; kind: string; connection: string; credential?: string },
+    input: { displayName: string; kind: string; connection: string; credential?: string; instance?: string },
   ): Promise<{ agent: Member; key: AgentKeySecret }> {
     enforce(canAddAgent(await this.actor(ctx)));
     if (!isAgentPair(input.kind, input.connection)) {
@@ -77,15 +83,20 @@ export class Agents {
     const platform = HARBOR_RUN_CONNECTIONS.includes(input.connection);
     if (platform && input.credential === undefined) throw new HarborError('invalid_request', `a ${input.connection} agent needs its ${input.connection} key`);
     if (!platform && input.credential !== undefined) throw new HarborError('invalid_request', 'only an agent Harbor reaches through a platform takes a credential');
+    // An instance connection's agent is one instance on the platform (2026-10-05): named at Add, never after.
+    const onInstance = INSTANCE_CONNECTIONS.includes(input.connection);
+    if (onInstance && input.instance === undefined) throw new HarborError('invalid_request', `a ${input.connection} agent is one ${input.connection} instance: name it`);
+    if (!onInstance && input.instance !== undefined) throw new HarborError('invalid_request', `a ${input.connection} agent runs on no instance of its own`);
     if (platform) {
       if (!this.hooks) throw new HarborError('invalid_request', `this Harbor runs no ${input.connection} connector`);
-      await this.hooks.verify(input.connection, input.credential!);
+      await this.hooks.verify(input.connection, input.credential!, { kind: input.kind, ...(input.instance ? { instance: input.instance } : {}) });
     }
     const agent = await this.spaces.createAgent({
       displayName: input.displayName,
       ownerId: ctx.memberId,
       agentKind: input.kind,
       agentConnection: input.connection,
+      ...(input.instance ? { agentInstance: input.instance } : {}),
     });
     if (platform) await this.hooks!.save(agent.id, input.credential!, ctx.memberId);
     const key = await this.mint(ctx, agent.id);
@@ -101,7 +112,8 @@ export class Agents {
     if (!HARBOR_RUN_CONNECTIONS.includes(connection)) throw new HarborError('invalid_request', 'only an agent Harbor reaches through a platform has a credential');
     if (!this.hooks) throw new HarborError('invalid_request', `this Harbor runs no ${connection} connector`);
     this.k.guardWrite();
-    await this.hooks.verify(connection, secret);
+    // The new key must still reach the agent's own instance.
+    await this.hooks.verify(connection, secret, { kind: agent.agentKind ?? '', ...(agent.agentInstance ? { instance: agent.agentInstance } : {}) });
     return this.hooks.save(agentId, secret, ctx.memberId);
   }
 

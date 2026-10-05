@@ -349,6 +349,8 @@ export const routes = {
       kind: z.string().min(1).max(32).default('custom'),
       connection: z.string().min(1).max(32).default('contract'),
       credential: z.string().min(1).max(512).optional(),
+      /** The platform instance the agent is (INSTANCE_CONNECTIONS only, 2026-10-05). */
+      instance: z.string().min(1).max(128).optional(),
     }),
     response: z.object({ agent: Member, key: AgentKeySecret }),
   },

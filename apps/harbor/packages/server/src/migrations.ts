@@ -884,6 +884,16 @@ export const MIGRATIONS: Migration[] = [
       )`,
     ],
   },
+  {
+    // The platform instance an agent is (spec §8 Connectors, Agent37,
+    // 2026-10-05): set at creation for a connection in INSTANCE_CONNECTIONS,
+    // null for every other agent and for people.
+    id: '032-agent-instance',
+    statements: [
+      `alter table members add column agent_instance text`,
+      `alter table members add constraint members_agent_instance_check check (kind = 'agent' or agent_instance is null)`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

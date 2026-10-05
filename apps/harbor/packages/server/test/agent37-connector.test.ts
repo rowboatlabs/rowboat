@@ -54,8 +54,8 @@ class Org {
     await this.as('dev-ramnique').post(`/v1/spaces/${this.spaceId}/members`, { memberIds: ['harsh'], actingMode: 'direct' });
     return this.spaceId;
   }
-  async agent(kind: string, name: string): Promise<Member> {
-    const created = await this.as('dev-ramnique').post('/v1/agents', { displayName: name, kind, connection: 'agent37', credential: GOOD_KEY });
+  async agent(kind: string, name: string, instance = kind === 'openclaw' ? 'inst2' : 'inst1'): Promise<Member> {
+    const created = await this.as('dev-ramnique').post('/v1/agents', { displayName: name, kind, connection: 'agent37', credential: GOOD_KEY, instance });
     expect(created.status).toBe(200);
     await this.as('dev-ramnique').post(`/v1/spaces/${this.spaceId}/members`, { memberIds: [created.body.agent.id], actingMode: 'direct' });
     return created.body.agent;
@@ -111,16 +111,27 @@ describe('the Agent37 connector', () => {
   });
 
   it('refuses a key Agent37 does not accept, creating nothing', async () => {
-    const r = await org.as('dev-ramnique').post('/v1/agents', { displayName: 'Nope', kind: 'hermes', connection: 'agent37', credential: 'sk_live_bad' });
+    const r = await org.as('dev-ramnique').post('/v1/agents', { displayName: 'Nope', kind: 'hermes', connection: 'agent37', credential: 'sk_live_bad', instance: 'inst1' });
     expect(r).toMatchObject({ status: 400, body: { message: expect.stringMatching(/Agent37 did not accept this key/) } });
   });
 
   it('accepts Hermes and OpenClaw, and nothing else, through Agent37', async () => {
-    const r = await org.as('dev-ramnique').post('/v1/agents', { displayName: 'Claude', kind: 'claude-code', connection: 'agent37', credential: GOOD_KEY });
+    const r = await org.as('dev-ramnique').post('/v1/agents', { displayName: 'Claude', kind: 'claude-code', connection: 'agent37', credential: GOOD_KEY, instance: 'inst1' });
     expect(r.status).toBe(400);
   });
 
-  it('declares Stop and Reasoning; no Instance while only one runs its kind', async () => {
+  it('is one instance: added with it, which the key must reach and which must run the agent’s kind', async () => {
+    const add = (body: Record<string, unknown>) => org.as('dev-ramnique').post('/v1/agents', { displayName: 'H', kind: 'hermes', connection: 'agent37', credential: GOOD_KEY, ...body });
+    expect(await add({})).toMatchObject({ status: 400, body: { message: expect.stringMatching(/is one agent37 instance/) } });
+    expect(await add({ instance: 'nope' })).toMatchObject({ status: 400, body: { message: expect.stringMatching(/does not reach an instance nope/) } });
+    expect(await add({ instance: 'inst2' })).toMatchObject({ status: 400, body: { message: expect.stringMatching(/runs agent37-openclaw, not hermes/) } });
+    expect(hermes.agentInstance).toBe('inst1');
+    // Only an instance connection takes one.
+    const custom = await org.as('dev-ramnique').post('/v1/agents', { displayName: 'C', instance: 'inst1' });
+    expect(custom.status).toBe(400);
+  });
+
+  it('declares Stop and Reasoning, and no choice of instance', async () => {
     const caps = await until(async () => {
       const r = await org.as('dev-harsh').get(`/v1/agents/${hermes.id}/capabilities`);
       return r.body.capabilities?.options?.length ? r.body.capabilities : undefined;
@@ -183,14 +194,14 @@ describe('the Agent37 connector', () => {
     expect(sent().at(-1)).toMatchObject({ reasoning_effort: 'high' });
   });
 
-  it('with several instances of its kind, uses the one picked, and says what to pick when none is', async () => {
-    fake.instances.push({ id: 'inst3', name: 'staging', template: 'agent37-hermes-small', status: 'sleeping' });
-    const unpicked = await org.post(`${mention(hermes)} which one?`);
-    expect(await org.ended(unpicked.invocations[0]!.id)).toMatchObject({ state: 'failed', error: expect.stringMatching(/several Hermes instances \(main \(inst1\), staging \(inst3\)\)/) });
-    const picked = await org.post(`${mention(hermes)} on staging`, { agentOptions: { [hermes.id]: { instance: 'inst3' } } });
-    expect((await org.ended(picked.invocations[0]!.id)).state).toBe('done');
-    expect(fake.responses().at(-1)!.path).toBe('/i/inst3/v1/responses');
-    fake.instances.pop();
+  it('fails plainly once its instance is gone, never moving to another', async () => {
+    fake.instances.push({ id: 'inst4', name: 'doomed', template: 'agent37-hermes', status: 'running' });
+    const gone = await org.agent('hermes', 'Gone', 'inst4');
+    fake.instances = fake.instances.filter((i) => i.id !== 'inst4');
+    const before = fake.responses().length;
+    const { invocations } = await org.post(`${mention(gone)} are you there?`);
+    expect(await org.ended(invocations[0]!.id)).toMatchObject({ state: 'failed', error: expect.stringMatching(/My Agent37 instance \(inst4\) is gone/) });
+    expect(fake.responses().slice(before).map((r) => r.path)).toEqual(['/i/inst4/v1/responses']);
   });
 
   it('fails a turn Agent37 reports as failed, with its reason', async () => {
@@ -234,7 +245,7 @@ describe('the Agent37 connector', () => {
   });
 
   it('when Agent37 rejects the key, fails fast and tells the owner once', async () => {
-    fake.refuse = { status: 401, code: 'invalid_api_key', paths: /^\/v1\/instances$/ };
+    fake.refuse = { status: 401, code: 'invalid_api_key', paths: /\/v1\/responses$/, flat: true };
     const a = await org.post(`${mention(hermes)} new thread one`);
     expect(await org.ended(a.invocations[0]!.id)).toMatchObject({ state: 'failed', error: expect.stringMatching(/Agent37 rejected this agent’s API key/) });
     const b = await org.post(`${mention(hermes)} new thread two`);

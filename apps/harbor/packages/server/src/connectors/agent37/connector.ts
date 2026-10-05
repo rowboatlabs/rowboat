@@ -3,7 +3,7 @@ import type { ConnectorCapabilities, Invocation, InvocationOption, InvocationUpd
 import { HarborError } from '../../errors.js';
 import type { ConnectorEnv, RunningConnector } from '../platforms.js';
 import { attachmentLinks, requestMarker, type Attachment } from '../thread-prompt.js';
-import { Agent37Error, type Agent37Api, type Agent37Instance, type HistoryEntry, type TurnEvent, type TurnRequest } from './api.js';
+import { Agent37Error, type Agent37Api, type HistoryEntry, type TurnEvent, type TurnRequest } from './api.js';
 import { buildPrompt } from './prompt.js';
 
 // The Agent37 connector (spec §8 Connectors, 2026-10-01): one per agent whose
@@ -11,7 +11,9 @@ import { buildPrompt } from './prompt.js';
 // agent contract in-process, on its agent's own frames and the one-minute list.
 //
 // An Agent37 instance is a hosted computer running a harness (Hermes or
-// OpenClaw here); one Rowboat thread is one session on one instance. The
+// OpenClaw here) with its own memory and files, so a Rowboat agent is one
+// instance, named when it was added (2026-10-05), and each Rowboat thread is
+// one session on it. The
 // connector mints the session id from the thread, which Hermes and OpenClaw
 // accept on a first turn ("an id it has not seen simply starts a fresh thread
 // under that id", https://www.agent37.com/docs/agents-api/chat), so a thread
@@ -44,11 +46,6 @@ const RETRY_FOR_MS = 5 * 60_000;
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const FILES_DIR = '~/rowboat/files';
 
-/** Agent37's system templates for each kind (https://www.agent37.com/docs/agents-api/templates). */
-const TEMPLATES: Record<string, string[]> = {
-  hermes: ['agent37-hermes', 'agent37-hermes-small'],
-  openclaw: ['agent37-openclaw'],
-};
 /** `reasoning_effort`, per turn on both harnesses (https://www.agent37.com/docs/agents-api/chat). */
 const EFFORTS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
 
@@ -187,38 +184,13 @@ export class Agent37Connector implements RunningConnector {
   private async run(invocation: Invocation): Promise<void> {
     const { spaceId, threadRootId } = invocation.conversation;
     let record = await this.record(spaceId, threadRootId);
-    if (!record.instanceId) {
-      const instanceId = await this.chooseInstance(invocation);
-      if (!instanceId) return; // failed, saying why
-      record = { ...record, instanceId, sessionId: sessionFor(this.env.agent.id, spaceId, threadRootId) };
-    }
+    const instanceId = this.env.agent.agentInstance;
+    if (!instanceId) return this.fail(invocation, 'This Agent37 agent has no instance. Its owner needs to add it again with one.');
+    // The agent is its instance (2026-10-05): every thread runs there, in a session of its own.
+    if (record.instanceId !== instanceId) record = { ...record, instanceId, sessionId: sessionFor(this.env.agent.id, spaceId, threadRootId) };
     record = { ...record, turn: { invocationId: invocation.id, triggerMessageId: invocation.trigger.messageId, sending: false } };
     await this.save(spaceId, threadRootId, record);
     await this.drive(invocation, record, { kind: 'send' });
-  }
-
-  /** The composer's pick (or the owner's default), else the only instance running this kind; otherwise say what to pick. */
-  private async chooseInstance(invocation: Invocation): Promise<string | undefined> {
-    const instances = await this.withAgent37(invocation, async (api) => this.usable(await api.instances()));
-    if (!instances) return undefined;
-    const kind = this.kindLabel();
-    if (instances.length === 0) {
-      await this.fail(invocation, `This Agent37 workspace has no ${kind} instance. Create one on agent37.com, then mention me again.`);
-      return undefined;
-    }
-    const picked = invocation.options?.instance;
-    if (typeof picked === 'string') {
-      if (instances.some((i) => i.id === picked)) return picked;
-      await this.fail(invocation, `The Agent37 instance picked for this (${picked}) is gone. Pick another and mention me again.`);
-      return undefined;
-    }
-    if (instances.length === 1) return instances[0]!.id;
-    const names = instances.map(instanceLabel).join(', ');
-    await this.fail(
-      invocation,
-      `This Agent37 workspace has several ${kind} instances (${names}). Pick one under Instance when you mention me, or ask my owner to set a default on my page in Agents.`,
-    );
-    return undefined;
   }
 
   /**
@@ -314,7 +286,7 @@ export class Agent37Connector implements RunningConnector {
           if (err instanceof HarborError) return await this.fail(invocation, err.message); // e.g. no key stored
           const a37 = err instanceof Agent37Error ? err : new Agent37Error(0, undefined, (err as Error).message);
           if (a37.rejectsKey) return await this.keyRejected(invocation, a37);
-          if (a37.gone) return await this.fail(invocation, 'The Agent37 instance for this thread is gone. Start a new thread to use another one.');
+          if (a37.gone) return await this.fail(invocation, `My Agent37 instance (${instanceId}) is gone: it was deleted, or this key no longer reaches it. My owner needs to add me again with another instance.`);
           if (a37.busy && step.kind === 'send') {
             // Refused, so not sent: another turn holds the session (one that outlived its invocation). Wait it out.
             step = a37.responseId ? { kind: 'follow', responseId: a37.responseId, ours: false } : { kind: 'settle' };
@@ -418,17 +390,13 @@ export class Agent37Connector implements RunningConnector {
   // --- what the connector tells Harbor --------------------------------------------------------
 
   /**
-   * Stop, and the options: the instance when there are several, and how hard
-   * to think. No Model option (2026-10-01): models are listed per instance on
+   * Stop, and how hard to think. The instance is the agent's own, so it is no
+   * option (2026-10-05). No Model option (2026-10-01): models are listed per instance on
    * its own URL, and asking would wake a sleeping instance every few minutes,
    * keeping it from ever sleeping. The instance's own default model applies.
    */
   private async declare(): Promise<void> {
     const options: InvocationOption[] = [];
-    const instances = await this.safe(async () => this.usable(await (await this.api()).instances()), undefined as Agent37Instance[] | undefined);
-    if (instances && instances.length > 1) {
-      options.push({ type: 'select', key: 'instance', label: 'Instance', choices: instances.slice(0, 100).map((i) => ({ id: i.id, label: instanceLabel(i).slice(0, 128) })) });
-    }
     options.push({ type: 'select', key: 'reasoning', label: 'Reasoning', choices: EFFORTS.map((e) => ({ id: e, label: e === 'xhigh' ? 'Extra high' : e[0]!.toUpperCase() + e.slice(1) })) });
     const capabilities: ConnectorCapabilities = { stop: true, options };
     const signature = JSON.stringify(capabilities);
@@ -506,20 +474,6 @@ export class Agent37Connector implements RunningConnector {
   }
 
   // --- helpers --------------------------------------------------------------------------------
-
-  /** Instances that can run this agent's kind: its system templates, or the workspace's own images (which may). */
-  private usable(instances: Agent37Instance[]): Agent37Instance[] {
-    const templates = TEMPLATES[this.env.agent.agentKind ?? ''] ?? [];
-    return instances.filter((i) => {
-      if (['failed', 'deleted', 'deleting'].includes(i.status)) return false;
-      const template = i.template.split('@')[0]!;
-      return template.startsWith('agent37-') ? templates.includes(template) : true;
-    });
-  }
-
-  private kindLabel(): string {
-    return this.env.agent.agentKind === 'openclaw' ? 'OpenClaw' : 'Hermes';
-  }
 
   private async record(spaceId: string, threadRootId: string): Promise<ThreadRecord> {
     return ((await this.env.thread.get(spaceId, threadRootId)) as ThreadRecord | undefined) ?? {};
@@ -619,10 +573,6 @@ export function toolActivity(data: Record<string, unknown>): string | undefined 
   const tool = typeof data.tool === 'string' ? data.tool : '';
   const line = label || (tool ? `Using ${tool}` : '');
   return line ? (line.length > 200 ? `${line.slice(0, 199)}…` : line) : undefined;
-}
-
-function instanceLabel(i: Agent37Instance): string {
-  return i.name ? `${i.name} (${i.id})` : i.id;
 }
 
 function safeName(name: string): string {

@@ -57,6 +57,11 @@ export const PLATFORMS: Record<string, { label: string; logo?: Logo }> = {
     agent37: { label: 'Agent37', logo: { light: agent37Logo, dark: agent37LogoDark } },
 }
 
+/** A platform instance as people see it: its name, then its id. */
+export function instanceLabel(i: { id: string; name: string | null }): string {
+    return i.name ? `${i.name} (${i.id})` : i.id
+}
+
 export function kindInfo(kind: string | undefined): { label: string; logo?: Logo } {
     return (kind && KINDS[kind]) || { label: 'Agent' }
 }
@@ -98,6 +103,8 @@ export interface SetupContext {
     agentKey: string
     /** What the agent is, for a setup that offers several kinds. */
     kind?: string
+    /** The platform instance the agent is (Agent37). */
+    instance?: string
     /** The owner's direct messages with the agent, when the kind wants a home for unprompted messages. */
     homeChannel?: string
 }
@@ -121,6 +128,8 @@ export interface AgentSetup {
     credential?: { label: string; placeholder: string; note: string }
     /** Where the agent's side is documented. */
     docsUrl?: string
+    /** The agent is one platform instance, picked or created on the Add screen; its kind follows the instance (Agent37, 2026-10-05). */
+    bindsInstance?: boolean
     /** Opens the owner's DM with the agent before setup, for `homeChannel`. */
     wantsHomeChannel?: boolean
     setup: (ctx: SetupContext) => SetupRoute[]
@@ -313,9 +322,10 @@ function replicasSetup({ orgUrl, agentKey }: SetupContext): SetupRoute[] {
 // instance's terminal (https://www.agent37.com/docs/agents-api/custom-image), and the harness
 // reads them at boot, hence the restart. OpenClaw's commands are its own CLI's
 // (https://docs.openclaw.ai/cli/mcp/registry, https://docs.openclaw.ai/cli/skills).
-function agent37Setup({ orgUrl, agentKey, kind }: SetupContext): SetupRoute[] {
-    const terminal = 'Open the instance’s terminal: from the Agent37 dashboard, or its port 7681 (https://<instance>-7681.agent37.app) through a signed URL.'
-    const restart = { title: 'Restart the instance', note: 'From the Agent37 dashboard, or POST /v1/instances/<instance>/restart. The agent picks up the tools and the skill when it starts.' }
+function agent37Setup({ orgUrl, agentKey, kind, instance }: SetupContext): SetupRoute[] {
+    const id = instance ?? '<instance>'
+    const terminal = `Open the instance’s terminal: from the Agent37 dashboard, or its port 7681 (https://${id}-7681.agent37.app) through a signed URL.`
+    const restart = { title: 'Restart the instance', note: `From the Agent37 dashboard, or POST /v1/instances/${id}/restart. The agent picks up the tools and the skill when it starts.` }
     if (kind === 'openclaw') {
         return [
             {
@@ -415,9 +425,10 @@ export const AGENT_SETUPS: readonly AgentSetup[] = [
         credential: {
             label: 'Agent37 API key',
             placeholder: 'Paste an sk_live_ key from agent37.com → API keys',
-            note: 'Harbor checks it with Agent37 and keeps it sealed. The key reaches every instance in its workspace, so make one just for Rowboat.',
+            note: 'Harbor checks it with Agent37 and keeps it sealed. A key reaches every instance in its Agent37 workspace (there are no per-instance keys), so make one just for Rowboat.',
         },
         docsUrl: 'https://www.agent37.com/docs/agents-api/concepts',
+        bindsInstance: true,
         setup: agent37Setup,
     },
     {

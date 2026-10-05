@@ -57,6 +57,19 @@ export interface Agent37Instance {
   status: string;
 }
 
+/**
+ * The kind of agent an instance runs, from its system template
+ * (https://www.agent37.com/docs/agents-api/templates): `agent37-hermes` and
+ * `agent37-hermes-small` run Hermes, `agent37-openclaw` OpenClaw. A pinned
+ * version (`@tag`) is the same template. Anything else is not one Rowboat drives.
+ */
+export function kindOfTemplate(template: string): string | undefined {
+  const name = template.split('@')[0];
+  if (name === 'agent37-hermes' || name === 'agent37-hermes-small') return 'hermes';
+  if (name === 'agent37-openclaw') return 'openclaw';
+  return undefined;
+}
+
 export interface Agent37Model {
   id: string;
   label?: string;
