@@ -98,6 +98,12 @@ export interface InstanceRecord {
   volumeId: string | null;
   image: string | null;
   managed: boolean;
+  /**
+   * The generation of the keys the machine runs with (instances.ts KEYS):
+   * the gateway relays with that generation's key until the machine moves
+   * to the current one, at its next wake or connection.
+   */
+  keys: number;
 }
 
 /** One app install that may reach its owner's instance through the gateway (security §2). */
@@ -158,6 +164,8 @@ export interface ControlStore {
   mediaHistory(accountId: string, limit: number): Promise<MediaHistoryEntry[]>;
   /** Lets `token` act as the account. Kept hashed only. */
   grantToken(token: string, accountId: string): Promise<void>;
+  /** `token` no longer acts as anyone; nothing happens when it never did. */
+  revokeToken(token: string): Promise<void>;
   /** The account a signed-in user acts as: the one linked to them, else the one they created. */
   accountForUser(userId: string): Promise<Account | null>;
   instance(accountId: string): Promise<InstanceRecord | null>;
@@ -260,6 +268,9 @@ export class MemoryStore implements ControlStore {
   async grantToken(token: string, accountId: string) {
     const account = await this.account(accountId);
     if (account) this.tokens.set(hashToken(token), account);
+  }
+  async revokeToken(token: string) {
+    this.tokens.delete(hashToken(token));
   }
   // In memory there is no sign-in server, hence no link: a user is their account.
   async accountForUser(userId: string) {

@@ -191,6 +191,11 @@ export const MIGRATIONS: string[] = [
     updated_at timestamptz NOT NULL
   );
   `,
+  // 6 — instance keys get generations (05/10/2026): the first ones were
+  // seen in screenshots, so they change; every machine so far runs the first.
+  `
+  ALTER TABLE baarali.instances ADD COLUMN keys integer NOT NULL DEFAULT 1;
+  `,
 ];
 
 /** Brings the schema up to date. Safe on several machines at once: the lock serializes them. */

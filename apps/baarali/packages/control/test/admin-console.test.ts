@@ -249,7 +249,7 @@ describe('what the console changes', () => {
 describe('instances from the console', () => {
   async function withInstance() {
     const s = setup();
-    await s.store.saveInstance({ accountId: AWA.id, app: 'baarali-instances', machineId: 'm_awa', volumeId: 'vol_awa', image: 'registry.fly.io/baarali-instances:v10', managed: true });
+    await s.store.saveInstance({ accountId: AWA.id, app: 'baarali-instances', machineId: 'm_awa', volumeId: 'vol_awa', image: 'registry.fly.io/baarali-instances:v10', managed: true, keys: 2 });
     return s;
   }
 
@@ -272,7 +272,7 @@ describe('instances from the console', () => {
 
   it('puts a machine that failed to start first in what needs attention', async () => {
     const { as, store } = await withInstance();
-    await store.saveInstance({ accountId: OWNER.id, app: 'baarali-instances', machineId: 'm_broken', volumeId: 'v', image: 'registry.fly.io/baarali-instances:v11', managed: true });
+    await store.saveInstance({ accountId: OWNER.id, app: 'baarali-instances', machineId: 'm_broken', volumeId: 'v', image: 'registry.fly.io/baarali-instances:v11', managed: true, keys: 2 });
     const overview = (await (await as('boss', '/admin/api/overview')).json()) as { attention: { failedInstances: unknown[] } };
     expect(overview.attention.failedInstances).toEqual([{ id: OWNER.id, email: OWNER.email }]);
   });

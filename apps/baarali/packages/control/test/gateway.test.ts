@@ -8,7 +8,7 @@ import { MemoryStore, hashToken, type Account, type InstanceRecord } from '../sr
 
 const T0 = Date.UTC(2026, 9, 1, 8, 0, 0);
 const ME: Account = { id: 'acc_me', email: null, planId: 'p', createdAt: T0 };
-const RECORD: InstanceRecord = { accountId: ME.id, app: 'baarali-instances', machineId: 'm_1', volumeId: 'v', image: 'i', managed: true };
+const RECORD: InstanceRecord = { accountId: ME.id, app: 'baarali-instances', machineId: 'm_1', volumeId: 'v', image: 'i', managed: true, keys: 2 };
 
 const servers: http.Server[] = [];
 afterEach(() => {

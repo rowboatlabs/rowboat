@@ -98,6 +98,10 @@ export class PgStore implements ControlStore {
     );
   }
 
+  async revokeToken(token: string): Promise<void> {
+    await this.db.query('DELETE FROM baarali.access_tokens WHERE token_hash = $1', [hashToken(token)]);
+  }
+
   /**
    * Links an account that predates the sign-in server (the owner's) to the
    * user who signs in with its email, once Better Auth says that email is
@@ -208,20 +212,20 @@ export class PgStore implements ControlStore {
   }
 
   async instance(accountId: string): Promise<InstanceRecord | null> {
-    const { rows } = await this.db.query<{ account_id: string; app: string; machine_id: string | null; volume_id: string | null; image: string | null; managed: boolean }>(
-      'SELECT account_id, app, machine_id, volume_id, image, managed FROM baarali.instances WHERE account_id = $1',
+    const { rows } = await this.db.query<{ account_id: string; app: string; machine_id: string | null; volume_id: string | null; image: string | null; managed: boolean; keys: number }>(
+      'SELECT account_id, app, machine_id, volume_id, image, managed, keys FROM baarali.instances WHERE account_id = $1',
       [accountId],
     );
     const r = rows[0];
-    return r ? { accountId: r.account_id, app: r.app, machineId: r.machine_id, volumeId: r.volume_id, image: r.image, managed: r.managed } : null;
+    return r ? { accountId: r.account_id, app: r.app, machineId: r.machine_id, volumeId: r.volume_id, image: r.image, managed: r.managed, keys: r.keys } : null;
   }
 
   async saveInstance(i: InstanceRecord) {
     await this.db.query(
-      `INSERT INTO baarali.instances (account_id, app, machine_id, volume_id, image, managed) VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO baarali.instances (account_id, app, machine_id, volume_id, image, managed, keys) VALUES ($1, $2, $3, $4, $5, $6, $7)
        ON CONFLICT (account_id) DO UPDATE SET app = EXCLUDED.app, machine_id = EXCLUDED.machine_id, volume_id = EXCLUDED.volume_id,
-         image = EXCLUDED.image, managed = EXCLUDED.managed`,
-      [i.accountId, i.app, i.machineId, i.volumeId, i.image, i.managed],
+         image = EXCLUDED.image, managed = EXCLUDED.managed, keys = EXCLUDED.keys`,
+      [i.accountId, i.app, i.machineId, i.volumeId, i.image, i.managed, i.keys],
     );
   }
 
@@ -321,10 +325,10 @@ export class PgStore implements ControlStore {
   }
 
   async allInstances(): Promise<InstanceRecord[]> {
-    const { rows } = await this.db.query<{ account_id: string; app: string; machine_id: string | null; volume_id: string | null; image: string | null; managed: boolean }>(
-      'SELECT account_id, app, machine_id, volume_id, image, managed FROM baarali.instances ORDER BY created_at',
+    const { rows } = await this.db.query<{ account_id: string; app: string; machine_id: string | null; volume_id: string | null; image: string | null; managed: boolean; keys: number }>(
+      'SELECT account_id, app, machine_id, volume_id, image, managed, keys FROM baarali.instances ORDER BY created_at',
     );
-    return rows.map((r) => ({ accountId: r.account_id, app: r.app, machineId: r.machine_id, volumeId: r.volume_id, image: r.image, managed: r.managed }));
+    return rows.map((r) => ({ accountId: r.account_id, app: r.app, machineId: r.machine_id, volumeId: r.volume_id, image: r.image, managed: r.managed, keys: r.keys }));
   }
 
   async modelSettings(): Promise<ModelSetting[]> {

@@ -67,6 +67,13 @@ const AWAKE_MS = 30_000;
 /** After a refusal of Fly's API, how long before asking it again. */
 const RATE_LIMITED_MS = 5_000;
 
+/**
+ * The generation of the keys new and updated machines run with. The first
+ * ones (1) were seen in screenshots on 05/10/2026: raised to 2. Raising it
+ * again changes every instance's keys at its next wake or connection.
+ */
+export const KEYS = 2;
+
 export class Instances {
   private readonly building = new Map<string, Promise<InstanceRecord>>();
   private readonly awakeUntil = new Map<string, number>();
@@ -77,18 +84,29 @@ export class Instances {
 
   constructor(private readonly deps: InstancesDeps) {}
 
-  private derive(purpose: string, accountId: string): string {
-    return createHmac('sha256', this.deps.secret).update(`${purpose}:v1:${accountId}`).digest('base64url');
+  private derive(purpose: string, accountId: string, keys: number): string {
+    return createHmac('sha256', this.deps.secret).update(`${purpose}:v${keys}:${accountId}`).digest('base64url');
   }
 
   /** The bearer the instance's rowboat-server expects (BAARALI_SERVER_KEY). */
-  serverKey(accountId: string): string {
-    return this.derive('server-key', accountId);
+  serverKey(accountId: string, keys = KEYS): string {
+    return this.derive('server-key', accountId, keys);
   }
 
   /** The bearer the instance presents to /v1 (BAARALI_INSTANCE_TOKEN). */
-  instanceToken(accountId: string): string {
-    return this.derive('instance-token', accountId);
+  instanceToken(accountId: string, keys = KEYS): string {
+    return this.derive('instance-token', accountId, keys);
+  }
+
+  /** On an older image or older keys: moved at its next wake or connection. */
+  outdatedRecord(record: InstanceRecord): boolean {
+    const image = this.deps.config?.image;
+    return Boolean(image && record.managed && (record.image !== image || record.keys !== KEYS));
+  }
+
+  /** The machine now runs the current keys: the previous instance token opens nothing. */
+  private async retireKeys(record: InstanceRecord): Promise<void> {
+    if (record.keys !== KEYS) await this.deps.store.revokeToken(this.instanceToken(record.accountId, record.keys));
   }
 
   /**
@@ -100,7 +118,7 @@ export class Instances {
     const existing = await this.deps.store.instance(account.id);
     // The owner's instance of phase 0 is deployed by hand: only reached.
     if (existing && !existing.managed) return existing;
-    if (existing?.machineId && existing.image === this.deps.config?.image) return existing;
+    if (existing?.machineId && existing.image === this.deps.config?.image && existing.keys === KEYS) return existing;
     const running = this.building.get(account.id);
     if (running) return running;
     const build = this.build(account, existing).finally(() => this.building.delete(account.id));
@@ -120,6 +138,7 @@ export class Instances {
       volumeId: null,
       image: null,
       managed: true,
+      keys: KEYS,
     };
     // Saved after each step: a creation cut short resumes, it does not leak a volume.
     await store.saveInstance(record);
@@ -133,12 +152,13 @@ export class Instances {
     const machineConfig = this.machineConfig(account.id, record.volumeId!, config);
     if (!record.machineId) {
       const machine = await fly.createMachine(record.app, { region: config.region, config: machineConfig });
-      record = { ...record, machineId: machine.id, image: config.image };
+      record = { ...record, machineId: machine.id, image: config.image, keys: KEYS };
     } else {
       // The update boots it again: a grown disk is seen whole.
       await this.settleDisk(record);
       await fly.updateMachine(record.app, record.machineId, machineConfig);
-      record = { ...record, image: config.image };
+      await this.retireKeys(record);
+      record = { ...record, image: config.image, keys: KEYS };
     }
     await store.saveInstance(record);
     return record;
@@ -239,7 +259,7 @@ export class Instances {
     const { config, store } = this.deps;
     if (!config || !record.managed) return false;
     const current = await store.instance(record.accountId);
-    return Boolean(current?.machineId && current.volumeId && current.image !== config.image);
+    return Boolean(current?.machineId && current.volumeId && (current.image !== config.image || current.keys !== KEYS));
   }
 
   /**
@@ -292,7 +312,8 @@ export class Instances {
     const current = await store.instance(record.accountId);
     if (!fly || !config || !current?.machineId || !current.volumeId) return;
     await fly.updateMachine(current.app, current.machineId, this.machineConfig(current.accountId, current.volumeId, config));
-    await store.saveInstance({ ...current, image: config.image });
+    await this.retireKeys(current);
+    await store.saveInstance({ ...current, image: config.image, keys: KEYS });
   }
 
   /** The size every managed disk is brought to; null without Fly. */
@@ -339,14 +360,14 @@ export class Instances {
       port: 80,
       // Pins the request to this account's machine among all of the app's.
       headers: record.managed && record.machineId ? { 'fly-force-instance-id': record.machineId } : {},
-      key: this.serverKey(record.accountId),
+      key: this.serverKey(record.accountId, record.keys),
     };
   }
 }
 
 /**
  * The owner's hand-deployed instance of phase 0 (BAARALI_OWNER_INSTANCE_APP):
- * reached while it is configured; once unset, its record is forgotten, and
+ * reached while it is configured, with the first keys it was deployed with; once unset, its record is forgotten, and
  * the owner gets a managed instance like everyone at the next sign-in of a
  * device (POST /v1/devices). The machine itself is left to whoever removes it.
  */
@@ -356,7 +377,7 @@ export async function settleOwnerInstance(
   ownerApp: string | undefined,
 ): Promise<'reached' | 'retired' | 'none'> {
   if (ownerApp) {
-    await store.saveInstance({ accountId: ownerId, app: ownerApp, machineId: null, volumeId: null, image: null, managed: false });
+    await store.saveInstance({ accountId: ownerId, app: ownerApp, machineId: null, volumeId: null, image: null, managed: false, keys: 1 });
     return 'reached';
   }
   if ((await store.instance(ownerId))?.managed !== false) return 'none';
