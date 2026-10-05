@@ -22,9 +22,10 @@ describe('the chat without its backstage', () => {
     expect(shownSteps(items).map((i) => i.id)).toEqual(['u', 't4'])
   })
 
-  it('keeps the thinking while it streams, and a backstage step that failed', () => {
+  it('keeps the thinking while it streams, and hides a backstage step even when it failed', () => {
     expect(isBackstage(thought('r', true))).toBe(false)
-    expect(isBackstage(tool('t', 'loadSkill', {}, 'error'))).toBe(false)
+    expect(isBackstage(tool('t', 'loadSkill', {}, 'error'))).toBe(true)
+    expect(isBackstage(tool('t', 'generate-image', {}, 'error'))).toBe(false)
     expect(isBackstage(tool('t', 'loadSkill', {}, 'running'))).toBe(true)
     expect(isBackstage(tool('t', 'executeMcpTool', { serverName: 'baarali-media', toolName: 'generate' }))).toBe(false)
   })

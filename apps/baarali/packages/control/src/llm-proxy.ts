@@ -125,7 +125,9 @@ export async function proxyLlm(deps: ProxyDeps, account: Account, req: Request):
     if (subpath === '/models' && req.method === 'GET' && upstream.ok) {
       const body = await upstream.text();
       const filtered = presentFor(catalog, plan, body, planName);
-      if (filtered !== null) deps.upstreamModels?.remember(body);
+      // The whole list only: a filtered one (?output_modalities=image) would
+      // make every other model look withdrawn.
+      if (filtered !== null && url.search === '') deps.upstreamModels?.remember(body);
       if (filtered === null) return errorResponse(502, { code: 'upstream_invalid', message: 'Unexpected model catalog' });
       return new Response(filtered, { status: 200, headers: passHeaders(upstream) });
     }
