@@ -15,7 +15,7 @@ import type { ToolUIPart } from "ai";
 import { ChevronDownIcon, LoaderIcon, ShieldCheckIcon } from "lucide-react";
 import { type ComponentProps, type ReactNode, isValidElement, useEffect, useRef, useState } from "react";
 import type { ToolCall, ToolGroup as ToolGroupType, ToolRowSummary } from "@/lib/chat-conversation";
-import { getToolActionsSummary, getToolErrorText, getToolRowSummary, toToolState } from "@/lib/chat-conversation";
+import { getToolErrorText, getToolRowSummary, toToolState } from "@/lib/chat-conversation";
 
 const formatToolValue = (value: unknown) => {
   if (typeof value === "string") return value;
@@ -278,7 +278,10 @@ export const ToolGroupComponent = ({ group, isToolOpen, onToolOpenChange, getAut
   const summaryText = isCompleted
     ? `Ran ${toolCount} tool${toolCount !== 1 ? "s" : ""}`
     : `Running ${toolCount} tool${toolCount !== 1 ? "s" : ""}…`;
-  const actions = isCompleted ? getToolActionsSummary(group.items) : "";
+  // BAARALI(05/10/2026): the summary is built in English from pieces
+  // (« ran a MCP tool, loaded a skill »), which no dictionary can translate
+  // whole; the count says enough, the rows say the rest.
+  const actions = "";
 
   return (
     <Collapsible open={open} onOpenChange={setOpen} className={quietRowContainerClass}>

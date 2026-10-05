@@ -27,6 +27,8 @@ export interface SeedOptions {
 export const MEDIA_SERVER_NAME = 'baarali-media';
 export const MEDIA_SKILL_DIR = 'baarali-media';
 export const IMAGES_SKILL_DIR = 'baarali-images';
+/** core's gateway image default (models/rowboat-selection.ts ROWBOAT_IMAGE_MODEL): cheap, on OpenRouter. */
+export const IMAGE_MODEL = 'google/gemini-2.5-flash-image';
 /** Their names until the rename to Baarali (01/10/2026): removed from existing workdirs. */
 const FORMER_MEDIA_NAME = 'warell-media';
 
@@ -68,7 +70,7 @@ Call \`generate-image\` at once: no other tool is needed, and never look for one
 - \`aspectRatio\` only when the user asks for a shape: \`"16:9"\` wide, \`"9:16"\` phone or story, \`"1:1"\` square.
 - Make one image per request unless the user asks for several.
 
-When it succeeds, show the saved path in a \`\`\`filepath code block, with one short sentence. If it fails because the plan does not include images, say so plainly and suggest a paid plan; for any other failure, say what went wrong in one sentence and offer to try again.
+When it succeeds, show the saved path in a \`\`\`filepath code block, with one short sentence. If it fails, say in one plain sentence what went wrong and offer to try again. Mention the user's plan only when the error itself says \`not_in_plan\`.
 `;
 
 /** Far future: the control plane rotates the token, core must never try to refresh it. */
@@ -160,15 +162,19 @@ export async function seedWorkdir(opts: SeedOptions): Promise<void> {
   await fs.mkdir(imagesDir, { recursive: true });
   await fs.writeFile(path.join(imagesDir, 'SKILL.md'), IMAGES_SKILL);
 
-  // Initial model choice only; a choice already made is never overwritten.
+  // Initial model choices only; a choice already made is never overwritten.
+  // The image model too (05/10/2026): core seeds it when someone signs in
+  // to the gateway (models/rowboat-selection.ts), which never happens on an
+  // instance, and without it the image tool is never offered to the agent.
   const modelsFile = path.join(config, 'models.json');
   const models = (await readJson(modelsFile)) ?? { version: 2, providers: {} };
-  if (!models.assistantModel) {
+  if (!models.assistantModel || !models.imageModel) {
     await writeJson(modelsFile, {
       ...models,
       version: 2,
       providers: models.providers ?? {},
-      assistantModel: { provider: 'rowboat', model: opts.assistantModel },
+      assistantModel: models.assistantModel ?? { provider: 'rowboat', model: opts.assistantModel },
+      imageModel: models.imageModel ?? { provider: 'rowboat', model: IMAGE_MODEL },
     });
   }
 

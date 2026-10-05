@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { BUILD_COMMANDS, CORE_ALLOWED_COMMANDS, IMAGES_SKILL, MEDIA_SKILL, NEVER_EXPIRES, SERVER_LOCK, seedWorkdir } from '../src/seed.js';
+import { BUILD_COMMANDS, CORE_ALLOWED_COMMANDS, IMAGE_MODEL, IMAGES_SKILL, MEDIA_SKILL, NEVER_EXPIRES, SERVER_LOCK, seedWorkdir } from '../src/seed.js';
 
 async function tmp() { return fs.mkdtemp(path.join(os.tmpdir(), 'baarali-seed-')); }
 const read = async (dir: string, f: string) => JSON.parse(await fs.readFile(path.join(dir, 'config', f), 'utf8'));
@@ -16,7 +16,13 @@ describe('seedWorkdir', () => {
       mode: 'rowboat',
       tokens: { access_token: 't1', refresh_token: null, expires_at: NEVER_EXPIRES, token_type: 'Bearer' },
     });
-    expect(await read(dir, 'models.json')).toEqual({ version: 2, providers: {}, assistantModel: { provider: 'rowboat', model: 'deepseek/deepseek-v4.1-flash' } });
+    expect(await read(dir, 'models.json')).toEqual({
+      version: 2,
+      providers: {},
+      assistantModel: { provider: 'rowboat', model: 'deepseek/deepseek-v4.1-flash' },
+      // Without it core never offers the agent its image tool (05/10/2026).
+      imageModel: { provider: 'rowboat', model: IMAGE_MODEL },
+    });
     expect((await fs.stat(path.join(dir, 'config', 'oauth.json'))).mode & 0o777).toBe(0o600);
     expect(await read(dir, 'note_creation.json')).toEqual({ strictness: 'medium', configured: false, onboardingComplete: true });
   });
@@ -58,6 +64,12 @@ describe('seedWorkdir', () => {
     expect(oauth.providers.google).toEqual({ tokens: null, clientId: 'g' });
     expect(oauth.providers.rowboat.tokens.access_token).toBe('t2');
     expect((await read(dir, 'models.json')).assistantModel.model).toBe('anthropic/claude-sonnet-5.5');
+    // An instance made before 05/10/2026 gets the image model it lacked, once.
+    expect((await read(dir, 'models.json')).imageModel).toEqual({ provider: 'rowboat', model: IMAGE_MODEL });
+    const models = await read(dir, 'models.json');
+    await fs.writeFile(path.join(dir, 'config', 'models.json'), JSON.stringify({ ...models, imageModel: { provider: 'rowboat', model: 'openai/gpt-image-1' } }));
+    await seedWorkdir({ workDir: dir, instanceToken: 't3', assistantModel: 'deepseek/deepseek-v4.1-flash' });
+    expect((await read(dir, 'models.json')).imageModel.model).toBe('openai/gpt-image-1');
     expect(await read(dir, 'server.json')).toEqual({ lanEnabled: false, port: 3220 });
   });
 
