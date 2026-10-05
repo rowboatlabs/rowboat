@@ -113,7 +113,7 @@ export default function AccountScreen() {
       ) : null}
 
       {/* Billing is not done on the phone: a plain note, no link (App Store 3.1.1). */}
-      <Group footer="To manage billing, use Rowboat on your Mac or go to app.x.rowboatlabs.com.">
+      <Group footer="To manage billing, use Rowboat on your desktop or go to app.x.rowboatlabs.com.">
         <Row first onPress={() => router.push('/spaces/notifications')}>
           <Image source="sf:bell" style={{ width: 18, height: 18 }} tintColor={colors.secondaryLabel} />
           <Text style={{ flex: 1, fontSize: 16, color: colors.label }}>Notifications</Text>
