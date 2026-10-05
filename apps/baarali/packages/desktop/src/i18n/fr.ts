@@ -3440,6 +3440,7 @@ export const FR: Dictionary = {
     "Your work is kept in your private, encrypted space, on all your devices.": "Votre travail est rangé dans votre espace privé et chiffré, sur tous vos appareils.",
     // Files and folders sent to the Baarali space (05/10/2026), with the main process's refusals.
     "A large file was left on your computer (25 MB at most per file).": "Un fichier trop lourd est resté sur votre ordinateur (25 Mo au maximum par fichier).",
+    "Folder": "Dossier",
     "Sending the file to your Baarali space…": "Envoi du fichier vers votre espace Baarali…",
     "Sending the folder to your Baarali space…": "Envoi du dossier vers votre espace Baarali…",
     "This file is too big to send to your Baarali space (25 MB at most).": "Ce fichier est trop lourd pour votre espace Baarali (25 Mo au maximum).",
@@ -3871,7 +3872,12 @@ export const FR: Dictionary = {
     "All set, $1": "Tout est prêt, $1",
     "Over to you, $1": "À vous de jouer, $1",
     // Files sent to the Baarali space (05/10/2026).
-    "$1 large files were left on your computer (25 MB at most per file).": "$1 fichiers trop lourds sont restés sur votre ordinateur (25 Mo au maximum par fichier)."
+    "$1 large files were left on your computer (25 MB at most per file).": "$1 fichiers trop lourds sont restés sur votre ordinateur (25 Mo au maximum par fichier).",
+    // The main process's refusals, as written there (src/to-instance.ts).
+    "This file is too big to send to your Baarali space ($1 at most).": "Ce fichier est trop lourd pour votre espace Baarali ($1 au maximum).",
+    "This folder is too big to send to your Baarali space: more than $1 files or $2. Choose a smaller folder.": "Ce dossier est trop lourd pour votre espace Baarali : plus de $1 fichiers ou $2. Choisissez un dossier plus petit.",
+    "Not a file or a folder: $1": "Ni un fichier ni un dossier : $1",
+    "No free name for $1": "Aucun nom libre pour $1"
 
   },
 };
