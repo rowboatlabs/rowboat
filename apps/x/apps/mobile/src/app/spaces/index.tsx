@@ -2,7 +2,7 @@ import { Stack, router, useFocusEffect } from 'expo-router';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { ActionSheetIOS, ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, View, TextInput } from 'react-native';
+import { ActionSheetIOS, ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, View, TextInput, LayoutAnimation } from 'react-native';
 
 import { useSpacesAccount, type SpacesOrg } from '@/lib/spaces/account';
 import { SpacesClient } from '@/lib/spaces/client';
@@ -431,6 +431,29 @@ function OrgCard({ org, onSwitch, mode = 'home', query = '' }: { org: SpacesOrg;
   }, [members, org.memberId]);
 
   const people = orgMembers.length;
+  // Collapsible sections (Slack): remembered per org; only on Home. A
+  // collapsed section still says how much is waiting inside it.
+  const collapseKey = `collapsed:${org.id}`;
+  const [collapsed, setCollapsed] = useState<{ spaces?: boolean; dms?: boolean }>(() => peekValue<{ spaces?: boolean; dms?: boolean }>(collapseKey) ?? {});
+  useEffect(() => {
+    void loadValue<{ spaces?: boolean; dms?: boolean }>(collapseKey).then((v) => v && setCollapsed(v));
+  }, [collapseKey]);
+  const toggle = (section: 'spaces' | 'dms') => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setCollapsed((prev) => {
+      const next = { ...prev, [section]: !prev[section] };
+      saveValue(collapseKey, next);
+      return next;
+    });
+  };
+  const canCollapse = mode === 'home';
+  const spacesClosed = canCollapse && Boolean(collapsed.spaces);
+  const dmsClosed = canCollapse && Boolean(collapsed.dms);
+  const sum = (badges: { unread: number; forYou: number }[]) =>
+    badges.reduce((t, b) => ({ unread: t.unread + b.unread, forYou: t.forYou + b.forYou }), { unread: 0, forYou: 0 });
+  const spacesWaiting = sum((spaces ?? []).map((sp) => badgeFor(sp.id, false)));
+  const dmsWaiting = sum(orgMembers.map((m) => { const dm = dmWith(m.id); return dm ? badgeFor(dm.id, true) : { unread: 0, forYou: 0 }; }));
+
   // Search is a jump list: spaces and people whose names contain the query.
   const q = query.trim().toLowerCase();
   const shownSpaces = mode === 'dms' ? null : mode === 'search' && q ? (spaces?.filter((s) => s.name.toLowerCase().includes(q)) ?? null) : spaces;
@@ -472,7 +495,8 @@ function OrgCard({ org, onSwitch, mode = 'home', query = '' }: { org: SpacesOrg;
       {/* Spaces */}
       {shownSpaces !== null && (mode !== 'search' || shownSpaces.length > 0) ? (
         <View style={{ gap: 8 }}>
-          <SectionLabel text="Spaces" />
+          <SectionLabel text="Spaces" collapsed={spacesClosed} onToggle={canCollapse ? () => toggle('spaces') : undefined} waiting={spacesWaiting} />
+          {spacesClosed ? null : (
           <Card>
             {shownSpaces.map((space, i) => {
               const badge = badgeFor(space.id, false);
@@ -492,6 +516,7 @@ function OrgCard({ org, onSwitch, mode = 'home', query = '' }: { org: SpacesOrg;
               <Text style={{ ...type.body, color: colors.tertiaryLabel, padding: 14 }}>No spaces in this org yet.</Text>
             ) : null}
           </Card>
+          )}
         </View>
       ) : null}
 
@@ -501,7 +526,8 @@ function OrgCard({ org, onSwitch, mode = 'home', query = '' }: { org: SpacesOrg;
           and your agent. */}
       {shownMembers.length > 0 ? (
         <View style={{ gap: 8 }}>
-          <SectionLabel text="Direct messages" />
+          <SectionLabel text="Direct messages" collapsed={dmsClosed} onToggle={canCollapse ? () => toggle('dms') : undefined} waiting={dmsWaiting} />
+          {dmsClosed ? null : (
           <Card>
             {shownMembers.map((m, i) => {
               const dm = dmWith(m.id);
@@ -519,6 +545,7 @@ function OrgCard({ org, onSwitch, mode = 'home', query = '' }: { org: SpacesOrg;
               );
             })}
           </Card>
+          )}
         </View>
       ) : null}
       {mode === 'search' && q && (shownSpaces?.length ?? 0) === 0 && shownMembers.length === 0 ? (
@@ -611,10 +638,39 @@ function OrgLogo({ org, size = 44, readOnly }: { org: SpacesOrg; size?: number; 
   );
 }
 
-/** Section header — the same small caps line Settings uses. */
-function SectionLabel({ text }: { text: string }) {
+/**
+ * Section header — the small caps line Settings uses. With onToggle it is a
+ * button: a chevron that points down when open and right when collapsed, and
+ * what's waiting inside when it is closed.
+ */
+function SectionLabel({ text, collapsed, onToggle, waiting }: {
+  text: string;
+  collapsed?: boolean;
+  onToggle?: () => void;
+  waiting?: { unread: number; forYou: number };
+}) {
   const colors = useColors();
-  return <Text style={{ ...type.section, color: colors.secondaryLabel, paddingHorizontal: 16 }}>{text}</Text>;
+  const label = <Text style={{ ...type.section, color: colors.secondaryLabel }}>{text}</Text>;
+  if (!onToggle) return <View style={{ paddingHorizontal: 16 }}>{label}</View>;
+  return (
+    <View style={{ gap: 14 }}>
+      <Pressable
+        onPress={() => {
+          if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
+          onToggle();
+        }}
+        hitSlop={{ top: 10, bottom: 10 }}
+        style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, minHeight: 22, opacity: pressed ? 0.6 : 1 })}
+      >
+        {label}
+        <Image source={collapsed ? 'sf:chevron.right' : 'sf:chevron.down'} style={{ width: 10, height: 10 }} contentFit="contain" tintColor={colors.tertiaryLabel} />
+        <View style={{ flex: 1 }} />
+        {collapsed && waiting ? <UnreadBadge badge={waiting} /> : null}
+      </Pressable>
+      {/* Closed, a hairline stands in for the list — it separates one closed section from the next. */}
+      {collapsed ? <View style={{ height: 0.5, marginHorizontal: 16, backgroundColor: colors.separator }} /> : null}
+    </View>
+  );
 }
 
 /** A flat grouped surface (iOS Settings): no shadow, no border — the ground does the work. */
