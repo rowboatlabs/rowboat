@@ -90,7 +90,9 @@ import { dispatchCreditExhausted, dispatchCreditReplenished } from "@/lib/credit
 import { ensureMarkdownExtension, normalizeWikiPath, splitWikiFragment, stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
 import { splitFrontmatter, joinFrontmatter } from '@/lib/frontmatter'
 import { extractConferenceLink } from '@/lib/calendar-event'
-import { OnboardingModal } from '@/components/onboarding'
+// BAARALI(04/10/2026): Baarali's onboarding in place of the upstream's (components/baarali-onboarding).
+import { BaaraliOnboarding } from '@/components/baarali-onboarding'
+import { clearSaved as clearOnboarding, loadSaved as loadOnboarding, shouldShow as shouldShowOnboarding } from '@/components/baarali-onboarding/model'
 import { ComposioGoogleMigrationModal } from '@/components/composio-google-migration-modal'
 import { ModelRecommendationUpdateModal, type RecommendationUpdate } from '@/components/model-recommendation-update-modal'
 import { CommandPalette, type CommandPaletteMention } from '@/components/command-palette'
@@ -6433,7 +6435,14 @@ function App() {
     async function checkOnboarding() {
       try {
         const result = await window.ipc.invoke('onboarding:getStatus', null)
-        setShowOnboarding(result.showOnboarding)
+        // BAARALI(04/10/2026): also without a Baarali session, and while this
+        // window's onboarding is under way (an instance says it was done).
+        const signedIn = await window.ipc.invoke('oauth:getState', null)
+          .then((r) => !!r.config?.rowboat?.connected)
+          .catch(() => true)
+        const show = shouldShowOnboarding({ upstream: result.showOnboarding, signedIn, saved: loadOnboarding() })
+        if (!show) clearOnboarding()
+        setShowOnboarding(show)
       } catch (err) {
         console.error('Failed to check onboarding status:', err)
       }
@@ -6444,7 +6453,7 @@ function App() {
   // Handler for onboarding completion. When the user accepts the tour offer
   // on the final step, hand off to the mascot tour once the modal's exit
   // animation has cleared.
-  const handleOnboardingComplete = useCallback(async (opts?: { startTour?: boolean }) => {
+  const handleOnboardingComplete = useCallback(async (opts?: { startTour?: boolean; prompt?: string }) => {
     try {
       await window.ipc.invoke('onboarding:markComplete', null)
     } catch (err) {
@@ -6455,6 +6464,8 @@ function App() {
     if (opts?.startTour) {
       window.setTimeout(() => setTourActive(true), 400)
     }
+    // BAARALI(04/10/2026): the first request picked at the end, in the composer to read before sending.
+    if (opts?.prompt) setHomeComposerPreset(opts.prompt)
   }, [])
 
   const knowledgeActions = React.useMemo(() => ({
@@ -8281,7 +8292,7 @@ function App() {
         onOpenChange={setVoiceSetupOpen}
         defaultTab="account"
       />
-      <OnboardingModal
+      <BaaraliOnboarding
         open={showOnboarding}
         onComplete={handleOnboardingComplete}
       />
