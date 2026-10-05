@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { BUILD_COMMANDS, CORE_ALLOWED_COMMANDS, MEDIA_SKILL, NEVER_EXPIRES, SERVER_LOCK, seedWorkdir } from '../src/seed.js';
+import { BUILD_COMMANDS, CORE_ALLOWED_COMMANDS, IMAGES_SKILL, MEDIA_SKILL, NEVER_EXPIRES, SERVER_LOCK, seedWorkdir } from '../src/seed.js';
 
 async function tmp() { return fs.mkdtemp(path.join(os.tmpdir(), 'baarali-seed-')); }
 const read = async (dir: string, f: string) => JSON.parse(await fs.readFile(path.join(dir, 'config', f), 'utf8'));
@@ -70,6 +70,11 @@ describe('seedWorkdir', () => {
     expect(await read(dir, 'mcp.json')).toEqual({ mcpServers: { mine: { url: 'https://x.test' }, 'baarali-media': { type: 'stdio', ...mediaServer } } });
     const skill = await fs.readFile(path.join(dir, 'skills', 'baarali-media', 'SKILL.md'), 'utf8');
     expect(skill).toBe(MEDIA_SKILL);
+    // Images go to core's own tool, attached alone.
+    const images = await fs.readFile(path.join(dir, 'skills', 'baarali-images', 'SKILL.md'), 'utf8');
+    expect(images).toBe(IMAGES_SKILL);
+    expect(images).toMatch(/^---\nname: Images\n[\s\S]*\ntools: \[generate-image\]\n---\n/);
+    expect(images).toContain('`generate-image`');
     expect(skill).toMatch(/^---\nname: .+\ndescription: .+\ntools: \[listMcpTools, executeMcpTool\]\n---/);
     expect(skill).toContain('`baarali-media` MCP server');
     // No secret in mcp.json: the server reads the session from oauth.json.

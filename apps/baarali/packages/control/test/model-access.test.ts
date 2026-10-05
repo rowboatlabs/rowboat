@@ -37,6 +37,13 @@ describe('who sees a model', () => {
     expect(accessFor(c, FREE, 'meta-llama/llama-5')).toEqual({ kind: 'hidden' });
   });
 
+  it('hides OpenRouter\'s own models (routers, vanishing previews) until the owner opens one', () => {
+    expect(accessFor(catalogOf(PLANS, []), MAX, 'openrouter/space-bunny-alpha')).toEqual({ kind: 'hidden' });
+    expect(accessFor(catalogOf(PLANS, []), MAX, 'openrouter/auto')).toEqual({ kind: 'hidden' });
+    const opened = catalogOf(PLANS, [setting('openrouter/auto')]);
+    expect(accessFor(opened, MAX, 'openrouter/auto')).toEqual({ kind: 'open' });
+  });
+
   it('hides a model switched off, from every plan', () => {
     const c = catalogOf(PLANS, [setting('anthropic/opus', { enabled: false })]);
     for (const p of PLANS) expect(accessFor(c, p, 'anthropic/opus')).toEqual({ kind: 'hidden' });
@@ -98,6 +105,17 @@ describe('a call fitted to the plan', () => {
     const c = catalogOf(PLANS, [setting('anthropic/opus', { minPlan: 'pro-100' })]);
     expect(fitCall(c, PRO, '/chat/completions', body('anthropic/opus'))).toBeNull();
     expect(fitCall(c, WEEK, '/embeddings', body('anthropic/opus'))).toBeNull();
+  });
+
+  it('sends a model OpenRouter no longer lists to the default, its variants and aliases kept', () => {
+    const c = catalogOf(PLANS, [setting('anthropic/sonnet', { recommended: true })]);
+    const known = new Set(['anthropic/sonnet', 'deepseek/flash', 'deepseek/flash:free']);
+    // A preview withdrawn while an app still has it chosen (05/10/2026).
+    expect(fitCall(c, MAX, '/chat/completions', body('x-ai/gone-alpha'), known)).toMatchObject({ ok: true, requested: 'x-ai/gone-alpha', served: 'anthropic/sonnet' });
+    expect(fitCall(c, MAX, '/chat/completions', body('deepseek/flash:online'), known)).toBeNull();
+    expect(fitCall(c, MAX, '/chat/completions', body('~anthropic/sonnet-latest'), known)).toBeNull();
+    // The list never read: nothing rerouted for it.
+    expect(fitCall(c, MAX, '/chat/completions', body('x-ai/gone-alpha'), null)).toBeNull();
   });
 
   it('keeps Découverte on its policy: its list, reasoning off', () => {

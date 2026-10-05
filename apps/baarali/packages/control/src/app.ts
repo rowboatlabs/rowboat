@@ -63,6 +63,13 @@ const publicDevice = (d: { id: string; name: string; createdAt: number; lastSeen
 export function createApp(deps: ControlDeps) {
   // One cache of the console's model settings, for the proxy and the console (model-catalog.ts).
   const models = deps.models ?? new ModelCatalog(deps.store, deps.now);
+  // OpenRouter's list, for the console and to reroute a withdrawn model (llm-proxy.ts).
+  const upstreamModels =
+    deps.upstreamModels ??
+    new UpstreamModels(
+      () => deps.fetch(`${deps.upstreamBase ?? OPENROUTER_BASE}/models`, { headers: { authorization: `Bearer ${deps.openRouterKey}` } }),
+      deps.now,
+    );
   const app = new Hono<Env>();
 
   app.get('/health', (c) => c.json({ ok: true }));
@@ -168,7 +175,7 @@ export function createApp(deps: ControlDeps) {
     });
   });
 
-  app.all('/v1/llm/*', (c) => proxyLlm({ ...deps, models }, c.get('account'), c.req.raw));
+  app.all('/v1/llm/*', (c) => proxyLlm({ ...deps, models, upstreamModels }, c.get('account'), c.req.raw));
 
   app.get('/v1/media/models', (c) => listMediaModels({ ...deps, models }, c.get('account')));
   app.get('/v1/media/balance', (c) => mediaBalance(deps, c.get('account')));
@@ -239,10 +246,7 @@ export function createApp(deps: ControlDeps) {
     mediaPacks: deps.mediaPacks,
     instances: deps.instances,
     models,
-    upstreamModels: new UpstreamModels(
-      () => deps.fetch(`${deps.upstreamBase ?? OPENROUTER_BASE}/models`, { headers: { authorization: `Bearer ${deps.openRouterKey}` } }),
-      deps.now,
-    ),
+    upstreamModels,
     now: deps.now,
   });
 

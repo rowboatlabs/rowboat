@@ -26,6 +26,7 @@ export interface SeedOptions {
 /** Our entries in the person's MCP config and skills; rewritten on every boot, the rest is theirs. */
 export const MEDIA_SERVER_NAME = 'baarali-media';
 export const MEDIA_SKILL_DIR = 'baarali-media';
+export const IMAGES_SKILL_DIR = 'baarali-images';
 /** Their names until the rename to Baarali (01/10/2026): removed from existing workdirs. */
 const FORMER_MEDIA_NAME = 'warell-media';
 
@@ -34,7 +35,7 @@ const FORMER_MEDIA_NAME = 'warell-media';
 // bridge ones, which keep their mcp-execute approval.
 export const MEDIA_SKILL = `---
 name: Video, voice and music
-description: Generate a video, a voice-over (text to speech) or a song/music track. Load whenever the user asks to create, make or generate a video, clip, animation, voice, narration, audio reading, song, jingle or music.
+description: Generate a video, a voice-over (text to speech) or a song/music track. Load whenever the user asks to create, make or generate a video, clip, animation, voice, narration, audio reading, song, jingle or music. Not for still images (the Images skill makes those).
 tools: [listMcpTools, executeMcpTool]
 ---
 
@@ -48,6 +49,26 @@ Generations run on the \`${MEDIA_SERVER_NAME}\` MCP server, through \`executeMcp
 4. When ready, show the saved path to the user in a \`\`\`filepath code block.
 
 Each generation is paid from the user's media credits when it starts, and refunded if it fails; \`list_models\` gives each model's price and the balance. Before a video, tell the user its price in credits. Generate once per request; never retry a successful one, and never start several variants unless asked. If \`generate\` reports \`insufficient_media_credits\`, say plainly what it costs and what is left, and offer a cheaper model, a shorter duration, or buying a media credit pack.
+`;
+
+// No bundled skill owns core's image tool (05/10/2026): asked for a picture,
+// the agent loaded the whole builtin toolset (76 tools), then searched the
+// media server, which makes none, and stalled. This one attaches only it.
+export const IMAGES_SKILL = `---
+name: Images
+description: Create, draw or generate a still image, picture, photo, illustration, drawing, logo, icon, poster, banner or wallpaper. Load whenever the user asks for an image.
+tools: [generate-image]
+---
+
+# Images
+
+Call \`generate-image\` at once: no other tool is needed, and never look for one on the \`${MEDIA_SERVER_NAME}\` server (it makes videos, voices and music, not images).
+
+- \`prompt\`: a vivid, self-contained description (subject, style, setting, light, colours), written from what the user asked.
+- \`aspectRatio\` only when the user asks for a shape: \`"16:9"\` wide, \`"9:16"\` phone or story, \`"1:1"\` square.
+- Make one image per request unless the user asks for several.
+
+When it succeeds, show the saved path in a \`\`\`filepath code block, with one short sentence. If it fails because the plan does not include images, say so plainly and suggest a paid plan; for any other failure, say what went wrong in one sentence and offer to try again.
 `;
 
 /** Far future: the control plane rotates the token, core must never try to refresh it. */
@@ -133,6 +154,11 @@ export async function seedWorkdir(opts: SeedOptions): Promise<void> {
     await fs.mkdir(skillDir, { recursive: true });
     await fs.writeFile(path.join(skillDir, 'SKILL.md'), MEDIA_SKILL);
   }
+
+  // Ours, rewritten on every boot like the media skill.
+  const imagesDir = path.join(opts.workDir, 'skills', IMAGES_SKILL_DIR);
+  await fs.mkdir(imagesDir, { recursive: true });
+  await fs.writeFile(path.join(imagesDir, 'SKILL.md'), IMAGES_SKILL);
 
   // Initial model choice only; a choice already made is never overwritten.
   const modelsFile = path.join(config, 'models.json');

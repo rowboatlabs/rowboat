@@ -21,6 +21,7 @@ import {
   mediaOpen,
   type ModelSetting,
   type PickerModel,
+  openUntouched,
 } from './model-access.js';
 import type { ModelCatalog, UpstreamModels } from './model-catalog.js';
 import { displayName } from './models.js';
@@ -53,7 +54,7 @@ export interface ConsoleDeps {
 /** One write touches this many models at most: a whole vendor fits, a slip does not empty the catalog. */
 export const MAX_MODELS_PER_WRITE = 500;
 
-const blank = (modelId: string): ModelSetting => ({ modelId, enabled: true, minPlan: null, recommended: false, strength: null, freeRank: null });
+const blank = (modelId: string): ModelSetting => ({ modelId, enabled: openUntouched(modelId), minPlan: null, recommended: false, strength: null, freeRank: null });
 
 /** OpenRouter prices a token in dollars; the console reads them per million. */
 function perMillion(v: unknown): number | null {
@@ -361,7 +362,7 @@ export function mountAdminConsole(app: Hono<any>, deps: ConsoleDeps): void {
         id: m.id,
         name: typeof m.name === 'string' ? displayName(m.name) : m.id,
         configured: Boolean(s),
-        enabled: s?.enabled ?? true,
+        enabled: s?.enabled ?? openUntouched(m.id),
         minPlan: s?.minPlan ?? null,
         recommended: s?.recommended ?? false,
         strength: s?.strength ?? null,
