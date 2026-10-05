@@ -236,6 +236,7 @@ Pour ne rien changer aux connecteurs de Rowboat, qui lisent `config/oauth.json` 
 - **Rotation** de la clé maîtresse chaque année, et immédiatement en cas d'incident. Le champ `key_version` permet de rechiffrer progressivement.
 - **Volumes d'instance** chiffrés au repos par l'hébergeur. Par-dessus, la clé `cipher-key` de Rowboat (H7) **n'est plus écrite sur le volume** : le plan de contrôle la remet à l'instance à chaque réveil, dans un système de fichiers en mémoire, et `ROWBOAT_WORKDIR/cipher-key` pointe dessus. **Latitude** sur le moyen (lien symbolique vers un tmpfs, variable d'environnement) : l'exigence est qu'une sauvegarde du volume ne contienne pas la clé.
 - **Sauvegardes** chiffrées avec une clé distincte de celle du volume.
+  - **État au 05/10/2026 :** les sauvegardes sont les instantanés quotidiens de Fly, gardés 14 jours, chiffrés par Fly. La clé `cipher-key` est **encore sur le volume** (H7 pas encore traité), donc dans ces instantanés. À traiter avant d'ouvrir au-delà de l'accès anticipé.
 
 ## 7. Politique d'approbation
 

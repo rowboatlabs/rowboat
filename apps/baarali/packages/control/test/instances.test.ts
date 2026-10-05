@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FlyApiError, type FlyApi, type Machine, type MachineConfig } from '../src/fly.js';
+import { FlyApiError, type FlyApi, type Machine, type MachineConfig, type Volume, type VolumeOpts } from '../src/fly.js';
 import { Instances, InstanceUnavailable, settleOwnerInstance, type InstancesConfig } from '../src/instances.js';
 import { MemoryStore, hashToken, type Account, type Plan } from '../src/store.js';
 
@@ -7,19 +7,40 @@ const T0 = Date.UTC(2026, 9, 1, 8, 0, 0);
 const PLAN: Plan = { id: 'decouverte', category: 'free', displayName: 'Découverte', weekCredits: 1, monthlyPrices: [], models: null };
 const ME: Account = { id: 'acc_me', email: 'me@example.test', planId: 'decouverte', createdAt: T0 };
 const OTHER: Account = { id: 'acc_other', email: null, planId: 'decouverte', createdAt: T0 };
-const CONFIG: InstancesConfig = { app: 'baarali-instances', region: 'cdg', image: 'registry.fly.io/baarali-instances:v2', apiUrl: 'https://app.baarali.test', maxInstances: 2 };
+const CONFIG: InstancesConfig = { app: 'baarali-instances', region: 'cdg', image: 'registry.fly.io/baarali-instances:v2', apiUrl: 'https://app.baarali.test', maxInstances: 2, diskGb: 10, backupDays: 14 };
 
 /** Fly in memory: volumes and machines, and the calls made. */
 class FakeFly implements FlyApi {
   readonly calls: string[] = [];
   readonly machines = new Map<string, Machine & { config: MachineConfig }>();
   failCreateMachine = false;
+  readonly volumes = new Map<string, Volume>();
   failUpdate = false;
+  failVolume = false;
   private n = 0;
 
-  async createVolume(app: string) {
-    this.calls.push(`volume ${app}`);
-    return { id: `vol_${++this.n}` };
+  async createVolume(app: string, opts: VolumeOpts) {
+    this.calls.push(`volume ${app} ${opts.sizeGb}GB ${opts.backupDays}d`);
+    const id = `vol_${++this.n}`;
+    this.volumes.set(id, { id, size_gb: opts.sizeGb, snapshot_retention: opts.backupDays, auto_backup_enabled: true });
+    return { id };
+  }
+  async volume(_app: string, id: string) {
+    this.calls.push(`get ${id}`);
+    if (this.failVolume) throw new FlyApiError(500, 'volumes are down');
+    return this.volumes.get(id)!;
+  }
+  async extendVolume(_app: string, id: string, sizeGb: number) {
+    this.calls.push(`extend ${id} ${sizeGb}`);
+    this.volumes.get(id)!.size_gb = sizeGb;
+    return { needs_restart: true };
+  }
+  async setBackups(_app: string, id: string, days: number) {
+    this.calls.push(`backups ${id} ${days}`);
+    Object.assign(this.volumes.get(id)!, { snapshot_retention: days, auto_backup_enabled: true });
+  }
+  async snapshots() {
+    return [];
   }
   async createMachine(app: string, { config }: { region: string; config: MachineConfig }) {
     this.calls.push(`create ${app} ${config.mounts[0].volume}`);
@@ -77,7 +98,7 @@ describe('Instances.ensure', () => {
     expect(await store.accountByToken(instances.instanceToken(ME.id))).toEqual(ME);
 
     await instances.ensure(ME);
-    expect(fly.calls).toEqual(['volume baarali-instances', 'create baarali-instances vol_1']);
+    expect(fly.calls).toEqual(['volume baarali-instances 10GB 14d', 'create baarali-instances vol_1']);
   });
 
   it('gives two devices connecting together the same machine', async () => {
@@ -227,6 +248,54 @@ describe('Instances keys and reach', () => {
       throw new FlyApiError(500, 'boom');
     };
     await expect(instances.wake(record)).rejects.toThrow('boom');
+  });
+});
+
+describe('Instances disks', () => {
+  /** An instance made before 05/10/2026: 1 GB, Fly's default 5 days of snapshots. */
+  async function oldDisk() {
+    const s = setup();
+    const record = await s.instances.ensure(ME);
+    Object.assign(s.fly.volumes.get(record.volumeId!)!, { size_gb: 1, snapshot_retention: 5 });
+    // A new process: it has checked no disk yet.
+    const instances = new Instances({ store: s.store, secret: 'test-secret-0123456789abcdef0123', fly: s.fly, config: CONFIG, now: () => T0 });
+    s.fly.calls.length = 0;
+    return { ...s, instances, record };
+  }
+
+  it('grows a sleeping instance\'s disk and boots it afresh to see it, once', async () => {
+    const { fly, instances, record } = await oldDisk();
+    fly.machines.get(record.machineId!)!.state = 'suspended';
+    await instances.wake(record);
+    const m = record.machineId, v = record.volumeId;
+    expect(fly.calls).toEqual([`get ${m}`, `get ${v}`, `extend ${v} 10`, `backups ${v} 14`, `update ${m} ${CONFIG.image}`, `wait ${m}`]);
+    expect(fly.volumes.get(v!)).toMatchObject({ size_gb: 10, snapshot_retention: 14 });
+    // Settled: the next sleep and wake is a plain start.
+    fly.machines.get(m!)!.state = 'suspended';
+    fly.calls.length = 0;
+    await instances.wake({ ...record });
+    expect(fly.calls.filter((c) => c.includes(v!))).toEqual([]);
+  });
+
+  it('never touches the disk of a running instance', async () => {
+    const { fly, instances, record } = await oldDisk();
+    await instances.wake(record);
+    expect(fly.calls).toEqual([`get ${record.machineId}`]);
+  });
+
+  it('grows the disk when a device connects and the machine is updated anyway', async () => {
+    const { store, fly, instances, record } = await oldDisk();
+    await store.saveInstance({ ...record, image: 'registry.fly.io/baarali-instances:v1' });
+    await instances.ensure(ME);
+    expect(fly.calls).toEqual([`get ${record.volumeId}`, `extend ${record.volumeId} 10`, `backups ${record.volumeId} 14`, `update ${record.machineId} ${CONFIG.image}`]);
+  });
+
+  it('still starts the instance when Fly will not describe the disk', async () => {
+    const { fly, instances, record } = await oldDisk();
+    fly.machines.get(record.machineId!)!.state = 'suspended';
+    fly.failVolume = true;
+    await instances.wake(record);
+    expect(fly.calls).toEqual([`get ${record.machineId}`, `get ${record.volumeId}`, `start ${record.machineId}`, `wait ${record.machineId}`]);
   });
 });
 

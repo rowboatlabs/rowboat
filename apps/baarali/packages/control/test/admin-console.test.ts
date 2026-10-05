@@ -53,6 +53,10 @@ function setup(opts: { adminEmails?: string[]; noAuth?: boolean } = {}) {
     start: async (_app, id) => void calls.push(`start ${id}`),
     restart: async (_app, id) => void calls.push(`restart ${id}`),
     waitStarted: async () => {},
+    volume: async (_app, id) => ({ id, size_gb: 1, block_size: 4096, blocks: 250_000, blocks_free: 200_000, snapshot_retention: 5, auto_backup_enabled: true }),
+    extendVolume: async () => ({ needs_restart: true }),
+    setBackups: async () => {},
+    snapshots: async () => [{ id: 's1', created_at: '2026-10-04T03:00:00Z' }, { id: 's2', created_at: '2026-10-05T03:00:00Z' }],
   };
   const store = new MemoryStore(new Map([[hashToken('tok-owner'), OWNER], [hashToken('tok-awa'), AWA]]), [FREE, PRO100, PRO]);
   let clock = T0 + 60_000;
@@ -60,7 +64,7 @@ function setup(opts: { adminEmails?: string[]; noAuth?: boolean } = {}) {
     store,
     secret: 'test-secret-0123456789abcdef0123',
     fly,
-    config: { app: 'baarali-instances', region: 'cdg', image: 'registry.fly.io/baarali-instances:v11', apiUrl: 'https://app.baarali.test', maxInstances: 5 },
+    config: { app: 'baarali-instances', region: 'cdg', image: 'registry.fly.io/baarali-instances:v11', apiUrl: 'https://app.baarali.test', maxInstances: 5, diskGb: 10, backupDays: 14 },
     now: () => clock,
   });
   const app = createApp({
@@ -254,9 +258,12 @@ describe('instances from the console', () => {
     const body = await (await as('boss', '/admin/api/instances')).json();
     expect(body).toEqual({
       currentImage: 'v11',
+      diskGb: 10,
       data: [expect.objectContaining({
         accountId: AWA.id, email: AWA.email, image: 'v10', outdated: true, state: 'suspended',
         logsUrl: 'https://fly.io/apps/baarali-instances/machines/m_awa',
+        // 50 000 blocks of 4 KiB in use; the newest of the snapshots.
+        disk: { sizeGb: 1, usedGb: 0.2048, backupDays: 5, lastBackupAt: '2026-10-05T03:00:00Z' },
       })],
     });
     const overview = (await (await as('boss', '/admin/api/overview')).json()) as { attention: { outdatedInstances: number; failedInstances: unknown[] } };

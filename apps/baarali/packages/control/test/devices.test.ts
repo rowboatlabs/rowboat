@@ -28,6 +28,10 @@ const fly: FlyApi = {
   start: async () => {},
   restart: async () => {},
   waitStarted: async () => {},
+  volume: async (_app, id) => ({ id, size_gb: 10 }),
+  extendVolume: async () => ({ needs_restart: false }),
+  setBackups: async () => {},
+  snapshots: async () => [],
 };
 
 function setup(maxInstances = 5) {
@@ -36,7 +40,7 @@ function setup(maxInstances = 5) {
     store,
     secret: 'test-secret-0123456789abcdef0123',
     fly,
-    config: { app: 'baarali-instances', region: 'cdg', image: 'img', apiUrl: 'https://app.baarali.test', maxInstances },
+    config: { app: 'baarali-instances', region: 'cdg', image: 'img', apiUrl: 'https://app.baarali.test', maxInstances, diskGb: 10, backupDays: 14 },
     now: () => T0,
   });
   const app = createApp({
