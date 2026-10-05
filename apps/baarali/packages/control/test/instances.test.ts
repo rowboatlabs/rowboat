@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { FlyApiError, type FlyApi, type Machine, type MachineConfig, type Volume, type VolumeOpts } from '../src/fly.js';
-import { Instances, InstanceUnavailable, settleOwnerInstance, type InstancesConfig } from '../src/instances.js';
+import { Instances, InstanceUnavailable, KEYS, settleOwnerInstance, type InstancesConfig } from '../src/instances.js';
 import { MemoryStore, hashToken, type Account, type Plan } from '../src/store.js';
 
 const T0 = Date.UTC(2026, 9, 1, 8, 0, 0);
@@ -88,7 +88,7 @@ describe('Instances.ensure', () => {
   it('creates a volume and a machine once, with the keys and the control plane in its env', async () => {
     const { store, fly, instances } = setup();
     const record = await instances.ensure(ME);
-    expect(record).toEqual({ accountId: ME.id, app: CONFIG.app, machineId: 'm_2', volumeId: 'vol_1', image: CONFIG.image, managed: true });
+    expect(record).toEqual({ accountId: ME.id, app: CONFIG.app, machineId: 'm_2', volumeId: 'vol_1', image: CONFIG.image, managed: true, keys: 2 });
     expect(await store.instance(ME.id)).toEqual(record);
     const env = fly.machines.get('m_2')!.config.env;
     expect(env).toEqual({ API_URL: CONFIG.apiUrl, BAARALI_INSTANCE_TOKEN: instances.instanceToken(ME.id), BAARALI_SERVER_KEY: instances.serverKey(ME.id) });
@@ -125,6 +125,30 @@ describe('Instances.ensure', () => {
     expect(fly.calls.at(-1)).toBe(`update ${old.machineId} ${CONFIG.image}`);
   });
 
+  it('moves a machine on the first keys to the current ones, and the old token opens nothing', async () => {
+    const { store, fly, instances } = setup();
+    const record = await instances.ensure(ME);
+    // A machine set up before the keys changed: on the current image, first keys.
+    await store.saveInstance({ ...record, keys: 1 });
+    await store.grantToken(instances.instanceToken(ME.id, 1), ME.id);
+    const old = (await store.instance(ME.id))!;
+    expect(instances.outdatedRecord(old)).toBe(true);
+    // Until it moves, the gateway still speaks its keys.
+    expect(instances.target(old).key).toBe(instances.serverKey(ME.id, 1));
+    expect(instances.serverKey(ME.id, 1)).not.toBe(instances.serverKey(ME.id));
+
+    expect((await instances.ensure(ME)).keys).toBe(KEYS);
+    expect(fly.calls.at(-1)).toBe(`update ${record.machineId} ${CONFIG.image}`);
+    const env = fly.machines.get(record.machineId!)!.config.env;
+    expect(env.BAARALI_SERVER_KEY).toBe(instances.serverKey(ME.id));
+    expect(env.BAARALI_INSTANCE_TOKEN).toBe(instances.instanceToken(ME.id));
+    expect(await store.accountByToken(instances.instanceToken(ME.id, 1))).toBeNull();
+    expect((await store.accountByToken(instances.instanceToken(ME.id)))?.id).toBe(ME.id);
+    const moved = (await store.instance(ME.id))!;
+    expect(instances.outdatedRecord(moved)).toBe(false);
+    expect(instances.target(moved).key).toBe(instances.serverKey(ME.id));
+  });
+
   it('creates none beyond the cap, and none at all without Fly', async () => {
     const { instances } = setup({ ...CONFIG, maxInstances: 1 });
     await instances.ensure(ME);
@@ -136,7 +160,7 @@ describe('Instances.ensure', () => {
 
   it('leaves the owner instance of phase 0 as deployed', async () => {
     const { store, fly, instances } = setup();
-    const owner = { accountId: 'owner', app: 'warell-owner', machineId: null, volumeId: null, image: null, managed: false };
+    const owner = { accountId: 'owner', app: 'warell-owner', machineId: null, volumeId: null, image: null, managed: false, keys: 1 };
     await store.saveInstance(owner);
     // Not a machine of ours: the record stands, nothing is created.
     expect(await instances.ensure({ ...ME, id: 'owner' })).toEqual(owner);
@@ -156,14 +180,14 @@ describe('Instances keys and reach', () => {
 
   it('pins a managed machine over Flycast, and reaches the owner by its app', () => {
     const { instances } = setup();
-    const managed = { accountId: ME.id, app: 'baarali-instances', machineId: 'm_9', volumeId: 'v', image: 'i', managed: true };
+    const managed = { accountId: ME.id, app: 'baarali-instances', machineId: 'm_9', volumeId: 'v', image: 'i', managed: true, keys: 2 };
     expect(instances.target(managed)).toEqual({
       host: 'baarali-instances.flycast',
       port: 80,
       headers: { 'fly-force-instance-id': 'm_9' },
       key: instances.serverKey(ME.id),
     });
-    expect(instances.target({ ...managed, accountId: 'owner', app: 'warell-owner', machineId: null, managed: false }).headers).toEqual({});
+    expect(instances.target({ ...managed, accountId: 'owner', app: 'warell-owner', machineId: null, managed: false, keys: 1 }).headers).toEqual({});
   });
 
   it('starts a suspended machine and waits for it, then trusts it awake for a while', async () => {

@@ -110,12 +110,15 @@ describe.each([
     const store = await make();
     await store.grantToken('tok-new', OTHER.id);
     expect(await store.accountByToken('tok-new')).toEqual(OTHER);
+    await store.revokeToken('tok-new');
+    expect(await store.accountByToken('tok-new')).toBeNull();
+    await store.revokeToken('tok-never-granted');
   });
 
   it('keeps an instance record and its later steps', async () => {
     const store = await make();
     expect(await store.instance(ME.id)).toBeNull();
-    const record = { accountId: ME.id, app: 'baarali-instances', machineId: null, volumeId: 'vol_1', image: null, managed: true };
+    const record = { accountId: ME.id, app: 'baarali-instances', machineId: null, volumeId: 'vol_1', image: null, managed: true, keys: 2 };
     await store.saveInstance(record);
     await store.saveInstance({ ...record, machineId: 'm1', image: 'img:1' });
     expect(await store.instance(ME.id)).toEqual({ ...record, machineId: 'm1', image: 'img:1' });
@@ -209,7 +212,7 @@ describe.each([
 
   it('lists every instance', async () => {
     const store = await make();
-    const record = { accountId: ME.id, app: 'baarali-instances', machineId: 'm1', volumeId: 'v1', image: 'img:1', managed: true };
+    const record = { accountId: ME.id, app: 'baarali-instances', machineId: 'm1', volumeId: 'v1', image: 'img:1', managed: true, keys: 2 };
     await store.saveInstance(record);
     expect(await store.allInstances()).toEqual([record]);
   });

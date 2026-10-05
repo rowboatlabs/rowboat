@@ -160,7 +160,7 @@ export function mountAdminConsole(app: Hono<any>, deps: ConsoleDeps): void {
     const { now, plans, label, list, rows } = await summaries();
     const instances = await store.allInstances();
     const outdated = deps.instances?.currentImage
-      ? instances.filter((i) => i.managed && i.image !== deps.instances!.currentImage).length
+      ? instances.filter((i) => deps.instances!.outdatedRecord(i)).length
       : 0;
     // A machine that failed to start is the first thing to see (mockup of 03/10/2026).
     const failed = deps.instances
@@ -304,7 +304,7 @@ export function mountAdminConsole(app: Hono<any>, deps: ConsoleDeps): void {
           // Its logs and metrics, on Fly's dashboard (signed in there).
           logsUrl: r.managed && r.machineId ? `https://fly.io/apps/${r.app}/machines/${r.machineId}` : null,
           image: imageLabel(r.image),
-          outdated: Boolean(current && r.managed && r.image !== current),
+          outdated: Boolean(deps.instances?.outdatedRecord(r)),
           state: live === 'unknown' ? 'unknown' : (live?.state ?? null),
           disk,
         };
