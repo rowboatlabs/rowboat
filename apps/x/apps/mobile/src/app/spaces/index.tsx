@@ -375,7 +375,7 @@ function OrgCard({ org, onSwitch }: { org: SpacesOrg; onSwitch: () => void }) {
   return (
     <View style={{ gap: 24 }}>
       {/* Org identity: a plain card — tile, name, one quiet line of facts. */}
-      <Card>
+      <Card radius={32 /* near-concentric with the 44pt logo and its 14pt inset */}>
         <Pressable
           onPress={() => {
             if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
@@ -547,9 +547,9 @@ function SectionLabel({ text }: { text: string }) {
 }
 
 /** A flat grouped surface (iOS Settings): no shadow, no border — the ground does the work. */
-function Card({ children }: { children: ReactNode }) {
+function Card({ children, radius = 20 }: { children: ReactNode; radius?: number }) {
   const colors = useColors();
-  return <View style={{ borderRadius: 20, borderCurve: 'continuous', overflow: 'hidden', backgroundColor: colors.card }}>{children}</View>;
+  return <View style={{ borderRadius: radius, borderCurve: 'continuous', overflow: 'hidden', backgroundColor: colors.card }}>{children}</View>;
 }
 
 /** 46pt row with a hairline inset past the leading glyph. */
