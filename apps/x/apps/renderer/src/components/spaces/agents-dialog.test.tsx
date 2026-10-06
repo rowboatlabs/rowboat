@@ -277,6 +277,10 @@ describe('AgentsDialog', () => {
             `openclaw mcp add rowboat --url 'https://rowboat.example/mcp' --transport streamable-http --header 'Authorization: Bearer ${NEW_KEY}'`,
         )
         expect(screen.getByText(/https:\/\/cd34ef56gh-7681\.agent37\.app/)).toBeInTheDocument()
+        // The key on its own copies whole, though it reads shortened on screen.
+        fireEvent.click(screen.getByRole('button', { name: 'Copy Agent key' }))
+        expect(vi.mocked(navigator.clipboard.writeText).mock.calls.at(-1)![0]).toBe(NEW_KEY)
+        expect(screen.queryByText(NEW_KEY)).toBeNull()
     })
 
     it('adds an Agent37 agent on a new instance, created with the key, a model budget and sleep', async () => {

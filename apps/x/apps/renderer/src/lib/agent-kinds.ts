@@ -326,6 +326,15 @@ function agent37Setup({ orgUrl, agentKey, kind, instance }: SetupContext): Setup
     const id = instance ?? '<instance>'
     const terminal = `Open the instance’s terminal: from the Agent37 dashboard, or its port 7681 (https://${id}-7681.agent37.app) through a signed URL.`
     const restart = { title: 'Restart the instance', note: `From the Agent37 dashboard, or POST /v1/instances/${id}/restart. The agent picks up the tools and the skill when it starts.` }
+    // The key on its own too (2026-10-06, found by Arjun): inside the commands it reads shortened and
+    // their Copy takes them all, so without this the key itself could not be copied.
+    const values = {
+        valuesNote: 'Or value by value, for the instance’s own dashboard:',
+        values: [
+            { label: 'MCP URL', text: `${orgUrl}/mcp` },
+            { label: 'Agent key', text: agentKey, secret: true },
+        ],
+    }
     if (kind === 'openclaw') {
         return [
             {
@@ -340,6 +349,7 @@ function agent37Setup({ orgUrl, agentKey, kind, instance }: SetupContext): Setup
                             secret: true,
                             text: `openclaw mcp add rowboat --url '${orgUrl}/mcp' --transport streamable-http --header 'Authorization: Bearer ${agentKey}'`,
                         },
+                        ...values,
                     },
                     {
                         title: 'Teach it Spaces (recommended)',
@@ -372,6 +382,7 @@ function agent37Setup({ orgUrl, agentKey, kind, instance }: SetupContext): Setup
                             `hermes config set mcp_servers.rowboat.headers.Authorization 'Bearer \${ROWBOAT_AGENT_KEY}'`,
                         ].join('\n'),
                     },
+                    ...values,
                 },
                 {
                     title: 'Teach it Spaces (recommended)',
