@@ -1,6 +1,8 @@
 import type { Member, ServerFrame } from '@rowboat/spaces-protocol';
 import type { ActorCtx } from '../core/kernel.js';
+import type { CredentialTarget } from '../core/agents.js';
 import type { HarborService } from '../service.js';
+import { agent37Platform } from './agent37/index.js';
 import { replicasPlatform } from './replicas/index.js';
 
 // Connectors Harbor runs (spec §8 Connectors, 2026-09-30): for an agent whose
@@ -39,10 +41,12 @@ export interface RunningConnector {
 
 export interface ConnectorPlatform {
   /**
-   * Check a credential with the platform before Harbor saves it. Throws a
-   * HarborError('invalid_request') carrying the platform's reason on refusal.
+   * Check a credential with the platform before Harbor saves it: that it is
+   * accepted and, for an instance connection, that it reaches the agent's
+   * instance and the instance runs the agent's kind. Throws a
+   * HarborError('invalid_request') carrying the reason on refusal.
    */
-  verify(secret: string): Promise<void>;
+  verify(secret: string, target: CredentialTarget): Promise<void>;
   /** Run the connector for one agent until stopped. */
   start(env: ConnectorEnv): RunningConnector;
 }
@@ -50,4 +54,5 @@ export interface ConnectorPlatform {
 /** One entry per connection in HARBOR_RUN_CONNECTIONS. */
 export const PLATFORMS: Record<string, ConnectorPlatform> = {
   replicas: replicasPlatform(),
+  agent37: agent37Platform(),
 };

@@ -3921,8 +3921,19 @@ export const ipcSchemas = {
       kind: z.string().optional(),
       connection: z.string().optional(),
       credential: z.string().optional(),
+      instance: z.string().optional(),
     }),
     res: z.object({ agent: z.custom<SpacesTypes.Member>(), key: z.custom<SpacesTypes.AgentKeySecret>() }),
+  },
+  // Adding an Agent37 agent (2026-10-05): find or create its instance with the
+  // key being pasted, before Harbor is asked to add it. The key is not kept.
+  'spaces:agent37Instances': {
+    req: z.object({ key: z.string() }),
+    res: z.object({ instances: z.array(z.object({ id: z.string(), name: z.string().nullable(), template: z.string(), status: z.string(), kind: z.string().optional() })) }),
+  },
+  'spaces:agent37CreateInstance': {
+    req: z.object({ key: z.string(), kind: z.string(), name: z.string(), monthlyBudgetUsd: z.number(), autoSleep: z.boolean() }),
+    res: z.object({ instance: z.object({ id: z.string(), name: z.string().nullable(), template: z.string(), status: z.string(), kind: z.string().optional() }) }),
   },
   'spaces:setAgentCredential': {
     req: z.object({ orgId: z.string(), agentId: z.string(), secret: z.string() }),

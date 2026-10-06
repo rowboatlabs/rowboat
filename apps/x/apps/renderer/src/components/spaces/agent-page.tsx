@@ -93,7 +93,7 @@ export function AgentPage({ org, listing, isAdmin, onChanged }: {
                         : `A key is shown only once, when it is made. Where the steps say ${KEY_PLACEHOLDER}, use that key${mine ? ', or make a new one to fill them in' : ''}.`
                 }
             >
-                <ConnectAgent org={org} setup={setupFor(agent)} agentId={agent.id} agentName={agent.displayName} agentKey={secret ?? KEY_PLACEHOLDER} />
+                <ConnectAgent org={org} setup={setupFor(agent)} {...(agent.agentKind ? { agentKind: agent.agentKind } : {})} {...(agent.agentInstance ? { agentInstance: agent.agentInstance } : {})} agentId={agent.id} agentName={agent.displayName} agentKey={secret ?? KEY_PLACEHOLDER} />
             </Section>
 
             <Section title="Keys" note="Each key lets whatever runs the agent act as it. Revoking one cuts that off at once.">
@@ -124,6 +124,11 @@ export function AgentPage({ org, listing, isAdmin, onChanged }: {
                     </Button>
                 )}
                 {credential && <CredentialRow orgId={org.id} agent={agent} credential={credential} canReplace={mine} onReplaced={onChanged} />}
+                {agent.agentInstance && (
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                        {PLATFORMS[agent.agentConnection ?? '']?.label ?? 'Platform'} instance {agent.agentInstance}: this agent is that instance, and stays on it.
+                    </p>
+                )}
             </Section>
         </div>
     )

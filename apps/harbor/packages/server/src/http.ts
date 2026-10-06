@@ -300,6 +300,7 @@ export function buildHttpApp(deps: {
         kind: input.kind,
         connection: input.connection,
         ...(input.credential !== undefined ? { credential: input.credential } : {}),
+        ...(input.instance !== undefined ? { instance: input.instance } : {}),
       }),
     );
   });

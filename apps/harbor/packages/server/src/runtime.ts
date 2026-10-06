@@ -65,7 +65,7 @@ export async function buildOrgRuntime(input: OrgRuntimeInput): Promise<OrgRuntim
   // connection is a platform, from boot, and for each such agent added later.
   const connectors = new HostedConnectors({ store, hub, service, orgId: input.orgId });
   service.attachConnectors({
-    verify: (connection, secret) => connectors.verify(connection, secret),
+    verify: (connection, secret, target) => connectors.verify(connection, secret, target),
     save: (agentId, secret, setBy) => connectors.save(agentId, secret, setBy),
     added: (agent) => connectors.ensure(agent),
   });

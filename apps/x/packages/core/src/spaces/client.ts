@@ -256,9 +256,10 @@ export class SpacesClient {
    * Add an agent this member owns; the response carries its first key's
    * secret, the only time it is shown. `kind`/`connection` say what it is and
    * how Harbor reaches it (2026-09-30); a platform agent (Replicas) also
-   * brings the platform's `credential`, which Harbor checks and seals.
+   * brings the platform's `credential`, which Harbor checks and seals, and an
+   * Agent37 agent its `instance` (2026-10-05).
    */
-  async addAgent(input: { displayName: string; kind?: string; connection?: string; credential?: string }): Promise<{ agent: Member; key: AgentKeySecret }> {
+  async addAgent(input: { displayName: string; kind?: string; connection?: string; credential?: string; instance?: string }): Promise<{ agent: Member; key: AgentKeySecret }> {
     return this.request('POST', routes.createAgent.path, routes.createAgent.response, input);
   }
 

@@ -169,7 +169,7 @@ export class HarborService {
   }
   addAgent(
     ctx: ActorCtx,
-    input: { displayName: string; kind: string; connection: string; credential?: string },
+    input: { displayName: string; kind: string; connection: string; credential?: string; instance?: string },
   ): Promise<{ agent: Member; key: AgentKeySecret }> {
     return this.agents.add(ctx, input);
   }

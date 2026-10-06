@@ -55,6 +55,13 @@ export const Member = z.object({
    */
   agentKind: z.string().min(1).max(32).optional(),
   agentConnection: z.string().min(1).max(32).optional(),
+  /**
+   * The platform instance the agent is, for a connection in
+   * INSTANCE_CONNECTIONS (2026-10-05): Agent37's instance id. Not a secret.
+   * Fixed at creation like the kind and connection: another instance is
+   * another agent. Absent for every other agent and for people.
+   */
+  agentInstance: z.string().min(1).max(128).optional(),
 });
 export type Member = z.infer<typeof Member>;
 
@@ -66,13 +73,22 @@ export type Member = z.infer<typeof Member>;
  * key. A new pair is a line here, never a migration.
  */
 export const REPLICAS_CODING_AGENTS = ['claude-code', 'codex', 'cursor', 'opencode', 'pi', 'muse-code'] as const;
+/** The general agents Agent37 hosts that Harbor drives through its API (2026-10-01): coding harnesses wait. */
+export const AGENT37_AGENTS = ['hermes', 'openclaw'] as const;
 export const AGENT_PAIRS: ReadonlyArray<{ kind: string; connection: string }> = [
   { kind: 'custom', connection: 'contract' },
   { kind: 'hermes', connection: 'plugin' },
   ...REPLICAS_CODING_AGENTS.map((kind) => ({ kind, connection: 'replicas' })),
+  ...AGENT37_AGENTS.map((kind) => ({ kind, connection: 'agent37' })),
 ];
 /** Connections whose connector Harbor runs, calling the platform with a credential it holds (spec §8 Connectors). */
-export const HARBOR_RUN_CONNECTIONS: readonly string[] = ['replicas'];
+export const HARBOR_RUN_CONNECTIONS: readonly string[] = ['replicas', 'agent37'];
+/**
+ * Connections whose agent is one instance on the platform (2026-10-05): the
+ * agent is added with it, and Harbor checks the instance runs the agent's kind.
+ * An Agent37 instance keeps its own memory and files, so it is the agent.
+ */
+export const INSTANCE_CONNECTIONS: readonly string[] = ['agent37'];
 
 export function isAgentPair(kind: string, connection: string): boolean {
   return AGENT_PAIRS.some((pair) => pair.kind === kind && pair.connection === connection);
