@@ -819,7 +819,7 @@ export const SpaceMarkdown = memo(function SpaceMarkdown({ body, className }: { 
                     write them that way), so a single newline inside a
                     paragraph has to render as one — remarkBreaks, same as
                     every other typed-message surface. */}
-                <Streamdown components={spaceComponents} remarkPlugins={userMessageRemarkPlugins}>{text}</Streamdown>
+                <Streamdown className="space-markdown-body" components={spaceComponents} remarkPlugins={userMessageRemarkPlugins}>{text}</Streamdown>
             </MessageImageGallery>
         </div>
     )
