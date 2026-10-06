@@ -71,6 +71,7 @@ contextBridge.exposeInMainWorld('ipc', ipc);
 // login-shell merge), so flags resolve synchronously before any renderer code.
 contextBridge.exposeInMainWorld('featureFlags', {
   spaces: flags.spacesEnabled(),
+  spacesOnly: flags.spacesOnly(process.env),
 });
 
 contextBridge.exposeInMainWorld('electronUtils', {

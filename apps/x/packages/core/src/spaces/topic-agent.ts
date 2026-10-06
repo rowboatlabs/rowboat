@@ -6,6 +6,7 @@ import { deriveTurnStatus, reduceTurn } from '@x/shared/dist/turns.js';
 import { WorkDir } from '../config/config.js';
 import { capture } from '../analytics/posthog.js';
 import { spacesMcpServerNameFor } from './orgs.js';
+import { flags } from '@x/shared';
 
 // @rowboat in a space (spec §8 grammar, §11 beat 7): an addressed message
 // routes into ONE session per thread — the anchor is the addressed message's
@@ -147,6 +148,9 @@ async function resolveSessions(): Promise<ISessions> {
 }
 
 export async function invokeTopicAgent(input: InvokeTopicAgentInput): Promise<InvokeTopicAgentResult> {
+  // Spaces-only (2026-10-02, spaces-only flag PR) ships without @rowboat; the
+  // renderer never asks, and this refuses any client that still does.
+  if (flags.spacesOnly(process.env)) throw new Error('@rowboat is not available in this app');
   const sessions = await resolveSessions();
 
   // The thread's session — verified alive, or recreated (todo-runner idiom).

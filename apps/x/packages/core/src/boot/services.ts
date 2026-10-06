@@ -103,6 +103,16 @@ export async function initCoreServices(): Promise<void> {
   servicesStarted = true;
 
   startRetentionSweep();
+
+  // Spaces-only (2026-10-02, spaces-only flag PR): Spaces' scheduler and
+  // nothing else. There is no @rowboat (so no models or skills), and email,
+  // calendar, knowledge, apps and background agents have no surface to show
+  // their work, so they must not run either.
+  if (flags.spacesOnly(process.env)) {
+    startSpacesScheduler();
+    return;
+  }
+
   startModelsDevRefresh();
 
   // Rowboat Apps server (per-app origins on 127.0.0.1:3210).

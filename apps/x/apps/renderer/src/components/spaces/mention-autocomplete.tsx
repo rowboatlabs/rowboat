@@ -4,6 +4,7 @@ import type { Editor } from '@tiptap/core'
 import { Bot, FileText, Hash, Megaphone } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
+import { SPACES_ONLY } from '@/lib/feature-flags'
 import { agentLabel } from '@/lib/agent-kinds'
 import { MemberAvatar } from '@/components/spaces/atoms'
 import { caretContext, type CaretContext } from '@/components/spaces/composer-editor'
@@ -97,7 +98,7 @@ export function useMentionAutocomplete(editor: Editor | null) {
         if (!match) return []
         const q = match.query
         const people: MentionCandidate[] = []
-        if ('rowboat'.startsWith(q)) people.push({ id: 'rowboat', label: 'rowboat', hint: 'your agent — acts only when asked', isAgent: true })
+        if (!SPACES_ONLY && 'rowboat'.startsWith(q)) people.push({ id: 'rowboat', label: 'rowboat', hint: 'your agent — acts only when asked', isAgent: true })
         if ('here'.startsWith(q)) people.push({ id: 'here', label: 'here', hint: 'notify everyone online', isBroadcast: true })
         // This space's people first, then the rest of the org. Someone not in
         // this space can be named but is not notified (the org drops their

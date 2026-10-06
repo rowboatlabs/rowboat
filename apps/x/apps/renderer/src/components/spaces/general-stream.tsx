@@ -24,6 +24,7 @@ import { formatScheduleTime, parseRemindArgs } from '@/lib/spaces-schedule'
 import { getSpaceReadState, getStreamReadOffset, getThreadReadState, isThreadUnread, markStreamRead, markThreadRead, noteThread } from '@/lib/spaces-read-state'
 import { toggleSaved, useSaved } from '@/lib/spaces-saved'
 import { maybeInvokeRowboat } from '@/lib/spaces-rowboat'
+import { SPACES_ONLY } from '@/lib/feature-flags'
 import { openResponseChat } from '@/lib/spaces-response-chat'
 import {
     AUTO_TOAST, collectRouteCandidates, refreshTypeSafeConfigured, routeDraft, routeThreadLabel, setAutoRouteMode, stripMentionTokens, useAutoRouteMode,
@@ -939,7 +940,7 @@ export function GeneralStream({
                 onOpenResponseChat={onOpenSession ? openResponse : undefined}
                 onStopAgent={(id) => void stopAgent(id)}
                 onReplyInThread={replyInThread}
-                onAskRowboat={askRowboat}
+                onAskRowboat={SPACES_ONLY ? undefined : askRowboat}
                 onCopyLink={(m) => void copySpacesLink(messageUrl(org.address, space.id, m.id))}
                 onReact={(m, emoji) => void toggleReaction(m, emoji)}
                 onDelete={(m) => void deleteMessage(m)}
@@ -1036,10 +1037,10 @@ export function GeneralStream({
                 {stream.ready && !snapping && messageRows === 0 && (
                     <div className="px-2 py-6 text-sm text-muted-foreground">
                         {space.kind === 'direct' && (space.participants ?? []).length === 1
-                            ? 'Your notes to self — drafts, links, files for later. Only you can see this, and @rowboat works here too.'
+                            ? SPACES_ONLY ? 'Your notes to self — drafts, links, files for later. Only you can see this.' : 'Your notes to self — drafts, links, files for later. Only you can see this, and @rowboat works here too.'
                             : space.kind === 'direct'
-                                ? 'Private to the two of you — say hello, or @rowboat to ask your agent.'
-                                : 'Nothing here yet — say hello, or @rowboat to ask your agent.'}
+                                ? SPACES_ONLY ? 'Private to the two of you — say hello.' : 'Private to the two of you — say hello, or @rowboat to ask your agent.'
+                                : SPACES_ONLY ? 'Nothing here yet — say hello.' : 'Nothing here yet — say hello, or @rowboat to ask your agent.'}
                     </div>
                 )}
                 {rows}
@@ -1125,7 +1126,7 @@ export function GeneralStream({
                 />
             )}
             <Composer
-                placeholder={`Message ${space.name} — @rowboat to ask your agent`}
+                placeholder={SPACES_ONLY ? `Message ${space.name}` : `Message ${space.name} — @rowboat to ask your agent`}
                 busy={routing}
                 draftKey={memoryKey}
                 onSend={post}

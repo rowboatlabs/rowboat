@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { setGoogleCredentials } from "@/lib/google-credentials-store"
 import { toast } from "sonner"
+import { SPACES_ONLY } from "@/lib/feature-flags"
 
 export interface ProviderState {
   isConnected: boolean
@@ -295,7 +296,8 @@ export function useOnboardingState(open: boolean, onComplete: (opts?: { startTou
     } else if (currentStep === 3) {
       setCurrentStep(2)
     } else if (currentStep === 4) {
-      setCurrentStep(3)
+      // Spaces-only (2026-10-02, spaces-only flag PR): Done follows Welcome.
+      setCurrentStep(SPACES_ONLY ? 0 : 3)
     }
   }, [currentStep, onboardingPath])
 

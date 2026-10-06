@@ -1,6 +1,6 @@
 import { app, Menu, shell, type BrowserWindow, type MenuItemConstructorOptions } from "electron";
 import { WorkDir } from "@x/core/dist/config/config.js";
-import type { ipc } from "@x/shared";
+import { flags, type ipc } from "@x/shared";
 import { dispatchDeepLink } from "./deeplink.js";
 import {
   getQuickAskShortcutState,
@@ -153,6 +153,9 @@ const GO_ITEMS: ReadonlyArray<{ label: string; type: string; accelerator?: strin
 
 function rebuildMenu(): void {
   const isMac = process.platform === "darwin";
+  // Spaces-only (2026-10-02, spaces-only flag PR): no chats, notes, browser,
+  // quick-ask or meeting notes to reach — only Spaces, search and settings.
+  const spacesOnly = flags.spacesOnly(process.env);
 
   const settingsItem: MenuItemConstructorOptions = {
     label: "Settings…",
@@ -181,7 +184,7 @@ function rebuildMenu(): void {
   const fileMenu: MenuItemConstructorOptions = {
     label: "File",
     submenu: [
-      {
+      ...(spacesOnly ? [] : [{
         label: "New Chat",
         accelerator: "CmdOrCtrl+N",
         registerAccelerator: false,
@@ -206,6 +209,7 @@ function rebuildMenu(): void {
         ],
       },
       { type: "separator" },
+      ] as MenuItemConstructorOptions[]),
       ...(isMac ? [] : [settingsItem, { type: "separator" } as MenuItemConstructorOptions]),
       { role: "close" },
       ...(isMac ? [] : [{ role: "quit" } as MenuItemConstructorOptions]),
@@ -263,7 +267,7 @@ function rebuildMenu(): void {
         click: () => sendCommand({ command: "open-search" }),
       },
       { type: "separator" },
-      {
+      ...(spacesOnly ? [] : [{
         label: "Toggle Sidebar",
         accelerator: "CmdOrCtrl+\\",
         click: () => sendToRenderer("menu:toggleSidebar", null),
@@ -279,6 +283,7 @@ function rebuildMenu(): void {
         click: () => sendCommand({ command: "toggle-full-screen-chat" }),
       },
       { type: "separator" },
+      ] as MenuItemConstructorOptions[]),
       // Display-only in effect: the keystrokes are consumed (and the menu
       // accelerators suppressed) by zoom.ts's before-input-event hook.
       { label: "Zoom In", accelerator: "CmdOrCtrl+Plus", click: () => withMainWindow(zoomIn) },
@@ -312,7 +317,7 @@ function rebuildMenu(): void {
         click: () => sendCommand({ command: "go-forward" }),
       },
       { type: "separator" },
-      ...GO_ITEMS.map((item): MenuItemConstructorOptions => ({
+      ...GO_ITEMS.filter((item) => !spacesOnly || item.type === "spaces").map((item): MenuItemConstructorOptions => ({
         label: item.label,
         ...(item.accelerator ? { accelerator: item.accelerator } : {}),
         click: () => navigate(item.type),
@@ -357,10 +362,11 @@ function rebuildMenu(): void {
       { label: "Report an Issue…", click: () => void shell.openExternal(`${REPO_URL}/issues/new`) },
       { label: "Release Notes", click: () => void shell.openExternal(`${REPO_URL}/releases`) },
       { type: "separator" },
-      {
+      // Spaces-only has no Shortcuts settings (only the hover chord lived there).
+      ...(spacesOnly ? [] : [{
         label: "Keyboard Shortcuts…",
         click: () => sendCommand({ command: "open-settings", tab: "shortcuts" }),
-      },
+      } as MenuItemConstructorOptions]),
       // ~/.rowboat — configs, caches, synced calendars; the place support
       // asks people to look, now one click away.
       { label: "Open Data Folder", click: () => void shell.openPath(WorkDir) },
@@ -380,7 +386,7 @@ function rebuildMenu(): void {
     editMenu,
     viewMenu,
     goMenu,
-    toolsMenu,
+    ...(spacesOnly ? [] : [toolsMenu]),
     windowMenu,
     helpMenu,
   ];
