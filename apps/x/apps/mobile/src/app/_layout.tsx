@@ -17,7 +17,7 @@ const LightTheme = {
 };
 import Drawer from 'expo-router/drawer';
 import * as SplashScreen from 'expo-splash-screen';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { Pressable, useColorScheme, useWindowDimensions } from 'react-native';
 import { Image } from 'expo-image';
 
@@ -134,20 +134,31 @@ function PushRegistrar() {
 // spaceId / threadRootId (push.ts on the org); the org list maps id → address.
 function PushNavigator() {
   const account = useSpacesAccount();
+  // Each notification response is handled ONCE (2026-10-07). This effect
+  // re-runs whenever the org list refreshes, and getLastNotificationResponse
+  // answers the same tap every time — so each refresh pushed chat + thread
+  // again and the back button walked through the copies.
+  const handled = useRef(new Set<string>());
   useEffect(() => {
-    const open = (data: Record<string, unknown> | undefined) => {
+    const open = (r: Notifications.NotificationResponse) => {
+      const key = `${r.notification.request.identifier}:${r.notification.date}`;
+      if (handled.current.has(key)) return;
+      const data = r.notification.request.content.data as Record<string, unknown> | undefined;
       const orgId = typeof data?.orgId === 'string' ? data.orgId : null;
       const spaceId = typeof data?.spaceId === 'string' ? data.spaceId : null;
       const threadRootId = typeof data?.threadRootId === 'string' ? data.threadRootId : null;
       const org = account.orgs?.find((o) => o.id === orgId);
       if (!org || !spaceId) return;
+      handled.current.add(key);
       const base = { org: org.address, space: spaceId, me: org.memberId };
+      // From the tabs: back from the thread goes to the channel, then home.
+      if (router.canDismiss()) router.dismissAll();
       router.push({ pathname: '/spaces/chat', params: base });
       if (threadRootId) router.push({ pathname: '/spaces/thread', params: { ...base, root: threadRootId, title: 'Thread', focus: 'latest' } });
     };
-    const sub = Notifications.addNotificationResponseReceivedListener((r) => open(r.notification.request.content.data as Record<string, unknown>));
+    const sub = Notifications.addNotificationResponseReceivedListener(open);
     // Cold start from a notification.
-    void Notifications.getLastNotificationResponseAsync().then((r) => r && open(r.notification.request.content.data as Record<string, unknown>));
+    void Notifications.getLastNotificationResponseAsync().then((r) => r && open(r));
     return () => sub.remove();
   }, [account.orgs]);
   return null;

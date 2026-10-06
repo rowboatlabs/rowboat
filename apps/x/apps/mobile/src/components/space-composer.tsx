@@ -1,5 +1,7 @@
 import { Image } from 'expo-image';
+import * as Clipboard from 'expo-clipboard';
 import * as DocumentPicker from 'expo-document-picker';
+import { File, Paths } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
 import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
@@ -92,17 +94,41 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
   // wire markdown joins the body only on send.
   const [attachments, setAttachments] = useState<{ key: string; uri: string; md: string; video: boolean; file?: string }[]>([]);
 
-  // "+" → photos and videos, or any file (2026-10-05).
-  const openAttachMenu = () => {
+  // "+" → photos and videos, any file, or an image on the clipboard
+  // (2026-10-07: a text field can't take an image paste, so the menu does).
+  const openAttachMenu = async () => {
     if (!onPickMedia || uploading) return;
     if (process.env.EXPO_OS !== 'ios') {
       void pickMedia();
       return;
     }
-    ActionSheetIOS.showActionSheetWithOptions({ options: ['Photo or video', 'File', 'Cancel'], cancelButtonIndex: 2 }, (i) => {
+    const clip = await Clipboard.hasImageAsync().catch(() => false);
+    const options = ['Photo or video', 'File', ...(clip ? ['Paste image'] : []), 'Cancel'];
+    ActionSheetIOS.showActionSheetWithOptions({ options, cancelButtonIndex: options.length - 1 }, (i) => {
       if (i === 0) void pickMedia();
       else if (i === 1) void pickFile();
+      else if (clip && i === 2) void pasteImage();
     });
+  };
+
+  const pasteImage = async () => {
+    if (!onPickMedia || uploading) return;
+    setUploading(true);
+    try {
+      const image = await Clipboard.getImageAsync({ format: 'png' });
+      if (!image) return;
+      // A data URL → bytes on disk, so the upload path is the same as a picked photo.
+      const base64 = image.data.replace(/^data:[^,]*,/, '');
+      const file = new File(Paths.cache, `pasted-${Date.now()}.png`);
+      file.create({ overwrite: true });
+      file.write(Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)));
+      const md = await onPickMedia({ uri: file.uri, mime: 'image/png', name: 'pasted-image.png' });
+      setAttachments((prev) => [...prev, { key: `${Date.now()}`, uri: file.uri, md, video: false }]);
+    } catch (err) {
+      Alert.alert("Couldn't paste the image", err instanceof Error ? err.message : String(err));
+    } finally {
+      setUploading(false);
+    }
   };
 
   const pickFile = async () => {
@@ -353,7 +379,7 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
             <Pressable
               hitSlop={8}
               disabled={uploading}
-              onPress={openAttachMenu}
+              onPress={() => void openAttachMenu()}
               style={{
                 width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center',
                 backgroundColor: colors.isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)',

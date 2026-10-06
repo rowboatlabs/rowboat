@@ -1,12 +1,14 @@
 import { Stack, router, useLocalSearchParams } from 'expo-router';
+import * as DocumentPicker from 'expo-document-picker';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 
 import { useSpacesAccount } from '@/lib/spaces/account';
 import { SpacesClient } from '@/lib/spaces/client';
 import { SpacesLive } from '@/lib/spaces/live';
+import { friendlyError } from '@/lib/spaces/errors';
 import { useColors } from '@/theme/colors';
 
 // A space's files (S3, read-only): entries grouped into a collapsible tree on
@@ -68,6 +70,28 @@ export default function SpaceFilesScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const loaded = useRef(false);
+
+  // Upload (2026-10-07): a picked file becomes a space asset at the top
+  // level under its own name — bytes to the blob store, then createAsset.
+  const [uploading, setUploading] = useState(false);
+  const upload = async () => {
+    if (uploading) return;
+    const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: false });
+    const asset = result.canceled ? null : result.assets[0];
+    if (!asset) return;
+    setUploading(true);
+    try {
+      const bytes = new Uint8Array(await (await fetch(asset.uri)).arrayBuffer());
+      const blob = await client.uploadBlob(space, bytes, { declaredMime: asset.mimeType ?? 'application/octet-stream' });
+      const name = asset.name.replace(/[/\\]/g, '_');
+      await client.createAsset(space, { path: name, blob: blob.hash, actingMode: 'direct', reason: 'Uploaded from the phone' });
+      await refresh();
+    } catch (err) {
+      Alert.alert("Couldn't upload", friendlyError(err));
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const refresh = useCallback(async () => {
     try {
@@ -154,7 +178,16 @@ export default function SpaceFilesScreen() {
         />
       }
     >
-      <Stack.Screen options={{ title: title ? `${title} files` : 'Files' }} />
+      <Stack.Screen
+        options={{
+          title: title ? `${title} files` : 'Files',
+          headerRight: () => (
+            <Pressable hitSlop={10} disabled={uploading} onPress={() => void upload()} style={{ opacity: uploading ? 0.5 : 1 }}>
+              {uploading ? <ActivityIndicator size="small" /> : <Image source="sf:square.and.arrow.up" style={{ width: 20, height: 22 }} contentFit="contain" tintColor={colors.label} />}
+            </Pressable>
+          ),
+        }}
+      />
       {error ? <Text style={{ fontSize: 13, color: colors.destructive, paddingHorizontal: 16, paddingBottom: 8 }}>{error}</Text> : null}
       {entries === null && !error ? <ActivityIndicator style={{ marginTop: 32 }} /> : null}
       {entries !== null ? renderNodes(tree, 0) : null}
