@@ -237,7 +237,8 @@ describe('/v1/llm on a plan with a model policy (Découverte)', () => {
     expect(sent(seen[0]).model).toBe('x-ai/withdrawn-alpha');
     // OpenRouter's own models are closed until the owner opens one.
     await call('/v1/llm/chat/completions', chat({ model: 'openrouter/space-bunny-alpha' }));
-    expect(sent(seen[1]).model).toBe(first);
+    // The list unknown, « Automatique » is taken for listed: it routes the call.
+    expect(sent(seen[1]).model).toBe('typesafe/jev-router');
     // The image list is filtered: not taken for the whole list.
     await call('/v1/llm/models?output_modalities=image');
     await call('/v1/llm/chat/completions', chat({ model: 'x-ai/withdrawn-alpha' }));

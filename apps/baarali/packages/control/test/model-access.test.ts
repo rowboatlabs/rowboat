@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  AUTO_MODEL,
   accessFor,
   catalogOf,
   compareVendors,
@@ -74,8 +75,19 @@ describe('who sees a model', () => {
 });
 
 describe('the model a call falls back to', () => {
+  it('is « Automatique » for every plan while it is open and listed (06/10/2026)', () => {
+    const c = catalogOf(PLANS, [setting('anthropic/sonnet', { recommended: true })]);
+    expect(defaultModel(c, WEEK)).toBe(AUTO_MODEL);
+    expect(defaultModel(c, FREE)).toBe(AUTO_MODEL);
+    // Withdrawn by OpenRouter, or closed by the owner: the chosen default.
+    expect(defaultModel(c, WEEK, new Set(['anthropic/sonnet']))).toBe('anthropic/sonnet');
+    const closed = catalogOf(PLANS, [setting(AUTO_MODEL, { enabled: false }), setting('anthropic/sonnet', { recommended: true })]);
+    expect(defaultModel(closed, WEEK)).toBe('anthropic/sonnet');
+  });
+
   it('is a paid plan\'s first « Conseillé » it opens, in vendor order', () => {
     const c = catalogOf(PLANS, [
+      setting(AUTO_MODEL, { enabled: false }),
       setting('openai/gpt-6', { recommended: true }),
       setting('anthropic/opus', { recommended: true, minPlan: 'pro-100' }),
       setting('anthropic/sonnet', { recommended: true }),
@@ -85,7 +97,7 @@ describe('the model a call falls back to', () => {
   });
 
   it('is Découverte\'s default otherwise', () => {
-    const c = catalogOf(PLANS, []);
+    const c = catalogOf(PLANS, [setting(AUTO_MODEL, { enabled: false })]);
     expect(defaultModel(c, WEEK)).toBe('deepseek/flash');
     expect(defaultModel(c, FREE)).toBe('deepseek/flash');
   });
@@ -95,7 +107,7 @@ describe('a call fitted to the plan', () => {
   const body = (model: string, extra: Record<string, unknown> = {}) => JSON.stringify({ model, messages: [], ...extra });
 
   it('sends a paid plan\'s closed model to its default, without OpenRouter\'s own fallbacks', () => {
-    const c = catalogOf(PLANS, [setting('anthropic/opus', { minPlan: 'pro-100' }), setting('anthropic/sonnet', { recommended: true })]);
+    const c = catalogOf(PLANS, [setting(AUTO_MODEL, { enabled: false }), setting('anthropic/opus', { minPlan: 'pro-100' }), setting('anthropic/sonnet', { recommended: true })]);
     const fitted = fitCall(c, WEEK, '/chat/completions', body('anthropic/opus', { models: ['anthropic/opus'] }));
     expect(fitted).toMatchObject({ ok: true, requested: 'anthropic/opus', served: 'anthropic/sonnet' });
     if (fitted?.ok) expect(JSON.parse(fitted.body)).toEqual({ model: 'anthropic/sonnet', messages: [] });
@@ -200,5 +212,67 @@ describe('vendors and strengths', () => {
     expect(deduceStrength('anthropic/claude-opus-5')).toBe('puissant');
     expect(deduceStrength('perplexity/sonar-pro')).toBe('recherche');
     expect(deduceStrength('openai/gpt-6')).toBe('polyvalent');
+  });
+});
+
+describe('« Automatique », Jev Router within the plan (06/10/2026)', () => {
+  const body = (model: string, extra: Record<string, unknown> = {}) => JSON.stringify({ model, messages: [], ...extra });
+  const KNOWN = new Set([AUTO_MODEL, 'deepseek/flash', 'deepseek/pro', 'openai/luna', 'openai/gpt-6', 'anthropic/opus', 'anthropic/sonnet', 'openrouter/auto']);
+  const plugin = (b: string) => (JSON.parse(b) as { plugins: Array<Record<string, unknown>> }).plugins.find((p) => p.id === 'jev-router');
+
+  it('routes Découverte within its list, every other model excluded, an app\'s own plugin replaced', () => {
+    const c = catalogOf(PLANS, []);
+    const fitted = fitCall(c, FREE, '/chat/completions', body(AUTO_MODEL, { plugins: [{ id: 'jev-router', models: ['anthropic/*'] }, { id: 'web' }] }), KNOWN);
+    expect(fitted).toMatchObject({ ok: true, served: AUTO_MODEL });
+    if (!fitted?.ok) return;
+    const sent = JSON.parse(fitted.body) as Record<string, unknown>;
+    expect(sent).toMatchObject({ model: AUTO_MODEL, reasoning: { enabled: false } });
+    expect(sent.models).toBeUndefined();
+    expect(sent.plugins).toContainEqual({ id: 'web' });
+    expect(plugin(fitted.body)).toEqual({
+      id: 'jev-router',
+      models: ['deepseek/flash', 'openai/luna'],
+      excluded_models: ['deepseek/pro', 'openai/gpt-6', 'anthropic/*', 'openrouter/*'],
+    });
+  });
+
+  it('sends Découverte\'s other calls to it too, and never lists it as a fallback', () => {
+    const c = catalogOf(PLANS, []);
+    const fitted = fitCall(c, FREE, '/chat/completions', body('anthropic/opus'), KNOWN);
+    expect(fitted).toMatchObject({ ok: true, requested: 'anthropic/opus', served: AUTO_MODEL });
+    const listed = fitCall(c, FREE, '/chat/completions', body('openai/luna'), KNOWN);
+    if (listed?.ok) expect(JSON.parse(listed.body).models).toEqual(['openai/luna', 'deepseek/flash']);
+  });
+
+  it('does not route Découverte while the catalog is unknown: its first model instead', () => {
+    const c = catalogOf(PLANS, []);
+    const fitted = fitCall(c, FREE, '/chat/completions', body(AUTO_MODEL), null);
+    expect(fitted).toMatchObject({ ok: true, requested: AUTO_MODEL, served: 'deepseek/flash' });
+    if (fitted?.ok) expect(JSON.parse(fitted.body)).toMatchObject({ model: 'deepseek/flash', models: ['deepseek/flash', 'openai/luna'] });
+  });
+
+  it('excludes from a paid plan\'s routing what the plan does not open', () => {
+    const c = catalogOf(PLANS, [setting('anthropic/opus', { minPlan: 'pro-100' }), setting('openai/gpt-6', { enabled: false })]);
+    const week = fitCall(c, WEEK, '/chat/completions', body(AUTO_MODEL), KNOWN);
+    expect(week?.ok && plugin(week.body)).toEqual({ id: 'jev-router', excluded_models: ['openrouter/*', 'anthropic/opus', 'openai/gpt-6'] });
+    const pro = fitCall(c, PRO, '/chat/completions', body(AUTO_MODEL), KNOWN);
+    expect(pro?.ok && plugin(pro.body)).toEqual({ id: 'jev-router', excluded_models: ['openrouter/*', 'openai/gpt-6'] });
+  });
+
+  it('shows it first, as « Automatique » in Baarali\'s group, and never Jev itself', () => {
+    const c = catalogOf(PLANS, []);
+    const raw = JSON.stringify({ data: [{ id: 'deepseek/flash', name: 'DeepSeek: Flash' }, { id: AUTO_MODEL, name: 'TypeSafe: Jev Router' }, { id: 'typesafe/jev-1.13', name: 'TypeSafe: Jev 1.13' }] });
+    const shown = JSON.parse(presentFor(c, FREE, raw, (id) => id)!) as { data: Array<{ id: string; name: string; baarali: Record<string, unknown> }> };
+    expect(shown.data.map((m) => m.id)).toEqual([AUTO_MODEL, 'deepseek/flash']);
+    expect(shown.data[0]).toMatchObject({ name: 'Automatique', baarali: { vendor: 'baarali', vendorName: 'Baarali', vendorRank: 0, strength: 'Le bon modèle pour chaque tâche' } });
+  });
+
+  it('answers /systemone with Jev only, on every plan', () => {
+    const c = catalogOf(PLANS, []);
+    for (const p of [FREE, WEEK]) {
+      const fitted = fitCall(c, p, '/systemone', JSON.stringify({ model: 'anthropic/opus', state: {}, questions: {} }));
+      expect(fitted).toMatchObject({ ok: true, served: 'typesafe/jev-1.13' });
+    }
+    expect(fitCall(c, FREE, '/systemone', JSON.stringify({ model: 'jev-latest', questions: {} }))).toMatchObject({ ok: true, served: 'jev-latest' });
   });
 });

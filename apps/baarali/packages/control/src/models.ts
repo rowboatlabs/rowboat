@@ -42,7 +42,8 @@ export function applyPolicy(policy: ModelPolicy, path: string, raw: string): Pol
   const requested = typeof body.model === 'string' ? body.model : null;
   const served = requested && policy.models.includes(requested) ? requested : policy.models[0];
   // OpenRouter tries `models` in order when one fails (provider down, rate limited).
-  const fallbacks = policy.models.filter((m) => m !== served);
+  // A router is never a fallback: it would be another round of choosing.
+  const fallbacks = policy.models.filter((m) => m !== served && m !== 'typesafe/jev-router');
   const rewritten = { ...body, ...policy.settings, model: served, models: [served, ...fallbacks] };
   return { ok: true, body: JSON.stringify(rewritten), requested, served };
 }

@@ -47,7 +47,7 @@ export const MEDIA_TOOLS: ToolDef[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        model: { type: 'string', description: 'A model id from list_models (e.g. "seedance-mini", "veo-fast", "gemini-voice", "lyria").' },
+        model: { type: 'string', description: 'A model id from list_models; prefer the one marked recommended for its kind (e.g. "hailuo-turbo", "minimax-voice", "minimax-music").' },
         prompt: { type: 'string', description: 'For video and music: a vivid description. For speech: the exact text to read aloud.' },
         duration: { type: 'number', description: 'Video only: seconds, one of the model durations. Omit for the default.' },
         aspect_ratio: { type: 'string', enum: ['16:9', '9:16'], description: 'Video only: 9:16 for a phone/story format.' },

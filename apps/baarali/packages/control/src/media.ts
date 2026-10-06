@@ -4,9 +4,14 @@
 // of chat cost, and a quota sized for text would either refuse it or be
 // emptied by it. It is charged before it is submitted, at its full price.
 //
-// Prices read on pixazo.ai model pages on 30/09/2026. The list price is kept
-// where a promotion runs (Seedance 2.0 Mini): a promotion ends without
-// notice, and the quota must never charge less than we pay.
+// Prices read on pixazo.ai model pages on 30/09/2026, the Chinese models on
+// 06/10/2026. The list price is kept where a promotion runs (Seedance 2.0
+// Mini): a promotion ends without notice, and the quota must never charge
+// less than we pay.
+//
+// Chinese models first (decided 06/10/2026): the best of them for each kind,
+// then the cheapest American ones. The order is the list's, so the agent
+// reads them first.
 
 export type MediaKind = 'video' | 'speech' | 'music';
 
@@ -32,6 +37,8 @@ export interface MediaModel {
   submit(req: MediaRequest): { path: string; body: Record<string, unknown> };
   /** Our cost in dollars for this request, decided before submitting. */
   costUsd(req: MediaRequest): number;
+  /** The one to prefer for its kind until the console says otherwise. */
+  recommended?: boolean;
 }
 
 const range = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => from + i);
@@ -43,7 +50,73 @@ function veoDuration(req: MediaRequest, durations: number[]): number {
   return req.duration && durations.includes(req.duration) ? req.duration : durations[0];
 }
 
+/**
+ * Seedance bills the seconds it outputs, rounded up, and a clip runs about
+ * 0.1 s over what was asked: 5 s asked bills 6 (Pixazo, Seedance 2.0 Mini).
+ */
+const seedanceSeconds = (req: MediaRequest) => (req.duration ?? 5) + 1;
+
 export const MEDIA_MODELS: MediaModel[] = [
+  {
+    id: 'hailuo-turbo',
+    kind: 'video',
+    displayName: 'Hailuo H3 Max Turbo (MiniMax)',
+    durations: range(5, 15),
+    maxPromptChars: 2000,
+    submit: (req) => ({
+      path: '/minimax-hailuo-h3-max-turbo/v1/text-to-video',
+      body: { prompt: req.prompt, duration: req.duration ?? 5, resolution: '768P', aspect_ratio: req.aspectRatio ?? '16:9', prompt_expansion_mode: 'balanced' },
+    }),
+    // 0.04 $/s at 768P; no sound.
+    costUsd: (req) => 0.04 * (req.duration ?? 5),
+    recommended: true,
+  },
+  {
+    id: 'seedance-2-5',
+    kind: 'video',
+    displayName: 'Seedance 2.5 (ByteDance)',
+    durations: [5, ...range(4, 30).filter((d) => d !== 5)],
+    maxPromptChars: 2000,
+    submit: (req) => ({
+      path: '/seedance-2-5/v1/text-to-video',
+      body: {
+        content: [{ type: 'text', text: req.prompt }],
+        duration: req.duration ?? 5,
+        resolution: '720p',
+        ratio: req.aspectRatio ?? '16:9',
+        generate_audio: req.audio ?? false,
+      },
+    }),
+    // 0.231 $/s at 720p, sound included.
+    costUsd: (req) => 0.231 * seedanceSeconds(req),
+  },
+  {
+    id: 'kling-3',
+    kind: 'video',
+    displayName: 'Kling 3.0 (Kuaishou)',
+    durations: [5, ...range(3, 15).filter((d) => d !== 5)],
+    maxPromptChars: 2500,
+    submit: (req) => ({
+      path: '/kling-3-0-text-to-video-standard/v1/kling-3-0-text-to-video-standard-request',
+      // Its sound speaks Chinese or English only: off unless asked.
+      body: { prompt: req.prompt, duration: String(req.duration ?? 5), aspect_ratio: req.aspectRatio ?? '16:9', generate_audio: req.audio ?? false },
+    }),
+    // 0.14 $/s, sound included.
+    costUsd: (req) => 0.14 * (req.duration ?? 5),
+  },
+  {
+    id: 'wan-3',
+    kind: 'video',
+    displayName: 'Wan 3.0 (Alibaba)',
+    durations: [5, ...range(2, 30).filter((d) => d !== 5)],
+    maxPromptChars: 2000,
+    submit: (req) => ({
+      path: '/wan-3-0-video/v1/text-to-video',
+      body: { prompt: req.prompt, duration: req.duration ?? 5, resolution: '720P', ratio: req.aspectRatio ?? '16:9', audio: req.audio ?? true },
+    }),
+    // 0.085 $/s at 720P, sound included.
+    costUsd: (req) => 0.085 * (req.duration ?? 5),
+  },
   {
     id: 'seedance-mini',
     kind: 'video',
@@ -61,7 +134,7 @@ export const MEDIA_MODELS: MediaModel[] = [
       },
     }),
     // 720p list price 0.0756 $/s (0.03024 during the promotion).
-    costUsd: (req) => 0.0756 * (req.duration ?? 5),
+    costUsd: (req) => 0.0756 * seedanceSeconds(req),
   },
   {
     id: 'veo-fast',
@@ -95,6 +168,19 @@ export const MEDIA_MODELS: MediaModel[] = [
     costUsd: (req) => 0.4 * veoDuration(req, [8, 4, 6]),
   },
   {
+    id: 'minimax-voice',
+    kind: 'speech',
+    displayName: 'MiniMax Speech 2.8 Turbo',
+    maxPromptChars: 4000,
+    submit: (req) => ({
+      path: '/minimax-speech-2-8-turbo/v1/minimax-speech-2-8-turbo-request',
+      body: { prompt: req.prompt, output_format: 'hex', voice_setting: { voice_id: 'Wise_Woman' }, language_boost: 'auto' },
+    }),
+    // 0.06 $ per 1,000 characters, counted by the started thousand.
+    costUsd: (req) => 0.06 * Math.ceil(req.prompt.length / 1000),
+    recommended: true,
+  },
+  {
     id: 'gemini-voice',
     kind: 'speech',
     displayName: 'Gemini 3.8 Flash TTS',
@@ -102,6 +188,17 @@ export const MEDIA_MODELS: MediaModel[] = [
     submit: (req) => ({ path: '/gemini-3-8-flash-tts/v1/text-to-speech', body: { text: req.prompt } }),
     // 0.01728 $ a minute of speech, billed by the started minute.
     costUsd: (req) => 0.01728 * Math.ceil(req.prompt.length / SPEECH_CHARS_PER_SECOND / 60),
+  },
+  {
+    id: 'minimax-music',
+    kind: 'music',
+    displayName: 'MiniMax Music 3.0',
+    maxPromptChars: 2000,
+    // Instrumental: the jingles under a video; lyrics would come in any language.
+    submit: (req) => ({ path: '/minimax-music-3-0/v1/text-to-music', body: { prompt: req.prompt, is_instrumental: true, format: 'mp3' } }),
+    // 0.15 $ a track, whatever its length.
+    costUsd: () => 0.15,
+    recommended: true,
   },
   {
     id: 'lyria',

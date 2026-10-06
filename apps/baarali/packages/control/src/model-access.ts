@@ -1,3 +1,4 @@
+import { mediaModel } from './media.js';
 import { applyPolicy, displayName, type ModelPolicy, type PolicyResult } from './models.js';
 import type { Plan } from './store.js';
 
@@ -31,6 +32,7 @@ export const STRENGTHS = {
   recherche: 'Recherche web',
   analyse: "Analyse d'images",
   rapide: 'Rapide',
+  auto: 'Le bon modèle pour chaque tâche',
 } as const;
 
 export type Strength = keyof typeof STRENGTHS;
@@ -42,10 +44,11 @@ export const isStrength = (s: unknown): s is Strength => typeof s === 'string' &
  * the routers, which make no model of their own, close the list. The same
  * order in the console and in the apps, so the list keeps its shape.
  */
-export const VENDOR_ORDER = ['anthropic', 'openai', 'google', 'x-ai', 'mistralai', 'deepseek', 'qwen', 'z-ai', 'moonshotai', 'minimax'];
+export const VENDOR_ORDER = ['baarali', 'anthropic', 'openai', 'google', 'x-ai', 'mistralai', 'deepseek', 'qwen', 'z-ai', 'moonshotai', 'minimax'];
 const ROUTERS = new Set(['openrouter']);
 
 const VENDOR_NAMES: Record<string, string> = {
+  baarali: 'Baarali',
   anthropic: 'Anthropic',
   openai: 'OpenAI',
   google: 'Google',
@@ -64,6 +67,26 @@ const VENDOR_NAMES: Record<string, string> = {
   perplexity: 'Perplexity',
   openrouter: 'OpenRouter',
 };
+
+/**
+ * « Automatique » (decided 06/10/2026): Jev Router, TypeSafe's router on
+ * OpenRouter, picks the model and the reasoning effort for each request,
+ * the cheapest that is good enough. The site promises « le bon modèle pour
+ * chaque tâche »: this is it. It is every plan's default, and it chooses
+ * only among the models the plan opens (routeWithin).
+ */
+export const AUTO_MODEL = 'typesafe/jev-router';
+
+/**
+ * Jev itself, a decision model: it answers typed questions, never a chat,
+ * so the picker never shows it. The apps call it on /systemone (the fast
+ * browser mode); a bare id is TypeSafe's SDK naming the same model.
+ */
+export const DECISION_MODEL = 'typesafe/jev-1.13';
+const DECISION_IDS = new Set([DECISION_MODEL, '~typesafe/jev-latest', 'typesafe/jev-latest', 'jev-1.13', 'jev-latest']);
+
+/** The picker's group: « Automatique » is ours, whoever routes it. */
+const pickerVendor = (modelId: string) => (modelId === AUTO_MODEL ? 'baarali' : vendorOf(modelId));
 
 /** `~anthropic/…` is OpenRouter's alias for a vendor's latest model: same vendor. */
 export const vendorOf = (modelId: string) => (modelId.split('/')[0] ?? modelId).replace(/^~/, '');
@@ -162,6 +185,8 @@ export function catalogOf(plans: Plan[], settings: ModelSetting[]): Catalog {
 
 export function accessFor(c: Catalog, plan: Plan, modelId: string): Access {
   const s = c.settings.get(modelId);
+  // Découverte included: it routes within the plan's own models.
+  if (modelId === AUTO_MODEL && (!s || (s.enabled && !s.minPlan))) return { kind: 'open' };
   if (s ? !s.enabled : !openUntouched(modelId)) return { kind: 'hidden' };
   const firstPaid = c.plans.find((p) => !isFreePlan(p));
   if (isFreePlan(plan)) {
@@ -182,10 +207,16 @@ export function accessFor(c: Catalog, plan: Plan, modelId: string): Access {
  * Découverte: the first of its list. A paid plan: its first « Conseillé »
  * model in vendor order, else Découverte's default, cheap and always there.
  */
-export function defaultModel(c: Catalog, plan: Plan): string | null {
+export function defaultModel(c: Catalog, plan: Plan, known?: Set<string> | null): string | null {
+  if (accessFor(c, plan, AUTO_MODEL).kind === 'open' && stillListed(known, AUTO_MODEL)) return AUTO_MODEL;
+  return chosenDefault(c, plan);
+}
+
+/** The default when « Automatique » is closed or withdrawn. */
+function chosenDefault(c: Catalog, plan: Plan): string | null {
   if (!isFreePlan(plan)) {
     const recommended = [...c.settings.values()]
-      .filter((s) => s.recommended && accessFor(c, plan, s.modelId).kind === 'open')
+      .filter((s) => s.recommended && s.modelId !== AUTO_MODEL && accessFor(c, plan, s.modelId).kind === 'open')
       .sort((a, b) => compareVendors(vendorOf(a.modelId), vendorOf(b.modelId)) || a.modelId.localeCompare(b.modelId));
     if (recommended[0]) return recommended[0].modelId;
   }
@@ -221,25 +252,29 @@ export function presentFor(c: Catalog, plan: Plan, raw: string, planName: (id: s
     return null;
   }
   if (!Array.isArray(parsed.data)) return null;
-  const fallback = defaultModel(c, plan);
-  const listed = parsed.data.filter((m): m is RawModel => !!m && typeof m === 'object' && typeof (m as { id?: unknown }).id === 'string');
+  const listed = parsed.data.filter(
+    (m): m is RawModel => !!m && typeof m === 'object' && typeof (m as { id?: unknown }).id === 'string' && !DECISION_IDS.has((m as { id: string }).id),
+  );
+  const fallback = defaultModel(c, plan, new Set(listed.map((m) => m.id)));
   // Ranked among the vendors this plan sees, hidden ones left out.
-  const vendors = [...new Set(listed.filter((m) => accessFor(c, plan, m.id).kind !== 'hidden').map((m) => vendorOf(m.id)))].sort(compareVendors);
+  const vendors = [...new Set(listed.filter((m) => accessFor(c, plan, m.id).kind !== 'hidden').map((m) => pickerVendor(m.id)))].sort(compareVendors);
   const data = listed
     .flatMap((m) => {
       const access = accessFor(c, plan, m.id);
       if (access.kind === 'hidden') return [];
       const s = c.settings.get(m.id);
-      const vendor = vendorOf(m.id);
+      const vendor = pickerVendor(m.id);
+      const auto = m.id === AUTO_MODEL;
       const baarali: PickerMeta = {
         vendor,
         vendorName: vendorName(vendor),
         vendorRank: vendors.indexOf(vendor),
-        strength: STRENGTHS[s?.strength ?? deduceStrength(m.id)],
+        strength: STRENGTHS[s?.strength ?? (auto ? 'auto' : deduceStrength(m.id))],
         recommended: s?.recommended ?? false,
         ...(access.kind === 'locked' ? { unlock: planName(access.unlock) } : {}),
       };
-      return [{ ...m, ...(typeof m.name === 'string' ? { name: displayName(m.name) } : {}), baarali }];
+      const name = auto ? 'Automatique' : typeof m.name === 'string' ? displayName(m.name) : undefined;
+      return [{ ...m, ...(name ? { name } : {}), baarali }];
     })
     .sort((a, b) => Number(b.id === fallback) - Number(a.id === fallback));
   return JSON.stringify({ ...parsed, data });
@@ -251,8 +286,61 @@ export function presentFor(c: Catalog, plan: Plan, raw: string, planName: (id: s
  * its default rather than refused, like Découverte's.
  */
 export function policyFor(c: Catalog, plan: Plan): ModelPolicy | null {
-  if (isFreePlan(plan)) return { models: c.free, settings: plan.models?.settings ?? {} };
-  return null;
+  if (!isFreePlan(plan)) return null;
+  const auto = accessFor(c, plan, AUTO_MODEL).kind === 'open' ? [AUTO_MODEL] : [];
+  return { models: [...auto, ...c.free.filter((m) => m !== AUTO_MODEL)], settings: plan.models?.settings ?? {} };
+}
+
+/**
+ * Keeps Jev Router among the plan's models (06/10/2026). Its pool is
+ * TypeSafe's, and the plugin only narrows it; an include list that matches
+ * nothing is ignored, so Découverte's is backed by exclusions, which never
+ * are: every vendor it has no model from, and the others' models it does
+ * not open. A paid plan excludes what it does not open. A plugin the app
+ * sent is replaced, never merged: it could only widen the pool. null: the
+ * pool cannot be bounded (the catalog unknown), so the call does not route.
+ */
+export function routeWithin(c: Catalog, plan: Plan, body: Record<string, unknown>, known: Set<string> | null | undefined): Record<string, unknown> | null {
+  const others = Array.isArray(body.plugins) ? body.plugins.filter((p) => !(p && typeof p === 'object' && (p as { id?: unknown }).id === 'jev-router')) : [];
+  let plugin: Record<string, unknown> | null;
+  if (isFreePlan(plan)) {
+    if (!known) return null;
+    const allowed = c.free.filter((m) => m !== AUTO_MODEL);
+    if (allowed.length === 0) return null;
+    const vendors = new Set(allowed.map(vendorOf));
+    const excluded = new Set<string>();
+    for (const id of known) {
+      if (id === AUTO_MODEL || allowed.includes(id)) continue;
+      excluded.add(vendors.has(vendorOf(id)) ? id : `${vendorOf(id)}/*`);
+    }
+    if (excluded.size > 1024) return null;
+    plugin = { id: 'jev-router', models: allowed, excluded_models: [...excluded] };
+  } else {
+    const closed = [...c.settings.values()].filter((s) => s.modelId !== AUTO_MODEL && !s.modelId.startsWith('media:') && accessFor(c, plan, s.modelId).kind !== 'open');
+    const excluded = [...new Set(['openrouter/*', ...closed.map((s) => s.modelId)])].slice(0, 1024);
+    plugin = { id: 'jev-router', excluded_models: excluded };
+  }
+  const { models: _fallbacks, ...rest } = body;
+  return { ...rest, model: AUTO_MODEL, plugins: [...others, plugin] };
+}
+
+/**
+ * /systemone (06/10/2026): Jev's decisions for the fast browser mode, open
+ * to every plan and counted in its usage like any call. Only Jev answers
+ * there: any other model named is replaced by it.
+ */
+function fitDecision(raw: string): PolicyResult {
+  let body: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not an object');
+    body = parsed as Record<string, unknown>;
+  } catch {
+    return { ok: false, status: 400, code: 'invalid_request', message: 'Expected a JSON body' };
+  }
+  const requested = typeof body.model === 'string' ? body.model : null;
+  const served = requested && DECISION_IDS.has(requested) ? requested : DECISION_MODEL;
+  return { ok: true, body: JSON.stringify({ ...body, model: served }), requested, served };
 }
 
 /**
@@ -262,6 +350,24 @@ export function policyFor(c: Catalog, plan: Plan): ModelPolicy | null {
  * app), goes to the plan's default. null: the call goes out as it came.
  */
 export function fitCall(c: Catalog, plan: Plan, path: string, raw: string, known?: Set<string> | null): PolicyResult | null {
+  if (path === '/systemone') return fitDecision(raw);
+  const fitted = fitModel(c, plan, path, raw, known);
+  if (!fitted?.ok || fitted.served !== AUTO_MODEL) return fitted;
+  const within = routeWithin(c, plan, JSON.parse(fitted.body) as Record<string, unknown>, known);
+  if (within) return { ...fitted, body: JSON.stringify(within) };
+  // Cannot be bounded: fitted again as if « Automatique » were closed.
+  const again = fitModel(withoutAuto(c), plan, path, raw, known);
+  return again && again.ok ? { ...again, requested: fitted.requested } : (again ?? { ok: false, status: 503, code: 'no_model', message: 'No model is available for this plan right now' });
+}
+
+/** The catalog with « Automatique » closed. */
+function withoutAuto(c: Catalog): Catalog {
+  const settings = new Map(c.settings);
+  settings.set(AUTO_MODEL, { modelId: AUTO_MODEL, enabled: false, minPlan: null, recommended: false, strength: null, freeRank: null });
+  return { ...c, settings, free: c.free.filter((m) => m !== AUTO_MODEL) };
+}
+
+function fitModel(c: Catalog, plan: Plan, path: string, raw: string, known?: Set<string> | null): PolicyResult | null {
   const policy = policyFor(c, plan);
   if (policy) return applyPolicy(policy, path, raw);
   if (path !== '/chat/completions') return null;
@@ -277,8 +383,11 @@ export function fitCall(c: Catalog, plan: Plan, path: string, raw: string, known
   // An image call names an image model, which OpenRouter's main list may
   // leave out (openai/gpt-image-1): never taken for withdrawn.
   const image = Array.isArray(body.modalities) && body.modalities.includes('image');
-  if (!requested || (accessFor(c, plan, requested).kind === 'open' && (image || stillListed(known, requested)))) return null;
-  const served = defaultModel(c, plan);
+  const open = requested !== null && accessFor(c, plan, requested).kind === 'open' && (image || stillListed(known, requested));
+  // « Automatique » goes out as named, then routeWithin bounds it.
+  if (open && requested === AUTO_MODEL) return { ok: true, body: raw, requested, served: AUTO_MODEL };
+  if (!requested || open) return null;
+  const served = defaultModel(c, plan, known);
   if (!served) return { ok: false, status: 403, code: 'not_in_plan', message: 'This plan does not include this model' };
   // OpenRouter's own fallbacks could name the closed model again.
   const { models: _fallbacks, ...rest } = body;
@@ -329,4 +438,5 @@ export function mediaOpen(c: Catalog, plan: Plan, id: string): boolean {
   return rank(s.minPlan) >= 0 && rank(s.minPlan) <= rank(plan.id);
 }
 
-export const mediaRecommended = (c: Catalog, id: string) => c.settings.get(mediaKey(id))?.recommended ?? false;
+/** The console's word, else the code's (media.ts: the Chinese models first, 06/10/2026). */
+export const mediaRecommended = (c: Catalog, id: string) => c.settings.get(mediaKey(id))?.recommended ?? mediaModel(id)?.recommended ?? false;

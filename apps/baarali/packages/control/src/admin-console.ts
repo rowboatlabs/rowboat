@@ -19,6 +19,7 @@ import {
   pickerGroups,
   mediaKey,
   mediaOpen,
+  mediaRecommended,
   type ModelSetting,
   type PickerModel,
   openUntouched,
@@ -492,7 +493,7 @@ export function mountAdminConsole(app: Hono<any>, deps: ConsoleDeps): void {
           configured: Boolean(s),
           enabled: s?.enabled ?? true,
           minPlan: s?.minPlan ?? null,
-          recommended: s?.recommended ?? false,
+          recommended: mediaRecommended(catalog, m.id),
           // The default request: what the agent quotes first.
           credits,
           usd: Math.round(m.costUsd({ model: m.id, prompt: 'x' }) * 1000) / 1000,
@@ -522,7 +523,9 @@ export function mountAdminConsole(app: Hono<any>, deps: ConsoleDeps): void {
       change.minPlan = set.minPlan as string | null;
     }
     if (Object.keys(change).length === 0) return c.json({ error: { code: 'invalid_request', message: 'Nothing to change' } }, 400);
-    const settings = ids.map((id) => ({ ...(catalog.settings.get(mediaKey(id)) ?? blank(mediaKey(id))), ...change, modelId: mediaKey(id) }));
+    // A first setting keeps the code's « Conseillé »: hiding a model must not also unmark it.
+    const first = (id: string) => ({ ...blank(mediaKey(id)), recommended: mediaRecommended(catalog, id) });
+    const settings = ids.map((id) => ({ ...(catalog.settings.get(mediaKey(id)) ?? first(id)), ...change, modelId: mediaKey(id) }));
     await store.saveModelSettings(settings, deps.now());
     deps.models.clear();
     const label = planLabeler(catalog.plans);

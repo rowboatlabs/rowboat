@@ -45,12 +45,16 @@ function errorResponse(status: number, error: Record<string, unknown>): Response
   });
 }
 
-/** Asks OpenRouter for the call's cost, so the quota counts what was spent. */
-function withUsageAccounting(raw: string): { body: string; model: string | null } {
+/**
+ * Asks OpenRouter for the call's cost, so the quota counts what was spent.
+ * /systemone always reports it, and its body is TypeSafe's: left as is.
+ */
+function withUsageAccounting(raw: string, subpath: string): { body: string; model: string | null } {
   try {
     const parsed: unknown = JSON.parse(raw);
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       const obj = parsed as Record<string, unknown>;
+      if (subpath === '/systemone') return { body: raw, model: typeof obj.model === 'string' ? obj.model : null };
       const usage = obj.usage && typeof obj.usage === 'object' ? obj.usage : {};
       obj.usage = { ...usage, include: true };
       return { body: JSON.stringify(obj), model: typeof obj.model === 'string' ? obj.model : null };
@@ -158,7 +162,7 @@ export async function proxyLlm(deps: ProxyDeps, account: Account, req: Request):
   }
   await deps.store.saveQuotaState(account.id, open(before, started));
 
-  const { body, model } = withUsageAccounting(raw);
+  const { body, model } = withUsageAccounting(raw, subpath);
   headers['content-type'] = req.headers.get('content-type') ?? 'application/json';
 
   let settled = false;
