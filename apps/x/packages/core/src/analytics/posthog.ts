@@ -1,6 +1,7 @@
 import { PostHog } from 'posthog-node';
 import { getInstallationId } from './installation.js';
 import { API_URL } from '../config/env.js';
+import { isAnalyticsEnabled, saveAppSettings } from '../config/app_settings.js';
 
 // Build-time injected via esbuild `define` (apps/main/bundle.mjs).
 // In dev/tsc, fall back to process.env so local runs work too.
@@ -11,8 +12,31 @@ const APP_VERSION = (process.env.ROWBOAT_APP_VERSION ?? process.env.npm_package_
 let client: PostHog | null = null;
 let initAttempted = false;
 let identifiedUserId: string | null = null;
+// Cached opt-out state; read from app_settings.json on first use so every
+// capture doesn't hit the disk. `setAnalyticsEnabled` keeps it in sync.
+let analyticsEnabled: boolean | null = null;
+
+export function getAnalyticsEnabled(): boolean {
+  if (analyticsEnabled === null) analyticsEnabled = isAnalyticsEnabled();
+  return analyticsEnabled;
+}
+
+/** Persist the user's analytics choice and apply it to the live client. */
+export async function setAnalyticsEnabled(enabled: boolean): Promise<void> {
+  analyticsEnabled = enabled;
+  saveAppSettings({ analyticsEnabled: enabled });
+  if (!enabled && client) {
+    try {
+      // Flush anything queued before the opt-out, then stop capturing.
+      await client.flush();
+    } catch (err) {
+      console.error('[Analytics] flush on opt-out failed:', err);
+    }
+  }
+}
 
 function getClient(): PostHog | null {
+  if (!getAnalyticsEnabled()) return null;
   if (initAttempted) return client;
   initAttempted = true;
   if (!POSTHOG_KEY) {

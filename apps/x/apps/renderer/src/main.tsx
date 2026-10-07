@@ -33,11 +33,13 @@ async function bootstrap() {
   let installationId: string | undefined
   let apiUrl: string | undefined
   let appVersion: string | undefined
+  let analyticsEnabled = true
   try {
     const result = await window.ipc.invoke('analytics:bootstrap', null)
     installationId = result.installationId
     apiUrl = result.apiUrl
     appVersion = result.appVersion
+    analyticsEnabled = result.analyticsEnabled
   } catch (err) {
     console.error('[Analytics] Failed to bootstrap from main:', err)
   }
@@ -47,6 +49,8 @@ async function bootstrap() {
   const options = {
     api_host: import.meta.env.VITE_PUBLIC_POSTHOG_HOST,
     defaults: '2025-11-30' as const,
+    // The user's Settings → Advanced choice; honoured before any event fires.
+    opt_out_capturing_by_default: !analyticsEnabled,
     ...(installationId ? { bootstrap: { distinctID: installationId } } : {}),
     before_send: (event: CaptureResult | null) => {
       if (!event) return event

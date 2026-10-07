@@ -189,7 +189,16 @@ export const ipcSchemas = {
       installationId: z.string(),
       apiUrl: z.string(),
       appVersion: z.string(),
+      analyticsEnabled: z.boolean(),
     }),
+  },
+  'analytics:getSettings': {
+    req: z.null(),
+    res: z.object({ enabled: z.boolean() }),
+  },
+  'analytics:setSettings': {
+    req: z.object({ enabled: z.boolean() }),
+    res: z.object({ success: z.literal(true) }),
   },
   'workspace:getRoot': {
     req: z.null(),

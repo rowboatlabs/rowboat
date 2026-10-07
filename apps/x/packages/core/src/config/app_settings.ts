@@ -27,6 +27,16 @@ export interface AppSettings {
      * falls back to the default.
      */
     quickAskShortcut?: string;
+    /**
+     * Product analytics (PostHog) consent. Absent = enabled (the historical
+     * default); `false` = the user opted out in Settings → Advanced, and no
+     * events are captured from the main process or the renderer.
+     */
+    analyticsEnabled?: boolean;
+}
+
+export function isAnalyticsEnabled(): boolean {
+    return loadAppSettings().analyticsEnabled !== false;
 }
 
 export function loadAppSettings(): AppSettings {

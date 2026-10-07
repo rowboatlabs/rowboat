@@ -298,6 +298,8 @@ For GitHub Actions / packaged builds: set both as workflow env vars (from secret
 
 If unset, analytics no-op silently — you'll see `[Analytics] POSTHOG_KEY not set; analytics disabled` in the process hosting core.
 
+**User opt-out:** Settings → Advanced → "Share anonymous usage analytics" persists `analyticsEnabled: false` in `~/.rowboat/config/app_settings.json`. When off, the main-process client (`packages/core/src/analytics/posthog.ts`) captures nothing and the renderer starts PostHog with `opt_out_capturing_by_default`; toggling applies live to both. The bundled child server reads the setting on its first event, so a change there takes effect on next app restart.
+
 `installationId`: stored in `~/.rowboat/config/installation.json`, generated on first run.
 
 ## File map
