@@ -11,6 +11,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { AgentBadge, MemberAvatar, MemberProfilePopover, OrgMonogram } from '@/components/spaces/atoms'
 import { openServerDialog } from '@/lib/server-dialog'
+import { isGroupChat } from '@/lib/spaces-navigation'
 import { BookmarksPopover } from '@/components/spaces/bookmarks'
 import { FileColumn, TrashDialog, UploadFilesDialog } from '@/components/spaces/files-tab'
 import { GeneralStream } from '@/components/spaces/general-stream'
@@ -437,7 +438,12 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // edge that peeks the rail as a drawer on hover — see SpaceRail. (The
     // shell sidebar contracts to the dock while in Spaces, so this rail is
     // THE sidebar here.)
-    const [railPinned, setRailPinned] = useState(() => localStorage.getItem('spaces:railOpen') !== '0')
+    // A group chat starts with the rail tucked away: it has no channels to
+    // pick between, so the conversation is the whole view (2026-10-07). Its
+    // pin is remembered apart from the workspaces' docked default.
+    const groupChat = isGroupChat(org)
+    const railPinKey = groupChat ? 'spaces:chatRailOpen' : 'spaces:railOpen'
+    const [railPinned, setRailPinned] = useState(() => groupChat ? localStorage.getItem(railPinKey) === '1' : localStorage.getItem(railPinKey) !== '0')
 
     // Width of the pane drives the Split floor and pinnability.
     const paneRef = useRef<HTMLDivElement | null>(null)
@@ -671,7 +677,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     /** The rail's lock: docked ⇄ edge sliver (the rail peeks on hover by itself). */
     const toggleRailPin = () => {
         const pin = !railPinned
-        localStorage.setItem('spaces:railOpen', pin ? '1' : '0')
+        localStorage.setItem(railPinKey, pin ? '1' : '0')
         setRailPinned(pin)
     }
 
@@ -879,21 +885,24 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
             {active && <SelectionCopy />}
             <header className="spaces-header flex shrink-0 items-center gap-2 border-b border-border">
                 <ServerSwitcher org={org} onOpenSpace={onSwitchSpace} />
-                <span aria-hidden="true" className="shrink-0 text-muted-foreground/50">/</span>
+                {/* A group chat's name is the server's: no "/ #name" after it, just who is in it. */}
+                {!(groupChat && !isDirect) && <span aria-hidden="true" className="shrink-0 text-muted-foreground/50">/</span>}
                 {/* Click to keep the identity card and its copy actions open. */}
                 <Popover>
                     <PopoverTrigger asChild>
                         <button
                             type="button"
-                            aria-label={isDirect ? 'Conversation details' : 'Space details'}
+                            aria-label={isDirect ? 'Conversation details' : groupChat ? 'Group details' : 'Space details'}
                             className="flex h-9 min-w-0 max-w-[320px] shrink items-center gap-2 rounded-md pl-1 pr-2 hover:bg-accent/60 data-[state=open]:bg-accent/60"
                         >
-                            <span className={cn('flex min-w-0 items-center', isDirect ? 'gap-1.5' : 'gap-0.5')}>
+                            {groupChat && !isDirect ? <span className="flex items-center gap-1 text-[13px] text-muted-foreground">
+                                <Users className="size-3.5 shrink-0" />{members.length}
+                            </span> : <span className={cn('flex min-w-0 items-center', isDirect ? 'gap-1.5' : 'gap-0.5')}>
                                 {isDirect
                                     ? <MemberAvatar id={directOtherId} name={spaceTitle} size="sm" />
                                     : <Hash className="size-4 shrink-0 text-muted-foreground" />}
                                 <h1 className="truncate text-[15px] font-semibold">{spaceTitle}</h1>
-                            </span>
+                            </span>}
                         </button>
                     </PopoverTrigger>
                     <PopoverContent align="start" sideOffset={4} className="w-80 px-5 pb-5 pt-6">
@@ -912,7 +921,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                             <div className="mt-0.5 text-xs text-muted-foreground">
                                 {isSelf
                                     ? `Your notes in ${org.name} — just you and your agent`
-                                    : isDirect ? `A direct message in ${org.name} — just the two of you` : `A space in ${org.name}`}
+                                    : isDirect ? `A direct message in ${org.name} — just the two of you` : groupChat ? 'A group chat — add a channel from the server menu when it grows' : `A space in ${org.name}`}
                             </div>
                         </div>
                         <dl className="mt-4 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-[13px]">

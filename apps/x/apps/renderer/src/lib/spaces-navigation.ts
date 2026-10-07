@@ -110,3 +110,13 @@ export function parseSpacesLink(input: string): SpacesLinkTarget | null {
   return target
 }
 
+
+/**
+ * A server you are in exactly one space of reads as a group chat: one row in
+ * the sidebar, straight into the conversation, no channel list. A second
+ * space makes it a workspace with channels — derived, never stored, so the
+ * two can't disagree (2026-10-07, spec §4 "a new org is a group chat").
+ */
+export function isGroupChat(org: Pick<OrgWithSpaces, 'spaces' | 'error'>): boolean {
+    return !org.error && org.spaces.length === 1
+}

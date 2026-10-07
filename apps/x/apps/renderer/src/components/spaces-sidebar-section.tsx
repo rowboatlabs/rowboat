@@ -20,10 +20,14 @@ import type { RailSelection } from '@/lib/spaces-selection'
 import { toast } from '@/lib/toast'
 import * as analytics from '@/lib/analytics'
 import { openServerDialog } from '@/lib/server-dialog'
-import { serverLandingSpaceId } from '@/lib/spaces-navigation'
+import { isGroupChat, serverLandingSpaceId } from '@/lib/spaces-navigation'
 import { AddServerDialog } from '@/components/spaces/add-server-dialog'
 
-/** Server shortcuts; conversation navigation lives inside each server. */
+/**
+ * Group chats and workspaces (2026-10-07): a server that is one conversation
+ * is a row that opens it, most recent first, whichever server you were in;
+ * a server with channels is a shortcut into its own navigation.
+ */
 export function SpacesSidebarSection({ active, activeSpace, onOpenSpace }: {
     active: boolean
     activeSpace?: SpaceSelection
@@ -42,26 +46,43 @@ export function SpacesSidebarSection({ active, activeSpace, onOpenSpace }: {
         }
         serverBadges.set(org.id, badge)
     }
+    const chats = orgs.filter(isGroupChat)
+    const workspaces = orgs.filter((org) => !isGroupChat(org))
+    // Warm each chat's tail so recency (and its unread) can read it.
+    const chatKeys = chats.map((org) => `${org.id}/${org.spaces[0].id}`).join(',')
+    useEffect(() => {
+        for (const org of chats) prefetchStream(org.id, org.spaces[0].id)
+    }, [chatKeys]) // eslint-disable-line react-hooks/exhaustive-deps
+    const lastActivity = (org: OrgWithSpaces) => spaceLastActivityAt(org.id, org.spaces[0].id) ?? org.spaces[0].createdAt
+    chats.sort((a, b) => lastActivity(b).localeCompare(lastActivity(a)))
+    const row = (org: OrgWithSpaces, spaceId: string) => <SidebarMenuItem key={org.id}>
+        <SidebarMenuButton className="pl-6" isActive={active && activeSpace?.orgId === org.id}
+            title={org.name} onClick={() => onOpenSpace(org.id, spaceId)}>
+            <OrgMonogram org={org} size="sm" />
+            <span className="min-w-0 flex-1 truncate">{org.name}</span>
+            <UnreadBadge badge={serverBadges.get(org.id)!} />
+        </SidebarMenuButton>
+    </SidebarMenuItem>
+    // Headings only when both kinds are there: one kind needs no label.
+    const both = chats.length > 0 && workspaces.length > 0
     return <SidebarGroup className="pt-0">
         <SidebarGroupContent>
             <div data-tour-id="nav-spaces" className="flex h-8 items-center gap-2.5 px-2.5">
                 <MessagesSquare className="size-4 shrink-0 text-muted-foreground" />
                 <h2 className="flex-1 text-sm font-medium text-muted-foreground">Spaces</h2>
-                <button type="button" aria-label="Add server" title="Add server"
+                <button type="button" aria-label="New group chat" title="New group chat"
                     className="flex size-5 shrink-0 items-center justify-center text-muted-foreground transition-colors hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
                     onClick={() => setAddingServer(true)}>
                     <Plus className="size-4" />
                 </button>
             </div>
-            <SidebarMenu>
-                {orgs.map((org) => <SidebarMenuItem key={org.id}>
-                    <SidebarMenuButton className="pl-6" isActive={active && activeSpace?.orgId === org.id}
-                        title={org.name} onClick={() => onOpenSpace(org.id, serverLandingSpaceId(org))}>
-                        <OrgMonogram org={org} size="sm" />
-                        <span className="min-w-0 flex-1 truncate">{org.name}</span>
-                        <UnreadBadge badge={serverBadges.get(org.id)!} />
-                    </SidebarMenuButton>
-                </SidebarMenuItem>)}
+            {both && <h3 className="flex h-7 items-center pl-6 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80">Chats</h3>}
+            <SidebarMenu aria-label="Chats">
+                {chats.map((org) => row(org, org.spaces[0].id))}
+            </SidebarMenu>
+            {both && <h3 className="flex h-7 items-center pl-6 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80">Workspaces</h3>}
+            <SidebarMenu aria-label="Workspaces">
+                {workspaces.map((org) => row(org, serverLandingSpaceId(org)))}
             </SidebarMenu>
             {addingServer && <AddServerDialog onClose={() => setAddingServer(false)} onChoose={(kind) => {
                 setAddingServer(false)

@@ -8,16 +8,16 @@ export function AddServerDialog({ onClose, onChoose }: {
     return <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
         <DialogContent className="max-w-md">
             <DialogHeader>
-                <DialogTitle>Add a server</DialogTitle>
-                <DialogDescription>Start a home for your team, or join them on an existing server.</DialogDescription>
+                <DialogTitle>New group chat</DialogTitle>
+                <DialogDescription>Start one with your people, or join one you were invited to.</DialogDescription>
             </DialogHeader>
             <div className="grid gap-3 pt-1">
                 <button type="button" onClick={() => onChoose('create')}
                     className="group flex items-center gap-4 rounded-xl border border-border bg-accent/30 p-4 text-left transition-colors hover:bg-accent/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                     <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><Plus className="size-5" /></span>
                     <span className="min-w-0 flex-1">
-                        <span className="block text-sm font-semibold">Create a free server</span>
-                        <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">Bring your team and their assistants together.</span>
+                        <span className="block text-sm font-semibold">Create a group chat</span>
+                        <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">Name it, invite people, start talking. Add channels when it grows into a team.</span>
                     </span>
                     <ArrowRight className="size-4 shrink-0 text-muted-foreground group-hover:text-foreground" />
                 </button>
