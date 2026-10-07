@@ -3,7 +3,8 @@ import { getRequestListener } from '@hono/node-server';
 import { bindAuth, type AuthDriver, type OrgAuth } from './auth.js';
 import type { BlobStore } from './blobs.js';
 import { HostedConnectors } from './connectors/host.js';
-import { jevApiKey } from './connectors/jev/index.js';
+import type { JevApi } from './connectors/jev/api.js';
+import { jevApiFromEnv, jevApiKey } from './connectors/jev/index.js';
 import { buildHttpApp } from './http.js';
 import type { SpaceHub } from './hub.js';
 import { handleMcpRequest } from './mcp.js';
@@ -34,6 +35,8 @@ export interface OrgRuntimeInput {
   blobs?: BlobStore;
   /** Test injection; default = Expo push for this org. */
   pushSender?: PushSender;
+  /** Test injection; default = the deployment's Jev, on HARBOR_JEV_OPENROUTER_KEY against OpenRouter. */
+  jev?: () => JevApi | undefined;
   /** Mounts /oauth/consent; takes effect only with an oidc driver (the issuer comes from its metadata). */
   consentPublishableKey?: string;
   /** Upload cap for the raw-bytes blob route (default 100MB). */
@@ -72,6 +75,8 @@ export async function buildOrgRuntime(input: OrgRuntimeInput): Promise<OrgRuntim
   });
   // Jev (spec §8 Jev, 2026-10-07): every org has it once the deployment has its key.
   if (jevApiKey()) await service.ensureJev();
+  // /find asks the same Jev (protocol find.ts, 2026-10-07), whether or not Ro is in the space.
+  service.attachJev(input.jev ?? jevApiFromEnv());
   await connectors.startAll();
   const auth = bindAuth(input.auth, store);
   const issuer = input.auth.metadata?.()?.authorizationServers[0];

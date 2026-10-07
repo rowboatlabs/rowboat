@@ -310,6 +310,7 @@ export const RPC_CHANNELS = [
   'spaces:diff',
   'spaces:listTopics',
   'spaces:search',
+  'spaces:find',
   'spaces:listStream',
   'spaces:getMessage',
   'spaces:listThread',

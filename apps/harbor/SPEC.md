@@ -574,7 +574,8 @@ Agents in a thread reach each other only through mention tokens, and agents (and
 - **Its tags take the message's hand-off depth.** A tag from Jev completes a mention the author meant to write. So it invokes at the depth the author's own mention would have had, recorded when the message was posted, because by the time Jev answers, the author's turn may be over. An agent and Jev passing work back and forth stop at the hop limit like any chain. Jev does not tag agents past it.
 - **Mentions of Jev and DMs to it are settled, not answered.** A mention in a space is done at once, because the tagging pass reads the message anyway. A DM fails with a line saying Jev doesn't chat.
 - **Durable like an invocation.** Jev keeps a cursor per space: a live frame wakes it, and a sweep every minute catches up on anything missed. A message TypeSafe could not judge is retried. A message older than ten minutes when Jev reaches it is skipped rather than tagged late.
-- **Separate from the desktop's Jev features** (the composer's Auto toggle, /find, tag suggestions), which run on a person's own key before a message is sent.
+- **/find runs on Harbor too** *(added 2026-10-07)*. A person's /find asks Jev on the deployment's key, not their own: Harbor gathers the candidates from what that person can read and Jev picks the one their words describe. It works wherever they can read, whether or not Ro is in the space. Ro's membership decides whether it tags, and /find is the reader's own act, like search, so it needs no one's consent but theirs. Each member gets 10 finds a minute, since every one is paid for by Rowboat.
+- **Separate from the desktop's other Jev features** (the composer's Auto toggle, tag suggestions), which run on a person's own key before a message is sent. The desktop's /find falls back to that key only when the Harbor has no Jev.
 
 ---
 

@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import type { find } from '@x/shared'
+import type { find, spaces } from '@x/shared'
 import { STREAM_READ_KEY, getStreamState } from '@/hooks/use-space-chat'
 import { collectRouteCandidates } from '@/lib/spaces-auto-route'
 import { requestJump } from '@/lib/spaces-jump'
@@ -12,13 +12,21 @@ import { resolveMentions } from '@/lib/spaces-presentation'
 // walks the ranking locally, since the Choice returned every probability at
 // once. One session at a time, app-wide: whichever pane the current pick
 // landed in shows the banner, and a pick that lands elsewhere moves it.
+//
+// Since 2026-10-07 (Arjun's call) the org does both halves on its own Jev
+// key (Harbor's POST /v1/spaces/:id/find), so /find works for everyone, Ro
+// in the space or not. The gathering below and the person's own TypeSafe key
+// are the fallback for a Harbor without Jev, or one that predates the route.
+
+/** What landing on a pick needs: Harbor's ranked hits and the local candidates both carry it. */
+export type FindPick = Pick<find.FindCandidate, 'messageId' | 'threadRootId' | 'title' | 'replyCount' | 'offset'>
 
 export interface FindSession {
     orgId: string
     spaceId: string
     query: string
     /** Jev's order, strongest first. */
-    ranked: find.FindCandidate[]
+    ranked: FindPick[]
     index: number
 }
 
@@ -59,7 +67,7 @@ export function clearFindSession(): void {
 export type FindLanding = { pane: 'stream' } | { pane: 'thread'; rootMessageId: string }
 
 /** Where a pick lands: a reply, a topic, or a root with replies opens as a thread; a lone root scrolls the stream, neighbours in view. */
-export function landingOf(c: find.FindCandidate): FindLanding {
+export function landingOf(c: FindPick): FindLanding {
     const isRoot = c.messageId === c.threadRootId
     if (!isRoot || c.title || (c.replyCount ?? 0) > 0) return { pane: 'thread', rootMessageId: c.threadRootId }
     return { pane: 'stream' }
@@ -71,7 +79,7 @@ export interface FindNav {
 }
 
 /** Land on a candidate: the jump is requested first so the pane consumes it as it opens (or where it already is). */
-export function landOn(c: find.FindCandidate, nav: FindNav): void {
+export function landOn(c: FindPick, nav: FindNav): void {
     const landing = landingOf(c)
     const offset = c.offset !== undefined ? { offset: c.offset } : {}
     if (landing.pane === 'thread') {
@@ -84,7 +92,7 @@ export function landOn(c: find.FindCandidate, nav: FindNav): void {
 }
 
 /** "Not this": the next pick, landed on; null when the ranking is spent (the session ends). */
-export function findNext(nav: FindNav): find.FindCandidate | null {
+export function findNext(nav: FindNav): FindPick | null {
     if (!session) return null
     if (session.index + 1 >= session.ranked.length) {
         session = null
@@ -153,12 +161,51 @@ export async function gatherFindCandidates(
 }
 
 export type FindOutcome =
-    | { outcome: 'landed'; candidate: find.FindCandidate; total: number }
+    | { outcome: 'landed'; candidate: FindPick; total: number }
     | { outcome: 'not-found' }
     | { outcome: 'no-key' }
     | { outcome: 'error'; error: string }
 
-/** Run a find end to end: gather, ask Jev, land on the top pick, open a session for "next". */
+/** The walkable part of a ranking: the top pick always, then whatever drew a real share. */
+function walkable<T extends { probability: number }>(ranked: readonly T[]): T[] {
+    return ranked.filter((r, i) => i === 0 || r.probability >= WALK_MIN_PROBABILITY).slice(0, WALK_MAX)
+}
+
+/** The org's Jev: null when this Harbor has none (or predates the route), so the local key can try. */
+async function findOnOrg(orgId: string, spaceId: string, query: string): Promise<{ result: spaces.FindResult } | { error: string } | null> {
+    try {
+        const result = await window.ipc.invoke('spaces:find', { orgId, spaceId, query })
+        return result.reason === 'unavailable' ? null : { result }
+    } catch (err) {
+        return { error: err instanceof Error ? err.message : 'Find failed' }
+    }
+}
+
+/** The fallback: gather here and ask Jev on the person's own TypeSafe key. */
+async function findLocally(args: {
+    orgId: string
+    spaceId: string
+    spaceName: string
+    query: string
+    memberNames: ReadonlyMap<string, string>
+    spaceNames: ReadonlyMap<string, string>
+}): Promise<{ found: boolean; ranked: FindPick[] } | { outcome: 'no-key' } | { error: string }> {
+    const candidates = await gatherFindCandidates(args.orgId, args.spaceId, args.query, args.memberNames, args.spaceNames)
+    let result: find.FindResult
+    try {
+        result = await window.ipc.invoke('spaces:findMessage', { spaceName: args.spaceName, query: args.query, candidates })
+    } catch (err) {
+        return { error: err instanceof Error ? err.message : 'TypeSafe request failed' }
+    }
+    if (result.reason === 'no-key') return { outcome: 'no-key' }
+    const byId = new Map(candidates.map((c) => [c.messageId, c]))
+    const ranked = walkable(result.ranked)
+        .map((r) => byId.get(r.messageId))
+        .filter((c): c is find.FindCandidate => !!c)
+    return { found: result.found, ranked }
+}
+
+/** Run a find end to end: ask the org's Jev (else the local key), land on the top pick, open a session for "next". */
 export async function runFind(args: {
     orgId: string
     spaceId: string
@@ -169,23 +216,22 @@ export async function runFind(args: {
     nav: FindNav
 }): Promise<FindOutcome> {
     clearFindSession()
-    const candidates = await gatherFindCandidates(args.orgId, args.spaceId, args.query, args.memberNames, args.spaceNames)
-    let result: find.FindResult
-    try {
-        result = await window.ipc.invoke('spaces:findMessage', { spaceName: args.spaceName, query: args.query, candidates })
-    } catch (err) {
-        return { outcome: 'error', error: err instanceof Error ? err.message : 'TypeSafe request failed' }
+    let found: boolean
+    let ranked: FindPick[]
+    const onOrg = await findOnOrg(args.orgId, args.spaceId, args.query)
+    if (onOrg && 'result' in onOrg) {
+        found = onOrg.result.found
+        ranked = walkable(onOrg.result.ranked)
+    } else {
+        const local = await findLocally(args)
+        // The org's failure is the one to report when there is no key to fall back on.
+        if ('outcome' in local) return onOrg ? { outcome: 'error', error: onOrg.error } : { outcome: 'no-key' }
+        if ('error' in local) return { outcome: 'error', error: local.error }
+        found = local.found
+        ranked = local.ranked
     }
-    if (result.reason === 'no-key') return { outcome: 'no-key' }
-    if (!result.found) return { outcome: 'not-found' }
-    const byId = new Map(candidates.map((c) => [c.messageId, c]))
-    const ranked = result.ranked
-        .filter((r, i) => i === 0 || r.probability >= WALK_MIN_PROBABILITY)
-        .slice(0, WALK_MAX)
-        .map((r) => byId.get(r.messageId))
-        .filter((c): c is find.FindCandidate => !!c)
     const top = ranked[0]
-    if (!top) return { outcome: 'not-found' }
+    if (!found || !top) return { outcome: 'not-found' }
     session = { orgId: args.orgId, spaceId: args.spaceId, query: args.query, ranked, index: 0 }
     emit()
     landOn(top, args.nav)

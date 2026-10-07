@@ -13,8 +13,9 @@
 #     HARBOR_INTEGRATION_PREVIOUS_KEYS, a JSON map of old ids to old keys)
 #   HARBOR_JEV_OPENROUTER_KEY (optional; Rowboat's OpenRouter key, for Jev
 #     through OpenRouter's ~typesafe/jev-latest — with it every org
-#     gets Jev, the built-in agent that tags whoever a message needs; without
-#     it, no Jev is created and an existing one stays idle)
+#     gets Jev, the built-in agent that tags whoever a message needs, and
+#     /find runs on it; without it, no Jev is created, an existing one stays
+#     idle, and /find answers unavailable)
 
 FROM node:22-slim AS build
 RUN corepack enable

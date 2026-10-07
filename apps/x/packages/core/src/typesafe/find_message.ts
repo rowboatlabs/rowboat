@@ -4,7 +4,9 @@ import { buildFindRequest, decideFind, selectFindCandidates } from './find_quest
 
 /**
  * The `spaces:findMessage` handler, both hosts: ask Jev which of the
- * gathered messages the person is looking for. Short-circuits without a key
+ * gathered messages the person is looking for. Since 2026-10-07 the
+ * fallback only: the org's Harbor answers /find on its own Jev key
+ * (`spaces:find`), and this runs when that Harbor has no Jev. Short-circuits without a key
  * or without candidates; network and API errors propagate so the composer
  * can hand the query to the search bar instead.
  */

@@ -34,6 +34,7 @@ import type { BannerChip } from '@/components/spaces/auto-banner'
 import { readThreadDraft, stageThreadDraft } from '@/lib/spaces-thread-draft'
 import { agentOptionsPayload, postStreamMessage } from '@/lib/spaces-post'
 import { noteInvocations } from '@/hooks/use-space-invocations'
+import { useOrgRoster } from '@/hooks/use-space-members'
 import { AutoBanner } from '@/components/spaces/auto-banner'
 import { ThreadPickerDialog } from '@/components/spaces/thread-picker-dialog'
 import { FindBanner } from '@/components/spaces/find-banner'
@@ -262,11 +263,15 @@ export function GeneralStream({
     // count). Everything else is the stream, with a word on why when Auto
     // could not decide. The send button spins while Jev is asked, and the
     // draft stays in the box until the destination is known.
-    // No TypeSafe key, no Auto (2026-09-24): the pill and /find exist only
-    // once a key is set, the way the Terminal pill exists only with code
-    // mode. The stored mode is kept, so a key that goes away and comes back
-    // finds Auto as it was; meanwhile every send is a plain stream post.
+    // No TypeSafe key, no Auto (2026-09-24): the pill exists only once a
+    // key is set, the way the Terminal pill exists only with code mode. The
+    // stored mode is kept, so a key that goes away and comes back finds Auto
+    // as it was; meanwhile every send is a plain stream post.
     const jev = useTypeSafeConfigured()
+    // /find also runs on the org's own Jev (2026-10-07): an org has Ro
+    // exactly when its Harbor has a Jev key, so Ro on the roster lists /find
+    // for everyone, key or not, and whether or not Ro is in this space.
+    const orgJev = useOrgRoster(org.id, [space.id]).some((m) => m.agentKind === 'jev')
     const storedMode = useAutoRouteMode()
     const autoRouteMode = jev ? storedMode : 'off'
     const [routing, setRouting] = useState(false)
@@ -1171,12 +1176,12 @@ export function GeneralStream({
                         hint: 'Create a poll — pick answers, votes tally live',
                         run: () => openPollRef.current?.(),
                     },
-                    ...(jev ? [{
+                    ...(jev || orgJev ? [{
                         // /find (2026-09-24): Jev picks the message or thread the
                         // words describe and the app lands there; the banner walks
                         // the rest. Anything short of a real match hands the query
                         // to the search bar rather than landing somewhere plausible.
-                        // Listed only with a key, like the Auto pill.
+                        // Listed when the org has Jev, or with a key of your own.
                         name: 'find',
                         args: '<what you remember>',
                         hint: 'Jump to the message or thread you describe',
@@ -1192,7 +1197,7 @@ export function GeneralStream({
                             if (res.outcome === 'not-found') {
                                 notify.info(`No match for "${query}"`, { ...AUTO_TOAST, action: { label: 'Open search', onClick: () => searchInstead(query) } })
                             } else if (res.outcome === 'no-key') {
-                                // The key went away since the menu was built: a plain search, and the entry follows.
+                                // Neither the org nor a key of your own has Jev: a plain search, and the entry follows.
                                 searchInstead(query)
                                 refreshTypeSafeConfigured()
                             } else if (res.outcome === 'error') {

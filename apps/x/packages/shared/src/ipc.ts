@@ -4155,9 +4155,16 @@ export const ipcSchemas = {
     req: AutoRouteRequest,
     res: AutoRouteDecision,
   },
+  // /find on the org (2026-10-07): Harbor gathers the candidates and asks
+  // Jev on the deployment's key. `unavailable` (no Jev on that Harbor) is
+  // the renderer's cue to fall back to spaces:findMessage below.
+  'spaces:find': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), query: z.string() }),
+    res: z.custom<SpacesTypes.FindResult>(),
+  },
   // /find (2026-09-24): Jev ranks the candidates the renderer gathered
-  // against what the person remembers. A ranking, never a navigation; the
-  // renderer lands on the top pick and walks "next" through the rest locally.
+  // against what the person remembers, on the person's own key. Since
+  // 2026-10-07 only the fallback for a Harbor without Jev.
   'spaces:findMessage': {
     req: FindRequest,
     res: FindResult,
