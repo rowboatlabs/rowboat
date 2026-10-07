@@ -2,6 +2,7 @@ import { createServer, type Server as HttpServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { DevAuthDriver, ensureMember, type AuthDriver } from './auth.js';
 import { MemoryBlobStore, type BlobStore } from './blobs.js';
+import type { JevApi } from './connectors/jev/api.js';
 import { SpaceHub } from './hub.js';
 import { internalHandler } from './internal.js';
 import { LiveStats } from './stats.js';
@@ -33,6 +34,8 @@ export interface SeedSpace {
 export interface HarborOptions {
   /** Test injection: replaces the default PushSender (push.ts). */
   pushSender?: PushSender;
+  /** Test injection: the Jev /find asks (runtime.ts); default = the deployment's key against OpenRouter. */
+  jev?: () => JevApi | undefined;
   /** 0 (default) picks an ephemeral port — tests never collide. */
   port?: number;
   orgName?: string;
@@ -98,6 +101,7 @@ export async function startHarbor(options: HarborOptions): Promise<RunningHarbor
     auth: options.auth ?? new DevAuthDriver(),
     blobs: options.blobs ?? new MemoryBlobStore(),
     ...(options.pushSender ? { pushSender: options.pushSender } : {}),
+    ...(options.jev ? { jev: options.jev } : {}),
     ...(options.consent ? { consentPublishableKey: options.consent.publishableKey } : {}),
     ...(options.maxBlobBytes !== undefined ? { maxBlobBytes: options.maxBlobBytes } : {}),
   });

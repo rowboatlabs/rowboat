@@ -68,6 +68,7 @@ type SpacesHandlers = {
   'spaces:diff': InvokeHandler<'spaces:diff'>;
   'spaces:listTopics': InvokeHandler<'spaces:listTopics'>;
   'spaces:search': InvokeHandler<'spaces:search'>;
+  'spaces:find': InvokeHandler<'spaces:find'>;
   'spaces:listStream': InvokeHandler<'spaces:listStream'>;
   'spaces:getMessage': InvokeHandler<'spaces:getMessage'>;
   'spaces:listThread': InvokeHandler<'spaces:listThread'>;
@@ -395,6 +396,8 @@ export const spacesIpcHandlers: SpacesHandlers = {
       ...(args.kinds !== undefined ? { kinds: args.kinds } : {}),
       ...(args.limit !== undefined ? { limit: args.limit } : {}),
     }),
+
+  'spaces:find': async (_event, args) => orgs.getClient(args.orgId).find(args.spaceId, args.query),
 
   'spaces:listStream': async (_event, args) =>
     orgs.getClient(args.orgId).listStream(args.spaceId, {

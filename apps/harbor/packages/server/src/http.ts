@@ -545,6 +545,12 @@ export function buildHttpApp(deps: {
     return reply(c, routes.search.response, results);
   });
 
+  app.post('/v1/spaces/:spaceId/find', async (c) => {
+    const { spaceId } = parseWith(routes.find.params, c.req.param());
+    const input = await body(c, routes.find.request);
+    return reply(c, routes.find.response, await service.find(actor(c), spaceId, input.query));
+  });
+
   app.get('/v1/spaces/:spaceId/stream', async (c) => {
     const { spaceId } = parseWith(routes.listStream.params, c.req.param());
     const q = parseWith(routes.listStream.query, {

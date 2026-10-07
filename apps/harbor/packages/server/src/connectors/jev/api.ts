@@ -2,13 +2,15 @@
 // for the Jev connector (spec §8 Jev, 2026-10-07). One endpoint: POST
 // /v1/systemone takes a `state` and a map of typed questions and returns one
 // judgment per question, a probability rather than prose, so Jev decides and
-// Harbor writes what is posted. Only the yes/no question type is used here.
+// Harbor writes what is posted. Yes/no for the tags; one-of-a-set for /find
+// (find.ts, 2026-10-07).
 // Reached through OpenRouter only (2026-10-07, Arjun's call in review), which
 // serves the same API at its own base with its own model id, billed to
 // Rowboat's OpenRouter account (TypeSafe's docs, "Configuring the base URL").
 // The key is the deployment's own (HARBOR_JEV_OPENROUTER_KEY), never a person's.
 // The desktop app has its own client for its composer features
 // (apps/x/packages/core/src/typesafe); the two are separate on purpose.
+// /find moved here on 2026-10-07; the desktop keeps it only as a fallback.
 
 export const OPENROUTER_API = 'https://openrouter.ai/api';
 /** OpenRouter's id for the latest Jev: https://openrouter.ai/~typesafe/jev-latest */
@@ -26,6 +28,20 @@ export interface NoulQuestion {
   criteria?: { true?: Json; false?: Json };
 }
 
+/** One option out of a defined set: the answer carries every option's probability. */
+export interface ChoiceQuestion {
+  type: 'choice';
+  instructions: Json;
+  /** Option name to its description; null when the name says it all. */
+  criteria: Record<string, Json | null>;
+}
+
+export type Question = NoulQuestion | ChoiceQuestion;
+
+export type Answer =
+  | { type: 'noul'; noul: number }
+  | { type: 'choice'; choice: string; probabilities: Record<string, number>; confidence: number };
+
 export class TypeSafeError extends Error {
   /** HTTP status; 0 = no response (network, timeout). */
   constructor(readonly status: number, message: string) {
@@ -40,11 +56,31 @@ export class TypeSafeError extends Error {
 export interface JevApi {
   /** Every question sees the same state; the result maps each key to its probability of yes. */
   ask(state: Json, questions: Record<string, NoulQuestion>): Promise<Record<string, number>>;
+  /** The same call with any question type: each key to its typed answer. Answers of a malformed shape are dropped. */
+  judge(state: Json, questions: Record<string, Question>): Promise<Record<string, Answer>>;
+}
+
+function answerOf(raw: unknown): Answer | undefined {
+  const a = raw as { type?: unknown; noul?: unknown; choice?: unknown; probabilities?: unknown; confidence?: unknown } | null;
+  if (a?.type === 'noul' && typeof a.noul === 'number') return { type: 'noul', noul: a.noul };
+  if (a?.type === 'choice' && typeof a.choice === 'string' && a.probabilities && typeof a.probabilities === 'object') {
+    const probabilities: Record<string, number> = {};
+    for (const [option, p] of Object.entries(a.probabilities)) if (typeof p === 'number') probabilities[option] = p;
+    return { type: 'choice', choice: a.choice, probabilities, confidence: typeof a.confidence === 'number' ? a.confidence : 0 };
+  }
+  return undefined;
 }
 
 export function jevApi(apiKey: string, base = OPENROUTER_API): JevApi {
-  return {
+  const api: JevApi = {
     async ask(state, questions) {
+      const answers: Record<string, number> = {};
+      for (const [key, answer] of Object.entries(await api.judge(state, questions))) {
+        if (answer.type === 'noul') answers[key] = answer.noul;
+      }
+      return answers;
+    },
+    async judge(state, questions) {
       const body = JSON.stringify({ model: MODEL, state, questions });
       let last: TypeSafeError | undefined;
       for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
@@ -69,14 +105,16 @@ export function jevApi(apiKey: string, base = OPENROUTER_API): JevApi {
           const detail = (await res.text().catch(() => '')).slice(0, 200).trim();
           throw new TypeSafeError(res.status, `OpenRouter refused the request (${res.status})${detail ? `: ${detail}` : ''}`);
         }
-        const json = (await res.json()) as { answers?: Record<string, { type?: string; noul?: unknown }> };
-        const answers: Record<string, number> = {};
-        for (const [key, answer] of Object.entries(json.answers ?? {})) {
-          if (answer?.type === 'noul' && typeof answer.noul === 'number') answers[key] = answer.noul;
+        const json = (await res.json()) as { answers?: Record<string, unknown> };
+        const answers: Record<string, Answer> = {};
+        for (const [key, raw] of Object.entries(json.answers ?? {})) {
+          const answer = answerOf(raw);
+          if (answer) answers[key] = answer;
         }
         return answers;
       }
       throw last ?? new TypeSafeError(0, 'OpenRouter request failed');
     },
   };
+  return api;
 }

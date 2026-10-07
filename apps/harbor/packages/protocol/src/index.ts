@@ -12,6 +12,7 @@ export * from './invocation.js';
 export * from './approval.js';
 export * from './invite.js';
 export * from './search.js';
+export * from './find.js';
 export * from './mentions.js';
 export * from './api.js';
 export * from './mcp.js';

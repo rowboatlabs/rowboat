@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { find } from '@x/shared'
 
 const jumps = vi.hoisted(() => [] as unknown[])
-const search = vi.hoisted(() => ({ results: { messages: [] as unknown[], topics: [] as unknown[], assets: [], truncated: { messages: false, topics: false, assets: false } }, findResult: null as unknown }))
+const search = vi.hoisted(() => ({ results: { messages: [] as unknown[], topics: [] as unknown[], assets: [], truncated: { messages: false, topics: false, assets: false } }, findResult: null as unknown, orgResult: null as unknown }))
 vi.mock('@/hooks/use-space-chat', () => ({ STREAM_READ_KEY: 'stream', getStreamState: () => ({ messages: [], topicsByRoot: new Map() }) }))
 vi.mock('@/lib/spaces-auto-route', () => ({
     collectRouteCandidates: () => [
@@ -24,12 +24,18 @@ beforeEach(() => {
     nav.openStream.mockClear()
     clearFindSession()
     search.results = { messages: [], topics: [], assets: [], truncated: { messages: false, topics: false, assets: false } }
+    // A Harbor without Jev unless a test says otherwise: the local key path runs.
+    search.orgResult = { reason: 'unavailable', found: false, ranked: [] }
     Object.defineProperty(window, 'ipc', {
         configurable: true,
         value: {
             invoke: vi.fn(async (channel: string) => {
                 if (channel === 'spaces:search') return search.results
                 if (channel === 'spaces:findMessage') return search.findResult
+                if (channel === 'spaces:find') {
+                    if (search.orgResult instanceof Error) throw search.orgResult
+                    return search.orgResult
+                }
                 throw new Error(`unexpected ${channel}`)
             }),
         },
@@ -100,5 +106,37 @@ describe('runFind and findNext', () => {
         expect(await runFind({ orgId: 'o1', spaceId: 's1', spaceName: 'eng', query: 'q', memberNames, spaceNames, nav })).toEqual({ outcome: 'error', error: 'boom' })
         expect(getFindSession()).toBeNull()
         expect(nav.openThread).not.toHaveBeenCalled()
+    })
+
+    it("lands on the org's ranking without gathering or a key of one's own", async () => {
+        search.orgResult = {
+            reason: 'ranked', found: true, presence: 0.9, confidence: 0.8,
+            ranked: [
+                { messageId: 'm9', threadRootId: 'r1', title: 'Offsite', offset: 40, probability: 0.7 },
+                { messageId: 'r2', threadRootId: 'r2', title: null, replyCount: 0, offset: 50, probability: 0.2 },
+                { messageId: 'r3', threadRootId: 'r3', title: null, replyCount: 0, offset: 60, probability: 0.01 },
+            ],
+        }
+        const res = await runFind({ orgId: 'o1', spaceId: 's1', spaceName: 'eng', query: 'lisbon', memberNames, spaceNames, nav })
+        expect(res).toMatchObject({ outcome: 'landed', candidate: { messageId: 'm9' }, total: 2 })
+        expect(jumps[0]).toEqual({ topicId: 'r1', messageId: 'm9', offset: 40 })
+        expect(nav.openThread).toHaveBeenCalledWith('r1')
+        const invoke = (window as unknown as { ipc: { invoke: ReturnType<typeof vi.fn> } }).ipc.invoke
+        expect(invoke.mock.calls.map((call) => call[0])).toEqual(['spaces:find'])
+        expect(invoke.mock.calls[0]![1]).toEqual({ orgId: 'o1', spaceId: 's1', query: 'lisbon' })
+    })
+
+    it("takes the org's not-found as the answer", async () => {
+        search.orgResult = { reason: 'ranked', found: false, ranked: [{ messageId: 'r1', threadRootId: 'r1', title: null, offset: 1, probability: 0.2 }] }
+        search.findResult = { reason: 'ranked', found: true, ranked: [{ messageId: 'r1', probability: 0.9 }] }
+        expect(await runFind({ orgId: 'o1', spaceId: 's1', spaceName: 'eng', query: 'q', memberNames, spaceNames, nav })).toEqual({ outcome: 'not-found' })
+    })
+
+    it("falls back to the local key when the org fails, and reports the org's error when there is no key", async () => {
+        search.orgResult = new Error('At most 10 finds a minute')
+        search.findResult = { reason: 'ranked', found: true, ranked: [{ messageId: 'r1', probability: 0.9 }] }
+        expect(await runFind({ orgId: 'o1', spaceId: 's1', spaceName: 'eng', query: 'q', memberNames, spaceNames, nav })).toMatchObject({ outcome: 'landed', candidate: { messageId: 'r1' } })
+        search.findResult = { reason: 'no-key', found: false, ranked: [] }
+        expect(await runFind({ orgId: 'o1', spaceId: 's1', spaceName: 'eng', query: 'q', memberNames, spaceNames, nav })).toEqual({ outcome: 'error', error: 'At most 10 finds a minute' })
     })
 })

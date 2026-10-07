@@ -31,6 +31,7 @@ import {
   type Routes,
   type SearchKind,
   type SearchResults,
+  type FindResult,
   type Space,
   type Topic,
   type TopicListing,
@@ -464,6 +465,11 @@ export class SpacesClient {
     if (opts.kinds !== undefined) qs.set('kinds', opts.kinds.join(','));
     if (opts.limit !== undefined) qs.set('limit', String(opts.limit));
     return this.request('GET', this.space(spaceId, `/search?${qs.toString()}`), routes.search.response);
+  }
+
+  /** /find (protocol find.ts, 2026-10-07): Jev ranks the space's messages against what the person remembers. */
+  async find(spaceId: string, query: string): Promise<FindResult> {
+    return this.request('POST', this.space(spaceId, '/find'), routes.find.response, { query });
   }
 
   /** A page request: newest by default, back from `beforeOffset`, forward from `afterOffset`, or landing around `aroundOffset` (at most one). */

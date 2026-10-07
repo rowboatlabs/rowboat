@@ -26,6 +26,7 @@ import { StreamEvent } from './events.js';
 import { Approval, ApprovalClose, ApprovalDecision, ApprovalId, ApprovalRequest } from './approval.js';
 import { ConnectorCapabilities, Invocation, InvocationId, InvocationOptionValues, InvocationUpdate } from './invocation.js';
 import { SearchKind, SearchResults } from './search.js';
+import { FindQuery, FindResult } from './find.js';
 
 // The render face (spec §9): REST + the live stream in events.ts. Member token
 // auth on every route. Shapes here are v0 — Latitude items (pagination, ETags,
@@ -1085,6 +1086,20 @@ export const routes = {
       limit: z.coerce.number().int().positive().max(50).optional(),
     }),
     response: SearchResults,
+  },
+  /**
+   * /find (find.ts, 2026-10-07): Jev picks the message or thread `query`
+   * describes from candidates Harbor gathers within what the caller can read.
+   * Render face only: it spends the deployment's Jev key on a person's
+   * composer, and an agent reads and judges for itself. `rate_limited` past
+   * a per-member budget.
+   */
+  find: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/find',
+    params: z.object({ spaceId: SpaceId }),
+    request: z.object({ query: FindQuery }),
+    response: FindResult,
   },
 
   // --- live ----------------------------------------------------------------

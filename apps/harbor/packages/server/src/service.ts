@@ -4,6 +4,8 @@ import { Agents, type AgentConnectorHooks } from './core/agents.js';
 import { Assets } from './core/assets.js';
 import { Images } from './core/images.js';
 import { Feed } from './core/feed.js';
+import { Find } from './core/find.js';
+import type { JevApi } from './connectors/jev/api.js';
 import { approvalCardBody } from './core/approval-card.js';
 import { Invocations } from './core/invocations.js';
 import { Kernel, type ActorCtx, type BindIdentity, type OrgInfo } from './core/kernel.js';
@@ -27,6 +29,7 @@ import type {
   CreateAssetResult,
   CreateInviteResult,
   DeleteAssetResult,
+  FindResult,
   Member,
   AgentKey,
   AgentCredential,
@@ -78,6 +81,7 @@ export class HarborService {
   private readonly readState: ReadState;
   private readonly agents: Agents;
   private readonly invocations: Invocations;
+  private readonly finder: Find;
 
   constructor(
     store: Store,
@@ -96,11 +100,17 @@ export class HarborService {
     this.feed = new Feed(this.k, this.assets, notifier, this.invocations);
     this.readState = new ReadState(this.k, this.spaces, this.feed);
     this.agents = new Agents(this.k, this.spaces);
+    this.finder = new Find(this.k, this.feed);
   }
 
   /** The kernel's clock, for code outside the core that stamps rows (connectors/host.ts). */
   now(): string {
     return this.k.now();
+  }
+
+  /** The deployment's Jev, for /find (runtime.ts): undefined without its key. */
+  attachJev(jev: () => JevApi | undefined): void {
+    this.finder.attachJev(jev);
   }
 
   /** The connector host, for creating agents Harbor reaches through a platform (runtime.ts). */
@@ -475,6 +485,10 @@ export class HarborService {
     opts?: { kinds?: SearchKind[]; limit?: number },
   ): Promise<SearchResults> {
     return this.feed.search(ctx, spaceId, rawQuery, opts);
+  }
+  /** /find (core/find.ts): Jev picks the message `query` describes. */
+  find(ctx: ActorCtx, spaceId: string, query: string): Promise<FindResult> {
+    return this.finder.find(ctx, spaceId, query);
   }
 
   // --- read state & activity (core/read-state.ts) ----------------------------------
