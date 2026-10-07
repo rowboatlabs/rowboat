@@ -50,7 +50,7 @@ export const KINDS: Record<string, { label: string; logo?: Logo }> = {
     'muse-code': { label: 'Muse Code' },
     custom: { label: 'Agent' },
     // Jev (Harbor spec §8 Jev, 2026-10-07): the agent Harbor itself is, on
-    // Rowboat's TypeSafe key. TypeSafe publishes no mark for it: the generic one.
+    // Rowboat's OpenRouter key. TypeSafe publishes no mark for it: the generic one.
     jev: { label: 'Jev' },
 }
 

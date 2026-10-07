@@ -5,7 +5,7 @@ import { TypeSafeError, type JevApi } from './api.js';
 import { buildQuestions, decideTags, MAX_THREAD_MESSAGES, selectCandidates } from './questions.js';
 
 // The Jev connector (spec §8 Jev, 2026-10-07): the agent Harbor itself is, on
-// the deployment's TypeSafe key. Unlike every other agent it is not invoked
+// the deployment's OpenRouter key. Unlike every other agent it is not invoked
 // by a mention: it reads every message in the spaces people add it to, asks
 // Jev who the message needs, and posts the tags in the message's thread
 // ("cc @Hermes @Sam"). The tags are an ordinary message, so they notify people

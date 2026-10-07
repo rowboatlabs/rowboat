@@ -8,7 +8,7 @@ import { FakeTypeSafe, namesThem } from './fake-typesafe.js';
 import { freshStore, restClient } from './helpers.js';
 
 // Jev (spec §8 Jev, 2026-10-07), end to end: a real Harbor running Jev's
-// connector against a stand-in TypeSafe. Jev is in every org, joins spaces
+// connector against a stand-in for TypeSafe's API as OpenRouter serves it. Jev is in every org, joins spaces
 // like any agent, reads every message there, and posts the tags the message
 // needs, people and agents alike; its tags take the message's hand-off depth.
 
@@ -29,7 +29,7 @@ const settle = () => new Promise((r) => setTimeout(r, 300));
 const token = (m: Member) => `[@${m.displayName}](#member:${m.id})`;
 
 beforeAll(async () => {
-  process.env.HARBOR_JEV_API_KEY = 'ts_test_key';
+  process.env.HARBOR_JEV_OPENROUTER_KEY = 'sk-or-test';
   fake = await new FakeTypeSafe().start();
   PLATFORMS.builtin = jevPlatform(fake.url);
 });
@@ -37,7 +37,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await fake.close();
   PLATFORMS.builtin = original!;
-  delete process.env.HARBOR_JEV_API_KEY;
+  delete process.env.HARBOR_JEV_OPENROUTER_KEY;
 });
 
 describe('Jev', () => {
@@ -131,7 +131,8 @@ describe('Jev', () => {
     expect(reply!.mentions).toEqual(['harsh']);
     // On the deployment's key, never naming ids to Jev; the author and Jev are never candidates.
     const call = fake.calls.at(-1)!;
-    expect(call.auth).toBe('Bearer ts_test_key');
+    expect(call.auth).toBe('Bearer sk-or-test');
+    expect(call.model).toBe('~typesafe/jev-latest');
     expect(call.state.message).toMatchObject({ author: 'Ramnique', author_is: 'a person' });
     expect(call.state.members.map((m) => m.name).sort()).toEqual(['Gagan', 'Harsh']);
     expect(JSON.stringify(call)).not.toContain('harsh"');

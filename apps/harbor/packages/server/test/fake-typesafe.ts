@@ -1,7 +1,8 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-// A stand-in for TypeSafe's System One API (https://docs.typesafe.ai/api) for
+// A stand-in for TypeSafe's System One API (https://docs.typesafe.ai/api), as
+// OpenRouter serves it at https://openrouter.ai/api/v1/systemone, for
 // the Jev tests (spec §8 Jev, 2026-10-07). It records every request and
 // answers each yes/no question with `judge`, which by default says yes to a
 // member the message names and no to everyone else.
