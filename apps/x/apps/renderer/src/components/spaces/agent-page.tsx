@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input'
 import { ConnectAgent } from '@/components/spaces/agent-setup'
 import { refreshAgentCapabilities } from '@/hooks/use-space-invocations'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
-import { PLATFORMS, setupFor } from '@/lib/agent-kinds'
+import { BUILT_IN_CONNECTION, PLATFORMS, setupFor } from '@/lib/agent-kinds'
 import { toast } from '@/lib/toast'
 
 // One agent's page in the Agents dialog (2026-10-01): its defaults, its setup
@@ -79,6 +79,18 @@ export function AgentPage({ org, listing, isAdmin, onChanged }: {
         } finally {
             setBusy(false)
         }
+    }
+
+    // Jev is built in (2026-10-07): no setup steps, no keys, nothing to set.
+    if (agent.agentConnection === BUILT_IN_CONNECTION) {
+        return (
+            <Section
+                title="Built in"
+                note={`${agent.displayName} comes with Rowboat and runs on Rowboat's own key. Add it to a space and it reads every message there, tagging the people and agents a message needs.`}
+            >
+                {null}
+            </Section>
+        )
     }
 
     return (

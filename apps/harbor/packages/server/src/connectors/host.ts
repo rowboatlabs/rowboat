@@ -1,11 +1,11 @@
-import { HARBOR_RUN_CONNECTIONS, type AgentCredential, type Member } from '@rowboat/spaces-protocol';
+import { type AgentCredential, type Member } from '@rowboat/spaces-protocol';
 import { HarborError } from '../errors.js';
 import type { SpaceHub } from '../hub.js';
 import { assertSealingConfigured, credentialHint, seal, unseal } from '../sealing.js';
 import type { HarborService } from '../service.js';
 import type { Store } from '../store.js';
 import type { CredentialTarget } from '../core/agents.js';
-import { PLATFORMS, type ConnectorEnv, type RunningConnector } from './platforms.js';
+import { HOSTED_CONNECTIONS, PLATFORMS, type ConnectorEnv, type RunningConnector } from './platforms.js';
 
 // Runs one org's connectors (spec §8 Connectors, 2026-09-30): one per agent
 // whose connection is a platform Harbor calls. Started at boot for every such
@@ -37,7 +37,7 @@ export class HostedConnectors {
   }
 
   async startAll(): Promise<void> {
-    for (const agent of await this.deps.store.listAgentsByConnection(HARBOR_RUN_CONNECTIONS)) this.ensure(agent);
+    for (const agent of await this.deps.store.listAgentsByConnection(HOSTED_CONNECTIONS)) this.ensure(agent);
   }
 
   /** Start the agent's connector if Harbor runs one for its connection and it isn't running yet. */
@@ -63,6 +63,7 @@ export class HostedConnectors {
       service,
       ctx: { memberId: agent.id, agent: true },
       subscribe: (fn) => hub.subscribeMember(agent.id, fn),
+      subscribeSpace: (spaceId, fn) => hub.subscribe(spaceId, fn),
       credential: async () => {
         const stored = await store.getAgentCredential(agent.id);
         if (!stored) throw new HarborError('invalid_request', 'this agent has no platform key');

@@ -492,6 +492,9 @@ export interface Store {
   listConversationInvocations(agentId: string, spaceId: string, threadRootId: string): Promise<Invocation[]>;
   /** A space's invocations (one thread's, when given), newest message first. */
   listSpaceInvocations(spaceId: string, threadRootId: string | null, limit: number): Promise<Invocation[]>;
+  /** The hand-off depth an agent a message mentions is invoked at (spec §8 Jev, 2026-10-07); 0 when none was recorded. */
+  getMessageHops(spaceId: string, messageId: string): Promise<number>;
+  putMessageHops(spaceId: string, messageId: string, depth: number): Promise<void>;
   /** Whether two members share a shared (not direct) space. */
   sharesSharedSpace(a: string, b: string): Promise<boolean>;
 

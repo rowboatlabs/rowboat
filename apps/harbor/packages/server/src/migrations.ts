@@ -894,6 +894,22 @@ export const MIGRATIONS: Migration[] = [
       `alter table members add constraint members_agent_instance_check check (kind = 'agent' or agent_instance is null)`,
     ],
   },
+  {
+    // How many agent hand-offs led to a message (spec §8 Jev, 2026-10-07):
+    // the depth an agent it mentions is invoked at, recorded when an agent
+    // posts, because by the time Jev tags someone for the message the turn
+    // that posted it may have finished. A person's message is depth 0 and
+    // has no row.
+    id: '033-message-hops',
+    statements: [
+      `create table message_hops (
+        space_id text not null,
+        message_id text not null,
+        depth integer not null,
+        primary key (space_id, message_id)
+      )`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {
