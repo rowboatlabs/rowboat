@@ -1,5 +1,5 @@
 import { useFileViewerSource } from './file-viewer-source'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { ExternalLinkIcon, FileTextIcon, Loader2Icon } from 'lucide-react'
 
 interface PdfFileViewerProps {
@@ -10,11 +10,10 @@ type State = 'loading' | 'ready' | 'error'
 
 export function PdfFileViewer({ path }: PdfFileViewerProps) {
   const source = useFileViewerSource()
-  const [state, setState] = useState<State>('loading')
-
-  useEffect(() => {
-    setState('loading')
-  }, [path])
+  // Kept with the path it belongs to, so a new path starts loading without an
+  // effect that could run after the iframe's load and undo it (2026-10-07, PR #1167 CI).
+  const [status, setStatus] = useState<{ path: string; state: State }>({ path, state: 'loading' })
+  const state = status.path === path ? status.state : 'loading'
 
   const src = source.url(path)
 
@@ -44,8 +43,8 @@ export function PdfFileViewer({ path }: PdfFileViewerProps) {
         src={src}
         className="h-full w-full border-0 bg-white"
         title="PDF preview"
-        onLoad={() => setState('ready')}
-        onError={() => setState('error')}
+        onLoad={() => setStatus({ path, state: 'ready' })}
+        onError={() => setStatus({ path, state: 'error' })}
       />
       {state === 'loading' && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background text-muted-foreground">
