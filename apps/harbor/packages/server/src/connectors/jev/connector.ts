@@ -2,7 +2,7 @@ import { mentionsAsText, mentionToken, type Invocation, type Member, type Messag
 import { AGENT_HOP_LIMIT } from '../../policy.js';
 import type { ConnectorEnv, RunningConnector } from '../platforms.js';
 import { TypeSafeError, type JevApi } from './api.js';
-import { buildQuestions, decideTags, MAX_NOTES, MAX_THREAD_MESSAGES, selectCandidates, type Note } from './questions.js';
+import { buildQuestions, clip, decideTags, MAX_NOTE_CHARS, MAX_NOTES, MAX_THREAD_CHARS, MAX_THREAD_MESSAGES, selectCandidates, type Note } from './questions.js';
 
 // The Jev connector (spec §8 Jev, 2026-10-07): the agent Harbor itself is, on
 // the deployment's OpenRouter key. Unlike every other agent it is not invoked
@@ -21,12 +21,16 @@ import { buildQuestions, decideTags, MAX_NOTES, MAX_THREAD_MESSAGES, selectCandi
 // A message that tags Jev is feedback on its tags (2026-10-07, Arjun in
 // Spaces): it is kept in the space's record, word for word with the thread it
 // was said in, given back to Jev with every question in that space and no
-// other, and acknowledged with a 👍. Deleting the message withdraws it.
+// other, and acknowledged with a 👍. Deleting the message withdraws it. The
+// notes are their own record, clipped when kept, so the cursor saved after
+// every message stays small and a note is written only when the notes change.
 
 const SWEEP_EVERY_MS = 60_000;
 const CATCH_UP_MS = 10 * 60_000;
 /** Its record per space, in agent_connection_threads under the empty thread root: one cursor, not a thread. */
 const SPACE_RECORD = '';
+/** Its feedback notes per space, beside the cursor; never a ULID, so never a thread root. */
+const NOTES_RECORD = 'notes';
 const LIVE_STATES = new Set<Invocation['state']>(['queued', 'pending', 'working', 'waiting']);
 /** How much of the thread a note keeps: enough to see the message and Jev's tags it is about. */
 const NOTE_THREAD_MESSAGES = 5;
@@ -35,8 +39,11 @@ const NOTED = '👍';
 interface SpaceRecord {
   /** The offset of the last event Jev has read in the space. */
   offset: number;
+}
+
+interface NotesRecord {
   /** The space's feedback to Jev, oldest first, at most MAX_NOTES. */
-  notes?: Note[];
+  notes: Note[];
 }
 
 export class JevConnector implements RunningConnector {
@@ -148,17 +155,21 @@ export class JevConnector implements RunningConnector {
     }
     const { events } = await service.replay(ctx, spaceId, record.offset);
     let offset = record.offset;
-    let notes = record.notes ?? [];
+    let notes = ((await this.env.thread.get(spaceId, NOTES_RECORD)) as NotesRecord | undefined)?.notes ?? [];
     let dirty = false;
-    const save = () => this.env.thread.put(spaceId, SPACE_RECORD, { offset, ...(notes.length > 0 ? { notes } : {}) } satisfies SpaceRecord);
+    const save = () => this.env.thread.put(spaceId, SPACE_RECORD, { offset } satisfies SpaceRecord);
+    const saveNotes = () => this.env.thread.put(spaceId, NOTES_RECORD, { notes } satisfies NotesRecord);
     for (const stored of events) {
       if (this.stopped) break;
       const event = stored.event;
       if (event.type === 'message') {
         const message = event.message;
         const note = message.mentions.includes(this.env.agent.id) ? await this.noteOf(message) : undefined;
-        if (note) notes = [...notes, note].slice(-MAX_NOTES);
-        else if ((await this.consider(message, notes)) === 'retry') break;
+        if (note) {
+          // A restart between the two saves reads the message again: keep it once.
+          notes = [...notes.filter((n) => n.messageId !== note.messageId), note].slice(-MAX_NOTES);
+          await saveNotes();
+        } else if ((await this.consider(message, notes)) === 'retry') break;
         offset = stored.offset;
         // After each message, so a restart never tags one twice or loses a note.
         await save();
@@ -167,6 +178,7 @@ export class JevConnector implements RunningConnector {
       } else {
         if (event.type === 'message_deleted' && notes.some((n) => n.messageId === event.deletion.messageId)) {
           notes = notes.filter((n) => n.messageId !== event.deletion.messageId);
+          await saveNotes();
         }
         offset = stored.offset;
         dirty = true;
@@ -188,13 +200,13 @@ export class JevConnector implements RunningConnector {
     const members = await service.listMembers(ctx, message.spaceId);
     const names = new Map(members.map((m) => [m.id, m.displayName]));
     const who = (id: string) => names.get(id) ?? 'someone who left';
-    const note: Note = { messageId: message.id, from: who(message.author.memberId), said: mentionsAsText(message.body, names) };
+    const note: Note = { messageId: message.id, from: who(message.author.memberId), said: clip(mentionsAsText(message.body, names), MAX_NOTE_CHARS) };
     if (message.threadRoot) {
       const page = await service.listThread(ctx, message.spaceId, message.threadRoot, { beforeOffset: message.offset, limit: NOTE_THREAD_MESSAGES });
       note.about = [page.root, ...page.messages]
         .filter((m) => !m.deletedAt)
         .slice(-NOTE_THREAD_MESSAGES)
-        .map((m) => ({ author: who(m.author.memberId), text: mentionsAsText(m.body, names) }));
+        .map((m) => ({ author: who(m.author.memberId), text: clip(mentionsAsText(m.body, names), MAX_THREAD_CHARS) }));
     }
     return note;
   }

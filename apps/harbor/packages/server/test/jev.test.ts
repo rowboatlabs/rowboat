@@ -269,6 +269,14 @@ describe('Jev', () => {
     await until(async () => fake.calls.length > after, 'judged after the deletion');
     expect(JSON.stringify(fake.calls.at(-1)!.state.team_feedback ?? [])).not.toContain('Gagan owns invoices');
   });
+
+  it('keeps feedback clipped, in its own record, apart from the cursor it saves after every message', async () => {
+    const long = await post(`${token(jev)} ${'tag Gagan on invoices. '.repeat(100)}`);
+    const kept = () => harbor.store.getConnectionThread(jev.id, spaceId, 'notes') as Promise<{ notes: Array<{ messageId: string; said: string }> } | undefined>;
+    const note = await until(async () => (await kept())?.notes.find((n) => n.messageId === long.id), 'long feedback kept');
+    expect(note.said.length).toBe(1000);
+    expect(Object.keys((await harbor.store.getConnectionThread(jev.id, spaceId, '')) as object)).toEqual(['offset']);
+  });
 });
 
 describe('Jev’s questions', () => {

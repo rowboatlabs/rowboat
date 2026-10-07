@@ -14,8 +14,8 @@ export const MAX_TAGS = 3;
 export const MAX_MESSAGE_CHARS = 4000;
 export const MAX_THREAD_MESSAGES = 10;
 export const MAX_THREAD_CHARS = 400;
-/** The newest notes a space keeps, and how much of each Jev sees. */
-export const MAX_NOTES = 20;
+/** The newest notes a space keeps, and how much of each it keeps. 50, so a standing rule outlasts a run of corrections (2026-10-07, Arjun in Spaces). */
+export const MAX_NOTES = 50;
 export const MAX_NOTE_CHARS = 1000;
 
 /** What an agent is underneath, in words, for the kinds Harbor knows (core.ts AGENT_PAIRS). */
@@ -63,7 +63,7 @@ export interface Note {
   about?: Array<{ author: string; text: string }>;
 }
 
-function clip(text: string, max: number): string {
+export function clip(text: string, max: number): string {
   const flat = text.trim();
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
@@ -145,11 +145,8 @@ export function buildQuestions(input: TagInput, candidates: readonly Member[]): 
     }),
   };
   if (input.notes.length > 0) {
-    state.team_feedback = input.notes.slice(-MAX_NOTES).map((n) => ({
-      from: n.from,
-      said: clip(n.said, MAX_NOTE_CHARS),
-      ...(n.about?.length ? { thread: n.about.map((m) => ({ author: m.author, text: clip(m.text, MAX_THREAD_CHARS) })) } : {}),
-    }));
+    // Clipped when kept (connector.ts), so given as they are.
+    state.team_feedback = input.notes.map((n) => ({ from: n.from, said: n.said, ...(n.about?.length ? { thread: n.about } : {}) }));
   }
   if (input.thread.length > 0) {
     state.thread = input.thread.slice(-MAX_THREAD_MESSAGES).map((m) => ({ author: who(m.authorId), text: clip(m.text, MAX_THREAD_CHARS) }));
