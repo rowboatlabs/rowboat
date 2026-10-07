@@ -875,7 +875,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         <SpaceRefsProvider refs={spaceRefs}>
         <SpaceInvocationsProvider byMessage={invocationsByMessage} orgId={org.id} selfId={org.memberId} isAdmin={selfIsAdmin}>
         <SpaceAssetsProvider entries={entries}>
-        <SpaceNavProvider onOpenFile={openFile} onOpenSpaceFile={openSpaceFile} onOpenSpace={openSpace} onOpenMessage={openMessage} onOpenDirect={openDirect} resolveOrg={resolveOrg} resolveSpace={resolveSpace} onOpenAttachment={(src, name) => {
+        <SpaceNavProvider onOpenFile={openFile} onOpenSpaceFile={openSpaceFile} onOpenSpace={openSpace} onOpenMessage={openMessage} onOpenDirect={groupChat ? undefined : openDirect} resolveOrg={resolveOrg} resolveSpace={resolveSpace} onOpenAttachment={(src, name) => {
             const url = new URL(src)
             url.searchParams.set('name', name)
             select({ kind: 'attachment', src: url.href, ...(chatRootId ? { fromThreadRootId: chatRootId } : {}) })

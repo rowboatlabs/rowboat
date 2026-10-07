@@ -185,6 +185,9 @@ export class HarborService {
   listSpaces(ctx: ActorCtx, opts: { includeDirect?: boolean } = {}): Promise<Space[]> {
     return this.spaces.listSpaces(ctx, opts);
   }
+  isGroupChat(): Promise<boolean> {
+    return this.spaces.isGroupChat();
+  }
   browseSpaces(ctx: ActorCtx): Promise<Array<{ space: Space; joined: boolean }>> {
     return this.spaces.browseSpaces(ctx);
   }

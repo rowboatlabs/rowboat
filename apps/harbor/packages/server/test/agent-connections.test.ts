@@ -39,6 +39,8 @@ beforeAll(async () => {
   PLATFORMS.replicas = standIn;
   harbor = await startTestHarbor({
     orgName: 'Rowboat Labs',
+    // A second space: a one-space org is a group chat, where DMs are off (2026-10-07).
+    seedSpaces: [{ name: 'Lobby', creator: 'ramnique' }],
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
       { id: 'harsh', displayName: 'Harsh' },

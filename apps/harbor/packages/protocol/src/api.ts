@@ -243,7 +243,16 @@ export const routes = {
     method: 'GET',
     path: '/v1/spaces',
     query: z.object({ includeDirect: z.coerce.boolean().optional() }),
-    response: z.object({ spaces: z.array(Space) }),
+    response: z.object({
+      spaces: z.array(Space),
+      /**
+       * The org is a group chat (spec §4, 2026-10-07): one shared space and
+       * no DMs, the same answer for every member. Clients show it as one
+       * conversation; DMs are off until a second space. Absent from orgs
+       * that predate it.
+       */
+      groupChat: z.boolean().optional(),
+    }),
   },
   /**
    * Direct messages (2026-09-07): a DM is a `direct` space between exactly

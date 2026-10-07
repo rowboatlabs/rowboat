@@ -166,8 +166,8 @@ export const spacesRpcHandlers: SpacesHandlers = {
   },
 
   'spaces:listSpaces': async (args) => {
-    const spaces = await orgs.getClient(args.orgId).listSpaces({ includeDirect: args.includeDirect ?? false });
-    return { spaces };
+    const { spaces, groupChat } = await orgs.getClient(args.orgId).listing({ includeDirect: args.includeDirect ?? false });
+    return { spaces, ...(groupChat !== undefined ? { groupChat } : {}) };
   },
 
   'spaces:createSpace': async (args) => {

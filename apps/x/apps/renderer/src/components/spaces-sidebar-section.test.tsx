@@ -109,6 +109,12 @@ describe('the sidebar server list', () => {
         fireEvent.click(within(chats).getByRole('button', { name: 'Quiet chat' }))
         expect(open).toHaveBeenCalledWith('quiet', 'q')
     })
+    it('takes the server at its word: one space of yours in a workspace is still a workspace', () => {
+        vi.mocked(useSpacesOrgs).mockReturnValue({ orgs: [{ ...other, groupChat: false }] as unknown as OrgWithSpaces[], loading: false, refresh: vi.fn() })
+        render(<SidebarProvider><SpacesSidebarSection active={false} onOpenSpace={vi.fn()} /></SidebarProvider>)
+        expect(within(screen.getByRole('list', { name: 'Workspaces' })).getByRole('button', { name: 'Other server' })).toBeVisible()
+        expect(within(screen.getByRole('list', { name: 'Chats' })).queryAllByRole('button')).toHaveLength(0)
+    })
     it('drops the headings when every server is one kind', () => {
         vi.mocked(useSpacesOrgs).mockReturnValue({ orgs: [other] as unknown as OrgWithSpaces[], loading: false, refresh: vi.fn() })
         render(<SidebarProvider><SpacesSidebarSection active={false} onOpenSpace={vi.fn()} /></SidebarProvider>)
@@ -133,6 +139,14 @@ describe('the sidebar server list', () => {
 })
 
 describe('server and space navigation', () => {
+    it('offers no DMs in a group chat, notes to self included', () => {
+        render(<SidebarProvider><ServerSpaceNavigation org={{ ...other, groupChat: true } as unknown as OrgWithSpaces} spaceId="welcome"
+            onOpenSpace={vi.fn()} showDiscussions={false} /></SidebarProvider>)
+        expect(screen.getByText('welcome')).toBeTruthy()
+        expect(screen.queryByRole('heading', { name: 'DMs' })).toBeNull()
+        expect(screen.queryByText('New DM')).toBeNull()
+        expect(screen.queryByText('Me')).toBeNull()
+    })
     it('nests and expands legacy discussions while keeping every DM visible', () => {
         const onOpenDiscussion = vi.fn()
         render(<SidebarProvider><ServerSpaceNavigation org={org as unknown as OrgWithSpaces} spaceId="main" onOpenSpace={vi.fn()}

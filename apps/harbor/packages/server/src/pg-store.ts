@@ -504,6 +504,15 @@ export class PgStore implements Store {
     return rows.map(rowToSpace);
   }
 
+  async countSpacesByKind(): Promise<{ shared: number; direct: number }> {
+    const rows = await this.sql.query<{ shared: string; direct: string }>(
+      `select count(*) filter (where kind = 'shared') as shared, count(*) filter (where kind = 'direct') as direct
+         from spaces where org_id = $1`,
+      [this.orgId],
+    );
+    return { shared: Number(rows[0]?.shared ?? 0), direct: Number(rows[0]?.direct ?? 0) };
+  }
+
   async getDirectSpace(directKey: string): Promise<Space | undefined> {
     const rows = await this.sql.query<SpaceRow>(
       `select id, name, created_at, kind, visibility, direct_key from spaces

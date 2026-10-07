@@ -224,8 +224,13 @@ export class SpacesClient {
 
   /** Shared spaces by default; `includeDirect` adds the member's DMs (api.ts listSpaces). */
   async listSpaces(opts: { includeDirect?: boolean } = {}): Promise<Space[]> {
+    return (await this.listing(opts)).spaces;
+  }
+
+  /** The listing whole: the spaces, and whether the org is a group chat (absent from older servers). */
+  async listing(opts: { includeDirect?: boolean } = {}): Promise<{ spaces: Space[]; groupChat?: boolean }> {
     const qs = opts.includeDirect ? '?includeDirect=true' : '';
-    return (await this.request('GET', `${routes.listSpaces.path}${qs}`, routes.listSpaces.response)).spaces;
+    return this.request('GET', `${routes.listSpaces.path}${qs}`, routes.listSpaces.response);
   }
 
   /** Get-or-create the DM with another member — idempotent from either side (api.ts openDirect). */

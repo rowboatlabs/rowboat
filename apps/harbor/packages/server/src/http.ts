@@ -164,7 +164,7 @@ export function buildHttpApp(deps: {
       ...(c.req.query('includeDirect') !== undefined ? { includeDirect: c.req.query('includeDirect') } : {}),
     });
     const spaces = await service.listSpaces(actor(c), { includeDirect: q.includeDirect ?? false });
-    return reply(c, routes.listSpaces.response, { spaces });
+    return reply(c, routes.listSpaces.response, { spaces, groupChat: await service.isGroupChat() });
   });
 
   app.get(routes.browseSpaces.path, async (c) =>

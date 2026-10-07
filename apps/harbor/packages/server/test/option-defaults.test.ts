@@ -24,7 +24,7 @@ async function invoke(token: string, body: string, extra: Record<string, unknown
 }
 
 beforeAll(async () => {
-  harbor = await startTestHarbor({ orgName: 'Rowboat Labs', seedMembers: [{ id: 'ramnique', displayName: 'Ramnique' }, { id: 'harsh', displayName: 'Harsh' }] });
+  harbor = await startTestHarbor({ orgName: 'Rowboat Labs', seedSpaces: [{ name: 'Lobby', creator: 'ramnique' }], seedMembers: [{ id: 'ramnique', displayName: 'Ramnique' }, { id: 'harsh', displayName: 'Harsh' }] });
   const created = await as('dev-ramnique').post('/v1/agents', { displayName: 'Coder' });
   agent = created.body.agent;
   agentKey = created.body.key.secret;

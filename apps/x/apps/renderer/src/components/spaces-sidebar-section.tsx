@@ -168,6 +168,8 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, activi
     // activity, labelled the way conversation lists do: your name, then a quiet "you".
     // It shows before it exists — the org creates it on the first click.
     const selfDm = org.directs.find((dm) => isSelfDirect(dm, org.memberId))
+    // DMs are off in a group chat, notes to self included (2026-10-07).
+    const directsOn = !org.error && !isGroupChat(org)
     const directs = [...org.directs].sort((a, b) =>
         (spaceLastActivityAt(org.id, b.id) ?? b.createdAt).localeCompare(spaceLastActivityAt(org.id, a.id) ?? a.createdAt))
     const selfRosterIds = useMemo(
@@ -317,12 +319,12 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, activi
             {/* Direct messages: the org's people you talk to, most recent first.
                 A DM is a space with a two-person roster (contract 2026-09-07);
                 the row is the person, not a channel. */}
-            {!org.error && (
+            {directsOn && (
                 <SidebarMenuItem>
                     <h3 className="flex h-8 items-center px-1 text-[13px] font-semibold text-muted-foreground">DMs</h3>
                 </SidebarMenuItem>
             )}
-            {!org.error && directs.map((dm) => {
+            {directsOn && directs.map((dm) => {
                 const active = activeSpace?.orgId === org.id && activeSpace.spaceId === dm.id
                 const badge = unread.get(`${org.id}/${dm.id}`) ?? NO_BADGE
                 const self = isSelfDirect(dm, org.memberId)
@@ -350,7 +352,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, activi
                 )
             })}
             {/* Not created yet: the same row, waiting for its first click. */}
-            {!org.error && !selfDm && (
+            {directsOn && !selfDm && (
                 <SidebarMenuItem>
                     <SidebarMenuButton
                         onClick={() => void openSelf()}
@@ -367,7 +369,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, activi
                     </SidebarMenuButton>
                 </SidebarMenuItem>
             )}
-            {!org.error && (
+            {directsOn && (
                 <SidebarMenuItem>
                     <SidebarMenuButton onClick={() => setNewDirectOpen(true)} className="pl-6 text-muted-foreground">
                         <Plus className="size-3.5 shrink-0" />

@@ -10,7 +10,7 @@ import { toast } from '@/lib/toast'
 /**
  * A group chat's way to grow (2026-10-07): its channel list is out of sight,
  * so the menu offers the second space — and with it the group becomes a
- * workspace with channels.
+ * workspace for everyone, DMs on (the server decides; spec §4).
  */
 export function AddChannelDialog({ org, open, onOpenChange, onCreated }: {
     org: OrgWithSpaces
@@ -41,7 +41,7 @@ export function AddChannelDialog({ org, open, onOpenChange, onCreated }: {
             <DialogHeader>
                 <DialogTitle>Add a channel</DialogTitle>
                 <DialogDescription>
-                    {org.name} becomes a workspace: the chat stays as it is, and channels show beside it for each topic or team.
+                    {org.name} becomes a workspace for everyone in it: the chat stays as it is, channels show beside it, and direct messages turn on. The new channel is private — add people from it.
                 </DialogDescription>
             </DialogHeader>
             <Input autoFocus aria-label="Channel name" value={name} placeholder="design, trips, random…"

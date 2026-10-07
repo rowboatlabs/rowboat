@@ -1,7 +1,7 @@
 import { SidebarChatContextMenu } from "./sidebar-chat-context-menu"
 "use client"
 
-import { readLastSpace, resolveSpacesLocation } from '@/lib/spaces-navigation'
+import { isGroupChat, readLastSpace, resolveSpacesLocation } from '@/lib/spaces-navigation'
 
 import * as React from "react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -1809,6 +1809,8 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, 
   // Your notes-to-self DM sits in the list like anyone else's ("<name>  you",
   // Slack's posture) and shows before it exists (the org creates it on first click).
   const selfDm = org.directs.find((dm) => isSelfDirect(dm, org.memberId))
+  // DMs are off in a group chat, notes to self included (2026-10-07).
+  const directsOn = !org.error && !isGroupChat(org)
   const directs = [...org.directs].sort((a, b) =>
     (spaceLastActivityAt(org.id, b.id) ?? b.createdAt).localeCompare(spaceLastActivityAt(org.id, a.id) ?? a.createdAt))
   const selfRosterIds = useMemo(
@@ -1870,9 +1872,9 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, 
             <DropdownMenuItem onClick={() => setCreating(true)}>
               <Plus className="mr-2 size-3.5" /> New space
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setNewDirectOpen(true)}>
+            {directsOn && <DropdownMenuItem onClick={() => setNewDirectOpen(true)}>
               <MessagesSquare className="mr-2 size-3.5" /> New message
-            </DropdownMenuItem>
+            </DropdownMenuItem>}
             <DropdownMenuSeparator />
             <DropdownMenuItem
               className="text-destructive focus:text-destructive"
@@ -1965,12 +1967,12 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, 
         </button>
       )}
       {/* Direct messages — a DM is a space with a two-person roster; the row is the person. */}
-      {!org.error && (
+      {directsOn && (
         <div className="flex h-6 items-end pl-5 pr-2.5 text-[10.5px] font-medium uppercase tracking-wide text-muted-foreground/70">
           <span className="truncate">Direct messages</span>
         </div>
       )}
-      {!org.error && directs.map((dm) => {
+      {directsOn && directs.map((dm) => {
         const active = activeSpace?.orgId === org.id && activeSpace.spaceId === dm.id
         const badge = unread.get(`${org.id}/${dm.id}`) ?? NO_BADGE
         const self = isSelfDirect(dm, org.memberId)
@@ -1995,7 +1997,7 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, 
           </button>
         )
       })}
-      {!org.error && !selfDm && (
+      {directsOn && !selfDm && (
         <button
           type="button"
           onClick={() => void openSelf()}
@@ -2011,7 +2013,7 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, 
           <span className="min-w-0 flex-1 truncate">{selfName}<span className="ml-1.5 font-normal text-muted-foreground">you</span></span>
         </button>
       )}
-      {!org.error && (
+      {directsOn && (
         <button
           type="button"
           onClick={() => setNewDirectOpen(true)}

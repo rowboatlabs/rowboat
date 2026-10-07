@@ -91,6 +91,7 @@ export const listSpaces = tool({
     'Shared spaces only by default; pass includeDirect to ' +
     'also list your direct messages (kind "direct": a private conversation with exactly one other ' +
     'member — its participants are listed; label it by the other member, its name is a placeholder). ' +
+    'groupChat: true means the org is one group conversation and DMs are off (open_direct refuses) until it has a second space. ' +
     "A DM flagged self: true is your person's own notes-to-self space (they are its only participant) — " +
     'the right place for "save this for me". Every other tool works on a DM exactly as on a space.',
   input: z.object({
@@ -113,6 +114,8 @@ export const listSpaces = tool({
         assets: z.array(Asset.omit({ state: true })),
       }),
     ),
+    /** The org is a group chat (spec §4, 2026-10-07): one space, DMs off until a second space. */
+    groupChat: z.boolean(),
   }),
 });
 
