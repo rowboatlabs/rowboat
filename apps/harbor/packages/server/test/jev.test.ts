@@ -225,6 +225,58 @@ describe('Jev', () => {
     expect((await tagged(first.id))[0]!.body).toBe('cc [@Gagan](#member:gagan)');
     expect((await tagged(second.id))[0]!.body).toBe('cc [@Harsh](#member:harsh)');
   });
+
+  it('keeps a message that tags it as the space’s feedback: acknowledged, never tagged, given back to Jev, withdrawn by deleting it', async () => {
+    const root = await post('Harsh, can you check the invoice totals?');
+    await tagged(root.id);
+    const calls = fake.calls.length;
+    const feedback = await post(`${token(jev)} wrong, Gagan owns invoices`, 'dev-harsh', { threadRoot: root.id });
+    const acked = await until(async () => {
+      const thread = await as('dev-harsh').get(`/v1/spaces/${spaceId}/threads/${root.id}`);
+      const m = (thread.body.messages as Message[]).find((x) => x.id === feedback.id)!;
+      return m.reactions.find((r) => r.emoji === '👍' && r.memberIds.includes(jev.id));
+    }, 'feedback acknowledged');
+    expect(acked).toBeTruthy();
+    // Feedback is not a message to tag: Jev was not asked about it.
+    expect(fake.calls.length).toBe(calls);
+
+    await post('Who can look at the refund export?');
+    await until(async () => fake.calls.length > calls && fake.calls.at(-1), 'next judgment');
+    const said = fake.calls.at(-1)!.state.team_feedback!.at(-1)!;
+    expect(said).toEqual({
+      from: 'Harsh',
+      said: '@Ro wrong, Gagan owns invoices',
+      thread: [
+        { author: 'Ramnique', text: 'Harsh, can you check the invoice totals?' },
+        { author: 'Ro', text: 'cc @Harsh' },
+      ],
+    });
+    expect((fake.calls.at(-1)!.questions.member_1 as unknown as { instructions: { context: string } }).instructions.context).toContain('team_feedback');
+
+    // Only this space's feedback: another space Ro is in hears none of it.
+    const other = (await as('dev-ramnique').post('/v1/spaces', { name: 'Hiring' })).body.space.id as string;
+    await as('dev-ramnique').post(`/v1/spaces/${other}/members`, { memberIds: ['harsh', jev.id], actingMode: 'direct' });
+    await settle();
+    const before = fake.calls.length;
+    await as('dev-ramnique').post(`/v1/spaces/${other}/messages`, { body: 'Harsh, the offer letter?', actingMode: 'direct' });
+    await until(async () => fake.calls.length > before, 'judged in the other space');
+    expect(fake.calls.at(-1)!.state.space).toBe('Hiring');
+    expect(fake.calls.at(-1)!.state.team_feedback).toBeUndefined();
+
+    expect((await as('dev-harsh').post(`/v1/spaces/${spaceId}/messages/${feedback.id}/delete`, { actingMode: 'direct' })).status).toBe(200);
+    const after = fake.calls.length;
+    await post('Who can look at the payout export?');
+    await until(async () => fake.calls.length > after, 'judged after the deletion');
+    expect(JSON.stringify(fake.calls.at(-1)!.state.team_feedback ?? [])).not.toContain('Gagan owns invoices');
+  });
+
+  it('keeps feedback clipped, in its own record, apart from the cursor it saves after every message', async () => {
+    const long = await post(`${token(jev)} ${'tag Gagan on invoices. '.repeat(100)}`);
+    const kept = () => harbor.store.getConnectionThread(jev.id, spaceId, 'notes') as Promise<{ notes: Array<{ messageId: string; said: string }> } | undefined>;
+    const note = await until(async () => (await kept())?.notes.find((n) => n.messageId === long.id), 'long feedback kept');
+    expect(note.said.length).toBe(1000);
+    expect(Object.keys((await harbor.store.getConnectionThread(jev.id, spaceId, '')) as object)).toEqual(['offset']);
+  });
 });
 
 describe('Jev’s questions', () => {
@@ -241,6 +293,7 @@ describe('Jev’s questions', () => {
     here: false,
     busyAgents: new Set(),
     agentsAllowed: true,
+    notes: [],
     ...over,
   });
 
@@ -288,6 +341,16 @@ describe('Jev’s questions', () => {
     expect(said('Harsh').context).toContain('follows it and already sees every reply');
     expect(buildQuestions(input(), selectCandidates(input())).state).toMatchObject({ message: { tags: [] } });
     expect(buildQuestions(input({ here: true }), selectCandidates(input({ here: true }))).state).toMatchObject({ message: { tags: ['@here'] } });
+  });
+
+  it('gives Jev the space’s feedback, with the thread it was said in, only when there is some', () => {
+    const notes = [{ messageId: 'n', from: 'Harsh', said: '@Ro always tag agents in threads', about: [{ author: 'Ro', text: 'cc @Gagan' }] }];
+    const { state, questions } = buildQuestions(input({ notes }), selectCandidates(input({ notes })));
+    expect((state as { team_feedback: unknown }).team_feedback).toEqual([{ from: 'Harsh', said: '@Ro always tag agents in threads', thread: [{ author: 'Ro', text: 'cc @Gagan' }] }]);
+    expect((questions.member_1!.instructions as Record<string, string>).context).toContain('`team_feedback`');
+    const none = buildQuestions(input(), selectCandidates(input()));
+    expect(none.state).not.toHaveProperty('team_feedback');
+    expect((none.questions.member_1!.instructions as Record<string, string>).context).not.toContain('team_feedback');
   });
 
   it('judges with the default stand-in the way the end-to-end tests assume', () => {
