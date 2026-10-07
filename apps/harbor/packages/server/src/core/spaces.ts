@@ -12,7 +12,7 @@ import {
 import { randomBytes } from 'node:crypto';
 import type { z } from 'zod';
 import { HarborError } from '../errors.js';
-import { canBind, canChangeMembership, canJoinSpace, canRenameSpace, enforce } from '../policy.js';
+import { canBind, canChangeMembership, canJoinSpace, canOpenDirect, canRenameSpace, enforce, isGroupChat } from '../policy.js';
 import { DIRECT_SPACE_NAME, directKeyFor, type PushLevel, type StoredEvent } from '../store.js';
 import { Kernel, type ActorCtx, type BindIdentity } from './kernel.js';
 
@@ -81,6 +81,11 @@ export class Spaces {
     return this.k.store.listSpacesFor(ctx.memberId, opts);
   }
 
+  /** Whether the org is a group chat right now (policy.ts isGroupChat): the same answer for every member. */
+  async isGroupChat(): Promise<boolean> {
+    return isGroupChat(await this.k.store.countSpacesByKind());
+  }
+
   async browseSpaces(ctx: ActorCtx): Promise<Array<{ space: Space; joined: boolean }>> {
     await this.k.requireOrgMember(ctx);
     return this.k.store.browseSpaces(ctx.memberId);
@@ -109,8 +114,9 @@ export class Spaces {
     this.k.guardWrite();
     const now = this.k.now();
     const space: Space = { id: this.k.ulid(), name, createdAt: now, kind: 'shared', visibility };
+    const wasGroupChat = await this.isGroupChat();
     await this.k.store.putSpace(space);
-    return this.k.locked(space.id, async () => {
+    const created = await this.k.locked(space.id, async () => {
       const membership: Membership = { spaceId: space.id, memberId: ctx.memberId, joinedAt: now };
       await this.k.store.putMembership(membership);
       await this.k.appendNext(space.id, now, { type: 'membership', membership, action: 'joined' });
@@ -118,6 +124,15 @@ export class Spaces {
       // space's root messages, born empty.
       return space;
     });
+    // A second space makes a group chat a workspace for everyone at once
+    // (2026-10-07), including members who are not in the new space: tell
+    // every member's connections so their listings move with it.
+    if (wasGroupChat) {
+      for (const member of await this.k.store.listAllMembers()) {
+        this.k.hub.publishToMember(member.id, { kind: 'org_changed', at: now });
+      }
+    }
+    return created;
   }
 
   /**
@@ -168,6 +183,7 @@ export class Spaces {
     const existing = await this.k.store.getDirectSpace(key);
     if (existing) return { space: existing, created: false };
 
+    enforce(canOpenDirect(await this.isGroupChat()));
     this.k.guardWrite();
     const now = this.k.now();
     const space: Space = { id: this.k.ulid(), name: DIRECT_SPACE_NAME, createdAt: now, kind: 'direct', visibility: 'private', participants };

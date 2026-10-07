@@ -223,8 +223,8 @@ export const spacesIpcHandlers: SpacesHandlers = {
   },
 
   'spaces:listSpaces': async (_event, args) => {
-    const spaces = await orgs.getClient(args.orgId).listSpaces({ includeDirect: args.includeDirect ?? false });
-    return { spaces };
+    const { spaces, groupChat } = await orgs.getClient(args.orgId).listing({ includeDirect: args.includeDirect ?? false });
+    return { spaces, ...(groupChat !== undefined ? { groupChat } : {}) };
   },
 
   'spaces:createSpace': async (_event, args) => {

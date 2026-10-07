@@ -203,6 +203,8 @@ describe('Jev', () => {
       return i?.state === 'done' ? i : undefined;
     }, 'mention settled');
     expect(mentioned.state).toBe('done');
+    // A second space: a one-space org is a group chat, where DMs are off (2026-10-07).
+    await as('dev-gagan').post('/v1/spaces', { name: 'Lobby' });
     const dm = await as('dev-gagan').post('/v1/direct', { memberId: jev.id });
     expect(dm.status).toBe(200);
     const dmId = dm.body.space.id as string;

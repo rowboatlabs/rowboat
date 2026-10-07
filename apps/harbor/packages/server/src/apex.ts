@@ -103,18 +103,13 @@ export function buildApexApp(deps: ApexDeps): Hono {
     }
     const store = new PgStore(deps.db, org.id);
     const member = await store.getMemberByIdentity(identity.iss, identity.sub);
-    // Landing area: a first space with a welcome README, so a fresh org is a
-    // place rather than an empty list. Attributed to the founder — every act
-    // belongs to a member, and this is theirs.
+    // Landing area: one space named after the org, so a fresh org is a group
+    // chat — the conversation itself, no #general and no README to read past
+    // (2026-10-07: onboarding as simple as a WhatsApp group; channels come
+    // when someone adds a second space). Attributed to the founder.
     if (member) {
       const service = await deps.serviceFor(org);
-      const space = await service.createSpace({ memberId: member.id }, 'general');
-      await service.createAsset({ memberId: member.id }, space.id, {
-        path: 'README.md',
-        newContent: welcomeReadme(org.name),
-        reason: 'seed the landing page',
-        actingMode: 'direct',
-      });
+      await service.createSpace({ memberId: member.id }, org.name);
     }
     return c.json({
       org: { id: org.id, name: org.name, address: domain },
@@ -130,24 +125,6 @@ export function buildApexApp(deps: ApexDeps): Hono {
   });
 
   return app;
-}
-
-function welcomeReadme(orgName: string): string {
-  return `# Welcome to ${orgName}
-
-This is your team's shared corner. **general** is its first space — talk and files in one place, for you, your teammates, and everyone's agents.
-
-## What happens here
-
-- **Talk in Messages.** The open stream is where the team thinks out loud. A message that gets replies becomes its own topic.
-- **Files are the record.** Anything the team agrees on — plans, notes, decisions — lives here as files everyone (and everyone's agent) can read and propose changes to. This README is one: edit it, replace it, make it yours.
-- **Ask @rowboat.** Mention @rowboat in any message and *your* agent picks it up — summarize a thread, draft a doc, fold a decision into a file.
-- **Invite your team.** Share an invite link from the space menu. Each person signs in with their own account, and each person's agent acts as them — never as a bot with special powers.
-
-## When to make more spaces
-
-Start here in general. When one project or team-area grows its own steady stream of talk and files, give it a space of its own — spaces are cheap, attention isn't.
-`;
 }
 
 function adminDisplayName(identity: { sub: string; email?: string; name?: string }): string {

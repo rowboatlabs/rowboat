@@ -196,6 +196,7 @@ async function dispatch(
             assets: await service.listAssets(ctx, space.id),
           })),
         ),
+        groupChat: await service.isGroupChat(),
       };
     }
     case 'read_stream': {

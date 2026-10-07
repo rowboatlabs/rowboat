@@ -3895,7 +3895,9 @@ export const ipcSchemas = {
   // 'direct') — opt-in on the wire so a pre-DM build never renders one as a space.
   'spaces:listSpaces': {
     req: z.object({ orgId: z.string(), includeDirect: z.boolean().optional() }),
-    res: z.object({ spaces: z.array(z.custom<SpacesTypes.Space>()) }),
+    // groupChat (2026-10-07): the org is one space and no DMs — a chat for
+    // every member, DMs off. Absent from servers that predate it.
+    res: z.object({ spaces: z.array(z.custom<SpacesTypes.Space>()), groupChat: z.boolean().optional() }),
   },
   'spaces:createSpace': {
     req: z.object({ orgId: z.string(), name: z.string() }),

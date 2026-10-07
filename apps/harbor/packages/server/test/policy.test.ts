@@ -8,6 +8,8 @@ import {
   canStopInvocation,
   invocationRefusal,
   canAccessSpace,
+  canOpenDirect,
+  isGroupChat,
   canAddAgent,
   canCreateAgentKey,
   canRevokeAgentKey,
@@ -32,6 +34,15 @@ const membership: Membership = { spaceId: 'S', memberId: 'a', joinedAt: NOW };
 const byA = { author: { memberId: 'a', actingMode: 'direct' } } as Message;
 
 describe('policy', () => {
+  it('a group chat is one shared space and no DMs; DMs are off in it (2026-10-07)', () => {
+    expect(isGroupChat({ shared: 1, direct: 0 })).toBe(true);
+    expect(isGroupChat({ shared: 2, direct: 0 })).toBe(false);
+    // An org already talking in DMs stays a workspace: the rule never hides what exists.
+    expect(isGroupChat({ shared: 1, direct: 1 })).toBe(false);
+    expect(isGroupChat({ shared: 0, direct: 0 })).toBe(false);
+    expect(canOpenDirect(false)).toBeNull();
+    expect(canOpenDirect(true)).toMatchObject({ code: 'forbidden' });
+  });
   it('enforce throws the refusal as a HarborError and passes null through', () => {
     expect(() => enforce(null)).not.toThrow();
     expect(() => enforce({ code: 'forbidden', message: 'no' })).toThrow(HarborError);

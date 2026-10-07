@@ -278,20 +278,14 @@ describe('apex face (self-serve org creation)', () => {
     expect(me.body.member.role).toBe('admin');
     expect(me.body.member.id).toBe(created.body.member.id);
 
-    // Landing area: a general space with a welcome README, attributed to the founder.
+    // Landing area: a group chat — one space named after the org, no files
+    // to read past (2026-10-07), attributed to the founder.
     const spaces = (await http('roadboard.spaces.test', token).get('/v1/spaces')).body.spaces;
-    expect(spaces.map((s: any) => s.name)).toEqual(['general']);
+    expect(spaces.map((s: any) => s.name)).toEqual(['Roadboard']);
     const entries = (await http('roadboard.spaces.test', token).get(`/v1/spaces/${spaces[0].id}/assets`)).body.entries;
-    expect(entries.map((e: any) => e.path)).toEqual(['README.md']);
-    const readme = await http('roadboard.spaces.test', token).get(
-      `/v1/spaces/${spaces[0].id}/assets/${entries[0].id}`,
-    );
-    expect(readme.status).toBe(200);
-    expect(readme.body.id).toBe(entries[0].id);
-    expect(readme.body.path).toBe('README.md');
-    expect(readme.body.content).toContain('# Welcome to Roadboard');
-    expect(readme.body.content).toContain('When to make more spaces');
-    expect(readme.body.recentHistory[0].attribution.memberId).toBe(created.body.member.id);
+    expect(entries).toEqual([]);
+    const roster = (await http('roadboard.spaces.test', token).get(`/v1/spaces/${spaces[0].id}/members`)).body.members;
+    expect(roster.map((m: any) => m.id)).toEqual([created.body.member.id]);
 
     // Still fully functional beyond the seed: create another space.
     expect((await http('roadboard.spaces.test', token).post('/v1/spaces', { name: 'General' })).status).toBe(200);
