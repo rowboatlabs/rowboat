@@ -108,6 +108,11 @@ export class HarborService {
     this.agents.attachConnectors(hooks);
   }
 
+  /** Jev, the agent Harbor itself is (spec §8 Jev, 2026-10-07): created once per org, when the deployment has its key (runtime.ts). */
+  ensureJev(): Promise<Member | undefined> {
+    return this.agents.ensureJev();
+  }
+
   /** The org this service serves — `address` is set once the listener knows its port (server.ts). */
   get org(): OrgInfo {
     return this.k.org;
@@ -371,6 +376,22 @@ export class HarborService {
     const invocation = await this.invocations.ownInvocation(ctx, invocationId);
     const { spaceId, threadRootId } = invocation.conversation;
     return this.feed.postMessage(ctx, spaceId, { body, threadRoot: threadRootId, actingMode: 'direct' }, { finishes: invocationId });
+  }
+
+  /**
+   * Jev's tags for one message (spec §8 Jev, 2026-10-07): a reply in its
+   * thread whose mentions take that message's hand-off depth, so an agent
+   * and Jev passing work back and forth stop at the hop limit. In-process
+   * only, like `finishes`.
+   */
+  async relayMentions(ctx: ActorCtx, spaceId: string, messageId: string, body: string): Promise<{ message: Message; invocations: Invocation[] }> {
+    const message = await this.feed.getMessage(ctx, spaceId, messageId);
+    return this.feed.postMessage(ctx, spaceId, { body, threadRoot: message.threadRoot ?? message.id, actingMode: 'direct' }, { relayOf: messageId });
+  }
+  /** The depth an agent this message mentions is invoked at: what Jev checks before it tags an agent. */
+  async messageHandOffDepth(ctx: ActorCtx, spaceId: string, messageId: string): Promise<number> {
+    await this.k.requireReadableSpace(ctx, spaceId);
+    return this.k.store.getMessageHops(spaceId, messageId);
   }
 
   // --- approvals (core/invocations.ts, spec §8 part 4, 2026-10-01) ----------------------
