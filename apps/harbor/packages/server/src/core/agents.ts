@@ -1,4 +1,4 @@
-import { HARBOR_RUN_CONNECTIONS, INSTANCE_CONNECTIONS, isAgentPair, type AgentCredential, type AgentKey, type AgentKeySecret, type AgentListing, type InvocationOptionValues, type Member } from '@rowboat/spaces-protocol';
+import { BUILT_IN_CONNECTION, HARBOR_RUN_CONNECTIONS, INSTANCE_CONNECTIONS, JEV_KIND, isAgentPair, type AgentCredential, type AgentKey, type AgentKeySecret, type AgentListing, type InvocationOptionValues, type Member } from '@rowboat/spaces-protocol';
 import { hashAgentKey, mintAgentKeySecret } from '../agent-keys.js';
 import { HarborError } from '../errors.js';
 import { agentsManagedBy, canAddAgent, canCreateAgentKey, canRevokeAgentKey, enforce } from '../policy.js';
@@ -102,6 +102,18 @@ export class Agents {
     const key = await this.mint(ctx, agent.id);
     this.hooks?.added(agent);
     return { agent, key };
+  }
+
+  /**
+   * Jev (spec §8 Jev, 2026-10-07): built into the org, never added by a
+   * person, so it has no owner, takes no keys, and is in no space until
+   * someone adds it. Created on the first boot with the deployment's key;
+   * a read-only org gets it once it can write again.
+   */
+  async ensureJev(): Promise<Member | undefined> {
+    const existing = (await this.k.store.listAgentsByConnection([BUILT_IN_CONNECTION])).find((a) => a.agentKind === JEV_KIND);
+    if (existing || this.k.readOnly) return existing;
+    return this.spaces.createAgent({ displayName: 'Jev', agentKind: JEV_KIND, agentConnection: BUILT_IN_CONNECTION });
   }
 
   /** Replace a platform agent's credential: the owner only, checked with the platform first; clears a rejection. */

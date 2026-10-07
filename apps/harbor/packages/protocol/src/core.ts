@@ -89,6 +89,15 @@ export const HARBOR_RUN_CONNECTIONS: readonly string[] = ['replicas', 'agent37']
  * An Agent37 instance keeps its own memory and files, so it is the agent.
  */
 export const INSTANCE_CONNECTIONS: readonly string[] = ['agent37'];
+/**
+ * An agent Harbor itself is (2026-10-07, Jev): built into the org, on the
+ * deployment's own key, so no person adds it, owns it or holds a key for it.
+ * Never in AGENT_PAIRS: people add it to spaces like any agent, but never
+ * create one. Jev is TypeSafe's decision model; it reads every message in
+ * its spaces and tags whoever a message needs (spec §8 Jev).
+ */
+export const BUILT_IN_CONNECTION = 'builtin';
+export const JEV_KIND = 'jev';
 
 export function isAgentPair(kind: string, connection: string): boolean {
   return AGENT_PAIRS.some((pair) => pair.kind === kind && pair.connection === connection);

@@ -1674,6 +1674,21 @@ export class PgStore implements Store {
     return rows.map((r) => r.data);
   }
 
+  async getMessageHops(spaceId: string, messageId: string): Promise<number> {
+    const rows = await this.sql.query<{ depth: number }>(
+      'select depth from message_hops where space_id = $1 and message_id = $2',
+      [spaceId, messageId],
+    );
+    return rows[0]?.depth ?? 0;
+  }
+  async putMessageHops(spaceId: string, messageId: string, depth: number): Promise<void> {
+    await this.sql.query(
+      `insert into message_hops (space_id, message_id, depth) values ($1, $2, $3)
+       on conflict (space_id, message_id) do update set depth = excluded.depth`,
+      [spaceId, messageId, depth],
+    );
+  }
+
   async sharesSharedSpace(a: string, b: string): Promise<boolean> {
     const rows = await this.sql.query<{ shares: boolean }>(
       `select exists (

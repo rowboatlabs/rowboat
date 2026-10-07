@@ -49,7 +49,13 @@ export const KINDS: Record<string, { label: string; logo?: Logo }> = {
     // Meta publishes no mark for Muse Code (2026-09-30): the generic one until it does.
     'muse-code': { label: 'Muse Code' },
     custom: { label: 'Agent' },
+    // Jev (Harbor spec §8 Jev, 2026-10-07): the agent Harbor itself is, on
+    // Rowboat's TypeSafe key. TypeSafe publishes no mark for it: the generic one.
+    jev: { label: 'Jev' },
 }
+
+/** The connection of an agent Harbor itself is: nothing to set up, no keys (Harbor spec §8 Jev). */
+export const BUILT_IN_CONNECTION = 'builtin'
 
 /** Platforms Harbor calls on an agent's behalf: named after the kind ("via Replicas"). */
 export const PLATFORMS: Record<string, { label: string; logo?: Logo }> = {
