@@ -12,6 +12,7 @@ import { useOrgListings } from '@/hooks/use-space-boards'
 import { useOrgRoster, useSpaceMembers } from '@/hooks/use-space-members'
 import { useSpacesOrgs } from '@/hooks/use-spaces'
 import { assetWireUrl } from '@/lib/spaces-presentation'
+import { byRank, matchRank } from '@/lib/mention-rank'
 
 // The @ autocomplete behind every mention surface — the composer and the
 // inline message editor. The hook owns the popup's whole lifecycle off the
@@ -105,39 +106,46 @@ export function useMentionAutocomplete(editor: Editor | null) {
         const inSpace = new Set(spaceMembers.map((m) => m.id))
         // A name matches anywhere; an id only as a prefix — a one-letter query
         // is a substring of most ULIDs and would drown the files below.
-        const matches = (m: spaces.Member) => !q || m.displayName.toLowerCase().includes(q) || m.id.toLowerCase().startsWith(q)
-        for (const m of spaceMembers) {
+        // Ranking stays inside each group: this space's people still lead the org's.
+        const rank = (m: spaces.Member) => (!q || m.id.toLowerCase().startsWith(q) ? 0 : matchRank(m.displayName, q))
+        people.push(...byRank(spaceMembers.map((m) => {
             const hint = m.id === selfMemberId ? 'you' : m.kind === 'agent' ? agentLabel(m.agentKind, m.agentConnection) : undefined
-            if (matches(m)) people.push({ id: m.id, label: m.displayName, ...(hint ? { hint } : {}) })
-        }
-        for (const m of orgRoster) {
+            return { row: { id: m.id, label: m.displayName, ...(hint ? { hint } : {}) }, rank: rank(m) }
+        })))
+        people.push(...byRank(orgRoster.filter((m) => !inSpace.has(m.id)).map((m) => {
             const hint = m.kind === 'agent' ? `${agentLabel(m.agentKind, m.agentConnection)} · not in this space` : 'not in this space'
-            if (!inSpace.has(m.id) && matches(m)) people.push({ id: m.id, label: m.displayName, hint })
-        }
+            return { row: { id: m.id, label: m.displayName, hint }, rank: rank(m) }
+        })))
         // Shared spaces, as #Name references (a DM is nobody's to point at).
-        const spaceRows: MentionCandidate[] = (org?.spaces ?? [])
-            .filter((s) => !q || s.name.toLowerCase().includes(q))
-            .map((s) => ({ id: `space:${s.id}`, label: s.name, space: { id: s.id, name: s.name } }))
+        const spaceRows = byRank<MentionCandidate>((org?.spaces ?? []).map((s) => ({
+            row: { id: `space:${s.id}`, label: s.name, space: { id: s.id, name: s.name } },
+            rank: q ? matchRank(s.name, q) : 0,
+        })))
         if (!q) return [...people, ...spaceRows].slice(0, MAX_ROWS)
         // Files join once a query exists (a bare "@" is a people gesture);
-        // picking one inserts a markdown link, not a mention. This space's
-        // files first, then every shared space's.
-        const files: MentionCandidate[] = []
+        // picking one inserts a markdown link, not a mention. Ranked by name;
+        // on a tie this space's files come before every shared space's.
+        const fileMatches: { row: MentionCandidate; rank: number }[] = []
         const fileRows = (fromSpaceId: string, spaceName?: string) => {
             for (const e of listings?.get(fromSpaceId) ?? []) {
-                if (!e.path.toLowerCase().includes(q)) continue
+                // The name ranks; the folder still finds it ("@design/sc…"), as a plain contains.
+                const name = e.path.split('/').pop() ?? e.path
+                const nameRank = matchRank(name, q)
+                const rank = nameRank >= 0 ? nameRank : e.path.toLowerCase().includes(q) ? 2 : -1
+                if (rank < 0) continue
                 const folder = e.path.includes('/')
                 const hint = spaceName ? (folder ? `${e.path} · in ${spaceName}` : `in ${spaceName}`) : folder ? e.path : undefined
-                files.push({
+                fileMatches.push({ rank, row: {
                     id: `file:${fromSpaceId}/${e.id}`,
-                    label: e.path.split('/').pop() ?? e.path,
+                    label: name,
                     ...(hint ? { hint } : {}),
                     file: { assetId: e.id, path: e.path, spaceId: fromSpaceId, ...(spaceName ? { spaceName } : {}) },
-                })
+                } })
             }
         }
         if (spaceId) fileRows(spaceId)
         for (const s of org?.spaces ?? []) if (s.id !== spaceId) fileRows(s.id, s.name)
+        const files = byRank(fileMatches)
         // Files keep a few rows of their own: a query heading for a file must
         // not be buried under every person whose name shares its letters.
         const fileQuota = Math.min(files.length, 4)
