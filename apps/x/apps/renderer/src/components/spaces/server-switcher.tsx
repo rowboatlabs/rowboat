@@ -72,12 +72,12 @@ export function ServerSwitcher({ org, onOpenSpace, onMenuOpenChange }: {
                     setMenuOpen(false)
                     setConfirmRemove(true)
                     onMenuOpenChange?.(true)
-                }}><Trash2 className="size-4" />Remove server</DropdownMenuItem>
+                }}><Trash2 className="size-4" />{isGroupChat(org) ? 'Remove from this app' : 'Remove server'}</DropdownMenuItem>
             </DropdownMenuContent>
         </DropdownMenu>
         <AddChannelDialog org={org} open={addingChannel} onOpenChange={(open) => { setAddingChannel(open); onMenuOpenChange?.(open) }}
             onCreated={(spaceId) => void refresh().then(() => onOpenSpace(org.id, spaceId))} />
         <AgentsDialog org={org} open={agentsOpen} onOpenChange={(open) => { setAgentsOpen(open); onMenuOpenChange?.(open) }} />
-        <RemoveServerDialog org={org} open={confirmRemove} onOpenChange={(open) => { setConfirmRemove(open); onMenuOpenChange?.(open) }} onRemoved={() => void refresh()} />
+        <RemoveServerDialog org={org} groupChat={isGroupChat(org)} open={confirmRemove} onOpenChange={(open) => { setConfirmRemove(open); onMenuOpenChange?.(open) }} onRemoved={() => void refresh()} />
     </>
 }

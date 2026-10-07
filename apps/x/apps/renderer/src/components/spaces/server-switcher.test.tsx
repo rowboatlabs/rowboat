@@ -27,13 +27,15 @@ function setup() {
 describe('ServerSwitcher', () => {
     it('hosts removal in the org menu and allows cancelling', () => {
         setup()
-        fireEvent.click(screen.getByRole('menuitem', { name: 'Remove server' }))
+        // A group chat says what removing does: this device only, you stay in the group.
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Remove from this app' }))
         expect(screen.getByRole('alertdialog')).toBeVisible()
         expect(screen.getByText('Remove Rowboat?')).toBeVisible()
+        expect(screen.getByText(/You stay in the group/)).toBeVisible()
         fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
         expect(screen.queryByRole('alertdialog')).toBeNull()
         fireEvent.keyDown(screen.getByRole('button', { name: 'Switch server: Rowboat' }), { key: 'Enter' })
-        expect(screen.getByRole('menuitem', { name: 'Remove server' })).toBeVisible()
+        expect(screen.getByRole('menuitem', { name: 'Remove from this app' })).toBeVisible()
     })
     it('switches servers even when their space IDs match', () => {
         const onOpenSpace = setup()
@@ -60,6 +62,7 @@ describe('ServerSwitcher', () => {
         render(<ServerSwitcher org={servers[2] as unknown as OrgWithSpaces} onOpenSpace={vi.fn()} />)
         fireEvent.keyDown(screen.getByRole('button', { name: 'Switch server: New server' }), { key: 'Enter' })
         expect(screen.queryByRole('menuitem', { name: 'Add a channel' })).toBeNull()
+        expect(screen.getByRole('menuitem', { name: 'Remove server' })).toBeVisible()
     })
     it.each(['create', 'join'] as const)('asks the app-level host for the %s dialog', (kind) => {
         setup()

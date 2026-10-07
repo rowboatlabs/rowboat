@@ -2,8 +2,10 @@ import { useState } from 'react'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { toast } from '@/lib/toast'
 
-export function RemoveServerDialog({ org, open, onOpenChange, onRemoved }: {
+export function RemoveServerDialog({ org, groupChat = false, open, onOpenChange, onRemoved }: {
     org: { id: string; name: string }
+    /** A group chat says what removing does not do: you stay in the group (2026-10-07). */
+    groupChat?: boolean
     open: boolean
     onOpenChange: (open: boolean) => void
     onRemoved: () => void
@@ -26,7 +28,9 @@ export function RemoveServerDialog({ org, open, onOpenChange, onRemoved }: {
         <AlertDialogContent>
             <AlertDialogHeader>
                 <AlertDialogTitle>Remove {org.name}?</AlertDialogTitle>
-                <AlertDialogDescription>This only removes the server from this device — you can rejoin with an invite link.</AlertDialogDescription>
+                <AlertDialogDescription>{groupChat
+                    ? 'This only removes the chat from this device. You stay in the group, and can come back with an invite link.'
+                    : 'This only removes the server from this device — you can rejoin with an invite link.'}</AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
                 <AlertDialogCancel disabled={removing}>Cancel</AlertDialogCancel>

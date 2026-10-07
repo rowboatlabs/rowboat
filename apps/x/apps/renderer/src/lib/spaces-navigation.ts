@@ -118,6 +118,8 @@ export function parseSpacesLink(input: string): SpacesLinkTarget | null {
  * to say gets the same rule from what this member can see.
  */
 export function isGroupChat(org: Pick<OrgWithSpaces, 'spaces' | 'directs' | 'groupChat' | 'error'>): boolean {
-    if (org.error) return false
-    return org.groupChat ?? (org.spaces.length === 1 && org.directs.length === 0)
+    // The row opens your one space: a member of none (left it through their
+    // agent, say) has nothing to open, so it is not a chat to them.
+    if (org.error || org.spaces.length !== 1) return false
+    return org.groupChat ?? org.directs.length === 0
 }

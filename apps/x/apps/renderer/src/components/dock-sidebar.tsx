@@ -1711,7 +1711,7 @@ function SpacesFlyout({
           onClick={onAddOrg}
           className="flex items-center gap-1 text-xs font-semibold text-teal-700 hover:text-teal-800 dark:text-teal-400 dark:hover:text-teal-300"
         >
-          <Plus className="size-3" /> Add server
+          <Plus className="size-3" /> New group chat
         </button>
       </div>
       {loading ? (
@@ -1722,7 +1722,7 @@ function SpacesFlyout({
           onClick={onAddOrg}
           className="px-2.5 pb-2 text-left text-[11.5px] italic text-muted-foreground hover:text-foreground"
         >
-          Add a server to see its spaces here.
+          Start a group chat, or join one with an invite.
         </button>
       ) : (
         orgs.map((org) => (
@@ -1880,7 +1880,7 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, 
               className="text-destructive focus:text-destructive"
               onClick={() => onRequestRemoveOrg(org.id, org.name)}
             >
-              <Trash2 className="mr-2 size-3.5" /> Remove server
+              <Trash2 className="mr-2 size-3.5" /> {isGroupChat(org) ? 'Remove from this app' : 'Remove server'}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

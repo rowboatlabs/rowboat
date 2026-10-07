@@ -250,7 +250,7 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
                             </div>
                         ) : (
                             <Button size="sm" className="mt-4" onClick={() => openServerDialog({ kind: 'create' })}>
-                                <Plus className="size-4 mr-1" /> Add a server
+                                <Plus className="size-4 mr-1" /> Create a group chat
                             </Button>
                         )}
                     </>
@@ -443,7 +443,16 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // pin is remembered apart from the workspaces' docked default.
     const groupChat = isGroupChat(org)
     const railPinKey = groupChat ? 'spaces:chatRailOpen' : 'spaces:railOpen'
-    const [railPinned, setRailPinned] = useState(() => groupChat ? localStorage.getItem(railPinKey) === '1' : localStorage.getItem(railPinKey) !== '0')
+    const readRailPin = (chat: boolean) => chat ? localStorage.getItem('spaces:chatRailOpen') === '1' : localStorage.getItem('spaces:railOpen') !== '0'
+    const [railPinned, setRailPinned] = useState(() => readRailPin(groupChat))
+    // A chat that becomes a workspace while open (someone added a channel)
+    // takes the workspace's rail at once, so its channels and DMs show
+    // without leaving the conversation (2026-10-07).
+    const [railShape, setRailShape] = useState(groupChat)
+    if (railShape !== groupChat) {
+        setRailShape(groupChat)
+        setRailPinned(readRailPin(groupChat))
+    }
 
     // Width of the pane drives the Split floor and pinnability.
     const paneRef = useRef<HTMLDivElement | null>(null)
@@ -967,7 +976,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                         <PopoverTrigger asChild>
                             <button
                                 type="button"
-                                title={`Invite someone to #${space.name}`}
+                                title={groupChat ? `Invite someone to ${org.name}` : `Invite someone to #${space.name}`}
                                 className="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-border px-2 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground data-[state=open]:bg-accent/60 data-[state=open]:text-foreground"
                             >
                                 <UserPlus className="size-3.5" />

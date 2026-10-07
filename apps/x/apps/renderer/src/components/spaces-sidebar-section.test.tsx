@@ -115,6 +115,11 @@ describe('the sidebar server list', () => {
         expect(within(screen.getByRole('list', { name: 'Workspaces' })).getByRole('button', { name: 'Other server' })).toBeVisible()
         expect(within(screen.getByRole('list', { name: 'Chats' })).queryAllByRole('button')).toHaveLength(0)
     })
+    it('lists a group chat you are in no space of as a workspace, without breaking', () => {
+        vi.mocked(useSpacesOrgs).mockReturnValue({ orgs: [{ ...other, spaces: [], groupChat: true }] as unknown as OrgWithSpaces[], loading: false, refresh: vi.fn() })
+        render(<SidebarProvider><SpacesSidebarSection active={false} onOpenSpace={vi.fn()} /></SidebarProvider>)
+        expect(within(screen.getByRole('list', { name: 'Workspaces' })).getByRole('button', { name: 'Other server' })).toBeVisible()
+    })
     it('drops the headings when every server is one kind', () => {
         vi.mocked(useSpacesOrgs).mockReturnValue({ orgs: [other] as unknown as OrgWithSpaces[], loading: false, refresh: vi.fn() })
         render(<SidebarProvider><SpacesSidebarSection active={false} onOpenSpace={vi.fn()} /></SidebarProvider>)
