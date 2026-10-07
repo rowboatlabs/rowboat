@@ -6,14 +6,17 @@ Harbor is the Spaces server: orgs, spaces, members, an append-only log, three fa
 
 Two pnpm workspace packages under `packages/`:
 
-- **`protocol/`** — `@rowboat/spaces-protocol`, the contract: zod schemas imported by the server *and* the app, so drift is structurally impossible. `core.ts` (the objects), `ids.ts` (ids, the link grammar and its one parser), `changeset.ts`, `events.ts` (`SpaceEvent` and the live frames), `api.ts` (`routes`), `mcp.ts` (`mcpTools`), `mentions.ts`, `search.ts`, `invite.ts`, `errors.ts`, `fixtures/merge/` (the golden merge cases every engine must pass).
+- **`protocol/`** — `@rowboat/spaces-protocol`, the contract: zod schemas imported by the server *and* the app, so drift is structurally impossible. `core.ts` (the objects), `ids.ts` (ids, the link grammar and its one parser), `changeset.ts`, `events.ts` (`SpaceEvent` and the live frames), `invocation.ts` (the agent contracts: `Invocation`, its states, `InvocationOption`, `InvocationUpdate`, `ConnectorCapabilities`), `approval.ts` (`Approval`, an agent's request for a person's OK, and its choices), `api.ts` (`routes`), `mcp.ts` (`mcpTools`), `mentions.ts`, `search.ts`, `invite.ts`, `errors.ts`, `fixtures/merge/` (the golden merge cases every engine must pass).
 - **`server/`** — `@rowboat/harbor`:
 
 | `src/` | Owns |
 |---|---|
 | `core/kernel.ts` | store, hub, org, the read-only knob, the space lock with its publish-after-commit outbox, `append` / `nextOffset` / `appendNext`, `requireSpace` / `requireReadableSpace` / `requireMember`, `guardWrite`, `attributionOf` |
-| `core/spaces.ts` | spaces, direct messages, invites and the bind ceremony, the roster, `me`, push registration, the read-gated replay and membership-gated live relays |
+| `core/spaces.ts` | spaces, direct messages, invites and the bind ceremony, the roster, `me`, agent members (`createAgent`), push registration, the read-gated replay and membership-gated live relays |
+| `core/agents.ts` | agent members' owners and keys: add an agent, list the ones a member manages, create and revoke keys |
+| `core/invocations.ts` | invoking agent members (spec §8): the trigger `Feed.postMessage` runs in its transaction, the per-(agent, conversation) queue, the connector's operations, cancel and stop, and approvals (part 4: raised with their card in `Feed.postMessage`'s transaction, decided by a person, settled by the connector; `approval-card.ts` writes the card's text); its frames leave after the commit through its own outbox |
 | `core/assets.ts` | assets by id, versions, the change log, blobs, history, diff |
+| `core/images.ts` | profile images: a member's avatar and the org's logo, the org-wide image registry (`org_images`) and its read gate |
 | `core/feed.ts` | messages, threads, topics, reactions, polls, search, mention stamps and their backfill |
 | `core/read-state.ts` | read marks, follows, unread, Activity, read-all |
 | `service.ts` | `HarborService`, the facade: one delegate per public method, `org` / `readOnly` accessors |
@@ -21,13 +24,16 @@ Two pnpm workspace packages under `packages/`:
 | `store.ts`, `pg-store.ts` | the data boundary and its one driver; `PgStore.transaction(fn)` for an org-level all-or-nothing write the caller shares (`directory.ts`); `sql.ts` (node-postgres), `sql-pglite.ts` (Postgres in-process) |
 | `migrations.ts` | the append-only schema ladder |
 | `http.ts`, `ws.ts`, `mcp.ts` | the three faces; `origin.ts` (the public origin behind the proxy) |
-| `auth.ts`, `auth-oidc.ts` | the drivers, `bindAuth` / `OrgAuth`, `authenticateRequest`, the RFC 9728 helpers; `consent.ts` (the login page) |
+| `auth.ts`, `auth-oidc.ts` | the drivers, `bindAuth` / `OrgAuth` (which resolves agent keys ahead of any driver), `authenticateRequest`, the RFC 9728 helpers; `consent.ts` (the login page); `agent-keys.ts` (minting and hashing an agent key) |
 | `runtime.ts` | `buildOrgRuntime` — the one assembly of an org |
 | `server.ts`, `main.ts` | `startHarbor` (one org) and the dev seed; the binary (dev, or `HARBOR_MODE=deployment`) |
 | `deployment.ts`, `directory.ts`, `apex.ts` | many orgs from one process: host → org runtime; the org directory; the apex face (create org, my orgs) |
 | `notify.ts`, `push.ts` | the one notification decision; Expo delivery |
 | `hub.ts`, `blobs*.ts`, `mime.ts`, `merge.ts`, `search.ts`, `mentions-backfill.ts` | in-process fan-out, blob drivers, sniffing, the three-way merge, query parsing, the mentions backfill |
+| `connectors/` | connectors Harbor runs for platform agents (spec §8 Connectors): `platforms.ts` (the registry), `host.ts` (one per platform agent, started with the org), `replicas/` (the Replicas connector: its API client and event stream, turn reading, the prompt), `agent37/` (the Agent37 connector: its API client and SSE parser, the turn loop, the prompt), `jev/` (Jev, the agent Harbor itself is: its TypeSafe client, the tag questions, the per-space pass over every message), `thread-prompt.ts` (what both write into a prompt: attachments, the request marker, the standing paragraph); `sealing.ts` seals their platform keys under `HARBOR_INTEGRATION_KEY` |
 | `stats.ts`, `internal.ts` | the live-load counters (connections, subscriptions, frames per minute by kind, deliveries) and the operator face that reads them, `GET /internal/stats` behind `HARBOR_INTERNAL_KEY` |
+
+`examples/echo-agent.mjs` is the smallest connector for the agent contract (spec §8): one agent's key, the live frame plus a list every minute, acknowledge, report, reply in the thread. Run it against a dev Harbor to watch invocations end to end, and start a real connector from its shape. The Hermes connector is that shape as a Hermes platform plugin, in its own repo ([rowboatlabs/hermes-rowboat](https://github.com/rowboatlabs/hermes-rowboat)); nothing in Harbor is specific to it. The Replicas and Agent37 connectors are the same shape run inside Harbor (`connectors/replicas/`, `connectors/agent37/`), because Harbor calls those platforms; `test/fake-replicas.ts` and `test/fake-agent37.ts` stand in for their APIs in the tests. Jev's connector (`connectors/jev/`, spec §8 Jev) is run the same way but is not invoked: it reads every message in its spaces from a per-space cursor and posts tags through `relayMentions`; `test/fake-typesafe.ts` stands in for TypeSafe's API as OpenRouter serves it.
 
 `test/` has one file per feature, every one on in-process Postgres. `helpers.ts` gives `startTestHarbor` (a harbor over a fresh database, closed with it), `restClient`, `agentClient`, `liveClient`, `startFakeAs` (a fake authorization server: discovery, JWKS, minted JWTs). `day-in-the-life.test.ts` is spec §11 as code; `mcp-parity.test.ts` proves the agent face; `policy.test.ts` pins every rule without a store.
 
@@ -40,7 +46,7 @@ Two pnpm workspace packages under `packages/`:
 - **The log is append-only, with two named exceptions.** Message deletion and message editing redact the stored event, because replay must never resurrect the text. Nothing else edits a stored event.
 - **Migrations are append-only.** One concern per entry, never edit an applied one, arbitrary SQL is fine from 002. Generated columns belong to Postgres; code never writes them.
 - **One store driver.** Tests and `pnpm dev` run the production SQL on PGlite. Do not add an in-memory store.
-- **Parity.** Every member operation exists on both the render face and the agent face; `reason` is required on the agent face's file operations. `mcp-parity.test.ts` is where a new tool proves itself.
+- **Parity.** Every member operation exists on both the render face and the agent face; `reason` is required on the agent face's file operations. `mcp-parity.test.ts` is where a new tool proves itself. The one exception is agent keys (2026-09-29): a secret never passes through a tool, so they are managed on the render face only.
 - **Attribution is universal.** Every act is a member's, built by `k.attributionOf(ctx, input)`; `actingMode` records how, never who else. Author-only checks compare member ids, not modes: a member's agent counts as the member.
 - **Org-scoped everything.** Member ids are org-scoped and every member-keyed table carries `org_id`; space ids are global ULIDs, so space-keyed tables need no org column and one hub serves every org.
 - **Bytes-derived facts are the org's.** Mime, image dimensions, hashes — computed from the bytes at upload; a client's claim is a fallback, never a fact.
@@ -109,9 +115,9 @@ Verified against Supabase Auth (2026-08-18/19), the flagship AS: tokens on a sha
 
 ## Ship
 
-- `HARBOR_MODE=deployment` with `DATABASE_URL`, `APEX_DOMAIN`, `AUTH_ISSUER`; optional `AUTH_PUBLISHABLE_KEY`, `BLOBS_S3_*` or `BLOBS_DIR`, `HARBOR_MAX_BLOB_BYTES`, `DATABASE_POOL_MAX`, `HARBOR_INTERNAL_KEY`. The `Dockerfile` header lists them. Migrations self-apply at boot under an advisory lock; orgs are created on the apex face.
+- `HARBOR_MODE=deployment` with `DATABASE_URL`, `APEX_DOMAIN`, `AUTH_ISSUER`; optional `AUTH_PUBLISHABLE_KEY`, `BLOBS_S3_*` or `BLOBS_DIR`, `HARBOR_MAX_BLOB_BYTES`, `DATABASE_POOL_MAX`, `HARBOR_INTERNAL_KEY`, `HARBOR_INTEGRATION_KEY` (sealing platform agents' keys; without it Replicas and Agent37 agents can't be added), `HARBOR_JEV_OPENROUTER_KEY` (Rowboat's OpenRouter key, which Jev's calls to TypeSafe go through; without it orgs get no Jev, and an existing Jev stays idle). The `Dockerfile` header lists them. Migrations self-apply at boot under an advisory lock; orgs are created on the apex face.
 - **Server before app.** A breaking wire change deploys the server first and the app build the same day; an additive change needs no coupling. Say which in the PR.
-- **One instance.** The hub is in-process; a second instance partitions live delivery. Autoscaling stays off until the hub has a shared backend. `GET /internal/stats` with the operator key shows what the instance carries — connections, subscriptions, frames per minute by kind, deliveries — the numbers that say when one stops being enough; the same line lands in the log once a minute whether or not the key is set. When a second instance comes, the counters feed an OpenTelemetry push and the hub gets its bus in the same change.
+- **One instance.** Autoscaling stays off until everything in [SPEC.md §4 *Running more than one instance*](SPEC.md#running-more-than-one-instance--deferred-added-2026-09-30) is addressed: the hub's shared bus, and the lease for connectors Harbor runs. `GET /internal/stats` with the operator key shows what the instance carries — connections, subscriptions, frames per minute by kind, deliveries — the numbers that say when one stops being enough; the same line lands in the log once a minute whether or not the key is set. When a second instance comes, the counters feed an OpenTelemetry push and the hub gets its bus in the same change.
 - The S3 blob driver's conformance suite runs when `HARBOR_TEST_S3_BUCKET` is set; the disk driver's always.
 
 ## Before you open a PR

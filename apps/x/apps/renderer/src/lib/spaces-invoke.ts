@@ -7,7 +7,7 @@ const memberActions = new Set<InvokeChannels>([
     'spaces:createAsset', 'spaces:proposeChange', 'spaces:moveAsset', 'spaces:deleteAsset',
     'spaces:restoreAsset', 'spaces:uploadBlob', 'spaces:renameSpace', 'spaces:createInvite',
     'spaces:markRead', 'spaces:followThread', 'spaces:presence', 'spaces:whiteboard',
-    'spaces:invokeRowboat', 'spaces:stopRowboat', 'spaces:schedule',
+    'spaces:invokeRowboat', 'spaces:stopRowboat', 'spaces:schedule', 'spaces:addMembers',
 ])
 
 // 2026-09-28, spec §5: a callback retained by a timer or dialog can outlive membership.

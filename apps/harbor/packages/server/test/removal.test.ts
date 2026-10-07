@@ -43,7 +43,7 @@ describe("a member's write re-verifies access inside the lock", () => {
     store = new RacingStore(db);
     await store.init();
     service = new HarborService(store, new SpaceHub(), { name: 'Org', address: 'org.test' });
-    for (const id of ['ramnique', 'gagan']) await store.putMember({ id, displayName: id, role: 'member' });
+    for (const id of ['ramnique', 'gagan']) await store.putMember({ id, displayName: id, role: 'member', kind: 'human' });
     spaceId = (await service.createSpace({ memberId: 'ramnique' }, 'Main')).id;
     await join('gagan');
   });

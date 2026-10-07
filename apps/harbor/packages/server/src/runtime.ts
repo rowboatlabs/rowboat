@@ -2,6 +2,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { getRequestListener } from '@hono/node-server';
 import { bindAuth, type AuthDriver, type OrgAuth } from './auth.js';
 import type { BlobStore } from './blobs.js';
+import { HostedConnectors } from './connectors/host.js';
+import { jevApiKey } from './connectors/jev/index.js';
 import { buildHttpApp } from './http.js';
 import type { SpaceHub } from './hub.js';
 import { handleMcpRequest } from './mcp.js';
@@ -45,6 +47,8 @@ export interface OrgRuntime {
   handle(req: IncomingMessage, res: ServerResponse): void;
   /** What the live face needs for a connection to this org. */
   live: LiveDeps;
+  /** Stops the connectors Harbor runs for this org. */
+  close(): Promise<void>;
 }
 
 export async function buildOrgRuntime(input: OrgRuntimeInput): Promise<OrgRuntime> {
@@ -58,6 +62,17 @@ export async function buildOrgRuntime(input: OrgRuntimeInput): Promise<OrgRuntim
   );
   // The mentions backfill (service.migrateMentions): idempotent, ledgered once per org, before the faces serve.
   await service.migrateMentions();
+  // Connectors Harbor runs (spec §8 Connectors, 2026-09-30): one per agent whose
+  // connection is a platform, from boot, and for each such agent added later.
+  const connectors = new HostedConnectors({ store, hub, service, orgId: input.orgId });
+  service.attachConnectors({
+    verify: (connection, secret, target) => connectors.verify(connection, secret, target),
+    save: (agentId, secret, setBy) => connectors.save(agentId, secret, setBy),
+    added: (agent) => connectors.ensure(agent),
+  });
+  // Jev (spec §8 Jev, 2026-10-07): every org has it once the deployment has its key.
+  if (jevApiKey()) await service.ensureJev();
+  await connectors.startAll();
   const auth = bindAuth(input.auth, store);
   const issuer = input.auth.metadata?.()?.authorizationServers[0];
   const render = getRequestListener(
@@ -79,5 +94,6 @@ export async function buildOrgRuntime(input: OrgRuntimeInput): Promise<OrgRuntim
       render(req, res);
     },
     live: { service, hub, auth },
+    close: () => connectors.stopAll(),
   };
 }

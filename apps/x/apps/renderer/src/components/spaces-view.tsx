@@ -13,12 +13,16 @@ import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { MemberAvatar, MemberProfilePopover, OrgMonogram } from '@/components/spaces/atoms'
+import { AgentBadge, MemberAvatar, MemberProfilePopover, OrgMonogram } from '@/components/spaces/atoms'
 import { openServerDialog } from '@/lib/server-dialog'
+import { isGroupChat } from '@/lib/spaces-navigation'
 import { BookmarksPopover } from '@/components/spaces/bookmarks'
 import { FileColumn, TrashDialog, UploadFilesDialog } from '@/components/spaces/files-tab'
 import { GeneralStream } from '@/components/spaces/general-stream'
 import { ScheduledDialog } from '@/components/spaces/scheduled-dialog'
+import { AddMembersDialog } from '@/components/spaces/add-members-dialog'
+import { SpaceInvocationsProvider } from '@/components/spaces/invocation-lines'
+import { useSpaceInvocations } from '@/hooks/use-space-invocations'
 import { SelectionCopy } from '@/components/spaces/selection-copy'
 import { ServerSwitcher } from '@/components/spaces/server-switcher'
 import { ServerSpaceNavigation } from '@/components/spaces-sidebar-section'
@@ -171,7 +175,7 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
         try {
             const result = await invokeSpace('spaces:joinSpace', { orgId: selectedOrg.id, spaceId: selectedSpace.id })
             updateDirectoryMembership(selectedOrg.id, result.space, true)
-            refreshMembers(selectedOrg.id, result.space.id, true)
+            refreshMembers(selectedOrg.id, result.space.id, { force: true })
             await refreshSpacesOrgs()
             void loadSpaceDirectory(selectedOrg.id)
         } catch (error) {
@@ -285,7 +289,7 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
                             </div>
                         ) : (
                             <Button size="sm" className="mt-4" onClick={() => openServerDialog({ kind: 'create' })}>
-                                <Plus className="size-4 mr-1" /> Add a server
+                                <Plus className="size-4 mr-1" /> Create a group chat
                             </Button>
                         )}
                     </>
@@ -349,6 +353,8 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // roster winning on identity), so a chip for someone mentioned from
     // another space still reads as a person here.
     const members = useSpaceMembers(org.id, space.id)
+    // Agent invocations (Harbor spec §8): the lines under messages that invoked an agent.
+    const invocationsByMessage = useSpaceInvocations(org.id, space.id)
     const orgSpaceIds = useMemo(() => org.spaces.map((s) => s.id), [org.spaces])
     const orgRoster = useOrgRoster(org.id, orgSpaceIds)
     const profiles = useMemo(() => {
@@ -357,6 +363,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         return [...byId.values()]
     }, [orgRoster, members])
     const memberNames = useMemo(() => new Map(profiles.map((m) => [m.id, m.displayName])), [profiles])
+    const selfIsAdmin = profiles.find((m) => m.id === org.memberId)?.role === 'admin'
     const spaceNames = useSpaceNames(org.id)
     // A direct message is this same pane with a two-person roster: named by
     // the other person, no invites.
@@ -413,7 +420,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         // Coarse-grained on purpose: any durable event refreshes the open
         // panes — and so does a (re)subscribe, since events published while a
         // socket was dead may have no replay to arrive by.
-        if (frame.kind === 'event' && frame.event.type === 'membership') refreshMembers(org.id, space.id, true)
+        if (frame.kind === 'event' && frame.event.type === 'membership') refreshMembers(org.id, space.id, { force: true })
         if (frame.kind !== 'event' && frame.kind !== 'subscribed') return
         setRefreshTick((t) => t + 1)
     })
@@ -474,7 +481,21 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // edge that peeks the rail as a drawer on hover — see SpaceRail. (The
     // shell sidebar contracts to the dock while in Spaces, so this rail is
     // THE sidebar here.)
-    const [railPinned, setRailPinned] = useState(() => localStorage.getItem('spaces:railOpen') !== '0')
+    // A group chat starts with the rail tucked away: it has no channels to
+    // pick between, so the conversation is the whole view (2026-10-07). Its
+    // pin is remembered apart from the workspaces' docked default.
+    const groupChat = isGroupChat(org)
+    const railPinKey = groupChat ? 'spaces:chatRailOpen' : 'spaces:railOpen'
+    const readRailPin = (chat: boolean) => chat ? localStorage.getItem('spaces:chatRailOpen') === '1' : localStorage.getItem('spaces:railOpen') !== '0'
+    const [railPinned, setRailPinned] = useState(() => readRailPin(groupChat))
+    // A chat that becomes a workspace while open (someone added a channel)
+    // takes the workspace's rail at once, so its channels and DMs show
+    // without leaving the conversation (2026-10-07).
+    const [railShape, setRailShape] = useState(groupChat)
+    if (railShape !== groupChat) {
+        setRailShape(groupChat)
+        setRailPinned(readRailPin(groupChat))
+    }
 
     // Width of the pane drives the Split floor and pinnability.
     const paneRef = useRef<HTMLDivElement | null>(null)
@@ -657,7 +678,11 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // when none exists yet), an artifact link, a deep link, or history. It
     // must never render as raw JSON in the document pane.
     // ------------------------------------------------------------------
-    const spaceRefs = useMemo(() => ({ orgId: org.id, orgAddress: org.address, spaceId: space.id }), [org.id, org.address, space.id])
+    const directWith = space.kind === 'direct' ? space.participants?.find((p) => p !== org.memberId) : undefined
+    const spaceRefs = useMemo(
+        () => ({ orgId: org.id, orgAddress: org.address, spaceId: space.id, ...(directWith ? { directWith } : {}) }),
+        [org.id, org.address, space.id, directWith],
+    )
     const isBoardKey = (key: string | null): key is string => {
         if (!key || isAttachmentKey(key)) return false
         const entry = entryById.get(key)
@@ -705,7 +730,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     /** The rail's lock: docked ⇄ edge sliver (the rail peeks on hover by itself). */
     const toggleRailPin = () => {
         const pin = !railPinned
-        localStorage.setItem('spaces:railOpen', pin ? '1' : '0')
+        localStorage.setItem(railPinKey, pin ? '1' : '0')
         setRailPinned(pin)
     }
 
@@ -895,13 +920,15 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // upload confirmation. Default to Space files; choosing a folder is optional.
     const [uploadFiles, setUploadFiles] = useState<File[] | null>(null)
     const [trashOpen, setTrashOpen] = useState(false)
+    const [addMembersOpen, setAddMembersOpen] = useState(false)
 
     return (
         <SpaceMembersProvider members={memberNames} spaceNames={spaceNames}>
         <SpaceProfilesProvider members={profiles} here={hereSet} selfId={org.memberId}>
         <SpaceRefsProvider refs={spaceRefs}>
+        <SpaceInvocationsProvider byMessage={invocationsByMessage} orgId={org.id} selfId={org.memberId} isAdmin={selfIsAdmin}>
         <SpaceAssetsProvider entries={entries}>
-        <SpaceNavProvider onOpenFile={openFile} onOpenSpaceFile={openSpaceFile} onOpenSpace={openSpace} onOpenMessage={openMessage} onOpenDirect={openDirect} resolveOrg={resolveOrg} resolveSpace={resolveSpace} onOpenAttachment={(src, name) => {
+        <SpaceNavProvider onOpenFile={openFile} onOpenSpaceFile={openSpaceFile} onOpenSpace={openSpace} onOpenMessage={openMessage} onOpenDirect={groupChat ? undefined : openDirect} resolveOrg={resolveOrg} resolveSpace={resolveSpace} onOpenAttachment={(src, name) => {
             const url = new URL(src)
             url.searchParams.set('name', name)
             select({ kind: 'attachment', src: url.href, ...(chatRootId ? { fromThreadRootId: chatRootId } : {}) })
@@ -912,21 +939,24 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
             {active && <SelectionCopy />}
             <header className="spaces-header flex shrink-0 items-center gap-2 border-b border-border">
                 <ServerSwitcher org={org} onOpenSpace={onSwitchSpace} />
-                <span aria-hidden="true" className="shrink-0 text-muted-foreground/50">/</span>
+                {/* A group chat's name is the server's: no "/ #name" after it, just who is in it. */}
+                {!(groupChat && !isDirect) && <span aria-hidden="true" className="shrink-0 text-muted-foreground/50">/</span>}
                 {/* Click to keep the identity card and its copy actions open. */}
                 <Popover>
                     <PopoverTrigger asChild>
                         <button
                             type="button"
-                            aria-label={isDirect ? 'Conversation details' : 'Space details'}
+                            aria-label={isDirect ? 'Conversation details' : groupChat ? 'Group details' : 'Space details'}
                             className="flex h-9 min-w-0 max-w-[320px] shrink items-center gap-2 rounded-md pl-1 pr-2 hover:bg-accent/60 data-[state=open]:bg-accent/60"
                         >
-                            <span className={cn('flex min-w-0 items-center', isDirect ? 'gap-1.5' : 'gap-0.5')}>
+                            {groupChat && !isDirect ? <span className="flex items-center gap-1 text-[13px] text-muted-foreground">
+                                <Users className="size-3.5 shrink-0" />{members.length}
+                            </span> : <span className={cn('flex min-w-0 items-center', isDirect ? 'gap-1.5' : 'gap-0.5')}>
                                 {isDirect
                                     ? <MemberAvatar id={directOtherId} name={spaceTitle} size="sm" />
                                     : space.visibility === 'open' ? <Hash className="size-4 shrink-0 text-muted-foreground" /> : <Lock aria-label="Private space" className="size-4 shrink-0 text-muted-foreground" />}
                                 <h1 className="truncate text-[15px] font-semibold">{spaceTitle}</h1>
-                            </span>
+                            </span>}
                         </button>
                     </PopoverTrigger>
                     <PopoverContent align="start" sideOffset={4} className="w-80 px-5 pb-5 pt-6">
@@ -945,7 +975,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                             <div className="mt-0.5 text-xs text-muted-foreground">
                                 {isSelf
                                     ? `Your notes in ${org.name} — just you and your agent`
-                                    : isDirect ? `A direct message in ${org.name} — just the two of you` : `${space.visibility === 'open' ? 'An open' : 'A private'} space in ${org.name}`}
+                                    : isDirect ? `A direct message in ${org.name} — just the two of you` : groupChat ? 'A group chat — add a channel from the server menu when it grows' : `${space.visibility === 'open' ? 'An open' : 'A private'} space in ${org.name}`}
                             </div>
                         </div>
                         <dl className="mt-4 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-[13px]">
@@ -991,7 +1021,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                         <PopoverTrigger asChild>
                             <button
                                 type="button"
-                                title={`Invite someone to #${space.name}`}
+                                title={groupChat ? `Invite someone to ${org.name}` : `Invite someone to #${space.name}`}
                                 className="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-border px-2 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground data-[state=open]:bg-accent/60 data-[state=open]:text-foreground"
                             >
                                 <UserPlus className="size-3.5" />
@@ -1028,13 +1058,14 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                     <MemberProfilePopover key={m.id} id={m.id}>
                                         <button type="button" className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-accent/60">
                                             <span className="relative shrink-0">
-                                                <MemberAvatar id={m.id} name={m.displayName} size="md" />
+                                                <MemberAvatar id={m.id} name={m.displayName} size="md" agent={m.kind === 'agent'} agentKind={m.agentKind} />
                                                 {isHere && <span className="absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-[var(--rowboat-success)] ring-2 ring-popover" />}
                                             </span>
                                             <span className="min-w-0 flex-1 truncate text-sm">
                                                 {m.displayName}
                                                 {m.id === org.memberId && <span className="text-muted-foreground"> (you)</span>}
                                             </span>
+                                            {m.kind === 'agent' && <AgentBadge agentKind={m.agentKind} agentConnection={m.agentConnection} />}
                                             {m.role === 'admin' && (
                                                 <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] font-medium text-muted-foreground">admin</span>
                                             )}
@@ -1044,9 +1075,16 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                 )
                             })}
                         </div>
-                        {/* A DM's membership is fixed — there is nobody to invite. */}
+                        {/* A DM's membership is fixed — there is nobody to add or invite. */}
                         {member && !isDirect && (
                             <div className="mt-1 border-t border-border pt-1">
+                                <button
+                                    type="button"
+                                    onClick={() => setAddMembersOpen(true)}
+                                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+                                >
+                                    <UserPlus className="size-3.5" /> Add people
+                                </button>
                                 <button
                                     type="button"
                                     onClick={() => void invite()}
@@ -1295,6 +1333,9 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                 </div>
             </div>
             {member && scheduledOpen && <ScheduledDialog orgId={org.id} spaceId={space.id} onClose={() => setScheduledOpen(false)} />}
+            {member && !isDirect && (
+                <AddMembersDialog org={org} space={space} members={members} open={addMembersOpen} onOpenChange={setAddMembersOpen} />
+            )}
             {member && trashOpen && (
                 <TrashDialog org={org} space={space} onClose={() => { setTrashOpen(false); setRefreshTick((t) => t + 1) }} />
             )}
@@ -1311,6 +1352,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         </div>
         </SpaceNavProvider>
         </SpaceAssetsProvider>
+        </SpaceInvocationsProvider>
         </SpaceRefsProvider>
         </SpaceProfilesProvider>
         </SpaceMembersProvider>

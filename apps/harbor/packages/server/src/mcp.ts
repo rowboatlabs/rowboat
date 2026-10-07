@@ -30,17 +30,22 @@ interface McpActor {
   memberId: string;
   actingMode: ActingMode;
   agentName?: string;
+  /** An agent member on its own key (2026-09-29): acts as itself, so always direct. */
+  agent?: boolean;
 }
 
 export async function handleMcpRequest(req: IncomingMessage, res: ServerResponse, deps: Deps): Promise<void> {
   let actor: McpActor;
   try {
     const { member } = await authenticateRequest(deps.auth, { authorization: req.headers.authorization });
-    actor = {
-      memberId: member.id,
-      actingMode: req.headers['x-acting-mode'] === 'scheduled' ? 'scheduled' : 'agent',
-      ...(typeof req.headers['x-agent-name'] === 'string' ? { agentName: req.headers['x-agent-name'] } : {}),
-    };
+    actor = member.kind === 'agent'
+      // An agent member on its own key is not a person's agent: no "via".
+      ? { memberId: member.id, actingMode: 'direct', agent: true }
+      : {
+          memberId: member.id,
+          actingMode: req.headers['x-acting-mode'] === 'scheduled' ? 'scheduled' : 'agent',
+          ...(typeof req.headers['x-agent-name'] === 'string' ? { agentName: req.headers['x-agent-name'] } : {}),
+        };
   } catch (err) {
     const e = err instanceof HarborError ? err : new HarborError('unauthorized', 'unauthorized');
     const headers: Record<string, string> = { 'content-type': 'application/json' };
@@ -122,7 +127,7 @@ async function dispatch(
   name: string,
   args: unknown,
 ): Promise<unknown> {
-  const ctx = { memberId: actor.memberId };
+  const ctx = { memberId: actor.memberId, ...(actor.agent ? { agent: true } : {}) };
   // Every write is attributed as the token's member acting in the declared
   // mode (PARITY 2026-09-09: an agent's vote/reaction/edit is the member's act).
   const attribution = {
@@ -163,6 +168,10 @@ async function dispatch(
       const a = args as { spaceId: string; name: string };
       return { space: await service.renameSpace(ctx, a.spaceId, { name: a.name, ...attribution }) };
     }
+    case 'add_members': {
+      const a = args as { spaceId: string; memberIds: string[] };
+      return { memberships: await service.addMembers(ctx, a.spaceId, { memberIds: a.memberIds, ...attribution }) };
+    }
     case 'leave_space': {
       const a = args as { spaceId: string };
       await service.leaveSpace(ctx, a.spaceId);
@@ -187,6 +196,7 @@ async function dispatch(
             assets: await service.listAssets(ctx, space.id),
           })),
         ),
+        groupChat: await service.isGroupChat(),
       };
     }
     case 'read_stream': {
@@ -304,16 +314,36 @@ async function dispatch(
       });
     }
     case 'post_message': {
-      const a = args as { spaceId: string; threadRoot?: string; body: string; poll?: z.infer<typeof NewPoll> };
-      const { message } = await service.postMessage(ctx, a.spaceId, {
+      const a = args as {
+        spaceId: string;
+        threadRoot?: string;
+        body: string;
+        poll?: z.infer<typeof NewPoll>;
+        agentOptions?: Record<string, Record<string, string | boolean>>;
+      };
+      const { message, invocations } = await service.postMessage(ctx, a.spaceId, {
         ...(a.threadRoot ? { threadRoot: a.threadRoot } : {}),
         body: a.body,
         ...(a.poll !== undefined ? { poll: a.poll } : {}),
+        ...(a.agentOptions ? { agentOptions: a.agentOptions } : {}),
         actingMode: actor.actingMode,
         ...(actor.agentName ? { agentName: actor.agentName } : {}),
       });
-      return { messageId: message.id, ...(message.threadRoot !== undefined ? { threadRoot: message.threadRoot } : {}) };
+      return {
+        messageId: message.id,
+        ...(message.threadRoot !== undefined ? { threadRoot: message.threadRoot } : {}),
+        // A refused hand-off comes back to the agent that posted it (spec §8).
+        ...(invocations.length > 0
+          ? { invocations: invocations.map((i) => ({ agentId: i.agentId, state: i.state, ...(i.refusal ? { refusal: i.refusal } : {}) })) }
+          : {}),
+      };
     }
+    case 'get_invocations': {
+      const a = args as { spaceId: string; threadRootId?: string };
+      return { invocations: await service.listInvocations(ctx, a.spaceId, a.threadRootId) };
+    }
+    case 'stop_invocation':
+      return { invocation: await service.cancelInvocation(ctx, (args as { invocationId: string }).invocationId) };
     case 'edit_message': {
       const a = args as { spaceId: string; messageId: string; body: string };
       return { message: await service.editMessage(ctx, a.spaceId, a.messageId, { body: a.body, ...attribution }) };

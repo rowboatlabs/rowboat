@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { ArtifactsSummary } from '@/components/spaces/artifacts'
 import { AttachDocumentDialog } from '@/components/spaces/attach-document-dialog'
-import { MemberAvatar, MemberProfilePopover } from '@/components/spaces/atoms'
+import { AgentMark, MemberAvatar, MemberProfilePopover } from '@/components/spaces/atoms'
 import { Composer, type AgentOptions } from '@/components/spaces/composer'
 import { ForwardDialog } from '@/components/spaces/forward-dialog'
 import { MemberName, MemberText } from '@/components/spaces/member-text'
@@ -29,7 +29,8 @@ import {
     clearStagedThreadDraft, peekStagedReply, releaseStagedThreadDraft, stageThreadDraft, subscribeStagedThreadDraft, threadDraftKey, useStagedThreadDraft,
 } from '@/lib/spaces-thread-draft'
 import { AUTO_TOAST, collectRouteCandidates, routeDraft, routeThreadLabel } from '@/lib/spaces-auto-route'
-import { postStreamMessage } from '@/lib/spaces-post'
+import { agentOptionsPayload, postStreamMessage } from '@/lib/spaces-post'
+import { noteInvocations } from '@/hooks/use-space-invocations'
 import { getStreamState, jumpToLatest } from '@/hooks/use-space-chat'
 import { AutoBanner } from '@/components/spaces/auto-banner'
 import { FindBanner } from '@/components/spaces/find-banner'
@@ -629,8 +630,9 @@ export function ThreadPane({
         }
         const pending = buildPendingMessage(space.id, org.memberId, body, rootMessageId)
         setMessages((prev) => [...prev, pending])
-        void invokeSpace('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body })
+        void invokeSpace('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body, ...agentOptionsPayload(agent) })
             .then((result) => {
+                noteInvocations(org.id, space.id, result.invocations)
                 setMessages((prev) => {
                     const rest = prev.filter((m) => m.id !== pending.id)
                     // A jump landed while the send was in flight: the reply lives
@@ -1186,6 +1188,7 @@ export function ThreadPane({
                                 <MemberProfilePopover id={root.author.memberId}>
                                     <button type="button" className="cursor-pointer text-[15px] font-bold hover:underline">{parentName}</button>
                                 </MemberProfilePopover>
+                                <AgentMark id={root.author.memberId} />
                                 {root.author.actingMode !== 'direct' && (
                                     <span className="text-muted-foreground">via {root.author.agentName ?? 'agent'}</span>
                                 )}

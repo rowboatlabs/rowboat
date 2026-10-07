@@ -91,6 +91,14 @@ export function restClient(harbor: RunningHarbor, token: string) {
       const res = await fetch(`${harbor.url}${path}`, { headers: { authorization: `Bearer ${token}` } });
       return { status: res.status, body: (await res.json()) as any };
     },
+    async put(path: string, body?: unknown) {
+      const res = await fetch(`${harbor.url}${path}`, {
+        method: 'PUT',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify(body ?? {}),
+      });
+      return { status: res.status, body: (await res.json()) as any };
+    },
     async post(path: string, body?: unknown) {
       const res = await fetch(`${harbor.url}${path}`, {
         method: 'POST',

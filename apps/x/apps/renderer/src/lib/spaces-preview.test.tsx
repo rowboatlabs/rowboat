@@ -25,6 +25,7 @@ describe('open-space preview boundary', () => {
         expect(invoke).toHaveBeenCalledTimes(1)
         await expect(invokeSpace('spaces:postMessage', { orgId: 'preview', spaceId: 'open', body: 'hello' })).rejects.toThrow('Join this space')
         await expect(invokeSpace('spaces:whiteboard', { orgId: 'preview', spaceId: 'open', boardId: 'board', payload: { t: 'scene_request', clientId: 'client' } })).rejects.toThrow('Join this space')
+        await expect(invokeSpace('spaces:addMembers', { orgId: 'preview', spaceId: 'open', memberIds: ['other'] })).rejects.toThrow('Join this space')
         expect(invoke).toHaveBeenCalledTimes(1)
     })
     it('does not manufacture personal state from content responses or marks', () => {

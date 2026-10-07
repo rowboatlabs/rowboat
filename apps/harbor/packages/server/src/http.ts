@@ -3,6 +3,7 @@ import { routes } from '@rowboat/spaces-protocol';
 import type { z } from 'zod';
 import { authenticateRequest, protectedResourceMetadata, wwwAuthenticate, type AuthIdentity, type OrgAuth } from './auth.js';
 import { consentPageHtml } from './consent.js';
+import { MAX_PROFILE_IMAGE_BYTES } from './core/images.js';
 import { HarborError } from './errors.js';
 import { publicOrigin } from './origin.js';
 import type { HarborService } from './service.js';
@@ -12,7 +13,7 @@ import type { HarborService } from './service.js';
 // too before they leave, so contract drift fails loudly in the stub instead of
 // silently in a client.
 
-type Env = { Variables: { memberId: string; identity?: AuthIdentity } };
+type Env = { Variables: { memberId: string; agent?: boolean; identity?: AuthIdentity } };
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 /** Uploads only (raw-bytes route). 100MB across the board — dogfood decision 2026-08-24. */
 const DEFAULT_MAX_BLOB_BYTES = 100 * 1024 * 1024;
@@ -44,8 +45,8 @@ function reply<S extends z.ZodType>(c: Context<Env>, schema: S, data: z.infer<S>
   return c.json(r.data as object);
 }
 
-function actor(c: Context<Env>): { memberId: string } {
-  return { memberId: c.get('memberId') };
+function actor(c: Context<Env>): { memberId: string; agent?: boolean } {
+  return { memberId: c.get('memberId'), ...(c.get('agent') ? { agent: true } : {}) };
 }
 
 export function buildHttpApp(deps: {
@@ -100,13 +101,60 @@ export function buildHttpApp(deps: {
       if (member) c.set('memberId', member.id);
       return next();
     }
-    c.set('memberId', (await authenticateRequest(auth, credentials)).member.id);
+    const { member } = await authenticateRequest(auth, credentials);
+    c.set('memberId', member.id);
+    // An agent presenting its own key acts as itself (2026-09-29).
+    if (member.kind === 'agent') c.set('agent', true);
     return next();
   });
 
   app.get('/v1/health', (c) => c.json({ ok: true, org: { name: service.org.name, address: service.org.address } }));
 
   app.get(routes.me.path, async (c) => reply(c, routes.me.response, { member: await service.me(actor(c)) }));
+
+  // --- profile images (2026-10-02) -------------------------------------------
+  // The body is the image; the limit is checked on the claim and again on the bytes.
+  const imageBody = async (c: Context<Env>): Promise<Uint8Array> => {
+    if (Number(c.req.header('content-length') ?? '0') > MAX_PROFILE_IMAGE_BYTES) {
+      throw new HarborError('payload_too_large', `profile images are limited to ${MAX_PROFILE_IMAGE_BYTES} bytes`);
+    }
+    return new Uint8Array(await c.req.arrayBuffer());
+  };
+
+  app.put(routes.setAvatar.path, async (c) =>
+    reply(c, routes.setAvatar.response, { member: await service.setAvatar(actor(c), await imageBody(c), publicOrigin(c)) }));
+
+  app.delete(routes.clearAvatar.path, async (c) =>
+    reply(c, routes.clearAvatar.response, { member: await service.clearAvatar(actor(c)) }));
+
+  app.get(routes.getOrgLogo.path, async (c) => {
+    const logoUrl = await service.orgLogoUrl(actor(c), publicOrigin(c));
+    return reply(c, routes.getOrgLogo.response, logoUrl ? { logoUrl } : {});
+  });
+
+  app.put(routes.setOrgLogo.path, async (c) =>
+    reply(c, routes.setOrgLogo.response, await service.setOrgLogo(actor(c), await imageBody(c), publicOrigin(c))));
+
+  app.delete(routes.clearOrgLogo.path, async (c) =>
+    reply(c, routes.clearOrgLogo.response, await service.clearOrgLogo(actor(c))));
+
+  // Immutable by address → cache forever, privately. Always an image (sniffed at upload).
+  app.get(routes.getImage.path, async (c) => {
+    const { hash } = parseWith(routes.getImage.params, c.req.param());
+    const result = await service.getImage(actor(c), hash);
+    if (result.url) {
+      c.header('cache-control', 'private, max-age=240');
+      return c.redirect(result.url, 302);
+    }
+    c.header('content-type', result.blob.mime);
+    c.header('content-length', String(result.blob.size));
+    c.header('content-disposition', 'inline');
+    c.header('cache-control', 'private, max-age=31536000, immutable');
+    c.header('x-content-type-options', 'nosniff');
+    c.header('content-security-policy', "default-src 'none'");
+    const bytes = result.bytes!;
+    return c.body(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
+  });
 
   // --- spaces & membership ---------------------------------------------------
 
@@ -116,7 +164,7 @@ export function buildHttpApp(deps: {
       ...(c.req.query('includeDirect') !== undefined ? { includeDirect: c.req.query('includeDirect') } : {}),
     });
     const spaces = await service.listSpaces(actor(c), { includeDirect: q.includeDirect ?? false });
-    return reply(c, routes.listSpaces.response, { spaces });
+    return reply(c, routes.listSpaces.response, { spaces, groupChat: await service.isGroupChat() });
   });
 
   app.get(routes.browseSpaces.path, async (c) =>
@@ -166,6 +214,123 @@ export function buildHttpApp(deps: {
     const { spaceId } = parseWith(routes.leaveSpace.params, c.req.param());
     await service.leaveSpace(actor(c), spaceId);
     return reply(c, routes.leaveSpace.response, { left: true });
+  });
+
+  // --- invocations (spec §8): the connector's operations, on an agent's own key ----
+
+  app.get(routes.listAgentInvocations.path, async (c) =>
+    reply(c, routes.listAgentInvocations.response, {
+      invocations: await service.listAgentInvocations(actor(c)),
+      approvals: await service.listApprovalDecisions(actor(c)),
+    }));
+
+  // Approvals (spec §8 part 4, 2026-10-01): the connector raises and settles; a person decides, REST only.
+  app.post(routes.requestApproval.path, async (c) => {
+    const { invocationId } = parseWith(routes.requestApproval.params, c.req.param());
+    const request = await body(c, routes.requestApproval.request);
+    return reply(c, routes.requestApproval.response, await service.requestApproval(actor(c), invocationId, request));
+  });
+
+  app.post(routes.applyApproval.path, async (c) => {
+    const { approvalId } = parseWith(routes.applyApproval.params, c.req.param());
+    return reply(c, routes.applyApproval.response, { approval: await service.applyApproval(actor(c), approvalId) });
+  });
+
+  app.post(routes.closeApproval.path, async (c) => {
+    const { approvalId } = parseWith(routes.closeApproval.params, c.req.param());
+    const close = await body(c, routes.closeApproval.request);
+    return reply(c, routes.closeApproval.response, { approval: await service.closeApproval(actor(c), approvalId, close) });
+  });
+
+  app.post(routes.decideApproval.path, async (c) => {
+    const { spaceId, approvalId } = parseWith(routes.decideApproval.params, c.req.param());
+    const decision = await body(c, routes.decideApproval.request);
+    return reply(c, routes.decideApproval.response, { approval: await service.decideApproval(actor(c), spaceId, approvalId, decision) });
+  });
+
+  app.post(routes.acknowledgeInvocation.path, async (c) => {
+    const { invocationId } = parseWith(routes.acknowledgeInvocation.params, c.req.param());
+    return reply(c, routes.acknowledgeInvocation.response, { invocation: await service.acknowledgeInvocation(actor(c), invocationId) });
+  });
+
+  app.post(routes.updateInvocation.path, async (c) => {
+    const { invocationId } = parseWith(routes.updateInvocation.params, c.req.param());
+    const update = await body(c, routes.updateInvocation.request);
+    return reply(c, routes.updateInvocation.response, { invocation: await service.updateInvocation(actor(c), invocationId, update) });
+  });
+
+  app.post(routes.declareCapabilities.path, async (c) => {
+    const capabilities = await body(c, routes.declareCapabilities.request);
+    return reply(c, routes.declareCapabilities.response, { capabilities: await service.declareCapabilities(actor(c), capabilities) });
+  });
+
+  // --- invocations: people's side ----------------------------------------------------
+
+  app.get(routes.getAgentCapabilities.path, async (c) => {
+    const { agentId } = parseWith(routes.getAgentCapabilities.params, c.req.param());
+    return reply(c, routes.getAgentCapabilities.response, {
+      capabilities: await service.getAgentCapabilities(agentId),
+      defaults: await service.getAgentOptionDefaults(agentId),
+    });
+  });
+
+  app.get(routes.listInvocations.path, async (c) => {
+    const { spaceId } = parseWith(routes.listInvocations.params, c.req.param());
+    const q = parseWith(routes.listInvocations.query, c.req.query());
+    return reply(c, routes.listInvocations.response, { invocations: await service.listInvocations(actor(c), spaceId, q.threadRootId) });
+  });
+
+  app.post(routes.cancelInvocation.path, async (c) => {
+    const { invocationId } = parseWith(routes.cancelInvocation.params, c.req.param());
+    return reply(c, routes.cancelInvocation.response, { invocation: await service.cancelInvocation(actor(c), invocationId) });
+  });
+
+  // --- agents and their keys (render face only: secrets never cross a tool) ----
+
+  app.get(routes.listAgents.path, async (c) =>
+    reply(c, routes.listAgents.response, { agents: await service.listAgents(actor(c)) }));
+
+  app.post(routes.createAgent.path, async (c) => {
+    const input = await body(c, routes.createAgent.request);
+    return reply(
+      c,
+      routes.createAgent.response,
+      await service.addAgent(actor(c), {
+        displayName: input.displayName,
+        kind: input.kind,
+        connection: input.connection,
+        ...(input.credential !== undefined ? { credential: input.credential } : {}),
+        ...(input.instance !== undefined ? { instance: input.instance } : {}),
+      }),
+    );
+  });
+
+  app.put(routes.setAgentCredential.path, async (c) => {
+    const { agentId } = parseWith(routes.setAgentCredential.params, c.req.param());
+    const input = await body(c, routes.setAgentCredential.request);
+    return reply(c, routes.setAgentCredential.response, { credential: await service.setAgentCredential(actor(c), agentId, input.secret) });
+  });
+
+  app.put(routes.setAgentOptionDefaults.path, async (c) => {
+    const { agentId } = parseWith(routes.setAgentOptionDefaults.params, c.req.param());
+    const input = await body(c, routes.setAgentOptionDefaults.request);
+    return reply(c, routes.setAgentOptionDefaults.response, { defaults: await service.setAgentOptionDefaults(actor(c), agentId, input.defaults) });
+  });
+
+  app.post(routes.createAgentKey.path, async (c) => {
+    const { agentId } = parseWith(routes.createAgentKey.params, c.req.param());
+    return reply(c, routes.createAgentKey.response, { key: await service.createAgentKey(actor(c), agentId) });
+  });
+
+  app.post(routes.revokeAgentKey.path, async (c) => {
+    const { agentId, keyId } = parseWith(routes.revokeAgentKey.params, c.req.param());
+    return reply(c, routes.revokeAgentKey.response, { key: await service.revokeAgentKey(actor(c), agentId, keyId) });
+  });
+
+  app.post(routes.addMembers.path, async (c) => {
+    const { spaceId } = parseWith(routes.addMembers.params, c.req.param());
+    const input = await body(c, routes.addMembers.request);
+    return reply(c, routes.addMembers.response, { memberships: await service.addMembers(actor(c), spaceId, input) });
   });
 
   // --- invites ---------------------------------------------------------------

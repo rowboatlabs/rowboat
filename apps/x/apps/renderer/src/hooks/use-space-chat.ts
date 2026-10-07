@@ -64,6 +64,12 @@ export interface StreamState {
     messages: ChatMessage[]
     /** Topic annotations for loaded roots, by rootMessageId. */
     topicsByRoot: ReadonlyMap<string, spaces.Topic>
+    /**
+     * Join and leave lines for the loaded window, oldest first (2026-09-29):
+     * the log's membership events, drawn between messages by offset. Facts
+     * never change once logged, so merging is a union by offset.
+     */
+    events: spaces.StreamEvent[]
     /** Older roots exist below the loaded window (scroll up to load them). */
     hasMore: boolean
     /** An older page is on its way. */
@@ -83,7 +89,7 @@ export interface StreamState {
 }
 
 const EMPTY_STREAM: StreamState = {
-    messages: [], topicsByRoot: new Map(), hasMore: false, loadingOlder: false, hasMoreAfter: false, newerSince: 0, ready: false,
+    messages: [], topicsByRoot: new Map(), events: [], hasMore: false, loadingOlder: false, hasMoreAfter: false, newerSince: 0, ready: false,
 }
 
 let streamState: ReadonlyMap<string, StreamState> = new Map()
@@ -99,6 +105,14 @@ function setStream(k: string, patch: Partial<StreamState>): void {
     streamState = next
     persistStream(k)
     emitStream()
+}
+
+/** Union two runs of stream events by offset, oldest first. */
+function withEvents(current: readonly spaces.StreamEvent[], incoming: readonly spaces.StreamEvent[] | undefined): spaces.StreamEvent[] {
+    if (!incoming || incoming.length === 0) return current as spaces.StreamEvent[]
+    const byOffset = new Map(current.map((e) => [e.offset, e]))
+    for (const e of incoming) byOffset.set(e.offset, e)
+    return [...byOffset.values()].sort((a, b) => a.offset - b.offset)
 }
 
 /** Fold a page's topic rows into the per-root map (annotation removed = caller deletes). */
@@ -130,6 +144,8 @@ interface StreamCache {
     messages: spaces.Message[]
     topics: spaces.Topic[]
     hasMore: boolean
+    /** The tail's join lines (2026-09-29); absent from older caches, read as none. */
+    events?: spaces.StreamEvent[]
 }
 
 function persistStream(k: string): void {
@@ -139,11 +155,16 @@ function persistStream(k: string): void {
     const settled = state.messages.filter((m) => !m.pending && !m.failed)
     if (settled.length === 0) return
     const tail = settled.slice(-CACHE_TAIL)
+    const hasMore = state.hasMore || tail.length < settled.length
+    // Lines older than the tail's first message go with the rows cut off,
+    // unless the tail is the whole history.
+    const floor = hasMore ? tail[0]!.offset : 0
     const payload: StreamCache = {
         v: CACHE_VERSION,
         messages: tail,
         topics: tail.map((m) => state.topicsByRoot.get(m.id)).filter((t): t is spaces.Topic => !!t),
-        hasMore: state.hasMore || tail.length < settled.length,
+        hasMore,
+        events: state.events.filter((e) => e.offset > floor),
     }
     try {
         window.localStorage.setItem(cacheKey(k), JSON.stringify(payload))
@@ -175,6 +196,7 @@ function hydrateStream(k: string): void {
             ...EMPTY_STREAM,
             messages: cached.messages,
             topicsByRoot: new Map((cached.topics ?? []).map((t) => [t.rootMessageId, t])),
+            events: Array.isArray(cached.events) ? cached.events : [],
             hasMore: cached.hasMore,
             ready: true,
         })
@@ -227,6 +249,7 @@ async function loadStream(orgId: string, spaceId: string): Promise<void> {
         setStream(k, {
             messages: [...mergeMessages(settled, res.messages), ...carried],
             topicsByRoot: withTopics(prev?.topicsByRoot ?? new Map(), res.topics),
+            events: withEvents(prev?.events ?? [], res.events),
             hasMore: reachesDeeper && prev ? prev.hasMore : res.hasMore,
             ready: true,
             // A fresh page clears an old failure (the merge would keep it).
@@ -263,6 +286,7 @@ export async function loadOlderStreamMessages(orgId: string, spaceId: string): P
         setStream(k, {
             messages: mergeMessages(cur.messages, res.messages),
             topicsByRoot: withTopics(cur.topicsByRoot, res.topics),
+            events: withEvents(cur.events, res.events),
             hasMore: res.hasMore,
             loadingOlder: false,
         })
@@ -298,6 +322,7 @@ export async function loadStreamAround(orgId: string, spaceId: string, offset: n
     setStream(k, {
         messages: res.messages,
         topicsByRoot: withTopics(prev?.topicsByRoot ?? new Map(), res.topics),
+        events: res.events ?? [],
         hasMore: res.hasMore,
         loadingOlder: false,
         hasMoreAfter: res.hasMoreAfter ?? false,
@@ -325,6 +350,7 @@ export async function loadNewerStreamMessages(orgId: string, spaceId: string): P
         setStream(k, {
             messages: mergeMessages(cur.messages, res.messages),
             topicsByRoot: withTopics(cur.topicsByRoot, res.topics),
+            events: withEvents(cur.events, res.events),
             hasMoreAfter,
             // The head reached: everything counted while detached is in the window now.
             ...(hasMoreAfter ? {} : { newerSince: 0 }),
@@ -346,7 +372,7 @@ export async function jumpToLatest(orgId: string, spaceId: string): Promise<void
     if (!streamState.get(k)?.hasMoreAfter) return
     // Not ready until the head page lands: an empty, ready window would paint
     // the space's empty-state copy for a round trip.
-    setStream(k, { messages: [], hasMore: false, loadingOlder: false, hasMoreAfter: false, newerSince: 0, ready: false })
+    setStream(k, { messages: [], events: [], hasMore: false, loadingOlder: false, hasMoreAfter: false, newerSince: 0, ready: false })
     await loadStream(orgId, spaceId)
 }
 
@@ -513,6 +539,12 @@ function wireBus(): void {
                 ingestThreadReply(event.orgId, frame.spaceId, message)
                 noteReplyActivity(event.orgId, frame.spaceId, message)
             }
+        } else if (frame.event.type === 'membership') {
+            // A join or leave line. Detached, it belongs to a page above the
+            // window, which paging forward fetches; it is not a root, so the
+            // pill does not count it.
+            if (state.hasMoreAfter) return
+            setStream(k, { events: withEvents(state.events, [{ offset: frame.offset, at: frame.at, event: frame.event }]) })
         } else if (frame.event.type === 'topic') {
             ingestTopic(event.orgId, frame.spaceId, frame.event.topic)
         } else if (frame.event.type === 'topic_removed') {

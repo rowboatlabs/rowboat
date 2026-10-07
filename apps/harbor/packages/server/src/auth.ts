@@ -1,4 +1,5 @@
 import type { Member } from '@rowboat/spaces-protocol';
+import { AGENT_KEY_PREFIX, hashAgentKey } from './agent-keys.js';
 import { HarborError } from './errors.js';
 import type { Store } from './store.js';
 
@@ -53,10 +54,44 @@ export interface OrgAuth {
 
 export function bindAuth(driver: AuthDriver, store: Store): OrgAuth {
   return {
-    authenticate: (authorization, queryToken) => driver.authenticate(authorization, queryToken),
-    resolveMember: (identity) => driver.resolveMember(store, identity),
+    authenticate: async (authorization, queryToken) => {
+      // Agent keys (spec §4 Agent members, 2026-09-29) are the org's own
+      // credential, checked ahead of any driver: an rbk_ bearer is never a
+      // JWT or a dev token, and every face (REST, live, MCP) gets agents
+      // through this one door.
+      const bearer = bearerOf(authorization, queryToken);
+      if (bearer?.startsWith(AGENT_KEY_PREFIX)) {
+        const key = await store.getAgentKeyByHash(hashAgentKey(bearer));
+        if (!key || key.revokedAt) throw new HarborError('unauthorized', 'unknown or revoked agent key');
+        return { iss: AGENT_KEY_ISSUER, sub: key.id };
+      }
+      return driver.authenticate(authorization, queryToken);
+    },
+    resolveMember: (identity) =>
+      identity.iss === AGENT_KEY_ISSUER ? resolveAgentKey(store, identity.sub) : driver.resolveMember(store, identity),
     metadata: () => driver.metadata?.(),
   };
+}
+
+/** The issuer an agent key's identity carries: not a URL, so no IdP's `iss` can ever equal it. */
+export const AGENT_KEY_ISSUER = 'harbor:agent-key';
+
+/** How often a key's last use is recorded: a busy agent writes at most this often. */
+const TOUCH_EVERY_MS = 60 * 60 * 1000;
+
+function bearerOf(authorization: string | undefined, queryToken?: string | null): string | undefined {
+  if (authorization?.startsWith('Bearer ')) return authorization.slice('Bearer '.length);
+  return queryToken ?? undefined;
+}
+
+/** A key id → its agent, re-checked (revoked since authenticate, or no longer an agent → unauthorized). */
+async function resolveAgentKey(store: Store, keyId: string): Promise<Member> {
+  const key = await store.getAgentKey(keyId);
+  const agent = key && !key.revokedAt ? await store.getMember(key.agentId) : undefined;
+  if (!key || !agent || agent.kind !== 'agent') throw new HarborError('unauthorized', 'unknown or revoked agent key');
+  const now = new Date();
+  await store.touchAgentKey(key.id, now.toISOString(), new Date(now.getTime() - TOUCH_EVERY_MS).toISOString());
+  return agent;
 }
 
 /** What a request's credentials resolve to on an org. */
@@ -132,7 +167,7 @@ export function parseDevToken(authorization: string | undefined, queryToken?: st
 export async function ensureMember(store: Store, memberId: string): Promise<Member> {
   const existing = await store.getMember(memberId);
   if (existing) return existing;
-  const member: Member = { id: memberId, displayName: prettify(memberId), role: 'member' };
+  const member: Member = { id: memberId, displayName: prettify(memberId), role: 'member', kind: 'human' };
   await store.putMember(member);
   return member;
 }

@@ -14,10 +14,12 @@ import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
-import { MemberAvatar, MemberProfilePopover } from '@/components/spaces/atoms'
+import { AgentMark, MemberAvatar, MemberProfilePopover } from '@/components/spaces/atoms'
+import { InvocationLines } from '@/components/spaces/invocation-lines'
 import { MessageEditBox } from '@/components/spaces/edit-box'
 import { EmojiPickerPopover } from '@/components/spaces/emoji-picker'
 import { MessageLinkPreview } from '@/components/spaces/link-preview-card'
+import { ApprovalCard } from '@/components/spaces/approval-card'
 import { PollCard } from '@/components/spaces/poll-card'
 import { SpaceMarkdown, useSpaceRefs } from '@/components/spaces/space-markdown'
 import { frequentEmoji, noteEmojiUsed } from '@/lib/emoji-data'
@@ -320,6 +322,7 @@ function MessageRowImpl({
                         <MemberProfilePopover id={message.author.memberId}>
                             <button type="button" className="cursor-pointer text-[15px] font-bold leading-[22px] text-foreground hover:underline">{name}</button>
                         </MemberProfilePopover>
+                        <AgentMark id={message.author.memberId} />
                         {viaAgent && (
                             canOpenResponseChat ? (
                                 // Your own Rowboat's post: the label is the subtle way in
@@ -375,6 +378,10 @@ function MessageRowImpl({
                     </div>
                 ) : deleted ? (
                     <div className="text-sm italic leading-relaxed text-muted-foreground">This message was deleted</div>
+                ) : message.approval ? (
+                    // An agent's approval card (spec §8 part 4) replaces the body,
+                    // which is its text rendering for card-blind clients.
+                    <ApprovalCard approval={message.approval} orgId={orgId} selfMemberId={selfMemberId} memberNames={memberNames} />
                 ) : message.poll ? (
                     // The card replaces the body — the body is the poll's
                     // markdown fallback for poll-blind clients, not content.
@@ -411,6 +418,7 @@ function MessageRowImpl({
                         )}
                     </div>
                 )}
+                {!deleted && !unconfirmed && <InvocationLines messageId={message.id} />}
                 {!deleted && !unconfirmed && (
                     <ReactionChips
                         message={message}

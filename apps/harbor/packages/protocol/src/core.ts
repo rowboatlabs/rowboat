@@ -1,9 +1,11 @@
 import { z } from 'zod';
+import { Approval } from './approval.js';
 import { AssetId, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 
 // Core objects shared by both faces. Every act in a space belongs to a member
-// (spec §2, principle 4); attribution carries the acting mode, never a separate
-// "bot" identity.
+// (spec §2, principle 4); attribution carries the acting mode. An agent that
+// acts as itself is a member of kind 'agent' (2026-09-29), never a label on
+// someone else's attribution.
 
 export const ActingMode = z.enum(['direct', 'agent', 'scheduled']);
 export type ActingMode = z.infer<typeof ActingMode>;
@@ -23,14 +25,121 @@ export type Attribution = z.infer<typeof Attribution>;
 export const MemberRole = z.enum(['admin', 'member']);
 export type MemberRole = z.infer<typeof MemberRole>;
 
+/**
+ * What a member IS (spec §4 Agent members, 2026-09-29): a person, or an agent
+ * that is a member in its own right and acts as itself. Fixed at creation.
+ * Distinct from `actingMode: 'agent'`, which is a person's own agent acting
+ * as that person.
+ */
+export const MemberKind = z.enum(['human', 'agent']);
+export type MemberKind = z.infer<typeof MemberKind>;
+
 export const Member = z.object({
   id: MemberId,
   /** Display-only, org-scoped, not unique. Attribution keys on `id`, never on names. */
   displayName: z.string().min(1).max(128),
   avatarUrl: z.string().url().optional(),
   role: MemberRole.default('member'),
+  /** Absent from servers before 2026-09-29, whose members are all people. */
+  kind: MemberKind.default('human'),
+  /**
+   * An agent's owner (spec §4 Agent members, 2026-09-29): the person who
+   * added it and alone holds its keys. Absent for people.
+   */
+  ownerId: MemberId.optional(),
+  /**
+   * What an agent is underneath, and the path Harbor takes to reach it (spec
+   * §4 Agent members, amended 2026-09-30). Set for every agent, absent for
+   * people, fixed at creation. Open strings on the wire: a kind this client
+   * doesn't know is drawn as a generic agent. AGENT_PAIRS is what Harbor accepts.
+   */
+  agentKind: z.string().min(1).max(32).optional(),
+  agentConnection: z.string().min(1).max(32).optional(),
+  /**
+   * The platform instance the agent is, for a connection in
+   * INSTANCE_CONNECTIONS (2026-10-05): Agent37's instance id. Not a secret.
+   * Fixed at creation like the kind and connection: another instance is
+   * another agent. Absent for every other agent and for people.
+   */
+  agentInstance: z.string().min(1).max(128).optional(),
 });
 export type Member = z.infer<typeof Member>;
+
+/**
+ * The (kind, connection) pairs Harbor accepts when an agent is added (spec §4
+ * Agent members, 2026-09-30). What Harbor does for an agent is looked up from
+ * its pair, never stored: a pair whose connection is in HARBOR_RUN_CONNECTIONS
+ * gets a connector Harbor runs; any other waits for whoever holds the agent's
+ * key. A new pair is a line here, never a migration.
+ */
+export const REPLICAS_CODING_AGENTS = ['claude-code', 'codex', 'cursor', 'opencode', 'pi', 'muse-code'] as const;
+/** The general agents Agent37 hosts that Harbor drives through its API (2026-10-01): coding harnesses wait. */
+export const AGENT37_AGENTS = ['hermes', 'openclaw'] as const;
+export const AGENT_PAIRS: ReadonlyArray<{ kind: string; connection: string }> = [
+  { kind: 'custom', connection: 'contract' },
+  { kind: 'hermes', connection: 'plugin' },
+  ...REPLICAS_CODING_AGENTS.map((kind) => ({ kind, connection: 'replicas' })),
+  ...AGENT37_AGENTS.map((kind) => ({ kind, connection: 'agent37' })),
+];
+/** Connections whose connector Harbor runs, calling the platform with a credential it holds (spec §8 Connectors). */
+export const HARBOR_RUN_CONNECTIONS: readonly string[] = ['replicas', 'agent37'];
+/**
+ * Connections whose agent is one instance on the platform (2026-10-05): the
+ * agent is added with it, and Harbor checks the instance runs the agent's kind.
+ * An Agent37 instance keeps its own memory and files, so it is the agent.
+ */
+export const INSTANCE_CONNECTIONS: readonly string[] = ['agent37'];
+/**
+ * An agent Harbor itself is (2026-10-07, Jev): built into the org, on the
+ * deployment's own key, so no person adds it, owns it or holds a key for it.
+ * Never in AGENT_PAIRS: people add it to spaces like any agent, but never
+ * create one. Jev is TypeSafe's decision model; it reads every message in
+ * its spaces and tags whoever a message needs (spec §8 Jev).
+ */
+export const BUILT_IN_CONNECTION = 'builtin';
+export const JEV_KIND = 'jev';
+
+export function isAgentPair(kind: string, connection: string): boolean {
+  return AGENT_PAIRS.some((pair) => pair.kind === kind && pair.connection === connection);
+}
+
+/**
+ * A credential an agent member presents as itself (spec §4, 2026-09-29): a
+ * bearer secret the org stores only as a hash. The secret is shown once, at
+ * creation (AgentKeySecret); every other read is this metadata.
+ */
+export const AgentKey = z.object({
+  id: z.string().min(1).max(64),
+  agentId: MemberId,
+  createdBy: MemberId,
+  createdAt: z.iso.datetime(),
+  lastUsedAt: z.iso.datetime().optional(),
+  revokedAt: z.iso.datetime().optional(),
+});
+export type AgentKey = z.infer<typeof AgentKey>;
+
+/** A key at the one moment its secret exists outside the agent: the response that created it. */
+export const AgentKeySecret = AgentKey.extend({ secret: z.string().startsWith('rbk_') });
+export type AgentKeySecret = z.infer<typeof AgentKeySecret>;
+
+/**
+ * The platform credential Harbor holds for an agent it reaches through that
+ * platform (spec §8 Connectors, 2026-09-30), as its owner sees it: only its
+ * last characters. The secret is sealed and never read back. `rejectedAt` is
+ * set when the platform refused it, and cleared when it is replaced.
+ */
+export const AgentCredential = z.object({
+  hint: z.string().max(16),
+  setBy: MemberId,
+  setAt: z.iso.datetime(),
+  rejectedAt: z.iso.datetime().optional(),
+  rejectedReason: z.string().max(280).optional(),
+});
+export type AgentCredential = z.infer<typeof AgentCredential>;
+
+/** An agent with its keys, as the Agents screen lists them, and its platform credential when Harbor runs its connector. */
+export const AgentListing = z.object({ agent: Member, keys: z.array(AgentKey), credential: AgentCredential.optional() });
+export type AgentListing = z.infer<typeof AgentListing>;
 
 /**
  * What a space IS at the org level (direct messages, 2026-09-07). `shared` =
@@ -301,6 +410,13 @@ export const Message = z.object({
    * the poll along with the body.
    */
   poll: Poll.optional(),
+  /**
+   * Present on an agent's approval card (spec §8 part 4, 2026-10-01), folded
+   * to its current state wherever messages are read; `approval` space events
+   * carry each change. `body` keeps a text rendering for clients that cannot
+   * show the card.
+   */
+  approval: Approval.optional(),
   /**
    * Who this message addresses — STAMPED by the org at post and edit from the
    * body's mention tokens (mentions.ts), never from names, and only ids that

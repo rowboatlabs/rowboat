@@ -1,11 +1,15 @@
 import type { z } from 'zod';
 import type { BlobStore } from './blobs.js';
+import { Agents, type AgentConnectorHooks } from './core/agents.js';
 import { Assets } from './core/assets.js';
+import { Images } from './core/images.js';
 import { Feed } from './core/feed.js';
+import { approvalCardBody } from './core/approval-card.js';
+import { Invocations } from './core/invocations.js';
 import { Kernel, type ActorCtx, type BindIdentity, type OrgInfo } from './core/kernel.js';
 import { ReadState } from './core/read-state.js';
 import { Spaces } from './core/spaces.js';
-import type { RenameSpaceInput } from './core/spaces.js';
+import type { AddMembersInput, RenameSpaceInput } from './core/spaces.js';
 import type { CreateTopicInput, DeleteMessageInput, EditMessageInput, EndPollInput, ManageTopicAction, NewMessage, PageOpts, ReactInput, VotePollInput } from './core/feed.js';
 import type { MarkReadInput, UnreadSnapshot } from './core/read-state.js';
 import type { SpaceHub } from './hub.js';
@@ -24,7 +28,20 @@ import type {
   CreateInviteResult,
   DeleteAssetResult,
   Member,
+  AgentKey,
+  AgentCredential,
+  AgentKeySecret,
+  AgentListing,
+  ConnectorCapabilities,
+  Approval,
+  ApprovalClose,
+  ApprovalDecision,
+  ApprovalRequest,
+  Invocation,
+  InvocationOptionValues,
+  InvocationUpdate,
   Membership,
+  StreamEvent,
   Message,
   MoveAssetResult,
   PresenceState,
@@ -56,8 +73,11 @@ export class HarborService {
   private readonly k: Kernel;
   private readonly spaces: Spaces;
   private readonly assets: Assets;
+  private readonly images: Images;
   private readonly feed: Feed;
   private readonly readState: ReadState;
+  private readonly agents: Agents;
+  private readonly invocations: Invocations;
 
   constructor(
     store: Store,
@@ -71,8 +91,26 @@ export class HarborService {
     this.k = new Kernel(store, hub, org);
     this.spaces = new Spaces(this.k);
     this.assets = new Assets(this.k, blobs);
-    this.feed = new Feed(this.k, this.assets, notifier);
+    this.images = new Images(this.k, blobs);
+    this.invocations = new Invocations(this.k);
+    this.feed = new Feed(this.k, this.assets, notifier, this.invocations);
     this.readState = new ReadState(this.k, this.spaces, this.feed);
+    this.agents = new Agents(this.k, this.spaces);
+  }
+
+  /** The kernel's clock, for code outside the core that stamps rows (connectors/host.ts). */
+  now(): string {
+    return this.k.now();
+  }
+
+  /** The connector host, for creating agents Harbor reaches through a platform (runtime.ts). */
+  attachConnectors(hooks: AgentConnectorHooks): void {
+    this.agents.attachConnectors(hooks);
+  }
+
+  /** Jev, the agent Harbor itself is (spec §8 Jev, 2026-10-07): created once per org, when the deployment has its key (runtime.ts). */
+  ensureJev(): Promise<Member | undefined> {
+    return this.agents.ensureJev();
   }
 
   /** The org this service serves — `address` is set once the listener knows its port (server.ts). */
@@ -97,8 +135,63 @@ export class HarborService {
   me(ctx: ActorCtx): Promise<Member> {
     return this.spaces.me(ctx);
   }
+  createAgent(input: { displayName: string; ownerId?: string }): Promise<Member> {
+    return this.spaces.createAgent(input);
+  }
+
+  // --- invocations (core/invocations.ts) -------------------------------------------
+  listAgentInvocations(ctx: ActorCtx): Promise<Invocation[]> {
+    return this.invocations.listForAgent(ctx);
+  }
+  acknowledgeInvocation(ctx: ActorCtx, invocationId: string): Promise<Invocation> {
+    return this.invocations.acknowledge(ctx, invocationId);
+  }
+  updateInvocation(ctx: ActorCtx, invocationId: string, update: InvocationUpdate): Promise<Invocation> {
+    return this.invocations.update(ctx, invocationId, update);
+  }
+  declareCapabilities(ctx: ActorCtx, capabilities: ConnectorCapabilities): Promise<ConnectorCapabilities> {
+    return this.invocations.declareCapabilities(ctx, capabilities);
+  }
+  getAgentOptionDefaults(agentId: string): Promise<InvocationOptionValues> {
+    return this.invocations.optionDefaults(agentId);
+  }
+  setAgentOptionDefaults(ctx: ActorCtx, agentId: string, defaults: InvocationOptionValues): Promise<InvocationOptionValues> {
+    return this.agents.setOptionDefaults(ctx, agentId, defaults);
+  }
+  getAgentCapabilities(agentId: string): Promise<ConnectorCapabilities> {
+    return this.invocations.capabilities(agentId);
+  }
+  listInvocations(ctx: ActorCtx, spaceId: string, threadRootId?: string): Promise<Invocation[]> {
+    return this.invocations.listForSpace(ctx, spaceId, threadRootId);
+  }
+  cancelInvocation(ctx: ActorCtx, invocationId: string): Promise<Invocation> {
+    return this.invocations.cancel(ctx, invocationId);
+  }
+
+  // --- agents and their keys (core/agents.ts) --------------------------------------
+  listAgents(ctx: ActorCtx): Promise<AgentListing[]> {
+    return this.agents.list(ctx);
+  }
+  addAgent(
+    ctx: ActorCtx,
+    input: { displayName: string; kind: string; connection: string; credential?: string; instance?: string },
+  ): Promise<{ agent: Member; key: AgentKeySecret }> {
+    return this.agents.add(ctx, input);
+  }
+  setAgentCredential(ctx: ActorCtx, agentId: string, secret: string): Promise<AgentCredential> {
+    return this.agents.setCredential(ctx, agentId, secret);
+  }
+  createAgentKey(ctx: ActorCtx, agentId: string): Promise<AgentKeySecret> {
+    return this.agents.createKey(ctx, agentId);
+  }
+  revokeAgentKey(ctx: ActorCtx, agentId: string, keyId: string): Promise<AgentKey> {
+    return this.agents.revokeKey(ctx, agentId, keyId);
+  }
   listSpaces(ctx: ActorCtx, opts: { includeDirect?: boolean } = {}): Promise<Space[]> {
     return this.spaces.listSpaces(ctx, opts);
+  }
+  isGroupChat(): Promise<boolean> {
+    return this.spaces.isGroupChat();
   }
   browseSpaces(ctx: ActorCtx): Promise<Array<{ space: Space; joined: boolean }>> {
     return this.spaces.browseSpaces(ctx);
@@ -120,6 +213,9 @@ export class HarborService {
   }
   listOrgMembers(ctx: ActorCtx): Promise<Member[]> {
     return this.spaces.listOrgMembers(ctx);
+  }
+  addMembers(ctx: ActorCtx, spaceId: string, input: AddMembersInput): Promise<Membership[]> {
+    return this.spaces.addMembers(ctx, spaceId, input);
   }
   leaveSpace(ctx: ActorCtx, spaceId: string): Promise<void> {
     return this.spaces.leaveSpace(ctx, spaceId);
@@ -196,13 +292,32 @@ export class HarborService {
   ): Promise<BlobInfo> {
     return this.assets.uploadBlob(ctx, spaceId, bytes, opts);
   }
+  setAvatar(ctx: ActorCtx, bytes: Uint8Array, origin: string): Promise<Member> {
+    return this.images.setAvatar(ctx, bytes, origin);
+  }
+  clearAvatar(ctx: ActorCtx): Promise<Member> {
+    return this.images.clearAvatar(ctx);
+  }
+  orgLogoUrl(ctx: ActorCtx, origin: string): Promise<string | undefined> {
+    return this.images.orgLogoUrl(ctx, origin);
+  }
+  setOrgLogo(ctx: ActorCtx, bytes: Uint8Array, origin: string): Promise<{ logoUrl: string }> {
+    return this.images.setOrgLogo(ctx, bytes, origin);
+  }
+  clearOrgLogo(ctx: ActorCtx): Promise<Record<string, never>> {
+    return this.images.clearOrgLogo(ctx);
+  }
+  getImage(ctx: ActorCtx, hash: string): Promise<{ blob: BlobInfo; url?: string; bytes?: Uint8Array }> {
+    return this.images.getImage(ctx, hash);
+  }
   downloadBlob(
     ctx: ActorCtx,
     spaceId: string,
     hash: string,
     name?: string,
+    opts?: { expiresInSeconds?: number },
   ): Promise<{ blob: BlobInfo; disposition: string; url?: string; bytes?: Uint8Array }> {
-    return this.assets.downloadBlob(ctx, spaceId, hash, name);
+    return this.assets.downloadBlob(ctx, spaceId, hash, name, opts);
   }
   proposeChange(ctx: ActorCtx, spaceId: string, input: ProposeChange): Promise<ProposeChangeResult> {
     return this.assets.proposeChange(ctx, spaceId, input);
@@ -226,7 +341,7 @@ export class HarborService {
     ctx: ActorCtx,
     spaceId: string,
     opts?: PageOpts,
-  ): Promise<{ messages: Message[]; topics: Topic[]; hasMore: boolean; hasMoreAfter: boolean; readOffset: number }> {
+  ): Promise<{ messages: Message[]; topics: Topic[]; hasMore: boolean; hasMoreAfter: boolean; readOffset: number; events: StreamEvent[] }> {
     return this.feed.listStream(ctx, spaceId, opts);
   }
   listThread(
@@ -248,8 +363,72 @@ export class HarborService {
   getMessage(ctx: ActorCtx, spaceId: string, messageId: string): Promise<Message> {
     return this.feed.getMessage(ctx, spaceId, messageId);
   }
-  postMessage(ctx: ActorCtx, spaceId: string, input: NewMessage): Promise<{ message: Message }> {
+  postMessage(ctx: ActorCtx, spaceId: string, input: NewMessage): Promise<{ message: Message; invocations: Invocation[] }> {
     return this.feed.postMessage(ctx, spaceId, input);
+  }
+  /**
+   * A connector's answer to one of its agent's invocations: posted in its
+   * thread and marked done in one transaction, or not at all if the
+   * invocation has already finished (spec §8 Connectors, 2026-09-30).
+   * In-process only; nothing on the wire takes `finishes`.
+   */
+  async answerInvocation(ctx: ActorCtx, invocationId: string, body: string): Promise<{ message: Message; invocations: Invocation[] }> {
+    const invocation = await this.invocations.ownInvocation(ctx, invocationId);
+    const { spaceId, threadRootId } = invocation.conversation;
+    return this.feed.postMessage(ctx, spaceId, { body, threadRoot: threadRootId, actingMode: 'direct' }, { finishes: invocationId });
+  }
+
+  /**
+   * Jev's tags for one message (spec §8 Jev, 2026-10-07): a reply in its
+   * thread whose mentions take that message's hand-off depth, so an agent
+   * and Jev passing work back and forth stop at the hop limit. In-process
+   * only, like `finishes`.
+   */
+  async relayMentions(ctx: ActorCtx, spaceId: string, messageId: string, body: string): Promise<{ message: Message; invocations: Invocation[] }> {
+    const message = await this.feed.getMessage(ctx, spaceId, messageId);
+    return this.feed.postMessage(ctx, spaceId, { body, threadRoot: message.threadRoot ?? message.id, actingMode: 'direct' }, { relayOf: messageId });
+  }
+  /** The depth an agent this message mentions is invoked at: what Jev checks before it tags an agent. */
+  async messageHandOffDepth(ctx: ActorCtx, spaceId: string, messageId: string): Promise<number> {
+    await this.k.requireReadableSpace(ctx, spaceId);
+    return this.k.store.getMessageHops(spaceId, messageId);
+  }
+
+  // --- approvals (core/invocations.ts, spec §8 part 4, 2026-10-01) ----------------------
+
+  /** The connector raises an approval: the agent's card in the invocation's thread, with the approval on it. Idempotent by requestKey. */
+  async requestApproval(ctx: ActorCtx, invocationId: string, request: ApprovalRequest): Promise<{ approval: Approval; message: Message }> {
+    const invocation = await this.invocations.ownInvocation(ctx, invocationId);
+    const { spaceId, threadRootId } = invocation.conversation;
+    const raised = async () => {
+      const existing = await this.invocations.findApproval(invocationId, request.requestKey);
+      return existing ? { approval: existing, message: await this.feed.getMessage(ctx, spaceId, existing.messageId) } : undefined;
+    };
+    const already = await raised();
+    if (already) return already;
+    const agent = await this.k.store.getMember(ctx.memberId);
+    const body = approvalCardBody(agent?.displayName ?? 'The agent', request);
+    try {
+      const { message } = await this.feed.postMessage(ctx, spaceId, { body, threadRoot: threadRootId, actingMode: 'direct' }, { approval: { invocationId, request } });
+      return { approval: message.approval!, message };
+    } catch (err) {
+      // The same request raised twice at once: the unique key let one through.
+      const raced = await raised();
+      if (raced) return raced;
+      throw err;
+    }
+  }
+  decideApproval(ctx: ActorCtx, spaceId: string, approvalId: string, input: ApprovalDecision & { actingMode: ActingMode }): Promise<Approval> {
+    return this.invocations.decideApproval(ctx, spaceId, approvalId, input);
+  }
+  closeApproval(ctx: ActorCtx, approvalId: string, close: ApprovalClose): Promise<Approval> {
+    return this.invocations.closeApproval(ctx, approvalId, close);
+  }
+  applyApproval(ctx: ActorCtx, approvalId: string): Promise<Approval> {
+    return this.invocations.applyApproval(ctx, approvalId);
+  }
+  listApprovalDecisions(ctx: ActorCtx): Promise<Approval[]> {
+    return this.invocations.listDecisionsForAgent(ctx);
   }
   createTopic(
     ctx: ActorCtx,

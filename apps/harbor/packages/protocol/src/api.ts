@@ -12,7 +12,7 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { ActingMode, Attribution, Member, Membership, Message, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic } from './core.js';
+import { ActingMode, AgentCredential, AgentKey, AgentKeySecret, AgentListing, Attribution, Member, Membership, Message, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic } from './core.js';
 import { AssetId, AssetPath, BlobHash, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 import {
   AcceptInvite,
@@ -22,6 +22,9 @@ import {
   ResolveInvite,
   ResolveInviteResult,
 } from './invite.js';
+import { StreamEvent } from './events.js';
+import { Approval, ApprovalClose, ApprovalDecision, ApprovalId, ApprovalRequest } from './approval.js';
+import { ConnectorCapabilities, Invocation, InvocationId, InvocationOptionValues, InvocationUpdate } from './invocation.js';
 import { SearchKind, SearchResults } from './search.js';
 
 // The render face (spec §9): REST + the live stream in events.ts. Member token
@@ -63,6 +66,14 @@ const NewMessage = z.object({
   poll: NewPoll.optional(),
   actingMode: ActingMode,
   agentName: z.string().max(64).optional(),
+  /**
+   * Options picked for agents this message mentions (spec §8 Invocation
+   * options), keyed by the agent's member id. They land on that agent's
+   * invocation, uninterpreted; values for an agent the message does not
+   * invoke are ignored (it invokes the agents it mentions, and in a DM with
+   * an agent, that agent: spec §8, 2026-09-30).
+   */
+  agentOptions: z.record(MemberId, InvocationOptionValues).optional(),
 });
 
 /**
@@ -173,6 +184,54 @@ export const routes = {
     path: '/v1/me',
     response: z.object({ member: Member }),
   },
+  // --- profile images (2026-10-02) -------------------------------------------
+  /**
+   * Your own avatar. The body is the image itself (PNG, JPEG, WebP or GIF,
+   * at most 1 MiB; the org sniffs the bytes and ignores the content-type).
+   * The member comes back with `avatarUrl` set: an absolute URL on this org
+   * that any member may read with their bearer (getImage). Clients send a
+   * small square; the org never resizes.
+   */
+  setAvatar: {
+    method: 'PUT',
+    path: '/v1/me/avatar',
+    response: z.object({ member: Member }),
+  },
+  /** Back to the initial. Idempotent. */
+  clearAvatar: {
+    method: 'DELETE',
+    path: '/v1/me/avatar',
+    response: z.object({ member: Member }),
+  },
+  /** The org's logo, or nothing when none is set. Any member. */
+  getOrgLogo: {
+    method: 'GET',
+    path: '/v1/org/logo',
+    response: z.object({ logoUrl: z.string().url().optional() }),
+  },
+  /** Set the org's logo — admins only. Same body rules as setAvatar. */
+  setOrgLogo: {
+    method: 'PUT',
+    path: '/v1/org/logo',
+    response: z.object({ logoUrl: z.string().url() }),
+  },
+  /** Remove the org's logo — admins only. Idempotent. */
+  clearOrgLogo: {
+    method: 'DELETE',
+    path: '/v1/org/logo',
+    response: z.object({ logoUrl: z.string().url().optional() }),
+  },
+  /**
+   * An avatar's or logo's bytes: a stream or a 302 to a short-lived presigned
+   * URL, exactly as getBlob. Readable by every member of the org; hash-keyed,
+   * so cacheable forever.
+   */
+  getImage: {
+    method: 'GET',
+    path: '/v1/images/:hash',
+    params: z.object({ hash: BlobHash }),
+    response: z.never(),
+  },
   // --- spaces & membership -------------------------------------------------
   /**
    * The spaces you are a member of. Default = SHARED spaces only (today's
@@ -184,7 +243,16 @@ export const routes = {
     method: 'GET',
     path: '/v1/spaces',
     query: z.object({ includeDirect: z.coerce.boolean().optional() }),
-    response: z.object({ spaces: z.array(Space) }),
+    response: z.object({
+      spaces: z.array(Space),
+      /**
+       * The org is a group chat (spec §4, 2026-10-07): one shared space and
+       * no DMs, the same answer for every member. Clients show it as one
+       * conversation; DMs are off until a second space. Absent from orgs
+       * that predate it.
+       */
+      groupChat: z.boolean().optional(),
+    }),
   },
   /**
    * Direct messages (2026-09-07): a DM is a `direct` space between exactly
@@ -264,13 +332,197 @@ export const routes = {
     response: z.object({ members: z.array(Member) }),
   },
   /**
-   * The org roster as THIS member may see it (2026-09-09): the union of the
-   * rosters of every space (DMs included) the caller belongs to, deduped,
-   * sorted by display name. Discovery is bounded by shared membership on
-   * purpose — you can only find people you already share a space with — so
-   * no admin-only directory and no privacy surface beyond what listMembers
-   * already exposes per space. Both faces use it: the app's "New message"
-   * picker and the agent's `list_members` resolve a name to a memberId here.
+   * Agent members and their keys (spec §4 Agent members, 2026-09-29). Render
+   * face only: a key is a secret, and a secret never passes through a tool.
+   * listAgents answers with the agents the caller manages — their own, or
+   * every agent for an admin.
+   */
+  listAgents: {
+    method: 'GET',
+    path: '/v1/agents',
+    response: z.object({ agents: z.array(AgentListing) }),
+  },
+  /**
+   * Add an agent: the caller becomes its owner and gets its first key, the
+   * one time the secret is shown. `kind` and `connection` must be a pair in
+   * AGENT_PAIRS (2026-09-30; absent = custom/contract, as before). A platform
+   * connection (HARBOR_RUN_CONNECTIONS) needs the platform's `credential`,
+   * which Harbor checks with the platform before anything is created, and
+   * seals; any other connection takes none.
+   */
+  createAgent: {
+    method: 'POST',
+    path: '/v1/agents',
+    request: z.object({
+      displayName: z.string().trim().min(1).max(128),
+      kind: z.string().min(1).max(32).default('custom'),
+      connection: z.string().min(1).max(32).default('contract'),
+      credential: z.string().min(1).max(512).optional(),
+      /** The platform instance the agent is (INSTANCE_CONNECTIONS only, 2026-10-05). */
+      instance: z.string().min(1).max(128).optional(),
+    }),
+    response: z.object({ agent: Member, key: AgentKeySecret }),
+  },
+  /**
+   * Replace a platform agent's credential (spec §8 Connectors, 2026-09-30).
+   * Owner only; checked with the platform before it is saved; clears a
+   * rejection. Render face only, like keys: a secret never passes through a tool.
+   */
+  setAgentCredential: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/credential',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ secret: z.string().min(1).max(512) }),
+    response: z.object({ credential: AgentCredential }),
+  },
+  /** Another key for an agent (rotation: create, switch, revoke the old one). Owner only. */
+  createAgentKey: {
+    method: 'POST',
+    path: '/v1/agents/:agentId/keys',
+    params: z.object({ agentId: MemberId }),
+    response: z.object({ key: AgentKeySecret }),
+  },
+  /** Revoke a key: the owner, or an admin — the off switch. Idempotent. */
+  revokeAgentKey: {
+    method: 'POST',
+    path: '/v1/agents/:agentId/keys/:keyId/revoke',
+    params: z.object({ agentId: MemberId, keyId: z.string().min(1).max(64) }),
+    response: z.object({ key: AgentKey }),
+  },
+  /**
+   * The connector's operations (spec §8 Invoking agent members, 2026-09-30):
+   * called on an agent's own key, about that agent's invocations only. Not
+   * tools for the model — the connector acknowledges and reports; the agent
+   * acts through the ordinary routes and tools.
+   */
+  listAgentInvocations: {
+    method: 'GET',
+    path: '/v1/agent/invocations',
+    /** `approvals`: decisions on the agent's approvals it has not yet confirmed applying (spec §8 part 4). */
+    response: z.object({ invocations: z.array(Invocation), approvals: z.array(Approval).default([]) }),
+  },
+  acknowledgeInvocation: {
+    method: 'POST',
+    path: '/v1/agent/invocations/:invocationId/ack',
+    params: z.object({ invocationId: InvocationId }),
+    response: z.object({ invocation: Invocation }),
+  },
+  updateInvocation: {
+    method: 'POST',
+    path: '/v1/agent/invocations/:invocationId/update',
+    params: z.object({ invocationId: InvocationId }),
+    request: InvocationUpdate,
+    response: z.object({ invocation: Invocation }),
+  },
+  /**
+   * Raise an approval on one of the agent's working invocations (spec §8
+   * part 4, 2026-10-01): posts the agent's card in the invocation's thread,
+   * with the approval riding on it, and shows the invocation waiting. Raising
+   * the same requestKey again returns the first.
+   */
+  requestApproval: {
+    method: 'POST',
+    path: '/v1/agent/invocations/:invocationId/approvals',
+    params: z.object({ invocationId: InvocationId }),
+    request: ApprovalRequest,
+    response: z.object({ approval: Approval, message: Message }),
+  },
+  /** The connector passed a decision to its agent: it leaves the listing. Idempotent. */
+  applyApproval: {
+    method: 'POST',
+    path: '/v1/agent/approvals/:approvalId/applied',
+    params: z.object({ approvalId: ApprovalId }),
+    response: z.object({ approval: Approval }),
+  },
+  /** The connector closes an approval its agent no longer waits on (it expired, or the turn went). A settled one is returned as it is. */
+  closeApproval: {
+    method: 'POST',
+    path: '/v1/agent/approvals/:approvalId/close',
+    params: z.object({ approvalId: ApprovalId }),
+    request: ApprovalClose,
+    response: z.object({ approval: Approval }),
+  },
+  declareCapabilities: {
+    method: 'POST',
+    path: '/v1/agent/capabilities',
+    request: ConnectorCapabilities,
+    response: z.object({ capabilities: ConnectorCapabilities }),
+  },
+  /**
+   * What an agent's connector declared — the composer's options, whether Stop
+   * is offered — and the defaults its owner set for those options, which the
+   * composer shows preselected (spec §8, 2026-10-01). Any org member.
+   */
+  getAgentCapabilities: {
+    method: 'GET',
+    path: '/v1/agents/:agentId/capabilities',
+    params: z.object({ agentId: MemberId }),
+    response: z.object({ capabilities: ConnectorCapabilities, defaults: InvocationOptionValues.default({}) }),
+  },
+  /**
+   * Set an agent's option defaults (spec §8 Invocation options, 2026-10-01):
+   * its owner only, for options its connector declared, each a declared
+   * choice or a toggle's value. Replaces them all; `{}` clears them. Harbor
+   * fills them into an invocation whose invoker picked none. App only.
+   */
+  setAgentOptionDefaults: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/option-defaults',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ defaults: InvocationOptionValues }),
+    response: z.object({ defaults: InvocationOptionValues }),
+  },
+  /** A space's invocations, newest first (a thread's, with threadRootId): the working indicators and refused lines. */
+  listInvocations: {
+    method: 'GET',
+    path: '/v1/spaces/:spaceId/invocations',
+    params: z.object({ spaceId: SpaceId }),
+    query: z.object({ threadRootId: MessageId.optional() }),
+    response: z.object({ invocations: z.array(Invocation) }),
+  },
+  /**
+   * Decide an approval (spec §8 part 4): any person who can see it, acting
+   * directly. Never an agent and never a tool, so a person's assistant cannot
+   * either. The first decision wins; a deny may carry a note to the model.
+   */
+  decideApproval: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/approvals/:approvalId/decide',
+    params: z.object({ spaceId: SpaceId, approvalId: ApprovalId }),
+    request: ApprovalDecision.extend({ actingMode: ActingMode }),
+    response: z.object({ approval: Approval }),
+  },
+  /** Cancel a queued invocation (its invoker), or stop a running one (its invoker or an admin, when the connector can stop). */
+  cancelInvocation: {
+    method: 'POST',
+    path: '/v1/invocations/:invocationId/cancel',
+    params: z.object({ invocationId: InvocationId }),
+    response: z.object({ invocation: Invocation }),
+  },
+  /**
+   * Add existing org members, people or agents, to a shared space the caller
+   * is in (spec §4 Roles, 2026-09-29). Each one added gets a `joined` event
+   * with `by`, and a `space_added` frame. Anyone already in is a no-op;
+   * `memberships` answers for every id asked, in the order asked.
+   */
+  addMembers: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/members',
+    params: z.object({ spaceId: SpaceId }),
+    request: z.object({
+      memberIds: z.array(MemberId).min(1).max(100),
+      actingMode: ActingMode,
+      agentName: z.string().max(64).optional(),
+    }),
+    response: z.object({ memberships: z.array(Membership) }),
+  },
+  /**
+   * The org roster: every member of the org, people and agents, sorted by
+   * display name (spec §5 answer 4, built 2026-09-29 — inside one org the org
+   * is the trust boundary, as inside one Slack workspace). Until then it was
+   * bounded to people sharing a space with the caller. Both faces use it: the
+   * app's pickers (New message, Add people, mentions) and the agent's
+   * `list_members` resolve a name to a memberId here.
    */
   listOrgMembers: {
     method: 'GET',
@@ -495,6 +747,13 @@ export const routes = {
       hasMoreAfter: z.boolean().optional(),
       /** The caller's stream mark (0 = never marked) — the New divider's anchor. */
       readOffset: StreamOffset,
+      /**
+       * The log events the page shows as lines between its messages, oldest
+       * first (2026-09-29): membership in v1. Each belongs to the page
+       * holding the next message after it; the newest page also takes those
+       * after its newest message. Absent from older orgs.
+       */
+      events: z.array(StreamEvent).default([]),
     }),
   },
   /**
@@ -546,7 +805,8 @@ export const routes = {
     path: '/v1/spaces/:spaceId/messages',
     params: z.object({ spaceId: SpaceId }),
     request: NewMessage,
-    response: z.object({ message: Message }),
+    /** `invocations`: the agents this message invoked, or refused to (spec §8) — absent from older orgs. */
+    response: z.object({ message: Message, invocations: z.array(Invocation).default([]) }),
   },
   /**
    * Author-only tombstone (the content plane is role-flat, so deleter ==

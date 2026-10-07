@@ -130,6 +130,7 @@ export async function startHarbor(options: HarborOptions): Promise<RunningHarbor
     close: async () => {
       closeLive();
       stats.close();
+      await runtime.close();
       await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
     },
   };
@@ -148,7 +149,7 @@ async function seedOrg(
 ): Promise<void> {
   for (const m of options.seedMembers ?? []) {
     const existing = await store.getMember(m.id);
-    await store.putMember({ id: m.id, displayName: m.displayName, role: existing?.role ?? 'member' });
+    await store.putMember({ ...existing, id: m.id, displayName: m.displayName, role: existing?.role ?? 'member', kind: 'human' });
   }
   for (const seed of options.seedSpaces ?? []) {
     const creator = await ensureMember(store, seed.creator);

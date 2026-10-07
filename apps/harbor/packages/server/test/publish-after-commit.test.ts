@@ -31,7 +31,7 @@ async function setup() {
   await store.init();
   const hub = new SpaceHub();
   const service = new HarborService(store, hub, { name: 'Org', address: 'org.test' });
-  await store.putMember({ id: 'ramnique', displayName: 'Ramnique', role: 'member' });
+  await store.putMember({ id: 'ramnique', displayName: 'Ramnique', role: 'member', kind: 'human' });
   const space = await service.createSpace({ memberId: 'ramnique' }, 'Main');
   return { db, store, hub, service, space, counts };
 }

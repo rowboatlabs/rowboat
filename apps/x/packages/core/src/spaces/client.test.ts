@@ -291,7 +291,12 @@ describe('SpacesClient', () => {
     expect((await ramnique.readAsset(spaceId, scratch)).content).toBe('scratch\n');
   });
 
-  it('direct messages: get-or-create from either side, hidden unless asked, fixed membership', async () => {
+  it('direct messages: off in a group chat, then get-or-create from either side, hidden unless asked, fixed membership', async () => {
+    // One space is a group chat (2026-10-07): the listing says so and a DM is refused, until a second space.
+    expect((await ramnique.listing()).groupChat).toBe(true);
+    await expect(ramnique.openDirect('gagan')).rejects.toBeInstanceOf(SpacesRequestError);
+    await ramnique.createSpace('Second');
+    expect((await gagan.listing()).groupChat).toBe(false);
     const opened = await ramnique.openDirect('gagan');
     expect(opened.created).toBe(true);
     expect(opened.space.kind).toBe('direct');
@@ -335,13 +340,14 @@ describe('SpacesClient.listOrgMembers', () => {
   }
 
   it('GETs /v1/members with the bearer and returns the members list', async () => {
+    // A server from before agent members (2026-09-29) sends no kind: everyone is a person.
     const members = [
       { id: 'gagan', displayName: 'Gagan', role: 'member' },
       { id: 'ramnique', displayName: 'Ramnique', role: 'member' },
     ];
     const { calls, fetchImpl } = fakeFetch({ members });
     const client = new SpacesClient({ baseUrl: 'http://org.test/', token: 'dev-ramnique', fetchImpl });
-    expect(await client.listOrgMembers()).toEqual(members);
+    expect(await client.listOrgMembers()).toEqual(members.map((m) => ({ ...m, kind: 'human' })));
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toBe('http://org.test/v1/members');
     expect(calls[0].init?.method).toBe('GET');
@@ -431,7 +437,7 @@ describe('SpacesLive', () => {
   });
 
   it('a member-addressed space_added frame reaches the other participant without any subscription', async () => {
-    await harbor.store.putMember({ id: 'harsh', displayName: 'Harsh', role: 'member' });
+    await harbor.store.putMember({ id: 'harsh', displayName: 'Harsh', role: 'member', kind: 'human' });
     const harsh = new SpacesLive({ baseUrl: harbor.url, token: 'dev-harsh' });
     const added: Array<{ spaceId: string; by: string }> = [];
     harsh.onMemberFrame((frame) => {

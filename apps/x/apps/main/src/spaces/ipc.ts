@@ -13,6 +13,7 @@ import { onSpaceAgentActivity, startSpaceAgentActivity } from '@x/core/dist/spac
 import { startSpaceNotifications } from '@x/core/dist/spaces/notify.js';
 import { resolveResponseSession, startSpaceResponseIndex } from '@x/core/dist/spaces/response-index.js';
 import { SpacesClient } from '@x/core/dist/spaces/client.js';
+import { createAgent37Instance, listAgent37Instances } from '@x/core/dist/spaces/agent37.js';
 import { fetchLinkPreview } from './link-preview.js';
 
 type IPCChannels = ipc.IPCChannels;
@@ -39,6 +40,14 @@ type SpacesHandlers = {
   'spaces:joinSpace': InvokeHandler<'spaces:joinSpace'>;
   'spaces:createSpace': InvokeHandler<'spaces:createSpace'>;
   'spaces:renameSpace': InvokeHandler<'spaces:renameSpace'>;
+  'spaces:addMembers': InvokeHandler<'spaces:addMembers'>;
+  'spaces:listAgents': InvokeHandler<'spaces:listAgents'>;
+  'spaces:addAgent': InvokeHandler<'spaces:addAgent'>;
+  'spaces:setAgentCredential': InvokeHandler<'spaces:setAgentCredential'>;
+  'spaces:agent37Instances': InvokeHandler<'spaces:agent37Instances'>;
+  'spaces:agent37CreateInstance': InvokeHandler<'spaces:agent37CreateInstance'>;
+  'spaces:createAgentKey': InvokeHandler<'spaces:createAgentKey'>;
+  'spaces:revokeAgentKey': InvokeHandler<'spaces:revokeAgentKey'>;
   'spaces:openDirect': InvokeHandler<'spaces:openDirect'>;
   'spaces:listMembers': InvokeHandler<'spaces:listMembers'>;
   'spaces:listOrgMembers': InvokeHandler<'spaces:listOrgMembers'>;
@@ -65,6 +74,10 @@ type SpacesHandlers = {
   'spaces:getMessage': InvokeHandler<'spaces:getMessage'>;
   'spaces:listThread': InvokeHandler<'spaces:listThread'>;
   'spaces:postMessage': InvokeHandler<'spaces:postMessage'>;
+  'spaces:listInvocations': InvokeHandler<'spaces:listInvocations'>;
+  'spaces:cancelInvocation': InvokeHandler<'spaces:cancelInvocation'>;
+  'spaces:getAgentCapabilities': InvokeHandler<'spaces:getAgentCapabilities'>;
+  'spaces:setAgentOptionDefaults': InvokeHandler<'spaces:setAgentOptionDefaults'>;
   'spaces:createTopic': InvokeHandler<'spaces:createTopic'>;
   'spaces:manageTopic': InvokeHandler<'spaces:manageTopic'>;
   'spaces:reactToMessage': InvokeHandler<'spaces:reactToMessage'>;
@@ -72,6 +85,7 @@ type SpacesHandlers = {
   'spaces:editMessage': InvokeHandler<'spaces:editMessage'>;
   'spaces:votePoll': InvokeHandler<'spaces:votePoll'>;
   'spaces:endPoll': InvokeHandler<'spaces:endPoll'>;
+  'spaces:decideApproval': InvokeHandler<'spaces:decideApproval'>;
   'spaces:invokeRowboat': InvokeHandler<'spaces:invokeRowboat'>;
   'spaces:topicSession': InvokeHandler<'spaces:topicSession'>;
   'spaces:responseSession': InvokeHandler<'spaces:responseSession'>;
@@ -211,8 +225,8 @@ export const spacesIpcHandlers: SpacesHandlers = {
   },
 
   'spaces:listSpaces': async (_event, args) => {
-    const spaces = await orgs.getClient(args.orgId).listSpaces({ includeDirect: args.includeDirect ?? false });
-    return { spaces };
+    const { spaces, groupChat } = await orgs.getClient(args.orgId).listing({ includeDirect: args.includeDirect ?? false });
+    return { spaces, ...(groupChat !== undefined ? { groupChat } : {}) };
   },
 
   'spaces:browseSpaces': async (_event, args) => orgs.getClient(args.orgId).browseSpaces(),
@@ -227,6 +241,18 @@ export const spacesIpcHandlers: SpacesHandlers = {
   'spaces:renameSpace': async (_event, args) => ({
     space: await orgs.getClient(args.orgId).renameSpace(args.spaceId, args.name),
   }),
+
+  'spaces:addMembers': async (_event, args) => ({
+    memberships: await orgs.getClient(args.orgId).addMembers(args.spaceId, args.memberIds),
+  }),
+
+  'spaces:listAgents': async (_event, args) => ({ agents: await orgs.getClient(args.orgId).listAgents() }),
+  'spaces:addAgent': async (_event, { orgId, ...input }) => orgs.getClient(orgId).addAgent(input),
+  'spaces:setAgentCredential': async (_event, args) => ({ credential: await orgs.getClient(args.orgId).setAgentCredential(args.agentId, args.secret) }),
+  'spaces:agent37Instances': async (_event, { key }) => ({ instances: await listAgent37Instances(key) }),
+  'spaces:agent37CreateInstance': async (_event, { key, ...input }) => ({ instance: await createAgent37Instance(key, input) }),
+  'spaces:createAgentKey': async (_event, args) => ({ key: await orgs.getClient(args.orgId).createAgentKey(args.agentId) }),
+  'spaces:revokeAgentKey': async (_event, args) => ({ key: await orgs.getClient(args.orgId).revokeAgentKey(args.agentId, args.keyId) }),
 
   'spaces:openDirect': async (_event, args) => {
     const result = await orgs.getClient(args.orgId).openDirect(args.memberId);
@@ -402,8 +428,23 @@ export const spacesIpcHandlers: SpacesHandlers = {
       ...(args.anchorChangeSetId ? { anchorChangeSetId: args.anchorChangeSetId } : {}),
       body: args.body,
       ...(args.poll ? { poll: args.poll } : {}),
+      ...(args.agentOptions ? { agentOptions: args.agentOptions } : {}),
       actingMode: 'direct',
     }),
+
+  'spaces:listInvocations': async (_event, args) => ({
+    invocations: await orgs.getClient(args.orgId).listInvocations(args.spaceId, args.threadRootId),
+  }),
+  'spaces:cancelInvocation': async (_event, args) => ({
+    invocation: await orgs.getClient(args.orgId).cancelInvocation(args.invocationId),
+  }),
+  'spaces:setAgentOptionDefaults': async (_event, args) => ({
+    defaults: await orgs.getClient(args.orgId).setAgentOptionDefaults(args.agentId, args.defaults),
+  }),
+
+  'spaces:getAgentCapabilities': async (_event, args) => ({
+    ...(await orgs.getClient(args.orgId).getAgentCapabilities(args.agentId)),
+  }),
 
   'spaces:createTopic': async (_event, args) =>
     orgs.getClient(args.orgId).createTopic(args.spaceId, {
@@ -449,6 +490,14 @@ export const spacesIpcHandlers: SpacesHandlers = {
 
   'spaces:endPoll': async (_event, args) => ({
     message: await orgs.getClient(args.orgId).endPoll(args.spaceId, args.messageId, {
+      actingMode: 'direct',
+    }),
+  }),
+
+  'spaces:decideApproval': async (_event, args) => ({
+    approval: await orgs.getClient(args.orgId).decideApproval(args.spaceId, args.approvalId, {
+      decision: args.decision,
+      ...(args.note ? { note: args.note } : {}),
       actingMode: 'direct',
     }),
   }),

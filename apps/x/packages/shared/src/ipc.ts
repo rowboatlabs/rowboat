@@ -3895,7 +3895,9 @@ export const ipcSchemas = {
   // 'direct') — opt-in on the wire so a pre-DM build never renders one as a space.
   'spaces:listSpaces': {
     req: z.object({ orgId: z.string(), includeDirect: z.boolean().optional() }),
-    res: z.object({ spaces: z.array(z.custom<SpacesTypes.Space>()) }),
+    // groupChat (2026-10-07): the org is one space and no DMs — a chat for
+    // every member, DMs off. Absent from servers that predate it.
+    res: z.object({ spaces: z.array(z.custom<SpacesTypes.Space>()), groupChat: z.boolean().optional() }),
   },
   'spaces:browseSpaces': {
     req: z.object({ orgId: z.string() }),
@@ -3913,6 +3915,54 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), spaceId: z.string(), name: z.string() }),
     res: z.object({ space: z.custom<SpacesTypes.Space>() }),
   },
+  // Agent members and their keys (2026-09-29): the caller's own agents, or
+  // every agent for an admin. A key's secret crosses IPC once, on the
+  // response that created it, for the Agents dialog to show and forget.
+  'spaces:listAgents': {
+    req: z.object({ orgId: z.string() }),
+    res: z.object({ agents: z.array(z.custom<SpacesTypes.AgentListing>()) }),
+  },
+  // An agent's kind and connection (2026-09-30); a platform agent's
+  // credential crosses IPC once, on the way to Harbor, which seals it.
+  'spaces:addAgent': {
+    req: z.object({
+      orgId: z.string(),
+      displayName: z.string(),
+      kind: z.string().optional(),
+      connection: z.string().optional(),
+      credential: z.string().optional(),
+      instance: z.string().optional(),
+    }),
+    res: z.object({ agent: z.custom<SpacesTypes.Member>(), key: z.custom<SpacesTypes.AgentKeySecret>() }),
+  },
+  // Adding an Agent37 agent (2026-10-05): find or create its instance with the
+  // key being pasted, before Harbor is asked to add it. The key is not kept.
+  'spaces:agent37Instances': {
+    req: z.object({ key: z.string() }),
+    res: z.object({ instances: z.array(z.object({ id: z.string(), name: z.string().nullable(), template: z.string(), status: z.string(), kind: z.string().optional() })) }),
+  },
+  'spaces:agent37CreateInstance': {
+    req: z.object({ key: z.string(), kind: z.string(), name: z.string(), monthlyBudgetUsd: z.number(), autoSleep: z.boolean() }),
+    res: z.object({ instance: z.object({ id: z.string(), name: z.string().nullable(), template: z.string(), status: z.string(), kind: z.string().optional() }) }),
+  },
+  'spaces:setAgentCredential': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), secret: z.string() }),
+    res: z.object({ credential: z.custom<SpacesTypes.AgentCredential>() }),
+  },
+  'spaces:createAgentKey': {
+    req: z.object({ orgId: z.string(), agentId: z.string() }),
+    res: z.object({ key: z.custom<SpacesTypes.AgentKeySecret>() }),
+  },
+  'spaces:revokeAgentKey': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), keyId: z.string() }),
+    res: z.object({ key: z.custom<SpacesTypes.AgentKey>() }),
+  },
+  // Add existing org members, people or agents, to a space the caller is in
+  // (2026-09-29). They learn of it by the space_added frame.
+  'spaces:addMembers': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), memberIds: z.array(z.string()).min(1) }),
+    res: z.object({ memberships: z.array(z.custom<SpacesTypes.Membership>()) }),
+  },
   // Direct messages: get-or-create the DM with another org member. No
   // invite, no acceptance — the other side learns of it by a space_added
   // frame on 'spaces:events' and shows it in their sidebar.
@@ -3924,8 +3974,8 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), spaceId: z.string() }),
     res: z.object({ members: z.array(z.custom<SpacesTypes.Member>()) }),
   },
-  // The org roster as the caller sees it: everyone they share a space with
-  // (DMs included), deduped, A–Z — computed by the org (GET /v1/members).
+  // The org roster: every member, people and agents, A–Z — computed by the
+  // org (GET /v1/members; the whole org since 2026-09-29).
   'spaces:listOrgMembers': {
     req: z.object({ orgId: z.string() }),
     res: z.object({ members: z.array(z.custom<SpacesTypes.Member>()) }),
@@ -4078,8 +4128,33 @@ export const ipcSchemas = {
       body: z.string(),
       /** Present = the message carries a poll; body must be its markdown fallback. */
       poll: z.custom<SpacesTypes.SpacesNewPollInput>().optional(),
+      /** Options picked for agents the message mentions, keyed by agent member id (2026-09-30). */
+      agentOptions: z.record(z.string(), z.record(z.string(), z.union([z.string(), z.boolean()]))).optional(),
     }),
     res: z.custom<SpacesPostResult>(),
+  },
+  // Agent invocations (Harbor spec §8, 2026-09-30): a space's, newest first,
+  // for the lines under the messages that invoked an agent; cancel a queued
+  // one or stop a running one; an agent's declared capabilities (the
+  // composer's options, whether Stop is offered).
+  'spaces:listInvocations': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), threadRootId: z.string().optional() }),
+    res: z.object({ invocations: z.array(z.custom<SpacesTypes.Invocation>()) }),
+  },
+  'spaces:cancelInvocation': {
+    req: z.object({ orgId: z.string(), invocationId: z.string() }),
+    res: z.object({ invocation: z.custom<SpacesTypes.Invocation>() }),
+  },
+  'spaces:getAgentCapabilities': {
+    req: z.object({ orgId: z.string(), agentId: z.string() }),
+    // `defaults`: what the agent's owner set for its options (Harbor spec §8, 2026-10-01).
+    res: z.object({ capabilities: z.custom<SpacesTypes.ConnectorCapabilities>(), defaults: z.record(z.string(), z.union([z.string(), z.boolean()])) }),
+  },
+  // The agent's owner sets defaults for the options its connector declares;
+  // Harbor fills them into any invocation whose invoker picked none.
+  'spaces:setAgentOptionDefaults': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), defaults: z.record(z.string(), z.union([z.string(), z.boolean()])) }),
+    res: z.object({ defaults: z.record(z.string(), z.union([z.string(), z.boolean()])) }),
   },
   // The stream composer's Auto toggle (2026-09-22): Jev says whether a draft
   // is a new root or a reply to one of the candidate threads the renderer
@@ -4176,6 +4251,19 @@ export const ipcSchemas = {
       messageId: z.string(),
     }),
     res: z.object({ message: z.custom<SpacesTypes.Message>() }),
+  },
+  // Decide an agent's approval card (spec §8 part 4): any person who can see
+  // it; actingMode is stamped 'direct' by main, and Harbor refuses agents and
+  // a person's assistant. The first decision wins; a note only with a deny.
+  'spaces:decideApproval': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      approvalId: z.string(),
+      decision: z.enum(['allow_once', 'allow_session', 'allow_always', 'deny']),
+      note: z.string().max(1000).optional(),
+    }),
+    res: z.object({ approval: z.custom<SpacesTypes.Approval>() }),
   },
   // @rowboat in a thread (spec §8): the renderer detected an addressed message
   // it just posted; main routes it into the thread's session (keyed on the

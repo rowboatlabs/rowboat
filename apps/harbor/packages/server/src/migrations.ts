@@ -692,6 +692,224 @@ export const MIGRATIONS: Migration[] = [
       `alter table spaces add constraint spaces_direct_private_check check (kind <> 'direct' or visibility = 'private')`,
     ],
   },
+  {
+    id: '024-agent-members',
+    statements: [
+      // Agent members (spec §4, 2026-09-29). Every existing row is a person.
+      `alter table members add column kind text not null default 'human'`,
+      `alter table members add constraint members_kind_check check (kind in ('human', 'agent'))`,
+      // Admin powers are membership and policy; an agent holding them could
+      // add itself to spaces past the people who invoke it. Held here, not
+      // only in code, because seeds and backfills write SQL directly.
+      `alter table members add constraint members_agent_not_admin_check check (kind = 'human' or role = 'member')`,
+    ],
+  },
+  {
+    // 025 was reserved for PR #1130's replicas-threads, which the 2026-09-30
+    // redesign on the agent contract replaced (028); the gap stays.
+    id: '026-agent-keys',
+    statements: [
+      // An agent's owner (spec §4 Agent members, 2026-09-29): the person who
+      // added it. Null for people. (Replicas was to be org-owned; the
+      // 2026-09-30 redesign gave every agent an owner.)
+      `alter table members add column owner_id text`,
+      `alter table members add constraint members_owner_agent_check check (owner_id is null or kind = 'agent')`,
+      // Keys stored as a SHA-256 of the secret, never the secret: a 256-bit
+      // random token needs no slow hash, and a leaked table grants nothing.
+      `create table agent_keys (
+        org_id text not null,
+        id text not null,
+        agent_id text not null,
+        hash text not null,
+        created_by text not null,
+        created_at text not null,
+        last_used_at text,
+        revoked_at text,
+        primary key (org_id, id),
+        foreign key (org_id, agent_id) references members(org_id, id)
+      )`,
+      `create unique index agent_keys_hash on agent_keys (hash)`,
+      `create index agent_keys_agent on agent_keys (org_id, agent_id)`,
+    ],
+  },
+  {
+    // Agent invocations (spec §8 Invoking agent members, 2026-09-30). The
+    // object lives in `data` (protocol Invocation); the columns are what the
+    // queue and the listings query on. One invocation per (message, agent):
+    // the unique index makes a replayed post a no-op. The queue runs in the
+    // order the messages were posted — `message_offset`, the space's log
+    // order, allocated under the space lock — never by a machine's clock,
+    // which can disagree across Harbor instances.
+    id: '027-invocations',
+    statements: [
+      `create table invocations (
+        org_id text not null,
+        id text not null,
+        agent_id text not null,
+        space_id text not null,
+        thread_root_id text not null,
+        message_id text not null,
+        message_offset int not null,
+        state text not null,
+        created_at text not null,
+        data jsonb not null,
+        primary key (org_id, id)
+      )`,
+      `alter table invocations add constraint invocations_state_check
+        check (state in ('queued', 'pending', 'working', 'waiting', 'done', 'failed', 'cancelled', 'refused'))`,
+      `create unique index invocations_message_agent on invocations (org_id, message_id, agent_id)`,
+      `create index invocations_agent_state on invocations (org_id, agent_id, state)`,
+      `create index invocations_conversation on invocations (space_id, thread_root_id, message_offset)`,
+      `create table agent_capabilities (
+        org_id text not null,
+        agent_id text not null,
+        data jsonb not null,
+        updated_at text not null,
+        primary key (org_id, agent_id)
+      )`,
+    ],
+  },
+  {
+    // What an agent is and how Harbor reaches it, and what a connector Harbor
+    // runs keeps (spec §4 Agent members and §8 Connectors, 2026-09-30: the
+    // Replicas redesign on the agent contract). Open strings: which pairs are
+    // valid is AGENT_PAIRS in the protocol, so a new pair needs no migration.
+    id: '028-agent-connections',
+    statements: [
+      `alter table members add column agent_kind text`,
+      `alter table members add column agent_connection text`,
+      `update members set agent_kind = 'custom', agent_connection = 'contract' where kind = 'agent'`,
+      `alter table members add constraint members_agent_connection_check check (
+        (kind = 'agent' and agent_kind is not null and agent_connection is not null)
+        or (kind = 'human' and agent_kind is null and agent_connection is null)
+      )`,
+      // A platform's key, which Harbor presents, so sealed rather than hashed
+      // (sealing.ts), unlike agent_keys. One per agent; replacing it clears a rejection.
+      `create table agent_connection_credentials (
+        org_id text not null,
+        agent_id text not null,
+        sealed text not null,
+        hint text not null,
+        set_by text not null,
+        set_at text not null,
+        rejected_at text,
+        rejected_reason text,
+        primary key (org_id, agent_id),
+        foreign key (org_id, agent_id) references members(org_id, id)
+      )`,
+      // A connector's record per thread (its platform session, how far
+      // delivery reached, what is in flight), for follow-ups and restart
+      // recovery. `data` is the connector's own shape.
+      `create table agent_connection_threads (
+        org_id text not null,
+        agent_id text not null,
+        space_id text not null,
+        thread_root_id text not null,
+        data jsonb not null,
+        updated_at text not null,
+        primary key (org_id, agent_id, space_id, thread_root_id),
+        foreign key (org_id, agent_id) references members(org_id, id)
+      )`,
+    ],
+  },
+  {
+    // Approvals (spec §8 part 4, 2026-10-01): an agent's request for a
+    // person's OK, its own record on an invocation. `data` is the whole
+    // Approval; the columns are what the queries need. One per request key
+    // per invocation, so a connector raising it again gets the first back.
+    id: '029-approvals',
+    statements: [
+      `create table approvals (
+        org_id text not null,
+        id text not null,
+        invocation_id text not null,
+        agent_id text not null,
+        space_id text not null,
+        message_id text not null,
+        request_key text not null,
+        state text not null,
+        applied boolean not null default false,
+        created_at text not null,
+        data jsonb not null,
+        primary key (org_id, id)
+      )`,
+      `alter table approvals add constraint approvals_state_check
+        check (state in ('open', 'allowed', 'denied', 'expired', 'cancelled'))`,
+      `create unique index approvals_request on approvals (org_id, invocation_id, request_key)`,
+      `create index approvals_agent_state on approvals (org_id, agent_id, state)`,
+      `create index approvals_message on approvals (space_id, message_id)`,
+      // The card's approval as raised rides its message row, as a poll does.
+      `alter table messages add column approval jsonb`,
+    ],
+  },
+  {
+    // An agent's option defaults, set by its owner (spec §8 Invocation
+    // options, 2026-10-01): kept apart from agent_capabilities, which its
+    // connector rewrites whenever it declares, so a reconnect never loses them.
+    id: '030-agent-option-defaults',
+    statements: [
+      `create table agent_option_defaults (
+        org_id text not null,
+        agent_id text not null,
+        data jsonb not null,
+        set_by text not null,
+        set_at text not null,
+        primary key (org_id, agent_id),
+        foreign key (org_id, agent_id) references members(org_id, id)
+      )`,
+    ],
+  },
+  {
+    // Profile images (2026-10-02): the hashes this org serves to all of its
+    // members (avatars, the logo) — the org-wide counterpart of space_blobs —
+    // and the one logo an org has. An avatar's URL rides members.avatar_url.
+    id: '031-profile-images',
+    statements: [
+      `create table org_images (
+        org_id text not null,
+        hash text not null,
+        size bigint not null,
+        mime text not null,
+        width integer,
+        height integer,
+        uploaded_by text not null,
+        uploaded_at text not null,
+        primary key (org_id, hash)
+      )`,
+      `create table org_logos (
+        org_id text primary key,
+        hash text not null,
+        set_by text not null,
+        set_at text not null
+      )`,
+    ],
+  },
+  {
+    // The platform instance an agent is (spec §8 Connectors, Agent37,
+    // 2026-10-05): set at creation for a connection in INSTANCE_CONNECTIONS,
+    // null for every other agent and for people.
+    id: '032-agent-instance',
+    statements: [
+      `alter table members add column agent_instance text`,
+      `alter table members add constraint members_agent_instance_check check (kind = 'agent' or agent_instance is null)`,
+    ],
+  },
+  {
+    // How many agent hand-offs led to a message (spec §8 Jev, 2026-10-07):
+    // the depth an agent it mentions is invoked at, recorded when an agent
+    // posts, because by the time Jev tags someone for the message the turn
+    // that posted it may have finished. A person's message is depth 0 and
+    // has no row.
+    id: '033-message-hops',
+    statements: [
+      `create table message_hops (
+        space_id text not null,
+        message_id text not null,
+        depth integer not null,
+        primary key (space_id, message_id)
+      )`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

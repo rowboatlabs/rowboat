@@ -16,6 +16,8 @@ export interface OrgWithSpaces extends spaces.SpacesOrgSummary {
     directs: spaces.Space[]
     /** DM space id → the other participant's current display name (resolved from the DM's own roster). */
     directLabels: Record<string, string>
+    /** The org is a group chat — one space, no DMs, the same for every member (2026-10-07). Absent from older servers. */
+    groupChat?: boolean
     /** Set when the org could not be reached — the sidebar's "org unreachable" state. */
     error?: string
 }
@@ -64,7 +66,7 @@ export function refreshSpacesOrgs(): Promise<void> {
                 records.map(async (org): Promise<OrgWithSpaces> => {
                     const previous = orgsState.orgs.find((o) => o.id === org.id)
                     try {
-                        const { spaces: list } = await window.ipc.invoke('spaces:listSpaces', { orgId: org.id, includeDirect: true })
+                        const { spaces: list, groupChat } = await window.ipc.invoke('spaces:listSpaces', { orgId: org.id, includeDirect: true })
                         const shared = list.filter((s) => s.kind !== 'direct')
                         const directs = list.filter((s) => s.kind === 'direct')
                         // A DM is labelled by the other person's CURRENT name — its
@@ -85,7 +87,7 @@ export function refreshSpacesOrgs(): Promise<void> {
                                 directLabels[dm.id] = previous?.directLabels[dm.id] ?? (self ? 'You' : who)
                             }
                         }))
-                        return { ...org, spaces: shared, directs, directLabels }
+                        return { ...org, spaces: shared, directs, directLabels, ...(groupChat !== undefined ? { groupChat } : {}) }
                     } catch (err) {
                         return { ...org, spaces: [], directs: [], directLabels: {}, error: err instanceof Error ? err.message : String(err) }
                     }
@@ -455,6 +457,11 @@ function wireFeedBus(): void {
                     await window.ipc.invoke('spaces:subscribeSpace', { orgId: event.orgId, spaceId: frame.spaceId, afterOffset: liveHeads.get(liveKey(event.orgId, frame.spaceId)) })
                 }
             })().catch(() => {})
+            void refreshSpacesOrgs()
+            return
+        }
+        if (frame.kind === 'org_changed') {
+            // A group chat became a workspace (2026-10-07): the listing carries the new shape.
             void refreshSpacesOrgs()
             return
         }

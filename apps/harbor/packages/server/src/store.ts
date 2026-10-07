@@ -1,6 +1,14 @@
 import type { ActivityKind } from '@rowboat/spaces-protocol';
 import type {
+  AgentCredential,
+  AgentKey,
   Attribution,
+  ConnectorCapabilities,
+  Approval,
+  ApprovalState,
+  Invocation,
+  InvocationOptionValues,
+  InvocationState,
   BlobInfo,
   ChangeSet,
   Member,
@@ -76,6 +84,17 @@ export interface StoredSpaceBlob {
   uploadedAt: string;
 }
 
+/** An image the whole org may read (core/images.ts): an avatar or the logo. */
+export interface StoredOrgImage {
+  hash: string;
+  size: number;
+  mime: string;
+  width?: number;
+  height?: number;
+  uploadedBy: string;
+  uploadedAt: string;
+}
+
 export interface StoredInvite {
   token: string;
   spaceId: string;
@@ -101,6 +120,17 @@ export function directKeyFor(participants: readonly string[]): string {
 }
 
 /** A durable, offsetted fact as stored — exactly what WS replay sends. */
+/** An agent key as stored: its metadata plus the SHA-256 of the secret (never the secret). */
+export interface StoredAgentKey extends AgentKey {
+  hash: string;
+}
+
+/** A platform credential as stored (spec §8 Connectors, 2026-09-30): what its owner sees, plus the sealed secret. */
+export interface StoredAgentCredential extends AgentCredential {
+  agentId: string;
+  sealed: string;
+}
+
 export interface StoredEvent {
   offset: number;
   at: string;
@@ -199,7 +229,6 @@ export interface Store {
    * question; whether discovery is bounded this way is the core's rule
    * (spaces.ts listOrgMembers; spec §5, open spaces).
    */
-  listMembersSharingSpace(memberId: string): Promise<Member[]>;
 
   // identity mapping — (issuer, subject) → member (spec §4: the token proves
   // WHO; this table says which member that is). Written only by the invite
@@ -217,6 +246,8 @@ export interface Store {
   listSpacesFor(memberId: string, opts?: { includeDirect?: boolean }): Promise<Space[]>;
   /** Every space on the org, DMs included — operator-side reads only (the mentions backfill). */
   listAllSpaces(): Promise<Space[]>;
+  /** How many spaces of each kind the org holds — what makes it a group chat (policy.ts isGroupChat). */
+  countSpacesByKind(): Promise<{ shared: number; direct: number }>;
   /** The DM whose participants encode to `directKey` (directKeyFor), if it exists. */
   getDirectSpace(directKey: string): Promise<Space | undefined>;
 
@@ -256,6 +287,15 @@ export interface Store {
   /** First write wins — re-uploading the same bytes never changes the recorded mime/uploader. */
   putSpaceBlob(blob: StoredSpaceBlob): Promise<void>;
   getSpaceBlob(spaceId: string, hash: string): Promise<StoredSpaceBlob | undefined>;
+
+  // profile images (org-scoped registry; bytes live in the BlobStore)
+  /** First write wins, as putSpaceBlob. */
+  putOrgImage(image: StoredOrgImage): Promise<void>;
+  getOrgImage(hash: string): Promise<StoredOrgImage | undefined>;
+  /** The org's logo hash, or undefined when none is set. */
+  getOrgLogo(): Promise<string | undefined>;
+  /** null clears it. */
+  setOrgLogo(hash: string | null, by: string, at: string): Promise<void>;
 
   // change log (append-only). ChangeSet.assetId is the lineage key: per-file
   // history is a filter instead of a chain walk.
@@ -416,6 +456,69 @@ export interface Store {
   /** `offset` must be head+1 — the caller allocates inside the space lock. */
   appendEvent(spaceId: string, stored: StoredEvent): Promise<void>;
   listEventsAfter(spaceId: string, afterOffset: number): Promise<StoredEvent[]>;
+
+  // --- agent keys (spec §4 Agent members, 2026-09-29) ---
+  /** Agent members, by display name: every one, or those `ownerId` owns. */
+  listAgents(ownerId: string | null): Promise<Member[]>;
+  putAgentKey(key: StoredAgentKey): Promise<void>;
+  getAgentKey(id: string): Promise<StoredAgentKey | undefined>;
+  getAgentKeyByHash(hash: string): Promise<StoredAgentKey | undefined>;
+  listAgentKeys(agentIds: string[]): Promise<AgentKey[]>;
+  /** Stamp revocation once; a revoked key stays revoked at its first time. */
+  revokeAgentKey(id: string, at: string): Promise<void>;
+  /** Record use, at most once per `since` window, so authentication rarely writes. */
+  touchAgentKey(id: string, at: string, since: string): Promise<void>;
+
+  // --- connectors Harbor runs (spec §8 Connectors, 2026-09-30) ---
+  /** Agent members whose connection is one of these. */
+  listAgentsByConnection(connections: readonly string[]): Promise<Member[]>;
+  getAgentCredential(agentId: string): Promise<StoredAgentCredential | undefined>;
+  listAgentCredentials(agentIds: string[]): Promise<StoredAgentCredential[]>;
+  /** Set or replace an agent's credential; a replacement clears its rejection. */
+  putAgentCredential(credential: StoredAgentCredential): Promise<void>;
+  /** Mark it rejected by its platform; true only the first time, until it is replaced. */
+  rejectAgentCredential(agentId: string, at: string, reason: string): Promise<boolean>;
+  /** A connector's own record for one thread (its shape is the connector's). */
+  getConnectionThread(agentId: string, spaceId: string, threadRootId: string): Promise<unknown | undefined>;
+  putConnectionThread(agentId: string, spaceId: string, threadRootId: string, data: unknown, at: string): Promise<void>;
+
+  // --- invocations (spec §8 Invoking agent members, 2026-09-30) ---
+  /** A new invocation, with its triggering message's offset: the queue's order. */
+  insertInvocation(invocation: Invocation, messageOffset: number): Promise<void>;
+  /** Replace an existing invocation's state and object, by id. */
+  putInvocation(invocation: Invocation): Promise<void>;
+  getInvocation(id: string): Promise<Invocation | undefined>;
+  /** One agent's invocations in the given states, oldest first. */
+  listInvocationsForAgent(agentId: string, states: InvocationState[]): Promise<Invocation[]>;
+  /** One agent's invocations in one conversation, in the order their messages were posted. */
+  listConversationInvocations(agentId: string, spaceId: string, threadRootId: string): Promise<Invocation[]>;
+  /** A space's invocations (one thread's, when given), newest message first. */
+  listSpaceInvocations(spaceId: string, threadRootId: string | null, limit: number): Promise<Invocation[]>;
+  /** The hand-off depth an agent a message mentions is invoked at (spec §8 Jev, 2026-10-07); 0 when none was recorded. */
+  getMessageHops(spaceId: string, messageId: string): Promise<number>;
+  putMessageHops(spaceId: string, messageId: string, depth: number): Promise<void>;
+  /** Whether two members share a shared (not direct) space. */
+  sharesSharedSpace(a: string, b: string): Promise<boolean>;
+
+  // --- approvals (spec §8 part 4, 2026-10-01) ---
+  insertApproval(approval: Approval): Promise<void>;
+  /** Replace an existing approval's state and object, by id. */
+  putApproval(approval: Approval): Promise<void>;
+  getApproval(id: string): Promise<Approval | undefined>;
+  getApprovalByRequest(invocationId: string, requestKey: string): Promise<Approval | undefined>;
+  /** An invocation's approvals in the given states, oldest first. */
+  listInvocationApprovals(invocationId: string, states: ApprovalState[]): Promise<Approval[]>;
+  /** One agent's decided approvals its connector has not confirmed applying, oldest first. */
+  listUnappliedDecisions(agentId: string): Promise<Approval[]>;
+  /** The approvals riding on these messages (their cards). */
+  listApprovalsForMessages(spaceId: string, messageIds: string[]): Promise<Approval[]>;
+  getAgentCapabilities(agentId: string): Promise<ConnectorCapabilities | undefined>;
+  /** The defaults an agent's owner set for its declared options (spec §8, 2026-10-01). */
+  getAgentOptionDefaults(agentId: string): Promise<InvocationOptionValues | undefined>;
+  putAgentOptionDefaults(agentId: string, defaults: InvocationOptionValues, by: string, at: string): Promise<void>;
+  putAgentCapabilities(agentId: string, capabilities: ConnectorCapabilities, at: string): Promise<void>;
+  /** Membership events with offset in (afterOffset, upToOffset], or to the head when upToOffset is null — the stream's join lines. */
+  listMembershipEvents(spaceId: string, afterOffset: number, upToOffset: number | null): Promise<StoredEvent[]>;
 
   // one-time passes (the mentions backfill): a ledger so a pass that rewrites
   // content runs exactly once per org, not on every boot

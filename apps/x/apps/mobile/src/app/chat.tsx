@@ -4,13 +4,14 @@ import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
+  Keyboard,
   Pressable,
   ScrollView,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { sessions as sessionsShared } from '@x/shared';
 import type { DrawerNavigationProp } from 'expo-router/drawer';
@@ -19,6 +20,7 @@ import * as analytics from '@/lib/analytics';
 import { ModelPill } from '@/components/model-picker';
 import { TurnView } from '@/components/turn-view';
 import { useConnection } from '@/lib/connection';
+import { useKeyboardVisible } from '@/lib/use-keyboard-visible';
 import { useLiveTurn } from '@/lib/use-live-turn';
 import { useModels } from '@/lib/use-models';
 import { useColors } from '@/theme/colors';
@@ -68,6 +70,7 @@ function Turn({ turnId, isLatest, onStreaming }: { turnId: string; isLatest: boo
 export default function ChatScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const keyboardVisible = useKeyboardVisible();
   const models = useModels();
   const { pairing, sessions, events } = useConnection();
   const params = useLocalSearchParams<{ id?: string }>();
@@ -129,6 +132,7 @@ export default function ChatScreen() {
   const send = useCallback(async () => {
     const content = draft.trim();
     if (!content || !sessions) return;
+    Keyboard.dismiss();
     setSending(true);
     setDraft('');
     try {
@@ -176,15 +180,15 @@ export default function ChatScreen() {
   if (pairing === null) return <Redirect href="/pairing" />;
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['bottom']}>
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={process.env.EXPO_OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={process.env.EXPO_OS === 'ios' ? 92 : 0}
-      >
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      {/* Full-height view (transparent header), so the keyboard needs no offset. */}
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={0}>
         {id ? (
           <ScrollView
             ref={scrollRef}
+            keyboardDismissMode="interactive"
+            keyboardShouldPersistTaps="handled"
+            alwaysBounceVertical
             // The header is transparent (floating hamburger) — pad the content
             // below it by hand: safe area + standard header height.
             contentContainerStyle={{ paddingTop: insets.top + 52, paddingHorizontal: 16, paddingBottom: 16, gap: 4 }}
@@ -201,16 +205,28 @@ export default function ChatScreen() {
             ))}
           </ScrollView>
         ) : (
-          <Pressable style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8 }} onPress={() => navigation.openDrawer()}>
-            <Text style={{ fontSize: 22, fontWeight: '600', color: colors.label }}>Rowboat</Text>
-            <Text style={{ fontSize: 15, color: colors.tertiaryLabel }}>Ask anything to get started</Text>
-          </Pressable>
+          <ScrollView
+            // A scroll view even when empty, so a drag toward the keyboard
+            // dismisses it interactively here too.
+            keyboardDismissMode="interactive"
+            keyboardShouldPersistTaps="handled"
+            alwaysBounceVertical
+            contentContainerStyle={{ flexGrow: 1 }}
+          >
+            <Pressable
+              style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8 }}
+              onPress={() => (keyboardVisible ? Keyboard.dismiss() : navigation.openDrawer())}
+            >
+              <Text style={{ fontSize: 22, fontWeight: '600', color: colors.label }}>Rowboat</Text>
+              <Text style={{ fontSize: 15, color: colors.tertiaryLabel }}>Ask anything to get started</Text>
+            </Pressable>
+          </ScrollView>
         )}
 
         {/* Composer — Claude-style card: input on top, model pill + send below */}
         <View
           style={{
-            marginHorizontal: 10, marginTop: 6, marginBottom: 4,
+            marginHorizontal: 10, marginTop: 6, marginBottom: keyboardVisible ? 16 : insets.bottom + 4,
             backgroundColor: colors.background,
             borderWidth: 1, borderColor: colors.separator,
             borderRadius: 22, borderCurve: 'continuous',
@@ -237,7 +253,7 @@ export default function ChatScreen() {
           </View>
         </View>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </View>
   );
 }
 

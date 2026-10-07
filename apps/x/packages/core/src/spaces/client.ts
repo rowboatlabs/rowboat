@@ -10,7 +10,17 @@ import {
   type CreateAssetResult,
   type DeleteAssetResult,
   type CreateInviteResult,
+  type AgentKey,
+  type AgentCredential,
+  type AgentKeySecret,
+  type AgentListing,
+  type ConnectorCapabilities,
+  type Approval,
+  type Invocation,
+  type InvocationOptionValues,
   type Member,
+  type Membership,
+  type StreamEvent,
   type Message,
   type MoveAssetResult,
   type ProposeChange,
@@ -104,6 +114,7 @@ type DeleteMessageInput = z.infer<Routes['deleteMessage']['request']>;
 type EditMessageInput = z.infer<Routes['editMessage']['request']>;
 type VotePollInput = z.infer<Routes['votePoll']['request']>;
 type EndPollInput = z.infer<Routes['endPoll']['request']>;
+type DecideApprovalInput = z.infer<Routes['decideApproval']['request']>;
 
 /** One page of a message list (protocol listStream / listThread query): at most one of the three offsets. */
 export interface MessageWindowOpts {
@@ -148,7 +159,7 @@ export class SpacesClient {
   }
 
   private async request<S extends z.ZodType>(
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'PUT',
     path: string,
     responseSchema: S,
     body?: unknown,
@@ -213,8 +224,13 @@ export class SpacesClient {
 
   /** Shared spaces by default; `includeDirect` adds the member's DMs (api.ts listSpaces). */
   async listSpaces(opts: { includeDirect?: boolean } = {}): Promise<Space[]> {
+    return (await this.listing(opts)).spaces;
+  }
+
+  /** The listing whole: the spaces, and whether the org is a group chat (absent from older servers). */
+  async listing(opts: { includeDirect?: boolean } = {}): Promise<{ spaces: Space[]; groupChat?: boolean }> {
     const qs = opts.includeDirect ? '?includeDirect=true' : '';
-    return (await this.request('GET', `${routes.listSpaces.path}${qs}`, routes.listSpaces.response)).spaces;
+    return this.request('GET', `${routes.listSpaces.path}${qs}`, routes.listSpaces.response);
   }
 
   /** Get-or-create the DM with another member — idempotent from either side (api.ts openDirect). */
@@ -252,14 +268,52 @@ export class SpacesClient {
     ).space;
   }
 
+  /** The agents this member manages, with their keys' metadata (api.ts listAgents). */
+  async listAgents(): Promise<AgentListing[]> {
+    return (await this.request('GET', routes.listAgents.path, routes.listAgents.response)).agents;
+  }
+
+  /**
+   * Add an agent this member owns; the response carries its first key's
+   * secret, the only time it is shown. `kind`/`connection` say what it is and
+   * how Harbor reaches it (2026-09-30); a platform agent (Replicas) also
+   * brings the platform's `credential`, which Harbor checks and seals, and an
+   * Agent37 agent its `instance` (2026-10-05).
+   */
+  async addAgent(input: { displayName: string; kind?: string; connection?: string; credential?: string; instance?: string }): Promise<{ agent: Member; key: AgentKeySecret }> {
+    return this.request('POST', routes.createAgent.path, routes.createAgent.response, input);
+  }
+
+  /** Replace a platform agent's credential (owner only); Harbor checks it with the platform first. */
+  async setAgentCredential(agentId: string, secret: string): Promise<AgentCredential> {
+    return (await this.request('PUT', `/v1/agents/${encodeURIComponent(agentId)}/credential`, routes.setAgentCredential.response, { secret })).credential;
+  }
+
+  async createAgentKey(agentId: string): Promise<AgentKeySecret> {
+    return (await this.request('POST', `/v1/agents/${encodeURIComponent(agentId)}/keys`, routes.createAgentKey.response)).key;
+  }
+
+  async revokeAgentKey(agentId: string, keyId: string): Promise<AgentKey> {
+    return (
+      await this.request('POST', `/v1/agents/${encodeURIComponent(agentId)}/keys/${encodeURIComponent(keyId)}/revoke`, routes.revokeAgentKey.response)
+    ).key;
+  }
+
+  /** Add existing org members, people or agents, to a space the caller is in (api.ts addMembers). */
+  async addMembers(spaceId: string, memberIds: string[]): Promise<Membership[]> {
+    return (
+      await this.request('POST', this.space(spaceId, '/members'), routes.addMembers.response, {
+        memberIds,
+        actingMode: 'direct',
+      })
+    ).memberships;
+  }
+
   async listMembers(spaceId: string): Promise<Member[]> {
     return (await this.request('GET', this.space(spaceId, '/members'), routes.listMembers.response)).members;
   }
 
-  /**
-   * The org roster as this member sees it: the union of every space they are
-   * in (DMs included), deduped and sorted by displayName (api.ts listOrgMembers).
-   */
+  /** The org roster: every member, people and agents, sorted by displayName (api.ts listOrgMembers; org-wide since 2026-09-29). */
   async listOrgMembers(): Promise<Member[]> {
     return (await this.request('GET', routes.listOrgMembers.path, routes.listOrgMembers.response)).members;
   }
@@ -442,7 +496,7 @@ export class SpacesClient {
   async listStream(
     spaceId: string,
     opts?: MessageWindowOpts,
-  ): Promise<{ messages: Message[]; topics: Topic[]; hasMore: boolean; hasMoreAfter?: boolean; readOffset: number }> {
+  ): Promise<{ messages: Message[]; topics: Topic[]; hasMore: boolean; hasMoreAfter?: boolean; readOffset: number; events: StreamEvent[] }> {
     return this.request('GET', this.space(spaceId, `/stream${this.windowQuery(opts)}`), routes.listStream.response);
   }
 
@@ -522,8 +576,31 @@ export class SpacesClient {
   }
 
   /** A root (no threadRoot) or a reply (threadRoot) — never creates a topic. */
-  async postMessage(spaceId: string, input: NewMessage): Promise<{ message: Message }> {
+  async postMessage(spaceId: string, input: NewMessage): Promise<{ message: Message; invocations: Invocation[] }> {
     return this.request('POST', this.space(spaceId, '/messages'), routes.postMessage.response, input);
+  }
+
+  /** A space's agent invocations, newest first (api.ts listInvocations; one thread's with threadRootId). */
+  async listInvocations(spaceId: string, threadRootId?: string): Promise<Invocation[]> {
+    const q = threadRootId ? `?threadRootId=${encodeURIComponent(threadRootId)}` : '';
+    return (await this.request('GET', this.space(spaceId, `/invocations${q}`), routes.listInvocations.response)).invocations;
+  }
+
+  /** Cancel a queued invocation, or stop a running one (api.ts cancelInvocation). */
+  async cancelInvocation(invocationId: string): Promise<Invocation> {
+    return (await this.request('POST', `/v1/invocations/${encodeURIComponent(invocationId)}/cancel`, routes.cancelInvocation.response)).invocation;
+  }
+
+  /** What an agent's connector declared, and the defaults its owner set for those options (api.ts getAgentCapabilities). */
+  async getAgentCapabilities(agentId: string): Promise<{ capabilities: ConnectorCapabilities; defaults: InvocationOptionValues }> {
+    return this.request('GET', `/v1/agents/${encodeURIComponent(agentId)}/capabilities`, routes.getAgentCapabilities.response);
+  }
+
+  /** Set an agent's option defaults: its owner only; `{}` clears them. */
+  async setAgentOptionDefaults(agentId: string, defaults: InvocationOptionValues): Promise<InvocationOptionValues> {
+    return (
+      await this.request('PUT', `/v1/agents/${encodeURIComponent(agentId)}/option-defaults`, routes.setAgentOptionDefaults.response, { defaults })
+    ).defaults;
   }
 
   /** The deliberate ceremony: promote a thread (rootMessageId) or post + annotate (body). */
@@ -565,6 +642,13 @@ export class SpacesClient {
         input,
       )
     ).message;
+  }
+
+  /** Decide an agent's approval (spec §8 part 4): a person acting directly; the first decision wins. */
+  async decideApproval(spaceId: string, approvalId: string, input: DecideApprovalInput): Promise<Approval> {
+    return (
+      await this.request('POST', this.space(spaceId, `/approvals/${encodeURIComponent(approvalId)}/decide`), routes.decideApproval.response, input)
+    ).approval;
   }
 
   /** Toggle a poll vote (idempotent; single-select add moves the vote). Returns the message with votes folded. */

@@ -2,11 +2,41 @@ import { z } from 'zod';
 import { ChangeSet } from './changeset.js';
 import { Attribution, Membership, Message, MessageDeletion, MessageEdit, PollEnd, PollVote, Reaction, Space, SpaceKind, Topic, TopicRemoval } from './core.js';
 import { AssetId, MemberId, MessageId, SpaceId, StreamOffset } from './ids.js';
+import { Approval } from './approval.js';
+import { Invocation, InvocationId } from './invocation.js';
 
 // Decision 2 (CONTRACT.md): one WebSocket per org, per-space subscriptions,
 // offset-based catch-up. Subscribing with `afterOffset` replays durable events
 // after that offset, then goes live — the same resume pattern as the app's
 // turn-event spine. Presence is ephemeral and carries no offset.
+
+/** Someone joined, left, or was removed from the space. */
+export const MembershipEvent = z.object({
+  type: z.literal('membership'),
+  membership: Membership,
+  action: z.enum(['joined', 'left', 'removed']),
+  /**
+   * Who acted on someone else's membership (2026-09-29): on `joined`, the
+   * member who added them (addMembers). Absent when the member acted
+   * themselves — an accepted invite, a self-join, leaving. A field rather
+   * than an `added` action, so older clients still parse the frame.
+   */
+  by: Attribution.optional(),
+});
+export type MembershipEvent = z.infer<typeof MembershipEvent>;
+
+/**
+ * A log event the stream shows as a line between its messages (listStream
+ * `events`, 2026-09-29): membership only in v1, the Matrix model — the fact
+ * stays in the log and the client draws it, never a system message. Carries
+ * its offset so a client merges it with the messages in log order.
+ */
+export const StreamEvent = z.object({
+  offset: StreamOffset,
+  at: z.iso.datetime(),
+  event: z.discriminatedUnion('type', [MembershipEvent]),
+});
+export type StreamEvent = z.infer<typeof StreamEvent>;
 
 /** Durable, offsetted facts. The feed's activity strand renders these (spec §7). */
 export const SpaceEvent = z.discriminatedUnion('type', [
@@ -27,11 +57,7 @@ export const SpaceEvent = z.discriminatedUnion('type', [
   }),
   /** The row deleted ("convert back to thread") — the thread itself is untouched. */
   z.object({ type: z.literal('topic_removed'), removal: TopicRemoval }),
-  z.object({
-    type: z.literal('membership'),
-    membership: Membership,
-    action: z.enum(['joined', 'left', 'removed']),
-  }),
+  MembershipEvent,
   /** A reaction toggled on or off a message. Idempotent re-adds/re-removes emit nothing. */
   z.object({
     type: z.literal('reaction'),
@@ -78,6 +104,16 @@ export const SpaceEvent = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('poll_ended'),
     end: PollEnd,
+  }),
+  /**
+   * An approval changed (spec §8 part 4, 2026-10-01): decided, or closed by
+   * its connector. Carries the whole approval; the stored card message keeps
+   * the at-request one, and folding clients replace the card's `approval`
+   * with this, the way they fold poll votes.
+   */
+  z.object({
+    type: z.literal('approval'),
+    approval: Approval,
   }),
   /**
    * The space was renamed (api.ts renameSpace) — the full row plus who did
@@ -186,6 +222,15 @@ export const ServerFrame = z.discriminatedUnion('kind', [
     at: z.iso.datetime(),
   }),
   /**
+   * Addressed to EVERY member of the org (2026-10-07): the org's shape
+   * changed — today, a second space made a group chat a workspace, DMs on.
+   * It reaches members the new space does not include, which is why it is
+   * not a space event. Ephemeral, never replayed: refetch the listing
+   * (`groupChat` on listSpaces is the truth). Older clients drop the
+   * unknown frame by contract.
+   */
+  z.object({ kind: z.literal('org_changed'), at: z.iso.datetime() }),
+  /**
    * Addressed to a MEMBER (read state, 2026-09-09): one of your own
    * connections advanced a read mark — the stream's (no threadRootId) or a
    * followed thread's — so your other devices apply it and badges agree
@@ -244,6 +289,28 @@ export const ServerFrame = z.discriminatedUnion('kind', [
     at: z.iso.datetime(),
     payload: z.unknown(),
   }),
+  /**
+   * Addressed to an AGENT member's connections (spec §8 Invoking agent
+   * members, 2026-09-30): an invocation is ready for it — new, or next out of
+   * its conversation's queue. Ephemeral: a connector that was away lists the
+   * pending ones (listAgentInvocations), so nothing depends on this arriving.
+   */
+  z.object({ kind: z.literal('invocation'), invocation: Invocation }),
+  /** Addressed to an AGENT member's connections: stop this running invocation, then report it cancelled. */
+  z.object({ kind: z.literal('invocation_stop'), invocationId: InvocationId }),
+  /**
+   * Addressed to an AGENT member's connections: a person decided one of its
+   * approvals (spec §8 part 4). Ephemeral like `invocation`: the connector's
+   * listing returns every decision it has not confirmed applying.
+   */
+  z.object({ kind: z.literal('approval_decided'), approval: Approval }),
+  /**
+   * To a space's subscribers, on every change of state of an invocation in
+   * it: the working indicator, what it waits for, a refused line. Ephemeral,
+   * never replayed; listInvocations is the snapshot. Older clients ignore
+   * unknown frame kinds by contract.
+   */
+  z.object({ kind: z.literal('invocation_state'), spaceId: SpaceId, invocation: Invocation }),
 ]);
 export type ServerFrame = z.infer<typeof ServerFrame>;
 

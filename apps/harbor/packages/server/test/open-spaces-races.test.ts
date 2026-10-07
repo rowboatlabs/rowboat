@@ -42,7 +42,7 @@ describe('open-space transactional boundaries', () => {
     await store.init();
     hub = new SpaceHub();
     service = new HarborService(store, hub, { name: 'Race org', address: 'race.test' }, new MemoryBlobStore());
-    for (const id of ['owner', 'reader']) await store.putMember({ id, displayName: id, role: 'member' });
+    for (const id of ['owner', 'reader']) await store.putMember({ id, displayName: id, role: 'member', kind: 'human' });
     spaceId = (await service.createSpace({ memberId: 'owner' }, 'Open', 'open')).id;
     root = (await service.postMessage({ memberId: 'owner' }, spaceId, { body: 'root', actingMode: 'direct' })).message.id;
   });

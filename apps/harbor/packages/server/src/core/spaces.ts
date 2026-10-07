@@ -1,8 +1,8 @@
 import {
   inviteUrl,
+  Member,
   type AcceptInviteResult,
   type CreateInviteResult,
-  type Member,
   type Membership,
   type PresenceState,
   type ResolveInviteResult,
@@ -12,14 +12,14 @@ import {
 import { randomBytes } from 'node:crypto';
 import type { z } from 'zod';
 import { HarborError } from '../errors.js';
-import { canBind, canChangeMembership, canJoinSpace, canRenameSpace, enforce } from '../policy.js';
+import { canBind, canChangeMembership, canJoinSpace, canOpenDirect, canRenameSpace, enforce, isGroupChat } from '../policy.js';
 import { DIRECT_SPACE_NAME, directKeyFor, type PushLevel, type StoredEvent } from '../store.js';
 import { Kernel, type ActorCtx, type BindIdentity } from './kernel.js';
 
 // Spaces and membership: the org's containers and who is in them — spaces and
-// direct messages, invites and the bind ceremony, the roster, push
-// registration, and the membership-gated live relays (presence, whiteboard,
-// the subscribe-time replay).
+// direct messages, invites and the bind ceremony, the roster and its agent
+// members, push registration, and the membership-gated live relays (presence,
+// whiteboard, the subscribe-time replay).
 
 function seedDisplayName(identity: BindIdentity): string {
   const name = identity.name?.trim();
@@ -30,6 +30,7 @@ function seedDisplayName(identity: BindIdentity): string {
 }
 
 export type RenameSpaceInput = z.infer<Routes['renameSpace']['request']>;
+export type AddMembersInput = z.infer<Routes['addMembers']['request']>;
 
 const DEFAULT_INVITE_HOURS = 24 * 7;
 
@@ -45,10 +46,44 @@ export class Spaces {
     return member;
   }
 
+  /**
+   * An agent member (spec §4 Agent members, 2026-09-29): a minted id, a
+   * display name, never admin, and no identity binding, so no one signs in as
+   * it. It joins spaces through ordinary membership. No route creates one on
+   * its own: the integration that owns the agent calls this and gates who may.
+   * The first is the Replicas coding agent (PR #1130).
+   */
+  async createAgent(input: { displayName: string; ownerId?: string; agentKind?: string; agentConnection?: string; agentInstance?: string }): Promise<Member> {
+    const displayName = input.displayName.trim();
+    if (!Member.shape.displayName.safeParse(displayName).success) {
+      throw new HarborError('invalid_request', 'an agent needs a display name of 1 to 128 characters');
+    }
+    this.k.guardWrite();
+    // A member-added agent names its person (core/agents.ts); its kind and
+    // connection default to custom/contract (spec §4 Agent members, 2026-09-30).
+    const member: Member = {
+      id: this.k.ulid(),
+      displayName,
+      role: 'member',
+      kind: 'agent',
+      ...(input.ownerId ? { ownerId: input.ownerId } : {}),
+      agentKind: input.agentKind ?? 'custom',
+      agentConnection: input.agentConnection ?? 'contract',
+      ...(input.agentInstance ? { agentInstance: input.agentInstance } : {}),
+    };
+    await this.k.store.putMember(member);
+    return member;
+  }
+
   // --- spaces & membership ---------------------------------------------------
 
   async listSpaces(ctx: ActorCtx, opts: { includeDirect?: boolean } = {}): Promise<Space[]> {
     return this.k.store.listSpacesFor(ctx.memberId, opts);
+  }
+
+  /** Whether the org is a group chat right now (policy.ts isGroupChat): the same answer for every member. */
+  async isGroupChat(): Promise<boolean> {
+    return isGroupChat(await this.k.store.countSpacesByKind());
   }
 
   async browseSpaces(ctx: ActorCtx): Promise<Array<{ space: Space; joined: boolean }>> {
@@ -79,8 +114,9 @@ export class Spaces {
     this.k.guardWrite();
     const now = this.k.now();
     const space: Space = { id: this.k.ulid(), name, createdAt: now, kind: 'shared', visibility };
+    const wasGroupChat = await this.isGroupChat();
     await this.k.store.putSpace(space);
-    return this.k.locked(space.id, async () => {
+    const created = await this.k.locked(space.id, async () => {
       const membership: Membership = { spaceId: space.id, memberId: ctx.memberId, joinedAt: now };
       await this.k.store.putMembership(membership);
       await this.k.appendNext(space.id, now, { type: 'membership', membership, action: 'joined' });
@@ -88,6 +124,15 @@ export class Spaces {
       // space's root messages, born empty.
       return space;
     });
+    // A second space makes a group chat a workspace for everyone at once
+    // (2026-10-07), including members who are not in the new space: tell
+    // every member's connections so their listings move with it.
+    if (wasGroupChat) {
+      for (const member of await this.k.store.listAllMembers()) {
+        this.k.hub.publishToMember(member.id, { kind: 'org_changed', at: now });
+      }
+    }
+    return created;
   }
 
   /**
@@ -138,6 +183,7 @@ export class Spaces {
     const existing = await this.k.store.getDirectSpace(key);
     if (existing) return { space: existing, created: false };
 
+    enforce(canOpenDirect(await this.isGroupChat()));
     this.k.guardWrite();
     const now = this.k.now();
     const space: Space = { id: this.k.ulid(), name: DIRECT_SPACE_NAME, createdAt: now, kind: 'direct', visibility: 'private', participants };
@@ -172,20 +218,62 @@ export class Spaces {
   }
 
   /**
-   * The org roster as THIS member may see it (api.ts listOrgMembers,
-   * 2026-09-09): the union of every roster the caller belongs to, DMs
-   * included, deduped by id and sorted by display name (case-insensitive,
-   * id breaks ties). Discovery is bounded by shared membership on purpose —
-   * no admin directory, no privacy surface beyond what listMembers already
-   * exposes per space. Always contains the caller (a member of no space at
-   * all still sees themself). One statement (2026-09-22).
+   * The org roster (api.ts listOrgMembers): every member, people and agents,
+   * sorted by display name (case-insensitive, id breaks ties). Org-wide since
+   * 2026-09-29 (spec §5 answer 4): inside one org the org is the trust
+   * boundary, so anyone can find, DM, mention, or add anyone. It was bounded
+   * to shared spaces until then; guests, when built, get that bound back.
+   * Admins see nothing members do not.
    */
-  async listOrgMembers(ctx: ActorCtx): Promise<Member[]> {
-    const members = await this.k.store.listMembersSharingSpace(ctx.memberId);
+  async listOrgMembers(_ctx: ActorCtx): Promise<Member[]> {
+    const members = await this.k.store.listAllMembers();
     return members.sort(
       (a, b) =>
         a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' }) || a.id.localeCompare(b.id),
     );
+  }
+
+  /**
+   * Add existing org members, people or agents, to a shared space the caller
+   * is in (spec §4 Roles: any member adds to spaces they are in; 2026-09-29).
+   * All or nothing: every id must be an org member before anything is
+   * written. Each one added gets the ordinary `joined` event with `by`, and a
+   * `space_added` frame once the transaction commits. No notification in v1
+   * (decided 2026-09-29): the sidebar and the stream's join line say it.
+   * Anyone already in is a no-op, so a repeated call writes nothing and
+   * passes a read-only org.
+   */
+  async addMembers(ctx: ActorCtx, spaceId: string, input: AddMembersInput): Promise<Membership[]> {
+    const space = await this.k.requireMember(ctx, spaceId);
+    enforce(canChangeMembership(space, 'add'));
+    const ids = [...new Set(input.memberIds)];
+    for (const id of ids) {
+      if (!(await this.k.store.getMember(id))) throw new HarborError('not_found', `no member ${id} in this org`);
+    }
+    const by = this.k.attributionOf(ctx, input);
+    const at = this.k.now();
+    const { memberships, added } = await this.k.lockedAs(ctx, spaceId, async () => {
+      const existing = new Map<string, Membership>();
+      for (const id of ids) {
+        const m = await this.k.store.getMembership(spaceId, id);
+        if (m) existing.set(id, m);
+      }
+      const added: Membership[] = [];
+      if (existing.size < ids.length) this.k.guardWrite();
+      for (const memberId of ids) {
+        if (existing.has(memberId)) continue;
+        const membership: Membership = { spaceId, memberId, joinedAt: at };
+        await this.k.store.putMembership(membership);
+        await this.k.appendNext(spaceId, at, { type: 'membership', membership, action: 'joined', by });
+        added.push(membership);
+      }
+      const memberships = ids.map((id) => existing.get(id) ?? added.find((m) => m.memberId === id)!);
+      return { memberships, added };
+    });
+    for (const m of added) {
+      this.k.hub.publishToMember(m.memberId, { kind: 'space_added', spaceId, spaceKind: 'shared', by: ctx.memberId, at });
+    }
+    return memberships;
   }
 
   async leaveSpace(ctx: ActorCtx, spaceId: string): Promise<void> {
@@ -252,7 +340,7 @@ export class Spaces {
     if (!member) {
       // Minted id, NOT the raw sub: issuer subjects live only in the mapping
       // table, so an org can change AS someday without rewriting history.
-      member = { id: this.k.ulid(), displayName: seedDisplayName(identity), role: 'member' };
+      member = { id: this.k.ulid(), displayName: seedDisplayName(identity), role: 'member', kind: 'human' };
       await this.k.store.putMember(member);
       await this.k.store.putIdentity(identity.iss, identity.sub, member.id);
     }

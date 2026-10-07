@@ -8,6 +8,15 @@ import { maybeInvokeRowboat, type RowboatTurnOptions } from '@/lib/spaces-rowboa
 import { threadLabelOf } from '@/lib/spaces-conventions'
 import { containsRowboatAddress } from '@/lib/spaces-mentions'
 import * as analytics from '@/lib/analytics'
+import { noteInvocations } from '@/hooks/use-space-invocations'
+
+/** Options picked in the composer for agent members a message mentions, by agent id (Harbor spec §8, 2026-09-30). */
+export type AgentMemberOptions = Record<string, Record<string, string | boolean>>
+
+/** The post payload's share of them: nothing when none were picked. */
+export function agentOptionsPayload(agent: { members?: AgentMemberOptions } | undefined): { agentOptions?: AgentMemberOptions } {
+    return agent?.members && Object.keys(agent.members).length > 0 ? { agentOptions: agent.members } : {}
+}
 
 // Posting a ROOT to a space's stream, the optimistic way (standard team-chat
 // pattern): the row renders the moment this is called, dimmed as pending; the
@@ -16,13 +25,14 @@ import * as analytics from '@/lib/analytics'
 // stream instead" lands exactly what the stream composer would have. Callers
 // on a detached window snap to the tail first (jumpToLatest), or the row has
 // no tail to land on.
-export function postStreamMessage(org: OrgWithSpaces, space: spaces.Space, body: string, agent?: RowboatTurnOptions): void {
+export function postStreamMessage(org: OrgWithSpaces, space: spaces.Space, body: string, agent?: RowboatTurnOptions & { members?: AgentMemberOptions }): void {
     if (!canActInSpace(org.id, space.id)) return
     const pending = buildPendingMessage(space.id, org.memberId, body)
     ingestStreamMessage(org.id, space.id, pending)
-    void invokeSpace('spaces:postMessage', { orgId: org.id, spaceId: space.id, body })
+    void invokeSpace('spaces:postMessage', { orgId: org.id, spaceId: space.id, body, ...agentOptionsPayload(agent) })
         .then((result) => {
             resolvePendingStreamMessage(org.id, space.id, pending.id, result.message)
+            noteInvocations(org.id, space.id, result.invocations)
             // The org read the stream up to our own post; mirror it.
             markStreamRead(org.id, space.id, result.message.offset, { sync: false })
             analytics.spacesMessagePosted({ kind: 'general', mentionsRowboat: containsRowboatAddress(body) })

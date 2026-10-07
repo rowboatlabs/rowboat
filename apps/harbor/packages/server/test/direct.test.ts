@@ -21,7 +21,8 @@ async function start(): Promise<void> {
       { id: 'harsh', displayName: 'Harsh' },
       { id: 'gagan', displayName: 'Gagan' },
     ],
-    seedSpaces: [{ name: 'Main', creator: 'ramnique' }],
+    // Two spaces: a one-space org is a group chat, where DMs are off (2026-10-07).
+    seedSpaces: [{ name: 'Main', creator: 'ramnique' }, { name: 'Ops', creator: 'ramnique' }],
   });
   ramnique = restClient(harbor, 'dev-ramnique');
   harsh = restClient(harbor, 'dev-harsh');
@@ -157,7 +158,7 @@ describe('direct messages', () => {
     const ramLive = await liveClient(harbor, 'dev-ramnique');
     const harshLive = await liveClient(harbor, 'dev-harsh');
     // A brand-new pair so the open actually creates.
-    await harbor.store.putMember({ id: 'prakhar', displayName: 'Prakhar', role: 'member' });
+    await harbor.store.putMember({ id: 'prakhar', displayName: 'Prakhar', role: 'member', kind: 'human' });
     const prakhar = restClient(harbor, 'dev-prakhar');
     const prakharLive = await liveClient(harbor, 'dev-prakhar');
     await ramnique.post('/v1/direct', { memberId: 'prakhar' });

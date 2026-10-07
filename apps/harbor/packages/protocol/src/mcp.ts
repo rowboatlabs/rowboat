@@ -14,6 +14,7 @@ import {
 import { Attribution, Member, Membership, Message, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic } from './core.js';
 import { AssetId, AssetPath, BlobHash, MemberId, MessageId, SpaceId, TopicId } from './ids.js';
 import { CreateInviteResult } from './invite.js';
+import { Invocation, InvocationId, InvocationOptionValues, InvocationRefusal, InvocationState } from './invocation.js';
 import { SearchKind, SearchLimit, SearchResults } from './search.js';
 
 // Decision 5 (CONTRACT.md): the agent face — direct projections of the core
@@ -70,9 +71,8 @@ export const whoami = tool({
 export const listMembers = tool({
   name: 'list_members',
   description:
-    'People, with names. Omit spaceId for the org roster as your person sees it: everyone they ' +
-    'share at least one space or DM with (deduped, sorted by display name). Pass spaceId for that ' +
-    "space's members only. This is how a name becomes a memberId — match displayName " +
+    'People and agents, with names. Omit spaceId for the whole org roster, sorted by display name. ' +
+    "Pass spaceId for that space's members only. This is how a name becomes a memberId — match displayName " +
     '(case-insensitive, first name is usually enough); if several match, say so and ask. ' +
     'Messages and reactions carry memberIds only; resolve them here before naming anyone.',
   input: z.object({ spaceId: SpaceId.optional() }),
@@ -91,6 +91,7 @@ export const listSpaces = tool({
     'Shared spaces only by default; pass includeDirect to ' +
     'also list your direct messages (kind "direct": a private conversation with exactly one other ' +
     'member — its participants are listed; label it by the other member, its name is a placeholder). ' +
+    'groupChat: true means the org is one group conversation and DMs are off (open_direct refuses) until it has a second space. ' +
     "A DM flagged self: true is your person's own notes-to-self space (they are its only participant) — " +
     'the right place for "save this for me". Every other tool works on a DM exactly as on a space.',
   input: z.object({
@@ -113,6 +114,8 @@ export const listSpaces = tool({
         assets: z.array(Asset.omit({ state: true })),
       }),
     ),
+    /** The org is a group chat (spec §4, 2026-10-07): one space, DMs off until a second space. */
+    groupChat: z.boolean(),
   }),
 });
 
@@ -167,6 +170,16 @@ export const renameSpace = tool({
     'person). An identical name is a no-op.',
   input: z.object({ spaceId: SpaceId, name: z.string().min(1).max(128) }),
   output: z.object({ space: Space }),
+});
+
+export const addMembers = tool({
+  name: 'add_members',
+  description:
+    'Add existing org members, people or agents, to a shared space your person is in. Take ' +
+    'memberIds from list_members. Anyone already in is a no-op. Direct messages cannot be added to. ' +
+    'Only when your person asked for it.',
+  input: z.object({ spaceId: SpaceId, memberIds: z.array(MemberId).min(1).max(100) }),
+  output: z.object({ memberships: z.array(Membership) }),
 });
 
 export const leaveSpace = tool({
@@ -284,8 +297,35 @@ export const postMessage = tool({
     threadRoot: MessageId.optional(),
     body: z.string().min(1).max(65_536),
     poll: NewPoll.optional(),
+    /** Options for agents the message mentions, keyed by agent member id (their declared options; see get_invocations). */
+    agentOptions: z.record(MemberId, InvocationOptionValues).optional(),
   }),
-  output: z.object({ messageId: MessageId, threadRoot: MessageId.optional() }),
+  output: z.object({
+    messageId: MessageId,
+    threadRoot: MessageId.optional(),
+    /** Agents this message invoked, or was refused (spec §8): say so if a hand-off was refused. */
+    invocations: z.array(z.object({ agentId: MemberId, state: InvocationState, refusal: InvocationRefusal.optional() })).optional(),
+  }),
+});
+
+/** Agent invocations in a space (spec §8), for "is it still working?" and "why didn't it answer?". */
+export const getInvocations = tool({
+  name: 'get_invocations',
+  description:
+    'Agent invocations in a space, newest first: which agent was asked, by whom, and its state ' +
+    '(queued, pending, working, waiting on a person, done, failed, cancelled, refused), with any ' +
+    'activity line. Pass threadRootId for one thread.',
+  input: z.object({ spaceId: SpaceId, threadRootId: MessageId.optional() }),
+  output: z.object({ invocations: z.array(Invocation) }),
+});
+
+export const stopInvocation = tool({
+  name: 'stop_invocation',
+  description:
+    'Cancel an agent invocation your person queued, or stop a running one (your person invoked it, ' +
+    'or is an admin) when the agent can be stopped. Only when they asked for it.',
+  input: z.object({ invocationId: InvocationId }),
+  output: z.object({ invocation: Invocation }),
 });
 
 export const editMessage = tool({
@@ -628,6 +668,7 @@ export const mcpTools = [
   openDirect,
   createSpace,
   renameSpace,
+  addMembers,
   leaveSpace,
   createInvite,
   readStream,
@@ -636,6 +677,8 @@ export const mcpTools = [
   markAllRead,
   searchSpace,
   postMessage,
+  getInvocations,
+  stopInvocation,
   editMessage,
   deleteMessage,
   react,
@@ -669,4 +712,5 @@ export const readOnlyMcpToolNames: ReadonlySet<string> = new Set([
   readAsset.name,
   assetHistory.name,
   diff.name,
+  getInvocations.name,
 ]);

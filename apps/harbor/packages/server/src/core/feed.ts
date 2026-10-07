@@ -2,6 +2,10 @@ import {
   parseMentions,
   stampsEqual,
   type Attribution,
+  type Approval,
+  type ApprovalRequest,
+  type Invocation,
+  type MembershipEvent,
   type MentionStamps,
   type Message,
   type Poll,
@@ -9,6 +13,7 @@ import {
   type Routes,
   type SearchKind,
   type SearchResults,
+  type StreamEvent,
   type Topic,
   type TopicListing,
   type TopicRemoval,
@@ -21,6 +26,7 @@ import { enforce, isAuthor } from '../policy.js';
 import { parseSearchQuery } from '../search.js';
 import type { MessageWindow, StoredPollVote, StoredReaction } from '../store.js';
 import type { Assets } from './assets.js';
+import type { InvocationOutbox, Invocations } from './invocations.js';
 import { Kernel, type ActorCtx } from './kernel.js';
 
 // The conversation (the annotation model, spec §7): one stream of root
@@ -38,6 +44,8 @@ export type CreateTopicInput = z.infer<Routes['createTopic']['request']>;
 
 /** A page request (protocol listStream / listThread query): at most one of the three offsets. */
 export type PageOpts = { beforeOffset?: number; afterOffset?: number; aroundOffset?: number; limit?: number };
+/** The log range a page answers for: offsets in (after, upTo], or to the head when upTo is null. */
+type PageSpan = { after: number; upTo: number | null };
 
 export type ManageTopicAction = z.infer<Routes['manageTopic']['request']>;
 
@@ -74,6 +82,8 @@ export class Feed {
     private readonly assets: Assets,
     /** Absent = no notifications on this org (notify.ts: frames + push). */
     private readonly notifier?: Notifier,
+    /** Absent = no agent invocations (core/invocations.ts). */
+    private readonly invocations?: Invocations,
   ) {}
 
   // --- mentions (protocol mentions.ts, 2026-09-10) -----------------------------
@@ -121,10 +131,15 @@ export class Feed {
         votesByMessage.set(v.messageId, [...(votesByMessage.get(v.messageId) ?? []), v]);
       }
     }
+    // An approval card shows its approval as it stands (spec §8 part 4), fetched only when the page carries one.
+    const cardIds = messages.filter((m) => m.approval).map((m) => m.id);
+    const approvals = new Map<string, Approval>();
+    for (const a of await this.k.store.listApprovalsForMessages(spaceId, cardIds)) approvals.set(a.messageId, a);
     return messages.map((m) => ({
       ...m,
       reactions: foldReactions(byMessage.get(m.id) ?? []),
       ...(m.poll ? { poll: foldPollVotes(m.poll, votesByMessage.get(m.id) ?? []) } : {}),
+      ...(m.approval && !m.deletedAt ? { approval: approvals.get(m.id) ?? m.approval } : {}),
     }));
   }
 
@@ -168,7 +183,7 @@ export class Feed {
   private async pageOf(
     fetch: (window: MessageWindow) => Promise<Message[]>,
     opts?: PageOpts,
-  ): Promise<{ rows: Message[]; hasMore: boolean; hasMoreAfter: boolean }> {
+  ): Promise<{ rows: Message[]; hasMore: boolean; hasMoreAfter: boolean; span: PageSpan }> {
     const given = [opts?.beforeOffset, opts?.afterOffset, opts?.aroundOffset].filter((v) => v !== undefined).length;
     if (given > 1) throw new HarborError('invalid_request', 'pass at most one of beforeOffset, afterOffset, aroundOffset');
     const limit = this.pageLimit(opts?.limit);
@@ -182,35 +197,47 @@ export class Feed {
       const above = await fetch({ afterOffset: opts.aroundOffset - 1, limit: aboveShare + 1 });
       const hasMore = below.length > belowShare;
       const hasMoreAfter = above.length > aboveShare;
+      const rows = [...(hasMore ? below.slice(1) : below), ...(hasMoreAfter ? above.slice(0, aboveShare) : above)];
       return {
-        rows: [...(hasMore ? below.slice(1) : below), ...(hasMoreAfter ? above.slice(0, aboveShare) : above)],
+        rows,
         hasMore,
         hasMoreAfter,
+        span: { after: hasMore ? below[0]!.offset : 0, upTo: hasMoreAfter ? rows.at(-1)!.offset : null },
       };
     }
     if (opts?.afterOffset !== undefined) {
       const above = await fetch({ afterOffset: opts.afterOffset, limit: limit + 1 });
       const hasMoreAfter = above.length > limit;
+      const rows = hasMoreAfter ? above.slice(0, limit) : above;
       // Paging forward says nothing about what lies below the edge the
       // caller already holds; that side is theirs to track.
-      return { rows: hasMoreAfter ? above.slice(0, limit) : above, hasMore: false, hasMoreAfter };
+      return { rows, hasMore: false, hasMoreAfter, span: { after: opts.afterOffset, upTo: hasMoreAfter ? rows.at(-1)!.offset : null } };
     }
     const window = await fetch({
       ...(opts?.beforeOffset !== undefined ? { beforeOffset: opts.beforeOffset } : {}),
       limit: limit + 1,
     });
     const hasMore = window.length > limit;
-    return { rows: hasMore ? window.slice(1) : window, hasMore, hasMoreAfter: false };
+    const rows = hasMore ? window.slice(1) : window;
+    // Paging back ends at this page's newest row: what lies above it belongs
+    // to the page the caller already holds. The newest page runs to the head.
+    const upTo = opts?.beforeOffset !== undefined ? (rows.at(-1)?.offset ?? 0) : null;
+    return { rows, hasMore, hasMoreAfter: false, span: { after: hasMore ? window[0]!.offset : 0, upTo } };
   }
 
   async listStream(
     ctx: ActorCtx,
     spaceId: string,
     opts?: PageOpts,
-  ): Promise<{ messages: Message[]; topics: Topic[]; hasMore: boolean; hasMoreAfter: boolean; readOffset: number }> {
+  ): Promise<{ messages: Message[]; topics: Topic[]; hasMore: boolean; hasMoreAfter: boolean; readOffset: number; events: StreamEvent[] }> {
     await this.k.requireReadableSpace(ctx, spaceId);
     // Newest page by default — never the full history.
-    const { rows: roots, hasMore, hasMoreAfter } = await this.pageOf((w) => this.k.store.listStream(spaceId, w), opts);
+    const { rows: roots, hasMore, hasMoreAfter, span } = await this.pageOf((w) => this.k.store.listStream(spaceId, w), opts);
+    // The join lines between these messages (2026-09-29, the Matrix model):
+    // each belongs to the page holding the next message after it, so paging
+    // either way never shows one twice or drops one. An empty older page
+    // (upTo 0) holds none.
+    const events = span.upTo === 0 ? [] : await this.k.store.listMembershipEvents(spaceId, span.after, span.upTo);
     // The page's topic badges, one batched decoration.
     const topics: Topic[] = [];
     for (const m of roots) {
@@ -223,6 +250,7 @@ export class Feed {
       hasMore,
       hasMoreAfter,
       readOffset: await this.k.store.getStreamReadMark(spaceId, ctx.memberId),
+      events: events.map((e) => ({ offset: e.offset, at: e.at, event: e.event as MembershipEvent })),
     };
   }
 
@@ -284,16 +312,58 @@ export class Feed {
     if (message.poll) {
       folded.poll = foldPollVotes(message.poll, await this.k.store.listPollVotesByMessage(spaceId, message.id));
     }
+    if (message.approval && !message.deletedAt) {
+      folded.approval = (await this.k.store.listApprovalsForMessages(spaceId, [message.id]))[0] ?? message.approval;
+    }
     return folded;
   }
 
-  async postMessage(ctx: ActorCtx, spaceId: string, input: NewMessage): Promise<{ message: Message }> {
+  /**
+   * `finishes` (in-process only, never on the wire): this message is the
+   * answer to that invocation, which is marked done in the same transaction,
+   * or nothing is posted (spec §8 Connectors, 2026-09-30). `approval`
+   * (in-process only): this message is the agent's approval card, and the
+   * approval rides on it, raised in the same transaction (spec §8 part 4).
+   * `relayOf` (in-process only): this message is Jev's tags for that one,
+   * and the agents it mentions take that message's hand-off depth (spec §8
+   * Jev, 2026-10-07).
+   */
+  async postMessage(
+    ctx: ActorCtx,
+    spaceId: string,
+    input: NewMessage,
+    opts: { finishes?: string; approval?: { invocationId: string; request: ApprovalRequest }; relayOf?: string } = {},
+  ): Promise<{ message: Message; invocations: Invocation[] }> {
     const space = await this.k.requireMember(ctx, spaceId);
     this.k.guardWrite();
     const author = this.k.attributionOf(ctx, input);
 
     const stamps = await this.stampsFor(spaceId, input.body);
+    // The agents this message invokes are decided in its transaction, so a
+    // mention is never lost between the post and the queue (spec §8); their
+    // frames leave with the rest, after the commit.
+    const outbox: InvocationOutbox = [];
+    let finishing: Invocation | undefined;
+    let raising: Invocation | undefined;
+    const invoke = async (message: Message): Promise<{ message: Message; invocations: Invocation[] }> => {
+      if (!this.invocations) return { message, invocations: [] };
+      // Recorded before the answer below finishes its turn: Jev may tag
+      // someone for this message later, at this depth (spec §8 Jev, 2026-10-07).
+      const depth = await this.invocations.handOffDepth(ctx, spaceId, opts.relayOf);
+      if (depth > 0) await this.k.store.putMessageHops(spaceId, message.id, depth);
+      const invocations = await this.invocations.onMessage(ctx, space, message, input.agentOptions, depth, outbox);
+      if (finishing && this.invocations) await this.invocations.finishWithin(finishing, outbox);
+      return { message, invocations };
+    };
     const result = await this.k.lockedAs(ctx, spaceId, async () => {
+      if (opts.finishes) {
+        if (!this.invocations || !input.threadRoot) throw new HarborError('invalid_request', 'an answer is a reply in its invocation\'s thread');
+        finishing = await this.invocations.assertFinishable(ctx, opts.finishes, spaceId, input.threadRoot);
+      }
+      if (opts.approval) {
+        if (!this.invocations || !input.threadRoot) throw new HarborError('invalid_request', 'an approval card is a reply in its invocation\'s thread');
+        raising = await this.invocations.assertCanRaise(ctx, opts.approval.invocationId, spaceId, input.threadRoot);
+      }
       const at = this.k.now();
       // The org stamps the poll from its own clock: answer ids 1..n, a
       // duration in becomes an expiry out (the Discord create asymmetry).
@@ -312,8 +382,9 @@ export class Feed {
         // replying to its thread) — threads stay flat by construction.
         const root = await this.resolveRoot(spaceId, input.threadRoot);
         const offset = await this.k.nextOffset(spaceId);
+        const id = this.k.ulid();
         const message: Message = {
-          id: this.k.ulid(),
+          id,
           spaceId,
           threadRoot: root.id,
           author,
@@ -323,9 +394,11 @@ export class Feed {
           replyCount: 0,
           reactions: [],
           ...(poll ? { poll } : {}),
+          ...(raising && opts.approval ? { approval: this.invocations!.approvalFor(raising, id, opts.approval.request) } : {}),
           ...stampFields(stamps),
         };
         await this.k.store.appendMessage(message);
+        if (raising && message.approval) await this.invocations!.raiseWithin(raising, message.approval, outbox);
         await this.k.store.refreshReplyStats(spaceId, root.id);
         await this.k.append(spaceId, offset, at, { type: 'message', message });
         // Read state (2026-09-09), the provisional follow rules: replying
@@ -349,7 +422,7 @@ export class Feed {
           await this.k.store.putTopic(revived);
           await this.k.append(spaceId, offset + 1, at, { type: 'topic', topic: revived, action: 'unarchived', by: author });
         }
-        return { message };
+        return invoke(message);
       }
 
       // A new root in the stream. Never a container — createTopic is the
@@ -377,8 +450,9 @@ export class Feed {
       // Posting directly reads the stream up to your own message (read state, 2026-09-09).
       if (author.actingMode === 'direct') await this.k.store.advanceStreamReadMark(spaceId, ctx.memberId, offset, at);
       await this.followMentioned(spaceId, message.id, stamps, ctx.memberId, at);
-      return { message };
+      return invoke(message);
     });
+    this.invocations?.flush(outbox);
     // Notification decisions run OUTSIDE the lock and never block the reply
     // (notify.ts: the `notify` frame to every connection, push to phones);
     // the notifier logs its own failures.
@@ -580,7 +654,7 @@ export class Feed {
         },
       });
       // A poll is content: redacted with the body (the store already dropped it). A tombstone addresses nobody.
-      const { poll: _poll, ...rest } = message;
+      const { poll: _poll, approval: _approval, ...rest } = message;
       return this.foldLive(spaceId, { ...rest, body: '', deletedAt: at, mentions: [], mentionsHere: false, mentionsRowboat: false });
     });
   }

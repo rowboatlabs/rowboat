@@ -25,6 +25,8 @@ No chip is set, but code mode is enabled (this skill only loads when it is). **P
 
 ## STEP 2 — Resolve workdir, then run
 
+**First, check that you actually have \`code_agent_run\`.** In a chat the harness runs inside a work directory, so the tool is attached only once this chat has one. If it is NOT in your tools, do not improvise with \`executeCommand\` or your own file tools: tell the user to pick the folder to work in — the folder button beside the chat input ("Choose a folder…"), or opening the project from the Code section — and that you will run the coding agent as soon as they do.
+
 **Resolve the workdir** (in this priority order):
 1. A path the user named in their original message (e.g. \`G:/4th sem/CN\`).
 2. The path from a "# User Work Directory" block in your context.
