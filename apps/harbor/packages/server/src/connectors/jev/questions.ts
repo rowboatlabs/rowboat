@@ -14,6 +14,9 @@ export const MAX_TAGS = 3;
 export const MAX_MESSAGE_CHARS = 4000;
 export const MAX_THREAD_MESSAGES = 10;
 export const MAX_THREAD_CHARS = 400;
+/** The newest notes a space keeps, and how much of each Jev sees. */
+export const MAX_NOTES = 20;
+export const MAX_NOTE_CHARS = 1000;
 
 /** What an agent is underneath, in words, for the kinds Harbor knows (core.ts AGENT_PAIRS). */
 const AGENT_KINDS: Record<string, string> = {
@@ -44,6 +47,20 @@ export interface TagInput {
   busyAgents: ReadonlySet<string>;
   /** False past the hop limit: a tag could not start an agent's turn. */
   agentsAllowed: boolean;
+  /** What people in the space told Ro about its tags, oldest first. */
+  notes: readonly Note[];
+}
+
+/**
+ * One message that tagged Ro, kept as the space's feedback (spec §8 Jev,
+ * 2026-10-07): what was said, by name, and the thread it was said in, so
+ * "you got this wrong" has the tags it is about. Only Jev reads it.
+ */
+export interface Note {
+  messageId: string;
+  from: string;
+  said: string;
+  about?: Array<{ author: string; text: string }>;
 }
 
 function clip(text: string, max: number): string {
@@ -95,6 +112,12 @@ const PERSON_CONTEXT =
 const AGENT_CONTEXT =
   'Unlike a person, an agent sees only messages that tag it, even in a thread it has already written in: a message meant for it that does not tag it never reaches it.';
 
+// People correct Ro by tagging it (2026-10-07, Arjun in Spaces): "@Ro you
+// should have tagged Sam", "@Ro always tag agents in threads". Jev cannot write
+// rules down, so the feedback is given back word for word with each question.
+const NOTES_CONTEXT =
+  '`team_feedback` is what people in this space told you about your past tags, oldest first, each with the `thread` it was said in. Follow it where it applies; when two disagree, the later one wins.';
+
 const memberKey = (index: number) => `member_${index + 1}`;
 
 export function buildQuestions(input: TagInput, candidates: readonly Member[]): { state: Json; questions: Record<string, NoulQuestion> } {
@@ -121,6 +144,13 @@ export function buildQuestions(input: TagInput, candidates: readonly Member[]): 
       return entry;
     }),
   };
+  if (input.notes.length > 0) {
+    state.team_feedback = input.notes.slice(-MAX_NOTES).map((n) => ({
+      from: n.from,
+      said: clip(n.said, MAX_NOTE_CHARS),
+      ...(n.about?.length ? { thread: n.about.map((m) => ({ author: m.author, text: clip(m.text, MAX_THREAD_CHARS) })) } : {}),
+    }));
+  }
   if (input.thread.length > 0) {
     state.thread = input.thread.slice(-MAX_THREAD_MESSAGES).map((m) => ({ author: who(m.authorId), text: clip(m.text, MAX_THREAD_CHARS) }));
   }
@@ -130,7 +160,7 @@ export function buildQuestions(input: TagInput, candidates: readonly Member[]): 
       type: 'noul',
       instructions: {
         question: `Should \`message\` tag \`members[${i}]\` so that they see it and act on it?`,
-        context: `${CONTEXT} ${TAGS_CONTEXT} ${m.kind === 'agent' ? AGENT_CONTEXT : PERSON_CONTEXT}`,
+        context: `${CONTEXT} ${TAGS_CONTEXT} ${m.kind === 'agent' ? AGENT_CONTEXT : PERSON_CONTEXT}${input.notes.length > 0 ? ` ${NOTES_CONTEXT}` : ''}`,
         yes_when: m.kind === 'agent' ? `${YES_WHEN}, including a follow-up meant for them in a thread they already wrote in` : YES_WHEN,
         not_when:
           'The message already tags anyone (`message.tags` is not empty), their name only comes up in passing, they are merely in the space, the message is meant for someone else, or the message is a remark that needs no one' +

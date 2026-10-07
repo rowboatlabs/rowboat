@@ -2,7 +2,7 @@ import { mentionsAsText, mentionToken, type Invocation, type Member, type Messag
 import { AGENT_HOP_LIMIT } from '../../policy.js';
 import type { ConnectorEnv, RunningConnector } from '../platforms.js';
 import { TypeSafeError, type JevApi } from './api.js';
-import { buildQuestions, decideTags, MAX_THREAD_MESSAGES, selectCandidates } from './questions.js';
+import { buildQuestions, decideTags, MAX_NOTES, MAX_THREAD_MESSAGES, selectCandidates, type Note } from './questions.js';
 
 // The Jev connector (spec §8 Jev, 2026-10-07): the agent Harbor itself is, on
 // the deployment's OpenRouter key. Unlike every other agent it is not invoked
@@ -17,16 +17,26 @@ import { buildQuestions, decideTags, MAX_THREAD_MESSAGES, selectCandidates } fro
 // thread root): a live frame wakes the space, and a sweep every minute is the
 // guarantee, so a restart catches up on what was posted while it was down.
 // A message older than CATCH_UP_MS is skipped rather than tagged late.
+//
+// A message that tags Jev is feedback on its tags (2026-10-07, Arjun in
+// Spaces): it is kept in the space's record, word for word with the thread it
+// was said in, given back to Jev with every question in that space and no
+// other, and acknowledged with a 👍. Deleting the message withdraws it.
 
 const SWEEP_EVERY_MS = 60_000;
 const CATCH_UP_MS = 10 * 60_000;
 /** Its record per space, in agent_connection_threads under the empty thread root: one cursor, not a thread. */
 const SPACE_RECORD = '';
 const LIVE_STATES = new Set<Invocation['state']>(['queued', 'pending', 'working', 'waiting']);
+/** How much of the thread a note keeps: enough to see the message and Jev's tags it is about. */
+const NOTE_THREAD_MESSAGES = 5;
+const NOTED = '👍';
 
 interface SpaceRecord {
   /** The offset of the last event Jev has read in the space. */
   offset: number;
+  /** The space's feedback to Jev, oldest first, at most MAX_NOTES. */
+  notes?: Note[];
 }
 
 export class JevConnector implements RunningConnector {
@@ -138,21 +148,59 @@ export class JevConnector implements RunningConnector {
     }
     const { events } = await service.replay(ctx, spaceId, record.offset);
     let offset = record.offset;
-    const save = () => this.env.thread.put(spaceId, SPACE_RECORD, { offset } satisfies SpaceRecord);
+    let notes = record.notes ?? [];
+    let dirty = false;
+    const save = () => this.env.thread.put(spaceId, SPACE_RECORD, { offset, ...(notes.length > 0 ? { notes } : {}) } satisfies SpaceRecord);
     for (const stored of events) {
       if (this.stopped) break;
-      if (stored.event.type === 'message') {
-        if ((await this.consider(stored.event.message)) === 'retry') break;
+      const event = stored.event;
+      if (event.type === 'message') {
+        const message = event.message;
+        const note = message.mentions.includes(this.env.agent.id) ? await this.noteOf(message) : undefined;
+        if (note) notes = [...notes, note].slice(-MAX_NOTES);
+        else if ((await this.consider(message, notes)) === 'retry') break;
         offset = stored.offset;
-        // After each tagged message, so a restart never tags one twice.
+        // After each message, so a restart never tags one twice or loses a note.
         await save();
-      } else offset = stored.offset;
+        dirty = false;
+        if (note) await this.safe(() => service.reactToMessage(ctx, spaceId, message.id, { emoji: NOTED, action: 'add', actingMode: 'direct' }), undefined);
+      } else {
+        if (event.type === 'message_deleted' && notes.some((n) => n.messageId === event.deletion.messageId)) {
+          notes = notes.filter((n) => n.messageId !== event.deletion.messageId);
+        }
+        offset = stored.offset;
+        dirty = true;
+      }
     }
-    if (offset !== record.offset) await save();
+    if (dirty) await save();
+  }
+
+  /**
+   * A message that tags Jev, as a note for the space; none for its own posts,
+   * a deleted message, or outside a shared space. In a thread, the note keeps
+   * the messages before it, Jev's tags among them, which "wrong" points at.
+   */
+  private async noteOf(message: Message): Promise<Note | undefined> {
+    const { ctx, service, agent } = this.env;
+    if (message.author.memberId === agent.id || message.deletedAt) return undefined;
+    const space = (await service.listSpaces(ctx)).find((s) => s.id === message.spaceId);
+    if (!space || space.kind !== 'shared') return undefined;
+    const members = await service.listMembers(ctx, message.spaceId);
+    const names = new Map(members.map((m) => [m.id, m.displayName]));
+    const who = (id: string) => names.get(id) ?? 'someone who left';
+    const note: Note = { messageId: message.id, from: who(message.author.memberId), said: mentionsAsText(message.body, names) };
+    if (message.threadRoot) {
+      const page = await service.listThread(ctx, message.spaceId, message.threadRoot, { beforeOffset: message.offset, limit: NOTE_THREAD_MESSAGES });
+      note.about = [page.root, ...page.messages]
+        .filter((m) => !m.deletedAt)
+        .slice(-NOTE_THREAD_MESSAGES)
+        .map((m) => ({ author: who(m.author.memberId), text: mentionsAsText(m.body, names) }));
+    }
+    return note;
   }
 
   /** One message: ask Jev who it needs, and tag them. 'retry' leaves it for the next sweep. */
-  private async consider(message: Message): Promise<'done' | 'retry'> {
+  private async consider(message: Message, notes: readonly Note[]): Promise<'done' | 'retry'> {
     const { ctx, service, agent } = this.env;
     if (message.author.memberId === agent.id || message.deletedAt) return 'done';
     if (Date.now() - Date.parse(message.postedAt) > CATCH_UP_MS) return 'done';
@@ -184,6 +232,7 @@ export class JevConnector implements RunningConnector {
       here: message.mentionsHere,
       busyAgents,
       agentsAllowed: depth <= AGENT_HOP_LIMIT,
+      notes,
     };
     const candidates = selectCandidates(input);
     if (candidates.length === 0) return 'done';
