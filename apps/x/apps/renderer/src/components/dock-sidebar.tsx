@@ -271,10 +271,16 @@ function isSameLocalDay(a: Date, b: Date): boolean {
 }
 
 function formatMeetingTime(event: UpcomingMeeting): string {
-  if (event.isAllDay) return 'All day'
   const now = new Date()
   const tomorrow = new Date(now)
   tomorrow.setDate(tomorrow.getDate() + 1)
+  // All-day events get a date qualifier when not today (2026-10-05, issue #932)
+  if (event.isAllDay) {
+    if (isSameLocalDay(event.start, now)) return 'All day'
+    if (isSameLocalDay(event.start, tomorrow)) return 'Tmrw · All day'
+    const date = event.start.toLocaleDateString([], { month: 'numeric', day: 'numeric' })
+    return `${date} · All day`
+  }
   const time = event.start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
   if (isSameLocalDay(event.start, now)) return time
   if (isSameLocalDay(event.start, tomorrow)) return `Tmrw ${time}`
@@ -725,9 +731,12 @@ export function DockSidebar({
         }))
         const items: UpcomingMeeting[] = []
         for (const r of settled) if (r.status === 'fulfilled' && r.value) items.push(r.value)
+        // Sort chronologically across days; keep all-day first only when start times match (2026-10-05, issue #932).
         items.sort((a, b) => {
+          const diff = a.start.getTime() - b.start.getTime()
+          if (diff !== 0) return diff
           if (a.isAllDay !== b.isAllDay) return a.isAllDay ? -1 : 1
-          return a.start.getTime() - b.start.getTime()
+          return 0
         })
         if (!cancelled) setMeetings(items.slice(0, 1))
       } catch { /* ignore */ }
