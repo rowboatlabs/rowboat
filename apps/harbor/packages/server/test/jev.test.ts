@@ -262,6 +262,16 @@ describe('Jev’s questions', () => {
     expect(decideTags({ member_1: 0.8, member_2: 0.9, member_3: 0.95, member_4: 0.85, member_5: 0.99 }, many).map((m) => m.id)).toEqual(['m4', 'm2', 'm1']);
   });
 
+  it('tells Jev an agent sees only what tags it, even in a thread it wrote in', () => {
+    const candidates = selectCandidates(input());
+    const { questions } = buildQuestions(input(), candidates);
+    const said = (i: number) => questions[`member_${i + 1}`]!.instructions as Record<string, string>;
+    const [agent, person] = [candidates.findIndex((m) => m.kind === 'agent'), candidates.findIndex((m) => m.kind !== 'agent')];
+    expect(said(agent).context).toContain('an agent sees only messages that tag it');
+    expect(said(agent).yes_when).toContain('a thread they already wrote in');
+    expect(said(person).context).not.toContain('an agent sees only');
+  });
+
   it('judges with the default stand-in the way the end-to-end tests assume', () => {
     expect(namesThem({ state: { message: { text: 'Harsh, look' } } } as never, { id: 'member_1', name: 'Harsh', is: 'a person' })).toBeGreaterThan(0.7);
   });
