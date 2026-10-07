@@ -289,6 +289,11 @@ That means you can plug in (for example) search, databases, CRMs, support tools,
 
 Examples: Exa (web search), Twitter/X, ElevenLabs (voice), Slack, Linear/Jira, GitHub, and more.
 
+### Example: Screenpipe desktop context
+
+[Connect Screenpipe](docs/readme/screenpipe.md) to search selected desktop and
+meeting history from Rowboat through a local MCP bridge.
+
 ### Example: Parallel web search
 
 [Parallel Search MCP](https://docs.parallel.ai/integrations/mcp/search-mcp) provides `web_search` and `web_fetch` for public web search and page extraction without a Parallel account or API key. Free access is rate limited.
