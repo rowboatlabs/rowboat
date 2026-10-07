@@ -21,7 +21,7 @@ import { cn } from '@/lib/utils'
 //
 // Four screens, one job each (2026-09-30; the agent's page, 2026-10-01): the
 // list, a roster to click into; adding one, which starts with how it connects
-// (lib/agent-kinds.ts: Hermes, Replicas with its coding agent and key, or
+// (lib/agent-kinds.ts: Hermes, Replicas with its coding agent and key, Conductor, or
 // Custom); connecting it with its new key, by the steps its setup gives; and
 // its page (agent-page.tsx): its option defaults, its setup steps any time
 // after, its keys, and a platform agent's key (Replicas) with Replace.
@@ -203,7 +203,7 @@ export function AgentsDialog({ org, open, onOpenChange }: {
                                 <div className="flex flex-col items-center gap-2 py-8 text-center">
                                     <Bot className="size-6 text-muted-foreground" />
                                     <div className="text-sm font-medium">{isAdmin ? 'No agents in this server yet' : 'You have no agents yet'}</div>
-                                    <div className="max-w-xs text-xs text-muted-foreground">Add one to connect Hermes, a coding agent in Replicas, or anything that speaks the agent contract.</div>
+                                    <div className="max-w-xs text-xs text-muted-foreground">Add one to connect Hermes, a coding agent in Replicas or Conductor, or anything that speaks the agent contract.</div>
                                 </div>
                             ) : (
                                 <ul className="-mx-2 flex flex-col">

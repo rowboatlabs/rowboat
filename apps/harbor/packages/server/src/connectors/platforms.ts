@@ -1,6 +1,7 @@
 import type { Member, ServerFrame } from '@rowboat/spaces-protocol';
 import type { ActorCtx } from '../core/kernel.js';
 import type { HarborService } from '../service.js';
+import { conductorPlatform } from './conductor/index.js';
 import { replicasPlatform } from './replicas/index.js';
 
 // Connectors Harbor runs (spec §8 Connectors, 2026-09-30): for an agent whose
@@ -25,6 +26,12 @@ export interface ConnectorEnv {
   credential(): Promise<string>;
   /** The platform refused the credential: marks it rejected; true only the first time, until it is replaced. */
   rejectCredential(reason: string): Promise<boolean>;
+  /**
+   * A key of the agent's own for the platform's workspaces to call Spaces
+   * with (an `rbk_` key; minted again if its owner revoked it). Only for
+   * platforms that let the connector set a workspace's variables (Conductor).
+   */
+  agentKey(): Promise<string>;
   /** The connector's own record for one thread (spec §8: its platform session and what is in flight). */
   thread: {
     get(spaceId: string, threadRootId: string): Promise<unknown | undefined>;
@@ -50,4 +57,5 @@ export interface ConnectorPlatform {
 /** One entry per connection in HARBOR_RUN_CONNECTIONS. */
 export const PLATFORMS: Record<string, ConnectorPlatform> = {
   replicas: replicasPlatform(),
+  conductor: conductorPlatform(),
 };

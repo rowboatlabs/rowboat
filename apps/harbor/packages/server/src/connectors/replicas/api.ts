@@ -1,3 +1,5 @@
+import type { AgentEvent } from '../common/agent-events.js';
+
 // The Replicas API, as its OpenAPI documents it (https://docs.replicas.dev/openapi.json,
 // "Replica API 2.0.0", read 2026-09-30), for the Replicas connector (spec §8
 // Connectors). Only what the connector calls. The key is an organization
@@ -44,12 +46,17 @@ export type ReplicasImage =
   | { type: 'image'; source: { type: 'url'; url: string } }
   | { type: 'image'; source: { type: 'base64'; media_type: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'; data: string } };
 
-/** One raw event from the coding agent: the shape of `payload` depends on the agent (AgentEvent). */
-export interface AgentEvent {
-  timestamp?: string;
-  type: string;
-  payload?: unknown;
-}
+export type { AgentEvent };
+
+/** Replicas's `coding_agent` for each kind it runs. */
+export const CODING_AGENTS: Record<string, string> = {
+  'claude-code': 'claude',
+  codex: 'codex',
+  cursor: 'cursor',
+  opencode: 'opencode',
+  pi: 'pi',
+  'muse-code': 'muse',
+};
 
 /** One event from a workspace's stream (EngineEvent): `type` discriminates `payload`. */
 export interface EngineEvent {

@@ -1775,6 +1775,20 @@ export class PgStore implements Store {
       [this.orgId, agentId, spaceId, threadRootId, JSON.stringify(data), at],
     );
   }
+  async getConnectorKey(agentId: string): Promise<{ keyId: string; sealed: string } | undefined> {
+    const rows = await this.sql.query<{ key_id: string; sealed: string }>(
+      'select key_id, sealed from agent_connector_keys where org_id = $1 and agent_id = $2',
+      [this.orgId, agentId],
+    );
+    return rows[0] ? { keyId: rows[0].key_id, sealed: rows[0].sealed } : undefined;
+  }
+  async putConnectorKey(agentId: string, keyId: string, sealed: string, at: string): Promise<void> {
+    await this.sql.query(
+      `insert into agent_connector_keys (org_id, agent_id, key_id, sealed, created_at) values ($1, $2, $3, $4, $5)
+       on conflict (org_id, agent_id) do update set key_id = excluded.key_id, sealed = excluded.sealed, created_at = excluded.created_at`,
+      [this.orgId, agentId, keyId, sealed, at],
+    );
+  }
 
   // A range scan on the primary key, filtered in the row. Unindexed on
   // purpose (2026-09-29): a page's range is small unless its window spans a

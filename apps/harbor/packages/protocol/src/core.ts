@@ -66,13 +66,16 @@ export type Member = z.infer<typeof Member>;
  * key. A new pair is a line here, never a migration.
  */
 export const REPLICAS_CODING_AGENTS = ['claude-code', 'codex', 'cursor', 'opencode', 'pi', 'muse-code'] as const;
+/** Conductor runs Claude Code first; Codex and Cursor once their transcripts are read (2026-10-06). */
+export const CONDUCTOR_CODING_AGENTS = ['claude-code'] as const;
 export const AGENT_PAIRS: ReadonlyArray<{ kind: string; connection: string }> = [
   { kind: 'custom', connection: 'contract' },
   { kind: 'hermes', connection: 'plugin' },
   ...REPLICAS_CODING_AGENTS.map((kind) => ({ kind, connection: 'replicas' })),
+  ...CONDUCTOR_CODING_AGENTS.map((kind) => ({ kind, connection: 'conductor' })),
 ];
 /** Connections whose connector Harbor runs, calling the platform with a credential it holds (spec §8 Connectors). */
-export const HARBOR_RUN_CONNECTIONS: readonly string[] = ['replicas'];
+export const HARBOR_RUN_CONNECTIONS: readonly string[] = ['replicas', 'conductor'];
 
 export function isAgentPair(kind: string, connection: string): boolean {
   return AGENT_PAIRS.some((pair) => pair.kind === kind && pair.connection === connection);

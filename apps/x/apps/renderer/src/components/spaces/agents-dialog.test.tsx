@@ -73,7 +73,7 @@ describe('AgentsDialog', () => {
         render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
         await screen.findByText('Hermes')
         fireEvent.click(screen.getByRole('button', { name: /Add agent/ }))
-        expect(setupsOffered()).toEqual(['Hermes', 'Replicas', 'Custom'])
+        expect(setupsOffered()).toEqual(['Hermes', 'Replicas', 'Conductor', 'Custom'])
         expect(screen.getByRole('radio', { name: 'Hermes' })).toHaveAttribute('aria-checked', 'true')
         // The name suggests the kind's own.
         expect(screen.getByLabelText('Agent name')).toHaveValue('Hermes')
@@ -235,6 +235,24 @@ describe('AgentsDialog', () => {
         expect(screen.getByText('ROWBOAT_AGENT_KEY')).toBeInTheDocument()
         expect(screen.getByText('Add it to a space')).toBeInTheDocument()
         expect(invoke).not.toHaveBeenCalledWith('spaces:openDirect', expect.anything())
+    })
+
+    it('adds a Conductor agent: Claude Code with the Conductor key, then the repo files that give it Spaces', async () => {
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        await screen.findByText('Hermes')
+        fireEvent.click(screen.getByRole('button', { name: /Add agent/ }))
+        fireEvent.click(screen.getByRole('radio', { name: 'Conductor' }))
+        expect(screen.queryByRole('radiogroup', { name: 'Coding agent' })).toBeNull() // one coding agent: no choice
+        expect(screen.getByLabelText('Agent name')).toHaveValue('Claude')
+        expect(screen.getByText(/needs a Claude key or subscription under Settings → Agents/)).toBeInTheDocument()
+        fireEvent.change(screen.getByLabelText('Conductor API key'), { target: { value: 'cnd_live_ab12' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Add agent' }))
+        await screen.findByRole('heading', { name: 'Connect Claude' })
+        expect(invoke).toHaveBeenCalledWith('spaces:addAgent', { orgId: 'org-1', displayName: 'Claude', kind: 'claude-code', connection: 'conductor', credential: 'cnd_live_ab12' })
+        // Nothing secret by hand: the .mcp.json reads the variables Rowboat sets in each workspace.
+        expect(screen.getByText('.mcp.json')).toBeInTheDocument()
+        expect(screen.getByText(/"Authorization": "Bearer \$\{ROWBOAT_AGENT_KEY\}"/)).toBeInTheDocument()
+        expect(screen.queryByText(NEW_KEY)).toBeNull()
     })
 
     it('shows a Replicas agent’s key by its end, flags a rejected one, and lets its owner replace it', async () => {
