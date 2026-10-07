@@ -78,6 +78,16 @@ export function selectCandidates(input: TagInput): Member[] {
     .map(({ m }) => m);
 }
 
+const CONTEXT =
+  'This is a team chat where people and agents work together. A tag notifies a person, and starts an agent working on the message. `thread` is the conversation the message replies in, oldest first.';
+const YES_WHEN =
+  'The message is addressed to them by name or by role, asks them a question, hands them work, or answers or follows up on something they asked or did in `thread`';
+// Agents get one more sentence (2026-10-07, Arjun in Spaces): unlike a person,
+// an agent does not follow a thread it wrote in. It sees only messages that tag
+// it, so an untagged follow-up meant for it never reaches it, and Ro must tag it.
+const AGENT_CONTEXT =
+  'Unlike a person, an agent sees only messages that tag it, even in a thread it has already written in: a message meant for it that does not tag it never reaches it.';
+
 const memberKey = (index: number) => `member_${index + 1}`;
 
 export function buildQuestions(input: TagInput, candidates: readonly Member[]): { state: Json; questions: Record<string, NoulQuestion> } {
@@ -104,15 +114,13 @@ export function buildQuestions(input: TagInput, candidates: readonly Member[]): 
     state.thread = input.thread.slice(-MAX_THREAD_MESSAGES).map((m) => ({ author: who(m.authorId), text: clip(m.text, MAX_THREAD_CHARS) }));
   }
   const questions: Record<string, NoulQuestion> = {};
-  candidates.forEach((_, i) => {
+  candidates.forEach((m, i) => {
     questions[memberKey(i)] = {
       type: 'noul',
       instructions: {
         question: `Should \`message\` tag \`members[${i}]\` so that they see it and act on it?`,
-        context:
-          'This is a team chat where people and agents work together. A tag notifies a person, and starts an agent working on the message. `thread` is the conversation the message replies in, oldest first.',
-        yes_when:
-          'The message is addressed to them by name or by role, asks them a question, hands them work, or answers or follows up on something they asked or did in `thread`',
+        context: m.kind === 'agent' ? `${CONTEXT} ${AGENT_CONTEXT}` : CONTEXT,
+        yes_when: m.kind === 'agent' ? `${YES_WHEN}, including a follow-up meant for them in a thread they already wrote in` : YES_WHEN,
         not_when:
           'Their name only comes up in passing, they are merely in the space, the message is meant for someone else, or the message is a remark that needs no one',
       },
