@@ -113,7 +113,8 @@ export class Agents {
   async ensureJev(): Promise<Member | undefined> {
     const existing = (await this.k.store.listAgentsByConnection([BUILT_IN_CONNECTION])).find((a) => a.agentKind === JEV_KIND);
     if (existing || this.k.readOnly) return existing;
-    return this.spaces.createAgent({ displayName: 'Jev', agentKind: JEV_KIND, agentConnection: BUILT_IN_CONNECTION });
+    // People meet it as Ro (2026-10-07, Arjun's call): Jev is the model it runs on, not its name.
+    return this.spaces.createAgent({ displayName: 'Ro', agentKind: JEV_KIND, agentConnection: BUILT_IN_CONNECTION });
   }
 
   /** Replace a platform agent's credential: the owner only, checked with the platform first; clears a rejection. */

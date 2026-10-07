@@ -105,7 +105,7 @@ export class JevConnector implements RunningConnector {
         this.env.ctx,
         invocation.id,
         invocation.where.spaceKind === 'direct'
-          ? { state: 'failed', error: 'Jev does not chat. Add it to a space and it tags whoever a message needs.' }
+          ? { state: 'failed', error: `${this.env.agent.displayName} does not chat. Add it to a space and it tags whoever a message needs.` }
           : { state: 'done' },
       );
     }, undefined);

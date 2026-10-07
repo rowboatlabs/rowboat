@@ -96,7 +96,7 @@ describe('Jev', () => {
     const jevs = roster.filter((m) => m.agentKind === 'jev');
     expect(jevs).toHaveLength(1);
     jev = jevs[0]!;
-    expect(jev).toMatchObject({ displayName: 'Jev', kind: 'agent', agentConnection: 'builtin', role: 'member' });
+    expect(jev).toMatchObject({ displayName: 'Ro', kind: 'agent', agentConnection: 'builtin', role: 'member' });
     expect(jev.ownerId).toBeUndefined();
     const members = (await as('dev-harsh').get(`/v1/spaces/${spaceId}/members`)).body.members as Member[];
     expect(members.some((m) => m.id === jev.id)).toBe(false);
@@ -228,7 +228,7 @@ describe('Jev', () => {
 describe('Jev’s questions', () => {
   const member = (id: string, displayName: string, kind: 'human' | 'agent' = 'human'): Member =>
     ({ id, displayName, kind, role: 'member', ...(kind === 'agent' ? { agentKind: 'claude-code', agentConnection: 'replicas' } : {}) }) as Member;
-  const members = [member('r', 'Ramnique'), member('h', 'Harsh'), member('g', 'Gagan'), member('c', 'Claude', 'agent'), member('j', 'Jev', 'agent')];
+  const members = [member('r', 'Ramnique'), member('h', 'Harsh'), member('g', 'Gagan'), member('c', 'Claude', 'agent'), member('j', 'Ro', 'agent')];
   const input = (over: Partial<TagInput> = {}): TagInput => ({
     spaceName: 'Payments',
     message: { authorId: 'r', text: 'Claude, fix the build' },
