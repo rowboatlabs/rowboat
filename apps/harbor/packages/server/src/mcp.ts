@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { mcpTools, NewPoll, type ActingMode, type ActivityItem, type ActivityKind, type SearchKind, relabelMentions, type Message } from '@rowboat/spaces-protocol';
+import { mcpTools, NewPoll, type ActingMode, type ReadAssetResult, type ActivityItem, type ActivityKind, type SearchKind, relabelMentions, type Message } from '@rowboat/spaces-protocol';
 import { z } from 'zod';
 import { authenticateRequest, wwwAuthenticate, type OrgAuth } from './auth.js';
 import { HarborError } from './errors.js';
@@ -57,7 +57,7 @@ export async function handleMcpRequest(req: IncomingMessage, res: ServerResponse
     return;
   }
 
-  const server = buildMcpServer(deps.service, actor);
+  const server = buildMcpServer(deps.service, actor, publicOriginOf(req));
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,
@@ -79,7 +79,7 @@ export async function handleMcpRequest(req: IncomingMessage, res: ServerResponse
   }
 }
 
-function buildMcpServer(service: HarborService, actor: McpActor): Server {
+function buildMcpServer(service: HarborService, actor: McpActor, origin: string): Server {
   const server = new Server({ name: 'harbor-stub', version: '0.0.1' }, { capabilities: { tools: {} } });
 
   server.setRequestHandler(ListToolsRequestSchema, () => ({
@@ -102,7 +102,7 @@ function buildMcpServer(service: HarborService, actor: McpActor): Server {
     try {
       const result = await dispatch(service, actor, request.params.name, parsed.data);
       return {
-        content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+        content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }, ...binaryNote(origin, request.params.name, parsed.data, result)],
         structuredContent: result as Record<string, unknown>,
       };
     } catch (err) {
@@ -119,6 +119,22 @@ function buildMcpServer(service: HarborService, actor: McpActor): Server {
 
 function errorResult(text: string) {
   return { content: [{ type: 'text' as const, text }], isError: true };
+}
+
+// A binary file's bytes never pass through a tool (spec §8, Files); its read says where they are
+// (2026-10-08). Told only that the bytes were "not readable over this face", Hermes answered that it
+// could not read a PNG in its space (2026-10-06), when its own key could download it. The structured
+// result is unchanged, so both faces still return the same object.
+function binaryNote(origin: string, tool: string, args: unknown, result: unknown) {
+  if (tool !== 'read_asset') return [];
+  const { blob } = result as ReadAssetResult;
+  if (!blob) return [];
+  const { spaceId } = args as { spaceId: string };
+  return [{
+    type: 'text' as const,
+    text: `This file is binary, so read_asset carries no bytes. Download them with the bearer you call this ` +
+      `server with: GET ${origin}/v1/spaces/${spaceId}/blobs/${blob.hash}`,
+  }];
 }
 
 async function dispatch(
