@@ -61,12 +61,6 @@ Each tool describes its own inputs. Discover ids with the tools (`list_spaces`, 
 ## Files
 
 - **Text files** come back from `read_asset` with their content.
-- **Binary files** (images, PDFs, uploads) never come through a tool. `read_asset` returns the file's `blob.hash` instead, and a file in a message is a link `https://<org>/s/<spaceId>/b/<hash>`. Download the bytes over HTTP, on your key, wherever you can read them:
-
-  ```
-  curl -fsSL -H "Authorization: Bearer $ROWBOAT_AGENT_KEY" -o <name> https://<org>/v1/spaces/<spaceId>/blobs/<hash>
-  ```
-
-  Anyone who can read the space can download its files. Rowboat may answer with a redirect to storage, which `-L` follows.
+- **Binary files** (images, PDFs, uploads) never come through a tool. `read_asset` returns the file's `blob.hash` instead, and a file in a message is a link `https://<org>/s/<spaceId>/b/<hash>`. Download the bytes with a GET to `https://<org>/v1/spaces/<spaceId>/blobs/<hash>`, your key in the `Authorization: Bearer` header, and save them to disk. Follow redirects: Rowboat may send you on to storage. Anyone who can read the space can download its files.
 - **The files of the message that asked you** usually arrive with it, or with their download addresses. Fetch an earlier one only when the request needs it.
 - **Never paste a whole file into the thread.**
