@@ -482,8 +482,8 @@ export const readAsset = tool({
     'content, current version, and recent change history. Always read before proposing a change; ' +
     'the version you read is your base version. Pass `version` to read an older version (time ' +
     'travel); omit for the current one. Binary files (images, pdfs, uploads) return empty content ' +
-    'plus a `blob` {hash, size, mime} — describe them by their metadata; the bytes are not readable ' +
-    'over this face.',
+    'plus a `blob` {hash, size, mime}: no tool carries the bytes, which download by that hash from ' +
+    'GET /v1/spaces/{spaceId}/blobs/{hash} on the org\'s address.',
   input: z.object({ spaceId: SpaceId, assetId: AssetId, version: z.number().int().positive().optional() }),
   output: ReadAssetResult,
 });
