@@ -31,8 +31,8 @@ export interface TagInput {
   spaceName: string;
   /** The message, its tokens written as plain "@Name" text. */
   message: { authorId: string; text: string };
-  /** The thread before it, oldest first, the same way; empty for a new message in the stream. */
-  thread: Array<{ authorId: string; text: string }>;
+  /** The thread before it, oldest first, the same way, with who each message tags; empty for a new message in the stream. */
+  thread: Array<{ authorId: string; text: string; mentions: readonly string[] }>;
   /** The space's members. */
   members: readonly Member[];
   jevId: string;
@@ -85,6 +85,13 @@ const YES_WHEN =
 // Agents get one more sentence (2026-10-07, Arjun in Spaces): unlike a person,
 // an agent does not follow a thread it wrote in. It sees only messages that tag
 // it, so an untagged follow-up meant for it never reaches it, and Ro must tag it.
+// The tags already written are told to Jev, not filtered in code (2026-10-07,
+// Arjun in Spaces): Jev tags only a message that tags no one, and not a person
+// tagged earlier in the thread, who follows it and sees every reply.
+const TAGS_CONTEXT =
+  '`message.tags` lists who the author already tagged. An author who tagged anyone, or @here, chose who sees the message, so it needs no more tags.';
+const PERSON_CONTEXT =
+  'A person tagged earlier in `thread` (`tagged_in_thread`) follows it and already sees every reply.';
 const AGENT_CONTEXT =
   'Unlike a person, an agent sees only messages that tag it, even in a thread it has already written in: a message meant for it that does not tag it never reaches it.';
 
@@ -95,18 +102,22 @@ export function buildQuestions(input: TagInput, candidates: readonly Member[]): 
   const who = (id: string) => byId.get(id)?.displayName ?? 'someone who left';
   const author = byId.get(input.message.authorId);
   const wrote = new Set(input.thread.map((m) => m.authorId));
+  const taggedInThread = new Set(input.thread.flatMap((m) => m.mentions));
+  const tags = [...input.mentioned.map(who), ...(input.here ? ['@here'] : [])];
   const state: Record<string, Json> = {
     space: input.spaceName,
     message: {
       author: who(input.message.authorId),
       author_is: author?.kind === 'agent' ? 'an agent' : 'a person',
       text: clip(input.message.text, MAX_MESSAGE_CHARS),
+      tags,
     },
     members: candidates.map((m, i) => {
       const entry: Record<string, Json> = { id: memberKey(i), name: m.displayName, is: m.kind === 'agent' ? 'an agent' : 'a person' };
       const kind = m.kind === 'agent' ? AGENT_KINDS[m.agentKind ?? ''] : undefined;
       if (kind) entry.agent = kind;
       if (wrote.has(m.id)) entry.wrote_in_thread = true;
+      if (taggedInThread.has(m.id)) entry.tagged_in_thread = true;
       return entry;
     }),
   };
@@ -119,10 +130,11 @@ export function buildQuestions(input: TagInput, candidates: readonly Member[]): 
       type: 'noul',
       instructions: {
         question: `Should \`message\` tag \`members[${i}]\` so that they see it and act on it?`,
-        context: m.kind === 'agent' ? `${CONTEXT} ${AGENT_CONTEXT}` : CONTEXT,
+        context: `${CONTEXT} ${TAGS_CONTEXT} ${m.kind === 'agent' ? AGENT_CONTEXT : PERSON_CONTEXT}`,
         yes_when: m.kind === 'agent' ? `${YES_WHEN}, including a follow-up meant for them in a thread they already wrote in` : YES_WHEN,
         not_when:
-          'Their name only comes up in passing, they are merely in the space, the message is meant for someone else, or the message is a remark that needs no one',
+          'The message already tags anyone (`message.tags` is not empty), their name only comes up in passing, they are merely in the space, the message is meant for someone else, or the message is a remark that needs no one' +
+          (m.kind === 'agent' ? '' : ', or they were already tagged in `thread`'),
       },
       criteria: { true: 'The author meant them to see it and act', false: 'Tagging them would be noise' },
     };

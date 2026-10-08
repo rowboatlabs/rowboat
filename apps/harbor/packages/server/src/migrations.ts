@@ -910,6 +910,38 @@ export const MIGRATIONS: Migration[] = [
       )`,
     ],
   },
+  {
+    // The key a connector Harbor runs hands its agent's workspaces, so the
+    // coding agent there can call Spaces as its agent (spec §8 Connectors,
+    // 2026-10-06: Conductor passes it as a workspace variable). An ordinary
+    // agent key (its hash in agent_keys, revocable by the owner), whose secret
+    // Harbor must present again, so it is also kept sealed here. One per agent.
+    id: '034-agent-connector-keys',
+    statements: [
+      `create table agent_connector_keys (
+        org_id text not null,
+        agent_id text not null,
+        key_id text not null,
+        sealed text not null,
+        created_at text not null,
+        primary key (org_id, agent_id),
+        foreign key (org_id, agent_id) references members(org_id, id)
+      )`,
+    ],
+  },
+  {
+    // Agent37's Effort option is keyed `effort` (2026-10-08), as the composer's
+    // model picker expects of every agent; it was `reasoning`. Owners' defaults
+    // move with it, or Harbor would skip them as an option no longer declared.
+    id: '035-agent37-effort-key',
+    statements: [
+      `update agent_option_defaults d
+         set data = (d.data - 'reasoning') || jsonb_build_object('effort', d.data -> 'reasoning')
+         from members m
+        where m.org_id = d.org_id and m.id = d.agent_id
+          and m.agent_connection = 'agent37' and d.data ? 'reasoning'`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

@@ -2,6 +2,8 @@ import agent37Logo from '@/assets/agents/agent37/logo.png'
 import agent37LogoDark from '@/assets/agents/agent37/logo-dark.png'
 import claudeCodeLogo from '@/assets/agents/claude-code/logo.png'
 import claudeCodeLogoDark from '@/assets/agents/claude-code/logo-dark.png'
+import conductorLogo from '@/assets/agents/conductor/logo.png'
+import conductorLogoDark from '@/assets/agents/conductor/logo-dark.png'
 import codexLogo from '@/assets/agents/codex/logo.png'
 import codexLogoDark from '@/assets/agents/codex/logo-dark.png'
 import cursorLogo from '@/assets/agents/cursor/logo.png'
@@ -20,7 +22,7 @@ import replicasLogoDark from '@/assets/agents/replicas/logo-dark.png'
 // What an agent is, how Harbor reaches it, and how you set one up (Harbor spec
 // §4 Agent members and §8 Connectors, 2026-09-30). Harbor stores every agent's
 // kind (what it is underneath: hermes, a coding agent, custom) and connection
-// (the path: plugin, contract, or a platform Harbor calls such as replicas);
+// (the path: plugin, contract, or a platform Harbor calls: replicas, conductor);
 // every surface draws the agent from them: the kind's logo on its avatar,
 // "Claude Code · via Replicas" beside its name.
 //
@@ -61,6 +63,7 @@ export const BUILT_IN_CONNECTION = 'builtin'
 /** Platforms Harbor calls on an agent's behalf: named after the kind ("via Replicas"). */
 export const PLATFORMS: Record<string, { label: string; logo?: Logo }> = {
     replicas: { label: 'Replicas', logo: { light: replicasLogo, dark: replicasLogoDark } },
+    conductor: { label: 'Conductor', logo: { light: conductorLogo, dark: conductorLogoDark } },
     agent37: { label: 'Agent37', logo: { light: agent37Logo, dark: agent37LogoDark } },
 }
 
@@ -321,6 +324,42 @@ function replicasSetup({ orgUrl, agentKey }: SetupContext): SetupRoute[] {
     ]
 }
 
+// Conductor (2026-10-06): Harbor runs the connector, so connecting is the Conductor key on the
+// Add screen. Every workspace it starts gets ROWBOAT_URL and ROWBOAT_AGENT_KEY (a key Harbor
+// keeps for the agent), so nothing secret is set up by hand: a repo's .mcp.json that reads them
+// gives Claude Code the Spaces tools, and the skill teaches it Spaces. Conductor's API can't set
+// MCP servers itself, so both are files the repo commits.
+const CONDUCTOR_MCP_JSON = JSON.stringify(
+    { mcpServers: { rowboat: { type: 'http', url: '${ROWBOAT_URL}/mcp', headers: { Authorization: 'Bearer ${ROWBOAT_AGENT_KEY}' } } } },
+    null,
+    2,
+)
+
+function conductorSetup(): SetupRoute[] {
+    return [
+        {
+            id: 'conductor',
+            label: 'Conductor',
+            steps: [
+                {
+                    title: 'Give it the Spaces tools (recommended)',
+                    note: 'Commit this as .mcp.json at the root of each repository it works in (or merge it into the one there). It holds no secret: Rowboat fills both variables in every workspace it starts.',
+                    code: { caption: '.mcp.json', text: CONDUCTOR_MCP_JSON },
+                },
+                {
+                    title: 'Teach it Spaces (recommended)',
+                    note: 'The rowboat-spaces skill teaches it how to behave in Spaces: mentions, hand-offs, threads. Run this in the repository and commit what it adds.',
+                    code: { caption: 'Terminal', text: `npx skills add ${SKILL_REPO} --skill rowboat-spaces` },
+                },
+                {
+                    title: 'Pick its repository when you mention it',
+                    note: 'With one Conductor project it uses that one. With several it asks, or name it in your message as [env:project-name].',
+                },
+            ],
+        },
+    ]
+}
+
 // Agent37 (2026-10-01): Harbor runs the connector, so connecting is the Agent37 key on the Add
 // screen; Harbor drives the instance's Hermes or OpenClaw through Agent37's API. What's left on
 // the instance is optional and the same as for any agent: our MCP server on the agent's key, the
@@ -448,6 +487,22 @@ export const AGENT_SETUPS: readonly AgentSetup[] = [
         docsUrl: 'https://www.agent37.com/docs/agents-api/concepts',
         bindsInstance: true,
         setup: agent37Setup,
+    },
+    {
+        id: 'conductor',
+        label: 'Conductor',
+        description: 'Claude Code in a Conductor cloud workspace, on your Conductor account',
+        logo: { light: conductorLogo, dark: conductorLogoDark },
+        connection: 'conductor',
+        kinds: ['claude-code'],
+        defaultName: 'Claude',
+        credential: {
+            label: 'Conductor API key',
+            placeholder: 'Paste the key from app.conductor.build → API keys',
+            note: 'Make it in your Conductor team org (Pro or higher), which needs a Claude key or subscription under Settings → Agents, and GitHub repositories. Harbor checks it with Conductor and keeps it sealed. Nobody sees it again, you included.',
+        },
+        docsUrl: 'https://www.conductor.build/docs/api',
+        setup: conductorSetup,
     },
     {
         id: 'custom',

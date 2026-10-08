@@ -1,4 +1,6 @@
 import { type AgentCredential, type Member } from '@rowboat/spaces-protocol';
+import { ulid } from 'ulid';
+import { hashAgentKey, mintAgentKeySecret } from '../agent-keys.js';
 import { HarborError } from '../errors.js';
 import type { SpaceHub } from '../hub.js';
 import { assertSealingConfigured, credentialHint, seal, unseal } from '../sealing.js';
@@ -16,6 +18,8 @@ import { HOSTED_CONNECTIONS, PLATFORMS, type ConnectorEnv, type RunningConnector
 
 export class HostedConnectors {
   private readonly running = new Map<string, RunningConnector>();
+  /** One mint at a time per agent: two turns starting together share one key. */
+  private readonly minting = new Map<string, Promise<string>>();
 
   constructor(
     private readonly deps: { store: Store; hub: SpaceHub; service: HarborService; orgId: string },
@@ -70,6 +74,7 @@ export class HostedConnectors {
         return unseal(stored.sealed, orgId, agent.id);
       },
       rejectCredential: (reason) => store.rejectAgentCredential(agent.id, service.now(), reason),
+      agentKey: () => this.agentKey(agent.id),
       thread: {
         get: (spaceId, threadRootId) => store.getConnectionThread(agent.id, spaceId, threadRootId),
         put: (spaceId, threadRootId, data) => store.putConnectionThread(agent.id, spaceId, threadRootId, data, service.now()),
@@ -77,7 +82,38 @@ export class HostedConnectors {
       log: (message, detail) => (detail === undefined ? console.log(tag, message) : console.log(tag, message, detail)),
     };
   }
+
+  /**
+   * The key the agent's workspaces call Spaces with (spec §8 Connectors,
+   * 2026-10-06): the one kept for it, or a new one when there is none or its
+   * owner revoked it. Created by the agent itself, so the agent page lists it
+   * beside the owner's keys.
+   */
+  private agentKey(agentId: string): Promise<string> {
+    const inFlight = this.minting.get(agentId);
+    if (inFlight) return inFlight;
+    const work = (async () => {
+      const { store, service, orgId } = this.deps;
+      const kept = await store.getConnectorKey(agentId);
+      if (kept) {
+        const key = await store.getAgentKey(kept.keyId);
+        if (key && !key.revokedAt) return unseal(kept.sealed, orgId, connectorKeyBinding(agentId));
+      }
+      assertSealingConfigured();
+      const secret = mintAgentKeySecret();
+      const keyId = ulid();
+      const at = service.now();
+      await store.putAgentKey({ id: keyId, agentId, hash: hashAgentKey(secret), createdBy: agentId, createdAt: at });
+      await store.putConnectorKey(agentId, keyId, seal(secret, orgId, connectorKeyBinding(agentId)), at);
+      return secret;
+    })().finally(() => this.minting.delete(agentId));
+    this.minting.set(agentId, work);
+    return work;
+  }
 }
+
+/** Sealed under a binding of its own, so it can never be swapped for the agent's platform credential. */
+const connectorKeyBinding = (agentId: string) => `${agentId}#workspace-key`;
 
 /** `host[:port]` → a URL: plain http only on this machine. */
 export function orgUrl(address: string): string {
