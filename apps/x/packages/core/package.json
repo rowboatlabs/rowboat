@@ -14,8 +14,8 @@
     "inspect": "node dist/runtime/turns/inspect-cli.js"
   },
   "dependencies": {
-    "@agentclientprotocol/claude-agent-acp": "^0.75.1",
-    "@agentclientprotocol/codex-acp": "^1.10.0",
+    "@agentclientprotocol/claude-agent-acp": "^0.86.0",
+    "@agentclientprotocol/codex-acp": "^2.1.1",
     "@agentclientprotocol/sdk": "^1.4.0",
     "@ai-sdk/anthropic": "^4.0.12",
     "@ai-sdk/google": "^4.0.12",
