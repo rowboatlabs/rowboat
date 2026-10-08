@@ -10,6 +10,8 @@ let harbor: RunningHarbor;
 beforeAll(async () => {
   harbor = await startTestHarbor({
     orgName: 'Test Org',
+    // A second space: a one-space org is a group chat, where DMs are off (2026-10-07).
+    seedSpaces: [{ name: 'Lobby', creator: 'ramnique' }],
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
       { id: 'gagan', displayName: 'Gagan' },

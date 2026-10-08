@@ -67,6 +67,23 @@ export function canRenameSpace(space: Space): Decision {
 }
 
 /**
+ * A group chat (spec §4, 2026-10-07): an org with one shared space and no
+ * DMs. One answer for every member — the org's count, not anyone's
+ * listing — so a group is a chat, or a workspace, for everyone at once.
+ * "No DMs" keeps an org that already talks in DMs a workspace: nothing
+ * that exists is ever hidden by this rule.
+ */
+export function isGroupChat(counts: { shared: number; direct: number }): boolean {
+  return counts.shared === 1 && counts.direct === 0;
+}
+
+/** DMs are off in a group chat, notes to self included; a second space turns them on (2026-10-07). */
+export function canOpenDirect(groupChat: boolean): Decision {
+  if (!groupChat) return null;
+  return { code: 'forbidden', message: 'direct messages are off in a group chat — add a channel to turn them on' };
+}
+
+/**
  * The content plane is role-flat (spec §4): the one act restricted to a
  * single member is an author acting on their own message — edit, delete,
  * end a poll. The check is on the member id, never the acting mode: a

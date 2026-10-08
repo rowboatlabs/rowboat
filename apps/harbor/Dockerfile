@@ -8,9 +8,13 @@
 #   HARBOR_INTERNAL_KEY (optional; bearer for GET /internal/stats — this
 #     instance's live counters; the once-a-minute log line prints regardless)
 #   HARBOR_INTEGRATION_KEY (optional; 64 hex characters, `openssl rand -hex 32`,
-#     sealing platform agents' keys such as Replicas's and Conductor's — without it, such
+#     sealing platform agents' keys such as Replicas's, Agent37's and Conductor's — without it, such
 #     agents can't be added. Rotate with HARBOR_INTEGRATION_KEY_ID and
 #     HARBOR_INTEGRATION_PREVIOUS_KEYS, a JSON map of old ids to old keys)
+#   HARBOR_JEV_OPENROUTER_KEY (optional; Rowboat's OpenRouter key, for Jev
+#     through OpenRouter's ~typesafe/jev-latest — with it every org
+#     gets Jev, the built-in agent that tags whoever a message needs; without
+#     it, no Jev is created and an existing one stays idle)
 
 FROM node:22-slim AS build
 RUN corepack enable

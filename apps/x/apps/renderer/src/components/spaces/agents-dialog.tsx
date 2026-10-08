@@ -5,11 +5,13 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { AgentPage } from '@/components/spaces/agent-page'
+import { InstancePicker, type InstanceChoice } from '@/components/spaces/agent-instance-picker'
 import { AgentLogo, ConnectAgent } from '@/components/spaces/agent-setup'
 import { MemberAvatar } from '@/components/spaces/atoms'
 import { refreshMembers, refreshOrgRoster, useOrgRoster } from '@/hooks/use-space-members'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
-import { AGENT_SETUPS, agentLabel, agentSetup, kindInfo, setupFor, type AgentSetup } from '@/lib/agent-kinds'
+import { isGroupChat } from '@/lib/spaces-navigation'
+import { AGENT_SETUPS, agentLabel, agentSetup, instanceLabel, kindInfo, setupFor, type AgentSetup } from '@/lib/agent-kinds'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 
@@ -29,7 +31,7 @@ import { cn } from '@/lib/utils'
 type Screen =
     | { name: 'list' }
     | { name: 'add' }
-    | { name: 'connect'; agentId: string; agentName: string; secret: string; setupId: string; kind: string }
+    | { name: 'connect'; agentId: string; agentName: string; secret: string; setupId: string; kind: string; instance?: string }
     | { name: 'agent'; agentId: string }
 
 function Header({ title, description, icon, onBack }: { title: string; description: string; icon?: ReactNode; onBack?: () => void }) {
@@ -148,12 +150,12 @@ function PickRow({ on, label, text, icon, onClick }: { on: boolean; label: strin
     )
 }
 
-/** The coding agent a Replicas agent runs: its kind. */
-function KindChoice({ kinds, selected, onSelect }: { kinds: readonly string[]; selected: string; onSelect: (kind: string) => void }) {
+/** The agent a platform runs (Replicas's coding agent, Agent37's Hermes or OpenClaw): its kind. */
+function KindChoice({ label, kinds, selected, onSelect }: { label: string; kinds: readonly string[]; selected: string; onSelect: (kind: string) => void }) {
     return (
         <div className="mt-4 flex flex-col gap-1.5">
-            <span className="text-xs font-medium text-foreground">Coding agent</span>
-            <div role="radiogroup" aria-label="Coding agent" className="flex flex-wrap gap-1.5">
+            <span className="text-xs font-medium text-foreground">{label}</span>
+            <div role="radiogroup" aria-label={label} className="flex flex-wrap gap-1.5">
                 {kinds.map((k) => (
                     <button
                         key={k}
@@ -194,16 +196,22 @@ export function AgentsDialog({ org, open, onOpenChange }: {
     const [name, setName] = useState('')
     const [nameEdited, setNameEdited] = useState(false)
     const [credential, setCredential] = useState('')
+    const [instance, setInstance] = useState<InstanceChoice | null>(null)
     const [addError, setAddError] = useState<string | null>(null)
     // The spaces a new agent joins on Add: every one of yours unless unticked (2026-10-08).
     const [skippedSpaces, setSkippedSpaces] = useState<ReadonlySet<string>>(new Set())
     const [withDirect, setWithDirect] = useState(true)
+    const [progress, setProgress] = useState<string | null>(null)
     // Until the person picks, the first way to connect, and its first kind.
     const setup = AGENT_SETUPS.find((k) => k.id === chosen) ?? AGENT_SETUPS[0]!
-    const kind = chosenKind && setup.kinds.includes(chosenKind) ? chosenKind : setup.kinds[0]!
+    // An agent that is one platform instance (Agent37) runs whatever its instance runs.
+    const kind = setup.bindsInstance ? instance?.kind ?? setup.kinds[0]! : chosenKind && setup.kinds.includes(chosenKind) ? chosenKind : setup.kinds[0]!
     // The name suggests the setup's own, or the kind's, until the person types one.
     const shownName = nameEdited ? name : setup.defaultName || kindInfo(kind).label
-    const ready = shownName.trim() !== '' && (!setup.credential || credential.trim() !== '')
+    const ready =
+        shownName.trim() !== '' &&
+        (!setup.credential || credential.trim() !== '') &&
+        (!setup.bindsInstance || (instance !== null && (instance.type === 'existing' || Number.isFinite(instance.monthlyBudgetUsd))))
 
     const load = useCallback(async () => {
         try {
@@ -227,6 +235,7 @@ export function AgentsDialog({ org, open, onOpenChange }: {
         setName('')
         setNameEdited(false)
         setCredential('')
+        setInstance(null)
         setAddError(null)
         setSkippedSpaces(new Set())
         setWithDirect(true)
@@ -239,14 +248,34 @@ export function AgentsDialog({ org, open, onOpenChange }: {
         setBusy(true)
         setAddError(null)
         try {
+            // A new instance is created first, with the key being pasted; Harbor then checks it like any other.
+            let instanceId: string | undefined
+            if (setup.bindsInstance && instance?.type === 'new') {
+                setProgress('Creating the Agent37 instance… this can take a few minutes.')
+                const { instance: created } = await window.ipc.invoke('spaces:agent37CreateInstance', {
+                    key: credential.trim(),
+                    kind: instance.kind,
+                    name: `rowboat-${shownName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'agent'}`,
+                    monthlyBudgetUsd: instance.monthlyBudgetUsd,
+                    autoSleep: instance.autoSleep,
+                })
+                // If adding fails after this, the instance exists: keep it picked so a retry doesn't create another.
+                setInstance({ type: 'existing', id: created.id, kind: created.kind ?? instance.kind, name: created.name })
+                instanceId = created.id
+                setProgress(`Created ${instanceLabel(created)}. Adding the agent…`)
+            } else if (setup.bindsInstance && instance?.type === 'existing') {
+                instanceId = instance.id
+            }
             const { agent, key } = await window.ipc.invoke('spaces:addAgent', {
                 orgId: org.id,
                 displayName: shownName.trim(),
                 kind,
                 connection: setup.connection,
                 ...(setup.credential ? { credential: credential.trim() } : {}),
+                ...(instanceId ? { instance: instanceId } : {}),
             })
             setCredential('')
+            setInstance(null)
             // Into the spaces picked on this form; one that refuses doesn't undo the agent.
             const into = org.spaces.filter((space) => !skippedSpaces.has(space.id))
             const joined = await Promise.allSettled(
@@ -255,18 +284,20 @@ export function AgentsDialog({ org, open, onOpenChange }: {
             joined.forEach((result, i) => result.status === 'fulfilled' && refreshMembers(org.id, into[i]!.id, { force: true }))
             const missed = into.filter((_, i) => joined[i]!.status === 'rejected').map((space) => `#${space.name}`)
             // Your DM with it, in the sidebar like any DM (Hermes's setup opens it as its home channel anyway).
-            if (withDirect && !setup.wantsHomeChannel) {
+            // DMs are off while the server is one group chat (2026-10-07): no DM to open then.
+            if (withDirect && !setup.wantsHomeChannel && !isGroupChat(org)) {
                 await window.ipc.invoke('spaces:openDirect', { orgId: org.id, memberId: agent.id }).catch(() => missed.push('your direct messages'))
             }
             if (missed.length > 0) toast(`Couldn't add ${agent.displayName} to ${missed.join(', ')}`, 'error')
             // Your new agent is on your roster (and so in Add people) right away.
             refreshOrgRoster(org.id)
             await load()
-            setScreen({ name: 'connect', agentId: agent.id, agentName: agent.displayName, secret: key.secret, setupId: setup.id, kind })
+            setScreen({ name: 'connect', agentId: agent.id, agentName: agent.displayName, secret: key.secret, setupId: setup.id, kind, ...(agent.agentInstance ? { instance: agent.agentInstance } : {}) })
         } catch (err) {
             setAddError(err instanceof Error ? err.message : 'Could not add the agent')
         } finally {
             setBusy(false)
+            setProgress(null)
         }
     }
 
@@ -349,7 +380,7 @@ export function AgentsDialog({ org, open, onOpenChange }: {
                                     />
                                 ))}
                             </div>
-                            {setup.kinds.length > 1 && <KindChoice kinds={setup.kinds} selected={kind} onSelect={setChosenKind} />}
+                            {setup.kinds.length > 1 && !setup.bindsInstance && <KindChoice label={setup.kindChoice ?? 'Agent'} kinds={setup.kinds} selected={kind} onSelect={setChosenKind} />}
                             <label className="mt-4 flex flex-col gap-1.5">
                                 <span className="text-xs font-medium text-foreground">Name</span>
                                 <Input
@@ -384,13 +415,15 @@ export function AgentsDialog({ org, open, onOpenChange }: {
                                     <span className="text-[11px] text-muted-foreground">{setup.credential.note}</span>
                                 </label>
                             )}
+                            {setup.bindsInstance && <InstancePicker credential={credential} choice={instance} onChoice={setInstance} />}
                             <SpacePicker
                                 spaces={org.spaces}
                                 skipped={skippedSpaces}
                                 onChange={setSkippedSpaces}
-                                direct={setup.wantsHomeChannel ? null : withDirect}
+                                direct={setup.wantsHomeChannel || isGroupChat(org) ? null : withDirect}
                                 onDirectChange={setWithDirect}
                             />
+                            {progress && <div className="mt-3 text-xs text-muted-foreground">{progress}</div>}
                             {addError && <div role="alert" className="mt-3 text-xs text-destructive">{addError}</div>}
                         </Body>
                         <Footer>
@@ -414,6 +447,8 @@ export function AgentsDialog({ org, open, onOpenChange }: {
                             <ConnectAgent
                                 org={org}
                                 setup={agentSetup(screen.setupId)}
+                                agentKind={screen.kind}
+                                {...(screen.instance ? { agentInstance: screen.instance } : {})}
                                 agentId={screen.agentId}
                                 agentName={screen.agentName}
                                 agentKey={screen.secret}

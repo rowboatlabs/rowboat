@@ -12,7 +12,7 @@ The reference offers a default Clean layout with profile photos and a Compact la
 
 The published interface image shows a stable avatar gutter, a name and quiet timestamp above the body, small reactions under the text, and an inline reply summary. Message text has no surrounding speech bubble. The text column also anchors continuation messages and reply links. The result supports scanning a changing roster of senders without forcing each message into an isolated card. [2]
 
-Spaces already used 15 px text with 22 px leading in the main stream. The inconsistencies were around it: thread replies had smaller avatars, the thread root was a tinted card with smaller text, and stacked container padding obscured the true gutter. The implementation keeps the readable body size and normalizes the surrounding geometry. Thread roots use the same visual identity and text scale as replies.
+Spaces already used 15 px text with 22 px leading in the main stream. The inconsistencies were around it: thread replies had smaller avatars, the thread root was a tinted card with smaller text, and stacked container padding obscured the true gutter. The implementation keeps the 15 px body size, increases message leading to 24 px, and normalizes the surrounding geometry. Thread roots use the same visual identity and text scale as replies.
 
 ### Actions and reactions
 
@@ -44,7 +44,7 @@ A separate global app rail, huddles, workspace theming controls, a new cross-spa
 
 | Reference pattern | Existing Spaces fit | Implemented adaptation |
 | --- | --- | --- |
-| Avatar-based conversation | `MessageRow` and continuation grouping | One 36 px avatar/gutter size in both timelines; 15/22 px body text |
+| Avatar-based conversation | `MessageRow` and continuation grouping | One 36 px avatar/gutter size in both timelines; 15/24 px body text |
 | Quiet message metadata | Sender, timestamp, agent attribution | Bold sender, secondary timestamp, wrapping attribution |
 | Message action bar | Reaction, Reply/Open, Ask agent, More | 32 px controls, 18 px glyphs, keyboard reveal, persistent open state |
 | Emoji reaction pill | Reaction groups and self membership | 28 px pill, 16 px emoji, 12 px count, pressed semantics |
@@ -69,7 +69,8 @@ The root message exposes reply counts and last-reply time, but the stream's summ
 | Message inset | 20 px desktop; 12 px narrow viewport | Full-width hover surface with a consistent text origin |
 | New author row | 8 px above, 4 px below | Separates speaking turns |
 | Continuation row | 2 px above and below | Groups consecutive messages without duplicate identity |
-| Message body | 15 px / 22 px | Comfortable long-form chat reading |
+| Message body | 15 px / 24 px; maximum 100ch reading width | Comfortable long-form chat reading |
+| Message Markdown | 0.75em between blocks; outside list markers, 1.75em indentation per level; inline code at 0.875em | Paragraph separation, visible nesting, and aligned wrapped text |
 | Sender | 15 px bold / 22 px | Primary scan anchor |
 | Timestamp and metadata | 12 px, secondary color | Supporting information stays subordinate |
 | Action target | 32 × 32 px; labeled reply at least 32 px high | Consistent pointer and keyboard target |
@@ -85,7 +86,7 @@ The root message exposes reply counts and last-reply time, but the stream's summ
 | Discussion navigation | 32 px high; 13 px title | Dense, readable destinations |
 | Thread split | Resizable; 400 px default, 360 px minimum, 6 px divider at ≥840 px content width | Retains a usable 440 px timeline |
 
-The implementation's semantic stylesheet is `apps/x/apps/renderer/src/styles/spaces.css`. Components retain utility classes for local flex layout and content-specific states. Theme colors come from existing application variables: foreground/background, secondary text, borders, raised surfaces, link blue, mention wash, and attention color. No reference-product identifiers are needed in feature code.
+The implementation's semantic stylesheet is `apps/x/apps/renderer/src/styles/spaces.css`; shared message Markdown typography lives in `apps/x/apps/renderer/src/styles/message-prose.css`. As of 2026-10-06, messages use a bounded reading width, explicit paragraph spacing, hanging list markers at every nesting level, and proportional inline code. Headings step down from 21 px to the 15 px body size. Code blocks, wide tables, and display mathematics scroll within the message; Streamdown retains syntax highlighting and copy/download controls. Task lists preserve checkbox alignment. Components retain utility classes for local flex layout and content-specific states. Theme colors come from existing application variables: foreground/background, secondary text, borders, raised surfaces, link blue, mention wash, and attention color. No reference-product identifiers are needed in feature code.
 
 ## Interaction rules
 

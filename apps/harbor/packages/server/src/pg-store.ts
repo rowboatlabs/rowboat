@@ -65,6 +65,7 @@ interface MemberRow {
   owner_id: string | null;
   agent_kind: string | null;
   agent_connection: string | null;
+  agent_instance: string | null;
 }
 
 interface AgentKeyRow {
@@ -121,6 +122,7 @@ function rowToMember(r: MemberRow): Member {
     ...(r.owner_id !== null ? { ownerId: r.owner_id } : {}),
     ...(r.agent_kind !== null ? { agentKind: r.agent_kind } : {}),
     ...(r.agent_connection !== null ? { agentConnection: r.agent_connection } : {}),
+    ...(r.agent_instance !== null ? { agentInstance: r.agent_instance } : {}),
   };
 }
 
@@ -386,7 +388,7 @@ export class PgStore implements Store {
 
   async getMember(id: string): Promise<Member | undefined> {
     const rows = await this.sql.query<MemberRow>(
-      'select id, display_name, avatar_url, role, kind, owner_id, agent_kind, agent_connection from members where org_id = $1 and id = $2',
+      'select id, display_name, avatar_url, role, kind, owner_id, agent_kind, agent_connection, agent_instance from members where org_id = $1 and id = $2',
       [this.orgId, id],
     );
     return rows[0] ? rowToMember(rows[0]) : undefined;
@@ -394,7 +396,7 @@ export class PgStore implements Store {
 
   async listAllMembers(): Promise<Member[]> {
     const rows = await this.sql.query<MemberRow>(
-      'select id, display_name, avatar_url, role, kind, owner_id, agent_kind, agent_connection from members where org_id = $1 order by id',
+      'select id, display_name, avatar_url, role, kind, owner_id, agent_kind, agent_connection, agent_instance from members where org_id = $1 order by id',
       [this.orgId],
     );
     return rows.map(rowToMember);
@@ -402,7 +404,7 @@ export class PgStore implements Store {
 
   async listSpaceMembers(spaceId: string): Promise<Member[]> {
     const rows = await this.sql.query<MemberRow>(
-      `select m.id, m.display_name, m.avatar_url, m.role, m.kind, m.owner_id, m.agent_kind, m.agent_connection from memberships ms
+      `select m.id, m.display_name, m.avatar_url, m.role, m.kind, m.owner_id, m.agent_kind, m.agent_connection, m.agent_instance from memberships ms
        join members m on m.org_id = $1 and m.id = ms.member_id
        where ms.space_id = $2
        order by ms.joined_at, ms.member_id`,
@@ -417,15 +419,15 @@ export class PgStore implements Store {
     // transfer yet, and reaching an agent another way is a new agent (spec §4
     // Agent members, 2026-09-29 and 2026-09-30).
     await this.sql.query(
-      `insert into members (org_id, id, display_name, avatar_url, role, kind, owner_id, agent_kind, agent_connection) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      `insert into members (org_id, id, display_name, avatar_url, role, kind, owner_id, agent_kind, agent_connection, agent_instance) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        on conflict (org_id, id) do update set display_name = excluded.display_name, avatar_url = excluded.avatar_url, role = excluded.role`,
-      [this.orgId, member.id, member.displayName, member.avatarUrl ?? null, member.role, member.kind, member.ownerId ?? null, member.agentKind ?? null, member.agentConnection ?? null],
+      [this.orgId, member.id, member.displayName, member.avatarUrl ?? null, member.role, member.kind, member.ownerId ?? null, member.agentKind ?? null, member.agentConnection ?? null, member.agentInstance ?? null],
     );
   }
 
   async getMemberByIdentity(iss: string, sub: string): Promise<Member | undefined> {
     const rows = await this.sql.query<MemberRow>(
-      `select m.id, m.display_name, m.avatar_url, m.role, m.kind, m.owner_id, m.agent_kind, m.agent_connection from member_identities mi
+      `select m.id, m.display_name, m.avatar_url, m.role, m.kind, m.owner_id, m.agent_kind, m.agent_connection, m.agent_instance from member_identities mi
        join members m on m.org_id = mi.org_id and m.id = mi.member_id
        where mi.org_id = $1 and mi.iss = $2 and mi.sub = $3`,
       [this.orgId, iss, sub],
@@ -500,6 +502,15 @@ export class PgStore implements Store {
       [this.orgId],
     );
     return rows.map(rowToSpace);
+  }
+
+  async countSpacesByKind(): Promise<{ shared: number; direct: number }> {
+    const rows = await this.sql.query<{ shared: string; direct: string }>(
+      `select count(*) filter (where kind = 'shared') as shared, count(*) filter (where kind = 'direct') as direct
+         from spaces where org_id = $1`,
+      [this.orgId],
+    );
+    return { shared: Number(rows[0]?.shared ?? 0), direct: Number(rows[0]?.direct ?? 0) };
   }
 
   async getDirectSpace(directKey: string): Promise<Space | undefined> {
@@ -1490,7 +1501,7 @@ export class PgStore implements Store {
 
   async listAgents(ownerId: string | null): Promise<Member[]> {
     const rows = await this.sql.query<MemberRow>(
-      `select id, display_name, avatar_url, role, kind, owner_id, agent_kind, agent_connection from members
+      `select id, display_name, avatar_url, role, kind, owner_id, agent_kind, agent_connection, agent_instance from members
        where org_id = $1 and kind = 'agent' and ($2::text is null or owner_id = $2)
        order by lower(display_name), id`,
       [this.orgId, ownerId],
@@ -1672,6 +1683,21 @@ export class PgStore implements Store {
     return rows.map((r) => r.data);
   }
 
+  async getMessageHops(spaceId: string, messageId: string): Promise<number> {
+    const rows = await this.sql.query<{ depth: number }>(
+      'select depth from message_hops where space_id = $1 and message_id = $2',
+      [spaceId, messageId],
+    );
+    return rows[0]?.depth ?? 0;
+  }
+  async putMessageHops(spaceId: string, messageId: string, depth: number): Promise<void> {
+    await this.sql.query(
+      `insert into message_hops (space_id, message_id, depth) values ($1, $2, $3)
+       on conflict (space_id, message_id) do update set depth = excluded.depth`,
+      [spaceId, messageId, depth],
+    );
+  }
+
   async sharesSharedSpace(a: string, b: string): Promise<boolean> {
     const rows = await this.sql.query<{ shares: boolean }>(
       `select exists (
@@ -1722,7 +1748,7 @@ export class PgStore implements Store {
   async listAgentsByConnection(connections: readonly string[]): Promise<Member[]> {
     if (connections.length === 0) return [];
     const rows = await this.sql.query<MemberRow>(
-      `select id, display_name, avatar_url, role, kind, owner_id, agent_kind, agent_connection from members
+      `select id, display_name, avatar_url, role, kind, owner_id, agent_kind, agent_connection, agent_instance from members
        where org_id = $1 and kind = 'agent' and agent_connection = any($2::text[]) order by id`,
       [this.orgId, [...connections]],
     );

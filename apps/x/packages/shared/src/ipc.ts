@@ -3895,7 +3895,9 @@ export const ipcSchemas = {
   // 'direct') — opt-in on the wire so a pre-DM build never renders one as a space.
   'spaces:listSpaces': {
     req: z.object({ orgId: z.string(), includeDirect: z.boolean().optional() }),
-    res: z.object({ spaces: z.array(z.custom<SpacesTypes.Space>()) }),
+    // groupChat (2026-10-07): the org is one space and no DMs — a chat for
+    // every member, DMs off. Absent from servers that predate it.
+    res: z.object({ spaces: z.array(z.custom<SpacesTypes.Space>()), groupChat: z.boolean().optional() }),
   },
   'spaces:createSpace': {
     req: z.object({ orgId: z.string(), name: z.string() }),
@@ -3921,8 +3923,19 @@ export const ipcSchemas = {
       kind: z.string().optional(),
       connection: z.string().optional(),
       credential: z.string().optional(),
+      instance: z.string().optional(),
     }),
     res: z.object({ agent: z.custom<SpacesTypes.Member>(), key: z.custom<SpacesTypes.AgentKeySecret>() }),
+  },
+  // Adding an Agent37 agent (2026-10-05): find or create its instance with the
+  // key being pasted, before Harbor is asked to add it. The key is not kept.
+  'spaces:agent37Instances': {
+    req: z.object({ key: z.string() }),
+    res: z.object({ instances: z.array(z.object({ id: z.string(), name: z.string().nullable(), template: z.string(), status: z.string(), kind: z.string().optional() })) }),
+  },
+  'spaces:agent37CreateInstance': {
+    req: z.object({ key: z.string(), kind: z.string(), name: z.string(), monthlyBudgetUsd: z.number(), autoSleep: z.boolean() }),
+    res: z.object({ instance: z.object({ id: z.string(), name: z.string().nullable(), template: z.string(), status: z.string(), kind: z.string().optional() }) }),
   },
   'spaces:setAgentCredential': {
     req: z.object({ orgId: z.string(), agentId: z.string(), secret: z.string() }),

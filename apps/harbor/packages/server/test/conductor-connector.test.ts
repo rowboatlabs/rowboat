@@ -99,6 +99,8 @@ describe('the Conductor connector', () => {
     org = await new Org(await freshStore()).start();
     await org.space();
     claude = await org.agent('Claude');
+    // A second space: a one-space server is a group chat, where DMs (the owner's notice) are off (2026-10-07).
+    await org.as('dev-ramnique').post('/v1/spaces', { name: 'Design' });
   });
   afterAll(async () => {
     await org.harbor.close();

@@ -222,6 +222,15 @@ export const ServerFrame = z.discriminatedUnion('kind', [
     at: z.iso.datetime(),
   }),
   /**
+   * Addressed to EVERY member of the org (2026-10-07): the org's shape
+   * changed — today, a second space made a group chat a workspace, DMs on.
+   * It reaches members the new space does not include, which is why it is
+   * not a space event. Ephemeral, never replayed: refetch the listing
+   * (`groupChat` on listSpaces is the truth). Older clients drop the
+   * unknown frame by contract.
+   */
+  z.object({ kind: z.literal('org_changed'), at: z.iso.datetime() }),
+  /**
    * Addressed to a MEMBER (read state, 2026-09-09): one of your own
    * connections advanced a read mark — the stream's (no threadRootId) or a
    * followed thread's — so your other devices apply it and badges agree

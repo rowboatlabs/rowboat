@@ -183,8 +183,8 @@ function CreateServerDialog({ onClose, onDone, onJoinInstead }: {
     const needsSignIn = account !== null && !account.hasSession
     return (
         <Shell
-            title="Create a server"
-            description="Home for your team and their assistants, with spaces for each project. Free, and you’re its admin."
+            title="Create a group chat"
+            description="Name it and you’re in. Invite people from the chat, and add channels whenever it grows into a team. Free, and you’re its admin."
             onClose={onClose}
             footerLeft={<FooterLink onClick={onJoinInstead}>Have an invite? Join a server</FooterLink>}
             footerRight={
@@ -204,17 +204,17 @@ function CreateServerDialog({ onClose, onDone, onJoinInstead }: {
         >
             {needsSignIn ? (
                 <p className="text-sm text-muted-foreground">
-                    Sign in with your Rowboat account first — the server is yours, so it needs to know who you are. Any servers you already belong to appear right after.
+                    Sign in with your Rowboat account first — the chat is yours, so it needs to know who you are. Any servers you already belong to appear right after.
                 </p>
             ) : (
                 <div>
-                    <label htmlFor="server-name" className="text-xs font-medium text-muted-foreground">Server name</label>
+                    <label htmlFor="server-name" className="text-xs font-medium text-muted-foreground">Group name</label>
                     <Input
                         id="server-name"
                         autoFocus
                         value={name}
                         onChange={(e) => setName(e.target.value)}
-                        placeholder="Acme, book club, just me…"
+                        placeholder="Family, book club, Acme…"
                         onKeyDown={(e) => e.key === 'Enter' && void create()}
                     />
                     {apexDomain === null && (

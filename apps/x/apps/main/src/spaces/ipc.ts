@@ -13,6 +13,7 @@ import { onSpaceAgentActivity, startSpaceAgentActivity } from '@x/core/dist/spac
 import { startSpaceNotifications } from '@x/core/dist/spaces/notify.js';
 import { resolveResponseSession, startSpaceResponseIndex } from '@x/core/dist/spaces/response-index.js';
 import { SpacesClient } from '@x/core/dist/spaces/client.js';
+import { createAgent37Instance, listAgent37Instances } from '@x/core/dist/spaces/agent37.js';
 import { fetchLinkPreview } from './link-preview.js';
 
 type IPCChannels = ipc.IPCChannels;
@@ -41,6 +42,8 @@ type SpacesHandlers = {
   'spaces:listAgents': InvokeHandler<'spaces:listAgents'>;
   'spaces:addAgent': InvokeHandler<'spaces:addAgent'>;
   'spaces:setAgentCredential': InvokeHandler<'spaces:setAgentCredential'>;
+  'spaces:agent37Instances': InvokeHandler<'spaces:agent37Instances'>;
+  'spaces:agent37CreateInstance': InvokeHandler<'spaces:agent37CreateInstance'>;
   'spaces:createAgentKey': InvokeHandler<'spaces:createAgentKey'>;
   'spaces:revokeAgentKey': InvokeHandler<'spaces:revokeAgentKey'>;
   'spaces:openDirect': InvokeHandler<'spaces:openDirect'>;
@@ -220,8 +223,8 @@ export const spacesIpcHandlers: SpacesHandlers = {
   },
 
   'spaces:listSpaces': async (_event, args) => {
-    const spaces = await orgs.getClient(args.orgId).listSpaces({ includeDirect: args.includeDirect ?? false });
-    return { spaces };
+    const { spaces, groupChat } = await orgs.getClient(args.orgId).listing({ includeDirect: args.includeDirect ?? false });
+    return { spaces, ...(groupChat !== undefined ? { groupChat } : {}) };
   },
 
   'spaces:createSpace': async (_event, args) => {
@@ -240,6 +243,8 @@ export const spacesIpcHandlers: SpacesHandlers = {
   'spaces:listAgents': async (_event, args) => ({ agents: await orgs.getClient(args.orgId).listAgents() }),
   'spaces:addAgent': async (_event, { orgId, ...input }) => orgs.getClient(orgId).addAgent(input),
   'spaces:setAgentCredential': async (_event, args) => ({ credential: await orgs.getClient(args.orgId).setAgentCredential(args.agentId, args.secret) }),
+  'spaces:agent37Instances': async (_event, { key }) => ({ instances: await listAgent37Instances(key) }),
+  'spaces:agent37CreateInstance': async (_event, { key, ...input }) => ({ instance: await createAgent37Instance(key, input) }),
   'spaces:createAgentKey': async (_event, args) => ({ key: await orgs.getClient(args.orgId).createAgentKey(args.agentId) }),
   'spaces:revokeAgentKey': async (_event, args) => ({ key: await orgs.getClient(args.orgId).revokeAgentKey(args.agentId, args.keyId) }),
 

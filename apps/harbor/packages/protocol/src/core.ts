@@ -55,6 +55,13 @@ export const Member = z.object({
    */
   agentKind: z.string().min(1).max(32).optional(),
   agentConnection: z.string().min(1).max(32).optional(),
+  /**
+   * The platform instance the agent is, for a connection in
+   * INSTANCE_CONNECTIONS (2026-10-05): Agent37's instance id. Not a secret.
+   * Fixed at creation like the kind and connection: another instance is
+   * another agent. Absent for every other agent and for people.
+   */
+  agentInstance: z.string().min(1).max(128).optional(),
 });
 export type Member = z.infer<typeof Member>;
 
@@ -68,14 +75,32 @@ export type Member = z.infer<typeof Member>;
 export const REPLICAS_CODING_AGENTS = ['claude-code', 'codex', 'cursor', 'opencode', 'pi', 'muse-code'] as const;
 /** Conductor runs Claude Code first; Codex and Cursor once their transcripts are read (2026-10-06). */
 export const CONDUCTOR_CODING_AGENTS = ['claude-code'] as const;
+/** The general agents Agent37 hosts that Harbor drives through its API (2026-10-01): coding harnesses wait. */
+export const AGENT37_AGENTS = ['hermes', 'openclaw'] as const;
 export const AGENT_PAIRS: ReadonlyArray<{ kind: string; connection: string }> = [
   { kind: 'custom', connection: 'contract' },
   { kind: 'hermes', connection: 'plugin' },
   ...REPLICAS_CODING_AGENTS.map((kind) => ({ kind, connection: 'replicas' })),
+  ...AGENT37_AGENTS.map((kind) => ({ kind, connection: 'agent37' })),
   ...CONDUCTOR_CODING_AGENTS.map((kind) => ({ kind, connection: 'conductor' })),
 ];
 /** Connections whose connector Harbor runs, calling the platform with a credential it holds (spec §8 Connectors). */
-export const HARBOR_RUN_CONNECTIONS: readonly string[] = ['replicas', 'conductor'];
+export const HARBOR_RUN_CONNECTIONS: readonly string[] = ['replicas', 'agent37', 'conductor'];
+/**
+ * Connections whose agent is one instance on the platform (2026-10-05): the
+ * agent is added with it, and Harbor checks the instance runs the agent's kind.
+ * An Agent37 instance keeps its own memory and files, so it is the agent.
+ */
+export const INSTANCE_CONNECTIONS: readonly string[] = ['agent37'];
+/**
+ * An agent Harbor itself is (2026-10-07, Jev): built into the org, on the
+ * deployment's own key, so no person adds it, owns it or holds a key for it.
+ * Never in AGENT_PAIRS: people add it to spaces like any agent, but never
+ * create one. Jev is TypeSafe's decision model; it reads every message in
+ * its spaces and tags whoever a message needs (spec §8 Jev).
+ */
+export const BUILT_IN_CONNECTION = 'builtin';
+export const JEV_KIND = 'jev';
 
 export function isAgentPair(kind: string, connection: string): boolean {
   return AGENT_PAIRS.some((pair) => pair.kind === kind && pair.connection === connection);

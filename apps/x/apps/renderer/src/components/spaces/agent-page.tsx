@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input'
 import { ConnectAgent } from '@/components/spaces/agent-setup'
 import { refreshAgentCapabilities } from '@/hooks/use-space-invocations'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
-import { PLATFORMS, setupFor } from '@/lib/agent-kinds'
+import { BUILT_IN_CONNECTION, PLATFORMS, setupFor } from '@/lib/agent-kinds'
 import { toast } from '@/lib/toast'
 
 // One agent's page in the Agents dialog (2026-10-01): its defaults, its setup
@@ -81,6 +81,18 @@ export function AgentPage({ org, listing, isAdmin, onChanged }: {
         }
     }
 
+    // Jev is built in (2026-10-07): no setup steps, no keys, nothing to set.
+    if (agent.agentConnection === BUILT_IN_CONNECTION) {
+        return (
+            <Section
+                title="Built in"
+                note={`${agent.displayName} comes with Rowboat and runs on Rowboat's own key. Add it to a space and it reads every message there, tagging the people and agents a message needs.`}
+            >
+                {null}
+            </Section>
+        )
+    }
+
     return (
         <div className="flex min-w-0 flex-col gap-6">
             <DefaultsSection orgId={org.id} agent={agent} canEdit={mine} />
@@ -93,7 +105,7 @@ export function AgentPage({ org, listing, isAdmin, onChanged }: {
                         : `A key is shown only once, when it is made. Where the steps say ${KEY_PLACEHOLDER}, use that key${mine ? ', or make a new one to fill them in' : ''}.`
                 }
             >
-                <ConnectAgent org={org} setup={setupFor(agent)} agentId={agent.id} agentName={agent.displayName} agentKey={secret ?? KEY_PLACEHOLDER} />
+                <ConnectAgent org={org} setup={setupFor(agent)} {...(agent.agentKind ? { agentKind: agent.agentKind } : {})} {...(agent.agentInstance ? { agentInstance: agent.agentInstance } : {})} agentId={agent.id} agentName={agent.displayName} agentKey={secret ?? KEY_PLACEHOLDER} />
             </Section>
 
             <Section title="Keys" note="Each key lets whatever runs the agent act as it. Revoking one cuts that off at once.">
@@ -124,6 +136,11 @@ export function AgentPage({ org, listing, isAdmin, onChanged }: {
                     </Button>
                 )}
                 {credential && <CredentialRow orgId={org.id} agent={agent} credential={credential} canReplace={mine} onReplaced={onChanged} />}
+                {agent.agentInstance && (
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                        {PLATFORMS[agent.agentConnection ?? '']?.label ?? 'Platform'} instance {agent.agentInstance}: this agent is that instance, and stays on it.
+                    </p>
+                )}
             </Section>
         </div>
     )

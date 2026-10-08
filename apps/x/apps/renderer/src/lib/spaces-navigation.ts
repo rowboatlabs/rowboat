@@ -110,3 +110,16 @@ export function parseSpacesLink(input: string): SpacesLinkTarget | null {
   return target
 }
 
+
+/**
+ * A group chat (2026-10-07, spec §4): the server says so — one space and no
+ * DMs, the same for every member — and shows as one conversation, with DMs
+ * off. A second space makes it a workspace for everyone. A server too old
+ * to say gets the same rule from what this member can see.
+ */
+export function isGroupChat(org: Pick<OrgWithSpaces, 'spaces' | 'directs' | 'groupChat' | 'error'>): boolean {
+    // The row opens your one space: a member of none (left it through their
+    // agent, say) has nothing to open, so it is not a chat to them.
+    if (org.error || org.spaces.length !== 1) return false
+    return org.groupChat ?? org.directs.length === 0
+}

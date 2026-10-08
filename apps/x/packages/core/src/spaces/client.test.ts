@@ -291,7 +291,12 @@ describe('SpacesClient', () => {
     expect((await ramnique.readAsset(spaceId, scratch)).content).toBe('scratch\n');
   });
 
-  it('direct messages: get-or-create from either side, hidden unless asked, fixed membership', async () => {
+  it('direct messages: off in a group chat, then get-or-create from either side, hidden unless asked, fixed membership', async () => {
+    // One space is a group chat (2026-10-07): the listing says so and a DM is refused, until a second space.
+    expect((await ramnique.listing()).groupChat).toBe(true);
+    await expect(ramnique.openDirect('gagan')).rejects.toBeInstanceOf(SpacesRequestError);
+    await ramnique.createSpace('Second');
+    expect((await gagan.listing()).groupChat).toBe(false);
     const opened = await ramnique.openDirect('gagan');
     expect(opened.created).toBe(true);
     expect(opened.space.kind).toBe('direct');
