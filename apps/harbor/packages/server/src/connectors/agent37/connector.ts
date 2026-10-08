@@ -3,7 +3,7 @@ import type { ConnectorCapabilities, Invocation, InvocationOption, InvocationUpd
 import { HarborError } from '../../errors.js';
 import type { ConnectorEnv, RunningConnector } from '../platforms.js';
 import { attachmentLinks, requestMarker, type Attachment } from '../thread-prompt.js';
-import { Agent37Error, type Agent37Api, type HistoryEntry, type TurnEvent, type TurnRequest } from './api.js';
+import { Agent37Error, type Agent37Api, type Agent37Model, type HistoryEntry, type TurnEvent, type TurnRequest } from './api.js';
 import { buildPrompt } from './prompt.js';
 
 // The Agent37 connector (spec §8 Connectors, 2026-10-01): one per agent whose
@@ -46,8 +46,10 @@ const RETRY_FOR_MS = 5 * 60_000;
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const FILES_DIR = '~/rowboat/files';
 
-/** `reasoning_effort`, per turn on both harnesses (https://www.agent37.com/docs/agents-api/chat). */
-const EFFORTS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+/** `reasoning_effort`, per turn: the eight levels every harness takes (https://www.agent37.com/docs/agents-api/chat, read 2026-10-08). */
+const EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+/** How old the instance's model list may get before the next turn, which wakes the instance anyway, reads it again. */
+const MODELS_EVERY_MS = 10 * 60_000;
 
 /** The connector's record for one thread (agent_connection_threads.data). */
 export interface ThreadRecord {
@@ -92,6 +94,9 @@ export class Agent37Connector implements RunningConnector {
   /** Ends every retry wait at once when the connector stops. */
   private readonly shutdown = new AbortController();
   private declared = '';
+  /** The Model option's choices, and when they were last read from the instance (0: carried over from the last declaration). */
+  private models: Array<{ id: string; label: string }> | undefined;
+  private modelsAt = 0;
 
   constructor(
     private readonly env: ConnectorEnv,
@@ -118,6 +123,7 @@ export class Agent37Connector implements RunningConnector {
   // --- intake -------------------------------------------------------------------------
 
   private async boot(): Promise<void> {
+    await this.loadModels();
     await this.declare();
     // Settle what a previous run acknowledged (spec §8), then pick up what waits.
     for (const invocation of await this.safe(() => this.env.service.listAgentInvocations(this.env.ctx), [])) {
@@ -347,12 +353,15 @@ export class Agent37Connector implements RunningConnector {
     for (const file of await this.fileBytes(invocation)) {
       files.push(await api.writeFile(record.instanceId!, `${FILES_DIR}/${file.hash.slice(0, 12)}-${safeName(file.name)}`, file.bytes, file.mime));
     }
-    const effort = invocation.options?.reasoning;
+    // The model goes as picked: Hermes runs a turn without one on the instance's default, and OpenClaw
+    // keeps the session's (https://www.agent37.com/docs/agents-api/models).
+    const { model, effort } = invocation.options ?? {};
     return {
       input: await this.prompt(invocation, record),
       sessionId: record.sessionId!,
       agent: kind,
       files,
+      ...(typeof model === 'string' && model ? { model } : {}),
       ...(typeof effort === 'string' && EFFORTS.includes(effort) ? { reasoningEffort: effort } : {}),
       metadata: { rowboat_invocation: invocation.id, rowboat_message: invocation.trigger.messageId },
     };
@@ -372,6 +381,8 @@ export class Agent37Connector implements RunningConnector {
       }
     }
     await this.save(spaceId, threadRootId, { ...record, ...(posted ? { deliveredOffset: posted.offset } : {}), turn: undefined });
+    // The instance just ran a turn, so it is awake: a good moment to see whether its models changed.
+    if (Date.now() - this.modelsAt > MODELS_EVERY_MS) void this.readModels().then(() => (this.stopped ? undefined : this.declare()));
   }
 
   // --- recovery -------------------------------------------------------------------------------
@@ -390,19 +401,51 @@ export class Agent37Connector implements RunningConnector {
   // --- what the connector tells Harbor --------------------------------------------------------
 
   /**
-   * Stop, and how hard to think. The instance is the agent's own, so it is no
-   * option (2026-10-05). No Model option (2026-10-01): models are listed per instance on
-   * its own URL, and asking would wake a sleeping instance every few minutes,
-   * keeping it from ever sleeping. The instance's own default model applies.
+   * Stop, Model and Effort. The instance is the agent's own, so it is no
+   * option (2026-10-05). Model (2026-10-08, reversing 2026-10-01) is the
+   * instance's own list, read only while the instance is awake (loadModels).
    */
   private async declare(): Promise<void> {
     const options: InvocationOption[] = [];
-    options.push({ type: 'select', key: 'reasoning', label: 'Reasoning', choices: EFFORTS.map((e) => ({ id: e, label: e === 'xhigh' ? 'Extra high' : e[0]!.toUpperCase() + e.slice(1) })) });
+    if (this.models?.length) options.push({ type: 'select', key: 'model', label: 'Model', choices: this.models });
+    // Keyed `effort` (2026-10-08, was `reasoning`; migration 035 moved owners' defaults), so the
+    // composer shows it on the model picker, as it does every agent's `model` and `effort`.
+    options.push({ type: 'select', key: 'effort', label: 'Effort', choices: EFFORTS.map((e) => ({ id: e, label: e === 'xhigh' ? 'Extra high' : e[0]!.toUpperCase() + e.slice(1) })) });
     const capabilities: ConnectorCapabilities = { stop: true, options };
     const signature = JSON.stringify(capabilities);
     if (signature === this.declared) return;
     this.declared = signature;
     await this.safe(() => this.env.service.declareCapabilities(this.env.ctx, capabilities), undefined);
+  }
+
+  /**
+   * The Model option's choices at start. The instance lists its models on its
+   * own address, and any request there wakes it and counts as activity that
+   * keeps it awake (https://www.agent37.com/docs/agents-api/instances#auto-sleep),
+   * so the list is never polled. It carries over from the last declaration;
+   * failing that, it is read now only if the hosting API, which wakes nothing,
+   * says the instance is running. After that, a turn refreshes it (finish).
+   * An owner's default model is filled only while Model is declared, so the
+   * option must not drop out while the instance sleeps.
+   */
+  private async loadModels(): Promise<void> {
+    const declared = await this.safe(() => this.env.service.getAgentCapabilities(this.env.agent.id), undefined);
+    const option = declared?.options.find((o) => o.key === 'model');
+    if (option?.type === 'select') this.models = option.choices;
+    if (this.models) return;
+    const instanceId = this.env.agent.agentInstance;
+    const running = await this.safe(async () => (await (await this.api()).instances()).find((i) => i.id === instanceId)?.status === 'running', false);
+    if (running) await this.readModels();
+  }
+
+  /** Read the instance's models: only while it is awake, since asking wakes it. */
+  private async readModels(): Promise<void> {
+    const instanceId = this.env.agent.agentInstance;
+    if (!instanceId || this.stopped) return;
+    const models = await this.safe(async () => (await this.api()).models(instanceId, this.env.agent.agentKind ?? 'hermes'), undefined);
+    if (!models) return;
+    this.models = modelChoices(models);
+    this.modelsAt = Date.now();
   }
 
   private async report(invocation: Invocation, update: InvocationUpdate): Promise<void> {
@@ -565,6 +608,17 @@ export function turnInHistory(history: HistoryEntry[], marker: string): { answer
     if (entry.role === 'assistant' && entry.content.trim()) answer = entry.content;
   }
   return { answer };
+}
+
+/** The instance's models as Model choices: its default first, at most 100, each label telling it apart from the rest. */
+export function modelChoices(models: Agent37Model[]): Array<{ id: string; label: string }> {
+  const fit = models
+    .filter((m) => m.id.length <= 256)
+    .sort((a, b) => Number(b.isDefault === true) - Number(a.isDefault === true))
+    .slice(0, 100);
+  const labels = fit.map((m) => m.label || m.id);
+  // Hermes labels a model by its upstream id, so two providers' copies of one model read the same: show those by id.
+  return fit.map((m, i) => ({ id: m.id, label: (labels.indexOf(labels[i]!) === labels.lastIndexOf(labels[i]!) ? labels[i]! : m.id).slice(0, 128) }));
 }
 
 /** One activity line for a tool call: the harness's own summary, or the tool's name. */

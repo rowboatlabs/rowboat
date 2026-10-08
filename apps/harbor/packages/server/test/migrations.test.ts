@@ -184,3 +184,27 @@ describe('open-space migration', () => {
     } finally { await db.close(); }
   });
 });
+
+describe('Agent37 effort key migration', () => {
+  it('moves an Agent37 agent’s Reasoning default to Effort, and leaves every other agent’s options alone', async () => {
+    const db = await pgliteDb();
+    try {
+      await db.query('create table schema_migrations (id text primary key, applied_at text not null)');
+      for (const migration of MIGRATIONS.filter((m) => m.id !== '035-agent37-effort-key')) {
+        for (const statement of migration.statements) await db.query(statement);
+        await db.query('insert into schema_migrations values ($1, $2)', [migration.id, '2026-10-07T00:00:00Z']);
+      }
+      await db.query(`insert into members (org_id, id, display_name, role, kind, agent_kind, agent_connection, agent_instance) values
+        ('o', 'a37', 'Hermes', 'member', 'agent', 'hermes', 'agent37', 'inst1'),
+        ('o', 'rpl', 'Claude', 'member', 'agent', 'claude-code', 'replicas', null)`);
+      await db.query(`insert into agent_option_defaults (org_id, agent_id, data, set_by, set_at) values
+        ('o', 'a37', '{"reasoning":"high"}', 'ramnique', '2026-10-07T00:00:00Z'),
+        ('o', 'rpl', '{"reasoning":"x","environment":"env-api"}', 'ramnique', '2026-10-07T00:00:00Z')`);
+      await migrate(db);
+      expect(await db.query('select agent_id, data from agent_option_defaults order by agent_id')).toEqual([
+        { agent_id: 'a37', data: { effort: 'high' } },
+        { agent_id: 'rpl', data: { reasoning: 'x', environment: 'env-api' } },
+      ]);
+    } finally { await db.close(); }
+  });
+});
