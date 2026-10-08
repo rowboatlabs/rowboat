@@ -1,5 +1,5 @@
 import { useFileViewerSource } from './file-viewer-source'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { ExternalLinkIcon, FileTextIcon, Loader2Icon } from 'lucide-react'
 
 interface PdfFileViewerProps {
@@ -9,12 +9,13 @@ interface PdfFileViewerProps {
 type State = 'loading' | 'ready' | 'error'
 
 export function PdfFileViewer({ path }: PdfFileViewerProps) {
+  // 2026-10-08, CI #1198: reset on navigation without an effect overwriting a fast iframe load.
+  return <PdfPreview key={path} path={path} />
+}
+
+function PdfPreview({ path }: PdfFileViewerProps) {
   const source = useFileViewerSource()
   const [state, setState] = useState<State>('loading')
-
-  useEffect(() => {
-    setState('loading')
-  }, [path])
 
   const src = source.url(path)
 
@@ -40,7 +41,6 @@ export function PdfFileViewer({ path }: PdfFileViewerProps) {
   return (
     <div className="relative h-full w-full">
       <iframe
-        key={path}
         src={src}
         className="h-full w-full border-0 bg-white"
         title="PDF preview"
