@@ -3,9 +3,10 @@ import { downloadLine, leadingMentionOf, namingAttachments, requestMarker, stand
 
 export { attachmentLinks, requestMarker, type Attachment } from '../thread-prompt.js';
 
-// The message the Replicas connector sends into a thread's workspace (spec §8
-// Connectors, 2026-09-30). The person's words come first, as written: Replicas
-// acts on a leading `/plan`, `/goal` or `/fast` itself, and a command anywhere
+// The message a coding-agent connector sends into a thread's workspace (spec
+// §8 Connectors, 2026-09-30; shared by Replicas and Conductor since
+// 2026-10-06). The person's words come first, as written: the platform acts
+// on a leading `/plan`, `/goal` or `/fast` itself, and a command anywhere
 // else would be lost. Then what the thread said since the workspace last heard
 // from it, the files attached, the standing instructions (carried over from
 // #1130), and last the marker the connector finds this request by in the

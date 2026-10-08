@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { spaces } from '@x/shared'
 
 vi.mock('@/lib/toast', () => ({ toast: vi.fn() }))
+vi.mock('@/hooks/use-models', () => ({ useModels: () => ({ groups: [], reasoningByKey: {}, defaultModel: null, catalogByProvider: {}, refresh: vi.fn() }) }))
 
 import { InvocationLines, SpaceInvocationsProvider } from './invocation-lines'
 import { AgentOptionsStrip } from './agent-options-strip'
@@ -37,6 +38,19 @@ const invoke = vi.fn(async (channel: string, args: { invocationId?: string; agen
                 ],
             },
             defaults: { environment: 'api', plan_first: true },
+        }
+    }
+    if (channel === 'spaces:getAgentCapabilities' && args.agentId === 'claude') {
+        return {
+            capabilities: {
+                stop: true,
+                options: [
+                    { type: 'select', key: 'model', label: 'Model', choices: [{ id: 'opus-5-5-1m', label: 'Opus 5.5 (1M)' }, { id: 'haiku-4-5', label: 'Haiku 4.5' }] },
+                    { type: 'select', key: 'effort', label: 'Effort', choices: [{ id: 'low', label: 'Low' }, { id: 'max', label: 'Max' }] },
+                    { type: 'toggle', key: 'fast_mode', label: 'Fast mode' },
+                ],
+            },
+            defaults: {},
         }
     }
     if (channel === 'spaces:getAgentCapabilities') {
@@ -117,8 +131,11 @@ describe('AgentOptionsStrip', () => {
                 </SpaceMembersProvider>
             </SpaceRefsProvider>,
         )
-        const select = await screen.findByRole('combobox', { name: 'Echo Env' })
-        fireEvent.change(select, { target: { value: 'api' } })
+        // The chat's model picker over the declared choices: open it, pick one.
+        vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} })
+        Element.prototype.scrollIntoView ??= () => {}
+        fireEvent.click(await screen.findByTitle('Echo Env'))
+        fireEvent.click(await screen.findByRole('option', { name: /payments-api/ }))
         expect(onChange).toHaveBeenCalledWith({ echo: { environment: 'api' } })
     })
 
@@ -134,11 +151,34 @@ describe('AgentOptionsStrip', () => {
                 </SpaceMembersProvider>
             </SpaceRefsProvider>,
         )
-        const select = (await screen.findByRole('combobox', { name: 'Coder Env' })) as HTMLSelectElement
-        expect(select.selectedOptions[0]!.textContent).toBe('Env: payments-api')
+        expect(await screen.findByTitle('Coder Env')).toHaveTextContent('Env: payments-api')
         const plan = screen.getByRole('button', { name: 'Plan first' })
         expect(plan).toHaveAttribute('aria-pressed', 'true')
         fireEvent.click(plan)
         expect(onChange).toHaveBeenCalledWith({ coder: { plan_first: false } })
+    })
+
+    it('shows Model and Effort as one picker: the model on the pill, its effort on hover', async () => {
+        vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} })
+        Element.prototype.scrollIntoView ??= () => {}
+        const onChange = vi.fn()
+        const claude = { id: 'claude', displayName: 'Claude', role: 'member', kind: 'agent' } as spaces.Member
+        render(
+            <SpaceRefsProvider refs={{ orgId: 'org-model', orgAddress: 'x', spaceId: 'S' }}>
+                <SpaceMembersProvider members={new Map([['claude', 'Claude']])}>
+                    <SpaceProfilesProvider members={[claude]} here={new Set()} selfId="harsh">
+                        <AgentOptionsStrip draft="[@Claude](#member:claude) fix it" values={{}} onChange={onChange} />
+                    </SpaceProfilesProvider>
+                </SpaceMembersProvider>
+            </SpaceRefsProvider>,
+        )
+        const pill = await screen.findByTitle('Claude Model')
+        expect(pill).toHaveTextContent('Model: default')
+        expect(screen.queryByTitle('Claude Effort')).toBeNull() // no separate effort pill
+        expect(screen.getByRole('button', { name: 'Fast mode' })).toBeInTheDocument()
+        fireEvent.click(pill)
+        fireEvent.mouseEnter(await screen.findByRole('option', { name: /Haiku 4.5/ }))
+        fireEvent.click(await screen.findByRole('button', { name: 'Max' }))
+        expect(onChange).toHaveBeenCalledWith({ claude: { model: 'haiku-4-5', effort: 'max' } })
     })
 })

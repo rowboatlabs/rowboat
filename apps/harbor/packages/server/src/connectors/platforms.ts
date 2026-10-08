@@ -3,6 +3,7 @@ import type { ActorCtx } from '../core/kernel.js';
 import type { CredentialTarget } from '../core/agents.js';
 import type { HarborService } from '../service.js';
 import { agent37Platform } from './agent37/index.js';
+import { conductorPlatform } from './conductor/index.js';
 import { jevPlatform } from './jev/index.js';
 import { replicasPlatform } from './replicas/index.js';
 
@@ -30,6 +31,12 @@ export interface ConnectorEnv {
   credential(): Promise<string>;
   /** The platform refused the credential: marks it rejected; true only the first time, until it is replaced. */
   rejectCredential(reason: string): Promise<boolean>;
+  /**
+   * A key of the agent's own for the platform's workspaces to call Spaces
+   * with (an `rbk_` key; minted again if its owner revoked it). Only for
+   * platforms that let the connector set a workspace's variables (Conductor).
+   */
+  agentKey(): Promise<string>;
   /** The connector's own record for one thread (spec §8: its platform session and what is in flight). */
   thread: {
     get(spaceId: string, threadRootId: string): Promise<unknown | undefined>;
@@ -58,6 +65,7 @@ export interface ConnectorPlatform {
 export const PLATFORMS: Record<string, ConnectorPlatform> = {
   replicas: replicasPlatform(),
   agent37: agent37Platform(),
+  conductor: conductorPlatform(),
   [BUILT_IN_CONNECTION]: jevPlatform(),
 };
 

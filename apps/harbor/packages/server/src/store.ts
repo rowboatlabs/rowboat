@@ -481,6 +481,9 @@ export interface Store {
   /** A connector's own record for one thread (its shape is the connector's). */
   getConnectionThread(agentId: string, spaceId: string, threadRootId: string): Promise<unknown | undefined>;
   putConnectionThread(agentId: string, spaceId: string, threadRootId: string, data: unknown, at: string): Promise<void>;
+  /** The agent key a connector hands its agent's workspaces: which key, and its sealed secret. */
+  getConnectorKey(agentId: string): Promise<{ keyId: string; sealed: string } | undefined>;
+  putConnectorKey(agentId: string, keyId: string, sealed: string, at: string): Promise<void>;
 
   // --- invocations (spec §8 Invoking agent members, 2026-09-30) ---
   /** A new invocation, with its triggering message's offset: the queue's order. */
