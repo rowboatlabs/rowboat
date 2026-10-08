@@ -3899,8 +3899,16 @@ export const ipcSchemas = {
     // every member, DMs off. Absent from servers that predate it.
     res: z.object({ spaces: z.array(z.custom<SpacesTypes.Space>()), groupChat: z.boolean().optional() }),
   },
+  'spaces:browseSpaces': {
+    req: z.object({ orgId: z.string() }),
+    res: z.object({ supported: z.boolean(), spaces: z.array(z.object({ space: z.custom<SpacesTypes.Space>(), joined: z.boolean() })) }),
+  },
+  'spaces:joinSpace': {
+    req: z.object({ orgId: z.string(), spaceId: z.string() }),
+    res: z.object({ space: z.custom<SpacesTypes.Space>(), membership: z.custom<SpacesTypes.Membership>() }),
+  },
   'spaces:createSpace': {
-    req: z.object({ orgId: z.string(), name: z.string() }),
+    req: z.object({ orgId: z.string(), name: z.string(), visibility: z.enum(['private', 'open']).optional() }),
     res: z.object({ space: z.custom<SpacesTypes.Space>() }),
   },
   'spaces:renameSpace': {

@@ -238,8 +238,24 @@ export class SpacesClient {
     return this.request('POST', routes.openDirect.path, routes.openDirect.response, { memberId });
   }
 
-  async createSpace(name: string): Promise<Space> {
-    return (await this.request('POST', routes.createSpace.path, routes.createSpace.response, { name })).space;
+  async browseSpaces() {
+    try {
+      const result = await this.request('GET', routes.browseSpaces.path, routes.browseSpaces.response);
+      return { supported: true as const, ...result };
+    } catch (error) {
+      if (error instanceof SpacesRequestError && error.status === 404) {
+        return { supported: false as const, spaces: [] };
+      }
+      throw error;
+    }
+  }
+
+  async joinSpace(spaceId: string) {
+    return this.request('POST', this.space(spaceId, '/join'), routes.joinSpace.response);
+  }
+
+  async createSpace(name: string, visibility?: Space['visibility']): Promise<Space> {
+    return (await this.request('POST', routes.createSpace.path, routes.createSpace.response, { name, ...(visibility ? { visibility } : {}) })).space;
   }
 
   /** Rename a shared space (api.ts renameSpace). Identical name = idempotent no-op. */

@@ -1,3 +1,4 @@
+import { invokeSpace } from '@/lib/spaces-invoke'
 import type { spaces } from '@x/shared'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { containsRowboatAddress } from '@/lib/spaces-mentions'
@@ -28,8 +29,7 @@ export function maybeInvokeRowboat(
     options?: RowboatTurnOptions,
 ): void {
     if (!containsRowboatAddress(body)) return
-    void window.ipc
-        .invoke('spaces:invokeRowboat', {
+    void invokeSpace('spaces:invokeRowboat', {
             orgId: org.id,
             spaceId: space.id,
             threadRootId: thread.rootMessageId,

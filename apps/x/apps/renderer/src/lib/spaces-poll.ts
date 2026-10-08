@@ -1,3 +1,4 @@
+import { invokeSpace } from '@/lib/spaces-invoke'
 import type { spaces } from '@x/shared'
 
 // Polls, the Discord model (CONTRACT.md "Polls are a field on a message"):
@@ -102,7 +103,7 @@ export async function postPoll(opts: {
     input: spaces.SpacesNewPollInput
 }): Promise<spaces.SpacesPostResult> {
     const { orgId, spaceId, rootMessageId, input } = opts
-    return window.ipc.invoke('spaces:postMessage', {
+    return invokeSpace('spaces:postMessage', {
         orgId,
         spaceId,
         ...(rootMessageId ? { threadRoot: rootMessageId } : {}),

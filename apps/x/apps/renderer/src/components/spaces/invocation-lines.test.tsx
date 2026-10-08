@@ -1,3 +1,4 @@
+import { SpaceAccessContext } from '@/lib/spaces-access'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { spaces } from '@x/shared'
@@ -66,18 +67,28 @@ beforeEach(() => {
 })
 
 const names = new Map([['echo', 'Echo'], ['harsh', 'Harsh']])
-function lines(list: spaces.Invocation[], viewer: { selfId: string; isAdmin?: boolean }, orgId = `org-${Math.random()}`) {
+function lines(list: spaces.Invocation[], viewer: { selfId: string; isAdmin?: boolean; member?: boolean }, orgId = `org-${Math.random()}`) {
     return render(
+        <SpaceAccessContext.Provider value={{ member: viewer.member ?? true, join: () => {}, joining: false }}>
         <SpaceMembersProvider members={names}>
             <SpaceInvocationsProvider byMessage={new Map([['m1', list]])} orgId={orgId} selfId={viewer.selfId} isAdmin={viewer.isAdmin ?? false}>
                 <InvocationLines messageId="m1" />
             </SpaceInvocationsProvider>
-        </SpaceMembersProvider>,
+        </SpaceMembersProvider>
+        </SpaceAccessContext.Provider>,
     )
 }
 
 // The line under a message that invoked an agent (Harbor spec §8, 2026-09-30).
 describe('InvocationLines', () => {
+    it('keeps invocation status visible without mutation controls in a preview', async () => {
+        lines([invocation('q', 'queued'), invocation('w', 'working')], { selfId: 'harsh', isAdmin: true, member: false })
+        expect(screen.getByText('Echo will get to this next')).toBeInTheDocument()
+        await screen.findByText('Echo is typing…')
+        expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull()
+        expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
+    })
+
     it('says what the agent is doing, and nothing once it is done', () => {
         const { container } = lines(
             [

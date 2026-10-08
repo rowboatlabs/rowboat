@@ -7,10 +7,11 @@ import { useSpacesUnreadCounts } from '@/hooks/use-space-chat'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 
 /** Stable space/people navigation. Space contents live in the top strip. */
-export function SpaceRail({ org, spaceId, onOpenSpace, onOpenActivity, onOpenMessage, active = true, open, onTogglePin }: {
+export function SpaceRail({ org, spaceId, onOpenSpace, onOpenActivity, onOpenBrowse, onOpenMessage, active = true, open, onTogglePin }: {
     org: OrgWithSpaces
     spaceId: string
     onOpenSpace: (orgId: string, spaceId: string) => void
+    onOpenBrowse?: (orgId: string) => void
     onOpenActivity?: (orgId: string) => void
     onOpenMessage?: (target: ActivityTarget) => void
     active?: boolean
@@ -26,7 +27,7 @@ export function SpaceRail({ org, spaceId, onOpenSpace, onOpenActivity, onOpenMes
                 <SecondaryRailToggle open={open} onToggle={togglePin} />
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-                <ServerSpaceNavigation org={org} spaceId={spaceId} onOpenSpace={onOpenSpace}
+                <ServerSpaceNavigation onOpenBrowse={onOpenBrowse} org={org} spaceId={spaceId} onOpenSpace={onOpenSpace}
                     showDiscussions={false} />
             </div>
         </SpaceRailSections>}

@@ -182,7 +182,7 @@ describe('server and space navigation', () => {
         expect(screen.getByText('founders').compareDocumentPosition(newSpace) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
         expect(newSpace.compareDocumentPosition(screen.getByRole('heading', { name: 'DMs' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
         fireEvent.click(newSpace)
-        expect(screen.getByPlaceholderText('Space name').compareDocumentPosition(screen.getByRole('heading', { name: 'DMs' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+        expect(screen.getByRole('dialog', { name: 'Create a space' })).toBeInTheDocument()
     })
     it('moves every space from the rail\'s one expand-all / collapse-all control', () => {
         // The rail header's control, standing in for space-rail.tsx: the space

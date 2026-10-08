@@ -1,3 +1,4 @@
+import { useSpaceAccess, canActInSpace } from '@/lib/spaces-access'
 import { createContext, useContext, useMemo, useState, type ReactNode } from 'react'
 import { AlertCircle, Ban, Clock, ExternalLink, Hand, Loader2, XCircle } from 'lucide-react'
 import type { spaces } from '@x/shared'
@@ -33,6 +34,7 @@ const RUNNING: readonly spaces.InvocationState[] = ['working', 'waiting']
 
 export function InvocationLines({ messageId }: { messageId: string }) {
     const { byMessage, orgId, selfId, isAdmin } = useContext(InvocationsContext)
+    const { member } = useSpaceAccess()
     const names = useMemberNames()
     const list = (byMessage.get(messageId) ?? []).filter((i) => i.state !== 'done')
     const running = list.filter((i) => RUNNING.includes(i.state)).map((i) => i.agentId)
@@ -41,6 +43,7 @@ export function InvocationLines({ messageId }: { messageId: string }) {
     if (list.length === 0) return null
 
     const cancel = async (invocation: spaces.Invocation) => {
+        if (!canActInSpace(orgId, invocation.conversation.spaceId)) return
         setBusy(invocation.id)
         try {
             const { invocation: updated } = await window.ipc.invoke('spaces:cancelInvocation', { orgId, invocationId: invocation.id })
@@ -57,8 +60,8 @@ export function InvocationLines({ messageId }: { messageId: string }) {
             {list.map((invocation) => {
                 const name = names.get(invocation.agentId) ?? 'The agent'
                 const mine = invocation.trigger.authorId === selfId
-                const canCancel = mine && (invocation.state === 'queued' || invocation.state === 'pending')
-                const canStop = RUNNING.includes(invocation.state) && (mine || isAdmin) && caps.get(invocation.agentId)?.stop === true
+                const canCancel = member && mine && (invocation.state === 'queued' || invocation.state === 'pending')
+                const canStop = member && RUNNING.includes(invocation.state) && (mine || isAdmin) && caps.get(invocation.agentId)?.stop === true
                 const { Icon, text, tone } = describe(invocation, name)
                 return (
                     <div key={invocation.id} data-invocation={invocation.state} className={cn('flex items-center gap-1.5 text-[12.5px]', tone)}>

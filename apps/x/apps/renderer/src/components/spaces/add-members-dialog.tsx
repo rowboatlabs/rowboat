@@ -1,3 +1,4 @@
+import { invokeSpace } from '@/lib/spaces-invoke'
 import { useEffect, useMemo, useState } from 'react'
 import { Check, Loader2 } from 'lucide-react'
 import type { spaces } from '@x/shared'
@@ -53,7 +54,7 @@ export function AddMembersDialog({ org, space, members, open, onOpenChange }: {
         if (picked.size === 0 || adding) return
         setAdding(true)
         try {
-            await window.ipc.invoke('spaces:addMembers', { orgId: org.id, spaceId: space.id, memberIds: [...picked] })
+            await invokeSpace('spaces:addMembers', { orgId: org.id, spaceId: space.id, memberIds: [...picked] })
             refreshMembers(org.id, space.id, { force: true })
             toast(picked.size === 1 ? `Added to #${space.name}` : `Added ${picked.size} to #${space.name}`, 'success')
             onOpenChange(false)

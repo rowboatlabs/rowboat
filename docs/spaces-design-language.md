@@ -104,6 +104,22 @@ The implementation's semantic stylesheet is `apps/x/apps/renderer/src/styles/spa
 12. On a held stream verdict, the notice may offer people to tag (2026-09-24): up to three members judged from the space's recent messages, and @here for an announcement, never more than Jev is confident about. Chips are offers: a click adds the mention, a second click removes it, a chip's × declines it for this draft (an edit-and-resend does not bring it back), the notice's X or Esc hides them all, and sending with chips untouched sends nothing extra. Nothing is ever added on its own. A switch on the Decision Models card turns suggestions off, which also skips the questions. Direct spaces never suggest.
 13. `/find <what you remember>` in the stream composer (2026-09-24) lands on the message or thread the words describe, with Jev picking by meaning from the recent roots and the org's word-search hits. A reply, a discussion, or a root with replies opens as a thread; a lone root scrolls the stream. A banner above the composer of the pane landed in reads 'Match 2 of 5 for "…"' with "Next match" (the ranking, walked locally with no second call), "Open search" (the search bar, prefilled), and a close. Every text node in these banners is one size. When nothing matches, or without a TypeSafe key, the query goes to the search bar instead of landing somewhere plausible.
 
+### Open-space discovery and previews (2026-09-28)
+
+Each server's navigation includes **Browse spaces**, a full-page directory of its open
+spaces with name search and a Joined indicator. A row opens the normal space view;
+opening it never joins. An unjoined view identifies itself as a preview and offers
+**Join space** in its banner and in place of conversation composers. Reading includes
+threads, the roster, search, attachments, files, history, diffs, and whiteboards.
+Previews do not send presence, advance read marks, follow threads, or acquire unread
+badges. Member-only actions become available after an explicit successful join.
+
+Create space offers **Private** (the default) and **Open**, with copy explaining the
+team visibility boundary. Private spaces use a lock; open spaces use the channel
+icon. The directory and Open creation explain when a server needs an update; private
+creation remains available. Existing-space visibility changes belong to admin controls.
+The product and access rules remain owned by [Harbor spec §5](../apps/harbor/SPEC.md#5-the-space).
+
 ## Verification and limitations
 
 The production Vite bundle builds successfully. Nine focused suites pass all 120 tests, covering presentation, formatting, mentions, conventions, the rich-text editor, message actions, thread resizing, inline editing, and message markdown. Renderer typechecking passes after rebuilding the protocol and shared declarations. `git diff --check` passes.

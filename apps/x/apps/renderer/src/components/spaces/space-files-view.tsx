@@ -1,3 +1,4 @@
+import { useSpaceAccess } from '@/lib/spaces-access'
 import { useRef, useState } from 'react'
 import { FileText, FolderPlus, MoreHorizontal, PenTool, Plus, Trash2, Upload } from 'lucide-react'
 import { spaces } from '@x/shared'
@@ -25,6 +26,7 @@ export function SpaceFilesView({ orgId, orgAddress, spaceId, entries, draftFolde
     onAddFolder: (path: string) => void
     onRemoveFolder: (path: string) => void
 }) {
+    const { member } = useSpaceAccess()
     const [creatingFile, setCreatingFile] = useState<{ prefix: string } | null>(null)
     const [creatingFolder, setCreatingFolder] = useState(false)
     const [creatingBoard, setCreatingBoard] = useState(false)
@@ -50,7 +52,7 @@ export function SpaceFilesView({ orgId, orgAddress, spaceId, entries, draftFolde
                 className="spaces-files-view group/section flex min-h-0 flex-1 flex-col" aria-label="All files"
                 onDragOver={(e) => { if (Array.from(e.dataTransfer.types).includes('Files')) e.preventDefault() }}
                 onDrop={(e) => {
-                    if (!Array.from(e.dataTransfer.types).includes('Files')) return
+                    if (!member || !Array.from(e.dataTransfer.types).includes('Files')) return
                     e.preventDefault()
                     const files = Array.from(e.dataTransfer.files)
                     if (files.length > 0) onUploadFiles(files)
@@ -58,7 +60,7 @@ export function SpaceFilesView({ orgId, orgAddress, spaceId, entries, draftFolde
             >
                 <div className="spaces-pane-header flex shrink-0 items-center gap-2 border-b border-border"><h2 className="flex-1 text-[13px] font-semibold">All files <span className="ml-1 font-normal text-muted-foreground">{liveFiles}</span></h2>
                     <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
+                        <DropdownMenuTrigger asChild disabled={!member}>
                             <button
                                 type="button"
                                 aria-label="Add to files"
@@ -84,7 +86,7 @@ export function SpaceFilesView({ orgId, orgAddress, spaceId, entries, draftFolde
                         </DropdownMenuContent>
                     </DropdownMenu>
                     <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
+                        <DropdownMenuTrigger asChild disabled={!member}>
                             <button
                                 type="button"
                                 aria-label="Files options"
@@ -100,12 +102,12 @@ export function SpaceFilesView({ orgId, orgAddress, spaceId, entries, draftFolde
                         </DropdownMenuContent>
                     </DropdownMenu>
                 </div>
-                    <FileListContextMenu actions={[
+                    <FileListContextMenu actions={member ? [
                         { label: 'New file', onSelect: () => { setCreatingBoard(false); setCreatingFile({ prefix: '' }) } },
                         { label: 'New folder', onSelect: () => { setCreatingBoard(false); setCreatingFolder(true) } },
                         { label: 'New board', onSelect: () => { setCreatingFile(null); setCreatingFolder(false); setCreatingBoard(true) } },
                         { label: 'Upload files…', onSelect: () => uploadInputRef.current?.click() },
-                    ]}>
+                    ] : []}>
                     <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3">
                         <FileTree
                             orgId={orgId}
@@ -122,14 +124,14 @@ export function SpaceFilesView({ orgId, orgAddress, spaceId, entries, draftFolde
                                 onCreateFile(path)
                             }}
                             onCancelCreate={() => setCreatingFile(null)}
-                            onStartCreate={(prefix) => setCreatingFile({ prefix })}
+                            onStartCreate={member ? (prefix) => setCreatingFile({ prefix }) : undefined}
                             creatingFolder={creatingFolder}
                             onCreateFolder={(path) => {
                                 setCreatingFolder(false)
                                 onAddFolder(path)
                             }}
                             onCancelCreateFolder={() => setCreatingFolder(false)}
-                            onRemoveFolder={onRemoveFolder}
+                            onRemoveFolder={member ? onRemoveFolder : undefined}
                         />
                         {creatingBoard && (
                             <div className="flex items-center gap-1.5 px-1 pt-1">
