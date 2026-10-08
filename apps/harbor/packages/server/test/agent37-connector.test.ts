@@ -133,13 +133,21 @@ describe('the Agent37 connector', () => {
     expect(custom.status).toBe(400);
   });
 
-  it('declares Stop and Reasoning, and no choice of instance', async () => {
+  it('declares Stop, the instance’s models, and Effort, and no choice of instance', async () => {
     const caps = await until(async () => {
       const r = await org.as('dev-harsh').get(`/v1/agents/${hermes.id}/capabilities`);
       return r.body.capabilities?.options?.length ? r.body.capabilities : undefined;
     }, 'capabilities');
     expect(caps.stop).toBe(true);
-    expect(caps.options.map((o: { key: string }) => o.key)).toEqual(['reasoning']);
+    expect(caps.options.map((o: { key: string }) => o.key)).toEqual(['model', 'effort']);
+    // The default first; two providers' copies of one model told apart by id.
+    expect(caps.options[0].choices).toEqual([
+      { id: 'hermes-4-405b', label: 'hermes-4-405b' },
+      { id: 'claude-sonnet-5-5', label: 'claude-sonnet-5-5' },
+      { id: '@openrouter:claude-sonnet-5-5', label: '@openrouter:claude-sonnet-5-5' },
+    ]);
+    expect(caps.options[1]).toMatchObject({ label: 'Effort' });
+    expect(caps.options[1].choices.map((c: { id: string }) => c.id)).toEqual(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
   });
 
   it('a first mention opens the thread’s session on the instance, shows progress, and answers in the thread', async () => {
@@ -190,10 +198,20 @@ describe('the Agent37 connector', () => {
     expect(String(turn.input)).toContain('[attached: chart.png]');
   });
 
-  it('takes the reasoning picked in the composer', async () => {
-    const { invocations } = await org.post(`${mention(hermes)} think hard`, { agentOptions: { [hermes.id]: { reasoning: 'high' } } });
+  it('takes the model and effort picked in the composer', async () => {
+    const { invocations } = await org.post(`${mention(hermes)} think hard`, { agentOptions: { [hermes.id]: { model: '@openrouter:claude-sonnet-5-5', effort: 'high' } } });
     expect((await org.ended(invocations[0]!.id)).state).toBe('done');
-    expect(sent().at(-1)).toMatchObject({ reasoning_effort: 'high' });
+    expect(sent().at(-1)).toMatchObject({ model: '@openrouter:claude-sonnet-5-5', reasoning_effort: 'high' });
+  });
+
+  it('sends its owner’s default model on every turn, since Hermes runs a turn without one on the instance’s default', async () => {
+    expect((await org.as('dev-ramnique').put(`/v1/agents/${hermes.id}/option-defaults`, { defaults: { model: 'claude-sonnet-5-5' } })).status).toBe(200);
+    const first = await org.post(`${mention(hermes)} one`);
+    expect((await org.ended(first.invocations[0]!.id)).state).toBe('done');
+    const second = await org.post(`${mention(hermes)} two`, { threadRoot: first.message.id });
+    expect((await org.ended(second.invocations[0]!.id)).state).toBe('done');
+    expect(sent().slice(-2).map((t) => t.model)).toEqual(['claude-sonnet-5-5', 'claude-sonnet-5-5']);
+    await org.as('dev-ramnique').put(`/v1/agents/${hermes.id}/option-defaults`, { defaults: {} });
   });
 
   it('fails plainly once its instance is gone, never moving to another', async () => {
@@ -308,6 +326,41 @@ describe('the Agent37 connector after a restart', () => {
     expect(session.history.filter((h) => h.role === 'user')).toHaveLength(1);
     await org.harbor.close();
     await store.db.close();
+  });
+});
+
+describe('the Agent37 connector and a sleeping instance', () => {
+  it('never wakes it to list models: it reads them after a turn, and keeps them across a restart', async () => {
+    fake.instances.push({ id: 'inst5', name: 'dozy', template: 'agent37-hermes', status: 'sleeping' });
+    fake.models.inst5 = [{ id: 'hermes-4-70b', label: 'hermes-4-70b', owned_by: 'nous', is_default: true }];
+    const store = await freshStore();
+    let org = await new Org(store).start();
+    const spaceId = await org.space();
+    const hermes = await org.agent('hermes', 'Hermes', 'inst5');
+    const keys = async () => ((await org.as('dev-harsh').get(`/v1/agents/${hermes.id}/capabilities`)).body.capabilities?.options ?? []).map((o: { key: string }) => o.key);
+    await until(async () => (await keys()).length > 0, 'capabilities');
+    expect(await keys()).toEqual(['effort']); // asleep at start: no Model yet, and nothing asked of the instance
+    expect(fake.modelReads('inst5')).toHaveLength(0);
+
+    const { invocations } = await org.post(`${mention(hermes)} wake up`); // a turn wakes it…
+    expect((await org.ended(invocations[0]!.id)).state).toBe('done');
+    await until(async () => (await keys()).includes('model'), 'the Model option'); // …and then its models are read
+    expect(fake.modelReads('inst5')).toHaveLength(1);
+    expect((await org.as('dev-ramnique').put(`/v1/agents/${hermes.id}/option-defaults`, { defaults: { model: 'hermes-4-70b' } })).status).toBe(200);
+    await org.harbor.close();
+
+    org = new Org(store); // back up while the instance sleeps
+    org.spaceId = spaceId;
+    await org.start();
+    await new Promise((r) => setTimeout(r, 200));
+    expect(await keys()).toEqual(['model', 'effort']);
+    expect(fake.modelReads('inst5')).toHaveLength(1);
+    const again = await org.post(`${mention(hermes)} still there?`);
+    expect((await org.ended(again.invocations[0]!.id)).state).toBe('done');
+    expect(sent().at(-1)).toMatchObject({ model: 'hermes-4-70b' }); // the owner's default still fills in
+    await org.harbor.close();
+    await store.db.close();
+    fake.instances = fake.instances.filter((i) => i.id !== 'inst5');
   });
 });
 
