@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { ArrowLeft, Bot, ChevronRight, Loader2, Plus } from 'lucide-react'
+import { ArrowLeft, Bot, Check, ChevronRight, Hash, Loader2, MessageSquare, Plus } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { AgentPage } from '@/components/spaces/agent-page'
 import { AgentLogo, ConnectAgent } from '@/components/spaces/agent-setup'
 import { MemberAvatar } from '@/components/spaces/atoms'
-import { refreshOrgRoster, useOrgRoster } from '@/hooks/use-space-members'
+import { refreshMembers, refreshOrgRoster, useOrgRoster } from '@/hooks/use-space-members'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { AGENT_SETUPS, agentLabel, agentSetup, kindInfo, setupFor, type AgentSetup } from '@/lib/agent-kinds'
 import { toast } from '@/lib/toast'
@@ -84,6 +84,70 @@ function SetupTile({ setup, selected, onSelect }: { setup: AgentSetup; selected:
     )
 }
 
+/**
+ * Where the new agent goes: your DM with it, and which of your spaces it joins,
+ * all by default, each one a tick. `direct` null hides the DM row (a setup that
+ * opens the DM itself).
+ */
+function SpacePicker({ spaces: list, skipped, onChange, direct, onDirectChange }: {
+    spaces: spaces.Space[]
+    skipped: ReadonlySet<string>
+    onChange: (skipped: ReadonlySet<string>) => void
+    direct: boolean | null
+    onDirectChange: (on: boolean) => void
+}) {
+    if (list.length === 0 && direct === null) return null
+    const allIn = skipped.size === 0
+    const toggle = (id: string) => {
+        const next = new Set(skipped)
+        if (next.has(id)) next.delete(id)
+        else next.add(id)
+        onChange(next)
+    }
+    return (
+        <div className="mt-4 flex flex-col gap-1.5">
+            <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-foreground">Add it to</span>
+                {list.length > 1 && <button
+                    type="button"
+                    onClick={() => onChange(allIn ? new Set(list.map((space) => space.id)) : new Set())}
+                    className="text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                >
+                    {allIn ? 'None' : 'All spaces'}
+                </button>}
+            </div>
+            <ul aria-label="Add it to" className="flex max-h-40 flex-col overflow-y-auto rounded-md border border-border">
+                {direct !== null && (
+                    <li className="border-b border-border last:border-b-0">
+                        <PickRow on={direct} label="Direct message" icon={<MessageSquare className="size-3.5 shrink-0 text-muted-foreground" />} onClick={() => onDirectChange(!direct)} />
+                    </li>
+                )}
+                {list.map((space) => {
+                    const on = !skipped.has(space.id)
+                    return (
+                        <li key={space.id} className="border-b border-border last:border-b-0">
+                            <PickRow on={on} label={`#${space.name}`} text={space.name} icon={<Hash className="size-3.5 shrink-0 text-muted-foreground" />} onClick={() => toggle(space.id)} />
+                        </li>
+                    )
+                })}
+            </ul>
+            <span className="text-[11px] text-muted-foreground">Anyone in these spaces can mention it, or DM it. You can add it to more later from its page.</span>
+        </div>
+    )
+}
+
+function PickRow({ on, label, text, icon, onClick }: { on: boolean; label: string; text?: string; icon: ReactNode; onClick: () => void }) {
+    return (
+        <button type="button" role="checkbox" aria-checked={on} aria-label={label} onClick={onClick} className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left hover:bg-accent">
+            <span className={cn('flex size-3.5 shrink-0 items-center justify-center rounded-[4px] border', on ? 'border-primary bg-primary text-primary-foreground' : 'border-border')}>
+                {on && <Check className="size-2.5" />}
+            </span>
+            {icon}
+            <span className="min-w-0 flex-1 truncate text-xs text-foreground">{text ?? label}</span>
+        </button>
+    )
+}
+
 /** The coding agent a Replicas agent runs: its kind. */
 function KindChoice({ kinds, selected, onSelect }: { kinds: readonly string[]; selected: string; onSelect: (kind: string) => void }) {
     return (
@@ -131,6 +195,9 @@ export function AgentsDialog({ org, open, onOpenChange }: {
     const [nameEdited, setNameEdited] = useState(false)
     const [credential, setCredential] = useState('')
     const [addError, setAddError] = useState<string | null>(null)
+    // The spaces a new agent joins on Add: every one of yours unless unticked (2026-10-08).
+    const [skippedSpaces, setSkippedSpaces] = useState<ReadonlySet<string>>(new Set())
+    const [withDirect, setWithDirect] = useState(true)
     // Until the person picks, the first way to connect, and its first kind.
     const setup = AGENT_SETUPS.find((k) => k.id === chosen) ?? AGENT_SETUPS[0]!
     const kind = chosenKind && setup.kinds.includes(chosenKind) ? chosenKind : setup.kinds[0]!
@@ -161,6 +228,8 @@ export function AgentsDialog({ org, open, onOpenChange }: {
         setNameEdited(false)
         setCredential('')
         setAddError(null)
+        setSkippedSpaces(new Set())
+        setWithDirect(true)
         setScreen({ name: 'add' })
     }
 
@@ -178,6 +247,18 @@ export function AgentsDialog({ org, open, onOpenChange }: {
                 ...(setup.credential ? { credential: credential.trim() } : {}),
             })
             setCredential('')
+            // Into the spaces picked on this form; one that refuses doesn't undo the agent.
+            const into = org.spaces.filter((space) => !skippedSpaces.has(space.id))
+            const joined = await Promise.allSettled(
+                into.map((space) => window.ipc.invoke('spaces:addMembers', { orgId: org.id, spaceId: space.id, memberIds: [agent.id] })),
+            )
+            joined.forEach((result, i) => result.status === 'fulfilled' && refreshMembers(org.id, into[i]!.id, { force: true }))
+            const missed = into.filter((_, i) => joined[i]!.status === 'rejected').map((space) => `#${space.name}`)
+            // Your DM with it, in the sidebar like any DM (Hermes's setup opens it as its home channel anyway).
+            if (withDirect && !setup.wantsHomeChannel) {
+                await window.ipc.invoke('spaces:openDirect', { orgId: org.id, memberId: agent.id }).catch(() => missed.push('your direct messages'))
+            }
+            if (missed.length > 0) toast(`Couldn't add ${agent.displayName} to ${missed.join(', ')}`, 'error')
             // Your new agent is on your roster (and so in Add people) right away.
             refreshOrgRoster(org.id)
             await load()
@@ -303,6 +384,13 @@ export function AgentsDialog({ org, open, onOpenChange }: {
                                     <span className="text-[11px] text-muted-foreground">{setup.credential.note}</span>
                                 </label>
                             )}
+                            <SpacePicker
+                                spaces={org.spaces}
+                                skipped={skippedSpaces}
+                                onChange={setSkippedSpaces}
+                                direct={setup.wantsHomeChannel ? null : withDirect}
+                                onDirectChange={setWithDirect}
+                            />
                             {addError && <div role="alert" className="mt-3 text-xs text-destructive">{addError}</div>}
                         </Body>
                         <Footer>

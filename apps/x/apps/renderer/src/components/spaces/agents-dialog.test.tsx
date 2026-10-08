@@ -22,6 +22,7 @@ const NEW_KEY = 'rbk_LXNtIBXAl77aMYBiJ2Z2qesaySzSrqaJCbspX72zz9U'
 const ROTATED = 'rbk_R0tat3dR0tat3dR0tat3dR0tat3dR0tat3dR0tat3d'
 
 let roster: spaces.Member[]
+const joinedSpaces = new Set<string>()
 let listing: spaces.AgentListing[]
 let options: Record<string, spaces.InvocationOption[]> = {}
 let defaults: Record<string, Record<string, string | boolean>> = {}
@@ -39,6 +40,8 @@ const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
         case 'spaces:createAgentKey': return { key: { ...key('k2', args.agentId!), secret: ROTATED } }
         case 'spaces:revokeAgentKey': return { key: key(args.keyId!, args.agentId!, { revokedAt: '2026-09-29T11:00:00Z' }) }
         case 'spaces:getAgentCapabilities': return { capabilities: { stop: false, options: options[args.agentId!] ?? [] }, defaults: defaults[args.agentId!] ?? {} }
+        case 'spaces:listMembers': return { members: joinedSpaces.has(args.spaceId!) ? [{ id: 'new', displayName: 'Claude', kind: 'agent' }] : [] }
+        case 'spaces:addMembers': joinedSpaces.add(args.spaceId!); return { memberships: [] }
         case 'spaces:setAgentOptionDefaults': return { defaults: (args as unknown as { defaults: Record<string, string | boolean> }).defaults }
     }
     throw new Error(`unexpected ${channel}`)
@@ -46,6 +49,7 @@ const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
 
 beforeEach(() => {
     invoke.mockClear()
+    joinedSpaces.clear()
     window.localStorage.clear()
     roster = [person('me', 'Ramnique'), person('harsh', 'Harsh')]
     options = {}
@@ -98,13 +102,13 @@ describe('AgentsDialog', () => {
             'Connect yourself to Rowboat: read https://raw.githubusercontent.com/rowboatlabs/hermes-rowboat/main/SETUP.md and follow it.',
         )
         expect(screen.getByText('Restart it')).toBeInTheDocument()
-        expect(screen.getByText('Add it to a space')).toBeInTheDocument()
+        expect(screen.getByText('Add it to spaces')).toBeInTheDocument()
         // By hand, from a terminal.
         fireEvent.click(screen.getByRole('radio', { name: 'Terminal' }))
         expect(screen.getByText('Save the settings')).toBeInTheDocument()
         expect(screen.getByText('Install the Rowboat plugin and skill')).toBeInTheDocument()
         expect(screen.getByText('Restart Hermes')).toBeInTheDocument()
-        expect(screen.getByText('Add it to a space')).toBeInTheDocument()
+        expect(screen.getByText('Add it to spaces')).toBeInTheDocument()
         expect(screen.getByText('hermes plugins install rowboatlabs/hermes-rowboat --enable')).toBeInTheDocument()
         expect(screen.getByText('hermes skills install rowboatlabs/rowboat/skills/rowboat-spaces --yes')).toBeInTheDocument()
         // The key reads as its ends; Copy takes the whole commands.
@@ -152,7 +156,7 @@ describe('AgentsDialog', () => {
         fireEvent.click(screen.getByRole('button', { name: `Copy ${NEW_KEY}` }))
         expect(navigator.clipboard.writeText).toHaveBeenCalledWith(NEW_KEY)
         expect(screen.getByText('https://rowboat.example/mcp')).toBeInTheDocument()
-        expect(invoke).not.toHaveBeenCalledWith('spaces:openDirect', expect.anything())
+        expect(invoke).toHaveBeenCalledWith('spaces:openDirect', { orgId: 'org-1', memberId: 'new' }) // your DM with it, ticked by default
     })
 
     it('switching kind keeps a typed name; Back returns to the list', async () => {
@@ -233,8 +237,8 @@ describe('AgentsDialog', () => {
         expect(screen.getByText('Give it the Spaces tools (optional)')).toBeInTheDocument()
         expect(screen.getByText('https://rowboat.example/mcp')).toBeInTheDocument()
         expect(screen.getByText('ROWBOAT_AGENT_KEY')).toBeInTheDocument()
-        expect(screen.getByText('Add it to a space')).toBeInTheDocument()
-        expect(invoke).not.toHaveBeenCalledWith('spaces:openDirect', expect.anything())
+        expect(screen.getByText('Add it to spaces')).toBeInTheDocument()
+        expect(invoke).toHaveBeenCalledWith('spaces:openDirect', { orgId: 'org-1', memberId: 'new' }) // your DM with it, ticked by default
     })
 
     it('adds a Conductor agent: Claude Code with the Conductor key, then the repo files that give it Spaces', async () => {
@@ -253,6 +257,32 @@ describe('AgentsDialog', () => {
         expect(screen.getByText('.mcp.json')).toBeInTheDocument()
         expect(screen.getByText(/"Authorization": "Bearer \$\{ROWBOAT_AGENT_KEY\}"/)).toBeInTheDocument()
         expect(screen.queryByText(NEW_KEY)).toBeNull()
+    })
+
+    it('adds the new agent to every space by default, minus the ones unticked, then offers the rest from its setup', async () => {
+        const withSpaces = { ...org, spaces: [{ id: 'S-payments', name: 'payments', kind: 'shared' }, { id: 'S-design', name: 'design', kind: 'shared' }] } as unknown as OrgWithSpaces
+        render(<AgentsDialog org={withSpaces} open onOpenChange={vi.fn()} />)
+        await screen.findByText('Hermes')
+        fireEvent.click(screen.getByRole('button', { name: /Add agent/ }))
+        fireEvent.click(screen.getByRole('radio', { name: 'Conductor' }))
+        const picker = screen.getByRole('list', { name: 'Add it to' })
+        expect(within(picker).getAllByRole('checkbox').map((c) => c.getAttribute('aria-label'))).toEqual(['Direct message', '#payments', '#design'])
+        expect(within(picker).getAllByRole('checkbox').map((c) => c.getAttribute('aria-checked'))).toEqual(['true', 'true', 'true'])
+        fireEvent.click(within(picker).getByRole('checkbox', { name: '#design' }))
+        fireEvent.click(within(picker).getByRole('checkbox', { name: 'Direct message' }))
+        fireEvent.change(screen.getByLabelText('Conductor API key'), { target: { value: 'cnd_live_ab12' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Add agent' }))
+        await screen.findByRole('heading', { name: 'Connect Claude' })
+        expect(invoke).toHaveBeenCalledWith('spaces:addMembers', { orgId: 'org-1', spaceId: 'S-payments', memberIds: ['new'] })
+        expect(invoke).not.toHaveBeenCalledWith('spaces:addMembers', expect.objectContaining({ spaceId: 'S-design' }))
+        expect(invoke).not.toHaveBeenCalledWith('spaces:openDirect', expect.anything())
+        // The setup's last step shows where it is, and adds it to the rest.
+        const spacesList = screen.getByRole('list', { name: 'Spaces' })
+        expect(await within(spacesList).findByText('Added')).toBeInTheDocument()
+        const add = within(spacesList).getByRole('button', { name: 'Add Claude to #design' })
+        await waitFor(() => expect(add).toBeEnabled())
+        fireEvent.click(add)
+        await waitFor(() => expect(within(spacesList).getAllByText('Added')).toHaveLength(2))
     })
 
     it('shows a Replicas agent’s key by its end, flags a rejected one, and lets its owner replace it', async () => {
