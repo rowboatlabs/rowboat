@@ -11,7 +11,9 @@ import { cn } from '@/lib/utils'
 // activity, waiting on a person, refused and why, failed. Done shows nothing:
 // the agent's reply in the thread is the answer. The invoker can cancel a
 // queued one; the invoker or an admin can stop a running one when the agent's
-// connector declared it can stop.
+// connector declared it can stop. Working shows the typing dots (2026-10-08):
+// one line for an agent at work, its activity, and Stop, rather than a
+// separate "is typing" beside it.
 
 interface InvocationsContextValue {
     byMessage: ReadonlyMap<string, spaces.Invocation[]>
@@ -57,10 +59,10 @@ export function InvocationLines({ messageId }: { messageId: string }) {
                 const mine = invocation.trigger.authorId === selfId
                 const canCancel = mine && (invocation.state === 'queued' || invocation.state === 'pending')
                 const canStop = RUNNING.includes(invocation.state) && (mine || isAdmin) && caps.get(invocation.agentId)?.stop === true
-                const { Icon, text, spin, tone } = describe(invocation, name)
+                const { Icon, text, tone } = describe(invocation, name)
                 return (
                     <div key={invocation.id} data-invocation={invocation.state} className={cn('flex items-center gap-1.5 text-[12.5px]', tone)}>
-                        <Icon className={cn('size-3.5 shrink-0', spin && 'animate-spin')} />
+                        {invocation.state === 'working' ? <TypingDots /> : <Icon className="size-3.5 shrink-0" />}
                         <span className="min-w-0 truncate">{text}</span>
                         {invocation.link && (
                             <button type="button" onClick={() => window.open(invocation.link)} className="inline-flex shrink-0 items-center gap-0.5 underline-offset-2 hover:underline">
@@ -89,7 +91,24 @@ export function InvocationLines({ messageId }: { messageId: string }) {
     )
 }
 
-function describe(invocation: spaces.Invocation, name: string): { Icon: typeof Clock; text: string; spin?: boolean; tone: string } {
+/** The same three pulsing dots as a person typing (TypingIndicator). */
+function TypingDots() {
+    return (
+        <span aria-hidden="true" className="inline-flex w-3.5 shrink-0 items-center justify-center gap-0.5">
+            <span className="size-1 rounded-full bg-current opacity-70 animate-pulse" />
+            <span className="size-1 rounded-full bg-current opacity-70 animate-pulse [animation-delay:150ms]" />
+            <span className="size-1 rounded-full bg-current opacity-70 animate-pulse [animation-delay:300ms]" />
+        </span>
+    )
+}
+
+/** "Claude is running `npm test`" for an activity that reads on from the name, else "Claude is working · Starting a workspace". */
+function workingText(name: string, activity: string | undefined): string {
+    if (!activity) return `${name} is typing…`
+    return /^is\s/.test(activity) ? `${name} ${activity}` : `${name} is working · ${activity}`
+}
+
+function describe(invocation: spaces.Invocation, name: string): { Icon: typeof Clock; text: string; tone: string } {
     const muted = 'text-muted-foreground'
     switch (invocation.state) {
         case 'queued':
@@ -97,7 +116,7 @@ function describe(invocation: spaces.Invocation, name: string): { Icon: typeof C
         case 'pending':
             return { Icon: Clock, text: `Waiting for ${name} to pick this up`, tone: muted }
         case 'working':
-            return { Icon: Loader2, spin: true, text: invocation.activity ? `${name} is working · ${invocation.activity}` : `${name} is working`, tone: muted }
+            return { Icon: Loader2, text: workingText(name, invocation.activity), tone: muted }
         case 'waiting':
             return { Icon: Hand, text: `${name} is waiting: ${invocation.activity ?? 'needs you to reply'}`, tone: 'text-foreground' }
         case 'refused':

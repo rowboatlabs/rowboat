@@ -130,7 +130,7 @@ export class ConductorConnector implements RunningConnector {
       if (invocation.state === 'working' && !this.takenOn.has(invocation.id)) {
         this.takenOn.add(invocation.id);
         if (invocation.stopRequested) this.stops.add(invocation.id);
-        this.track(invocation.id, () => this.recover(invocation));
+        this.track(invocation, () => this.recover(invocation));
       } else if (invocation.state === 'pending') this.intake(invocation);
     }
   }
@@ -149,7 +149,7 @@ export class ConductorConnector implements RunningConnector {
   private intake(invocation: Invocation): void {
     if (this.stopped || invocation.state !== 'pending' || this.running.has(invocation.id)) return;
     this.takenOn.add(invocation.id);
-    this.track(invocation.id, async () => {
+    this.track(invocation, async () => {
       try {
         await this.env.service.acknowledgeInvocation(this.env.ctx, invocation.id);
       } catch {
@@ -161,7 +161,8 @@ export class ConductorConnector implements RunningConnector {
     });
   }
 
-  private track(id: string, work: () => Promise<void>): void {
+  private track(invocation: Invocation, work: () => Promise<void>): void {
+    const id = invocation.id;
     const done = work()
       .catch((err) => this.env.log('invocation failed unexpectedly', { id, error: (err as Error).message }))
       .finally(() => {
