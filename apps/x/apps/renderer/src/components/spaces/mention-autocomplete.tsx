@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { LOCAL_RUNTIME } from '@/lib/feature-flags'
 import { createPortal } from 'react-dom'
 import type { Editor } from '@tiptap/core'
 import { Bot, FileText, Hash, Megaphone } from 'lucide-react'
@@ -98,7 +99,7 @@ export function useMentionAutocomplete(editor: Editor | null) {
         if (!match) return []
         const q = match.query
         const people: MentionCandidate[] = []
-        if ('rowboat'.startsWith(q)) people.push({ id: 'rowboat', label: 'rowboat', hint: 'your agent — acts only when asked', isAgent: true })
+        if (LOCAL_RUNTIME && 'rowboat'.startsWith(q)) people.push({ id: 'rowboat', label: 'rowboat', hint: 'your agent — acts only when asked', isAgent: true })
         if ('here'.startsWith(q)) people.push({ id: 'here', label: 'here', hint: 'notify everyone online', isBroadcast: true })
         // This space's people first, then the rest of the org. Someone not in
         // this space can be named but is not notified (the org drops their
