@@ -885,10 +885,68 @@ export const MIGRATIONS: Migration[] = [
     ],
   },
   {
+    // The platform instance an agent is (spec §8 Connectors, Agent37,
+    // 2026-10-05): set at creation for a connection in INSTANCE_CONNECTIONS,
+    // null for every other agent and for people.
+    id: '032-agent-instance',
+    statements: [
+      `alter table members add column agent_instance text`,
+      `alter table members add constraint members_agent_instance_check check (kind = 'agent' or agent_instance is null)`,
+    ],
+  },
+  {
+    // How many agent hand-offs led to a message (spec §8 Jev, 2026-10-07):
+    // the depth an agent it mentions is invoked at, recorded when an agent
+    // posts, because by the time Jev tags someone for the message the turn
+    // that posted it may have finished. A person's message is depth 0 and
+    // has no row.
+    id: '033-message-hops',
+    statements: [
+      `create table message_hops (
+        space_id text not null,
+        message_id text not null,
+        depth integer not null,
+        primary key (space_id, message_id)
+      )`,
+    ],
+  },
+  {
+    // The key a connector Harbor runs hands its agent's workspaces, so the
+    // coding agent there can call Spaces as its agent (spec §8 Connectors,
+    // 2026-10-06: Conductor passes it as a workspace variable). An ordinary
+    // agent key (its hash in agent_keys, revocable by the owner), whose secret
+    // Harbor must present again, so it is also kept sealed here. One per agent.
+    id: '034-agent-connector-keys',
+    statements: [
+      `create table agent_connector_keys (
+        org_id text not null,
+        agent_id text not null,
+        key_id text not null,
+        sealed text not null,
+        created_at text not null,
+        primary key (org_id, agent_id),
+        foreign key (org_id, agent_id) references members(org_id, id)
+      )`,
+    ],
+  },
+  {
+    // Agent37's Effort option is keyed `effort` (2026-10-08), as the composer's
+    // model picker expects of every agent; it was `reasoning`. Owners' defaults
+    // move with it, or Harbor would skip them as an option no longer declared.
+    id: '035-agent37-effort-key',
+    statements: [
+      `update agent_option_defaults d
+         set data = (d.data - 'reasoning') || jsonb_build_object('effort', d.data -> 'reasoning')
+         from members m
+        where m.org_id = d.org_id and m.id = d.agent_id
+          and m.agent_connection = 'agent37' and d.data ? 'reasoning'`,
+    ],
+  },
+  {
     // A platform agent's alert hook (spec §8 Alerts, 2026-10-03): the hash of
     // the secret in its address, like agent_keys, and the space its alerts
     // land in. One per agent; setting it again replaces the secret.
-    id: '032-agent-hooks',
+    id: '036-agent-hooks',
     statements: [
       `create table agent_hooks (
         org_id text not null,

@@ -16,7 +16,7 @@ export type SpaceLocation = {
     /** What was open inside the space (a discussion, a file, a board). */
     rail?: RailSelection
     /** An org-level surface instead of a space (spaceId is '' then): Activity. */
-    view?: 'activity'
+    view?: 'activity' | 'browse'
 }
 
 /**
@@ -32,15 +32,15 @@ export function serverLandingSpaceId(org: Pick<OrgWithSpaces, 'id' | 'spaces' | 
     return lastVisitedSpaceId(org.id, rooms.map((room) => room.id)) ?? rooms[0]?.id ?? ''
 }
 
-/** Restore a valid location, preferring another space on the same server if it was deleted. */
+/** Restore the destination; the view resolves membership or open-space access asynchronously (spec §5, 2026-09-28). */
 export function resolveSpacesLocation(orgs: OrgWithSpaces[], previous: unknown): SpaceLocation | null {
     const saved = readLocation(previous)
     const previousOrg = saved ? orgs.find((org) => org.id === saved.orgId) : undefined
     // An org-level surface has no space to validate against — the server being
     // there is the whole of it.
-    if (previousOrg && saved?.view === 'activity') return { orgId: previousOrg.id, spaceId: '', view: 'activity' }
-    if (previousOrg && saved && [...previousOrg.spaces, ...previousOrg.directs].some((space) => space.id === saved.spaceId)) {
-        // The space survived, so what was open inside it comes back with it.
+    if (previousOrg && saved?.view) return { orgId: previousOrg.id, spaceId: '', view: saved.view }
+    if (previousOrg && saved && saved.spaceId) {
+        // A missing membership may mean an open preview, so preserve its content target.
         return { orgId: previousOrg.id, spaceId: saved.spaceId, ...(saved.rail ? { rail: saved.rail } : {}) }
     }
     // Landing on a different space than the saved one: its rail selection named
@@ -60,7 +60,7 @@ function readLocation(previous: unknown): SpaceLocation | null {
     const { orgId, spaceId, rail, view } = previous as Partial<SpaceLocation>
     if (typeof orgId !== 'string' || typeof spaceId !== 'string') return null
     const checked = rail ? readRailSelection(rail) : undefined
-    return { orgId, spaceId, ...(checked && checked.kind !== 'general' ? { rail: checked } : {}), ...(view === 'activity' ? { view } : {}) }
+    return { orgId, spaceId, ...(checked && checked.kind !== 'general' ? { rail: checked } : {}), ...(view === 'activity' || view === 'browse' ? { view } : {}) }
 }
 
 /**
@@ -110,3 +110,16 @@ export function parseSpacesLink(input: string): SpacesLinkTarget | null {
   return target
 }
 
+
+/**
+ * A group chat (2026-10-07, spec §4): the server says so — one space and no
+ * DMs, the same for every member — and shows as one conversation, with DMs
+ * off. A second space makes it a workspace for everyone. A server too old
+ * to say gets the same rule from what this member can see.
+ */
+export function isGroupChat(org: Pick<OrgWithSpaces, 'spaces' | 'directs' | 'groupChat' | 'error'>): boolean {
+    // The row opens your one space: a member of none (left it through their
+    // agent, say) has nothing to open, so it is not a chat to them.
+    if (org.error || org.spaces.length !== 1) return false
+    return org.groupChat ?? org.directs.length === 0
+}

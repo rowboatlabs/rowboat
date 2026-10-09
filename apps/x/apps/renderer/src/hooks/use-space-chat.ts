@@ -1,3 +1,4 @@
+import { canActInSpace } from '@/lib/spaces-access'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { spaces } from '@x/shared'
 import { toast } from '@/lib/toast'
@@ -888,12 +889,12 @@ function foldLeases(leases: Map<string, Lease>, selfMemberId: string): SpacePres
     return { here: [...here], typing, working }
 }
 
-export function useSpacePresence(orgId: string, spaceId: string, selfMemberId: string): SpacePresence {
+export function useSpacePresence(orgId: string, spaceId: string, selfMemberId: string, active = true): SpacePresence {
     const leasesRef = useRef<Map<string, Lease>>(new Map())
     const [presence, setPresence] = useState<SpacePresence>(EMPTY_PRESENCE)
     const ownActivity = useSpaceAgentActivity(orgId, spaceId)
 
-    useSpaceLive(orgId, spaceId, (frame) => {
+    useSpaceLive(active ? orgId : null, active ? spaceId : null, (frame) => {
         if (frame.kind !== 'presence') return
         const leases = leasesRef.current
         // Human and agent leases are independent per (member, thread) — the frame's
@@ -944,6 +945,7 @@ export function usePresenceSender(orgId: string, spaceId: string, threadRootId?:
 
     const send = useCallback(
         (state: 'viewing' | 'typing' | 'idle') => {
+            if (!canActInSpace(orgId, spaceId)) return
             void window.ipc.invoke('spaces:presence', { orgId, spaceId, state, ...(threadRootId ? { threadRootId } : {}) }).catch(() => {})
         },
         [orgId, spaceId, threadRootId],
@@ -961,6 +963,7 @@ export function usePresenceSender(orgId: string, spaceId: string, threadRootId?:
     }, [send, active])
 
     const onType = useCallback(() => {
+        if (!active || !canActInSpace(orgId, spaceId)) return
         const now = Date.now()
         if (now - lastTypingRef.current > 4_000) {
             lastTypingRef.current = now
@@ -968,7 +971,7 @@ export function usePresenceSender(orgId: string, spaceId: string, threadRootId?:
         }
         if (idleTimerRef.current) clearTimeout(idleTimerRef.current)
         idleTimerRef.current = setTimeout(() => send('viewing'), 6_000)
-    }, [send])
+    }, [send, active, orgId, spaceId])
 
     return { onType }
 }

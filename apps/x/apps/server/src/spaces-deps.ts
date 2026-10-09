@@ -85,7 +85,7 @@ type SpacesRpcChannel =
   | 'spaces:listOrgs' | 'spaces:addOrg' | 'spaces:resolveInviteLink' | 'spaces:joinInvite'
   | 'spaces:signInOrg' | 'spaces:createOrg' | 'spaces:apexInfo' | 'spaces:removeOrg'
   | 'spaces:accountState' | 'spaces:signInRowboat' | 'spaces:addOrgByAddress'
-  | 'spaces:listSpaces' | 'spaces:createSpace' | 'spaces:openDirect' | 'spaces:listMembers' | 'spaces:createInvite'
+  | 'spaces:browseSpaces' | 'spaces:joinSpace' | 'spaces:listSpaces' | 'spaces:createSpace' | 'spaces:openDirect' | 'spaces:listMembers' | 'spaces:createInvite'
   | 'spaces:resolveInvite' | 'spaces:acceptInvite' | 'spaces:listAssets' | 'spaces:createAsset' | 'spaces:moveAsset'
   | 'spaces:deleteAsset' | 'spaces:restoreAsset' | 'spaces:uploadBlob' | 'spaces:readAsset'
   | 'spaces:proposeChange' | 'spaces:assetHistory' | 'spaces:diff' | 'spaces:listTopics'
@@ -166,12 +166,16 @@ export const spacesRpcHandlers: SpacesHandlers = {
   },
 
   'spaces:listSpaces': async (args) => {
-    const spaces = await orgs.getClient(args.orgId).listSpaces({ includeDirect: args.includeDirect ?? false });
-    return { spaces };
+    const { spaces, groupChat } = await orgs.getClient(args.orgId).listing({ includeDirect: args.includeDirect ?? false });
+    return { spaces, ...(groupChat !== undefined ? { groupChat } : {}) };
   },
 
+  'spaces:browseSpaces': async (args) => orgs.getClient(args.orgId).browseSpaces(),
+
+  'spaces:joinSpace': async (args) => orgs.getClient(args.orgId).joinSpace(args.spaceId),
+
   'spaces:createSpace': async (args) => {
-    const space = await orgs.getClient(args.orgId).createSpace(args.name);
+    const space = await orgs.getClient(args.orgId).createSpace(args.name, args.visibility);
     return { space };
   },
 

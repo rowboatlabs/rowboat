@@ -225,8 +225,13 @@ export class SpacesClient {
 
   /** Shared spaces by default; `includeDirect` adds the member's DMs (api.ts listSpaces). */
   async listSpaces(opts: { includeDirect?: boolean } = {}): Promise<Space[]> {
+    return (await this.listing(opts)).spaces;
+  }
+
+  /** The listing whole: the spaces, and whether the org is a group chat (absent from older servers). */
+  async listing(opts: { includeDirect?: boolean } = {}): Promise<{ spaces: Space[]; groupChat?: boolean }> {
     const qs = opts.includeDirect ? '?includeDirect=true' : '';
-    return (await this.request('GET', `${routes.listSpaces.path}${qs}`, routes.listSpaces.response)).spaces;
+    return this.request('GET', `${routes.listSpaces.path}${qs}`, routes.listSpaces.response);
   }
 
   /** Get-or-create the DM with another member — idempotent from either side (api.ts openDirect). */
@@ -234,8 +239,24 @@ export class SpacesClient {
     return this.request('POST', routes.openDirect.path, routes.openDirect.response, { memberId });
   }
 
-  async createSpace(name: string): Promise<Space> {
-    return (await this.request('POST', routes.createSpace.path, routes.createSpace.response, { name })).space;
+  async browseSpaces() {
+    try {
+      const result = await this.request('GET', routes.browseSpaces.path, routes.browseSpaces.response);
+      return { supported: true as const, ...result };
+    } catch (error) {
+      if (error instanceof SpacesRequestError && error.status === 404) {
+        return { supported: false as const, spaces: [] };
+      }
+      throw error;
+    }
+  }
+
+  async joinSpace(spaceId: string) {
+    return this.request('POST', this.space(spaceId, '/join'), routes.joinSpace.response);
+  }
+
+  async createSpace(name: string, visibility?: Space['visibility']): Promise<Space> {
+    return (await this.request('POST', routes.createSpace.path, routes.createSpace.response, { name, ...(visibility ? { visibility } : {}) })).space;
   }
 
   /** Rename a shared space (api.ts renameSpace). Identical name = idempotent no-op. */
@@ -257,9 +278,10 @@ export class SpacesClient {
    * Add an agent this member owns; the response carries its first key's
    * secret, the only time it is shown. `kind`/`connection` say what it is and
    * how Harbor reaches it (2026-09-30); a platform agent (Replicas) also
-   * brings the platform's `credential`, which Harbor checks and seals.
+   * brings the platform's `credential`, which Harbor checks and seals, and an
+   * Agent37 agent its `instance` (2026-10-05).
    */
-  async addAgent(input: { displayName: string; kind?: string; connection?: string; credential?: string }): Promise<{ agent: Member; key: AgentKeySecret }> {
+  async addAgent(input: { displayName: string; kind?: string; connection?: string; credential?: string; instance?: string }): Promise<{ agent: Member; key: AgentKeySecret }> {
     return this.request('POST', routes.createAgent.path, routes.createAgent.response, input);
   }
 

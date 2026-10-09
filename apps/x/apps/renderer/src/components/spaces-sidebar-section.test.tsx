@@ -87,14 +87,44 @@ describe('the sidebar server list', () => {
         vi.mocked(useSpacesOrgs).mockReturnValue({ orgs: [], loading: false, refresh: vi.fn() })
         view.rerender(<SidebarProvider><SpacesSidebarSection active={false} onOpenSpace={open} /></SidebarProvider>)
         expect(screen.queryByText('Our server')).toBeNull()
-        fireEvent.click(screen.getByRole('button', { name: 'Add server' }))
-        expect(screen.getByRole('dialog', { name: 'Add a server' })).toBeVisible()
-        fireEvent.click(screen.getByRole('button', { name: /Create a free server/ }))
+        fireEvent.click(screen.getByRole('button', { name: 'New group chat' }))
+        expect(screen.getByRole('dialog', { name: 'New group chat' })).toBeVisible()
+        fireEvent.click(screen.getByRole('button', { name: /Create a group chat/ }))
         expect(openServerDialog).toHaveBeenLastCalledWith({ kind: 'create' })
         expect(screen.queryByRole('dialog')).toBeNull()
-        fireEvent.click(screen.getByRole('button', { name: 'Add server' }))
+        fireEvent.click(screen.getByRole('button', { name: 'New group chat' }))
         fireEvent.click(screen.getByRole('button', { name: /Join a server/ }))
         expect(openServerDialog).toHaveBeenLastCalledWith({ kind: 'join' })
+    })
+    it('lists one-space servers as chats, most recent first, and the rest as workspaces', () => {
+        const quiet = { ...other, id: 'quiet', name: 'Quiet chat', spaces: [{ id: 'q', name: 'Quiet chat', createdAt: '2026-08-01' }] }
+        vi.mocked(useSpacesOrgs).mockReturnValue({ orgs: [org, quiet, other] as unknown as OrgWithSpaces[], loading: false, refresh: vi.fn() })
+        const open = vi.fn()
+        render(<SidebarProvider><SpacesSidebarSection active={false} onOpenSpace={open} /></SidebarProvider>)
+        const chats = screen.getByRole('list', { name: 'Chats' })
+        expect(within(chats).getAllByRole('button').map((button) => button.textContent)).toEqual(['Other server', 'Quiet chat'])
+        expect(within(screen.getByRole('list', { name: 'Workspaces' })).getByRole('button', { name: 'Our server' })).toBeVisible()
+        expect(screen.getByRole('heading', { name: 'Chats' })).toBeVisible()
+        // A chat row opens the conversation itself.
+        fireEvent.click(within(chats).getByRole('button', { name: 'Quiet chat' }))
+        expect(open).toHaveBeenCalledWith('quiet', 'q')
+    })
+    it('takes the server at its word: one space of yours in a workspace is still a workspace', () => {
+        vi.mocked(useSpacesOrgs).mockReturnValue({ orgs: [{ ...other, groupChat: false }] as unknown as OrgWithSpaces[], loading: false, refresh: vi.fn() })
+        render(<SidebarProvider><SpacesSidebarSection active={false} onOpenSpace={vi.fn()} /></SidebarProvider>)
+        expect(within(screen.getByRole('list', { name: 'Workspaces' })).getByRole('button', { name: 'Other server' })).toBeVisible()
+        expect(within(screen.getByRole('list', { name: 'Chats' })).queryAllByRole('button')).toHaveLength(0)
+    })
+    it('lists a group chat you are in no space of as a workspace, without breaking', () => {
+        vi.mocked(useSpacesOrgs).mockReturnValue({ orgs: [{ ...other, spaces: [], groupChat: true }] as unknown as OrgWithSpaces[], loading: false, refresh: vi.fn() })
+        render(<SidebarProvider><SpacesSidebarSection active={false} onOpenSpace={vi.fn()} /></SidebarProvider>)
+        expect(within(screen.getByRole('list', { name: 'Workspaces' })).getByRole('button', { name: 'Other server' })).toBeVisible()
+    })
+    it('drops the headings when every server is one kind', () => {
+        vi.mocked(useSpacesOrgs).mockReturnValue({ orgs: [other] as unknown as OrgWithSpaces[], loading: false, refresh: vi.fn() })
+        render(<SidebarProvider><SpacesSidebarSection active={false} onOpenSpace={vi.fn()} /></SidebarProvider>)
+        expect(screen.queryByRole('heading', { name: 'Chats' })).toBeNull()
+        expect(screen.queryByRole('heading', { name: 'Workspaces' })).toBeNull()
     })
     it('aggregates space and DM unread counts per server and updates after reading', async () => {
         vi.mocked(useSpacesOrgs).mockReturnValue({ orgs: [org, other] as unknown as OrgWithSpaces[], loading: false, refresh: vi.fn() })
@@ -114,6 +144,14 @@ describe('the sidebar server list', () => {
 })
 
 describe('server and space navigation', () => {
+    it('offers no DMs in a group chat, notes to self included', () => {
+        render(<SidebarProvider><ServerSpaceNavigation org={{ ...other, groupChat: true } as unknown as OrgWithSpaces} spaceId="welcome"
+            onOpenSpace={vi.fn()} showDiscussions={false} /></SidebarProvider>)
+        expect(screen.getByText('welcome')).toBeTruthy()
+        expect(screen.queryByRole('heading', { name: 'DMs' })).toBeNull()
+        expect(screen.queryByText('New DM')).toBeNull()
+        expect(screen.queryByText('Me')).toBeNull()
+    })
     it('nests and expands legacy discussions while keeping every DM visible', () => {
         const onOpenDiscussion = vi.fn()
         render(<SidebarProvider><ServerSpaceNavigation org={org as unknown as OrgWithSpaces} spaceId="main" onOpenSpace={vi.fn()}
@@ -144,7 +182,7 @@ describe('server and space navigation', () => {
         expect(screen.getByText('founders').compareDocumentPosition(newSpace) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
         expect(newSpace.compareDocumentPosition(screen.getByRole('heading', { name: 'DMs' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
         fireEvent.click(newSpace)
-        expect(screen.getByPlaceholderText('Space name').compareDocumentPosition(screen.getByRole('heading', { name: 'DMs' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+        expect(screen.getByRole('dialog', { name: 'Create a space' })).toBeInTheDocument()
     })
     it('moves every space from the rail\'s one expand-all / collapse-all control', () => {
         // The rail header's control, standing in for space-rail.tsx: the space

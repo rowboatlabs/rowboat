@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import { orgUrl } from '@x/shared/dist/spaces.js'
 import { copySpacesLink } from '@/lib/spaces-copy-link'
-import { Bot, Check, ChevronsUpDown, Link as LinkIcon, LogIn, Plus, Trash2 } from 'lucide-react'
+import { Bot, Check, ChevronsUpDown, Hash, Link as LinkIcon, LogIn, Plus, Trash2 } from 'lucide-react'
 import { OrgMonogram } from '@/components/spaces/atoms'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
-import { serverLandingSpaceId } from '@/lib/spaces-navigation'
+import { isGroupChat, serverLandingSpaceId } from '@/lib/spaces-navigation'
 import { openServerDialog } from '@/lib/server-dialog'
+import { AddChannelDialog } from './add-channel-dialog'
 import { AgentsDialog } from './agents-dialog'
 import { RemoveServerDialog } from './remove-server-dialog'
 
@@ -19,6 +20,7 @@ export function ServerSwitcher({ org, onOpenSpace, onMenuOpenChange }: {
     const [menuOpen, setMenuOpen] = useState(false)
     const [confirmRemove, setConfirmRemove] = useState(false)
     const [agentsOpen, setAgentsOpen] = useState(false)
+    const [addingChannel, setAddingChannel] = useState(false)
     const openServer = (server: OrgWithSpaces, spaceId?: string) => {
         onOpenSpace(server.id, spaceId ?? serverLandingSpaceId(server))
     }
@@ -54,9 +56,15 @@ export function ServerSwitcher({ org, onOpenSpace, onMenuOpenChange }: {
                     setAgentsOpen(true)
                     onMenuOpenChange?.(true)
                 }}><Bot className="size-4" /> Agents and bots</DropdownMenuItem>
+                {isGroupChat(org) && <DropdownMenuItem onSelect={(event) => {
+                    event.preventDefault()
+                    setMenuOpen(false)
+                    setAddingChannel(true)
+                    onMenuOpenChange?.(true)
+                }}><Hash className="size-4" /> Add a channel</DropdownMenuItem>}
                 <DropdownMenuSeparator />
                 {/* The dialogs are hosted once in App (lib/server-dialog.ts); a finished one lands in the new server itself. */}
-                <DropdownMenuItem onSelect={() => openServerDialog({ kind: 'create' })}><Plus className="size-4" /> Create a server</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => openServerDialog({ kind: 'create' })}><Plus className="size-4" /> Create a group chat</DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => openServerDialog({ kind: 'join' })}><LogIn className="size-4" /> Join a server</DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={(event) => {
@@ -64,10 +72,12 @@ export function ServerSwitcher({ org, onOpenSpace, onMenuOpenChange }: {
                     setMenuOpen(false)
                     setConfirmRemove(true)
                     onMenuOpenChange?.(true)
-                }}><Trash2 className="size-4" />Remove server</DropdownMenuItem>
+                }}><Trash2 className="size-4" />{isGroupChat(org) ? 'Remove from this app' : 'Remove server'}</DropdownMenuItem>
             </DropdownMenuContent>
         </DropdownMenu>
+        <AddChannelDialog org={org} open={addingChannel} onOpenChange={(open) => { setAddingChannel(open); onMenuOpenChange?.(open) }}
+            onCreated={(spaceId) => void refresh().then(() => onOpenSpace(org.id, spaceId))} />
         <AgentsDialog org={org} open={agentsOpen} onOpenChange={(open) => { setAgentsOpen(open); onMenuOpenChange?.(open) }} />
-        <RemoveServerDialog org={org} open={confirmRemove} onOpenChange={(open) => { setConfirmRemove(open); onMenuOpenChange?.(open) }} onRemoved={() => void refresh()} />
+        <RemoveServerDialog org={org} groupChat={isGroupChat(org)} open={confirmRemove} onOpenChange={(open) => { setConfirmRemove(open); onMenuOpenChange?.(open) }} onRemoved={() => void refresh()} />
     </>
 }

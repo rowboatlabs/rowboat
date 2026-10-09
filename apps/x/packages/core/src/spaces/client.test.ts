@@ -291,7 +291,12 @@ describe('SpacesClient', () => {
     expect((await ramnique.readAsset(spaceId, scratch)).content).toBe('scratch\n');
   });
 
-  it('direct messages: get-or-create from either side, hidden unless asked, fixed membership', async () => {
+  it('direct messages: off in a group chat, then get-or-create from either side, hidden unless asked, fixed membership', async () => {
+    // One space is a group chat (2026-10-07): the listing says so and a DM is refused, until a second space.
+    expect((await ramnique.listing()).groupChat).toBe(true);
+    await expect(ramnique.openDirect('gagan')).rejects.toBeInstanceOf(SpacesRequestError);
+    await ramnique.createSpace('Second');
+    expect((await gagan.listing()).groupChat).toBe(false);
     const opened = await ramnique.openDirect('gagan');
     expect(opened.created).toBe(true);
     expect(opened.space.kind).toBe('direct');
@@ -545,5 +550,28 @@ describe('read state', () => {
     ]);
     expect(await ramnique.followThread(space.id, message.id, false)).toEqual({ following: false, readOffset: message.offset });
     expect((await ramnique.unread()).spaces.find((s) => s.spaceId === space.id)!.threads).toEqual([]);
+  });
+});
+
+
+describe('open spaces through the desktop client', () => {
+  it('browses and reads before joining, then posts after an idempotent join', async () => {
+    const open = await ramnique.createSpace('Client open space', 'open');
+    const privateSpace = await ramnique.createSpace('Client private space');
+    expect(privateSpace.visibility).toBe('private');
+    const directory = await gagan.browseSpaces();
+    expect(directory.supported).toBe(true);
+    expect(directory.spaces).toContainEqual({ space: open, joined: false });
+    expect(directory.spaces.some(e => e.space.id === privateSpace.id)).toBe(false);
+    expect((await gagan.listSpaces()).some(s => s.id === open.id)).toBe(false);
+    await expect(gagan.listMembers(open.id)).resolves.toBeDefined();
+    await expect(gagan.postMessage(open.id, { body: 'not joined', actingMode: 'direct' })).rejects.toMatchObject({ code: 'forbidden' });
+    const joined = await gagan.joinSpace(open.id);
+    expect(joined.space.id).toBe(open.id);
+    await expect(gagan.postMessage(open.id, { body: 'joined', actingMode: 'direct' })).resolves.toHaveProperty('message.body', 'joined');
+    const again = await gagan.joinSpace(open.id);
+    expect(again.membership).toEqual(joined.membership);
+    expect((await gagan.listSpaces()).some(s => s.id === open.id)).toBe(true);
+    expect((await gagan.browseSpaces()).spaces).toContainEqual({ space: open, joined: true });
   });
 });

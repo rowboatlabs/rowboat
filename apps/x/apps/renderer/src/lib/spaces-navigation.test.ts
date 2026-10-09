@@ -52,8 +52,8 @@ describe('returning to Spaces', () => {
     it.each(['design', 'dm'])('restores the saved location %s instead of the first server', (spaceId) => {
         expect(resolveSpacesLocation(orgs, { orgId: 'second', spaceId })).toEqual({ orgId: 'second', spaceId })
     })
-    it('keeps the previous server when its saved space was removed', () => {
-        expect(resolveSpacesLocation(orgs, { orgId: 'second', spaceId: 'removed' })).toEqual({ orgId: 'second', spaceId: 'founders' })
+    it('preserves an unjoined destination for asynchronous access resolution', () => {
+        expect(resolveSpacesLocation(orgs, { orgId: 'second', spaceId: 'removed' })).toEqual({ orgId: 'second', spaceId: 'removed' })
     })
     it.each([
         { kind: 'thread', rootMessageId: 'msg1' },
@@ -77,9 +77,13 @@ describe('returning to Spaces', () => {
         expect(resolveSpacesLocation(orgs, { orgId: 'second', spaceId: 'design', rail }))
             .toEqual({ orgId: 'second', spaceId: 'design' })
     })
-    it('leaves the rail behind when the saved space is gone', () => {
+    it('preserves a deep content target while resolving an unjoined space', () => {
         expect(resolveSpacesLocation(orgs, { orgId: 'second', spaceId: 'removed', rail: { kind: 'thread', rootMessageId: 'msg1' } }))
-            .toEqual({ orgId: 'second', spaceId: 'founders' })
+            .toEqual({ orgId: 'second', spaceId: 'removed', rail: { kind: 'thread', rootMessageId: 'msg1' } })
+    })
+    it('restores Browse spaces even when no spaces are joined', () => {
+        expect(resolveSpacesLocation(orgs, { orgId: 'empty', spaceId: '', view: 'browse' }))
+            .toEqual({ orgId: 'empty', spaceId: '', view: 'browse' })
     })
     it('returns to the Activity surface instead of a space', () => {
         expect(resolveSpacesLocation(orgs, { orgId: 'second', spaceId: '', view: 'activity' }))

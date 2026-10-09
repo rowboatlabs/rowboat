@@ -24,6 +24,7 @@ const HOOK_URL = 'https://rowboat.example/v1/hooks/cal/rbh_H00kH00kH00kH00kH00kH
 const ROTATED = 'rbk_R0tat3dR0tat3dR0tat3dR0tat3dR0tat3dR0tat3d'
 
 let roster: spaces.Member[]
+const joinedSpaces = new Set<string>()
 let listing: spaces.AgentListing[]
 let options: Record<string, spaces.InvocationOption[]> = {}
 let defaults: Record<string, Record<string, string | boolean>> = {}
@@ -36,13 +37,23 @@ const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
         case 'spaces:openDirect': return { space: { id: `DM-${args.memberId}`, kind: 'direct' }, created: true }
         case 'spaces:addAgent':
             if (args.credential === 'rpl_refused') throw new Error('Replicas did not accept this key: Invalid or missing API key')
-            return { agent: { ...hermes, id: 'new', displayName: args.displayName, agentKind: args.kind, agentConnection: args.connection }, key: { ...key('k9', 'new'), secret: NEW_KEY } }
+            return { agent: { ...hermes, id: 'new', displayName: args.displayName, agentKind: args.kind, agentConnection: args.connection, ...(args.instance ? { agentInstance: args.instance } : {}) }, key: { ...key('k9', 'new'), secret: NEW_KEY } }
+        case 'spaces:agent37Instances':
+            if (args.key === 'sk_live_bad') throw new Error('Agent37 did not accept this key: Missing, malformed, or revoked API key.')
+            return { instances: [
+                { id: 'ab12cd34ef', name: 'main', template: 'agent37-hermes', status: 'running', kind: 'hermes' },
+                { id: 'cd34ef56gh', name: 'claws', template: 'agent37-openclaw', status: 'sleeping', kind: 'openclaw' },
+                { id: 'ef56gh78ij', name: 'coder', template: 'agent37-codex', status: 'running' },
+            ] }
+        case 'spaces:agent37CreateInstance': return { instance: { id: 'zz99', name: args.name, template: 'agent37-openclaw', status: 'running', kind: 'openclaw' } }
         case 'spaces:setAgentCredential': return { credential: { hint: `…${args.secret!.slice(-4)}`, setBy: 'me', setAt: '2026-09-30T12:00:00Z' } }
         case 'spaces:createAgentKey': return { key: { ...key('k2', args.agentId!), secret: ROTATED } }
         case 'spaces:revokeAgentKey': return { key: key(args.keyId!, args.agentId!, { revokedAt: '2026-09-29T11:00:00Z' }) }
         case 'spaces:getAgentCapabilities': return { capabilities: { stop: false, options: options[args.agentId!] ?? [] }, defaults: defaults[args.agentId!] ?? {} }
         case 'spaces:setAgentHook': return { hook: { spaceId: args.spaceId, setBy: 'me', setAt: '2026-10-03T10:00:00Z' }, url: HOOK_URL }
         case 'spaces:clearAgentHook': return {}
+        case 'spaces:listMembers': return { members: joinedSpaces.has(args.spaceId!) ? [{ id: 'new', displayName: 'Claude', kind: 'agent' }] : [] }
+        case 'spaces:addMembers': joinedSpaces.add(args.spaceId!); return { memberships: [] }
         case 'spaces:setAgentOptionDefaults': return { defaults: (args as unknown as { defaults: Record<string, string | boolean> }).defaults }
     }
     throw new Error(`unexpected ${channel}`)
@@ -50,6 +61,7 @@ const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
 
 beforeEach(() => {
     invoke.mockClear()
+    joinedSpaces.clear()
     window.localStorage.clear()
     roster = [person('me', 'Ramnique'), person('harsh', 'Harsh')]
     options = {}
@@ -77,7 +89,7 @@ describe('AgentsDialog', () => {
         render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
         await screen.findByText('Hermes')
         fireEvent.click(screen.getByRole('button', { name: /Add agent/ }))
-        expect(setupsOffered()).toEqual(['Hermes', 'Replicas', 'Custom'])
+        expect(setupsOffered()).toEqual(['Hermes', 'Replicas', 'Agent37', 'Conductor', 'Custom'])
         expect(screen.getByRole('radio', { name: 'Hermes' })).toHaveAttribute('aria-checked', 'true')
         // The name suggests the kind's own.
         expect(screen.getByLabelText('Agent name')).toHaveValue('Hermes')
@@ -102,13 +114,13 @@ describe('AgentsDialog', () => {
             'Connect yourself to Rowboat: read https://raw.githubusercontent.com/rowboatlabs/hermes-rowboat/main/SETUP.md and follow it.',
         )
         expect(screen.getByText('Restart it')).toBeInTheDocument()
-        expect(screen.getByText('Add it to a space')).toBeInTheDocument()
+        expect(screen.getByText('Add it to spaces')).toBeInTheDocument()
         // By hand, from a terminal.
         fireEvent.click(screen.getByRole('radio', { name: 'Terminal' }))
         expect(screen.getByText('Save the settings')).toBeInTheDocument()
         expect(screen.getByText('Install the Rowboat plugin and skill')).toBeInTheDocument()
         expect(screen.getByText('Restart Hermes')).toBeInTheDocument()
-        expect(screen.getByText('Add it to a space')).toBeInTheDocument()
+        expect(screen.getByText('Add it to spaces')).toBeInTheDocument()
         expect(screen.getByText('hermes plugins install rowboatlabs/hermes-rowboat --enable')).toBeInTheDocument()
         expect(screen.getByText('hermes skills install rowboatlabs/rowboat/skills/rowboat-spaces --yes')).toBeInTheDocument()
         // The key reads as its ends; Copy takes the whole commands.
@@ -156,7 +168,7 @@ describe('AgentsDialog', () => {
         fireEvent.click(screen.getByRole('button', { name: `Copy ${NEW_KEY}` }))
         expect(navigator.clipboard.writeText).toHaveBeenCalledWith(NEW_KEY)
         expect(screen.getByText('https://rowboat.example/mcp')).toBeInTheDocument()
-        expect(invoke).not.toHaveBeenCalledWith('spaces:openDirect', expect.anything())
+        expect(invoke).toHaveBeenCalledWith('spaces:openDirect', { orgId: 'org-1', memberId: 'new' }) // your DM with it, ticked by default
     })
 
     it('switching kind keeps a typed name; Back returns to the list', async () => {
@@ -237,8 +249,108 @@ describe('AgentsDialog', () => {
         expect(screen.getByText('Give it the Spaces tools (optional)')).toBeInTheDocument()
         expect(screen.getByText('https://rowboat.example/mcp')).toBeInTheDocument()
         expect(screen.getByText('ROWBOAT_AGENT_KEY')).toBeInTheDocument()
-        expect(screen.getByText('Add it to a space')).toBeInTheDocument()
+        expect(screen.getByText('Add it to spaces')).toBeInTheDocument()
+        expect(invoke).toHaveBeenCalledWith('spaces:openDirect', { orgId: 'org-1', memberId: 'new' }) // your DM with it, ticked by default
+    })
+
+    it('adds a Conductor agent: Claude Code with the Conductor key, then the repo files that give it Spaces', async () => {
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        await screen.findByText('Hermes')
+        fireEvent.click(screen.getByRole('button', { name: /Add agent/ }))
+        fireEvent.click(screen.getByRole('radio', { name: 'Conductor' }))
+        expect(screen.queryByRole('radiogroup', { name: 'Coding agent' })).toBeNull() // one coding agent: no choice
+        expect(screen.getByLabelText('Agent name')).toHaveValue('Claude')
+        expect(screen.getByText(/needs a Claude key or subscription under Settings → Agents/)).toBeInTheDocument()
+        fireEvent.change(screen.getByLabelText('Conductor API key'), { target: { value: 'cnd_live_ab12' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Add agent' }))
+        await screen.findByRole('heading', { name: 'Connect Claude' })
+        expect(invoke).toHaveBeenCalledWith('spaces:addAgent', { orgId: 'org-1', displayName: 'Claude', kind: 'claude-code', connection: 'conductor', credential: 'cnd_live_ab12' })
+        // Nothing secret by hand: the .mcp.json reads the variables Rowboat sets in each workspace.
+        expect(screen.getByText('.mcp.json')).toBeInTheDocument()
+        expect(screen.getByText(/"Authorization": "Bearer \$\{ROWBOAT_AGENT_KEY\}"/)).toBeInTheDocument()
+        expect(screen.queryByText(NEW_KEY)).toBeNull()
+    })
+
+    it('adds the new agent to every space by default, minus the ones unticked, then offers the rest from its setup', async () => {
+        const withSpaces = { ...org, spaces: [{ id: 'S-payments', name: 'payments', kind: 'shared' }, { id: 'S-design', name: 'design', kind: 'shared' }] } as unknown as OrgWithSpaces
+        render(<AgentsDialog org={withSpaces} open onOpenChange={vi.fn()} />)
+        await screen.findByText('Hermes')
+        fireEvent.click(screen.getByRole('button', { name: /Add agent/ }))
+        fireEvent.click(screen.getByRole('radio', { name: 'Conductor' }))
+        const picker = screen.getByRole('list', { name: 'Add it to' })
+        expect(within(picker).getAllByRole('checkbox').map((c) => c.getAttribute('aria-label'))).toEqual(['Direct message', '#payments', '#design'])
+        expect(within(picker).getAllByRole('checkbox').map((c) => c.getAttribute('aria-checked'))).toEqual(['true', 'true', 'true'])
+        fireEvent.click(within(picker).getByRole('checkbox', { name: '#design' }))
+        fireEvent.click(within(picker).getByRole('checkbox', { name: 'Direct message' }))
+        fireEvent.change(screen.getByLabelText('Conductor API key'), { target: { value: 'cnd_live_ab12' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Add agent' }))
+        await screen.findByRole('heading', { name: 'Connect Claude' })
+        expect(invoke).toHaveBeenCalledWith('spaces:addMembers', { orgId: 'org-1', spaceId: 'S-payments', memberIds: ['new'] })
+        expect(invoke).not.toHaveBeenCalledWith('spaces:addMembers', expect.objectContaining({ spaceId: 'S-design' }))
         expect(invoke).not.toHaveBeenCalledWith('spaces:openDirect', expect.anything())
+        // The setup's last step shows where it is, and adds it to the rest.
+        const spacesList = screen.getByRole('list', { name: 'Spaces' })
+        expect(await within(spacesList).findByText('Added')).toBeInTheDocument()
+        const add = within(spacesList).getByRole('button', { name: 'Add Claude to #design' })
+        await waitFor(() => expect(add).toBeEnabled())
+        fireEvent.click(add)
+        await waitFor(() => expect(within(spacesList).getAllByText('Added')).toHaveLength(2))
+    })
+
+    it('adds an Agent37 agent as one of the instances its key reaches; the instance decides the kind', async () => {
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        await screen.findByText('Hermes')
+        fireEvent.click(screen.getByRole('button', { name: /Add agent/ }))
+        fireEvent.click(screen.getByRole('radio', { name: 'Agent37' }))
+        // No kind to pick: the instance runs one.
+        expect(screen.queryByRole('radiogroup', { name: 'Agent' })).toBeNull()
+        expect(screen.getByRole('button', { name: 'Find instances' })).toBeDisabled()
+
+        fireEvent.change(screen.getByLabelText('Agent37 API key'), { target: { value: 'sk_live_bad' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Find instances' }))
+        expect(await screen.findByRole('alert')).toHaveTextContent('Agent37 did not accept this key')
+
+        fireEvent.change(screen.getByLabelText('Agent37 API key'), { target: { value: 'sk_live_ab12' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Find instances' }))
+        const list = await screen.findByRole('radiogroup', { name: 'Instance' })
+        expect(within(list).getAllByRole('radio').map((r) => r.getAttribute('aria-label'))).toEqual(['main (ab12cd34ef)', 'claws (cd34ef56gh)', 'coder (ef56gh78ij)', 'A new instance'])
+        expect(within(list).getByRole('radio', { name: 'coder (ef56gh78ij)' })).toBeDisabled()
+        expect(screen.getByRole('button', { name: 'Add agent' })).toBeDisabled()
+        fireEvent.click(within(list).getByRole('radio', { name: 'claws (cd34ef56gh)' }))
+        expect(screen.getByLabelText('Agent name')).toHaveValue('OpenClaw')
+
+        fireEvent.click(screen.getByRole('button', { name: 'Add agent' }))
+        await screen.findByRole('heading', { name: 'Connect OpenClaw' })
+        expect(invoke).toHaveBeenCalledWith('spaces:addAgent', { orgId: 'org-1', displayName: 'OpenClaw', kind: 'openclaw', connection: 'agent37', credential: 'sk_live_ab12', instance: 'cd34ef56gh' })
+        expect(invoke).not.toHaveBeenCalledWith('spaces:agent37CreateInstance', expect.anything())
+        // On the instance: OpenClaw's own commands, with our MCP server on the new key, and its own address.
+        fireEvent.click(screen.getAllByRole('button', { name: /Copy/ })[0]!)
+        expect(vi.mocked(navigator.clipboard.writeText).mock.calls.at(-1)![0]).toBe(
+            `openclaw mcp add rowboat --url 'https://rowboat.example/mcp' --transport streamable-http --header 'Authorization: Bearer ${NEW_KEY}'`,
+        )
+        expect(screen.getByText(/https:\/\/cd34ef56gh-7681\.agent37\.app/)).toBeInTheDocument()
+        // The key on its own copies whole, though it reads shortened on screen.
+        fireEvent.click(screen.getByRole('button', { name: 'Copy Agent key' }))
+        expect(vi.mocked(navigator.clipboard.writeText).mock.calls.at(-1)![0]).toBe(NEW_KEY)
+        expect(screen.queryByText(NEW_KEY)).toBeNull()
+    })
+
+    it('adds an Agent37 agent on a new instance, created with the key, a model budget and sleep', async () => {
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        await screen.findByText('Hermes')
+        fireEvent.click(screen.getByRole('button', { name: /Add agent/ }))
+        fireEvent.click(screen.getByRole('radio', { name: 'Agent37' }))
+        fireEvent.change(screen.getByLabelText('Agent37 API key'), { target: { value: 'sk_live_ab12' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Find instances' }))
+        fireEvent.click(within(await screen.findByRole('radiogroup', { name: 'Instance' })).getByRole('radio', { name: 'A new instance' }))
+        fireEvent.click(within(screen.getByRole('radiogroup', { name: 'New instance runs' })).getByRole('radio', { name: 'OpenClaw' }))
+        fireEvent.change(screen.getByLabelText('Monthly model budget'), { target: { value: '10' } })
+        fireEvent.click(screen.getByLabelText('Sleep when idle'))
+        fireEvent.change(screen.getByLabelText('Agent name'), { target: { value: 'Claws' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Add agent' }))
+        await screen.findByRole('heading', { name: 'Connect Claws' })
+        expect(invoke).toHaveBeenCalledWith('spaces:agent37CreateInstance', { key: 'sk_live_ab12', kind: 'openclaw', name: 'rowboat-claws', monthlyBudgetUsd: 10, autoSleep: false })
+        expect(invoke).toHaveBeenCalledWith('spaces:addAgent', { orgId: 'org-1', displayName: 'Claws', kind: 'openclaw', connection: 'agent37', credential: 'sk_live_ab12', instance: 'zz99' })
     })
 
     it('shows a Replicas agent’s key by its end, flags a rejected one, and lets its owner replace it', async () => {

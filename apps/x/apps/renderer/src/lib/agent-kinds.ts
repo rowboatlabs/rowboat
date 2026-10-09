@@ -1,11 +1,17 @@
+import agent37Logo from '@/assets/agents/agent37/logo.png'
+import agent37LogoDark from '@/assets/agents/agent37/logo-dark.png'
 import claudeCodeLogo from '@/assets/agents/claude-code/logo.png'
 import claudeCodeLogoDark from '@/assets/agents/claude-code/logo-dark.png'
+import conductorLogo from '@/assets/agents/conductor/logo.png'
+import conductorLogoDark from '@/assets/agents/conductor/logo-dark.png'
 import codexLogo from '@/assets/agents/codex/logo.png'
 import codexLogoDark from '@/assets/agents/codex/logo-dark.png'
 import cursorLogo from '@/assets/agents/cursor/logo.png'
 import cursorLogoDark from '@/assets/agents/cursor/logo-dark.png'
 import hermesLogo from '@/assets/agents/hermes/logo.png'
 import hermesLogoDark from '@/assets/agents/hermes/logo-dark.png'
+import openclawLogo from '@/assets/agents/openclaw/logo.png'
+import openclawLogoDark from '@/assets/agents/openclaw/logo-dark.png'
 import opencodeLogo from '@/assets/agents/opencode/logo.png'
 import opencodeLogoDark from '@/assets/agents/opencode/logo-dark.png'
 import piLogo from '@/assets/agents/pi/logo.png'
@@ -16,7 +22,7 @@ import replicasLogoDark from '@/assets/agents/replicas/logo-dark.png'
 // What an agent is, how Harbor reaches it, and how you set one up (Harbor spec
 // §4 Agent members and §8 Connectors, 2026-09-30). Harbor stores every agent's
 // kind (what it is underneath: hermes, a coding agent, custom) and connection
-// (the path: plugin, contract, or a platform Harbor calls such as replicas);
+// (the path: plugin, contract, or a platform Harbor calls: replicas, conductor);
 // every surface draws the agent from them: the kind's logo on its avatar,
 // "Claude Code · via Replicas" beside its name.
 //
@@ -40,6 +46,7 @@ export interface Logo {
  */
 export const KINDS: Record<string, { label: string; logo?: Logo; bot?: boolean }> = {
     hermes: { label: 'Hermes', logo: { light: hermesLogo, dark: hermesLogoDark } },
+    openclaw: { label: 'OpenClaw', logo: { light: openclawLogo, dark: openclawLogoDark } },
     'claude-code': { label: 'Claude Code', logo: { light: claudeCodeLogo, dark: claudeCodeLogoDark } },
     codex: { label: 'Codex', logo: { light: codexLogo, dark: codexLogoDark } },
     cursor: { label: 'Cursor', logo: { light: cursorLogo, dark: cursorLogoDark } },
@@ -51,13 +58,27 @@ export const KINDS: Record<string, { label: string; logo?: Logo; bot?: boolean }
     posthog: { label: 'PostHog', bot: true },
     cal: { label: 'Cal.com', bot: true },
     custom: { label: 'Agent' },
+    // Ro (Harbor spec §8 Jev, 2026-10-07): the agent Harbor itself is, run on
+    // TypeSafe's Jev through Rowboat's OpenRouter key. People meet it as Ro,
+    // so its kind reads Ro too. No mark yet: the generic one.
+    jev: { label: 'Ro' },
 }
+
+/** The connection of an agent Harbor itself is: nothing to set up, no keys (Harbor spec §8 Jev). */
+export const BUILT_IN_CONNECTION = 'builtin'
 
 /** Platforms Harbor calls on an agent's behalf: named after the kind ("via Replicas"). */
 export const PLATFORMS: Record<string, { label: string; logo?: Logo }> = {
     replicas: { label: 'Replicas', logo: { light: replicasLogo, dark: replicasLogoDark } },
     posthog: { label: 'PostHog' },
     cal: { label: 'Cal.com' },
+    conductor: { label: 'Conductor', logo: { light: conductorLogo, dark: conductorLogoDark } },
+    agent37: { label: 'Agent37', logo: { light: agent37Logo, dark: agent37LogoDark } },
+}
+
+/** A platform instance as people see it: its name, then its id. */
+export function instanceLabel(i: { id: string; name: string | null }): string {
+    return i.name ? `${i.name} (${i.id})` : i.id
 }
 
 export function isBot(kind: string | undefined): boolean {
@@ -105,6 +126,10 @@ export interface SetupContext {
     /** The org's address, as Rowboat reaches it. */
     orgUrl: string
     agentKey: string
+    /** What the agent is, for a setup that offers several kinds. */
+    kind?: string
+    /** The platform instance the agent is (Agent37). */
+    instance?: string
     /** The owner's direct messages with the agent, when the kind wants a home for unprompted messages. */
     homeChannel?: string
 }
@@ -119,14 +144,17 @@ export interface AgentSetup {
     logo?: Logo
     /** The connection every agent added this way has. */
     connection: string
-    /** The kinds it offers: one is fixed; several are a choice on the Add screen. */
+    /** The kinds it offers: one is fixed; several are a choice on the Add screen, under `kindChoice` ("Agent" when unset). */
     kinds: readonly string[]
+    kindChoice?: string
     /** What the name field suggests; empty = the chosen kind's label. */
     defaultName: string
     /** A platform key the person pastes on the Add screen; Harbor checks it with the platform and seals it. */
     credential?: { label: string; placeholder: string; note: string }
     /** Where the agent's side is documented. */
     docsUrl?: string
+    /** The agent is one platform instance, picked or created on the Add screen; its kind follows the instance (Agent37, 2026-10-05). */
+    bindsInstance?: boolean
     /** Opens the owner's DM with the agent before setup, for `homeChannel`. */
     wantsHomeChannel?: boolean
     /** A bot rather than an agent (KINDS `bot`): offered under Add bot. */
@@ -336,6 +364,123 @@ function integrationSetup(name: string, example: string): () => SetupRoute[] {
     ]
 }
 
+// Conductor (2026-10-06): Harbor runs the connector, so connecting is the Conductor key on the
+// Add screen. Every workspace it starts gets ROWBOAT_URL and ROWBOAT_AGENT_KEY (a key Harbor
+// keeps for the agent), so nothing secret is set up by hand: a repo's .mcp.json that reads them
+// gives Claude Code the Spaces tools, and the skill teaches it Spaces. Conductor's API can't set
+// MCP servers itself, so both are files the repo commits.
+const CONDUCTOR_MCP_JSON = JSON.stringify(
+    { mcpServers: { rowboat: { type: 'http', url: '${ROWBOAT_URL}/mcp', headers: { Authorization: 'Bearer ${ROWBOAT_AGENT_KEY}' } } } },
+    null,
+    2,
+)
+
+function conductorSetup(): SetupRoute[] {
+    return [
+        {
+            id: 'conductor',
+            label: 'Conductor',
+            steps: [
+                {
+                    title: 'Give it the Spaces tools (recommended)',
+                    note: 'Commit this as .mcp.json at the root of each repository it works in (or merge it into the one there). It holds no secret: Rowboat fills both variables in every workspace it starts.',
+                    code: { caption: '.mcp.json', text: CONDUCTOR_MCP_JSON },
+                },
+                {
+                    title: 'Teach it Spaces (recommended)',
+                    note: 'The rowboat-spaces skill teaches it how to behave in Spaces: mentions, hand-offs, threads. Run this in the repository and commit what it adds.',
+                    code: { caption: 'Terminal', text: `npx skills add ${SKILL_REPO} --skill rowboat-spaces` },
+                },
+                {
+                    title: 'Pick its repository when you mention it',
+                    note: 'With one Conductor project it uses that one. With several it asks, or name it in your message as [env:project-name].',
+                },
+            ],
+        },
+    ]
+}
+
+// Agent37 (2026-10-01): Harbor runs the connector, so connecting is the Agent37 key on the Add
+// screen; Harbor drives the instance's Hermes or OpenClaw through Agent37's API. What's left on
+// the instance is optional and the same as for any agent: our MCP server on the agent's key, the
+// key itself for downloading earlier attachments, and the rowboat-spaces skill. Agent37 has no
+// dashboard or API for MCP servers or skills; they go in the harness's own config, from the
+// instance's terminal (https://www.agent37.com/docs/agents-api/custom-image), and the harness
+// reads them at boot, hence the restart. OpenClaw's commands are its own CLI's
+// (https://docs.openclaw.ai/cli/mcp/registry, https://docs.openclaw.ai/cli/skills).
+function agent37Setup({ orgUrl, agentKey, kind, instance }: SetupContext): SetupRoute[] {
+    const id = instance ?? '<instance>'
+    const terminal = `Open the instance’s terminal: from the Agent37 dashboard, or its port 7681 (https://${id}-7681.agent37.app) through a signed URL.`
+    const restart = { title: 'Restart the instance', note: `From the Agent37 dashboard, or POST /v1/instances/${id}/restart. The agent picks up the tools and the skill when it starts.` }
+    // The key on its own too (2026-10-06, found by Arjun): inside the commands it reads shortened and
+    // their Copy takes them all, so without this the key itself could not be copied.
+    const values = {
+        valuesNote: 'Or value by value, for the instance’s own dashboard:',
+        values: [
+            { label: 'MCP URL', text: `${orgUrl}/mcp` },
+            { label: 'Agent key', text: agentKey, secret: true },
+        ],
+    }
+    if (kind === 'openclaw') {
+        return [
+            {
+                id: 'terminal',
+                label: 'Terminal',
+                steps: [
+                    {
+                        title: 'Give it the Spaces tools (recommended)',
+                        note: `${terminal} This adds our MCP server, acting as this agent.`,
+                        code: {
+                            caption: 'Terminal',
+                            secret: true,
+                            text: `openclaw mcp add rowboat --url '${orgUrl}/mcp' --transport streamable-http --header 'Authorization: Bearer ${agentKey}'`,
+                        },
+                        ...values,
+                    },
+                    {
+                        title: 'Teach it Spaces (recommended)',
+                        note: 'The rowboat-spaces skill teaches it how to behave in Spaces: mentions, hand-offs, threads.',
+                        code: {
+                            caption: 'Terminal',
+                            text: `git clone --depth 1 https://github.com/${SKILL_REPO} /tmp/rowboat-skills && openclaw skills install /tmp/rowboat-skills/skills/rowboat-spaces --global --force && rm -rf /tmp/rowboat-skills`,
+                        },
+                    },
+                    restart,
+                ],
+            },
+        ]
+    }
+    return [
+        {
+            id: 'terminal',
+            label: 'Terminal',
+            steps: [
+                {
+                    title: 'Give it the Spaces tools (recommended)',
+                    note: `${terminal} This adds our MCP server, acting as this agent, and lets it download files attached earlier in a thread.`,
+                    code: {
+                        caption: 'Terminal',
+                        secret: true,
+                        text: [
+                            `hermes config set ROWBOAT_URL '${orgUrl}'`,
+                            `hermes config set ROWBOAT_AGENT_KEY '${agentKey}'`,
+                            `hermes config set mcp_servers.rowboat.url '\${ROWBOAT_URL}/mcp'`,
+                            `hermes config set mcp_servers.rowboat.headers.Authorization 'Bearer \${ROWBOAT_AGENT_KEY}'`,
+                        ].join('\n'),
+                    },
+                    ...values,
+                },
+                {
+                    title: 'Teach it Spaces (recommended)',
+                    note: 'The rowboat-spaces skill teaches it how to behave in Spaces: mentions, hand-offs, threads.',
+                    code: { caption: 'Terminal', text: HERMES_SKILL },
+                },
+                restart,
+            ],
+        },
+    ]
+}
+
 export const AGENT_SETUPS: readonly AgentSetup[] = [
     {
         id: 'hermes',
@@ -356,6 +501,7 @@ export const AGENT_SETUPS: readonly AgentSetup[] = [
         logo: { light: replicasLogo, dark: replicasLogoDark },
         connection: 'replicas',
         kinds: ['claude-code', 'codex', 'cursor', 'opencode', 'pi', 'muse-code'],
+        kindChoice: 'Coding agent',
         defaultName: '',
         credential: {
             label: 'Replicas API key',
@@ -364,6 +510,39 @@ export const AGENT_SETUPS: readonly AgentSetup[] = [
         },
         docsUrl: 'https://docs.replicas.dev/features/environments',
         setup: replicasSetup,
+    },
+    {
+        id: 'agent37',
+        label: 'Agent37',
+        description: 'Hermes or OpenClaw on an Agent37 instance, on your Agent37 account',
+        logo: { light: agent37Logo, dark: agent37LogoDark },
+        connection: 'agent37',
+        kinds: ['hermes', 'openclaw'],
+        defaultName: '',
+        credential: {
+            label: 'Agent37 API key',
+            placeholder: 'Paste an sk_live_ key from agent37.com → API keys',
+            note: 'Harbor checks it with Agent37 and keeps it sealed. A key reaches every instance in its Agent37 workspace (there are no per-instance keys), so make one just for Rowboat.',
+        },
+        docsUrl: 'https://www.agent37.com/docs/agents-api/concepts',
+        bindsInstance: true,
+        setup: agent37Setup,
+    },
+    {
+        id: 'conductor',
+        label: 'Conductor',
+        description: 'Claude Code in a Conductor cloud workspace, on your Conductor account',
+        logo: { light: conductorLogo, dark: conductorLogoDark },
+        connection: 'conductor',
+        kinds: ['claude-code'],
+        defaultName: 'Claude',
+        credential: {
+            label: 'Conductor API key',
+            placeholder: 'Paste the key from app.conductor.build → API keys',
+            note: 'Make it in your Conductor team org (Pro or higher), which needs a Claude key or subscription under Settings → Agents, and GitHub repositories. Harbor checks it with Conductor and keeps it sealed. Nobody sees it again, you included.',
+        },
+        docsUrl: 'https://www.conductor.build/docs/api',
+        setup: conductorSetup,
     },
     {
         id: 'posthog',

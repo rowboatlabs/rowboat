@@ -1,3 +1,4 @@
+import { loadSpaceDirectory, getDirectorySpace } from '@/hooks/use-space-directory'
 import { OpenBrowserContext } from '@/contexts/browser-context';
 import { WorkspaceSessionTabs } from './components/code/workspace-session-tabs'
 import { DocumentFileViewer } from '@/components/document-file-viewer'
@@ -662,7 +663,7 @@ type ViewState =
       spaceId?: string
       rail?: RailSelection
       /** An org-level surface instead of a space: Activity (layer 3, 2026-09-10). */
-      view?: 'activity'
+      view?: 'activity' | 'browse'
       /** Scroll to this message once the pane paints (a notification or Activity click). */
       messageId?: string
       /** Its offset, when the producer fetched the message — the pane can load around it without asking. */
@@ -766,7 +767,7 @@ function parseDeepLink(input: string): ViewState | null {
       // through openSpacesLink, which looks things up first.
       const orgId = params.get('orgId')
       const spaceId = params.get('spaceId')
-      if (orgId && params.get('view') === 'activity') return { type: 'spaces', orgId, view: 'activity' }
+      if (orgId && (params.get('view') === 'activity' || params.get('view') === 'browse')) return { type: 'spaces', orgId, view: params.get('view') as 'activity' | 'browse' }
       if (!orgId || !spaceId) return { type: 'spaces' }
       const threadRootId = params.get('threadRootId')
       const messageId = params.get('messageId')
@@ -4866,7 +4867,7 @@ function App() {
       case 'apps': return 'Apps'
       case 'spaces': {
         const org = spacesOrgs.find((o) => o.id === currentViewState.orgId)
-        if (org && currentViewState.view === 'activity') return 'Activity'
+        if (org && currentViewState.view) return currentViewState.view === 'browse' ? 'Browse spaces' : 'Activity'
         const space = org ? findSpace(org, currentViewState.spaceId) : undefined
         return org && space ? spaceDisplayName(org, space) : 'Spaces'
       }
@@ -5512,6 +5513,10 @@ function App() {
   }, [navigateToView])
 
   /** The org's Activity surface (layer 3): everything that involves you, newest first. */
+  const openBrowse = useCallback((orgId: string) => {
+    void navigateToView({ type: 'spaces', orgId, view: 'browse' })
+  }, [navigateToView])
+
   const openActivity = useCallback((orgId: string) => {
     void navigateToView({ type: 'spaces', orgId, view: 'activity' })
   }, [navigateToView])
@@ -5680,8 +5685,9 @@ function App() {
         void navigateToViewRef.current({ type: 'spaces', orgId: org.id, view: 'activity' })
         return
       }
-      if (!findSpace(org, target.spaceId)) {
-        toast.error('That link points at a space you are not in')
+      if (!findSpace(org, target.spaceId)) await loadSpaceDirectory(org.id)
+      if (!findSpace(org, target.spaceId) && !getDirectorySpace(org.id, target.spaceId)) {
+        toast.error('This space is unavailable or you do not have access')
         void navigateToViewRef.current({ type: 'spaces', orgId: org.id, view: 'activity' })
         return
       }
@@ -7680,6 +7686,7 @@ function App() {
                     // Activity → a message: one navigation entry that opens the
                     // space (or thread) and lands on the row.
                     onOpenMessage={(target) => void navigateToView({ type: 'spaces', ...target })}
+                    onOpenBrowse={openBrowse}
                     onOpenActivity={openActivity}
                     onOpenSession={openAssistantRun}
                   />

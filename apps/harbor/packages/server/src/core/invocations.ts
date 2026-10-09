@@ -72,13 +72,14 @@ export class Invocations {
    * agent member other than the author gets an invocation: refused (no
    * shared space, or past the hop limit), pending (its conversation is free,
    * or its turn is waiting on a person, which this answers), or queued.
-   * Edits never invoke.
+   * Edits never invoke. `depth` is the message's hand-off depth (handOffDepth).
    */
   async onMessage(
     ctx: ActorCtx,
     space: Space,
     message: Message,
     agentOptions: Record<string, InvocationOptionValues> | undefined,
+    depth: number,
     out: InvocationOutbox,
   ): Promise<Invocation[]> {
     const created: Invocation[] = [];
@@ -92,8 +93,6 @@ export class Invocations {
       const agent = await this.k.store.getMember(agentId);
       if (agent?.kind !== 'agent') continue;
       const threadRootId = message.threadRoot ?? message.id;
-      // An agent's post hands work on: one hop deeper than the deepest turn it is running (spec §8).
-      const depth = ctx.agent ? 1 + (await this.deepestLive(ctx.memberId)) : 0;
       const shares = space.kind === 'shared' || (await this.k.store.sharesSharedSpace(message.author.memberId, agentId));
       const refusal = invocationRefusal(shares, depth);
       const now = this.k.now();
@@ -477,9 +476,19 @@ export class Invocations {
     if (invocation.state === 'pending') out.push({ to: 'agent', memberId: invocation.agentId, frame: { kind: 'invocation', invocation } });
   }
 
-  private async deepestLive(agentId: string): Promise<number> {
-    const live = await this.k.store.listInvocationsForAgent(agentId, LIVE);
-    return live.reduce((max, i) => Math.max(max, i.depth), 0);
+  /**
+   * The depth an agent a new message mentions is invoked at (spec §8). A
+   * person's post is 0; an agent's hands work on, one hop deeper than the
+   * deepest turn it is running. Jev's tags (`relayOf`, spec §8 Jev,
+   * 2026-10-07) complete the mentions of the message they answer, so they
+   * take that message's depth: an agent and Jev passing work along still
+   * stop at the hop limit.
+   */
+  async handOffDepth(ctx: ActorCtx, spaceId: string, relayOf?: string): Promise<number> {
+    if (relayOf) return this.k.store.getMessageHops(spaceId, relayOf);
+    if (!ctx.agent) return 0;
+    const live = await this.k.store.listInvocationsForAgent(ctx.memberId, LIVE);
+    return 1 + live.reduce((max, i) => Math.max(max, i.depth), 0);
   }
 
   /** One of the calling agent's own invocations, as it stands. */

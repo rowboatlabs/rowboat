@@ -32,17 +32,17 @@ afterEach(() => {
 })
 
 it.each([
-    ['Create a free server', 'Create a server'],
+    ['Create a group chat', 'Create a group chat'],
     ['Join a server', 'Join a server'],
 ])('routes %s from the chooser to the existing dialog', async (label, destination) => {
     render(<DialogFlow />)
-    expect(screen.getByRole('dialog', { name: 'Add a server' })).toBeVisible()
+    expect(screen.getByRole('dialog', { name: 'New group chat' })).toBeVisible()
     await act(async () => {
         fireEvent.click(screen.getByRole('button', { name: new RegExp(label) }))
     })
     expect(screen.getAllByRole('dialog')).toHaveLength(1)
     expect(screen.getByRole('dialog', { name: destination })).toBeVisible()
-    expect(screen.queryByRole('dialog', { name: 'Add a server' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'New group chat' })).toBeNull()
 })
 
 it('dismisses the chooser without entering either flow', () => {

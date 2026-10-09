@@ -1,9 +1,10 @@
 import type { ConnectorCapabilities, Invocation, InvocationOption, InvocationUpdate, Message, ServerFrame } from '@rowboat/spaces-protocol';
 import { HarborError } from '../../errors.js';
 import type { ConnectorEnv, RunningConnector } from '../platforms.js';
-import { ReplicasError, type AgentEvent, type EngineEvent, type ReplicasApi, type ReplicasEnvironment, type ReplicasImage } from './api.js';
-import { attachmentLinks, buildPrompt, environmentTag, requestMarker, type Attachment } from './prompt.js';
-import { activityOf, answerOf, CODING_AGENTS, failureOf, readsAnswers } from './turns.js';
+import { CODING_AGENTS, ReplicasError, THINKING_LEVELS, type AgentEvent, type EngineEvent, type ReplicasApi, type ReplicasEnvironment, type ReplicasImage } from './api.js';
+import { attachmentLinks, environmentTag, requestMarker } from '../common/prompt.js';
+import { requestPrompt, sleep } from '../common/request.js';
+import { activityOf, answerOf, failureOf, readsAnswers } from '../common/agent-events.js';
 
 // The Replicas connector (spec §8 Connectors, 2026-09-30): one per agent whose
 // connection is `replicas`, run by Harbor (connectors/host.ts). A client of the
@@ -52,6 +53,14 @@ const RETRY_FOR_MS = 5 * 60_000;
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 const MAX_IMAGES = 10;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+/** Which coding agents Replicas lists models for (GET /v1/agents/{agent}/models); Muse Code's two are documented. */
+const LISTS_MODELS = new Set(['claude', 'codex', 'opencode', 'pi']);
+const MUSE_MODELS = [{ id: 'muse-spark-1.3', name: 'Muse Spark 1.3' }, { id: 'muse-spark-1.2', name: 'Muse Spark 1.2' }];
+const LEVEL_LABELS: Record<string, string> = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max', ultra: 'Ultra', ultracode: 'Ultracode' };
+/** Thinking levels a coding agent takes: `ultra` is Codex's and Muse Code's, `ultracode` Claude Code's (Replicas's OpenAPI). */
+function levelsFor(codingAgent: string): string[] {
+  return THINKING_LEVELS.filter((level) => (level === 'ultra' ? codingAgent === 'codex' || codingAgent === 'muse' : level === 'ultracode' ? codingAgent === 'claude' : true));
+}
 /** A workspace in Replicas's app: undocumented, confirmed live 2026-09-30 (a direct link opens it for anyone in the Replicas org). */
 const workspaceLink = (workspaceId: string) => `https://app.replicas.dev/workspace/${encodeURIComponent(workspaceId)}`;
 
@@ -166,16 +175,21 @@ export class ReplicasConnector implements RunningConnector {
       environmentId = resolved;
     }
     await this.report(invocation, { state: 'working', activity: record.workspaceId ? 'Sending to Replicas' : 'Starting a workspace' });
-    const message = await this.prompt(invocation, record);
+    const message = await requestPrompt(this.env, invocation, record.deliveredOffset);
     const images = await this.images(invocation);
     const planMode = invocation.options?.plan_first === true;
+    // Model and effort, as picked in the composer or the owner's defaults (2026-10-08); unpicked is Replicas's default.
+    const picks = {
+      ...(typeof invocation.options?.model === 'string' ? { model: invocation.options.model } : {}),
+      ...(typeof invocation.options?.effort === 'string' ? { thinkingLevel: invocation.options.effort } : {}),
+    };
 
     record = { ...record, ...(environmentId ? { environmentId } : {}), turn: { invocationId: invocation.id, triggerMessageId: invocation.trigger.messageId, sending: true, prUrls: [] } };
     await this.save(spaceId, threadRootId, record);
     const sent = await this.withReplicas(invocation, async (api) => {
       if (record.workspaceId) {
         try {
-          const { messageId, chatId } = await api.send(record.workspaceId, { ...(record.chatId ? { chatId: record.chatId } : {}), message, planMode, images });
+          const { messageId, chatId } = await api.send(record.workspaceId, { ...(record.chatId ? { chatId: record.chatId } : {}), message, planMode, ...picks, images });
           return { workspaceId: record.workspaceId, chatId: chatId ?? record.chatId, messageId: messageId ?? undefined };
         } catch (err) {
           if (!(err instanceof ReplicasError && err.gone)) throw err;
@@ -183,7 +197,7 @@ export class ReplicasConnector implements RunningConnector {
           this.env.log('workspace gone; replacing it', { workspaceId: record.workspaceId });
         }
       }
-      const workspace = await api.create({ name: `spaces-${threadRootId}`, environmentId: environmentId!, codingAgent: this.codingAgent(), message, planMode, images });
+      const workspace = await api.create({ name: `spaces-${threadRootId}`, environmentId: environmentId!, codingAgent: this.codingAgent(), message, planMode, ...picks, images });
       return { workspaceId: workspace.id, chatId: undefined, messageId: undefined };
     });
     if (!sent) return;
@@ -470,6 +484,17 @@ export class ReplicasConnector implements RunningConnector {
     if (environments && environments.length > 1) {
       options.push({ type: 'select', key: 'environment', label: 'Environment', choices: environments.slice(0, 100).map((e) => ({ id: e.id, label: e.name.slice(0, 128) || e.id })) });
     }
+    // The model picker (2026-10-08): the coding agent's models on the account, and its thinking levels.
+    const agent = this.codingAgent();
+    const models = agent === 'muse'
+      ? MUSE_MODELS
+      : LISTS_MODELS.has(agent)
+        ? (await this.safe(async () => (await this.api()).models(agent), undefined as { models: Array<{ id: string; name: string }> } | undefined))?.models ?? []
+        : [];
+    if (models.length > 0) {
+      options.push({ type: 'select', key: 'model', label: 'Model', choices: models.slice(0, 100).map((m) => ({ id: m.id, label: m.name.slice(0, 128) || m.id })) });
+    }
+    options.push({ type: 'select', key: 'effort', label: 'Effort', choices: levelsFor(agent).map((level) => ({ id: level, label: LEVEL_LABELS[level] ?? level })) });
     options.push({ type: 'toggle', key: 'plan_first', label: 'Plan first' });
     const capabilities: ConnectorCapabilities = { stop: false, options };
     const signature = JSON.stringify(capabilities);
@@ -575,45 +600,6 @@ export class ReplicasConnector implements RunningConnector {
     return this.safe(async () => (await this.env.service.getMessage(this.env.ctx, spaceId, messageId)).offset, undefined);
   }
 
-  /** The prompt for this invocation: the request, the thread since the workspace last heard it, the files. */
-  private async prompt(invocation: Invocation, record: ThreadRecord): Promise<string> {
-    const { spaceId, threadRootId } = invocation.conversation;
-    const names = new Map((await this.safe(() => this.env.service.listOrgMembers(this.env.ctx), [])).map((m) => [m.id, m.displayName]));
-    const trigger = await this.safe(() => this.env.service.getMessage(this.env.ctx, spaceId, invocation.trigger.messageId), undefined);
-    const after = record.deliveredOffset ?? 0;
-    const context: Message[] = [];
-    if (trigger && trigger.id !== threadRootId) {
-      const page = await this.safe(() => this.env.service.listThread(this.env.ctx, spaceId, threadRootId, { afterOffset: after, limit: 100 }), undefined);
-      if (page) {
-        const earlier = [page.root, ...page.messages].filter(
-          (m) => m.offset > after && m.offset < trigger.offset && m.author.memberId !== this.env.agent.id && !m.deletedAt,
-        );
-        context.push(...earlier.slice(-50));
-      }
-    }
-    const attachments = await this.attachments(spaceId, invocation.trigger.body);
-    const earlierAttachments = (await Promise.all(context.map((m) => this.attachments(spaceId, m.body)))).flat();
-    return buildPrompt({
-      invocation,
-      agentId: this.env.agent.id,
-      context,
-      names,
-      orgAddress: this.env.service.org.address,
-      orgUrl: this.env.orgUrl,
-      attachments,
-      earlierAttachments,
-    });
-  }
-
-  private async attachments(spaceId: string, body: string): Promise<Attachment[]> {
-    const found: Attachment[] = [];
-    for (const { hash, name } of attachmentLinks(body, spaceId)) {
-      const blob = await this.safe(async () => (await this.env.service.downloadBlob(this.env.ctx, spaceId, hash, name)).blob, undefined);
-      if (blob) found.push({ name, mime: blob.mime, size: blob.size, hash });
-    }
-    return found;
-  }
-
   /** The invoking message's images, for the model to see: a long-lived link where storage gives one, else the bytes. */
   private async images(invocation: Invocation): Promise<ReplicasImage[]> {
     const { spaceId } = invocation.conversation;
@@ -649,13 +635,4 @@ export class ReplicasConnector implements RunningConnector {
  */
 function pickChat(chats: Array<{ id: string; provider?: string }>, codingAgent: string): string | undefined {
   return chats.find((c) => c.provider === codingAgent)?.id ?? (chats.length === 1 ? chats[0]!.id : undefined);
-}
-
-/** Wait, or stop waiting as soon as `signal` aborts. */
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    if (signal.aborted) return resolve();
-    const timer = setTimeout(resolve, ms);
-    signal.addEventListener('abort', () => (clearTimeout(timer), resolve()), { once: true });
-  });
 }

@@ -1,3 +1,4 @@
+import { useSpaceAccess } from '@/lib/spaces-access'
 import { useReactionReadMark } from '@/hooks/use-reaction-read-mark'
 import { MESSAGE_PROSE } from '@/components/spaces/message-prose'
 import { memo, useState } from 'react'
@@ -55,7 +56,7 @@ function ReactionChips({ message, memberNames, selfMemberId, onReact, onPickerOp
     message: spaces.Message
     memberNames: Map<string, string>
     selfMemberId?: string
-    onReact: (message: spaces.Message, emoji: string) => void
+    onReact?: (message: spaces.Message, emoji: string) => void
     onPickerOpenChange: (open: boolean) => void
     orgId?: string
     visible?: boolean
@@ -78,7 +79,7 @@ function ReactionChips({ message, memberNames, selfMemberId, onReact, onPickerOp
                             {/* Keep the toggle state available to assistive technology. */}
                             <button
                                 type="button"
-                                onClick={() => onReact(message, group.emoji)}
+                                disabled={!onReact} onClick={() => onReact?.(message, group.emoji)}
                                 aria-pressed={mine}
                                 aria-label={`${group.emoji}, ${group.memberIds.length} reactions, ${joinNames(group.memberIds.map(nameOf))}${mine ? ", including you" : ""}`}
                                 className={cn(
@@ -111,7 +112,7 @@ function ReactionChips({ message, memberNames, selfMemberId, onReact, onPickerOp
                     </HoverCard>
                 )
             })}
-            <ReactionPicker onPick={(emoji) => onReact(message, emoji)} onOpenChange={onPickerOpenChange}>
+            {onReact && <ReactionPicker onPick={(emoji) => onReact?.(message, emoji)} onOpenChange={onPickerOpenChange}>
                 <button
                     type="button"
                     title="Add reaction"
@@ -119,7 +120,7 @@ function ReactionChips({ message, memberNames, selfMemberId, onReact, onPickerOp
                 >
                     <SmilePlus className="size-3.5" />
                 </button>
-            </ReactionPicker>
+            </ReactionPicker>}
         </div>
     )
 }
@@ -196,6 +197,23 @@ function MessageRowImpl({
     /** Marks thread rows; message geometry stays consistent across both panes. */
     dense?: boolean
 }) {
+    const { member } = useSpaceAccess()
+    if (!member) {
+        onAskRowboat = undefined
+        onStopAgent = undefined
+        onReplyInThread = undefined
+        onReact = undefined
+        onDelete = undefined
+        onEdit = undefined
+        onQuoteReply = undefined
+        onForward = undefined
+        onToggleSave = undefined
+        onRetryFailed = undefined
+        onDiscardFailed = undefined
+        onVotePoll = undefined
+        onRemovePollVote = undefined
+        onEndPoll = undefined
+    }
     const name = memberNames.get(message.author.memberId) ?? message.author.memberId
     const viaAgent = message.author.actingMode !== 'direct'
     const avatarSize = 'xl'
@@ -326,7 +344,7 @@ function MessageRowImpl({
                         <span title={formatFullTimestamp(message.postedAt)} className="text-muted-foreground">{formatFeedTime(message.postedAt)}</span>
                     </div>
                 )}
-                {edit !== null ? (
+                {member && edit !== null ? (
                     <div className="mt-1">
                         <MessageEditBox
                             initial={edit.initial}
@@ -401,7 +419,7 @@ function MessageRowImpl({
                     </div>
                 )}
                 {!deleted && !unconfirmed && <InvocationLines messageId={message.id} />}
-                {!deleted && !unconfirmed && onReact && (
+                {!deleted && !unconfirmed && (
                     <ReactionChips
                         message={message}
                         memberNames={memberNames}
@@ -485,7 +503,7 @@ function MessageRowImpl({
             {showActions && (
                 <div className={cn('spaces-message-actions absolute right-4 flex items-center rounded-md border border-border bg-[var(--rowboat-raised)] p-1 shadow-sm', (pickerOpen || menuOpen) && 'spaces-message-actions--open')}>
                     {onReact && (
-                        <ReactionPicker onPick={(emoji) => onReact(message, emoji)} onOpenChange={setPickerOpen}>
+                        <ReactionPicker onPick={(emoji) => onReact?.(message, emoji)} onOpenChange={setPickerOpen}>
                             <button
                                 type="button"
                                 title="Add reaction"
