@@ -3,7 +3,7 @@ import { FileConflictNotice, useSpaceFileSave, type SavedSpaceFile } from './fil
 import { createContext, memo, useContext, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode } from 'react'
 import type { spaces } from '@x/shared'
 import { BlobPreview } from '@/components/spaces/blob-preview'
-import { Streamdown } from 'streamdown'
+import { Streamdown } from '@/components/streamdown'
 import { Eye, FileDown, FilePlus2, FileText, Loader2, MessageSquare, X } from 'lucide-react'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { cn } from '@/lib/utils'
