@@ -8,6 +8,7 @@
     "@rowboat/spaces-protocol": "link:../../../harbor/packages/protocol",
     "@x/client": "workspace:*",
     "@x/shared": "workspace:*",
+    "@x/spaces-client": "workspace:*",
     "expo": "~57.0.19",
     "expo-blur": "~57.0.2",
     "expo-camera": "~57.0.2",
@@ -59,7 +60,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "eas-build-post-install": "cd ../../../harbor && pnpm install --filter ./packages/protocol --no-frozen-lockfile && pnpm --filter ./packages/protocol run build && cd ../x && pnpm --filter @x/shared --filter @x/client run build"
+    "eas-build-post-install": "cd ../../../harbor && pnpm install --filter ./packages/protocol --no-frozen-lockfile && pnpm --filter ./packages/protocol run build && cd ../x && pnpm --filter @x/shared --filter @x/spaces-client --filter @x/client run build"
   },
   "private": true
 }

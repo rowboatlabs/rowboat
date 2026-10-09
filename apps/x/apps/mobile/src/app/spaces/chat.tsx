@@ -23,7 +23,7 @@ import { fetchLinkPreview, peekLinkPreview, previewUrls } from '@/lib/spaces/lin
 const TAIL_ROWS = 8;
 const TAIL_WAIT_MS = 700;
 import { SpacesClient } from '@/lib/spaces/client';
-import { SpacesLive } from '@/lib/spaces/live';
+import { SpacesLive } from '@x/spaces-client';
 import { useColors } from '@/theme/colors';
 
 // One space's stream (S2): root messages newest at the bottom, live over the

@@ -30,6 +30,7 @@
     "@rowboat/spaces-protocol": "link:../../../harbor/packages/protocol",
     "@types/react": "^19.2.7",
     "@x/shared": "workspace:*",
+    "@x/spaces-client": "workspace:*",
     "ai": "^7.0.22",
     "awilix": "^12.0.5",
     "baileys": "7.0.0-rc13",
