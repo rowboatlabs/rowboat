@@ -5,8 +5,7 @@ import { getSessionAccessToken, readSession } from '../auth/tokens.js';
 import { WorkDir } from '../config/config.js';
 import { getRowboatConfig } from '../config/rowboat.js';
 import type { ServerFrame } from '@rowboat/spaces-protocol';
-import { SpacesClient } from './client.js';
-import { SpacesLive } from './live.js';
+import { SpacesClient, SpacesLive } from '@x/spaces-client';
 
 // Org registry: which orgs this install is signed into, and the live client
 // pair (REST + WS) for each. Config only carries identity/credentials — spaces

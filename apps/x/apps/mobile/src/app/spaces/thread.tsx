@@ -22,7 +22,7 @@ import { useSpacesAccount } from '@/lib/spaces/account';
 import { StatusBanner } from '@/components/status-banner';
 import { loadRoster, loadThread, peekRoster, peekThread, saveRoster, saveThread } from '@/lib/spaces/cache';
 import { SpacesClient } from '@/lib/spaces/client';
-import { SpacesLive } from '@/lib/spaces/live';
+import { SpacesLive } from '@x/spaces-client';
 import { useColors } from '@/theme/colors';
 
 // One flat thread: root pinned on top, replies below, composer posts with

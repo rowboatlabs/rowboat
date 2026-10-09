@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import * as oauthClient from '../auth/oauth-client.js';
 import { ensureRowboatSession } from '../auth/oauth-flows.js';
 import { getSessionAccessToken, readSession } from '../auth/tokens.js';
-import { SpacesClient, SpacesRequestError } from './client.js';
+import { SpacesClient, SpacesRequestError } from '@x/spaces-client';
 import {
   applyManagedListing,
   dropSessionOrgs,
