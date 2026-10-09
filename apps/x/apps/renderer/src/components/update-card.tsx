@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { X } from "lucide-react"
-import { Streamdown } from "streamdown"
+import { Streamdown } from "@/components/streamdown"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { updatePrompted } from "@/lib/analytics"

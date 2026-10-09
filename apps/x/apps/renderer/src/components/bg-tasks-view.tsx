@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Streamdown } from 'streamdown'
+import { Streamdown } from '@/components/streamdown'
 import {
     ListChecks, Play, Square, Loader2, Trash2, Plus, X, AlertCircle,
     Repeat, Clock, Zap, ChevronLeft, ChevronDown, ChevronRight,

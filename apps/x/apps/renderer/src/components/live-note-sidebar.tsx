@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Streamdown } from 'streamdown'
+import { Streamdown } from '@/components/streamdown'
 import '@/styles/live-note-panel.css'
 import * as analytics from '@/lib/analytics'
 import { Button } from '@/components/ui/button'
