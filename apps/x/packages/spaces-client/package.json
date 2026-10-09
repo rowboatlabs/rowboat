@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@rowboat/spaces-protocol": "link:../../../harbor/packages/protocol",
+    "@x/shared": "workspace:*",
     "zod": "^4.2.1"
   },
   "devDependencies": {
