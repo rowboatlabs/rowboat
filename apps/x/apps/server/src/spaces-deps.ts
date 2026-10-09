@@ -1,7 +1,6 @@
 import fs from 'node:fs/promises';
 import { ipc, spaces as spacesShared } from '@x/shared';
 import * as orgs from '@x/core/dist/spaces/orgs.js';
-import { SpaceSubscriptions } from '@x/core/dist/spaces/subscriptions.js';
 import * as spacesOAuth from '@x/core/dist/spaces/oauth.js';
 import { oauthConnectBus } from '@x/core/dist/auth/connector-events.js';
 import { cancelScheduled, listScheduled, scheduleItem } from '@x/core/dist/spaces/scheduler.js';
@@ -10,12 +9,13 @@ import { onSpaceAgentActivity, startSpaceAgentActivity } from '@x/core/dist/spac
 import { startSpaceNotifications } from '@x/core/dist/spaces/notify.js';
 import { resolveResponseSession, startSpaceResponseIndex } from '@x/core/dist/spaces/response-index.js';
 import { fetchLinkPreview } from '@x/core/dist/spaces/link-preview.js';
-import { SpacesClient } from '@x/spaces-client';
+import { SpaceSubscriptions, harborChannelHandlers, type HarborChannelHandlers } from '@x/spaces-client';
 import { openExternalUrl } from '@x/core/dist/auth/url-opener.js';
 
-// Spaces handlers, server-side (Phase 9). Verbatim lifts of the Electron
-// handlers in apps/main/src/spaces/ipc.ts, minus the client-only ones
-// (save dialogs — those stay in main). Spaces is core-coupled
+// Spaces handlers, server-side (Phase 9). The channels that are one Harbor
+// call each are the shared table in @x/spaces-client (2026-10-09); these are
+// the ones that need core, as in apps/main/src/spaces/ipc.ts minus the
+// client-only ones (save dialogs — those stay in main). Spaces is core-coupled
 // — the topic agent runs turns through the session runtime, mention offsets
 // and org tokens live in the workdir — so it runs where core runs. Browser
 // opens ride the url-opener seam (shell.openExternal in-process, the
@@ -54,8 +54,8 @@ void startSpaceResponseIndex().catch((err) => console.error('[spaces] response i
 
 // One core-level live subscription per (org, space), fanned out to every
 // client. The registry tracks each entry's resume point and re-subscribes
-// on a fresh client whenever core replaces an org's socket (core/spaces/
-// subscriptions) — a subscription left on the dead one would swallow frames.
+// on a fresh client whenever core replaces an org's socket (@x/spaces-client
+// subscriptions.ts) — a subscription left on the dead one would swallow frames.
 const subscriptions = new SpaceSubscriptions({ getLive: orgs.getLive, onRuntimeReset: orgs.onRuntimeReset });
 
 // Member-addressed frames (space_added) ride no space subscription — relay
@@ -81,32 +81,27 @@ oauthConnectBus.subscribe((event) => {
   if (event.provider === 'rowboat') spacesOAuth.invalidateManagedOrgsSync();
 });
 
-type SpacesRpcChannel =
+// The Spaces channels that depend on this host; the ones that are one Harbor
+// call each come from the shared table (@x/spaces-client channels.ts).
+type SpacesHostChannel =
   | 'spaces:listOrgs' | 'spaces:addOrg' | 'spaces:resolveInviteLink' | 'spaces:joinInvite'
   | 'spaces:signInOrg' | 'spaces:createOrg' | 'spaces:apexInfo' | 'spaces:removeOrg'
   | 'spaces:accountState' | 'spaces:signInRowboat' | 'spaces:addOrgByAddress'
-  | 'spaces:browseSpaces' | 'spaces:joinSpace' | 'spaces:listSpaces' | 'spaces:createSpace' | 'spaces:openDirect' | 'spaces:listMembers' | 'spaces:createInvite'
-  | 'spaces:resolveInvite' | 'spaces:acceptInvite' | 'spaces:listAssets' | 'spaces:createAsset' | 'spaces:moveAsset'
-  | 'spaces:deleteAsset' | 'spaces:restoreAsset' | 'spaces:uploadBlob' | 'spaces:readAsset'
-  | 'spaces:proposeChange' | 'spaces:assetHistory' | 'spaces:diff' | 'spaces:listTopics'
-  | 'spaces:search'
-  | 'spaces:listStream' | 'spaces:getMessage' | 'spaces:listThread' | 'spaces:linkPreview' | 'spaces:postMessage' | 'spaces:createTopic'
-  | 'spaces:manageTopic' | 'spaces:reactToMessage'
-  | 'spaces:deleteMessage' | 'spaces:editMessage' | 'spaces:votePoll' | 'spaces:endPoll' | 'spaces:decideApproval'
+  | 'spaces:uploadBlob' | 'spaces:linkPreview'
   | 'spaces:invokeRowboat' | 'spaces:topicSession' | 'spaces:responseSession' | 'spaces:stopRowboat'
-  | 'spaces:subscribeSpace' | 'spaces:unsubscribeSpace' | 'spaces:presence' | 'spaces:whiteboard'
   | 'spaces:bounceLive'
-  | 'spaces:markRead' | 'spaces:followThread' | 'spaces:getUnread'
-  | 'spaces:getActivity'
-  | 'spaces:markActivitySeen' | 'spaces:readAll'
   | 'spaces:schedule' | 'spaces:listScheduled' | 'spaces:cancelScheduled';
-type SpacesHandlers = {
-  [K in SpacesRpcChannel]: (
+type SpacesHandlers = HarborChannelHandlers & {
+  [K in SpacesHostChannel]: (
     args: ipc.IPCChannels[K]['req'],
   ) => ipc.IPCChannels[K]['res'] | Promise<ipc.IPCChannels[K]['res']>;
 };
 
 export const spacesRpcHandlers: SpacesHandlers = {
+  // The router serves only the channels main forwards (channels.ts); the
+  // table's roster, agent and invocation channels still run in main.
+  ...harborChannelHandlers({ getClient: orgs.getClient, getLive: orgs.getLive, subscriptions, emit: emitSpacesEvent }),
+
   // The listing first makes the managed orgs match the apex (cheap when a
   // sync ran moments ago; a failed sync keeps the cached records and logs).
   'spaces:listOrgs': async () => {
@@ -165,76 +160,6 @@ export const spacesRpcHandlers: SpacesHandlers = {
     return { success: true };
   },
 
-  'spaces:listSpaces': async (args) => {
-    const { spaces, groupChat } = await orgs.getClient(args.orgId).listing({ includeDirect: args.includeDirect ?? false });
-    return { spaces, ...(groupChat !== undefined ? { groupChat } : {}) };
-  },
-
-  'spaces:browseSpaces': async (args) => orgs.getClient(args.orgId).browseSpaces(),
-
-  'spaces:joinSpace': async (args) => orgs.getClient(args.orgId).joinSpace(args.spaceId),
-
-  'spaces:createSpace': async (args) => {
-    const space = await orgs.getClient(args.orgId).createSpace(args.name, args.visibility);
-    return { space };
-  },
-
-  'spaces:openDirect': async (args) => {
-    const result = await orgs.getClient(args.orgId).openDirect(args.memberId);
-    return result;
-  },
-
-  'spaces:listMembers': async (args) => ({
-    members: await orgs.getClient(args.orgId).listMembers(args.spaceId),
-  }),
-
-  'spaces:createInvite': async (args) =>
-    orgs.getClient(args.orgId).createInvite(args.spaceId, args.expiresInHours),
-
-  // Pre-auth: works before the org has been added, so the join flow can show
-  // what's being joined (spec §4). The token is unused on this route.
-  'spaces:resolveInvite': async (args) =>
-    new SpacesClient({ baseUrl: args.baseUrl, token: 'dev-preauth' }).resolveInvite(args.token),
-
-  'spaces:acceptInvite': async (args) => orgs.getClient(args.orgId).acceptInvite(args.token),
-
-  'spaces:listAssets': async (args) => ({
-    entries: await orgs.getClient(args.orgId).listAssets(args.spaceId, {
-      ...(args.includeDeleted !== undefined ? { includeDeleted: args.includeDeleted } : {}),
-    }),
-  }),
-
-  // Namespace ops — the renderer is the human surface, so everything here is
-  // 'direct' (agents move/delete through the org's MCP face, attributed there).
-  'spaces:createAsset': async (args) =>
-    orgs.getClient(args.orgId).createAsset(args.spaceId, {
-      path: args.input.path,
-      // Exactly one of the two variants (contract decision 1, amended).
-      ...(args.input.blob !== undefined ? { blob: args.input.blob } : { newContent: args.input.newContent ?? '' }),
-      ...(args.input.reason ? { reason: args.input.reason } : {}),
-      actingMode: 'direct',
-    }),
-
-  'spaces:moveAsset': async (args) =>
-    orgs.getClient(args.orgId).moveAsset(args.spaceId, {
-      assetId: args.assetId,
-      toPath: args.toPath,
-      baseVersion: args.baseVersion,
-      ...(args.reason ? { reason: args.reason } : {}),
-      actingMode: 'direct',
-    }),
-
-  'spaces:deleteAsset': async (args) =>
-    orgs.getClient(args.orgId).deleteAsset(args.spaceId, {
-      assetId: args.assetId,
-      baseVersion: args.baseVersion,
-      ...(args.reason ? { reason: args.reason } : {}),
-      actingMode: 'direct',
-    }),
-
-  'spaces:restoreAsset': async (args) =>
-    orgs.getClient(args.orgId).restoreAsset(args.spaceId, { assetId: args.assetId, actingMode: 'direct' }),
-
   // Upload phase 1. Pastes arrive as bytes; drag-drop / picker sends the
   // absolute path so big files never cross IPC. NOTE: the path is read on the
   // machine core runs on — same-machine in child mode; with a remote server,
@@ -247,129 +172,7 @@ export const spacesRpcHandlers: SpacesHandlers = {
     return { blob };
   },
 
-  'spaces:readAsset': async (args) =>
-    orgs.getClient(args.orgId).readAsset(args.spaceId, args.assetId, args.version),
-
-  'spaces:proposeChange': async (args) =>
-    orgs.getClient(args.orgId).proposeChange(args.spaceId, {
-      assetId: args.input.assetId,
-      baseVersion: args.input.baseVersion,
-      // Exactly one of the two variants (contract decision 1, amended).
-      ...(args.input.blob !== undefined ? { blob: args.input.blob } : { newContent: args.input.newContent ?? '' }),
-      ...(args.input.reason ? { reason: args.input.reason } : {}),
-      actingMode: 'direct',
-    }),
-
-  'spaces:assetHistory': async (args) => ({
-    changeSets: await orgs.getClient(args.orgId).assetHistory(args.spaceId, {
-      ...(args.assetId !== undefined ? { assetId: args.assetId } : {}),
-      ...(args.beforeOffset !== undefined ? { beforeOffset: args.beforeOffset } : {}),
-      ...(args.limit !== undefined ? { limit: args.limit } : {}),
-    }),
-  }),
-
-  'spaces:diff': async (args) => ({
-    unified: await orgs.getClient(args.orgId).diff(args.spaceId, args.assetId, args.from, args.to),
-  }),
-
-  'spaces:listTopics': async (args) => ({
-    topics: await orgs.getClient(args.orgId).listTopics(args.spaceId, args.includeArchived ?? false),
-  }),
-
-  'spaces:search': async (args) =>
-    orgs.getClient(args.orgId).search(args.spaceId, {
-      q: args.q,
-      ...(args.kinds !== undefined ? { kinds: args.kinds } : {}),
-      ...(args.limit !== undefined ? { limit: args.limit } : {}),
-    }),
-
-  'spaces:listStream': async (args) =>
-    orgs.getClient(args.orgId).listStream(args.spaceId, {
-      ...(args.beforeOffset !== undefined ? { beforeOffset: args.beforeOffset } : {}),
-      ...(args.afterOffset !== undefined ? { afterOffset: args.afterOffset } : {}),
-      ...(args.aroundOffset !== undefined ? { aroundOffset: args.aroundOffset } : {}),
-      ...(args.limit !== undefined ? { limit: args.limit } : {}),
-    }),
-
-  'spaces:getMessage': async (args) => ({
-    message: await orgs.getClient(args.orgId).getMessage(args.spaceId, args.messageId),
-  }),
-
-  'spaces:listThread': async (args) =>
-    orgs.getClient(args.orgId).listThread(args.spaceId, args.rootMessageId, {
-      ...(args.beforeOffset !== undefined ? { beforeOffset: args.beforeOffset } : {}),
-      ...(args.afterOffset !== undefined ? { afterOffset: args.afterOffset } : {}),
-      ...(args.aroundOffset !== undefined ? { aroundOffset: args.aroundOffset } : {}),
-      ...(args.limit !== undefined ? { limit: args.limit } : {}),
-    }),
-
   'spaces:linkPreview': async (args) => ({ preview: await fetchLinkPreview(args.url) }),
-
-  'spaces:postMessage': async (args) =>
-    orgs.getClient(args.orgId).postMessage(args.spaceId, {
-      ...(args.threadRoot ? { threadRoot: args.threadRoot } : {}),
-      ...(args.anchorChangeSetId ? { anchorChangeSetId: args.anchorChangeSetId } : {}),
-      body: args.body,
-      ...(args.poll ? { poll: args.poll } : {}),
-      ...(args.agentOptions ? { agentOptions: args.agentOptions } : {}),
-      actingMode: 'direct',
-    }),
-
-  'spaces:createTopic': async (args) =>
-    orgs.getClient(args.orgId).createTopic(args.spaceId, {
-      ...(args.rootMessageId ? { rootMessageId: args.rootMessageId } : {}),
-      title: args.title,
-      ...(args.body ? { body: args.body } : {}),
-      ...(args.documentAssetId ? { documentAssetId: args.documentAssetId } : {}),
-      actingMode: 'direct',
-    }),
-
-  'spaces:manageTopic': async (args) => ({
-    topic: await orgs.getClient(args.orgId).manageTopic(args.spaceId, args.topicId, { ...args.action, actingMode: 'direct' }),
-  }),
-
-  'spaces:reactToMessage': async (args) => ({
-    message: await orgs.getClient(args.orgId).reactToMessage(args.spaceId, args.messageId, {
-      emoji: args.emoji,
-      action: args.action,
-      actingMode: 'direct',
-    }),
-  }),
-
-  'spaces:deleteMessage': async (args) => ({
-    message: await orgs.getClient(args.orgId).deleteMessage(args.spaceId, args.messageId, {
-      actingMode: 'direct',
-    }),
-  }),
-
-  'spaces:editMessage': async (args) => ({
-    message: await orgs.getClient(args.orgId).editMessage(args.spaceId, args.messageId, {
-      body: args.body,
-      actingMode: 'direct',
-    }),
-  }),
-
-  'spaces:votePoll': async (args) => ({
-    message: await orgs.getClient(args.orgId).votePoll(args.spaceId, args.messageId, {
-      answerId: args.answerId,
-      action: args.action,
-      actingMode: 'direct',
-    }),
-  }),
-
-  'spaces:endPoll': async (args) => ({
-    message: await orgs.getClient(args.orgId).endPoll(args.spaceId, args.messageId, {
-      actingMode: 'direct',
-    }),
-  }),
-
-  'spaces:decideApproval': async (args) => ({
-    approval: await orgs.getClient(args.orgId).decideApproval(args.spaceId, args.approvalId, {
-      decision: args.decision,
-      ...(args.note ? { note: args.note } : {}),
-      actingMode: 'direct',
-    }),
-  }),
 
   'spaces:invokeRowboat': async (args) => invokeTopicAgent(args),
 
@@ -381,28 +184,6 @@ export const spacesRpcHandlers: SpacesHandlers = {
 
   'spaces:stopRowboat': async (args) => stopTopicAgent(args),
 
-  'spaces:subscribeSpace': async (args) => {
-    subscriptions.subscribe(args.orgId, args.spaceId, (frame) => emitSpacesEvent({ orgId: args.orgId, frame }), args.afterOffset);
-    return { success: true };
-  },
-
-  'spaces:unsubscribeSpace': async (args) => {
-    subscriptions.unsubscribe(args.orgId, args.spaceId);
-    return { success: true };
-  },
-
-  'spaces:presence': async (args) => {
-    orgs.getLive(args.orgId).presence(args.spaceId, args.state, args.threadRootId);
-    return { success: true };
-  },
-
-  // Fire-and-forget like presence; incoming whiteboard frames ride the same
-  // per-space live subscription and reach clients over 'spaces:events'.
-  'spaces:whiteboard': async (args) => {
-    orgs.getLive(args.orgId).whiteboard(args.spaceId, args.boardId, args.payload);
-    return { success: true };
-  },
-
   // Sleep leaves spaces WebSockets half-open (no close ever fires). The
   // client's powerMonitor calls this on wake so every stream reconnects and
   // replays immediately instead of waiting out the watchdog.
@@ -410,20 +191,6 @@ export const spacesRpcHandlers: SpacesHandlers = {
     orgs.bounceAllLive();
     return { success: true };
   },
-
-  // Read state: the org owns the cursors (offsets, per member) — pass-throughs.
-  'spaces:markRead': async (args) =>
-    orgs.getClient(args.orgId).markRead(args.spaceId, {
-      ...(args.threadRootId ? { threadRootId: args.threadRootId } : {}),
-      offset: args.offset,
-    }),
-
-  'spaces:followThread': async (args) => orgs.getClient(args.orgId).followThread(args.spaceId, args.rootMessageId, args.following),
-
-  'spaces:getUnread': async (args) => orgs.getClient(args.orgId).unread(),
-  'spaces:getActivity': async ({ orgId, ...query }) => orgs.getClient(orgId).activity(query),
-  'spaces:markActivitySeen': async (args) => orgs.getClient(args.orgId).markActivitySeen(args.at),
-  'spaces:readAll': async (args) => orgs.getClient(args.orgId).readAll(args.spaceId !== undefined ? { spaceId: args.spaceId } : {}),
 
   // Scheduled sends + reminders: the 20s scheduler tick lives in this process.
   'spaces:schedule': async (args) => ({

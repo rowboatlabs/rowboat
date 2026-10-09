@@ -3,7 +3,6 @@ import path from 'node:path';
 import { BrowserWindow, dialog, shell } from 'electron';
 import { ipc, spaces as spacesShared } from '@x/shared';
 import * as orgs from '@x/core/dist/spaces/orgs.js';
-import { SpaceSubscriptions } from '@x/core/dist/spaces/subscriptions.js';
 import * as blobCache from './blob-cache.js';
 import * as spacesOAuth from '@x/core/dist/spaces/oauth.js';
 import { oauthConnectBus } from '@x/core/dist/auth/connector-events.js';
@@ -12,7 +11,7 @@ import { invokeTopicAgent, stopTopicAgent, topicSessionId } from '@x/core/dist/s
 import { onSpaceAgentActivity, startSpaceAgentActivity } from '@x/core/dist/spaces/agent-activity.js';
 import { startSpaceNotifications } from '@x/core/dist/spaces/notify.js';
 import { resolveResponseSession, startSpaceResponseIndex } from '@x/core/dist/spaces/response-index.js';
-import { SpacesClient } from '@x/spaces-client';
+import { SpaceSubscriptions, harborChannelHandlers, type HarborChannel } from '@x/spaces-client';
 import { createAgent37Instance, listAgent37Instances } from '@x/core/dist/spaces/agent37.js';
 import { fetchLinkPreview } from './link-preview.js';
 
@@ -23,90 +22,17 @@ type InvokeHandler<K extends keyof IPCChannels> = (
   args: IPCChannels[K]['req'],
 ) => IPCChannels[K]['res'] | Promise<IPCChannels[K]['res']>;
 
-type SpacesHandlers = {
-  'spaces:listOrgs': InvokeHandler<'spaces:listOrgs'>;
-  'spaces:addOrg': InvokeHandler<'spaces:addOrg'>;
-  'spaces:resolveInviteLink': InvokeHandler<'spaces:resolveInviteLink'>;
-  'spaces:joinInvite': InvokeHandler<'spaces:joinInvite'>;
-  'spaces:signInOrg': InvokeHandler<'spaces:signInOrg'>;
-  'spaces:accountState': InvokeHandler<'spaces:accountState'>;
-  'spaces:signInRowboat': InvokeHandler<'spaces:signInRowboat'>;
-  'spaces:addOrgByAddress': InvokeHandler<'spaces:addOrgByAddress'>;
-  'spaces:createOrg': InvokeHandler<'spaces:createOrg'>;
-  'spaces:apexInfo': InvokeHandler<'spaces:apexInfo'>;
-  'spaces:removeOrg': InvokeHandler<'spaces:removeOrg'>;
-  'spaces:listSpaces': InvokeHandler<'spaces:listSpaces'>;
-  'spaces:browseSpaces': InvokeHandler<'spaces:browseSpaces'>;
-  'spaces:joinSpace': InvokeHandler<'spaces:joinSpace'>;
-  'spaces:createSpace': InvokeHandler<'spaces:createSpace'>;
-  'spaces:renameSpace': InvokeHandler<'spaces:renameSpace'>;
-  'spaces:addMembers': InvokeHandler<'spaces:addMembers'>;
-  'spaces:listAgents': InvokeHandler<'spaces:listAgents'>;
-  'spaces:addAgent': InvokeHandler<'spaces:addAgent'>;
-  'spaces:setAgentCredential': InvokeHandler<'spaces:setAgentCredential'>;
-  'spaces:setAgentHook': InvokeHandler<'spaces:setAgentHook'>;
-  'spaces:clearAgentHook': InvokeHandler<'spaces:clearAgentHook'>;
-  'spaces:agent37Instances': InvokeHandler<'spaces:agent37Instances'>;
-  'spaces:agent37CreateInstance': InvokeHandler<'spaces:agent37CreateInstance'>;
-  'spaces:createAgentKey': InvokeHandler<'spaces:createAgentKey'>;
-  'spaces:revokeAgentKey': InvokeHandler<'spaces:revokeAgentKey'>;
-  'spaces:openDirect': InvokeHandler<'spaces:openDirect'>;
-  'spaces:listMembers': InvokeHandler<'spaces:listMembers'>;
-  'spaces:listOrgMembers': InvokeHandler<'spaces:listOrgMembers'>;
-  'spaces:createInvite': InvokeHandler<'spaces:createInvite'>;
-  'spaces:resolveInvite': InvokeHandler<'spaces:resolveInvite'>;
-  'spaces:acceptInvite': InvokeHandler<'spaces:acceptInvite'>;
-  'spaces:listAssets': InvokeHandler<'spaces:listAssets'>;
-  'spaces:createAsset': InvokeHandler<'spaces:createAsset'>;
-  'spaces:moveAsset': InvokeHandler<'spaces:moveAsset'>;
-  'spaces:deleteAsset': InvokeHandler<'spaces:deleteAsset'>;
-  'spaces:restoreAsset': InvokeHandler<'spaces:restoreAsset'>;
-  'spaces:uploadBlob': InvokeHandler<'spaces:uploadBlob'>;
-  'spaces:saveBlob': InvokeHandler<'spaces:saveBlob'>;
-  'spaces:saveAsset': InvokeHandler<'spaces:saveAsset'>;
-  'spaces:saveImageUrl': InvokeHandler<'spaces:saveImageUrl'>;
-  'spaces:linkPreview': InvokeHandler<'spaces:linkPreview'>;
-  'spaces:readAsset': InvokeHandler<'spaces:readAsset'>;
-  'spaces:proposeChange': InvokeHandler<'spaces:proposeChange'>;
-  'spaces:assetHistory': InvokeHandler<'spaces:assetHistory'>;
-  'spaces:diff': InvokeHandler<'spaces:diff'>;
-  'spaces:listTopics': InvokeHandler<'spaces:listTopics'>;
-  'spaces:search': InvokeHandler<'spaces:search'>;
-  'spaces:listStream': InvokeHandler<'spaces:listStream'>;
-  'spaces:getMessage': InvokeHandler<'spaces:getMessage'>;
-  'spaces:listThread': InvokeHandler<'spaces:listThread'>;
-  'spaces:postMessage': InvokeHandler<'spaces:postMessage'>;
-  'spaces:listInvocations': InvokeHandler<'spaces:listInvocations'>;
-  'spaces:cancelInvocation': InvokeHandler<'spaces:cancelInvocation'>;
-  'spaces:getAgentCapabilities': InvokeHandler<'spaces:getAgentCapabilities'>;
-  'spaces:setAgentOptionDefaults': InvokeHandler<'spaces:setAgentOptionDefaults'>;
-  'spaces:createTopic': InvokeHandler<'spaces:createTopic'>;
-  'spaces:manageTopic': InvokeHandler<'spaces:manageTopic'>;
-  'spaces:reactToMessage': InvokeHandler<'spaces:reactToMessage'>;
-  'spaces:deleteMessage': InvokeHandler<'spaces:deleteMessage'>;
-  'spaces:editMessage': InvokeHandler<'spaces:editMessage'>;
-  'spaces:votePoll': InvokeHandler<'spaces:votePoll'>;
-  'spaces:endPoll': InvokeHandler<'spaces:endPoll'>;
-  'spaces:decideApproval': InvokeHandler<'spaces:decideApproval'>;
-  'spaces:invokeRowboat': InvokeHandler<'spaces:invokeRowboat'>;
-  'spaces:topicSession': InvokeHandler<'spaces:topicSession'>;
-  'spaces:responseSession': InvokeHandler<'spaces:responseSession'>;
-  'spaces:stopRowboat': InvokeHandler<'spaces:stopRowboat'>;
-  'spaces:schedule': InvokeHandler<'spaces:schedule'>;
-  'spaces:listScheduled': InvokeHandler<'spaces:listScheduled'>;
-  'spaces:cancelScheduled': InvokeHandler<'spaces:cancelScheduled'>;
-  'spaces:subscribeSpace': InvokeHandler<'spaces:subscribeSpace'>;
-  'spaces:unsubscribeSpace': InvokeHandler<'spaces:unsubscribeSpace'>;
-  'spaces:presence': InvokeHandler<'spaces:presence'>;
-  'spaces:whiteboard': InvokeHandler<'spaces:whiteboard'>;
-  'spaces:bounceLive': InvokeHandler<'spaces:bounceLive'>;
-  'spaces:markRead': InvokeHandler<'spaces:markRead'>;
-  'spaces:followThread': InvokeHandler<'spaces:followThread'>;
-  'spaces:getUnread': InvokeHandler<'spaces:getUnread'>;
-  'spaces:getActivity': InvokeHandler<'spaces:getActivity'>;
-  'spaces:markActivitySeen': InvokeHandler<'spaces:markActivitySeen'>;
-  'spaces:readAll': InvokeHandler<'spaces:readAll'>;
-};
+// The Spaces channels that depend on this host; the ones that are one Harbor
+// call each come from the shared table (@x/spaces-client channels.ts).
+type SpacesHostChannel =
+  | 'spaces:listOrgs' | 'spaces:addOrg' | 'spaces:resolveInviteLink' | 'spaces:joinInvite' | 'spaces:signInOrg'
+  | 'spaces:accountState' | 'spaces:signInRowboat' | 'spaces:addOrgByAddress' | 'spaces:createOrg' | 'spaces:apexInfo'
+  | 'spaces:removeOrg' | 'spaces:agent37Instances' | 'spaces:agent37CreateInstance' | 'spaces:uploadBlob'
+  | 'spaces:saveBlob' | 'spaces:saveAsset' | 'spaces:saveImageUrl' | 'spaces:linkPreview' | 'spaces:invokeRowboat'
+  | 'spaces:topicSession' | 'spaces:responseSession' | 'spaces:stopRowboat' | 'spaces:schedule'
+  | 'spaces:listScheduled' | 'spaces:cancelScheduled' | 'spaces:bounceLive';
+
+type SpacesHandlers = { [K in HarborChannel | SpacesHostChannel]: InvokeHandler<K> };
 
 async function orgSummary(record: orgs.OrgRecord): Promise<spacesShared.SpacesOrgSummary> {
   return {
@@ -157,8 +83,17 @@ function broadcastSpacesEvent(event: spacesShared.SpacesBusEvent): void {
 // One core-level live subscription per (org, space), fanned out to all windows.
 // The renderer's afterOffset drives replay on first subscribe; after that the
 // registry tracks each entry's resume point and re-subscribes on a fresh
-// client whenever core replaces an org's socket (core/spaces/subscriptions).
+// client whenever core replaces an org's socket (@x/spaces-client subscriptions.ts).
 const subscriptions = new SpaceSubscriptions({ getLive: orgs.getLive, onRuntimeReset: orgs.onRuntimeReset });
+
+// The table's handlers take the request alone; main's take the IPC event first.
+const harbor = harborChannelHandlers({ getClient: orgs.getClient, getLive: orgs.getLive, subscriptions, emit: broadcastSpacesEvent });
+const harborIpcHandlers = Object.fromEntries(
+  Object.entries(harbor).map(([channel, handle]) => [
+    channel,
+    (_event: Electron.IpcMainInvokeEvent, args: unknown) => (handle as (args: unknown) => unknown)(args),
+  ]),
+) as { [K in HarborChannel]: InvokeHandler<K> };
 
 /**
  * Spaces IPC handlers, exported as a plain object and spread into the main
@@ -168,6 +103,8 @@ const subscriptions = new SpaceSubscriptions({ getLive: orgs.getLive, onRuntimeR
  * agents write through the org's MCP face).
  */
 export const spacesIpcHandlers: SpacesHandlers = {
+  ...harborIpcHandlers,
+
   // The listing first makes the managed orgs match the apex (cheap when a
   // sync ran moments ago; a failed sync keeps the cached records and logs).
   'spaces:listOrgs': async () => {
@@ -226,100 +163,8 @@ export const spacesIpcHandlers: SpacesHandlers = {
     return { success: true };
   },
 
-  'spaces:listSpaces': async (_event, args) => {
-    const { spaces, groupChat } = await orgs.getClient(args.orgId).listing({ includeDirect: args.includeDirect ?? false });
-    return { spaces, ...(groupChat !== undefined ? { groupChat } : {}) };
-  },
-
-  'spaces:browseSpaces': async (_event, args) => orgs.getClient(args.orgId).browseSpaces(),
-
-  'spaces:joinSpace': async (_event, args) => orgs.getClient(args.orgId).joinSpace(args.spaceId),
-
-  'spaces:createSpace': async (_event, args) => {
-    const space = await orgs.getClient(args.orgId).createSpace(args.name, args.visibility);
-    return { space };
-  },
-
-  'spaces:renameSpace': async (_event, args) => ({
-    space: await orgs.getClient(args.orgId).renameSpace(args.spaceId, args.name),
-  }),
-
-  'spaces:addMembers': async (_event, args) => ({
-    memberships: await orgs.getClient(args.orgId).addMembers(args.spaceId, args.memberIds),
-  }),
-
-  'spaces:listAgents': async (_event, args) => ({ agents: await orgs.getClient(args.orgId).listAgents() }),
-  'spaces:addAgent': async (_event, { orgId, ...input }) => orgs.getClient(orgId).addAgent(input),
-  'spaces:setAgentCredential': async (_event, args) => ({ credential: await orgs.getClient(args.orgId).setAgentCredential(args.agentId, args.secret) }),
-  'spaces:setAgentHook': async (_event, args) => orgs.getClient(args.orgId).setAgentHook(args.agentId, args.spaceId),
-  'spaces:clearAgentHook': async (_event, args) => {
-    await orgs.getClient(args.orgId).clearAgentHook(args.agentId);
-    return {};
-  },
   'spaces:agent37Instances': async (_event, { key }) => ({ instances: await listAgent37Instances(key) }),
   'spaces:agent37CreateInstance': async (_event, { key, ...input }) => ({ instance: await createAgent37Instance(key, input) }),
-  'spaces:createAgentKey': async (_event, args) => ({ key: await orgs.getClient(args.orgId).createAgentKey(args.agentId) }),
-  'spaces:revokeAgentKey': async (_event, args) => ({ key: await orgs.getClient(args.orgId).revokeAgentKey(args.agentId, args.keyId) }),
-
-  'spaces:openDirect': async (_event, args) => {
-    const result = await orgs.getClient(args.orgId).openDirect(args.memberId);
-    return result;
-  },
-
-  'spaces:listMembers': async (_event, args) => ({
-    members: await orgs.getClient(args.orgId).listMembers(args.spaceId),
-  }),
-
-  'spaces:listOrgMembers': async (_event, args) => ({
-    members: await orgs.getClient(args.orgId).listOrgMembers(),
-  }),
-
-  'spaces:createInvite': async (_event, args) =>
-    orgs.getClient(args.orgId).createInvite(args.spaceId, args.expiresInHours),
-
-  // Pre-auth: works before the org has been added, so the join flow can show
-  // what's being joined (spec §4). The token is unused on this route.
-  'spaces:resolveInvite': async (_event, args) =>
-    new SpacesClient({ baseUrl: args.baseUrl, token: 'dev-preauth' }).resolveInvite(args.token),
-
-  'spaces:acceptInvite': async (_event, args) => orgs.getClient(args.orgId).acceptInvite(args.token),
-
-  'spaces:listAssets': async (_event, args) => ({
-    entries: await orgs.getClient(args.orgId).listAssets(args.spaceId, {
-      ...(args.includeDeleted !== undefined ? { includeDeleted: args.includeDeleted } : {}),
-    }),
-  }),
-
-  // Namespace ops — the renderer is the human surface, so everything here is
-  // 'direct' (agents move/delete through the org's MCP face, attributed there).
-  'spaces:createAsset': async (_event, args) =>
-    orgs.getClient(args.orgId).createAsset(args.spaceId, {
-      path: args.input.path,
-      // Exactly one of the two variants (contract decision 1, amended).
-      ...(args.input.blob !== undefined ? { blob: args.input.blob } : { newContent: args.input.newContent ?? '' }),
-      ...(args.input.reason ? { reason: args.input.reason } : {}),
-      actingMode: 'direct',
-    }),
-
-  'spaces:moveAsset': async (_event, args) =>
-    orgs.getClient(args.orgId).moveAsset(args.spaceId, {
-      assetId: args.assetId,
-      toPath: args.toPath,
-      baseVersion: args.baseVersion,
-      ...(args.reason ? { reason: args.reason } : {}),
-      actingMode: 'direct',
-    }),
-
-  'spaces:deleteAsset': async (_event, args) =>
-    orgs.getClient(args.orgId).deleteAsset(args.spaceId, {
-      assetId: args.assetId,
-      baseVersion: args.baseVersion,
-      ...(args.reason ? { reason: args.reason } : {}),
-      actingMode: 'direct',
-    }),
-
-  'spaces:restoreAsset': async (_event, args) =>
-    orgs.getClient(args.orgId).restoreAsset(args.spaceId, { assetId: args.assetId, actingMode: 'direct' }),
 
   // Upload phase 1. Pastes arrive as bytes; drag-drop / picker sends the
   // absolute path (via electronUtils.getPathForFile) so big files never cross
@@ -373,142 +218,6 @@ export const spacesIpcHandlers: SpacesHandlers = {
 
   'spaces:linkPreview': async (_event, args) => ({ preview: await fetchLinkPreview(args.url) }),
 
-  'spaces:readAsset': async (_event, args) =>
-    orgs.getClient(args.orgId).readAsset(args.spaceId, args.assetId, args.version),
-
-  'spaces:proposeChange': async (_event, args) =>
-    orgs.getClient(args.orgId).proposeChange(args.spaceId, {
-      assetId: args.input.assetId,
-      baseVersion: args.input.baseVersion,
-      // Exactly one of the two variants (contract decision 1, amended).
-      ...(args.input.blob !== undefined ? { blob: args.input.blob } : { newContent: args.input.newContent ?? '' }),
-      ...(args.input.reason ? { reason: args.input.reason } : {}),
-      actingMode: 'direct',
-    }),
-
-  'spaces:assetHistory': async (_event, args) => ({
-    changeSets: await orgs.getClient(args.orgId).assetHistory(args.spaceId, {
-      ...(args.assetId !== undefined ? { assetId: args.assetId } : {}),
-      ...(args.beforeOffset !== undefined ? { beforeOffset: args.beforeOffset } : {}),
-      ...(args.limit !== undefined ? { limit: args.limit } : {}),
-    }),
-  }),
-
-  'spaces:diff': async (_event, args) => ({
-    unified: await orgs.getClient(args.orgId).diff(args.spaceId, args.assetId, args.from, args.to),
-  }),
-
-  'spaces:listTopics': async (_event, args) => ({
-    topics: await orgs.getClient(args.orgId).listTopics(args.spaceId, args.includeArchived ?? false),
-  }),
-
-  'spaces:search': async (_event, args) =>
-    orgs.getClient(args.orgId).search(args.spaceId, {
-      q: args.q,
-      ...(args.kinds !== undefined ? { kinds: args.kinds } : {}),
-      ...(args.limit !== undefined ? { limit: args.limit } : {}),
-    }),
-
-  'spaces:listStream': async (_event, args) =>
-    orgs.getClient(args.orgId).listStream(args.spaceId, {
-      ...(args.beforeOffset !== undefined ? { beforeOffset: args.beforeOffset } : {}),
-      ...(args.afterOffset !== undefined ? { afterOffset: args.afterOffset } : {}),
-      ...(args.aroundOffset !== undefined ? { aroundOffset: args.aroundOffset } : {}),
-      ...(args.limit !== undefined ? { limit: args.limit } : {}),
-    }),
-
-  'spaces:getMessage': async (_event, args) => ({
-    message: await orgs.getClient(args.orgId).getMessage(args.spaceId, args.messageId),
-  }),
-
-  'spaces:listThread': async (_event, args) =>
-    orgs.getClient(args.orgId).listThread(args.spaceId, args.rootMessageId, {
-      ...(args.beforeOffset !== undefined ? { beforeOffset: args.beforeOffset } : {}),
-      ...(args.afterOffset !== undefined ? { afterOffset: args.afterOffset } : {}),
-      ...(args.aroundOffset !== undefined ? { aroundOffset: args.aroundOffset } : {}),
-      ...(args.limit !== undefined ? { limit: args.limit } : {}),
-    }),
-
-  'spaces:postMessage': async (_event, args) =>
-    orgs.getClient(args.orgId).postMessage(args.spaceId, {
-      ...(args.threadRoot ? { threadRoot: args.threadRoot } : {}),
-      ...(args.anchorChangeSetId ? { anchorChangeSetId: args.anchorChangeSetId } : {}),
-      body: args.body,
-      ...(args.poll ? { poll: args.poll } : {}),
-      ...(args.agentOptions ? { agentOptions: args.agentOptions } : {}),
-      actingMode: 'direct',
-    }),
-
-  'spaces:listInvocations': async (_event, args) => ({
-    invocations: await orgs.getClient(args.orgId).listInvocations(args.spaceId, args.threadRootId),
-  }),
-  'spaces:cancelInvocation': async (_event, args) => ({
-    invocation: await orgs.getClient(args.orgId).cancelInvocation(args.invocationId),
-  }),
-  'spaces:setAgentOptionDefaults': async (_event, args) => ({
-    defaults: await orgs.getClient(args.orgId).setAgentOptionDefaults(args.agentId, args.defaults),
-  }),
-
-  'spaces:getAgentCapabilities': async (_event, args) => ({
-    ...(await orgs.getClient(args.orgId).getAgentCapabilities(args.agentId)),
-  }),
-
-  'spaces:createTopic': async (_event, args) =>
-    orgs.getClient(args.orgId).createTopic(args.spaceId, {
-      ...(args.rootMessageId ? { rootMessageId: args.rootMessageId } : {}),
-      title: args.title,
-      ...(args.body ? { body: args.body } : {}),
-      ...(args.documentAssetId ? { documentAssetId: args.documentAssetId } : {}),
-      actingMode: 'direct',
-    }),
-
-  'spaces:manageTopic': async (_event, args) => ({
-    topic: await orgs.getClient(args.orgId).manageTopic(args.spaceId, args.topicId, { ...args.action, actingMode: 'direct' }),
-  }),
-
-  'spaces:reactToMessage': async (_event, args) => ({
-    message: await orgs.getClient(args.orgId).reactToMessage(args.spaceId, args.messageId, {
-      emoji: args.emoji,
-      action: args.action,
-      actingMode: 'direct',
-    }),
-  }),
-
-  'spaces:deleteMessage': async (_event, args) => ({
-    message: await orgs.getClient(args.orgId).deleteMessage(args.spaceId, args.messageId, {
-      actingMode: 'direct',
-    }),
-  }),
-
-  'spaces:editMessage': async (_event, args) => ({
-    message: await orgs.getClient(args.orgId).editMessage(args.spaceId, args.messageId, {
-      body: args.body,
-      actingMode: 'direct',
-    }),
-  }),
-
-  'spaces:votePoll': async (_event, args) => ({
-    message: await orgs.getClient(args.orgId).votePoll(args.spaceId, args.messageId, {
-      answerId: args.answerId,
-      action: args.action,
-      actingMode: 'direct',
-    }),
-  }),
-
-  'spaces:endPoll': async (_event, args) => ({
-    message: await orgs.getClient(args.orgId).endPoll(args.spaceId, args.messageId, {
-      actingMode: 'direct',
-    }),
-  }),
-
-  'spaces:decideApproval': async (_event, args) => ({
-    approval: await orgs.getClient(args.orgId).decideApproval(args.spaceId, args.approvalId, {
-      decision: args.decision,
-      ...(args.note ? { note: args.note } : {}),
-      actingMode: 'direct',
-    }),
-  }),
-
   'spaces:invokeRowboat': async (_event, args) => invokeTopicAgent(args),
 
   'spaces:topicSession': async (_event, args) => ({
@@ -518,21 +227,6 @@ export const spacesIpcHandlers: SpacesHandlers = {
   'spaces:responseSession': async (_event, args) => resolveResponseSession(args),
 
   'spaces:stopRowboat': async (_event, args) => stopTopicAgent(args),
-
-  // Read state: the org owns the cursors (offsets, per member) — pass-throughs.
-  'spaces:markRead': async (_event, args) =>
-    orgs.getClient(args.orgId).markRead(args.spaceId, {
-      ...(args.threadRootId ? { threadRootId: args.threadRootId } : {}),
-      offset: args.offset,
-    }),
-
-  'spaces:followThread': async (_event, args) =>
-    orgs.getClient(args.orgId).followThread(args.spaceId, args.rootMessageId, args.following),
-
-  'spaces:getUnread': async (_event, args) => orgs.getClient(args.orgId).unread(),
-  'spaces:getActivity': async (_event, { orgId, ...query }) => orgs.getClient(orgId).activity(query),
-  'spaces:markActivitySeen': async (_event, args) => orgs.getClient(args.orgId).markActivitySeen(args.at),
-  'spaces:readAll': async (_event, args) => orgs.getClient(args.orgId).readAll(args.spaceId !== undefined ? { spaceId: args.spaceId } : {}),
 
   'spaces:schedule': async (_event, args) => ({
     id: scheduleItem({
@@ -549,28 +243,6 @@ export const spacesIpcHandlers: SpacesHandlers = {
 
   'spaces:cancelScheduled': async (_event, args) => {
     cancelScheduled(args.id);
-    return { success: true };
-  },
-
-  'spaces:subscribeSpace': async (_event, args) => {
-    subscriptions.subscribe(args.orgId, args.spaceId, (frame) => broadcastSpacesEvent({ orgId: args.orgId, frame }), args.afterOffset);
-    return { success: true };
-  },
-
-  'spaces:unsubscribeSpace': async (_event, args) => {
-    subscriptions.unsubscribe(args.orgId, args.spaceId);
-    return { success: true };
-  },
-
-  'spaces:presence': async (_event, args) => {
-    orgs.getLive(args.orgId).presence(args.spaceId, args.state, args.threadRootId);
-    return { success: true };
-  },
-
-  // Fire-and-forget like presence; incoming whiteboard frames ride the same
-  // per-space live subscription and reach the renderer on 'spaces:events'.
-  'spaces:whiteboard': async (_event, args) => {
-    orgs.getLive(args.orgId).whiteboard(args.spaceId, args.boardId, args.payload);
     return { success: true };
   },
 
