@@ -1,5 +1,4 @@
 import type { ActivityKind, ActivityPage } from '@rowboat/spaces-protocol';
-import { createHash } from 'node:crypto';
 import {
   routes,
   type AcceptInviteResult,
@@ -43,6 +42,12 @@ import type { z } from 'zod';
 // route from the protocol's api.ts, request/response validated with the
 // contract schemas — the same drift tripwire the stub server runs, from the
 // other side of the wire.
+//
+// One client for every app that speaks to Harbor: the desktop's core and the
+// phone, which kept its own copy until 2026-10-09, and a browser next (the
+// Spaces web-app plan). So it uses only what all of them have — fetch,
+// WebSocket, WebCrypto — and React Native, which lacks WebCrypto, passes its
+// own sha256Hex.
 
 export interface SpacesApiError {
   code: string;
@@ -105,6 +110,13 @@ export interface SpacesClientOptions {
   /** Static bearer (dev tokens, tests) or a provider (OAuth orgs — always fresh). */
   token: string | SpacesTokenProvider;
   fetchImpl?: typeof fetch;
+  /** Lowercase hex SHA-256 of a blob's bytes; WebCrypto unless given. */
+  sha256Hex?: (bytes: Uint8Array) => Promise<string>;
+}
+
+async function webCryptoSha256Hex(bytes: Uint8Array): Promise<string> {
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes as Uint8Array<ArrayBuffer>);
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 type NewMessage = z.infer<Routes['postMessage']['request']>;
@@ -129,11 +141,15 @@ export class SpacesClient {
   private readonly baseUrl: string;
   private readonly token: string | SpacesTokenProvider;
   private readonly fetchImpl: typeof fetch;
+  private readonly sha256Hex: (bytes: Uint8Array) => Promise<string>;
 
   constructor(options: SpacesClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, '');
     this.token = options.token;
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    // Wrapped, not stored bare: a browser's fetch called as this client's
+    // method throws "Illegal invocation".
+    this.fetchImpl = options.fetchImpl ?? ((input, init) => fetch(input, init));
+    this.sha256Hex = options.sha256Hex ?? webCryptoSha256Hex;
   }
 
   private async currentToken(opts?: { forceRefresh?: boolean }): Promise<string> {
@@ -181,6 +197,31 @@ export class SpacesClient {
     if (res.status === 401 && auth && typeof this.token !== 'string') {
       res = await send(await this.currentToken({ forceRefresh: true }));
     }
+    return this.parse(res, responseSchema);
+  }
+
+  /** A PUT whose body is the bytes themselves (a blob, a profile image): `request` without the JSON. */
+  private async putBytes<S extends z.ZodType>(
+    path: string,
+    responseSchema: S,
+    bytes: Uint8Array,
+    headers: Record<string, string>,
+  ): Promise<z.infer<S>> {
+    const send = async (token: string) =>
+      this.transport(`${this.baseUrl}${path}`, {
+        method: 'PUT',
+        headers: { authorization: `Bearer ${token}`, ...headers },
+        body: bytes as unknown as BodyInit,
+      });
+    let res = await send(await this.currentToken());
+    if (res.status === 401 && typeof this.token !== 'string') {
+      res = await send(await this.currentToken({ forceRefresh: true }));
+    }
+    return this.parse(res, responseSchema);
+  }
+
+  /** An error body becomes a SpacesRequestError; a success must match the route's schema. */
+  private async parse<S extends z.ZodType>(res: Response, responseSchema: S): Promise<z.infer<S>> {
     const json = (await res.json().catch(() => undefined)) as unknown;
     if (!res.ok) {
       const parsed = (json ?? {}) as Partial<SpacesApiError>;
@@ -219,6 +260,42 @@ export class SpacesClient {
   /** Who this token is on the org — the only client-side source of our memberId under OAuth. */
   async me(): Promise<{ member: Member }> {
     return this.request('GET', routes.me.path, routes.me.response);
+  }
+
+  // --- profile images (CONTRACT.md, 2026-10-02) ------------------------------
+
+  /** Your avatar on this org; the body is the image itself. */
+  async setAvatar(image: { bytes: Uint8Array; mime: string }): Promise<Member> {
+    return (await this.putBytes(routes.setAvatar.path, routes.setAvatar.response, image.bytes, { 'content-type': image.mime })).member;
+  }
+
+  async clearAvatar(): Promise<Member> {
+    return (await this.request('DELETE', routes.clearAvatar.path, routes.clearAvatar.response)).member;
+  }
+
+  /** The org's logo URL, or undefined when none is set. */
+  async getOrgLogo(): Promise<string | undefined> {
+    return (await this.request('GET', routes.getOrgLogo.path, routes.getOrgLogo.response)).logoUrl;
+  }
+
+  /** Admins only (the org refuses anyone else). */
+  async setOrgLogo(image: { bytes: Uint8Array; mime: string }): Promise<string> {
+    return (await this.putBytes(routes.setOrgLogo.path, routes.setOrgLogo.response, image.bytes, { 'content-type': image.mime })).logoUrl;
+  }
+
+  async clearOrgLogo(): Promise<void> {
+    await this.request('DELETE', routes.clearOrgLogo.path, routes.clearOrgLogo.response);
+  }
+
+  // --- push (CONTRACT.md, the push bullet) -----------------------------------
+
+  /** Register this device's push token and the member's level. */
+  async registerPush(input: { token: string; level: 'off' | 'mentions' | 'dms' | 'all' }): Promise<{ ok: true }> {
+    return this.request('POST', routes.registerPush.path, routes.registerPush.response, input);
+  }
+
+  async unregisterPush(token: string): Promise<{ ok: true }> {
+    return this.request('POST', routes.unregisterPush.path, routes.unregisterPush.response, { token });
   }
 
   // --- spaces & membership --------------------------------------------------
@@ -412,39 +489,9 @@ export class SpacesClient {
    * no-op with the same hash.
    */
   async uploadBlob(spaceId: string, bytes: Uint8Array, opts: { declaredMime?: string } = {}): Promise<BlobInfo> {
-    const hash = createHash('sha256').update(bytes).digest('hex');
-    const send = async (token: string) =>
-      this.transport(`${this.baseUrl}${this.space(spaceId, '/blobs')}`, {
-        method: 'PUT',
-        headers: {
-          authorization: `Bearer ${token}`,
-          'x-blob-sha256': hash,
-          ...(opts.declaredMime ? { 'content-type': opts.declaredMime } : {}),
-        },
-        body: bytes as unknown as BodyInit,
-      });
-    let res = await send(await this.currentToken());
-    if (res.status === 401 && typeof this.token !== 'string') {
-      res = await send(await this.currentToken({ forceRefresh: true }));
-    }
-    const json = (await res.json().catch(() => undefined)) as unknown;
-    if (!res.ok) {
-      const parsed = (json ?? {}) as Partial<SpacesApiError>;
-      throw new SpacesRequestError(res.status, {
-        code: parsed.code ?? 'internal',
-        message: parsed.message ?? `upload failed with ${res.status}`,
-        retryable: parsed.retryable ?? false,
-      });
-    }
-    const result = routes.uploadBlob.response.safeParse(json);
-    if (!result.success) {
-      throw new SpacesRequestError(res.status, {
-        code: 'internal',
-        message: `response failed contract validation: ${result.error.message}`,
-        retryable: false,
-      });
-    }
-    return result.data.blob;
+    const hash = await this.sha256Hex(bytes);
+    const headers = { 'x-blob-sha256': hash, ...(opts.declaredMime ? { 'content-type': opts.declaredMime } : {}) };
+    return (await this.putBytes(this.space(spaceId, '/blobs'), routes.uploadBlob.response, bytes, headers)).blob;
   }
 
   /**

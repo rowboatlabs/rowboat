@@ -375,7 +375,7 @@ module.exports = {
             fs.mkdirSync(packageDir, { recursive: true });
 
             // Build order matters! Dependencies must be built before dependents:
-            // shared → core → (renderer, preload, main)
+            // shared → spaces-client → core → (renderer, preload, main)
 
             // Build shared (TypeScript compilation) - no dependencies
             console.log('Building shared...');
@@ -384,7 +384,15 @@ module.exports = {
                 stdio: 'inherit'
             });
 
-            // Build core (TypeScript compilation) - depends on shared
+            // Build spaces-client (TypeScript compilation) - the Harbor client;
+            // core, server and main import it
+            console.log('Building spaces-client...');
+            execSync('pnpm run build', {
+                cwd: path.join(__dirname, '../../packages/spaces-client'),
+                stdio: 'inherit'
+            });
+
+            // Build core (TypeScript compilation) - depends on shared, spaces-client
             console.log('Building core...');
             execSync('pnpm run build', {
                 cwd: path.join(__dirname, '../../packages/core'),

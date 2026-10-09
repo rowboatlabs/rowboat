@@ -5,7 +5,7 @@ import { ActivityIndicator, Image, Platform, ScrollView, Text, useWindowDimensio
 import { ChatMarkdown } from '@/components/markdown';
 import { useSpacesAccount } from '@/lib/spaces/account';
 import { SpacesClient } from '@/lib/spaces/client';
-import { SpacesLive } from '@/lib/spaces/live';
+import { SpacesLive } from '@x/spaces-client';
 import { useColors } from '@/theme/colors';
 
 // One file by asset id, read-only (S3): markdown rendered like chat, other

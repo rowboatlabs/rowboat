@@ -4,7 +4,7 @@ import { ServerFrame, type PresenceState } from '@rowboat/spaces-protocol';
 // per-space subscriptions, offset-based resume. The socket owns reconnection;
 // each subscription remembers the last durable offset it saw, so a reconnect
 // resubscribes with afterOffset = lastSeen and the server replays exactly the
-// gap. Uses the runtime's native WebSocket (Electron main / Node ≥22).
+// gap. Uses the runtime's native WebSocket (Node ≥22, browsers, React Native).
 //
 // Liveness: a socket that only READS can stay half-open forever — after a
 // laptop sleeps or the network path changes, no close event ever arrives, the

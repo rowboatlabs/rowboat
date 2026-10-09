@@ -5,6 +5,8 @@
 const NETWORK = /network request failed|internet connection appears to be offline|offline|timed? ?out|aborted|failed to fetch|could not connect/i;
 
 export function isNetworkError(err: unknown): boolean {
+  // The shared client (2026-10-09) wraps a failed fetch as code 'unreachable'.
+  if ((err as { code?: unknown } | null)?.code === 'unreachable') return true;
   const message = err instanceof Error ? err.message : String(err ?? '');
   return NETWORK.test(message);
 }

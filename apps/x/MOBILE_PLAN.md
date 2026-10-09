@@ -23,9 +23,9 @@ reinvent.
 
 ## Architecture (settled in discussion)
 
-- **Phone = direct Harbor client.** Reuse/port `packages/core/src/spaces/`
-  (`client.ts` SpacesClient REST, `live.ts` SpacesLive WS) — both are
-  near-portable fetch/WS code.
+- **Phone = direct Harbor client.** It uses `@x/spaces-client`
+  (`SpacesClient` REST, `SpacesLive` WS), the package the desktop uses
+  too (2026-10-09; the phone carried a port of core's copy until then).
 - **Login = Supabase Auth** (the same project behind Rowboat accounts).
   Harbor is only a resource server; the OAuth dance is DCR + PKCE against
   the org's pinned issuer. Mobile uses a deep-link redirect

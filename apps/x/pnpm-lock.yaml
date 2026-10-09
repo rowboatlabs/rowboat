@@ -70,6 +70,9 @@ importers:
       '@x/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@x/spaces-client':
+        specifier: workspace:*
+        version: link:../../packages/spaces-client
       agent-slack:
         specifier: 0.9.3
         version: 0.9.3
@@ -164,6 +167,9 @@ importers:
       '@x/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@x/spaces-client':
+        specifier: workspace:*
+        version: link:../../packages/spaces-client
       expo:
         specifier: ~57.0.19
         version: 57.0.19(@babel/core@7.28.5)(@expo/dom-webview@57.0.1)(@expo/metro-runtime@57.0.12)(expo-router@57.0.18)(react-dom@19.2.3(react@19.2.3))(react-native-web@0.21.2(encoding@0.1.13)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-native-worklets@0.10.1(@babel/core@7.28.5)(@react-native/metro-config@0.86.3(@babel/core@7.28.5))(react-native@0.86.3(@babel/core@7.28.5)(@react-native/metro-config@0.86.3(@babel/core@7.28.5))(@types/react@19.2.7)(react@19.2.3))(react@19.2.3))(react-native@0.86.3(@babel/core@7.28.5)(@react-native/metro-config@0.86.3(@babel/core@7.28.5))(@types/react@19.2.7)(react@19.2.3))(react@19.2.3)(typescript@6.0.3)
@@ -599,6 +605,9 @@ importers:
       '@x/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@x/spaces-client':
+        specifier: workspace:*
+        version: link:../../packages/spaces-client
       hono:
         specifier: ^4.11.9
         version: 4.13.3
@@ -688,6 +697,9 @@ importers:
       '@x/shared':
         specifier: workspace:*
         version: link:../shared
+      '@x/spaces-client':
+        specifier: workspace:*
+        version: link:../spaces-client
       ai:
         specifier: ^7.0.22
         version: 7.0.22(zod@4.2.1)
@@ -813,6 +825,25 @@ importers:
         specifier: ^4.2.1
         version: 4.2.1
     devDependencies:
+      '@types/node':
+        specifier: ^25.0.3
+        version: 25.0.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.7(@opentelemetry/api@1.9.0)(@types/node@25.0.3)(jsdom@29.1.1)(vite@7.3.0(@types/node@25.0.3)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.46.0)(yaml@2.8.2))
+
+  packages/spaces-client:
+    dependencies:
+      '@rowboat/spaces-protocol':
+        specifier: link:../../../harbor/packages/protocol
+        version: link:../../../harbor/packages/protocol
+      zod:
+        specifier: ^4.2.1
+        version: 4.2.1
+    devDependencies:
+      '@rowboat/harbor':
+        specifier: link:../../../harbor/packages/server
+        version: link:../../../harbor/packages/server
       '@types/node':
         specifier: ^25.0.3
         version: 25.0.3

@@ -19,6 +19,7 @@
         "@x/core": "workspace:*",
         "@x/server": "workspace:*",
         "@x/shared": "workspace:*",
+        "@x/spaces-client": "workspace:*",
         "agent-slack": "0.9.3",
         "chokidar": "^4.0.3",
         "electron-chrome-extensions": "^4.9.0",

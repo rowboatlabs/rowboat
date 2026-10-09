@@ -10,7 +10,7 @@ import { onSpaceAgentActivity, startSpaceAgentActivity } from '@x/core/dist/spac
 import { startSpaceNotifications } from '@x/core/dist/spaces/notify.js';
 import { resolveResponseSession, startSpaceResponseIndex } from '@x/core/dist/spaces/response-index.js';
 import { fetchLinkPreview } from '@x/core/dist/spaces/link-preview.js';
-import { SpacesClient } from '@x/core/dist/spaces/client.js';
+import { SpacesClient } from '@x/spaces-client';
 import { openExternalUrl } from '@x/core/dist/auth/url-opener.js';
 
 // Spaces handlers, server-side (Phase 9). Verbatim lifts of the Electron

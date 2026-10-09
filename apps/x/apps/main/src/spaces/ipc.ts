@@ -12,7 +12,7 @@ import { invokeTopicAgent, stopTopicAgent, topicSessionId } from '@x/core/dist/s
 import { onSpaceAgentActivity, startSpaceAgentActivity } from '@x/core/dist/spaces/agent-activity.js';
 import { startSpaceNotifications } from '@x/core/dist/spaces/notify.js';
 import { resolveResponseSession, startSpaceResponseIndex } from '@x/core/dist/spaces/response-index.js';
-import { SpacesClient } from '@x/core/dist/spaces/client.js';
+import { SpacesClient } from '@x/spaces-client';
 import { createAgent37Instance, listAgent37Instances } from '@x/core/dist/spaces/agent37.js';
 import { fetchLinkPreview } from './link-preview.js';
 
