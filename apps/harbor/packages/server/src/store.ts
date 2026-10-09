@@ -1,6 +1,7 @@
 import type { ActivityKind } from '@rowboat/spaces-protocol';
 import type {
   AgentCredential,
+  AgentHook,
   AgentKey,
   Attribution,
   ConnectorCapabilities,
@@ -129,6 +130,12 @@ export interface StoredAgentKey extends AgentKey {
 export interface StoredAgentCredential extends AgentCredential {
   agentId: string;
   sealed: string;
+}
+
+/** An alert hook as stored (spec §8 Alerts, 2026-10-03): what its owner sees, plus the hash of its secret. */
+export interface StoredAgentHook extends AgentHook {
+  agentId: string;
+  tokenHash: string;
 }
 
 export interface StoredEvent {
@@ -478,6 +485,11 @@ export interface Store {
   putAgentCredential(credential: StoredAgentCredential): Promise<void>;
   /** Mark it rejected by its platform; true only the first time, until it is replaced. */
   rejectAgentCredential(agentId: string, at: string, reason: string): Promise<boolean>;
+  getAgentHook(agentId: string): Promise<StoredAgentHook | undefined>;
+  listAgentHooks(agentIds: string[]): Promise<StoredAgentHook[]>;
+  /** Set or replace an agent's hook; a replacement's secret is the only one that works. */
+  putAgentHook(hook: StoredAgentHook): Promise<void>;
+  deleteAgentHook(agentId: string): Promise<void>;
   /** A connector's own record for one thread (its shape is the connector's). */
   getConnectionThread(agentId: string, spaceId: string, threadRootId: string): Promise<unknown | undefined>;
   putConnectionThread(agentId: string, spaceId: string, threadRootId: string, data: unknown, at: string): Promise<void>;

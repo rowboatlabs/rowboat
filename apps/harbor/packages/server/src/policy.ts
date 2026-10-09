@@ -135,6 +135,18 @@ export function canCreateAgentKey(actor: Member, agent: Member): Decision {
   return { code: 'forbidden', message: 'only the agent’s owner can create its keys' };
 }
 
+/** Pointing an agent's alerts at a space (spec §8 Alerts, 2026-10-03): the owner, as with its keys. */
+export function canSetAgentHook(actor: Member, agent: Member): Decision {
+  if (agent.kind === 'agent' && agent.ownerId !== undefined && agent.ownerId === actor.id) return null;
+  return { code: 'forbidden', message: 'only the agent’s owner can set where its alerts go' };
+}
+
+/** Turning its alerts off: the owner, or any admin, like revoking a key. */
+export function canClearAgentHook(actor: Member, agent: Member): Decision {
+  if (agent.kind === 'agent' && (actor.role === 'admin' || (agent.ownerId !== undefined && agent.ownerId === actor.id))) return null;
+  return { code: 'forbidden', message: 'only the agent’s owner or an admin can turn its alerts off' };
+}
+
 /** Revoking: the owner, or any admin — the off switch for an agent that misbehaves. */
 export function canRevokeAgentKey(actor: Member, agent: Member): Decision {
   if (agent.kind === 'agent' && (actor.role === 'admin' || (agent.ownerId !== undefined && agent.ownerId === actor.id))) return null;

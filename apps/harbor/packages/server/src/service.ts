@@ -30,6 +30,7 @@ import type {
   Member,
   AgentKey,
   AgentCredential,
+  AgentHook,
   AgentKeySecret,
   AgentListing,
   ConnectorCapabilities,
@@ -180,6 +181,19 @@ export class HarborService {
   }
   setAgentCredential(ctx: ActorCtx, agentId: string, secret: string): Promise<AgentCredential> {
     return this.agents.setCredential(ctx, agentId, secret);
+  }
+  setAgentHook(ctx: ActorCtx, agentId: string, spaceId: string): Promise<{ hook: AgentHook; token: string }> {
+    return this.agents.setHook(ctx, agentId, spaceId);
+  }
+  clearAgentHook(ctx: ActorCtx, agentId: string): Promise<void> {
+    return this.agents.clearHook(ctx, agentId);
+  }
+  /** An alert at an agent's address (spec §8 Alerts, 2026-10-03), posted by the agent in its space; false when it has nothing to say. */
+  async receiveAgentHook(agentId: string, token: string, payload: unknown): Promise<boolean> {
+    const alert = await this.agents.hookAlert(agentId, token, payload);
+    if (!alert) return false;
+    await this.feed.postMessage({ memberId: agentId, agent: true }, alert.spaceId, { body: alert.body, actingMode: 'direct' });
+    return true;
   }
   createAgentKey(ctx: ActorCtx, agentId: string): Promise<AgentKeySecret> {
     return this.agents.createKey(ctx, agentId);

@@ -88,7 +88,7 @@ function CodeBlock({ text, caption, label, secret }: { text: string; caption: st
 }
 
 /** One value to paste (a key, an address), with Copy beside it and what it is before it. */
-function CopyField({ value }: { value: SetupValue }) {
+export function CopyField({ value }: { value: SetupValue }) {
     return (
         <div className="flex min-w-0 items-center gap-2 rounded-lg border border-border bg-muted/50 py-1 pr-1 pl-3">
             {value.label && <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{value.label}</span>}

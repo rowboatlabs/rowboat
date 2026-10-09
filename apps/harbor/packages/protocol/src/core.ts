@@ -83,9 +83,12 @@ export const AGENT_PAIRS: ReadonlyArray<{ kind: string; connection: string }> = 
   ...REPLICAS_CODING_AGENTS.map((kind) => ({ kind, connection: 'replicas' })),
   ...AGENT37_AGENTS.map((kind) => ({ kind, connection: 'agent37' })),
   ...CONDUCTOR_CODING_AGENTS.map((kind) => ({ kind, connection: 'conductor' })),
+  // Integrations (2026-10-03): the service's own API, called on a command, its kind and connection one name.
+  { kind: 'posthog', connection: 'posthog' },
+  { kind: 'cal', connection: 'cal' },
 ];
 /** Connections whose connector Harbor runs, calling the platform with a credential it holds (spec §8 Connectors). */
-export const HARBOR_RUN_CONNECTIONS: readonly string[] = ['replicas', 'agent37', 'conductor'];
+export const HARBOR_RUN_CONNECTIONS: readonly string[] = ['replicas', 'agent37', 'conductor', 'posthog', 'cal'];
 /**
  * Connections whose agent is one instance on the platform (2026-10-05): the
  * agent is added with it, and Harbor checks the instance runs the agent's kind.
@@ -140,8 +143,20 @@ export const AgentCredential = z.object({
 });
 export type AgentCredential = z.infer<typeof AgentCredential>;
 
-/** An agent with its keys, as the Agents screen lists them, and its platform credential when Harbor runs its connector. */
-export const AgentListing = z.object({ agent: Member, keys: z.array(AgentKey), credential: AgentCredential.optional() });
+/**
+ * Where a platform agent's alerts land (spec §8 Alerts, 2026-10-03): the
+ * service posts to a secret address, and the agent posts what it says into
+ * this space. The address is shown once, when it is set; the org keeps its hash.
+ */
+export const AgentHook = z.object({
+  spaceId: SpaceId,
+  setBy: MemberId,
+  setAt: z.iso.datetime(),
+});
+export type AgentHook = z.infer<typeof AgentHook>;
+
+/** An agent with its keys, as the Agents screen lists them, and its platform credential and alert hook when Harbor runs its connector. */
+export const AgentListing = z.object({ agent: Member, keys: z.array(AgentKey), credential: AgentCredential.optional(), hook: AgentHook.optional() });
 export type AgentListing = z.infer<typeof AgentListing>;
 
 /**

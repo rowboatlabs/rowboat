@@ -40,6 +40,11 @@ export class HostedConnectors {
     return credential;
   }
 
+  /** The agent's platform's words for an alert, or undefined when it says nothing (spec §8 Alerts). */
+  alert(connection: string, payload: unknown): string | undefined {
+    return PLATFORMS[connection]?.alert?.(payload);
+  }
+
   async startAll(): Promise<void> {
     for (const agent of await this.deps.store.listAgentsByConnection(HOSTED_CONNECTIONS)) this.ensure(agent);
   }

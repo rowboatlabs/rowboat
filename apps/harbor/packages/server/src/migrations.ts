@@ -942,6 +942,24 @@ export const MIGRATIONS: Migration[] = [
           and m.agent_connection = 'agent37' and d.data ? 'reasoning'`,
     ],
   },
+  {
+    // A platform agent's alert hook (spec §8 Alerts, 2026-10-03): the hash of
+    // the secret in its address, like agent_keys, and the space its alerts
+    // land in. One per agent; setting it again replaces the secret.
+    id: '036-agent-hooks',
+    statements: [
+      `create table agent_hooks (
+        org_id text not null,
+        agent_id text not null,
+        token_hash text not null,
+        space_id text not null,
+        set_by text not null,
+        set_at text not null,
+        primary key (org_id, agent_id),
+        foreign key (org_id, agent_id) references members(org_id, id)
+      )`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

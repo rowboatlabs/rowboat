@@ -126,7 +126,7 @@ if (process.env.HARBOR_MODE === 'deployment') {
     `  blobs      ${process.env.BLOBS_S3_BUCKET ? `s3 bucket ${process.env.BLOBS_S3_BUCKET}` : process.env.BLOBS_DIR ? `disk ${process.env.BLOBS_DIR}` : 'UNCONFIGURED — uploads will be refused (set BLOBS_S3_BUCKET or BLOBS_DIR)'}`,
   );
   console.log(`  internal   ${process.env.HARBOR_INTERNAL_KEY ? 'GET /internal/stats (operator key set)' : 'off (set HARBOR_INTERNAL_KEY)'}`);
-  console.log(`  platforms  ${process.env.HARBOR_INTEGRATION_KEY ? 'Replicas, Agent37 and Conductor agents can be added (sealing key set)' : 'off — Replicas, Agent37 and Conductor agents need HARBOR_INTEGRATION_KEY'}`);
+  console.log(`  platforms  ${process.env.HARBOR_INTEGRATION_KEY ? 'Replicas, Agent37, Conductor, PostHog and Cal.com agents can be added (sealing key set)' : 'off — Replicas, Agent37, Conductor, PostHog and Cal.com agents need HARBOR_INTEGRATION_KEY'}`);
   console.log(`  listening  :${deployment.port}`);
   process.on('SIGTERM', () => void deployment.close().then(() => process.exit(0)));
 } else {

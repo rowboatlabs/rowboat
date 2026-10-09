@@ -32,6 +32,7 @@ import {
   type MessageSearchRow,
   type Store,
   type StoredAgentCredential,
+  type StoredAgentHook,
   type StoredAgentKey,
   type StoredEvent,
   type StoredInvite,
@@ -1770,6 +1771,28 @@ export class PgStore implements Store {
       [this.orgId, agentIds],
     );
     return rows.map(rowToAgentCredential);
+  }
+  async getAgentHook(agentId: string): Promise<StoredAgentHook | undefined> {
+    return (await this.listAgentHooks([agentId]))[0];
+  }
+  async listAgentHooks(agentIds: string[]): Promise<StoredAgentHook[]> {
+    if (agentIds.length === 0) return [];
+    const rows = await this.sql.query<{ agent_id: string; token_hash: string; space_id: string; set_by: string; set_at: string }>(
+      'select agent_id, token_hash, space_id, set_by, set_at from agent_hooks where org_id = $1 and agent_id = any($2::text[])',
+      [this.orgId, agentIds],
+    );
+    return rows.map((r) => ({ agentId: r.agent_id, tokenHash: r.token_hash, spaceId: r.space_id, setBy: r.set_by, setAt: r.set_at }));
+  }
+  async putAgentHook(hook: StoredAgentHook): Promise<void> {
+    await this.sql.query(
+      `insert into agent_hooks (org_id, agent_id, token_hash, space_id, set_by, set_at) values ($1, $2, $3, $4, $5, $6)
+       on conflict (org_id, agent_id) do update set token_hash = excluded.token_hash, space_id = excluded.space_id,
+         set_by = excluded.set_by, set_at = excluded.set_at`,
+      [this.orgId, hook.agentId, hook.tokenHash, hook.spaceId, hook.setBy, hook.setAt],
+    );
+  }
+  async deleteAgentHook(agentId: string): Promise<void> {
+    await this.sql.query('delete from agent_hooks where org_id = $1 and agent_id = $2', [this.orgId, agentId]);
   }
   async putAgentCredential(credential: StoredAgentCredential): Promise<void> {
     await this.sql.query(

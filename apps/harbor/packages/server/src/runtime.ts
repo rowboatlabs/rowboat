@@ -69,6 +69,7 @@ export async function buildOrgRuntime(input: OrgRuntimeInput): Promise<OrgRuntim
     verify: (connection, secret, target) => connectors.verify(connection, secret, target),
     save: (agentId, secret, setBy) => connectors.save(agentId, secret, setBy),
     added: (agent) => connectors.ensure(agent),
+    alert: (connection, payload) => connectors.alert(connection, payload),
   });
   // Jev (spec §8 Jev, 2026-10-07): every org has it once the deployment has its key.
   if (jevApiKey()) await service.ensureJev();

@@ -13,6 +13,8 @@ import {
   canAddAgent,
   canCreateAgentKey,
   canRevokeAgentKey,
+  canSetAgentHook,
+  canClearAgentHook,
   canReadSpace,
   canJoinSpace,
   canBind,
@@ -126,6 +128,10 @@ describe('policy', () => {
     expect(canRevokeAgentKey(owner, hermes)).toBeNull();
     expect(canRevokeAgentKey(admin, hermes)).toBeNull();
     expect(canRevokeAgentKey(other, hermes)).toMatchObject({ code: 'forbidden' });
+    expect(canSetAgentHook(owner, hermes)).toBeNull();
+    expect(canSetAgentHook(admin, hermes)).toMatchObject({ code: 'forbidden' });
+    expect(canClearAgentHook(admin, hermes)).toBeNull();
+    expect(canClearAgentHook(other, hermes)).toMatchObject({ code: 'forbidden' });
     expect(agentsManagedBy(admin)).toBe('all');
     expect(agentsManagedBy(owner)).toBe('owned');
   });

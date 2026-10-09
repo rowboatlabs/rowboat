@@ -3949,6 +3949,15 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), agentId: z.string(), secret: z.string() }),
     res: z.object({ credential: z.custom<SpacesTypes.AgentCredential>() }),
   },
+  // A platform agent's alerts (2026-10-03): the address crosses IPC once, on its way to the screen.
+  'spaces:setAgentHook': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), spaceId: z.string() }),
+    res: z.object({ hook: z.custom<SpacesTypes.AgentHook>(), url: z.string() }),
+  },
+  'spaces:clearAgentHook': {
+    req: z.object({ orgId: z.string(), agentId: z.string() }),
+    res: z.object({}),
+  },
   'spaces:createAgentKey': {
     req: z.object({ orgId: z.string(), agentId: z.string() }),
     res: z.object({ key: z.custom<SpacesTypes.AgentKeySecret>() }),

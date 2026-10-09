@@ -12,7 +12,7 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { ActingMode, AgentCredential, AgentKey, AgentKeySecret, AgentListing, Attribution, Member, Membership, Message, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic } from './core.js';
+import { ActingMode, AgentCredential, AgentHook, AgentKey, AgentKeySecret, AgentListing, Attribution, Member, Membership, Message, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic } from './core.js';
 import { AssetId, AssetPath, BlobHash, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 import {
   AcceptInvite,
@@ -471,6 +471,38 @@ export const routes = {
     params: z.object({ agentId: MemberId }),
     request: z.object({ defaults: InvocationOptionValues }),
     response: z.object({ defaults: InvocationOptionValues }),
+  },
+  /**
+   * Point a platform agent's alerts at a space (spec §8 Alerts, 2026-10-03):
+   * its owner only, a space the agent is a member of. Mints a new secret
+   * address every time, shown this once (the old one stops working); pasted
+   * into the service's webhook settings. Render face only, like keys.
+   */
+  setAgentHook: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/hook',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ spaceId: SpaceId }),
+    response: z.object({ hook: AgentHook, url: z.string().url() }),
+  },
+  /** Turn a platform agent's alerts off: its address stops working. Owner only. Idempotent. */
+  clearAgentHook: {
+    method: 'DELETE',
+    path: '/v1/agents/:agentId/hook',
+    params: z.object({ agentId: MemberId }),
+    response: z.object({}),
+  },
+  /**
+   * The service's webhook delivery (spec §8 Alerts, 2026-10-03). Pre-auth:
+   * the secret in the address is the credential. Any JSON body; the agent's
+   * connector says what it means, and `posted` is false for an event it
+   * leaves unsaid.
+   */
+  receiveAgentHook: {
+    method: 'POST',
+    path: '/v1/hooks/:agentId/:token', // pre-auth allowed
+    params: z.object({ agentId: MemberId, token: z.string().min(1).max(128) }),
+    response: z.object({ posted: z.boolean() }),
   },
   /** A space's invocations, newest first (a thread's, with threadRootId): the working indicators and refused lines. */
   listInvocations: {

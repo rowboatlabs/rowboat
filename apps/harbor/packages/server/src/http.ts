@@ -17,6 +17,8 @@ type Env = { Variables: { memberId: string; agent?: boolean; identity?: AuthIden
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 /** Uploads only (raw-bytes route). 100MB across the board — dogfood decision 2026-08-24. */
 const DEFAULT_MAX_BLOB_BYTES = 100 * 1024 * 1024;
+/** A service's alert is a small JSON event (spec §8 Alerts, 2026-10-03). */
+const MAX_HOOK_BYTES = 256 * 1024;
 
 function parseWith<S extends z.ZodType>(schema: S, value: unknown): z.infer<S> {
   const r = schema.safeParse(value);
@@ -94,6 +96,8 @@ export function buildHttpApp(deps: {
   // the handler runs the bind ceremony instead.
   app.use('/v1/*', async (c, next) => {
     if (c.req.path === routes.resolveInvite.path || c.req.path === '/v1/health') return next();
+    // A service's alert carries no bearer: the secret in its address is the credential (spec §8 Alerts, 2026-10-03).
+    if (c.req.path.startsWith('/v1/hooks/')) return next();
     const credentials = { authorization: c.req.header('authorization'), queryToken: new URL(c.req.url).searchParams.get('token') };
     if (c.req.path === routes.acceptInvite.path) {
       const { identity, member } = await authenticateRequest(auth, credentials, { allowUnmapped: true });
@@ -315,6 +319,33 @@ export function buildHttpApp(deps: {
     const { agentId } = parseWith(routes.setAgentOptionDefaults.params, c.req.param());
     const input = await body(c, routes.setAgentOptionDefaults.request);
     return reply(c, routes.setAgentOptionDefaults.response, { defaults: await service.setAgentOptionDefaults(actor(c), agentId, input.defaults) });
+  });
+
+  app.put(routes.setAgentHook.path, async (c) => {
+    const { agentId } = parseWith(routes.setAgentHook.params, c.req.param());
+    const input = await body(c, routes.setAgentHook.request);
+    const { hook, token } = await service.setAgentHook(actor(c), agentId, input.spaceId);
+    return reply(c, routes.setAgentHook.response, { hook, url: `${publicOrigin(c)}/v1/hooks/${agentId}/${token}` });
+  });
+
+  app.delete(routes.clearAgentHook.path, async (c) => {
+    const { agentId } = parseWith(routes.clearAgentHook.params, c.req.param());
+    await service.clearAgentHook(actor(c), agentId);
+    return reply(c, routes.clearAgentHook.response, {});
+  });
+
+  app.post(routes.receiveAgentHook.path, async (c) => {
+    const { agentId, token } = parseWith(routes.receiveAgentHook.params, c.req.param());
+    if (Number(c.req.header('content-length') ?? '0') > MAX_HOOK_BYTES) throw new HarborError('payload_too_large', `alerts are limited to ${MAX_HOOK_BYTES} bytes`);
+    const text = await c.req.text();
+    if (text.length > MAX_HOOK_BYTES) throw new HarborError('payload_too_large', `alerts are limited to ${MAX_HOOK_BYTES} bytes`);
+    let payload: unknown;
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      throw new HarborError('invalid_request', 'an alert is a JSON body');
+    }
+    return reply(c, routes.receiveAgentHook.response, { posted: await service.receiveAgentHook(agentId, token, payload) });
   });
 
   app.post(routes.createAgentKey.path, async (c) => {

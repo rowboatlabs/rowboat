@@ -44,6 +44,8 @@ type SpacesHandlers = {
   'spaces:listAgents': InvokeHandler<'spaces:listAgents'>;
   'spaces:addAgent': InvokeHandler<'spaces:addAgent'>;
   'spaces:setAgentCredential': InvokeHandler<'spaces:setAgentCredential'>;
+  'spaces:setAgentHook': InvokeHandler<'spaces:setAgentHook'>;
+  'spaces:clearAgentHook': InvokeHandler<'spaces:clearAgentHook'>;
   'spaces:agent37Instances': InvokeHandler<'spaces:agent37Instances'>;
   'spaces:agent37CreateInstance': InvokeHandler<'spaces:agent37CreateInstance'>;
   'spaces:createAgentKey': InvokeHandler<'spaces:createAgentKey'>;
@@ -249,6 +251,11 @@ export const spacesIpcHandlers: SpacesHandlers = {
   'spaces:listAgents': async (_event, args) => ({ agents: await orgs.getClient(args.orgId).listAgents() }),
   'spaces:addAgent': async (_event, { orgId, ...input }) => orgs.getClient(orgId).addAgent(input),
   'spaces:setAgentCredential': async (_event, args) => ({ credential: await orgs.getClient(args.orgId).setAgentCredential(args.agentId, args.secret) }),
+  'spaces:setAgentHook': async (_event, args) => orgs.getClient(args.orgId).setAgentHook(args.agentId, args.spaceId),
+  'spaces:clearAgentHook': async (_event, args) => {
+    await orgs.getClient(args.orgId).clearAgentHook(args.agentId);
+    return {};
+  },
   'spaces:agent37Instances': async (_event, { key }) => ({ instances: await listAgent37Instances(key) }),
   'spaces:agent37CreateInstance': async (_event, { key, ...input }) => ({ instance: await createAgent37Instance(key, input) }),
   'spaces:createAgentKey': async (_event, args) => ({ key: await orgs.getClient(args.orgId).createAgentKey(args.agentId) }),

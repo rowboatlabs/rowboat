@@ -55,7 +55,7 @@ export function ServerSwitcher({ org, onOpenSpace, onMenuOpenChange }: {
                     setMenuOpen(false)
                     setAgentsOpen(true)
                     onMenuOpenChange?.(true)
-                }}><Bot className="size-4" /> Agents</DropdownMenuItem>
+                }}><Bot className="size-4" /> Agents and bots</DropdownMenuItem>
                 {isGroupChat(org) && <DropdownMenuItem onSelect={(event) => {
                     event.preventDefault()
                     setMenuOpen(false)

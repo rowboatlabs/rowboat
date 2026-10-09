@@ -3,8 +3,10 @@ import type { ActorCtx } from '../core/kernel.js';
 import type { CredentialTarget } from '../core/agents.js';
 import type { HarborService } from '../service.js';
 import { agent37Platform } from './agent37/index.js';
+import { calPlatform } from './cal/index.js';
 import { conductorPlatform } from './conductor/index.js';
 import { jevPlatform } from './jev/index.js';
+import { posthogPlatform } from './posthog/index.js';
 import { replicasPlatform } from './replicas/index.js';
 
 // Connectors Harbor runs (spec §8 Connectors, 2026-09-30): for an agent whose
@@ -59,6 +61,12 @@ export interface ConnectorPlatform {
   verify(secret: string, target: CredentialTarget): Promise<void>;
   /** Run the connector for one agent until stopped. */
   start(env: ConnectorEnv): RunningConnector;
+  /**
+   * What the agent says about an alert its platform sent to its hook (spec §8
+   * Alerts, 2026-10-03): the message to post, or undefined for an event it
+   * leaves unsaid. Absent = the platform sends none.
+   */
+  alert?(payload: unknown): string | undefined;
 }
 
 /** One entry per connection in HARBOR_RUN_CONNECTIONS, and Jev's, the one built in (2026-10-07). */
@@ -66,6 +74,8 @@ export const PLATFORMS: Record<string, ConnectorPlatform> = {
   replicas: replicasPlatform(),
   agent37: agent37Platform(),
   conductor: conductorPlatform(),
+  posthog: posthogPlatform(),
+  cal: calPlatform(),
   [BUILT_IN_CONNECTION]: jevPlatform(),
 };
 
