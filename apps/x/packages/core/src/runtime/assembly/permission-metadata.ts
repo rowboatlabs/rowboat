@@ -124,16 +124,25 @@ export async function getToolPermissionMetadata(
     }
 
     const resolvedTargets = await Promise.all(targets.paths.map(p => resolveFilePathForPermission(p)));
-    const outsideWorkspacePaths = resolvedTargets
-        .filter(target => !target.isInsideWorkspace)
+    // The skills folder sits inside the workspace but is guarded like the
+    // outside (2026-10-05): skill-manage is the agent's write path there and
+    // enforces who owns which skill, so the generic file tools must not be a
+    // silent way around it. Reads stay free.
+    const isMutation = targets.operation === 'write' || targets.operation === 'delete';
+    const skillsRoot = isMutation
+        ? (await resolveFilePathForPermission(path.join(WorkDir, 'skills'))).canonicalPath
+        : null;
+    const guardedPaths = resolvedTargets
+        .filter(target => !target.isInsideWorkspace
+            || (skillsRoot !== null && isPathInside(skillsRoot, target.canonicalPath)))
         .map(target => target.canonicalPath);
-    if (!outsideWorkspacePaths.length) {
+    if (!guardedPaths.length) {
         return null;
     }
 
     const persistentGrants = getFileAccessAllowList();
     const allGrants = [...persistentGrants, ...sessionAllowedFileAccess];
-    const uncovered = outsideWorkspacePaths.filter(resolvedPath =>
+    const uncovered = guardedPaths.filter(resolvedPath =>
         !allGrants.some(grant => fileGrantCoversPath(grant, targets.operation, resolvedPath))
     );
     if (!uncovered.length) {

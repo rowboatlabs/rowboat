@@ -262,6 +262,7 @@ const HISTORICAL_KEY_ORDER = [
     "cancel_scheduled",
     "whiteboard-read",
     "whiteboard-draw",
+    "skill-manage",
     "spawn-agent",
 ];
 
