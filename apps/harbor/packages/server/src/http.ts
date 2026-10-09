@@ -3,6 +3,7 @@ import { routes } from '@rowboat/spaces-protocol';
 import type { z } from 'zod';
 import { authenticateRequest, protectedResourceMetadata, wwwAuthenticate, type AuthIdentity, type OrgAuth } from './auth.js';
 import { consentPageHtml } from './consent.js';
+import { webCors } from './cors.js';
 import { MAX_PROFILE_IMAGE_BYTES } from './core/images.js';
 import { HarborError } from './errors.js';
 import { publicOrigin } from './origin.js';
@@ -58,6 +59,8 @@ export function buildHttpApp(deps: {
   consent?: { issuer: string; publishableKey: string };
   /** Upload cap for the raw-bytes blob route (default 100MB). */
   maxBlobBytes?: number;
+  /** Browser origins allowed to call this org cross-origin (cors.ts). */
+  webOrigins?: readonly string[];
 }): Hono<Env> {
   const { service, auth, consent } = deps;
   const maxBlobBytes = deps.maxBlobBytes ?? DEFAULT_MAX_BLOB_BYTES;
@@ -71,6 +74,8 @@ export function buildHttpApp(deps: {
     if (e.code === 'unauthorized' && auth.metadata()) c.header('WWW-Authenticate', wwwAuthenticate(publicOrigin(c)));
     return c.json(e.toBody(), e.status as 400);
   });
+
+  app.use('*', webCors(deps.webOrigins ?? []));
 
   // RFC 9728 protected-resource metadata: the org names its authorization
   // server here (the org is only ever a resource server — spec §4). 404 under

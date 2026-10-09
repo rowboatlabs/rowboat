@@ -23,7 +23,7 @@ Two pnpm workspace packages under `packages/`:
 | `policy.ts` | who may do what — pure decisions over facts the core loads; `enforce` throws |
 | `store.ts`, `pg-store.ts` | the data boundary and its one driver; `PgStore.transaction(fn)` for an org-level all-or-nothing write the caller shares (`directory.ts`); `sql.ts` (node-postgres), `sql-pglite.ts` (Postgres in-process) |
 | `migrations.ts` | the append-only schema ladder |
-| `http.ts`, `ws.ts`, `mcp.ts` | the three faces; `origin.ts` (the public origin behind the proxy) |
+| `http.ts`, `ws.ts`, `mcp.ts` | the three faces; `origin.ts` (the public origin behind the proxy); `cors.ts` (the browser origins the render face and the apex answer) |
 | `auth.ts`, `auth-oidc.ts` | the drivers, `bindAuth` / `OrgAuth` (which resolves agent keys ahead of any driver), `authenticateRequest`, the RFC 9728 helpers; `consent.ts` (the login page); `agent-keys.ts` (minting and hashing an agent key) |
 | `runtime.ts` | `buildOrgRuntime` — the one assembly of an org |
 | `server.ts`, `main.ts` | `startHarbor` (one org) and the dev seed; the binary (dev, or `HARBOR_MODE=deployment`) |
@@ -115,7 +115,7 @@ Verified against Supabase Auth (2026-08-18/19), the flagship AS: tokens on a sha
 
 ## Ship
 
-- `HARBOR_MODE=deployment` with `DATABASE_URL`, `APEX_DOMAIN`, `AUTH_ISSUER`; optional `AUTH_PUBLISHABLE_KEY`, `BLOBS_S3_*` or `BLOBS_DIR`, `HARBOR_MAX_BLOB_BYTES`, `DATABASE_POOL_MAX`, `HARBOR_INTERNAL_KEY`, `HARBOR_INTEGRATION_KEY` (sealing platform agents' keys; without it Replicas, Agent37, Conductor, PostHog and Cal.com agents can't be added), `HARBOR_JEV_OPENROUTER_KEY` (Rowboat's OpenRouter key, which Jev's calls to TypeSafe go through; without it orgs get no Jev, and an existing Jev stays idle). The `Dockerfile` header lists them. Migrations self-apply at boot under an advisory lock; orgs are created on the apex face.
+- `HARBOR_MODE=deployment` with `DATABASE_URL`, `APEX_DOMAIN`, `AUTH_ISSUER`; optional `AUTH_PUBLISHABLE_KEY`, `HARBOR_WEB_ORIGINS` (the browser origins allowed cross-origin; dev defaults to the web app's `http://localhost:5174`), `BLOBS_S3_*` or `BLOBS_DIR`, `HARBOR_MAX_BLOB_BYTES`, `DATABASE_POOL_MAX`, `HARBOR_INTERNAL_KEY`, `HARBOR_INTEGRATION_KEY` (sealing platform agents' keys; without it Replicas, Agent37, Conductor, PostHog and Cal.com agents can't be added), `HARBOR_JEV_OPENROUTER_KEY` (Rowboat's OpenRouter key, which Jev's calls to TypeSafe go through; without it orgs get no Jev, and an existing Jev stays idle). The `Dockerfile` header lists them. Migrations self-apply at boot under an advisory lock; orgs are created on the apex face.
 - **Server before app.** A breaking wire change deploys the server first and the app build the same day; an additive change needs no coupling. Say which in the PR.
 - **One instance.** Autoscaling stays off until everything in [SPEC.md §4 *Running more than one instance*](SPEC.md#running-more-than-one-instance--deferred-added-2026-09-30) is addressed: the hub's shared bus, and the lease for connectors Harbor runs. `GET /internal/stats` with the operator key shows what the instance carries — connections, subscriptions, frames per minute by kind, deliveries — the numbers that say when one stops being enough; the same line lands in the log once a minute whether or not the key is set. When a second instance comes, the counters feed an OpenTelemetry push and the hub gets its bus in the same change.
 - The S3 blob driver's conformance suite runs when `HARBOR_TEST_S3_BUCKET` is set; the disk driver's always.

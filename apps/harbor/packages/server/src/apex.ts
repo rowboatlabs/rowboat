@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { protectedResourceMetadata, wwwAuthenticate, type AuthDriver } from './auth.js';
 import { consentPageHtml } from './consent.js';
+import { webCors } from './cors.js';
 import type { OrgConfig, OrgDirectory } from './directory.js';
 import { HarborError } from './errors.js';
 import { publicOrigin } from './origin.js';
@@ -47,6 +48,8 @@ export interface ApexDeps {
    * https://<apexDomain>/oauth/consent.
    */
   consentPublishableKey?: string;
+  /** Browser origins allowed to call the apex cross-origin (cors.ts). */
+  webOrigins?: readonly string[];
 }
 
 export function buildApexApp(deps: ApexDeps): Hono {
@@ -58,6 +61,8 @@ export function buildApexApp(deps: ApexDeps): Hono {
     if (e.code === 'unauthorized') c.header('WWW-Authenticate', wwwAuthenticate(publicOrigin(c)));
     return c.json(e.toBody(), e.status as 400);
   });
+
+  app.use('*', webCors(deps.webOrigins ?? []));
 
   app.get('/v1/health', (c) => c.json({ ok: true, apex: deps.apexDomain }));
 
