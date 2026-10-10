@@ -445,7 +445,7 @@ export async function runTodoItem(
         if (item.proposed && item.receipts.length === 0) {
             // The user gave a planner proposal its go — a positive signal.
             const { recordPlannerSignal } = await import('./planner-memory.js');
-            void recordPlannerSignal('ran', item.text).catch(() => {});
+            await recordPlannerSignal('ran', item.text).catch(() => {});
         }
         const { sessions } = await resolveDeps();
         const title = parent ? `${item.text} · ${parent.text}` : item.text;
