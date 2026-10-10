@@ -3,6 +3,7 @@ import fsp from 'fs/promises';
 import path from 'path';
 import { WorkDir } from '../config/config.js';
 import { OutlookClientFactory } from './outlook-client-factory.js';
+import { outlookRateLimitCooldownMs } from './outlook-rate-limit.js';
 import { isAutomatedAddress } from './contact_filters.js';
 
 // Outlook mirror of gmail_sent_contacts.ts: a local index of the people the
@@ -214,6 +215,7 @@ async function performSync(): Promise<void> {
 
 function ensureFresh(): void {
     if (pendingSync) return;
+    if (outlookRateLimitCooldownMs() > 0) return;
     if (Date.now() - lastRefreshAt < REFRESH_INTERVAL_MS) return;
     pendingSync = performSync()
         .catch((err) => {

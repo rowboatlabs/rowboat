@@ -4,6 +4,12 @@ import { getProviderConfig } from '../auth/providers.js';
 import * as oauthClient from '../auth/oauth-client.js';
 import type { Configuration } from '../auth/oauth-client.js';
 import { OAuthTokens } from '../auth/types.js';
+import {
+    inRequestRetryWaitMs,
+    noteOutlookRateLimit,
+    noteOutlookSuccess,
+    outlookCooldownInfo,
+} from './outlook-rate-limit.js';
 
 const GRAPH_BASE = 'https://graph.microsoft.com/v1.0';
 
@@ -89,10 +95,10 @@ export class OutlookClientFactory {
      *
      * Always sends `Prefer: IdType="ImmutableId"` so message ids survive folder
      * moves (archive!); pass additional Prefer values via init.headers and they
-     * are merged. 429s honor Retry-After once; a 401 marks the connection as
-     * needing reconnect (proactive refresh means a 401 is a revoked grant, not
-     * simple expiry). Returns the parsed JSON body, or null for empty replies
-     * (202 send, 204 delete).
+     * are merged. 429s honor Retry-After once when under IN_REQUEST_RETRY_CAP_MS;
+     * a 401 marks the connection as needing reconnect. Unrecovered 429s arm
+     * the cross-cycle cooldown (outlook-rate-limit.ts). Returns the parsed JSON
+     * body, or null for empty replies (202 send, 204 delete).
      */
     static async graphFetch<T = unknown>(pathOrUrl: string, init: RequestInit = {}): Promise<T> {
         const token = await this.getAccessToken();
@@ -111,11 +117,20 @@ export class OutlookClientFactory {
         let res = await fetch(url, { ...init, headers });
 
         if (res.status === 429) {
-            const retryAfter = Number(res.headers.get('Retry-After'));
-            const waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter, 30) * 1000 : 2000;
-            console.warn(`[Outlook] Graph 429 — retrying after ${waitMs}ms`);
-            await new Promise((resolve) => setTimeout(resolve, waitMs));
-            res = await fetch(url, { ...init, headers });
+            const retryHeader = res.headers.get('Retry-After');
+            const waitMs = inRequestRetryWaitMs(retryHeader);
+            if (waitMs !== null) {
+                console.warn(`[Outlook] Graph 429 — retrying after ${waitMs}ms`);
+                await new Promise((resolve) => setTimeout(resolve, waitMs));
+                res = await fetch(url, { ...init, headers });
+            }
+
+            if (res.status === 429) {
+                const retryAfter = res.headers.get('Retry-After');
+                const until = noteOutlookRateLimit(retryAfter);
+                const source = outlookCooldownInfo()?.source === 'graph' ? "Microsoft Graph's stated deadline" : 'default backoff';
+                console.warn(`[Outlook] rate limited — cooling down until ${new Date(until).toISOString()} (${source})`);
+            }
         }
 
         if (res.status === 401) {
@@ -133,6 +148,9 @@ export class OutlookClientFactory {
             } catch { /* non-JSON error body */ }
             throw new GraphError(`Graph request failed (${res.status})${detail ? `: ${detail}` : ''}`, res.status);
         }
+
+        // Proven recovery: any 2xx response proves Graph quota is healthy and resets cooldown/strikes.
+        noteOutlookSuccess();
 
         if (res.status === 204) return null as T;
         const contentType = res.headers.get('Content-Type') || '';
