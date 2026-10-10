@@ -299,7 +299,8 @@ Open **Settings → MCP Servers**, add the `parallel` entry to your existing `mc
 {
   "mcpServers": {
     "parallel": {
-      "url": "https://search.parallel.ai/mcp"
+      "url": "https://search.parallel.ai/mcp",
+      "headers": { "User-Agent": "Rowboat" }
     }
   }
 }
