@@ -1,4 +1,5 @@
 import { harborChannelHandlers, SpaceSubscriptions } from '@x/spaces-client'
+import { blobAppUrl } from '@/lib/spaces-presentation'
 import type { ipc, spaces } from '@x/shared'
 import { beginSignIn, getAccessToken, hasSession } from './account'
 import { APEX_HOST, APEX_URL, DEV_HARBOR } from './config'
@@ -18,6 +19,28 @@ function decodeBase64(base64: string): Uint8Array {
     const bytes = new Uint8Array(bin.length)
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
     return bytes
+}
+
+/** Save through the browser's own download: a link the browser follows. */
+function download(href: string, name?: string): void {
+    const a = document.createElement('a')
+    a.href = href
+    if (name) a.download = name
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+}
+
+/**
+ * A blob's own Harbor URL, served as an attachment under its name. The
+ * session cookie authorizes the download (CONTRACT.md: getBlob's download=1).
+ */
+function blobDownloadUrl(orgId: string, spaceId: string, hash: string, name: string): string {
+    const url = new URL(blobAppUrl({ orgId, spaceId }, hash))
+    url.search = ''
+    url.searchParams.set('name', name)
+    url.searchParams.set('download', '1')
+    return url.toString()
 }
 
 export function webChannelHandlers(emit: (event: spaces.SpacesBusEvent) => void): Handlers {
@@ -58,6 +81,30 @@ export function webChannelHandlers(emit: (event: spaces.SpacesBusEvent) => void)
 
         // The desktop's model account (the LLM gateway's sign-in); the browser has none.
         'account:getRowboat': async () => ({ signedIn: false, accessToken: null }),
+
+        // Saving is the browser's download; there's no path to report back.
+        'spaces:saveBlob': async (args) => {
+            download(blobDownloadUrl(args.orgId, args.spaceId, args.hash, args.suggestedName ?? args.hash.slice(0, 12)))
+            return { saved: true }
+        },
+        'spaces:saveAsset': async (args) => {
+            const asset = await orgs.getClient(args.orgId).readAsset(args.spaceId, args.assetId)
+            const name = asset.path.split('/').pop() || asset.path
+            if (asset.blob) {
+                download(blobDownloadUrl(args.orgId, args.spaceId, asset.blob.hash, name))
+            } else {
+                const href = URL.createObjectURL(new Blob([asset.content], { type: 'text/plain;charset=utf-8' }))
+                download(href, name)
+                setTimeout(() => URL.revokeObjectURL(href), 60_000)
+            }
+            return { saved: true }
+        },
+        // Another site's image can't be fetched from here (CORS), so it opens
+        // where the person can save it. saved: false means no saved toast.
+        'spaces:saveImageUrl': async (args) => {
+            window.open(args.url, '_blank', 'noopener,noreferrer')
+            return { saved: false }
+        },
 
         'spaces:linkPreview': async () => ({ preview: null }),
         'spaces:listScheduled': async () => ({ items: [] }),

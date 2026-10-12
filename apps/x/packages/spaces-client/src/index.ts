@@ -4,8 +4,8 @@
 // public-client OAuth a direct-to-Harbor app signs in with (oauth.ts). See
 // apps/harbor/CONTRACT.md for the wire.
 
-export { SpacesClient, SpacesRequestError } from './client.js';
-export type { SpacesClientOptions, SpacesApiError, SpacesTokenProvider, ActivityQueryInput, MessageWindowOpts } from './client.js';
+export { SpacesClient, SpacesRequestError, isSessionCookie } from './client.js';
+export type { SpacesClientOptions, SpacesApiError, SpacesTokenProvider, SpacesSessionCookie, ActivityQueryInput, MessageWindowOpts } from './client.js';
 export { SpacesLive } from './live.js';
 export type { SpacesLiveOptions, SpacesLiveStatus, SpaceFrameHandler } from './live.js';
 export { SpaceSubscriptions } from './subscriptions.js';

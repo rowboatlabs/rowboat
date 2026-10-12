@@ -1,12 +1,15 @@
 import { SpacesClient, SpacesLive } from '@x/spaces-client'
 import type { spaces } from '@x/shared'
-import { getAccessToken, hasSession } from './account'
+import { registerOrgOrigin } from '@/lib/spaces-presentation'
+import { hasSession } from './account'
 import { APEX_HOST, APEX_URL, DEV_HARBOR, DEV_MEMBER } from './config'
+import { harborSession } from './session'
 
 // The orgs this browser is signed into, and one REST client and live socket
 // per org: the desktop's core/spaces/orgs.ts without a registry on disk. The
 // apex's "my orgs" is the list (as on the phone), refreshed on every listing;
-// under a dev Harbor it is that one org, signed in with a dev token.
+// under a dev Harbor it is that one org. Every call rides Harbor's session
+// cookie (session.ts), dev tokens included.
 
 export type WebOrg = spaces.SpacesOrgSummary
 
@@ -20,19 +23,18 @@ const runtimes = new Map<string, Runtime>()
 const memberFrameListeners = new Set<(orgId: string, frame: spaces.ServerFrame) => void>()
 const resetListeners = new Set<(orgId: string) => void>()
 
-function tokenFor(org: WebOrg): string | ((opts?: { forceRefresh?: boolean }) => Promise<string>) {
-    return org.authKind === 'dev' ? `dev-${org.memberId}` : getAccessToken
-}
-
 async function fetchOrgs(): Promise<WebOrg[]> {
     if (DEV_HARBOR) {
-        const health = await new SpacesClient({ baseUrl: DEV_HARBOR, token: `dev-${DEV_MEMBER}` }).health()
+        const health = await new SpacesClient({ baseUrl: DEV_HARBOR, token: harborSession }).health()
         return [{ id: 'dev', name: health.org.name, address: new URL(DEV_HARBOR).host, baseUrl: DEV_HARBOR, memberId: DEV_MEMBER, authKind: 'dev' }]
     }
     if (!hasSession()) return []
-    const send = async (token: string) => fetch(`${APEX_URL}/v1/orgs`, { headers: { authorization: `Bearer ${token}` } })
-    let res = await send(await getAccessToken())
-    if (res.status === 401) res = await send(await getAccessToken({ forceRefresh: true }))
+    const send = async (refresh?: { forceRefresh: true }) => {
+        await harborSession.ensure(refresh)
+        return fetch(`${APEX_URL}/v1/orgs`, { credentials: 'include' })
+    }
+    let res = await send()
+    if (res.status === 401) res = await send({ forceRefresh: true })
     if (!res.ok) throw new Error(`Could not list your servers (${res.status}).`)
     const { orgs: listed } = (await res.json()) as { orgs: Array<{ id: string; name: string; address: string; memberId: string }> }
     return listed.map((org) => ({
@@ -55,6 +57,8 @@ export async function loadOrgs(): Promise<WebOrg[]> {
         for (const listener of resetListeners) listener(id)
     }
     orgs = next
+    // Blob URLs are the org's own Harbor URLs (spaces-presentation).
+    for (const org of orgs) registerOrgOrigin(org.id, org.baseUrl)
     return orgs
 }
 
@@ -73,10 +77,9 @@ function runtime(orgId: string): Runtime {
     if (cached) return cached
     const org = orgs.find((o) => o.id === orgId)
     if (!org) throw new Error(`unknown org ${orgId}`)
-    const token = tokenFor(org)
     const created: Runtime = {
-        client: new SpacesClient({ baseUrl: org.baseUrl, token }),
-        live: new SpacesLive({ baseUrl: org.baseUrl, token: typeof token === 'string' ? token : () => token() }),
+        client: new SpacesClient({ baseUrl: org.baseUrl, token: harborSession }),
+        live: new SpacesLive({ baseUrl: org.baseUrl, token: harborSession }),
     }
     created.live.onMemberFrame((frame) => {
         for (const listener of memberFrameListeners) listener(orgId, frame)

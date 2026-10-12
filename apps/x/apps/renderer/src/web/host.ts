@@ -46,10 +46,6 @@ export function installBrowserHost(): BrowserHost {
             }
         },
     }
-    // The page has the bytes of a dropped file, never its path.
-    window.electronUtils = { getPathForFile: () => '', getZoomFactor: () => 1 }
-    window.featureFlags = { spaces: true, localRuntime: false }
-
     return {
         emit(channel, payload) {
             for (const listener of listeners.get(channel) ?? []) listener(payload)

@@ -1,4 +1,5 @@
 import { ServerFrame, type PresenceState } from '@rowboat/spaces-protocol';
+import { isSessionCookie, type SpacesSessionCookie } from './client.js';
 
 // The live face, client side: ONE WebSocket per org (CONTRACT.md decision 2),
 // per-space subscriptions, offset-based resume. The socket owns reconnection;
@@ -41,8 +42,12 @@ const DEFAULT_TOKEN_TIMEOUT_MS = 20_000;
 export interface SpacesLiveOptions {
   /** http(s)://host[:port] — same base as the REST client. */
   baseUrl: string;
-  /** Static bearer (dev tokens, tests) or a provider — resolved fresh per connection attempt. */
-  token: string | (() => Promise<string>);
+  /**
+   * Static bearer (dev tokens, tests) or a provider, resolved fresh per
+   * connection attempt. Or the web app's session cookie: the browser sends it
+   * on the upgrade, so no token rides the URL.
+   */
+  token: string | (() => Promise<string>) | SpacesSessionCookie;
   /** Injection point for tests; defaults to the global WebSocket. */
   webSocketImpl?: typeof WebSocket;
   /** Frame-silence tolerated before the watchdog bounces the socket (test knob). */
@@ -55,7 +60,7 @@ export interface SpacesLiveOptions {
 
 export class SpacesLive {
   private readonly wsBase: string;
-  private readonly token: string | (() => Promise<string>);
+  private readonly token: string | (() => Promise<string>) | SpacesSessionCookie;
   private readonly WebSocketImpl: typeof WebSocket;
   private readonly staleAfterMs: number;
   private readonly watchdogTickMs: number;
@@ -260,17 +265,23 @@ export class SpacesLive {
     this.setStatus('connecting');
     this.ensureWatchdog();
     void (async () => {
-      let token: string;
+      let token: string | undefined;
       try {
         // The timeout guards `connecting` itself: an un-timed-out provider
         // fetch that never settles would pin it true forever, blocking every
         // future attempt. An abandoned attempt just retries with backoff; the
         // provider's own single-flight absorbs the duplicate resolution.
+        const credential = this.token;
+        const pending = typeof credential === 'string'
+          ? undefined
+          : isSessionCookie(credential)
+            ? credential.ensure().then(() => undefined)
+            : credential();
         token =
-          typeof this.token === 'string'
-            ? this.token
+          pending === undefined
+            ? (credential as string)
             : await Promise.race([
-                this.token(),
+                pending,
                 new Promise<never>((_, reject) => {
                   const t = setTimeout(() => reject(new Error('token timeout')), this.tokenTimeoutMs);
                   (t as { unref?: () => void }).unref?.();
@@ -287,7 +298,7 @@ export class SpacesLive {
       this.connecting = false;
       if (this.closed || this.ws) return;
       try {
-        this.openSocket(`${this.wsBase}/v1/live?token=${encodeURIComponent(token)}`);
+        this.openSocket(token === undefined ? `${this.wsBase}/v1/live` : `${this.wsBase}/v1/live?token=${encodeURIComponent(token)}`);
       } catch {
         // Constructor threw (bad URL from a mangled base, a runtime without
         // the impl). Without this the attempt died scheduling nothing.

@@ -9,8 +9,13 @@ The renderer's Spaces section also builds as a standalone web app (2026-10-09): 
   - `src/web/handlers.ts` answers the Spaces channels. Every channel that is one Harbor call comes from the shared table in `@x/spaces-client` (`channels.ts`), the same one the desktop serves. The rest are the browser's own: sign-in, the org list, uploads from bytes.
   - Any other channel is refused by name, the way a failed IPC call already fails.
 - **Talks to Harbor directly.** It calls each org's host cross-origin, which Harbor allows for the origins in `HARBOR_WEB_ORIGINS` (`apps/harbor/CONTRACT.md`).
-- **Sign-in** is the phone's journey as a full-page redirect (`src/web/account.ts`): the apex names the authorization server, the browser registers itself once, PKCE carries the round trip. Tokens live in `localStorage`, and a refresh runs under a Web Lock so two tabs don't spend the same rotating refresh token.
+- **Sign-in** is the phone's journey as a full-page redirect (`src/web/account.ts`): the apex names the authorization server, the browser registers itself once, PKCE carries the round trip. Tokens live in `localStorage`, and a refresh runs under a Web Lock so two tabs don't spend the same rotating refresh token. The access token's only use is minting Harbor's session cookie.
 - **The address bar is the navigation** (`src/web/routes.ts`): `/<org>/s/<space>`, `…/t/<thread>`, `…/a/<file>`, `/<org>/activity`.
+- **Every Harbor call rides Harbor's session cookie** (`src/web/session.ts`; CONTRACT.md: `createSession`). The page mints the cookie at the apex from its access token, and mints it again when the token changes or a call is refused. The shared client's cookie mode sends credentials and no bearer, and the live socket opens with no token in its URL.
+- **Files and images load straight from the org's Harbor.**
+  - A blob URL is the org's own `/v1/spaces/<space>/blobs/<hash>`. A plain `<img>` loads it on the cookie, and Harbor streams it with immutable caching, so the browser fetches each blob once. In-page reads go through `fetchBlob`, which sends the cookie.
+  - Downloads are links with `download=1`.
+  - HTML documents render as `srcdoc` in the viewer's sandbox, without their relative files.
 - **No local runtime.** Nothing that needs the person's own machine is shown: `LOCAL_RUNTIME` in `lib/feature-flags.ts` is false here. That covers their Rowboat agent, scheduled sends and reminders, and voice.
 
 ## Run it

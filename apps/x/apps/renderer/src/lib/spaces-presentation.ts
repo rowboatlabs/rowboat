@@ -1,4 +1,5 @@
 import type { spaces } from '@x/shared'
+import { LOCAL_RUNTIME } from '@/lib/feature-flags'
 
 // Pure presentation helpers for the Spaces surfaces (design: "App shell scope
 // planning" artboard). Everything here is data → display data; no IPC, no React.
@@ -213,13 +214,35 @@ export function blobWireUrl(refs: SpaceRefs, hash: string, name?: string, dims?:
     return `https://${refs.orgAddress}/s/${refs.spaceId}/b/${hash}${qs}`
 }
 
-/** The renderable form — app://space-blob/… served by main's protocol handler. */
+/**
+ * Where a blob's bytes load from. On the desktop that's main's protocol handler
+ * over its blob cache (app://space-blob/…). In the web app (2026-10-12) it's
+ * the org's own Harbor blob URL, authorized by the session cookie: a plain
+ * <img> loads it and the browser caches it forever. fetch() reads go through
+ * fetchBlob, which sends the cookie.
+ */
+const APP_BLOB_BASE = 'app://space-blob/'
+
+/** The web app's org origins by org id, registered as orgs load (src/web/orgs.ts). */
+const orgOrigins = new Map<string, string>()
+
+export function registerOrgOrigin(orgId: string, origin: string): void {
+    orgOrigins.set(orgId, origin.replace(/\/$/, ''))
+}
+
+/** The renderable form: app://space-blob/… on the desktop, the org's blob route on the web. */
 export function blobAppUrl(refs: { orgId: string; spaceId: string }, hash: string, opts?: { thumb?: number; width?: number; height?: number }): string {
     const parts: string[] = []
     if (opts?.thumb) parts.push(`thumb=${opts.thumb}`)
     if (opts?.width && opts?.height) parts.push(`w=${opts.width}`, `h=${opts.height}`)
     const qs = parts.length > 0 ? `?${parts.join('&')}` : ''
-    return `app://space-blob/${encodeURIComponent(refs.orgId)}/${encodeURIComponent(refs.spaceId)}/${hash}${qs}`
+    if (LOCAL_RUNTIME) return `${APP_BLOB_BASE}${encodeURIComponent(refs.orgId)}/${encodeURIComponent(refs.spaceId)}/${hash}${qs}`
+    return `${orgOrigins.get(refs.orgId) ?? ''}/v1/spaces/${encodeURIComponent(refs.spaceId)}/blobs/${hash}${qs}`
+}
+
+/** Read a blob's bytes in the page; on the web, with the session cookie. */
+export function fetchBlob(url: string, init?: RequestInit): Promise<Response> {
+    return fetch(url, LOCAL_RUNTIME ? init : { ...init, credentials: 'include' })
 }
 
 /** The w/h display hints off a blob URL (wire or app form) — null unless both parse positive. */
@@ -235,14 +258,25 @@ export function imageDimsFromUrl(url: string): { width: number; height: number }
     }
 }
 
-const BLOB_APP_URL_RE = /^app:\/\/space-blob\/([^/]+)\/([^/]+)\/([0-9a-f]{64})/
+const APP_BLOB_URL_RE = /^app:\/\/space-blob\/([^/]+)\/([^/]+)\/([0-9a-f]{64})/
+const WEB_BLOB_URL_RE = /^(https?:\/\/[^/]+)\/v1\/spaces\/([^/?#]+)\/blobs\/([0-9a-f]{64})/
 
-/** Parse an app://space-blob URL back into its parts (anchor-click interception). */
+/** Parse a blob URL (blobAppUrl's form) back into its parts (anchor-click interception). */
 export function parseBlobAppUrl(url: string): { orgId: string; spaceId: string; hash: string } | null {
-    const m = BLOB_APP_URL_RE.exec(url)
+    if (LOCAL_RUNTIME) {
+        const m = APP_BLOB_URL_RE.exec(url)
+        return m ? { orgId: decodeURIComponent(m[1]!), spaceId: decodeURIComponent(m[2]!), hash: m[3]! } : null
+    }
+    const m = WEB_BLOB_URL_RE.exec(url)
     if (!m) return null
-    return { orgId: decodeURIComponent(m[1]!), spaceId: decodeURIComponent(m[2]!), hash: m[3]! }
+    for (const [orgId, origin] of orgOrigins) {
+        if (origin === m[1]) return { orgId, spaceId: decodeURIComponent(m[2]!), hash: m[3]! }
+    }
+    return null
 }
+
+/** The desktop matches its scheme as it always has; the web, a blob route on a registered org. */
+export const isBlobAppUrl = (url: string): boolean => (LOCAL_RUNTIME ? url.startsWith(APP_BLOB_BASE) : parseBlobAppUrl(url) !== null)
 
 /**
  * Rewrite the org's blob links inside a markdown body to their app:// form so

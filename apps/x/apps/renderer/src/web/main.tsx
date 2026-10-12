@@ -1,3 +1,5 @@
+// First: the flags every later import reads as it loads (flags.ts).
+import './flags'
 import { StrictMode } from 'react'
 import '../index.css'
 // The theme (tokens, dark mode, base styles) lives in App.css, which the
@@ -7,10 +9,9 @@ import { CALLBACK_PATH, completeSignIn } from './account'
 import { webChannelHandlers } from './handlers'
 import { installBrowserHost } from './host'
 
-// The web app's entry (2026-10-09). The host goes in before any app module
-// loads — lib/feature-flags reads window.featureFlags at import — so the app
-// itself is a dynamic import. A sign-in callback is finished before the
-// first render, so the page never paints signed out on the way in.
+// The web app's entry (2026-10-09). The flags go in first (flags.ts), the host
+// before the app, which is a dynamic import. A sign-in callback is finished
+// before the first render, so the page never paints signed out on the way in.
 
 async function start() {
     const host = installBrowserHost()
