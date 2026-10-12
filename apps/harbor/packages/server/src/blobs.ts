@@ -28,6 +28,12 @@ export interface BlobStore {
   put(bytes: Uint8Array): Promise<string>;
   /** undefined when the blob is not present. */
   get(hash: string): Promise<Uint8Array | undefined>;
+  /**
+   * Optional capability: the bytes as a stream, for serving through Harbor
+   * without holding the whole blob in memory (S3, 2026-10-12: the web app's
+   * cookie-authorized reads stream rather than redirect). Absent = get().
+   */
+  stream?(hash: string): Promise<ReadableStream<Uint8Array> | undefined>;
   has(hash: string): Promise<boolean>;
   /** GC only (refcount sweep, spec §12). Deleting a missing blob is fine. */
   delete(hash: string): Promise<void>;

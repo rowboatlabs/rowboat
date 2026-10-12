@@ -103,7 +103,8 @@ export class Images {
   }
 
   /** The bytes back, to any member of the org: a presigned URL (S3-family) or the bytes (disk, memory). */
-  async getImage(ctx: ActorCtx, hash: string): Promise<{ blob: BlobInfo; url?: string; bytes?: Uint8Array }> {
+  /** `inline`: through Harbor, not a redirect (core/assets.ts downloadBlob). */
+  async getImage(ctx: ActorCtx, hash: string, opts: { inline?: boolean } = {}): Promise<{ blob: BlobInfo; url?: string; bytes?: Uint8Array; stream?: ReadableStream<Uint8Array> }> {
     await this.k.requireOrgMember(ctx);
     const blobs = this.requireBlobStore();
     const stored = await this.k.store.getOrgImage(hash);
@@ -114,7 +115,12 @@ export class Images {
       mime: stored.mime,
       ...(stored.width !== undefined && stored.height !== undefined ? { width: stored.width, height: stored.height } : {}),
     };
-    if (blobs.downloadUrl) {
+    if (opts.inline && blobs.stream) {
+      const stream = await blobs.stream(hash);
+      if (!stream) throw new HarborError('internal', 'image registered but bytes are missing from storage');
+      return { blob, stream };
+    }
+    if (blobs.downloadUrl && !opts.inline) {
       return { blob, url: await blobs.downloadUrl(hash, { expiresInSeconds: 300, responseContentType: stored.mime, responseContentDisposition: 'inline' }) };
     }
     const bytes = await blobs.get(hash);

@@ -321,16 +321,16 @@ export class HarborService {
   clearOrgLogo(ctx: ActorCtx): Promise<Record<string, never>> {
     return this.images.clearOrgLogo(ctx);
   }
-  getImage(ctx: ActorCtx, hash: string): Promise<{ blob: BlobInfo; url?: string; bytes?: Uint8Array }> {
-    return this.images.getImage(ctx, hash);
+  getImage(ctx: ActorCtx, hash: string, opts?: { inline?: boolean }): Promise<{ blob: BlobInfo; url?: string; bytes?: Uint8Array; stream?: ReadableStream<Uint8Array> }> {
+    return this.images.getImage(ctx, hash, opts);
   }
   downloadBlob(
     ctx: ActorCtx,
     spaceId: string,
     hash: string,
     name?: string,
-    opts?: { expiresInSeconds?: number },
-  ): Promise<{ blob: BlobInfo; disposition: string; url?: string; bytes?: Uint8Array }> {
+    opts?: { expiresInSeconds?: number; inline?: boolean; attachment?: boolean },
+  ): Promise<{ blob: BlobInfo; disposition: string; url?: string; bytes?: Uint8Array; stream?: ReadableStream<Uint8Array> }> {
     return this.assets.downloadBlob(ctx, spaceId, hash, name, opts);
   }
   proposeChange(ctx: ActorCtx, spaceId: string, input: ProposeChange): Promise<ProposeChangeResult> {

@@ -50,8 +50,8 @@ export function servesInline(mime: string): boolean {
  * path separators are stripped so it can never break the header or the save
  * path.
  */
-export function dispositionFor(mime: string, name?: string): string {
-  const base = servesInline(mime) ? 'inline' : 'attachment';
+export function dispositionFor(mime: string, name?: string, opts: { attachment?: boolean } = {}): string {
+  const base = !opts.attachment && servesInline(mime) ? 'inline' : 'attachment';
   const clean = name
     ?.replace(/[/\\]/g, '-')
     .replace(/[\x00-\x1f\x7f"%;]/g, '')

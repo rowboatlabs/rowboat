@@ -23,7 +23,7 @@ Two pnpm workspace packages under `packages/`:
 | `policy.ts` | who may do what — pure decisions over facts the core loads; `enforce` throws |
 | `store.ts`, `pg-store.ts` | the data boundary and its one driver; `PgStore.transaction(fn)` for an org-level all-or-nothing write the caller shares (`directory.ts`); `sql.ts` (node-postgres), `sql-pglite.ts` (Postgres in-process) |
 | `migrations.ts` | the append-only schema ladder |
-| `http.ts`, `ws.ts`, `mcp.ts` | the three faces; `origin.ts` (the public origin behind the proxy); `cors.ts` (the browser origins the render face and the apex answer) |
+| `http.ts`, `ws.ts`, `mcp.ts` | the three faces; `origin.ts` (the public origin behind the proxy); `cors.ts` (the browser origins the render face and the apex answer); `session.ts` (the web app's session cookie: minting it, and when a request may use it) |
 | `auth.ts`, `auth-oidc.ts` | the drivers, `bindAuth` / `OrgAuth` (which resolves agent keys ahead of any driver), `authenticateRequest`, the RFC 9728 helpers; `consent.ts` (the login page); `agent-keys.ts` (minting and hashing an agent key) |
 | `runtime.ts` | `buildOrgRuntime` — the one assembly of an org |
 | `server.ts`, `main.ts` | `startHarbor` (one org) and the dev seed; the binary (dev, or `HARBOR_MODE=deployment`) |
@@ -109,7 +109,7 @@ Dev auth is `Authorization: Bearer dev-<memberId>` (first sight creates the memb
 
 ## Auth, as built
 
-Harbor is only ever a **resource server**. A driver turns a bearer into an identity (`dev`, or `oidc`: pinned issuer, RFC 8414 discovery, JWKS-verified JWTs) and the org's identity table turns `(iss, sub)` into a member — never auto-created; a valid token with no mapping is `not_a_member`, and the invite-bind ceremony (`bindInvite`) is the one route that accepts it. The org serves RFC 9728 resource metadata and its 401s point at it, so MCP clients find the OAuth dance mechanically. The login page (`consent.ts`) is static HTML that drives the authorization server's consent state machine in the browser; Harbor never sees a credential.
+Harbor is only ever a **resource server**. A driver turns a bearer into an identity (`dev`, or `oidc`: pinned issuer, RFC 8414 discovery, JWKS-verified JWTs) and the org's identity table turns `(iss, sub)` into a member — never auto-created; a valid token with no mapping is `not_a_member`, and the invite-bind ceremony (`bindInvite`) is the one route that accepts it. The org serves RFC 9728 resource metadata and its 401s point at it, so MCP clients find the OAuth dance mechanically. A browser (the Spaces web app) presents the same token as Harbor's session cookie, which `POST /v1/session` sets. The cookie counts only from a listed origin, and a header always wins over it (`session.ts`; CONTRACT.md). The login page (`consent.ts`) is static HTML that drives the authorization server's consent state machine in the browser; Harbor never sees a credential.
 
 Verified against Supabase Auth (2026-08-18/19), the flagship AS: tokens on a shared realm are realm-generic (`aud: "authenticated"`), so **membership is the authorization boundary**, not the audience; the consent flow is claim-then-approve (`GET /oauth/authorizations/{id}` before the `POST`); with DCR off the `registration_endpoint` disappears from discovery, so clients detect the policy mechanically; refresh tokens rotate on use; the OAuth server ships in GoTrue itself, so self-hosting needs no Supabase fleet.
 

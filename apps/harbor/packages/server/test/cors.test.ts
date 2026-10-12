@@ -37,7 +37,8 @@ describe('the render face', () => {
     expect(res.headers.get('access-control-allow-origin')).toBe(WEB);
     expect(res.headers.get('access-control-allow-headers')).toContain('authorization');
     expect(res.headers.get('access-control-allow-methods')).toContain('PUT');
-    expect(res.headers.get('access-control-allow-credentials')).toBeNull();
+    // Credentials are allowed for listed origins: the web app calls on its session cookie (session.ts).
+    expect(res.headers.get('access-control-allow-credentials')).toBe('true');
   });
 
   it('marks a real response, and a 401, so the page can read them', async () => {

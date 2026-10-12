@@ -369,15 +369,23 @@ export class Assets {
     name?: string,
     // A connector handing a platform an image link needs it to outlive the
     // platform's own queue (spec §8 Connectors, 2026-09-30); people get 5 minutes.
-    opts: { expiresInSeconds?: number } = {},
-  ): Promise<{ blob: BlobInfo; disposition: string; url?: string; bytes?: Uint8Array }> {
+    // `inline`: serve the bytes through Harbor instead of redirecting to the
+    // store, for a browser on the session cookie (2026-10-12). `attachment`:
+    // force a download (getBlob's download=1).
+    opts: { expiresInSeconds?: number; inline?: boolean; attachment?: boolean } = {},
+  ): Promise<{ blob: BlobInfo; disposition: string; url?: string; bytes?: Uint8Array; stream?: ReadableStream<Uint8Array> }> {
     await this.k.requireReadableSpace(ctx, spaceId);
     const blobs = this.requireBlobStore();
     const stored = await this.k.store.getSpaceBlob(spaceId, hash);
     if (!stored) throw new HarborError('not_found', 'no such blob in this space');
     const blob: BlobInfo = { hash: stored.hash, size: stored.size, mime: stored.mime, ...blobDims(stored) };
-    const disposition = dispositionFor(stored.mime, name);
-    if (blobs.downloadUrl) {
+    const disposition = dispositionFor(stored.mime, name, { attachment: opts.attachment === true });
+    if (opts.inline && blobs.stream) {
+      const stream = await blobs.stream(hash);
+      if (!stream) throw new HarborError('internal', 'blob registered but bytes are missing from storage');
+      return { blob, disposition, stream };
+    }
+    if (blobs.downloadUrl && !opts.inline) {
       const url = await blobs.downloadUrl(hash, {
         expiresInSeconds: opts.expiresInSeconds ?? 300,
         responseContentType: stored.mime,
