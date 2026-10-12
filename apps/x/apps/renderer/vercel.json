@@ -1,8 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
-  "installCommand": "cd ../../../harbor && pnpm install --frozen-lockfile --filter @rowboat/spaces-protocol && pnpm --filter @rowboat/spaces-protocol run build && cd ../x && ELECTRON_SKIP_BINARY_DOWNLOAD=1 pnpm install --frozen-lockfile --filter @x/renderer...",
-  "buildCommand": "cd ../.. && pnpm --filter @x/shared --filter @x/spaces-client run build && cd apps/renderer && pnpm run build:web",
+  "installCommand": "cd ../../../harbor && npx -y pnpm@10 install --frozen-lockfile --filter @rowboat/spaces-protocol && npx -y pnpm@10 --filter @rowboat/spaces-protocol run build && cd ../x && ELECTRON_SKIP_BINARY_DOWNLOAD=1 npx -y pnpm@10 install --frozen-lockfile --filter @x/renderer...",
+  "buildCommand": "cd ../.. && npx -y pnpm@10 --filter @x/shared --filter @x/spaces-client run build && cd apps/renderer && npx -y pnpm@10 run build:web",
   "outputDirectory": "dist-web",
   "rewrites": [
     {

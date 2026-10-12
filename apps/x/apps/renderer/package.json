@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "dev:web": "vite --config vite.web.config.ts",
-    "build:web": "tsc -b && vite build --config vite.web.config.ts",
+    "build:web": "vite build --config vite.web.config.ts",
     "preview:web": "vite preview --config vite.web.config.ts",
     "test": "vitest run",
     "test:watch": "vitest"
