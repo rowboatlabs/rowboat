@@ -210,6 +210,38 @@ async function getBlobOidAtCommit(commitOid: string, filepath: string): Promise<
 }
 
 /**
+ * Whether the knowledge repo exists and has at least one commit — i.e. HEAD
+ * is resolvable and "not tracked at HEAD" is a meaningful statement.
+ */
+export async function hasHeadCommit(): Promise<boolean> {
+    try {
+        await git.resolveRef({ fs, dir: KNOWLEDGE_DIR, ref: 'HEAD' });
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Read a file's content as of HEAD, or null if the file isn't tracked there
+ * (never committed, or the repo has no commits yet).
+ */
+export async function readFileAtHead(knowledgeRelPath: string): Promise<string | null> {
+    try {
+        const oid = await git.resolveRef({ fs, dir: KNOWLEDGE_DIR, ref: 'HEAD' });
+        const result = await git.readBlob({
+            fs,
+            dir: KNOWLEDGE_DIR,
+            oid,
+            filepath: knowledgeRelPath.replace(/\\/g, '/'),
+        });
+        return Buffer.from(result.blob).toString('utf-8');
+    } catch {
+        return null;
+    }
+}
+
+/**
  * Read file content at a specific commit.
  */
 export async function getFileAtCommit(knowledgeRelPath: string, oid: string): Promise<string> {
