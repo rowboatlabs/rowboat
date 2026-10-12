@@ -125,6 +125,7 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
               ...(org.issuer && options.consentPublishableKey ? { consentPublishableKey: options.consentPublishableKey } : {}),
               ...(options.maxBlobBytes !== undefined ? { maxBlobBytes: options.maxBlobBytes } : {}),
               ...(options.webOrigins ? { webOrigins: options.webOrigins } : {}),
+              ...(apexDomain ? { sessionCookieDomain: apexDomain } : {}),
             });
       runtimes.set(org.id, pending);
       // A failed build is not cached — the next request tries again.

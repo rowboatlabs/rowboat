@@ -4,6 +4,7 @@ import type { z } from 'zod';
 import { authenticateRequest, protectedResourceMetadata, wwwAuthenticate, type AuthIdentity, type OrgAuth } from './auth.js';
 import { consentPageHtml } from './consent.js';
 import { webCors } from './cors.js';
+import { clearedSessionCookie, sessionCookie, sessionToken, type SessionCookieConfig } from './session.js';
 import { MAX_PROFILE_IMAGE_BYTES } from './core/images.js';
 import { HarborError } from './errors.js';
 import { publicOrigin } from './origin.js';
@@ -14,7 +15,7 @@ import type { HarborService } from './service.js';
 // too before they leave, so contract drift fails loudly in the stub instead of
 // silently in a client.
 
-type Env = { Variables: { memberId: string; agent?: boolean; identity?: AuthIdentity } };
+type Env = { Variables: { memberId: string; agent?: boolean; identity?: AuthIdentity; viaSession?: boolean } };
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 /** Uploads only (raw-bytes route). 100MB across the board — dogfood decision 2026-08-24. */
 const DEFAULT_MAX_BLOB_BYTES = 100 * 1024 * 1024;
@@ -48,6 +49,18 @@ function reply<S extends z.ZodType>(c: Context<Env>, schema: S, data: z.infer<S>
   return c.json(r.data as object);
 }
 
+/** A blob or an image read: the routes a browser loads with no Origin (an <img>, a link opened in a tab). */
+function blobRead(method: string, path: string): boolean {
+  return (method === 'GET' || method === 'HEAD') && /^\/v1\/(spaces\/[^/]+\/blobs|images)\/[0-9a-f]{64}$/.test(path);
+}
+
+/** A served blob's body: its stream (a store that streams), else its bytes. */
+function bodyOf(result: { bytes?: Uint8Array; stream?: ReadableStream<Uint8Array> }): ArrayBuffer | ReadableStream<Uint8Array> {
+  if (result.stream) return result.stream;
+  const bytes = result.bytes!;
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
+
 function actor(c: Context<Env>): { memberId: string; agent?: boolean } {
   return { memberId: c.get('memberId'), ...(c.get('agent') ? { agent: true } : {}) };
 }
@@ -59,8 +72,10 @@ export function buildHttpApp(deps: {
   consent?: { issuer: string; publishableKey: string };
   /** Upload cap for the raw-bytes blob route (default 100MB). */
   maxBlobBytes?: number;
-  /** Browser origins allowed to call this org cross-origin (cors.ts). */
+  /** Browser origins allowed to call this org cross-origin (cors.ts), and to use the session cookie (session.ts). */
   webOrigins?: readonly string[];
+  /** The session cookie's Domain: the apex on a deployment, so one cookie covers every org. */
+  sessionCookieDomain?: string;
 }): Hono<Env> {
   const { service, auth, consent } = deps;
   const maxBlobBytes = deps.maxBlobBytes ?? DEFAULT_MAX_BLOB_BYTES;
@@ -76,6 +91,10 @@ export function buildHttpApp(deps: {
   });
 
   app.use('*', webCors(deps.webOrigins ?? []));
+  const session: SessionCookieConfig = {
+    webOrigins: new Set(deps.webOrigins ?? []),
+    ...(deps.sessionCookieDomain ? { domain: deps.sessionCookieDomain } : {}),
+  };
 
   // RFC 9728 protected-resource metadata: the org names its authorization
   // server here (the org is only ever a resource server — spec §4). 404 under
@@ -100,10 +119,19 @@ export function buildHttpApp(deps: {
   // legitimately authenticated-but-not-yet-a-member: it gets the identity and
   // the handler runs the bind ceremony instead.
   app.use('/v1/*', async (c, next) => {
-    if (c.req.path === routes.resolveInvite.path || c.req.path === '/v1/health') return next();
+    if (c.req.path === routes.resolveInvite.path || c.req.path === '/v1/health' || c.req.path === routes.createSession.path) return next();
     // A service's alert carries no bearer: the secret in its address is the credential (spec §8 Alerts, 2026-10-03).
     if (c.req.path.startsWith('/v1/hooks/')) return next();
-    const credentials = { authorization: c.req.header('authorization'), queryToken: new URL(c.req.url).searchParams.get('token') };
+    const authorization = c.req.header('authorization');
+    const query = new URL(c.req.url).searchParams.get('token');
+    // The web app's cookie (session.ts) counts only when neither the header
+    // nor a query token came, and only from a listed origin. A blob read may
+    // come with no Origin at all: an <img>, or a link opened in a tab.
+    const cookie = authorization || query
+      ? undefined
+      : sessionToken({ cookie: c.req.header('cookie'), origin: c.req.header('origin') }, session.webOrigins, { originless: blobRead(c.req.method, c.req.path) });
+    if (cookie) c.set('viaSession', true);
+    const credentials = { authorization, queryToken: query ?? cookie };
     if (c.req.path === routes.acceptInvite.path) {
       const { identity, member } = await authenticateRequest(auth, credentials, { allowUnmapped: true });
       c.set('identity', identity);
@@ -118,6 +146,22 @@ export function buildHttpApp(deps: {
   });
 
   app.get('/v1/health', (c) => c.json({ ok: true, org: { name: service.org.name, address: service.org.address } }));
+
+  // The web app's session (session.ts): the bearer in, the cookie out. The
+  // token only has to be valid here; membership is checked per org on use.
+  app.post(routes.createSession.path, async (c) => {
+    const authorization = c.req.header('authorization');
+    if (!authorization?.startsWith('Bearer ')) throw new HarborError('unauthorized', 'a session starts from a bearer in the Authorization header');
+    await auth.authenticate(authorization);
+    const cookie = sessionCookie(authorization.slice('Bearer '.length), session);
+    c.header('set-cookie', cookie.header);
+    return reply(c, routes.createSession.response, { ok: true, ...(cookie.expiresAt ? { expiresAt: cookie.expiresAt } : {}) });
+  });
+
+  app.delete(routes.deleteSession.path, (c) => {
+    c.header('set-cookie', clearedSessionCookie(session));
+    return reply(c, routes.deleteSession.response, { ok: true });
+  });
 
   app.get(routes.me.path, async (c) => reply(c, routes.me.response, { member: await service.me(actor(c)) }));
 
@@ -150,7 +194,9 @@ export function buildHttpApp(deps: {
   // Immutable by address → cache forever, privately. Always an image (sniffed at upload).
   app.get(routes.getImage.path, async (c) => {
     const { hash } = parseWith(routes.getImage.params, c.req.param());
-    const result = await service.getImage(actor(c), hash);
+    // On the session cookie the bytes come through Harbor, so a browser caches
+    // them forever and needs no CORS from the store (2026-10-12).
+    const result = await service.getImage(actor(c), hash, { inline: c.get('viaSession') === true });
     if (result.url) {
       c.header('cache-control', 'private, max-age=240');
       return c.redirect(result.url, 302);
@@ -161,8 +207,7 @@ export function buildHttpApp(deps: {
     c.header('cache-control', 'private, max-age=31536000, immutable');
     c.header('x-content-type-options', 'nosniff');
     c.header('content-security-policy', "default-src 'none'");
-    const bytes = result.bytes!;
-    return c.body(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
+    return c.body(bodyOf(result));
   });
 
   // --- spaces & membership ---------------------------------------------------
@@ -537,8 +582,12 @@ export function buildHttpApp(deps: {
     const { spaceId, hash } = parseWith(routes.getBlob.params, c.req.param());
     const q = parseWith(routes.getBlob.query, {
       ...(c.req.query('name') !== undefined ? { name: c.req.query('name') } : {}),
+      ...(c.req.query('download') !== undefined ? { download: c.req.query('download') } : {}),
     });
-    const result = await service.downloadBlob(actor(c), spaceId, hash, q.name);
+    const result = await service.downloadBlob(actor(c), spaceId, hash, q.name, {
+      inline: c.get('viaSession') === true,
+      attachment: q.download === '1',
+    });
     if (result.url) {
       // Do not cache the redirect itself beyond the presign window.
       c.header('cache-control', 'private, max-age=240');
@@ -550,8 +599,7 @@ export function buildHttpApp(deps: {
     c.header('cache-control', 'private, max-age=31536000, immutable');
     c.header('x-content-type-options', 'nosniff');
     c.header('content-security-policy', "default-src 'none'");
-    const bytes = result.bytes!;
-    return c.body(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
+    return c.body(bodyOf(result));
   });
 
   // --- feed ------------------------------------------------------------------

@@ -127,6 +127,8 @@ export async function completeSignIn(url: URL): Promise<string> {
 
 export function signOut(): void {
     writeSession(null)
+    // Harbor's cookie (session.ts) holds the same token; clear it too.
+    void fetch(`${DEV_HARBOR ?? APEX_URL}/v1/session`, { method: 'DELETE', credentials: 'include' }).catch(() => {})
     for (const listener of sessionListeners) listener()
 }
 

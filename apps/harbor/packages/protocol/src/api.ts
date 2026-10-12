@@ -179,6 +179,25 @@ export type ActivityPage = z.infer<typeof ActivityPage>;
 export const routes = {
   // --- identity ------------------------------------------------------------
   /** Who am I on this org — the client's only source of its own memberId under OAuth. */
+  // --- the web app's session (2026-10-12) ------------------------------------
+  /**
+   * Turn the caller's bearer into Harbor's session cookie, so a browser can
+   * call every face with credentials and no bearer, and load blobs with a
+   * plain <img> (CONTRACT.md). The cookie is HttpOnly, Secure, SameSite=Lax,
+   * scoped to the deployment's apex so one cookie covers every org on it, and
+   * expires with the token. The bearer must come in the header.
+   */
+  createSession: {
+    method: 'POST',
+    path: '/v1/session',
+    response: z.object({ ok: z.literal(true), expiresAt: z.iso.datetime().optional() }),
+  },
+  /** Clear the session cookie. Idempotent, and needs no credential. */
+  deleteSession: {
+    method: 'DELETE',
+    path: '/v1/session',
+    response: z.object({ ok: z.literal(true) }),
+  },
   me: {
     method: 'GET',
     path: '/v1/me',
@@ -727,7 +746,8 @@ export const routes = {
     method: 'GET',
     path: '/v1/spaces/:spaceId/blobs/:hash',
     params: z.object({ spaceId: SpaceId, hash: BlobHash }),
-    query: z.object({ name: z.string().max(255).optional() }),
+    // download=1 serves as an attachment, so a link saves the file (2026-10-12, the web app).
+    query: z.object({ name: z.string().max(255).optional(), download: z.literal('1').optional() }),
     response: z.never(),
   },
 

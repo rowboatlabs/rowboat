@@ -46,7 +46,7 @@ import { chord } from '@/lib/shortcut'
 import { SpaceMembersProvider, SpaceProfilesProvider } from '@/components/spaces/member-text'
 import { AttachmentColumn, SpaceAssetsProvider, SpaceNavProvider, SpaceRefsProvider } from '@/components/spaces/space-markdown'
 import { artifactsForThread, threadLabelOf } from '@/lib/spaces-conventions'
-import { isUnreadChange, resolveMentions } from '@/lib/spaces-presentation'
+import { isBlobAppUrl, isUnreadChange, resolveMentions } from '@/lib/spaces-presentation'
 import { getSpaceReadState, markStreamRead, markThreadRead, useStreamReadOffset } from '@/lib/spaces-read-state'
 import { toast } from '@/lib/toast'
 import { copySpacesLink } from '@/lib/spaces-copy-link'
@@ -110,7 +110,7 @@ type ColumnAnim = { column: 'chat' | 'doc'; phase: 'enter' | 'exit'; width: numb
  */
 const columnMemory = new Map<string, { docKey: DocKey; docIsBoard: boolean; chatOpen: boolean }>()
 
-const isAttachmentKey = (key: string) => key.startsWith('app://space-blob/')
+const isAttachmentKey = (key: string) => isBlobAppUrl(key)
 
 // The whiteboard is heavy (the Excalidraw editor); it loads as its own chunk
 // the first time a board opens, never inflating the main renderer bundle.

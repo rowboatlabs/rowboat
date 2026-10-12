@@ -96,6 +96,20 @@ export class SpacesRequestError extends Error {
  */
 export type SpacesTokenProvider = (opts?: { forceRefresh?: boolean }) => Promise<string>;
 
+/**
+ * The web app's credential (2026-10-12): Harbor's session cookie, which the
+ * host keeps holding a live token (CONTRACT.md: createSession). Requests go
+ * with credentials and no bearer; a 401 asks the host for a fresh cookie once.
+ */
+export interface SpacesSessionCookie {
+  readonly session: 'cookie';
+  ensure(opts?: { forceRefresh?: boolean }): Promise<void>;
+}
+
+export function isSessionCookie(credential: unknown): credential is SpacesSessionCookie {
+  return typeof credential === 'object' && credential !== null && (credential as { session?: unknown }).session === 'cookie';
+}
+
 export interface ActivityQueryInput {
   kinds?: ActivityKind[];
   spaceId?: string;
@@ -107,8 +121,8 @@ export interface ActivityQueryInput {
 export interface SpacesClientOptions {
   /** e.g. http://localhost:4272 — scheme + host[:port], no trailing slash. */
   baseUrl: string;
-  /** Static bearer (dev tokens, tests) or a provider (OAuth orgs — always fresh). */
-  token: string | SpacesTokenProvider;
+  /** Static bearer (dev tokens, tests), a provider (OAuth orgs — always fresh), or the web app's session cookie. */
+  token: string | SpacesTokenProvider | SpacesSessionCookie;
   fetchImpl?: typeof fetch;
   /** Lowercase hex SHA-256 of a blob's bytes; WebCrypto unless given. */
   sha256Hex?: (bytes: Uint8Array) => Promise<string>;
@@ -139,7 +153,7 @@ export interface MessageWindowOpts {
 
 export class SpacesClient {
   private readonly baseUrl: string;
-  private readonly token: string | SpacesTokenProvider;
+  private readonly token: string | SpacesTokenProvider | SpacesSessionCookie;
   private readonly fetchImpl: typeof fetch;
   private readonly sha256Hex: (bytes: Uint8Array) => Promise<string>;
 
@@ -152,8 +166,23 @@ export class SpacesClient {
     this.sha256Hex = options.sha256Hex ?? webCryptoSha256Hex;
   }
 
-  private async currentToken(opts?: { forceRefresh?: boolean }): Promise<string> {
-    return typeof this.token === 'string' ? this.token : this.token(opts);
+  /**
+   * One authorized call: the bearer in the header, or the session cookie
+   * (credentials, no bearer). On a 401 with a live credential it asks for a
+   * fresh one once, because an access token can be revoked before its expiry
+   * says so.
+   */
+  private async authorizedFetch(url: string, init: RequestInit = {}): Promise<Response> {
+    const attempt = async (refresh?: { forceRefresh: true }) => {
+      if (isSessionCookie(this.token)) {
+        await this.token.ensure(refresh);
+        return this.transport(url, { ...init, credentials: 'include' });
+      }
+      const token = typeof this.token === 'string' ? this.token : await this.token(refresh);
+      return this.transport(url, { ...init, headers: { ...(init.headers as Record<string, string> | undefined), authorization: `Bearer ${token}` } });
+    };
+    const res = await attempt();
+    return res.status === 401 && typeof this.token !== 'string' ? attempt({ forceRefresh: true }) : res;
   }
 
   /**
@@ -182,21 +211,13 @@ export class SpacesClient {
     body?: unknown,
     auth = true,
   ): Promise<z.infer<S>> {
-    const send = async (token: string | undefined) =>
-      this.transport(`${this.baseUrl}${path}`, {
-        method,
-        headers: {
-          ...(token !== undefined ? { authorization: `Bearer ${token}` } : {}),
-          ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
-        },
-        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-      });
-    let res = await send(auth ? await this.currentToken() : undefined);
-    // One forced-refresh retry on 401 when the token source is live (an
-    // access token can be revoked before its expiry says so).
-    if (res.status === 401 && auth && typeof this.token !== 'string') {
-      res = await send(await this.currentToken({ forceRefresh: true }));
-    }
+    const init: RequestInit = {
+      method,
+      headers: body !== undefined ? { 'content-type': 'application/json' } : {},
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    };
+    const url = `${this.baseUrl}${path}`;
+    const res = auth ? await this.authorizedFetch(url, init) : await this.transport(url, init);
     return this.parse(res, responseSchema);
   }
 
@@ -207,16 +228,7 @@ export class SpacesClient {
     bytes: Uint8Array,
     headers: Record<string, string>,
   ): Promise<z.infer<S>> {
-    const send = async (token: string) =>
-      this.transport(`${this.baseUrl}${path}`, {
-        method: 'PUT',
-        headers: { authorization: `Bearer ${token}`, ...headers },
-        body: bytes as unknown as BodyInit,
-      });
-    let res = await send(await this.currentToken());
-    if (res.status === 401 && typeof this.token !== 'string') {
-      res = await send(await this.currentToken({ forceRefresh: true }));
-    }
+    const res = await this.authorizedFetch(`${this.baseUrl}${path}`, { method: 'PUT', headers, body: bytes as unknown as BodyInit });
     return this.parse(res, responseSchema);
   }
 
@@ -499,14 +511,7 @@ export class SpacesClient {
    * follows the redirect, so this client never knows which driver served it.
    */
   async fetchBlob(spaceId: string, hash: string): Promise<{ bytes: Uint8Array; mime: string }> {
-    const send = async (token: string) =>
-      this.transport(`${this.baseUrl}${this.space(spaceId, `/blobs/${hash}`)}`, {
-        headers: { authorization: `Bearer ${token}` },
-      });
-    let res = await send(await this.currentToken());
-    if (res.status === 401 && typeof this.token !== 'string') {
-      res = await send(await this.currentToken({ forceRefresh: true }));
-    }
+    const res = await this.authorizedFetch(`${this.baseUrl}${this.space(spaceId, `/blobs/${hash}`)}`);
     if (!res.ok) {
       const parsed = ((await res.json().catch(() => undefined)) ?? {}) as Partial<SpacesApiError>;
       throw new SpacesRequestError(res.status, {

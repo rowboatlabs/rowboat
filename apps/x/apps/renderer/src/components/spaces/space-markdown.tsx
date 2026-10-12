@@ -34,6 +34,7 @@ import {
     rewriteFileLinks,
     rewriteMentionLinks,
     separateImageParagraphs,
+    isBlobAppUrl,
     HERE_APP_URL,
     ROWBOAT_APP_URL,
     type SpaceRefs,
@@ -587,7 +588,7 @@ type StreamdownComponents = NonNullable<ComponentProps<typeof Streamdown>['compo
 const spaceComponents: StreamdownComponents = {
     img: ({ src, alt }) => {
         const url = typeof src === 'string' ? src : ''
-        if (url.startsWith('app://space-blob/')) {
+        if (isBlobAppUrl(url)) {
             return <BlobImage src={url} alt={alt ?? ''} />
         }
         return <ExternalImage src={url} alt={alt ?? ''} />
@@ -762,7 +763,7 @@ function SpaceAnchor({ href, children }: ComponentProps<'a'>) {
             </button>
         )
     }
-    if (url.startsWith('app://space-blob/')) {
+    if (isBlobAppUrl(url)) {
         return <BlobLinkCard href={url}>{children}</BlobLinkCard>
     }
     const target = fileLinkTarget(url, refs, assets, nav)
