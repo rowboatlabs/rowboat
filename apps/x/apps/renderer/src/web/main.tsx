@@ -1,5 +1,8 @@
 import { StrictMode } from 'react'
 import '../index.css'
+// The theme (tokens, dark mode, base styles) lives in App.css, which the
+// desktop's App.tsx imports; the web app never loads App.tsx.
+import '../App.css'
 import { CALLBACK_PATH, completeSignIn } from './account'
 import { webChannelHandlers } from './handlers'
 import { installBrowserHost } from './host'
