@@ -840,6 +840,9 @@ importers:
       '@rowboat/spaces-protocol':
         specifier: link:../../../harbor/packages/protocol
         version: link:../../../harbor/packages/protocol
+      '@x/shared':
+        specifier: workspace:*
+        version: link:../shared
       zod:
         specifier: ^4.2.1
         version: 4.2.1
