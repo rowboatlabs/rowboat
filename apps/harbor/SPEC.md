@@ -141,7 +141,7 @@ Three shapes, one protocol; the client cannot tell them apart:
 
 ### Adding an org, joining a space — **Decided** (flow) / **Latitude** (mechanics)
 
-- **Add an org**: paste/open its address in Rowboat → OAuth journey (in-app browser or system browser) → tokens stored in the OS keychain (as GitHub/ChatGPT tokens are today) → the org's spaces appear.
+- **Add an org**: paste/open its address in Rowboat → OAuth journey (in-app browser or system browser) → tokens stored in the OS keychain (as GitHub/ChatGPT tokens are today) → the org's spaces appear. Amended 2026-10-09: the web app keeps them in its origin's storage, which no keychain guards, so its page allows no inline or foreign script (CSP) and Markdown it renders is sanitized.
 - **Join a space**: the protocol defines a standard **invite link** shape. Opening one triggers: resolve the org → OAuth if not yet signed in → membership per org policy → the space appears. The ceremony must be identical regardless of the IdP behind it; if every org joins differently, the product feels broken. In practice the invite link is the phrase people share — the tenant noun rarely needs to be spoken.
 - **Session expiry**: org sessions will lapse. The failure mode must be visible and gentle (an "org needs re-login" surface, mail-client style) — never silently failing automations.
 

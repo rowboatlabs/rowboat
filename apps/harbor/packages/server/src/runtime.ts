@@ -38,6 +38,8 @@ export interface OrgRuntimeInput {
   consentPublishableKey?: string;
   /** Upload cap for the raw-bytes blob route (default 100MB). */
   maxBlobBytes?: number;
+  /** Browser origins allowed to call the render face cross-origin (cors.ts). */
+  webOrigins?: readonly string[];
 }
 
 export interface OrgRuntime {
@@ -82,6 +84,7 @@ export async function buildOrgRuntime(input: OrgRuntimeInput): Promise<OrgRuntim
       auth,
       ...(input.consentPublishableKey && issuer ? { consent: { issuer, publishableKey: input.consentPublishableKey } } : {}),
       ...(input.maxBlobBytes !== undefined ? { maxBlobBytes: input.maxBlobBytes } : {}),
+      ...(input.webOrigins ? { webOrigins: input.webOrigins } : {}),
     }).fetch,
   );
   return {

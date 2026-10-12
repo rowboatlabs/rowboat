@@ -1,4 +1,5 @@
 import { invokeSpace } from '@/lib/spaces-invoke'
+import { LOCAL_RUNTIME } from '@/lib/feature-flags'
 import { SearchMenu } from '@/components/search-menu'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
@@ -364,7 +365,8 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     // --- slash commands ------------------------------------------------------
     // "/name" (no space yet) filters the menu; "/name args" pins the matched
     // command's usage hint above the box; Enter runs it via send().
-    const allCommands: CommandEntry[] = [ASK_COMMAND, ...commands]
+    // /ask is your own Rowboat, which runs on your machine (LOCAL_RUNTIME).
+    const allCommands: CommandEntry[] = LOCAL_RUNTIME ? [ASK_COMMAND, ...commands] : commands
     const cmdMenuMatch = /^\/([a-zA-Z]*)$/.exec(draft)
     const cmdQuery = cmdMenuMatch?.[1]?.toLowerCase() ?? null
     const cmdCandidates = cmdQuery !== null ? allCommands.filter((c) => c.name.startsWith(cmdQuery)) : []
@@ -950,17 +952,19 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                                 <BarChart3 className="size-4" />
                             </button>
                         )}
-                        <button
-                            type="button"
-                            onClick={insertRowboatChip}
-                            title="Address your Rowboat — it acts only when asked"
-                            className={cn(
-                                'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs',
-                                mentioned ? 'bg-foreground text-background' : 'bg-muted text-foreground/80 hover:bg-accent',
-                            )}
-                        >
-                            @rowboat
-                        </button>
+                        {LOCAL_RUNTIME && (
+                            <button
+                                type="button"
+                                onClick={insertRowboatChip}
+                                title="Address your Rowboat — it acts only when asked"
+                                className={cn(
+                                    'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs',
+                                    mentioned ? 'bg-foreground text-background' : 'bg-muted text-foreground/80 hover:bg-accent',
+                                )}
+                            >
+                                @rowboat
+                            </button>
+                        )}
                         {autoRoute && (
                             <>
                                 <button

@@ -1,4 +1,5 @@
 import { invokeSpace } from '@/lib/spaces-invoke'
+import { LOCAL_RUNTIME } from '@/lib/feature-flags'
 import { SpaceAccessContext, useSpaceAccess, canActInSpace } from '@/lib/spaces-access'
 import { useSpaceDirectory, updateDirectoryMembership, loadSpaceDirectory } from '@/hooks/use-space-directory'
 import { SpaceBrowser } from '@/components/spaces/space-browser'
@@ -1139,9 +1140,11 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                         <DropdownMenuItem disabled={!member} onClick={markAllRead}>
                             <Check className="size-3.5 mr-2" /> Mark all read
                         </DropdownMenuItem>
-                        <DropdownMenuItem disabled={!member} onClick={() => setScheduledOpen(true)}>
-                            <Clock className="size-3.5 mr-2" /> Scheduled
-                        </DropdownMenuItem>
+                        {LOCAL_RUNTIME && (
+                            <DropdownMenuItem disabled={!member} onClick={() => setScheduledOpen(true)}>
+                                <Clock className="size-3.5 mr-2" /> Scheduled
+                            </DropdownMenuItem>
+                        )}
                     </DropdownMenuContent>
                 </DropdownMenu>
             </header>

@@ -39,6 +39,8 @@ declare global {
     };
     featureFlags?: {
       spaces: boolean;
+      /** False in the browser build: no core runs beside the page (src/web/host.ts). */
+      localRuntime?: boolean;
     };
   }
 }
