@@ -17,7 +17,7 @@ const read = (file: string) => readFileSync(resolve(HARBOR, file), 'utf8');
 /** GitHub's heading → anchor rule, for our headings: markdown stripped, lowercased, punctuation dropped, spaces to hyphens. */
 function anchorsOf(markdown: string): Set<string> {
   const anchors = new Set<string>();
-  for (const line of markdown.split('\n')) {
+  for (const line of markdown.split(/\r?\n/)) {
     const heading = /^#{1,6}\s+(.*)$/.exec(line);
     if (!heading) continue;
     const text = heading[1]!.replace(/[*_`]/g, '').trim().toLowerCase();

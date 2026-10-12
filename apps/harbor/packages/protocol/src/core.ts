@@ -86,9 +86,10 @@ export const AGENT_PAIRS: ReadonlyArray<{ kind: string; connection: string }> = 
   // Integrations (2026-10-03): the service's own API, called on a command, its kind and connection one name.
   { kind: 'posthog', connection: 'posthog' },
   { kind: 'cal', connection: 'cal' },
+  { kind: 'attio', connection: 'attio' },
 ];
 /** Connections whose connector Harbor runs, calling the platform with a credential it holds (spec §8 Connectors). */
-export const HARBOR_RUN_CONNECTIONS: readonly string[] = ['replicas', 'agent37', 'conductor', 'posthog', 'cal'];
+export const HARBOR_RUN_CONNECTIONS: readonly string[] = ['replicas', 'agent37', 'conductor', 'posthog', 'cal', 'attio'];
 /**
  * Connections whose agent is one instance on the platform (2026-10-05): the
  * agent is added with it, and Harbor checks the instance runs the agent's kind.

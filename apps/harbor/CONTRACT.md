@@ -14,6 +14,8 @@
 
 How the server is built — modules, invariants, the slice a capability cuts through — is [AGENTS.md](./AGENTS.md). This section records what the wire *means*, settled while building; every entry is dated.
 
+- **Attio credentials** (`addAgent`, `setAgentCredential` — 2026-10-12, [spec §8](./SPEC.md#8-agents-in-spaces)). The supported pair `attio` / `attio` uses the existing credential-bearing agent routes. Add and replacement validate the trimmed key against `GET /v2/self`: HTTP 200 with `active: false` is a refusal. An active token must grant `object_configuration:read` and `record_permission:read` (the corresponding `read-write` scopes also suffice). When scope metadata is absent, a one-record company query must succeed, even if it returns no records. Invalid credentials or unreadable responses return `invalid_request`; a failed replacement preserves the existing credential. Secrets use the existing sealed storage and owner-only replacement rules. Additive; no new route or schema field.
+
 ### Open spaces separate reading from acting (2026-09-23, spec §5)
 
 - **Visibility and migration.** `Space.visibility` is `private | open`, defaulting to private for old payloads and creation requests (`createSpace` / `create_space`); migration 023 preserves existing spaces as private, and the database pins DMs to private.

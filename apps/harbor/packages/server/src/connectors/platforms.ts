@@ -3,6 +3,7 @@ import type { ActorCtx } from '../core/kernel.js';
 import type { CredentialTarget } from '../core/agents.js';
 import type { HarborService } from '../service.js';
 import { agent37Platform } from './agent37/index.js';
+import { attioPlatform } from './attio/index.js';
 import { calPlatform } from './cal/index.js';
 import { conductorPlatform } from './conductor/index.js';
 import { jevPlatform } from './jev/index.js';
@@ -76,6 +77,7 @@ export const PLATFORMS: Record<string, ConnectorPlatform> = {
   conductor: conductorPlatform(),
   posthog: posthogPlatform(),
   cal: calPlatform(),
+  attio: attioPlatform(),
   [BUILT_IN_CONNECTION]: jevPlatform(),
 };
 
