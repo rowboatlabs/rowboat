@@ -10,6 +10,7 @@ import { LlmModelConfig, LlmProvider } from "@x/shared/dist/models.js";
 import z from "zod";
 import { getGatewayProvider } from "./gateway.js";
 import { getCodexProvider } from "./codex.js";
+import { getAntigravityProvider } from "./antigravity.js";
 import { getDefaultModelAndProvider, resolveProviderConfig } from "./defaults.js";
 import { getChatModelIds } from "./models-dev.js";
 import { withUseCase } from "../analytics/use_case.js";
@@ -84,6 +85,8 @@ export function createProvider(config: z.infer<typeof Provider>): ProviderV4 {
             return getGatewayProvider();
         case "codex":
             return getCodexProvider();
+        case "antigravity":
+            return getAntigravityProvider();
         default:
             throw new Error(`Unsupported provider flavor: ${config.flavor}`);
     }
