@@ -9,6 +9,8 @@ import {
     ZCreateAuthConfigResponse,
     ZCreateConnectedAccountRequest,
     ZCreateConnectedAccountResponse,
+    ZCreateLinkRequest,
+    ZCreateLinkResponse,
     ZDeleteOperationResponse,
     ZErrorResponse,
     ZExecuteActionRequest,
@@ -236,15 +238,48 @@ export async function createAuthConfig(
 }
 
 /**
- * Create a connected account
+ * Create a link session for a Composio-managed OAuth account (2026-10-13, #896).
+ */
+export async function createConnectedAccountLink(
+    request: z.infer<typeof ZCreateLinkRequest>
+): Promise<z.infer<typeof ZCreateLinkResponse>> {
+    return composioApiCall(ZCreateLinkResponse, "/connected_accounts/link", {}, {
+        method: 'POST',
+        body: JSON.stringify(request),
+    });
+}
+
+/**
+ * Create a connected account (2026-10-13, #896).
+ * For Composio-managed OAuth configs, uses POST /connected_accounts/link (Composio Connect Link)
+ * as required by Composio API v3, mapping connected_account_id and redirect_url for downstream consumers.
  */
 export async function createConnectedAccount(
     request: z.infer<typeof ZCreateConnectedAccountRequest>
 ): Promise<z.infer<typeof ZCreateConnectedAccountResponse>> {
-    return composioApiCall(ZCreateConnectedAccountResponse, "/connected_accounts", {}, {
-        method: 'POST',
-        body: JSON.stringify(request),
+    const linkResponse = await createConnectedAccountLink({
+        auth_config_id: request.auth_config.id,
+        user_id: request.connection.user_id,
+        callback_url: request.connection.callback_url,
     });
+
+    const connectedAccountId = linkResponse.connected_account_id || linkResponse.connectedAccountId || linkResponse.id;
+    const redirectUrl = linkResponse.redirect_url || linkResponse.redirectUrl;
+
+    if (!connectedAccountId) {
+        throw new Error('Composio link response missing connected_account_id');
+    }
+
+    return {
+        id: connectedAccountId,
+        connectionData: {
+            authScheme: 'OAUTH2',
+            val: {
+                status: 'INITIALIZING',
+                ...(redirectUrl ? { redirectUrl } : {}),
+            },
+        },
+    };
 }
 
 /**
