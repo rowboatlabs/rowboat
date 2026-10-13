@@ -29,6 +29,7 @@ describe('schema migrations', () => {
       await migrate(db);
       await db.query(`alter table reactions drop column stream_offset`);
       await db.query(`delete from schema_migrations where id = '021-reaction-read-offsets'`);
+      await db.query(`insert into spaces (id, name, created_at) values ('space', 'Space', '2026-09-15T10:00:00Z')`);
       const by = { memberId: 'reader', actingMode: 'direct' };
       await db.query(`insert into reactions (space_id, message_id, emoji, member_id, attribution, at)
         values ('space', 'message', '✅', 'reader', $1::jsonb, '2026-09-15T10:00:00Z')`, [JSON.stringify(by)]);
@@ -73,6 +74,8 @@ describe('schema migrations', () => {
     // The legacy stream, a marker-anchored thread (pre-004 style, with the
     // machine COPY of the parent as its seed), a first-line-titled standalone
     // topic (an accident of the reply gesture), and an explicitly-renamed one.
+    // Its space: 039 drops rows whose space does not exist (2026-10-13).
+    await db.query(`insert into spaces (id, name, created_at) values ('s1', 'Roadboard', '2026-08-20T09:00:00Z')`);
     await topic('t-gen', 'messages', '2026-08-20T09:00:00Z');
     await topic('t-thread-a', 'The parent text', '2026-08-20T10:01:00Z');
     await topic('t-standalone', 'standalone opener', '2026-08-20T10:02:00Z');
