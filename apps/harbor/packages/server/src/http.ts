@@ -242,6 +242,18 @@ export function buildHttpApp(deps: {
     return reply(c, routes.renameSpace.response, { space: await service.renameSpace(actor(c), spaceId, input) });
   });
 
+  app.post(routes.archiveSpace.path, async (c) => {
+    const { spaceId } = parseWith(routes.archiveSpace.params, c.req.param());
+    const input = await body(c, routes.archiveSpace.request);
+    return reply(c, routes.archiveSpace.response, { space: await service.archiveSpace(actor(c), spaceId, input) });
+  });
+
+  app.post(routes.unarchiveSpace.path, async (c) => {
+    const { spaceId } = parseWith(routes.unarchiveSpace.params, c.req.param());
+    const input = await body(c, routes.unarchiveSpace.request);
+    return reply(c, routes.unarchiveSpace.response, { space: await service.unarchiveSpace(actor(c), spaceId, input) });
+  });
+
   app.post(routes.openDirect.path, async (c) => {
     const input = await body(c, routes.openDirect.request);
     return reply(c, routes.openDirect.response, await service.openDirect(actor(c), input.memberId));

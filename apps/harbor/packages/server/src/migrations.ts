@@ -967,6 +967,12 @@ export const MIGRATIONS: Migration[] = [
     id: '037-member-deactivated-at',
     statements: [`alter table members add column if not exists deactivated_at text`],
   },
+  {
+    // Archive is a space state (spec §6, 2026-09-22; built 2026-10-13): a
+    // flag on the row, nothing else in storage. Every existing space is live.
+    id: '038-archive-spaces',
+    statements: [`alter table spaces add column if not exists archived boolean not null default false`],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

@@ -172,6 +172,22 @@ export const renameSpace = tool({
   output: z.object({ space: Space }),
 });
 
+export const archiveSpace = tool({
+  name: 'archive_space',
+  description:
+    'Archive a shared space (admins only; DMs refuse). An archived space stays readable but ' +
+    'refuses new messages, files and members until unarchived. Only when your person asked for it.',
+  input: z.object({ spaceId: SpaceId }),
+  output: z.object({ space: Space }),
+});
+
+export const unarchiveSpace = tool({
+  name: 'unarchive_space',
+  description: 'Unarchive a shared space so it accepts writes again (admins only). A live space is a no-op.',
+  input: z.object({ spaceId: SpaceId }),
+  output: z.object({ space: Space }),
+});
+
 export const addMembers = tool({
   name: 'add_members',
   description:
@@ -668,6 +684,8 @@ export const mcpTools = [
   openDirect,
   createSpace,
   renameSpace,
+  archiveSpace,
+  unarchiveSpace,
   addMembers,
   leaveSpace,
   createInvite,
