@@ -1,9 +1,11 @@
-import { harborChannelHandlers, SpaceSubscriptions } from '@x/spaces-client'
+import { harborChannelHandlers, parseInviteLink, SpacesClient, SpaceSubscriptions } from '@x/spaces-client'
 import { blobAppUrl } from '@/lib/spaces-presentation'
 import type { ipc, spaces } from '@x/shared'
 import { beginSignIn, getAccessToken, hasSession } from './account'
 import { APEX_HOST, APEX_URL, DEV_HARBOR } from './config'
+import { inviteOpenPath } from './links'
 import * as orgs from './orgs'
+import { harborSession } from './session'
 
 // The Spaces channels, served in the tab: the shared table for everything
 // that is one Harbor call, and the few the browser answers its own way. What
@@ -43,6 +45,20 @@ function blobDownloadUrl(orgId: string, spaceId: string, hash: string, name: str
     return url.toString()
 }
 
+/**
+ * An invite to an org on this deployment (or the dev Harbor): the only orgs
+ * the web app can reach, since its page connects nowhere else (CSP) and only
+ * they take its session. A self-hosted org's invite opens in the desktop app.
+ */
+function deploymentInvite(url: string): { baseUrl: string; token: string } {
+    const parsed = parseInviteLink(url)
+    if (!parsed) throw new Error('That isn’t an invite link. It looks like https://<server>/join/<code>.')
+    const host = new URL(parsed.baseUrl).host
+    const ours = DEV_HARBOR ? parsed.baseUrl === new URL(DEV_HARBOR).origin : host.endsWith(`.${APEX_HOST}`)
+    if (!ours) throw new Error(`This invite is for ${host}, which opens in the Rowboat desktop app.`)
+    return parsed
+}
+
 export function webChannelHandlers(emit: (event: spaces.SpacesBusEvent) => void): Handlers {
     const subscriptions = new SpaceSubscriptions({ getLive: orgs.getLive, onRuntimeReset: orgs.onRuntimeReset })
     orgs.onMemberFrame((orgId, frame) => emit({ orgId, frame }))
@@ -56,6 +72,22 @@ export function webChannelHandlers(emit: (event: spaces.SpacesBusEvent) => void)
         'spaces:signInRowboat': async () => beginSignIn(here()),
         'spaces:signInOrg': async () => beginSignIn(here()),
         'spaces:apexInfo': async () => ({ apexDomain: DEV_HARBOR ? null : APEX_HOST }),
+
+        // Invites (2026-10-13): read pre-auth, accepted on the session cookie,
+        // which every org on the deployment takes. Joining signed out signs in
+        // first and comes back to the same invite (links.ts).
+        'spaces:resolveInviteLink': async (args) => {
+            const { baseUrl, token } = deploymentInvite(args.url)
+            return { baseUrl, resolved: await new SpacesClient({ baseUrl, token: '' }).resolveInvite(token) }
+        },
+        'spaces:joinInvite': async (args) => {
+            const { baseUrl, token } = deploymentInvite(args.url)
+            if (!DEV_HARBOR && !hasSession()) return beginSignIn(inviteOpenPath(new URL(baseUrl).host, token))
+            const { space } = await new SpacesClient({ baseUrl, token: harborSession }).acceptInvite(token)
+            const org = (await orgs.loadOrgs()).find((o) => o.baseUrl === baseUrl)
+            if (!org) throw new Error(`You joined ${space.name}, but its server isn’t listed yet. Reload to see it.`)
+            return { org, space }
+        },
 
         'spaces:createOrg': async (args) => {
             const res = await fetch(`${APEX_URL}/v1/orgs`, {
