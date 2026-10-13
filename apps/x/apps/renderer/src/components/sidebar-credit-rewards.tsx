@@ -4,6 +4,7 @@ import { useCallback, useState } from "react"
 import { Check, ChevronRight, Copy, Gift, UserPlus, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Popover, PopoverArrow, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { useSidebar } from "@/components/ui/sidebar"
 import { CREDIT_ACTIVITY_ICONS, useCreditsState } from "@/hooks/use-credits-state"
 import { formatCreditsAsDollars, type CreditActivityCode } from "@x/shared/dist/credits.js"
 
@@ -35,6 +36,9 @@ export function SidebarCreditRewards({
   const state = useCreditsState()
   const [dismissed, setDismissed] = useState(() => localStorage.getItem(DISMISSED_KEY) === "1")
   const [open, setOpen] = useState(false)
+  // 2026-10-07: hidden while the sidebar is collapsed, since its anchor slides
+  // off-screen and the popover would be cut off.
+  const sidebarCollapsed = useSidebar().state === "collapsed"
   const [copied, setCopied] = useState(false)
 
   const handleDismiss = useCallback(() => {
@@ -81,7 +85,7 @@ export function SidebarCreditRewards({
 
   return (
     <div className="px-3 pt-2">
-      <Popover open={open} onOpenChange={setOpen}>
+      <Popover open={open && !sidebarCollapsed} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <button
             type="button"
