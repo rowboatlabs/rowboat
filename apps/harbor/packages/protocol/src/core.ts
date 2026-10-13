@@ -200,6 +200,12 @@ export const Space = z.object({
    * and by the member's own agent.
    */
   participants: z.array(MemberId).min(1).optional(),
+  /**
+   * Archived (spec §6, built 2026-10-13): refuses writes, stays readable.
+   * Listings still carry it — the client files it under Archived. Old
+   * payloads and every existing space are live. A DM is never archived.
+   */
+  archived: z.boolean().default(false),
 });
 export type Space = z.infer<typeof Space>;
 

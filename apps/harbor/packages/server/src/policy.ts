@@ -67,6 +67,26 @@ export function canRenameSpace(space: Space): Decision {
 }
 
 /**
+ * Archive and unarchive are admin acts on a shared space (spec §4 Roles and
+ * §6, built 2026-10-13). A DM has no admin path into it, so it never archives.
+ */
+export function canArchiveSpace(actor: Member, space: Space, act: 'archive' | 'unarchive'): Decision {
+  if (space.kind === 'direct') return { code: 'invalid_request', message: `a direct message cannot be ${act}d` };
+  if (actor.role === 'admin') return null;
+  return { code: 'forbidden', message: `only an admin can ${act} a space` };
+}
+
+/**
+ * An archived space refuses every write that would add to it (spec §6,
+ * 2026-10-13). Asked by the space lock for every member's act; leaving and
+ * unarchiving opt out, and personal state (read marks, follows) never asks.
+ */
+export function canWriteSpace(space: Space): Decision {
+  if (!space.archived) return null;
+  return { code: 'forbidden', message: 'this space is archived — an admin can unarchive it' };
+}
+
+/**
  * A group chat (spec §4, 2026-10-07): an org with one shared space and no
  * DMs. One answer for every member — the org's count, not anyone's
  * listing — so a group is a chat, or a workspace, for everyone at once.

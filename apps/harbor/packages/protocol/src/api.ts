@@ -344,6 +344,28 @@ export const routes = {
     request: z.object({ name: z.string().min(1).max(128), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
     response: z.object({ space: Space }),
   },
+  /**
+   * Archive and unarchive a shared space (spec §6, 2026-10-13): an admin
+   * act, refused on a DM. An archived space refuses every write that would
+   * add to it — messages, reactions, topics, files, joins, invites — with
+   * `forbidden`; reads, read marks and leaving still work. Archiving an
+   * archived space (or unarchiving a live one) is a no-op with no event.
+   * Members learn by `space_archived` / `space_unarchived` on the log.
+   */
+  archiveSpace: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/archive',
+    params: z.object({ spaceId: SpaceId }),
+    request: z.object({ actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+    response: z.object({ space: Space }),
+  },
+  unarchiveSpace: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/unarchive',
+    params: z.object({ spaceId: SpaceId }),
+    request: z.object({ actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+    response: z.object({ space: Space }),
+  },
   listMembers: {
     method: 'GET',
     path: '/v1/spaces/:spaceId/members',

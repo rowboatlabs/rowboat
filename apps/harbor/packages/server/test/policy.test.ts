@@ -10,6 +10,7 @@ import {
   canStopInvocation,
   invocationRefusal,
   canAccessSpace,
+  canArchiveSpace,
   canOpenDirect,
   isGroupChat,
   canAddAgent,
@@ -23,6 +24,7 @@ import {
   canChangeMembership,
   canRenameSpace,
   canWrite,
+  canWriteSpace,
   enforce,
   isAuthor,
 } from '../src/policy.js';
@@ -32,8 +34,8 @@ import {
 // prove the service ASKS.
 
 const NOW = '2026-09-21T10:00:00.000Z';
-const shared: Space = { id: 'S', name: 'Roadboard', createdAt: NOW, kind: 'shared', visibility: 'private' };
-const direct: Space = { id: 'D', name: 'Direct message', createdAt: NOW, kind: 'direct', visibility: 'private', participants: ['a', 'b'] };
+const shared: Space = { id: 'S', name: 'Roadboard', createdAt: NOW, kind: 'shared', visibility: 'private', archived: false };
+const direct: Space = { id: 'D', name: 'Direct message', createdAt: NOW, kind: 'direct', visibility: 'private', participants: ['a', 'b'], archived: false };
 const membership: Membership = { spaceId: 'S', memberId: 'a', joinedAt: NOW };
 const byA = { author: { memberId: 'a', actingMode: 'direct' } } as Message;
 
@@ -76,6 +78,18 @@ describe('policy', () => {
     expect(canJoinSpace(open)).toBeNull();
     expect(canJoinSpace(shared)).toMatchObject({ code: 'forbidden' });
     expect(canJoinSpace({ ...direct, visibility: 'open' })).toMatchObject({ code: 'forbidden' });
+  });
+
+  it('archive and unarchive: an admin on a shared space; a DM never (2026-10-13)', () => {
+    const admin = { role: 'admin' } as Member;
+    const member = { role: 'member' } as Member;
+    expect(canArchiveSpace(admin, shared, 'archive')).toBeNull();
+    expect(canArchiveSpace(admin, shared, 'unarchive')).toBeNull();
+    expect(canArchiveSpace(member, shared, 'archive')).toMatchObject({ code: 'forbidden' });
+    expect(canArchiveSpace(member, shared, 'unarchive')).toMatchObject({ code: 'forbidden' });
+    expect(canArchiveSpace(admin, direct, 'archive')).toMatchObject({ code: 'invalid_request' });
+    expect(canWriteSpace(shared)).toBeNull();
+    expect(canWriteSpace({ ...shared, archived: true })).toMatchObject({ code: 'forbidden' });
   });
 
   it('canWrite: read-only orgs refuse writes with read_only_limit', () => {

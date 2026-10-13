@@ -50,6 +50,7 @@ describe('agent face (MCP)', () => {
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
       'add_members',
+      'archive_space',
       'asset_history',
       'browse_spaces',
       'create_asset',
@@ -83,6 +84,7 @@ describe('agent face (MCP)', () => {
       'restore_asset',
       'search_space',
       'stop_invocation',
+      'unarchive_space',
       'vote_poll',
       'whoami',
     ]);

@@ -12,7 +12,7 @@ import {
 import { randomBytes } from 'node:crypto';
 import type { z } from 'zod';
 import { HarborError } from '../errors.js';
-import { canBind, canChangeMembership, canJoinSpace, canOpenDirect, canReachMember, canRenameSpace, canSignIn, enforce, isGroupChat } from '../policy.js';
+import { canArchiveSpace, canBind, canChangeMembership, canJoinSpace, canOpenDirect, canReachMember, canRenameSpace, canSignIn, canWriteSpace, enforce, isGroupChat } from '../policy.js';
 import { DIRECT_SPACE_NAME, directKeyFor, type PushLevel, type StoredEvent } from '../store.js';
 import { Kernel, type ActorCtx, type BindIdentity } from './kernel.js';
 
@@ -31,6 +31,7 @@ function seedDisplayName(identity: BindIdentity): string {
 
 export type RenameSpaceInput = z.infer<Routes['renameSpace']['request']>;
 export type AddMembersInput = z.infer<Routes['addMembers']['request']>;
+export type ArchiveSpaceInput = z.infer<Routes['archiveSpace']['request']>;
 
 const DEFAULT_INVITE_HOURS = 24 * 7;
 
@@ -98,6 +99,7 @@ export class Spaces {
       enforce(canJoinSpace(space));
       const existing = await this.k.store.getMembership(spaceId, ctx.memberId);
       if (existing) return { space, membership: existing, created: false };
+      enforce(canWriteSpace(space)); // an archived space takes no new members (2026-10-13)
       this.k.guardWrite();
       const membership: Membership = { spaceId, memberId: ctx.memberId, joinedAt: this.k.now() };
       await this.k.store.putMembership(membership);
@@ -113,7 +115,7 @@ export class Spaces {
   async createSpace(ctx: ActorCtx, name: string, visibility: Space['visibility'] = 'private'): Promise<Space> {
     this.k.guardWrite();
     const now = this.k.now();
-    const space: Space = { id: this.k.ulid(), name, createdAt: now, kind: 'shared', visibility };
+    const space: Space = { id: this.k.ulid(), name, createdAt: now, kind: 'shared', visibility, archived: false };
     const wasGroupChat = await this.isGroupChat();
     await this.k.store.putSpace(space);
     const created = await this.k.locked(space.id, async () => {
@@ -158,6 +160,36 @@ export class Spaces {
   }
 
   /**
+   * Archive a shared space (spec §6, 2026-10-13): an admin act, in the
+   * renameSpace shape. The space lock then refuses every member's write
+   * (kernel.ts lockedAs); reads, read marks and leaving go on. Archiving an
+   * archived space is a no-op with no event.
+   */
+  async archiveSpace(ctx: ActorCtx, spaceId: string, input: ArchiveSpaceInput): Promise<Space> {
+    return this.setArchived(ctx, spaceId, input, true);
+  }
+
+  /** Unarchive: the same act reversed; a live space is a no-op with no event. */
+  async unarchiveSpace(ctx: ActorCtx, spaceId: string, input: ArchiveSpaceInput): Promise<Space> {
+    return this.setArchived(ctx, spaceId, input, false);
+  }
+
+  private async setArchived(ctx: ActorCtx, spaceId: string, input: ArchiveSpaceInput, archived: boolean): Promise<Space> {
+    const space = await this.k.requireMember(ctx, spaceId);
+    enforce(canArchiveSpace(await this.me(ctx), space, archived ? 'archive' : 'unarchive'));
+    this.k.guardWrite();
+    const by = this.k.attributionOf(ctx, input);
+    return this.k.lockedAs(ctx, spaceId, async () => {
+      const current = (await this.k.store.getSpace(spaceId)) ?? space;
+      if (current.archived === archived) return current; // idempotent, no event
+      const updated: Space = { ...current, archived };
+      await this.k.store.putSpace(updated);
+      await this.k.appendNext(spaceId, this.k.now(), { type: archived ? 'space_archived' : 'space_unarchived', space: updated, by });
+      return updated;
+    }, { archived: 'allow' });
+  }
+
+  /**
    * Direct messages (api.ts openDirect): get-or-create the one DM between
    * the caller and `otherMemberId`. Membership is written for both under the
    * new space's lock — two `joined` events are the whole membership history
@@ -187,7 +219,7 @@ export class Spaces {
     enforce(canOpenDirect(await this.isGroupChat()));
     this.k.guardWrite();
     const now = this.k.now();
-    const space: Space = { id: this.k.ulid(), name: DIRECT_SPACE_NAME, createdAt: now, kind: 'direct', visibility: 'private', participants };
+    const space: Space = { id: this.k.ulid(), name: DIRECT_SPACE_NAME, createdAt: now, kind: 'direct', visibility: 'private', participants, archived: false };
     try {
       await this.k.store.putSpace(space);
     } catch (err) {
@@ -288,7 +320,7 @@ export class Spaces {
       await this.k.store.deleteMembership(spaceId, ctx.memberId);
       await this.k.store.deleteReadMarks(spaceId, ctx.memberId);
       await this.k.appendNext(spaceId, at, { type: 'membership', membership, action: 'left' });
-    });
+    }, { archived: 'allow' }); // anyone may leave an archived space (2026-10-13)
     // Every connection the member holds ends its subscription to the space
     // (2026-09-22) — leave on the laptop, the phone stops receiving too.
     this.k.hub.publishToMember(ctx.memberId, { kind: 'space_removed', spaceId, by: ctx.memberId, at });
@@ -362,6 +394,7 @@ export class Spaces {
     return this.k.locked(spaceId, async () => {
       const existing = await this.k.store.getMembership(spaceId, ctx.memberId);
       if (existing) return { membership: existing, space }; // idempotent join
+      enforce(canWriteSpace((await this.k.store.getSpace(spaceId)) ?? space)); // an archived space takes no new members (2026-10-13)
       const membership: Membership = { spaceId, memberId: ctx.memberId, joinedAt: this.k.now() };
       await this.k.store.putMembership(membership);
       await this.k.appendNext(spaceId, membership.joinedAt, { type: 'membership', membership, action: 'joined' });

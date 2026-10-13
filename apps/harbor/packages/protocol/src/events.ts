@@ -125,6 +125,21 @@ export const SpaceEvent = z.discriminatedUnion('type', [
     space: Space,
     by: Attribution,
   }),
+  /**
+   * An admin archived or unarchived the space (api.ts archiveSpace,
+   * 2026-10-13) — the full row plus who did it, so clients move it in and
+   * out of their Archived list and the feed can render an attributed line.
+   */
+  z.object({
+    type: z.literal('space_archived'),
+    space: Space,
+    by: Attribution,
+  }),
+  z.object({
+    type: z.literal('space_unarchived'),
+    space: Space,
+    by: Attribution,
+  }),
 ]);
 export type SpaceEvent = z.infer<typeof SpaceEvent>;
 
