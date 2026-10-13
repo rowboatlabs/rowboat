@@ -10,6 +10,8 @@ let harbor: RunningHarbor;
 beforeAll(async () => {
   harbor = await startTestHarbor({
     orgName: 'Test Org',
+    // The web app the link landings offer beside the desktop app (2026-10-13).
+    webAppUrl: 'https://web.test/',
     // A second space: a one-space org is a group chat, where DMs are off (2026-10-07).
     seedSpaces: [{ name: 'Lobby', creator: 'ramnique' }],
     seedMembers: [
@@ -125,10 +127,12 @@ describe('spaces, invites, membership', () => {
     expect(html).toContain('Show HN draft');
     // The deep link names the org by address and carries the token — the app
     // rebuilds the https invite link from those two (spaces-navigation.ts).
-    expect(html).toContain(
-      `rowboat://open?type=spaces&org=${encodeURIComponent(harbor.service.org.address)}&invite=${encodeURIComponent(inv.body.token)}`,
-    );
+    const query = `type=spaces&org=${encodeURIComponent(harbor.service.org.address)}&invite=${encodeURIComponent(inv.body.token)}`;
+    expect(html).toContain(`rowboat://open?${query}`);
     expect(html).toContain('location.replace(');
+    // No app: the download, or the web app's /open on the same query.
+    expect(html).toContain('Download Rowboat');
+    expect(html).toContain(`href="https://web.test/open?${query.replaceAll('&', '&amp;')}"`);
 
     // A dead invite: says so, launches nothing.
     const stored = await harbor.store.getInvite(inv.body.token);
@@ -393,6 +397,9 @@ describe('feed: the stream, threads, and topic annotations', () => {
       expect(html).toContain('rowboat://open?type=spaces&');
       expect(html).toContain(expected);
       expect(html).not.toContain('Feed'); // never the space's name — nothing is looked up
+      // Slack's pattern (2026-10-13): the same query, on the web app's /open.
+      const deep = /location\.replace\("rowboat:\/\/open\?([^"]*)"\)/.exec(html)![1]!;
+      expect(html).toContain(`href="https://web.test/open?${deep.replaceAll('&', '&amp;')}"`);
     }
     // The one parser reads every one of them back.
     expect(parseOrgUrl(orgUrl(address))).toEqual({ kind: 'org', orgAddress: address });
@@ -405,6 +412,18 @@ describe('feed: the stream, threads, and topic annotations', () => {
     expect(parseOrgUrl(`https://${address}/join/tok`)).toBeNull();
     expect(parseOrgUrl(`https://${address}/s/not-a-ulid`)).toBeNull();
     expect(parseOrgUrl('not a url')).toBeNull();
+  });
+
+  it('a hand-off page offers no browser when the deployment names no web app', async () => {
+    const bare = await startTestHarbor({ seedMembers: [{ id: 'ramnique', displayName: 'Ramnique' }] });
+    try {
+      const html = await (await fetch(`${bare.url}/`)).text();
+      expect(html).toContain('rowboat://open?type=spaces&');
+      expect(html).toContain('Download Rowboat');
+      expect(html).not.toContain('in your browser');
+    } finally {
+      await bare.close();
+    }
   });
 
   it('a new space has an empty stream and no topics — the stream is not an object', async () => {

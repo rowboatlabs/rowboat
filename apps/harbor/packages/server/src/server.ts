@@ -48,6 +48,8 @@ export interface HarborOptions {
   maxBlobBytes?: number;
   /** Browser origins allowed to call the org cross-origin (cors.ts). */
   webOrigins?: readonly string[];
+  /** The Spaces web app, offered by the org's link landings (http.ts). */
+  webAppUrl?: string;
   /** Live-face heartbeat cadence (default 25s). A test knob; production keeps the default. */
   liveHeartbeatMs?: number;
   /** Test knob: unsent-bytes ceiling before a stalled socket is terminated (ws.ts). */
@@ -103,6 +105,7 @@ export async function startHarbor(options: HarborOptions): Promise<RunningHarbor
     ...(options.consent ? { consentPublishableKey: options.consent.publishableKey } : {}),
     ...(options.maxBlobBytes !== undefined ? { maxBlobBytes: options.maxBlobBytes } : {}),
     ...(options.webOrigins ? { webOrigins: options.webOrigins } : {}),
+    ...(options.webAppUrl ? { webAppUrl: options.webAppUrl } : {}),
   });
   await seedOrg(runtime.service, store, options);
 
