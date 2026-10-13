@@ -14,6 +14,7 @@ import { useModels } from "@/hooks/use-models"
 import { useRowboatConfig } from "@/hooks/use-rowboat-config"
 import { useChatGPT } from "@/hooks/useChatGPT"
 import {
+  AimlapiIcon,
   AnthropicIcon,
   GenericApiIcon,
   GoogleIcon,
@@ -29,7 +30,7 @@ import {
 // Providers manage CREDENTIALS only — model choices live in
 // ModelSelectionSection above this section.
 
-type ByokFlavor = "openai" | "anthropic" | "google" | "openrouter" | "aigateway" | "ollama" | "openai-compatible"
+type ByokFlavor = "openai" | "anthropic" | "google" | "openrouter" | "aigateway" | "aimlapi" | "ollama" | "openai-compatible"
 
 interface ProviderMeta {
   id: string
@@ -60,6 +61,10 @@ const BYOK_CATALOG: Array<{ flavor: ByokFlavor; name: string; tagline: string; i
   { flavor: "ollama", name: "Ollama", tagline: "Run models locally", icon: OllamaIcon, needsKey: false, needsEndpoint: true },
   { flavor: "openrouter", name: "OpenRouter", tagline: "One key, many models", icon: OpenRouterIcon, needsKey: true, needsEndpoint: false },
   { flavor: "aigateway", name: "AI Gateway (Vercel)", tagline: "Vercel's AI Gateway", icon: VercelIcon, needsKey: true, needsEndpoint: false },
+  // manualModel: the catalog is ~350 chat models deep and its order is the
+  // provider's, so auto-select (first listed) is close to arbitrary — the
+  // optional box lets someone name the model they came for at connect time.
+  { flavor: "aimlapi", name: "aimlapi.com", tagline: "One key, 350+ chat models", icon: AimlapiIcon, needsKey: true, needsEndpoint: false, manualModel: true },
   { flavor: "openai-compatible", name: "OpenAI-Compatible", tagline: "Custom OpenAI-compatible endpoint", icon: GenericApiIcon, needsKey: true, optionalKey: true, needsEndpoint: true, manualModel: true },
 ]
 
@@ -67,6 +72,7 @@ const DEFAULT_BASE_URLS: Partial<Record<ByokFlavor, string>> = {
   ollama: "http://localhost:11434",
   "openai-compatible": "http://localhost:1234/v1",
   aigateway: "https://ai-gateway.vercel.sh/v1",
+  aimlapi: "https://api.aimlapi.com/v1",
 }
 
 function flavorMeta(flavor: string) {
