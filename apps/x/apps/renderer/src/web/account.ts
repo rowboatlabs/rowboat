@@ -78,6 +78,22 @@ window.addEventListener('storage', (event) => {
     }
 })
 
+/**
+ * The signed-in account's email, from the access token's claims. For showing
+ * who you are only: Harbor verifies the token, and nothing here trusts it.
+ */
+export function sessionEmail(): string | null {
+    const payload = readSession()?.tokens.access.split('.')[1]
+    if (!payload) return null
+    try {
+        const bytes = Uint8Array.from(atob(payload.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0))
+        const claims = JSON.parse(new TextDecoder().decode(bytes)) as { email?: unknown }
+        return typeof claims.email === 'string' ? claims.email : null
+    } catch {
+        return null
+    }
+}
+
 /** A local dev Harbor needs no session: its tokens are dev tokens. */
 export function hasSession(): boolean {
     return !!DEV_HARBOR || readSession() !== null
