@@ -3,6 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { WorkDir } from '../config/config.js';
 import { OutlookClientFactory } from './outlook-client-factory.js';
+import { outlookRateLimitCooldownMs } from './outlook-rate-limit.js';
 import { serviceLogger } from '../services/service_logger.js';
 import { limitEventItems } from './limit_event_items.js';
 import { createEvent } from '../events/producer.js';
@@ -454,7 +455,13 @@ async function syncCalendarWindow(): Promise<void> {
     }
 }
 
-async function performSync(): Promise<void> {
+export async function performSync(): Promise<void> {
+    const cooldownMs = outlookRateLimitCooldownMs();
+    if (cooldownMs > 0) {
+        console.log(`[Outlook Calendar] rate-limit cooldown active — skipping sync for another ${Math.ceil(cooldownMs / 1000)}s`);
+        return;
+    }
+
     try {
         if (!fs.existsSync(SYNC_DIR)) fs.mkdirSync(SYNC_DIR, { recursive: true });
         if (!(await OutlookClientFactory.getAccessToken())) {
@@ -484,6 +491,11 @@ export async function init() {
             console.error('[Outlook Calendar] Error in main loop:', error);
         }
 
-        await interruptibleSleep(SYNC_INTERVAL_MS);
+        // An active rate-limit cooldown stretches the sleep to Microsoft Graph's
+        // own deadline (or our ladder wait) — without it the loop wakes every 30s
+        // mid-lockout, repeatedly slamming Graph and prolonging the lockout.
+        const cooldownMs = outlookRateLimitCooldownMs();
+        const sleepMs = Math.max(SYNC_INTERVAL_MS, cooldownMs > 0 ? cooldownMs + 1_000 : 0);
+        await interruptibleSleep(sleepMs);
     }
 }
