@@ -42,6 +42,8 @@ export interface OrgRuntimeInput {
   webOrigins?: readonly string[];
   /** The session cookie's Domain: the apex on a deployment. */
   sessionCookieDomain?: string;
+  /** The Spaces web app, which an org link opened in a browser offers beside the desktop app (http.ts, the landings). */
+  webAppUrl?: string;
 }
 
 export interface OrgRuntime {
@@ -88,6 +90,7 @@ export async function buildOrgRuntime(input: OrgRuntimeInput): Promise<OrgRuntim
       ...(input.maxBlobBytes !== undefined ? { maxBlobBytes: input.maxBlobBytes } : {}),
       ...(input.webOrigins ? { webOrigins: input.webOrigins } : {}),
       ...(input.sessionCookieDomain ? { sessionCookieDomain: input.sessionCookieDomain } : {}),
+      ...(input.webAppUrl ? { webAppUrl: input.webAppUrl } : {}),
     }).fetch,
   );
   return {

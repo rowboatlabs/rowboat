@@ -76,6 +76,8 @@ export function buildHttpApp(deps: {
   webOrigins?: readonly string[];
   /** The session cookie's Domain: the apex on a deployment, so one cookie covers every org. */
   sessionCookieDomain?: string;
+  /** The Spaces web app, which a browser-opened org link offers beside the desktop app (the landings below). */
+  webAppUrl?: string;
 }): Hono<Env> {
   const { service, auth, consent } = deps;
   const maxBlobBytes = deps.maxBlobBytes ?? DEFAULT_MAX_BLOB_BYTES;
@@ -437,6 +439,15 @@ export function buildHttpApp(deps: {
     return reply(c, routes.acceptInvite.response, result);
   });
 
+  // Where a browser-opened link goes (2026-10-13, Slack's pattern): the
+  // desktop app, launched at once, else the web app when this Harbor names
+  // one. The web app's /open takes the deep link's query unchanged, so both
+  // resolve the link the same way (the renderer's parseSpacesLink).
+  const openers = (query: string): Openers => ({
+    deep: `rowboat://open?${query}`,
+    ...(deps.webAppUrl ? { web: `${deps.webAppUrl.replace(/\/$/, '')}/open?${query}` } : {}),
+  });
+
   // The invite link's landing (2026-09-15): a browser-opened /join/<token>
   // hands the invite into the app as rowboat://open?type=spaces&org=…&invite=…
   // — the same deep-link grammar as the org link landings below, the org
@@ -447,24 +458,19 @@ export function buildHttpApp(deps: {
     const token = c.req.param('token');
     const resolved = await service.resolveInvite(token);
     if (resolved.state !== 'ok') return c.html(invitePage({ state: resolved.state }), 410);
-    const deep = `rowboat://open?type=spaces&org=${encodeURIComponent(service.org.address)}&invite=${encodeURIComponent(token)}`;
-    return c.html(invitePage({ state: 'ok', space: resolved.space.name, org: resolved.org.name, invitedBy: resolved.invitedBy, deep }));
+    const query = `type=spaces&org=${encodeURIComponent(service.org.address)}&invite=${encodeURIComponent(token)}`;
+    return c.html(invitePage({ state: 'ok', space: resolved.space.name, org: resolved.org.name, invitedBy: resolved.invitedBy, ...openers(query) }));
   });
 
   // --- link landings ---------------------------------------------------------
   // Every org link (ids.ts grammar) opened in a browser lands here and is
-  // handed into the app as a rowboat:// deep link, the org named by its
-  // address. Nothing is looked up and nothing is rendered about the target,
-  // so a link says nothing to someone who cannot open it. The app itself
-  // intercepts these URLs before they ever reach a browser.
+  // handed on, the org named by its address. Nothing is looked up and nothing
+  // is rendered about the target, so a link says nothing to someone who
+  // cannot open it. The app itself intercepts these URLs before they ever
+  // reach a browser.
   const landing = (target: URLSearchParams) => {
     target.set('org', service.org.address);
-    const deep = `rowboat://open?type=spaces&${target.toString()}`;
-    return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Open in Rowboat</title>` +
-      `<style>body{font:15px/1.5 system-ui,sans-serif;margin:0;display:grid;place-items:center;min-height:100vh;color:#222;background:#fafafa}` +
-      `main{text-align:center;padding:2rem}a.b{display:inline-block;margin-top:1rem;padding:.6rem 1.1rem;border-radius:8px;background:#111;color:#fff;text-decoration:none}</style>` +
-      `<main><p>This link opens in Rowboat.</p><a class="b" href="${deep}">Open in Rowboat</a></main>` +
-      `<script>location.replace(${JSON.stringify(deep)})</script>`;
+    return landingPage(openers(`type=spaces&${target.toString()}`));
   };
   app.get('/', (c) => c.html(landing(new URLSearchParams())));
   app.get('/s/:spaceId', (c) => c.html(landing(new URLSearchParams({ spaceId: c.req.param('spaceId') }))));
@@ -758,28 +764,48 @@ function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!);
 }
 
+const PAGE_HEAD = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">`;
+const PAGE_STYLE =
+  `<style>body{font:15px/1.5 system-ui,sans-serif;margin:0;display:grid;place-items:center;min-height:100vh;color:#222;background:#fafafa}` +
+  `main{text-align:center;padding:2rem;max-width:26rem}h1{font-size:1.25rem;margin:0 0 .25rem}p{margin:.25rem 0}.m{color:#666}` +
+  `a.b{display:inline-block;margin-top:1rem;padding:.6rem 1.1rem;border-radius:8px;background:#111;color:#fff;text-decoration:none}` +
+  `.s{margin-top:1.25rem;font-size:13px;color:#666}.s+.s{margin-top:.25rem}.s a{color:inherit}</style>`;
+
+/** The desktop app's deep link, and the web app's address for the same link when the Harbor names one. */
+interface Openers {
+  deep: string;
+  web?: string;
+}
+
+/** Launch the desktop app at once; offer the download, and the web app. */
+function openerLinks(o: Openers): string {
+  return (
+    `<a class="b" href="${escapeHtml(o.deep)}">Open in Rowboat</a>` +
+    `<p class="s">Don't have the app? <a href="${DOWNLOAD_URL}">Download Rowboat</a>, then open this link again.</p>` +
+    (o.web ? `<p class="s">You can also <a href="${escapeHtml(o.web)}">open this link in your browser</a>.</p>` : '') +
+    `<script>location.replace(${JSON.stringify(o.deep)})</script>`
+  );
+}
+
+/** An org link's landing. */
+function landingPage(o: Openers): string {
+  return `${PAGE_HEAD}<title>Open in Rowboat</title>${PAGE_STYLE}<main><h1>This link opens in Rowboat</h1>${openerLinks(o)}</main>`;
+}
+
 type InvitePage =
-  | { state: 'ok'; space: string; org: string; invitedBy?: string; deep: string }
+  | ({ state: 'ok'; space: string; org: string; invitedBy?: string } & Openers)
   | { state: 'expired' | 'revoked' };
 
 /** The /join landing: launch the app with the invite, or say why not. */
 function invitePage(page: InvitePage): string {
-  const style =
-    `<style>body{font:15px/1.5 system-ui,sans-serif;margin:0;display:grid;place-items:center;min-height:100vh;color:#222;background:#fafafa}` +
-    `main{text-align:center;padding:2rem;max-width:26rem}h1{font-size:1.25rem;margin:0 0 .25rem}p{margin:.25rem 0}.m{color:#666}` +
-    `a.b{display:inline-block;margin-top:1rem;padding:.6rem 1.1rem;border-radius:8px;background:#111;color:#fff;text-decoration:none}` +
-    `.s{margin-top:1.25rem;font-size:13px;color:#666}.s a{color:inherit}</style>`;
-  const head = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">`;
   if (page.state !== 'ok') {
     const why = page.state === 'expired' ? 'This invite has expired.' : 'This invite was revoked.';
-    return `${head}<title>Invite ${page.state}</title>${style}<main><h1>${why}</h1><p class="m">Ask whoever sent it for a new link.</p></main>`;
+    return `${PAGE_HEAD}<title>Invite ${page.state}</title>${PAGE_STYLE}<main><h1>${why}</h1><p class="m">Ask whoever sent it for a new link.</p></main>`;
   }
   const by = page.invitedBy ? `<p class="m">Invited by ${escapeHtml(page.invitedBy)}</p>` : '';
   return (
-    `${head}<title>Join ${escapeHtml(page.space)} on ${escapeHtml(page.org)}</title>${style}<main>` +
+    `${PAGE_HEAD}<title>Join ${escapeHtml(page.space)} on ${escapeHtml(page.org)}</title>${PAGE_STYLE}<main>` +
     `<h1>You're invited to ${escapeHtml(page.space)}</h1><p class="m">on ${escapeHtml(page.org)}</p>${by}` +
-    `<a class="b" href="${page.deep}">Open in Rowboat</a>` +
-    `<p class="s">Don't have Rowboat? <a href="${DOWNLOAD_URL}">Download it</a>, then open this link again.</p></main>` +
-    `<script>location.replace(${JSON.stringify(page.deep)})</script>`
+    `${openerLinks(page)}</main>`
   );
 }

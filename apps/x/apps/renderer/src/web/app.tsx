@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { toast } from 'sonner'
 import { SpacesView, type SpaceSelection } from '@/components/spaces-view'
 import { ServerDialogs } from '@/components/spaces/server-dialogs'
 import { SidebarProvider } from '@/components/ui/sidebar'
@@ -7,12 +8,16 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { STREAM_READ_KEY } from '@/hooks/use-space-chat'
 import { getSpacesOrgs, useSpacesOrgs } from '@/hooks/use-spaces'
 import type { ActivityTarget } from '@/lib/spaces-activity'
+import { openServerDialog } from '@/lib/server-dialog'
 import { requestJump } from '@/lib/spaces-jump'
+import { resolveSpacesLink, type SpacesPlace } from '@/lib/spaces-link-open'
 import { serverLandingSpaceId } from '@/lib/spaces-navigation'
 import { railForOpening, rememberRail } from '@/lib/spaces-rail-memory'
 import { readRailSelection, type RailSelection } from '@/lib/spaces-selection'
 import { noteSpaceVisit } from '@/lib/spaces-visits'
-import { onSessionChange } from './account'
+import { hasSession, onSessionChange } from './account'
+import { DEV_HARBOR } from './config'
+import { takeOpenLink } from './links'
 import { orgKey } from './orgs'
 import { parseRoute, routePath } from './routes'
 
@@ -33,9 +38,14 @@ function current(): Location {
     return { path: window.location.pathname, ...(state?.rail ? { rail: readRailSelection(state.rail) } : {}) }
 }
 
-export function WebApp() {
+/** `signInError`: why the sign-in this load returned from failed, said once the toaster is up. */
+export function WebApp({ signInError }: { signInError: string | null }) {
     const [location, setLocation] = useState<Location>(current)
     const { orgs } = useSpacesOrgs()
+
+    useEffect(() => {
+        if (signInError) toast.error(signInError, { id: 'sign-in' })
+    }, [signInError])
 
     useEffect(() => {
         const onPop = () => setLocation(current())
@@ -97,6 +107,38 @@ export function WebApp() {
         requestJump({
             topicId: target.rail.kind === 'thread' ? target.rail.rootMessageId : STREAM_READ_KEY,
             messageId: target.messageId,
+        })
+    }, [go])
+
+    // A shared link opened in this tab (links.ts): resolved as the desktop
+    // resolves its deep links, and opened in place of the root it arrived on.
+    useEffect(() => {
+        const target = takeOpenLink(DEV_HARBOR !== undefined || hasSession())
+        if (!target) return
+        const land = (place: SpacesPlace) => {
+            go(place.orgId, place, true)
+            if (!place.messageId) return
+            requestJump({
+                topicId: place.rail?.kind === 'thread' ? place.rail.rootMessageId : STREAM_READ_KEY,
+                messageId: place.messageId,
+                ...(place.messageOffset !== undefined ? { offset: place.messageOffset } : {}),
+            })
+        }
+        void resolveSpacesLink(target).then((outcome) => {
+            switch (outcome.kind) {
+                case 'invite':
+                    openServerDialog({ kind: 'join', inviteUrl: outcome.inviteUrl })
+                    return
+                case 'unknown-org':
+                    toast.error(`This link is for ${outcome.orgAddress}, which isn't one of your servers.`)
+                    return
+                case 'refused':
+                    toast.error(outcome.message)
+                    if (outcome.place) land(outcome.place)
+                    return
+                case 'place':
+                    land(outcome.place)
+            }
         })
     }, [go])
 

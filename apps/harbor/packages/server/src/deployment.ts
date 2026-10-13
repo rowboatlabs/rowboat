@@ -58,6 +58,8 @@ export interface DeploymentOptions {
   maxBlobBytes?: number;
   /** Browser origins allowed to call every org and the apex cross-origin (cors.ts). */
   webOrigins?: readonly string[];
+  /** The Spaces web app, offered by every org's link landings (http.ts). */
+  webAppUrl?: string;
   /**
    * The operator face (internal.ts). `key` enables GET /internal/stats; `log`
    * prints the live-load line once a minute — independent of the key, the
@@ -126,6 +128,7 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
               ...(options.maxBlobBytes !== undefined ? { maxBlobBytes: options.maxBlobBytes } : {}),
               ...(options.webOrigins ? { webOrigins: options.webOrigins } : {}),
               ...(apexDomain ? { sessionCookieDomain: apexDomain } : {}),
+              ...(options.webAppUrl ? { webAppUrl: options.webAppUrl } : {}),
             });
       runtimes.set(org.id, pending);
       // A failed build is not cached — the next request tries again.

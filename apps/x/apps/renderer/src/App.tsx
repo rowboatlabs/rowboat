@@ -1,9 +1,9 @@
-import { loadSpaceDirectory, getDirectorySpace } from '@/hooks/use-space-directory'
 import { OpenBrowserContext } from '@/contexts/browser-context';
 import { WorkspaceSessionTabs } from './components/code/workspace-session-tabs'
 import { DocumentFileViewer } from '@/components/document-file-viewer'
 import { parseSpacesLink, readLastSpace, resolveSpacesLocation, serverLandingSpaceId, type SpacesLinkTarget } from '@/lib/spaces-navigation'
 import { openServerDialog } from '@/lib/server-dialog'
+import { resolveSpacesLink } from '@/lib/spaces-link-open'
 import { ServerDialogs } from '@/components/spaces/server-dialogs'
 import { noteSpaceVisit } from '@/lib/spaces-visits'
 import { railForOpening, rememberRail } from '@/lib/spaces-rail-memory'
@@ -5657,60 +5657,23 @@ function App() {
   }, [])
 
   const openSpacesLink = useCallback(async (target: SpacesLinkTarget) => {
-    if (getSpacesOrgs().length === 0) await refreshSpacesOrgs()
-    const org = getSpacesOrgs().find((o) => o.address === target.orgAddress)
-    if (target.inviteToken) {
-      // An invite is joined, not navigated to: rebuild the https link (a
-      // signed-in org's own base URL, else https on the address) and hand it
-      // to the join dialog, which resolves it pre-auth and shows the card.
-      const base = org?.baseUrl ?? `https://${target.orgAddress}`
-      openServerDialog({ kind: 'join', inviteUrl: `${base}/join/${target.inviteToken}` })
-      void navigateToViewRef.current({ type: 'spaces' })
-      return
-    }
-    if (!org) {
-      toast.error(`Sign in to ${target.orgAddress} to open this link`)
-      void navigateToViewRef.current({ type: 'spaces' })
-      return
-    }
-    try {
-      if (target.memberId) {
-        // A person: their DM, created on first use, then opened.
-        const { space } = await window.ipc.invoke('spaces:openDirect', { orgId: org.id, memberId: target.memberId })
-        await refreshSpacesOrgs()
-        void navigateToViewRef.current({ type: 'spaces', orgId: org.id, spaceId: space.id, rail: { kind: 'general' } })
+    const outcome = await resolveSpacesLink(target)
+    const navigate = navigateToViewRef.current
+    switch (outcome.kind) {
+      case 'invite':
+        openServerDialog({ kind: 'join', inviteUrl: outcome.inviteUrl })
+        void navigate({ type: 'spaces' })
         return
-      }
-      if (!target.spaceId) {
-        void navigateToViewRef.current({ type: 'spaces', orgId: org.id, view: 'activity' })
+      case 'unknown-org':
+        toast.error(`Sign in to ${outcome.orgAddress} to open this link`)
+        void navigate({ type: 'spaces' })
         return
-      }
-      if (!findSpace(org, target.spaceId)) await loadSpaceDirectory(org.id)
-      if (!findSpace(org, target.spaceId) && !getDirectorySpace(org.id, target.spaceId)) {
-        toast.error('This space is unavailable or you do not have access')
-        void navigateToViewRef.current({ type: 'spaces', orgId: org.id, view: 'activity' })
+      case 'refused':
+        toast.error(outcome.message)
+        if (outcome.place) void navigate({ type: 'spaces', ...outcome.place })
         return
-      }
-      if (target.assetId) {
-        void navigateToViewRef.current({ type: 'spaces', orgId: org.id, spaceId: target.spaceId, rail: { kind: 'file', assetId: target.assetId } })
-        return
-      }
-      if (target.messageId) {
-        // A reply lands in its thread; the org says which one.
-        const { message } = await window.ipc.invoke('spaces:getMessage', { orgId: org.id, spaceId: target.spaceId, messageId: target.messageId })
-        void navigateToViewRef.current({
-          type: 'spaces',
-          orgId: org.id,
-          spaceId: target.spaceId,
-          rail: message.threadRoot ? { kind: 'thread', rootMessageId: message.threadRoot } : { kind: 'general' },
-          messageId: target.messageId,
-          messageOffset: message.offset,
-        })
-        return
-      }
-      void navigateToViewRef.current({ type: 'spaces', orgId: org.id, spaceId: target.spaceId, rail: { kind: 'general' } })
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Could not open that link')
+      case 'place':
+        void navigate({ type: 'spaces', ...outcome.place })
     }
   }, [])
 
