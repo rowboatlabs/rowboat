@@ -16,10 +16,11 @@ import { railForOpening, rememberRail } from '@/lib/spaces-rail-memory'
 import { readRailSelection, type RailSelection } from '@/lib/spaces-selection'
 import { noteSpaceVisit } from '@/lib/spaces-visits'
 import { hasSession, onSessionChange } from './account'
-import { DEV_HARBOR } from './config'
+import { WebRail } from './account-menu'
 import { takeOpenLink } from './links'
 import { orgKey } from './orgs'
 import { parseRoute, routePath } from './routes'
+import { SignedOut } from './signed-out'
 
 // The web app's shell (2026-10-09): the desktop's Spaces section alone, with
 // the address bar as its navigation. The desktop keeps the selection in
@@ -113,7 +114,7 @@ export function WebApp({ signInError }: { signInError: string | null }) {
     // A shared link opened in this tab (links.ts): resolved as the desktop
     // resolves its deep links, and opened in place of the root it arrived on.
     useEffect(() => {
-        const target = takeOpenLink(DEV_HARBOR !== undefined || hasSession())
+        const target = takeOpenLink(hasSession())
         if (!target) return
         const land = (place: SpacesPlace) => {
             go(place.orgId, place, true)
@@ -146,18 +147,26 @@ export function WebApp({ signInError }: { signInError: string | null }) {
         <TooltipProvider delayDuration={0}>
             {/* The space rail's rows are sidebar menu items; the desktop's shell provides this. */}
             <SidebarProvider className="rowboat-shell h-svh overflow-hidden">
-                <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-                    <SpacesView
-                        selection={selection}
-                        onSelect={onSelect}
-                        onSwitchSpace={(id, space, named) => go(id, { spaceId: space, rail: railForOpening(id, space, named) })}
-                        railSelection={rail}
-                        onRailSelect={(next) => { if (selection?.spaceId) go(selection.orgId, { spaceId: selection.spaceId, rail: next }) }}
-                        onOpenMessage={onOpenMessage}
-                        onOpenActivity={(id) => go(id, { view: 'activity' })}
-                        onOpenBrowse={(id) => go(id, { view: 'browse' })}
-                    />
-                </div>
+                {/* Signed out, a sign-in page; a session ending reloads the tab (above). */}
+                {hasSession() ? (
+                    <>
+                        <WebRail />
+                        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+                            <SpacesView
+                                selection={selection}
+                                onSelect={onSelect}
+                                onSwitchSpace={(id, space, named) => go(id, { spaceId: space, rail: railForOpening(id, space, named) })}
+                                railSelection={rail}
+                                onRailSelect={(next) => { if (selection?.spaceId) go(selection.orgId, { spaceId: selection.spaceId, rail: next }) }}
+                                onOpenMessage={onOpenMessage}
+                                onOpenActivity={(id) => go(id, { view: 'activity' })}
+                                onOpenBrowse={(id) => go(id, { view: 'browse' })}
+                            />
+                        </div>
+                    </>
+                ) : (
+                    <SignedOut />
+                )}
             </SidebarProvider>
             <Toaster />
             <ServerDialogs
