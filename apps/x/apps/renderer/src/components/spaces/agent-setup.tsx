@@ -42,16 +42,20 @@ function shortened(text: string): string {
 
 function CopyButton({ text, label }: { text: string; label: string }) {
     const [copied, setCopied] = useState(false)
+    // The reset is cleared on unmount, so it never sets state on a gone component
+    // (a closed dialog, or a test torn down; 2026-10-13, PR #1167 CI).
+    useEffect(() => {
+        if (!copied) return
+        const timer = setTimeout(() => setCopied(false), 1500)
+        return () => clearTimeout(timer)
+    }, [copied])
     return (
         <button
             type="button"
             aria-label={label}
             onClick={() =>
                 void navigator.clipboard.writeText(text).then(
-                    () => {
-                        setCopied(true)
-                        setTimeout(() => setCopied(false), 1500)
-                    },
+                    () => setCopied(true),
                     () => toast('Could not copy', 'error'),
                 )
             }
