@@ -9,6 +9,8 @@
 // up from the space's listing wherever it shows. A rename is a display
 // change — the selection, the open column and any draft survive it.
 
+import { isBlobAppUrl } from './spaces-presentation'
+
 export type RailSelection =
     | { kind: 'general' }
     | { kind: 'discussions' }
@@ -56,7 +58,7 @@ export function readRailSelection(raw: unknown): RailSelection {
         case 'whiteboard':
             return typeof sel.assetId === 'string' && sel.assetId ? { kind: 'whiteboard', assetId: sel.assetId } : { kind: 'general' }
         case 'attachment':
-            return typeof sel.src === 'string' && sel.src.startsWith('app://space-blob/') ? { kind: 'attachment', src: sel.src, ...from } : { kind: 'general' }
+            return typeof sel.src === 'string' && isBlobAppUrl(sel.src) ? { kind: 'attachment', src: sel.src, ...from } : { kind: 'general' }
         default:
             return { kind: 'general' }
     }

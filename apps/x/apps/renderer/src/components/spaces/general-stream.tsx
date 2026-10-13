@@ -1,4 +1,5 @@
 import { invokeSpace } from '@/lib/spaces-invoke'
+import { LOCAL_RUNTIME } from '@/lib/feature-flags'
 import { useSpaceAccess, JoinSpacePrompt, canActInSpace } from '@/lib/spaces-access'
 import { startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowDown, ArrowUp, Loader2, X } from 'lucide-react'
@@ -1044,10 +1045,10 @@ export function GeneralStream({
                 {stream.ready && !snapping && messageRows === 0 && (
                     <div className="px-2 py-6 text-sm text-muted-foreground">
                         {space.kind === 'direct' && (space.participants ?? []).length === 1
-                            ? 'Your notes to self — drafts, links, files for later. Only you can see this, and @rowboat works here too.'
+                            ? `Your notes to self — drafts, links, files for later. Only you can see this${LOCAL_RUNTIME ? ', and @rowboat works here too' : ''}.`
                             : space.kind === 'direct'
-                                ? 'Private to the two of you — say hello, or @rowboat to ask your agent.'
-                                : 'Nothing here yet — say hello, or @rowboat to ask your agent.'}
+                                ? `Private to the two of you — say hello${LOCAL_RUNTIME ? ', or @rowboat to ask your agent' : ''}.`
+                                : `Nothing here yet — say hello${LOCAL_RUNTIME ? ', or @rowboat to ask your agent' : ''}.`}
                     </div>
                 )}
                 {rows}
@@ -1133,7 +1134,7 @@ export function GeneralStream({
                 />
             )}
             {member ? <Composer
-                placeholder={`Message ${space.name} — @rowboat to ask your agent`}
+                placeholder={LOCAL_RUNTIME ? `Message ${space.name} — @rowboat to ask your agent` : `Message ${space.name}`}
                 busy={routing}
                 draftKey={memoryKey}
                 onSend={post}
@@ -1149,7 +1150,7 @@ export function GeneralStream({
                     return true
                 }}
                 autoRoute={jev ? { mode: autoRouteMode, onToggle: toggleAutoRoute, onModeChange: setAutoRouteMode } : undefined}
-                onSchedule={async (body, at) => {
+                onSchedule={!LOCAL_RUNTIME ? undefined : async (body, at) => {
                     setVerdict(null)
                     await invokeSpace('spaces:schedule', {
                         orgId: org.id, spaceId: space.id, body, at: at.toISOString(), kind: 'message',
@@ -1209,11 +1210,12 @@ export function GeneralStream({
                             }
                         },
                     }] : []),
-                    {
+                    // Scheduled sends live on the desktop (core's scheduler), so the browser has no /remind.
+                    ...(LOCAL_RUNTIME ? [{
                         name: 'remind',
                         args: '<when> <text>',
                         hint: 'Set a reminder — 20m, 2h, 9:30, tomorrow',
-                        run: async (args) => {
+                        run: async (args: string) => {
                             const parsed = parseRemindArgs(args)
                             if (typeof parsed === 'string') {
                                 toast(parsed, 'info')
@@ -1228,7 +1230,7 @@ export function GeneralStream({
                                 toast(err instanceof Error ? err.message : 'Could not set the reminder', 'error')
                             }
                         },
-                    },
+                    }] : []),
                     {
                         name: 'read',
                         hint: 'Mark everything in this space read',

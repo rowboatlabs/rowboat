@@ -421,6 +421,9 @@ importers:
       '@x/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@x/spaces-client':
+        specifier: workspace:*
+        version: link:../../packages/spaces-client
       '@xterm/addon-fit':
         specifier: ^0.11.0
         version: 0.11.0
@@ -840,6 +843,9 @@ importers:
       '@rowboat/spaces-protocol':
         specifier: link:../../../harbor/packages/protocol
         version: link:../../../harbor/packages/protocol
+      '@x/shared':
+        specifier: workspace:*
+        version: link:../shared
       zod:
         specifier: ^4.2.1
         version: 4.2.1

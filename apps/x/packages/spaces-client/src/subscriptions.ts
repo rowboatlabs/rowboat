@@ -1,5 +1,5 @@
 import type { ServerFrame } from '@rowboat/spaces-protocol';
-import type { SpacesLive } from '@x/spaces-client';
+import type { SpacesLive } from './live.js';
 
 // The host's per-space live subscriptions, one per (org, space), fanned out
 // to every window. Kept here, not in each host, because the one thing that

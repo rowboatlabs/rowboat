@@ -1,6 +1,9 @@
 import { Hono } from 'hono';
 import { protectedResourceMetadata, wwwAuthenticate, type AuthDriver } from './auth.js';
 import { consentPageHtml } from './consent.js';
+import { webCors } from './cors.js';
+import { routes } from '@rowboat/spaces-protocol';
+import { clearedSessionCookie, sessionCookie, sessionToken, type SessionCookieConfig } from './session.js';
 import type { OrgConfig, OrgDirectory } from './directory.js';
 import { HarborError } from './errors.js';
 import { publicOrigin } from './origin.js';
@@ -47,6 +50,8 @@ export interface ApexDeps {
    * https://<apexDomain>/oauth/consent.
    */
   consentPublishableKey?: string;
+  /** Browser origins allowed to call the apex cross-origin (cors.ts). */
+  webOrigins?: readonly string[];
 }
 
 export function buildApexApp(deps: ApexDeps): Hono {
@@ -57,6 +62,31 @@ export function buildApexApp(deps: ApexDeps): Hono {
     if (!(err instanceof HarborError)) console.error('[harbor] apex error:', err);
     if (e.code === 'unauthorized') c.header('WWW-Authenticate', wwwAuthenticate(publicOrigin(c)));
     return c.json(e.toBody(), e.status as 400);
+  });
+
+  app.use('*', webCors(deps.webOrigins ?? []));
+  // The web app's session (session.ts) is minted here, scoped to the apex
+  // domain, so one cookie covers the apex and every org beneath it.
+  const session: SessionCookieConfig = { webOrigins: new Set(deps.webOrigins ?? []), domain: deps.apexDomain };
+  /** The header, else the session cookie from a listed origin. */
+  const identityOf = (c: { req: { header(name: string): string | undefined } }) => {
+    const authorization = c.req.header('authorization');
+    const cookie = authorization ? undefined : sessionToken({ cookie: c.req.header('cookie'), origin: c.req.header('origin') }, session.webOrigins);
+    return deps.auth.authenticate(authorization, cookie);
+  };
+
+  app.post(routes.createSession.path, async (c) => {
+    const authorization = c.req.header('authorization');
+    if (!authorization?.startsWith('Bearer ')) throw new HarborError('unauthorized', 'a session starts from a bearer in the Authorization header');
+    await deps.auth.authenticate(authorization);
+    const cookie = sessionCookie(authorization.slice('Bearer '.length), session);
+    c.header('set-cookie', cookie.header);
+    return c.json({ ok: true, ...(cookie.expiresAt ? { expiresAt: cookie.expiresAt } : {}) });
+  });
+
+  app.delete(routes.deleteSession.path, (c) => {
+    c.header('set-cookie', clearedSessionCookie(session));
+    return c.json({ ok: true });
   });
 
   app.get('/v1/health', (c) => c.json({ ok: true, apex: deps.apexDomain }));
@@ -76,7 +106,7 @@ export function buildApexApp(deps: ApexDeps): Hono {
 
   /** Create an org: {name, slug} → org at slug.<apexDomain>, caller = first admin. */
   app.post('/v1/orgs', async (c) => {
-    const identity = await deps.auth.authenticate(c.req.header('authorization'));
+    const identity = await identityOf(c);
     const body = (await c.req.json().catch(() => ({}))) as { name?: unknown; slug?: unknown };
     const name = typeof body.name === 'string' ? body.name.trim() : '';
     const slug = typeof body.slug === 'string' ? body.slug.trim().toLowerCase() : '';
@@ -119,7 +149,7 @@ export function buildApexApp(deps: ApexDeps): Hono {
 
   /** The caller's orgs on this deployment — what the app lists after sign-in. */
   app.get('/v1/orgs', async (c) => {
-    const identity = await deps.auth.authenticate(c.req.header('authorization'));
+    const identity = await identityOf(c);
     // One statement over the identity table, whatever the number of orgs on the deployment (2026-09-22).
     return c.json({ orgs: await deps.directory.listOrgsForIdentity(identity.iss, identity.sub) });
   });

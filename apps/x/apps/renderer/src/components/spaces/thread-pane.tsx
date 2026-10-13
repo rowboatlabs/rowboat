@@ -1,4 +1,5 @@
 import { invokeSpace } from '@/lib/spaces-invoke'
+import { LOCAL_RUNTIME } from '@/lib/feature-flags'
 import { useSpaceAccess, JoinSpacePrompt } from '@/lib/spaces-access'
 import { MESSAGE_PROSE } from '@/components/spaces/message-prose'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
@@ -1340,7 +1341,7 @@ export function ThreadPane({
                 placeholder="Reply…"
                 busy={false}
                 onSend={post}
-                onSchedule={async (body, at) => {
+                onSchedule={!LOCAL_RUNTIME ? undefined : async (body, at) => {
                     clearStagedThreadDraft(draftKey)
                     await invokeSpace('spaces:schedule', {
                         orgId: org.id, spaceId: space.id, threadRootId: rootMessageId, body, at: at.toISOString(), kind: 'message',
@@ -1392,11 +1393,12 @@ export function ThreadPane({
                                   : { name: 'archive', hint: 'Archive this discussion — it leaves the rail until a new reply revives it', run: () => void manage({ action: 'archive' }) },
                           ]
                         : []),
-                    {
+                    // Scheduled sends live on the desktop (core's scheduler), so the browser has no /remind.
+                    ...(LOCAL_RUNTIME ? [{
                         name: 'remind',
                         args: '<when> <text>',
                         hint: 'Set a reminder — 20m, 2h, 9:30, tomorrow',
-                        run: async (args) => {
+                        run: async (args: string) => {
                             const parsed = parseRemindArgs(args)
                             if (typeof parsed === 'string') {
                                 toast(parsed, 'info')
@@ -1411,7 +1413,7 @@ export function ThreadPane({
                                 toast(err instanceof Error ? err.message : 'Could not set the reminder', 'error')
                             }
                         },
-                    },
+                    }] : []),
                     {
                         name: 'invite',
                         hint: 'Copy an invite link to this space',
