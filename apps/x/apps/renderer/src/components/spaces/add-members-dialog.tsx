@@ -33,7 +33,8 @@ export function AddMembersDialog({ org, space, members, open, onOpenChange }: {
     const inSpace = useMemo(() => new Set(members.map((m) => m.id)), [members])
     const candidates = useMemo(() => {
         const q = query.trim().toLowerCase()
-        return roster.filter((m) => !inSpace.has(m.id) && (!q || m.displayName.toLowerCase().includes(q)))
+        // A deleted account is never offered (2026-10-13): Harbor refuses the add.
+        return roster.filter((m) => !inSpace.has(m.id) && !m.deactivatedAt && (!q || m.displayName.toLowerCase().includes(q)))
     }, [roster, inSpace, query])
 
     useEffect(() => {

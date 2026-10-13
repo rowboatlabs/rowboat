@@ -240,6 +240,8 @@ The admin surface follows the house API pattern: Harbor exposes `/internal/*` (b
 
 **Flagship IdP:** Rowboat-managed orgs authenticate members with Rowboat accounts (the existing Supabase auth) as their IdP — one instance of the general contract, not a privileged path. A client already signed into a Rowboat account gets a near-one-click join on managed orgs; a free account is never a paid requirement. Self-hosted orgs bring their own IdP.
 
+**Leaving for good** *(added 2026-10-08, revised 2026-10-13)*: a person deleting their Rowboat account calls the apex once, and is deactivated in every org on the deployment — out of every shared space and refused at sign-in, but kept under their name, marked deactivated, so the conversations they were part of still read (the org owns its history, as in Slack). Their photo goes; it is personal data the history doesn't need. The account itself (login, billing) belongs to rowboatx-backend; Harbor only lets go of the person. Wire semantics: CONTRACT.md.
+
 **Latitude:** where Harbor incubates (an open package in the rowboat monorepo, per house TS/Hono conventions, is the pragmatic start; extraction to `rowboatlabs/harbor` with a one-command self-host path when third-party hosting is announced).
 
 ### Running more than one instance — **Deferred** *(added 2026-09-30)*

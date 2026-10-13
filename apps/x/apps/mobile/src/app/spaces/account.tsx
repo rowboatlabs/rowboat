@@ -62,7 +62,7 @@ export default function AccountScreen() {
     if (process.env.EXPO_OS === 'ios') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     Alert.alert(
       'Delete your account?',
-      'This permanently deletes your Rowboat account and removes you from all your orgs. Any subscription is cancelled. This cannot be undone.',
+      "You'll be signed out and removed from all your orgs right away. Your account and its data are permanently deleted within 30 days. This cannot be undone.",
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -72,9 +72,10 @@ export default function AccountScreen() {
             setDeleting(true);
             account
               .deleteAccount()
-              .then(() => {
+              .then(({ deleteBy }) => {
                 router.replace('/spaces');
-                Alert.alert('Account deleted', 'Your Rowboat account has been deleted.');
+                const date = new Date(deleteBy).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+                Alert.alert('Account deletion requested', `Your account and its data will be permanently deleted by ${date}. We've emailed you a confirmation.`);
               })
               .catch((err) => Alert.alert("Couldn't delete account", err instanceof Error ? err.message : String(err)))
               .finally(() => setDeleting(false));
@@ -124,7 +125,7 @@ export default function AccountScreen() {
         </Row>
       </Group>
 
-      <Group footer="Permanently deletes your Rowboat account and removes you from every org.">
+      <Group footer="Signs you out, removes you from every org, and permanently deletes your Rowboat account within 30 days.">
         <Row first onPress={deleting ? undefined : confirmDelete}>
           <Text style={{ flex: 1, fontSize: 16, color: colors.destructive }}>Delete account</Text>
           {deleting ? <ActivityIndicator size="small" /> : null}

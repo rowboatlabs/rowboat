@@ -62,6 +62,13 @@ export const Member = z.object({
    * another agent. Absent for every other agent and for people.
    */
   agentInstance: z.string().min(1).max(128).optional(),
+  /**
+   * When the person deleted their account (2026-10-08, App Store 5.1.1(v)).
+   * The member stays, name and all, so their messages keep their author;
+   * clients mark them deactivated and leave them out of pickers. Harbor
+   * refuses them as a sign-in, a DM, or an addition. Absent = active.
+   */
+  deactivatedAt: z.string().optional(),
 });
 export type Member = z.infer<typeof Member>;
 

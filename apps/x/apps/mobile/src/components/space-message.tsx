@@ -15,6 +15,7 @@ import { EmojiPicker } from '@/components/emoji-picker';
 import { AuthedImage } from '@/components/avatar';
 import { BottomSheet } from '@/components/bottom-sheet';
 import { useColors } from '@/theme/colors';
+import { memberLabel } from '@/lib/spaces/profiles';
 
 /** The contract's file link: https://<org>/s/<spaceId>/a/<assetId> (the label is the file's name at write time). */
 const ASSET_LINK_RE = /^https:\/\/([^/?#]+)\/s\/([^/?#]+)\/a\/([^/?#]+)$/;
@@ -92,7 +93,7 @@ export const MessageRow = memo(function MessageRow({
 }) {
   const colors = useColors();
   const dark = colors.isDark;
-  const name = member?.displayName ?? message.author.memberId;
+  const name = member ? memberLabel(member) : message.author.memberId;
   const agent = message.author.actingMode !== 'direct';
   const time = new Date(message.postedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   // Wire member addresses ("@01ABC…") → bold display names, code spans untouched.

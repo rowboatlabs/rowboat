@@ -3,6 +3,8 @@ import type { Invocation, Member, Membership, Message, Space } from '@rowboat/sp
 import { HarborError } from '../src/errors.js';
 import {
   AGENT_HOP_LIMIT,
+  canReachMember,
+  canSignIn,
   agentsManagedBy,
   canCancelQueuedInvocation,
   canStopInvocation,
@@ -149,5 +151,20 @@ describe('policy', () => {
     expect(canStopInvocation(person('ramnique', 'admin'), inv, true)).toBeNull();
     expect(canStopInvocation(person('gagan'), inv, true)).toMatchObject({ code: 'forbidden' });
     expect(canStopInvocation(person('harsh'), inv, false)).toMatchObject({ code: 'invalid_request' });
+  });
+});
+
+describe('deleted accounts (2026-10-13)', () => {
+  const active: Member = { id: 'm1', displayName: 'Ada', role: 'member', kind: 'human' };
+  const deleted: Member = { ...active, deactivatedAt: '2026-10-13T00:00:00.000Z' };
+
+  it('refuses a deactivated member as a sign-in', () => {
+    expect(canSignIn(active)).toBeNull();
+    expect(canSignIn(deleted)?.code).toBe('not_a_member');
+  });
+
+  it('refuses adding, or opening a DM with, a deactivated member', () => {
+    expect(canReachMember(active)).toBeNull();
+    expect(canReachMember(deleted)).toEqual({ code: 'invalid_request', message: 'Ada has deleted their account' });
   });
 });

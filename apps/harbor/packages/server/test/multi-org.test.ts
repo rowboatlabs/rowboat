@@ -34,6 +34,13 @@ const http = (host: string, token?: string) => ({
     });
     return { status: res.status, body: (await res.json().catch(() => ({}))) as any };
   },
+  async delete(path: string) {
+    const res = await fetch(`${dep.url}${path}`, {
+      method: 'DELETE',
+      headers: { 'x-forwarded-host': host, ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    });
+    return { status: res.status, body: (await res.json().catch(() => ({}))) as any };
+  },
 });
 
 beforeAll(async () => {
@@ -309,5 +316,62 @@ describe('apex face (self-serve org creation)', () => {
     const anon = await http('spaces.test').post('/v1/orgs', { name: 'X', slug: 'nope' });
     expect(anon.status).toBe(401);
     expect((await http('spaces.test').get('/v1/health')).body.apex).toBe('spaces.test');
+  });
+});
+
+describe('apex face: account deletion (DELETE /v1/me, 2026-10-08)', () => {
+  it('deactivates the caller in every org: out of shared spaces, name kept, refused at sign-in', async () => {
+    const leaver = await as.mint({ sub: 'sub-leaver', email: 'leaver@rowboatlabs.com', name: 'Leaver' });
+    const ram = await as.mint({ sub: 'sub-ram' });
+    const created = await http('spaces.test', leaver).post('/v1/orgs', { name: 'Leavers', slug: 'leavers' });
+    const leaverId = created.body.member.id;
+    const org = http('leavers.spaces.test', leaver);
+    const spaceId = (await org.get('/v1/spaces')).body.spaces[0].id;
+    const posted = await org.post(`/v1/spaces/${spaceId}/messages`, { body: 'hello', actingMode: 'direct' });
+    expect(posted.status).toBe(200);
+    expect((await org.post('/v1/push/register', { token: 'ExponentPushToken[leaver]', level: 'all' })).status).toBe(200);
+    const invite = (await org.post('/v1/invites', { spaceId })).body;
+    const ramOrg = http('leavers.spaces.test', ram);
+    expect((await ramOrg.post('/v1/invites/accept', { token: invite.token })).status).toBe(200);
+
+    const gone = await http('spaces.test', leaver).delete('/v1/me');
+    expect(gone.status).toBe(200);
+    expect(gone.body.deactivated).toEqual([created.body.org.id]);
+
+    // The same token no longer reaches the org, and the apex lists nothing.
+    const after = await org.get('/v1/spaces');
+    expect(after.status).toBe(403);
+    expect(after.body.code).toBe('not_a_member');
+    expect((await http('spaces.test', leaver).get('/v1/orgs')).body.orgs).toEqual([]);
+
+    // Out of the space; on the org roster with their name, marked deactivated, no photo.
+    const spaceRoster = (await ramOrg.get(`/v1/spaces/${spaceId}/members`)).body.members;
+    expect(spaceRoster.map((m: any) => m.id)).not.toContain(leaverId);
+    const kept = (await ramOrg.get('/v1/members')).body.members.find((m: any) => m.id === leaverId);
+    expect(kept.displayName).toBe('Leaver');
+    expect(kept.deactivatedAt).toEqual(expect.any(String));
+    expect(kept.avatarUrl).toBeUndefined();
+    expect(posted.body.message.author.memberId).toBe(leaverId);
+
+    const tokens = await db.query('select 1 from push_tokens where member_id = $1', [leaverId]);
+    expect(tokens).toEqual([]);
+
+    // Nobody adds them back or opens a DM with them.
+    const add = await ramOrg.post(`/v1/spaces/${spaceId}/members`, { memberIds: [leaverId], actingMode: 'direct' });
+    expect(add.status).toBe(400);
+    expect(add.body.message).toContain('deleted their account');
+
+    // An invite cannot rebind the same identity.
+    const again = (await ramOrg.post('/v1/invites', { spaceId })).body;
+    const rebind = await org.post('/v1/invites/accept', { token: again.token });
+    expect(rebind.status).toBe(403);
+    expect(rebind.body.code).toBe('not_a_member');
+
+    // Idempotent: nothing left to deactivate.
+    expect((await http('spaces.test', leaver).delete('/v1/me')).body.deactivated).toEqual([]);
+  });
+
+  it('refuses an unauthenticated caller', async () => {
+    expect((await http('spaces.test').delete('/v1/me')).status).toBe(401);
   });
 });

@@ -40,7 +40,7 @@ import { STREAM_READ_KEY, useSpacePresence, useStream } from '@/hooks/use-space-
 import { refreshMembers, useOrgRoster, useSpaceMembers } from '@/hooks/use-space-members'
 import { findSpace, refreshSpacesAccountState, refreshSpacesOrgs, useSpaceFeed, useSpaceLive, useSpaceNames, useSpacesAccountState, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { noteListingFromEntries } from '@/hooks/use-space-boards'
-import { directAvatarId, directLabel, isSelfDirect } from '@/lib/spaces-direct'
+import { directAvatarId, directLabel, isSelfDirect, memberLabel } from '@/lib/spaces-direct'
 import { requestJump } from '@/lib/spaces-jump'
 import { chord } from '@/lib/shortcut'
 import { SpaceMembersProvider, SpaceProfilesProvider } from '@/components/spaces/member-text'
@@ -363,7 +363,8 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         for (const m of members) byId.set(m.id, m)
         return [...byId.values()]
     }, [orgRoster, members])
-    const memberNames = useMemo(() => new Map(profiles.map((m) => [m.id, m.displayName])), [profiles])
+    // A deleted account keeps its name on what it wrote, marked (2026-10-13).
+    const memberNames = useMemo(() => new Map(profiles.map((m) => [m.id, memberLabel(m)])), [profiles])
     const selfIsAdmin = profiles.find((m) => m.id === org.memberId)?.role === 'admin'
     const spaceNames = useSpaceNames(org.id)
     // A direct message is this same pane with a two-person roster: named by

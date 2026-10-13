@@ -960,6 +960,13 @@ export const MIGRATIONS: Migration[] = [
       )`,
     ],
   },
+  {
+    // Account deletion, minimal v1 (2026-10-08, App Store 5.1.1(v), revised
+    // 2026-10-13 after review): the member row stays — name and attribution
+    // intact — and this marks it. Null = an active member.
+    id: '037-member-deactivated-at',
+    statements: [`alter table members add column if not exists deactivated_at text`],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

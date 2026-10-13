@@ -242,6 +242,14 @@ export interface Store {
   // ceremony (and seeding); the oidc auth driver reads, never creates.
   getMemberByIdentity(iss: string, sub: string): Promise<Member | undefined>;
   putIdentity(iss: string, sub: string, memberId: string): Promise<void>;
+  /**
+   * Account deletion (2026-10-08, revised 2026-10-13): the person behind a
+   * member leaves for good. Stamps deactivated_at and drops the avatar — the
+   * name stays, so attribution reads — deletes their push tokens, and
+   * revokes the keys of agents they own. The identity row stays: it is what
+   * refuses the next sign-in (policy.ts canSignIn). Idempotent.
+   */
+  deactivateMember(memberId: string, at: string): Promise<void>;
 
   // spaces — `kind` (migration 014) rides the row; a direct space also
   // stores its direct key, and putSpace MUST refuse a second direct space

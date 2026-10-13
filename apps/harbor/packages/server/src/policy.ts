@@ -112,6 +112,22 @@ export function canBind(identity: { email?: string }, org: { allowedEmailDomains
 }
 
 /** The org's logo is its admins' to set (2026-10-02); a member's avatar is always their own. */
+/**
+ * A deleted account's member (2026-10-13): kept for attribution, refused as
+ * a sign-in — through any driver, and through an invite, which would
+ * otherwise rebind the same row.
+ */
+export function canSignIn(member: Member): Decision {
+  if (member.deactivatedAt === undefined) return null;
+  return { code: 'not_a_member', message: 'this account was deleted' };
+}
+
+/** Nobody adds, or opens a DM with, a deactivated member (2026-10-13). */
+export function canReachMember(member: Member): Decision {
+  if (member.deactivatedAt === undefined) return null;
+  return { code: 'invalid_request', message: `${member.displayName} has deleted their account` };
+}
+
 export function canSetOrgLogo(actor: Member): Decision {
   if (actor.role === 'admin') return null;
   return { code: 'forbidden', message: 'only an admin can change the org’s logo' };
