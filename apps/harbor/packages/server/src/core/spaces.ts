@@ -12,7 +12,7 @@ import {
 import { randomBytes } from 'node:crypto';
 import type { z } from 'zod';
 import { HarborError } from '../errors.js';
-import { canBind, canChangeMembership, canJoinSpace, canOpenDirect, canRenameSpace, enforce, isGroupChat } from '../policy.js';
+import { canBind, canChangeMembership, canJoinSpace, canOpenDirect, canReachMember, canRenameSpace, canSignIn, enforce, isGroupChat } from '../policy.js';
 import { DIRECT_SPACE_NAME, directKeyFor, type PushLevel, type StoredEvent } from '../store.js';
 import { Kernel, type ActorCtx, type BindIdentity } from './kernel.js';
 
@@ -177,6 +177,7 @@ export class Spaces {
     if (!self) {
       const other = await this.k.store.getMember(otherMemberId);
       if (!other) throw new HarborError('not_found', 'no such member on this org');
+      enforce(canReachMember(other));
     }
     const participants = self ? [ctx.memberId] : [ctx.memberId, otherMemberId].sort();
     const key = directKeyFor(participants);
@@ -248,7 +249,9 @@ export class Spaces {
     enforce(canChangeMembership(space, 'add'));
     const ids = [...new Set(input.memberIds)];
     for (const id of ids) {
-      if (!(await this.k.store.getMember(id))) throw new HarborError('not_found', `no member ${id} in this org`);
+      const member = await this.k.store.getMember(id);
+      if (!member) throw new HarborError('not_found', `no member ${id} in this org`);
+      enforce(canReachMember(member));
     }
     const by = this.k.attributionOf(ctx, input);
     const at = this.k.now();
@@ -337,6 +340,7 @@ export class Spaces {
     this.k.guardWrite();
     enforce(canBind(identity, this.k.org));
     let member = await this.k.store.getMemberByIdentity(identity.iss, identity.sub);
+    if (member) enforce(canSignIn(member));
     if (!member) {
       // Minted id, NOT the raw sub: issuer subjects live only in the mapping
       // table, so an org can change AS someday without rewriting history.
@@ -378,6 +382,20 @@ export class Spaces {
   async unregisterPush(ctx: ActorCtx, input: { token: string }): Promise<{ ok: true }> {
     await this.k.store.deleteMemberPushToken(ctx.memberId, input.token);
     return { ok: true };
+  }
+
+  /**
+   * Account deletion, minimal v1 (2026-10-08, App Store 5.1.1(v)); the apex's
+   * DELETE /v1/me calls it once per org. The member leaves every shared space
+   * the ordinary way, then the row is marked (store.deactivateMember): the
+   * name stays, so their messages keep their author (Ramnique's review,
+   * 2026-10-13), and canSignIn refuses the identity from now on. DMs keep
+   * their membership: a DM is named by its other participant, who keeps the
+   * conversation. Idempotent.
+   */
+  async deactivateSelf(ctx: ActorCtx): Promise<void> {
+    for (const space of await this.k.store.listSpacesFor(ctx.memberId)) await this.leaveSpace(ctx, space.id);
+    await this.k.store.deactivateMember(ctx.memberId, this.k.now());
   }
 
   async publishPresence(

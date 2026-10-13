@@ -42,7 +42,7 @@ export function useSpacesMentionTargets(): SpacesMentionTargets {
         }
       }
       for (const member of rosters.get(org.id) ?? []) {
-        if (member.id === org.memberId) continue
+        if (member.id === org.memberId || member.deactivatedAt) continue
         members.push({ kind: 'member', orgId: org.id, orgName: org.name, memberId: member.id, displayName: member.displayName })
       }
     }

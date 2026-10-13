@@ -154,6 +154,25 @@ export function buildApexApp(deps: ApexDeps): Hono {
     return c.json({ orgs: await deps.directory.listOrgsForIdentity(identity.iss, identity.sub) });
   });
 
+  /**
+   * Account deletion, minimal v1 (2026-10-08, App Store 5.1.1(v)): the caller
+   * leaves every org on the deployment — each member deactivated in place
+   * (core/spaces.ts deactivateSelf). The app calls this before the account
+   * API bans the login, while the token is still good. Idempotent: a repeat
+   * finds no orgs and returns an empty list.
+   */
+  app.delete('/v1/me', async (c) => {
+    const identity = await deps.auth.authenticate(c.req.header('authorization'));
+    const rows = await deps.directory.listOrgsForIdentity(identity.iss, identity.sub);
+    for (const row of rows) {
+      const org = await deps.directory.getById(row.id);
+      if (!org) continue;
+      const service = await deps.serviceFor(org);
+      await service.deactivateSelf({ memberId: row.memberId });
+    }
+    return c.json({ deactivated: rows.map((r) => r.id) });
+  });
+
   return app;
 }
 

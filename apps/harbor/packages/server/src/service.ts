@@ -252,6 +252,9 @@ export class HarborService {
   unregisterPush(ctx: ActorCtx, input: { token: string }): Promise<{ ok: true }> {
     return this.spaces.unregisterPush(ctx, input);
   }
+  deactivateSelf(ctx: ActorCtx): Promise<void> {
+    return this.spaces.deactivateSelf(ctx);
+  }
   publishPresence(
     ctx: ActorCtx,
     spaceId: string,

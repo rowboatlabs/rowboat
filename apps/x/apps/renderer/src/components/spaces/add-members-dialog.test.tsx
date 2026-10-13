@@ -46,6 +46,18 @@ describe('AddMembersDialog', () => {
         expect(invoke).toHaveBeenCalledWith('spaces:addMembers', { orgId: 'org-1', spaceId: 'S1', memberIds: ['01HREPL', 'harsh'] })
     })
 
+    it('never offers a deleted account (2026-10-13)', async () => {
+        const gone = { id: 'gone', displayName: 'Gone', role: 'member', kind: 'human', deactivatedAt: '2026-10-13T00:00:00.000Z' } as spaces.Member
+        invoke.mockImplementationOnce(async (channel: string) => {
+            if (channel === 'spaces:listOrgMembers') return { members: [gone, harsh, ram] }
+            throw new Error(`unexpected ${channel}`)
+        })
+        const org2 = { ...org, id: 'org-2' } as OrgWithSpaces
+        render(<AddMembersDialog org={org2} space={space} members={[ram]} open onOpenChange={vi.fn()} />)
+        await waitFor(() => expect(screen.getByRole('checkbox', { name: /Harsh/ })).toBeInTheDocument())
+        expect(screen.queryByRole('checkbox', { name: /Gone/ })).not.toBeInTheDocument()
+    })
+
     it('adds nobody until someone is picked', async () => {
         render(<AddMembersDialog org={org} space={space} members={[ram]} open onOpenChange={vi.fn()} />)
         await waitFor(() => expect(screen.getByRole('checkbox', { name: /Harsh/ })).toBeInTheDocument())

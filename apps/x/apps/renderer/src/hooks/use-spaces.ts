@@ -1,3 +1,4 @@
+import { memberLabel } from '@/lib/spaces-direct'
 import { setSpacePreview } from '@/lib/spaces-access'
 import { invalidateSpaceDirectory, updateDirectoryMembership, loadSpaceDirectory, getDirectorySpace } from '@/hooks/use-space-directory'
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
@@ -81,7 +82,8 @@ export function refreshSpacesOrgs(): Promise<void> {
                             if (!who) return
                             try {
                                 const { members } = await window.ipc.invoke('spaces:listMembers', { orgId: org.id, spaceId: dm.id })
-                                const name = members.find((m) => m.id === who)?.displayName ?? who
+                                const other = members.find((m) => m.id === who)
+                                const name = other ? memberLabel(other) : who
                                 directLabels[dm.id] = self ? `${name} (you)` : name
                             } catch {
                                 directLabels[dm.id] = previous?.directLabels[dm.id] ?? (self ? 'You' : who)
