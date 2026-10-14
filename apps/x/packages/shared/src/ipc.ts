@@ -189,6 +189,7 @@ export const ipcSchemas = {
       installationId: z.string(),
       apiUrl: z.string(),
       appVersion: z.string(),
+      telemetryOptOut: z.boolean().optional(),
     }),
   },
   'workspace:getRoot': {
@@ -1374,6 +1375,21 @@ export const ipcSchemas = {
   'app:setLoginItemSettings': {
     req: z.object({
       openAtLogin: z.boolean(),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // Anonymous product telemetry opt-out (2026-10-13, #415).
+  'app:getTelemetrySettings': {
+    req: z.null(),
+    res: z.object({
+      optOut: z.boolean(),
+    }),
+  },
+  'app:setTelemetrySettings': {
+    req: z.object({
+      optOut: z.boolean(),
     }),
     res: z.object({
       success: z.literal(true),

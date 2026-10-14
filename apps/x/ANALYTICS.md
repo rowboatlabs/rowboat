@@ -298,6 +298,16 @@ For GitHub Actions / packaged builds: set both as workflow env vars (from secret
 
 If unset, analytics no-op silently — you'll see `[Analytics] POSTHOG_KEY not set; analytics disabled` in the process hosting core.
 
+### Telemetry opt-out (2026-10-13, #415)
+
+Users and operators can disable product analytics collection in either of the following ways:
+- **Environment variables**: set `DO_NOT_TRACK=1` (or `DO_NOT_TRACK=true`) or `ROWBOAT_TELEMETRY_DISABLED=1` in the environment.
+- **Settings UI**: toggle "Anonymous usage analytics" under Settings → Appearance/System (persisted as `telemetryOptOut: true` in `~/.rowboat/config/app_settings.json`).
+
+When opted out:
+- `packages/core/src/analytics/posthog.ts` logs `[Analytics] Telemetry opted out; analytics disabled`, returns `null` for `getClient()`, no-ops `capture()` and `identify()`, returns default values for feature flags, and shuts down any active client.
+- The renderer receives `telemetryOptOut: true` via the `analytics:bootstrap` IPC response and calls `posthog.opt_out_capturing()`.
+
 `installationId`: stored in `~/.rowboat/config/installation.json`, generated on first run.
 
 ## File map
