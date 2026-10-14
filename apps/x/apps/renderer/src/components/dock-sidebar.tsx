@@ -1209,7 +1209,8 @@ export function DockSidebar({
         if (totalSpaces === 0) return null
         return (
           <>
-            {orgs.flatMap((org) => org.spaces.map((space) => (
+            {/* Archived spaces stay out of the quick picker; the Spaces nav files them under Archived. */}
+            {orgs.flatMap((org) => org.spaces.filter((space) => !space.archived).map((space) => (
               <ContextMenuItem key={`${org.id}/${space.id}`} onClick={() => onOpenSpace?.(org.id, space.id)}>
                 <MessagesSquare className="mr-2 size-3.5 text-muted-foreground" />
                 <span className="truncate">{space.name}</span>
@@ -1905,7 +1906,7 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, 
           </button>
         )
       })()}
-      {org.spaces.map((space) => {
+      {org.spaces.filter((space) => !space.archived).map((space) => {
         const active = activeSpace?.orgId === org.id && activeSpace.spaceId === space.id
         const badge = unread.get(`${org.id}/${space.id}`) ?? NO_BADGE
         if (renamingId === space.id) {

@@ -358,6 +358,20 @@ export class SpacesClient {
     ).space;
   }
 
+  /** Archive a shared space, admin only (api.ts archiveSpace, 2026-10-13). Already archived = no-op. */
+  async archiveSpace(spaceId: string): Promise<Space> {
+    return (await this.request('POST', this.space(spaceId, '/archive'), routes.archiveSpace.response, { actingMode: 'direct' })).space;
+  }
+
+  async unarchiveSpace(spaceId: string): Promise<Space> {
+    return (await this.request('POST', this.space(spaceId, '/unarchive'), routes.unarchiveSpace.response, { actingMode: 'direct' })).space;
+  }
+
+  /** Delete a shared space and everything in it, admin only (api.ts deleteSpace, 2026-10-14). No undo. */
+  async deleteSpace(spaceId: string): Promise<void> {
+    await this.request('DELETE', this.space(spaceId, ''), routes.deleteSpace.response);
+  }
+
   /** The agents this member manages, with their keys' metadata (api.ts listAgents). */
   async listAgents(): Promise<AgentListing[]> {
     return (await this.request('GET', routes.listAgents.path, routes.listAgents.response)).agents;

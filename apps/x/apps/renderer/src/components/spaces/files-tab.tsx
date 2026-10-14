@@ -72,7 +72,7 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
     /** Remove an empty (draft) folder. */
     onRemoveFolder?: (path: string) => void
 }) {
-    const { member } = useSpaceAccess()
+    const { writable } = useSpaceAccess()
     const tree = useMemo(() => buildFileTree(entries, draftFolders), [entries, draftFolders])
     const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
     const [newPath, setNewPath] = useState('')
@@ -89,7 +89,7 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
     const entryById = useMemo(() => new Map(entries.map((e) => [e.id, e])), [entries])
     const dragHasAsset = (e: React.DragEvent) => Array.from(e.dataTransfer.types).includes(ASSET_DRAG_MIME)
     const dropInto = (e: React.DragEvent, dir: string) => {
-        if (!member) return
+        if (!writable) return
         e.preventDefault()
         e.stopPropagation()
         setDropTarget(null)
@@ -102,7 +102,7 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
     }
     const dirDragProps = (dir: string) => ({
         onDragOver: (e: React.DragEvent) => {
-            if (!member || !dragHasAsset(e)) return
+            if (!writable || !dragHasAsset(e)) return
             e.preventDefault()
             e.stopPropagation()
             e.dataTransfer.dropEffect = 'move'
@@ -166,7 +166,7 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                                 </button>
                             </ContextMenuTrigger>
                             <ContextMenuContent>
-                                <ContextMenuItem disabled={!member} onSelect={() => onStartCreate?.(`${node.path}/`)}>
+                                <ContextMenuItem disabled={!writable} onSelect={() => onStartCreate?.(`${node.path}/`)}>
                                     <Plus className="size-3.5 mr-2" /> New file
                                 </ContextMenuItem>
                                 {empty && onRemoveFolder && (
@@ -190,7 +190,7 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                                 </button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                                <DropdownMenuItem disabled={!member} onClick={() => onStartCreate?.(`${node.path}/`)}>
+                                <DropdownMenuItem disabled={!writable} onClick={() => onStartCreate?.(`${node.path}/`)}>
                                     <Plus className="size-3.5 mr-2" /> New file
                                 </DropdownMenuItem>
                                 {empty && onRemoveFolder && (
@@ -256,7 +256,7 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                         <button
                             type="button"
                             style={pad}
-                            draggable={member}
+                            draggable={writable}
                             onDragStart={(e) => {
                                 e.dataTransfer.setData(ASSET_DRAG_MIME, entry.id)
                                 e.dataTransfer.effectAllowed = 'move'
@@ -294,11 +294,11 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                         <ContextMenuItem onSelect={() => void copySpacesLink(spaces.assetUrl(orgAddress, spaceId, entry.id))}>
                             <LinkIcon className="size-3.5 mr-2" /> Copy link
                         </ContextMenuItem>
-                        <ContextMenuItem disabled={!member} onSelect={() => setRenaming({ assetId: entry.id, value: entry.path })}>
+                        <ContextMenuItem disabled={!writable} onSelect={() => setRenaming({ assetId: entry.id, value: entry.path })}>
                             <Pencil className="size-3.5 mr-2" /> Rename / move
                         </ContextMenuItem>
                         <ContextMenuSeparator />
-                        <ContextMenuItem disabled={!member} onSelect={() => setDeleting(entry)}>
+                        <ContextMenuItem disabled={!writable} onSelect={() => setDeleting(entry)}>
                             <Trash2 className="size-3.5 mr-2" /> Delete…
                         </ContextMenuItem>
                     </ContextMenuContent>
@@ -323,11 +323,11 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                         <DropdownMenuItem onClick={() => void copySpacesLink(spaces.assetUrl(orgAddress, spaceId, entry.id))}>
                             <LinkIcon className="size-3.5 mr-2" /> Copy link
                         </DropdownMenuItem>
-                        <DropdownMenuItem disabled={!member} onClick={() => setRenaming({ assetId: entry.id, value: entry.path })}>
+                        <DropdownMenuItem disabled={!writable} onClick={() => setRenaming({ assetId: entry.id, value: entry.path })}>
                             <Pencil className="size-3.5 mr-2" /> Rename / move
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem disabled={!member} onClick={() => setDeleting(entry)}>
+                        <DropdownMenuItem disabled={!writable} onClick={() => setDeleting(entry)}>
                             <Trash2 className="size-3.5 mr-2" /> Delete…
                         </DropdownMenuItem>
                     </DropdownMenuContent>
@@ -427,14 +427,14 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
     /** A canonical link to a file in ANOTHER space (by org address — the owner knows whether the reader is in it). */
     onOpenSpaceFile?: (orgAddress: string, spaceId: string, assetId: string) => void
 }) {
-    const { member } = useSpaceAccess()
+    const { writable } = useSpaceAccess()
     const draftRef = { orgId: org.id, spaceId: space.id, assetId }
     const [asset, setAsset] = useState<spaces.ReadAssetResult | null>(null)
     const [missing, setMissing] = useState(false)
     // A draft left open on an earlier mount resumes here — the column paints in
     // edit mode, on that text, before the read comes back.
-    const [storedDraft, setDraft] = useState<DraftState | null>(() => member ? readSpaceDraft(draftRef) : null)
-    const draft = member ? storedDraft : null
+    const [storedDraft, setDraft] = useState<DraftState | null>(() => writable ? readSpaceDraft(draftRef) : null)
+    const draft = writable ? storedDraft : null
     const [applying, setApplying] = useState(false)
     const [historyOpen, setHistoryOpen] = useState(false)
     const [diffView, setDiffView] = useState<{ title: string; unified: string; restorable: number | null } | null>(null)
@@ -468,7 +468,7 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
     // painted state was is what an unmount leaves behind. There is no cleanup on
     // unmount by design; clearing is the draft going null (applied, discarded).
     useEffect(() => {
-        if (member) writeSpaceDraft({ orgId: org.id, spaceId: space.id, assetId }, draft)
+        if (writable) writeSpaceDraft({ orgId: org.id, spaceId: space.id, assetId }, draft)
     }, [org.id, space.id, assetId, draft])
     useEffect(() => {
         if (!crumbBack || editing) return
@@ -758,14 +758,14 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
                                 <button
                                     type="button"
                                     className="hover:text-foreground flex items-center gap-1"
-                                    disabled={!member || replacing}
+                                    disabled={!writable || replacing}
                                     onClick={() => replaceInputRef.current?.click()}
                                 >
                                     {replacing ? <Loader2 className="size-3 animate-spin" /> : <Upload className="size-3" />} Replace
                                 </button>
                             </>
                         ) : (
-                            <button type="button" className="hover:text-foreground flex items-center gap-1" disabled={!member} onClick={beginEdit}>
+                            <button type="button" className="hover:text-foreground flex items-center gap-1" disabled={!writable} onClick={beginEdit}>
                                 <Pencil className="size-3" /> Edit
                             </button>
                         )}
@@ -792,18 +792,18 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
                                 <DropdownMenuItem onClick={() => void copySpacesLink(spaces.assetUrl(org.address, space.id, assetId))}>
                                     <LinkIcon className="size-3.5 mr-2" /> Copy link
                                 </DropdownMenuItem>
-                                <DropdownMenuItem disabled={!member} onClick={() => setEditingPath(path)}>
+                                <DropdownMenuItem disabled={!writable} onClick={() => setEditingPath(path)}>
                                     <Pencil className="size-3.5 mr-2" /> Rename / move
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
-                                <DropdownMenuItem disabled={!member} onClick={() => setDeleteOpen(true)}>
+                                <DropdownMenuItem disabled={!writable} onClick={() => setDeleteOpen(true)}>
                                     <Trash2 className="size-3.5 mr-2" /> Delete…
                                 </DropdownMenuItem>
                             </DropdownMenuContent>
                         </DropdownMenu>
                     </>
                 )}
-                {member && deleteOpen && asset && (
+                {writable && deleteOpen && asset && (
                     <DeleteAssetDialog
                         orgId={org.id}
                         spaceId={space.id}
@@ -933,7 +933,7 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
                         <div className="px-5 py-4 max-w-3xl">
                             <RichMarkdownViewer
                                 content={renderedContent}
-                                onToggleTask={member ? (i) => void toggleTask(i) : undefined}
+                                onToggleTask={writable ? (i) => void toggleTask(i) : undefined}
                                 onOpenLink={openLink}
                             />
                         </div>
@@ -982,7 +982,7 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
                     )}
                 </DialogContent>
             </Dialog>
-            {member && restoreTarget !== null && asset && (
+            {writable && restoreTarget !== null && asset && (
                 <RestoreVersionDialog
                     orgId={org.id}
                     spaceId={space.id}
@@ -1049,7 +1049,7 @@ function HistoryPanel({ org, space, assetId, memberNames, refreshTick, currentVe
     onShowDiff: (from: number, to: number, restorable: number | null) => void
     onRestore: (version: number) => void
 }) {
-    const { member } = useSpaceAccess()
+    const { writable } = useSpaceAccess()
     const [changeSets, setChangeSets] = useState<spaces.ChangeSet[]>([])
 
     useEffect(() => {
@@ -1093,7 +1093,7 @@ function HistoryPanel({ org, space, assetId, memberNames, refreshTick, currentVe
                                 <Clock className="size-2.5" /> {formatFeedTime(cs.committedAt)} · v{cs.resultVersion}
                             </div>
                         </button>
-                        {member && isRestorableChangeSet(cs, currentVersion) && (
+                        {writable && isRestorableChangeSet(cs, currentVersion) && (
                             <button
                                 type="button"
                                 aria-label={`Restore to v${cs.resultVersion}`}

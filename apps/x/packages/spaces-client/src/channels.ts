@@ -17,6 +17,7 @@ type IPCChannels = ipc.IPCChannels;
 
 export type HarborChannel =
   | 'spaces:listSpaces' | 'spaces:browseSpaces' | 'spaces:joinSpace' | 'spaces:createSpace' | 'spaces:renameSpace'
+  | 'spaces:archiveSpace' | 'spaces:unarchiveSpace' | 'spaces:deleteSpace'
   | 'spaces:addMembers' | 'spaces:openDirect' | 'spaces:listMembers' | 'spaces:listOrgMembers'
   | 'spaces:listAgents' | 'spaces:addAgent' | 'spaces:setAgentCredential' | 'spaces:setAgentHook' | 'spaces:clearAgentHook'
   | 'spaces:createAgentKey' | 'spaces:revokeAgentKey'
@@ -65,6 +66,19 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit 
     'spaces:renameSpace': async (args) => ({
       space: await getClient(args.orgId).renameSpace(args.spaceId, args.name),
     }),
+
+    'spaces:archiveSpace': async (args) => ({
+      space: await getClient(args.orgId).archiveSpace(args.spaceId),
+    }),
+
+    'spaces:unarchiveSpace': async (args) => ({
+      space: await getClient(args.orgId).unarchiveSpace(args.spaceId),
+    }),
+
+    'spaces:deleteSpace': async (args) => {
+      await getClient(args.orgId).deleteSpace(args.spaceId);
+      return { deleted: true as const };
+    },
 
     'spaces:addMembers': async (args) => ({
       memberships: await getClient(args.orgId).addMembers(args.spaceId, args.memberIds),

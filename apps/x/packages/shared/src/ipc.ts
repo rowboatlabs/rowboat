@@ -3931,6 +3931,21 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), spaceId: z.string(), name: z.string() }),
     res: z.object({ space: z.custom<SpacesTypes.Space>() }),
   },
+  // Archive, unarchive and delete a shared space (2026-10-14, harbor #1186
+  // and #1189): admin only. A delete's departure reaches every window as
+  // the space_removed frame, the same as leaving.
+  'spaces:archiveSpace': {
+    req: z.object({ orgId: z.string(), spaceId: z.string() }),
+    res: z.object({ space: z.custom<SpacesTypes.Space>() }),
+  },
+  'spaces:unarchiveSpace': {
+    req: z.object({ orgId: z.string(), spaceId: z.string() }),
+    res: z.object({ space: z.custom<SpacesTypes.Space>() }),
+  },
+  'spaces:deleteSpace': {
+    req: z.object({ orgId: z.string(), spaceId: z.string() }),
+    res: z.object({ deleted: z.literal(true) }),
+  },
   // Agent members and their keys (2026-09-29): the caller's own agents, or
   // every agent for an admin. A key's secret crosses IPC once, on the
   // response that created it, for the Agents dialog to show and forget.

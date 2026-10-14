@@ -144,7 +144,7 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
     /** Closes the board's column; the chat takes the width. */
     onClose: () => void
 }) {
-    const { member } = useSpaceAccess()
+    const { member, writable } = useSpaceAccess()
     const { resolvedTheme } = useTheme()
     const [load, setLoad] = useState<LoadState>({ phase: 'loading' })
     const [retryTick, setRetryTick] = useState(0)
@@ -167,7 +167,7 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
         // A taken name just opens that board; a new one is created by path.
         const taken = allBoards.find((b) => b.path === path)
         if (taken) { if (taken.id !== boardId) onSelectBoard(taken.id) }
-        else if (member) onCreateBoard(path)
+        else if (writable) onCreateBoard(path)
     }
 
     const apiRef = useRef<ExcalidrawImperativeAPI | null>(null)
@@ -211,7 +211,7 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
         /** The snapshot is in hand — only now does a saver (and any write path) exist. */
         const adopt = (version: number, elements: OrderedExcalidrawElement[]) => {
             for (const el of elements) broadcastVersionsRef.current.set(el.id, el.version)
-            if (!member) return
+            if (!writable) return
             saverRef.current = createBoardSaver({
                 baseVersion: version,
                 elements,
@@ -263,7 +263,7 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
             send({ t: 'idle', clientId, state: 'away' })
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [org.id, space.id, boardId, retryTick, member])
+    }, [org.id, space.id, boardId, retryTick, writable])
 
     // ------------------------------------------------------------------
     // Outbound: diff broadcasts from onChange, the periodic full sync,
@@ -552,9 +552,9 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
                         currentItemRoughness: 0,
                     },
                 }}
-                viewModeEnabled={!member}
-                onChange={member ? onChange : undefined}
-                onPointerUpdate={member ? onPointerUpdate : undefined}
+                viewModeEnabled={!writable}
+                onChange={writable ? onChange : undefined}
+                onPointerUpdate={writable ? onPointerUpdate : undefined}
                 theme={resolvedTheme}
                 isCollaborating
                 autoFocus
@@ -625,7 +625,7 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
                                 </div>
                                 <div className="mt-1 border-t border-border pt-1">
                                     <input
-                                        disabled={!member}
+                                        disabled={!writable}
                                         placeholder="New board…"
                                         className="h-8 w-full rounded-md bg-transparent px-2 text-[13px] text-foreground outline-none placeholder:text-muted-foreground focus:bg-accent/30"
                                         onKeyDown={(e) => {
@@ -662,8 +662,8 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
                     canvas actions stay. Theme follows the app; save is automatic. */}
                 <MainMenu>
                     <MainMenu.DefaultItems.SaveAsImage />
-                    {member && <MainMenu.DefaultItems.ClearCanvas />}
-                    {member && <MainMenu.DefaultItems.ChangeCanvasBackground />}
+                    {writable && <MainMenu.DefaultItems.ClearCanvas />}
+                    {writable && <MainMenu.DefaultItems.ChangeCanvasBackground />}
                 </MainMenu>
                 {/* Our empty state, not the stock one (Excalidraw wordmark + data
                     pitch): what this surface is, in the app's voice. */}

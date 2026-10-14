@@ -97,7 +97,7 @@ export function ThreadPane({
     /** False while kept mounted but off screen (read mode, hidden Spaces view) — no presence, no read marks. */
     visible?: boolean
 }) {
-    const { member } = useSpaceAccess()
+    const { member, writable } = useSpaceAccess()
     // The cached copy from the last open — plus any replies that streamed in
     // live while the pane was closed. Seeding paints the whole thread in the
     // first frame; the fetch below reconciles right behind it. A PARTIAL
@@ -1064,28 +1064,28 @@ export function ThreadPane({
                         <DropdownMenuSeparator />
                         {topic ? (
                             <>
-                                <DropdownMenuItem disabled={!member} onClick={() => setEditingTitle(topic.title)}>
+                                <DropdownMenuItem disabled={!writable} onClick={() => setEditingTitle(topic.title)}>
                                     <Pencil className="size-3.5 mr-2" /> Rename
                                 </DropdownMenuItem>
-                                <DropdownMenuItem disabled={!member} onClick={() => setAttaching(true)}>
+                                <DropdownMenuItem disabled={!writable} onClick={() => setAttaching(true)}>
                                     <Paperclip className="size-3.5 mr-2" /> {topic.documentAssetId ? 'Change linked file…' : 'Link a file…'}
                                 </DropdownMenuItem>
                                 {topic.documentAssetId && (
-                                    <DropdownMenuItem disabled={!member} onClick={() => void manage({ action: 'detach_document' })}>
+                                    <DropdownMenuItem disabled={!writable} onClick={() => void manage({ action: 'detach_document' })}>
                                         <Unlink className="size-3.5 mr-2" /> Unlink file
                                     </DropdownMenuItem>
                                 )}
                                 {topic.archived ? (
-                                    <DropdownMenuItem disabled={!member} onClick={() => void manage({ action: 'unarchive' })}><ArchiveRestore className="size-3.5 mr-2" /> Unarchive</DropdownMenuItem>
+                                    <DropdownMenuItem disabled={!writable} onClick={() => void manage({ action: 'unarchive' })}><ArchiveRestore className="size-3.5 mr-2" /> Unarchive</DropdownMenuItem>
                                 ) : (
-                                    <DropdownMenuItem disabled={!member} onClick={() => void manage({ action: 'archive' })}><Archive className="size-3.5 mr-2" /> Archive</DropdownMenuItem>
+                                    <DropdownMenuItem disabled={!writable} onClick={() => void manage({ action: 'archive' })}><Archive className="size-3.5 mr-2" /> Archive</DropdownMenuItem>
                                 )}
-                                <DropdownMenuItem disabled={!member} onClick={() => void manage({ action: 'remove' })}>
+                                <DropdownMenuItem disabled={!writable} onClick={() => void manage({ action: 'remove' })}>
                                     <MessageSquareOff className="size-3.5 mr-2" /> Convert back to thread
                                 </DropdownMenuItem>
                             </>
                         ) : (
-                            <DropdownMenuItem disabled={!member} onClick={() => setEditingTitle('')}>
+                            <DropdownMenuItem disabled={!writable} onClick={() => setEditingTitle('')}>
                                 <Tag className="size-3.5 mr-2" /> Make this a discussion…
                             </DropdownMenuItem>
                         )}
@@ -1264,7 +1264,7 @@ export function ThreadPane({
                                     <button
                                         className="flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:opacity-60"
                                         title="Stop your Rowboat"
-                                        disabled={!member || stopping}
+                                        disabled={!writable || stopping}
                                         onClick={() => void stopRowboat()}
                                     >
                                         {stopping ? <Loader2 className="size-2.5 animate-spin" /> : <Square className="size-2.5 fill-current" />} Stop
@@ -1304,7 +1304,7 @@ export function ThreadPane({
             )}
             </div>
 
-            {member && attaching && topic && (
+            {writable && attaching && topic && (
                 <AttachDocumentDialog
                     entries={entries}
                     current={topic.documentAssetId}
@@ -1315,10 +1315,10 @@ export function ThreadPane({
                     }}
                 />
             )}
-            {member && forwarding && (
+            {writable && forwarding && (
                 <ForwardDialog org={org} space={space} message={forwarding} memberNames={memberNames} onClose={() => setForwarding(null)} />
             )}
-            {member && <PollDialogHost openRef={openPollRef} onSubmit={createPoll} />}
+            {writable && <PollDialogHost openRef={openPollRef} onSubmit={createPoll} />}
             <FindBanner
                 orgId={org.id}
                 spaceId={space.id}
@@ -1337,7 +1337,7 @@ export function ThreadPane({
                     dismissTitle="Looks right: keep it here as a draft"
                 />
             )}
-            {member ? <Composer
+            {writable ? <Composer
                 placeholder="Reply…"
                 busy={false}
                 onSend={post}
