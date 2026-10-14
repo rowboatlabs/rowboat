@@ -973,6 +973,48 @@ export const MIGRATIONS: Migration[] = [
     id: '038-archive-spaces',
     statements: [`alter table spaces add column if not exists archived boolean not null default false`],
   },
+  {
+    // Every space-keyed table hangs off its space (spec §6, the deletion
+    // doctrine, decided 2026-09-22; built 2026-10-13): a foreign key with
+    // cascade, so deleting a space is one statement and a new table cannot
+    // silently escape it (test/space-cascade.test.ts holds every table with
+    // a space_id to this). Nothing has ever deleted a space, so orphans can
+    // only come from hand surgery; they are unreachable, and are dropped
+    // first so the constraint can be added. Plain constraints, not NOT VALID
+    // + VALIDATE: this entry runs in one transaction, where the two-step
+    // buys nothing. invites and agent_connection_threads get the space_id
+    // index the cascade's lookup needs; every other table already leads an
+    // index with it.
+    id: '039-space-cascade-fks',
+    statements: [
+      ...[
+        'memberships',
+        'assets',
+        'asset_versions',
+        'asset_search',
+        'change_sets',
+        'events',
+        'topics',
+        'messages',
+        'reactions',
+        'poll_votes',
+        'space_blobs',
+        'invites',
+        'space_read_marks',
+        'thread_read_marks',
+        'invocations',
+        'approvals',
+        'agent_connection_threads',
+        'message_hops',
+        'agent_hooks',
+      ].flatMap((table) => [
+        `delete from ${table} t where not exists (select 1 from spaces s where s.id = t.space_id)`,
+        `alter table ${table} add constraint ${table}_space_fk foreign key (space_id) references spaces(id) on delete cascade`,
+      ]),
+      `create index if not exists invites_space on invites (space_id)`,
+      `create index if not exists agent_connection_threads_space on agent_connection_threads (space_id)`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

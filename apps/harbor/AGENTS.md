@@ -49,6 +49,7 @@ Two pnpm workspace packages under `packages/`:
 - **Parity.** Every member operation exists on both the render face and the agent face; `reason` is required on the agent face's file operations. `mcp-parity.test.ts` is where a new tool proves itself. The one exception is agent keys (2026-09-29): a secret never passes through a tool, so they are managed on the render face only.
 - **Attribution is universal.** Every act is a member's, built by `k.attributionOf(ctx, input)`; `actingMode` records how, never who else. Author-only checks compare member ids, not modes: a member's agent counts as the member.
 - **Org-scoped everything.** Member ids are org-scoped and every member-keyed table carries `org_id`; space ids are global ULIDs, so space-keyed tables need no org column and one hub serves every org.
+- **Every space-keyed table cascades from its space (2026-10-13, migration 039, spec §6).** A new table with a `space_id` gets `foreign key (space_id) references spaces(id) on delete cascade` in the migration that creates it; `space-cascade.test.ts` fails otherwise, because deleting a space is one statement and a table without the cascade would keep rows for a space that no longer exists.
 - **Bytes-derived facts are the org's.** Mime, image dimensions, hashes — computed from the bytes at upload; a client's claim is a fallback, never a fact.
 - **Conflicts are outcomes, errors are failures.** A stale base returns `conflict` with everything needed to retry; `HarborError` carries a contract `ErrorCode`.
 

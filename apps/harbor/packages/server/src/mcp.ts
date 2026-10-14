@@ -186,6 +186,9 @@ async function dispatch(
     }
     case 'archive_space':
       return { space: await service.archiveSpace(ctx, (args as { spaceId: string }).spaceId, attribution) };
+    case 'delete_space':
+      await service.deleteSpace(ctx, (args as { spaceId: string }).spaceId);
+      return { deleted: true };
     case 'unarchive_space':
       return { space: await service.unarchiveSpace(ctx, (args as { spaceId: string }).spaceId, attribution) };
     case 'add_members': {

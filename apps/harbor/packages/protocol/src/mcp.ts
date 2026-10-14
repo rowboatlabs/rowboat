@@ -188,6 +188,17 @@ export const unarchiveSpace = tool({
   output: z.object({ space: Space }),
 });
 
+export const deleteSpace = tool({
+  name: 'delete_space',
+  description:
+    'Permanently delete a shared space (admins only; DMs refuse): every message, file and ' +
+    'membership in it, with no undo. Only when your person explicitly asked to delete this ' +
+    'space by name — never to tidy up, and never as a step toward something else. To take a ' +
+    'space out of use while keeping it, use archive_space.',
+  input: z.object({ spaceId: SpaceId }),
+  output: z.object({ deleted: z.literal(true) }),
+});
+
 export const addMembers = tool({
   name: 'add_members',
   description:
@@ -686,6 +697,7 @@ export const mcpTools = [
   renameSpace,
   archiveSpace,
   unarchiveSpace,
+  deleteSpace,
   addMembers,
   leaveSpace,
   createInvite,

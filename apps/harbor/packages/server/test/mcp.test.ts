@@ -59,6 +59,7 @@ describe('agent face (MCP)', () => {
       'create_topic',
       'delete_asset',
       'delete_message',
+      'delete_space',
       'diff',
       'edit_message',
       'end_poll',

@@ -270,6 +270,8 @@ export interface Store {
   getMembership(spaceId: string, memberId: string): Promise<Membership | undefined>;
   listMemberships(spaceId: string): Promise<Membership[]>;
   putMembership(membership: Membership): Promise<void>;
+  /** Delete the space row; every space-keyed table cascades from it (migration 039). */
+  deleteSpace(spaceId: string): Promise<void>;
   deleteMembership(spaceId: string, memberId: string): Promise<void>;
 
   // push (push.ts): per-device Expo tokens, per-member notify level.
@@ -302,6 +304,10 @@ export interface Store {
   /** First write wins — re-uploading the same bytes never changes the recorded mime/uploader. */
   putSpaceBlob(blob: StoredSpaceBlob): Promise<void>;
   getSpaceBlob(spaceId: string, hash: string): Promise<StoredSpaceBlob | undefined>;
+  /** Every hash a space has registered — read before the space is deleted, while the rows exist. */
+  listSpaceBlobHashes(spaceId: string): Promise<string[]>;
+  /** Of `hashes`, the ones no space of this org and no profile image or logo still uses: bytes safe to delete. */
+  unreferencedBlobs(hashes: string[]): Promise<string[]>;
 
   // profile images (org-scoped registry; bytes live in the BlobStore)
   /** First write wins, as putSpaceBlob. */
