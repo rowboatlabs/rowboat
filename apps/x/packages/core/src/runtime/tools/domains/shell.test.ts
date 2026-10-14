@@ -126,4 +126,26 @@ describe('shellTools - working-directory boundary (#1144)', () => {
 
         expect(result.success).toBe(true);
     });
+
+    it('fails closed when server.json is malformed (has syntax error)', () => {
+        const configDir = path.join(tempDir, 'config');
+        fs.mkdirSync(configDir, { recursive: true });
+        // Write malformed JSON
+        fs.writeFileSync(path.join(configDir, 'server.json'), '{"shell": { allowedRoots: [');
+
+        const roots = getAllowedRoots(tempDir);
+        // Fails closed by returning empty array rather than null
+        expect(roots).toEqual([]);
+        expect(isWithinAllowedRoots(tempDir, roots!)).toBe(false);
+    });
+
+    it('returns null (unrestricted) when server.json exists without shell.allowedRoots', () => {
+        const configDir = path.join(tempDir, 'config');
+        fs.mkdirSync(configDir, { recursive: true });
+        fs.writeFileSync(path.join(configDir, 'server.json'), JSON.stringify({ lanEnabled: false, port: 3220 }));
+
+        const roots = getAllowedRoots(tempDir);
+        expect(roots).toBeNull();
+    });
 });
+

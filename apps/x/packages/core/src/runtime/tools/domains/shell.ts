@@ -25,19 +25,21 @@ export function getAllowedRoots(workDir: string = WorkDir): string[] | null {
             .map((r) => path.resolve(workDir, r));
     }
 
-    try {
-        const configFile = path.join(workDir, 'config', 'server.json');
-        if (fs.existsSync(configFile)) {
+    const configFile = path.join(workDir, 'config', 'server.json');
+    if (fs.existsSync(configFile)) {
+        try {
             const raw = JSON.parse(fs.readFileSync(configFile, 'utf8'));
-            const roots = raw?.shell?.allowedRoots ?? raw?.allowedRoots;
-            if (Array.isArray(roots) && roots.length > 0) {
+            const roots = raw?.shell?.allowedRoots;
+            if (Array.isArray(roots)) {
                 return roots
                     .filter((r): r is string => typeof r === 'string' && r.trim() !== '')
                     .map((r) => path.resolve(workDir, r.trim()));
             }
+        } catch (err) {
+            console.warn('[Shell] Failed to parse config/server.json (failing closed):', err);
+            // Fail closed: reject commands if server.json exists but cannot be parsed (2026-10-14, #1144)
+            return [];
         }
-    } catch {
-        // Fall back to unrestricted if server.json cannot be read
     }
 
     return null;
