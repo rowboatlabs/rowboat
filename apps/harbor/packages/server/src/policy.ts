@@ -76,6 +76,13 @@ export function canArchiveSpace(actor: Member, space: Space, act: 'archive' | 'u
   return { code: 'forbidden', message: `only an admin can ${act} a space` };
 }
 
+/** Deleting a space is an admin act too, on the same terms as archiving it (spec §6, built 2026-10-14). */
+export function canDeleteSpace(actor: Member, space: Space): Decision {
+  if (space.kind === 'direct') return { code: 'invalid_request', message: 'a direct message cannot be deleted' };
+  if (actor.role === 'admin') return null;
+  return { code: 'forbidden', message: 'only an admin can delete a space' };
+}
+
 /**
  * An archived space refuses every write that would add to it (spec §6,
  * 2026-10-13). Asked by the space lock for every member's act; leaving and

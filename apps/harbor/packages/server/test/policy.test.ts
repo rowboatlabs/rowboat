@@ -11,6 +11,7 @@ import {
   invocationRefusal,
   canAccessSpace,
   canArchiveSpace,
+  canDeleteSpace,
   canOpenDirect,
   isGroupChat,
   canAddAgent,
@@ -80,7 +81,7 @@ describe('policy', () => {
     expect(canJoinSpace({ ...direct, visibility: 'open' })).toMatchObject({ code: 'forbidden' });
   });
 
-  it('archive and unarchive: an admin on a shared space; a DM never (2026-10-13)', () => {
+  it('archive, unarchive and delete: an admin on a shared space; a DM never (2026-10-13/14)', () => {
     const admin = { role: 'admin' } as Member;
     const member = { role: 'member' } as Member;
     expect(canArchiveSpace(admin, shared, 'archive')).toBeNull();
@@ -88,6 +89,10 @@ describe('policy', () => {
     expect(canArchiveSpace(member, shared, 'archive')).toMatchObject({ code: 'forbidden' });
     expect(canArchiveSpace(member, shared, 'unarchive')).toMatchObject({ code: 'forbidden' });
     expect(canArchiveSpace(admin, direct, 'archive')).toMatchObject({ code: 'invalid_request' });
+    expect(canDeleteSpace(admin, shared)).toBeNull();
+    expect(canDeleteSpace(admin, { ...shared, archived: true })).toBeNull();
+    expect(canDeleteSpace(member, shared)).toMatchObject({ code: 'forbidden' });
+    expect(canDeleteSpace(admin, direct)).toMatchObject({ code: 'invalid_request' });
     expect(canWriteSpace(shared)).toBeNull();
     expect(canWriteSpace({ ...shared, archived: true })).toMatchObject({ code: 'forbidden' });
   });

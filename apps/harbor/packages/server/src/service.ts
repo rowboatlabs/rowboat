@@ -90,7 +90,7 @@ export class HarborService {
     notifier?: Notifier,
   ) {
     this.k = new Kernel(store, hub, org);
-    this.spaces = new Spaces(this.k);
+    this.spaces = new Spaces(this.k, blobs);
     this.assets = new Assets(this.k, blobs);
     this.images = new Images(this.k, blobs);
     this.invocations = new Invocations(this.k);
@@ -224,6 +224,9 @@ export class HarborService {
   }
   unarchiveSpace(ctx: ActorCtx, spaceId: string, input: ArchiveSpaceInput): Promise<Space> {
     return this.spaces.unarchiveSpace(ctx, spaceId, input);
+  }
+  deleteSpace(ctx: ActorCtx, spaceId: string): Promise<void> {
+    return this.spaces.deleteSpace(ctx, spaceId);
   }
   openDirect(ctx: ActorCtx, otherMemberId: string): Promise<{ space: Space; created: boolean }> {
     return this.spaces.openDirect(ctx, otherMemberId);

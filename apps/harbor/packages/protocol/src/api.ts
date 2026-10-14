@@ -366,6 +366,21 @@ export const routes = {
     request: z.object({ actingMode: ActingMode, agentName: z.string().max(64).optional() }),
     response: z.object({ space: Space }),
   },
+  /**
+   * Delete a shared space (spec §6, 2026-10-14): an admin act, refused on a
+   * DM, allowed on an archived space. The space and every row that hangs off
+   * it go in one statement (the cascade, migration 039); blob bytes no other
+   * space or image of the org uses go after the commit. No body: no event
+   * survives to carry an attribution. Former members (every org member, for
+   * an open space) get `space_removed`. Deleting a deleted space is
+   * `not_found`. The client confirms by name; the server does not ask.
+   */
+  deleteSpace: {
+    method: 'DELETE',
+    path: '/v1/spaces/:spaceId',
+    params: z.object({ spaceId: SpaceId }),
+    response: z.object({ deleted: z.literal(true) }),
+  },
   listMembers: {
     method: 'GET',
     path: '/v1/spaces/:spaceId/members',

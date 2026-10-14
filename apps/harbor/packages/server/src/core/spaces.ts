@@ -11,8 +11,9 @@ import {
 } from '@rowboat/spaces-protocol';
 import { randomBytes } from 'node:crypto';
 import type { z } from 'zod';
+import type { BlobStore } from '../blobs.js';
 import { HarborError } from '../errors.js';
-import { canArchiveSpace, canBind, canChangeMembership, canJoinSpace, canOpenDirect, canReachMember, canRenameSpace, canSignIn, canWriteSpace, enforce, isGroupChat } from '../policy.js';
+import { canArchiveSpace, canBind, canDeleteSpace, canChangeMembership, canJoinSpace, canOpenDirect, canReachMember, canRenameSpace, canSignIn, canWriteSpace, enforce, isGroupChat } from '../policy.js';
 import { DIRECT_SPACE_NAME, directKeyFor, type PushLevel, type StoredEvent } from '../store.js';
 import { Kernel, type ActorCtx, type BindIdentity } from './kernel.js';
 
@@ -36,7 +37,11 @@ export type ArchiveSpaceInput = z.infer<Routes['archiveSpace']['request']>;
 const DEFAULT_INVITE_HOURS = 24 * 7;
 
 export class Spaces {
-  constructor(private readonly k: Kernel) {}
+  constructor(
+    private readonly k: Kernel,
+    /** The org's blob bytes: deleting a space removes the ones nothing else uses. Absent = uploads unconfigured. */
+    private readonly blobs?: BlobStore,
+  ) {}
 
   // --- identity --------------------------------------------------------------
 
@@ -187,6 +192,51 @@ export class Spaces {
       await this.k.appendNext(spaceId, this.k.now(), { type: archived ? 'space_archived' : 'space_unarchived', space: updated, by });
       return updated;
     }, { archived: 'allow' });
+  }
+
+  /**
+   * Delete a shared space (spec §6, the deletion doctrine; built 2026-10-14):
+   * an admin act, on the same terms as archive, and allowed on an archived
+   * space. One statement drops the space and, through the cascade (migration
+   * 039), every row that hangs off it. No undo and no event: the log goes
+   * with it.
+   *
+   * No write guard: over its limit an org cannot grow, but it may shrink
+   * (policy.ts canWrite), as anyone may leave.
+   *
+   * What the delete erases is read first, inside the lock. Everything that
+   * cannot be undone waits for the commit: the frames, because hub frames do
+   * not ride the lock's outbox, and the blob bytes, because a rolled-back
+   * delete must still find its files.
+   */
+  async deleteSpace(ctx: ActorCtx, spaceId: string): Promise<void> {
+    const space = await this.k.requireMember(ctx, spaceId);
+    enforce(canDeleteSpace(await this.me(ctx), space));
+    const at = this.k.now();
+    const { hashes, told } = await this.k.lockedAs(ctx, spaceId, async () => {
+      const current = (await this.k.store.getSpace(spaceId)) ?? space;
+      // An open space may be open in anyone's window, member or not; a
+      // private one is known only to its members, and only they are told.
+      const told = current.visibility === 'open'
+        ? await this.k.store.listAllMembers()
+        : await this.k.store.listSpaceMembers(spaceId);
+      const hashes = await this.k.store.listSpaceBlobHashes(spaceId);
+      await this.k.store.deleteSpace(spaceId);
+      return { hashes, told };
+    }, { archived: 'allow' });
+    if (this.blobs) {
+      for (const hash of await this.k.store.unreferencedBlobs(hashes)) {
+        // The space is already gone: a byte delete that fails leaves garbage
+        // for the blob sweep (spec §12), never a broken space, so it is
+        // logged rather than failing a delete that has happened.
+        await this.blobs.delete(hash).catch((err: unknown) => {
+          console.warn(`[harbor] space ${spaceId} deleted; blob ${hash} not removed:`, err);
+        });
+      }
+    }
+    for (const member of told) {
+      this.k.hub.publishToMember(member.id, { kind: 'space_removed', spaceId, by: ctx.memberId, at });
+    }
   }
 
   /**

@@ -227,7 +227,9 @@ export const ServerFrame = z.discriminatedUnion('kind', [
    * space reaches you after your departure, and a re-subscribe to a private space is refused.
    * Ephemeral, never replayed: the durable truth is the `membership` event
    * (`left` / `removed`) on the space's own log. Pre-2026-09-22 clients drop
-   * the unknown frame by contract.
+   * the unknown frame by contract. Also sent when an admin deletes the space
+   * (2026-10-14) — to every member, and for an open space to everyone in the
+   * org, since anyone may be reading it; there is no log left to replay.
    */
   z.object({
     kind: z.literal('space_removed'),

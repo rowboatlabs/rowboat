@@ -571,6 +571,10 @@ export class PgStore implements Store {
     );
   }
 
+  async deleteSpace(spaceId: string): Promise<void> {
+    await this.sql.query('delete from spaces where org_id = $1 and id = $2', [this.orgId, spaceId]);
+  }
+
   async deleteMembership(spaceId: string, memberId: string): Promise<void> {
     await this.sql.query('delete from memberships where space_id = $1 and member_id = $2', [spaceId, memberId]);
   }
@@ -726,6 +730,27 @@ export class PgStore implements Store {
        values ($1, $2, $3, $4, $5, $6, $7, $8) on conflict (space_id, hash) do nothing`,
       [blob.spaceId, blob.hash, blob.size, blob.mime, blob.width ?? null, blob.height ?? null, blob.uploadedBy, blob.uploadedAt],
     );
+  }
+
+  async listSpaceBlobHashes(spaceId: string): Promise<string[]> {
+    const rows = await this.sql.query<{ hash: string }>('select hash from space_blobs where space_id = $1', [spaceId]);
+    return rows.map((r) => r.hash);
+  }
+
+  async unreferencedBlobs(hashes: string[]): Promise<string[]> {
+    if (hashes.length === 0) return [];
+    // Scoped to this org on purpose: every org's bytes live under its own
+    // prefix (main.ts blobStoreFactory), so only this org's references can
+    // keep them. Avatars and the logo are registered in org_images; org_logos
+    // is checked too so a logo is never lost to a registry gap.
+    const rows = await this.sql.query<{ hash: string }>(
+      `select h.hash from unnest($2::text[]) as h(hash)
+       where not exists (select 1 from space_blobs b join spaces s on s.id = b.space_id where b.hash = h.hash and s.org_id = $1)
+         and not exists (select 1 from org_images i where i.org_id = $1 and i.hash = h.hash)
+         and not exists (select 1 from org_logos l where l.org_id = $1 and l.hash = h.hash)`,
+      [this.orgId, hashes],
+    );
+    return rows.map((r) => r.hash);
   }
 
   async putOrgImage(image: StoredOrgImage): Promise<void> {

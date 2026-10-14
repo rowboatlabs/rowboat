@@ -248,6 +248,12 @@ export function buildHttpApp(deps: {
     return reply(c, routes.archiveSpace.response, { space: await service.archiveSpace(actor(c), spaceId, input) });
   });
 
+  app.delete(routes.deleteSpace.path, async (c) => {
+    const { spaceId } = parseWith(routes.deleteSpace.params, c.req.param());
+    await service.deleteSpace(actor(c), spaceId);
+    return reply(c, routes.deleteSpace.response, { deleted: true });
+  });
+
   app.post(routes.unarchiveSpace.path, async (c) => {
     const { spaceId } = parseWith(routes.unarchiveSpace.params, c.req.param());
     const input = await body(c, routes.unarchiveSpace.request);
