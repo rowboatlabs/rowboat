@@ -83,3 +83,20 @@ describe("workspace.writeFile etag guard", () => {
     expect(recreated.stat.size).toBe(6);
   });
 });
+
+describe("workspace.copy overwrite behavior", () => {
+  it("copies new files, protects existing files by default, and overwrites explicitly", async () => {
+    const workspace = await loadWorkspace();
+    await workspace.writeFile("source.txt", "source");
+
+    await expect(workspace.copy("source.txt", "new.txt")).resolves.toEqual({ ok: true });
+    await expect(fs.readFile(path.join(workspaceDir, "new.txt"), "utf8")).resolves.toBe("source");
+
+    await workspace.writeFile("existing.txt", "keep");
+    await expect(workspace.copy("source.txt", "existing.txt")).rejects.toThrow("Destination already exists");
+    await expect(fs.readFile(path.join(workspaceDir, "existing.txt"), "utf8")).resolves.toBe("keep");
+
+    await expect(workspace.copy("source.txt", "existing.txt", true)).resolves.toEqual({ ok: true });
+    await expect(fs.readFile(path.join(workspaceDir, "existing.txt"), "utf8")).resolves.toBe("source");
+  });
+});
