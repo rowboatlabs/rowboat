@@ -28,10 +28,18 @@ export interface AppSettings {
      */
     quickAskShortcut?: string;
     /**
-     * Set to true if the user has opted out of product analytics/telemetry.
-     * (2026-10-13, #415)
+     * Product analytics (PostHog) consent. Absent = enabled (the historical
+     * default); `false` = the user opted out in Settings → Advanced, and no
+     * events are captured from the main process or the renderer.
      */
+    analyticsEnabled?: boolean;
+    /** Telemetry opt-out compatibility (2026-10-13, #415). */
     telemetryOptOut?: boolean;
+}
+
+export function isAnalyticsEnabled(): boolean {
+    const settings = loadAppSettings();
+    return settings.analyticsEnabled !== false && settings.telemetryOptOut !== true;
 }
 
 export function loadAppSettings(): AppSettings {
