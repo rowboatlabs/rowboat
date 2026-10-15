@@ -95,6 +95,25 @@ describe('todo fileops parse/serialize', () => {
         expect(back.blocks.filter(b => b.kind === 'raw' && b.text.trim() !== '')).toHaveLength(0);
     });
 
+    it('keeps links in question and error receipts across a rewrite', () => {
+        const md = `- [ ] @rowboat draft reply
+  - → needs you: send [this draft](knowledge/draft.md) as-is?
+- [ ] call the bank
+  - → failed: see [setup guide](https://example.com/setup) — Gmail sync is disconnected
+`;
+        const receipts = (text: string) => parseTodoFile(text).blocks.flatMap(b => b.kind === 'item' ? b.item.receipts : []);
+        const before = receipts(md);
+        expect(before.map(r => r.links)).toEqual([
+            [{ label: 'this draft', path: 'knowledge/draft.md' }],
+            [{ label: 'setup guide', url: 'https://example.com/setup' }],
+        ]);
+
+        // Every todo write re-parses and re-serializes the whole file.
+        const once = serializeTodoFile(parseTodoFile(md));
+        expect(receipts(once)).toEqual(before);
+        expect(serializeTodoFile(parseTodoFile(once))).toEqual(once);
+    });
+
     it('parses archive files into dated entries with restore handles', () => {
         const archive = `
 ## 2026-07-27

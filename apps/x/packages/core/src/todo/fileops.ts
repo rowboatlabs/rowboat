@@ -76,12 +76,13 @@ function serializeReceipt(r: TodoReceipt, indent: string): string {
     // A receipt is exactly one line — embedded newlines (e.g. multi-line
     // provider errors) would leak raw text lines into the file.
     const text = r.text.replace(/\s+/g, ' ').trim();
-    if (r.kind === 'question') return `${indent}- → needs you: ${text}`;
-    if (r.kind === 'error') return `${indent}- → failed: ${text}`;
+    // (2026-09-25) parseReceipt lifts links out of every kind, so every kind writes them
+    // back — otherwise a question or error's links vanish on the next save.
+    const prefix = r.kind === 'question' ? 'needs you: ' : r.kind === 'error' ? 'failed: ' : '';
     const links = r.links.map(l => `[${l.label}](${l.url ?? l.path ?? ''})`).join(', ');
-    if (links && text) return `${indent}- → ${links} — ${text}`;
-    if (links) return `${indent}- → ${links}`;
-    return `${indent}- → ${text}`;
+    if (links && text) return `${indent}- → ${prefix}${links} — ${text}`;
+    if (links) return `${indent}- → ${prefix}${links}`;
+    return `${indent}- → ${prefix}${text}`;
 }
 
 function newItem(text: string, checked: boolean, key: string): TodoItem {
