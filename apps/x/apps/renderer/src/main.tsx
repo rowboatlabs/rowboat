@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
 import { PostHogProvider } from 'posthog-js/react'
-import type { CaptureResult } from 'posthog-js'
+import type { CaptureResult, PostHog } from 'posthog-js'
 import { ThemeProvider } from '@/contexts/theme-context'
 import { configureAnalyticsContext } from './lib/analytics'
 import { MeetingDetectedPopup } from '@/components/meeting-detected-popup'
@@ -33,7 +33,7 @@ async function bootstrap() {
   let installationId: string | undefined
   let apiUrl: string | undefined
   let appVersion: string | undefined
-  let analyticsEnabled = true
+  let analyticsEnabled = false
   try {
     const result = await window.ipc.invoke('analytics:bootstrap', null)
     installationId = result.installationId
@@ -62,7 +62,10 @@ async function bootstrap() {
       }
       return event
     },
-    loaded: () => {
+    loaded: (client: PostHog) => {
+      // 2026-10-15 (#415): the shared setting overrides stale SDK consent.
+      if (analyticsEnabled) client.opt_in_capturing({ captureEventName: false })
+      else client.opt_out_capturing()
       configureAnalyticsContext({ apiUrl, appVersion })
     },
   }
