@@ -36,10 +36,10 @@ function hover(label: string) {
 }
 
 describe('space content menus', () => {
-    it.each(['two-person-dm', 'self-dm'])('exposes discussions and files for %s with DM badges', (spaceId) => {
+    it.each(['two-person-dm', 'self-dm'])('exposes threads and files for %s with DM badges', (spaceId) => {
         vi.useFakeTimers()
         const onSelect = mount(true, spaceId)
-        const discussions = hover('Discussions')
+        const discussions = hover('Threads')
         expect(within(discussions).getByLabelText('3 unread · all for you')).toBeInTheDocument()
         fireEvent.click(discussions)
         expect(onSelect).toHaveBeenLastCalledWith({ kind: 'discussions' })
@@ -52,9 +52,9 @@ describe('space content menus', () => {
     it('clicking a hovered tab opens the full view, not the menu', () => {
         vi.useFakeTimers()
         const onSelect = mount()
-        const button = hover('Discussions')
+        const button = hover('Threads')
         expect(onSelect).not.toHaveBeenCalled()
-        const menu = screen.getByRole('dialog', { name: 'Recent discussions' })
+        const menu = screen.getByRole('dialog', { name: 'Recent threads' })
         const rows = within(menu).getAllByRole('button')
         expect(rows[0]).toHaveTextContent('Recent discussion')
         expect(within(menu).queryByText('Archived discussion')).not.toBeInTheDocument()
@@ -66,7 +66,7 @@ describe('space content menus', () => {
     it('keeps the menu open while crossing into it and selects the exact discussion', () => {
         vi.useFakeTimers()
         const onSelect = mount()
-        const button = hover('Discussions')
+        const button = hover('Threads')
         fireEvent.pointerLeave(button, { pointerType: 'mouse' })
         act(() => { vi.advanceTimersByTime(100) })
         const menu = screen.getByRole('dialog')
