@@ -10,7 +10,7 @@ import type { AddressInfo } from 'node:net';
 export interface SystemOneCall {
   auth: string | undefined;
   model: string;
-  state: { space: string; message: { author: string; author_is: string; text: string }; members: Array<{ id: string; name: string; is: string; agent?: string }>; thread?: Array<{ author: string; text: string }> };
+  state: { space: string; message: { author: string; author_is: string; text: string; tags: string[] }; members: Array<{ id: string; name: string; is: string; agent?: string; tagged_in_thread?: boolean }>; thread?: Array<{ author: string; text: string }> };
   questions: Record<string, { type: string }>;
 }
 

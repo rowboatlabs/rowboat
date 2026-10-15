@@ -62,6 +62,13 @@ export const Member = z.object({
    * another agent. Absent for every other agent and for people.
    */
   agentInstance: z.string().min(1).max(128).optional(),
+  /**
+   * When the person deleted their account (2026-10-08, App Store 5.1.1(v)).
+   * The member stays, name and all, so their messages keep their author;
+   * clients mark them deactivated and leave them out of pickers. Harbor
+   * refuses them as a sign-in, a DM, or an addition. Absent = active.
+   */
+  deactivatedAt: z.string().optional(),
 });
 export type Member = z.infer<typeof Member>;
 
@@ -73,6 +80,8 @@ export type Member = z.infer<typeof Member>;
  * key. A new pair is a line here, never a migration.
  */
 export const REPLICAS_CODING_AGENTS = ['claude-code', 'codex', 'cursor', 'opencode', 'pi', 'muse-code'] as const;
+/** Conductor runs Claude Code first; Codex and Cursor once their transcripts are read (2026-10-06). */
+export const CONDUCTOR_CODING_AGENTS = ['claude-code'] as const;
 /** The general agents Agent37 hosts that Harbor drives through its API (2026-10-01): coding harnesses wait. */
 export const AGENT37_AGENTS = ['hermes', 'openclaw'] as const;
 export const AGENT_PAIRS: ReadonlyArray<{ kind: string; connection: string }> = [
@@ -80,9 +89,13 @@ export const AGENT_PAIRS: ReadonlyArray<{ kind: string; connection: string }> = 
   { kind: 'hermes', connection: 'plugin' },
   ...REPLICAS_CODING_AGENTS.map((kind) => ({ kind, connection: 'replicas' })),
   ...AGENT37_AGENTS.map((kind) => ({ kind, connection: 'agent37' })),
+  ...CONDUCTOR_CODING_AGENTS.map((kind) => ({ kind, connection: 'conductor' })),
+  // Integrations (2026-10-03): the service's own API, called on a command, its kind and connection one name.
+  { kind: 'posthog', connection: 'posthog' },
+  { kind: 'cal', connection: 'cal' },
 ];
 /** Connections whose connector Harbor runs, calling the platform with a credential it holds (spec §8 Connectors). */
-export const HARBOR_RUN_CONNECTIONS: readonly string[] = ['replicas', 'agent37'];
+export const HARBOR_RUN_CONNECTIONS: readonly string[] = ['replicas', 'agent37', 'conductor', 'posthog', 'cal'];
 /**
  * Connections whose agent is one instance on the platform (2026-10-05): the
  * agent is added with it, and Harbor checks the instance runs the agent's kind.
@@ -137,8 +150,20 @@ export const AgentCredential = z.object({
 });
 export type AgentCredential = z.infer<typeof AgentCredential>;
 
-/** An agent with its keys, as the Agents screen lists them, and its platform credential when Harbor runs its connector. */
-export const AgentListing = z.object({ agent: Member, keys: z.array(AgentKey), credential: AgentCredential.optional() });
+/**
+ * Where a platform agent's alerts land (spec §8 Alerts, 2026-10-03): the
+ * service posts to a secret address, and the agent posts what it says into
+ * this space. The address is shown once, when it is set; the org keeps its hash.
+ */
+export const AgentHook = z.object({
+  spaceId: SpaceId,
+  setBy: MemberId,
+  setAt: z.iso.datetime(),
+});
+export type AgentHook = z.infer<typeof AgentHook>;
+
+/** An agent with its keys, as the Agents screen lists them, and its platform credential and alert hook when Harbor runs its connector. */
+export const AgentListing = z.object({ agent: Member, keys: z.array(AgentKey), credential: AgentCredential.optional(), hook: AgentHook.optional() });
 export type AgentListing = z.infer<typeof AgentListing>;
 
 /**
@@ -175,6 +200,12 @@ export const Space = z.object({
    * and by the member's own agent.
    */
   participants: z.array(MemberId).min(1).optional(),
+  /**
+   * Archived (spec §6, built 2026-10-13): refuses writes, stays readable.
+   * Listings still carry it — the client files it under Archived. Old
+   * payloads and every existing space are live. A DM is never archived.
+   */
+  archived: z.boolean().default(false),
 });
 export type Space = z.infer<typeof Space>;
 

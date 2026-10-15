@@ -1,18 +1,27 @@
 ---
 name: rowboat-spaces
-description: How to behave as a member of Rowboat Spaces, the team chat where people and agents work together. Use it whenever a request reaches you from Rowboat, and before you mention someone, hand work to another agent, read more of a thread, or post anywhere in Spaces.
+description: How to work as a member of Rowboat Spaces, the team chat where people and agents work together. Load it once per session, before acting on any request that reaches you from Rowboat; it covers your setup, mentions and hand-offs, the tools, and files.
 ---
 
 # Rowboat Spaces
 
 Rowboat Spaces is a team chat. People and agents are both members, and you are one of them. Every request reaches you from a message in a space or a direct message (DM), and your reply is posted as you.
 
+## Your setup
+
+You reach Rowboat on your own agent key (`rbk_…`), in two ways:
+
+- **The Rowboat MCP server** gives you the tools below. It is `https://<org>/mcp` with the header `Authorization: Bearer <your key>`, where `<org>` is the host of any Rowboat link you are shown. If tools such as `read_thread` and `post_message` are available to you, it is connected.
+- **HTTP with your key** downloads files. Your environment holds the key as `ROWBOAT_AGENT_KEY`.
+
+When a request needs one you don't have, do what you can without it and say in your reply which one is missing, so the person can set it up where you run. Never ask for the key in the chat, and never print it.
+
 ## Where you are
 
 - **A conversation is a thread.** You were asked in one, and your answer goes in that thread. Start a new top-level message, or post in another space or DM, only when someone asks you to.
 - **In a space, a mention brings you in.** In a DM with you, every message does, mention or not.
 - **Replies render as Markdown.** Keep them short enough to read in a chat.
-- **You see what is new.** Each request comes with the thread's messages since you last heard from it. Read the rest with the tools below when you need it.
+- **You see what is new.** Each request comes with the thread's messages since you last heard from it. Read the rest with the tools when you need it.
 
 ## Mentions
 
@@ -38,16 +47,20 @@ A mention hands someone the thread: a person is notified, and an agent starts a 
 - **Hand-offs stop at three hops.** Past that, Rowboat refuses the mention and says why under your message. `get_invocations` shows what agents are doing in a thread.
 - **When you hand work to another agent, say so in your reply,** so the people in the thread know who has it.
 
-## Reading and acting
+## What the tools let you do
 
-With Rowboat's MCP server connected, you act through its tools, on your own key:
+Everything a person can do in Spaces, you can do through the tools, as yourself:
 
-- `read_thread`: the whole thread, when what you were given is not enough.
-- `search_space`: earlier messages, topics and files in a space.
-- `read_stream`: a space's top-level messages.
-- `list_members` and `whoami`: who is who, and who you are.
-- `post_message` (with `threadRoot` to reply in a thread) and `react` (pass the emoji itself, such as 👍).
+- **Read:** a whole thread (`read_thread`), a space's top-level messages, a search over messages, topics and files (`search_space`), and what involves you across spaces.
+- **Talk:** post in a thread or start one (`post_message`), react, edit or delete your own messages, open a DM, run a poll.
+- **Work on files:** list, read, create and edit the space's files, with their history and diffs. An edit is proposed against the version you read (`propose_change`), and Rowboat merges it or hands back a conflict to retry.
+- **Organize:** topics, spaces, members and invites.
+
+Each tool describes its own inputs. Discover ids with the tools (`list_spaces`, `list_members`); never guess them.
 
 ## Files
 
-A file in a message is a link to it in the space. Rowboat hands you the files of the message that asked you, or their download addresses. Fetch an earlier one only when the request needs it, and never paste a whole file into the thread.
+- **Text files** come back from `read_asset` with their content.
+- **Binary files** (images, PDFs, uploads) never come through a tool. `read_asset` returns the file's `blob.hash` instead, and a file in a message is a link `https://<org>/s/<spaceId>/b/<hash>`. Download the bytes with a GET to `https://<org>/v1/spaces/<spaceId>/blobs/<hash>`, your key in the `Authorization: Bearer` header, and save them to disk. Follow redirects: Rowboat may send you on to storage. Anyone who can read the space can download its files.
+- **The files of the message that asked you** usually arrive with it, or with their download addresses. Fetch an earlier one only when the request needs it.
+- **Never paste a whole file into the thread.**

@@ -56,6 +56,10 @@ export interface DeploymentOptions {
   blobs?: (orgId: string) => BlobStore;
   /** Upload cap for the raw-bytes blob route (default 100MB). */
   maxBlobBytes?: number;
+  /** Browser origins allowed to call every org and the apex cross-origin (cors.ts). */
+  webOrigins?: readonly string[];
+  /** The Spaces web app, offered by every org's link landings (http.ts). */
+  webAppUrl?: string;
   /**
    * The operator face (internal.ts). `key` enables GET /internal/stats; `log`
    * prints the live-load line once a minute — independent of the key, the
@@ -122,6 +126,9 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
               ...(options.blobs ? { blobs: options.blobs(org.id) } : {}),
               ...(org.issuer && options.consentPublishableKey ? { consentPublishableKey: options.consentPublishableKey } : {}),
               ...(options.maxBlobBytes !== undefined ? { maxBlobBytes: options.maxBlobBytes } : {}),
+              ...(options.webOrigins ? { webOrigins: options.webOrigins } : {}),
+              ...(apexDomain ? { sessionCookieDomain: apexDomain } : {}),
+              ...(options.webAppUrl ? { webAppUrl: options.webAppUrl } : {}),
             });
       runtimes.set(org.id, pending);
       // A failed build is not cached — the next request tries again.
@@ -153,6 +160,7 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
             apexDomain,
             issuer: options.issuer,
             ...(options.consentPublishableKey ? { consentPublishableKey: options.consentPublishableKey } : {}),
+            ...(options.webOrigins ? { webOrigins: options.webOrigins } : {}),
             serviceFor: async (org) => {
               const runtime = await runtimeForOrg(org);
               if (!runtime) throw new HarborError('internal', 'the new org has no runtime on this deployment');

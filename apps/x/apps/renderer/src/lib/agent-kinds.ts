@@ -2,6 +2,8 @@ import agent37Logo from '@/assets/agents/agent37/logo.png'
 import agent37LogoDark from '@/assets/agents/agent37/logo-dark.png'
 import claudeCodeLogo from '@/assets/agents/claude-code/logo.png'
 import claudeCodeLogoDark from '@/assets/agents/claude-code/logo-dark.png'
+import conductorLogo from '@/assets/agents/conductor/logo.png'
+import conductorLogoDark from '@/assets/agents/conductor/logo-dark.png'
 import codexLogo from '@/assets/agents/codex/logo.png'
 import codexLogoDark from '@/assets/agents/codex/logo-dark.png'
 import cursorLogo from '@/assets/agents/cursor/logo.png'
@@ -20,7 +22,7 @@ import replicasLogoDark from '@/assets/agents/replicas/logo-dark.png'
 // What an agent is, how Harbor reaches it, and how you set one up (Harbor spec
 // §4 Agent members and §8 Connectors, 2026-09-30). Harbor stores every agent's
 // kind (what it is underneath: hermes, a coding agent, custom) and connection
-// (the path: plugin, contract, or a platform Harbor calls such as replicas);
+// (the path: plugin, contract, or a platform Harbor calls: replicas, conductor);
 // every surface draws the agent from them: the kind's logo on its avatar,
 // "Claude Code · via Replicas" beside its name.
 //
@@ -37,8 +39,12 @@ export interface Logo {
     dark: string
 }
 
-/** What an agent is underneath. Unknown kinds (from a newer Harbor) read as a generic agent. */
-export const KINDS: Record<string, { label: string; logo?: Logo }> = {
+/**
+ * What an agent is underneath. Unknown kinds (from a newer Harbor) read as a generic agent.
+ * `bot`: the app calls it a bot (2026-10-03, Arjun): it runs a service's commands, as a Slack
+ * bot does, rather than thinking for itself. To Harbor it is an agent member like any other.
+ */
+export const KINDS: Record<string, { label: string; logo?: Logo; bot?: boolean }> = {
     hermes: { label: 'Hermes', logo: { light: hermesLogo, dark: hermesLogoDark } },
     openclaw: { label: 'OpenClaw', logo: { light: openclawLogo, dark: openclawLogoDark } },
     'claude-code': { label: 'Claude Code', logo: { light: claudeCodeLogo, dark: claudeCodeLogoDark } },
@@ -48,6 +54,9 @@ export const KINDS: Record<string, { label: string; logo?: Logo }> = {
     pi: { label: 'Pi', logo: { light: piLogo, dark: piLogoDark } },
     // Meta publishes no mark for Muse Code (2026-09-30): the generic one until it does.
     'muse-code': { label: 'Muse Code' },
+    // Integrations (2026-10-03) show the generic mark until their official ones are added.
+    posthog: { label: 'PostHog', bot: true },
+    cal: { label: 'Cal.com', bot: true },
     custom: { label: 'Agent' },
     // Ro (Harbor spec §8 Jev, 2026-10-07): the agent Harbor itself is, run on
     // TypeSafe's Jev through Rowboat's OpenRouter key. People meet it as Ro,
@@ -61,6 +70,9 @@ export const BUILT_IN_CONNECTION = 'builtin'
 /** Platforms Harbor calls on an agent's behalf: named after the kind ("via Replicas"). */
 export const PLATFORMS: Record<string, { label: string; logo?: Logo }> = {
     replicas: { label: 'Replicas', logo: { light: replicasLogo, dark: replicasLogoDark } },
+    posthog: { label: 'PostHog' },
+    cal: { label: 'Cal.com' },
+    conductor: { label: 'Conductor', logo: { light: conductorLogo, dark: conductorLogoDark } },
     agent37: { label: 'Agent37', logo: { light: agent37Logo, dark: agent37LogoDark } },
 }
 
@@ -69,14 +81,20 @@ export function instanceLabel(i: { id: string; name: string | null }): string {
     return i.name ? `${i.name} (${i.id})` : i.id
 }
 
-export function kindInfo(kind: string | undefined): { label: string; logo?: Logo } {
+export function isBot(kind: string | undefined): boolean {
+    return kindInfo(kind).bot === true
+}
+
+export function kindInfo(kind: string | undefined): { label: string; logo?: Logo; bot?: boolean } {
     return (kind && KINDS[kind]) || { label: 'Agent' }
 }
 
-/** "Hermes", "Claude Code · via Replicas", or "Agent". */
+/** "Hermes", "Claude Code · via Replicas", "PostHog bot", or "Agent". */
 export function agentLabel(kind: string | undefined, connection: string | undefined): string {
     const platform = connection ? PLATFORMS[connection] : undefined
     const what = kindInfo(kind).label
+    // A bot is its own platform: "PostHog bot", not "PostHog · via PostHog".
+    if (isBot(kind)) return `${what} bot`
     return platform ? `${what} · via ${platform.label}` : what
 }
 
@@ -139,6 +157,10 @@ export interface AgentSetup {
     bindsInstance?: boolean
     /** Opens the owner's DM with the agent before setup, for `homeChannel`. */
     wantsHomeChannel?: boolean
+    /** A bot rather than an agent (KINDS `bot`): offered under Add bot. */
+    bot?: boolean
+    /** The service can post alerts through the agent (Harbor spec §8 Alerts): where its address goes, on the agent's page. */
+    alerts?: { note: string }
     setup: (ctx: SetupContext) => SetupRoute[]
 }
 
@@ -321,6 +343,63 @@ function replicasSetup({ orgUrl, agentKey }: SetupContext): SetupRoute[] {
     ]
 }
 
+// A bot (Harbor spec §8 Integrations, 2026-10-03) needs nothing on the service's side
+// beyond its key: it answers commands, and alerts are set up on its page.
+function integrationSetup(name: string, example: string): () => SetupRoute[] {
+    return () => [
+        {
+            id: 'commands',
+            label: 'Commands',
+            steps: [
+                {
+                    title: 'Ask it what it can do',
+                    note: `Mention it with help for its commands, such as @${name} ${example}. It calls the service's API with your key and replies in the thread.`,
+                },
+                {
+                    title: 'Send its alerts to a space (optional)',
+                    note: "On this bot's page, under Alerts, pick a space it is in and copy the address it gives you into the service's webhook settings.",
+                },
+            ],
+        },
+    ]
+}
+
+// Conductor (2026-10-06): Harbor runs the connector, so connecting is the Conductor key on the
+// Add screen. Every workspace it starts gets ROWBOAT_URL and ROWBOAT_AGENT_KEY (a key Harbor
+// keeps for the agent), so nothing secret is set up by hand: a repo's .mcp.json that reads them
+// gives Claude Code the Spaces tools, and the skill teaches it Spaces. Conductor's API can't set
+// MCP servers itself, so both are files the repo commits.
+const CONDUCTOR_MCP_JSON = JSON.stringify(
+    { mcpServers: { rowboat: { type: 'http', url: '${ROWBOAT_URL}/mcp', headers: { Authorization: 'Bearer ${ROWBOAT_AGENT_KEY}' } } } },
+    null,
+    2,
+)
+
+function conductorSetup(): SetupRoute[] {
+    return [
+        {
+            id: 'conductor',
+            label: 'Conductor',
+            steps: [
+                {
+                    title: 'Give it the Spaces tools (recommended)',
+                    note: 'Commit this as .mcp.json at the root of each repository it works in (or merge it into the one there). It holds no secret: Rowboat fills both variables in every workspace it starts.',
+                    code: { caption: '.mcp.json', text: CONDUCTOR_MCP_JSON },
+                },
+                {
+                    title: 'Teach it Spaces (recommended)',
+                    note: 'The rowboat-spaces skill teaches it how to behave in Spaces: mentions, hand-offs, threads. Run this in the repository and commit what it adds.',
+                    code: { caption: 'Terminal', text: `npx skills add ${SKILL_REPO} --skill rowboat-spaces` },
+                },
+                {
+                    title: 'Pick its repository when you mention it',
+                    note: 'With one Conductor project it uses that one. With several it asks, or name it in your message as [env:project-name].',
+                },
+            ],
+        },
+    ]
+}
+
 // Agent37 (2026-10-01): Harbor runs the connector, so connecting is the Agent37 key on the Add
 // screen; Harbor drives the instance's Hermes or OpenClaw through Agent37's API. What's left on
 // the instance is optional and the same as for any agent: our MCP server on the agent's key, the
@@ -448,6 +527,60 @@ export const AGENT_SETUPS: readonly AgentSetup[] = [
         docsUrl: 'https://www.agent37.com/docs/agents-api/concepts',
         bindsInstance: true,
         setup: agent37Setup,
+    },
+    {
+        id: 'conductor',
+        label: 'Conductor',
+        description: 'Claude Code in a Conductor cloud workspace, on your Conductor account',
+        logo: { light: conductorLogo, dark: conductorLogoDark },
+        connection: 'conductor',
+        kinds: ['claude-code'],
+        defaultName: 'Claude',
+        credential: {
+            label: 'Conductor API key',
+            placeholder: 'Paste the key from app.conductor.build → API keys',
+            note: 'Make it in your Conductor team org (Pro or higher), which needs a Claude key or subscription under Settings → Agents, and GitHub repositories. Harbor checks it with Conductor and keeps it sealed. Nobody sees it again, you included.',
+        },
+        docsUrl: 'https://www.conductor.build/docs/api',
+        setup: conductorSetup,
+    },
+    {
+        id: 'posthog',
+        label: 'PostHog',
+        description: 'Your PostHog project: event counts, HogQL, insights, flags and alerts',
+        connection: 'posthog',
+        kinds: ['posthog'],
+        bot: true,
+        defaultName: 'PostHog',
+        credential: {
+            label: 'PostHog personal API key',
+            placeholder: 'phx_… (self-hosted: https://your-posthog phx_…)',
+            note: 'Settings → Personal API keys, with read access to user, query, insight and feature flag. Harbor checks it with PostHog and keeps it sealed.',
+        },
+        docsUrl: 'https://posthog.com/docs/api',
+        alerts: {
+            note: 'In PostHog, Data pipelines → Destinations → New → HTTP Webhook, with this as the URL. Send it from an alert, or any event. A body of {"text": "…"} is posted as written.',
+        },
+        setup: integrationSetup('PostHog', 'count signup 30'),
+    },
+    {
+        id: 'cal',
+        label: 'Cal.com',
+        description: 'Your Cal.com calendar: bookings, links, open times, booking and cancelling',
+        connection: 'cal',
+        kinds: ['cal'],
+        bot: true,
+        defaultName: 'Cal',
+        credential: {
+            label: 'Cal.com API key',
+            placeholder: 'cal_live_…',
+            note: 'Settings → Developer → API keys. The agent acts as you, in your time zone. Harbor checks it with Cal.com and keeps it sealed.',
+        },
+        docsUrl: 'https://cal.com/docs/api-reference/v2/introduction',
+        alerts: {
+            note: 'In Cal.com, Settings → Developer → Webhooks → New, with this as the Subscriber URL and the booking events you want. Ping test posts a hello.',
+        },
+        setup: integrationSetup('Cal', 'today'),
     },
     {
         id: 'custom',

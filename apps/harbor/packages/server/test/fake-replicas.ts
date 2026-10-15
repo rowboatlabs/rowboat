@@ -112,6 +112,10 @@ export class FakeReplicas {
 
     const parts = url.pathname.split('/').filter(Boolean); // v1, replica, :id, …
     if (url.pathname === '/v1/environments') return json(200, { environments: this.environments });
+    if (parts[0] === 'v1' && parts[1] === 'agents' && parts[3] === 'models' && req.method === 'GET') {
+      const models = parts[2] === 'claude' ? [{ id: 'claude-opus-5-5', displayName: 'Opus 5.5' }, { id: 'claude-sonnet-5-5', displayName: 'Sonnet 5.5' }] : [];
+      return json(200, { source: 'static', models, defaultModel: models[0]?.id ?? null, page: 1, total: models.length, limit: 100, totalPages: 1 });
+    }
     if (url.pathname === '/v1/replica' && req.method === 'POST') {
       const id = `ws-${++this.sequence}`;
       const workspace: Workspace = {

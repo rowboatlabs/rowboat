@@ -63,7 +63,7 @@ it.each([
         setup(builder) {
           const fixtures = {
             './installation.js': "export const getInstallationId = () => 'test-installation';",
-            '../config/app_settings.js': `export const isAnalyticsEnabled = () => ${analyticsEnabled}; export const saveAppSettings = () => {};`,
+            '../config/app_settings.js': `export const loadAppSettings = () => ({ analyticsEnabled: ${analyticsEnabled} }); export const saveAppSettings = () => {};`,
             '../config/env.js': "export const API_URL = 'https://api.example.test';",
             '../account/account.js': 'export const isSignedIn = async () => true;',
             '../billing/billing.js': "export const getBillingInfo = async () => ({ userId: 'test-user', userEmail: 'test@example.test' });",

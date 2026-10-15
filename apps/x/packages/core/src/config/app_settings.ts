@@ -33,10 +33,13 @@ export interface AppSettings {
      * events are captured from the main process or the renderer.
      */
     analyticsEnabled?: boolean;
+    /** Telemetry opt-out compatibility (2026-10-13, #415). */
+    telemetryOptOut?: boolean;
 }
 
 export function isAnalyticsEnabled(): boolean {
-    return loadAppSettings().analyticsEnabled !== false;
+    const settings = loadAppSettings();
+    return settings.analyticsEnabled !== false && settings.telemetryOptOut !== true;
 }
 
 export function loadAppSettings(): AppSettings {

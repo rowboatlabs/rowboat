@@ -3,6 +3,7 @@ import { addressesRowboat, mapMentionTokens, mentionsAsText } from '@rowboat/spa
 import type {
   AcceptInviteResult,
   AgentCredential,
+  AgentHook,
   AgentKey,
   AgentKeySecret,
   AgentListing,
@@ -64,6 +65,7 @@ import type {
 export type {
   AcceptInviteResult,
   AgentCredential,
+  AgentHook,
   AgentKey,
   AgentKeySecret,
   AgentListing,

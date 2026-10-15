@@ -177,7 +177,7 @@ export class JevConnector implements RunningConnector {
     const input = {
       spaceName: space.name,
       message: { authorId: message.author.memberId, text: mentionsAsText(message.body, names) },
-      thread: thread.map((m) => ({ authorId: m.author.memberId, text: mentionsAsText(m.body, names) })),
+      thread: thread.map((m) => ({ authorId: m.author.memberId, text: mentionsAsText(m.body, names), mentions: m.mentions })),
       members,
       jevId: agent.id,
       mentioned: message.mentions,

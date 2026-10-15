@@ -50,6 +50,7 @@ describe('agent face (MCP)', () => {
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
       'add_members',
+      'archive_space',
       'asset_history',
       'browse_spaces',
       'create_asset',
@@ -58,6 +59,7 @@ describe('agent face (MCP)', () => {
       'create_topic',
       'delete_asset',
       'delete_message',
+      'delete_space',
       'diff',
       'edit_message',
       'end_poll',
@@ -83,6 +85,7 @@ describe('agent face (MCP)', () => {
       'restore_asset',
       'search_space',
       'stop_invocation',
+      'unarchive_space',
       'vote_poll',
       'whoami',
     ]);
@@ -278,6 +281,33 @@ describe('agent face (MCP)', () => {
     });
     expect(occupied.isError).toBe(true);
     expect((occupied.content as Array<{ text: string }>)[0]!.text).toContain(created.asset.id);
+    await client.close();
+  });
+
+  it('read_asset of a binary file says where its bytes download, and they download there (2026-10-08)', async () => {
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+    const hash = createHash('sha256').update(bytes).digest('hex');
+    await fetch(`${harbor.url}/v1/spaces/${spaceId}/blobs`, {
+      method: 'PUT',
+      headers: { authorization: 'Bearer dev-harsh', 'x-blob-sha256': hash },
+      body: bytes,
+    });
+    const client = await mcpClient('dev-harsh');
+    const filed = (await client.callTool({
+      name: 'create_asset',
+      arguments: { spaceId, path: 'images/mock.png', blob: hash, reason: 'a binary file to read' },
+    })).structuredContent as { asset: { id: string } };
+
+    const read = await client.callTool({ name: 'read_asset', arguments: { spaceId, assetId: filed.asset.id } });
+    expect((read.structuredContent as { content: string; blob: { hash: string } })).toMatchObject({ content: '', blob: { hash } });
+    const url = `${harbor.url}/v1/spaces/${spaceId}/blobs/${hash}`;
+    expect((read.content as Array<{ text: string }>)[1]!.text).toContain(`GET ${url}`);
+    const downloaded = await fetch(url, { headers: { authorization: 'Bearer dev-harsh' } });
+    expect(new Uint8Array(await downloaded.arrayBuffer())).toEqual(bytes);
+
+    // A text file's read carries its content, and no note.
+    const text = await client.callTool({ name: 'read_asset', arguments: { spaceId, assetId: roadmapId } });
+    expect(text.content as unknown[]).toHaveLength(1);
     await client.close();
   });
 

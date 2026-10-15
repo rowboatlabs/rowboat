@@ -1,3 +1,4 @@
+import { invokeSpace } from '@/lib/spaces-invoke'
 import { useMemo, useState } from 'react'
 import { Forward, Hash, Loader2, MessagesSquare, Search } from 'lucide-react'
 import type { spaces } from '@x/shared'
@@ -89,7 +90,7 @@ export function ForwardDialog({ org, space, message, memberNames, onClose }: {
             const quote = (text || '(attachment)').split('\n').map((l) => `> ${l}`).join('\n')
             const attribution = `> — ${authorName}${cross ? `, in ${space.name}` : ''}${stripped ? ' _(attachments not forwarded)_' : ''}`
             const body = [comment.trim(), `${quote}\n${attribution}`].filter(Boolean).join('\n\n')
-            await window.ipc.invoke('spaces:postMessage', {
+            await invokeSpace('spaces:postMessage', {
                 orgId: picked.orgId,
                 spaceId: picked.spaceId,
                 ...(picked.threadRootId ? { threadRoot: picked.threadRootId } : {}),

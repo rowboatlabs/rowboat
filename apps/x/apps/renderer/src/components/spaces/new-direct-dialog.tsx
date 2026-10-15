@@ -42,7 +42,8 @@ export function NewDirectDialog({ org, open, onOpenChange, onOpened }: {
         const me = roster.find((m) => m.id === org.memberId)
         const self = me && (!q || 'you'.includes(q) || 'me'.includes(q) || me.displayName.toLowerCase().includes(q)) ? [me] : []
         const others = roster
-            .filter((m) => m.id !== org.memberId && (!q || m.displayName.toLowerCase().includes(q)))
+            // A deleted account is never offered (2026-10-13): Harbor refuses the DM.
+            .filter((m) => m.id !== org.memberId && !m.deactivatedAt && (!q || m.displayName.toLowerCase().includes(q)))
             .sort((a, b) => Number(existing.has(b.id)) - Number(existing.has(a.id)))
         return self.concat(others)
     }, [roster, org.memberId, query, existing])

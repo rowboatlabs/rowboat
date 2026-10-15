@@ -92,6 +92,18 @@ const poolOpts = process.env.DATABASE_POOL_MAX ? { max: Number(process.env.DATAB
 // a minute whenever the binary runs; HARBOR_INTERNAL_KEY additionally enables
 // GET /internal/stats. Unset = the route does not exist, the line still prints.
 const internal = { internal: { log: true, ...(process.env.HARBOR_INTERNAL_KEY ? { key: process.env.HARBOR_INTERNAL_KEY } : {}) } };
+// Browser origins allowed to call the orgs and the apex cross-origin (cors.ts,
+// 2026-10-09): the Spaces web app's, comma-separated. Dev defaults to the web
+// app's dev server so a local pair works with no setup.
+const webOrigins = (process.env.HARBOR_WEB_ORIGINS ?? (process.env.HARBOR_MODE === 'deployment' ? '' : 'http://localhost:5174'))
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+// The web app the org link landings offer (http.ts, 2026-10-13): a link
+// opened in a browser with no desktop app goes on to <this>/open. Dev defaults
+// to the web app's dev server, like the origins above.
+const webAppUrl = process.env.HARBOR_WEB_APP_URL ?? (process.env.HARBOR_MODE === 'deployment' ? undefined : 'http://localhost:5174');
+const web = { ...(webOrigins.length > 0 ? { webOrigins } : {}), ...(webAppUrl ? { webAppUrl } : {}) };
 
 // Deployment mode (the managed fleet / any multi-org host): HARBOR_MODE=deployment
 // + DATABASE_URL + APEX_DOMAIN + AUTH_ISSUER. No seeding, no dev tokens —
@@ -116,6 +128,7 @@ if (process.env.HARBOR_MODE === 'deployment') {
     ...(blobs ? { blobs } : {}),
     ...(maxBlobBytes !== undefined ? { maxBlobBytes } : {}),
     ...internal,
+    ...web,
   });
   console.log(`Harbor deployment (multi-org, Postgres)`);
   console.log(``);
@@ -125,8 +138,10 @@ if (process.env.HARBOR_MODE === 'deployment') {
   console.log(
     `  blobs      ${process.env.BLOBS_S3_BUCKET ? `s3 bucket ${process.env.BLOBS_S3_BUCKET}` : process.env.BLOBS_DIR ? `disk ${process.env.BLOBS_DIR}` : 'UNCONFIGURED — uploads will be refused (set BLOBS_S3_BUCKET or BLOBS_DIR)'}`,
   );
+  console.log(`  web        ${webOrigins.length > 0 ? webOrigins.join(', ') : 'no browser origins (set HARBOR_WEB_ORIGINS)'}`);
+  console.log(`  web app    ${webAppUrl ? `${webAppUrl} (links opened in a browser offer it)` : 'none — links opened in a browser offer only the desktop app (set HARBOR_WEB_APP_URL)'}`);
   console.log(`  internal   ${process.env.HARBOR_INTERNAL_KEY ? 'GET /internal/stats (operator key set)' : 'off (set HARBOR_INTERNAL_KEY)'}`);
-  console.log(`  platforms  ${process.env.HARBOR_INTEGRATION_KEY ? 'Replicas and Agent37 agents can be added (sealing key set)' : 'off — Replicas and Agent37 agents need HARBOR_INTEGRATION_KEY'}`);
+  console.log(`  platforms  ${process.env.HARBOR_INTEGRATION_KEY ? 'Replicas, Agent37, Conductor, PostHog and Cal.com agents can be added (sealing key set)' : 'off — Replicas, Agent37, Conductor, PostHog and Cal.com agents need HARBOR_INTEGRATION_KEY'}`);
   console.log(`  listening  :${deployment.port}`);
   process.on('SIGTERM', () => void deployment.close().then(() => process.exit(0)));
 } else {
@@ -159,6 +174,7 @@ const harbor = await startHarbor({
   ...(blobFactory ? { blobs: blobFactory('org-default') } : {}),
   ...(maxBlobBytes !== undefined ? { maxBlobBytes } : {}),
   ...internal,
+  ...web,
   ...(auth ? { auth } : {}),
   ...(auth && process.env.AUTH_PUBLISHABLE_KEY
     ? { consent: { publishableKey: process.env.AUTH_PUBLISHABLE_KEY } }

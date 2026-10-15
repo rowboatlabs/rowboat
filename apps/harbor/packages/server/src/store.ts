@@ -1,6 +1,7 @@
 import type { ActivityKind } from '@rowboat/spaces-protocol';
 import type {
   AgentCredential,
+  AgentHook,
   AgentKey,
   Attribution,
   ConnectorCapabilities,
@@ -131,6 +132,12 @@ export interface StoredAgentCredential extends AgentCredential {
   sealed: string;
 }
 
+/** An alert hook as stored (spec §8 Alerts, 2026-10-03): what its owner sees, plus the hash of its secret. */
+export interface StoredAgentHook extends AgentHook {
+  agentId: string;
+  tokenHash: string;
+}
+
 export interface StoredEvent {
   offset: number;
   at: string;
@@ -235,6 +242,14 @@ export interface Store {
   // ceremony (and seeding); the oidc auth driver reads, never creates.
   getMemberByIdentity(iss: string, sub: string): Promise<Member | undefined>;
   putIdentity(iss: string, sub: string, memberId: string): Promise<void>;
+  /**
+   * Account deletion (2026-10-08, revised 2026-10-13): the person behind a
+   * member leaves for good. Stamps deactivated_at and drops the avatar — the
+   * name stays, so attribution reads — deletes their push tokens, and
+   * revokes the keys of agents they own. The identity row stays: it is what
+   * refuses the next sign-in (policy.ts canSignIn). Idempotent.
+   */
+  deactivateMember(memberId: string, at: string): Promise<void>;
 
   // spaces — `kind` (migration 014) rides the row; a direct space also
   // stores its direct key, and putSpace MUST refuse a second direct space
@@ -255,6 +270,8 @@ export interface Store {
   getMembership(spaceId: string, memberId: string): Promise<Membership | undefined>;
   listMemberships(spaceId: string): Promise<Membership[]>;
   putMembership(membership: Membership): Promise<void>;
+  /** Delete the space row; every space-keyed table cascades from it (migration 039). */
+  deleteSpace(spaceId: string): Promise<void>;
   deleteMembership(spaceId: string, memberId: string): Promise<void>;
 
   // push (push.ts): per-device Expo tokens, per-member notify level.
@@ -287,6 +304,10 @@ export interface Store {
   /** First write wins — re-uploading the same bytes never changes the recorded mime/uploader. */
   putSpaceBlob(blob: StoredSpaceBlob): Promise<void>;
   getSpaceBlob(spaceId: string, hash: string): Promise<StoredSpaceBlob | undefined>;
+  /** Every hash a space has registered — read before the space is deleted, while the rows exist. */
+  listSpaceBlobHashes(spaceId: string): Promise<string[]>;
+  /** Of `hashes`, the ones no space of this org and no profile image or logo still uses: bytes safe to delete. */
+  unreferencedBlobs(hashes: string[]): Promise<string[]>;
 
   // profile images (org-scoped registry; bytes live in the BlobStore)
   /** First write wins, as putSpaceBlob. */
@@ -478,9 +499,17 @@ export interface Store {
   putAgentCredential(credential: StoredAgentCredential): Promise<void>;
   /** Mark it rejected by its platform; true only the first time, until it is replaced. */
   rejectAgentCredential(agentId: string, at: string, reason: string): Promise<boolean>;
+  getAgentHook(agentId: string): Promise<StoredAgentHook | undefined>;
+  listAgentHooks(agentIds: string[]): Promise<StoredAgentHook[]>;
+  /** Set or replace an agent's hook; a replacement's secret is the only one that works. */
+  putAgentHook(hook: StoredAgentHook): Promise<void>;
+  deleteAgentHook(agentId: string): Promise<void>;
   /** A connector's own record for one thread (its shape is the connector's). */
   getConnectionThread(agentId: string, spaceId: string, threadRootId: string): Promise<unknown | undefined>;
   putConnectionThread(agentId: string, spaceId: string, threadRootId: string, data: unknown, at: string): Promise<void>;
+  /** The agent key a connector hands its agent's workspaces: which key, and its sealed secret. */
+  getConnectorKey(agentId: string): Promise<{ keyId: string; sealed: string } | undefined>;
+  putConnectorKey(agentId: string, keyId: string, sealed: string, at: string): Promise<void>;
 
   // --- invocations (spec §8 Invoking agent members, 2026-09-30) ---
   /** A new invocation, with its triggering message's offset: the queue's order. */

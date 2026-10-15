@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseServerSentEvents } from '../src/connectors/replicas/api.js';
-import { attachmentLinks } from '../src/connectors/replicas/prompt.js';
-import { activityOf, answerOf, failureOf, readsAnswers } from '../src/connectors/replicas/turns.js';
+import { attachmentLinks } from '../src/connectors/common/prompt.js';
+import { activityOf, answerOf, failureOf, readsAnswers } from '../src/connectors/common/agent-events.js';
 
 // Reading Replicas's streams and its coding agents' events (spec §8
 // Connectors, 2026-09-30): the documented shapes, and nothing guessed.

@@ -910,6 +910,111 @@ export const MIGRATIONS: Migration[] = [
       )`,
     ],
   },
+  {
+    // The key a connector Harbor runs hands its agent's workspaces, so the
+    // coding agent there can call Spaces as its agent (spec §8 Connectors,
+    // 2026-10-06: Conductor passes it as a workspace variable). An ordinary
+    // agent key (its hash in agent_keys, revocable by the owner), whose secret
+    // Harbor must present again, so it is also kept sealed here. One per agent.
+    id: '034-agent-connector-keys',
+    statements: [
+      `create table agent_connector_keys (
+        org_id text not null,
+        agent_id text not null,
+        key_id text not null,
+        sealed text not null,
+        created_at text not null,
+        primary key (org_id, agent_id),
+        foreign key (org_id, agent_id) references members(org_id, id)
+      )`,
+    ],
+  },
+  {
+    // Agent37's Effort option is keyed `effort` (2026-10-08), as the composer's
+    // model picker expects of every agent; it was `reasoning`. Owners' defaults
+    // move with it, or Harbor would skip them as an option no longer declared.
+    id: '035-agent37-effort-key',
+    statements: [
+      `update agent_option_defaults d
+         set data = (d.data - 'reasoning') || jsonb_build_object('effort', d.data -> 'reasoning')
+         from members m
+        where m.org_id = d.org_id and m.id = d.agent_id
+          and m.agent_connection = 'agent37' and d.data ? 'reasoning'`,
+    ],
+  },
+  {
+    // A platform agent's alert hook (spec §8 Alerts, 2026-10-03): the hash of
+    // the secret in its address, like agent_keys, and the space its alerts
+    // land in. One per agent; setting it again replaces the secret.
+    id: '036-agent-hooks',
+    statements: [
+      `create table agent_hooks (
+        org_id text not null,
+        agent_id text not null,
+        token_hash text not null,
+        space_id text not null,
+        set_by text not null,
+        set_at text not null,
+        primary key (org_id, agent_id),
+        foreign key (org_id, agent_id) references members(org_id, id)
+      )`,
+    ],
+  },
+  {
+    // Account deletion, minimal v1 (2026-10-08, App Store 5.1.1(v), revised
+    // 2026-10-13 after review): the member row stays — name and attribution
+    // intact — and this marks it. Null = an active member.
+    id: '037-member-deactivated-at',
+    statements: [`alter table members add column if not exists deactivated_at text`],
+  },
+  {
+    // Archive is a space state (spec §6, 2026-09-22; built 2026-10-13): a
+    // flag on the row, nothing else in storage. Every existing space is live.
+    id: '038-archive-spaces',
+    statements: [`alter table spaces add column if not exists archived boolean not null default false`],
+  },
+  {
+    // Every space-keyed table hangs off its space (spec §6, the deletion
+    // doctrine, decided 2026-09-22; built 2026-10-13): a foreign key with
+    // cascade, so deleting a space is one statement and a new table cannot
+    // silently escape it (test/space-cascade.test.ts holds every table with
+    // a space_id to this). Nothing has ever deleted a space, so orphans can
+    // only come from hand surgery; they are unreachable, and are dropped
+    // first so the constraint can be added. Plain constraints, not NOT VALID
+    // + VALIDATE: this entry runs in one transaction, where the two-step
+    // buys nothing. invites and agent_connection_threads get the space_id
+    // index the cascade's lookup needs; every other table already leads an
+    // index with it.
+    id: '039-space-cascade-fks',
+    statements: [
+      ...[
+        'memberships',
+        'assets',
+        'asset_versions',
+        'asset_search',
+        'change_sets',
+        'events',
+        'topics',
+        'messages',
+        'reactions',
+        'poll_votes',
+        'space_blobs',
+        'invites',
+        'space_read_marks',
+        'thread_read_marks',
+        'invocations',
+        'approvals',
+        'agent_connection_threads',
+        'message_hops',
+        'agent_hooks',
+      ].flatMap((table) => [
+        `delete from ${table} t where not exists (select 1 from spaces s where s.id = t.space_id)`,
+        `alter table ${table} add constraint ${table}_space_fk foreign key (space_id) references spaces(id) on delete cascade`,
+      ]),
+      `create index if not exists invites_space on invites (space_id)`,
+      `create index if not exists agent_connection_threads_space on agent_connection_threads (space_id)`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

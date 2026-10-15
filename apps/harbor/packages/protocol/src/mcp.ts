@@ -172,6 +172,33 @@ export const renameSpace = tool({
   output: z.object({ space: Space }),
 });
 
+export const archiveSpace = tool({
+  name: 'archive_space',
+  description:
+    'Archive a shared space (admins only; DMs refuse). An archived space stays readable but ' +
+    'refuses new messages, files and members until unarchived. Only when your person asked for it.',
+  input: z.object({ spaceId: SpaceId }),
+  output: z.object({ space: Space }),
+});
+
+export const unarchiveSpace = tool({
+  name: 'unarchive_space',
+  description: 'Unarchive a shared space so it accepts writes again (admins only). A live space is a no-op.',
+  input: z.object({ spaceId: SpaceId }),
+  output: z.object({ space: Space }),
+});
+
+export const deleteSpace = tool({
+  name: 'delete_space',
+  description:
+    'Permanently delete a shared space (admins only; DMs refuse): every message, file and ' +
+    'membership in it, with no undo. Only when your person explicitly asked to delete this ' +
+    'space by name — never to tidy up, and never as a step toward something else. To take a ' +
+    'space out of use while keeping it, use archive_space.',
+  input: z.object({ spaceId: SpaceId }),
+  output: z.object({ deleted: z.literal(true) }),
+});
+
 export const addMembers = tool({
   name: 'add_members',
   description:
@@ -482,8 +509,8 @@ export const readAsset = tool({
     'content, current version, and recent change history. Always read before proposing a change; ' +
     'the version you read is your base version. Pass `version` to read an older version (time ' +
     'travel); omit for the current one. Binary files (images, pdfs, uploads) return empty content ' +
-    'plus a `blob` {hash, size, mime} — describe them by their metadata; the bytes are not readable ' +
-    'over this face.',
+    'plus a `blob` {hash, size, mime}: no tool carries the bytes, which download by that hash from ' +
+    'GET /v1/spaces/{spaceId}/blobs/{hash} on the org\'s address.',
   input: z.object({ spaceId: SpaceId, assetId: AssetId, version: z.number().int().positive().optional() }),
   output: ReadAssetResult,
 });
@@ -668,6 +695,9 @@ export const mcpTools = [
   openDirect,
   createSpace,
   renameSpace,
+  archiveSpace,
+  unarchiveSpace,
+  deleteSpace,
   addMembers,
   leaveSpace,
   createInvite,

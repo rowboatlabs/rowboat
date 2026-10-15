@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { PostHog, PostHogConfig } from 'posthog-js'
+import posthog, { type CaptureResult, type PostHog, type PostHogConfig } from 'posthog-js'
 
 const { render, invoke } = vi.hoisted(() => ({ render: vi.fn(), invoke: vi.fn() }))
 vi.mock('react-dom/client', () => ({ createRoot: () => ({ render }) }))
@@ -54,4 +54,26 @@ describe('renderer analytics consent bootstrap', () => {
     const options = await bootstrap()
     expect(options.opt_out_capturing_by_default).toBe(true)
   })
+  it('honours telemetry opt-out even when analyticsEnabled is true', async () => {
+    invoke.mockResolvedValue({ analyticsEnabled: true, telemetryOptOut: true })
+    const options = await bootstrap()
+    expect(options.opt_out_capturing_by_default).toBe(true)
+    const client = { opt_in_capturing: vi.fn(), opt_out_capturing: vi.fn() }
+    options.loaded!(client as unknown as PostHog)
+    expect(client.opt_out_capturing).toHaveBeenCalledOnce()
+    expect(client.opt_in_capturing).not.toHaveBeenCalled()
+  })
+
+  it('uses live consent so opting back in does not require a restart', async () => {
+    invoke.mockResolvedValue({ analyticsEnabled: false, telemetryOptOut: true })
+    const options = await bootstrap()
+    const consent = vi.spyOn(posthog, 'has_opted_out_capturing')
+    const beforeSend = options.before_send as (event: CaptureResult | null) => CaptureResult | null
+    const event = { properties: {} } as CaptureResult
+    consent.mockReturnValue(true)
+    expect(beforeSend(event)).toBeNull()
+    consent.mockReturnValue(false)
+    expect(beforeSend(event)).toBe(event)
+  })
+
 })

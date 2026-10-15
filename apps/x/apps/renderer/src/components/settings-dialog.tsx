@@ -24,6 +24,7 @@ import posthog from "posthog-js"
 import { cn, compactPath, parentPath } from "@/lib/utils"
 import { SPACES_ENABLED } from "@/lib/feature-flags"
 import * as analytics from "@/lib/analytics"
+import posthog from "posthog-js"
 import { useTheme } from "@/contexts/theme-context"
 import { toast } from "sonner"
 import { AnthropicIcon, DiscordIcon, GitHubIcon, OpenAIIcon } from "@/components/onboarding/provider-icons"
@@ -424,6 +425,47 @@ function LaunchAtLoginSetting() {
   )
 }
 
+function TelemetryOptOutSetting() {
+  const [optOut, setOptOut] = useState(false)
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    window.ipc.invoke("app:getTelemetrySettings", null)
+      .then(({ optOut }) => setOptOut(optOut))
+      .catch(() => { /* dev builds report off */ })
+      .finally(() => setLoaded(true))
+  }, [])
+
+  const handleToggle = async (enabled: boolean) => {
+    const nextOptOut = !enabled
+    setOptOut(nextOptOut)
+    try {
+      await window.ipc.invoke("app:setTelemetrySettings", { optOut: nextOptOut })
+      const settings = await window.ipc.invoke("app:getTelemetrySettings", null)
+      setOptOut(settings.optOut)
+      if (settings.optOut) {
+        posthog.opt_out_capturing()
+      } else {
+        posthog.opt_in_capturing({ captureEventName: false })
+      }
+    } catch {
+      setOptOut(!nextOptOut)
+    }
+  }
+
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-md border px-3 py-2.5 mt-2">
+      <div className="min-w-0">
+        <div className="text-sm font-medium">Anonymous usage analytics</div>
+        <div className="text-xs text-muted-foreground mt-0.5">
+          Send anonymous product telemetry to help improve Rowboat. Disable to opt out.
+        </div>
+      </div>
+      <Switch checked={!optOut} onCheckedChange={handleToggle} disabled={!loaded} />
+    </div>
+  )
+}
+
 function AppearanceSettings() {
   const { theme, setTheme, chatPanePlacement, setChatPanePlacement, chatPaneSize, setChatPaneSize } = useTheme()
 
@@ -432,6 +474,7 @@ function AppearanceSettings() {
       <div>
         <h4 className="text-sm font-medium mb-3">System</h4>
         <LaunchAtLoginSetting />
+        <TelemetryOptOutSetting />
       </div>
       <div>
         <h4 className="text-sm font-medium mb-3">Theme</h4>
@@ -1776,7 +1819,9 @@ function AdvancedSettings({ dialogOpen }: { dialogOpen: boolean }) {
     try {
       await window.ipc.invoke("analytics:setSettings", { enabled })
       // Apply to the renderer's PostHog instance right away.
-      if (enabled) posthog.opt_in_capturing()
+      const settings = await window.ipc.invoke("analytics:getSettings", null)
+      setAnalyticsEnabled(settings.enabled)
+      if (settings.enabled) posthog.opt_in_capturing({ captureEventName: false })
       else posthog.opt_out_capturing()
     } catch {
       setAnalyticsEnabled(previous)

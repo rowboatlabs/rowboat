@@ -12,7 +12,7 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { ActingMode, AgentCredential, AgentKey, AgentKeySecret, AgentListing, Attribution, Member, Membership, Message, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic } from './core.js';
+import { ActingMode, AgentCredential, AgentHook, AgentKey, AgentKeySecret, AgentListing, Attribution, Member, Membership, Message, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic } from './core.js';
 import { AssetId, AssetPath, BlobHash, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 import {
   AcceptInvite,
@@ -179,6 +179,25 @@ export type ActivityPage = z.infer<typeof ActivityPage>;
 export const routes = {
   // --- identity ------------------------------------------------------------
   /** Who am I on this org — the client's only source of its own memberId under OAuth. */
+  // --- the web app's session (2026-10-12) ------------------------------------
+  /**
+   * Turn the caller's bearer into Harbor's session cookie, so a browser can
+   * call every face with credentials and no bearer, and load blobs with a
+   * plain <img> (CONTRACT.md). The cookie is HttpOnly, Secure, SameSite=Lax,
+   * scoped to the deployment's apex so one cookie covers every org on it, and
+   * expires with the token. The bearer must come in the header.
+   */
+  createSession: {
+    method: 'POST',
+    path: '/v1/session',
+    response: z.object({ ok: z.literal(true), expiresAt: z.iso.datetime().optional() }),
+  },
+  /** Clear the session cookie. Idempotent, and needs no credential. */
+  deleteSession: {
+    method: 'DELETE',
+    path: '/v1/session',
+    response: z.object({ ok: z.literal(true) }),
+  },
   me: {
     method: 'GET',
     path: '/v1/me',
@@ -324,6 +343,43 @@ export const routes = {
     params: z.object({ spaceId: SpaceId }),
     request: z.object({ name: z.string().min(1).max(128), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
     response: z.object({ space: Space }),
+  },
+  /**
+   * Archive and unarchive a shared space (spec §6, 2026-10-13): an admin
+   * act, refused on a DM. An archived space refuses every write that would
+   * add to it — messages, reactions, topics, files, joins, invites — with
+   * `forbidden`; reads, read marks and leaving still work. Archiving an
+   * archived space (or unarchiving a live one) is a no-op with no event.
+   * Members learn by `space_archived` / `space_unarchived` on the log.
+   */
+  archiveSpace: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/archive',
+    params: z.object({ spaceId: SpaceId }),
+    request: z.object({ actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+    response: z.object({ space: Space }),
+  },
+  unarchiveSpace: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/unarchive',
+    params: z.object({ spaceId: SpaceId }),
+    request: z.object({ actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+    response: z.object({ space: Space }),
+  },
+  /**
+   * Delete a shared space (spec §6, 2026-10-14): an admin act, refused on a
+   * DM, allowed on an archived space. The space and every row that hangs off
+   * it go in one statement (the cascade, migration 039); blob bytes no other
+   * space or image of the org uses go after the commit. No body: no event
+   * survives to carry an attribution. Former members (every org member, for
+   * an open space) get `space_removed`. Deleting a deleted space is
+   * `not_found`. The client confirms by name; the server does not ask.
+   */
+  deleteSpace: {
+    method: 'DELETE',
+    path: '/v1/spaces/:spaceId',
+    params: z.object({ spaceId: SpaceId }),
+    response: z.object({ deleted: z.literal(true) }),
   },
   listMembers: {
     method: 'GET',
@@ -471,6 +527,38 @@ export const routes = {
     params: z.object({ agentId: MemberId }),
     request: z.object({ defaults: InvocationOptionValues }),
     response: z.object({ defaults: InvocationOptionValues }),
+  },
+  /**
+   * Point a platform agent's alerts at a space (spec §8 Alerts, 2026-10-03):
+   * its owner only, a space the agent is a member of. Mints a new secret
+   * address every time, shown this once (the old one stops working); pasted
+   * into the service's webhook settings. Render face only, like keys.
+   */
+  setAgentHook: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/hook',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ spaceId: SpaceId }),
+    response: z.object({ hook: AgentHook, url: z.string().url() }),
+  },
+  /** Turn a platform agent's alerts off: its address stops working. Owner only. Idempotent. */
+  clearAgentHook: {
+    method: 'DELETE',
+    path: '/v1/agents/:agentId/hook',
+    params: z.object({ agentId: MemberId }),
+    response: z.object({}),
+  },
+  /**
+   * The service's webhook delivery (spec §8 Alerts, 2026-10-03). Pre-auth:
+   * the secret in the address is the credential. Any JSON body; the agent's
+   * connector says what it means, and `posted` is false for an event it
+   * leaves unsaid.
+   */
+  receiveAgentHook: {
+    method: 'POST',
+    path: '/v1/hooks/:agentId/:token', // pre-auth allowed
+    params: z.object({ agentId: MemberId, token: z.string().min(1).max(128) }),
+    response: z.object({ posted: z.boolean() }),
   },
   /** A space's invocations, newest first (a thread's, with threadRootId): the working indicators and refused lines. */
   listInvocations: {
@@ -695,7 +783,8 @@ export const routes = {
     method: 'GET',
     path: '/v1/spaces/:spaceId/blobs/:hash',
     params: z.object({ spaceId: SpaceId, hash: BlobHash }),
-    query: z.object({ name: z.string().max(255).optional() }),
+    // download=1 serves as an attachment, so a link saves the file (2026-10-12, the web app).
+    query: z.object({ name: z.string().max(255).optional(), download: z.literal('1').optional() }),
     response: z.never(),
   },
 

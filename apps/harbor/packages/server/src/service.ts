@@ -9,7 +9,7 @@ import { Invocations } from './core/invocations.js';
 import { Kernel, type ActorCtx, type BindIdentity, type OrgInfo } from './core/kernel.js';
 import { ReadState } from './core/read-state.js';
 import { Spaces } from './core/spaces.js';
-import type { AddMembersInput, RenameSpaceInput } from './core/spaces.js';
+import type { AddMembersInput, ArchiveSpaceInput, RenameSpaceInput } from './core/spaces.js';
 import type { CreateTopicInput, DeleteMessageInput, EditMessageInput, EndPollInput, ManageTopicAction, NewMessage, PageOpts, ReactInput, VotePollInput } from './core/feed.js';
 import type { MarkReadInput, UnreadSnapshot } from './core/read-state.js';
 import type { SpaceHub } from './hub.js';
@@ -30,6 +30,7 @@ import type {
   Member,
   AgentKey,
   AgentCredential,
+  AgentHook,
   AgentKeySecret,
   AgentListing,
   ConnectorCapabilities,
@@ -89,7 +90,7 @@ export class HarborService {
     notifier?: Notifier,
   ) {
     this.k = new Kernel(store, hub, org);
-    this.spaces = new Spaces(this.k);
+    this.spaces = new Spaces(this.k, blobs);
     this.assets = new Assets(this.k, blobs);
     this.images = new Images(this.k, blobs);
     this.invocations = new Invocations(this.k);
@@ -181,6 +182,19 @@ export class HarborService {
   setAgentCredential(ctx: ActorCtx, agentId: string, secret: string): Promise<AgentCredential> {
     return this.agents.setCredential(ctx, agentId, secret);
   }
+  setAgentHook(ctx: ActorCtx, agentId: string, spaceId: string): Promise<{ hook: AgentHook; token: string }> {
+    return this.agents.setHook(ctx, agentId, spaceId);
+  }
+  clearAgentHook(ctx: ActorCtx, agentId: string): Promise<void> {
+    return this.agents.clearHook(ctx, agentId);
+  }
+  /** An alert at an agent's address (spec §8 Alerts, 2026-10-03), posted by the agent in its space; false when it has nothing to say. */
+  async receiveAgentHook(agentId: string, token: string, payload: unknown): Promise<boolean> {
+    const alert = await this.agents.hookAlert(agentId, token, payload);
+    if (!alert) return false;
+    await this.feed.postMessage({ memberId: agentId, agent: true }, alert.spaceId, { body: alert.body, actingMode: 'direct' });
+    return true;
+  }
   createAgentKey(ctx: ActorCtx, agentId: string): Promise<AgentKeySecret> {
     return this.agents.createKey(ctx, agentId);
   }
@@ -204,6 +218,15 @@ export class HarborService {
   }
   renameSpace(ctx: ActorCtx, spaceId: string, input: RenameSpaceInput): Promise<Space> {
     return this.spaces.renameSpace(ctx, spaceId, input);
+  }
+  archiveSpace(ctx: ActorCtx, spaceId: string, input: ArchiveSpaceInput): Promise<Space> {
+    return this.spaces.archiveSpace(ctx, spaceId, input);
+  }
+  unarchiveSpace(ctx: ActorCtx, spaceId: string, input: ArchiveSpaceInput): Promise<Space> {
+    return this.spaces.unarchiveSpace(ctx, spaceId, input);
+  }
+  deleteSpace(ctx: ActorCtx, spaceId: string): Promise<void> {
+    return this.spaces.deleteSpace(ctx, spaceId);
   }
   openDirect(ctx: ActorCtx, otherMemberId: string): Promise<{ space: Space; created: boolean }> {
     return this.spaces.openDirect(ctx, otherMemberId);
@@ -237,6 +260,9 @@ export class HarborService {
   }
   unregisterPush(ctx: ActorCtx, input: { token: string }): Promise<{ ok: true }> {
     return this.spaces.unregisterPush(ctx, input);
+  }
+  deactivateSelf(ctx: ActorCtx): Promise<void> {
+    return this.spaces.deactivateSelf(ctx);
   }
   publishPresence(
     ctx: ActorCtx,
@@ -307,16 +333,16 @@ export class HarborService {
   clearOrgLogo(ctx: ActorCtx): Promise<Record<string, never>> {
     return this.images.clearOrgLogo(ctx);
   }
-  getImage(ctx: ActorCtx, hash: string): Promise<{ blob: BlobInfo; url?: string; bytes?: Uint8Array }> {
-    return this.images.getImage(ctx, hash);
+  getImage(ctx: ActorCtx, hash: string, opts?: { inline?: boolean }): Promise<{ blob: BlobInfo; url?: string; bytes?: Uint8Array; stream?: ReadableStream<Uint8Array> }> {
+    return this.images.getImage(ctx, hash, opts);
   }
   downloadBlob(
     ctx: ActorCtx,
     spaceId: string,
     hash: string,
     name?: string,
-    opts?: { expiresInSeconds?: number },
-  ): Promise<{ blob: BlobInfo; disposition: string; url?: string; bytes?: Uint8Array }> {
+    opts?: { expiresInSeconds?: number; inline?: boolean; attachment?: boolean },
+  ): Promise<{ blob: BlobInfo; disposition: string; url?: string; bytes?: Uint8Array; stream?: ReadableStream<Uint8Array> }> {
     return this.assets.downloadBlob(ctx, spaceId, hash, name, opts);
   }
   proposeChange(ctx: ActorCtx, spaceId: string, input: ProposeChange): Promise<ProposeChangeResult> {

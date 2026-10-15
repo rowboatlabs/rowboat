@@ -3,22 +3,29 @@ import type { Invocation, Member, Membership, Message, Space } from '@rowboat/sp
 import { HarborError } from '../src/errors.js';
 import {
   AGENT_HOP_LIMIT,
+  canReachMember,
+  canSignIn,
   agentsManagedBy,
   canCancelQueuedInvocation,
   canStopInvocation,
   invocationRefusal,
   canAccessSpace,
+  canArchiveSpace,
+  canDeleteSpace,
   canOpenDirect,
   isGroupChat,
   canAddAgent,
   canCreateAgentKey,
   canRevokeAgentKey,
+  canSetAgentHook,
+  canClearAgentHook,
   canReadSpace,
   canJoinSpace,
   canBind,
   canChangeMembership,
   canRenameSpace,
   canWrite,
+  canWriteSpace,
   enforce,
   isAuthor,
 } from '../src/policy.js';
@@ -28,8 +35,8 @@ import {
 // prove the service ASKS.
 
 const NOW = '2026-09-21T10:00:00.000Z';
-const shared: Space = { id: 'S', name: 'Roadboard', createdAt: NOW, kind: 'shared', visibility: 'private' };
-const direct: Space = { id: 'D', name: 'Direct message', createdAt: NOW, kind: 'direct', visibility: 'private', participants: ['a', 'b'] };
+const shared: Space = { id: 'S', name: 'Roadboard', createdAt: NOW, kind: 'shared', visibility: 'private', archived: false };
+const direct: Space = { id: 'D', name: 'Direct message', createdAt: NOW, kind: 'direct', visibility: 'private', participants: ['a', 'b'], archived: false };
 const membership: Membership = { spaceId: 'S', memberId: 'a', joinedAt: NOW };
 const byA = { author: { memberId: 'a', actingMode: 'direct' } } as Message;
 
@@ -72,6 +79,22 @@ describe('policy', () => {
     expect(canJoinSpace(open)).toBeNull();
     expect(canJoinSpace(shared)).toMatchObject({ code: 'forbidden' });
     expect(canJoinSpace({ ...direct, visibility: 'open' })).toMatchObject({ code: 'forbidden' });
+  });
+
+  it('archive, unarchive and delete: an admin on a shared space; a DM never (2026-10-13/14)', () => {
+    const admin = { role: 'admin' } as Member;
+    const member = { role: 'member' } as Member;
+    expect(canArchiveSpace(admin, shared, 'archive')).toBeNull();
+    expect(canArchiveSpace(admin, shared, 'unarchive')).toBeNull();
+    expect(canArchiveSpace(member, shared, 'archive')).toMatchObject({ code: 'forbidden' });
+    expect(canArchiveSpace(member, shared, 'unarchive')).toMatchObject({ code: 'forbidden' });
+    expect(canArchiveSpace(admin, direct, 'archive')).toMatchObject({ code: 'invalid_request' });
+    expect(canDeleteSpace(admin, shared)).toBeNull();
+    expect(canDeleteSpace(admin, { ...shared, archived: true })).toBeNull();
+    expect(canDeleteSpace(member, shared)).toMatchObject({ code: 'forbidden' });
+    expect(canDeleteSpace(admin, direct)).toMatchObject({ code: 'invalid_request' });
+    expect(canWriteSpace(shared)).toBeNull();
+    expect(canWriteSpace({ ...shared, archived: true })).toMatchObject({ code: 'forbidden' });
   });
 
   it('canWrite: read-only orgs refuse writes with read_only_limit', () => {
@@ -126,6 +149,10 @@ describe('policy', () => {
     expect(canRevokeAgentKey(owner, hermes)).toBeNull();
     expect(canRevokeAgentKey(admin, hermes)).toBeNull();
     expect(canRevokeAgentKey(other, hermes)).toMatchObject({ code: 'forbidden' });
+    expect(canSetAgentHook(owner, hermes)).toBeNull();
+    expect(canSetAgentHook(admin, hermes)).toMatchObject({ code: 'forbidden' });
+    expect(canClearAgentHook(admin, hermes)).toBeNull();
+    expect(canClearAgentHook(other, hermes)).toMatchObject({ code: 'forbidden' });
     expect(agentsManagedBy(admin)).toBe('all');
     expect(agentsManagedBy(owner)).toBe('owned');
   });
@@ -143,5 +170,20 @@ describe('policy', () => {
     expect(canStopInvocation(person('ramnique', 'admin'), inv, true)).toBeNull();
     expect(canStopInvocation(person('gagan'), inv, true)).toMatchObject({ code: 'forbidden' });
     expect(canStopInvocation(person('harsh'), inv, false)).toMatchObject({ code: 'invalid_request' });
+  });
+});
+
+describe('deleted accounts (2026-10-13)', () => {
+  const active: Member = { id: 'm1', displayName: 'Ada', role: 'member', kind: 'human' };
+  const deleted: Member = { ...active, deactivatedAt: '2026-10-13T00:00:00.000Z' };
+
+  it('refuses a deactivated member as a sign-in', () => {
+    expect(canSignIn(active)).toBeNull();
+    expect(canSignIn(deleted)?.code).toBe('not_a_member');
+  });
+
+  it('refuses adding, or opening a DM with, a deactivated member', () => {
+    expect(canReachMember(active)).toBeNull();
+    expect(canReachMember(deleted)).toEqual({ code: 'invalid_request', message: 'Ada has deleted their account' });
   });
 });

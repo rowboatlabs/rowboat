@@ -18,6 +18,7 @@ vi.mock('@/lib/spaces-feed', () => ({
 const readState = vi.hoisted(() => ({ head: 0 }))
 vi.mock('@/lib/spaces-read-state', () => ({
     loadUnread: async () => {},
+    dropSpaceReadState: vi.fn(),
     getSpaceReadState: () => (readState.head ? { head: readState.head } : undefined),
 }))
 
@@ -116,4 +117,24 @@ describe('listing resync', () => {
         await boot()
         expect(invoke).toHaveBeenCalledWith('spaces:subscribeSpace', { orgId: 'org', spaceId: 's2' })
     })
+})
+
+
+it('removal drops membership immediately and explicitly resubscribes an open preview', async () => {
+    const mod = await boot()
+    const release = mod.acquireSpaceLive('org', 's1')
+    invoke.mockImplementation(async (channel: string) => {
+        if (channel === 'spaces:listOrgs') return { orgs }
+        if (channel === 'spaces:listSpaces') return { spaces: [] }
+        if (channel === 'spaces:browseSpaces') return { supported: true, spaces: [{ space: { id: 's1', name: 'Main', kind: 'shared', visibility: 'open', createdAt: '2026-01-01T00:00:00.000Z' }, joined: false }] }
+        return null
+    })
+    emit({ orgId: 'org', frame: { kind: 'space_removed', spaceId: 's1', by: 'me', at: '2026-09-28T00:00:00Z' } })
+    expect(mod.getSpacesOrgs()[0].spaces).toEqual([])
+    const access = await import('@/lib/spaces-access')
+    expect(access.canActInSpace('org', 's1')).toBe(false)
+    await vi.advanceTimersByTimeAsync(0)
+    const channels = invoke.mock.calls.map(([channel]) => channel)
+    expect(channels.lastIndexOf('spaces:subscribeSpace')).toBeGreaterThan(channels.lastIndexOf('spaces:unsubscribeSpace'))
+    release()
 })

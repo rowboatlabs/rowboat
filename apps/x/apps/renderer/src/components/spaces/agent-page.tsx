@@ -3,7 +3,7 @@ import { KeyRound, Loader2 } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { ConnectAgent } from '@/components/spaces/agent-setup'
+import { ConnectAgent, CopyField } from '@/components/spaces/agent-setup'
 import { refreshAgentCapabilities } from '@/hooks/use-space-invocations'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { BUILT_IN_CONNECTION, PLATFORMS, setupFor } from '@/lib/agent-kinds'
@@ -44,7 +44,8 @@ export function AgentPage({ org, listing, isAdmin, onChanged }: {
     /** Reload the listing after a change to keys or the platform key. */
     onChanged: () => Promise<void>
 }) {
-    const { agent, keys, credential } = listing
+    const { agent, keys, credential, hook } = listing
+    const setup = setupFor(agent)
     const mine = agent.ownerId === org.memberId
     const live = keys.filter((k) => !k.revokedAt)
     // A key made here, shown this once and filled into the setup steps.
@@ -105,8 +106,12 @@ export function AgentPage({ org, listing, isAdmin, onChanged }: {
                         : `A key is shown only once, when it is made. Where the steps say ${KEY_PLACEHOLDER}, use that key${mine ? ', or make a new one to fill them in' : ''}.`
                 }
             >
-                <ConnectAgent org={org} setup={setupFor(agent)} {...(agent.agentKind ? { agentKind: agent.agentKind } : {})} {...(agent.agentInstance ? { agentInstance: agent.agentInstance } : {})} agentId={agent.id} agentName={agent.displayName} agentKey={secret ?? KEY_PLACEHOLDER} />
+                <ConnectAgent org={org} setup={setup} {...(agent.agentKind ? { agentKind: agent.agentKind } : {})} {...(agent.agentInstance ? { agentInstance: agent.agentInstance } : {})} agentId={agent.id} agentName={agent.displayName} agentKey={secret ?? KEY_PLACEHOLDER} />
             </Section>
+
+            {setup.alerts && (
+                <AlertsSection org={org} agent={agent} hook={hook} note={setup.alerts.note} canSet={mine} canClear={mine || isAdmin} onChanged={onChanged} />
+            )}
 
             <Section title="Keys" note="Each key lets whatever runs the agent act as it. Revoking one cuts that off at once.">
                 {live.length === 0 ? (
@@ -227,7 +232,93 @@ function DefaultsSection({ orgId, agent, canEdit }: { orgId: string; agent: spac
     )
 }
 
-/** A platform agent's key (Replicas): its last characters, whether the platform rejected it, and Replace for its owner. */
+/**
+ * Where the service's alerts land (Harbor spec §8 Alerts, 2026-10-03): its
+ * owner picks a space the agent is in and gets a secret address, shown this
+ * once, to paste into the service's webhook settings. Getting a new one stops
+ * the old; the owner or an admin turns alerts off.
+ */
+function AlertsSection({ org, agent, hook, note, canSet, canClear, onChanged }: {
+    org: OrgWithSpaces
+    agent: spaces.Member
+    hook: spaces.AgentHook | undefined
+    note: string
+    canSet: boolean
+    canClear: boolean
+    onChanged: () => Promise<void>
+}) {
+    const [spaceId, setSpaceId] = useState(hook?.spaceId ?? '')
+    const [url, setUrl] = useState<string | null>(null)
+    const [busy, setBusy] = useState(false)
+    const spaceName = (id: string) => org.spaces.find((s) => s.id === id)?.name ?? 'a space'
+
+    const set = async () => {
+        if (!spaceId || busy) return
+        setBusy(true)
+        try {
+            const result = await window.ipc.invoke('spaces:setAgentHook', { orgId: org.id, agentId: agent.id, spaceId })
+            setUrl(result.url)
+            await onChanged()
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not set up alerts', 'error')
+        } finally {
+            setBusy(false)
+        }
+    }
+
+    const clear = async () => {
+        if (busy) return
+        setBusy(true)
+        try {
+            await window.ipc.invoke('spaces:clearAgentHook', { orgId: org.id, agentId: agent.id })
+            setUrl(null)
+            toast('Alerts turned off', 'success')
+            await onChanged()
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not turn alerts off', 'error')
+        } finally {
+            setBusy(false)
+        }
+    }
+
+    return (
+        <Section title="Alerts" note={url ? `This is the only time this address is shown. ${note}` : note}>
+            {hook && !url && (
+                <p className="text-[11px] text-muted-foreground">
+                    Posting to #{spaceName(hook.spaceId)} since {when(hook.setAt)}. A new address stops the old one.
+                </p>
+            )}
+            {url && <CopyField value={{ label: 'URL', text: url, secret: true }} />}
+            {canSet && (
+                <div className="flex items-center gap-1.5">
+                    <select
+                        aria-label="Space for alerts"
+                        value={spaceId}
+                        disabled={busy}
+                        onChange={(e) => setSpaceId(e.target.value)}
+                        className="h-8 max-w-[16rem] rounded-md border border-border bg-background px-2 text-xs disabled:opacity-60"
+                    >
+                        <option value="">Pick a space {agent.displayName} is in</option>
+                        {org.spaces.map((s) => (
+                            <option key={s.id} value={s.id}>#{s.name}</option>
+                        ))}
+                    </select>
+                    <Button size="sm" variant="outline" className="h-8" disabled={!spaceId || busy} onClick={() => void set()}>
+                        {busy && <Loader2 className="size-3 animate-spin" />}
+                        {hook ? 'New address' : 'Get address'}
+                    </Button>
+                </div>
+            )}
+            {hook && canClear && (
+                <button type="button" disabled={busy} onClick={() => void clear()} className="self-start rounded px-1.5 py-0.5 text-[11px] text-destructive hover:bg-destructive/10">
+                    Turn alerts off
+                </button>
+            )}
+        </Section>
+    )
+}
+
+/** A platform agent's key (Replicas, PostHog, Cal.com): its last characters, whether the platform rejected it, and Replace for its owner. */
 export function CredentialRow({ orgId, agent, credential, canReplace, onReplaced }: {
     orgId: string
     agent: spaces.Member

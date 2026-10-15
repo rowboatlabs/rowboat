@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { Brain, Check, ChevronDown } from 'lucide-react'
 
@@ -164,6 +164,24 @@ export interface ModelSelectorProps {
    * frozen model still allows effort-only picks.
    */
   effortSelectable?: boolean
+  /** The search field's placeholder, for pickers over something other than chat models (an agent's options). */
+  searchPlaceholder?: string
+  /**
+   * The effort levels the submenu offers, for a caller-supplied model space
+   * (an agent's own, e.g. Conductor's low…max, 2026-10-08): with
+   * staticOptions and effortSelectable, every row gets the submenu. The
+   * value '' is the default; the picked level rides the selection's
+   * `effort` as the caller's own string.
+   */
+  effortLevels?: EffortOption[]
+}
+
+interface EffortOption {
+  value: string
+  label: string
+  /** Shown after the model name on the trigger; the label when absent. */
+  short?: string
+  hint?: string
 }
 
 // cmdk item value for the defaultOption sentinel row. Never a valid model
@@ -221,7 +239,14 @@ export function ModelSelector({
   triggerTitle,
   lockedModel = null,
   effortSelectable = false,
+  searchPlaceholder = 'Search models and providers…',
+  effortLevels,
 }: ModelSelectorProps) {
+  const effortOptions: EffortOption[] = effortLevels ?? REASONING_EFFORT_OPTIONS
+  const effortShort = (level: string) => {
+    const option = effortOptions.find((o) => o.value === level)
+    return option ? (option.short ?? option.label) : level
+  }
   const { groups: catalogGroups, reasoningByKey, defaultModel: catalogDefault, catalogByProvider, refresh } = useModels()
   const allGroups = groupsProp ?? catalogGroups
   // The chat default has no standing in a caller-supplied model space.
@@ -269,6 +294,18 @@ export function ModelSelector({
   // list scroll and query changes close it rather than tracking movement.
   const [sub, setSub] = useState<{ key: string; provider: string; model: string; top: number; left: number } | null>(null)
   const subPanelRef = useRef<HTMLDivElement | null>(null)
+  // The open position used an estimated height; once the panel is drawn, lift
+  // it by however far it really overflows the window (a caller's longer
+  // effort list, e.g. Conductor's six levels, 2026-10-08). Before paint.
+  useLayoutEffect(() => {
+    const panel = subPanelRef.current
+    if (!sub || !panel) return
+    const overflow = sub.top + panel.offsetHeight - (window.innerHeight - 8)
+    if (overflow > 0) {
+      const top = Math.max(8, sub.top - overflow)
+      if (top !== sub.top) setSub({ ...sub, top })
+    }
+  }, [sub])
   const subCloseTimer = useRef<number | null>(null)
   const cancelSubClose = useCallback(() => {
     if (subCloseTimer.current !== null) {
@@ -384,7 +421,7 @@ export function ModelSelector({
 
   // The cmdk value of the current selection, for check indicators.
   const selectedKey = value
-    ? (staticOptions ? value.model : `${value.provider}/${value.model}`)
+    ? (staticOptions ? `/${value.model}` : `${value.provider}/${value.model}`)
     : sentinel
       ? DEFAULT_OPTION_KEY
       : (defaultModel ? `${defaultModel.provider}/${defaultModel.model}` : '')
@@ -395,11 +432,12 @@ export function ModelSelector({
   // Where a slash-less custom id lands (see parseCustomModel).
   const customFallbackProvider = defaultModel?.provider ?? ''
 
-  const select = useCallback((ref: ModelRef | null, effortLevel: '' | ReasoningEffortLevel = '') => {
+  const select = useCallback((ref: ModelRef | null, effortLevel = '') => {
     if (lockedModel) return
     setSub(null)
     setOpen(false)
-    onChange(ref ? { ...ref, ...(effortLevel ? { effort: effortLevel } : {}) } : null)
+    // A caller's own levels (effortLevels) pass through as its strings.
+    onChange(ref ? { ...ref, ...(effortLevel ? { effort: effortLevel as ReasoningEffortLevel } : {}) } : null)
   }, [lockedModel, onChange])
 
   // Reasoning effort applies to the model the next message will actually use:
@@ -409,13 +447,13 @@ export function ModelSelector({
     ? `${lockedModel.provider}/${lockedModel.model}`
     : (value ? `${value.provider}/${value.model}` : '')
       || (defaultModel ? `${defaultModel.provider}/${defaultModel.model}` : '')
-  const reasoningAvailable = reasoningByKey[effectiveModelKey] === true
+  const reasoningAvailable = staticOptions ? Boolean(effortLevels) && value !== null : reasoningByKey[effectiveModelKey] === true
   const effortControl = reasoningAvailable && effortSelectable
   // The effort shown on the trigger and ticked in panels — always the
   // value's own effort. A stale effort on a non-reasoning model is not
   // auto-cleared here: the pair semantics make it unreachable via the UI,
   // and the runtime's capability mapping fails closed anyway.
-  const shownEffort: '' | ReasoningEffortLevel = value?.effort ?? ''
+  const shownEffort: string = value?.effort ?? ''
 
   // Effort radio row for the locked-model popover only (model frozen, effort
   // still adjustable): commits the locked ref with the new effort as one
@@ -427,7 +465,7 @@ export function ModelSelector({
         Reasoning
       </span>
       <div className="flex items-center gap-0.5">
-        {REASONING_EFFORT_OPTIONS.map((option) => (
+        {effortOptions.map((option) => (
           <button
             key={option.value || 'auto'}
             type="button"
@@ -435,7 +473,7 @@ export function ModelSelector({
             onClick={() => onChange({
               provider: lockedModel.provider,
               model: lockedModel.model,
-              ...(option.value ? { effort: option.value } : {}),
+              ...(option.value ? { effort: option.value as ReasoningEffortLevel } : {}),
             })}
             className={cn(
               'rounded-full px-2 py-0.5 text-xs transition-colors',
@@ -455,18 +493,18 @@ export function ModelSelector({
   // it: model name followed by the grayed short form ("claude-fable-5 Thoro").
   const renderEffortBadge = () => effortControl && shownEffort !== '' && (
     <span className="shrink-0 text-xs text-muted-foreground">
-      {REASONING_EFFORT_OPTIONS.find((o) => o.value === shownEffort)?.short}
+      {effortShort(shownEffort)}
     </span>
   )
 
-  const renderModelItem = (providerId: string, model: string, secondary?: string) => {
+  const renderModelItem = (providerId: string, model: string, secondary?: string, label?: string) => {
     const key = `${providerId}/${model}`
     // Hovering a reasoning-capable row opens the effort submenu (hermes
     // pattern); hovering any other row schedules it closed so the panel
     // always tracks the row under the pointer. Both re-check on every move
     // (not just enter) so a pointer that parks on a row past the grace
     // expiry still takes effect without needing to re-enter the row.
-    const canEffort = effortSelectable && reasoningByKey[key] === true
+    const canEffort = effortSelectable && (staticOptions ? Boolean(effortLevels) : reasoningByKey[key] === true)
     const isSelected = selectedKey === key
     const onHover = canEffort
       ? (e: ReactMouseEvent<HTMLDivElement>) => {
@@ -499,10 +537,10 @@ export function ModelSelector({
           : undefined}
       >
         <Check className={cn('size-3.5 shrink-0', isSelected ? 'opacity-100' : 'opacity-0')} />
-        <span className="truncate">{model}</span>
+        <span className="truncate">{label ?? model}</span>
         {isSelected && canEffort && shownEffort !== '' && (
           <span className="shrink-0 text-xs text-muted-foreground">
-            {REASONING_EFFORT_OPTIONS.find((o) => o.value === shownEffort)?.short}
+            {effortShort(shownEffort)}
           </span>
         )}
         {secondary && <span className="ml-auto shrink-0 text-xs text-muted-foreground">{secondary}</span>}
@@ -533,7 +571,7 @@ export function ModelSelector({
         <div className="px-2 py-1.5 text-[13px] font-normal text-muted-foreground">
           Effort
         </div>
-        {REASONING_EFFORT_OPTIONS.map((option) => (
+        {effortOptions.map((option) => (
           <button
             key={option.value || 'auto'}
             type="button"
@@ -711,7 +749,7 @@ export function ModelSelector({
                     // Typing refilters the rows the panel was anchored to.
                     setSub(null)
                   }}
-                  placeholder="Search models and providers…"
+                  placeholder={searchPlaceholder}
                 />
                 {splitMode && activeGroup ? (
                   <div className="flex">
@@ -761,15 +799,7 @@ export function ModelSelector({
                     )}
                     {staticVisible && staticVisible.length > 0 && (
                       <CommandGroup>
-                        {staticVisible.map((o) => (
-                          <CommandItem key={o.id} value={o.id} onSelect={() => select({ provider: '', model: o.id })}>
-                            <Check className={cn('size-3.5 shrink-0', selectedKey === o.id ? 'opacity-100' : 'opacity-0')} />
-                            <span className="truncate">{o.label ?? o.id}</span>
-                            {o.label && o.label !== o.id && (
-                              <span className="ml-2 shrink-0 text-xs text-muted-foreground">{o.id}</span>
-                            )}
-                          </CommandItem>
-                        ))}
+                        {staticVisible.map((o) => renderModelItem('', o.id, o.label && o.label !== o.id && !effortLevels ? o.id : undefined, o.label ?? o.id))}
                       </CommandGroup>
                     )}
                     {!staticOptions && standaloneDefault && standaloneVisible && (

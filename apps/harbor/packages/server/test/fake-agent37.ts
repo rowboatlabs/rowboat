@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net';
 // A stand-in for Agent37, built from its docs (https://www.agent37.com/docs/llms-full.txt,
 // read 2026-10-01): the hosting API's instance list, and each instance's Agent
 // API (responses streamed as named SSE events, reattach, cancel, sessions with
-// history, file writes). Instances live under `/i/<id>` on the same server.
+// history, file writes, its models). Instances live under `/i/<id>` on the same server.
 // Each turn plays a script: the test chooses what the agent does, and whether
 // the stream drops, or the turn holds until the test finishes it.
 
@@ -46,6 +46,15 @@ export class FakeAgent37 {
     { id: 'inst1', name: 'main', template: 'agent37-hermes', status: 'running' },
     { id: 'inst2', name: 'claws', template: 'agent37-openclaw', status: 'running' },
   ];
+  /** What each instance's `GET /v1/models` lists, in the docs' shape (https://www.agent37.com/docs/agents-api/models). */
+  models: Record<string, Array<{ id: string; label: string; owned_by: string; is_default: boolean }>> = {
+    inst1: [
+      { id: 'claude-sonnet-5-5', label: 'claude-sonnet-5-5', owned_by: 'anthropic', is_default: false },
+      { id: 'hermes-4-405b', label: 'hermes-4-405b', owned_by: 'nous', is_default: true },
+      { id: '@openrouter:claude-sonnet-5-5', label: 'claude-sonnet-5-5', owned_by: 'openrouter', is_default: false },
+    ],
+    inst2: [{ id: 'anthropic/claude-opus-5-5', label: 'Claude Opus 5.5', owned_by: 'anthropic', is_default: false }],
+  };
   readonly sessions = new Map<string, { active: string | null; history: Array<{ role: string; content: string }> }>();
   readonly turns = new Map<string, Turn>();
   readonly files = new Map<string, Buffer>();
@@ -71,6 +80,11 @@ export class FakeAgent37 {
     for (const turn of this.turns.values()) for (const s of turn.streams) s.end();
     this.server.closeAllConnections();
     await new Promise<void>((resolve) => this.server.close(() => resolve()));
+  }
+
+  /** Requests to an instance's model list: each one would have woken it. */
+  modelReads(instanceId: string): Received[] {
+    return this.received.filter((r) => r.path === `/i/${instanceId}/v1/models`);
   }
 
   responses(): Received[] {
@@ -181,6 +195,10 @@ export class FakeAgent37 {
     const [, instanceId, path] = m as unknown as [string, string, string];
     if (!this.instances.some((i) => i.id === instanceId)) return json(404, { error: 'not_found' });
 
+    if (req.method === 'GET' && path === '/v1/models') {
+      const data = (this.models[instanceId] ?? []).map((m) => ({ ...m, object: 'model', created: 0, source: 'catalog' }));
+      return json(200, { object: 'list', agent: url.searchParams.get('agent'), default_model: data.find((m) => m.is_default)?.id ?? null, data });
+    }
     if (req.method === 'POST' && path === '/v1/responses') {
       const sessionId = String(body?.session_id);
       if (!/^[0-9a-f]{32}$/.test(sessionId)) return error(400, 'validation_error', { param: 'session_id' });

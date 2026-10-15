@@ -274,6 +274,22 @@ describe('Jev’s questions', () => {
     expect(said(person).context).not.toContain('an agent sees only');
   });
 
+  it('tells Jev who the message already tags, and which people were tagged earlier in the thread', () => {
+    const thread = [{ authorId: 'r', text: '@Harsh @Claude look', mentions: ['h', 'c'] }];
+    const over = { mentioned: ['g'], thread };
+    const candidates = selectCandidates(input(over));
+    const { state, questions } = buildQuestions(input(over), candidates);
+    const s = state as { message: { tags: string[] }; members: Array<{ name: string; tagged_in_thread?: boolean }> };
+    expect(s.message.tags).toEqual(['Gagan']);
+    expect(s.members.find((m) => m.name === 'Harsh')!.tagged_in_thread).toBe(true);
+    const said = (name: string) => questions[`member_${candidates.findIndex((m) => m.displayName === name) + 1}`]!.instructions as Record<string, string>;
+    expect(said('Claude').not_when).toContain('`message.tags` is not empty');
+    expect(said('Claude').not_when).not.toContain('already tagged in `thread`');
+    expect(said('Harsh').context).toContain('follows it and already sees every reply');
+    expect(buildQuestions(input(), selectCandidates(input())).state).toMatchObject({ message: { tags: [] } });
+    expect(buildQuestions(input({ here: true }), selectCandidates(input({ here: true }))).state).toMatchObject({ message: { tags: ['@here'] } });
+  });
+
   it('judges with the default stand-in the way the end-to-end tests assume', () => {
     expect(namesThem({ state: { message: { text: 'Harsh, look' } } } as never, { id: 'member_1', name: 'Harsh', is: 'a person' })).toBeGreaterThan(0.7);
   });

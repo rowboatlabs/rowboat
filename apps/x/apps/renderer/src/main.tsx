@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
 import { PostHogProvider } from 'posthog-js/react'
-import type { CaptureResult, PostHog } from 'posthog-js'
+import posthog, { type CaptureResult, type PostHog } from 'posthog-js'
 import { ThemeProvider } from '@/contexts/theme-context'
 import { configureAnalyticsContext } from './lib/analytics'
 import { MeetingDetectedPopup } from '@/components/meeting-detected-popup'
@@ -39,7 +39,7 @@ async function bootstrap() {
     installationId = result.installationId
     apiUrl = result.apiUrl
     appVersion = result.appVersion
-    analyticsEnabled = result.analyticsEnabled
+    analyticsEnabled = result.analyticsEnabled !== false && !result.telemetryOptOut
   } catch (err) {
     console.error('[Analytics] Failed to bootstrap from main:', err)
   }
@@ -53,6 +53,8 @@ async function bootstrap() {
     opt_out_capturing_by_default: !analyticsEnabled,
     ...(installationId ? { bootstrap: { distinctID: installationId } } : {}),
     before_send: (event: CaptureResult | null) => {
+      // 2026-10-16 (#1202): live SDK consent allows opt-in without a restart.
+      if (posthog.has_opted_out_capturing()) return null
       if (!event) return event
       if (appVersion) {
         event.properties = {

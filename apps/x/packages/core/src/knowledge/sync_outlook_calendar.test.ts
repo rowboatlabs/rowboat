@@ -1,5 +1,18 @@
-import { describe, expect, it } from 'vitest';
-import { allDayDate } from './sync_outlook_calendar.js';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+
+vi.mock('../di/container.js', () => ({
+  default: {
+    resolve: vi.fn(),
+  },
+}));
+
+import { allDayDate, performSync } from './sync_outlook_calendar.js';
+import { OutlookClientFactory } from './outlook-client-factory.js';
+import {
+  noteOutlookRateLimit,
+  outlookRateLimitCooldownMs,
+  resetOutlookRateLimitForTests,
+} from './outlook-rate-limit.js';
 
 // Graph returns all-day boundaries as midnight in the event's original time
 // zone converted to UTC (Prefer: outlook.timezone="UTC"); allDayDate must
@@ -29,3 +42,30 @@ describe('allDayDate', () => {
     expect(allDayDate('not-a-date-at-all')).toBe('not-a-date');
   });
 });
+
+describe('Outlook calendar rate-limit cooldown', () => {
+  beforeEach(() => {
+    resetOutlookRateLimitForTests();
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  it('skips sync when rate-limit cooldown is active', async () => {
+    noteOutlookRateLimit('60');
+    expect(outlookRateLimitCooldownMs()).toBeGreaterThan(0);
+
+    const tokenSpy = vi.spyOn(OutlookClientFactory, 'getAccessToken').mockResolvedValue(null);
+    await performSync();
+
+    expect(tokenSpy).not.toHaveBeenCalled();
+  });
+
+  it('proceeds with sync when rate-limit cooldown is inactive', async () => {
+    expect(outlookRateLimitCooldownMs()).toBe(0);
+
+    const tokenSpy = vi.spyOn(OutlookClientFactory, 'getAccessToken').mockResolvedValue(null);
+    await performSync();
+
+    expect(tokenSpy).toHaveBeenCalled();
+  });
+});
+

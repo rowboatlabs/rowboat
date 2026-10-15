@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import * as oauthClient from '../auth/oauth-client.js';
 import { ensureRowboatSession } from '../auth/oauth-flows.js';
 import { getSessionAccessToken, readSession } from '../auth/tokens.js';
-import { SpacesClient, SpacesRequestError } from './client.js';
+import { parseInviteLink, SpacesClient, SpacesRequestError } from '@x/spaces-client';
 import {
   applyManagedListing,
   dropSessionOrgs,
@@ -44,17 +44,6 @@ const SCOPES = ['openid', 'email', 'profile'];
 const DANCE_TIMEOUT_MS = 5 * 60_000;
 
 export type OpenBrowser = (url: string) => Promise<void> | void;
-
-export function parseInviteLink(url: string): { baseUrl: string; token: string } | null {
-  try {
-    const u = new URL(url.trim());
-    const match = u.pathname.match(/^\/join\/([^/]+)$/);
-    if (!match?.[1]) return null;
-    return { baseUrl: u.origin, token: match[1] };
-  } catch {
-    return null;
-  }
-}
 
 /** The org's RFC 9728 metadata names its AS; absence means dev auth. */
 export async function discoverOrgIssuer(baseUrl: string): Promise<string | null> {

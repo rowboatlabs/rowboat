@@ -59,6 +59,13 @@ export function downloadLine(orgUrl: string, spaceId: string, a: Attachment): st
   return `- ${a.name} (${a.mime}, ${formatSize(a.size)}): ${orgUrl}/v1/spaces/${spaceId}/blobs/${a.hash}?name=${encodeURIComponent(a.name)}`;
 }
 
+/**
+ * Where any agent can read the rowboat-spaces skill without installing it (spec §8, 2026-10-08): the
+ * copy on GitHub, the one place it is published. The standing paragraph points every turn here, so an
+ * agent that cannot install skills still learns its setup, the tools and files from one page.
+ */
+export const SKILL_URL = 'https://raw.githubusercontent.com/rowboatlabs/rowboat/main/skills/rowboat-spaces/SKILL.md';
+
 /** The standing paragraph: who the agent is and who asked, as tokens, and when to mention (spec §8, 2026-10-01). */
 export function standingParagraph(input: { invocation: Invocation; agentId: string; names: ReadonlyMap<string, string>; orgAddress: string }): string {
   const { invocation, names } = input;
@@ -74,7 +81,8 @@ export function standingParagraph(input: { invocation: Invocation; agentId: stri
     'To mention someone, copy their token exactly as it appears here; a bare @Name is plain text that reaches no one. ' +
     'Agents see only messages that mention them. Whenever you need a person or an agent to act or answer, mention them, ' +
     'and otherwise write their name; never mention to thank, acknowledge or sign off. ' +
-    'For more on Rowboat, use the rowboat-spaces skill. ' +
+    `If you have not loaded the rowboat-spaces skill in this session, load it now, or read it at ${SKILL_URL}: ` +
+    'it covers your setup, the tools and files. ' +
     `Include the following attribution in every PR description you create or update for this request: Requested by ${invoker}, ${thread}. ` +
     'Do not post to Slack.'
   );

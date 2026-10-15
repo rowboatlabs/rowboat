@@ -70,9 +70,12 @@ export function kindOfTemplate(template: string): string | undefined {
   return undefined;
 }
 
+/** One model a harness can run (https://www.agent37.com/docs/agents-api/models): on Hermes, another provider's is `@provider:model`. */
 export interface Agent37Model {
   id: string;
   label?: string;
+  /** The instance's default (Hermes reports it; OpenClaw never does). */
+  isDefault?: boolean;
 }
 
 /** One message of a session's transcript (https://www.agent37.com/docs/agents-api/sessions). */
@@ -107,7 +110,7 @@ export interface TurnRequest {
 export interface Agent37Api {
   /** The workspace's instances, newest first. Also the cheap check of a key: there is no /me. */
   instances(): Promise<Agent37Instance[]>;
-  /** The models one harness on an instance can run. */
+  /** The models one harness on an instance can run. A request to the instance wakes it, so ask only while it is awake. */
   models(instanceId: string, agent: string): Promise<Agent37Model[]>;
   /** Start a turn and stream it, until the stream ends or `signal` aborts. */
   respond(instanceId: string, turn: TurnRequest, signal: AbortSignal): AsyncGenerator<TurnEvent>;
@@ -194,8 +197,8 @@ export function agent37Api(key: string, base = AGENT37_API, instance: InstanceUr
       return (body.data ?? []).map((i) => ({ id: i.id, name: i.name ?? null, template: i.template ?? '', status: i.status ?? '' }));
     },
     async models(instanceId, harness) {
-      const body = await call<{ data?: Array<{ id: string; label?: string }> }>(at(instanceId, `/v1/models?agent=${encodeURIComponent(harness)}`), agent);
-      return (body.data ?? []).map(({ id, label }) => ({ id, ...(label ? { label } : {}) }));
+      const body = await call<{ data?: Array<{ id: string; label?: string; is_default?: boolean }> }>(at(instanceId, `/v1/models?agent=${encodeURIComponent(harness)}`), agent);
+      return (body.data ?? []).map(({ id, label, is_default }) => ({ id, ...(label ? { label } : {}), ...(is_default ? { isDefault: true } : {}) }));
     },
     respond(instanceId, turn, signal) {
       const body = {
