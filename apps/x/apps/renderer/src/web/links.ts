@@ -1,3 +1,4 @@
+import { parseInviteLink } from '@x/spaces-client'
 import { parseSpacesLink, type SpacesLinkTarget } from '@/lib/spaces-navigation'
 
 // The web app's door for shared links (2026-10-13). Harbor's page for a link
@@ -9,6 +10,7 @@ import { parseSpacesLink, type SpacesLinkTarget } from '@/lib/spaces-navigation'
 
 export const OPEN_PATH = '/open'
 const PENDING_KEY = 'rowboat.spaces.web.link.v1'
+const JOIN_KEY = 'rowboat.spaces.web.join.v1'
 
 /** On /open: keep the link for later and leave the address bar at the root. */
 export function captureOpenLink(): void {
@@ -32,4 +34,31 @@ export function takeOpenLink(signedIn: boolean): SpacesLinkTarget | null {
 /** The web app's own address for an invite, which a sign-in started from the join dialog returns to. */
 export function inviteOpenPath(orgAddress: string, token: string): string {
     return `${OPEN_PATH}?${new URLSearchParams({ type: 'spaces', org: orgAddress, invite: token })}`
+}
+
+// Join, clicked while signed out, signs in first (2026-10-15). The click is
+// kept for the trip, so the join finishes when the page comes back instead
+// of asking again. Only this tab's own click sets it, never a link's query:
+// a link that joined on its own would put anyone signed in into whatever
+// space it named.
+const inviteKey = (inviteUrl: string): string | null => {
+    const parsed = parseInviteLink(inviteUrl)
+    return parsed ? `${new URL(parsed.baseUrl).host} ${parsed.token}` : null
+}
+
+export function rememberJoinClick(inviteUrl: string): void {
+    const key = inviteKey(inviteUrl)
+    if (key) sessionStorage.setItem(JOIN_KEY, key)
+}
+
+/** A sign-in that failed takes its Join click with it. */
+export function forgetJoinClick(): void {
+    sessionStorage.removeItem(JOIN_KEY)
+}
+
+/** Whether Join was clicked on this invite before the sign-in; asked once. */
+export function takeJoinClick(inviteUrl: string): boolean {
+    const clicked = sessionStorage.getItem(JOIN_KEY)
+    sessionStorage.removeItem(JOIN_KEY)
+    return clicked !== null && clicked === inviteKey(inviteUrl)
 }

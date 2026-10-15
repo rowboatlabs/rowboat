@@ -17,7 +17,7 @@ import { readRailSelection, type RailSelection } from '@/lib/spaces-selection'
 import { noteSpaceVisit } from '@/lib/spaces-visits'
 import { hasSession, onSessionChange } from './account'
 import { WebRail } from './account-menu'
-import { takeOpenLink } from './links'
+import { takeJoinClick, takeOpenLink } from './links'
 import { startNotifications } from './notifications'
 import { NotificationsPrompt } from './notifications-prompt'
 import { orgKey } from './orgs'
@@ -133,7 +133,8 @@ export function WebApp({ signInError }: { signInError: string | null }) {
         void resolveSpacesLink(target).then((outcome) => {
             switch (outcome.kind) {
                 case 'invite':
-                    openServerDialog({ kind: 'join', inviteUrl: outcome.inviteUrl })
+                    // Back from the sign-in Join started: the card joins without a second click.
+                    openServerDialog({ kind: 'join', inviteUrl: outcome.inviteUrl, ...(takeJoinClick(outcome.inviteUrl) ? { autoJoin: true } : {}) })
                     return
                 case 'unknown-org':
                     toast.error(`This link is for ${outcome.orgAddress}, which isn't one of your servers.`)

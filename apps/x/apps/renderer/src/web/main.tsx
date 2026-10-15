@@ -8,7 +8,7 @@ import '../App.css'
 import { CALLBACK_PATH, completeSignIn } from './account'
 import { webChannelHandlers } from './handlers'
 import { installBrowserHost } from './host'
-import { captureOpenLink } from './links'
+import { captureOpenLink, forgetJoinClick } from './links'
 
 // The web app's entry (2026-10-09). The flags go in first (flags.ts), the host
 // before the app, which is a dynamic import. A sign-in callback is finished
@@ -26,6 +26,7 @@ async function start() {
             window.history.replaceState(null, '', await completeSignIn(new URL(window.location.href)))
         } catch (err) {
             window.history.replaceState(null, '', '/')
+            forgetJoinClick()
             signInError = err instanceof Error ? err.message : 'Sign-in failed.'
         }
     }
