@@ -62,7 +62,7 @@ async function bootstrap() {
       }
       return event
     },
-    loaded: (client: PostHog) => {
+    loaded: (client: Pick<PostHog, 'opt_in_capturing' | 'opt_out_capturing'>) => {
       // 2026-10-15 (#415): the shared setting overrides stale SDK consent.
       if (analyticsEnabled) client.opt_in_capturing({ captureEventName: false })
       else client.opt_out_capturing()
