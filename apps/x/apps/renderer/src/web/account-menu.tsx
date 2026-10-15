@@ -1,12 +1,14 @@
 import type { spaces } from '@x/shared'
-import { Download, LogOut } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { Bell, Download, LogOut } from 'lucide-react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Switch } from '@/components/ui/switch'
 import { useSpacesOrgs } from '@/hooks/use-spaces'
 import { avatarColorClass, initials } from '@/lib/spaces-presentation'
 import { cn } from '@/lib/utils'
 import { sessionEmail, signOut } from './account'
 import { DEV_HARBOR } from './config'
+import { notificationState, subscribeNotificationState, turnOffNotifications, turnOnNotifications } from './notifications'
 import { getClient } from './orgs'
 
 // The web app's own chrome (2026-10-13): a slim rail beside Spaces, as
@@ -45,6 +47,29 @@ function Face({ id, name, large }: { id: string; name: string; large?: boolean }
 }
 
 const ROW = 'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent'
+
+/** The switch for notifications.ts: turning it on asks the browser the first time. */
+function NotificationsRow() {
+    const state = useSyncExternalStore(subscribeNotificationState, notificationState)
+    if (state === 'unsupported') return null
+    return (
+        <div className="px-2 py-1.5">
+            <div className="flex items-center gap-2 text-sm">
+                <Bell className="size-4 text-muted-foreground" />
+                <span className="flex-1">Notifications</span>
+                <Switch
+                    aria-label="Notifications"
+                    checked={state === 'on'}
+                    disabled={state === 'blocked'}
+                    onCheckedChange={(on) => { if (on) void turnOnNotifications(); else turnOffNotifications() }}
+                />
+            </div>
+            {state === 'blocked' && (
+                <p className="mt-1 pl-6 text-xs text-muted-foreground">Blocked for this site. Allow notifications in your browser&apos;s site settings.</p>
+            )}
+        </div>
+    )
+}
 
 export function WebRail() {
     const { orgs } = useSpacesOrgs()
@@ -88,6 +113,7 @@ export function WebRail() {
                         </div>
                     )}
                     <div className="border-t border-border p-1">
+                        <NotificationsRow />
                         <a href={DOWNLOAD_URL} target="_blank" rel="noreferrer" className={ROW}>
                             <Download className="size-4 text-muted-foreground" /> Get the desktop app
                         </a>

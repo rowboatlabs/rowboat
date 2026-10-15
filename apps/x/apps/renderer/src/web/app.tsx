@@ -18,9 +18,12 @@ import { noteSpaceVisit } from '@/lib/spaces-visits'
 import { hasSession, onSessionChange } from './account'
 import { WebRail } from './account-menu'
 import { takeOpenLink } from './links'
+import { startNotifications } from './notifications'
+import { NotificationsPrompt } from './notifications-prompt'
 import { orgKey } from './orgs'
 import { parseRoute, routePath } from './routes'
 import { SignedOut } from './signed-out'
+import { useTabBadge } from './tab-badge'
 
 // The web app's shell (2026-10-09): the desktop's Spaces section alone, with
 // the address bar as its navigation. The desktop keeps the selection in
@@ -111,20 +114,22 @@ export function WebApp({ signInError }: { signInError: string | null }) {
         })
     }, [go])
 
+    /** Open a place, landing on its message when it names one. */
+    const land = useCallback((place: SpacesPlace, replace: boolean) => {
+        go(place.orgId, place, replace)
+        if (!place.messageId) return
+        requestJump({
+            topicId: place.rail?.kind === 'thread' ? place.rail.rootMessageId : STREAM_READ_KEY,
+            messageId: place.messageId,
+            ...(place.messageOffset !== undefined ? { offset: place.messageOffset } : {}),
+        })
+    }, [go])
+
     // A shared link opened in this tab (links.ts): resolved as the desktop
     // resolves its deep links, and opened in place of the root it arrived on.
     useEffect(() => {
         const target = takeOpenLink(hasSession())
         if (!target) return
-        const land = (place: SpacesPlace) => {
-            go(place.orgId, place, true)
-            if (!place.messageId) return
-            requestJump({
-                topicId: place.rail?.kind === 'thread' ? place.rail.rootMessageId : STREAM_READ_KEY,
-                messageId: place.messageId,
-                ...(place.messageOffset !== undefined ? { offset: place.messageOffset } : {}),
-            })
-        }
         void resolveSpacesLink(target).then((outcome) => {
             switch (outcome.kind) {
                 case 'invite':
@@ -135,13 +140,23 @@ export function WebApp({ signInError }: { signInError: string | null }) {
                     return
                 case 'refused':
                     toast.error(outcome.message)
-                    if (outcome.place) land(outcome.place)
+                    if (outcome.place) land(outcome.place, true)
                     return
                 case 'place':
-                    land(outcome.place)
+                    land(outcome.place, true)
             }
         })
-    }, [go])
+    }, [land])
+
+    // The org's notifications while the tab isn't focused (notifications.ts);
+    // a click opens the message in its thread.
+    useEffect(() => startNotifications((orgId, frame) => land({
+        orgId,
+        spaceId: frame.spaceId,
+        rail: frame.threadRootId ? { kind: 'thread', rootMessageId: frame.threadRootId } : { kind: 'general' },
+        messageId: frame.messageId,
+    }, false)), [land])
+    useTabBadge()
 
     return (
         <TooltipProvider delayDuration={0}>
@@ -152,6 +167,7 @@ export function WebApp({ signInError }: { signInError: string | null }) {
                     <>
                         <WebRail />
                         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+                            <NotificationsPrompt />
                             <SpacesView
                                 selection={selection}
                                 onSelect={onSelect}
