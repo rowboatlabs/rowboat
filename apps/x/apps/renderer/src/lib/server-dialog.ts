@@ -9,7 +9,15 @@
 export type ServerDialogRequest =
     | { kind: 'create' }
     /** With `inviteUrl` the dialog opens on the resolved invite, one click from Join. */
-    | { kind: 'join'; inviteUrl?: string }
+    | {
+        kind: 'join'
+        inviteUrl?: string
+        /**
+         * Join as soon as the invite resolves: Join was already clicked, and a
+         * sign-in took the page away before it finished (the web app, 2026-10-15).
+         */
+        autoJoin?: boolean
+    }
     /** A server by address — self-hosted, or one you are already a member of. */
     | { kind: 'address' }
     /** Dev sign-in against a stub Harbor. */

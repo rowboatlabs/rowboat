@@ -50,3 +50,24 @@ it('dismisses the chooser without entering either flow', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close' }))
     expect(screen.queryByRole('dialog')).toBeNull()
 })
+
+// Back from a sign-in that Join started (the web app, 2026-10-15): the card
+// joins without a second click; any other opening waits for one.
+it.each([
+    [true, 1],
+    [false, 0],
+])('with autoJoin %s, joins %i time(s) once the invite resolves', async (autoJoin, joins) => {
+    const invoke = vi.fn(async (channel: string) => {
+        if (channel === 'spaces:resolveInviteLink') return { baseUrl: 'https://acme.test', resolved: { state: 'ok', org: { name: 'Acme' }, space: { name: 'launch' } } }
+        if (channel === 'spaces:joinInvite') return { org: { id: 'o', name: 'Acme' }, space: { id: 's', name: 'launch' } }
+        return {}
+    })
+    vi.stubGlobal('ipc', { invoke })
+    render(<ServerDialogs onDone={vi.fn()} />)
+    await act(async () => {
+        openServerDialog({ kind: 'join', inviteUrl: 'https://acme.test/join/tok', autoJoin })
+    })
+    await act(async () => {})
+    expect(invoke.mock.calls.filter(([channel]) => channel === 'spaces:joinInvite')).toHaveLength(joins)
+    if (!autoJoin) expect(screen.getByText('launch')).toBeVisible()
+})

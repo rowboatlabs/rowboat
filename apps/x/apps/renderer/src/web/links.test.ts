@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { captureOpenLink, inviteOpenPath, takeOpenLink } from './links'
+import { captureOpenLink, forgetJoinClick, inviteOpenPath, rememberJoinClick, takeJoinClick, takeOpenLink } from './links'
 
 // The web app's door for shared links (2026-10-13): Harbor's page sends a
 // browser to /open with the deep link's query, which waits out a sign-in.
@@ -39,5 +39,16 @@ describe('shared links in the web app', () => {
         window.history.replaceState(null, '', `/acme/s/${SPACE}`)
         captureOpenLink()
         expect(window.location.pathname).toBe(`/acme/s/${SPACE}`)
+    })
+
+    it('remember a Join click across the sign-in, for that invite only, once', () => {
+        rememberJoinClick(' https://acme.spaces.test/join/tok ')
+        expect(takeJoinClick('https://other.spaces.test/join/tok')).toBe(false)
+        rememberJoinClick('https://acme.spaces.test/join/tok')
+        expect(takeJoinClick('https://acme.spaces.test/join/tok')).toBe(true)
+        expect(takeJoinClick('https://acme.spaces.test/join/tok')).toBe(false)
+        rememberJoinClick('https://acme.spaces.test/join/tok')
+        forgetJoinClick()
+        expect(takeJoinClick('https://acme.spaces.test/join/tok')).toBe(false)
     })
 })

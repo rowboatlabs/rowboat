@@ -3,7 +3,7 @@ import { blobAppUrl } from '@/lib/spaces-presentation'
 import type { ipc, spaces } from '@x/shared'
 import { beginSignIn, getAccessToken, hasSession } from './account'
 import { APEX_HOST, APEX_URL, DEV_HARBOR } from './config'
-import { inviteOpenPath } from './links'
+import { inviteOpenPath, rememberJoinClick } from './links'
 import * as orgs from './orgs'
 import { harborSession } from './session'
 
@@ -82,7 +82,10 @@ export function webChannelHandlers(emit: (event: spaces.SpacesBusEvent) => void)
         },
         'spaces:joinInvite': async (args) => {
             const { baseUrl, token } = deploymentInvite(args.url)
-            if (!DEV_HARBOR && !hasSession()) return beginSignIn(inviteOpenPath(new URL(baseUrl).host, token))
+            if (!DEV_HARBOR && !hasSession()) {
+                rememberJoinClick(args.url)
+                return beginSignIn(inviteOpenPath(new URL(baseUrl).host, token))
+            }
             const { space } = await new SpacesClient({ baseUrl, token: harborSession }).acceptInvite(token)
             const org = (await orgs.loadOrgs()).find((o) => o.baseUrl === baseUrl)
             if (!org) throw new Error(`You joined ${space.name}, but its server isn’t listed yet. Reload to see it.`)
