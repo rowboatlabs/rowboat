@@ -58,27 +58,62 @@ export default function AccountScreen() {
     );
   };
 
+  const runDelete = () => {
+    setDeleting(true);
+    account
+      .deleteAccount()
+      .then(({ deleteBy }) => {
+        router.replace('/spaces');
+        const date = new Date(deleteBy).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+        Alert.alert('Account deletion requested', `Your account and its data will be permanently deleted by ${date}. We've emailed you a confirmation.`);
+      })
+      .catch((err) => Alert.alert("Couldn't delete account", err instanceof Error ? err.message : String(err)))
+      .finally(() => setDeleting(false));
+  };
+
+  // Three confirmations (2026-10-16): what happens, a last chance, then typing
+  // DELETE — deletion can't be undone from the app. Alert.prompt is iOS-only,
+  // so Android ends on a plain button.
+  const typeToConfirm = () => {
+    if (process.env.EXPO_OS !== 'ios') {
+      Alert.alert('Final step', 'Delete your account now?', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete account', style: 'destructive', onPress: runDelete },
+      ]);
+      return;
+    }
+    Alert.prompt('Final step', 'Type DELETE to confirm.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete account',
+        style: 'destructive',
+        onPress: (value?: string) => {
+          if (value?.trim().toUpperCase() === 'DELETE') runDelete();
+          else Alert.alert('Not deleted', 'You need to type DELETE to confirm.');
+        },
+      },
+    ]);
+  };
   const confirmDelete = () => {
     if (process.env.EXPO_OS === 'ios') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     Alert.alert(
       'Delete your account?',
-      "You'll be signed out and removed from all your orgs right away. Your account and its data are permanently deleted within 30 days. This cannot be undone.",
+      "You'll be signed out and removed from all your orgs right away. Your account and its data are permanently deleted within 30 days.",
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Delete account',
+          text: 'Continue',
           style: 'destructive',
           onPress: () => {
-            setDeleting(true);
-            account
-              .deleteAccount()
-              .then(({ deleteBy }) => {
-                router.replace('/spaces');
-                const date = new Date(deleteBy).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
-                Alert.alert('Account deletion requested', `Your account and its data will be permanently deleted by ${date}. We've emailed you a confirmation.`);
-              })
-              .catch((err) => Alert.alert("Couldn't delete account", err instanceof Error ? err.message : String(err)))
-              .finally(() => setDeleting(false));
+            if (process.env.EXPO_OS === 'ios') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+            Alert.alert(
+              'Are you sure?',
+              "You'll leave every org, your agents will stop working, and you won't be able to sign in again. Your messages stay, marked as deactivated. This can't be undone.",
+              [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Continue', style: 'destructive', onPress: typeToConfirm },
+              ],
+            );
           },
         },
       ],
