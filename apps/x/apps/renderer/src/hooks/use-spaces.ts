@@ -1,5 +1,5 @@
 import { memberLabel } from '@/lib/spaces-direct'
-import { setSpacePreview } from '@/lib/spaces-access'
+import { setSpaceArchived, setSpacePreview } from '@/lib/spaces-access'
 import { invalidateSpaceDirectory, updateDirectoryMembership, loadSpaceDirectory, getDirectorySpace } from '@/hooks/use-space-directory'
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import type { spaces } from '@x/shared'
@@ -108,6 +108,7 @@ export function refreshSpacesOrgs(): Promise<void> {
                     }
                 }
                 for (const id of current) setSpacePreview(org.id, id, false)
+                for (const space of org.spaces) setSpaceArchived(org.id, space.id, space.archived === true)
             }
             orgsState = { orgs: withSpaces, loading: false }
             orgsRefreshedAt = Date.now()
@@ -481,6 +482,19 @@ function wireFeedBus(): void {
         if (frame.kind !== 'event') return
         // A rename lands as a durable event on the space's log — refresh the
         // org listing so the sidebar label follows on every device.
+        // Archived or back (harbor #1186, 2026-10-14): the event carries the
+        // row, so the sidebar and the space's write lock move before the refetch.
+        if (frame.event.type === 'space_archived' || frame.event.type === 'space_unarchived') {
+            const updated = frame.event.space
+            setSpaceArchived(event.orgId, updated.id, updated.archived === true)
+            orgsState = { ...orgsState, orgs: orgsState.orgs.map(o => o.id !== event.orgId ? o : {
+                ...o, spaces: o.spaces.map(s => s.id === updated.id ? updated : s),
+            }) }
+            emitOrgs()
+            void refreshSpacesOrgs()
+            invalidateSpaceDirectory(event.orgId)
+            void loadSpaceDirectory(event.orgId)
+        }
         if (frame.event.type === 'space_renamed') {
             void refreshSpacesOrgs()
             invalidateSpaceDirectory(event.orgId)

@@ -64,10 +64,10 @@ describe('open-space preview boundary', () => {
     })
     it('offers an explicit join action and disables it while pending', () => {
         const join = vi.fn()
-        const { rerender } = render(<SpaceAccessContext.Provider value={{ member: false, join, joining: false }}><JoinSpacePrompt /></SpaceAccessContext.Provider>)
+        const { rerender } = render(<SpaceAccessContext.Provider value={{ member: false, writable: false, archived: false, join, joining: false }}><JoinSpacePrompt /></SpaceAccessContext.Provider>)
         fireEvent.click(screen.getByRole('button', { name: 'Join space' }))
         expect(join).toHaveBeenCalledTimes(1)
-        rerender(<SpaceAccessContext.Provider value={{ member: false, join, joining: true }}><JoinSpacePrompt /></SpaceAccessContext.Provider>)
+        rerender(<SpaceAccessContext.Provider value={{ member: false, writable: false, archived: false, join, joining: true }}><JoinSpacePrompt /></SpaceAccessContext.Provider>)
         expect(screen.getByRole('button', { name: 'Joining…' })).toBeDisabled()
     })
     it('searches the directory and opens a preview without joining', async () => {

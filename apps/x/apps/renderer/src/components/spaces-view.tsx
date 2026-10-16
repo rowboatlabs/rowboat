@@ -7,7 +7,7 @@ import '@/styles/spaces.css'
 import { ThreadResizeHandle, THREAD_DEFAULT_WIDTH, THREAD_MIN_WIDTH, THREAD_DIVIDER_WIDTH, STREAM_MIN_WIDTH } from '@/components/spaces/thread-resize-handle'
 import { getViewerType } from '@/lib/file-types'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Lock, Link as LinkIcon, Loader2, MoreHorizontal, PenTool, Plus, UserPlus, Users } from 'lucide-react'
+import { Archive, ArchiveRestore, Check, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Lock, Link as LinkIcon, Loader2, MoreHorizontal, PenTool, Plus, Trash2, UserPlus, Users } from 'lucide-react'
 import { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import {
@@ -22,6 +22,7 @@ import { FileColumn, TrashDialog, UploadFilesDialog } from '@/components/spaces/
 import { GeneralStream } from '@/components/spaces/general-stream'
 import { ScheduledDialog } from '@/components/spaces/scheduled-dialog'
 import { AddMembersDialog } from '@/components/spaces/add-members-dialog'
+import { ArchiveSpaceDialog, DeleteSpaceDialog } from '@/components/spaces/space-admin-dialogs'
 import { SpaceInvocationsProvider } from '@/components/spaces/invocation-lines'
 import { useSpaceInvocations } from '@/hooks/use-space-invocations'
 import { SelectionCopy } from '@/components/spaces/selection-copy'
@@ -212,7 +213,7 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
 
     if (selectedOrg && selectedSpace) {
         return (
-            <SpaceAccessContext.Provider value={{ member, join: () => void join(), joining }}>
+            <SpaceAccessContext.Provider value={{ member, writable: member && !selectedSpace.archived, archived: selectedSpace.archived === true, join: () => void join(), joining }}>
             <SpacePane
                 key={`${selectedOrg.id}/${selectedSpace.id}`}
                 org={selectedOrg}
@@ -327,7 +328,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     /** False while the Spaces view is kept mounted but hidden. */
     active?: boolean
 }) {
-    const { member, join, joining } = useSpaceAccess()
+    const { member, writable, archived, join, joining } = useSpaceAccess()
     const [entries, setEntries] = useState<spaces.SpacesAssetEntry[]>([])
     const [filesLoaded, setFilesLoaded] = useState(false)
     const [filesError, setFilesError] = useState<string | null>(null)
@@ -923,6 +924,23 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     const [uploadFiles, setUploadFiles] = useState<File[] | null>(null)
     const [trashOpen, setTrashOpen] = useState(false)
     const [addMembersOpen, setAddMembersOpen] = useState(false)
+    // Archive and delete are an admin's, on a shared space (harbor #1186, #1189);
+    // a group chat's one space is the server itself, so it has neither.
+    const canAdminSpace = selfIsAdmin && member && !isDirect && !groupChat
+    const [archiveOpen, setArchiveOpen] = useState(false)
+    const [deleteOpen, setDeleteOpen] = useState(false)
+    const [unarchiving, setUnarchiving] = useState(false)
+    const unarchive = async () => {
+        setUnarchiving(true)
+        try {
+            await window.ipc.invoke('spaces:unarchiveSpace', { orgId: org.id, spaceId: space.id })
+            await refreshSpacesOrgs()
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not unarchive the space', 'error')
+        } finally {
+            setUnarchiving(false)
+        }
+    }
 
     return (
         <SpaceMembersProvider members={memberNames} spaceNames={spaceNames}>
@@ -937,6 +955,10 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         }}>
         <div className="spaces-surface relative flex-1 min-h-0 flex flex-col">
             {!member && <div className="flex items-center justify-between gap-3 border-b border-border bg-muted px-4 py-2 text-sm"><span>You’re previewing this open space</span><Button size="sm" onClick={join} disabled={joining}>{joining ? 'Joining…' : 'Join space'}</Button></div>}
+            {member && archived && <div className="flex items-center justify-between gap-3 border-b border-border bg-muted px-4 py-2 text-sm">
+                <span className="flex items-center gap-2"><Archive className="size-3.5 shrink-0 text-muted-foreground" />This space is archived. You can read it, but nobody can post.</span>
+                {canAdminSpace && <Button size="sm" variant="outline" onClick={() => void unarchive()} disabled={unarchiving}>{unarchiving ? 'Unarchiving…' : 'Unarchive'}</Button>}
+            </div>}
             {/* One per pane — covers the stream and thread panes alike. */}
             {active && <SelectionCopy />}
             <header className="spaces-header flex shrink-0 items-center gap-2 border-b border-border">
@@ -1018,7 +1040,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                 {/* Right: Invite (a DM's membership is fixed — nobody to
                     invite), members as one pill (a dot when anyone is here —
                     the roster says who), then the tools. */}
-                {member && !isDirect && (
+                {writable && !isDirect && (
                     <Popover>
                         <PopoverTrigger asChild>
                             <button
@@ -1078,7 +1100,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                             })}
                         </div>
                         {/* A DM's membership is fixed — there is nobody to add or invite. */}
-                        {member && !isDirect && (
+                        {writable && !isDirect && (
                             <div className="mt-1 border-t border-border pt-1">
                                 <button
                                     type="button"
@@ -1142,8 +1164,22 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                             <Check className="size-3.5 mr-2" /> Mark all read
                         </DropdownMenuItem>
                         {LOCAL_RUNTIME && (
-                            <DropdownMenuItem disabled={!member} onClick={() => setScheduledOpen(true)}>
+                            <DropdownMenuItem disabled={!writable} onClick={() => setScheduledOpen(true)}>
                                 <Clock className="size-3.5 mr-2" /> Scheduled
+                            </DropdownMenuItem>
+                        )}
+                        {canAdminSpace && (archived ? (
+                            <DropdownMenuItem disabled={unarchiving} onClick={() => void unarchive()}>
+                                <ArchiveRestore className="size-3.5 mr-2" /> Unarchive space
+                            </DropdownMenuItem>
+                        ) : (
+                            <DropdownMenuItem onClick={() => setArchiveOpen(true)}>
+                                <Archive className="size-3.5 mr-2" /> Archive space
+                            </DropdownMenuItem>
+                        ))}
+                        {canAdminSpace && (
+                            <DropdownMenuItem variant="destructive" onClick={() => setDeleteOpen(true)}>
+                                <Trash2 className="size-3.5 mr-2" /> Delete space
                             </DropdownMenuItem>
                         )}
                     </DropdownMenuContent>
@@ -1336,14 +1372,16 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                 </div>
                 </div>
             </div>
-            {member && scheduledOpen && <ScheduledDialog orgId={org.id} spaceId={space.id} onClose={() => setScheduledOpen(false)} />}
-            {member && !isDirect && (
+            {canAdminSpace && <ArchiveSpaceDialog orgId={org.id} space={space} open={archiveOpen} onOpenChange={setArchiveOpen} />}
+            {canAdminSpace && <DeleteSpaceDialog orgId={org.id} space={space} open={deleteOpen} onOpenChange={setDeleteOpen} />}
+            {writable && scheduledOpen && <ScheduledDialog orgId={org.id} spaceId={space.id} onClose={() => setScheduledOpen(false)} />}
+            {writable && !isDirect && (
                 <AddMembersDialog org={org} space={space} members={members} open={addMembersOpen} onOpenChange={setAddMembersOpen} />
             )}
-            {member && trashOpen && (
+            {writable && trashOpen && (
                 <TrashDialog org={org} space={space} onClose={() => { setTrashOpen(false); setRefreshTick((t) => t + 1) }} />
             )}
-            {member && uploadFiles && (
+            {writable && uploadFiles && (
                 <UploadFilesDialog
                     org={org}
                     space={space}

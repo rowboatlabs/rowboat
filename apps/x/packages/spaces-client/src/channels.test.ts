@@ -26,6 +26,8 @@ beforeAll(async () => {
       { id: 'ramnique', displayName: 'Ramnique' },
       { id: 'gagan', displayName: 'Gagan' },
     ],
+    // A seed space's creator is the org's admin, who may archive and delete.
+    seedSpaces: [{ name: 'Lobby', creator: 'ramnique' }],
   });
   harbor = { ...started, close: async () => { await started.close(); await db.close(); } };
   const client = new SpacesClient({ baseUrl: harbor.url, token: 'dev-ramnique' });
@@ -88,6 +90,16 @@ describe('harborChannelHandlers', () => {
   it('passes the activity query on without the org id', async () => {
     const page = await table['spaces:getActivity']({ orgId, unread: true });
     expect(Array.isArray(page.items)).toBe(true);
+  });
+
+  it('archives, unarchives and deletes a space', async () => {
+    const { space } = await table['spaces:createSpace']({ orgId, name: 'Doomed' });
+    expect((await table['spaces:archiveSpace']({ orgId, spaceId: space.id })).space.archived).toBe(true);
+    await expect(table['spaces:postMessage']({ orgId, spaceId: space.id, body: 'too late' })).rejects.toMatchObject({ code: 'forbidden' });
+    expect((await table['spaces:unarchiveSpace']({ orgId, spaceId: space.id })).space.archived).toBe(false);
+    expect(await table['spaces:deleteSpace']({ orgId, spaceId: space.id })).toEqual({ deleted: true });
+    const { spaces } = await table['spaces:listSpaces']({ orgId });
+    expect(spaces.map((s) => s.id)).not.toContain(space.id);
   });
 
   it('fails for an org the host does not know', async () => {

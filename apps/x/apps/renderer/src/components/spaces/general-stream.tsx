@@ -91,7 +91,7 @@ export function GeneralStream({
     /** The content strip already labels a lone stream; split panes retain their headings. */
     showHeader?: boolean
 }) {
-    const { member } = useSpaceAccess()
+    const { member, writable } = useSpaceAccess()
     const [seed, setSeed] = useState<{ text: string; nonce: number; append?: boolean } | null>(null)
     const scrollRef = useRef<HTMLDivElement | null>(null)
     const bottomRef = useRef<HTMLDivElement | null>(null)
@@ -317,10 +317,10 @@ export function GeneralStream({
     const holdsRef = useRef(new Map<number, { timer: number; fire: () => void }>())
     const holdSeqRef = useRef(0)
     useEffect(() => {
-        if (member) return
+        if (writable) return
         for (const hold of holdsRef.current.values()) window.clearTimeout(hold.timer)
         holdsRef.current.clear()
-    }, [member])
+    }, [writable])
     const holdThenPostInThread = (rootMessageId: string, body: string, agent?: AgentOptions) => {
         const label = threadLabelFor(rootMessageId)
         const id = ++holdSeqRef.current
@@ -1094,10 +1094,10 @@ export function GeneralStream({
                 )
             })()}
             </div>
-            {member && forwarding && (
+            {writable && forwarding && (
                 <ForwardDialog org={org} space={space} message={forwarding} memberNames={memberNames} onClose={() => setForwarding(null)} />
             )}
-            {member && <PollDialogHost openRef={openPollRef} onSubmit={createPoll} />}
+            {writable && <PollDialogHost openRef={openPollRef} onSubmit={createPoll} />}
             {picking && (
                 <ThreadPickerDialog
                     candidates={collectRouteCandidates(org.id, space.id, stream, memberNames, spaceNames)}
@@ -1133,7 +1133,7 @@ export function GeneralStream({
                     chips={tagChips}
                 />
             )}
-            {member ? <Composer
+            {writable ? <Composer
                 placeholder={LOCAL_RUNTIME ? `Message ${space.name} — @rowboat to ask your agent` : `Message ${space.name}`}
                 busy={routing}
                 draftKey={memoryKey}
