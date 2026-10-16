@@ -289,6 +289,9 @@ That means you can plug in (for example) search, databases, CRMs, support tools,
 
 Examples: Exa (web search), Twitter/X, ElevenLabs (voice), Slack, Linear/Jira, GitHub, and more.
 
+For local source code instead of web pages, see the optional
+[Sem code-navigation example](docs/sem-mcp.md).
+
 ### Example: Parallel web search
 
 [Parallel Search MCP](https://docs.parallel.ai/integrations/mcp/search-mcp) provides `web_search` and `web_fetch` for public web search and page extraction without a Parallel account or API key. Free access is rate limited.
