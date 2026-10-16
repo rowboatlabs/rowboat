@@ -31,12 +31,12 @@ import { ActivityView, type ActivityTarget } from '@/components/spaces/activity-
 import { SpaceRailSections } from '@/components/spaces/space-rail-sections'
 import { SpaceRail } from '@/components/spaces/space-rail'
 import { SpaceContentTabs } from '@/components/spaces/space-content-tabs'
-import { SpaceDiscussionsView } from '@/components/spaces/space-discussions-view'
+import { SpaceThreadsView } from '@/components/spaces/space-threads-view'
 import { SpaceFilesView } from '@/components/spaces/space-files-view'
 import { SpaceSearch } from '@/components/spaces/space-search'
 import { railKey, type RailSelection } from '@/lib/spaces-selection'
 import { ThreadPane } from '@/components/spaces/thread-pane'
-import { STREAM_READ_KEY, useSpacePresence, useStream } from '@/hooks/use-space-chat'
+import { loadOlderStreamMessages, STREAM_READ_KEY, useSpacePresence, useStream } from '@/hooks/use-space-chat'
 import { refreshMembers, useOrgRoster, useSpaceMembers } from '@/hooks/use-space-members'
 import { findSpace, refreshSpacesAccountState, refreshSpacesOrgs, useSpaceFeed, useSpaceLive, useSpaceNames, useSpacesAccountState, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { noteListingFromEntries } from '@/hooks/use-space-boards'
@@ -1169,8 +1169,9 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                     <SpaceContentTabs orgId={org.id} orgAddress={org.address} spaceId={space.id} direct={isDirect} topics={feed.topics}
                         entries={entries} unreadAssetIds={unreadAssetIds} selection={selection} memberNames={memberNames}
                         spaceNames={spaceNames} onSelect={select} topicsLoaded={feed.loaded} filesLoaded={filesLoaded} filesError={filesError} />
-                    {selection.kind === 'discussions' && <SpaceDiscussionsView orgId={org.id} orgAddress={org.address} spaceId={space.id}
-                        topics={feed.topics} direct={isDirect} loaded={feed.loaded} memberNames={memberNames} spaceNames={spaceNames}
+                    {selection.kind === 'discussions' && <SpaceThreadsView orgId={org.id} orgAddress={org.address} spaceId={space.id}
+                        selfMemberId={org.memberId} topics={feed.topics} roots={stream.messages} hasMore={stream.hasMore} loadingOlder={stream.loadingOlder}
+                        onLoadOlder={() => void loadOlderStreamMessages(org.id, space.id)} direct={isDirect} loaded={feed.loaded} memberNames={memberNames} spaceNames={spaceNames}
                         presence={presence} onOpen={(rootMessageId) => select({ kind: 'thread', rootMessageId })} />}
                     {selection.kind === 'files' && <>
                         {filesError && <div role="alert" className="flex items-center gap-3 px-5 py-2 text-xs text-destructive">

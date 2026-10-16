@@ -119,10 +119,10 @@ export function SpaceContentTabs({ orgId, orgAddress, spaceId, direct, topics, e
             aria-current={!discussionSelected && !filesSelected ? 'page' : undefined} onClick={() => onSelect({ kind: 'general' })}>
             <MessageSquare className="size-3.5" /><span>Messages</span>{' '}<UnreadBadge badge={streamBadge(orgId, spaceId, direct)} direct={direct} />
         </button>
-        <ContentMenu label="Discussions" icon={<MessagesSquare className="size-3.5" />} selected={discussionSelected}
+        <ContentMenu label="Threads" icon={<MessagesSquare className="size-3.5" />} selected={discussionSelected}
             badge={discussionBadge} direct={direct} onNavigate={() => onSelect({ kind: 'discussions' })}>
             {(close) => <>
-                <div className="px-2 py-1.5 text-xs text-muted-foreground">Recently active</div>
+                <div className="px-2 py-1.5 text-xs text-muted-foreground">Recent discussions</div>
                 {recentTopics.slice(0, RECENT_LIMIT).map((topic) => <div key={topic.id} className="flex items-center gap-1">
                     <button type="button" className="spaces-content-menu-row min-w-0 flex-1"
                     title={resolveMentions(topic.title, memberNames, spaceNames)}
@@ -140,7 +140,7 @@ export function SpaceContentTabs({ orgId, orgAddress, spaceId, direct, topics, e
                     </button>
                 </div>)}
                 {recentTopics.length === 0 && <p className="px-2 py-3 text-xs text-muted-foreground">{topicsLoaded ? 'No active discussions yet.' : 'Loading discussions…'}</p>}
-                <button type="button" className="spaces-content-menu-all" onClick={() => { close(); onSelect({ kind: 'discussions' }) }}>All discussions</button>
+                <button type="button" className="spaces-content-menu-all" onClick={() => { close(); onSelect({ kind: 'discussions' }) }}>All threads</button>
             </>}
         </ContentMenu>
         <ContentMenu label="Files" icon={<FolderOpen className="size-3.5" />} selected={filesSelected}
