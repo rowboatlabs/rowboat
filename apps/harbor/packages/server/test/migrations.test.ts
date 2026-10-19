@@ -162,7 +162,9 @@ describe('open-space migration', () => {
     const db = await pgliteDb();
     try {
       await db.query('create table schema_migrations (id text primary key, applied_at text not null)');
-      for (const migration of MIGRATIONS.filter((m) => m.id !== '023-open-spaces')) {
+      // Everything before 023, as a database that predates it; later entries
+      // (040's default-space CHECK) build on its column.
+      for (const migration of MIGRATIONS.slice(0, MIGRATIONS.findIndex((m) => m.id === '023-open-spaces'))) {
         for (const statement of migration.statements) await db.query(statement);
         await db.query('insert into schema_migrations values ($1, $2)', [migration.id, '2026-09-22T00:00:00Z']);
       }

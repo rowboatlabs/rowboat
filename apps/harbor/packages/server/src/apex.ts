@@ -136,10 +136,12 @@ export function buildApexApp(deps: ApexDeps): Hono {
     // Landing area: one space named after the org, so a fresh org is a group
     // chat — the conversation itself, no #general and no README to read past
     // (2026-10-07: onboarding as simple as a WhatsApp group; channels come
-    // when someone adds a second space). Attributed to the founder.
+    // when someone adds a second space). Attributed to the founder. It is
+    // open and the org's first default space (spec §5 answer 3, built
+    // 2026-10-19), so everyone an invite admits lands in it.
     if (member) {
       const service = await deps.serviceFor(org);
-      await service.createSpace({ memberId: member.id }, org.name);
+      await service.createSpace({ memberId: member.id }, org.name, 'open', { isDefault: true });
     }
     return c.json({
       org: { id: org.id, name: org.name, address: domain },

@@ -140,6 +140,16 @@ export const SpaceEvent = z.discriminatedUnion('type', [
     space: Space,
     by: Attribution,
   }),
+  /**
+   * An admin made the space a default space or took it off the defaults
+   * (api.ts setDefaultSpace, 2026-10-19) — the full row, whose `isDefault`
+   * says which, plus who did it. Clients older than it skip the event.
+   */
+  z.object({
+    type: z.literal('space_default_changed'),
+    space: Space,
+    by: Attribution,
+  }),
 ]);
 export type SpaceEvent = z.infer<typeof SpaceEvent>;
 

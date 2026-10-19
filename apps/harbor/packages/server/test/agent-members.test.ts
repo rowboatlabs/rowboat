@@ -24,7 +24,7 @@ beforeAll(async () => {
   agent = await harbor.service.createAgent({ displayName: '  Replicas ' });
   // Ordinary membership: the same invite acceptance, and the same `joined`
   // event, a person's join leaves.
-  const invite = await harbor.service.createInvite({ memberId: 'ramnique' }, spaceId);
+  const invite = await harbor.service.createInvite({ memberId: 'ramnique' }, { spaceIds: [spaceId] });
   await harbor.service.acceptInvite({ memberId: agent.id }, invite.token);
   ramAgent = await agentClient(harbor, 'dev-ramnique', { agentName: 'Rowboat' });
 });

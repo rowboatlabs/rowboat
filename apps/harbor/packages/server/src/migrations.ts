@@ -1015,6 +1015,49 @@ export const MIGRATIONS: Migration[] = [
       `create index if not exists agent_connection_threads_space on agent_connection_threads (space_id)`,
     ],
   },
+  {
+    // Default spaces (spec §5 answer 3, built 2026-10-19): a flag on the
+    // space row. The CHECK keeps the rule in the schema as 023 does for DMs:
+    // only a shared open space can be a default, so an invite to the org is
+    // never a back door into a private space. No backfill: every org's first
+    // space was created private, and turning a private space open is not a
+    // migration's call — an admin marks the defaults.
+    id: '040-default-spaces',
+    statements: [
+      `alter table spaces add column if not exists is_default boolean not null default false`,
+      `alter table spaces add constraint spaces_default_open_check check (not is_default or (kind = 'shared' and visibility = 'open'))`,
+      `create index if not exists spaces_default on spaces (org_id) where is_default`,
+    ],
+  },
+  {
+    // An invite is to the org with an optional list of spaces (spec §4
+    // Invites, amended 2026-09-22; built 2026-10-19). The list moves to its
+    // own table, cascading from both ends: deleting a listed space drops it
+    // from the list and the invite still admits to the org; deleting the
+    // invite drops its list. invites gains org_id, because an invite that
+    // lists nothing no longer reaches its org through a space. invites.space_id
+    // stays, null on every new invite and read by nothing: 039 names it, and
+    // an applied migration is never edited.
+    id: '041-org-invites',
+    statements: [
+      `alter table invites add column if not exists org_id text`,
+      `update invites i set org_id = s.org_id from spaces s where s.id = i.space_id`,
+      `delete from invites where org_id is null`,
+      `alter table invites alter column org_id set not null`,
+      `alter table invites alter column space_id drop not null`,
+      `create table invite_spaces (
+        token text not null,
+        space_id text not null,
+        position int not null,
+        primary key (token, space_id),
+        constraint invite_spaces_token_fk foreign key (token) references invites(token) on delete cascade,
+        constraint invite_spaces_space_fk foreign key (space_id) references spaces(id) on delete cascade
+      )`,
+      `create index invite_spaces_space on invite_spaces (space_id)`,
+      `insert into invite_spaces (token, space_id, position) select token, space_id, 0 from invites where space_id is not null`,
+      `update invites set space_id = null`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

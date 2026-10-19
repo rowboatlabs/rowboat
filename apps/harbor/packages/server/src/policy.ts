@@ -84,6 +84,29 @@ export function canDeleteSpace(actor: Member, space: Space): Decision {
 }
 
 /**
+ * Default spaces are an admin's to set (spec §4 Roles, §5 answer 3; built
+ * 2026-10-19), and only a shared open space can be one, so an invite to the
+ * org is never a back door into a private space. Taking the flag off needs
+ * only the admin bit. The schema holds the same rule (migration 040).
+ */
+export function canSetDefaultSpace(actor: Member, space: Space, isDefault: boolean): Decision {
+  if (space.kind === 'direct') return { code: 'invalid_request', message: 'a direct message cannot be a default space' };
+  if (actor.role !== 'admin') return { code: 'forbidden', message: 'only an admin can choose the default spaces' };
+  if (isDefault && space.visibility !== 'open') return { code: 'invalid_request', message: 'only an open space can be a default space' };
+  return null;
+}
+
+/**
+ * Listing a space on an invite requires being a member of it (spec §4
+ * Invites, amended 2026-09-22): for a private space that is the whole rule,
+ * for an open one it is harmless, and it needs no kind check. A DM is never
+ * listed — its membership is fixed.
+ */
+export function canListOnInvite(space: Space, membership: Membership | undefined): Decision {
+  return canChangeMembership(space, 'invite') ?? canAccessSpace(space, membership);
+}
+
+/**
  * An archived space refuses every write that would add to it (spec §6,
  * 2026-10-13). Asked by the space lock for every member's act; leaving and
  * unarchiving opt out, and personal state (read marks, follows) never asks.

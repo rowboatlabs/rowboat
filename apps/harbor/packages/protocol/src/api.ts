@@ -367,6 +367,23 @@ export const routes = {
     response: z.object({ space: Space }),
   },
   /**
+   * Make a space a default space, or take it off the defaults (spec §5
+   * answer 3, 2026-10-19): everyone who accepts an invite to the org joins
+   * every default space. An admin act, on a shared open space only — a
+   * private space or a DM refuses with `invalid_request`, so an invite is
+   * never a back door into either; taking a flag off is allowed on any
+   * shared space. The admin need not be a member. Archived spaces refuse.
+   * Setting the flag a space already has is a no-op with no event. Members
+   * learn by `space_default_changed` on the log.
+   */
+  setDefaultSpace: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/default',
+    params: z.object({ spaceId: SpaceId }),
+    request: z.object({ isDefault: z.boolean(), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+    response: z.object({ space: Space }),
+  },
+  /**
    * Delete a shared space (spec §6, 2026-10-14): an admin act, refused on a
    * DM, allowed on an archived space. The space and every row that hangs off
    * it go in one statement (the cascade, migration 039); blob bytes no other
@@ -625,6 +642,13 @@ export const routes = {
   },
 
   // --- invites -------------------------------------------------------------
+  /**
+   * An invite to the org, listing any spaces the caller is in (spec §4
+   * Invites, amended 2026-10-19). Any org member may create one; a listed
+   * DM refuses with `invalid_request`, a listed space the caller is not in
+   * or one that is archived with `forbidden`. Accepting joins the listed
+   * spaces and the org's defaults.
+   */
   createInvite: {
     method: 'POST',
     path: '/v1/invites',

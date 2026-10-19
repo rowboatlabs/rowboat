@@ -191,6 +191,10 @@ async function dispatch(
       return { deleted: true };
     case 'unarchive_space':
       return { space: await service.unarchiveSpace(ctx, (args as { spaceId: string }).spaceId, attribution) };
+    case 'set_default_space': {
+      const a = args as { spaceId: string; isDefault: boolean };
+      return { space: await service.setDefaultSpace(ctx, a.spaceId, { isDefault: a.isDefault, ...attribution }) };
+    }
     case 'add_members': {
       const a = args as { spaceId: string; memberIds: string[] };
       return { memberships: await service.addMembers(ctx, a.spaceId, { memberIds: a.memberIds, ...attribution }) };
@@ -201,8 +205,8 @@ async function dispatch(
       return { left: true };
     }
     case 'create_invite': {
-      const a = args as { spaceId: string; expiresInHours?: number };
-      return service.createInvite(ctx, a.spaceId, a.expiresInHours);
+      const a = args as { spaceIds?: string[]; spaceId?: string; expiresInHours?: number };
+      return service.createInvite(ctx, a);
     }
     case 'list_spaces': {
       const a = args as { includeDirect?: boolean };

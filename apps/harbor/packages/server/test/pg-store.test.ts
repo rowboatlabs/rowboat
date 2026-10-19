@@ -30,7 +30,7 @@ beforeAll(async () => {
   await ensureMember(store, 'gagan');
   const space = await service.createSpace(ram, 'PG Space');
   spaceId = space.id;
-  const invite = await service.createInvite(ram, spaceId);
+  const invite = await service.createInvite(ram, { spaceIds: [spaceId] });
   await service.acceptInvite(gagan, invite.token);
 });
 
@@ -173,7 +173,7 @@ describe('PgStore through the service', () => {
   });
 
   it('invite expiry round-trips through storage', async () => {
-    const invite = await service.createInvite(ram, spaceId, 1);
+    const invite = await service.createInvite(ram, { spaceIds: [spaceId], expiresInHours: 1 });
     const stored = await store.getInvite(invite.token);
     expect(stored?.expiresAt).toBe(invite.expiresAt);
     await store.putInvite({ ...stored!, expiresAt: new Date(Date.now() - 1000).toISOString() });
