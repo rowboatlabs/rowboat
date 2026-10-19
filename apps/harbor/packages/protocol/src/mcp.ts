@@ -11,7 +11,7 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { Attribution, Member, Membership, Message, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic, UpdateProfile } from './core.js';
+import { Attribution, InvitePolicy, Member, MemberRole, Membership, Message, OrgSettings, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic, UpdateProfile } from './core.js';
 import { AssetId, AssetPath, BlobHash, MemberId, MessageId, SpaceId, TopicId } from './ids.js';
 import { CreateInviteResult, MAX_INVITE_SPACES } from './invite.js';
 import { Invocation, InvocationId, InvocationOptionValues, InvocationRefusal, InvocationState } from './invocation.js';
@@ -209,6 +209,16 @@ export const deleteSpace = tool({
   output: z.object({ deleted: z.literal(true) }),
 });
 
+export const setSpaceVisibility = tool({
+  name: 'set_space_visibility',
+  description:
+    "Change a shared space's visibility (admins only, in a space they are in; DMs and archived " +
+    'spaces refuse). open: any org member can find, read and join it. private: members only, and ' +
+    'nobody else can see it. The same value is a no-op. Only when your person asked for it.',
+  input: z.object({ spaceId: SpaceId, visibility: SpaceVisibility }),
+  output: z.object({ space: Space }),
+});
+
 export const addMembers = tool({
   name: 'add_members',
   description:
@@ -217,6 +227,52 @@ export const addMembers = tool({
     'Only when your person asked for it.',
   input: z.object({ spaceId: SpaceId, memberIds: z.array(MemberId).min(1).max(100) }),
   output: z.object({ memberships: z.array(Membership) }),
+});
+
+export const removeMember = tool({
+  name: 'remove_member',
+  description:
+    'Remove someone, person or agent, from a shared space (admins only, in a space they are in; ' +
+    'DMs refuse). Take the memberId from list_members. To take your person out, use leave_space. ' +
+    'Someone not in the space is a no-op. Only when your person explicitly asked to remove them.',
+  input: z.object({ spaceId: SpaceId, memberId: MemberId }),
+  output: z.object({ removed: z.boolean() }),
+});
+
+export const removeOrgMember = tool({
+  name: 'remove_org_member',
+  description:
+    'Remove someone, person or agent, from the whole org (admins only; never your person). They ' +
+    'leave every shared space and can no longer sign in; their messages stay, attributed. A new ' +
+    'invite brings the same member back. Only when your person explicitly asked to remove this ' +
+    'person from the org by name — never as a step toward something else.',
+  input: z.object({ memberId: MemberId }),
+  output: z.object({ member: Member }),
+});
+
+export const setMemberRole = tool({
+  name: 'set_member_role',
+  description:
+    "Make a person an admin, or a member again (admins only). Agents can't be admins, and the org " +
+    'always keeps one admin. The same role is a no-op. Only when your person asked for it.',
+  input: z.object({ memberId: MemberId, role: MemberRole }),
+  output: z.object({ member: Member }),
+});
+
+export const getOrgSettings = tool({
+  name: 'get_org_settings',
+  description: "The org's settings: invitePolicy says who may create invite links (members, or admins only).",
+  input: z.object({}),
+  output: z.object({ settings: OrgSettings }),
+});
+
+export const setInvitePolicy = tool({
+  name: 'set_invite_policy',
+  description:
+    'Set who may create invite links: members (anyone) or admins (admins only). Admins only. ' +
+    'The same value is a no-op. Only when your person asked for it.',
+  input: z.object({ invitePolicy: InvitePolicy }),
+  output: z.object({ settings: OrgSettings }),
 });
 
 export const leaveSpace = tool({
@@ -241,7 +297,8 @@ export const setDefaultSpace = tool({
 export const createInvite = tool({
   name: 'create_invite',
   description:
-    'Make an invite link to the org (any member may). The person who accepts joins the org, its ' +
+    "Make an invite link to the org (any member may, unless the org's invite policy is admins only). " +
+    'The person who accepts joins the org, its ' +
     'default spaces, and any spaceIds listed — each one a shared space your person is in. Returns ' +
     'the link to share — delivery is up to your person (paste it in a DM, an email, wherever they ' +
     'said). The org may cap expiresInHours.',
@@ -726,8 +783,14 @@ export const mcpTools = [
   unarchiveSpace,
   setDefaultSpace,
   deleteSpace,
+  setSpaceVisibility,
   addMembers,
+  removeMember,
   leaveSpace,
+  removeOrgMember,
+  setMemberRole,
+  getOrgSettings,
+  setInvitePolicy,
   createInvite,
   readStream,
   readThread,
@@ -771,4 +834,5 @@ export const readOnlyMcpToolNames: ReadonlySet<string> = new Set([
   assetHistory.name,
   diff.name,
   getInvocations.name,
+  getOrgSettings.name,
 ]);

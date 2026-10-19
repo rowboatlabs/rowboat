@@ -22,7 +22,9 @@ import { FileColumn, TrashDialog, UploadFilesDialog } from '@/components/spaces/
 import { GeneralStream } from '@/components/spaces/general-stream'
 import { ScheduledDialog } from '@/components/spaces/scheduled-dialog'
 import { AddMembersDialog } from '@/components/spaces/add-members-dialog'
-import { ArchiveSpaceDialog, DeleteSpaceDialog } from '@/components/spaces/space-admin-dialogs'
+import { ArchiveSpaceDialog, DeleteSpaceDialog, SpaceVisibilityDialog } from '@/components/spaces/space-admin-dialogs'
+import { MemberAdminProvider } from '@/components/spaces/member-admin'
+import { canInvite, useOrgSettings } from '@/hooks/use-org-settings'
 import { setDefaultSpace } from '@/lib/spaces-invites'
 import { InviteLinkPanel } from '@/components/spaces/invite-link'
 import { SpaceInvocationsProvider } from '@/components/spaces/invocation-lines'
@@ -930,6 +932,11 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // a group chat's one space is the server itself, so it has neither.
     const canAdminSpace = selfIsAdmin && member && !isDirect && !groupChat
     const [archiveOpen, setArchiveOpen] = useState(false)
+    // Visibility is an admin's too, and refused on an archived space (2026-10-19).
+    const [visibilityOpen, setVisibilityOpen] = useState(false)
+    // Under an admins-only invite policy a member's invite is refused, so the controls hide.
+    const mayInvite = canInvite(useOrgSettings(org.id), selfIsAdmin)
+    const spaceMemberIds = useMemo(() => members.map((m) => m.id), [members])
     const [deleteOpen, setDeleteOpen] = useState(false)
     const [unarchiving, setUnarchiving] = useState(false)
     const unarchive = async () => {
@@ -947,6 +954,8 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     return (
         <SpaceMembersProvider members={memberNames} spaceNames={spaceNames}>
         <SpaceProfilesProvider members={profiles} here={hereSet} selfId={org.memberId}>
+        <MemberAdminProvider orgId={org.id} orgName={org.name} selfId={org.memberId} isAdmin={selfIsAdmin}
+            space={canAdminSpace ? space : undefined} spaceMemberIds={spaceMemberIds}>
         <SpaceRefsProvider refs={spaceRefs}>
         <SpaceInvocationsProvider byMessage={invocationsByMessage} orgId={org.id} selfId={org.memberId} isAdmin={selfIsAdmin}>
         <SpaceAssetsProvider entries={entries}>
@@ -1042,7 +1051,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                 {/* Right: Invite (a DM's membership is fixed — nobody to
                     invite), members as one pill (a dot when anyone is here —
                     the roster says who), then the tools. */}
-                {writable && !isDirect && (
+                {writable && !isDirect && mayInvite && (
                     <Popover>
                         <PopoverTrigger asChild>
                             <button
@@ -1111,13 +1120,15 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                 >
                                     <UserPlus className="size-3.5" /> Add people
                                 </button>
-                                <button
-                                    type="button"
-                                    onClick={() => void invite()}
-                                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-                                >
-                                    <LinkIcon className="size-3.5" /> Copy invite link
-                                </button>
+                                {mayInvite && (
+                                    <button
+                                        type="button"
+                                        onClick={() => void invite()}
+                                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+                                    >
+                                        <LinkIcon className="size-3.5" /> Copy invite link
+                                    </button>
+                                )}
                             </div>
                         )}
                     </PopoverContent>
@@ -1179,6 +1190,13 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                 <Archive className="size-3.5 mr-2" /> Archive space
                             </DropdownMenuItem>
                         ))}
+                        {canAdminSpace && !archived && (
+                            <DropdownMenuItem onClick={() => setVisibilityOpen(true)}>
+                                {space.visibility === 'open'
+                                    ? <><Lock className="size-3.5 mr-2" /> Make private</>
+                                    : <><Hash className="size-3.5 mr-2" /> Make open</>}
+                            </DropdownMenuItem>
+                        )}
                         {/* Default spaces (harbor, 2026-10-19): only an open space can be one,
                             and an archived one can only stop being one. */}
                         {canAdminSpace && (space.isDefault ? (
@@ -1387,6 +1405,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
             </div>
             {canAdminSpace && <ArchiveSpaceDialog orgId={org.id} space={space} open={archiveOpen} onOpenChange={setArchiveOpen} />}
             {canAdminSpace && <DeleteSpaceDialog orgId={org.id} space={space} open={deleteOpen} onOpenChange={setDeleteOpen} />}
+            {canAdminSpace && <SpaceVisibilityDialog orgId={org.id} orgName={org.name} space={space} open={visibilityOpen} onOpenChange={setVisibilityOpen} />}
             {writable && scheduledOpen && <ScheduledDialog orgId={org.id} spaceId={space.id} onClose={() => setScheduledOpen(false)} />}
             {writable && !isDirect && (
                 <AddMembersDialog org={org} space={space} members={members} open={addMembersOpen} onOpenChange={setAddMembersOpen} />
@@ -1409,6 +1428,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         </SpaceAssetsProvider>
         </SpaceInvocationsProvider>
         </SpaceRefsProvider>
+        </MemberAdminProvider>
         </SpaceProfilesProvider>
         </SpaceMembersProvider>
     )

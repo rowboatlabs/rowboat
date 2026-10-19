@@ -12,6 +12,12 @@ import {
   canAccessSpace,
   canArchiveSpace,
   canDeleteSpace,
+  canRemoveFromSpace,
+  canRemoveFromOrg,
+  canSetRole,
+  canSetSpaceVisibility,
+  canSetOrgSettings,
+  canInvite,
   canOpenDirect,
   isGroupChat,
   canAddAgent,
@@ -96,6 +102,43 @@ describe('policy', () => {
     expect(canDeleteSpace(admin, direct)).toMatchObject({ code: 'invalid_request' });
     expect(canWriteSpace(shared)).toBeNull();
     expect(canWriteSpace({ ...shared, archived: true })).toMatchObject({ code: 'forbidden' });
+  });
+
+  it('admin controls: membership and policy acts are an admin’s, never on a DM (2026-10-19)', () => {
+    const admin = { id: 'a', role: 'admin', kind: 'human', displayName: 'A' } as Member;
+    const member = { id: 'm', role: 'member', kind: 'human', displayName: 'M' } as Member;
+    const agent = { id: 'g', role: 'member', kind: 'agent', displayName: 'G' } as Member;
+    const jev = { ...agent, agentConnection: 'builtin' } as Member;
+
+    expect(canRemoveFromSpace(admin, shared, 'm')).toBeNull();
+    expect(canRemoveFromSpace(member, shared, 'a')).toMatchObject({ code: 'forbidden' });
+    expect(canRemoveFromSpace(admin, shared, 'a')).toMatchObject({ code: 'invalid_request' });
+    expect(canRemoveFromSpace(admin, direct, 'm')).toMatchObject({ code: 'invalid_request' });
+
+    expect(canSetSpaceVisibility(admin, shared)).toBeNull();
+    expect(canSetSpaceVisibility(member, shared)).toMatchObject({ code: 'forbidden' });
+    expect(canSetSpaceVisibility(admin, direct)).toMatchObject({ code: 'invalid_request' });
+
+    expect(canRemoveFromOrg(admin, member)).toBeNull();
+    expect(canRemoveFromOrg(admin, agent)).toBeNull();
+    expect(canRemoveFromOrg(member, agent)).toMatchObject({ code: 'forbidden' });
+    expect(canRemoveFromOrg(admin, admin)).toMatchObject({ code: 'invalid_request' });
+    expect(canRemoveFromOrg(admin, jev)).toMatchObject({ code: 'invalid_request' });
+
+    expect(canSetRole(admin, member, 'admin')).toBeNull();
+    expect(canSetRole(admin, admin, 'member')).toBeNull(); // the last-admin count is the store's
+    expect(canSetRole(member, member, 'admin')).toMatchObject({ code: 'forbidden' });
+    expect(canSetRole(admin, agent, 'admin')).toMatchObject({ code: 'invalid_request' });
+    expect(canSetRole(admin, { ...member, removedAt: 'x' }, 'admin')).toMatchObject({ code: 'invalid_request' });
+
+    expect(canSetOrgSettings(admin)).toBeNull();
+    expect(canSetOrgSettings(member)).toMatchObject({ code: 'forbidden' });
+    expect(canInvite(member, 'members')).toBeNull();
+    expect(canInvite(member, 'admins')).toMatchObject({ code: 'forbidden' });
+    expect(canInvite(admin, 'admins')).toBeNull();
+
+    expect(canSignIn({ ...member, removedAt: 'x' })).toMatchObject({ code: 'not_a_member' });
+    expect(canReachMember({ ...member, removedAt: 'x' })).toMatchObject({ code: 'invalid_request' });
   });
 
   it('canWrite: read-only orgs refuse writes with read_only_limit', () => {

@@ -102,6 +102,19 @@ describe('harborChannelHandlers', () => {
     expect(spaces.map((s) => s.id)).not.toContain(space.id);
   });
 
+  it('admin controls: visibility, removal from a space, roles, the invite policy, removal from the org', async () => {
+    const { space } = await table['spaces:createSpace']({ orgId, name: 'Admin' });
+    expect((await table['spaces:setSpaceVisibility']({ orgId, spaceId: space.id, visibility: 'open' })).space.visibility).toBe('open');
+    await table['spaces:addMembers']({ orgId, spaceId: space.id, memberIds: ['gagan'] });
+    expect(await table['spaces:removeMember']({ orgId, spaceId: space.id, memberId: 'gagan' })).toEqual({ removed: true });
+    expect((await table['spaces:setMemberRole']({ orgId, memberId: 'gagan', role: 'admin' })).member.role).toBe('admin');
+    expect((await table['spaces:setMemberRole']({ orgId, memberId: 'gagan', role: 'member' })).member.role).toBe('member');
+    expect((await table['spaces:getOrgSettings']({ orgId })).settings).toEqual({ invitePolicy: 'members' });
+    expect((await table['spaces:setInvitePolicy']({ orgId, invitePolicy: 'admins' })).settings).toEqual({ invitePolicy: 'admins' });
+    await table['spaces:setInvitePolicy']({ orgId, invitePolicy: 'members' });
+    expect((await table['spaces:removeOrgMember']({ orgId, memberId: 'gagan' })).member.removedAt).toEqual(expect.any(String));
+  });
+
   it('makes a space a default, and an invite to the org joins it', async () => {
     const { space } = await table['spaces:createSpace']({ orgId, name: 'Welcome', visibility: 'open' });
     expect((await table['spaces:setDefaultSpace']({ orgId, spaceId: space.id, isDefault: true })).space.isDefault).toBe(true);

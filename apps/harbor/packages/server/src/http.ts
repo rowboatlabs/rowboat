@@ -259,6 +259,18 @@ export function buildHttpApp(deps: {
     return reply(c, routes.deleteSpace.response, { deleted: true });
   });
 
+  app.post(routes.setSpaceVisibility.path, async (c) => {
+    const { spaceId } = parseWith(routes.setSpaceVisibility.params, c.req.param());
+    const input = await body(c, routes.setSpaceVisibility.request);
+    return reply(c, routes.setSpaceVisibility.response, { space: await service.setSpaceVisibility(actor(c), spaceId, input) });
+  });
+
+  app.post(routes.removeMember.path, async (c) => {
+    const { spaceId, memberId } = parseWith(routes.removeMember.params, c.req.param());
+    const input = await body(c, routes.removeMember.request);
+    return reply(c, routes.removeMember.response, await service.removeMember(actor(c), spaceId, memberId, input));
+  });
+
   app.post(routes.unarchiveSpace.path, async (c) => {
     const { spaceId } = parseWith(routes.unarchiveSpace.params, c.req.param());
     const input = await body(c, routes.unarchiveSpace.request);
@@ -289,6 +301,27 @@ export function buildHttpApp(deps: {
   app.get('/v1/spaces/:spaceId/members', async (c) => {
     const { spaceId } = parseWith(routes.listMembers.params, c.req.param());
     return reply(c, routes.listMembers.response, { members: await service.listMembers(actor(c), spaceId) });
+  });
+
+  app.post(routes.removeOrgMember.path, async (c) => {
+    const { memberId } = parseWith(routes.removeOrgMember.params, c.req.param());
+    const input = await body(c, routes.removeOrgMember.request);
+    return reply(c, routes.removeOrgMember.response, { member: await service.removeOrgMember(actor(c), memberId, input) });
+  });
+
+  app.post(routes.setMemberRole.path, async (c) => {
+    const { memberId } = parseWith(routes.setMemberRole.params, c.req.param());
+    const input = await body(c, routes.setMemberRole.request);
+    return reply(c, routes.setMemberRole.response, { member: await service.setMemberRole(actor(c), memberId, input) });
+  });
+
+  app.get(routes.getOrgSettings.path, async (c) => {
+    return reply(c, routes.getOrgSettings.response, { settings: await service.getOrgSettings(actor(c)) });
+  });
+
+  app.patch(routes.updateOrgSettings.path, async (c) => {
+    const input = await body(c, routes.updateOrgSettings.request);
+    return reply(c, routes.updateOrgSettings.response, { settings: await service.updateOrgSettings(actor(c), input) });
   });
 
   app.get(routes.listOrgMembers.path, async (c) => {

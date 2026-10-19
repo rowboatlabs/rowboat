@@ -9,7 +9,7 @@ import { Invocations } from './core/invocations.js';
 import { Kernel, type ActorCtx, type BindIdentity, type OrgInfo } from './core/kernel.js';
 import { ReadState } from './core/read-state.js';
 import { Spaces } from './core/spaces.js';
-import type { AddMembersInput, ArchiveSpaceInput, CreateInviteInput, RenameSpaceInput, SetDefaultSpaceInput } from './core/spaces.js';
+import type { AddMembersInput, ArchiveSpaceInput, CreateInviteInput, RemoveMemberInput, RenameSpaceInput, SetDefaultSpaceInput, SetMemberRoleInput, SetSpaceVisibilityInput, UpdateOrgSettingsInput } from './core/spaces.js';
 import type { CreateTopicInput, DeleteMessageInput, EditMessageInput, EndPollInput, ManageTopicAction, NewMessage, PageOpts, ReactInput, VotePollInput } from './core/feed.js';
 import type { MarkReadInput, UnreadSnapshot } from './core/read-state.js';
 import type { SpaceHub } from './hub.js';
@@ -28,6 +28,7 @@ import type {
   CreateInviteResult,
   DeleteAssetResult,
   Member,
+  OrgSettings,
   UpdateProfile,
   AgentKey,
   AgentCredential,
@@ -234,6 +235,24 @@ export class HarborService {
   }
   deleteSpace(ctx: ActorCtx, spaceId: string): Promise<void> {
     return this.spaces.deleteSpace(ctx, spaceId);
+  }
+  setSpaceVisibility(ctx: ActorCtx, spaceId: string, input: SetSpaceVisibilityInput): Promise<Space> {
+    return this.spaces.setSpaceVisibility(ctx, spaceId, input);
+  }
+  removeMember(ctx: ActorCtx, spaceId: string, memberId: string, input: RemoveMemberInput): Promise<{ removed: boolean }> {
+    return this.spaces.removeMember(ctx, spaceId, memberId, input);
+  }
+  removeOrgMember(ctx: ActorCtx, memberId: string, input: RemoveMemberInput): Promise<Member> {
+    return this.spaces.removeOrgMember(ctx, memberId, input);
+  }
+  setMemberRole(ctx: ActorCtx, memberId: string, input: SetMemberRoleInput): Promise<Member> {
+    return this.spaces.setMemberRole(ctx, memberId, input);
+  }
+  getOrgSettings(ctx: ActorCtx): Promise<OrgSettings> {
+    return this.spaces.getOrgSettings(ctx);
+  }
+  updateOrgSettings(ctx: ActorCtx, input: UpdateOrgSettingsInput): Promise<OrgSettings> {
+    return this.spaces.updateOrgSettings(ctx, input);
   }
   openDirect(ctx: ActorCtx, otherMemberId: string): Promise<{ space: Space; created: boolean }> {
     return this.spaces.openDirect(ctx, otherMemberId);

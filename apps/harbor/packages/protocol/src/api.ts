@@ -12,7 +12,7 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { ActingMode, AgentCredential, AgentHook, AgentKey, AgentKeySecret, AgentListing, Attribution, Member, Membership, Message, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic, UpdateProfile } from './core.js';
+import { ActingMode, AgentCredential, AgentHook, AgentKey, AgentKeySecret, AgentListing, Attribution, InvitePolicy, Member, MemberRole, Membership, Message, OrgSettings, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic, UpdateProfile } from './core.js';
 import { AssetId, AssetPath, BlobHash, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 import {
   AcceptInvite,
@@ -251,6 +251,23 @@ export const routes = {
     path: '/v1/org/logo',
     response: z.object({ logoUrl: z.string().url().optional() }),
   },
+  /** The org's settings (2026-10-19): today, who may invite. Any member reads them. */
+  getOrgSettings: {
+    method: 'GET',
+    path: '/v1/org/settings',
+    response: z.object({ settings: OrgSettings }),
+  },
+  /**
+   * Change the org's settings — admins only (spec §4 Roles, 2026-10-19).
+   * Fields left out stay as they are; an unchanged value is a no-op. Every
+   * member's connections get `org_changed`.
+   */
+  updateOrgSettings: {
+    method: 'PATCH',
+    path: '/v1/org/settings',
+    request: z.object({ invitePolicy: InvitePolicy.optional() }),
+    response: z.object({ settings: OrgSettings }),
+  },
   /**
    * An avatar's or logo's bytes: a stream or a 302 to a short-lived presigned
    * URL, exactly as getBlob. Readable by every member of the org; hash-keyed,
@@ -375,6 +392,21 @@ export const routes = {
     path: '/v1/spaces/:spaceId/unarchive',
     params: z.object({ spaceId: SpaceId }),
     request: z.object({ actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+    response: z.object({ space: Space }),
+  },
+  /**
+   * Change a shared space's visibility (spec §4 Roles, 2026-10-19): an admin
+   * act by a member of the space, refused on a DM and on an archived space.
+   * The same value is a no-op with no event; a change appends
+   * `space_visibility_changed`. Every org member gets `org_changed`, so
+   * browse listings move; making a space private also sends `space_removed`
+   * to every org member not in it, ending any reading subscription.
+   */
+  setSpaceVisibility: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/visibility',
+    params: z.object({ spaceId: SpaceId }),
+    request: z.object({ visibility: SpaceVisibility, actingMode: ActingMode, agentName: z.string().max(64).optional() }),
     response: z.object({ space: Space }),
   },
   /**
@@ -633,6 +665,21 @@ export const routes = {
     response: z.object({ memberships: z.array(Membership) }),
   },
   /**
+   * Remove a member from a shared space (spec §4 Roles, 2026-10-19): an
+   * admin act by a member of the space, refused on a DM, allowed on an
+   * archived one. Appends a `removed` membership event with `by`; the
+   * removed member's connections get `space_removed`. Someone not in the
+   * space is a no-op (`removed: false`); removing yourself is refused —
+   * leave instead.
+   */
+  removeMember: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/members/:memberId/remove',
+    params: z.object({ spaceId: SpaceId, memberId: MemberId }),
+    request: z.object({ actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+    response: z.object({ removed: z.boolean() }),
+  },
+  /**
    * The org roster: every member of the org, people and agents, sorted by
    * display name (spec §5 answer 4, built 2026-09-29 — inside one org the org
    * is the trust boundary, as inside one Slack workspace). Until then it was
@@ -644,6 +691,37 @@ export const routes = {
     method: 'GET',
     path: '/v1/members',
     response: z.object({ members: z.array(Member) }),
+  },
+  /**
+   * Remove a member, person or agent, from the org (spec §4 Roles,
+   * 2026-10-19): admins only, never yourself, never Jev. The member leaves
+   * every shared space (a `removed` event with `by` on each, and
+   * `space_removed`), their push tokens go, keys of the agent and of agents
+   * they own are revoked, an admin becomes a member, and `removedAt` is
+   * stamped. Their DMs keep the membership, as with a deleted account. Their
+   * sign-in is `not_a_member` until an invite they accept reactivates the
+   * same row. Removing a removed member is a no-op. Every member's
+   * connections get `org_changed`.
+   */
+  removeOrgMember: {
+    method: 'POST',
+    path: '/v1/members/:memberId/remove',
+    params: z.object({ memberId: MemberId }),
+    request: z.object({ actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+    response: z.object({ member: Member }),
+  },
+  /**
+   * Promote or demote an admin (spec §4 Roles, 2026-10-19): admins only.
+   * Agents are never admins; the org always keeps one, so demoting its last
+   * admin — yourself included — is refused. The same role is a no-op. Every
+   * member's connections get `org_changed`.
+   */
+  setMemberRole: {
+    method: 'POST',
+    path: '/v1/members/:memberId/role',
+    params: z.object({ memberId: MemberId }),
+    request: z.object({ role: MemberRole, actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+    response: z.object({ member: Member }),
   },
   leaveSpace: {
     method: 'POST',

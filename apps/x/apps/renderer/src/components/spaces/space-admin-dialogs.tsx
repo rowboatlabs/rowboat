@@ -98,3 +98,52 @@ export function DeleteSpaceDialog({ orgId, space, open, onOpenChange }: {
         </AlertDialog>
     )
 }
+
+/**
+ * Open or close a shared space (harbor admin controls, 2026-10-19). Going
+ * private cuts off everyone who isn't a member, readers included, so it
+ * says so; going open lets anyone in the server find and join it.
+ */
+export function SpaceVisibilityDialog({ orgId, orgName, space, open, onOpenChange }: {
+    orgId: string
+    orgName: string
+    space: spaces.Space
+    open: boolean
+    onOpenChange: (open: boolean) => void
+}) {
+    const [busy, setBusy] = useState(false)
+    const next = space.visibility === 'open' ? 'private' : 'open'
+    const apply = async () => {
+        setBusy(true)
+        try {
+            await window.ipc.invoke('spaces:setSpaceVisibility', { orgId, spaceId: space.id, visibility: next })
+            await refreshSpacesOrgs()
+            toast(next === 'open' ? `${space.name} is now open` : `${space.name} is now private`, 'success')
+            onOpenChange(false)
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not change who can see the space', 'error')
+        } finally {
+            setBusy(false)
+        }
+    }
+    return (
+        <AlertDialog open={open} onOpenChange={onOpenChange}>
+            <AlertDialogContent>
+                <AlertDialogHeader>
+                    <AlertDialogTitle>{next === 'open' ? `Make ${space.name} open?` : `Make ${space.name} private?`}</AlertDialogTitle>
+                    <AlertDialogDescription>
+                        {next === 'open'
+                            ? `Anyone in ${orgName} can find it, read it and join it.`
+                            : 'Only its members can see it. Anyone reading it without joining loses access.'}
+                    </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                    <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+                    <AlertDialogAction disabled={busy} onClick={(event) => { event.preventDefault(); void apply() }}>
+                        {busy ? 'Saving…' : next === 'open' ? 'Make open' : 'Make private'}
+                    </AlertDialogAction>
+                </AlertDialogFooter>
+            </AlertDialogContent>
+        </AlertDialog>
+    )
+}

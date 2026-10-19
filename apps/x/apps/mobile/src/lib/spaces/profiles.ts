@@ -24,7 +24,18 @@ export function useProfiles(client: SpacesClient, members: Map<string, Member>):
   return useMemo(() => new Map([...orgMembers, ...members]), [orgMembers, members]);
 }
 
-/** A deleted account keeps its name on what it wrote, marked (Harbor's `Member.deactivatedAt`). */
-export function memberLabel(member: Pick<Member, 'displayName' | 'deactivatedAt'>): string {
-  return member.deactivatedAt ? `${member.displayName} (deactivated)` : member.displayName;
+/**
+ * A deleted account keeps its name on what it wrote, marked (Harbor's
+ * `Member.deactivatedAt`); so does someone an admin removed from the org
+ * (`Member.removedAt`, 2026-10-19).
+ */
+export function memberLabel(member: Pick<Member, 'displayName' | 'deactivatedAt' | 'removedAt'>): string {
+  if (member.deactivatedAt) return `${member.displayName} (deactivated)`;
+  if (member.removedAt) return `${member.displayName} (removed)`;
+  return member.displayName;
+}
+
+/** No longer in the org — a deleted account, or removed by an admin. Pickers leave them out. */
+export function isDeparted(member: Pick<Member, 'deactivatedAt' | 'removedAt'>): boolean {
+  return !!member.deactivatedAt || !!member.removedAt;
 }

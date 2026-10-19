@@ -197,6 +197,24 @@ async function dispatch(
       const a = args as { spaceId: string; isDefault: boolean };
       return { space: await service.setDefaultSpace(ctx, a.spaceId, { isDefault: a.isDefault, ...attribution }) };
     }
+    case 'set_space_visibility': {
+      const a = args as { spaceId: string; visibility: 'private' | 'open' };
+      return { space: await service.setSpaceVisibility(ctx, a.spaceId, { visibility: a.visibility, ...attribution }) };
+    }
+    case 'remove_member': {
+      const a = args as { spaceId: string; memberId: string };
+      return service.removeMember(ctx, a.spaceId, a.memberId, attribution);
+    }
+    case 'remove_org_member':
+      return { member: await service.removeOrgMember(ctx, (args as { memberId: string }).memberId, attribution) };
+    case 'set_member_role': {
+      const a = args as { memberId: string; role: 'admin' | 'member' };
+      return { member: await service.setMemberRole(ctx, a.memberId, { role: a.role, ...attribution }) };
+    }
+    case 'get_org_settings':
+      return { settings: await service.getOrgSettings(ctx) };
+    case 'set_invite_policy':
+      return { settings: await service.updateOrgSettings(ctx, { invitePolicy: (args as { invitePolicy: 'members' | 'admins' }).invitePolicy }) };
     case 'add_members': {
       const a = args as { spaceId: string; memberIds: string[] };
       return { memberships: await service.addMembers(ctx, a.spaceId, { memberIds: a.memberIds, ...attribution }) };

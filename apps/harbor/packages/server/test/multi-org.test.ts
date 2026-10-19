@@ -329,6 +329,40 @@ describe('apex face (self-serve org creation)', () => {
   });
 });
 
+describe('org removal and reactivation (spec §4 Roles, 2026-10-19)', () => {
+  it('a removed member is refused, an old link does not bring them back, a new invite reactivates the same row', async () => {
+    const ram = await as.mint({ sub: 'sub-ram' });
+    const temp = await as.mint({ sub: 'sub-temp', email: 'temp@acme.example', name: 'Temp' });
+    const admin = http('acme.test', ram);
+    const org = http('acme.test', temp);
+    const spaceId = (await admin.post('/v1/spaces', { name: 'Contractors' })).body.space.id;
+    const before = (await admin.post('/v1/invites', { spaceId })).body;
+    const joined = await org.post('/v1/invites/accept', { token: before.token });
+    expect(joined.status).toBe(200);
+    const tempId = joined.body.membership.memberId;
+    const posted = await org.post(`/v1/spaces/${spaceId}/messages`, { body: 'hello', actingMode: 'direct' });
+
+    const removed = await admin.post(`/v1/members/${tempId}/remove`, { actingMode: 'direct' });
+    expect(removed.status).toBe(200);
+    expect((await org.get('/v1/spaces')).body.code).toBe('not_a_member');
+    expect((await http('spaces.test', temp).get('/v1/orgs')).body.orgs.map((o: any) => o.name)).not.toContain('Acme');
+
+    // The invite they joined with predates the removal: refused.
+    const stale = await org.post('/v1/invites/accept', { token: before.token });
+    expect(stale.status).toBe(403);
+    expect(stale.body.code).toBe('not_a_member');
+
+    const after = (await admin.post('/v1/invites', { spaceId })).body;
+    const back = await org.post('/v1/invites/accept', { token: after.token });
+    expect(back.status).toBe(200);
+    expect(back.body.membership.memberId).toBe(tempId);
+    const me = (await org.get('/v1/me')).body.member;
+    expect(me.id).toBe(tempId);
+    expect(me.removedAt).toBeUndefined();
+    expect(posted.body.message.author.memberId).toBe(tempId);
+  });
+});
+
 describe('apex face: account deletion (DELETE /v1/me, 2026-10-08)', () => {
   it('deactivates the caller in every org: out of shared spaces, name kept, refused at sign-in', async () => {
     const leaver = await as.mint({ sub: 'sub-leaver', email: 'leaver@rowboatlabs.com', name: 'Leaver' });

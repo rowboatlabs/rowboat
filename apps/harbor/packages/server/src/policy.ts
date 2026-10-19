@@ -1,4 +1,5 @@
-import type { ErrorCode, Invocation, InvocationRefusal, Member, Membership, Message, Space } from '@rowboat/spaces-protocol';
+import type { ErrorCode, Invocation, InvocationRefusal, InvitePolicy, Member, MemberRole, Membership, Message, Space } from '@rowboat/spaces-protocol';
+import { BUILT_IN_CONNECTION } from '@rowboat/spaces-protocol';
 import { HarborError } from './errors.js';
 
 // Who may do what. The service loads the facts (space, membership, message,
@@ -84,6 +85,37 @@ export function canDeleteSpace(actor: Member, space: Space): Decision {
 }
 
 /**
+ * Removing someone from a shared space is an admin act (spec §4 Roles,
+ * built 2026-10-19). A DM's membership is fixed; your own tool is leave.
+ */
+export function canRemoveFromSpace(actor: Member, space: Space, targetId: string): Decision {
+  if (space.kind === 'direct') return { code: 'invalid_request', message: 'a direct message has a fixed membership — nobody can be removed' };
+  if (actor.role !== 'admin') return { code: 'forbidden', message: 'only an admin can remove someone from a space' };
+  if (targetId === actor.id) return { code: 'invalid_request', message: 'to take yourself out of a space, leave it' };
+  return null;
+}
+
+/** Changing who may find a space is an admin act on a shared space (spec §4 Roles, 2026-10-19); a DM is private forever. */
+export function canSetSpaceVisibility(actor: Member, space: Space): Decision {
+  if (space.kind === 'direct') return { code: 'invalid_request', message: 'a direct message is always private' };
+  if (actor.role === 'admin') return null;
+  return { code: 'forbidden', message: 'only an admin can change who can see a space' };
+}
+
+/**
+ * Removing a member from the org (spec §4 Roles, 2026-10-19): an admin act,
+ * never on yourself (an org removal is not a way to leave, and it keeps the
+ * last admin from removing the org's last admin), and never on an agent
+ * Harbor itself is, which no person added.
+ */
+export function canRemoveFromOrg(actor: Member, target: Member): Decision {
+  if (actor.role !== 'admin') return { code: 'forbidden', message: 'only an admin can remove someone from the org' };
+  if (target.id === actor.id) return { code: 'invalid_request', message: 'you can’t remove yourself from the org' };
+  if (target.agentConnection === BUILT_IN_CONNECTION) return { code: 'invalid_request', message: `${target.displayName} is built into the org and can’t be removed` };
+  return null;
+}
+
+/**
  * Default spaces are an admin's to set (spec §4 Roles, §5 answer 3; built
  * 2026-10-19), and only a shared open space can be one, so an invite to the
  * org is never a back door into a private space. Taking the flag off needs
@@ -94,6 +126,32 @@ export function canSetDefaultSpace(actor: Member, space: Space, isDefault: boole
   if (actor.role !== 'admin') return { code: 'forbidden', message: 'only an admin can choose the default spaces' };
   if (isDefault && space.visibility !== 'open') return { code: 'invalid_request', message: 'only an open space can be a default space' };
   return null;
+}
+
+/**
+ * Promoting and demoting (spec §4 Roles, 2026-10-19): an admin act on an
+ * active person. An agent is never an admin (spec §4 Agent members). The
+ * at-least-one-admin rule needs the count, so the store decides it.
+ */
+export function canSetRole(actor: Member, target: Member, role: MemberRole): Decision {
+  if (actor.role !== 'admin') return { code: 'forbidden', message: 'only an admin can change who is an admin' };
+  if (target.kind === 'agent' && role === 'admin') return { code: 'invalid_request', message: 'an agent can’t be an admin' };
+  if (target.removedAt !== undefined || target.deactivatedAt !== undefined) {
+    return { code: 'invalid_request', message: `${target.displayName} is no longer in the org` };
+  }
+  return null;
+}
+
+/** The org's settings are its admins' to set (spec §4 Roles, 2026-10-19). */
+export function canSetOrgSettings(actor: Member): Decision {
+  if (actor.role === 'admin') return null;
+  return { code: 'forbidden', message: 'only an admin can change the org’s settings' };
+}
+
+/** Creating an invite, under the org's policy (spec §4 Invites, built 2026-10-19). */
+export function canInvite(actor: Member, policy: InvitePolicy): Decision {
+  if (policy === 'members' || actor.role === 'admin') return null;
+  return { code: 'forbidden', message: 'only admins can invite people to this org' };
 }
 
 /**
@@ -168,14 +226,18 @@ export function canBind(identity: { email?: string }, org: { allowedEmailDomains
  * otherwise rebind the same row.
  */
 export function canSignIn(member: Member): Decision {
-  if (member.deactivatedAt === undefined) return null;
-  return { code: 'not_a_member', message: 'this account was deleted' };
+  if (member.deactivatedAt !== undefined) return { code: 'not_a_member', message: 'this account was deleted' };
+  // Removed by an admin (2026-10-19): refused as a sign-in; an invite
+  // reactivates the row instead (spaces.ts bindInvite), so it never asks.
+  if (member.removedAt !== undefined) return { code: 'not_a_member', message: 'you were removed from this org' };
+  return null;
 }
 
-/** Nobody adds, or opens a DM with, a deactivated member (2026-10-13). */
+/** Nobody adds, or opens a DM with, a deactivated or removed member (2026-10-13, 2026-10-19). */
 export function canReachMember(member: Member): Decision {
-  if (member.deactivatedAt === undefined) return null;
-  return { code: 'invalid_request', message: `${member.displayName} has deleted their account` };
+  if (member.deactivatedAt !== undefined) return { code: 'invalid_request', message: `${member.displayName} has deleted their account` };
+  if (member.removedAt !== undefined) return { code: 'invalid_request', message: `${member.displayName} is no longer in this org` };
+  return null;
 }
 
 export function canSetOrgLogo(actor: Member): Decision {

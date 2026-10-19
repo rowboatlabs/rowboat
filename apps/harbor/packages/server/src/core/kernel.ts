@@ -73,14 +73,24 @@ export class Kernel {
     return space;
   }
 
+  /**
+   * Whether the caller is in the org now: a member row that was neither
+   * deactivated nor removed (2026-10-19). A removed member's open socket
+   * still names them, so browsing open spaces asks this, not the row alone.
+   */
+  async isActiveOrgMember(ctx: ActorCtx): Promise<boolean> {
+    const member = await this.store.getMember(ctx.memberId);
+    return !!member && member.deactivatedAt === undefined && member.removedAt === undefined;
+  }
+
   async requireOrgMember(ctx: ActorCtx): Promise<void> {
-    if (!(await this.store.getMember(ctx.memberId))) throw new HarborError('not_a_member', 'you are not a member of this org');
+    if (!(await this.isActiveOrgMember(ctx))) throw new HarborError('not_a_member', 'you are not a member of this org');
   }
 
   async requireReadableSpace(ctx: ActorCtx, spaceId: string): Promise<Space> {
     const space = await this.requireSpace(spaceId);
     const membership = await this.store.getMembership(spaceId, ctx.memberId);
-    const orgMember = membership ? true : !!(await this.store.getMember(ctx.memberId));
+    const orgMember = membership ? true : await this.isActiveOrgMember(ctx);
     enforce(canReadSpace(space, membership, orgMember));
     return space;
   }

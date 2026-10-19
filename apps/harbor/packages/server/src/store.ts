@@ -12,7 +12,10 @@ import type {
   InvocationState,
   BlobInfo,
   ChangeSet,
+  InvitePolicy,
   Member,
+  MemberRole,
+  OrgSettings,
   Membership,
   MentionStamps,
   Message,
@@ -251,6 +254,27 @@ export interface Store {
    * refuses the next sign-in (policy.ts canSignIn). Idempotent.
    */
   deactivateMember(memberId: string, at: string): Promise<void>;
+  /**
+   * An admin removes a member from the org (spec §4 Roles, 2026-10-19): the
+   * row stays, stamped removed_at, and an admin's role drops to member so a
+   * removed admin never counts toward, or comes back as, an admin. Push
+   * tokens go; keys of the member (an agent) and of agents they own are
+   * revoked. The identity row stays: it is how an invite finds the same row
+   * again (reactivateMember). Idempotent.
+   */
+  removeMemberFromOrg(memberId: string, at: string): Promise<void>;
+  /** Clear removed_at: the same identity accepted an invite (2026-10-19). */
+  reactivateMember(memberId: string): Promise<void>;
+  /**
+   * Set the admin bit. Demoting the org's last active admin answers
+   * 'last_admin' and writes nothing, decided under a row lock so two admins
+   * demoting each other cannot both pass (spec §4 Roles: at least one admin).
+   */
+  setMemberRole(memberId: string, role: MemberRole): Promise<'ok' | 'last_admin'>;
+
+  // org settings (2026-10-19): one row per org once an admin sets one; no row = the defaults.
+  getOrgSettings(): Promise<OrgSettings>;
+  setInvitePolicy(policy: InvitePolicy, by: string, at: string): Promise<void>;
 
   // spaces — `kind` (migration 014) rides the row; a direct space also
   // stores its direct key, and putSpace MUST refuse a second direct space
