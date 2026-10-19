@@ -564,6 +564,13 @@ export default function SpaceChatScreen() {
 
       {/* Composer */}
       <View style={{ paddingTop: 8, paddingBottom: keyboardVisible ? 16 : insets.bottom + 10 }}>
+        {/* A deleted account only stays on a DM roster (shared spaces drop
+            it), so one here means the other person is gone (2026-10-19). */}
+        {[...members.values()].some((m) => m.deactivatedAt) ? (
+          <Text style={{ fontSize: 13, textAlign: 'center', color: colors.secondaryLabel, paddingHorizontal: 32, paddingVertical: 12 }}>
+            This account was deleted. You can still read your conversation.
+          </Text>
+        ) : (
         <SpaceComposer
           ref={composerRef}
           placeholder={`Message #${title ?? ''}`}
@@ -574,6 +581,7 @@ export default function SpaceChatScreen() {
           onPickMedia={uploadMedia}
           onEdit={saveEdit}
         />
+        )}
       </View>
 
       <MessageActionSheet
