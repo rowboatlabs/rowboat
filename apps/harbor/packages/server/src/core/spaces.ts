@@ -8,12 +8,13 @@ import {
   type ResolveInviteResult,
   type Routes,
   type Space,
+  type UpdateProfile,
 } from '@rowboat/spaces-protocol';
 import { randomBytes } from 'node:crypto';
 import type { z } from 'zod';
 import type { BlobStore } from '../blobs.js';
 import { HarborError } from '../errors.js';
-import { canArchiveSpace, canBind, canDeleteSpace, canChangeMembership, canJoinSpace, canOpenDirect, canReachMember, canRenameSpace, canSignIn, canWriteSpace, enforce, isGroupChat } from '../policy.js';
+import { canArchiveSpace, canBind, canDeleteSpace, canChangeMembership, canEditProfile,canJoinSpace, canOpenDirect, canReachMember, canRenameSpace, canSignIn, canWriteSpace, enforce, isGroupChat } from '../policy.js';
 import { DIRECT_SPACE_NAME, directKeyFor, type PushLevel, type StoredEvent } from '../store.js';
 import { Kernel, type ActorCtx, type BindIdentity } from './kernel.js';
 
@@ -28,6 +29,11 @@ function seedDisplayName(identity: BindIdentity): string {
   const local = identity.email?.split('@')[0];
   if (local) return local.slice(0, 128);
   return identity.sub.slice(0, 24);
+}
+
+/** A profile field is one line: rosters and mentions have no room for a newline. */
+function oneLine(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
 }
 
 export type RenameSpaceInput = z.infer<Routes['renameSpace']['request']>;
@@ -50,6 +56,32 @@ export class Spaces {
     const member = await this.k.store.getMember(ctx.memberId);
     if (!member) throw new HarborError('not_found', 'member not found');
     return member;
+  }
+
+  /**
+   * Your own name and title (spec §4 Member profile; built 2026-10-19). An
+   * org fact, not a space's: no event, no lock — rosters and `me` carry it on
+   * the next read, as the avatar does. Attribution keys on the id, so a
+   * rename never touches history.
+   */
+  async updateProfile(ctx: ActorCtx, input: UpdateProfile): Promise<Member> {
+    const member = await this.me(ctx);
+    enforce(canEditProfile(member));
+    const updated: Member = { ...member };
+    if (input.displayName !== undefined) {
+      const displayName = oneLine(input.displayName);
+      if (!displayName) throw new HarborError('invalid_request', 'a display name needs at least one character');
+      updated.displayName = displayName;
+    }
+    if (input.title !== undefined) {
+      const title = oneLine(input.title);
+      if (title) updated.title = title;
+      else delete updated.title;
+    }
+    if (updated.displayName === member.displayName && updated.title === member.title) return member; // idempotent no-op: no write
+    this.k.guardWrite();
+    await this.k.store.putMember(updated);
+    return updated;
   }
 
   /**

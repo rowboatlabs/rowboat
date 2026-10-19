@@ -156,6 +156,8 @@ async function dispatch(
       // The same row /v1/me serves.
       return { member: await service.me(ctx), org: { name: service.org.name, address: service.org.address } };
     }
+    case 'update_profile':
+      return { member: await service.updateProfile(ctx, args as { displayName?: string; title?: string }) };
     case 'list_members': {
       const a = args as { spaceId?: string };
       const members = a.spaceId !== undefined

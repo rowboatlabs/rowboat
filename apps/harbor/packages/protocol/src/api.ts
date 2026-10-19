@@ -12,7 +12,7 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { ActingMode, AgentCredential, AgentHook, AgentKey, AgentKeySecret, AgentListing, Attribution, Member, Membership, Message, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic } from './core.js';
+import { ActingMode, AgentCredential, AgentHook, AgentKey, AgentKeySecret, AgentListing, Attribution, Member, Membership, Message, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic, UpdateProfile } from './core.js';
 import { AssetId, AssetPath, BlobHash, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 import {
   AcceptInvite,
@@ -201,6 +201,17 @@ export const routes = {
   me: {
     method: 'GET',
     path: '/v1/me',
+    response: z.object({ member: Member }),
+  },
+  /**
+   * Your own display name and title (spec §4 Member profile, 2026-10-19).
+   * Only you edit your profile; an agent member's name is its owner's choice
+   * at creation, so agents are refused. Unchanged fields are a no-op.
+   */
+  updateMe: {
+    method: 'PUT',
+    path: '/v1/me',
+    request: UpdateProfile,
     response: z.object({ member: Member }),
   },
   // --- profile images (2026-10-02) -------------------------------------------
