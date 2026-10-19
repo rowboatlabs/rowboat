@@ -160,6 +160,17 @@ export function canSetOrgLogo(actor: Member): Decision {
   return { code: 'forbidden', message: 'only an admin can change the org’s logo' };
 }
 
+/**
+ * Only you edit your profile (spec §4 Member profile, 2026-09-22), and only a
+ * person has one to edit: an agent member is named by its owner when it is
+ * added (built 2026-10-19), so an agent's own key cannot rename it. A
+ * person's own assistant acting for them is the person, and may.
+ */
+export function canEditProfile(actor: Member): Decision {
+  if (actor.kind !== 'agent') return null;
+  return { code: 'forbidden', message: 'an agent’s name is set when it is added' };
+}
+
 // --- agent members and their keys (spec §4 Agent members, 2026-09-29) --------
 
 /** Any person may add an agent and becomes its owner. An agent may not: one agent minting others escapes every owner. */

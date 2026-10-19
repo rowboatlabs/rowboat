@@ -167,6 +167,11 @@ export function buildHttpApp(deps: {
 
   app.get(routes.me.path, async (c) => reply(c, routes.me.response, { member: await service.me(actor(c)) }));
 
+  app.put(routes.updateMe.path, async (c) => {
+    const input = await body(c, routes.updateMe.request);
+    return reply(c, routes.updateMe.response, { member: await service.updateProfile(actor(c), input) });
+  });
+
   // --- profile images (2026-10-02) -------------------------------------------
   // The body is the image; the limit is checked on the claim and again on the bytes.
   const imageBody = async (c: Context<Env>): Promise<Uint8Array> => {

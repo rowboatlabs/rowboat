@@ -1015,6 +1015,12 @@ export const MIGRATIONS: Migration[] = [
       `create index if not exists agent_connection_threads_space on agent_connection_threads (space_id)`,
     ],
   },
+  {
+    // A member's title (spec §4 Member profile, v1 = name, title, avatar;
+    // built 2026-10-19). Null = none.
+    id: '040-member-title',
+    statements: [`alter table members add column if not exists title text`],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

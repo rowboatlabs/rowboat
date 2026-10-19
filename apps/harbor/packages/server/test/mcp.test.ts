@@ -86,6 +86,7 @@ describe('agent face (MCP)', () => {
       'search_space',
       'stop_invocation',
       'unarchive_space',
+      'update_profile',
       'vote_poll',
       'whoami',
     ]);

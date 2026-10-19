@@ -11,7 +11,7 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { Attribution, Member, Membership, Message, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic } from './core.js';
+import { Attribution, Member, Membership, Message, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic, UpdateProfile } from './core.js';
 import { AssetId, AssetPath, BlobHash, MemberId, MessageId, SpaceId, TopicId } from './ids.js';
 import { CreateInviteResult } from './invite.js';
 import { Invocation, InvocationId, InvocationOptionValues, InvocationRefusal, InvocationState } from './invocation.js';
@@ -66,6 +66,16 @@ export const whoami = tool({
     'reactions in what you read, and to open their notes-to-self DM (open_direct with their own memberId).',
   input: z.object({}),
   output: z.object({ member: Member, org: z.object({ name: z.string(), address: z.string() }) }),
+});
+
+export const updateProfile = tool({
+  name: 'update_profile',
+  description:
+    "Change your person's own display name or title (what they do, e.g. \"Design lead\") on this org. " +
+    'Pass only what changes; an empty title removes it. Only when they ask — it is how every teammate ' +
+    'sees them. Nobody can change anyone else’s profile.',
+  input: UpdateProfile,
+  output: z.object({ member: Member }),
 });
 
 export const listMembers = tool({
@@ -687,6 +697,7 @@ export const markAllRead = tool({
 
 export const mcpTools = [
   whoami,
+  updateProfile,
   listMembers,
   listSpaces,
   browseSpaces,
