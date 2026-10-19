@@ -11,9 +11,9 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { Attribution, InvitePolicy, Member, MemberRole, Membership, Message, OrgSettings, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic } from './core.js';
+import { Attribution, InvitePolicy, Member, MemberRole, Membership, Message, OrgSettings, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic, UpdateProfile } from './core.js';
 import { AssetId, AssetPath, BlobHash, MemberId, MessageId, SpaceId, TopicId } from './ids.js';
-import { CreateInviteResult } from './invite.js';
+import { CreateInviteResult, MAX_INVITE_SPACES } from './invite.js';
 import { Invocation, InvocationId, InvocationOptionValues, InvocationRefusal, InvocationState } from './invocation.js';
 import { SearchKind, SearchLimit, SearchResults } from './search.js';
 
@@ -66,6 +66,16 @@ export const whoami = tool({
     'reactions in what you read, and to open their notes-to-self DM (open_direct with their own memberId).',
   input: z.object({}),
   output: z.object({ member: Member, org: z.object({ name: z.string(), address: z.string() }) }),
+});
+
+export const updateProfile = tool({
+  name: 'update_profile',
+  description:
+    "Change your person's own display name or title (what they do, e.g. \"Design lead\") on this org. " +
+    'Pass only what changes; an empty title removes it. Only when they ask — it is how every teammate ' +
+    'sees them. Nobody can change anyone else’s profile.',
+  input: UpdateProfile,
+  output: z.object({ member: Member }),
 });
 
 export const listMembers = tool({
@@ -274,14 +284,30 @@ export const leaveSpace = tool({
   output: z.object({ left: z.literal(true) }),
 });
 
+export const setDefaultSpace = tool({
+  name: 'set_default_space',
+  description:
+    'Make a shared open space a default space, or take it off the defaults (admins only). ' +
+    'Everyone who accepts an invite to the org joins every default space. Private spaces and ' +
+    'DMs cannot be defaults. Only when your person asked for it.',
+  input: z.object({ spaceId: SpaceId, isDefault: z.boolean() }),
+  output: z.object({ space: Space }),
+});
+
 export const createInvite = tool({
   name: 'create_invite',
   description:
-    "Make an invite link for a shared space (any member may, unless the org's invite policy is " +
-    'admins only; DMs refuse). Returns the link to ' +
-    'share — delivery is up to your person (paste it in a DM, an email, wherever they said). ' +
-    'The org may cap expiresInHours.',
-  input: z.object({ spaceId: SpaceId, expiresInHours: z.number().int().positive().max(24 * 30).optional() }),
+    "Make an invite link to the org (any member may, unless the org's invite policy is admins only). " +
+    'The person who accepts joins the org, its ' +
+    'default spaces, and any spaceIds listed — each one a shared space your person is in. Returns ' +
+    'the link to share — delivery is up to your person (paste it in a DM, an email, wherever they ' +
+    'said). The org may cap expiresInHours.',
+  input: z.object({
+    spaceIds: z.array(SpaceId).max(MAX_INVITE_SPACES).optional(),
+    /** One space, the form before 2026-10-19: the same as `spaceIds: [spaceId]`. */
+    spaceId: SpaceId.optional(),
+    expiresInHours: z.number().int().positive().max(24 * 30).optional(),
+  }),
   output: CreateInviteResult,
 });
 
@@ -744,6 +770,7 @@ export const markAllRead = tool({
 
 export const mcpTools = [
   whoami,
+  updateProfile,
   listMembers,
   listSpaces,
   browseSpaces,
@@ -754,6 +781,7 @@ export const mcpTools = [
   renameSpace,
   archiveSpace,
   unarchiveSpace,
+  setDefaultSpace,
   deleteSpace,
   setSpaceVisibility,
   addMembers,

@@ -12,7 +12,7 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { ActingMode, AgentCredential, AgentHook, AgentKey, AgentKeySecret, AgentListing, Attribution, InvitePolicy, Member, MemberRole, Membership, Message, OrgSettings, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic } from './core.js';
+import { ActingMode, AgentCredential, AgentHook, AgentKey, AgentKeySecret, AgentListing, Attribution, InvitePolicy, Member, MemberRole, Membership, Message, OrgSettings, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic, UpdateProfile } from './core.js';
 import { AssetId, AssetPath, BlobHash, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 import {
   AcceptInvite,
@@ -201,6 +201,17 @@ export const routes = {
   me: {
     method: 'GET',
     path: '/v1/me',
+    response: z.object({ member: Member }),
+  },
+  /**
+   * Your own display name and title (spec §4 Member profile, 2026-10-19).
+   * Only you edit your profile; an agent member's name is its owner's choice
+   * at creation, so agents are refused. Unchanged fields are a no-op.
+   */
+  updateMe: {
+    method: 'PUT',
+    path: '/v1/me',
+    request: UpdateProfile,
     response: z.object({ member: Member }),
   },
   // --- profile images (2026-10-02) -------------------------------------------
@@ -396,6 +407,23 @@ export const routes = {
     path: '/v1/spaces/:spaceId/visibility',
     params: z.object({ spaceId: SpaceId }),
     request: z.object({ visibility: SpaceVisibility, actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+    response: z.object({ space: Space }),
+  },
+  /**
+   * Make a space a default space, or take it off the defaults (spec §5
+   * answer 3, 2026-10-19): everyone who accepts an invite to the org joins
+   * every default space. An admin act, on a shared open space only — a
+   * private space or a DM refuses with `invalid_request`, so an invite is
+   * never a back door into either; taking a flag off is allowed on any
+   * shared space. The admin need not be a member. Archived spaces refuse.
+   * Setting the flag a space already has is a no-op with no event. Members
+   * learn by `space_default_changed` on the log.
+   */
+  setDefaultSpace: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/default',
+    params: z.object({ spaceId: SpaceId }),
+    request: z.object({ isDefault: z.boolean(), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
     response: z.object({ space: Space }),
   },
   /**
@@ -703,6 +731,13 @@ export const routes = {
   },
 
   // --- invites -------------------------------------------------------------
+  /**
+   * An invite to the org, listing any spaces the caller is in (spec §4
+   * Invites, amended 2026-10-19). Any org member may create one; a listed
+   * DM refuses with `invalid_request`, a listed space the caller is not in
+   * or one that is archived with `forbidden`. Accepting joins the listed
+   * spaces and the org's defaults.
+   */
   createInvite: {
     method: 'POST',
     path: '/v1/invites',

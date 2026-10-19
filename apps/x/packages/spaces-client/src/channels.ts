@@ -17,7 +17,7 @@ type IPCChannels = ipc.IPCChannels;
 
 export type HarborChannel =
   | 'spaces:listSpaces' | 'spaces:browseSpaces' | 'spaces:joinSpace' | 'spaces:createSpace' | 'spaces:renameSpace'
-  | 'spaces:archiveSpace' | 'spaces:unarchiveSpace' | 'spaces:deleteSpace' | 'spaces:setSpaceVisibility'
+  | 'spaces:archiveSpace' | 'spaces:unarchiveSpace' | 'spaces:deleteSpace' | 'spaces:setSpaceVisibility' | 'spaces:setDefaultSpace'
   | 'spaces:removeMember' | 'spaces:removeOrgMember' | 'spaces:setMemberRole' | 'spaces:getOrgSettings' | 'spaces:setInvitePolicy'
   | 'spaces:addMembers' | 'spaces:openDirect' | 'spaces:listMembers' | 'spaces:listOrgMembers'
   | 'spaces:listAgents' | 'spaces:addAgent' | 'spaces:setAgentCredential' | 'spaces:setAgentHook' | 'spaces:clearAgentHook'
@@ -76,6 +76,10 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit 
       space: await getClient(args.orgId).unarchiveSpace(args.spaceId),
     }),
 
+    'spaces:setDefaultSpace': async (args) => ({
+      space: await getClient(args.orgId).setDefaultSpace(args.spaceId, args.isDefault),
+    }),
+
     'spaces:deleteSpace': async (args) => {
       await getClient(args.orgId).deleteSpace(args.spaceId);
       return { deleted: true as const };
@@ -130,7 +134,10 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit 
     'spaces:createAgentKey': async (args) => ({ key: await getClient(args.orgId).createAgentKey(args.agentId) }),
     'spaces:revokeAgentKey': async (args) => ({ key: await getClient(args.orgId).revokeAgentKey(args.agentId, args.keyId) }),
 
-    'spaces:createInvite': async (args) => getClient(args.orgId).createInvite(args.spaceId, args.expiresInHours),
+    'spaces:createInvite': async (args) => getClient(args.orgId).createInvite({
+      ...(args.spaceIds ? { spaceIds: args.spaceIds } : {}),
+      ...(args.expiresInHours !== undefined ? { expiresInHours: args.expiresInHours } : {}),
+    }),
 
     // Pre-auth: works before the org has been added, so the join flow can show
     // what's being joined (spec §4). The token is unused on this route.

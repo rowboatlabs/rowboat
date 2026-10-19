@@ -29,6 +29,7 @@ import {
   canJoinSpace,
   canBind,
   canChangeMembership,
+  canEditProfile,
   canRenameSpace,
   canWrite,
   canWriteSpace,
@@ -41,8 +42,8 @@ import {
 // prove the service ASKS.
 
 const NOW = '2026-09-21T10:00:00.000Z';
-const shared: Space = { id: 'S', name: 'Roadboard', createdAt: NOW, kind: 'shared', visibility: 'private', archived: false };
-const direct: Space = { id: 'D', name: 'Direct message', createdAt: NOW, kind: 'direct', visibility: 'private', participants: ['a', 'b'], archived: false };
+const shared: Space = { id: 'S', name: 'Roadboard', createdAt: NOW, kind: 'shared', visibility: 'private', archived: false, isDefault: false };
+const direct: Space = { id: 'D', name: 'Direct message', createdAt: NOW, kind: 'direct', visibility: 'private', participants: ['a', 'b'], archived: false, isDefault: false };
 const membership: Membership = { spaceId: 'S', memberId: 'a', joinedAt: NOW };
 const byA = { author: { memberId: 'a', actingMode: 'direct' } } as Message;
 
@@ -228,5 +229,13 @@ describe('deleted accounts (2026-10-13)', () => {
   it('refuses adding, or opening a DM with, a deactivated member', () => {
     expect(canReachMember(active)).toBeNull();
     expect(canReachMember(deleted)).toEqual({ code: 'invalid_request', message: 'Ada has deleted their account' });
+  });
+});
+
+describe('profiles (2026-10-19)', () => {
+  it('a person edits their own profile; an agent member may not rename itself', () => {
+    expect(canEditProfile({ id: 'm1', displayName: 'Ada', role: 'member', kind: 'human' })).toBeNull();
+    expect(canEditProfile({ id: 'm1', displayName: 'Ada', role: 'admin', kind: 'human' })).toBeNull();
+    expect(canEditProfile({ id: 'a1', displayName: 'Bot', role: 'member', kind: 'agent', ownerId: 'm1' })).toMatchObject({ code: 'forbidden' });
   });
 });

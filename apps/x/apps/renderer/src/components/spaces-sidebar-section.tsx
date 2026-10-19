@@ -2,7 +2,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from '@/components/ui/button'
 import { useSpaceDirectory, invalidateSpaceDirectory } from '@/hooks/use-space-directory'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Archive, Bell, ChevronRight, CornerDownRight, Hash, Lock, MessagesSquare, Pencil, Plus } from 'lucide-react'
+import { Archive, Bell, ChevronRight, CornerDownRight, Hash, Lock, MessagesSquare, Pencil, Plus, UserPlus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { SidebarGroup, SidebarGroupContent, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar'
 import {
@@ -16,8 +16,10 @@ import { NO_BADGE, streamBadge, threadBadge, useReadStateVersion, type SpaceBadg
 import { UnreadBadge } from '@/components/spaces/unread-badge'
 import { MemberAvatar, OrgMonogram } from '@/components/spaces/atoms'
 import { NewDirectDialog } from '@/components/spaces/new-direct-dialog'
+import { InviteDialog } from '@/components/spaces/invite-dialog'
 import { directAvatarId, isSelfDirect, isSelfDirectUnsupported, markSelfDirectUnsupported, selfDirectFailureMessage, selfDirectRefused, spaceDisplayName } from '@/lib/spaces-direct'
-import { prefetchMembers, useSelfDisplayName } from '@/hooks/use-space-members'
+import { prefetchMembers, useOrgRoster, useSelfDisplayName } from '@/hooks/use-space-members'
+import { canInvite, useOrgSettings } from '@/hooks/use-org-settings'
 import { isSpaceExpanded, setSpaceExpanded, useSpaceExpansionVersion } from '@/lib/spaces-expansion'
 import type { RailSelection } from '@/lib/spaces-selection'
 import { toast } from '@/lib/toast'
@@ -123,6 +125,11 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onOpen
     const [renamingId, setRenamingId] = useState<string | null>(null)
     const [renameValue, setRenameValue] = useState('')
     const [newDirectOpen, setNewDirectOpen] = useState(false)
+    const [inviteOpen, setInviteOpen] = useState(false)
+    // Under an admins-only invite policy (2026-10-19) a member's invite is refused, so Invite hides.
+    const orgSpaceIds = useMemo(() => org.spaces.map((s) => s.id), [org.spaces])
+    const selfIsAdmin = useOrgRoster(org.id, orgSpaceIds).find((m) => m.id === org.memberId)?.role === 'admin'
+    const mayInvite = canInvite(useOrgSettings(org.id), selfIsAdmin)
     // A dead OAuth session shows as a gentle "Sign in again" (org.authError, from core);
     // an unreachable org shows Retry.
     const needsSignIn = !!org.authError
@@ -306,6 +313,12 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onOpen
                     <button type="button" onClick={() => setCreating(true)} className="flex flex-1 items-center gap-1.5 text-left hover:text-foreground">
                         <Plus className="size-3.5" /> New space
                     </button>
+                    {/* An invite is to the server (harbor, 2026-10-19), so it lives with the server, not a space. */}
+                    {!needsSignIn && !org.error && mayInvite && (
+                        <button type="button" onClick={() => setInviteOpen(true)} className="flex items-center gap-1.5 hover:text-foreground" title={`Invite people to ${org.name}`}>
+                            <UserPlus className="size-3.5" /> Invite
+                        </button>
+                    )}
                     {needsSignIn ? (
                         <button
                             type="button"
@@ -406,6 +419,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onOpen
                 </SidebarMenuItem>
             )}
             <NewDirectDialog org={org} open={newDirectOpen} onOpenChange={setNewDirectOpen} onOpened={onOpenSpace} />
+            <InviteDialog org={org} open={inviteOpen} onOpenChange={setInviteOpen} />
         </>
     )
 }

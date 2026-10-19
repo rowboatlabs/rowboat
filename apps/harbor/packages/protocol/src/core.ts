@@ -38,6 +38,8 @@ export const Member = z.object({
   id: MemberId,
   /** Display-only, org-scoped, not unique. Attribution keys on `id`, never on names. */
   displayName: z.string().min(1).max(128),
+  /** What they do, as the roster shows it (spec §4 Member profile; built 2026-10-19). Absent = none. */
+  title: z.string().min(1).max(128).optional(),
   avatarUrl: z.string().url().optional(),
   role: MemberRole.default('member'),
   /** Absent from servers before 2026-09-29, whose members are all people. */
@@ -92,6 +94,17 @@ export const OrgSettings = z.object({
   invitePolicy: InvitePolicy.default('members'),
 });
 export type OrgSettings = z.infer<typeof OrgSettings>;
+
+/**
+ * Edit your own profile (spec §4 Member profile; built 2026-10-19): a field
+ * left out is left alone. Both are trimmed; a name must keep a character, and
+ * an empty title clears it. The avatar has its own byte route.
+ */
+export const UpdateProfile = z.object({
+  displayName: z.string().max(128).optional(),
+  title: z.string().max(128).optional(),
+});
+export type UpdateProfile = z.infer<typeof UpdateProfile>;
 
 /**
  * The (kind, connection) pairs Harbor accepts when an agent is added (spec §4
@@ -227,6 +240,13 @@ export const Space = z.object({
    * payloads and every existing space are live. A DM is never archived.
    */
   archived: z.boolean().default(false),
+  /**
+   * A default space (spec §5 answer 3, built 2026-10-19): everyone who
+   * accepts an invite to the org joins it. Only a shared open space can be
+   * one, and only an admin sets it. Old payloads and every existing space
+   * are not defaults.
+   */
+  isDefault: z.boolean().default(false),
 });
 export type Space = z.infer<typeof Space>;
 

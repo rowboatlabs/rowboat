@@ -294,6 +294,16 @@ describe('apex face (self-serve org creation)', () => {
     const roster = (await http('roadboard.spaces.test', token).get(`/v1/spaces/${spaces[0].id}/members`)).body.members;
     expect(roster.map((m: any) => m.id)).toEqual([created.body.member.id]);
 
+    // It is open and the org's first default (2026-10-19), so an invite to
+    // the org that lists nothing binds a newcomer straight into it.
+    expect(spaces[0]).toMatchObject({ visibility: 'open', isDefault: true });
+    const invite = (await http('roadboard.spaces.test', token).post('/v1/invites', {})).body;
+    const newcomer = await as.mint({ sub: 'sub-newcomer', email: 'new@rowboatlabs.com', name: 'Newcomer' });
+    const bound = await http('roadboard.spaces.test', newcomer).post('/v1/invites/accept', { token: invite.token });
+    expect(bound.status).toBe(200);
+    expect(bound.body.space.id).toBe(spaces[0].id);
+    expect(bound.body.spaces.map((s: any) => s.id)).toEqual([spaces[0].id]);
+
     // Still fully functional beyond the seed: create another space.
     expect((await http('roadboard.spaces.test', token).post('/v1/spaces', { name: 'General' })).status).toBe(200);
   });

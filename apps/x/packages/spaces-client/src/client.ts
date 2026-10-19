@@ -38,6 +38,7 @@ import {
   type Topic,
   type TopicListing,
   type UnreadSnapshot,
+  type UpdateProfile,
 } from '@rowboat/spaces-protocol';
 import type { z } from 'zod';
 
@@ -277,6 +278,11 @@ export class SpacesClient {
     return this.request('GET', routes.me.path, routes.me.response);
   }
 
+  /** Your name and title on this org (CONTRACT.md, 2026-10-19). Leave a field out to keep it; an empty title removes it. */
+  async updateProfile(input: UpdateProfile): Promise<Member> {
+    return (await this.request('PUT', routes.updateMe.path, routes.updateMe.response, input)).member;
+  }
+
   // --- profile images (CONTRACT.md, 2026-10-02) ------------------------------
 
   /** Your avatar on this org; the body is the image itself. */
@@ -380,6 +386,11 @@ export class SpacesClient {
     return (await this.request('POST', this.space(spaceId, `/members/${encodeURIComponent(memberId)}/remove`), routes.removeMember.response, { actingMode: 'direct' })).removed;
   }
 
+  /** Make a shared open space a default space, or take it off, admin only (api.ts setDefaultSpace, 2026-10-19). */
+  async setDefaultSpace(spaceId: string, isDefault: boolean): Promise<Space> {
+    return (await this.request('POST', this.space(spaceId, '/default'), routes.setDefaultSpace.response, { isDefault, actingMode: 'direct' })).space;
+  }
+
   /** Delete a shared space and everything in it, admin only (api.ts deleteSpace, 2026-10-14). No undo. */
   async deleteSpace(spaceId: string): Promise<void> {
     await this.request('DELETE', this.space(spaceId, ''), routes.deleteSpace.response);
@@ -470,10 +481,11 @@ export class SpacesClient {
 
   // --- invites --------------------------------------------------------------
 
-  async createInvite(spaceId: string, expiresInHours?: number): Promise<CreateInviteResult> {
+  /** An invite to the org, listing spaces the caller is in (api.ts createInvite, 2026-10-19). None = the org's default spaces only. */
+  async createInvite(opts: { spaceIds?: string[]; expiresInHours?: number } = {}): Promise<CreateInviteResult> {
     return this.request('POST', routes.createInvite.path, routes.createInvite.response, {
-      spaceId,
-      ...(expiresInHours !== undefined ? { expiresInHours } : {}),
+      ...(opts.spaceIds ? { spaceIds: opts.spaceIds } : {}),
+      ...(opts.expiresInHours !== undefined ? { expiresInHours: opts.expiresInHours } : {}),
     });
   }
 

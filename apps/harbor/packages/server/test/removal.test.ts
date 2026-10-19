@@ -34,7 +34,7 @@ describe("a member's write re-verifies access inside the lock", () => {
   let spaceId: string;
 
   async function join(memberId: string): Promise<void> {
-    const invite = await service.createInvite({ memberId: 'ramnique' }, spaceId);
+    const invite = await service.createInvite({ memberId: 'ramnique' }, { spaceIds: [spaceId] });
     await service.acceptInvite({ memberId }, invite.token);
   }
 

@@ -131,7 +131,7 @@ export const spacesRpcHandlers: SpacesHandlers = {
 
   'spaces:joinInvite': async (args) => {
     const { org, result } = await spacesOAuth.joinViaInviteLink({ url: args.url, openBrowser });
-    return { org: await orgSummary(org), space: result.space };
+    return { org: await orgSummary(org), ...(result.space ? { space: result.space } : {}) };
   },
 
   'spaces:signInOrg': async (args) => {

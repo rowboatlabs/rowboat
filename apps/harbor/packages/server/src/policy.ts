@@ -116,6 +116,19 @@ export function canRemoveFromOrg(actor: Member, target: Member): Decision {
 }
 
 /**
+ * Default spaces are an admin's to set (spec §4 Roles, §5 answer 3; built
+ * 2026-10-19), and only a shared open space can be one, so an invite to the
+ * org is never a back door into a private space. Taking the flag off needs
+ * only the admin bit. The schema holds the same rule (migration 041).
+ */
+export function canSetDefaultSpace(actor: Member, space: Space, isDefault: boolean): Decision {
+  if (space.kind === 'direct') return { code: 'invalid_request', message: 'a direct message cannot be a default space' };
+  if (actor.role !== 'admin') return { code: 'forbidden', message: 'only an admin can choose the default spaces' };
+  if (isDefault && space.visibility !== 'open') return { code: 'invalid_request', message: 'only an open space can be a default space' };
+  return null;
+}
+
+/**
  * Promoting and demoting (spec §4 Roles, 2026-10-19): an admin act on an
  * active person. An agent is never an admin (spec §4 Agent members). The
  * at-least-one-admin rule needs the count, so the store decides it.
@@ -139,6 +152,16 @@ export function canSetOrgSettings(actor: Member): Decision {
 export function canInvite(actor: Member, policy: InvitePolicy): Decision {
   if (policy === 'members' || actor.role === 'admin') return null;
   return { code: 'forbidden', message: 'only admins can invite people to this org' };
+}
+
+/**
+ * Listing a space on an invite requires being a member of it (spec §4
+ * Invites, amended 2026-09-22): for a private space that is the whole rule,
+ * for an open one it is harmless, and it needs no kind check. A DM is never
+ * listed — its membership is fixed.
+ */
+export function canListOnInvite(space: Space, membership: Membership | undefined): Decision {
+  return canChangeMembership(space, 'invite') ?? canAccessSpace(space, membership);
 }
 
 /**
@@ -220,6 +243,17 @@ export function canReachMember(member: Member): Decision {
 export function canSetOrgLogo(actor: Member): Decision {
   if (actor.role === 'admin') return null;
   return { code: 'forbidden', message: 'only an admin can change the org’s logo' };
+}
+
+/**
+ * Only you edit your profile (spec §4 Member profile, 2026-09-22), and only a
+ * person has one to edit: an agent member is named by its owner when it is
+ * added (built 2026-10-19), so an agent's own key cannot rename it. A
+ * person's own assistant acting for them is the person, and may.
+ */
+export function canEditProfile(actor: Member): Decision {
+  if (actor.kind !== 'agent') return null;
+  return { code: 'forbidden', message: 'an agent’s name is set when it is added' };
 }
 
 // --- agent members and their keys (spec §4 Agent members, 2026-09-29) --------

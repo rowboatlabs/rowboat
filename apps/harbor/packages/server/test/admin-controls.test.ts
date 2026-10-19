@@ -147,6 +147,16 @@ describe('change a space’s visibility', () => {
     expect((await admin().post(`/v1/spaces/${spaceId}/visibility`, { visibility: 'open', ...direct })).status).toBe(403);
   });
 
+  it('a default space stays open until an admin takes it off the defaults', async () => {
+    const spaceId = await newSpace('Welcome', 'open', ['gagan']);
+    await admin().post(`/v1/spaces/${spaceId}/default`, { isDefault: true, ...direct });
+    const refused = await admin().post(`/v1/spaces/${spaceId}/visibility`, { visibility: 'private', ...direct });
+    expect(refused.status).toBe(400);
+    expect(refused.body.message).toContain('default space');
+    await admin().post(`/v1/spaces/${spaceId}/default`, { isDefault: false, ...direct });
+    expect((await admin().post(`/v1/spaces/${spaceId}/visibility`, { visibility: 'private', ...direct })).body.space.visibility).toBe('private');
+  });
+
   it('the agent face', async () => {
     const spaceId = await newSpace('Tooled', 'private', ['gagan']);
     const { space } = await call<{ space: Space }>(ramAgent, 'set_space_visibility', { spaceId, visibility: 'open' });

@@ -101,7 +101,8 @@ export interface StoredOrgImage {
 
 export interface StoredInvite {
   token: string;
-  spaceId: string;
+  /** The spaces it lists, in the order given; empty = the org and its default spaces only (2026-10-19). */
+  spaceIds: string[];
   createdBy: string;
   createdAt: string;
   expiresAt?: string;
@@ -285,6 +286,8 @@ export interface Store {
   listSpacesFor(memberId: string, opts?: { includeDirect?: boolean }): Promise<Space[]>;
   /** Every space on the org, DMs included — operator-side reads only (the mentions backfill). */
   listAllSpaces(): Promise<Space[]>;
+  /** The org's default spaces (spec §5 answer 3), oldest first — archived ones included; the caller skips them. */
+  listDefaultSpaces(): Promise<Space[]>;
   /** How many spaces of each kind the org holds — what makes it a group chat (policy.ts isGroupChat). */
   countSpacesByKind(): Promise<{ shared: number; direct: number }>;
   /** The DM whose participants encode to `directKey` (directKeyFor), if it exists. */
