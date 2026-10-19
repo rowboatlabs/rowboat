@@ -17,7 +17,8 @@ type IPCChannels = ipc.IPCChannels;
 
 export type HarborChannel =
   | 'spaces:listSpaces' | 'spaces:browseSpaces' | 'spaces:joinSpace' | 'spaces:createSpace' | 'spaces:renameSpace'
-  | 'spaces:archiveSpace' | 'spaces:unarchiveSpace' | 'spaces:deleteSpace'
+  | 'spaces:archiveSpace' | 'spaces:unarchiveSpace' | 'spaces:deleteSpace' | 'spaces:setSpaceVisibility'
+  | 'spaces:removeMember' | 'spaces:removeOrgMember' | 'spaces:setMemberRole' | 'spaces:getOrgSettings' | 'spaces:setInvitePolicy'
   | 'spaces:addMembers' | 'spaces:openDirect' | 'spaces:listMembers' | 'spaces:listOrgMembers'
   | 'spaces:listAgents' | 'spaces:addAgent' | 'spaces:setAgentCredential' | 'spaces:setAgentHook' | 'spaces:clearAgentHook'
   | 'spaces:createAgentKey' | 'spaces:revokeAgentKey'
@@ -79,6 +80,30 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit 
       await getClient(args.orgId).deleteSpace(args.spaceId);
       return { deleted: true as const };
     },
+
+    'spaces:setSpaceVisibility': async (args) => ({
+      space: await getClient(args.orgId).setSpaceVisibility(args.spaceId, args.visibility),
+    }),
+
+    'spaces:removeMember': async (args) => ({
+      removed: await getClient(args.orgId).removeMember(args.spaceId, args.memberId),
+    }),
+
+    'spaces:removeOrgMember': async (args) => ({
+      member: await getClient(args.orgId).removeOrgMember(args.memberId),
+    }),
+
+    'spaces:setMemberRole': async (args) => ({
+      member: await getClient(args.orgId).setMemberRole(args.memberId, args.role),
+    }),
+
+    'spaces:getOrgSettings': async (args) => ({
+      settings: await getClient(args.orgId).getOrgSettings(),
+    }),
+
+    'spaces:setInvitePolicy': async (args) => ({
+      settings: await getClient(args.orgId).setInvitePolicy(args.invitePolicy),
+    }),
 
     'spaces:addMembers': async (args) => ({
       memberships: await getClient(args.orgId).addMembers(args.spaceId, args.memberIds),

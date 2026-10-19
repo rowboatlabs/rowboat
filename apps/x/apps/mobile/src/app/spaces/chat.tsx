@@ -23,7 +23,7 @@ import { fetchLinkPreview, peekLinkPreview, previewUrls } from '@/lib/spaces/lin
 const TAIL_ROWS = 8;
 const TAIL_WAIT_MS = 700;
 import { SpacesClient } from '@/lib/spaces/client';
-import { memberLabel, useProfiles } from '@/lib/spaces/profiles';
+import { isDeparted, memberLabel, useProfiles } from '@/lib/spaces/profiles';
 import { SpacesLive } from '@x/spaces-client';
 import { useColors } from '@/theme/colors';
 
@@ -519,7 +519,7 @@ export default function SpaceChatScreen() {
         <SpaceComposer
           ref={composerRef}
           placeholder={`Message #${title ?? ''}`}
-          members={[...members.values()].filter((m) => !m.deactivatedAt)}
+          members={[...members.values()].filter((m) => !isDeparted(m))}
           me={me}
           sending={sending}
           onSend={(body) => void send(body)}

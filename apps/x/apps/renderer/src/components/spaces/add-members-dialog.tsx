@@ -10,6 +10,7 @@ import { refreshMembers, useOrgRoster } from '@/hooks/use-space-members'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
+import { isDeparted } from '@/lib/spaces-direct'
 
 // "Add people" (2026-09-29): any member adds existing org members, people or
 // agents, to a space they are in. The candidates are the org roster (the
@@ -34,7 +35,7 @@ export function AddMembersDialog({ org, space, members, open, onOpenChange }: {
     const candidates = useMemo(() => {
         const q = query.trim().toLowerCase()
         // A deleted account is never offered (2026-10-13): Harbor refuses the add.
-        return roster.filter((m) => !inSpace.has(m.id) && !m.deactivatedAt && (!q || m.displayName.toLowerCase().includes(q)))
+        return roster.filter((m) => !inSpace.has(m.id) && !isDeparted(m) && (!q || m.displayName.toLowerCase().includes(q)))
     }, [roster, inSpace, query])
 
     useEffect(() => {

@@ -18,7 +18,10 @@ import {
   type Approval,
   type Invocation,
   type InvocationOptionValues,
+  type InvitePolicy,
   type Member,
+  type MemberRole,
+  type OrgSettings,
   type Membership,
   type StreamEvent,
   type Message,
@@ -205,7 +208,7 @@ export class SpacesClient {
   }
 
   private async request<S extends z.ZodType>(
-    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
     path: string,
     responseSchema: S,
     body?: unknown,
@@ -367,6 +370,16 @@ export class SpacesClient {
     return (await this.request('POST', this.space(spaceId, '/unarchive'), routes.unarchiveSpace.response, { actingMode: 'direct' })).space;
   }
 
+  /** Open or close a shared space, admin only (api.ts setSpaceVisibility, 2026-10-19). Same value = no-op. */
+  async setSpaceVisibility(spaceId: string, visibility: Space['visibility']): Promise<Space> {
+    return (await this.request('POST', this.space(spaceId, '/visibility'), routes.setSpaceVisibility.response, { visibility, actingMode: 'direct' })).space;
+  }
+
+  /** Remove someone from a shared space, admin only (api.ts removeMember, 2026-10-19). Not in it = `false`. */
+  async removeMember(spaceId: string, memberId: string): Promise<boolean> {
+    return (await this.request('POST', this.space(spaceId, `/members/${encodeURIComponent(memberId)}/remove`), routes.removeMember.response, { actingMode: 'direct' })).removed;
+  }
+
   /** Delete a shared space and everything in it, admin only (api.ts deleteSpace, 2026-10-14). No undo. */
   async deleteSpace(spaceId: string): Promise<void> {
     await this.request('DELETE', this.space(spaceId, ''), routes.deleteSpace.response);
@@ -424,6 +437,26 @@ export class SpacesClient {
 
   async listMembers(spaceId: string): Promise<Member[]> {
     return (await this.request('GET', this.space(spaceId, '/members'), routes.listMembers.response)).members;
+  }
+
+  /** Remove someone from the org, admin only (api.ts removeOrgMember, 2026-10-19). A later invite brings them back. */
+  async removeOrgMember(memberId: string): Promise<Member> {
+    return (await this.request('POST', `/v1/members/${encodeURIComponent(memberId)}/remove`, routes.removeOrgMember.response, { actingMode: 'direct' })).member;
+  }
+
+  /** Promote or demote an admin (api.ts setMemberRole, 2026-10-19). The org keeps at least one. */
+  async setMemberRole(memberId: string, role: MemberRole): Promise<Member> {
+    return (await this.request('POST', `/v1/members/${encodeURIComponent(memberId)}/role`, routes.setMemberRole.response, { role, actingMode: 'direct' })).member;
+  }
+
+  /** The org's settings any member reads (api.ts getOrgSettings, 2026-10-19). */
+  async getOrgSettings(): Promise<OrgSettings> {
+    return (await this.request('GET', routes.getOrgSettings.path, routes.getOrgSettings.response)).settings;
+  }
+
+  /** Set who may invite, admin only (api.ts updateOrgSettings, 2026-10-19). */
+  async setInvitePolicy(invitePolicy: InvitePolicy): Promise<OrgSettings> {
+    return (await this.request('PATCH', routes.updateOrgSettings.path, routes.updateOrgSettings.response, { invitePolicy })).settings;
   }
 
   /** The org roster: every member, people and agents, sorted by displayName (api.ts listOrgMembers; org-wide since 2026-09-29). */

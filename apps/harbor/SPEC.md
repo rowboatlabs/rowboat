@@ -203,6 +203,14 @@ One org-level role: a member is an **admin** or not. The first admin is named at
 - **Agents perform admin acts their member may.** Parity (§9): the role check is on the member, not the acting mode; every admin act is attributed with the mode, so the record shows it was the agent. Confirmation of a high-blast-radius act (org removal, delete) is the app's tool-approval step, not a Harbor carve-out that would make the agent face second-class.
 - **Org facts have no log in v1.** A role change or an invite-policy change is a state change visible through the roster and org settings; its space-level consequences land on the space logs as events, which is what Slack shows in-channel. An org-level audit log is Deferred (§12; trigger: a compliance ask).
 
+*Built 2026-10-19 — the admin controls above (remove from a space, remove from the org, roles, visibility, invite policy), with four decisions the list left open:*
+- **The identity binding is refused, not deleted.** A removed member's `(iss, sub)` row stays, and sign-in refuses it, as for a deleted account. That row is how an invite finds the same member again. **Only an invite created after the removal reactivates them.** A link from before, which may still be pinned in a space, is not a re-invite. Reactivation brings back the row and its history, but not the old spaces: they rejoin the invite's space only.
+- **The roster keeps departed members, marked.** That is how deleted accounts already work (2026-10-13). Clients label authors from the roster, so dropping removed members would leave their messages nameless. Pickers leave them out. This amends "the roster lists `active` members only" (§5 answer 4).
+- **Space-level admin acts need membership of the space**, as archive and delete already do. An admin who isn't in an open space joins it first. A private space they're not in is invisible to them anyway. Visibility is refused on an archived space, like any write; removal is allowed, since it only shrinks the space.
+- **Making a space private ends every outside reader's live view.** Non-members reading an open space get the same frame a removal sends, so nobody keeps reading a space they can no longer see.
+
+The protocol has no org log. Role, policy and removal changes reach clients as `org_changed`, telling them to refetch. Wire semantics: CONTRACT.md.
+
 ### Agent members — **Decided** *(added 2026-09-29)*
 
 An agent can be a member in its own right: a team's shared coding agent, or a Hermes or OpenClaw bot someone runs. It is not a member's own agent (§8), which acts *as* its person ("Ramnique (via Rowboat)"). An agent member acts as itself, and its acts are attributed to its own id.

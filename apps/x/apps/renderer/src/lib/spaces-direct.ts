@@ -71,8 +71,16 @@ export function spaceDisplayName(org: Pick<OrgWithSpaces, 'directLabels'>, space
 /**
  * A member's name as the stream and sidebar show it: a deleted account keeps
  * its name, marked, so what it wrote still reads as theirs (2026-10-13,
- * Harbor's `Member.deactivatedAt`).
+ * Harbor's `Member.deactivatedAt`); so does someone an admin removed from the
+ * org (2026-10-19, `Member.removedAt`).
  */
-export function memberLabel(member: Pick<spaces.Member, 'displayName' | 'deactivatedAt'>): string {
-    return member.deactivatedAt ? `${member.displayName} (deactivated)` : member.displayName
+export function memberLabel(member: Pick<spaces.Member, 'displayName' | 'deactivatedAt' | 'removedAt'>): string {
+    if (member.deactivatedAt) return `${member.displayName} (deactivated)`
+    if (member.removedAt) return `${member.displayName} (removed)`
+    return member.displayName
+}
+
+/** No longer in the org — a deleted account, or removed by an admin. Pickers leave them out. */
+export function isDeparted(member: Pick<spaces.Member, 'deactivatedAt' | 'removedAt'>): boolean {
+    return !!member.deactivatedAt || !!member.removedAt
 }

@@ -1015,6 +1015,26 @@ export const MIGRATIONS: Migration[] = [
       `create index if not exists agent_connection_threads_space on agent_connection_threads (space_id)`,
     ],
   },
+  {
+    // Admin controls (spec §4 Roles, built 2026-10-19). An admin removes a
+    // member from the org: the row stays, stamped, so attribution reads and
+    // an invite accepted by the same identity reactivates it. Null = active.
+    id: '040-member-removed-at',
+    statements: [`alter table members add column if not exists removed_at text`],
+  },
+  {
+    // The org's settings an admin sets (spec §4 Roles, 2026-10-19): who may
+    // invite. One row per org once set; no row = members may.
+    id: '041-org-settings',
+    statements: [
+      `create table org_settings (
+        org_id text primary key,
+        invite_policy text not null default 'members' check (invite_policy in ('members', 'admins')),
+        set_by text not null,
+        set_at text not null
+      )`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

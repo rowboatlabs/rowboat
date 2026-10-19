@@ -1,9 +1,11 @@
 import {
   inviteUrl,
   Member,
+  type Attribution,
   type AcceptInviteResult,
   type CreateInviteResult,
   type Membership,
+  type OrgSettings,
   type PresenceState,
   type ResolveInviteResult,
   type Routes,
@@ -13,7 +15,7 @@ import { randomBytes } from 'node:crypto';
 import type { z } from 'zod';
 import type { BlobStore } from '../blobs.js';
 import { HarborError } from '../errors.js';
-import { canArchiveSpace, canBind, canDeleteSpace, canChangeMembership, canJoinSpace, canOpenDirect, canReachMember, canRenameSpace, canSignIn, canWriteSpace, enforce, isGroupChat } from '../policy.js';
+import { canArchiveSpace, canBind, canDeleteSpace, canChangeMembership, canInvite, canJoinSpace, canOpenDirect, canReachMember, canRemoveFromOrg, canRemoveFromSpace, canRenameSpace, canSetOrgSettings, canSetRole, canSetSpaceVisibility, canSignIn, canWriteSpace, enforce, isGroupChat } from '../policy.js';
 import { DIRECT_SPACE_NAME, directKeyFor, type PushLevel, type StoredEvent } from '../store.js';
 import { Kernel, type ActorCtx, type BindIdentity } from './kernel.js';
 
@@ -33,6 +35,10 @@ function seedDisplayName(identity: BindIdentity): string {
 export type RenameSpaceInput = z.infer<Routes['renameSpace']['request']>;
 export type AddMembersInput = z.infer<Routes['addMembers']['request']>;
 export type ArchiveSpaceInput = z.infer<Routes['archiveSpace']['request']>;
+export type SetSpaceVisibilityInput = z.infer<Routes['setSpaceVisibility']['request']>;
+export type RemoveMemberInput = z.infer<Routes['removeMember']['request']>;
+export type SetMemberRoleInput = z.infer<Routes['setMemberRole']['request']>;
+export type UpdateOrgSettingsInput = z.infer<Routes['updateOrgSettings']['request']>;
 
 const DEFAULT_INVITE_HOURS = 24 * 7;
 
@@ -192,6 +198,40 @@ export class Spaces {
       await this.k.appendNext(spaceId, this.k.now(), { type: archived ? 'space_archived' : 'space_unarchived', space: updated, by });
       return updated;
     }, { archived: 'allow' });
+  }
+
+  /**
+   * Change who may find a shared space (spec §4 Roles, built 2026-10-19): an
+   * admin act by a member of the space, in the renameSpace shape, refused on
+   * an archived space like any write. Every org member is told
+   * (`org_changed`), since browse listings move; going private also sends
+   * `space_removed` to every org member not in the space, so nobody keeps a
+   * reading subscription to a space they can no longer see.
+   */
+  async setSpaceVisibility(ctx: ActorCtx, spaceId: string, input: SetSpaceVisibilityInput): Promise<Space> {
+    const space = await this.k.requireMember(ctx, spaceId);
+    enforce(canSetSpaceVisibility(await this.me(ctx), space));
+    this.k.guardWrite();
+    const by = this.k.attributionOf(ctx, input);
+    const at = this.k.now();
+    const { updated, changed, members } = await this.k.lockedAs(ctx, spaceId, async () => {
+      const current = (await this.k.store.getSpace(spaceId)) ?? space;
+      if (current.visibility === input.visibility) return { updated: current, changed: false, members: [] };
+      const updated: Space = { ...current, visibility: input.visibility };
+      await this.k.store.putSpace(updated);
+      await this.k.appendNext(spaceId, at, { type: 'space_visibility_changed', space: updated, by });
+      return { updated, changed: true, members: await this.k.store.listSpaceMembers(spaceId) };
+    });
+    if (changed) {
+      const inSpace = new Set(members.map((m) => m.id));
+      for (const member of await this.k.store.listAllMembers()) {
+        if (updated.visibility === 'private' && !inSpace.has(member.id)) {
+          this.k.hub.publishToMember(member.id, { kind: 'space_removed', spaceId, by: ctx.memberId, at });
+        }
+        this.k.hub.publishToMember(member.id, { kind: 'org_changed', at });
+      }
+    }
+    return updated;
   }
 
   /**
@@ -361,6 +401,34 @@ export class Spaces {
     return memberships;
   }
 
+  /**
+   * Remove someone from a shared space (spec §4 Roles, built 2026-10-19): an
+   * admin act by a member of the space; allowed on an archived space, since
+   * it shrinks it, and with no write guard for the same reason (policy.ts
+   * canWrite). The `removed` event carries the admin as `by`, and the
+   * removed member's connections get `space_removed`. Someone not in the
+   * space is a no-op with no event.
+   */
+  async removeMember(ctx: ActorCtx, spaceId: string, memberId: string, input: RemoveMemberInput): Promise<{ removed: boolean }> {
+    const space = await this.k.requireMember(ctx, spaceId);
+    enforce(canRemoveFromSpace(await this.me(ctx), space, memberId));
+    const by = this.k.attributionOf(ctx, input);
+    const at = this.k.now();
+    const removed = await this.k.lockedAs(ctx, spaceId, () => this.removeMembershipLocked(spaceId, memberId, by, at), { archived: 'allow' });
+    if (removed) this.k.hub.publishToMember(memberId, { kind: 'space_removed', spaceId, by: ctx.memberId, at });
+    return { removed };
+  }
+
+  /** The removal itself, inside the space lock: the row, the member's read marks, the `removed` event. */
+  private async removeMembershipLocked(spaceId: string, memberId: string, by: Attribution, at: string): Promise<boolean> {
+    const membership = await this.k.store.getMembership(spaceId, memberId);
+    if (!membership) return false;
+    await this.k.store.deleteMembership(spaceId, memberId);
+    await this.k.store.deleteReadMarks(spaceId, memberId);
+    await this.k.appendNext(spaceId, at, { type: 'membership', membership, action: 'removed', by });
+    return true;
+  }
+
   async leaveSpace(ctx: ActorCtx, spaceId: string): Promise<void> {
     const space = await this.k.requireMember(ctx, spaceId);
     enforce(canChangeMembership(space, 'leave'));
@@ -376,11 +444,73 @@ export class Spaces {
     this.k.hub.publishToMember(ctx.memberId, { kind: 'space_removed', spaceId, by: ctx.memberId, at });
   }
 
+  // --- org administration (spec §4 Roles, built 2026-10-19) ---------------------
+
+  /**
+   * Remove a member, person or agent, from the org. The row stays and is
+   * stamped (store.removeMemberFromOrg), so everything they wrote keeps its
+   * author, and canSignIn refuses them until an invite reactivates the row
+   * (bindInvite). They leave every shared space with a `removed` event; DMs
+   * keep the membership, as with a deleted account: a DM is named by its
+   * other participant, who keeps the conversation. Re-running finishes a
+   * removal that stopped halfway, and on a removed member writes nothing.
+   */
+  async removeOrgMember(ctx: ActorCtx, memberId: string, input: { actingMode: Attribution['actingMode']; agentName?: string }): Promise<Member> {
+    const target = await this.k.store.getMember(memberId);
+    if (!target) throw new HarborError('not_found', 'no such member on this org');
+    enforce(canRemoveFromOrg(await this.me(ctx), target));
+    const by = this.k.attributionOf(ctx, input);
+    const at = this.k.now();
+    // Stamped first: from here every sign-in and socket read is refused, so
+    // nothing can join a space behind the sweep below.
+    if (target.removedAt === undefined) await this.k.store.removeMemberFromOrg(memberId, at);
+    for (const space of await this.k.store.listSpacesFor(memberId)) {
+      const removed = await this.k.locked(space.id, () => this.removeMembershipLocked(space.id, memberId, by, at));
+      if (removed) this.k.hub.publishToMember(memberId, { kind: 'space_removed', spaceId: space.id, by: ctx.memberId, at });
+    }
+    if (target.removedAt === undefined) await this.tellOrg(at);
+    return (await this.k.store.getMember(memberId))!;
+  }
+
+  /** Promote or demote an admin; the store keeps the last one (store.setMemberRole). */
+  async setMemberRole(ctx: ActorCtx, memberId: string, input: SetMemberRoleInput): Promise<Member> {
+    const target = await this.k.store.getMember(memberId);
+    if (!target) throw new HarborError('not_found', 'no such member on this org');
+    enforce(canSetRole(await this.me(ctx), target, input.role));
+    if (target.role === input.role) return target; // idempotent, nothing to tell
+    if ((await this.k.store.setMemberRole(memberId, input.role)) === 'last_admin') {
+      throw new HarborError('invalid_request', 'the org needs at least one admin — make someone else an admin first');
+    }
+    await this.tellOrg(this.k.now());
+    return (await this.k.store.getMember(memberId))!;
+  }
+
+  async getOrgSettings(ctx: ActorCtx): Promise<OrgSettings> {
+    await this.k.requireOrgMember(ctx);
+    return this.k.store.getOrgSettings();
+  }
+
+  async updateOrgSettings(ctx: ActorCtx, input: UpdateOrgSettingsInput): Promise<OrgSettings> {
+    enforce(canSetOrgSettings(await this.me(ctx)));
+    const current = await this.k.store.getOrgSettings();
+    if (input.invitePolicy === undefined || input.invitePolicy === current.invitePolicy) return current;
+    const at = this.k.now();
+    await this.k.store.setInvitePolicy(input.invitePolicy, ctx.memberId, at);
+    await this.tellOrg(at);
+    return this.k.store.getOrgSettings();
+  }
+
+  /** Org facts have no log (spec §4 Roles): every member's connections refetch on `org_changed`. */
+  private async tellOrg(at: string): Promise<void> {
+    for (const member of await this.k.store.listAllMembers()) this.k.hub.publishToMember(member.id, { kind: 'org_changed', at });
+  }
+
   // --- invites ---------------------------------------------------------------
 
   async createInvite(ctx: ActorCtx, spaceId: string, expiresInHours?: number): Promise<CreateInviteResult> {
     const space = await this.k.requireMember(ctx, spaceId);
     enforce(canChangeMembership(space, 'invite'));
+    enforce(canInvite(await this.me(ctx), (await this.k.store.getOrgSettings()).invitePolicy));
     this.k.guardWrite();
     const token = randomBytes(24).toString('base64url');
     const now = this.k.now();
@@ -422,6 +552,18 @@ export class Spaces {
     this.k.guardWrite();
     enforce(canBind(identity, this.k.org));
     let member = await this.k.store.getMemberByIdentity(identity.iss, identity.sub);
+    if (member && member.deactivatedAt === undefined && member.removedAt !== undefined) {
+      // A removed member comes back as the same row (spec §4 Roles,
+      // 2026-10-19), but only through an invite made after the removal: a
+      // link they were sent before, perhaps still pinned in a space, is not
+      // a re-invite.
+      const invite = await this.k.store.getInvite(token);
+      if (invite && invite.createdAt > member.removedAt) {
+        await this.k.store.reactivateMember(member.id);
+        const { removedAt: _removed, ...active } = member;
+        member = active;
+      }
+    }
     if (member) enforce(canSignIn(member));
     if (!member) {
       // Minted id, NOT the raw sub: issuer subjects live only in the mapping

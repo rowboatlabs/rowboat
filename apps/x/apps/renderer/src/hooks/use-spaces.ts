@@ -4,6 +4,8 @@ import { invalidateSpaceDirectory, updateDirectoryMembership, loadSpaceDirectory
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import type { spaces } from '@x/shared'
 import { subscribeSpacesFeed } from '@/lib/spaces-feed'
+import { refreshOrgRoster } from '@/hooks/use-space-members'
+import { refreshOrgSettings } from '@/hooks/use-org-settings'
 import { SPACES_ENABLED } from '@/lib/feature-flags'
 import { getSpaceReadState, loadUnread, dropSpaceReadState } from '@/lib/spaces-read-state'
 
@@ -464,8 +466,15 @@ function wireFeedBus(): void {
             return
         }
         if (frame.kind === 'org_changed') {
-            // A group chat became a workspace (2026-10-07): the listing carries the new shape.
+            // A group chat became a workspace (2026-10-07): the listing carries
+            // the new shape. Since 2026-10-19 also an admin's act — a role, the
+            // invite policy, a visibility, a removal — so the roster and the
+            // org's settings come again too.
             void refreshSpacesOrgs()
+            refreshOrgRoster(event.orgId)
+            void refreshOrgSettings(event.orgId)
+            invalidateSpaceDirectory(event.orgId)
+            void loadSpaceDirectory(event.orgId)
             return
         }
         if (frame.kind === 'space_added') {
@@ -484,7 +493,7 @@ function wireFeedBus(): void {
         // org listing so the sidebar label follows on every device.
         // Archived or back (harbor #1186, 2026-10-14): the event carries the
         // row, so the sidebar and the space's write lock move before the refetch.
-        if (frame.event.type === 'space_archived' || frame.event.type === 'space_unarchived') {
+        if (frame.event.type === 'space_archived' || frame.event.type === 'space_unarchived' || frame.event.type === 'space_visibility_changed') {
             const updated = frame.event.space
             setSpaceArchived(event.orgId, updated.id, updated.archived === true)
             orgsState = { ...orgsState, orgs: orgsState.orgs.map(o => o.id !== event.orgId ? o : {

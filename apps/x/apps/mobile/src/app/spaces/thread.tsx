@@ -22,7 +22,7 @@ import { useSpacesAccount } from '@/lib/spaces/account';
 import { StatusBanner } from '@/components/status-banner';
 import { loadRoster, loadThread, peekRoster, peekThread, saveRoster, saveThread } from '@/lib/spaces/cache';
 import { SpacesClient } from '@/lib/spaces/client';
-import { memberLabel, useProfiles } from '@/lib/spaces/profiles';
+import { isDeparted, memberLabel, useProfiles } from '@/lib/spaces/profiles';
 import { SpacesLive } from '@x/spaces-client';
 import { useColors } from '@/theme/colors';
 
@@ -393,7 +393,7 @@ export default function SpaceThreadScreen() {
         <SpaceComposer
           ref={composerRef}
           placeholder="Add a reply"
-          members={[...members.values()].filter((m) => !m.deactivatedAt)}
+          members={[...members.values()].filter((m) => !isDeparted(m))}
           me={me}
           sending={sending}
           onSend={(body) => void send(body)}

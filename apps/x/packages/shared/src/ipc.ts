@@ -3946,6 +3946,33 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), spaceId: z.string() }),
     res: z.object({ deleted: z.literal(true) }),
   },
+  // Admin controls (2026-10-19, spec §4 Roles): removing someone from a
+  // space or the org, roles, a space's visibility, the invite policy. The
+  // org refuses a non-admin; the app hides the controls too.
+  'spaces:setSpaceVisibility': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), visibility: z.enum(['private', 'open']) }),
+    res: z.object({ space: z.custom<SpacesTypes.Space>() }),
+  },
+  'spaces:removeMember': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), memberId: z.string() }),
+    res: z.object({ removed: z.boolean() }),
+  },
+  'spaces:removeOrgMember': {
+    req: z.object({ orgId: z.string(), memberId: z.string() }),
+    res: z.object({ member: z.custom<SpacesTypes.Member>() }),
+  },
+  'spaces:setMemberRole': {
+    req: z.object({ orgId: z.string(), memberId: z.string(), role: z.enum(['admin', 'member']) }),
+    res: z.object({ member: z.custom<SpacesTypes.Member>() }),
+  },
+  'spaces:getOrgSettings': {
+    req: z.object({ orgId: z.string() }),
+    res: z.object({ settings: z.custom<SpacesTypes.OrgSettings>() }),
+  },
+  'spaces:setInvitePolicy': {
+    req: z.object({ orgId: z.string(), invitePolicy: z.enum(['members', 'admins']) }),
+    res: z.object({ settings: z.custom<SpacesTypes.OrgSettings>() }),
+  },
   // Agent members and their keys (2026-09-29): the caller's own agents, or
   // every agent for an admin. A key's secret crosses IPC once, on the
   // response that created it, for the Agents dialog to show and forget.
