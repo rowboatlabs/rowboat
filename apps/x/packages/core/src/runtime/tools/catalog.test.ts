@@ -220,6 +220,7 @@ const HISTORICAL_KEY_ORDER = [
     "spreadsheet-edit",
     "generate-image",
     "whoami",
+    "update_profile",
     "list_members",
     "list_spaces",
     "browse_spaces",
@@ -354,6 +355,8 @@ describe("BuiltinTools permission audit", () => {
             // the app-owned cache.
             // The projected agent face: every org write is gated; reads
             // (whoami, list_*, read_*, search, history, diff) are "none".
+            // How every teammate sees your person: gated like any org write.
+            update_profile: "prompt",
             join_space: "prompt",
             open_direct: "prompt",
             create_space: "prompt",
