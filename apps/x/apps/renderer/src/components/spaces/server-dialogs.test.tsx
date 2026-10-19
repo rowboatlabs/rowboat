@@ -51,6 +51,22 @@ it('dismisses the chooser without entering either flow', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
 })
 
+it('joining an invite that lands nowhere opens the server', async () => {
+    const onDone = vi.fn()
+    const invoke = vi.fn(async (channel: string) => {
+        if (channel === 'spaces:resolveInviteLink') return { baseUrl: 'https://acme.test', resolved: { state: 'ok', org: { name: 'Acme' }, spaces: [] } }
+        if (channel === 'spaces:joinInvite') return { org: { id: 'o', name: 'Acme' } }
+        return { orgs: [] }
+    })
+    vi.stubGlobal('ipc', { invoke })
+    render(<ServerDialogs onDone={onDone} />)
+    await act(async () => {
+        openServerDialog({ kind: 'join', inviteUrl: 'https://acme.test/join/tok', autoJoin: true })
+    })
+    await act(async () => {})
+    await vi.waitFor(() => expect(onDone).toHaveBeenCalledWith('o', undefined))
+})
+
 // Back from a sign-in that Join started (the web app, 2026-10-15): the card
 // joins without a second click; any other opening waits for one.
 it.each([
@@ -58,7 +74,7 @@ it.each([
     [false, 0],
 ])('with autoJoin %s, joins %i time(s) once the invite resolves', async (autoJoin, joins) => {
     const invoke = vi.fn(async (channel: string) => {
-        if (channel === 'spaces:resolveInviteLink') return { baseUrl: 'https://acme.test', resolved: { state: 'ok', org: { name: 'Acme' }, space: { name: 'launch' } } }
+        if (channel === 'spaces:resolveInviteLink') return { baseUrl: 'https://acme.test', resolved: { state: 'ok', org: { name: 'Acme' }, space: { name: 'launch' }, spaces: [{ name: 'launch' }, { name: 'general' }] } }
         if (channel === 'spaces:joinInvite') return { org: { id: 'o', name: 'Acme' }, space: { id: 's', name: 'launch' } }
         return {}
     })
@@ -69,5 +85,6 @@ it.each([
     })
     await act(async () => {})
     expect(invoke.mock.calls.filter(([channel]) => channel === 'spaces:joinInvite')).toHaveLength(joins)
-    if (!autoJoin) expect(screen.getByText('launch')).toBeVisible()
+    // An invite is to the org (2026-10-19): the card names it, then every space it joins.
+    if (!autoJoin) expect(screen.getByText('You’ll join launch and general')).toBeVisible()
 })

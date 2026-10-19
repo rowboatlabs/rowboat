@@ -1166,7 +1166,7 @@ export function GeneralStream({
                         hint: 'Copy an invite link to this space',
                         run: async () => {
                             try {
-                                const result = await invokeSpace('spaces:createInvite', { orgId: org.id, spaceId: space.id })
+                                const result = await invokeSpace('spaces:createInvite', { orgId: org.id, spaceIds: [space.id] })
                                 await navigator.clipboard.writeText(result.link)
                                 analytics.spacesInviteLinkCopied()
                                 toast('Invite link copied to clipboard', 'success')

@@ -338,6 +338,14 @@ export async function resolveInviteLink(url: string): Promise<{ baseUrl: string;
 }
 
 /**
+ * Who the accept made us. An invite that joined no space (2026-10-19: an org
+ * with no default, nothing listed) carries no membership to read it from.
+ */
+async function memberIdAfterAccept(client: SpacesClient, result: AcceptInviteResult): Promise<string> {
+  return result.membership?.memberId ?? (await client.me()).member.id;
+}
+
+/**
  * The full join: parse → identity (the account session for a managed org —
  * signing in to Rowboat once if there is none; this install's own dance for
  * a foreign org it has no working auth on) → accept (the bind ceremony
@@ -374,7 +382,7 @@ export async function joinViaInviteLink(input: {
       name: health.org.name,
       address: health.org.address,
       issuer,
-      memberId: result.membership.memberId,
+      memberId: await memberIdAfterAccept(client, result),
     });
     invalidateManagedOrgsSync();
     return { org, result };
@@ -390,7 +398,7 @@ export async function joinViaInviteLink(input: {
     address: health.org.address,
     issuer: dance.issuer,
     clientId: dance.clientId,
-    memberId: result.membership.memberId,
+    memberId: await memberIdAfterAccept(client, result),
     tokens: dance.tokens,
   });
   return { org, result };

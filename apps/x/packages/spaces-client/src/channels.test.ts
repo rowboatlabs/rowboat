@@ -82,7 +82,7 @@ describe('harborChannelHandlers', () => {
   });
 
   it('resolves an invite before the org is added, by its base URL alone', async () => {
-    const invite = await table['spaces:createInvite']({ orgId, spaceId });
+    const invite = await table['spaces:createInvite']({ orgId, spaceIds: [spaceId] });
     const resolved = await table['spaces:resolveInvite']({ baseUrl: harbor.url, token: invite.token });
     expect(resolved).toMatchObject({ state: 'ok', space: { id: spaceId } });
   });
@@ -100,6 +100,15 @@ describe('harborChannelHandlers', () => {
     expect(await table['spaces:deleteSpace']({ orgId, spaceId: space.id })).toEqual({ deleted: true });
     const { spaces } = await table['spaces:listSpaces']({ orgId });
     expect(spaces.map((s) => s.id)).not.toContain(space.id);
+  });
+
+  it('makes a space a default, and an invite to the org joins it', async () => {
+    const { space } = await table['spaces:createSpace']({ orgId, name: 'Welcome', visibility: 'open' });
+    expect((await table['spaces:setDefaultSpace']({ orgId, spaceId: space.id, isDefault: true })).space.isDefault).toBe(true);
+    const invite = await table['spaces:createInvite']({ orgId });
+    const resolved = await table['spaces:resolveInvite']({ baseUrl: harbor.url, token: invite.token });
+    expect(resolved).toMatchObject({ state: 'ok', spaces: [{ id: space.id }] });
+    await table['spaces:setDefaultSpace']({ orgId, spaceId: space.id, isDefault: false });
   });
 
   it('fails for an org the host does not know', async () => {

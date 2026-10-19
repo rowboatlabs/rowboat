@@ -9,6 +9,7 @@ import { consumeServerDialog, subscribeServerDialog, type ServerDialogRequest } 
 import { toast } from '@/lib/toast'
 import * as analytics from '@/lib/analytics'
 import { LOCAL_RUNTIME } from '@/lib/feature-flags'
+import { listNames } from '@/lib/spaces-invites'
 
 // The server dialogs, one host for the whole app (lib/server-dialog.ts is
 // how anything opens one). Two intents, two dialogs: CREATE a server, or
@@ -236,7 +237,8 @@ function CreateServerDialog({ onClose, onDone, onJoinInstead }: {
 // Join
 // ---------------------------------------------------------------------------
 
-interface InvitePreview { org: string; space: string; invitedBy?: string }
+/** An invite is to the org (2026-10-19): the org, and every space accepting joins. */
+interface InvitePreview { org: string; spaces: string[]; invitedBy?: string }
 
 function JoinServerDialog({ inviteUrl: initialUrl, autoJoin = false, onClose, onDone, onCreateInstead, onByAddress, onDev }: {
     inviteUrl?: string
@@ -265,7 +267,7 @@ function JoinServerDialog({ inviteUrl: initialUrl, autoJoin = false, onClose, on
         try {
             const { resolved } = await window.ipc.invoke('spaces:resolveInviteLink', { url: next.trim() })
             if (resolved.state === 'ok') {
-                setPreview({ org: resolved.org.name, space: resolved.space.name, ...(resolved.invitedBy ? { invitedBy: resolved.invitedBy } : {}) })
+                setPreview({ org: resolved.org.name, spaces: (resolved.spaces ?? []).map((s) => s.name), ...(resolved.invitedBy ? { invitedBy: resolved.invitedBy } : {}) })
                 return true
             }
             toast(`This invite is ${resolved.state}`, 'error')
@@ -298,8 +300,8 @@ function JoinServerDialog({ inviteUrl: initialUrl, autoJoin = false, onClose, on
         try {
             const { org, space } = await window.ipc.invoke('spaces:joinInvite', { url: target.trim() })
             analytics.spacesSpaceJoined('invite_link')
-            toast(`Joined ${space.name} on ${org.name}`, 'success')
-            onDone(org.id, space.id)
+            toast(space ? `Joined ${space.name} on ${org.name}` : `Joined ${org.name}`, 'success')
+            onDone(org.id, space?.id)
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not join', 'error')
         } finally {
@@ -361,9 +363,11 @@ function JoinServerDialog({ inviteUrl: initialUrl, autoJoin = false, onClose, on
             {preview ? (
                 <div className="rounded-md border px-3 py-2.5 text-sm">
                     <div>
-                        You’re invited to <span className="font-medium">{preview.space}</span> on{' '}
-                        <span className="font-medium">{preview.org}</span>
+                        You’re invited to <span className="font-medium">{preview.org}</span>
                     </div>
+                    {preview.spaces.length > 0 && (
+                        <div className="text-xs text-muted-foreground">You’ll join {listNames(preview.spaces)}</div>
+                    )}
                     {preview.invitedBy && <div className="text-xs text-muted-foreground">Invited by {preview.invitedBy}</div>}
                 </div>
             ) : resolving ? (
