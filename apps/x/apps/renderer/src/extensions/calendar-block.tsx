@@ -114,6 +114,8 @@ declare global {
       htmlLink?: string
       conferenceLink?: string
       source?: string
+      /** Invitees as "Name <email>" strings, when the launch site has the full event. */
+      attendees?: string[]
     }
   }
 }
