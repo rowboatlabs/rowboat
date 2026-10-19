@@ -59,8 +59,8 @@ export type LiveNote = {
 };
 
 const TriggerWindowSchema = z.object({
-    startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).describe('24h HH:MM, local time. Also the daily cycle anchor — once the agent fires after this time, the window is done for the day.'),
-    endTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).describe('24h HH:MM, local time. After this, the window is closed for the day.'),
+    startTime: z.string().regex(/^([01][0-9]|2[0-3]):[0-5][0-9]$/).describe('24h HH:MM, local time. Also the daily cycle anchor — once the agent fires after this time, the window is done for the day.'),
+    endTime: z.string().regex(/^([01][0-9]|2[0-3]):[0-5][0-9]$/).describe('24h HH:MM, local time. After this, the window is closed for the day.'),
 });
 
 export const TriggersSchema = z.object({
