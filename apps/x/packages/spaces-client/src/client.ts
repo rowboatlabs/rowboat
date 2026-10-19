@@ -35,6 +35,7 @@ import {
   type Topic,
   type TopicListing,
   type UnreadSnapshot,
+  type UpdateProfile,
 } from '@rowboat/spaces-protocol';
 import type { z } from 'zod';
 
@@ -272,6 +273,11 @@ export class SpacesClient {
   /** Who this token is on the org — the only client-side source of our memberId under OAuth. */
   async me(): Promise<{ member: Member }> {
     return this.request('GET', routes.me.path, routes.me.response);
+  }
+
+  /** Your name and title on this org (CONTRACT.md, 2026-10-19). Leave a field out to keep it; an empty title removes it. */
+  async updateProfile(input: UpdateProfile): Promise<Member> {
+    return (await this.request('PUT', routes.updateMe.path, routes.updateMe.response, input)).member;
   }
 
   // --- profile images (CONTRACT.md, 2026-10-02) ------------------------------

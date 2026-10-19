@@ -23,6 +23,7 @@ import {
   canJoinSpace,
   canBind,
   canChangeMembership,
+  canEditProfile,
   canRenameSpace,
   canWrite,
   canWriteSpace,
@@ -185,5 +186,13 @@ describe('deleted accounts (2026-10-13)', () => {
   it('refuses adding, or opening a DM with, a deactivated member', () => {
     expect(canReachMember(active)).toBeNull();
     expect(canReachMember(deleted)).toEqual({ code: 'invalid_request', message: 'Ada has deleted their account' });
+  });
+});
+
+describe('profiles (2026-10-19)', () => {
+  it('a person edits their own profile; an agent member may not rename itself', () => {
+    expect(canEditProfile({ id: 'm1', displayName: 'Ada', role: 'member', kind: 'human' })).toBeNull();
+    expect(canEditProfile({ id: 'm1', displayName: 'Ada', role: 'admin', kind: 'human' })).toBeNull();
+    expect(canEditProfile({ id: 'a1', displayName: 'Bot', role: 'member', kind: 'agent', ownerId: 'm1' })).toMatchObject({ code: 'forbidden' });
   });
 });

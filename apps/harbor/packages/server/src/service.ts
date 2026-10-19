@@ -28,6 +28,7 @@ import type {
   CreateInviteResult,
   DeleteAssetResult,
   Member,
+  UpdateProfile,
   AgentKey,
   AgentCredential,
   AgentHook,
@@ -135,6 +136,9 @@ export class HarborService {
   // --- spaces & membership (core/spaces.ts) ----------------------------------------
   me(ctx: ActorCtx): Promise<Member> {
     return this.spaces.me(ctx);
+  }
+  updateProfile(ctx: ActorCtx, input: UpdateProfile): Promise<Member> {
+    return this.spaces.updateProfile(ctx, input);
   }
   createAgent(input: { displayName: string; ownerId?: string }): Promise<Member> {
     return this.spaces.createAgent(input);

@@ -45,6 +45,14 @@ afterAll(async () => {
 describe('SpacesClient', () => {
   let spaceId: string;
 
+  it('edits your own name and title', async () => {
+    const member = await gagan.updateProfile({ displayName: 'Gagan P', title: 'Engineer' });
+    expect(member).toMatchObject({ id: 'gagan', displayName: 'Gagan P', title: 'Engineer' });
+    expect((await gagan.me()).member).toEqual(member);
+    const cleared = await gagan.updateProfile({ displayName: 'Gagan', title: '' });
+    expect(cleared.title).toBeUndefined();
+  });
+
   it('health probe reports the org', async () => {
     const health = await ramnique.health();
     expect(health.ok).toBe(true);

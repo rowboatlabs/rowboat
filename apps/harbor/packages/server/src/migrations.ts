@@ -1016,13 +1016,19 @@ export const MIGRATIONS: Migration[] = [
     ],
   },
   {
+    // A member's title (spec §4 Member profile, v1 = name, title, avatar;
+    // built 2026-10-19). Null = none.
+    id: '040-member-title',
+    statements: [`alter table members add column if not exists title text`],
+  },
+  {
     // Default spaces (spec §5 answer 3, built 2026-10-19): a flag on the
     // space row. The CHECK keeps the rule in the schema as 023 does for DMs:
     // only a shared open space can be a default, so an invite to the org is
     // never a back door into a private space. No backfill: every org's first
     // space was created private, and turning a private space open is not a
     // migration's call — an admin marks the defaults.
-    id: '040-default-spaces',
+    id: '041-default-spaces',
     statements: [
       `alter table spaces add column if not exists is_default boolean not null default false`,
       `alter table spaces add constraint spaces_default_open_check check (not is_default or (kind = 'shared' and visibility = 'open'))`,
@@ -1038,7 +1044,7 @@ export const MIGRATIONS: Migration[] = [
     // lists nothing no longer reaches its org through a space. invites.space_id
     // stays, null on every new invite and read by nothing: 039 names it, and
     // an applied migration is never edited.
-    id: '041-org-invites',
+    id: '042-org-invites',
     statements: [
       `alter table invites add column if not exists org_id text`,
       `update invites i set org_id = s.org_id from spaces s where s.id = i.space_id`,

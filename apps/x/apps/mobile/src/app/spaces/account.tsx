@@ -1,11 +1,11 @@
 import { router } from 'expo-router';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
-import { useState, type ReactNode } from 'react';
-import { ActionSheetIOS, ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from 'react-native';
+import { useEffect, useState, type ReactNode } from 'react';
+import { ActionSheetIOS, ActivityIndicator, Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 
 import { Avatar } from '@/components/avatar';
-import { useSpacesAccount } from '@/lib/spaces/account';
+import { useSpacesAccount, type SpacesOrg } from '@/lib/spaces/account';
 import { SpacesClient } from '@/lib/spaces/client';
 import { friendlyError } from '@/lib/spaces/errors';
 import { setMyAvatar, useMyAvatar } from '@/lib/spaces/my-avatar';
@@ -19,9 +19,56 @@ export default function AccountScreen() {
   const account = useSpacesAccount();
   const [deleting, setDeleting] = useState(false);
   const me = account.orgs?.[0];
-  const name = me?.displayName ?? 'Your account';
   const myAvatar = useMyAvatar(me);
   const [savingPhoto, setSavingPhoto] = useState(false);
+  const clientFor = (org: SpacesOrg) => new SpacesClient({ baseUrl: `https://${org.address}`, token: (opts) => account.getAccessToken(opts) });
+
+  // Name and title as saved, and as being typed. The title isn't on the org
+  // listing, so both come from GET /v1/me.
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [draft, setDraft] = useState<Profile>({ displayName: '', title: '' });
+  const [savingProfile, setSavingProfile] = useState(false);
+  useEffect(() => {
+    if (!me) return;
+    let cancelled = false;
+    clientFor(me)
+      .me()
+      .then(({ member }) => {
+        if (cancelled) return;
+        const saved = { displayName: member.displayName, title: member.title ?? '' };
+        setProfile(saved);
+        setDraft(saved);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per org, not per render's client
+  }, [me?.id, me?.address]);
+  const name = profile?.displayName || me?.displayName || 'Your account';
+
+  // Like the photo, your name and title are set on every org you're in.
+  const saveProfile = async (field: keyof Profile) => {
+    if (!profile) return;
+    const value = draft[field].replace(/\s+/g, ' ').trim();
+    if (value === profile[field] || (field === 'displayName' && !value)) {
+      setDraft((d) => ({ ...d, [field]: profile[field] }));
+      return;
+    }
+    setSavingProfile(true);
+    try {
+      for (const org of account.orgs ?? []) await clientFor(org).updateProfile({ [field]: value });
+      const saved = { ...profile, [field]: value };
+      setProfile(saved);
+      setDraft(saved);
+      if (field === 'displayName') void account.refreshOrgs();
+    } catch (err) {
+      setDraft((d) => ({ ...d, [field]: profile[field] }));
+      Alert.alert("Couldn't update your profile", friendlyError(err));
+    } finally {
+      setSavingProfile(false);
+    }
+  };
 
   // Your photo is per org on the server; set it on every org you're in so
   // you look the same everywhere.
@@ -29,8 +76,7 @@ export default function AccountScreen() {
     setSavingPhoto(true);
     try {
       for (const org of account.orgs ?? []) {
-        const client = new SpacesClient({ baseUrl: `https://${org.address}`, token: (opts) => account.getAccessToken(opts) });
-        setMyAvatar(org.id, (await work(client)).avatarUrl);
+        setMyAvatar(org.id, (await work(clientFor(org))).avatarUrl);
       }
     } catch (err) {
       Alert.alert("Couldn't update your photo", friendlyError(err));
@@ -125,17 +171,60 @@ export default function AccountScreen() {
       style={{ flex: 1, backgroundColor: colors.groupedBackground }}
       contentInsetAdjustmentBehavior="automatic"
       contentContainerStyle={{ padding: 16, gap: 24, paddingBottom: 48 }}
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="interactive"
     >
       {/* Identity */}
       <View style={{ alignItems: 'center', gap: 10, paddingTop: 8 }}>
         <Pressable disabled={savingPhoto} onPress={photoMenu} style={({ pressed }) => ({ opacity: pressed || savingPhoto ? 0.6 : 1 })}>
           <Avatar id={me?.memberId ?? ''} name={name} size={84} url={myAvatar} />
         </Pressable>
-        <Text style={{ fontSize: 22, fontWeight: '700', color: colors.label }}>{name}</Text>
+        <View style={{ alignItems: 'center', gap: 2 }}>
+          <Text style={{ fontSize: 22, fontWeight: '700', color: colors.label }}>{name}</Text>
+          {profile?.title ? <Text style={{ fontSize: 15, color: colors.secondaryLabel }}>{profile.title}</Text> : null}
+        </View>
         <Pressable disabled={savingPhoto} onPress={photoMenu} hitSlop={8}>
           <Text style={{ fontSize: 15, color: '#0a84ff' }}>{savingPhoto ? 'Saving…' : myAvatar ? 'Change photo' : 'Add photo'}</Text>
         </Pressable>
       </View>
+
+      {profile ? (
+        <Group label="Profile" footer="How your teammates see you in every org you're in.">
+          <Row first>
+            <Text style={{ width: 56, fontSize: 16, color: colors.label }}>Name</Text>
+            <TextInput
+              value={draft.displayName}
+              onChangeText={(displayName) => setDraft((d) => ({ ...d, displayName }))}
+              onEndEditing={() => void saveProfile('displayName')}
+              editable={!savingProfile}
+              placeholder="Your name"
+              placeholderTextColor={colors.tertiaryLabel}
+              maxLength={128}
+              autoCapitalize="words"
+              autoCorrect={false}
+              textContentType="name"
+              returnKeyType="done"
+              style={{ flex: 1, fontSize: 16, color: colors.label, paddingVertical: 12 }}
+            />
+          </Row>
+          <Row>
+            <Text style={{ width: 56, fontSize: 16, color: colors.label }}>Title</Text>
+            <TextInput
+              value={draft.title}
+              onChangeText={(title) => setDraft((d) => ({ ...d, title }))}
+              onEndEditing={() => void saveProfile('title')}
+              editable={!savingProfile}
+              placeholder="What you do"
+              placeholderTextColor={colors.tertiaryLabel}
+              maxLength={128}
+              textContentType="jobTitle"
+              returnKeyType="done"
+              style={{ flex: 1, fontSize: 16, color: colors.label, paddingVertical: 12 }}
+            />
+            {savingProfile ? <ActivityIndicator size="small" /> : null}
+          </Row>
+        </Group>
+      ) : null}
 
       {account.orgs?.length ? (
         <Group label="Orgs">
@@ -168,6 +257,11 @@ export default function AccountScreen() {
       </Group>
     </ScrollView>
   );
+}
+
+interface Profile {
+  displayName: string;
+  title: string;
 }
 
 function Group({ label, footer, children }: { label?: string; footer?: string; children: ReactNode }) {

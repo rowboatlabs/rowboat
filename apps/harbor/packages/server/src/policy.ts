@@ -87,7 +87,7 @@ export function canDeleteSpace(actor: Member, space: Space): Decision {
  * Default spaces are an admin's to set (spec §4 Roles, §5 answer 3; built
  * 2026-10-19), and only a shared open space can be one, so an invite to the
  * org is never a back door into a private space. Taking the flag off needs
- * only the admin bit. The schema holds the same rule (migration 040).
+ * only the admin bit. The schema holds the same rule (migration 041).
  */
 export function canSetDefaultSpace(actor: Member, space: Space, isDefault: boolean): Decision {
   if (space.kind === 'direct') return { code: 'invalid_request', message: 'a direct message cannot be a default space' };
@@ -181,6 +181,17 @@ export function canReachMember(member: Member): Decision {
 export function canSetOrgLogo(actor: Member): Decision {
   if (actor.role === 'admin') return null;
   return { code: 'forbidden', message: 'only an admin can change the org’s logo' };
+}
+
+/**
+ * Only you edit your profile (spec §4 Member profile, 2026-09-22), and only a
+ * person has one to edit: an agent member is named by its owner when it is
+ * added (built 2026-10-19), so an agent's own key cannot rename it. A
+ * person's own assistant acting for them is the person, and may.
+ */
+export function canEditProfile(actor: Member): Decision {
+  if (actor.kind !== 'agent') return null;
+  return { code: 'forbidden', message: 'an agent’s name is set when it is added' };
 }
 
 // --- agent members and their keys (spec §4 Agent members, 2026-09-29) --------

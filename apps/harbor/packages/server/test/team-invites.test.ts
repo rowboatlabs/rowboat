@@ -105,7 +105,7 @@ describe('default spaces', () => {
     expect((await setDefault(dm, true)).body.code).toBe('invalid_request');
     // A private space the admin is not in is not theirs to read.
     expect((await setDefault(secretId, true, restClient(harbor, 'dev-prakhar'))).status).toBe(403);
-    // The schema holds the rule too (migration 040).
+    // The schema holds the rule too (migration 041).
     await expect(harbor.store.putSpace({ ...(await harbor.store.getSpace(privateId))!, isDefault: true })).rejects.toThrow();
   });
 
