@@ -13,7 +13,7 @@ import {
 } from './changeset.js';
 import { Attribution, Member, Membership, Message, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic, UpdateProfile } from './core.js';
 import { AssetId, AssetPath, BlobHash, MemberId, MessageId, SpaceId, TopicId } from './ids.js';
-import { CreateInviteResult } from './invite.js';
+import { CreateInviteResult, MAX_INVITE_SPACES } from './invite.js';
 import { Invocation, InvocationId, InvocationOptionValues, InvocationRefusal, InvocationState } from './invocation.js';
 import { SearchKind, SearchLimit, SearchResults } from './search.js';
 
@@ -228,13 +228,29 @@ export const leaveSpace = tool({
   output: z.object({ left: z.literal(true) }),
 });
 
+export const setDefaultSpace = tool({
+  name: 'set_default_space',
+  description:
+    'Make a shared open space a default space, or take it off the defaults (admins only). ' +
+    'Everyone who accepts an invite to the org joins every default space. Private spaces and ' +
+    'DMs cannot be defaults. Only when your person asked for it.',
+  input: z.object({ spaceId: SpaceId, isDefault: z.boolean() }),
+  output: z.object({ space: Space }),
+});
+
 export const createInvite = tool({
   name: 'create_invite',
   description:
-    'Make an invite link for a shared space (any member may; DMs refuse). Returns the link to ' +
-    'share — delivery is up to your person (paste it in a DM, an email, wherever they said). ' +
-    'The org may cap expiresInHours.',
-  input: z.object({ spaceId: SpaceId, expiresInHours: z.number().int().positive().max(24 * 30).optional() }),
+    'Make an invite link to the org (any member may). The person who accepts joins the org, its ' +
+    'default spaces, and any spaceIds listed — each one a shared space your person is in. Returns ' +
+    'the link to share — delivery is up to your person (paste it in a DM, an email, wherever they ' +
+    'said). The org may cap expiresInHours.',
+  input: z.object({
+    spaceIds: z.array(SpaceId).max(MAX_INVITE_SPACES).optional(),
+    /** One space, the form before 2026-10-19: the same as `spaceIds: [spaceId]`. */
+    spaceId: SpaceId.optional(),
+    expiresInHours: z.number().int().positive().max(24 * 30).optional(),
+  }),
   output: CreateInviteResult,
 });
 
@@ -708,6 +724,7 @@ export const mcpTools = [
   renameSpace,
   archiveSpace,
   unarchiveSpace,
+  setDefaultSpace,
   deleteSpace,
   addMembers,
   leaveSpace,

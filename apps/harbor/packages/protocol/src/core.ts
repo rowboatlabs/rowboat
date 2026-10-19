@@ -219,6 +219,13 @@ export const Space = z.object({
    * payloads and every existing space are live. A DM is never archived.
    */
   archived: z.boolean().default(false),
+  /**
+   * A default space (spec §5 answer 3, built 2026-10-19): everyone who
+   * accepts an invite to the org joins it. Only a shared open space can be
+   * one, and only an admin sets it. Old payloads and every existing space
+   * are not defaults.
+   */
+  isDefault: z.boolean().default(false),
 });
 export type Space = z.infer<typeof Space>;
 

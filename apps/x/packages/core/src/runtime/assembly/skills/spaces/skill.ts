@@ -72,7 +72,7 @@ everyone in the space. To point at a space, \`[#Its Name](#space:<spaceId>)\`
 | "rename / move / delete / restore a file" | \`move_asset\` (new path) / \`delete_asset\` / \`restore_asset\` — by assetId |
 | "share this image / PDF" | \`spaces-upload-blob\` (a local file) → reference it in a post or file |
 | "open that attachment" | \`spaces-download-blob\` → then parse it |
-| "new space", "rename it", "invite link" | \`create_space\` / \`rename_space\` / \`create_invite\` |
+| "new space", "rename it", "invite link", "invite them to the team" | \`create_space\` / \`rename_space\` / \`create_invite\` (to the org; \`spaceIds\` adds spaces your person is in) |
 | "send at 9am", "remind me" | \`schedule_message\` |
 | "draw / sketch / diagram X on the board", "what's on the whiteboard" | \`loadSkill\` \`whiteboard\` → \`whiteboard-read\` / \`whiteboard-draw\` |
 

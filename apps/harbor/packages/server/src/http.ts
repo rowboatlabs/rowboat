@@ -265,6 +265,12 @@ export function buildHttpApp(deps: {
     return reply(c, routes.unarchiveSpace.response, { space: await service.unarchiveSpace(actor(c), spaceId, input) });
   });
 
+  app.post(routes.setDefaultSpace.path, async (c) => {
+    const { spaceId } = parseWith(routes.setDefaultSpace.params, c.req.param());
+    const input = await body(c, routes.setDefaultSpace.request);
+    return reply(c, routes.setDefaultSpace.response, { space: await service.setDefaultSpace(actor(c), spaceId, input) });
+  });
+
   app.post(routes.openDirect.path, async (c) => {
     const input = await body(c, routes.openDirect.request);
     return reply(c, routes.openDirect.response, await service.openDirect(actor(c), input.memberId));
@@ -443,7 +449,7 @@ export function buildHttpApp(deps: {
 
   app.post(routes.createInvite.path, async (c) => {
     const input = await body(c, routes.createInvite.request);
-    return reply(c, routes.createInvite.response, await service.createInvite(actor(c), input.spaceId, input.expiresInHours));
+    return reply(c, routes.createInvite.response, await service.createInvite(actor(c), input));
   });
 
   app.post(routes.resolveInvite.path, async (c) => {
@@ -482,7 +488,7 @@ export function buildHttpApp(deps: {
     const resolved = await service.resolveInvite(token);
     if (resolved.state !== 'ok') return c.html(invitePage({ state: resolved.state }), 410);
     const query = `type=spaces&org=${encodeURIComponent(service.org.address)}&invite=${encodeURIComponent(token)}`;
-    return c.html(invitePage({ state: 'ok', space: resolved.space.name, org: resolved.org.name, invitedBy: resolved.invitedBy, ...openers(query) }));
+    return c.html(invitePage({ state: 'ok', spaces: resolved.spaces.map((s) => s.name), org: resolved.org.name, invitedBy: resolved.invitedBy, ...openers(query) }));
   });
 
   // --- link landings ---------------------------------------------------------
@@ -816,8 +822,13 @@ function landingPage(o: Openers): string {
 }
 
 type InvitePage =
-  | ({ state: 'ok'; space: string; org: string; invitedBy?: string } & Openers)
+  | ({ state: 'ok'; spaces: string[]; org: string; invitedBy?: string } & Openers)
   | { state: 'expired' | 'revoked' };
+
+/** "a", "a and b", "a, b and c". */
+function listNames(names: string[]): string {
+  return names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
 
 /** The /join landing: launch the app with the invite, or say why not. */
 function invitePage(page: InvitePage): string {
@@ -825,10 +836,13 @@ function invitePage(page: InvitePage): string {
     const why = page.state === 'expired' ? 'This invite has expired.' : 'This invite was revoked.';
     return `${PAGE_HEAD}<title>Invite ${page.state}</title>${PAGE_STYLE}<main><h1>${why}</h1><p class="m">Ask whoever sent it for a new link.</p></main>`;
   }
+  // An invite is to the org (2026-10-19): the org is the headline, the
+  // spaces accepting joins the line under it.
+  const joins = page.spaces.length > 0 ? `<p class="m">You'll join ${escapeHtml(listNames(page.spaces))}</p>` : '';
   const by = page.invitedBy ? `<p class="m">Invited by ${escapeHtml(page.invitedBy)}</p>` : '';
   return (
-    `${PAGE_HEAD}<title>Join ${escapeHtml(page.space)} on ${escapeHtml(page.org)}</title>${PAGE_STYLE}<main>` +
-    `<h1>You're invited to ${escapeHtml(page.space)}</h1><p class="m">on ${escapeHtml(page.org)}</p>${by}` +
+    `${PAGE_HEAD}<title>Join ${escapeHtml(page.org)}</title>${PAGE_STYLE}<main>` +
+    `<h1>You're invited to ${escapeHtml(page.org)}</h1>${joins}${by}` +
     `${openerLinks(page)}</main>`
   );
 }

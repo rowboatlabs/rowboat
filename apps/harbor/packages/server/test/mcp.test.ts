@@ -84,6 +84,7 @@ describe('agent face (MCP)', () => {
       'rename_space',
       'restore_asset',
       'search_space',
+      'set_default_space',
       'stop_invocation',
       'unarchive_space',
       'update_profile',

@@ -88,8 +88,8 @@ export function webChannelHandlers(emit: (event: spaces.SpacesBusEvent) => void)
             }
             const { space } = await new SpacesClient({ baseUrl, token: harborSession }).acceptInvite(token)
             const org = (await orgs.loadOrgs()).find((o) => o.baseUrl === baseUrl)
-            if (!org) throw new Error(`You joined ${space.name}, but its server isn’t listed yet. Reload to see it.`)
-            return { org, space }
+            if (!org) throw new Error(`You joined ${space?.name ?? 'the server'}, but it isn’t listed yet. Reload to see it.`)
+            return { org, ...(space ? { space } : {}) }
         },
 
         'spaces:createOrg': async (args) => {

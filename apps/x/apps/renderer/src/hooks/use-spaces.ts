@@ -484,7 +484,8 @@ function wireFeedBus(): void {
         // org listing so the sidebar label follows on every device.
         // Archived or back (harbor #1186, 2026-10-14): the event carries the
         // row, so the sidebar and the space's write lock move before the refetch.
-        if (frame.event.type === 'space_archived' || frame.event.type === 'space_unarchived') {
+        // A default flag flipped (2026-10-19) carries the row the same way.
+        if (frame.event.type === 'space_archived' || frame.event.type === 'space_unarchived' || frame.event.type === 'space_default_changed') {
             const updated = frame.event.space
             setSpaceArchived(event.orgId, updated.id, updated.archived === true)
             orgsState = { ...orgsState, orgs: orgsState.orgs.map(o => o.id !== event.orgId ? o : {

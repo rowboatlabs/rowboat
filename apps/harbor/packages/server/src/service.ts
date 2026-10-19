@@ -9,7 +9,7 @@ import { Invocations } from './core/invocations.js';
 import { Kernel, type ActorCtx, type BindIdentity, type OrgInfo } from './core/kernel.js';
 import { ReadState } from './core/read-state.js';
 import { Spaces } from './core/spaces.js';
-import type { AddMembersInput, ArchiveSpaceInput, RenameSpaceInput } from './core/spaces.js';
+import type { AddMembersInput, ArchiveSpaceInput, CreateInviteInput, RenameSpaceInput, SetDefaultSpaceInput } from './core/spaces.js';
 import type { CreateTopicInput, DeleteMessageInput, EditMessageInput, EndPollInput, ManageTopicAction, NewMessage, PageOpts, ReactInput, VotePollInput } from './core/feed.js';
 import type { MarkReadInput, UnreadSnapshot } from './core/read-state.js';
 import type { SpaceHub } from './hub.js';
@@ -217,8 +217,8 @@ export class HarborService {
   joinSpace(ctx: ActorCtx, spaceId: string): Promise<{ space: Space; membership: Membership }> {
     return this.spaces.joinSpace(ctx, spaceId);
   }
-  createSpace(ctx: ActorCtx, name: string, visibility: Space['visibility'] = 'private'): Promise<Space> {
-    return this.spaces.createSpace(ctx, name, visibility);
+  createSpace(ctx: ActorCtx, name: string, visibility: Space['visibility'] = 'private', opts: { isDefault?: boolean } = {}): Promise<Space> {
+    return this.spaces.createSpace(ctx, name, visibility, opts);
   }
   renameSpace(ctx: ActorCtx, spaceId: string, input: RenameSpaceInput): Promise<Space> {
     return this.spaces.renameSpace(ctx, spaceId, input);
@@ -228,6 +228,9 @@ export class HarborService {
   }
   unarchiveSpace(ctx: ActorCtx, spaceId: string, input: ArchiveSpaceInput): Promise<Space> {
     return this.spaces.unarchiveSpace(ctx, spaceId, input);
+  }
+  setDefaultSpace(ctx: ActorCtx, spaceId: string, input: SetDefaultSpaceInput): Promise<Space> {
+    return this.spaces.setDefaultSpace(ctx, spaceId, input);
   }
   deleteSpace(ctx: ActorCtx, spaceId: string): Promise<void> {
     return this.spaces.deleteSpace(ctx, spaceId);
@@ -247,8 +250,8 @@ export class HarborService {
   leaveSpace(ctx: ActorCtx, spaceId: string): Promise<void> {
     return this.spaces.leaveSpace(ctx, spaceId);
   }
-  createInvite(ctx: ActorCtx, spaceId: string, expiresInHours?: number): Promise<CreateInviteResult> {
-    return this.spaces.createInvite(ctx, spaceId, expiresInHours);
+  createInvite(ctx: ActorCtx, input: CreateInviteInput): Promise<CreateInviteResult> {
+    return this.spaces.createInvite(ctx, input);
   }
   resolveInvite(token: string): Promise<ResolveInviteResult> {
     return this.spaces.resolveInvite(token);

@@ -36,8 +36,8 @@ import {
 // prove the service ASKS.
 
 const NOW = '2026-09-21T10:00:00.000Z';
-const shared: Space = { id: 'S', name: 'Roadboard', createdAt: NOW, kind: 'shared', visibility: 'private', archived: false };
-const direct: Space = { id: 'D', name: 'Direct message', createdAt: NOW, kind: 'direct', visibility: 'private', participants: ['a', 'b'], archived: false };
+const shared: Space = { id: 'S', name: 'Roadboard', createdAt: NOW, kind: 'shared', visibility: 'private', archived: false, isDefault: false };
+const direct: Space = { id: 'D', name: 'Direct message', createdAt: NOW, kind: 'direct', visibility: 'private', participants: ['a', 'b'], archived: false, isDefault: false };
 const membership: Membership = { spaceId: 'S', memberId: 'a', joinedAt: NOW };
 const byA = { author: { memberId: 'a', actingMode: 'direct' } } as Message;
 
