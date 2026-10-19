@@ -1,3 +1,5 @@
+import { invokeSpace } from '@/lib/spaces-invoke'
+import { useSpaceAccess, canActInSpace } from '@/lib/spaces-access'
 import { useEffect, useRef, useState } from 'react'
 import { Check, ChevronDown, Link as LinkIcon, Loader2, PenTool, X } from 'lucide-react'
 import {
@@ -21,6 +23,8 @@ import type { OrderedExcalidrawElement } from '@excalidraw/excalidraw/element/ty
 import type { RemoteExcalidrawElement } from '@excalidraw/excalidraw/data/reconcile'
 import { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
+import { LOCAL_RUNTIME } from '@/lib/feature-flags'
+import { blobAppUrl, fetchBlob } from '@/lib/spaces-presentation'
 import { copySpacesLink } from '@/lib/spaces-copy-link'
 import { createBoardSaver, type BoardSaver } from '@/lib/whiteboard-saver'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -64,7 +68,9 @@ declare global {
 }
 // Self-hosted fonts (vite.config.ts copies/serves them) — without this the
 // editor falls back to a CDN, which a desktop app can't rely on offline.
-window.EXCALIDRAW_ASSET_PATH = './excalidraw-assets/'
+// The web app is served from a domain and its paths are deep (/<org>/s/…),
+// so its fonts sit at the root, not next to the page (2026-10-12).
+window.EXCALIDRAW_ASSET_PATH = LOCAL_RUNTIME ? './excalidraw-assets/' : '/excalidraw-assets/'
 
 const CURSOR_SYNC_MS = 33 // ~30fps, Excalidraw's own cadence
 const FULL_SYNC_MS = 20_000 // periodic full-scene self-heal
@@ -82,7 +88,7 @@ interface SnapshotJson {
 }
 
 function blobUrl(orgId: string, spaceId: string, hash: string): string {
-    return `app://space-blob/${encodeURIComponent(orgId)}/${encodeURIComponent(spaceId)}/${hash}`
+    return blobAppUrl({ orgId, spaceId }, hash)
 }
 
 function bytesToBase64(bytes: Uint8Array): string {
@@ -138,6 +144,7 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
     /** Closes the board's column; the chat takes the width. */
     onClose: () => void
 }) {
+    const { member } = useSpaceAccess()
     const { resolvedTheme } = useTheme()
     const [load, setLoad] = useState<LoadState>({ phase: 'loading' })
     const [retryTick, setRetryTick] = useState(0)
@@ -160,7 +167,7 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
         // A taken name just opens that board; a new one is created by path.
         const taken = allBoards.find((b) => b.path === path)
         if (taken) { if (taken.id !== boardId) onSelectBoard(taken.id) }
-        else onCreateBoard(path)
+        else if (member) onCreateBoard(path)
     }
 
     const apiRef = useRef<ExcalidrawImperativeAPI | null>(null)
@@ -183,8 +190,8 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
     memberNamesRef.current = memberNames
 
     const send = (payload: spaces.SpacesWhiteboardPayload) => {
-        void window.ipc
-            .invoke('spaces:whiteboard', { orgId: org.id, spaceId: space.id, boardId, payload })
+        if (!canActInSpace(org.id, space.id)) return
+        void invokeSpace('spaces:whiteboard', { orgId: org.id, spaceId: space.id, boardId, payload })
             .catch(() => {}) // fire-and-forget like presence; full sync heals
     }
 
@@ -204,6 +211,7 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
         /** The snapshot is in hand — only now does a saver (and any write path) exist. */
         const adopt = (version: number, elements: OrderedExcalidrawElement[]) => {
             for (const el of elements) broadcastVersionsRef.current.set(el.id, el.version)
+            if (!member) return
             saverRef.current = createBoardSaver({
                 baseVersion: version,
                 elements,
@@ -214,12 +222,12 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
         }
         void (async () => {
             try {
-                const res = await window.ipc.invoke('spaces:readAsset', { orgId: org.id, spaceId: space.id, assetId: boardId })
+                const res = await invokeSpace('spaces:readAsset', { orgId: org.id, spaceId: space.id, assetId: boardId })
                 if (cancelled) return
                 setReadPath(res.path)
                 let snapshot: SnapshotJson | null = null
                 if (res.blob) {
-                    const resp = await fetch(blobUrl(org.id, space.id, res.blob.hash))
+                    const resp = await fetchBlob(blobUrl(org.id, space.id, res.blob.hash))
                     if (!resp.ok) throw new Error('could not fetch the board snapshot')
                     snapshot = parseSnapshot(await resp.text())
                 } else if (res.content.trim()) {
@@ -249,19 +257,20 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
             const saver = saverRef.current
             saverRef.current = null
             if (saver) {
-                saver.flush()
+                if (canActInSpace(org.id, space.id)) saver.flush()
                 saver.dispose()
             }
             send({ t: 'idle', clientId, state: 'away' })
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [org.id, space.id, boardId, retryTick])
+    }, [org.id, space.id, boardId, retryTick, member])
 
     // ------------------------------------------------------------------
     // Outbound: diff broadcasts from onChange, the periodic full sync,
     // cursors from onPointerUpdate, snapshot saves.
     // ------------------------------------------------------------------
     const broadcastAll = () => {
+        if (!canActInSpace(org.id, space.id)) return
         const api = apiRef.current
         if (!api) return
         const elements = api.getSceneElementsIncludingDeleted()
@@ -270,6 +279,7 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
     }
 
     const scheduleFullSync = () => {
+        if (!canActInSpace(org.id, space.id)) return
         if (fullSyncTimerRef.current) return
         fullSyncTimerRef.current = setTimeout(() => {
             fullSyncTimerRef.current = null
@@ -285,32 +295,33 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
      * One number for every writer (shared/spaces.ts).
      */
     const proposeSnapshot = async (json: string, baseVersion: number): Promise<spaces.ProposeChangeResult> => {
+        if (!canActInSpace(org.id, space.id)) throw new Error('Join this space to edit')
         const encoded = new TextEncoder().encode(json)
         let input: spaces.SpacesProposeInput
         if (encoded.length <= spaces.WHITEBOARD_TEXT_SNAPSHOT_MAX_BYTES) {
             input = { assetId: boardId, baseVersion, newContent: json, reason: 'whiteboard' }
         } else {
             const name = boardPath.slice(boardPath.lastIndexOf('/') + 1)
-            const uploaded = await window.ipc.invoke('spaces:uploadBlob', {
+            const uploaded = await invokeSpace('spaces:uploadBlob', {
                 orgId: org.id, spaceId: space.id, bytes: bytesToBase64(encoded), name, mime: 'application/json',
             })
             input = { assetId: boardId, baseVersion, blob: uploaded.blob.hash, reason: 'whiteboard' }
         }
-        return await window.ipc.invoke('spaces:proposeChange', { orgId: org.id, spaceId: space.id, input })
+        return await invokeSpace('spaces:proposeChange', { orgId: org.id, spaceId: space.id, input })
     }
 
     /** Fetch the stored snapshot and reconcile it into the open scene (conflict / change-event heal, agent writes included). */
     const pullSnapshot = async () => {
         const saver = saverRef.current
-        if (!apiRef.current || !saver) return
+        if (!apiRef.current) return
         try {
-            const res = await window.ipc.invoke('spaces:readAsset', { orgId: org.id, spaceId: space.id, assetId: boardId })
+            const res = await invokeSpace('spaces:readAsset', { orgId: org.id, spaceId: space.id, assetId: boardId })
             if (saverRef.current !== saver) return // the pane moved on while we fetched
             setReadPath(res.path)
-            saver.noteRemoteVersion(res.version)
+            saver?.noteRemoteVersion(res.version)
             let snapshot: SnapshotJson | null = null
             if (res.blob) {
-                const resp = await fetch(blobUrl(org.id, space.id, res.blob.hash))
+                const resp = await fetchBlob(blobUrl(org.id, space.id, res.blob.hash))
                 if (resp.ok) snapshot = parseSnapshot(await resp.text())
             } else if (res.content.trim()) {
                 snapshot = parseSnapshot(res.content)
@@ -442,7 +453,8 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
         }
     }
 
-    useSpaceLive(org.id, space.id, (frame) => {
+    useSpaceLive(member || active ? org.id : null, member || active ? space.id : null, (frame) => {
+        if (frame.kind === 'subscribed') { void pullSnapshot(); return }
         if (frame.kind === 'whiteboard') {
             if (frame.boardId !== boardId) return
             const payload = frame.payload as spaces.SpacesWhiteboardPayload | undefined
@@ -451,10 +463,10 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
         } else if (frame.kind === 'event' && frame.event.type === 'change') {
             const cs = frame.event.changeSet
             const saver = saverRef.current
-            if (!saver || cs.assetId !== boardId) return
+            if (cs.assetId !== boardId) return
             // A rename is a display change: the chip follows the new path.
             if (cs.op === 'move') { setReadPath(cs.assetPath); return }
-            if (cs.op || cs.resultVersion <= saver.baseVersion) return
+            if (cs.op || saver && cs.resultVersion <= saver.baseVersion) return
             // A snapshot we didn't write (another client, another window, or an
             // agent via the MCP face) — pull and reconcile it into the scene.
             void pullSnapshot()
@@ -540,8 +552,9 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
                         currentItemRoughness: 0,
                     },
                 }}
-                onChange={onChange}
-                onPointerUpdate={onPointerUpdate}
+                viewModeEnabled={!member}
+                onChange={member ? onChange : undefined}
+                onPointerUpdate={member ? onPointerUpdate : undefined}
                 theme={resolvedTheme}
                 isCollaborating
                 autoFocus
@@ -612,6 +625,7 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
                                 </div>
                                 <div className="mt-1 border-t border-border pt-1">
                                     <input
+                                        disabled={!member}
                                         placeholder="New board…"
                                         className="h-8 w-full rounded-md bg-transparent px-2 text-[13px] text-foreground outline-none placeholder:text-muted-foreground focus:bg-accent/30"
                                         onKeyDown={(e) => {
@@ -648,8 +662,8 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
                     canvas actions stay. Theme follows the app; save is automatic. */}
                 <MainMenu>
                     <MainMenu.DefaultItems.SaveAsImage />
-                    <MainMenu.DefaultItems.ClearCanvas />
-                    <MainMenu.DefaultItems.ChangeCanvasBackground />
+                    {member && <MainMenu.DefaultItems.ClearCanvas />}
+                    {member && <MainMenu.DefaultItems.ChangeCanvasBackground />}
                 </MainMenu>
                 {/* Our empty state, not the stock one (Excalidraw wordmark + data
                     pitch): what this surface is, in the app's voice. */}

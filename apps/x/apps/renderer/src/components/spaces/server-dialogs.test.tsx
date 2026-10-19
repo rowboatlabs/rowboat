@@ -32,21 +32,42 @@ afterEach(() => {
 })
 
 it.each([
-    ['Create a free server', 'Create a server'],
+    ['Create a group chat', 'Create a group chat'],
     ['Join a server', 'Join a server'],
 ])('routes %s from the chooser to the existing dialog', async (label, destination) => {
     render(<DialogFlow />)
-    expect(screen.getByRole('dialog', { name: 'Add a server' })).toBeVisible()
+    expect(screen.getByRole('dialog', { name: 'New group chat' })).toBeVisible()
     await act(async () => {
         fireEvent.click(screen.getByRole('button', { name: new RegExp(label) }))
     })
     expect(screen.getAllByRole('dialog')).toHaveLength(1)
     expect(screen.getByRole('dialog', { name: destination })).toBeVisible()
-    expect(screen.queryByRole('dialog', { name: 'Add a server' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'New group chat' })).toBeNull()
 })
 
 it('dismisses the chooser without entering either flow', () => {
     render(<DialogFlow />)
     fireEvent.click(screen.getByRole('button', { name: 'Close' }))
     expect(screen.queryByRole('dialog')).toBeNull()
+})
+
+// Back from a sign-in that Join started (the web app, 2026-10-15): the card
+// joins without a second click; any other opening waits for one.
+it.each([
+    [true, 1],
+    [false, 0],
+])('with autoJoin %s, joins %i time(s) once the invite resolves', async (autoJoin, joins) => {
+    const invoke = vi.fn(async (channel: string) => {
+        if (channel === 'spaces:resolveInviteLink') return { baseUrl: 'https://acme.test', resolved: { state: 'ok', org: { name: 'Acme' }, space: { name: 'launch' } } }
+        if (channel === 'spaces:joinInvite') return { org: { id: 'o', name: 'Acme' }, space: { id: 's', name: 'launch' } }
+        return {}
+    })
+    vi.stubGlobal('ipc', { invoke })
+    render(<ServerDialogs onDone={vi.fn()} />)
+    await act(async () => {
+        openServerDialog({ kind: 'join', inviteUrl: 'https://acme.test/join/tok', autoJoin })
+    })
+    await act(async () => {})
+    expect(invoke.mock.calls.filter(([channel]) => channel === 'spaces:joinInvite')).toHaveLength(joins)
+    if (!autoJoin) expect(screen.getByText('launch')).toBeVisible()
 })

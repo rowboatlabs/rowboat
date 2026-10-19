@@ -1,0 +1,47 @@
+# Spaces on the web
+
+The renderer's Spaces section also builds as a standalone web app (2026-10-09): `web.html` → `src/web/main.tsx`, served from a domain instead of `app://`. It is the desktop's own components; only the host underneath differs.
+
+## How it works
+
+- **The same `window.ipc` contract, served in the tab.**
+  - `src/web/host.ts` installs it before the app loads.
+  - `src/web/handlers.ts` answers the Spaces channels. Every channel that is one Harbor call comes from the shared table in `@x/spaces-client` (`channels.ts`), the same one the desktop serves. The rest are the browser's own: sign-in, the org list, uploads from bytes.
+  - Any other channel is refused by name, the way a failed IPC call already fails.
+- **Talks to Harbor directly.** It calls each org's host cross-origin, which Harbor allows for the origins in `HARBOR_WEB_ORIGINS` (`apps/harbor/CONTRACT.md`).
+- **Sign-in** is the phone's journey as a full-page redirect (`src/web/account.ts`): the apex names the authorization server, the browser registers itself once, PKCE carries the round trip. Tokens live in `localStorage`, and a refresh runs under a Web Lock so two tabs don't spend the same rotating refresh token. The access token's only use is minting Harbor's session cookie.
+- **The web app's own chrome** (2026-10-13). A slim rail on the left, as Slack's web client has, with your account at the bottom (`src/web/account-menu.tsx`): your name and role on each server (Harbor's `me`), your email (the access token's claim), a link to the desktop app, and Sign out. Signing out forgets the tokens and clears Harbor's cookie, as the desktop's sign-out forgets its own. Ending the session at the sign-in server too would need Supabase's publishable key, which neither app has. Signed out, the app shows a sign-in page (`src/web/signed-out.tsx`), and signing in returns to the address it started from.
+- **Notifications** (2026-10-15, `src/web/notifications.ts`). Harbor decides who is told: a `notify` frame on the member channel says a message mentioned you, used @here, landed in your DM, or replied in a thread you follow. The desktop shows these while no window is focused, and the web app does the same while its tab isn't focused. Clicking one opens the message in its thread. A browser asks for permission only after a click, so a one-time banner offers it, and the account menu keeps an on/off switch. Nothing arrives with no tab open, which would need Web Push from Harbor. The tab's title and icon carry the desktop dock badge's count (`src/web/tab-badge.ts`): "(3)" for messages for you, "•" for anything else unread.
+- **The address bar is the navigation** (`src/web/routes.ts`): `/<org>/s/<space>`, `…/t/<thread>`, `…/a/<file>`, `/<org>/activity`.
+- **Shared links come in at `/open`** (`src/web/links.ts`, 2026-10-13). A share link stays on the org's own host. Opened in a browser, Harbor's page launches the desktop app and offers "open this link in your browser", which is `/open` with the desktop deep link's query. The link waits out a sign-in in `sessionStorage`, then `lib/spaces-link-open.ts` resolves it exactly as the desktop does. An invite opens the join dialog, which accepts on the session cookie, but only for orgs on this deployment: a self-hosted org's invite opens in the desktop app. Join clicked while signed out signs in first, and the join finishes when the page comes back, with no second click. The click waits in `sessionStorage`, never in the link, so a link can't join anyone on its own.
+- **Every Harbor call rides Harbor's session cookie** (`src/web/session.ts`; CONTRACT.md: `createSession`). The page mints the cookie at the apex from its access token, and mints it again when the token changes or a call is refused. The shared client's cookie mode sends credentials and no bearer, and the live socket opens with no token in its URL.
+- **Files and images load straight from the org's Harbor.**
+  - A blob URL is the org's own `/v1/spaces/<space>/blobs/<hash>`. A plain `<img>` loads it on the cookie, and Harbor streams it with immutable caching, so the browser fetches each blob once. In-page reads go through `fetchBlob`, which sends the cookie.
+  - Downloads are links with `download=1`.
+  - HTML documents render as `srcdoc` in the viewer's sandbox, without their relative files.
+- **No local runtime.** Nothing that needs the person's own machine is shown: `LOCAL_RUNTIME` in `lib/feature-flags.ts` is false here. That covers their Rowboat agent, scheduled sends and reminders, and voice.
+
+## Run it
+
+Against a local Harbor, with dev tokens and no sign-in. Harbor's dev binary already allows `http://localhost:5174`:
+
+```sh
+cd apps/harbor/packages/server && pnpm dev
+cd apps/x/apps/renderer && VITE_SPACES_DEV_HARBOR=http://localhost:4272 pnpm dev:web   # http://localhost:5174
+```
+
+`VITE_SPACES_DEV_MEMBER` picks who you are (default `ramnique`).
+
+Against a deployment, with real sign-in: set `VITE_SPACES_APEX_URL` (default production, `https://spaces.x.rowboatlabs.com`). That deployment's `HARBOR_WEB_ORIGINS` must list the page's origin.
+
+## Ship it
+
+- **Vercel.** The project's Root Directory is `apps/x/apps/renderer`. `vercel.json` there carries:
+  - the install and build commands, as `scripts/vercel-install.sh` and `scripts/vercel-build.sh`, because Vercel caps a command at 256 characters (Harbor's protocol package first, then the renderer's workspace dependencies)
+  - the rewrite of every path to `web.html`
+  - the Content Security Policy. Tokens sit in page storage, so no inline or foreign script may run, and `components/streamdown.tsx` sanitizes every Markdown it renders.
+- **Environment:** `VITE_SPACES_APEX_URL` for the deployment it serves. Two Vercel projects, one per deployment:
+  - staging: `https://staging.spaces.rowboatlabs.com`, with `VITE_SPACES_APEX_URL=https://spaces.staging.x.rowboatlabs.com`
+  - production: `https://spaces.rowboatlabs.com`, with the default apex
+- **The deploy build doesn't typecheck.** `build:web` is `vite build` only, because CI typechecks every PR. A web-only install has no Electron types, and the renderer's `tsc -b` reaches into the desktop's main process. pnpm is pinned with `npx pnpm@10`, because this workspace's lockfile is not in the Vercel project's root directory, so Vercel can't pick the pnpm version from it.
+- **Harbor:** `HARBOR_WEB_ORIGINS` on that deployment lists the web app's origin, and `HARBOR_WEB_APP_URL` names the web app, so a link opened in a browser offers it.

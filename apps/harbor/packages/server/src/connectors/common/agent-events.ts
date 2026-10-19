@@ -1,5 +1,3 @@
-import type { AgentEvent } from './api.js';
-
 // Reading a coding agent's own events (spec §8 Connectors: mirror, then
 // interpret). Replicas streams each agent's raw events, and its OpenAPI
 // documents the shapes of two: Claude Code (claude-assistant/-user/-result/
@@ -9,16 +7,15 @@ import type { AgentEvent } from './api.js';
 // "type + payload", so for them nothing here guesses (2026-09-30, Ramnique:
 // offer all six, with fallbacks): the connector shows "Working in Replicas"
 // and posts the links it knows when the turn ends. When Replicas documents
-// their events, their readers go here.
+// their events, their readers go here. Shared with the Conductor connector
+// (2026-10-06), which brings its transcript to the same Claude Code shape.
 
-export const CODING_AGENTS: Record<string, string> = {
-  'claude-code': 'claude',
-  codex: 'codex',
-  cursor: 'cursor',
-  opencode: 'opencode',
-  pi: 'pi',
-  'muse-code': 'muse',
-};
+/** One raw event from the coding agent: the shape of `payload` depends on the agent. */
+export interface AgentEvent {
+  timestamp?: string;
+  type: string;
+  payload?: unknown;
+}
 
 /** Whether the connector can read this coding agent's answers (the rest get the fallback). */
 export function readsAnswers(kind: string): boolean {

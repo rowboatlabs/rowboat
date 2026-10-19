@@ -23,7 +23,7 @@ import {
   VolumeX,
   X,
 } from 'lucide-react'
-import { Streamdown } from 'streamdown'
+import { Streamdown } from '@/components/streamdown'
 // The raw sonner Toaster, NOT the app's ui/sonner wrapper: the wrapper
 // calls useTheme(), which throws outside ThemeProvider — and this window
 // deliberately has no ThemeProvider. A render crash here paints the whole

@@ -324,12 +324,15 @@ export class Feed {
    * or nothing is posted (spec §8 Connectors, 2026-09-30). `approval`
    * (in-process only): this message is the agent's approval card, and the
    * approval rides on it, raised in the same transaction (spec §8 part 4).
+   * `relayOf` (in-process only): this message is Jev's tags for that one,
+   * and the agents it mentions take that message's hand-off depth (spec §8
+   * Jev, 2026-10-07).
    */
   async postMessage(
     ctx: ActorCtx,
     spaceId: string,
     input: NewMessage,
-    opts: { finishes?: string; approval?: { invocationId: string; request: ApprovalRequest } } = {},
+    opts: { finishes?: string; approval?: { invocationId: string; request: ApprovalRequest }; relayOf?: string } = {},
   ): Promise<{ message: Message; invocations: Invocation[] }> {
     const space = await this.k.requireMember(ctx, spaceId);
     this.k.guardWrite();
@@ -343,7 +346,12 @@ export class Feed {
     let finishing: Invocation | undefined;
     let raising: Invocation | undefined;
     const invoke = async (message: Message): Promise<{ message: Message; invocations: Invocation[] }> => {
-      const invocations = this.invocations ? await this.invocations.onMessage(ctx, space, message, input.agentOptions, outbox) : [];
+      if (!this.invocations) return { message, invocations: [] };
+      // Recorded before the answer below finishes its turn: Jev may tag
+      // someone for this message later, at this depth (spec §8 Jev, 2026-10-07).
+      const depth = await this.invocations.handOffDepth(ctx, spaceId, opts.relayOf);
+      if (depth > 0) await this.k.store.putMessageHops(spaceId, message.id, depth);
+      const invocations = await this.invocations.onMessage(ctx, space, message, input.agentOptions, depth, outbox);
       if (finishing && this.invocations) await this.invocations.finishWithin(finishing, outbox);
       return { message, invocations };
     };

@@ -3,6 +3,7 @@ import { getRequestListener } from '@hono/node-server';
 import { bindAuth, type AuthDriver, type OrgAuth } from './auth.js';
 import type { BlobStore } from './blobs.js';
 import { HostedConnectors } from './connectors/host.js';
+import { jevApiKey } from './connectors/jev/index.js';
 import { buildHttpApp } from './http.js';
 import type { SpaceHub } from './hub.js';
 import { handleMcpRequest } from './mcp.js';
@@ -37,6 +38,12 @@ export interface OrgRuntimeInput {
   consentPublishableKey?: string;
   /** Upload cap for the raw-bytes blob route (default 100MB). */
   maxBlobBytes?: number;
+  /** Browser origins allowed to call the render face cross-origin (cors.ts), and to use the session cookie (session.ts). */
+  webOrigins?: readonly string[];
+  /** The session cookie's Domain: the apex on a deployment. */
+  sessionCookieDomain?: string;
+  /** The Spaces web app, which an org link opened in a browser offers beside the desktop app (http.ts, the landings). */
+  webAppUrl?: string;
 }
 
 export interface OrgRuntime {
@@ -65,10 +72,13 @@ export async function buildOrgRuntime(input: OrgRuntimeInput): Promise<OrgRuntim
   // connection is a platform, from boot, and for each such agent added later.
   const connectors = new HostedConnectors({ store, hub, service, orgId: input.orgId });
   service.attachConnectors({
-    verify: (connection, secret) => connectors.verify(connection, secret),
+    verify: (connection, secret, target) => connectors.verify(connection, secret, target),
     save: (agentId, secret, setBy) => connectors.save(agentId, secret, setBy),
     added: (agent) => connectors.ensure(agent),
+    alert: (connection, payload) => connectors.alert(connection, payload),
   });
+  // Jev (spec §8 Jev, 2026-10-07): every org has it once the deployment has its key.
+  if (jevApiKey()) await service.ensureJev();
   await connectors.startAll();
   const auth = bindAuth(input.auth, store);
   const issuer = input.auth.metadata?.()?.authorizationServers[0];
@@ -78,6 +88,9 @@ export async function buildOrgRuntime(input: OrgRuntimeInput): Promise<OrgRuntim
       auth,
       ...(input.consentPublishableKey && issuer ? { consent: { issuer, publishableKey: input.consentPublishableKey } } : {}),
       ...(input.maxBlobBytes !== undefined ? { maxBlobBytes: input.maxBlobBytes } : {}),
+      ...(input.webOrigins ? { webOrigins: input.webOrigins } : {}),
+      ...(input.sessionCookieDomain ? { sessionCookieDomain: input.sessionCookieDomain } : {}),
+      ...(input.webAppUrl ? { webAppUrl: input.webAppUrl } : {}),
     }).fetch,
   );
   return {
@@ -90,7 +103,7 @@ export async function buildOrgRuntime(input: OrgRuntimeInput): Promise<OrgRuntim
       }
       render(req, res);
     },
-    live: { service, hub, auth },
+    live: { service, hub, auth, webOrigins: new Set(input.webOrigins ?? []) },
     close: () => connectors.stopAll(),
   };
 }

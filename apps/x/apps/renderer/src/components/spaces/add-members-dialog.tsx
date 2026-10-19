@@ -1,3 +1,4 @@
+import { invokeSpace } from '@/lib/spaces-invoke'
 import { useEffect, useMemo, useState } from 'react'
 import { Check, Loader2 } from 'lucide-react'
 import type { spaces } from '@x/shared'
@@ -32,7 +33,8 @@ export function AddMembersDialog({ org, space, members, open, onOpenChange }: {
     const inSpace = useMemo(() => new Set(members.map((m) => m.id)), [members])
     const candidates = useMemo(() => {
         const q = query.trim().toLowerCase()
-        return roster.filter((m) => !inSpace.has(m.id) && (!q || m.displayName.toLowerCase().includes(q)))
+        // A deleted account is never offered (2026-10-13): Harbor refuses the add.
+        return roster.filter((m) => !inSpace.has(m.id) && !m.deactivatedAt && (!q || m.displayName.toLowerCase().includes(q)))
     }, [roster, inSpace, query])
 
     useEffect(() => {
@@ -53,7 +55,7 @@ export function AddMembersDialog({ org, space, members, open, onOpenChange }: {
         if (picked.size === 0 || adding) return
         setAdding(true)
         try {
-            await window.ipc.invoke('spaces:addMembers', { orgId: org.id, spaceId: space.id, memberIds: [...picked] })
+            await invokeSpace('spaces:addMembers', { orgId: org.id, spaceId: space.id, memberIds: [...picked] })
             refreshMembers(org.id, space.id, { force: true })
             toast(picked.size === 1 ? `Added to #${space.name}` : `Added ${picked.size} to #${space.name}`, 'success')
             onOpenChange(false)

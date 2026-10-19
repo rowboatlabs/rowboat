@@ -1,3 +1,6 @@
+import { invokeSpace } from '@/lib/spaces-invoke'
+import { LOCAL_RUNTIME } from '@/lib/feature-flags'
+import { useSpaceAccess, JoinSpacePrompt } from '@/lib/spaces-access'
 import { MESSAGE_PROSE } from '@/components/spaces/message-prose'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
@@ -94,6 +97,7 @@ export function ThreadPane({
     /** False while kept mounted but off screen (read mode, hidden Spaces view) — no presence, no read marks. */
     visible?: boolean
 }) {
+    const { member } = useSpaceAccess()
     // The cached copy from the last open — plus any replies that streamed in
     // live while the pane was closed. Seeding paints the whole thread in the
     // first frame; the fetch below reconciles right behind it. A PARTIAL
@@ -134,7 +138,7 @@ export function ThreadPane({
     const parkedTopRef = useRef<number | null>(null)
     /** Composer prefill (quote-reply, mention-from-profile); a new nonce re-applies it. */
     const [seed, setSeed] = useState<{ text: string; nonce: number; append?: boolean } | null>(null)
-    const { onType } = usePresenceSender(org.id, space.id, rootMessageId, visible)
+    const { onType } = usePresenceSender(org.id, space.id, rootMessageId, visible && member)
     // The plain-text faces (quotes, titles, copies) name a space token by its current name.
     const spaceNames = useSpaceNames(org.id)
 
@@ -291,8 +295,7 @@ export function ThreadPane({
         // pane this way (every event ticks); they stay out of the window.
         const detachedAt = hasMoreAfterRef.current ? newestOffset(messagesRef.current, 0) : null
         const gen = windowGenRef.current
-        void window.ipc
-            .invoke('spaces:listThread', {
+        void invokeSpace('spaces:listThread', {
                 orgId: org.id, spaceId: space.id, rootMessageId, ...(detachedAt !== null ? { afterOffset: detachedAt } : {}),
             })
             .then((res) => {
@@ -320,7 +323,7 @@ export function ThreadPane({
                     setHasMore(res.hasMore)
                 }
                 setLoaded(true)
-                if (visibleRef.current) markThreadRead(org.id, space.id, rootMessageId, newestOffset(res.messages, res.root.offset))
+                if (member && visibleRef.current) markThreadRead(org.id, space.id, rootMessageId, newestOffset(res.messages, res.root.offset))
             })
             .catch(() => {})
         return () => {
@@ -345,7 +348,7 @@ export function ThreadPane({
     // Marks only advance, so a detached window never regresses one, and
     // paging forward (or snapping back) moves it on.
     useEffect(() => {
-        if (visible && loaded && root) markThreadRead(org.id, space.id, rootMessageId, newestOffset(messages, root.offset))
+        if (member && visible && loaded && root) markThreadRead(org.id, space.id, rootMessageId, newestOffset(messages, root.offset))
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [visible, loaded, org.id, space.id, rootMessageId, messages.length, hasMoreAfter])
 
@@ -355,7 +358,7 @@ export function ThreadPane({
         setLoadingOlder(true)
         const gen = windowGenRef.current
         try {
-            const res = await window.ipc.invoke('spaces:listThread', {
+            const res = await invokeSpace('spaces:listThread', {
                 orgId: org.id, spaceId: space.id, rootMessageId, beforeOffset: oldest.offset,
             })
             if (gen !== windowGenRef.current) return
@@ -375,7 +378,7 @@ export function ThreadPane({
         loadingNewerRef.current = true
         const gen = windowGenRef.current
         try {
-            const res = await window.ipc.invoke('spaces:listThread', {
+            const res = await invokeSpace('spaces:listThread', {
                 orgId: org.id, spaceId: space.id, rootMessageId, afterOffset: newest,
             })
             if (gen !== windowGenRef.current) return
@@ -397,7 +400,7 @@ export function ThreadPane({
         if (!hasMoreAfterRef.current) return
         setSnapping(true)
         try {
-            const res = await window.ipc.invoke('spaces:listThread', { orgId: org.id, spaceId: space.id, rootMessageId })
+            const res = await invokeSpace('spaces:listThread', { orgId: org.id, spaceId: space.id, rootMessageId })
             windowGenRef.current += 1
             noteNewestPage(res)
             setMessages(res.messages)
@@ -417,7 +420,7 @@ export function ThreadPane({
     const ownActivity = useSpaceAgentActivity(org.id, space.id)
     // Your own agent, blocked mid-turn on a tool permission: surface it here
     // instead of letting it idle behind a "working…" spinner (or silence).
-    const permissionWait = useTopicAgentPermissionWait(org.id, space.id, rootMessageId, visible)
+    const permissionWait = useTopicAgentPermissionWait(org.id, space.id, rootMessageId, visible && member)
     // While blocked, the amber pill replaces the own-agent spinner.
     const spinningAgents = permissionWait.length > 0 ? workingAgents.filter((id) => id !== org.memberId) : workingAgents
 
@@ -468,7 +471,7 @@ export function ThreadPane({
         void (async () => {
             try {
                 const offset = await resolveJumpOffset(org.id, space.id, jump.anchor)
-                const res = await window.ipc.invoke('spaces:listThread', {
+                const res = await invokeSpace('spaces:listThread', {
                     orgId: org.id, spaceId: space.id, rootMessageId, aroundOffset: offset,
                 })
                 if (pendingJumpRef.current !== jump) return
@@ -608,7 +611,7 @@ export function ThreadPane({
             ...(root?.lastReplyOffset !== undefined ? { lastReplyOffset: root.lastReplyOffset } : {}),
         })
         try {
-            const res = await window.ipc.invoke('spaces:followThread', { orgId: org.id, spaceId: space.id, rootMessageId, following: next })
+            const res = await invokeSpace('spaces:followThread', { orgId: org.id, spaceId: space.id, rootMessageId, following: next })
             noteThread(org.id, space.id, rootMessageId, { following: res.following, readOffset: res.readOffset })
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not update following', 'error')
@@ -628,8 +631,7 @@ export function ThreadPane({
         }
         const pending = buildPendingMessage(space.id, org.memberId, body, rootMessageId)
         setMessages((prev) => [...prev, pending])
-        void window.ipc
-            .invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body, ...agentOptionsPayload(agent) })
+        void invokeSpace('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body, ...agentOptionsPayload(agent) })
             .then((result) => {
                 noteInvocations(org.id, space.id, result.invocations)
                 setMessages((prev) => {
@@ -669,7 +671,7 @@ export function ThreadPane({
         onFolding?.(true)
         try {
             const body = `[@rowboat](#rowboat) fold this thread’s decision into \`${file.path}\` (assetId ${file.assetId}) — keep the file’s structure and put it under the right section. End your change reason with “· thread:${rootMessageId}”.`
-            const result = await window.ipc.invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body })
+            const result = await invokeSpace('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body })
             echo(result.message)
             noteThread(org.id, space.id, rootMessageId, { following: true, readOffset: result.message.offset, lastReplyOffset: result.message.offset })
             analytics.spacesFoldRequested()
@@ -691,7 +693,7 @@ export function ThreadPane({
         if (message.id === root?.id) setRoot(fold_(root))
         else setMessages((prev) => prev.map((m) => (m.id === message.id ? fold_(m) : m)))
         try {
-            const { message: updated } = await window.ipc.invoke('spaces:reactToMessage', {
+            const { message: updated } = await invokeSpace('spaces:reactToMessage', {
                 orgId: org.id, spaceId: space.id, messageId: message.id, emoji, action,
             })
             if (updated.id === root?.id) setRoot(updated)
@@ -755,7 +757,7 @@ export function ThreadPane({
         try {
             let updated: spaces.Message | undefined
             for (const answerId of answerIds) {
-                const res = await window.ipc.invoke('spaces:votePoll', {
+                const res = await invokeSpace('spaces:votePoll', {
                     orgId: org.id, spaceId: space.id, messageId: message.id, answerId, action: 'add',
                 })
                 updated = res.message
@@ -779,7 +781,7 @@ export function ThreadPane({
         try {
             let updated: spaces.Message | undefined
             for (const answerId of mine) {
-                const res = await window.ipc.invoke('spaces:votePoll', {
+                const res = await invokeSpace('spaces:votePoll', {
                     orgId: org.id, spaceId: space.id, messageId: message.id, answerId, action: 'remove',
                 })
                 updated = res.message
@@ -794,7 +796,7 @@ export function ThreadPane({
     const endPoll = async (message: spaces.Message) => {
         if (!window.confirm('End this poll now? Voting stops immediately.')) return
         try {
-            const { message: updated } = await window.ipc.invoke('spaces:endPoll', {
+            const { message: updated } = await invokeSpace('spaces:endPoll', {
                 orgId: org.id, spaceId: space.id, messageId: message.id,
             })
             reconcile(updated)
@@ -807,7 +809,7 @@ export function ThreadPane({
     const editMessage = async (message: spaces.Message, body: string) => {
         setMessages((prev) => prev.map((m) => (m.id === message.id ? { ...m, body, editedAt: new Date().toISOString() } : m)))
         try {
-            const { message: updated } = await window.ipc.invoke('spaces:editMessage', {
+            const { message: updated } = await invokeSpace('spaces:editMessage', {
                 orgId: org.id, spaceId: space.id, messageId: message.id, body,
             })
             setMessages((prev) => prev.map((m) => (m.id === updated.id ? updated : m)))
@@ -820,7 +822,7 @@ export function ThreadPane({
     const deleteMessage = async (message: spaces.Message) => {
         if (!window.confirm('Delete this message? This cannot be undone.')) return
         try {
-            const { message: deleted } = await window.ipc.invoke('spaces:deleteMessage', {
+            const { message: deleted } = await invokeSpace('spaces:deleteMessage', {
                 orgId: org.id, spaceId: space.id, messageId: message.id,
             })
             setMessages((prev) => prev.map((m) => (m.id === deleted.id ? deleted : m)))
@@ -835,7 +837,7 @@ export function ThreadPane({
     const manage = async (action: spaces.SpacesManageTopicAction) => {
         if (!topic) return
         try {
-            const res = await window.ipc.invoke('spaces:manageTopic', { orgId: org.id, spaceId: space.id, topicId: topic.id, action })
+            const res = await invokeSpace('spaces:manageTopic', { orgId: org.id, spaceId: space.id, topicId: topic.id, action })
             if (action.action === 'remove') {
                 setTopic(null)
                 removeTopicByRoot(org.id, space.id, rootMessageId)
@@ -853,7 +855,7 @@ export function ThreadPane({
         const trimmed = title.trim()
         if (!trimmed) return
         try {
-            const res = await window.ipc.invoke('spaces:createTopic', { orgId: org.id, spaceId: space.id, rootMessageId, title: trimmed })
+            const res = await invokeSpace('spaces:createTopic', { orgId: org.id, spaceId: space.id, rootMessageId, title: trimmed })
             setTopic(res.topic)
             ingestTopic(org.id, space.id, res.topic)
             analytics.spacesTopicStarted()
@@ -886,7 +888,7 @@ export function ThreadPane({
             return
         }
         try {
-            const { sessionId } = await window.ipc.invoke('spaces:topicSession', { orgId: org.id, spaceId: space.id, threadRootId: rootMessageId })
+            const { sessionId } = await invokeSpace('spaces:topicSession', { orgId: org.id, spaceId: space.id, threadRootId: rootMessageId })
             if (sessionId && onOpenSession) onOpenSession(sessionId)
             else if (!sessionId) toast('No agent session for this thread yet', 'info')
         } catch {
@@ -905,8 +907,7 @@ export function ThreadPane({
     const [hasSession, setHasSession] = useState(false)
     useEffect(() => {
         let cancelled = false
-        void window.ipc
-            .invoke('spaces:topicSession', { orgId: org.id, spaceId: space.id, threadRootId: rootMessageId })
+        void invokeSpace('spaces:topicSession', { orgId: org.id, spaceId: space.id, threadRootId: rootMessageId })
             .then((res) => {
                 if (!cancelled) setHasSession(!!res.sessionId)
             })
@@ -924,7 +925,7 @@ export function ThreadPane({
     const stopRowboat = async () => {
         setStopping(true)
         try {
-            const { stopped } = await window.ipc.invoke('spaces:stopRowboat', { orgId: org.id, spaceId: space.id, threadRootId: rootMessageId })
+            const { stopped } = await invokeSpace('spaces:stopRowboat', { orgId: org.id, spaceId: space.id, threadRootId: rootMessageId })
             if (!stopped) toast('Nothing to stop — the run already finished', 'info')
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not stop the run', 'error')
@@ -1045,7 +1046,7 @@ export function ThreadPane({
                         variant="ghost"
                         size="xs"
                         className={cn('gap-1 px-2', following ? 'text-foreground' : 'text-muted-foreground')}
-                        onClick={() => void toggleFollow()}
+                        disabled={!member} onClick={() => void toggleFollow()}
                         title={following ? 'Following — new replies here badge you. Click to stop.' : 'Follow — new replies here will badge you.'}
                     >
                         {following ? <BellOff className="size-3.5" /> : <Bell className="size-3.5" />} {following ? 'Following' : 'Follow'}
@@ -1063,28 +1064,28 @@ export function ThreadPane({
                         <DropdownMenuSeparator />
                         {topic ? (
                             <>
-                                <DropdownMenuItem onClick={() => setEditingTitle(topic.title)}>
+                                <DropdownMenuItem disabled={!member} onClick={() => setEditingTitle(topic.title)}>
                                     <Pencil className="size-3.5 mr-2" /> Rename
                                 </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => setAttaching(true)}>
+                                <DropdownMenuItem disabled={!member} onClick={() => setAttaching(true)}>
                                     <Paperclip className="size-3.5 mr-2" /> {topic.documentAssetId ? 'Change linked file…' : 'Link a file…'}
                                 </DropdownMenuItem>
                                 {topic.documentAssetId && (
-                                    <DropdownMenuItem onClick={() => void manage({ action: 'detach_document' })}>
+                                    <DropdownMenuItem disabled={!member} onClick={() => void manage({ action: 'detach_document' })}>
                                         <Unlink className="size-3.5 mr-2" /> Unlink file
                                     </DropdownMenuItem>
                                 )}
                                 {topic.archived ? (
-                                    <DropdownMenuItem onClick={() => void manage({ action: 'unarchive' })}><ArchiveRestore className="size-3.5 mr-2" /> Unarchive</DropdownMenuItem>
+                                    <DropdownMenuItem disabled={!member} onClick={() => void manage({ action: 'unarchive' })}><ArchiveRestore className="size-3.5 mr-2" /> Unarchive</DropdownMenuItem>
                                 ) : (
-                                    <DropdownMenuItem onClick={() => void manage({ action: 'archive' })}><Archive className="size-3.5 mr-2" /> Archive</DropdownMenuItem>
+                                    <DropdownMenuItem disabled={!member} onClick={() => void manage({ action: 'archive' })}><Archive className="size-3.5 mr-2" /> Archive</DropdownMenuItem>
                                 )}
-                                <DropdownMenuItem onClick={() => void manage({ action: 'remove' })}>
+                                <DropdownMenuItem disabled={!member} onClick={() => void manage({ action: 'remove' })}>
                                     <MessageSquareOff className="size-3.5 mr-2" /> Convert back to thread
                                 </DropdownMenuItem>
                             </>
                         ) : (
-                            <DropdownMenuItem onClick={() => setEditingTitle('')}>
+                            <DropdownMenuItem disabled={!member} onClick={() => setEditingTitle('')}>
                                 <Tag className="size-3.5 mr-2" /> Make this a discussion…
                             </DropdownMenuItem>
                         )}
@@ -1263,7 +1264,7 @@ export function ThreadPane({
                                     <button
                                         className="flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:opacity-60"
                                         title="Stop your Rowboat"
-                                        disabled={stopping}
+                                        disabled={!member || stopping}
                                         onClick={() => void stopRowboat()}
                                     >
                                         {stopping ? <Loader2 className="size-2.5 animate-spin" /> : <Square className="size-2.5 fill-current" />} Stop
@@ -1303,7 +1304,7 @@ export function ThreadPane({
             )}
             </div>
 
-            {attaching && topic && (
+            {member && attaching && topic && (
                 <AttachDocumentDialog
                     entries={entries}
                     current={topic.documentAssetId}
@@ -1314,10 +1315,10 @@ export function ThreadPane({
                     }}
                 />
             )}
-            {forwarding && (
+            {member && forwarding && (
                 <ForwardDialog org={org} space={space} message={forwarding} memberNames={memberNames} onClose={() => setForwarding(null)} />
             )}
-            <PollDialogHost openRef={openPollRef} onSubmit={createPoll} />
+            {member && <PollDialogHost openRef={openPollRef} onSubmit={createPoll} />}
             <FindBanner
                 orgId={org.id}
                 spaceId={space.id}
@@ -1336,13 +1337,13 @@ export function ThreadPane({
                     dismissTitle="Looks right: keep it here as a draft"
                 />
             )}
-            <Composer
+            {member ? <Composer
                 placeholder="Reply…"
                 busy={false}
                 onSend={post}
-                onSchedule={async (body, at) => {
+                onSchedule={!LOCAL_RUNTIME ? undefined : async (body, at) => {
                     clearStagedThreadDraft(draftKey)
-                    await window.ipc.invoke('spaces:schedule', {
+                    await invokeSpace('spaces:schedule', {
                         orgId: org.id, spaceId: space.id, threadRootId: rootMessageId, body, at: at.toISOString(), kind: 'message',
                     })
                     toast(`Scheduled — sends ${formatScheduleTime(at)}`, 'success')
@@ -1392,18 +1393,19 @@ export function ThreadPane({
                                   : { name: 'archive', hint: 'Archive this discussion — it leaves the rail until a new reply revives it', run: () => void manage({ action: 'archive' }) },
                           ]
                         : []),
-                    {
+                    // Scheduled sends live on the desktop (core's scheduler), so the browser has no /remind.
+                    ...(LOCAL_RUNTIME ? [{
                         name: 'remind',
                         args: '<when> <text>',
                         hint: 'Set a reminder — 20m, 2h, 9:30, tomorrow',
-                        run: async (args) => {
+                        run: async (args: string) => {
                             const parsed = parseRemindArgs(args)
                             if (typeof parsed === 'string') {
                                 toast(parsed, 'info')
                                 return
                             }
                             try {
-                                await window.ipc.invoke('spaces:schedule', {
+                                await invokeSpace('spaces:schedule', {
                                     orgId: org.id, spaceId: space.id, threadRootId: rootMessageId, body: parsed.text, at: parsed.at.toISOString(), kind: 'reminder',
                                 })
                                 toast(`Reminder set for ${formatScheduleTime(parsed.at)}`, 'success')
@@ -1411,13 +1413,13 @@ export function ThreadPane({
                                 toast(err instanceof Error ? err.message : 'Could not set the reminder', 'error')
                             }
                         },
-                    },
+                    }] : []),
                     {
                         name: 'invite',
                         hint: 'Copy an invite link to this space',
                         run: async () => {
                             try {
-                                const result = await window.ipc.invoke('spaces:createInvite', { orgId: org.id, spaceId: space.id })
+                                const result = await invokeSpace('spaces:createInvite', { orgId: org.id, spaceId: space.id })
                                 await navigator.clipboard.writeText(result.link)
                                 analytics.spacesInviteLinkCopied()
                                 toast('Invite link copied to clipboard', 'success')
@@ -1427,7 +1429,7 @@ export function ThreadPane({
                         },
                     },
                 ]}
-            />
+            /> : <JoinSpacePrompt />}
 
         </div>
     )

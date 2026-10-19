@@ -11,8 +11,9 @@ import {
 } from '@rowboat/spaces-protocol';
 import { randomBytes } from 'node:crypto';
 import type { z } from 'zod';
+import type { BlobStore } from '../blobs.js';
 import { HarborError } from '../errors.js';
-import { canBind, canChangeMembership, canJoinSpace, canRenameSpace, enforce } from '../policy.js';
+import { canArchiveSpace, canBind, canDeleteSpace, canChangeMembership, canJoinSpace, canOpenDirect, canReachMember, canRenameSpace, canSignIn, canWriteSpace, enforce, isGroupChat } from '../policy.js';
 import { DIRECT_SPACE_NAME, directKeyFor, type PushLevel, type StoredEvent } from '../store.js';
 import { Kernel, type ActorCtx, type BindIdentity } from './kernel.js';
 
@@ -31,11 +32,16 @@ function seedDisplayName(identity: BindIdentity): string {
 
 export type RenameSpaceInput = z.infer<Routes['renameSpace']['request']>;
 export type AddMembersInput = z.infer<Routes['addMembers']['request']>;
+export type ArchiveSpaceInput = z.infer<Routes['archiveSpace']['request']>;
 
 const DEFAULT_INVITE_HOURS = 24 * 7;
 
 export class Spaces {
-  constructor(private readonly k: Kernel) {}
+  constructor(
+    private readonly k: Kernel,
+    /** The org's blob bytes: deleting a space removes the ones nothing else uses. Absent = uploads unconfigured. */
+    private readonly blobs?: BlobStore,
+  ) {}
 
   // --- identity --------------------------------------------------------------
 
@@ -53,7 +59,7 @@ export class Spaces {
    * its own: the integration that owns the agent calls this and gates who may.
    * The first is the Replicas coding agent (PR #1130).
    */
-  async createAgent(input: { displayName: string; ownerId?: string; agentKind?: string; agentConnection?: string }): Promise<Member> {
+  async createAgent(input: { displayName: string; ownerId?: string; agentKind?: string; agentConnection?: string; agentInstance?: string }): Promise<Member> {
     const displayName = input.displayName.trim();
     if (!Member.shape.displayName.safeParse(displayName).success) {
       throw new HarborError('invalid_request', 'an agent needs a display name of 1 to 128 characters');
@@ -69,6 +75,7 @@ export class Spaces {
       ...(input.ownerId ? { ownerId: input.ownerId } : {}),
       agentKind: input.agentKind ?? 'custom',
       agentConnection: input.agentConnection ?? 'contract',
+      ...(input.agentInstance ? { agentInstance: input.agentInstance } : {}),
     };
     await this.k.store.putMember(member);
     return member;
@@ -78,6 +85,11 @@ export class Spaces {
 
   async listSpaces(ctx: ActorCtx, opts: { includeDirect?: boolean } = {}): Promise<Space[]> {
     return this.k.store.listSpacesFor(ctx.memberId, opts);
+  }
+
+  /** Whether the org is a group chat right now (policy.ts isGroupChat): the same answer for every member. */
+  async isGroupChat(): Promise<boolean> {
+    return isGroupChat(await this.k.store.countSpacesByKind());
   }
 
   async browseSpaces(ctx: ActorCtx): Promise<Array<{ space: Space; joined: boolean }>> {
@@ -92,6 +104,7 @@ export class Spaces {
       enforce(canJoinSpace(space));
       const existing = await this.k.store.getMembership(spaceId, ctx.memberId);
       if (existing) return { space, membership: existing, created: false };
+      enforce(canWriteSpace(space)); // an archived space takes no new members (2026-10-13)
       this.k.guardWrite();
       const membership: Membership = { spaceId, memberId: ctx.memberId, joinedAt: this.k.now() };
       await this.k.store.putMembership(membership);
@@ -107,9 +120,10 @@ export class Spaces {
   async createSpace(ctx: ActorCtx, name: string, visibility: Space['visibility'] = 'private'): Promise<Space> {
     this.k.guardWrite();
     const now = this.k.now();
-    const space: Space = { id: this.k.ulid(), name, createdAt: now, kind: 'shared', visibility };
+    const space: Space = { id: this.k.ulid(), name, createdAt: now, kind: 'shared', visibility, archived: false };
+    const wasGroupChat = await this.isGroupChat();
     await this.k.store.putSpace(space);
-    return this.k.locked(space.id, async () => {
+    const created = await this.k.locked(space.id, async () => {
       const membership: Membership = { spaceId: space.id, memberId: ctx.memberId, joinedAt: now };
       await this.k.store.putMembership(membership);
       await this.k.appendNext(space.id, now, { type: 'membership', membership, action: 'joined' });
@@ -117,6 +131,15 @@ export class Spaces {
       // space's root messages, born empty.
       return space;
     });
+    // A second space makes a group chat a workspace for everyone at once
+    // (2026-10-07), including members who are not in the new space: tell
+    // every member's connections so their listings move with it.
+    if (wasGroupChat) {
+      for (const member of await this.k.store.listAllMembers()) {
+        this.k.hub.publishToMember(member.id, { kind: 'org_changed', at: now });
+      }
+    }
+    return created;
   }
 
   /**
@@ -142,6 +165,81 @@ export class Spaces {
   }
 
   /**
+   * Archive a shared space (spec §6, 2026-10-13): an admin act, in the
+   * renameSpace shape. The space lock then refuses every member's write
+   * (kernel.ts lockedAs); reads, read marks and leaving go on. Archiving an
+   * archived space is a no-op with no event.
+   */
+  async archiveSpace(ctx: ActorCtx, spaceId: string, input: ArchiveSpaceInput): Promise<Space> {
+    return this.setArchived(ctx, spaceId, input, true);
+  }
+
+  /** Unarchive: the same act reversed; a live space is a no-op with no event. */
+  async unarchiveSpace(ctx: ActorCtx, spaceId: string, input: ArchiveSpaceInput): Promise<Space> {
+    return this.setArchived(ctx, spaceId, input, false);
+  }
+
+  private async setArchived(ctx: ActorCtx, spaceId: string, input: ArchiveSpaceInput, archived: boolean): Promise<Space> {
+    const space = await this.k.requireMember(ctx, spaceId);
+    enforce(canArchiveSpace(await this.me(ctx), space, archived ? 'archive' : 'unarchive'));
+    this.k.guardWrite();
+    const by = this.k.attributionOf(ctx, input);
+    return this.k.lockedAs(ctx, spaceId, async () => {
+      const current = (await this.k.store.getSpace(spaceId)) ?? space;
+      if (current.archived === archived) return current; // idempotent, no event
+      const updated: Space = { ...current, archived };
+      await this.k.store.putSpace(updated);
+      await this.k.appendNext(spaceId, this.k.now(), { type: archived ? 'space_archived' : 'space_unarchived', space: updated, by });
+      return updated;
+    }, { archived: 'allow' });
+  }
+
+  /**
+   * Delete a shared space (spec §6, the deletion doctrine; built 2026-10-14):
+   * an admin act, on the same terms as archive, and allowed on an archived
+   * space. One statement drops the space and, through the cascade (migration
+   * 039), every row that hangs off it. No undo and no event: the log goes
+   * with it.
+   *
+   * No write guard: over its limit an org cannot grow, but it may shrink
+   * (policy.ts canWrite), as anyone may leave.
+   *
+   * What the delete erases is read first, inside the lock. Everything that
+   * cannot be undone waits for the commit: the frames, because hub frames do
+   * not ride the lock's outbox, and the blob bytes, because a rolled-back
+   * delete must still find its files.
+   */
+  async deleteSpace(ctx: ActorCtx, spaceId: string): Promise<void> {
+    const space = await this.k.requireMember(ctx, spaceId);
+    enforce(canDeleteSpace(await this.me(ctx), space));
+    const at = this.k.now();
+    const { hashes, told } = await this.k.lockedAs(ctx, spaceId, async () => {
+      const current = (await this.k.store.getSpace(spaceId)) ?? space;
+      // An open space may be open in anyone's window, member or not; a
+      // private one is known only to its members, and only they are told.
+      const told = current.visibility === 'open'
+        ? await this.k.store.listAllMembers()
+        : await this.k.store.listSpaceMembers(spaceId);
+      const hashes = await this.k.store.listSpaceBlobHashes(spaceId);
+      await this.k.store.deleteSpace(spaceId);
+      return { hashes, told };
+    }, { archived: 'allow' });
+    if (this.blobs) {
+      for (const hash of await this.k.store.unreferencedBlobs(hashes)) {
+        // The space is already gone: a byte delete that fails leaves garbage
+        // for the blob sweep (spec §12), never a broken space, so it is
+        // logged rather than failing a delete that has happened.
+        await this.blobs.delete(hash).catch((err: unknown) => {
+          console.warn(`[harbor] space ${spaceId} deleted; blob ${hash} not removed:`, err);
+        });
+      }
+    }
+    for (const member of told) {
+      this.k.hub.publishToMember(member.id, { kind: 'space_removed', spaceId, by: ctx.memberId, at });
+    }
+  }
+
+  /**
    * Direct messages (api.ts openDirect): get-or-create the one DM between
    * the caller and `otherMemberId`. Membership is written for both under the
    * new space's lock — two `joined` events are the whole membership history
@@ -161,15 +259,17 @@ export class Spaces {
     if (!self) {
       const other = await this.k.store.getMember(otherMemberId);
       if (!other) throw new HarborError('not_found', 'no such member on this org');
+      enforce(canReachMember(other));
     }
     const participants = self ? [ctx.memberId] : [ctx.memberId, otherMemberId].sort();
     const key = directKeyFor(participants);
     const existing = await this.k.store.getDirectSpace(key);
     if (existing) return { space: existing, created: false };
 
+    enforce(canOpenDirect(await this.isGroupChat()));
     this.k.guardWrite();
     const now = this.k.now();
-    const space: Space = { id: this.k.ulid(), name: DIRECT_SPACE_NAME, createdAt: now, kind: 'direct', visibility: 'private', participants };
+    const space: Space = { id: this.k.ulid(), name: DIRECT_SPACE_NAME, createdAt: now, kind: 'direct', visibility: 'private', participants, archived: false };
     try {
       await this.k.store.putSpace(space);
     } catch (err) {
@@ -231,7 +331,9 @@ export class Spaces {
     enforce(canChangeMembership(space, 'add'));
     const ids = [...new Set(input.memberIds)];
     for (const id of ids) {
-      if (!(await this.k.store.getMember(id))) throw new HarborError('not_found', `no member ${id} in this org`);
+      const member = await this.k.store.getMember(id);
+      if (!member) throw new HarborError('not_found', `no member ${id} in this org`);
+      enforce(canReachMember(member));
     }
     const by = this.k.attributionOf(ctx, input);
     const at = this.k.now();
@@ -268,7 +370,7 @@ export class Spaces {
       await this.k.store.deleteMembership(spaceId, ctx.memberId);
       await this.k.store.deleteReadMarks(spaceId, ctx.memberId);
       await this.k.appendNext(spaceId, at, { type: 'membership', membership, action: 'left' });
-    });
+    }, { archived: 'allow' }); // anyone may leave an archived space (2026-10-13)
     // Every connection the member holds ends its subscription to the space
     // (2026-09-22) — leave on the laptop, the phone stops receiving too.
     this.k.hub.publishToMember(ctx.memberId, { kind: 'space_removed', spaceId, by: ctx.memberId, at });
@@ -320,6 +422,7 @@ export class Spaces {
     this.k.guardWrite();
     enforce(canBind(identity, this.k.org));
     let member = await this.k.store.getMemberByIdentity(identity.iss, identity.sub);
+    if (member) enforce(canSignIn(member));
     if (!member) {
       // Minted id, NOT the raw sub: issuer subjects live only in the mapping
       // table, so an org can change AS someday without rewriting history.
@@ -341,6 +444,7 @@ export class Spaces {
     return this.k.locked(spaceId, async () => {
       const existing = await this.k.store.getMembership(spaceId, ctx.memberId);
       if (existing) return { membership: existing, space }; // idempotent join
+      enforce(canWriteSpace((await this.k.store.getSpace(spaceId)) ?? space)); // an archived space takes no new members (2026-10-13)
       const membership: Membership = { spaceId, memberId: ctx.memberId, joinedAt: this.k.now() };
       await this.k.store.putMembership(membership);
       await this.k.appendNext(spaceId, membership.joinedAt, { type: 'membership', membership, action: 'joined' });
@@ -361,6 +465,20 @@ export class Spaces {
   async unregisterPush(ctx: ActorCtx, input: { token: string }): Promise<{ ok: true }> {
     await this.k.store.deleteMemberPushToken(ctx.memberId, input.token);
     return { ok: true };
+  }
+
+  /**
+   * Account deletion, minimal v1 (2026-10-08, App Store 5.1.1(v)); the apex's
+   * DELETE /v1/me calls it once per org. The member leaves every shared space
+   * the ordinary way, then the row is marked (store.deactivateMember): the
+   * name stays, so their messages keep their author (Ramnique's review,
+   * 2026-10-13), and canSignIn refuses the identity from now on. DMs keep
+   * their membership: a DM is named by its other participant, who keeps the
+   * conversation. Idempotent.
+   */
+  async deactivateSelf(ctx: ActorCtx): Promise<void> {
+    for (const space of await this.k.store.listSpacesFor(ctx.memberId)) await this.leaveSpace(ctx, space.id);
+    await this.k.store.deactivateMember(ctx.memberId, this.k.now());
   }
 
   async publishPresence(

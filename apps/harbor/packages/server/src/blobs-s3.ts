@@ -88,6 +88,16 @@ export class S3BlobStore implements BlobStore {
     }
   }
 
+  async stream(hash: string): Promise<ReadableStream<Uint8Array> | undefined> {
+    try {
+      const res = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: this.keyFor(hash) }));
+      return res.Body ? (res.Body.transformToWebStream() as ReadableStream<Uint8Array>) : undefined;
+    } catch (err) {
+      if (isMissing(err)) return undefined;
+      throw err;
+    }
+  }
+
   async delete(hash: string): Promise<void> {
     // S3 DeleteObject is idempotent — deleting a missing key succeeds.
     await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: this.keyFor(hash) }));

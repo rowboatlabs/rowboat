@@ -7,7 +7,7 @@ import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, 
 
 import { useSpacesAccount } from '@/lib/spaces/account';
 import { SpacesClient } from '@/lib/spaces/client';
-import { SpacesLive } from '@/lib/spaces/live';
+import { SpacesLive } from '@x/spaces-client';
 import { friendlyError } from '@/lib/spaces/errors';
 import { useColors } from '@/theme/colors';
 

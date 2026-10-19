@@ -91,6 +91,7 @@ export const listSpaces = tool({
     'Shared spaces only by default; pass includeDirect to ' +
     'also list your direct messages (kind "direct": a private conversation with exactly one other ' +
     'member — its participants are listed; label it by the other member, its name is a placeholder). ' +
+    'groupChat: true means the org is one group conversation and DMs are off (open_direct refuses) until it has a second space. ' +
     "A DM flagged self: true is your person's own notes-to-self space (they are its only participant) — " +
     'the right place for "save this for me". Every other tool works on a DM exactly as on a space.',
   input: z.object({
@@ -113,6 +114,8 @@ export const listSpaces = tool({
         assets: z.array(Asset.omit({ state: true })),
       }),
     ),
+    /** The org is a group chat (spec §4, 2026-10-07): one space, DMs off until a second space. */
+    groupChat: z.boolean(),
   }),
 });
 
@@ -167,6 +170,33 @@ export const renameSpace = tool({
     'person). An identical name is a no-op.',
   input: z.object({ spaceId: SpaceId, name: z.string().min(1).max(128) }),
   output: z.object({ space: Space }),
+});
+
+export const archiveSpace = tool({
+  name: 'archive_space',
+  description:
+    'Archive a shared space (admins only; DMs refuse). An archived space stays readable but ' +
+    'refuses new messages, files and members until unarchived. Only when your person asked for it.',
+  input: z.object({ spaceId: SpaceId }),
+  output: z.object({ space: Space }),
+});
+
+export const unarchiveSpace = tool({
+  name: 'unarchive_space',
+  description: 'Unarchive a shared space so it accepts writes again (admins only). A live space is a no-op.',
+  input: z.object({ spaceId: SpaceId }),
+  output: z.object({ space: Space }),
+});
+
+export const deleteSpace = tool({
+  name: 'delete_space',
+  description:
+    'Permanently delete a shared space (admins only; DMs refuse): every message, file and ' +
+    'membership in it, with no undo. Only when your person explicitly asked to delete this ' +
+    'space by name — never to tidy up, and never as a step toward something else. To take a ' +
+    'space out of use while keeping it, use archive_space.',
+  input: z.object({ spaceId: SpaceId }),
+  output: z.object({ deleted: z.literal(true) }),
 });
 
 export const addMembers = tool({
@@ -479,8 +509,8 @@ export const readAsset = tool({
     'content, current version, and recent change history. Always read before proposing a change; ' +
     'the version you read is your base version. Pass `version` to read an older version (time ' +
     'travel); omit for the current one. Binary files (images, pdfs, uploads) return empty content ' +
-    'plus a `blob` {hash, size, mime} — describe them by their metadata; the bytes are not readable ' +
-    'over this face.',
+    'plus a `blob` {hash, size, mime}: no tool carries the bytes, which download by that hash from ' +
+    'GET /v1/spaces/{spaceId}/blobs/{hash} on the org\'s address.',
   input: z.object({ spaceId: SpaceId, assetId: AssetId, version: z.number().int().positive().optional() }),
   output: ReadAssetResult,
 });
@@ -665,6 +695,9 @@ export const mcpTools = [
   openDirect,
   createSpace,
   renameSpace,
+  archiveSpace,
+  unarchiveSpace,
+  deleteSpace,
   addMembers,
   leaveSpace,
   createInvite,

@@ -1,6 +1,7 @@
 import type { Member } from '@rowboat/spaces-protocol';
 import { AGENT_KEY_PREFIX, hashAgentKey } from './agent-keys.js';
 import { HarborError } from './errors.js';
+import { canSignIn, enforce } from './policy.js';
 import type { Store } from './store.js';
 
 // The auth-driver boundary (spec §4). Two steps the dev stub used to conflate:
@@ -67,8 +68,12 @@ export function bindAuth(driver: AuthDriver, store: Store): OrgAuth {
       }
       return driver.authenticate(authorization, queryToken);
     },
-    resolveMember: (identity) =>
-      identity.iss === AGENT_KEY_ISSUER ? resolveAgentKey(store, identity.sub) : driver.resolveMember(store, identity),
+    resolveMember: async (identity) => {
+      if (identity.iss === AGENT_KEY_ISSUER) return resolveAgentKey(store, identity.sub);
+      const member = await driver.resolveMember(store, identity);
+      enforce(canSignIn(member));
+      return member;
+    },
     metadata: () => driver.metadata?.(),
   };
 }

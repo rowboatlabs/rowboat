@@ -1,5 +1,8 @@
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { useSpaceDirectory, invalidateSpaceDirectory } from '@/hooks/use-space-directory'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Bell, ChevronRight, CornerDownRight, Hash, MessagesSquare, Pencil, Plus } from 'lucide-react'
+import { Bell, ChevronRight, CornerDownRight, Hash, Lock, MessagesSquare, Pencil, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { SidebarGroup, SidebarGroupContent, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar'
 import {
@@ -20,10 +23,14 @@ import type { RailSelection } from '@/lib/spaces-selection'
 import { toast } from '@/lib/toast'
 import * as analytics from '@/lib/analytics'
 import { openServerDialog } from '@/lib/server-dialog'
-import { serverLandingSpaceId } from '@/lib/spaces-navigation'
+import { isGroupChat, serverLandingSpaceId } from '@/lib/spaces-navigation'
 import { AddServerDialog } from '@/components/spaces/add-server-dialog'
 
-/** Server shortcuts; conversation navigation lives inside each server. */
+/**
+ * Group chats and workspaces (2026-10-07): a server that is one conversation
+ * is a row that opens it, most recent first, whichever server you were in;
+ * a server with channels is a shortcut into its own navigation.
+ */
 export function SpacesSidebarSection({ active, activeSpace, onOpenSpace }: {
     active: boolean
     activeSpace?: SpaceSelection
@@ -42,26 +49,43 @@ export function SpacesSidebarSection({ active, activeSpace, onOpenSpace }: {
         }
         serverBadges.set(org.id, badge)
     }
+    const chats = orgs.filter(isGroupChat)
+    const workspaces = orgs.filter((org) => !isGroupChat(org))
+    // Warm each chat's tail so recency (and its unread) can read it.
+    const chatKeys = chats.map((org) => `${org.id}/${org.spaces[0].id}`).join(',')
+    useEffect(() => {
+        for (const org of chats) prefetchStream(org.id, org.spaces[0].id)
+    }, [chatKeys]) // eslint-disable-line react-hooks/exhaustive-deps
+    const lastActivity = (org: OrgWithSpaces) => spaceLastActivityAt(org.id, org.spaces[0].id) ?? org.spaces[0].createdAt
+    chats.sort((a, b) => lastActivity(b).localeCompare(lastActivity(a)))
+    const row = (org: OrgWithSpaces, spaceId: string) => <SidebarMenuItem key={org.id}>
+        <SidebarMenuButton className="pl-6" isActive={active && activeSpace?.orgId === org.id}
+            title={org.name} onClick={() => onOpenSpace(org.id, spaceId)}>
+            <OrgMonogram org={org} size="sm" />
+            <span className="min-w-0 flex-1 truncate">{org.name}</span>
+            <UnreadBadge badge={serverBadges.get(org.id)!} />
+        </SidebarMenuButton>
+    </SidebarMenuItem>
+    // Headings only when both kinds are there: one kind needs no label.
+    const both = chats.length > 0 && workspaces.length > 0
     return <SidebarGroup className="pt-0">
         <SidebarGroupContent>
             <div data-tour-id="nav-spaces" className="flex h-8 items-center gap-2.5 px-2.5">
                 <MessagesSquare className="size-4 shrink-0 text-muted-foreground" />
                 <h2 className="flex-1 text-sm font-medium text-muted-foreground">Spaces</h2>
-                <button type="button" aria-label="Add server" title="Add server"
+                <button type="button" aria-label="New group chat" title="New group chat"
                     className="flex size-5 shrink-0 items-center justify-center text-muted-foreground transition-colors hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
                     onClick={() => setAddingServer(true)}>
                     <Plus className="size-4" />
                 </button>
             </div>
-            <SidebarMenu>
-                {orgs.map((org) => <SidebarMenuItem key={org.id}>
-                    <SidebarMenuButton className="pl-6" isActive={active && activeSpace?.orgId === org.id}
-                        title={org.name} onClick={() => onOpenSpace(org.id, serverLandingSpaceId(org))}>
-                        <OrgMonogram org={org} size="sm" />
-                        <span className="min-w-0 flex-1 truncate">{org.name}</span>
-                        <UnreadBadge badge={serverBadges.get(org.id)!} />
-                    </SidebarMenuButton>
-                </SidebarMenuItem>)}
+            {both && <h3 className="flex h-7 items-center pl-6 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80">Chats</h3>}
+            <SidebarMenu aria-label="Chats">
+                {chats.map((org) => row(org, org.spaces[0].id))}
+            </SidebarMenu>
+            {both && <h3 className="flex h-7 items-center pl-6 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80">Workspaces</h3>}
+            <SidebarMenu aria-label="Workspaces">
+                {workspaces.map((org) => row(org, serverLandingSpaceId(org)))}
             </SidebarMenu>
             {addingServer && <AddServerDialog onClose={() => setAddingServer(false)} onChoose={(kind) => {
                 setAddingServer(false)
@@ -71,7 +95,7 @@ export function SpacesSidebarSection({ active, activeSpace, onOpenSpace }: {
     </SidebarGroup>
 }
 
-function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, activityActive = false, onChanged, renderDiscussions, showArchived = false, activeDiscussionCount }: {
+function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onOpenBrowse, browseActive = false, activityActive = false, onChanged, renderDiscussions, showArchived = false, activeDiscussionCount }: {
     org: OrgWithSpaces
     activeSpace: SpaceSelection
     unread: Map<string, SpaceBadge>
@@ -80,6 +104,8 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, activi
     renderDiscussions?: (spaceId: string) => ReactNode
     onOpenSpace: (orgId: string, spaceId: string) => void
     /** The org's Activity surface (layer 3); absent = no row. */
+    onOpenBrowse?: (orgId: string) => void
+    browseActive?: boolean
     onOpenActivity?: (orgId: string) => void
     activityActive?: boolean
     onChanged: () => void
@@ -90,6 +116,9 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, activi
     for (const [key, badge] of unread) if (key.startsWith(`${org.id}/`)) forYou += badge.forYou
     const [creating, setCreating] = useState(false)
     const [newName, setNewName] = useState('')
+    const [visibility, setVisibility] = useState<'private' | 'open'>('private')
+    const [submitting, setSubmitting] = useState(false)
+    const directory = useSpaceDirectory(org.id, creating)
     // Rename-in-place: the row's label becomes an input (same shape as create).
     const [renamingId, setRenamingId] = useState<string | null>(null)
     const [renameValue, setRenameValue] = useState('')
@@ -113,9 +142,13 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, activi
 
     const createSpace = async () => {
         const name = newName.trim()
-        if (!name) return
+        if (!name || submitting || (visibility === 'open' && (!directory.loaded || !directory.supported || directory.error))) return
+        setSubmitting(true)
         try {
-            const { space } = await window.ipc.invoke('spaces:createSpace', { orgId: org.id, name })
+            const { space } = await window.ipc.invoke('spaces:createSpace', { orgId: org.id, name, visibility })
+            if (space.visibility !== visibility) toast('The server created this space as private. Update the server to create open spaces.', 'info')
+            invalidateSpaceDirectory(org.id)
+            setVisibility('private')
             analytics.spacesSpaceCreated()
             setCreating(false)
             setNewName('')
@@ -123,6 +156,8 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, activi
             onOpenSpace(org.id, space.id)
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not create the space', 'error')
+        } finally {
+            setSubmitting(false)
         }
     }
 
@@ -147,6 +182,8 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, activi
     // activity, labelled the way conversation lists do: your name, then a quiet "you".
     // It shows before it exists — the org creates it on the first click.
     const selfDm = org.directs.find((dm) => isSelfDirect(dm, org.memberId))
+    // DMs are off in a group chat, notes to self included (2026-10-07).
+    const directsOn = !org.error && !isGroupChat(org)
     const directs = [...org.directs].sort((a, b) =>
         (spaceLastActivityAt(org.id, b.id) ?? b.createdAt).localeCompare(spaceLastActivityAt(org.id, a.id) ?? a.createdAt))
     const selfRosterIds = useMemo(
@@ -176,6 +213,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, activi
 
     return (
         <>
+            {onOpenBrowse && <SidebarMenuItem><SidebarMenuButton isActive={browseActive} onClick={() => onOpenBrowse(org.id)} className="pl-6">Browse spaces</SidebarMenuButton></SidebarMenuItem>}
             {onOpenActivity && (
                 <SidebarMenuItem>
                     <SidebarMenuButton isActive={activityActive} onClick={() => onOpenActivity(org.id)} className="pl-6">
@@ -222,7 +260,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, activi
                                         className="min-w-0 flex-1 pl-1"
                                     >
                                         {/* A space is a channel — # says so. */}
-                                        <Hash className="size-3.5 shrink-0 text-muted-foreground" />
+                                        {space.visibility === 'open' ? <Hash className="size-3.5 shrink-0 text-muted-foreground" /> : <Lock aria-label="Private space" className="size-3.5 shrink-0 text-muted-foreground" />}
                                         <span className={cn('flex-1 truncate', badge.unread > 0 && !active && 'font-medium text-foreground')}>{space.name}</span>
                                         {!active && <UnreadBadge badge={badge} />}
                                     </SidebarMenuButton>
@@ -270,38 +308,30 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, activi
 
                 </div>
             </SidebarMenuItem>
-            {creating && (
-                <SidebarMenuItem>
-                    <div className="flex items-center gap-1 py-0.5 pl-9 pr-2">
-                        <Input
-                            autoFocus
-                            value={newName}
-                            placeholder="Space name"
-                            className="h-7 text-xs"
-                            onChange={(e) => setNewName(e.target.value)}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter') void createSpace()
-                                if (e.key === 'Escape') {
-                                    setCreating(false)
-                                    setNewName('')
-                                }
-                            }}
-                            onBlur={() => {
-                                if (!newName.trim()) setCreating(false)
-                            }}
-                        />
-                    </div>
-                </SidebarMenuItem>
-            )}
+            <Dialog open={creating} onOpenChange={(open) => { if (!submitting) { setCreating(open); if (!open) { setNewName(''); setVisibility('private') } } }}>
+                <DialogContent>
+                    <DialogHeader><DialogTitle>Create a space</DialogTitle><DialogDescription>Choose who can discover and read this space.</DialogDescription></DialogHeader>
+                    <form className="flex flex-col gap-4" onSubmit={event => { event.preventDefault(); void createSpace() }}>
+                        <label className="text-sm">Name<Input autoFocus maxLength={128} value={newName} onChange={event => setNewName(event.target.value)} placeholder="Space name" /></label>
+                        <fieldset className="space-y-3" disabled={submitting}><legend className="mb-2 text-sm font-medium">Visibility</legend>
+                            <label className="flex items-start gap-2 text-sm"><input type="radio" name="visibility" checked={visibility === 'private'} onChange={() => setVisibility('private')} /><span>Private<span className="block text-xs text-muted-foreground">Only space members can read and participate.</span></span></label>
+                            <label className="flex items-start gap-2 text-sm"><input type="radio" name="visibility" checked={visibility === 'open'} disabled={!directory.loaded || !directory.supported || !!directory.error} onChange={() => setVisibility('open')} /><span>Open<span className="block text-xs text-muted-foreground">Anyone in the team can browse and join.</span></span></label>
+                        </fieldset>
+                        {directory.error && <p role="alert" className="text-sm text-muted-foreground">Could not check open-space support. You can still create a private space.</p>}
+                        {directory.loaded && !directory.supported && <p className="text-sm text-muted-foreground">Update this server to create open spaces.</p>}
+                        <Button type="submit" disabled={!newName.trim() || submitting}>{submitting ? 'Creating…' : 'Create space'}</Button>
+                    </form>
+                </DialogContent>
+            </Dialog>
             {/* Direct messages: the org's people you talk to, most recent first.
                 A DM is a space with a two-person roster (contract 2026-09-07);
                 the row is the person, not a channel. */}
-            {!org.error && (
+            {directsOn && (
                 <SidebarMenuItem>
                     <h3 className="flex h-8 items-center px-1 text-[13px] font-semibold text-muted-foreground">DMs</h3>
                 </SidebarMenuItem>
             )}
-            {!org.error && directs.map((dm) => {
+            {directsOn && directs.map((dm) => {
                 const active = activeSpace?.orgId === org.id && activeSpace.spaceId === dm.id
                 const badge = unread.get(`${org.id}/${dm.id}`) ?? NO_BADGE
                 const self = isSelfDirect(dm, org.memberId)
@@ -329,7 +359,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, activi
                 )
             })}
             {/* Not created yet: the same row, waiting for its first click. */}
-            {!org.error && !selfDm && (
+            {directsOn && !selfDm && (
                 <SidebarMenuItem>
                     <SidebarMenuButton
                         onClick={() => void openSelf()}
@@ -346,7 +376,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, activi
                     </SidebarMenuButton>
                 </SidebarMenuItem>
             )}
-            {!org.error && (
+            {directsOn && (
                 <SidebarMenuItem>
                     <SidebarMenuButton onClick={() => setNewDirectOpen(true)} className="pl-6 text-muted-foreground">
                         <Plus className="size-3.5 shrink-0" />
@@ -360,10 +390,12 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, activi
 }
 
 /** Space and DM destinations; nested discussions are optional for legacy consumers. */
-export function ServerSpaceNavigation({ org, spaceId, onOpenSpace, onOpenActivity, activityActive = false, onOpenDiscussion, renderActiveDiscussions, activeDiscussionCount = 0, showArchived = false, showDiscussions = true }: {
+export function ServerSpaceNavigation({ org, spaceId, onOpenSpace, onOpenActivity, onOpenBrowse, browseActive = false, activityActive = false, onOpenDiscussion, renderActiveDiscussions, activeDiscussionCount = 0, showArchived = false, showDiscussions = true }: {
     org: OrgWithSpaces
     spaceId: string
     onOpenSpace: (orgId: string, spaceId: string) => void
+    onOpenBrowse?: (orgId: string) => void
+    browseActive?: boolean
     onOpenActivity?: (orgId: string) => void
     activityActive?: boolean
     onOpenDiscussion?: (spaceId: string, selection: RailSelection) => void
@@ -376,7 +408,7 @@ export function ServerSpaceNavigation({ org, spaceId, onOpenSpace, onOpenActivit
     const unread = useSpacesUnreadCounts()
     return <SidebarMenu>
         <OrgRows org={org} activeSpace={{ orgId: org.id, spaceId }} unread={unread} showArchived={showArchived} activeDiscussionCount={activeDiscussionCount}
-            onOpenSpace={onOpenSpace} onOpenActivity={onOpenActivity} activityActive={activityActive} onChanged={() => void refresh()}
+            onOpenSpace={onOpenSpace} onOpenActivity={onOpenActivity} onOpenBrowse={onOpenBrowse} browseActive={browseActive} activityActive={activityActive} onChanged={() => void refresh()}
             renderDiscussions={showDiscussions && renderActiveDiscussions ? (id) => <SpaceDiscussions orgId={org.id} spaceId={id}
                 active={id === spaceId} activeCount={activeDiscussionCount} showArchived={showArchived} renderActive={renderActiveDiscussions}
                 onSelect={(selection) => onOpenDiscussion?.(id, selection)} /> : undefined} />

@@ -12,7 +12,7 @@ The reference offers a default Clean layout with profile photos and a Compact la
 
 The published interface image shows a stable avatar gutter, a name and quiet timestamp above the body, small reactions under the text, and an inline reply summary. Message text has no surrounding speech bubble. The text column also anchors continuation messages and reply links. The result supports scanning a changing roster of senders without forcing each message into an isolated card. [2]
 
-Spaces already used 15 px text with 22 px leading in the main stream. The inconsistencies were around it: thread replies had smaller avatars, the thread root was a tinted card with smaller text, and stacked container padding obscured the true gutter. The implementation keeps the readable body size and normalizes the surrounding geometry. Thread roots use the same visual identity and text scale as replies.
+Spaces already used 15 px text with 22 px leading in the main stream. The inconsistencies were around it: thread replies had smaller avatars, the thread root was a tinted card with smaller text, and stacked container padding obscured the true gutter. The implementation keeps the 15 px body size, increases message leading to 24 px, and normalizes the surrounding geometry. Thread roots use the same visual identity and text scale as replies.
 
 ### Actions and reactions
 
@@ -44,7 +44,7 @@ A separate global app rail, huddles, workspace theming controls, a new cross-spa
 
 | Reference pattern | Existing Spaces fit | Implemented adaptation |
 | --- | --- | --- |
-| Avatar-based conversation | `MessageRow` and continuation grouping | One 36 px avatar/gutter size in both timelines; 15/22 px body text |
+| Avatar-based conversation | `MessageRow` and continuation grouping | One 36 px avatar/gutter size in both timelines; 15/24 px body text |
 | Quiet message metadata | Sender, timestamp, agent attribution | Bold sender, secondary timestamp, wrapping attribution |
 | Message action bar | Reaction, Reply/Open, Ask agent, More | 32 px controls, 18 px glyphs, keyboard reveal, persistent open state |
 | Emoji reaction pill | Reaction groups and self membership | 28 px pill, 16 px emoji, 12 px count, pressed semantics |
@@ -69,7 +69,8 @@ The root message exposes reply counts and last-reply time, but the stream's summ
 | Message inset | 20 px desktop; 12 px narrow viewport | Full-width hover surface with a consistent text origin |
 | New author row | 8 px above, 4 px below | Separates speaking turns |
 | Continuation row | 2 px above and below | Groups consecutive messages without duplicate identity |
-| Message body | 15 px / 22 px | Comfortable long-form chat reading |
+| Message body | 15 px / 24 px; maximum 100ch reading width | Comfortable long-form chat reading |
+| Message Markdown | 0.75em between blocks; outside list markers, 1.75em indentation per level; inline code at 0.875em | Paragraph separation, visible nesting, and aligned wrapped text |
 | Sender | 15 px bold / 22 px | Primary scan anchor |
 | Timestamp and metadata | 12 px, secondary color | Supporting information stays subordinate |
 | Action target | 32 × 32 px; labeled reply at least 32 px high | Consistent pointer and keyboard target |
@@ -85,7 +86,7 @@ The root message exposes reply counts and last-reply time, but the stream's summ
 | Discussion navigation | 32 px high; 13 px title | Dense, readable destinations |
 | Thread split | Resizable; 400 px default, 360 px minimum, 6 px divider at ≥840 px content width | Retains a usable 440 px timeline |
 
-The implementation's semantic stylesheet is `apps/x/apps/renderer/src/styles/spaces.css`. Components retain utility classes for local flex layout and content-specific states. Theme colors come from existing application variables: foreground/background, secondary text, borders, raised surfaces, link blue, mention wash, and attention color. No reference-product identifiers are needed in feature code.
+The implementation's semantic stylesheet is `apps/x/apps/renderer/src/styles/spaces.css`; shared message Markdown typography lives in `apps/x/apps/renderer/src/styles/message-prose.css`. As of 2026-10-06, messages use a bounded reading width, explicit paragraph spacing, hanging list markers at every nesting level, and proportional inline code. Headings step down from 21 px to the 15 px body size. Code blocks, wide tables, and display mathematics scroll within the message; Streamdown retains syntax highlighting and copy/download controls. Task lists preserve checkbox alignment. Components retain utility classes for local flex layout and content-specific states. Theme colors come from existing application variables: foreground/background, secondary text, borders, raised surfaces, link blue, mention wash, and attention color. No reference-product identifiers are needed in feature code.
 
 ## Interaction rules
 
@@ -102,6 +103,22 @@ The implementation's semantic stylesheet is `apps/x/apps/renderer/src/styles/spa
 11. A wrong destination is corrected in the thread, not in a toast (2026-09-23). A staged reply (Preview, or Post's Undo) shows a banner above the thread composer that stays until the person acts: post it to the stream instead, try another thread (Jev again, with every rejected thread excluded; nothing fitting leaves the reply where it is), or keep it as a plain draft. Sending from that composer settles it. Taking the reply back leaves any draft that was there before.
 12. On a held stream verdict, the notice may offer people to tag (2026-09-24): up to three members judged from the space's recent messages, and @here for an announcement, never more than Jev is confident about. Chips are offers: a click adds the mention, a second click removes it, a chip's × declines it for this draft (an edit-and-resend does not bring it back), the notice's X or Esc hides them all, and sending with chips untouched sends nothing extra. Nothing is ever added on its own. A switch on the Decision Models card turns suggestions off, which also skips the questions. Direct spaces never suggest.
 13. `/find <what you remember>` in the stream composer (2026-09-24) lands on the message or thread the words describe, with Jev picking by meaning from the recent roots and the org's word-search hits. A reply, a discussion, or a root with replies opens as a thread; a lone root scrolls the stream. A banner above the composer of the pane landed in reads 'Match 2 of 5 for "…"' with "Next match" (the ranking, walked locally with no second call), "Open search" (the search bar, prefilled), and a close. Every text node in these banners is one size. When nothing matches, or without a TypeSafe key, the query goes to the search bar instead of landing somewhere plausible.
+
+### Open-space discovery and previews (2026-09-28)
+
+Each server's navigation includes **Browse spaces**, a full-page directory of its open
+spaces with name search and a Joined indicator. A row opens the normal space view;
+opening it never joins. An unjoined view identifies itself as a preview and offers
+**Join space** in its banner and in place of conversation composers. Reading includes
+threads, the roster, search, attachments, files, history, diffs, and whiteboards.
+Previews do not send presence, advance read marks, follow threads, or acquire unread
+badges. Member-only actions become available after an explicit successful join.
+
+Create space offers **Private** (the default) and **Open**, with copy explaining the
+team visibility boundary. Private spaces use a lock; open spaces use the channel
+icon. The directory and Open creation explain when a server needs an update; private
+creation remains available. Existing-space visibility changes belong to admin controls.
+The product and access rules remain owned by [Harbor spec §5](../apps/harbor/SPEC.md#5-the-space).
 
 ## Verification and limitations
 

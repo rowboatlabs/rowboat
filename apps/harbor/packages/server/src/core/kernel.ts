@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { monotonicFactory } from 'ulid';
 import { HarborError } from '../errors.js';
 import type { SpaceHub } from '../hub.js';
-import { canAccessSpace, canReadSpace, canWrite, enforce } from '../policy.js';
+import { canAccessSpace, canReadSpace, canWrite, canWriteSpace, enforce } from '../policy.js';
 import type { Store, StoredEvent } from '../store.js';
 
 // The transactional core every aggregate is built on: the store and the hub,
@@ -121,12 +121,24 @@ export class Kernel {
    * event. Same rule as the gate (policy.ts canAccessSpace), never a second
    * one. Acts that create the membership themselves (createSpace, openDirect,
    * acceptInvite) and operator passes use `locked`.
+   *
+   * It also refuses a write to an archived space (2026-10-13, policy.ts
+   * canWriteSpace), here rather than in each method so a new write path
+   * cannot forget it, and inside the transaction so a write that waited
+   * behind the archive is refused. Leave and unarchive pass
+   * `{ archived: 'allow' }`; archive does too, so archiving twice is a no-op.
    */
-  async lockedAs<T>(ctx: ActorCtx, spaceId: string, fn: (membership: Membership) => Promise<T>): Promise<T> {
+  async lockedAs<T>(
+    ctx: ActorCtx,
+    spaceId: string,
+    fn: (membership: Membership) => Promise<T>,
+    opts: { archived?: 'allow' } = {},
+  ): Promise<T> {
     return this.locked(spaceId, async () => {
       const space = await this.requireSpace(spaceId);
       const membership = await this.store.getMembership(spaceId, ctx.memberId);
       enforce(canAccessSpace(space, membership));
+      if (opts.archived !== 'allow') enforce(canWriteSpace(space));
       return fn(membership!);
     });
   }

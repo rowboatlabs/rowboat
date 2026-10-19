@@ -488,6 +488,11 @@ export function SidebarContentPanel({
   const connectorsButtonRef = useRef<HTMLButtonElement | null>(null)
   const [isRowboatConnected, setIsRowboatConnected] = useState(false)
   const [creditPopoverOpen, setCreditPopoverOpen] = useState(false)
+  // 2026-10-07: the sidebar collapses offcanvas, sliding the plan card off-screen,
+  // and a popover anchored to it is cut off. Hide it while collapsed; the open
+  // state is kept, so an out-of-credits auto-open still shows on expand.
+  const { state: sidebarState } = useSidebar()
+  const sidebarCollapsed = sidebarState === "collapsed"
   const [outOfCredits, setOutOfCredits] = useState(false)
   const outOfCreditsRef = useRef(false)
   const creditPopoverAutoShownRef = useRef(false)
@@ -1204,7 +1209,7 @@ export function SidebarContentPanel({
         if (outOfCredits) {
           return (
             <div className="px-3 py-2">
-              <Popover open={creditPopoverOpen} onOpenChange={setCreditPopoverOpen}>
+              <Popover open={creditPopoverOpen && !sidebarCollapsed} onOpenChange={setCreditPopoverOpen}>
                 <div className="flex items-center justify-between rounded-lg border border-red-500/50 bg-red-500/10 px-3 py-2">
                   <PopoverTrigger asChild>
                     <button type="button" className="flex min-w-0 flex-1 items-center gap-2 text-left">

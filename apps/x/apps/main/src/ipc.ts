@@ -124,7 +124,7 @@ import { findSpaceMessage } from '@x/core/dist/typesafe/find_message.js';
 import * as appsIndexer from '@x/core/dist/apps/indexer.js';
 import * as appsServer from '@x/core/dist/apps/server.js';
 import * as appsAgents from '@x/core/dist/apps/agents.js';
-import { capture } from '@x/core/dist/analytics/posthog.js';
+import { capture, isTelemetryOptedOut, setTelemetryOptedOut } from '@x/core/dist/analytics/posthog.js';
 import { recordAppVersion, isVersionUpgrade } from '@x/core/dist/config/app_version.js';
 import { getUpdaterStatus, checkForUpdates, quitAndInstallUpdate } from './updater.js';
 import { setSpacesDockBadge } from './dock-badge.js';
@@ -906,6 +906,14 @@ export function setupIpcHandlers() {
       }
       return { success: true as const };
     },
+    // Anonymous product telemetry opt-out (2026-10-13, #415).
+    'app:getTelemetrySettings': async () => {
+      return { optOut: isTelemetryOptedOut() };
+    },
+    'app:setTelemetrySettings': async (_event, args) => {
+      setTelemetryOptedOut(args.optOut);
+      return { success: true as const };
+    },
     'meeting:setRecordingState': async (_event, args) => {
       setTrayRecordingState(args.recording);
       setMenuRecordingState(args.recording);
@@ -1158,6 +1166,7 @@ export function setupIpcHandlers() {
         installationId: getInstallationId(),
         apiUrl: API_URL,
         appVersion: app.getVersion(),
+        telemetryOptOut: isTelemetryOptedOut(),
       };
     },
     'workspace:getRoot': async () => {

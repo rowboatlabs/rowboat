@@ -4,7 +4,7 @@ Two applications, each its own pnpm workspace, plus product docs. Each area keep
 
 | Path | What | Guide |
 |---|---|---|
-| `apps/x/` | The Rowboat desktop app (Electron + React) and its packages, including the mobile app | none yet — read `apps/x/package.json` scripts and the package READMEs |
+| `apps/x/` | The Rowboat desktop app (Electron + React) and its packages, including the mobile app and the Spaces web app | none yet — read `apps/x/package.json` scripts and the package READMEs; the web app is [`apps/x/apps/renderer/WEB.md`](apps/x/apps/renderer/WEB.md) |
 | `apps/harbor/` | Harbor, the Spaces server, and the spaces protocol package | [`apps/harbor/AGENTS.md`](apps/harbor/AGENTS.md) |
 | `docs/` | Product docs that belong to no one app (the Spaces design language, notes) | — |
 

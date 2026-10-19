@@ -125,6 +125,21 @@ export const SpaceEvent = z.discriminatedUnion('type', [
     space: Space,
     by: Attribution,
   }),
+  /**
+   * An admin archived or unarchived the space (api.ts archiveSpace,
+   * 2026-10-13) — the full row plus who did it, so clients move it in and
+   * out of their Archived list and the feed can render an attributed line.
+   */
+  z.object({
+    type: z.literal('space_archived'),
+    space: Space,
+    by: Attribution,
+  }),
+  z.object({
+    type: z.literal('space_unarchived'),
+    space: Space,
+    by: Attribution,
+  }),
 ]);
 export type SpaceEvent = z.infer<typeof SpaceEvent>;
 
@@ -212,7 +227,9 @@ export const ServerFrame = z.discriminatedUnion('kind', [
    * space reaches you after your departure, and a re-subscribe to a private space is refused.
    * Ephemeral, never replayed: the durable truth is the `membership` event
    * (`left` / `removed`) on the space's own log. Pre-2026-09-22 clients drop
-   * the unknown frame by contract.
+   * the unknown frame by contract. Also sent when an admin deletes the space
+   * (2026-10-14) — to every member, and for an open space to everyone in the
+   * org, since anyone may be reading it; there is no log left to replay.
    */
   z.object({
     kind: z.literal('space_removed'),
@@ -221,6 +238,15 @@ export const ServerFrame = z.discriminatedUnion('kind', [
     by: MemberId,
     at: z.iso.datetime(),
   }),
+  /**
+   * Addressed to EVERY member of the org (2026-10-07): the org's shape
+   * changed — today, a second space made a group chat a workspace, DMs on.
+   * It reaches members the new space does not include, which is why it is
+   * not a space event. Ephemeral, never replayed: refetch the listing
+   * (`groupChat` on listSpaces is the truth). Older clients drop the
+   * unknown frame by contract.
+   */
+  z.object({ kind: z.literal('org_changed'), at: z.iso.datetime() }),
   /**
    * Addressed to a MEMBER (read state, 2026-09-09): one of your own
    * connections advanced a read mark — the stream's (no threadRootId) or a

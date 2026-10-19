@@ -15,7 +15,7 @@ const SPACE = '01HZZZZZZZZZZZZZZZZZZZZZZZ';
 const ROOT = '01HXXXXXXXXXXXXXXXXXXXXXXX';
 
 const space = (kind: 'shared' | 'direct'): Space =>
-  ({ id: SPACE, name: 'general', createdAt: new Date().toISOString(), kind, visibility: 'private' }) as Space;
+  ({ id: SPACE, name: 'general', createdAt: new Date().toISOString(), kind, visibility: 'private', archived: false }) as Space;
 
 const msg = (body: string, author = 'harsh', opts: { agent?: boolean; threadRoot?: string } = {}): Message =>
   ({
@@ -159,7 +159,8 @@ async function start(): Promise<void> {
       { id: 'harsh', displayName: 'Harsh' },
       { id: 'arjun', displayName: 'Arjun' },
     ],
-    seedSpaces: [{ name: 'Main', creator: 'ramnique' }],
+    // Two spaces: a one-space org is a group chat, where DMs are off (2026-10-07).
+    seedSpaces: [{ name: 'Main', creator: 'ramnique' }, { name: 'Ops', creator: 'ramnique' }],
   });
   ramnique = restClient(harbor, 'dev-ramnique');
   harsh = restClient(harbor, 'dev-harsh');

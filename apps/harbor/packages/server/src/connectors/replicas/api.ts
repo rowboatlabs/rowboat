@@ -1,3 +1,5 @@
+import type { AgentEvent } from '../common/agent-events.js';
+
 // The Replicas API, as its OpenAPI documents it (https://docs.replicas.dev/openapi.json,
 // "Replica API 2.0.0", read 2026-09-30), for the Replicas connector (spec §8
 // Connectors). Only what the connector calls. The key is an organization
@@ -44,12 +46,17 @@ export type ReplicasImage =
   | { type: 'image'; source: { type: 'url'; url: string } }
   | { type: 'image'; source: { type: 'base64'; media_type: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'; data: string } };
 
-/** One raw event from the coding agent: the shape of `payload` depends on the agent (AgentEvent). */
-export interface AgentEvent {
-  timestamp?: string;
-  type: string;
-  payload?: unknown;
-}
+export type { AgentEvent };
+
+/** Replicas's `coding_agent` for each kind it runs. */
+export const CODING_AGENTS: Record<string, string> = {
+  'claude-code': 'claude',
+  codex: 'codex',
+  cursor: 'cursor',
+  opencode: 'opencode',
+  pi: 'pi',
+  'muse-code': 'muse',
+};
 
 /** One event from a workspace's stream (EngineEvent): `type` discriminates `payload`. */
 export interface EngineEvent {
@@ -65,19 +72,26 @@ export interface ReplicasChat {
   processing?: boolean;
 }
 
+/** Replicas's `thinking_level` values (its OpenAPI, read 2026-10-08). */
+export const THINKING_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'ultracode'] as const;
+
 export interface ReplicasApi {
   environments(): Promise<ReplicasEnvironment[]>;
+  /** A coding agent's models on the account's inference provider, and its default (null: one must be picked). */
+  models(codingAgent: string): Promise<{ models: Array<{ id: string; name: string }>; defaultModel: string | null }>;
   create(input: {
     name: string;
     environmentId: string;
     codingAgent: string;
     message: string;
     planMode: boolean;
+    model?: string;
+    thinkingLevel?: string;
     images: ReplicasImage[];
   }): Promise<{ id: string }>;
   send(
     workspaceId: string,
-    input: { chatId?: string; message: string; planMode: boolean; images: ReplicasImage[] },
+    input: { chatId?: string; message: string; planMode: boolean; model?: string; thinkingLevel?: string; images: ReplicasImage[] },
   ): Promise<{ messageId: string | null; chatId: string | null }>;
   /** Workspaces this key created through the API, newest first. */
   recent(limit: number): Promise<Array<{ id: string; name: string }>>;
@@ -114,6 +128,12 @@ export function replicasApi(key: string, base = REPLICAS_API): ReplicasApi {
       const body = await call<{ environments?: Array<{ id: string; name: string; is_global?: boolean }> }>('/v1/environments');
       return (body.environments ?? []).filter((e) => e.is_global !== true).map(({ id, name }) => ({ id, name }));
     },
+    async models(codingAgent) {
+      const body = await call<{ models?: Array<{ id: string; displayName?: string }>; defaultModel?: string | null }>(
+        `/v1/agents/${encodeURIComponent(codingAgent)}/models?limit=100`,
+      );
+      return { models: (body.models ?? []).map((m) => ({ id: m.id, name: m.displayName || m.id })), defaultModel: body.defaultModel ?? null };
+    },
     async create(input) {
       const body = await call<{ replica: { id: string } }>('/v1/replica', {
         method: 'POST',
@@ -123,6 +143,8 @@ export function replicasApi(key: string, base = REPLICAS_API): ReplicasApi {
           coding_agent: input.codingAgent,
           message: input.message,
           plan_mode: input.planMode,
+          ...(input.model ? { model: input.model } : {}),
+          ...(input.thinkingLevel ? { thinking_level: input.thinkingLevel } : {}),
           ...(input.images.length > 0 ? { images: input.images } : {}),
         },
       });
@@ -134,6 +156,8 @@ export function replicasApi(key: string, base = REPLICAS_API): ReplicasApi {
         body: {
           message: input.message,
           plan_mode: input.planMode,
+          ...(input.model ? { model: input.model } : {}),
+          ...(input.thinkingLevel ? { thinking_level: input.thinkingLevel } : {}),
           ...(input.chatId ? { chat_id: input.chatId } : {}),
           ...(input.images.length > 0 ? { images: input.images } : {}),
         },

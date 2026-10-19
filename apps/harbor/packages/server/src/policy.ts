@@ -67,6 +67,50 @@ export function canRenameSpace(space: Space): Decision {
 }
 
 /**
+ * Archive and unarchive are admin acts on a shared space (spec §4 Roles and
+ * §6, built 2026-10-13). A DM has no admin path into it, so it never archives.
+ */
+export function canArchiveSpace(actor: Member, space: Space, act: 'archive' | 'unarchive'): Decision {
+  if (space.kind === 'direct') return { code: 'invalid_request', message: `a direct message cannot be ${act}d` };
+  if (actor.role === 'admin') return null;
+  return { code: 'forbidden', message: `only an admin can ${act} a space` };
+}
+
+/** Deleting a space is an admin act too, on the same terms as archiving it (spec §6, built 2026-10-14). */
+export function canDeleteSpace(actor: Member, space: Space): Decision {
+  if (space.kind === 'direct') return { code: 'invalid_request', message: 'a direct message cannot be deleted' };
+  if (actor.role === 'admin') return null;
+  return { code: 'forbidden', message: 'only an admin can delete a space' };
+}
+
+/**
+ * An archived space refuses every write that would add to it (spec §6,
+ * 2026-10-13). Asked by the space lock for every member's act; leaving and
+ * unarchiving opt out, and personal state (read marks, follows) never asks.
+ */
+export function canWriteSpace(space: Space): Decision {
+  if (!space.archived) return null;
+  return { code: 'forbidden', message: 'this space is archived — an admin can unarchive it' };
+}
+
+/**
+ * A group chat (spec §4, 2026-10-07): an org with one shared space and no
+ * DMs. One answer for every member — the org's count, not anyone's
+ * listing — so a group is a chat, or a workspace, for everyone at once.
+ * "No DMs" keeps an org that already talks in DMs a workspace: nothing
+ * that exists is ever hidden by this rule.
+ */
+export function isGroupChat(counts: { shared: number; direct: number }): boolean {
+  return counts.shared === 1 && counts.direct === 0;
+}
+
+/** DMs are off in a group chat, notes to self included; a second space turns them on (2026-10-07). */
+export function canOpenDirect(groupChat: boolean): Decision {
+  if (!groupChat) return null;
+  return { code: 'forbidden', message: 'direct messages are off in a group chat — add a channel to turn them on' };
+}
+
+/**
  * The content plane is role-flat (spec §4): the one act restricted to a
  * single member is an author acting on their own message — edit, delete,
  * end a poll. The check is on the member id, never the acting mode: a
@@ -94,6 +138,28 @@ export function canBind(identity: { email?: string }, org: { allowedEmailDomains
   return { code: 'policy_refused', message: `this org admits only ${domains.map((d) => `@${d}`).join(', ')} accounts` };
 }
 
+/** The org's logo is its admins' to set (2026-10-02); a member's avatar is always their own. */
+/**
+ * A deleted account's member (2026-10-13): kept for attribution, refused as
+ * a sign-in — through any driver, and through an invite, which would
+ * otherwise rebind the same row.
+ */
+export function canSignIn(member: Member): Decision {
+  if (member.deactivatedAt === undefined) return null;
+  return { code: 'not_a_member', message: 'this account was deleted' };
+}
+
+/** Nobody adds, or opens a DM with, a deactivated member (2026-10-13). */
+export function canReachMember(member: Member): Decision {
+  if (member.deactivatedAt === undefined) return null;
+  return { code: 'invalid_request', message: `${member.displayName} has deleted their account` };
+}
+
+export function canSetOrgLogo(actor: Member): Decision {
+  if (actor.role === 'admin') return null;
+  return { code: 'forbidden', message: 'only an admin can change the org’s logo' };
+}
+
 // --- agent members and their keys (spec §4 Agent members, 2026-09-29) --------
 
 /** Any person may add an agent and becomes its owner. An agent may not: one agent minting others escapes every owner. */
@@ -110,6 +176,18 @@ export function canAddAgent(actor: Member): Decision {
 export function canCreateAgentKey(actor: Member, agent: Member): Decision {
   if (agent.kind === 'agent' && agent.ownerId !== undefined && agent.ownerId === actor.id) return null;
   return { code: 'forbidden', message: 'only the agent’s owner can create its keys' };
+}
+
+/** Pointing an agent's alerts at a space (spec §8 Alerts, 2026-10-03): the owner, as with its keys. */
+export function canSetAgentHook(actor: Member, agent: Member): Decision {
+  if (agent.kind === 'agent' && agent.ownerId !== undefined && agent.ownerId === actor.id) return null;
+  return { code: 'forbidden', message: 'only the agent’s owner can set where its alerts go' };
+}
+
+/** Turning its alerts off: the owner, or any admin, like revoking a key. */
+export function canClearAgentHook(actor: Member, agent: Member): Decision {
+  if (agent.kind === 'agent' && (actor.role === 'admin' || (agent.ownerId !== undefined && agent.ownerId === actor.id))) return null;
+  return { code: 'forbidden', message: 'only the agent’s owner or an admin can turn its alerts off' };
 }
 
 /** Revoking: the owner, or any admin — the off switch for an agent that misbehaves. */
