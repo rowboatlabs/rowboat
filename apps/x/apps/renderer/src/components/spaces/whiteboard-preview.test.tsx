@@ -34,7 +34,7 @@ it('loads and refreshes a preview board without a saver or outbound frames, incl
     const space = { id: 'space', name: 'Open', visibility: 'open', kind: 'shared' } as spaces.Space
     let unmount!: () => void
     await act(async () => {
-        unmount = render(<SpaceAccessContext.Provider value={{ member: false, joining: false, join: vi.fn() }}>
+        unmount = render(<SpaceAccessContext.Provider value={{ member: false, writable: false, archived: false, joining: false, join: vi.fn() }}>
             <WhiteboardPane org={org} space={space} boardId="board" memberNames={new Map()} active boards={[]} onSelectBoard={vi.fn()} onCreateBoard={vi.fn()} onClose={vi.fn()} />
         </SpaceAccessContext.Provider>).unmount
     })

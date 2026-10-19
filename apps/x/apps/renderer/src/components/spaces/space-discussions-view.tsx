@@ -26,7 +26,7 @@ export function SpaceDiscussionsView({ orgId, orgAddress, spaceId, direct, topic
     presence: SpacePresence
     onOpen: (rootMessageId: string) => void
 }) {
-    const { member } = useSpaceAccess()
+    const { writable } = useSpaceAccess()
     useReadStateVersion()
     const [archived, setArchived] = useState(false)
     const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null)
@@ -80,12 +80,12 @@ export function SpaceDiscussionsView({ orgId, orgAddress, spaceId, direct, topic
                                 <DropdownMenuContent align="end">
                                     <DropdownMenuItem onSelect={copyLink}><LinkIcon className="mr-2 size-3.5" />Copy link</DropdownMenuItem>
                                     <DropdownMenuSeparator />
-                                    <DropdownMenuItem disabled={!member} onSelect={() => setRenaming({ id: topic.id, title })}><Pencil className="mr-2 size-3.5" />Rename</DropdownMenuItem>
-                                    <DropdownMenuItem disabled={!member} onSelect={() => void manage(topic.id, { action: archived ? 'unarchive' : 'archive' })}>
+                                    <DropdownMenuItem disabled={!writable} onSelect={() => setRenaming({ id: topic.id, title })}><Pencil className="mr-2 size-3.5" />Rename</DropdownMenuItem>
+                                    <DropdownMenuItem disabled={!writable} onSelect={() => void manage(topic.id, { action: archived ? 'unarchive' : 'archive' })}>
                                         {archived ? <ArchiveRestore className="mr-2 size-3.5" /> : <Archive className="mr-2 size-3.5" />}{archived ? 'Unarchive' : 'Archive'}
                                     </DropdownMenuItem>
                                     <DropdownMenuSeparator />
-                                    <DropdownMenuItem disabled={!member} onSelect={() => void manage(topic.id, { action: 'remove' })}><MessageSquareOff className="mr-2 size-3.5" />Convert back to thread</DropdownMenuItem>
+                                    <DropdownMenuItem disabled={!writable} onSelect={() => void manage(topic.id, { action: 'remove' })}><MessageSquareOff className="mr-2 size-3.5" />Convert back to thread</DropdownMenuItem>
                                 </DropdownMenuContent>
                             </DropdownMenu>
                         </div>

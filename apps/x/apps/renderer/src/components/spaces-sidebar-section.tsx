@@ -2,7 +2,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from '@/components/ui/button'
 import { useSpaceDirectory, invalidateSpaceDirectory } from '@/hooks/use-space-directory'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Bell, ChevronRight, CornerDownRight, Hash, Lock, MessagesSquare, Pencil, Plus } from 'lucide-react'
+import { Archive, Bell, ChevronRight, CornerDownRight, Hash, Lock, MessagesSquare, Pencil, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { SidebarGroup, SidebarGroupContent, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar'
 import {
@@ -211,6 +211,72 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onOpen
         }
     }
 
+    // Archived spaces (harbor #1186, 2026-10-14) leave the list for a
+    // collapsed section at its foot — still readable, out of the way.
+    const liveSpaces = org.spaces.filter((space) => !space.archived)
+    const archivedSpaces = org.spaces.filter((space) => space.archived)
+    const [archivedOpen, setArchivedOpen] = useState(false)
+    // Viewing an archived space keeps its row in sight.
+    const archivedShown = archivedOpen || archivedSpaces.some((space) => activeSpace?.orgId === org.id && activeSpace.spaceId === space.id)
+    const spaceRow = (space: OrgWithSpaces['spaces'][number]) => {
+        const active = activeSpace?.orgId === org.id && activeSpace.spaceId === space.id
+        // Collapsed, the row carries the stream plus every followed
+        // discussion; expanded, the discussions show their own and the
+        // row keeps the stream's.
+        const summed = unread.get(`${org.id}/${space.id}`) ?? NO_BADGE
+        if (renamingId === space.id) {
+            return <SidebarMenuItem key={space.id}>
+                <div className="flex items-center gap-1 py-0.5 pl-9 pr-2">
+                    <Input autoFocus value={renameValue} className="h-7 text-xs"
+                        onChange={(event) => setRenameValue(event.target.value)}
+                        onKeyDown={(event) => {
+                            if (event.key === 'Enter') void renameSpace(space.id)
+                            if (event.key === 'Escape') setRenamingId(null)
+                        }} onBlur={() => void renameSpace(space.id)} />
+                </div>
+            </SidebarMenuItem>
+        }
+        return (
+                <CollapsibleSpace key={space.id} orgId={org.id} spaceId={space.id} name={space.name}
+                showArchived={showArchived} countOverride={active ? activeDiscussionCount : undefined} enabled={!!renderDiscussions}
+                discussions={() => renderDiscussions?.(space.id)}>
+                    {(expanded) => { const badge = expanded ? streamBadge(org.id, space.id, false) : summed; return (
+                    <ContextMenu>
+                        <ContextMenuTrigger asChild>
+                            <SidebarMenuButton
+                                isActive={active}
+                                onClick={() => onOpenSpace(org.id, space.id)}
+                                // Hover = intent: warm the cached tail + roster and
+                                // start the refresh, so the click paints instantly.
+                                onMouseEnter={() => {
+                                    prefetchStream(org.id, space.id)
+                                    prefetchMembers(org.id, space.id)
+                                }}
+                                className="min-w-0 flex-1 pl-1"
+                            >
+                                {/* A space is a channel — # says so. */}
+                                {space.visibility === 'open' ? <Hash className="size-3.5 shrink-0 text-muted-foreground" /> : <Lock aria-label="Private space" className="size-3.5 shrink-0 text-muted-foreground" />}
+                                <span className={cn('flex-1 truncate', badge.unread > 0 && !active && 'font-medium text-foreground')}>{space.name}</span>
+                                {!active && <UnreadBadge badge={badge} />}
+                            </SidebarMenuButton>
+                        </ContextMenuTrigger>
+                        <ContextMenuContent>
+                            <ContextMenuItem
+                                disabled={space.archived}
+                                onClick={() => {
+                                    setRenameValue(space.name)
+                                    setRenamingId(space.id)
+                                }}
+                            >
+                                <Pencil className="mr-2 size-3.5" /> Rename space
+                            </ContextMenuItem>
+                        </ContextMenuContent>
+                    </ContextMenu>
+                    ) }}
+            </CollapsibleSpace>
+        )
+    }
+
     return (
         <>
             {onOpenBrowse && <SidebarMenuItem><SidebarMenuButton isActive={browseActive} onClick={() => onOpenBrowse(org.id)} className="pl-6">Browse spaces</SidebarMenuButton></SidebarMenuItem>}
@@ -223,63 +289,18 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onOpen
                     </SidebarMenuButton>
                 </SidebarMenuItem>
             )}
-            {org.spaces.map((space) => {
-                const active = activeSpace?.orgId === org.id && activeSpace.spaceId === space.id
-                // Collapsed, the row carries the stream plus every followed
-                // discussion; expanded, the discussions show their own and the
-                // row keeps the stream's.
-                const summed = unread.get(`${org.id}/${space.id}`) ?? NO_BADGE
-                if (renamingId === space.id) {
-                    return <SidebarMenuItem key={space.id}>
-                        <div className="flex items-center gap-1 py-0.5 pl-9 pr-2">
-                            <Input autoFocus value={renameValue} className="h-7 text-xs"
-                                onChange={(event) => setRenameValue(event.target.value)}
-                                onKeyDown={(event) => {
-                                    if (event.key === 'Enter') void renameSpace(space.id)
-                                    if (event.key === 'Escape') setRenamingId(null)
-                                }} onBlur={() => void renameSpace(space.id)} />
-                        </div>
-                    </SidebarMenuItem>
-                }
-                return (
-                        <CollapsibleSpace key={space.id} orgId={org.id} spaceId={space.id} name={space.name}
-                        showArchived={showArchived} countOverride={active ? activeDiscussionCount : undefined} enabled={!!renderDiscussions}
-                        discussions={() => renderDiscussions?.(space.id)}>
-                            {(expanded) => { const badge = expanded ? streamBadge(org.id, space.id, false) : summed; return (
-                            <ContextMenu>
-                                <ContextMenuTrigger asChild>
-                                    <SidebarMenuButton
-                                        isActive={active}
-                                        onClick={() => onOpenSpace(org.id, space.id)}
-                                        // Hover = intent: warm the cached tail + roster and
-                                        // start the refresh, so the click paints instantly.
-                                        onMouseEnter={() => {
-                                            prefetchStream(org.id, space.id)
-                                            prefetchMembers(org.id, space.id)
-                                        }}
-                                        className="min-w-0 flex-1 pl-1"
-                                    >
-                                        {/* A space is a channel — # says so. */}
-                                        {space.visibility === 'open' ? <Hash className="size-3.5 shrink-0 text-muted-foreground" /> : <Lock aria-label="Private space" className="size-3.5 shrink-0 text-muted-foreground" />}
-                                        <span className={cn('flex-1 truncate', badge.unread > 0 && !active && 'font-medium text-foreground')}>{space.name}</span>
-                                        {!active && <UnreadBadge badge={badge} />}
-                                    </SidebarMenuButton>
-                                </ContextMenuTrigger>
-                                <ContextMenuContent>
-                                    <ContextMenuItem
-                                        onClick={() => {
-                                            setRenameValue(space.name)
-                                            setRenamingId(space.id)
-                                        }}
-                                    >
-                                        <Pencil className="mr-2 size-3.5" /> Rename space
-                                    </ContextMenuItem>
-                                </ContextMenuContent>
-                            </ContextMenu>
-                            ) }}
-                    </CollapsibleSpace>
-                )
-            })}
+            {liveSpaces.map(spaceRow)}
+            {archivedSpaces.length > 0 && (
+                <SidebarMenuItem>
+                    <SidebarMenuButton onClick={() => setArchivedOpen((open) => !open)} className="pl-6 text-xs text-muted-foreground">
+                        <ChevronRight className={cn('size-3.5 shrink-0 transition-transform', archivedShown && 'rotate-90')} />
+                        <Archive className="size-3.5 shrink-0" />
+                        <span className="flex-1 truncate">Archived</span>
+                        <span className="tabular-nums">{archivedSpaces.length}</span>
+                    </SidebarMenuButton>
+                </SidebarMenuItem>
+            )}
+            {archivedShown && archivedSpaces.map(spaceRow)}
             <SidebarMenuItem>
                 <div className="group/org flex h-8 items-center gap-1.5 rounded-md pl-6 pr-2 text-xs text-muted-foreground" title={`You are ${org.memberId}`}>
                     <button type="button" onClick={() => setCreating(true)} className="flex flex-1 items-center gap-1.5 text-left hover:text-foreground">

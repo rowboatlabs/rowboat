@@ -197,8 +197,8 @@ function MessageRowImpl({
     /** Marks thread rows; message geometry stays consistent across both panes. */
     dense?: boolean
 }) {
-    const { member } = useSpaceAccess()
-    if (!member) {
+    const { writable } = useSpaceAccess()
+    if (!writable) {
         onAskRowboat = undefined
         onStopAgent = undefined
         onReplyInThread = undefined
@@ -344,7 +344,7 @@ function MessageRowImpl({
                         <span title={formatFullTimestamp(message.postedAt)} className="text-muted-foreground">{formatFeedTime(message.postedAt)}</span>
                     </div>
                 )}
-                {member && edit !== null ? (
+                {writable && edit !== null ? (
                     <div className="mt-1">
                         <MessageEditBox
                             initial={edit.initial}

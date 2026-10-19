@@ -221,7 +221,7 @@ describe('GeneralStream jump to a row outside the window', () => {
 it('renders preview content and an explicit Join action without marking it read', () => {
     vi.mocked(markStreamRead).mockClear()
     const join = vi.fn()
-    render(<SpaceAccessContext.Provider value={{ member: false, join, joining: false }}>
+    render(<SpaceAccessContext.Provider value={{ member: false, writable: false, archived: false, join, joining: false }}>
         <GeneralStream org={org} space={space} stream={streamOf([msg(1)])} presence={presence} memberNames={new Map()}
             onOpenThread={vi.fn()} />
     </SpaceAccessContext.Provider>)
