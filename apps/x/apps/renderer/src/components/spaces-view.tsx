@@ -1,3 +1,4 @@
+import { MemberDirectory } from '@/components/spaces/member-directory'
 import { invokeSpace } from '@/lib/spaces-invoke'
 import { LOCAL_RUNTIME } from '@/lib/feature-flags'
 import { SpaceAccessContext, useSpaceAccess, canActInSpace } from '@/lib/spaces-access'
@@ -14,7 +15,7 @@ import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { AgentBadge, MemberAvatar, MemberProfilePopover, OrgMonogram } from '@/components/spaces/atoms'
+import { MemberAvatar, OrgMonogram } from '@/components/spaces/atoms'
 import { openServerDialog } from '@/lib/server-dialog'
 import { isGroupChat } from '@/lib/spaces-navigation'
 import { BookmarksPopover } from '@/components/spaces/bookmarks'
@@ -868,11 +869,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     const selfName = memberNames.get(org.memberId) ?? org.memberId
 
     const here = presence.here.filter((id) => members.some((m) => m.id === id))
-    // Roster for the members popover: whoever is here floats up, then A–Z.
     const hereSet = new Set(here)
-    const roster = [...members].sort(
-        (a, b) => Number(hereSet.has(b.id)) - Number(hereSet.has(a.id)) || a.displayName.localeCompare(b.displayName),
-    )
 
     // The chat surface keeps its context while a file has focus: a thread
     // stays open beside the document it changed (fromThreadRootId), otherwise
@@ -1082,34 +1079,8 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                             <span className="tabular-nums">{members.length}</span>
                         </button>
                     </PopoverTrigger>
-                    <PopoverContent align="end" className="w-64 p-1.5">
-                        <div className="px-2 pb-1 pt-0.5 text-[13px] text-muted-foreground">
-                            Members — {members.length}
-                        </div>
-                        <div className="max-h-72 overflow-y-auto">
-                            {roster.map((m) => {
-                                const isHere = hereSet.has(m.id)
-                                return (
-                                    <MemberProfilePopover key={m.id} id={m.id}>
-                                        <button type="button" className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-accent/60">
-                                            <span className="relative shrink-0">
-                                                <MemberAvatar id={m.id} name={m.displayName} size="md" agent={m.kind === 'agent'} agentKind={m.agentKind} />
-                                                {isHere && <span className="absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-[var(--rowboat-success)] ring-2 ring-popover" />}
-                                            </span>
-                                            <span className="min-w-0 flex-1 truncate text-sm">
-                                                {m.displayName}
-                                                {m.id === org.memberId && <span className="text-muted-foreground"> (you)</span>}
-                                            </span>
-                                            {m.kind === 'agent' && <AgentBadge agentKind={m.agentKind} agentConnection={m.agentConnection} />}
-                                            {m.role === 'admin' && (
-                                                <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] font-medium text-muted-foreground">admin</span>
-                                            )}
-                                            {isHere && <span className="shrink-0 text-[10.5px] text-[var(--rowboat-success)]">here</span>}
-                                        </button>
-                                    </MemberProfilePopover>
-                                )
-                            })}
-                        </div>
+                    <PopoverContent align="end" className="w-[400px] max-w-[calc(100vw-24px)] p-1.5">
+                        <MemberDirectory members={members} here={hereSet} selfId={org.memberId} />
                         {/* A DM's membership is fixed — there is nobody to add or invite. */}
                         {writable && !isDirect && (
                             <div className="mt-1 border-t border-border pt-1">
