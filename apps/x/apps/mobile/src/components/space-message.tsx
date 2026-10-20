@@ -362,6 +362,8 @@ export function MessageActionSheet({
   onQuote,
   onEdit,
   onDelete,
+  onReport,
+  onBlock,
   linkFor,
   reactionsOnly,
 }: {
@@ -375,6 +377,9 @@ export function MessageActionSheet({
   /** Author-only (the content plane is role-flat). */
   onEdit?: (message: Message) => void;
   onDelete?: (message: Message) => void;
+  /** Someone else's message only (App Store Guideline 1.2, 2026-10-20). */
+  onReport?: (message: Message) => void;
+  onBlock?: (message: Message) => void;
   /** The message's canonical link (https://<org>/s/<space>/m/<id>). */
   linkFor?: (message: Message) => string;
   /** The emoji+ pill's mode: just the reactions row. */
@@ -394,6 +399,8 @@ export function MessageActionSheet({
   if (linkFor) actions.push({ key: 'link', icon: 'sf:link', label: 'Copy link', run: () => void Clipboard.setStringAsync(linkFor(message)) });
   if (isAuthor && onEdit && !message.poll) actions.push({ key: 'edit', icon: 'sf:pencil', label: 'Edit message', run: () => onEdit(message) });
   if (isAuthor && onDelete) actions.push({ key: 'delete', icon: 'sf:trash', label: 'Delete message', destructive: true, run: () => onDelete(message) });
+  if (!isAuthor && onReport) actions.push({ key: 'report', icon: 'sf:flag', label: 'Report message', destructive: true, run: () => onReport(message) });
+  if (!isAuthor && onBlock) actions.push({ key: 'block', icon: 'sf:hand.raised', label: 'Block this person', destructive: true, run: () => onBlock(message) });
 
   return (
     <Modal transparent visible animationType="fade" onRequestClose={onClose}>

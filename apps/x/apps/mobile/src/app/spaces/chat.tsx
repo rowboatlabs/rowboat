@@ -27,6 +27,7 @@ const TAIL_ROWS = 8;
 const TAIL_WAIT_MS = 700;
 import { SpacesClient } from '@/lib/spaces/client';
 import { memberLabel, useProfiles } from '@/lib/spaces/profiles';
+import { blockMember, reportMessage, useBlockedIds } from '@/lib/spaces/moderation';
 import { SpacesLive } from '@x/spaces-client';
 import { useColors } from '@/theme/colors';
 
@@ -52,6 +53,9 @@ export default function SpaceChatScreen() {
   const [messages, setMessages] = useState<Message[] | null>(() => peekValue<Message[]>(streamCacheKey) ?? null);
   const [members, setMembers] = useState<Map<string, Member>>(() => new Map((peekRoster(org, space) ?? []).map((m) => [m.id, m])));
   const profiles = useProfiles(client, members);
+  // People you blocked (2026-10-20): their messages are hidden on this phone.
+  const blockedIds = useBlockedIds(org);
+  const blockedKey = [...blockedIds].join(',');
   const memberNames = useMemo(() => new Map([...profiles].map(([id, m]) => [id, memberLabel(m)])), [profiles]);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -226,7 +230,11 @@ export default function SpaceChatScreen() {
   // that grows later (link cards, images) pushes history UP, never the view.
   // Deleted messages vanish (Slack) unless replies still hang off them.
   messagesRef.current = messages;
-  const visible = useMemo(() => messages?.filter((m) => !m.deletedAt || m.replyCount > 0) ?? [], [messages]);
+  const visible = useMemo(
+    () => messages?.filter((m) => (!m.deletedAt || m.replyCount > 0) && !blockedIds.has(m.author.memberId)) ?? [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- blockedKey stands for blockedIds
+    [messages, blockedKey],
+  );
 
   // Live: one socket for this screen's lifetime, replay from the last offset
   // the initial fetch saw (subscribe waits until that fetch lands).
@@ -570,6 +578,10 @@ export default function SpaceChatScreen() {
           <Text style={{ fontSize: 13, textAlign: 'center', color: colors.secondaryLabel, paddingHorizontal: 32, paddingVertical: 12 }}>
             This account was deleted. You can still read your conversation.
           </Text>
+        ) : members.size === 2 && [...members.keys()].some((id) => blockedIds.has(id)) ? (
+          <Text style={{ fontSize: 13, textAlign: 'center', color: colors.secondaryLabel, paddingHorizontal: 32, paddingVertical: 12 }}>
+            You blocked this person. Unblock them in Account → Blocked users.
+          </Text>
         ) : (
         <SpaceComposer
           ref={composerRef}
@@ -594,6 +606,8 @@ export default function SpaceChatScreen() {
         onQuote={quote}
         onEdit={beginEdit}
         onDelete={confirmDelete}
+        onReport={(m) => reportMessage({ org, message: m, author: profiles.get(m.author.memberId), getAccessToken: () => account.getAccessToken() })}
+        onBlock={(m) => blockMember({ org, spaceId: space, member: { id: m.author.memberId, name: profiles.get(m.author.memberId)?.displayName ?? 'this person' }, getAccessToken: () => account.getAccessToken() })}
         linkFor={linkFor}
       />
     </KeyboardAvoidingView>

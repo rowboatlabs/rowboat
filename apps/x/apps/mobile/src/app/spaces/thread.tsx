@@ -27,6 +27,7 @@ import { postMessageReliably } from '@/lib/spaces/send';
 import { loadRoster, loadThread, peekRoster, peekThread, saveRoster, saveThread } from '@/lib/spaces/cache';
 import { SpacesClient } from '@/lib/spaces/client';
 import { memberLabel, useProfiles } from '@/lib/spaces/profiles';
+import { blockMember, reportMessage, useBlockedIds } from '@/lib/spaces/moderation';
 import { SpacesLive } from '@x/spaces-client';
 import { useColors } from '@/theme/colors';
 
@@ -54,6 +55,9 @@ export default function SpaceThreadScreen() {
   const [replies, setReplies] = useState<Message[] | null>(initial?.messages ?? null);
   const [members, setMembers] = useState<Map<string, Member>>(() => new Map((peekRoster(org, space) ?? []).map((m) => [m.id, m])));
   const profiles = useProfiles(client, members);
+  // People you blocked (2026-10-20): their messages are hidden on this phone.
+  const blockedIds = useBlockedIds(org);
+  const blockedKey = [...blockedIds].join(',');
   const memberNames = useMemo(() => new Map([...profiles].map(([id, m]) => [id, memberLabel(m)])), [profiles]);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -139,7 +143,11 @@ export default function SpaceThreadScreen() {
   }, [client, org, space, root]);
 
   // Deleted replies vanish (Slack) — they anchor nothing.
-  const visibleReplies = useMemo(() => replies?.filter((m) => !m.deletedAt) ?? null, [replies]);
+  const visibleReplies = useMemo(
+    () => replies?.filter((m) => !m.deletedAt && !blockedIds.has(m.author.memberId)) ?? null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- blockedKey stands for blockedIds
+    [replies, blockedKey],
+  );
 
   // Write-through: whatever is on screen is what the next open paints.
   useEffect(() => {
@@ -483,6 +491,8 @@ export default function SpaceThreadScreen() {
         onQuote={quote}
         onEdit={beginEdit}
         onDelete={confirmDelete}
+        onReport={(m) => reportMessage({ org, message: m, author: profiles.get(m.author.memberId), getAccessToken: () => account.getAccessToken() })}
+        onBlock={(m) => blockMember({ org, spaceId: space, member: { id: m.author.memberId, name: profiles.get(m.author.memberId)?.displayName ?? 'this person' }, getAccessToken: () => account.getAccessToken() })}
         linkFor={linkFor}
       />
     </KeyboardAvoidingView>

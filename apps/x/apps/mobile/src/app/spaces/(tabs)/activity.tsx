@@ -3,6 +3,7 @@ import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
+import { useBlocked } from '@/lib/spaces/moderation';
 import type { ActivityItem, ActivityPage } from '@rowboat/spaces-protocol';
 import { spaces } from '@x/shared';
 
@@ -44,7 +45,17 @@ export default function ActivityScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<Filter>('all');
   const [clearing, setClearing] = useState(false);
-  const visible = useMemo(() => rows?.filter((r) => FILTERS.find((f) => f.key === filter)!.kinds?.includes(r.item.kind) ?? true) ?? null, [rows, filter]);
+  // Items from people you blocked (2026-10-20) stay out of the feed.
+  const blocked = useBlocked();
+  const visible = useMemo(
+    () =>
+      rows?.filter(
+        (r) =>
+          (FILTERS.find((f) => f.key === filter)!.kinds?.includes(r.item.kind) ?? true) &&
+          !(blocked[r.org.address] ?? []).some((b) => b.id === r.item.message.author.memberId),
+      ) ?? null,
+    [rows, filter, blocked],
+  );
 
   const load = useCallback(async () => {
     const orgs = account.orgs ?? [];

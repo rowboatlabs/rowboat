@@ -11,6 +11,7 @@ import { Avatar, AuthedImage } from '@/components/avatar';
 import { StatusBanner } from '@/components/status-banner';
 import { friendlyError } from '@/lib/spaces/errors';
 import { memberLabel } from '@/lib/spaces/profiles';
+import { useBlockedIds } from '@/lib/spaces/moderation';
 import { useMyAvatar } from '@/lib/spaces/my-avatar';
 import { useParentHeader } from '@/lib/use-parent-header';
 import { pickProfileImage } from '@/lib/spaces/profile-image';
@@ -399,6 +400,8 @@ function OrgCard({ org, onSwitch, mode = 'home', query = '' }: { org: SpacesOrg;
   );
 
   const [openingDm, setOpeningDm] = useState<string | null>(null);
+  const blockedIds = useBlockedIds(org.address);
+  const blockedKey = [...blockedIds].join(',');
 
   // Deleted accounts you share a DM with that has messages in it. A DM's
   // stream also holds join events, so ask for its newest message instead.
@@ -448,11 +451,14 @@ function OrgCard({ org, onSwitch, mode = 'home', query = '' }: { org: SpacesOrg;
     // A deleted account (2026-10-19) stays only where you two actually talked:
     // a DM with messages in it. Otherwise there's nobody left to message.
     for (const m of seen.values()) if (m.deactivatedAt && !talkedWith.has(m.id)) seen.delete(m.id);
+    // People you blocked (2026-10-20) leave the list; unblock from Account.
+    for (const id of blockedIds) seen.delete(id);
     // You first (the self-DM is your notes-to-self), then everyone by name.
     return [...seen.values()].sort((a, b) =>
       a.id === org.memberId ? -1 : b.id === org.memberId ? 1 : a.displayName.localeCompare(b.displayName),
     );
-  }, [members, org.memberId, talkedWith]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- blockedKey stands for blockedIds
+  }, [members, org.memberId, talkedWith, blockedKey]);
 
   const people = orgMembers.filter((m) => !m.deactivatedAt).length;
   // Collapsible sections (Slack): remembered per org; only on Home. A
