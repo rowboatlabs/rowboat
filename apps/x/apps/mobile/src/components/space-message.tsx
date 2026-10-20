@@ -451,7 +451,9 @@ export function MessageActionSheet({
                   onPress={() => {
                     if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
                     onClose();
-                    a.run();
+                    // After the menu's fade-out (2026-10-20): presenting a sheet or
+                    // alert over a dismissing modal can crash on iOS.
+                    setTimeout(a.run, 350);
                   }}
                   style={({ pressed }) => ({
                     flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 46,

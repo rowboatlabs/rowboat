@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useState } from 'react';
-import { ActionSheetIOS, Alert } from 'react-native';
+import { Alert } from 'react-native';
 import type { Member, Message } from '@rowboat/spaces-protocol';
 
 import { ACCOUNT_API_URL } from './account';
@@ -86,17 +86,12 @@ async function sendReport(input: ReportInput, token: string) {
 
 const REASONS = ['Spam', 'Harassment or bullying', 'Hate or violence', 'Sexual content', 'Something else'];
 
+// A plain alert, not ActionSheetIOS (2026-10-20): the report starts from the
+// long-press menu, and an action sheet presented while that modal is still
+// dismissing crashed the app on device. Alerts present in their own window.
 function pickReason(title: string, onPick: (reason: string) => void) {
-  if (process.env.EXPO_OS === 'ios') {
-    ActionSheetIOS.showActionSheetWithOptions(
-      { title, message: 'Why are you reporting this?', options: [...REASONS, 'Cancel'], cancelButtonIndex: REASONS.length },
-      (i) => i < REASONS.length && onPick(REASONS[i]),
-    );
-    return;
-  }
   Alert.alert(title, 'Why are you reporting this?', [
-    ...REASONS.slice(0, 2).map((r) => ({ text: r, onPress: () => onPick(r) })),
-    { text: 'Something else', onPress: () => onPick('Something else') },
+    ...REASONS.map((r) => ({ text: r, onPress: () => onPick(r) })),
     { text: 'Cancel', style: 'cancel' as const },
   ]);
 }
