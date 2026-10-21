@@ -207,12 +207,15 @@ function Sidebar({
         data-slot="sidebar-container"
         className={cn(
           "fixed inset-y-0 z-10 flex h-svh w-(--sidebar-width)",
-          "will-change-transform in-data-[resizing=false]:transition-[translate,width] in-data-[resizing=false]:duration-(--sb-dur) in-data-[resizing=false]:ease-(--sb-ease)",
+          "in-data-[resizing=false]:transition-[clip-path,width] in-data-[resizing=false]:duration-(--sb-dur) in-data-[resizing=false]:ease-(--sb-ease)",
           side === "left"
-            // 2026-10-21: offcanvas slides with translate (compositor only)
-            // instead of animating left/right, which relaid it out every frame.
-            ? "left-(--sidebar-offset) group-data-[collapsible=offcanvas]:-translate-x-full"
-            : "right-0 group-data-[collapsible=offcanvas]:translate-x-full",
+            // 2026-10-21: offcanvas no longer slides the panel its full width.
+            // The panel stays put at full width and is clipped from the right
+            // in step with the gap closing, while its contents fade and nudge
+            // 8px (styles/sidebar.css, data-slot="sidebar-inner"): nothing in
+            // the panel relays out, and nothing travels far.
+            ? "left-(--sidebar-offset) [clip-path:inset(0)] group-data-[collapsible=offcanvas]:[clip-path:inset(0_100%_0_0)]"
+            : "right-0 [clip-path:inset(0)] group-data-[collapsible=offcanvas]:[clip-path:inset(0_0_0_100%)]",
           // Adjust the padding for floating and inset variants.
           variant === "floating" || variant === "inset"
             ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]"
@@ -224,7 +227,7 @@ function Sidebar({
         <div
           data-sidebar="sidebar"
           data-slot="sidebar-inner"
-          className="bg-sidebar group-data-[variant=floating]:border-sidebar-border flex h-full w-full flex-col transition-opacity duration-(--sb-dur) ease-(--sb-ease) group-data-[collapsible=offcanvas]:opacity-0 group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:shadow-sm"
+          className="bg-sidebar group-data-[variant=floating]:border-sidebar-border flex h-full w-full flex-col group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:shadow-sm"
         >
           {children}
         </div>

@@ -596,7 +596,7 @@ export function DockSidebar({
     if (switcherOnly) closeFlyouts()
   }, [switcherOnly, closeFlyouts])
 
-  // 2026-10-21: when the panel comes back, the rail fades out over 160ms
+  // 2026-10-21: when the panel comes back, the rail fades out over 120ms
   // instead of vanishing in the frame the panel starts sliding in.
   const [railLeaving, setRailLeaving] = useState(false)
   const [lastSwitcherOnly, setLastSwitcherOnly] = useState(switcherOnly)
@@ -606,7 +606,7 @@ export function DockSidebar({
   }
   useEffect(() => {
     if (!railLeaving) return
-    const timer = setTimeout(() => setRailLeaving(false), 170)
+    const timer = setTimeout(() => setRailLeaving(false), 130)
     return () => clearTimeout(timer)
   }, [railLeaving])
 

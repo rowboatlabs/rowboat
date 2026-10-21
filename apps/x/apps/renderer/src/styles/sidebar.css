@@ -1,14 +1,29 @@
 /* Main sidebar — redesign (2026-10-21). One row height (32px) with a 2px
    gap between rows, so a hovered row never touches the selected one. Labels
    sit a step below full ink and icons a step below that; hover and the
-   selected row bring both up to full. Motion stays under 280ms and turns off
-   under reduced motion. */
+   selected row bring both up to full. Motion turns off under reduced motion.
+
+   2026-10-21, after studying the Kimi desktop app: hover feedback is instant
+   (no fade), folds take 160ms, menus only fade, and collapsing clips the
+   panel in place and nudges its contents 8px instead of sliding it away. */
 
 /* One curve and duration for everything that moves when the sidebar
-   collapses or expands: the panel, the content beside it, the header. */
+   collapses or expands: the panel's clip, the content beside it, the header.
+   An ease-in-out: a width that grows and shrinks reads calmest when it
+   starts and lands softly. */
 :root {
-  --sb-ease: cubic-bezier(.32, .72, 0, 1);
+  --sb-ease: cubic-bezier(.4, 0, .2, 1);
   --sb-dur: 300ms;
+}
+
+/* The panel's contents fade out early and drift 8px as it clips away; on
+   the way back they fade in over the opening. */
+[data-slot="sidebar-inner"] {
+  transition: opacity 180ms ease-out, translate var(--sb-dur) var(--sb-ease);
+}
+[data-collapsible="offcanvas"] [data-slot="sidebar-inner"] {
+  opacity: 0;
+  translate: -8px 0;
 }
 
 .rowboat-sidebar [data-sidebar="menu"] { gap: 2px; }
@@ -18,14 +33,13 @@
   padding: 0 8px 0 10px;
   border-radius: 8px;
   color: color-mix(in srgb, var(--sidebar-foreground) 80%, transparent);
-  transition: background-color 140ms ease, color 140ms ease, transform 120ms ease;
+  transition: transform 120ms ease;
 }
 .rowboat-sidebar [data-sidebar="menu-button"] > svg,
 .rowboat-sidebar [data-sidebar="menu-button"] > .sb-icon {
   width: 16px;
   height: 16px;
   color: color-mix(in srgb, var(--sidebar-foreground) 55%, transparent);
-  transition: color 140ms ease;
 }
 .rowboat-sidebar [data-sidebar="menu-button"]:hover,
 .rowboat-sidebar [data-sidebar="menu-button"][data-state="open"] {
@@ -77,7 +91,7 @@
   color: color-mix(in srgb, var(--sidebar-foreground) 70%, transparent);
   background: color-mix(in srgb, var(--sidebar-foreground) 3%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sidebar-foreground) 9%, transparent);
-  transition: background-color 140ms ease, color 140ms ease, transform 120ms ease;
+  transition: transform 120ms ease;
 }
 .sb-square:hover {
   color: var(--sidebar-foreground);
@@ -145,7 +159,7 @@
   height: 22px;
   border-radius: 6px;
   color: color-mix(in srgb, var(--sidebar-foreground) 60%, transparent);
-  transition: background-color 120ms ease, color 120ms ease, transform 120ms ease;
+  transition: transform 120ms ease;
 }
 .sb-row-action:hover,
 .sb-row-action[data-state="open"] {
@@ -186,7 +200,7 @@
   width: 12px;
   height: 12px;
   opacity: 0;
-  transition: transform 220ms cubic-bezier(.2, 0, 0, 1), opacity 120ms ease;
+  transition: transform 160ms cubic-bezier(.2, 0, 0, 1), opacity 120ms ease;
 }
 .sb-section-head:hover .sb-chevron,
 .sb-section-toggle:focus-visible .sb-chevron,
@@ -206,7 +220,7 @@
   display: grid;
   grid-template-rows: 1fr;
   opacity: 1;
-  transition: grid-template-rows 240ms cubic-bezier(.2, 0, 0, 1), opacity 180ms ease;
+  transition: grid-template-rows 160ms cubic-bezier(.2, 0, 0, 1), opacity 120ms ease-out;
 }
 .sb-section[data-open="false"] .sb-collapse { grid-template-rows: 0fr; opacity: 0; }
 .sb-collapse > * { min-height: 0; overflow: hidden; }
@@ -274,7 +288,6 @@
   height: 44px;
   padding: 0 8px 0 0;
   border-radius: 14px;
-  transition: background-color 160ms ease;
 }
 .sb-account-group:hover,
 .sb-account-group:has([data-state="open"]),
@@ -337,7 +350,7 @@
   color: color-mix(in srgb, var(--sidebar-foreground) 88%, transparent);
   background: color-mix(in srgb, var(--sidebar-foreground) 5%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sidebar-foreground) 10%, transparent);
-  transition: background-color 140ms ease, color 140ms ease, transform 120ms ease;
+  transition: transform 120ms ease;
 }
 .sb-plan-pill:hover {
   color: var(--sidebar-foreground);
@@ -358,12 +371,12 @@
   border-radius: 999px !important;
 }
 
-/* Menus opened from the sidebar rise out of it. */
+/* Menus opened from the sidebar only fade: no rise, no scale. */
 @keyframes sb-menu-in {
-  from { opacity: 0; transform: translateY(6px) scale(.97); }
-  to { opacity: 1; transform: none; }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
-.sb-menu[data-state="open"] { animation: sb-menu-in 200ms cubic-bezier(.2, .8, .2, 1); transform-origin: bottom left; }
+.sb-menu[data-state="open"] { animation: sb-menu-in 150ms ease; }
 
 /* The collapsed rail hands off to the panel and back with a short fade,
    instead of swapping in a single frame. */
@@ -371,16 +384,17 @@
   from { opacity: 0; transform: translateX(-6px); }
   to { opacity: 1; transform: none; }
 }
-.rowboat-dock { animation: rowboat-dock-in 220ms var(--sb-ease) 90ms both; }
+/* It arrives as the panel finishes clipping away. */
+.rowboat-dock { animation: rowboat-dock-in 180ms ease-out 140ms both; }
 @keyframes rowboat-dock-out {
   from { opacity: 1; transform: none; }
   to { opacity: 0; transform: translateX(-6px); }
 }
 .rowboat-dock[data-leaving="true"] {
-  animation: rowboat-dock-out 160ms ease both;
+  animation: rowboat-dock-out 120ms ease-out both;
   pointer-events: none;
 }
-.rowboat-dock-tile { transition: background-color 140ms ease, color 140ms ease, transform 120ms ease; }
+.rowboat-dock-tile { transition: transform 120ms ease !important; }
 .rowboat-dock-tile:active { transform: scale(.94); }
 .rowboat-dock-tile[data-active="true"] {
   background: color-mix(in srgb, var(--sidebar-foreground) 9%, transparent);
@@ -390,6 +404,7 @@
 @media (prefers-reduced-motion: reduce) {
   :root { --sb-dur: 0ms; }
   .rowboat-sidebar [data-sidebar="menu-button"],
+  [data-slot="sidebar-inner"],
   .sb-collapse,
   .sb-chevron { transition: none; }
   .sb-row-in,
