@@ -10,7 +10,7 @@ import { RemoveFromOrgDialog } from '@/components/spaces/member-admin'
 import { refreshOrgRoster, useOrgRoster, useSpaceRosters } from '@/hooks/use-space-members'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { BUILT_IN_CONNECTION, agentLabel, kindInfo } from '@/lib/agent-kinds'
-import { avatarColorClass, initials } from '@/lib/spaces-presentation'
+import { initials } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 
@@ -22,6 +22,30 @@ import { cn } from '@/lib/utils'
 // its keys reuse the Agents dialog's screens.
 
 type Filter = 'all' | 'mine'
+
+// Theme by the app's class, not the OS: `[.dark_&]:`, never `dark:` (agent-setup.tsx).
+// Light (2026-10-21): a white page with grey-filled cards on a firm hairline,
+// so the cards read as objects, not outlines; dark keeps the tinted card
+// surface. Faces are soft tints, not the stream's solid avatars.
+const PAGE = 'bg-background'
+const CARD = 'border-black/[0.1] bg-[#f5f5f5] shadow-[0_1px_2px_rgba(0,0,0,0.05),0_2px_8px_rgba(0,0,0,0.03)] [.dark_&]:border-border [.dark_&]:bg-[var(--card-surface)] [.dark_&]:shadow-[0_1px_2px_rgba(0,0,0,0.3)]'
+const CARD_BG = 'ring-[#f5f5f5] [.dark_&]:ring-[var(--card-surface)]'
+const FACES = [
+    'bg-sky-100 text-sky-700 [.dark_&]:bg-sky-400/15 [.dark_&]:text-sky-300',
+    'bg-orange-100 text-orange-700 [.dark_&]:bg-orange-400/15 [.dark_&]:text-orange-300',
+    'bg-teal-100 text-teal-700 [.dark_&]:bg-teal-400/15 [.dark_&]:text-teal-300',
+    'bg-amber-100 text-amber-700 [.dark_&]:bg-amber-400/15 [.dark_&]:text-amber-300',
+    'bg-indigo-100 text-indigo-700 [.dark_&]:bg-indigo-400/15 [.dark_&]:text-indigo-300',
+    'bg-rose-100 text-rose-700 [.dark_&]:bg-rose-400/15 [.dark_&]:text-rose-300',
+    'bg-emerald-100 text-emerald-700 [.dark_&]:bg-emerald-400/15 [.dark_&]:text-emerald-300',
+    'bg-violet-100 text-violet-700 [.dark_&]:bg-violet-400/15 [.dark_&]:text-violet-300',
+] as const
+
+function faceClass(id: string): string {
+    let hash = 0
+    for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0
+    return FACES[Math.abs(hash) % FACES.length]!
+}
 
 export function AgentsView({ org }: { org: OrgWithSpaces }) {
     const spaceIds = useMemo(() => org.spaces.map((s) => s.id), [org.spaces])
@@ -68,7 +92,7 @@ export function AgentsView({ org }: { org: OrgWithSpaces }) {
     )
 
     return (
-        <section aria-label="Agents" className="flex min-w-0 flex-1 flex-col overflow-y-auto">
+        <section aria-label="Agents" className={cn('flex min-w-0 flex-1 flex-col overflow-y-auto', PAGE)}>
             <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-8 sm:py-10">
                 <header className="flex flex-wrap items-end justify-between gap-4">
                     <div className="min-w-0">
@@ -76,7 +100,7 @@ export function AgentsView({ org }: { org: OrgWithSpaces }) {
                             Agents
                             <span className="text-base font-normal tabular-nums text-muted-foreground">{agents.length}</span>
                         </h1>
-                        <p className="mt-1 text-sm text-muted-foreground">Every agent in {org.name}, what it runs on, and who added it.</p>
+                        <p className="mt-1 text-sm text-[var(--rowboat-ink-secondary)]">Every agent in {org.name}, what it runs on, and who added it.</p>
                     </div>
                     <Segmented
                         label="Show"
@@ -128,7 +152,7 @@ function Segmented<T extends string>({ label, value, onChange, options }: {
     options: ReadonlyArray<{ value: T; label: string }>
 }) {
     return (
-        <div role="radiogroup" aria-label={label} className="inline-flex rounded-lg border border-border p-0.5">
+        <div role="radiogroup" aria-label={label} className="inline-flex rounded-lg bg-black/[0.05] p-0.5 [.dark_&]:bg-white/[0.06]">
             {options.map((o) => (
                 <button
                     key={o.value}
@@ -138,7 +162,9 @@ function Segmented<T extends string>({ label, value, onChange, options }: {
                     onClick={() => onChange(o.value)}
                     className={cn(
                         'rounded-md px-3 py-1 text-xs transition-colors',
-                        value === o.value ? 'bg-accent font-medium text-foreground' : 'text-muted-foreground hover:text-foreground',
+                        value === o.value
+                            ? 'bg-white font-medium text-foreground shadow-[0_1px_2px_rgba(0,0,0,0.08)] [.dark_&]:bg-white/[0.1] [.dark_&]:shadow-none'
+                            : 'text-muted-foreground hover:text-foreground',
                     )}
                 >
                     {o.label}
@@ -153,11 +179,11 @@ function AgentFace({ agent }: { agent: spaces.Member }) {
     const logo = kindInfo(agent.agentKind).logo
     return (
         <span className="relative inline-flex">
-            <span className={cn('inline-flex size-12 items-center justify-center rounded-full text-base font-semibold select-none', avatarColorClass(agent.id))}>
+            <span className={cn('inline-flex size-12 items-center justify-center rounded-full text-base font-semibold select-none', faceClass(agent.id))}>
                 {initials(agent.displayName)}
             </span>
             {/* `[.dark_&]:`, not `dark:`: the app's theme class, not the OS setting (agent-setup.tsx). */}
-            <span aria-hidden className="absolute -right-1 -bottom-1 flex size-5 items-center justify-center overflow-hidden rounded-md bg-background ring-2 ring-[var(--card-surface)]">
+            <span aria-hidden className={cn('absolute -right-1 -bottom-1 flex size-5 items-center justify-center overflow-hidden rounded-md bg-background ring-2', CARD_BG)}>
                 {logo ? (
                     <>
                         <img src={logo.light} alt="" className="size-full [.dark_&]:hidden" />
@@ -218,8 +244,8 @@ function AgentCard({ orgId, agent, owner, spaceNames, isAdmin, onOpenSettings, o
     return (
         <li
             className={cn(
-                'group relative flex min-h-[188px] flex-col rounded-xl border border-border bg-[var(--card-surface)] p-4 transition-[border-color,box-shadow,transform] duration-150',
-                canOpen && 'hover:-translate-y-px hover:border-foreground/15 hover:shadow-[var(--rowboat-shadow-soft)]',
+                'group relative flex min-h-[188px] flex-col rounded-xl border p-4 transition-[border-color,box-shadow,transform] duration-150', CARD,
+                canOpen && 'hover:-translate-y-px hover:border-black/[0.16] hover:shadow-[var(--rowboat-shadow-soft)] [.dark_&]:hover:border-foreground/15',
             )}
         >
             {canOpen && !renaming && (
@@ -282,7 +308,7 @@ function AgentCard({ orgId, agent, owner, spaceNames, isAdmin, onOpenSettings, o
                 ) : (
                     <div className="truncate text-sm font-medium" title={shownName}>{shownName}</div>
                 )}
-                <div className="mt-0.5 truncate text-xs text-muted-foreground">{agentLabel(agent.agentKind, agent.agentConnection)}</div>
+                <div className="mt-0.5 truncate text-xs text-[var(--rowboat-ink-secondary)]">{agentLabel(agent.agentKind, agent.agentConnection)}</div>
             </div>
 
             <div className="mt-auto flex items-center justify-between gap-2 pt-4 text-xs text-muted-foreground">
@@ -323,13 +349,13 @@ function SpacesBadge({ names }: { names: string[] }) {
 
 function NewAgentCard({ onAdd }: { onAdd: (bot: boolean) => void }) {
     return (
-        <li className="flex min-h-[188px] flex-col rounded-xl border border-dashed border-border transition-colors hover:border-foreground/25">
+        <li className="flex min-h-[188px] flex-col rounded-xl border border-dashed border-black/20 transition-colors hover:border-black/35 hover:bg-[#fafafa] [.dark_&]:border-border [.dark_&]:hover:border-foreground/25 [.dark_&]:hover:bg-transparent">
             <button
                 type="button"
                 onClick={() => onAdd(false)}
                 className="flex flex-1 flex-col items-center justify-center gap-2 rounded-t-xl text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
             >
-                <span className="flex size-9 items-center justify-center rounded-full border border-border">
+                <span className="flex size-9 items-center justify-center rounded-full border border-black/15 bg-[#f5f5f5] [.dark_&]:border-border [.dark_&]:bg-transparent">
                     <Plus className="size-4" />
                 </span>
                 New agent
