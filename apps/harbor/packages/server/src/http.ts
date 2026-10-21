@@ -429,6 +429,12 @@ export function buildHttpApp(deps: {
     return reply(c, routes.setAgentCredential.response, { credential: await service.setAgentCredential(actor(c), agentId, input.secret) });
   });
 
+  app.put(routes.renameAgent.path, async (c) => {
+    const { agentId } = parseWith(routes.renameAgent.params, c.req.param());
+    const input = await body(c, routes.renameAgent.request);
+    return reply(c, routes.renameAgent.response, { agent: await service.renameAgent(actor(c), agentId, input) });
+  });
+
   app.put(routes.setAgentOptionDefaults.path, async (c) => {
     const { agentId } = parseWith(routes.setAgentOptionDefaults.params, c.req.param());
     const input = await body(c, routes.setAgentOptionDefaults.request);
