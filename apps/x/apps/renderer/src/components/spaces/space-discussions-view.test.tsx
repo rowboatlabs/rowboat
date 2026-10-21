@@ -31,7 +31,7 @@ describe('all discussions', () => {
         expect(screen.queryByText('Old launch')).not.toBeInTheDocument()
         fireEvent.click(screen.getByRole('button', { name: /^Launch 0 replies/ }))
         expect(onOpen).toHaveBeenCalledWith('root-live')
-        fireEvent.click(screen.getByRole('button', { name: 'Archived' }))
+        fireEvent.click(screen.getByRole('button', { name: /^Archived/ }))
         expect(screen.queryByText('Launch', { exact: true })).not.toBeInTheDocument()
         fireEvent.click(screen.getByRole('button', { name: /^Old launch 0 replies/ }))
         expect(onOpen).toHaveBeenLastCalledWith('root-archived')

@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react'
 import { Bookmark, Loader2, Pin, X as XIcon } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { MemberAvatar } from '@/components/spaces/atoms'
 import { useMemberNames } from '@/components/spaces/member-text'
 import { useSpaceNames } from '@/hooks/use-spaces'
@@ -67,7 +66,12 @@ function BookmarkRow({ authorId, authorName, postedAt, excerpt, topicLabel, onOp
     )
 }
 
-export function BookmarksPopover({ orgId, spaceId, streamKey, topics, onNavigate }: {
+/**
+ * Pinned and saved messages, as a panel. Spaces redesign (2026-10-21): it
+ * lives inside the space's title menu instead of its own header icon, so the
+ * header keeps three controls. `onClose` closes whatever holds it.
+ */
+export function BookmarksPanel({ orgId, spaceId, streamKey, topics, onNavigate, onClose }: {
     orgId: string
     spaceId: string
     /** The read-state key standing for the stream — its messages label as "Messages". */
@@ -75,21 +79,20 @@ export function BookmarksPopover({ orgId, spaceId, streamKey, topics, onNavigate
     topics: spaces.Topic[]
     /** Open the message's surface and scroll to it. */
     onNavigate: (rootMessageId: string, messageId: string) => void
+    onClose: () => void
 }) {
     const memberNames = useMemberNames()
     const spaceNames = useSpaceNames(orgId)
     const [tab, setTab] = useState<'pinned' | 'saved'>('pinned')
-    const [open, setOpen] = useState(false)
     const [corpus, setCorpus] = useState<spaces.Message[] | null>(() => peekSpaceCorpus(orgId, spaceId))
-    const [loading, setLoading] = useState(false)
+    // The panel mounts each time it opens, so it starts out loading.
+    const [loading, setLoading] = useState(true)
     const saved = useSaved(orgId, spaceId)
 
-    // The pinned list needs the corpus (every topic's newest page) — fetch on
-    // open, paint the cached copy meanwhile.
+    // The pinned list needs the corpus (every topic's newest page) — fetch when
+    // the panel shows, paint the cached copy meanwhile.
     useEffect(() => {
-        if (!open) return
         let cancelled = false
-        setLoading(true)
         void loadSpaceCorpus(orgId, spaceId)
             .then((messages) => {
                 if (cancelled) return
@@ -101,7 +104,7 @@ export function BookmarksPopover({ orgId, spaceId, streamKey, topics, onNavigate
         return () => {
             cancelled = true
         }
-    }, [open, orgId, spaceId])
+    }, [orgId, spaceId])
 
     const pinned = useMemo(() => pinnedMessages(corpus ?? []), [corpus])
     const topicLabel = (rootMessageId: string): string => {
@@ -114,84 +117,74 @@ export function BookmarksPopover({ orgId, spaceId, streamKey, topics, onNavigate
     const count = tab === 'pinned' ? pinned.length : saved.length
 
     return (
-        <Popover open={open} onOpenChange={setOpen}>
-            <PopoverTrigger asChild>
-                <button
-                    type="button"
-                    title="Pinned & saved messages"
-                    className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground"
-                >
-                    <Bookmark className="size-4" />
-                </button>
-            </PopoverTrigger>
-            <PopoverContent align="end" className="w-96 p-1.5">
-                <div className="flex items-center gap-1 px-1 pb-1.5 pt-0.5">
-                    {(['pinned', 'saved'] as const).map((t) => (
-                        <button
-                            key={t}
-                            type="button"
-                            onClick={() => setTab(t)}
-                            className={cn(
-                                'inline-flex h-6 items-center gap-1.5 rounded-md px-2 text-xs capitalize',
-                                tab === t ? 'bg-accent font-medium text-foreground' : 'text-muted-foreground hover:text-foreground',
-                            )}
-                        >
-                            {t === 'pinned' ? <Pin className="size-3" /> : <Bookmark className="size-3" />}
-                            {t}
-                        </button>
+        <div>
+
+            <div className="flex items-center gap-1 px-1 pb-1.5 pt-0.5">
+                {(['pinned', 'saved'] as const).map((t) => (
+                    <button
+                        key={t}
+                        type="button"
+                        onClick={() => setTab(t)}
+                        className={cn(
+                            'inline-flex h-6 items-center gap-1.5 rounded-md px-2 text-xs capitalize',
+                            tab === t ? 'bg-accent font-medium text-foreground' : 'text-muted-foreground hover:text-foreground',
+                        )}
+                    >
+                        {t === 'pinned' ? <Pin className="size-3" /> : <Bookmark className="size-3" />}
+                        {t}
+                    </button>
+                ))}
+                <span className="flex-1" />
+                {loading && tab === 'pinned' ? (
+                    <Loader2 className="size-3 animate-spin text-muted-foreground" />
+                ) : (
+                    <span className="pr-1 text-[11px] text-muted-foreground">{count}</span>
+                )}
+            </div>
+            <div className="max-h-80 overflow-y-auto">
+                {tab === 'pinned' &&
+                    pinned.map((m) => (
+                        <BookmarkRow
+                            key={m.id}
+                            authorId={m.author.memberId}
+                            authorName={nameOf(m.author.memberId)}
+                            postedAt={m.postedAt}
+                            excerpt={messageExcerpt(m.body, memberNames, spaceNames)}
+                            topicLabel={topicLabel(m.threadRoot ?? streamKey)}
+                            onOpen={() => {
+                                onClose()
+                                onNavigate(m.threadRoot ?? streamKey, m.id)
+                            }}
+                            onRemove={undefined}
+                        />
                     ))}
-                    <span className="flex-1" />
-                    {loading && tab === 'pinned' ? (
-                        <Loader2 className="size-3 animate-spin text-muted-foreground" />
-                    ) : (
-                        <span className="pr-1 text-[11px] text-muted-foreground">{count}</span>
-                    )}
-                </div>
-                <div className="max-h-80 overflow-y-auto">
-                    {tab === 'pinned' &&
-                        pinned.map((m) => (
-                            <BookmarkRow
-                                key={m.id}
-                                authorId={m.author.memberId}
-                                authorName={nameOf(m.author.memberId)}
-                                postedAt={m.postedAt}
-                                excerpt={messageExcerpt(m.body, memberNames, spaceNames)}
-                                topicLabel={topicLabel(m.threadRoot ?? streamKey)}
-                                onOpen={() => {
-                                    setOpen(false)
-                                    onNavigate(m.threadRoot ?? streamKey, m.id)
-                                }}
-                                onRemove={undefined}
-                            />
-                        ))}
-                    {tab === 'pinned' && pinned.length === 0 && !loading && (
-                        <div className="px-2 py-4 text-xs text-muted-foreground">
-                            Nothing pinned. Pin a message from its ⋯ menu — pins are shared with the whole space.
-                        </div>
-                    )}
-                    {tab === 'saved' &&
-                        saved.map((s) => (
-                            <BookmarkRow
-                                key={s.messageId}
-                                authorId={s.authorId}
-                                authorName={nameOf(s.authorId)}
-                                postedAt={s.postedAt}
-                                excerpt={messageExcerpt(s.body, memberNames, spaceNames)}
-                                topicLabel={topicLabel(s.threadRootId)}
-                                onOpen={() => {
-                                    setOpen(false)
-                                    onNavigate(s.threadRootId, s.messageId)
-                                }}
-                                onRemove={() => removeSaved(orgId, spaceId, s.messageId)}
-                            />
-                        ))}
-                    {tab === 'saved' && saved.length === 0 && (
-                        <div className="px-2 py-4 text-xs text-muted-foreground">
-                            Nothing saved. Save a message from its ⋯ menu — saved items are just for you.
-                        </div>
-                    )}
-                </div>
-            </PopoverContent>
-        </Popover>
+                {tab === 'pinned' && pinned.length === 0 && !loading && (
+                    <div className="px-2 py-4 text-xs text-muted-foreground">
+                        Nothing pinned. Pin a message from its ⋯ menu — pins are shared with the whole space.
+                    </div>
+                )}
+                {tab === 'saved' &&
+                    saved.map((s) => (
+                        <BookmarkRow
+                            key={s.messageId}
+                            authorId={s.authorId}
+                            authorName={nameOf(s.authorId)}
+                            postedAt={s.postedAt}
+                            excerpt={messageExcerpt(s.body, memberNames, spaceNames)}
+                            topicLabel={topicLabel(s.threadRootId)}
+                            onOpen={() => {
+                                onClose()
+                                onNavigate(s.threadRootId, s.messageId)
+                            }}
+                            onRemove={() => removeSaved(orgId, spaceId, s.messageId)}
+                        />
+                    ))}
+                {tab === 'saved' && saved.length === 0 && (
+                    <div className="px-2 py-4 text-xs text-muted-foreground">
+                        Nothing saved. Save a message from its ⋯ menu — saved items are just for you.
+                    </div>
+                )}
+            </div>
+        </div>
     )
 }

@@ -40,71 +40,9 @@
 
 .spaces-navigation { background: var(--rowboat-panel-soft); }
 
-/* Content navigation is a thin strip; previews overlay rather than resize it. */
-.spaces-content-tabs {
-  display: flex;
-  flex-shrink: 0;
-  align-items: stretch;
-  gap: 16px;
-  min-height: 36px;
-  padding-inline: 16px;
-  border-bottom: 1px solid var(--border);
-}
-.spaces-content-tab {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-height: 36px;
-  padding: 0 2px;
-  border-bottom: 2px solid transparent;
-  color: var(--muted-foreground);
-  font-size: 12px;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.spaces-content-tab:hover { color: var(--foreground); }
-.spaces-content-tab.is-selected { color: var(--foreground); border-bottom-color: var(--foreground); }
-.spaces-content-tab:focus-visible,
-.spaces-content-menu button:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
-.spaces-content-menu-row {
-  display: flex;
-  width: 100%;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 8px;
-  border-radius: 4px;
-  text-align: left;
-  font-size: 13px;
-  cursor: pointer;
-}
-.spaces-content-menu-row:hover, .spaces-content-menu-all:hover { background: var(--accent); }
-.spaces-content-menu-all {
-  width: 100%;
-  margin-top: 4px;
-  border-top: 1px solid var(--border);
-  padding: 9px 8px 5px;
-  text-align: left;
-  font-size: 12px;
-  cursor: pointer;
-}
-.spaces-content-menu[data-state="open"] { animation: spaces-menu-reveal 100ms ease-out; }
-.spaces-content-menu[data-state="closed"] { animation: none; }
-@keyframes spaces-menu-reveal {
-  from { opacity: 0; transform: translateY(-4px); }
-  to { opacity: 1; transform: translateY(0); }
-}
 .spaces-collection-filter { padding: 4px 8px; border-radius: 4px; font-size: 12px; color: var(--muted-foreground); cursor: pointer; }
 .spaces-collection-filter[aria-pressed="true"], .spaces-collection-filter:hover { color: var(--foreground); background: var(--accent); }
 .spaces-files-view { --spaces-pane-header: 40px; }
-@media (max-width: 520px) {
-  .spaces-content-tabs { gap: 8px; padding-inline: 8px; }
-  .spaces-content-tab { gap: 4px; }
-  .spaces-content-tab > svg:first-child { display: none; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .spaces-content-menu[data-state="open"] { animation: none; }
-}
 .spaces-message-list { scroll-padding-block: 24px; }
 .spaces-message {
   gap: 12px;
@@ -120,13 +58,17 @@
   z-index: 10;
   visibility: hidden;
   opacity: 0;
-  transition: opacity 100ms ease;
+  transform: translateY(4px);
+  /* visibility flips at the end of the fade-out, so the bar stays painted while it leaves. */
+  transition: opacity 120ms ease, transform 160ms cubic-bezier(.2, .8, .2, 1), visibility 0s linear 120ms;
 }
 .spaces-message:hover .spaces-message-actions,
 .spaces-message:focus-within .spaces-message-actions,
 .spaces-message-actions--open {
   visibility: visible;
   opacity: 1;
+  transform: none;
+  transition-delay: 0s;
 }
 .spaces-message-actions svg { width: 18px; height: 18px; }
 .spaces-reaction {
@@ -141,18 +83,18 @@
 .spaces-thread-root { padding: 8px var(--spaces-gutter); }
 .spaces-thread-root > div > div:first-child { flex-wrap: wrap; }
 .spaces-composer-dock { padding: 12px 16px 16px; }
+/* Spaces redesign (2026-10-21): a softer frame — subtle border that firms up
+   on focus with a faint ring; the asking state is in the Composer block below. */
 .spaces-composer-frame {
-  border-color: color-mix(in srgb, var(--foreground) 24%, var(--background));
-  border-radius: var(--spaces-radius);
-  transition: border-color 120ms ease;
+  border-color: color-mix(in srgb, var(--foreground) 14%, var(--background));
+  border-radius: 14px;
+  transition: border-color 180ms ease, box-shadow 220ms ease;
 }
 .spaces-composer-frame:focus-within {
-  border-color: color-mix(in srgb, var(--foreground) 65%, var(--background));
+  border-color: color-mix(in srgb, var(--foreground) 30%, var(--background));
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--foreground) 4%, transparent);
 }
-.spaces-formatting {
-  background: var(--spaces-hover);
-  border-radius: 7px 7px 0 0;
-}
+.spaces-formatting { gap: 2px; padding: 6px 8px 0; }
 .spaces-formatting button { min-width: 28px; min-height: 28px; }
 .spaces-compose-actions { min-height: 40px; }
 .spaces-surface :is(button, [role="button"]):focus-visible {
@@ -166,7 +108,7 @@
 
 @media (pointer: coarse) {
   .spaces-message { padding-bottom: 44px; }
-  .spaces-message-actions { top: auto; bottom: 0; visibility: visible; opacity: 1; }
+  .spaces-message-actions { top: auto; bottom: 0; visibility: visible; opacity: 1; transform: none; }
   .spaces-message-actions button,
   .spaces-compose-actions button { min-height: 36px; min-width: 36px; }
   .spaces-reaction { min-height: 32px; }
@@ -178,4 +120,179 @@
 @media (prefers-reduced-motion: reduce) {
   .spaces-message-actions,
   .spaces-composer-frame { transition: none; }
+}
+
+/* Messages & motion — spaces redesign 2026-10-21 */
+/* The hover bar floats as a card: a soft shadow lifts it off the row. */
+.spaces-message-actions {
+  box-shadow: 0 6px 18px color-mix(in srgb, #000 22%, transparent), 0 1px 2px color-mix(in srgb, #000 10%, transparent);
+}
+.spaces-message { transition: background-color 120ms ease; }
+
+/* Reaction chips answer a press with a small spring. */
+.spaces-reaction {
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease, opacity 120ms ease,
+    transform 180ms cubic-bezier(.3, 1.6, .5, 1);
+}
+.spaces-reaction:active:not(:disabled) { transform: scale(.9); }
+/* "Add reaction" is chrome: shown with the row's other hover chrome (or while its picker is open). */
+.spaces-reaction-add { opacity: 0; }
+.spaces-message:hover .spaces-reaction-add,
+.spaces-message:focus-within .spaces-reaction-add,
+.spaces-reaction-add[data-state="open"] { opacity: 1; }
+
+/* The reply line is the way into a thread: a rounded hit area, a chevron that
+   slides in on hover, and a persistent tint while its thread is open. */
+.spaces-reply-link {
+  padding: 4px 10px 4px 4px;
+  margin-left: -4px;
+  border-radius: 8px;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+.spaces-reply-link:hover { background: color-mix(in srgb, var(--foreground) 6%, transparent); }
+.spaces-reply-link[data-open] { background: color-mix(in srgb, var(--stream-link) 12%, transparent); }
+.spaces-reply-link-go {
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity 140ms ease, transform 180ms cubic-bezier(.2, .8, .2, 1);
+}
+.spaces-reply-link:hover .spaces-reply-link-go,
+.spaces-reply-link:focus-visible .spaces-reply-link-go,
+.spaces-reply-link[data-open] .spaces-reply-link-go { opacity: 1; transform: none; }
+
+/* A row that arrives live rises into place; first paint and older pages don't. */
+.spaces-message--arriving { animation: spaces-message-rise 320ms cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes spaces-message-rise {
+  from { opacity: 0; transform: translateY(10px) scale(.985); }
+  to { opacity: 1; transform: none; }
+}
+
+/* The thread pane slides in from the right as it mounts (its column width animates in spaces-view). */
+.spaces-thread-pane { animation: spaces-thread-enter 300ms cubic-bezier(.2, 0, 0, 1) both; }
+@keyframes spaces-thread-enter {
+  from { opacity: 0; transform: translateX(24px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Touch has no hover: the add chip and the chevron stay visible. */
+@media (pointer: coarse) {
+  .spaces-reaction-add,
+  .spaces-reply-link-go { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spaces-message-actions { transform: none; }
+  .spaces-message,
+  .spaces-reaction,
+  .spaces-reply-link,
+  .spaces-reply-link-go { transition: none; }
+  .spaces-reaction:active:not(:disabled),
+  .spaces-reply-link-go { transform: none; }
+  .spaces-message--arriving,
+  .spaces-thread-pane { animation: none; }
+}
+
+/* Composer — spaces redesign 2026-10-21 */
+/* Height + fade reveal for the formatting bar and the ask hint: grid rows
+   animate 0fr↔1fr, so the content's natural height needs no measuring. */
+.spaces-collapse {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition: grid-template-rows 240ms cubic-bezier(.2, 0, 0, 1), opacity 180ms ease;
+}
+.spaces-collapse[data-open="false"] { grid-template-rows: 0fr; opacity: 0; }
+.spaces-collapse > div { overflow: hidden; min-height: 0; }
+
+/* A draft addressing @rowboat: accent border + soft ring, in the link color. */
+.spaces-composer-frame.is-asking,
+.spaces-composer-frame.is-asking:focus-within {
+  border-color: color-mix(in srgb, var(--stream-link) 55%, transparent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--stream-link) 12%, transparent);
+}
+.spaces-ask-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px 0;
+  font-size: 12.5px;
+  color: var(--stream-link);
+}
+
+.spaces-ask-chip {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--foreground) 12%, transparent);
+  border-radius: 14px;
+  font-size: 12.5px;
+  color: var(--muted-foreground);
+  transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease, transform 120ms ease;
+}
+.spaces-ask-chip:hover { color: var(--foreground); border-color: color-mix(in srgb, var(--foreground) 24%, transparent); }
+.spaces-ask-chip:active { transform: scale(.96); }
+/* --background as the ink: white on the light theme's deep link blue, near-black
+   on the dark theme's bright one — readable in both without a new token. */
+.spaces-ask-chip.is-on,
+.spaces-ask-chip.is-on:hover {
+  background: var(--stream-link);
+  border-color: var(--stream-link);
+  color: var(--background);
+}
+
+.spaces-plus svg { transition: transform 200ms cubic-bezier(.2, .8, .2, 1); }
+.spaces-plus[data-state="open"] svg { transform: rotate(45deg); }
+
+.spaces-send {
+  transition: background-color 180ms ease, color 180ms ease, transform 220ms cubic-bezier(.3, 1.6, .5, 1);
+}
+.spaces-send:not(:disabled):active { transform: scale(.9); }
+
+@media (prefers-reduced-motion: reduce) {
+  .spaces-collapse,
+  .spaces-ask-chip,
+  .spaces-plus svg,
+  .spaces-send { transition: none; }
+  .spaces-ask-chip:active,
+  .spaces-send:not(:disabled):active { transform: none; }
+}
+
+/* Sidebar — spaces redesign 2026-10-21 */
+/* Rows ease their hover wash in; the sidebar button's own width/height/padding easing is kept. */
+.spaces-rail-row {
+  transition: background-color 120ms ease, color 120ms ease, width 150ms, height 150ms, padding 150ms;
+}
+/* Section "+" and a space row's "⋯" stay out of sight until the pointer or focus is there. */
+.spaces-sec-add,
+.spaces-row-more {
+  opacity: 0;
+  transition: opacity 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+.spaces-sec:hover .spaces-sec-add,
+.spaces-sec:focus-within .spaces-sec-add,
+.spaces-row:hover .spaces-row-more,
+.spaces-row:focus-within .spaces-row-more,
+.spaces-row-more[data-state="open"] { opacity: 1; }
+.spaces-chev { transition: transform 220ms cubic-bezier(.2, 0, 0, 1); }
+.spaces-chev[data-closed] { transform: rotate(-90deg); }
+/* Animated height: grid rows 1fr ↔ 0fr; the inner div clips (with room for focus rings). */
+.spaces-collapse {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition: grid-template-rows 240ms cubic-bezier(.2, 0, 0, 1), opacity 180ms ease;
+}
+.spaces-collapse[data-open="false"] { grid-template-rows: 0fr; opacity: 0; }
+.spaces-collapse > div { min-height: 0; overflow: hidden; }
+@supports (overflow-clip-margin: 2px) {
+  .spaces-collapse > div { overflow: clip; overflow-clip-margin: 2px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spaces-rail-row,
+  .spaces-sec-add,
+  .spaces-row-more,
+  .spaces-chev,
+  .spaces-collapse { transition: none; }
 }
