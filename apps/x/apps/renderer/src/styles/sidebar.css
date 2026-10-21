@@ -4,6 +4,13 @@
    selected row bring both up to full. Motion stays under 280ms and turns off
    under reduced motion. */
 
+/* One curve and duration for everything that moves when the sidebar
+   collapses or expands: the panel, the content beside it, the header. */
+:root {
+  --sb-ease: cubic-bezier(.32, .72, 0, 1);
+  --sb-dur: 300ms;
+}
+
 .rowboat-sidebar [data-sidebar="menu"] { gap: 2px; }
 
 .rowboat-sidebar [data-sidebar="menu-button"] {
@@ -364,7 +371,7 @@
   from { opacity: 0; transform: translateX(-6px); }
   to { opacity: 1; transform: none; }
 }
-.rowboat-dock { animation: rowboat-dock-in 220ms cubic-bezier(.2, .8, .2, 1) 70ms both; }
+.rowboat-dock { animation: rowboat-dock-in 220ms var(--sb-ease) 90ms both; }
 @keyframes rowboat-dock-out {
   from { opacity: 1; transform: none; }
   to { opacity: 0; transform: translateX(-6px); }
@@ -381,6 +388,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  :root { --sb-dur: 0ms; }
   .rowboat-sidebar [data-sidebar="menu-button"],
   .sb-collapse,
   .sb-chevron { transition: none; }

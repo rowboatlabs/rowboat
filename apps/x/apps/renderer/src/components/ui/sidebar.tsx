@@ -195,7 +195,7 @@ function Sidebar({
         data-slot="sidebar-gap"
         className={cn(
           "relative w-(--sidebar-width) bg-transparent",
-          "in-data-[resizing=false]:transition-[width] in-data-[resizing=false]:duration-[260ms] in-data-[resizing=false]:ease-[cubic-bezier(.2,.8,.2,1)]",
+          "in-data-[resizing=false]:transition-[width] in-data-[resizing=false]:duration-(--sb-dur) in-data-[resizing=false]:ease-(--sb-ease)",
           "group-data-[collapsible=offcanvas]:w-0",
           "group-data-[side=right]:rotate-180",
           variant === "floating" || variant === "inset"
@@ -207,10 +207,12 @@ function Sidebar({
         data-slot="sidebar-container"
         className={cn(
           "fixed inset-y-0 z-10 flex h-svh w-(--sidebar-width)",
-          "in-data-[resizing=false]:transition-[left,right,width] in-data-[resizing=false]:duration-[260ms] in-data-[resizing=false]:ease-[cubic-bezier(.2,.8,.2,1)]",
+          "will-change-transform in-data-[resizing=false]:transition-[translate,width] in-data-[resizing=false]:duration-(--sb-dur) in-data-[resizing=false]:ease-(--sb-ease)",
           side === "left"
-            ? "left-(--sidebar-offset) group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-offset)-var(--sidebar-width))]"
-            : "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
+            // 2026-10-21: offcanvas slides with translate (compositor only)
+            // instead of animating left/right, which relaid it out every frame.
+            ? "left-(--sidebar-offset) group-data-[collapsible=offcanvas]:-translate-x-full"
+            : "right-0 group-data-[collapsible=offcanvas]:translate-x-full",
           // Adjust the padding for floating and inset variants.
           variant === "floating" || variant === "inset"
             ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]"
@@ -222,7 +224,7 @@ function Sidebar({
         <div
           data-sidebar="sidebar"
           data-slot="sidebar-inner"
-          className="bg-sidebar group-data-[variant=floating]:border-sidebar-border flex h-full w-full flex-col transition-opacity duration-200 group-data-[collapsible=offcanvas]:opacity-0 group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:shadow-sm"
+          className="bg-sidebar group-data-[variant=floating]:border-sidebar-border flex h-full w-full flex-col transition-opacity duration-(--sb-dur) ease-(--sb-ease) group-data-[collapsible=offcanvas]:opacity-0 group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:shadow-sm"
         >
           {children}
         </div>

@@ -821,12 +821,25 @@ function FixedSidebarToggle({
       >
         <PanelLeftIcon className="size-[17px]" strokeWidth={1.5} />
       </button>
-      {/* 2026-10-21: the expanded sidebar has its own New chat row; the
-          cluster keeps this one only while the sidebar is collapsed. */}
-      {onNewChat && state === 'collapsed' && (
+      {/* Caffeinate lives here rather than in a pane header: it is app-wide
+          state, and this cluster is the one control group present on every
+          view, sidebar expanded or docked. */}
+      <CaffeinateToggle />
+      {/* 2026-10-21: the expanded sidebar has its own New chat row, so this
+          one (last in the cluster) fades out while expanded. It keeps its slot: the
+          cluster's width (and the header padding measured from it) must not
+          change mid-collapse, or the header jumps a frame late. */}
+      {onNewChat && (
         <button
           type="button"
           onClick={onNewChat}
+          tabIndex={state === 'collapsed' ? undefined : -1}
+          aria-hidden={state === 'collapsed' ? undefined : true}
+          style={{
+            opacity: state === 'collapsed' ? 1 : 0,
+            pointerEvents: state === 'collapsed' ? undefined : 'none',
+            transition: 'opacity 180ms ease, background-color 150ms ease, color 150ms ease',
+          }}
           className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
           aria-label="New chat"
           title="New chat"
@@ -834,10 +847,6 @@ function FixedSidebarToggle({
           <SquarePen className="size-[17px]" strokeWidth={1.5} />
         </button>
       )}
-      {/* Caffeinate lives here rather than in a pane header: it is app-wide
-          state, and this cluster is the one control group present on every
-          view, sidebar expanded or docked. */}
-      <CaffeinateToggle />
     </div>
   )
 }
@@ -880,7 +889,7 @@ function ContentHeader({
       style={{
         paddingLeft: state === 'collapsed' ? (collapsedLeftPaddingPx ?? 12) : 12,
         paddingRight: 12,
-        transition: 'padding-left 200ms linear',
+        transition: 'padding-left var(--sb-dur) var(--sb-ease)',
       }}
     >
       {onNavigateBack && onNavigateForward ? (
@@ -7312,7 +7321,7 @@ function App() {
             onOpenChange={handleSidebarOpenChange}
             style={{
               paddingLeft: sidebarOpen ? 0 : DOCK_GUTTER_PX,
-              transition: 'padding-left 260ms cubic-bezier(.2, .8, .2, 1)',
+              transition: 'padding-left var(--sb-dur) var(--sb-ease)',
             }}
           >
             <SidebarContentPanel
