@@ -130,6 +130,28 @@ export const ZCreateConnectedAccountRequest = z.object({
 });
 
 /**
+ * Create link request for Composio-managed OAuth
+ */
+export const ZCreateLinkRequest = z.object({
+    auth_config_id: z.string(),
+    user_id: z.string().optional(),
+    callback_url: z.string().optional(),
+});
+
+/**
+ * Create link response for Composio-managed OAuth
+ */
+export const ZCreateLinkResponse = z.object({
+    link_token: z.string().optional(),
+    redirect_url: z.string().optional(),
+    redirectUrl: z.string().optional(),
+    connected_account_id: z.string().optional(),
+    connectedAccountId: z.string().optional(),
+    id: z.string().optional(),
+    expires_at: z.string().optional(),
+}).passthrough();
+
+/**
  * Create connected account response
  */
 export const ZCreateConnectedAccountResponse = z.object({
