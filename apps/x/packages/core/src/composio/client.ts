@@ -8,6 +8,7 @@ import {
     ZCreateAuthConfigRequest,
     ZCreateAuthConfigResponse,
     ZCreateConnectedAccountRequest,
+    ZCreateConnectedAccountLinkResponse,
     ZCreateConnectedAccountResponse,
     ZDeleteOperationResponse,
     ZErrorResponse,
@@ -241,10 +242,25 @@ export async function createAuthConfig(
 export async function createConnectedAccount(
     request: z.infer<typeof ZCreateConnectedAccountRequest>
 ): Promise<z.infer<typeof ZCreateConnectedAccountResponse>> {
-    return composioApiCall(ZCreateConnectedAccountResponse, "/connected_accounts", {}, {
+    const response = await composioApiCall(ZCreateConnectedAccountLinkResponse, "/connected_accounts/link", {}, {
         method: 'POST',
-        body: JSON.stringify(request),
+        body: JSON.stringify({
+            auth_config_id: request.auth_config.id,
+            user_id: request.connection.user_id,
+            callback_url: request.connection.callback_url,
+        }),
     });
+
+    return {
+        id: response.connected_account_id,
+        connectionData: {
+            authScheme: 'OAUTH2',
+            val: {
+                status: 'INITIATED',
+                redirectUrl: response.redirect_url,
+            },
+        },
+    };
 }
 
 /**
