@@ -596,6 +596,20 @@ export function DockSidebar({
     if (switcherOnly) closeFlyouts()
   }, [switcherOnly, closeFlyouts])
 
+  // 2026-10-21: when the panel comes back, the rail fades out over 160ms
+  // instead of vanishing in the frame the panel starts sliding in.
+  const [railLeaving, setRailLeaving] = useState(false)
+  const [lastSwitcherOnly, setLastSwitcherOnly] = useState(switcherOnly)
+  if (lastSwitcherOnly !== switcherOnly) {
+    setLastSwitcherOnly(switcherOnly)
+    setRailLeaving(switcherOnly)
+  }
+  useEffect(() => {
+    if (!railLeaving) return
+    const timer = setTimeout(() => setRailLeaving(false), 170)
+    return () => clearTimeout(timer)
+  }, [railLeaving])
+
   // ----- data: account / billing -----
   const [hasOauthError, setHasOauthError] = useState(false)
   const [isRowboatConnected, setIsRowboatConnected] = useState(false)
@@ -925,9 +939,8 @@ export function DockSidebar({
   // ----- the item list -----
   const rows = useMemo<DockRow[]>(() => {
     const items: DockRow[] = [
-      // The top section: Assistant (resumes the most recent chat, falling
-      // back to a fresh one — white tile), then Projects and Spaces, then a
-      // divider before the destinations.
+      // Same order as the panel (2026-10-21): Assistant, Spaces, the
+      // daily destinations, the work tools, then Chats.
       ...(onOpenRun || onNewChat ? [
         {
           item: {
@@ -943,14 +956,7 @@ export function DockSidebar({
           },
         },
       ] : []),
-      {
-        item: {
-          key: 'workspaces', label: 'Projects', icon: Folder, tourId: 'nav-workspaces',
-          running: activeNav === 'workspaces' || activeNav === 'code',
-          onClick: () => { closeFlyouts(); knowledgeActions.openWorkspaceAt() },
-        },
-      },
-      ...(SPACES_ENABLED && (!switcherOnly || totalSpaces > 0) ? [{
+      ...(SPACES_ENABLED && (!switcherOnly || totalSpaces > 0) ? [{ sep: true as const }, {
         item: {
           key: 'spaces', label: 'Spaces', icon: MessagesSquare, tourId: 'nav-spaces',
           notification: spacesNotification.unread > 0
@@ -973,8 +979,7 @@ export function DockSidebar({
             }
           },
         },
-      }] : []),
-      { sep: true as const },
+      }, { sep: true as const }] : [{ sep: true as const }]),
       {
         item: {
           key: 'email', label: 'Email', icon: Mail, tourId: 'nav-email',
@@ -997,20 +1002,27 @@ export function DockSidebar({
       },
       {
         item: {
+          key: 'home', label: 'Todo', icon: ListTodo, tourId: 'nav-home',
+          running: activeNav === 'home',
+          onClick: () => { closeFlyouts(); onOpenHome?.() },
+        },
+      },
+      {
+        item: {
           key: 'brain', label: 'Brain', icon: FileText, tourId: 'nav-knowledge',
           status: knowledgeUpdatedLabel ?? undefined,
           running: activeNav === 'knowledge',
           onClick: () => { closeFlyouts(); knowledgeActions.openKnowledgeView() },
         },
       },
+      { sep: true },
       {
         item: {
-          key: 'home', label: 'Todo', icon: ListTodo, tourId: 'nav-home',
-          running: activeNav === 'home',
-          onClick: () => { closeFlyouts(); onOpenHome?.() },
+          key: 'workspaces', label: 'Projects', icon: Folder, tourId: 'nav-workspaces',
+          running: activeNav === 'workspaces' || activeNav === 'code',
+          onClick: () => { closeFlyouts(); knowledgeActions.openWorkspaceAt() },
         },
       },
-      { sep: true },
       {
         item: {
           key: 'agents', label: 'Background agents', switcherLabel: 'Agents', icon: Bot, tourId: 'nav-agents',
@@ -1285,8 +1297,8 @@ export function DockSidebar({
   // ----- render -----
   return (
     <>
-      {!switcherOnly && (
-      <div data-dock-root="" className="rowboat-dock titlebar-no-drag" style={{ width: DOCK_GUTTER_PX }}>
+      {(!switcherOnly || railLeaving) && (
+      <div data-dock-root="" data-leaving={railLeaving || undefined} className="rowboat-dock titlebar-no-drag" style={{ width: DOCK_GUTTER_PX }}>
         <div
           className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto px-2 pb-2 pt-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           onMouseLeave={() => setHoverTip(null)}
@@ -1303,10 +1315,10 @@ export function DockSidebar({
               type="button"
               aria-label={item.label}
               data-tour-id={item.tourId}
+              data-active={item.running || undefined}
               className={cn(
-                'relative flex shrink-0 items-center justify-center rounded-md text-sidebar-foreground/70 transition-colors',
-                'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-                item.running && 'bg-sidebar-accent text-sidebar-accent-foreground',
+                'rowboat-dock-tile relative flex shrink-0 items-center justify-center rounded-lg text-sidebar-foreground/65',
+                'hover:bg-sidebar-accent hover:text-sidebar-foreground',
               )}
               style={{ width: RAIL_BUTTON_PX, height: RAIL_BUTTON_PX }}
               onMouseEnter={(e) => {

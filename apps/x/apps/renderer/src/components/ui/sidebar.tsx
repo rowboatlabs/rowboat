@@ -20,6 +20,7 @@ const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
 const SIDEBAR_WIDTH = 256 // 16rem in pixels
 const SIDEBAR_WIDTH_MIN = 200
 const SIDEBAR_WIDTH_MAX = 480
+const SIDEBAR_WIDTH_STORAGE_KEY = "x:sidebar-width"
 const SIDEBAR_WIDTH_ICON = "3rem"
 const SIDEBAR_OFFSET = "0px" // Default offset for nested sidebars
 const SIDEBAR_AUTO_COLLAPSE_WIDTH = 760 // Auto-collapse when window narrower than this
@@ -59,7 +60,15 @@ function SidebarProvider({
   open?: boolean
   onOpenChange?: (open: boolean) => void
 }) {
-  const [sidebarWidth, setSidebarWidth] = React.useState(SIDEBAR_WIDTH)
+  // 2026-10-21: a dragged width survives a restart.
+  const [sidebarWidth, setSidebarWidth] = React.useState(() => {
+    try {
+      const saved = Number(window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY))
+      return saved >= SIDEBAR_WIDTH_MIN && saved <= SIDEBAR_WIDTH_MAX ? saved : SIDEBAR_WIDTH
+    } catch {
+      return SIDEBAR_WIDTH
+    }
+  })
   const [isResizing, setIsResizing] = React.useState(false)
 
   // This is the internal state of the sidebar.
@@ -186,7 +195,7 @@ function Sidebar({
         data-slot="sidebar-gap"
         className={cn(
           "relative w-(--sidebar-width) bg-transparent",
-          "in-data-[resizing=false]:transition-[width] in-data-[resizing=false]:duration-200 in-data-[resizing=false]:ease-linear",
+          "in-data-[resizing=false]:transition-[width] in-data-[resizing=false]:duration-(--sb-dur) in-data-[resizing=false]:ease-(--sb-ease)",
           "group-data-[collapsible=offcanvas]:w-0",
           "group-data-[side=right]:rotate-180",
           variant === "floating" || variant === "inset"
@@ -198,10 +207,12 @@ function Sidebar({
         data-slot="sidebar-container"
         className={cn(
           "fixed inset-y-0 z-10 flex h-svh w-(--sidebar-width)",
-          "in-data-[resizing=false]:transition-[left,right,width] in-data-[resizing=false]:duration-200 in-data-[resizing=false]:ease-linear",
+          "will-change-transform in-data-[resizing=false]:transition-[translate,width] in-data-[resizing=false]:duration-(--sb-dur) in-data-[resizing=false]:ease-(--sb-ease)",
           side === "left"
-            ? "left-(--sidebar-offset) group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-offset)-var(--sidebar-width))]"
-            : "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
+            // 2026-10-21: offcanvas slides with translate (compositor only)
+            // instead of animating left/right, which relaid it out every frame.
+            ? "left-(--sidebar-offset) group-data-[collapsible=offcanvas]:-translate-x-full"
+            : "right-0 group-data-[collapsible=offcanvas]:translate-x-full",
           // Adjust the padding for floating and inset variants.
           variant === "floating" || variant === "inset"
             ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]"
@@ -213,7 +224,7 @@ function Sidebar({
         <div
           data-sidebar="sidebar"
           data-slot="sidebar-inner"
-          className="bg-sidebar group-data-[variant=floating]:border-sidebar-border flex h-full w-full flex-col group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:shadow-sm"
+          className="bg-sidebar group-data-[variant=floating]:border-sidebar-border flex h-full w-full flex-col transition-opacity duration-(--sb-dur) ease-(--sb-ease) group-data-[collapsible=offcanvas]:opacity-0 group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:shadow-sm"
         >
           {children}
         </div>
@@ -281,6 +292,11 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"div">) {
 
     const handleMouseUp = () => {
       setIsResizing(false)
+      const sidebar = document.querySelector('[data-slot="sidebar-wrapper"]')
+      const width = sidebar ? parseInt(getComputedStyle(sidebar).getPropertyValue("--sidebar-width")) : NaN
+      try {
+        if (Number.isFinite(width)) window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(width))
+      } catch { /* in-memory only */ }
     }
 
     document.addEventListener("mousemove", handleMouseMove)
