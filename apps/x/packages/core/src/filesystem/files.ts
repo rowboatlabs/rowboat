@@ -494,9 +494,12 @@ export async function editText(inputPath: string, oldString: string, newString: 
     return { error: `oldString found ${occurrences} times. Use replaceAll: true or provide more context to make it unique.` };
   }
 
+  // (2026-09-25) A replacer function, not the string itself: String.replace reads `$$`,
+  // `$&`, `` $` `` and `$'` in a string replacement as patterns, which would
+  // rewrite shell code, regexes and prices the agent meant to insert verbatim.
   const newContent = replaceAll
-    ? content.replaceAll(oldString, newString)
-    : content.replace(oldString, newString);
+    ? content.replaceAll(oldString, () => newString)
+    : content.replace(oldString, () => newString);
   await writeText(inputPath, newContent, { atomic: true, mkdirp: true });
   return {
     success: true,
