@@ -141,7 +141,8 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
         })
 
     const renderNode = (node: FileTreeNode, depth: number): ReactNode => {
-        const pad = { paddingLeft: `${8 + depth * 12}px` }
+        // Spaces redesign (2026-10-21): the tree is the Files page's body now, at the app's 14px row size.
+        const pad = { paddingLeft: `${10 + depth * 18}px` }
         if (node.kind === 'dir') {
             const open = !collapsed.has(node.path)
             const empty = node.children.length === 0
@@ -155,13 +156,13 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                                     style={pad}
                                     onClick={() => toggle(node.path)}
                                     className={cn(
-                                        'flex h-7 w-full items-center gap-1.5 rounded-md pr-7 text-[13px] text-foreground/90 hover:bg-accent/50',
+                                        'flex h-9 w-full items-center gap-2 rounded-lg pr-9 text-sm text-foreground/90 transition-colors hover:bg-accent/60',
                                         dropTarget === node.path && 'bg-accent ring-1 ring-inset ring-foreground/40',
                                     )}
                                 >
                                     {open
-                                        ? <FolderOpen className="size-3 shrink-0 text-muted-foreground" />
-                                        : <Folder className="size-3 shrink-0 text-muted-foreground" />}
+                                        ? <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
+                                        : <Folder className="size-4 shrink-0 text-muted-foreground" />}
                                     <ClippedText text={node.name} />
                                 </button>
                             </ContextMenuTrigger>
@@ -184,7 +185,7 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                                 <button
                                     type="button"
                                     aria-label="Folder actions"
-                                    className="absolute right-1 top-1 inline-flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-background hover:text-foreground focus-visible:opacity-100 group-hover/dirrow:opacity-100 data-[state=open]:opacity-100"
+                                    className="absolute right-1.5 top-1.5 inline-flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-0 hover:bg-background hover:text-foreground focus-visible:opacity-100 group-hover/dirrow:opacity-100 data-[state=open]:opacity-100"
                                 >
                                     <MoreHorizontal className="size-3.5" />
                                 </button>
@@ -208,10 +209,10 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                         <div className="relative">
                             {/* Indent guide: a faint dotted line under the folder's icon
                                 column, spanning its children — nesting reads without carets. */}
-                            <span aria-hidden className="pointer-events-none absolute bottom-1 top-0 border-l border-dotted border-foreground/25" style={{ left: `${8 + depth * 12 + 6}px` }} />
+                            <span aria-hidden className="pointer-events-none absolute bottom-1 top-0 border-l border-dotted border-foreground/25" style={{ left: `${10 + depth * 18 + 8}px` }} />
                             {node.children.map((child) => renderNode(child, depth + 1))}
                             {empty && (
-                                <div style={{ paddingLeft: `${8 + (depth + 1) * 12}px` }} className="py-0.5 pr-2 text-[11px] italic text-muted-foreground/70">
+                                <div style={{ paddingLeft: `${10 + (depth + 1) * 18}px` }} className="py-1 pr-2 text-xs italic text-muted-foreground/70">
                                     empty — files added here keep it
                                 </div>
                             )}
@@ -264,15 +265,15 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                             onDragEnd={() => setDropTarget(null)}
                             onClick={() => onOpenFile(entry.id)}
                             className={cn(
-                                'flex h-7 w-full items-center gap-1.5 rounded-md pr-7 text-[13px] text-left',
-                                active ? 'bg-accent font-medium text-foreground' : 'text-foreground/90 hover:bg-accent/50',
+                                'flex h-9 w-full items-center gap-2 rounded-lg pr-9 text-sm text-left transition-colors',
+                                active ? 'bg-accent font-medium text-foreground' : 'text-foreground/90 hover:bg-accent/60',
                             )}
                         >
-                            <span className="w-3 shrink-0" />
-                            {board && <PenTool className="size-3 shrink-0 text-muted-foreground" />}
+                            <span className="w-4 shrink-0" />
+                            {board && <PenTool className="size-4 shrink-0 text-muted-foreground" />}
                             {!board && blob && (isImageMime(blob.mime)
-                                ? <ImageIcon className="size-3 shrink-0 text-muted-foreground" />
-                                : <FileText className="size-3 shrink-0 text-muted-foreground" />)}
+                                ? <ImageIcon className="size-4 shrink-0 text-muted-foreground" />
+                                : <FileText className="size-4 shrink-0 text-muted-foreground" />)}
                             <ClippedText
                                 text={board ? spaces.whiteboardDisplayName(node.name) : node.name}
                                 detail={blob ? `${blob.mime} · ${formatBytes(blob.size)}` : null}
@@ -308,7 +309,7 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                         <button
                             type="button"
                             aria-label="File actions"
-                            className="absolute right-1 top-1 inline-flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-background hover:text-foreground focus-visible:opacity-100 group-hover/filerow:opacity-100 data-[state=open]:opacity-100"
+                            className="absolute right-1.5 top-1.5 inline-flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-0 hover:bg-background hover:text-foreground focus-visible:opacity-100 group-hover/filerow:opacity-100 data-[state=open]:opacity-100"
                         >
                             <MoreHorizontal className="size-3.5" />
                         </button>
@@ -350,7 +351,7 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                 />
             )}
             {tree.map((node) => renderNode(node, 0))}
-            {tree.length === 0 && !creating && !creatingFolder && <div className="px-2 py-1 text-xs text-muted-foreground">No files yet.</div>}
+            {tree.length === 0 && !creating && !creatingFolder && <div className="px-3 py-10 text-sm text-muted-foreground">No files yet. Use New, or drop files here.</div>}
             {creating && (
                 <div className="flex items-center gap-1 px-1 pt-1">
                     <Input

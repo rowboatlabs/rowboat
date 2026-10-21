@@ -13,6 +13,10 @@ import { prefetchThread, type SpacePresence } from '@/hooks/use-space-chat'
 import { threadBadge, useReadStateVersion } from '@/lib/spaces-read-state'
 import { formatFeedTime, resolveMentions } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
+import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { FilterTabs, SpacesEmpty, SpacesPage } from '@/components/spaces/page-shell'
 
 export function SpaceDiscussionsView({ orgId, orgAddress, spaceId, direct, topics, loaded, memberNames, spaceNames, presence, onOpen }: {
     orgId: string
@@ -43,40 +47,48 @@ export function SpaceDiscussionsView({ orgId, orgAddress, spaceId, direct, topic
             toast(error instanceof Error ? error.message : 'Could not update the discussion', 'error')
         } finally { setPending(null) }
     }
-    return <section aria-label="All discussions" className="flex min-h-0 flex-1 flex-col">
-        <div className="spaces-pane-header flex shrink-0 items-center gap-3 border-b border-border">
-            <h2 className="flex-1 text-[13px] font-semibold">All discussions</h2>
-            <button type="button" aria-pressed={!archived} className="spaces-collection-filter" onClick={() => setArchived(false)}>Active</button>
-            <button type="button" aria-pressed={archived} className="spaces-collection-filter" onClick={() => setArchived(true)}>Archived</button>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3">
+    const activeCount = topics.filter((topic) => !topic.archived).length
+    const archivedCount = topics.length - activeCount
+    return <SpacesPage label="All discussions" title="Discussions" count={activeCount}
+        subtitle="Threads with a title, so the team can find them again."
+        toolbar={<FilterTabs label="Show" value={archived ? 'archived' : 'active'} onChange={(value) => setArchived(value === 'archived')}
+            options={[{ value: 'active', label: 'Active' }, { value: 'archived', label: 'Archived', count: archivedCount }]} />}>
+        <ul className="flex flex-col gap-0.5">
             {rows.map((topic) => {
                 const title = resolveMentions(topic.title, memberNames, spaceNames)
                 const badge = threadBadge(orgId, spaceId, topic.rootMessageId, direct)
+                const replies = topic.rootMessage?.replyCount ?? 0
+                const working = (presence.working.get(topic.rootMessageId)?.length ?? 0) > 0
                 const copyLink = () => void copySpacesLink(messageUrl(orgAddress, spaceId, topic.rootMessageId))
-                return <ContextMenu key={topic.id}>
+                return <li key={topic.id}><ContextMenu>
                     <ContextMenuTrigger asChild>
-                        <div className="group flex items-center gap-2 border-b border-border/60 py-1">
-                            {renaming?.id === topic.id ? <form className="flex min-w-0 flex-1 gap-2 py-2" onSubmit={(event) => {
+                        <div className="group relative flex items-center rounded-xl transition-colors hover:bg-accent/60 has-[[data-state=open]]:bg-accent/60">
+                            {renaming?.id === topic.id ? <form className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2.5" onSubmit={(event) => {
                                 event.preventDefault()
                                 if (renaming.title.trim()) void manage(topic.id, { action: 'retitle', title: renaming.title.trim() })
                             }}>
-                                <input autoFocus aria-label="Discussion title" className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 text-sm"
+                                <Input autoFocus aria-label="Discussion title" className="h-9 min-w-0 flex-1 text-sm"
                                     value={renaming.title} onChange={(event) => setRenaming({ id: topic.id, title: event.target.value })}
                                     onKeyDown={(event) => { if (event.key === 'Escape') setRenaming(null) }} />
-                                <button type="submit" className="spaces-collection-filter" disabled={pending === topic.id || !renaming.title.trim()}>Save</button>
-                                <button type="button" className="spaces-collection-filter" onClick={() => setRenaming(null)}>Cancel</button>
-                            </form> : <button type="button" className="flex min-w-0 flex-1 items-center gap-3 rounded py-3 text-left hover:bg-accent/50"
+                                <Button type="submit" size="sm" disabled={pending === topic.id || !renaming.title.trim()}>Save</Button>
+                                <Button type="button" size="sm" variant="ghost" onClick={() => setRenaming(null)}>Cancel</Button>
+                            </form> : <button type="button" className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-3 pr-12 text-left"
                                 onMouseEnter={() => prefetchThread(orgId, spaceId, topic.rootMessageId)} onClick={() => onOpen(topic.rootMessageId)}>
-                                <MessagesSquare className="size-4 shrink-0 text-muted-foreground" />
-                                <span className="min-w-0 flex-1"><span className={`block truncate text-[13px] ${badge.unread > 0 ? 'font-semibold' : ''}`}>{title}</span>{' '}
-                                    <span className="mt-1 block text-xs text-muted-foreground">{topic.rootMessage?.replyCount ?? 0} replies · {formatFeedTime(topic.lastActivityAt)}</span></span>
-                                {(presence.working.get(topic.rootMessageId)?.length ?? 0) > 0 && <Bot className="size-3.5 shrink-0 text-muted-foreground" aria-label="A Rowboat is working here" />}
+                                <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                                    <MessagesSquare className="size-4" />
+                                </span>
+                                <span className="min-w-0 flex-1">
+                                    <span className={cn('block truncate text-sm', badge.unread > 0 ? 'font-semibold text-foreground' : 'font-medium')}>{title}</span>{' '}
+                                    <span className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                                        <span>{replies} {replies === 1 ? 'reply' : 'replies'} · {formatFeedTime(topic.lastActivityAt)}</span>
+                                        {working && <span className="inline-flex items-center gap-1 text-[var(--stream-link)]"><Bot className="size-3.5" aria-hidden /> Rowboat is working</span>}
+                                    </span>
+                                </span>
                                 <UnreadBadge badge={badge} direct={direct} />
                             </button>}
-                            <DropdownMenu>
+                            {renaming?.id !== topic.id && <DropdownMenu>
                                 <DropdownMenuTrigger asChild><button type="button" aria-label={`Options for ${title}`} disabled={pending === topic.id}
-                                    className="flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent"><MoreHorizontal className="size-4" /></button></DropdownMenuTrigger>
+                                    className="absolute right-2 top-1/2 flex size-8 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-background hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"><MoreHorizontal className="size-4" /></button></DropdownMenuTrigger>
                                 <DropdownMenuContent align="end">
                                     <DropdownMenuItem onSelect={copyLink}><LinkIcon className="mr-2 size-3.5" />Copy link</DropdownMenuItem>
                                     <DropdownMenuSeparator />
@@ -87,16 +99,20 @@ export function SpaceDiscussionsView({ orgId, orgAddress, spaceId, direct, topic
                                     <DropdownMenuSeparator />
                                     <DropdownMenuItem disabled={!writable} onSelect={() => void manage(topic.id, { action: 'remove' })}><MessageSquareOff className="mr-2 size-3.5" />Convert back to thread</DropdownMenuItem>
                                 </DropdownMenuContent>
-                            </DropdownMenu>
+                            </DropdownMenu>}
                         </div>
                     </ContextMenuTrigger>
                     <ContextMenuContent>
                         <ContextMenuItem onSelect={() => onOpen(topic.rootMessageId)}><MessagesSquare className="mr-2 size-3.5" />Open discussion</ContextMenuItem>
                         <ContextMenuItem onSelect={copyLink}><LinkIcon className="mr-2 size-3.5" />Copy link</ContextMenuItem>
                     </ContextMenuContent>
-                </ContextMenu>
+                </ContextMenu></li>
             })}
-            {rows.length === 0 && <p className="py-8 text-sm text-muted-foreground">{!loaded ? 'Loading discussions…' : archived ? 'No archived discussions.' : 'No active discussions. Turn a message thread into a discussion to give a topic its own place.'}</p>}
-        </div>
-    </section>
+        </ul>
+        {rows.length === 0 && (!loaded
+            ? <p className="px-3 py-12 text-sm text-muted-foreground">Loading discussions…</p>
+            : archived
+                ? <SpacesEmpty icon={<Archive />} title="No archived discussions">Archived discussions stay readable here.</SpacesEmpty>
+                : <SpacesEmpty icon={<MessagesSquare />} title="No discussions yet">Give a thread a title from its ⋯ menu, or type /discussion in a reply, and it shows up here.</SpacesEmpty>)}
+    </SpacesPage>
 }
