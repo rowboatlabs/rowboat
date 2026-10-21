@@ -265,7 +265,10 @@ function rebuildMenu(): void {
       { type: "separator" },
       {
         label: "Toggle Sidebar",
-        accelerator: "CmdOrCtrl+\\",
+        // ⌘B since 2026-10-21 (⌘\ still works). Display-only: the renderer
+        // binds it, so ⌘B keeps meaning bold inside text editors.
+        accelerator: "CmdOrCtrl+B",
+        registerAccelerator: false,
         click: () => sendToRenderer("menu:toggleSidebar", null),
       },
       {

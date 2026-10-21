@@ -101,6 +101,34 @@
 .sb-square:focus-visible { outline: 2px solid var(--sidebar-ring); outline-offset: -2px; }
 .sb-square > svg { width: 16px; height: 16px; }
 
+/* Keyboard shortcuts as one small chip per key (⌘ · N). In a row they show
+   on hover, taking the place of its count or time; in a tooltip they sit
+   beside the label. */
+.keys { display: inline-flex; flex-shrink: 0; align-items: center; gap: 3px; }
+.key {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  background: color-mix(in srgb, var(--sidebar-foreground) 7%, transparent);
+  color: color-mix(in srgb, var(--sidebar-foreground) 55%, transparent);
+}
+.keys--dark .key {
+  background: color-mix(in srgb, currentColor 16%, transparent);
+  color: inherit;
+}
+.sb-row-keys { display: none; }
+[data-sidebar="menu-item"]:hover .sb-row-keys { display: inline-flex; }
+[data-sidebar="menu-item"]:has(.sb-row-keys):hover .sb-meta,
+[data-sidebar="menu-item"]:has(.sb-row-keys):hover .sb-count { display: none; }
+
 /* Right-hand bits of a row: keyboard hints show on hover, counts and times
    always; a row's own buttons replace its meta on hover. */
 .sb-hint {

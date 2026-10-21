@@ -17,7 +17,8 @@ import {
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
-const SIDEBAR_WIDTH = 256 // 16rem in pixels
+// 2026-10-21: 256 → 272, a little more room for chat titles and server names.
+const SIDEBAR_WIDTH = 272
 const SIDEBAR_WIDTH_MIN = 200
 const SIDEBAR_WIDTH_MAX = 480
 const SIDEBAR_WIDTH_STORAGE_KEY = "x:sidebar-width"

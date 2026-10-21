@@ -66,7 +66,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
@@ -82,6 +81,8 @@ import { SettingsDialog } from "@/components/settings-dialog"
 import { SidebarCreditRewards } from "@/components/sidebar-credit-rewards"
 import { SpacesSidebarSection } from "@/components/spaces-sidebar-section"
 import { SidebarSection } from "@/components/sidebar-section"
+import { Keys } from "@/components/keys"
+import { SHORTCUTS } from "@/lib/shortcuts"
 import { useCodeSessions } from "@/components/code/use-code-sessions"
 import { useUnreadCodeSessions } from "@/components/code/session-read-state"
 import { UnreadBadge } from "@/components/spaces/unread-badge"
@@ -158,7 +159,6 @@ const MIN_CHATS = 10
 const MAX_CHATS = 60
 /** One chat row: 32px tall plus the 2px gap (styles/sidebar.css). */
 const CHAT_ROW_PX = 34
-const MOD_KEY = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl+'
 
 const SERVICE_LABELS: Record<string, string> = {
   gmail: "Syncing Gmail",
@@ -918,7 +918,7 @@ export function SidebarContentPanel({
                 <SidebarMenuButton className="sb-primary min-w-0 flex-1" onClick={onNewChat}>
                   <SquarePen />
                   <span className="flex-1 truncate">New chat</span>
-                  <kbd className="sb-hint font-sans">{MOD_KEY}N</kbd>
+                  <Keys keys={SHORTCUTS.newChat} className="sb-row-keys" />
                 </SidebarMenuButton>
               )}
               {onOpenSearch && (
@@ -928,7 +928,7 @@ export function SidebarContentPanel({
                       <Search />
                     </button>
                   </TooltipTrigger>
-                  <TooltipContent side="bottom" sideOffset={6}>Search <span className="ml-1 opacity-60">{MOD_KEY}K</span></TooltipContent>
+                  <TooltipContent side="bottom" sideOffset={6} className="flex items-center gap-2">Search <Keys keys={SHORTCUTS.search} tone="dark" /></TooltipContent>
                 </Tooltip>
               )}
             </SidebarMenuItem>
@@ -953,13 +953,7 @@ export function SidebarContentPanel({
           </SidebarMenu>
         </SidebarGroup>
 
-        {/* Spaces sits right under Assistant (2026-10-21). */}
-        {SPACES_ENABLED && (
-          <SpacesSidebarSection active={activeNav === 'spaces'} activeSpace={activeSpace}
-            onOpenSpace={(orgId, spaceId) => onOpenSpace?.(orgId, spaceId)} onOpenSpaces={onOpenSpaces} />
-        )}
-
-        <SidebarGroup className="pb-0 pt-3">
+        <SidebarGroup className="pb-0 pt-0.5">
           <SidebarMenu>
             <SidebarMenuItem>
               <RowTip tip={emailTip}>
@@ -967,6 +961,7 @@ export function SidebarContentPanel({
                   <Mail />
                   <span className="flex-1 truncate">Email</span>
                   {unreadEmailCount > 0 && <span className="sb-count">{unreadEmailCount > 99 ? '99+' : unreadEmailCount}</span>}
+                  <Keys keys={SHORTCUTS.email} className="sb-row-keys" />
                 </SidebarMenuButton>
               </RowTip>
             </SidebarMenuItem>
@@ -978,6 +973,8 @@ export function SidebarContentPanel({
                   {meetingIsRecording
                     ? <span className="w-12 shrink-0" aria-hidden="true" />
                     : meetingMeta && <span className="sb-meta">{meetingMeta}</span>}
+                  {/* With a meeting coming up, hover shows its buttons instead. */}
+                  {!meetingIsRecording && !previewMeeting && <Keys keys={SHORTCUTS.meetings} className="sb-row-keys" />}
                 </SidebarMenuButton>
               </RowTip>
               {meetingIsRecording ? (
@@ -1043,6 +1040,7 @@ export function SidebarContentPanel({
               <SidebarMenuButton data-tour-id="nav-home" isActive={activeNav === 'home'} onClick={onOpenHome}>
                 <ListTodo />
                 <span className="flex-1 truncate">Todo</span>
+                <Keys keys={SHORTCUTS.todo} className="sb-row-keys" />
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
@@ -1050,13 +1048,14 @@ export function SidebarContentPanel({
                 <SidebarMenuButton data-tour-id="nav-knowledge" isActive={activeNav === 'knowledge'} onClick={() => knowledgeActions.openKnowledgeView()}>
                   <FileText />
                   <span className="flex-1 truncate">Brain</span>
+                  <Keys keys={SHORTCUTS.brain} className="sb-row-keys" />
                 </SidebarMenuButton>
               </RowTip>
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarGroup>
 
-        <SidebarGroup className="pb-0 pt-3">
+        <SidebarGroup className="pb-0 pt-0.5">
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton
@@ -1066,10 +1065,13 @@ export function SidebarContentPanel({
               >
                 <Folder />
                 <span className="flex-1 truncate">Projects</span>
-                {hasWorkingProjectSession && (
-                  <span role="status" aria-label="Project session working" className="code-working-dot size-2 shrink-0 rounded-full bg-[var(--rowboat-git)]" />
-                )}
-                <UnreadBadge badge={{ unread: unreadProjectCount, forYou: unreadProjectCount }} direct />
+                <span className="sb-meta flex items-center gap-2">
+                  {hasWorkingProjectSession && (
+                    <span role="status" aria-label="Project session working" className="code-working-dot size-2 shrink-0 rounded-full bg-[var(--rowboat-git)]" />
+                  )}
+                  <UnreadBadge badge={{ unread: unreadProjectCount, forYou: unreadProjectCount }} direct />
+                </span>
+                <Keys keys={SHORTCUTS.projects} className="sb-row-keys" />
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
@@ -1080,6 +1082,7 @@ export function SidebarContentPanel({
                   {bgFailed > 0
                     ? <span className="sb-meta is-alert">{bgFailed} failed</span>
                     : bgActive > 0 && <span className="sb-meta">{bgActive} active</span>}
+                  <Keys keys={SHORTCUTS.agents} className="sb-row-keys" />
                 </SidebarMenuButton>
               </RowTip>
             </SidebarMenuItem>
@@ -1087,6 +1090,7 @@ export function SidebarContentPanel({
               <SidebarMenuButton data-tour-id="nav-apps" isActive={activeNav === 'apps'} onClick={onOpenApps}>
                 <LayoutGrid />
                 <span className="flex-1 truncate">Apps</span>
+                <Keys keys={SHORTCUTS.apps} className="sb-row-keys" />
               </SidebarMenuButton>
             </SidebarMenuItem>
             {pinnedApps.map(({ folder, name }) => (
@@ -1109,6 +1113,12 @@ export function SidebarContentPanel({
             ))}
           </SidebarMenu>
         </SidebarGroup>
+
+        {/* Trying Spaces right after Apps (2026-10-21). */}
+        {SPACES_ENABLED && (
+          <SpacesSidebarSection active={activeNav === 'spaces'} activeSpace={activeSpace}
+            onOpenSpace={(orgId, spaceId) => onOpenSpace?.(orgId, spaceId)} onOpenSpaces={onOpenSpaces} />
+        )}
 
         <SidebarSection id="chats" label="Chats" tourId="nav-chats">
           {recentChats.length === 0 ? (
@@ -1319,7 +1329,7 @@ export function SidebarContentPanel({
                   <DropdownMenuItem onSelect={() => setSettingsOpen(true)}>
                     <Settings />
                     Settings
-                    <DropdownMenuShortcut>{MOD_KEY},</DropdownMenuShortcut>
+                    <Keys keys={SHORTCUTS.settings} className="ml-auto" />
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>

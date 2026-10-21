@@ -17,6 +17,8 @@ import z from 'zod';
 import { CheckIcon, LoaderIcon, PanelLeftIcon, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon, SquarePen, MessageSquare } from 'lucide-react';
 import { cn, compactPath, parentPath } from '@/lib/utils';
 import { SPACES_ENABLED } from '@/lib/feature-flags';
+import { SHORTCUTS, isRichTextTarget } from '@/lib/shortcuts';
+import { Keys } from '@/components/keys';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
 import { AssistantWorkspace } from './components/assistant/assistant-workspace';
 import { ASSISTANT_LAYOUT_KEY, chatLocation, defaultWindowSize, restoreAssistantLayout, useAssistantLayout, type ChatLocation } from './lib/assistant-layout';
@@ -811,16 +813,23 @@ function FixedSidebarToggle({
   return (
     <div ref={rootRef} className="fixed left-0 top-0 z-50 flex h-10 items-center gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
       <div aria-hidden="true" className="h-10 shrink-0" style={{ width: leftInsetPx }} />
-      <button
-        type="button"
-        onClick={toggleSidebar}
-        className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-        style={{ marginLeft: TITLEBAR_TOGGLE_MARGIN_LEFT_PX }}
-        aria-label="Toggle sidebar"
-        title={state === 'collapsed' ? 'Expand sidebar' : 'Collapse sidebar'}
-      >
-        <PanelLeftIcon className="size-[17px]" strokeWidth={1.5} />
-      </button>
+      <Tooltip delayDuration={400}>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+            style={{ marginLeft: TITLEBAR_TOGGLE_MARGIN_LEFT_PX }}
+            aria-label={state === 'collapsed' ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            <PanelLeftIcon className="size-[17px]" strokeWidth={1.5} />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" sideOffset={6} className="flex items-center gap-2">
+          {state === 'collapsed' ? 'Expand sidebar' : 'Collapse sidebar'}
+          <Keys keys={SHORTCUTS.toggleSidebar} tone="dark" />
+        </TooltipContent>
+      </Tooltip>
       {/* Caffeinate lives here rather than in a pane header: it is app-wide
           state, and this cluster is the one control group present on every
           view, sidebar expanded or docked. */}
@@ -830,22 +839,28 @@ function FixedSidebarToggle({
           cluster's width (and the header padding measured from it) must not
           change mid-collapse, or the header jumps a frame late. */}
       {onNewChat && (
-        <button
-          type="button"
-          onClick={onNewChat}
-          tabIndex={state === 'collapsed' ? undefined : -1}
-          aria-hidden={state === 'collapsed' ? undefined : true}
-          style={{
-            opacity: state === 'collapsed' ? 1 : 0,
-            pointerEvents: state === 'collapsed' ? undefined : 'none',
-            transition: 'opacity 180ms ease, background-color 150ms ease, color 150ms ease',
-          }}
-          className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-          aria-label="New chat"
-          title="New chat"
-        >
-          <SquarePen className="size-[17px]" strokeWidth={1.5} />
-        </button>
+        <Tooltip delayDuration={400}>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={onNewChat}
+              tabIndex={state === 'collapsed' ? undefined : -1}
+              aria-hidden={state === 'collapsed' ? undefined : true}
+              style={{
+                opacity: state === 'collapsed' ? 1 : 0,
+                pointerEvents: state === 'collapsed' ? undefined : 'none',
+                transition: 'opacity 180ms ease',
+              }}
+              className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+              aria-label="New chat"
+            >
+              <SquarePen className="size-[17px]" strokeWidth={1.5} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={6} className="flex items-center gap-2">
+            New chat <Keys keys={SHORTCUTS.newChat} tone="dark" />
+          </TooltipContent>
+        </Tooltip>
       )}
     </div>
   )
@@ -859,6 +874,21 @@ function MenuSidebarToggleBridge() {
   const toggleRef = useRef(toggleSidebar)
   useEffect(() => { toggleRef.current = toggleSidebar }, [toggleSidebar])
   useEffect(() => window.ipc.on('menu:toggleSidebar', () => toggleRef.current()), [])
+  // ⌘B toggles the sidebar (2026-10-21), except in a rich-text editor, where
+  // it is bold; ⌘\ (the old chord) toggles anywhere. Capture phase, so an
+  // inner handler that stops the event can't swallow it.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return
+      const key = e.key.toLowerCase()
+      if (key === '\\' || (key === 'b' && !isRichTextTarget(e.target))) {
+        e.preventDefault()
+        toggleRef.current()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown, true)
+    return () => document.removeEventListener('keydown', onKeyDown, true)
+  }, [])
   return null
 }
 

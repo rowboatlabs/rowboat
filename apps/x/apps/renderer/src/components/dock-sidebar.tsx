@@ -1,6 +1,8 @@
 import { SidebarChatContextMenu } from "./sidebar-chat-context-menu"
 "use client"
 
+import { Keys } from '@/components/keys'
+import { SHORTCUTS, type ShortcutKeys } from '@/lib/shortcuts'
 import { isGroupChat, readLastSpace, resolveSpacesLocation } from '@/lib/spaces-navigation'
 
 import * as React from "react"
@@ -101,6 +103,19 @@ import z from "zod"
 
 /** Rail width = horizontal space the content panes leave for it. */
 export const DOCK_GUTTER_PX = 48
+
+/** Each tile's chord, shown in its tooltip (2026-10-21). */
+const DOCK_SHORTCUTS: Record<string, ShortcutKeys | undefined> = {
+  email: SHORTCUTS.email,
+  meetings: SHORTCUTS.meetings,
+  home: SHORTCUTS.todo,
+  brain: SHORTCUTS.brain,
+  workspaces: SHORTCUTS.projects,
+  agents: SHORTCUTS.agents,
+  apps: SHORTCUTS.apps,
+  spaces: SHORTCUTS.spaces,
+  settings: SHORTCUTS.settings,
+}
 const RAIL_BUTTON_PX = 32
 const RAIL_ICON_PX = 18
 
@@ -1377,12 +1392,16 @@ export function DockSidebar({
           if (!row || row.sep) return null
           const item = row.item
           if ((item.key === 'chats' && chatsOpen) || (item.key === 'spaces' && spacesOpen)) return null
+          const tipKeys = DOCK_SHORTCUTS[item.key]
           return (
             <span
               className="rowboat-dock-tip"
               style={{ left: DOCK_GUTTER_PX + 8, top: hoverTip.centerY, padding: item.status ? '6px 12px' : '4px 10px' }}
             >
-              <span>{item.label}</span>
+              <span className="flex items-center gap-2">
+                {item.label}
+                {tipKeys && <Keys keys={tipKeys} tone="dark" />}
+              </span>
               {item.status && (
                 <span className={cn('rowboat-dock-tip-status', item.statusAlert && 'rowboat-dock-tip-status-alert')}>
                   {item.status}
