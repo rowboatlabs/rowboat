@@ -76,8 +76,15 @@ describe('the sidebar server list', () => {
         expect(screen.queryByRole('region', { name: 'Activity across organizations' })).toBeNull()
         fireEvent.click(screen.getByRole('button', { name: 'Other server' }))
         expect(open).toHaveBeenCalledWith(other.id, 'welcome')
-        expect(screen.queryByRole('button', { name: 'Spaces' })).toBeNull()
-        expect(screen.getByRole('heading', { name: 'Spaces' })).toBeVisible()
+        // The heading folds the list (sidebar redesign, 2026-10-21) and the
+        // choice is remembered.
+        const heading = screen.getByRole('button', { name: 'Spaces' })
+        expect(heading).toHaveAttribute('aria-expanded', 'true')
+        fireEvent.click(heading)
+        expect(heading).toHaveAttribute('aria-expanded', 'false')
+        expect(window.localStorage.getItem('x:sidebar-section:spaces')).toBe('closed')
+        fireEvent.click(heading)
+        expect(heading).toHaveAttribute('aria-expanded', 'true')
     })
     it('can open an empty server and add a server when none are connected', () => {
         vi.mocked(useSpacesOrgs).mockReturnValue({ orgs: [{ ...org, spaces: [], directs: [] }] as unknown as OrgWithSpaces[], loading: false, refresh: vi.fn() })

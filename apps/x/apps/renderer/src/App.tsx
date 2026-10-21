@@ -821,7 +821,9 @@ function FixedSidebarToggle({
       >
         <PanelLeftIcon className="size-[17px]" strokeWidth={1.5} />
       </button>
-      {onNewChat && (
+      {/* 2026-10-21: the expanded sidebar has its own New chat row; the
+          cluster keeps this one only while the sidebar is collapsed. */}
+      {onNewChat && state === 'collapsed' && (
         <button
           type="button"
           onClick={onNewChat}
@@ -7272,6 +7274,7 @@ function App() {
     recentRuns: chatRuns,
     onOpenRun: openAssistantRun,
     onOpenAssistant: openAssistant,
+    onOpenSearch: () => setIsSearchOpen(true),
     onRenameRun: (rid: string, title: string) => {
       void window.ipc.invoke('sessions:setTitle', { sessionId: rid, title })
         .then(() => setRuns((prev) => prev.map((r) => (r.id === rid ? { ...r, title } : r))))
@@ -7309,7 +7312,7 @@ function App() {
             onOpenChange={handleSidebarOpenChange}
             style={{
               paddingLeft: sidebarOpen ? 0 : DOCK_GUTTER_PX,
-              transition: 'padding-left 200ms linear',
+              transition: 'padding-left 260ms cubic-bezier(.2, .8, .2, 1)',
             }}
           >
             <SidebarContentPanel
@@ -8131,7 +8134,7 @@ function App() {
             {!sidebarOpen && (
               <div
                 aria-hidden="true"
-                className="titlebar-drag-region fixed left-0 top-0 z-20 h-10 border-b border-border bg-background"
+                className="titlebar-drag-region fixed left-0 top-0 z-20 h-10 border-b border-border bg-background animate-in fade-in duration-200"
                 style={{ width: DOCK_GUTTER_PX }}
               />
             )}

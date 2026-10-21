@@ -2,9 +2,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from '@/components/ui/button'
 import { useSpaceDirectory, invalidateSpaceDirectory } from '@/hooks/use-space-directory'
 import { useEffect, useId, useMemo, useState, type ReactNode } from 'react'
-import { Archive, Bell, Bot, ChevronDown, ChevronRight, Compass, CornerDownRight, Hash, Lock, LogIn, MessagesSquare, MoreHorizontal, Pencil, Plus, RotateCw, UserPlus } from 'lucide-react'
+import { Archive, Bell, Bot, ChevronDown, ChevronRight, Compass, CornerDownRight, Hash, Lock, LogIn, MoreHorizontal, Pencil, Plus, RotateCw, UserPlus } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { SidebarGroup, SidebarGroupContent, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar'
+import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar'
+import { SidebarSection } from '@/components/sidebar-section'
 import {
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
 } from '@/components/ui/context-menu'
@@ -61,8 +62,10 @@ export function SpacesSidebarSection({ active, activeSpace, onOpenSpace }: {
     }, [chatKeys]) // eslint-disable-line react-hooks/exhaustive-deps
     const lastActivity = (org: OrgWithSpaces) => spaceLastActivityAt(org.id, org.spaces[0].id) ?? org.spaces[0].createdAt
     chats.sort((a, b) => lastActivity(b).localeCompare(lastActivity(a)))
+    // Sidebar redesign (2026-10-21): server rows line up with every other row
+    // (the monogram sits in the icon column), under a heading that folds.
     const row = (org: OrgWithSpaces, spaceId: string) => <SidebarMenuItem key={org.id}>
-        <SidebarMenuButton className="pl-6" isActive={active && activeSpace?.orgId === org.id}
+        <SidebarMenuButton isActive={active && activeSpace?.orgId === org.id}
             title={org.name} onClick={() => onOpenSpace(org.id, spaceId)}>
             <OrgMonogram org={org} size="sm" />
             <span className="min-w-0 flex-1 truncate">{org.name}</span>
@@ -71,31 +74,24 @@ export function SpacesSidebarSection({ active, activeSpace, onOpenSpace }: {
     </SidebarMenuItem>
     // Headings only when both kinds are there: one kind needs no label.
     const both = chats.length > 0 && workspaces.length > 0
-    return <SidebarGroup className="pt-0">
-        <SidebarGroupContent>
-            <div data-tour-id="nav-spaces" className="flex h-8 items-center gap-2.5 px-2.5">
-                <MessagesSquare className="size-4 shrink-0 text-muted-foreground" />
-                <h2 className="flex-1 text-sm font-medium text-muted-foreground">Spaces</h2>
-                <button type="button" aria-label="New group chat" title="New group chat"
-                    className="flex size-5 shrink-0 items-center justify-center text-muted-foreground transition-colors hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
-                    onClick={() => setAddingServer(true)}>
-                    <Plus className="size-4" />
-                </button>
-            </div>
-            {both && <h3 className="flex h-7 items-center pl-6 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80">Chats</h3>}
-            <SidebarMenu aria-label="Chats">
-                {chats.map((org) => row(org, org.spaces[0].id))}
-            </SidebarMenu>
-            {both && <h3 className="flex h-7 items-center pl-6 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80">Workspaces</h3>}
-            <SidebarMenu aria-label="Workspaces">
-                {workspaces.map((org) => row(org, serverLandingSpaceId(org)))}
-            </SidebarMenu>
-            {addingServer && <AddServerDialog onClose={() => setAddingServer(false)} onChoose={(kind) => {
-                setAddingServer(false)
-                openServerDialog({ kind })
-            }} />}
-        </SidebarGroupContent>
-    </SidebarGroup>
+    return <SidebarSection id="spaces" label="Spaces" tourId="nav-spaces"
+        tools={<button type="button" aria-label="New group chat" title="New group chat"
+            className="sb-row-action" onClick={() => setAddingServer(true)}>
+            <Plus />
+        </button>}>
+        {both && <h3 className="sb-subhead">Chats</h3>}
+        <SidebarMenu aria-label="Chats">
+            {chats.map((org) => row(org, org.spaces[0].id))}
+        </SidebarMenu>
+        {both && <h3 className="sb-subhead">Workspaces</h3>}
+        <SidebarMenu aria-label="Workspaces">
+            {workspaces.map((org) => row(org, serverLandingSpaceId(org)))}
+        </SidebarMenu>
+        {addingServer && <AddServerDialog onClose={() => setAddingServer(false)} onChoose={(kind) => {
+            setAddingServer(false)
+            openServerDialog({ kind })
+        }} />}
+    </SidebarSection>
 }
 
 function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onOpenBrowse, browseActive = false, onOpenAgents, agentsActive = false, activityActive = false, onChanged, renderDiscussions, showArchived = false, activeDiscussionCount }: {
