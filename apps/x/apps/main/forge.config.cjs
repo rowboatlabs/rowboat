@@ -269,6 +269,8 @@ module.exports = {
     },
     makers: [
         {
+            // This maker's appdmg is patched — see patchedDependencies in
+            // apps/x/pnpm-workspace.yaml for why.
             name: '@electron-forge/maker-dmg',
             config: (arch) => ({
                 format: 'ULFO',
