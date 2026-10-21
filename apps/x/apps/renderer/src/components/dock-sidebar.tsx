@@ -939,8 +939,8 @@ export function DockSidebar({
   // ----- the item list -----
   const rows = useMemo<DockRow[]>(() => {
     const items: DockRow[] = [
-      // Same order as the panel (2026-10-21): Assistant, the daily
-      // destinations, the work tools, then Spaces and Chats.
+      // Same order as the panel (2026-10-21): Assistant, Spaces, the
+      // daily destinations, the work tools, then Chats.
       ...(onOpenRun || onNewChat ? [
         {
           item: {
@@ -956,7 +956,30 @@ export function DockSidebar({
           },
         },
       ] : []),
-      { sep: true as const },
+      ...(SPACES_ENABLED && (!switcherOnly || totalSpaces > 0) ? [{ sep: true as const }, {
+        item: {
+          key: 'spaces', label: 'Spaces', icon: MessagesSquare, tourId: 'nav-spaces',
+          notification: spacesNotification.unread > 0
+            ? (spacesNotification.forYou > 0 ? 'alert' as const : 'muted' as const)
+            : undefined,
+          status: spacesNotification.unread > 0
+            ? `${spacesNotification.unread} unread${spacesNotification.forYou > 0 ? ` · ${spacesNotification.forYou} for you` : ''}`
+            : totalSpaces > 0 ? `${totalSpaces} space${totalSpaces === 1 ? '' : 's'}` : undefined,
+          running: activeNav === 'spaces' || spacesOpen,
+          onClick: () => {
+            if (!openLastSpace() && !switcherOnly) {
+              setChatsOpen(false)
+              setSpacesOpen(true)
+            }
+          },
+          switchTo: () => {
+            if (!openLastSpace() && !switcherOnly) {
+              setChatsOpen(false)
+              setSpacesOpen(true)
+            }
+          },
+        },
+      }, { sep: true as const }] : [{ sep: true as const }]),
       {
         item: {
           key: 'email', label: 'Email', icon: Mail, tourId: 'nav-email',
@@ -1026,30 +1049,6 @@ export function DockSidebar({
         },
       })),
       { sep: true },
-      ...(SPACES_ENABLED && (!switcherOnly || totalSpaces > 0) ? [{
-        item: {
-          key: 'spaces', label: 'Spaces', icon: MessagesSquare, tourId: 'nav-spaces',
-          notification: spacesNotification.unread > 0
-            ? (spacesNotification.forYou > 0 ? 'alert' as const : 'muted' as const)
-            : undefined,
-          status: spacesNotification.unread > 0
-            ? `${spacesNotification.unread} unread${spacesNotification.forYou > 0 ? ` · ${spacesNotification.forYou} for you` : ''}`
-            : totalSpaces > 0 ? `${totalSpaces} space${totalSpaces === 1 ? '' : 's'}` : undefined,
-          running: activeNav === 'spaces' || spacesOpen,
-          onClick: () => {
-            if (!openLastSpace() && !switcherOnly) {
-              setChatsOpen(false)
-              setSpacesOpen(true)
-            }
-          },
-          switchTo: () => {
-            if (!openLastSpace() && !switcherOnly) {
-              setChatsOpen(false)
-              setSpacesOpen(true)
-            }
-          },
-        },
-      }] : []),
       {
         item: {
           key: 'chats', label: 'Chats', icon: MessageSquare, tourId: 'nav-chats',

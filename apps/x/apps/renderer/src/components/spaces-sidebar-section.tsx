@@ -2,10 +2,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from '@/components/ui/button'
 import { useSpaceDirectory, invalidateSpaceDirectory } from '@/hooks/use-space-directory'
 import { useEffect, useId, useMemo, useState, type ReactNode } from 'react'
-import { Archive, Bell, Bot, ChevronDown, ChevronRight, Compass, CornerDownRight, Hash, Lock, LogIn, MoreHorizontal, Pencil, Plus, RotateCw, UserPlus } from 'lucide-react'
+import { Archive, Bell, Bot, ChevronDown, ChevronRight, Compass, CornerDownRight, Hash, Lock, LogIn, MessagesSquare, MoreHorizontal, Pencil, Plus, RotateCw, UserPlus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar'
-import { SidebarSection } from '@/components/sidebar-section'
+import { SidebarNavSection } from '@/components/sidebar-section'
 import {
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
 } from '@/components/ui/context-menu'
@@ -35,10 +35,12 @@ import { AddServerDialog } from '@/components/spaces/add-server-dialog'
  * is a row that opens it, most recent first, whichever server you were in;
  * a server with channels is a shortcut into its own navigation.
  */
-export function SpacesSidebarSection({ active, activeSpace, onOpenSpace }: {
+export function SpacesSidebarSection({ active, activeSpace, onOpenSpace, onOpenSpaces }: {
     active: boolean
     activeSpace?: SpaceSelection
     onOpenSpace: (orgId: string, spaceId: string) => void
+    /** The Spaces row itself: the last space, or the Spaces home. */
+    onOpenSpaces?: () => void
 }) {
     const { orgs } = useSpacesOrgs()
     const [addingServer, setAddingServer] = useState(false)
@@ -74,24 +76,36 @@ export function SpacesSidebarSection({ active, activeSpace, onOpenSpace }: {
     </SidebarMenuItem>
     // Headings only when both kinds are there: one kind needs no label.
     const both = chats.length > 0 && workspaces.length > 0
-    return <SidebarSection id="spaces" label="Spaces" tourId="nav-spaces"
+    // Spaces is a nav row like Email or Apps (2026-10-21): it opens Spaces,
+    // its servers nest under it, and the chevron folds them. Folded, the row
+    // carries the unread from all of them.
+    const total = { unread: 0, forYou: 0 }
+    for (const badge of serverBadges.values()) { total.unread += badge.unread; total.forYou += badge.forYou }
+    const onAServer = active && orgs.some((org) => org.id === activeSpace?.orgId)
+    return <SidebarNavSection id="spaces" label="Spaces" tourId="nav-spaces"
+        icon={<MessagesSquare />}
+        active={active && !onAServer}
+        onOpen={onOpenSpaces}
+        foldedBadge={<UnreadBadge badge={total} />}
         tools={<button type="button" aria-label="New group chat" title="New group chat"
             className="sb-row-action" onClick={() => setAddingServer(true)}>
             <Plus />
         </button>}>
-        {both && <h3 className="sb-subhead">Chats</h3>}
-        <SidebarMenu aria-label="Chats">
-            {chats.map((org) => row(org, org.spaces[0].id))}
-        </SidebarMenu>
-        {both && <h3 className="sb-subhead">Workspaces</h3>}
-        <SidebarMenu aria-label="Workspaces">
-            {workspaces.map((org) => row(org, serverLandingSpaceId(org)))}
-        </SidebarMenu>
+        <div>
+            {both && <h3 className="sb-subhead">Chats</h3>}
+            <SidebarMenu aria-label="Chats">
+                {chats.map((org) => row(org, org.spaces[0].id))}
+            </SidebarMenu>
+            {both && <h3 className="sb-subhead">Workspaces</h3>}
+            <SidebarMenu aria-label="Workspaces">
+                {workspaces.map((org) => row(org, serverLandingSpaceId(org)))}
+            </SidebarMenu>
+        </div>
         {addingServer && <AddServerDialog onClose={() => setAddingServer(false)} onChoose={(kind) => {
             setAddingServer(false)
             openServerDialog({ kind })
         }} />}
-    </SidebarSection>
+    </SidebarNavSection>
 }
 
 function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onOpenBrowse, browseActive = false, onOpenAgents, agentsActive = false, activityActive = false, onChanged, renderDiscussions, showArchived = false, activeDiscussionCount }: {

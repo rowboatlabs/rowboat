@@ -58,6 +58,28 @@
   background: color-mix(in srgb, var(--sidebar-foreground) 7%, transparent);
 }
 
+/* The search square beside New chat: same frame and height. */
+.sb-square {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  color: color-mix(in srgb, var(--sidebar-foreground) 70%, transparent);
+  background: color-mix(in srgb, var(--sidebar-foreground) 3%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sidebar-foreground) 9%, transparent);
+  transition: background-color 140ms ease, color 140ms ease, transform 120ms ease;
+}
+.sb-square:hover {
+  color: var(--sidebar-foreground);
+  background: color-mix(in srgb, var(--sidebar-foreground) 7%, transparent);
+}
+.sb-square:active { transform: scale(.94); }
+.sb-square:focus-visible { outline: 2px solid var(--sidebar-ring); outline-offset: -2px; }
+.sb-square > svg { width: 16px; height: 16px; }
+
 /* Right-hand bits of a row: keyboard hints show on hover, counts and times
    always; a row's own buttons replace its meta on hover. */
 .sb-hint {
@@ -181,6 +203,34 @@
 }
 .sb-section[data-open="false"] .sb-collapse { grid-template-rows: 0fr; opacity: 0; }
 .sb-collapse > * { min-height: 0; overflow: hidden; }
+/* A nav row with children (Spaces): sits in the row rhythm, not as a heading.
+   Its chevron points down when open and right when folded. */
+.sb-section.sb-nav-section { margin-top: 2px; }
+.sb-nav-section .sb-chevron { opacity: 1; width: 14px; height: 14px; }
+.sb-nav-section[data-open="false"] .sb-chevron { transform: rotate(-90deg); }
+.sb-nav-section .sb-tree { margin-left: 17px; margin-top: 2px; }
+/* Two buttons on hover (+ and the chevron): leave room for both. */
+.sb-nav-section [data-sidebar="menu-item"]:has(.sb-row-actions):hover > [data-sidebar="menu-button"],
+.sb-nav-section [data-sidebar="menu-item"]:has(.sb-row-actions):focus-within > [data-sidebar="menu-button"] { padding-right: 58px; }
+
+/* A nested list: indented under its heading with a faint guide line, the
+   line centred under the heading's first letter. */
+.sb-tree {
+  position: relative;
+  margin-left: 14px;
+  padding-left: 8px;
+}
+.sb-tree::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 1px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--sidebar-foreground) 10%, transparent);
+}
+.sb-tree .sb-subhead { padding-left: 10px; }
 .sb-subhead {
   display: flex;
   align-items: center;

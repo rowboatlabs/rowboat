@@ -76,15 +76,16 @@ describe('the sidebar server list', () => {
         expect(screen.queryByRole('region', { name: 'Activity across organizations' })).toBeNull()
         fireEvent.click(screen.getByRole('button', { name: 'Other server' }))
         expect(open).toHaveBeenCalledWith(other.id, 'welcome')
-        // The heading folds the list (sidebar redesign, 2026-10-21) and the
-        // choice is remembered.
-        const heading = screen.getByRole('button', { name: 'Spaces' })
-        expect(heading).toHaveAttribute('aria-expanded', 'true')
-        fireEvent.click(heading)
-        expect(heading).toHaveAttribute('aria-expanded', 'false')
+        // Spaces is a nav row; its chevron folds the servers (sidebar
+        // redesign, 2026-10-21) and the choice is remembered.
+        expect(screen.getByRole('button', { name: 'Spaces' })).toBeVisible()
+        const fold = screen.getByRole('button', { name: 'Hide spaces list' })
+        expect(fold).toHaveAttribute('aria-expanded', 'true')
+        fireEvent.click(fold)
+        expect(fold).toHaveAttribute('aria-expanded', 'false')
         expect(window.localStorage.getItem('x:sidebar-section:spaces')).toBe('closed')
-        fireEvent.click(heading)
-        expect(heading).toHaveAttribute('aria-expanded', 'true')
+        fireEvent.click(fold)
+        expect(fold).toHaveAttribute('aria-expanded', 'true')
     })
     it('can open an empty server and add a server when none are connected', () => {
         vi.mocked(useSpacesOrgs).mockReturnValue({ orgs: [{ ...org, spaces: [], directs: [] }] as unknown as OrgWithSpaces[], loading: false, refresh: vi.fn() })

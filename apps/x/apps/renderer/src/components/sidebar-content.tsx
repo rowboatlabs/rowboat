@@ -466,6 +466,7 @@ export function SidebarContentPanel({
   onOpenApps,
   onOpenApp,
   onOpenSpace,
+  onOpenSpaces,
   activeSpace,
   recentRuns = [],
   onOpenRun,
@@ -910,24 +911,27 @@ export function SidebarContentPanel({
       <SidebarContent ref={contentRef} className="gap-0 pb-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <SidebarGroup className="pb-0 pt-1">
           <SidebarMenu>
-            {onNewChat && (
-              <SidebarMenuItem>
-                <SidebarMenuButton className="sb-primary" onClick={onNewChat}>
+            {/* New chat and Search share one row (2026-10-21): the wide button
+                is the primary action, search a square beside it. */}
+            <SidebarMenuItem className="flex items-center gap-1.5">
+              {onNewChat && (
+                <SidebarMenuButton className="sb-primary min-w-0 flex-1" onClick={onNewChat}>
                   <SquarePen />
                   <span className="flex-1 truncate">New chat</span>
                   <kbd className="sb-hint font-sans">{MOD_KEY}N</kbd>
                 </SidebarMenuButton>
-              </SidebarMenuItem>
-            )}
-            {onOpenSearch && (
-              <SidebarMenuItem>
-                <SidebarMenuButton onClick={onOpenSearch}>
-                  <Search />
-                  <span className="flex-1 truncate">Search</span>
-                  <kbd className="sb-hint font-sans">{MOD_KEY}K</kbd>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            )}
+              )}
+              {onOpenSearch && (
+                <Tooltip delayDuration={400}>
+                  <TooltipTrigger asChild>
+                    <button type="button" className="sb-square" aria-label="Search" onClick={onOpenSearch}>
+                      <Search />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" sideOffset={6}>Search <span className="ml-1 opacity-60">{MOD_KEY}K</span></TooltipContent>
+                </Tooltip>
+              )}
+            </SidebarMenuItem>
           </SidebarMenu>
         </SidebarGroup>
 
@@ -946,6 +950,17 @@ export function SidebarContentPanel({
                 <span className="flex-1 truncate">Assistant</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarGroup>
+
+        {/* Spaces sits right under Assistant (2026-10-21). */}
+        {SPACES_ENABLED && (
+          <SpacesSidebarSection active={activeNav === 'spaces'} activeSpace={activeSpace}
+            onOpenSpace={(orgId, spaceId) => onOpenSpace?.(orgId, spaceId)} onOpenSpaces={onOpenSpaces} />
+        )}
+
+        <SidebarGroup className="pb-0 pt-3">
+          <SidebarMenu>
             <SidebarMenuItem>
               <RowTip tip={emailTip}>
                 <SidebarMenuButton data-tour-id="nav-email" isActive={activeNav === 'email'} onClick={() => onOpenEmail?.()}>
@@ -1094,11 +1109,6 @@ export function SidebarContentPanel({
             ))}
           </SidebarMenu>
         </SidebarGroup>
-
-        {SPACES_ENABLED && (
-          <SpacesSidebarSection active={activeNav === 'spaces'} activeSpace={activeSpace}
-            onOpenSpace={(orgId, spaceId) => onOpenSpace?.(orgId, spaceId)} />
-        )}
 
         <SidebarSection id="chats" label="Chats" tourId="nav-chats">
           {recentChats.length === 0 ? (
