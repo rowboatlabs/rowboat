@@ -106,6 +106,7 @@ export const DOCK_GUTTER_PX = 48
 
 /** Each tile's chord, shown in its tooltip (2026-10-21). */
 const DOCK_SHORTCUTS: Record<string, ShortcutKeys | undefined> = {
+  assistant: SHORTCUTS.assistant,
   email: SHORTCUTS.email,
   meetings: SHORTCUTS.meetings,
   home: SHORTCUTS.todo,

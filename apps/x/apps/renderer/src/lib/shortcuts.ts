@@ -13,15 +13,16 @@ export const SHORTCUTS = {
     search: ['mod', 'K'],
     toggleSidebar: ['mod', 'B'],
     settings: ['mod', ','],
-    // Go menu (menu.ts GO_ITEMS).
-    todo: ['mod', '1'],
-    spaces: ['mod', '2'],
-    email: ['mod', '3'],
-    meetings: ['mod', '5'],
-    brain: ['mod', '6'],
-    apps: ['mod', '7'],
-    agents: ['mod', '8'],
-    projects: ['mod', '9'],
+    // Go menu (menu.ts GO_ITEMS): the sidebar's order, top to bottom.
+    assistant: ['mod', '1'],
+    email: ['mod', '2'],
+    meetings: ['mod', '3'],
+    todo: ['mod', '4'],
+    brain: ['mod', '5'],
+    projects: ['mod', '6'],
+    agents: ['mod', '7'],
+    apps: ['mod', '8'],
+    spaces: ['mod', '9'],
 } as const satisfies Record<string, ShortcutKeys>
 
 export function keyLabel(key: string): string {

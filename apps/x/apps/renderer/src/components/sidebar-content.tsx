@@ -943,6 +943,7 @@ export function SidebarContentPanel({
               >
                 <MascotFaceIcon className="sb-icon" />
                 <span className="flex-1 truncate">Assistant</span>
+                <Keys keys={SHORTCUTS.assistant} className="sb-row-keys" />
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
