@@ -983,7 +983,8 @@ export function ThreadPane({
     const replyCountLabel = Math.max(visibleReplies.length, root?.replyCount ?? 0)
 
     return (
-        <div className="flex h-full min-h-0 flex-col bg-background">
+        // Spaces redesign (2026-10-21): spaces-thread-pane slides the pane in from the right on mount.
+        <div className="spaces-thread-pane flex h-full min-h-0 flex-col bg-background">
             <div className="spaces-pane-header flex shrink-0 items-center gap-1.5 border-b border-border">
                 {showBack && (
                     <>

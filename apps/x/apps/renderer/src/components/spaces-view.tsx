@@ -5,21 +5,19 @@ import { SpaceAccessContext, useSpaceAccess, canActInSpace } from '@/lib/spaces-
 import { useSpaceDirectory, updateDirectoryMembership, loadSpaceDirectory } from '@/hooks/use-space-directory'
 import { SpaceBrowser } from '@/components/spaces/space-browser'
 import '@/styles/spaces.css'
+import '@/styles/spaces-header.css'
 import { ThreadResizeHandle, THREAD_DEFAULT_WIDTH, THREAD_MIN_WIDTH, THREAD_DIVIDER_WIDTH, STREAM_MIN_WIDTH } from '@/components/spaces/thread-resize-handle'
 import { getViewerType } from '@/lib/file-types'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { Archive, ArchiveRestore, Check, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Lock, Link as LinkIcon, Loader2, MoreHorizontal, PenTool, Plus, Star, Trash2, UserPlus, Users } from 'lucide-react'
+import { Archive, ArchiveRestore, Bookmark, Check, ChevronDown, ChevronLeft, ChevronRight, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Lock, Link as LinkIcon, Loader2, PenTool, Plus, Star, Trash2, UserPlus, Users } from 'lucide-react'
 import { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
-import {
-    DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { MemberAvatar, OrgMonogram } from '@/components/spaces/atoms'
 import { openServerDialog } from '@/lib/server-dialog'
 import { isGroupChat, type OrgView } from '@/lib/spaces-navigation'
 import { AgentsView } from '@/components/spaces/agents-view'
-import { BookmarksPopover } from '@/components/spaces/bookmarks'
+import { BookmarksPanel } from '@/components/spaces/bookmarks'
 import { FileColumn, TrashDialog, UploadFilesDialog } from '@/components/spaces/files-tab'
 import { GeneralStream } from '@/components/spaces/general-stream'
 import { ScheduledDialog } from '@/components/spaces/scheduled-dialog'
@@ -33,10 +31,8 @@ import { SpaceInvocationsProvider } from '@/components/spaces/invocation-lines'
 import { useSpaceInvocations } from '@/hooks/use-space-invocations'
 import { SelectionCopy } from '@/components/spaces/selection-copy'
 import { ServerSwitcher } from '@/components/spaces/server-switcher'
-import { ServerSpaceNavigation } from '@/components/spaces-sidebar-section'
 import { ActivityView, type ActivityTarget } from '@/components/spaces/activity-view'
-import { SpaceRailSections } from '@/components/spaces/space-rail-sections'
-import { SpaceRail } from '@/components/spaces/space-rail'
+import { OrgRail, SpaceRail } from '@/components/spaces/space-rail'
 import { SpaceContentTabs } from '@/components/spaces/space-content-tabs'
 import { SpaceDiscussionsView } from '@/components/spaces/space-discussions-view'
 import { SpaceFilesView } from '@/components/spaces/space-files-view'
@@ -233,7 +229,6 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
                 onOpenActivity={onOpenActivity}
                 onOpenBrowse={onOpenBrowse}
                 onOpenAgents={onOpenAgents}
-                onOpenMessage={onOpenMessage}
                 active={active}
             />
             </SpaceAccessContext.Provider>
@@ -246,17 +241,8 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
                 <ServerSwitcher org={selectedOrg} onOpenSpace={onSwitchSpace} {...(onOpenAgents ? { onOpenAgents } : {})} />
             </header>
             <div className="flex min-h-0 flex-1">
-            <aside className="w-64 shrink-0 border-r border-border bg-[var(--rowboat-panel-soft)]">
-                <SpaceRailSections orgId={selectedOrg.id} active={active} activityActive={selection?.view === 'activity'}
-                    onOpenMessage={onOpenMessage} onOpenActivity={onOpenActivity}>
-                <div className="flex h-8 shrink-0 items-center px-2">
-                    <span className="flex-1 px-1 text-[13px] font-semibold text-muted-foreground">Spaces</span>
-                </div>
-                <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-                    <ServerSpaceNavigation org={selectedOrg} spaceId="" onOpenSpace={onSwitchSpace} onOpenBrowse={onOpenBrowse} browseActive={selection?.view === 'browse'} onOpenAgents={onOpenAgents} agentsActive={selection?.view === 'agents'} showDiscussions={false} />
-                </div>
-                </SpaceRailSections>
-            </aside>
+            <OrgRail org={selectedOrg} spaceId="" onOpenSpace={onSwitchSpace} onOpenBrowse={onOpenBrowse} browseActive={selection?.view === 'browse'}
+                onOpenAgents={onOpenAgents} agentsActive={selection?.view === 'agents'} onOpenActivity={onOpenActivity} activityActive={selection?.view === 'activity'} />
             {selection?.view === 'browse' || !selection?.spaceId && !selection?.view ? (
                 <SpaceBrowser key={selectedOrg.id} orgId={selectedOrg.id} memberId={selectedOrg.memberId} active={active} onOpenSpace={onSwitchSpace} />
             ) : selection?.spaceId ? (
@@ -325,7 +311,7 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
 // One space: header across the top, then the space rail | the selected thing
 // ---------------------------------------------------------------------------
 
-function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSession, onOpenActivity, onOpenMessage, onOpenBrowse, onOpenAgents, active = true }: {
+function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSession, onOpenActivity, onOpenBrowse, onOpenAgents, active = true }: {
     org: OrgWithSpaces
     space: spaces.Space
     selection: RailSelection
@@ -336,7 +322,6 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     /** Every agent in the org (2026-10-21). */
     onOpenAgents?: (orgId: string) => void
     onOpenActivity?: (orgId: string) => void
-    onOpenMessage?: (target: ActivityTarget) => void
     onOpenSession?: (sessionId: string) => void
     /** False while the Spaces view is kept mounted but hidden. */
     active?: boolean
@@ -878,6 +863,9 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
 
     const here = presence.here.filter((id) => members.some((m) => m.id === id))
     const hereSet = new Set(here)
+    // The header's face pile: people before integrations, whoever is here first.
+    const facepile = [...members].sort((a, b) => Number(a.kind === 'agent') - Number(b.kind === 'agent')
+        || Number(hereSet.has(b.id)) - Number(hereSet.has(a.id))).slice(0, 3)
 
     // The chat surface keeps its context while a file has focus: a thread
     // stays open beside the document it changed (fromThreadRootId), otherwise
@@ -933,6 +921,11 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     const [uploadFiles, setUploadFiles] = useState<File[] | null>(null)
     const [trashOpen, setTrashOpen] = useState(false)
     const [addMembersOpen, setAddMembersOpen] = useState(false)
+    // The header's two menus each swap to a sub-view (pins, invite link) in place.
+    const [titleMenuOpen, setTitleMenuOpen] = useState(false)
+    const [titleMenuView, setTitleMenuView] = useState<'menu' | 'bookmarks'>('menu')
+    const [peopleOpen, setPeopleOpen] = useState(false)
+    const [peopleView, setPeopleView] = useState<'list' | 'invite'>('list')
     // Archive and delete are an admin's, on a shared space (harbor #1186, #1189);
     // a group chat's one space is the server itself, so it has neither.
     const canAdminSpace = selfIsAdmin && member && !isDirect && !groupChat
@@ -977,17 +970,20 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
             </div>}
             {/* One per pane — covers the stream and thread panes alike. */}
             {active && <SelectionCopy />}
-            <header className="spaces-header flex shrink-0 items-center gap-2 border-b border-border">
+            {/* Spaces redesign (2026-10-21): the header is the space's name (one
+                menu for details, pins, admin), its three views, then search,
+                people and the board. The old Invite button, bookmark icon and ⋯
+                menu folded into those — every action is still one or two clicks. */}
+            <header className="spaces-header flex shrink-0 items-center gap-3 border-b border-border">
                 <ServerSwitcher org={org} onOpenSpace={onSwitchSpace} {...(onOpenAgents ? { onOpenAgents } : {})} />
                 {/* A group chat's name is the server's: no "/ #name" after it, just who is in it. */}
-                {!(groupChat && !isDirect) && <span aria-hidden="true" className="shrink-0 text-muted-foreground/50">/</span>}
-                {/* Click to keep the identity card and its copy actions open. */}
-                <Popover>
+                {!(groupChat && !isDirect) && <span aria-hidden="true" className="-mx-1 shrink-0 text-muted-foreground/50">/</span>}
+                <Popover open={titleMenuOpen} onOpenChange={(open) => { setTitleMenuOpen(open); if (!open) setTitleMenuView('menu') }}>
                     <PopoverTrigger asChild>
                         <button
                             type="button"
-                            aria-label={isDirect ? 'Conversation details' : groupChat ? 'Group details' : 'Space details'}
-                            className="flex h-9 min-w-0 max-w-[320px] shrink items-center gap-2 rounded-md pl-1 pr-2 hover:bg-accent/60 data-[state=open]:bg-accent/60"
+                            aria-label={isDirect ? 'Conversation menu' : groupChat ? 'Group menu' : 'Space menu'}
+                            className="spaces-title-button shrink"
                         >
                             {groupChat && !isDirect ? <span className="flex items-center gap-1 text-[13px] text-muted-foreground">
                                 <Users className="size-3.5 shrink-0" />{members.length}
@@ -997,211 +993,192 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                     : space.visibility === 'open' ? <Hash className="size-4 shrink-0 text-muted-foreground" /> : <Lock aria-label="Private space" className="size-4 shrink-0 text-muted-foreground" />}
                                 <h1 className="truncate text-[15px] font-semibold">{spaceTitle}</h1>
                             </span>}
+                            <ChevronDown className="spaces-title-chevron size-3.5 shrink-0 text-muted-foreground" />
                         </button>
                     </PopoverTrigger>
-                    <PopoverContent align="start" sideOffset={4} className="w-80 px-5 pb-5 pt-6">
-                        {/* "About this space", in the shape of About This Mac: the
-                            org's mark as the hero, the space as the title, then a
-                            label/value table — what you're looking at, who it
-                            belongs to, and who you are in it. */}
-                        <div className="flex flex-col items-center text-center">
-                            <OrgMonogram org={org} size="xl" />
-                            <div className={cn('mt-3 flex items-center text-lg font-semibold leading-tight', isDirect ? 'gap-1.5' : 'gap-0.5')}>
-                                {isDirect
-                                    ? <MemberAvatar id={directOtherId} name={spaceTitle} size="sm" />
-                                    : space.visibility === 'open' ? <Hash className="size-4 text-muted-foreground" /> : <Lock aria-label="Private space" className="size-4 text-muted-foreground" />}
-                                <span className="truncate">{spaceTitle}</span>
+                    <PopoverContent align="start" sideOffset={6} className="w-[300px] p-1.5">
+                        {titleMenuView === 'bookmarks' ? (
+                            <div className="spaces-subview">
+                                <button type="button" className="spaces-menu-row font-medium" onClick={() => setTitleMenuView('menu')}>
+                                    <ChevronLeft /> Pinned & saved
+                                </button>
+                                <div className="spaces-menu-sep" />
+                                <BookmarksPanel orgId={org.id} spaceId={space.id} streamKey={STREAM_READ_KEY} topics={feed.topics}
+                                    onNavigate={navigateToMessage} onClose={() => setTitleMenuOpen(false)} />
                             </div>
-                            <div className="mt-0.5 text-xs text-muted-foreground">
-                                {isSelf
-                                    ? `Your notes in ${org.name} — just you and your agent`
-                                    : isDirect ? `A direct message in ${org.name} — just the two of you` : groupChat ? 'A group chat — add a channel from the server menu when it grows' : `${space.visibility === 'open' ? 'An open' : 'A private'} space in ${org.name}`}
+                        ) : <>
+                            <div className="px-2.5 pb-3 pt-2">
+                                <div className={cn('flex items-center text-[14px] font-semibold', isDirect ? 'gap-1.5' : 'gap-0.5')}>
+                                    {isDirect
+                                        ? <MemberAvatar id={directOtherId} name={spaceTitle} size="sm" />
+                                        : groupChat ? <OrgMonogram org={org} size="sm" />
+                                            : space.visibility === 'open' ? <Hash className="size-3.5 text-muted-foreground" /> : <Lock aria-label="Private space" className="size-3.5 text-muted-foreground" />}
+                                    <span className="truncate">{groupChat && !isDirect ? org.name : spaceTitle}</span>
+                                </div>
+                                <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                                    {isSelf
+                                        ? `Your notes in ${org.name} — just you and your agent`
+                                        : isDirect ? `A direct message in ${org.name} — just the two of you` : groupChat ? 'A group chat — add a channel from the server menu when it grows' : `${space.visibility === 'open' ? 'An open' : 'A private'} space in ${org.name}`}
+                                </div>
+                                <div className="mt-2 text-xs text-muted-foreground">
+                                    {members.length} {members.length === 1 ? 'member' : 'members'}
+                                    {here.length > 0 && ` · ${here.length} here`}
+                                    {space.isDefault && ' · Default space'}
+                                </div>
                             </div>
-                        </div>
-                        <dl className="mt-4 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-[13px]">
-                            <dt className="text-right font-medium">Server</dt>
-                            <dd className="truncate text-muted-foreground">{org.name}</dd>
-                            <dt className="text-right font-medium">Members</dt>
-                            <dd className="truncate text-muted-foreground">
-                                {members.length}{here.length > 0 && <span> · {here.length} here</span>}
-                            </dd>
-                            <dt className="text-right font-medium">You</dt>
-                            <dd className="min-w-0">
-                                <span className="inline-block max-w-full truncate rounded-[4px] bg-[var(--stream-you-wash)] px-[3px] py-px align-middle font-medium text-[var(--stream-you-ink)]">@{selfName}</span>
-                            </dd>
-                            <dt className="text-right font-medium">Member id</dt>
-                            <dd className="min-w-0"><CopyLine text={org.memberId} title="Copy your member id" className="font-mono text-xs" /></dd>
-                        </dl>
-                        <div className="mt-4 flex flex-col gap-1 border-t border-border pt-3">
-                            <Button variant="ghost" size="sm" className="justify-start" onClick={() => void copySpacesLink(spaces.spaceUrl(org.address, space.id))}>
-                                <LinkIcon className="size-3.5" /> {isDirect ? 'Copy conversation link' : 'Copy space link'}
-                            </Button>
-                            {isDirect && (
-                                <Button variant="ghost" size="sm" className="justify-start" onClick={() => void copySpacesLink(spaces.memberUrl(org.address, directOtherId))}>
-                                    <LinkIcon className="size-3.5" /> Copy member link
-                                </Button>
+                            <div className="spaces-menu-sep" />
+                            <button type="button" className="spaces-menu-row" onClick={() => setTitleMenuView('bookmarks')}>
+                                <Bookmark /> Pinned & saved <ChevronRight className="ml-auto" />
+                            </button>
+                            {LOCAL_RUNTIME && (
+                                <button type="button" className="spaces-menu-row" disabled={!writable} onClick={() => { setTitleMenuOpen(false); setScheduledOpen(true) }}>
+                                    <Clock /> Scheduled messages
+                                </button>
                             )}
-                            <Button variant="ghost" size="sm" className="justify-start" onClick={() => void copySpacesLink(spaces.orgUrl(org.address))}>
-                                <LinkIcon className="size-3.5" /> Copy server link
-                            </Button>
-                        </div>
+                            <button type="button" className="spaces-menu-row" disabled={!member} onClick={() => { setTitleMenuOpen(false); markAllRead() }}>
+                                <Check /> Mark all as read
+                            </button>
+                            <button type="button" className="spaces-menu-row" onClick={() => { setTitleMenuOpen(false); void copySpacesLink(spaces.spaceUrl(org.address, space.id)) }}>
+                                <LinkIcon /> {isDirect ? 'Copy conversation link' : 'Copy space link'}
+                            </button>
+                            {isDirect && (
+                                <button type="button" className="spaces-menu-row" onClick={() => { setTitleMenuOpen(false); void copySpacesLink(spaces.memberUrl(org.address, directOtherId)) }}>
+                                    <LinkIcon /> Copy member link
+                                </button>
+                            )}
+                            <button type="button" className="spaces-menu-row" onClick={() => { setTitleMenuOpen(false); void copySpacesLink(spaces.orgUrl(org.address)) }}>
+                                <LinkIcon /> Copy server link
+                            </button>
+                            {canAdminSpace && <>
+                                <div className="spaces-menu-sep" />
+                                <div className="spaces-menu-label">Admin</div>
+                                {archived ? (
+                                    <button type="button" className="spaces-menu-row" disabled={unarchiving} onClick={() => { setTitleMenuOpen(false); void unarchive() }}>
+                                        <ArchiveRestore /> Unarchive space
+                                    </button>
+                                ) : (
+                                    <button type="button" className="spaces-menu-row" onClick={() => { setTitleMenuOpen(false); setArchiveOpen(true) }}>
+                                        <Archive /> Archive space
+                                    </button>
+                                )}
+                                {!archived && (
+                                    <button type="button" className="spaces-menu-row" onClick={() => { setTitleMenuOpen(false); setVisibilityOpen(true) }}>
+                                        {space.visibility === 'open' ? <><Lock /> Make private</> : <><Hash /> Make open</>}
+                                    </button>
+                                )}
+                                {/* Default spaces (harbor, 2026-10-19): only an open space can be one,
+                                    and an archived one can only stop being one. */}
+                                {space.isDefault ? (
+                                    <button type="button" className="spaces-menu-row" onClick={() => { setTitleMenuOpen(false); void setDefaultSpace(org.id, space, false) }}>
+                                        <Star /> Remove from default spaces
+                                    </button>
+                                ) : space.visibility === 'open' && !archived ? (
+                                    <button type="button" className="spaces-menu-row" onClick={() => { setTitleMenuOpen(false); void setDefaultSpace(org.id, space, true) }}>
+                                        <Star /> Make a default space
+                                    </button>
+                                ) : null}
+                                <button type="button" className="spaces-menu-row spaces-menu-row--danger" onClick={() => { setTitleMenuOpen(false); setDeleteOpen(true) }}>
+                                    <Trash2 /> Delete space…
+                                </button>
+                            </>}
+                            <div className="spaces-menu-sep" />
+                            <div className="flex items-center gap-2 px-2.5 pb-1.5 pt-0.5 text-[11.5px] text-muted-foreground">
+                                <span className="shrink-0">You are</span>
+                                <span className="min-w-0 truncate rounded-[4px] bg-[var(--stream-you-wash)] px-[3px] py-px font-medium text-[var(--stream-you-ink)]">@{selfName}</span>
+                                <CopyLine text={org.memberId} title="Copy your member id" className="font-mono text-[11px]" />
+                            </div>
+                        </>}
                     </PopoverContent>
                 </Popover>
 
-                {/* Centre: search gets the room. */}
-                <div className="flex min-w-0 flex-1 justify-center px-2">
-                    <SpaceSearch orgId={org.id} spaceId={space.id} selfMemberId={org.memberId} onNavigate={select} className="w-full max-w-[480px]" />
-                </div>
+                <SpaceContentTabs orgId={org.id} spaceId={space.id} direct={isDirect} topics={feed.topics}
+                    entries={entries} unreadAssetIds={unreadAssetIds} selection={selection} onSelect={select} />
 
-                {/* Right: Invite (a DM's membership is fixed — nobody to
-                    invite), members as one pill (a dot when anyone is here —
-                    the roster says who), then the tools. */}
-                {writable && !isDirect && mayInvite && (
-                    <Popover>
-                        <PopoverTrigger asChild>
-                            <button
-                                type="button"
-                                title={groupChat ? `Invite someone to ${org.name}` : `Invite someone to #${space.name}`}
-                                className="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-border px-2 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground data-[state=open]:bg-accent/60 data-[state=open]:text-foreground"
-                            >
-                                <UserPlus className="size-3.5" />
-                                <span>Invite</span>
-                            </button>
-                        </PopoverTrigger>
-                        <PopoverContent align="end" className="w-96 p-3">
-                            <InviteLinkPanel orgId={org.id} spaceIds={[space.id]} />
-                        </PopoverContent>
-                    </Popover>
-                )}
-                <Popover>
+                <div className="min-w-0 flex-1" />
+
+                <SpaceSearch orgId={org.id} spaceId={space.id} selfMemberId={org.memberId} onNavigate={select} className="spaces-header-search shrink-0" />
+
+                {/* Members and invites are one control: the face pile opens the
+                    roster with Invite on top (a DM's membership is fixed). */}
+                <Popover open={peopleOpen} onOpenChange={(open) => { setPeopleOpen(open); if (!open) setPeopleView('list') }}>
                     <PopoverTrigger asChild>
                         <button
                             type="button"
-                            className="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-border px-2 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground data-[state=open]:bg-accent/60 data-[state=open]:text-foreground"
+                            className="spaces-header-button"
+                            aria-label={`Members — ${members.length}${here.length > 0 ? `, ${here.length} here` : ''}`}
                             title={here.length > 0 ? `${members.length} members · ${here.length} here` : `${members.length} members`}
                         >
-                            <span className="relative">
-                                <Users className="size-3.5" />
-                                {here.length > 0 && <span className="absolute -right-1 -top-1 size-2 rounded-full bg-[var(--rowboat-success)] ring-2 ring-background" />}
+                            <span className="spaces-facepile flex" aria-hidden="true">
+                                {facepile.map((m) => <MemberAvatar key={m.id} id={m.id} name={m.displayName} size="sm" agent={m.kind === 'agent'} agentKind={m.agentKind} />)}
                             </span>
                             <span className="tabular-nums">{members.length}</span>
+                            {here.length > 0 && <span aria-hidden="true" className="-ml-0.5 size-1.5 rounded-full bg-[var(--rowboat-success)]" />}
                         </button>
                     </PopoverTrigger>
-                    <PopoverContent align="end" className="w-[400px] max-w-[calc(100vw-24px)] p-1.5">
-                        <MemberDirectory members={members} here={hereSet} selfId={org.memberId} />
-                        {/* A DM's membership is fixed — there is nobody to add or invite. */}
-                        {writable && !isDirect && (
-                            <div className="mt-1 border-t border-border pt-1">
-                                <button
-                                    type="button"
-                                    onClick={() => setAddMembersOpen(true)}
-                                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-                                >
-                                    <UserPlus className="size-3.5" /> Add people
+                    <PopoverContent align="end" sideOffset={6} className={cn('max-w-[calc(100vw-24px)] p-1.5', peopleView === 'invite' ? 'w-96' : 'w-[400px]')}>
+                        {peopleView === 'invite' ? (
+                            <div className="spaces-subview">
+                                <button type="button" className="spaces-menu-row font-medium" onClick={() => setPeopleView('list')}>
+                                    <ChevronLeft /> {groupChat ? `Invite to ${org.name}` : `Invite to #${space.name}`}
                                 </button>
-                                {mayInvite && (
-                                    <button
-                                        type="button"
-                                        onClick={() => void invite()}
-                                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-                                    >
-                                        <LinkIcon className="size-3.5" /> Copy invite link
-                                    </button>
-                                )}
+                                <div className="spaces-menu-sep" />
+                                <div className="p-1.5"><InviteLinkPanel orgId={org.id} spaceIds={[space.id]} /></div>
                             </div>
-                        )}
+                        ) : <>
+                            <div className="flex items-baseline justify-between px-2.5 pb-2 pt-1.5">
+                                <span className="text-sm font-semibold">Members</span>
+                                <span className="text-xs text-muted-foreground">{members.length}{here.length > 0 && ` · ${here.length} here now`}</span>
+                            </div>
+                            {writable && !isDirect && (
+                                <div className="flex flex-col gap-0.5 px-1 pb-1">
+                                    {mayInvite && (
+                                        <Button size="sm" className="mb-1 w-full" onClick={() => setPeopleView('invite')}>
+                                            <UserPlus className="size-3.5" /> {groupChat ? `Invite to ${org.name}` : `Invite to #${space.name}`}
+                                        </Button>
+                                    )}
+                                    <button type="button" className="spaces-menu-row" onClick={() => { setPeopleOpen(false); setAddMembersOpen(true) }}>
+                                        <Users /> Add people from {org.name}
+                                    </button>
+                                    {mayInvite && (
+                                        <button type="button" className="spaces-menu-row" onClick={() => void invite()}>
+                                            <LinkIcon /> Copy invite link
+                                        </button>
+                                    )}
+                                </div>
+                            )}
+                            {writable && !isDirect && <div className="spaces-menu-sep" />}
+                            <MemberDirectory members={members} here={hereSet} selfId={org.memberId} />
+                        </>}
                     </PopoverContent>
                 </Popover>
-                <BookmarksPopover
-                    orgId={org.id}
-                    spaceId={space.id}
-                    streamKey={STREAM_READ_KEY}
-                    topics={feed.topics}
-                    onNavigate={navigateToMessage}
-                />
                 {!docOpen && lastDocEntry && !lastDocEntry.state && (
                     <button
                         type="button"
                         onClick={reopenDoc}
                         title={`Reopen ${lastDocEntry.path} beside the conversation`}
-                        className="inline-flex h-6 max-w-[14rem] items-center gap-1.5 rounded-md border border-border bg-background px-2 text-xs text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                        className="spaces-header-button max-w-[14rem]"
                     >
-                        <FileText className="size-3 shrink-0" />
+                        <FileText className="size-3.5 shrink-0" />
                         <span className="truncate font-mono text-[11px]">{lastDocEntry.path.split('/').pop()}</span>
-                        <Columns2 className="size-3 shrink-0" />
+                        <Columns2 className="size-3.5 shrink-0" />
                     </button>
                 )}
                 <button
                     type="button"
+                    aria-label="Whiteboard"
+                    aria-pressed={isWhiteboard}
                     title={isWhiteboard ? `Close the board ${chord('4')}` : `Whiteboard — draw together, live ${chord('4')}`}
                     onClick={toggleWhiteboard}
-                    className={cn(
-                        'inline-flex h-6 items-center gap-1.5 rounded-md border px-2 text-xs',
-                        isWhiteboard
-                            ? 'border-primary/40 bg-primary/10 text-foreground'
-                            : 'border-border text-muted-foreground hover:bg-accent/50 hover:text-foreground',
-                    )}
+                    className="spaces-header-button"
                 >
-                    <PenTool className="size-3.5" />
-                    {/* Stable identity on purpose: always "Board", active state via the
-                        highlight — the board's NAME lives in the chip on the canvas. */}
-                    <span className="hidden lg:inline">Board</span>
+                    <PenTool className="size-4" />
                 </button>
-                <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="size-7 text-muted-foreground"><MoreHorizontal className="size-4" /></Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                        <DropdownMenuItem disabled={!member} onClick={markAllRead}>
-                            <Check className="size-3.5 mr-2" /> Mark all read
-                        </DropdownMenuItem>
-                        {LOCAL_RUNTIME && (
-                            <DropdownMenuItem disabled={!writable} onClick={() => setScheduledOpen(true)}>
-                                <Clock className="size-3.5 mr-2" /> Scheduled
-                            </DropdownMenuItem>
-                        )}
-                        {canAdminSpace && (archived ? (
-                            <DropdownMenuItem disabled={unarchiving} onClick={() => void unarchive()}>
-                                <ArchiveRestore className="size-3.5 mr-2" /> Unarchive space
-                            </DropdownMenuItem>
-                        ) : (
-                            <DropdownMenuItem onClick={() => setArchiveOpen(true)}>
-                                <Archive className="size-3.5 mr-2" /> Archive space
-                            </DropdownMenuItem>
-                        ))}
-                        {canAdminSpace && !archived && (
-                            <DropdownMenuItem onClick={() => setVisibilityOpen(true)}>
-                                {space.visibility === 'open'
-                                    ? <><Lock className="size-3.5 mr-2" /> Make private</>
-                                    : <><Hash className="size-3.5 mr-2" /> Make open</>}
-                            </DropdownMenuItem>
-                        )}
-                        {/* Default spaces (harbor, 2026-10-19): only an open space can be one,
-                            and an archived one can only stop being one. */}
-                        {canAdminSpace && (space.isDefault ? (
-                            <DropdownMenuItem onClick={() => void setDefaultSpace(org.id, space, false)}>
-                                <Star className="size-3.5 mr-2" /> Remove from default spaces
-                            </DropdownMenuItem>
-                        ) : space.visibility === 'open' && !archived ? (
-                            <DropdownMenuItem onClick={() => void setDefaultSpace(org.id, space, true)}>
-                                <Star className="size-3.5 mr-2" /> Make a default space
-                            </DropdownMenuItem>
-                        ) : null)}
-                        {canAdminSpace && (
-                            <DropdownMenuItem variant="destructive" onClick={() => setDeleteOpen(true)}>
-                                <Trash2 className="size-3.5 mr-2" /> Delete space
-                            </DropdownMenuItem>
-                        )}
-                    </DropdownMenuContent>
-                </DropdownMenu>
             </header>
 
             <div ref={paneRef} className="flex-1 min-h-0 flex">
                 <SpaceRail
                     onOpenBrowse={onOpenBrowse}
                     onOpenAgents={onOpenAgents}
-                    onOpenMessage={onOpenMessage}
-                    active={active}
                     onOpenActivity={onOpenActivity}
                     org={org}
                     onOpenSpace={(orgId, spaceId) => {
@@ -1213,9 +1190,6 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                     onTogglePin={toggleRailPin}
                 />
                 <div className="flex min-w-0 min-h-0 flex-1 flex-col">
-                    <SpaceContentTabs orgId={org.id} orgAddress={org.address} spaceId={space.id} direct={isDirect} topics={feed.topics}
-                        entries={entries} unreadAssetIds={unreadAssetIds} selection={selection} memberNames={memberNames}
-                        spaceNames={spaceNames} onSelect={select} topicsLoaded={feed.loaded} filesLoaded={filesLoaded} filesError={filesError} />
                     {selection.kind === 'discussions' && <SpaceDiscussionsView orgId={org.id} orgAddress={org.address} spaceId={space.id}
                         topics={feed.topics} direct={isDirect} loaded={feed.loaded} memberNames={memberNames} spaceNames={spaceNames}
                         presence={presence} onOpen={(rootMessageId) => select({ kind: 'thread', rootMessageId })} />}
@@ -1253,6 +1227,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                             presence={presence}
                             memberNames={memberNames}
                             onOpenThread={(id) => select({ kind: 'thread', rootMessageId: id })}
+                            openThreadId={chatRootId}
                             onOpenSession={onOpenSession}
                             onClose={split ? closeChat : undefined}
                             visible={active && !collectionOpen && showChat && (!chatRootId || threadBesideStream)}

@@ -62,6 +62,24 @@ describe('conversation message interactions', () => {
         expect(onOpenThread).toHaveBeenCalledWith(message.id)
     })
 
+    it('tints the reply line while its thread is open (spaces redesign 2026-10-21)', () => {
+        const thread = { rootMessageId: message.id, replyCount: 3, lastActivityAt: message.postedAt, archived: false, unreadCount: 0, workingAgents: [] }
+        const { rerender } = render(<MessageRow message={message} memberNames={memberNames} continuation={false} onOpenThread={vi.fn()} thread={thread} />)
+        const line = () => screen.getByRole('button', { name: /3 replies/ })
+        expect(line()).not.toHaveAttribute('data-open')
+        rerender(<MessageRow message={message} memberNames={memberNames} continuation={false} onOpenThread={vi.fn()} thread={thread} threadOpen />)
+        expect(line()).toHaveAttribute('data-open')
+    })
+
+    it('plays the arrival entrance once, then drops it', () => {
+        const { container } = render(<MessageRow message={message} memberNames={memberNames} continuation={false} arriving />)
+        const row = container.querySelector('[data-mid="message-1"]') as HTMLElement
+        expect(row).toHaveClass('spaces-message--arriving')
+        // jsdom has no AnimationEvent, so React listens on the prefixed name.
+        fireEvent(row, new Event('webkitAnimationEnd', { bubbles: true }))
+        expect(row).not.toHaveClass('spaces-message--arriving')
+    })
+
     it('keeps unconfirmed messages free of server actions', () => {
         const { container } = render(<MessageRow message={{ ...message, pending: true }} memberNames={memberNames} continuation={false} onReact={vi.fn()} onReplyInThread={vi.fn()} />)
         expect(screen.queryByTitle('Add reaction')).not.toBeInTheDocument()
