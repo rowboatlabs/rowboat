@@ -1,6 +1,8 @@
 import { SidebarChatContextMenu } from "./sidebar-chat-context-menu"
 "use client"
 
+import { Keys } from '@/components/keys'
+import { SHORTCUTS, type ShortcutKeys } from '@/lib/shortcuts'
 import { isGroupChat, readLastSpace, resolveSpacesLocation } from '@/lib/spaces-navigation'
 
 import * as React from "react"
@@ -101,6 +103,20 @@ import z from "zod"
 
 /** Rail width = horizontal space the content panes leave for it. */
 export const DOCK_GUTTER_PX = 48
+
+/** Each tile's chord, shown in its tooltip (2026-10-21). */
+const DOCK_SHORTCUTS: Record<string, ShortcutKeys | undefined> = {
+  assistant: SHORTCUTS.assistant,
+  email: SHORTCUTS.email,
+  meetings: SHORTCUTS.meetings,
+  home: SHORTCUTS.todo,
+  brain: SHORTCUTS.brain,
+  workspaces: SHORTCUTS.projects,
+  agents: SHORTCUTS.agents,
+  apps: SHORTCUTS.apps,
+  spaces: SHORTCUTS.spaces,
+  settings: SHORTCUTS.settings,
+}
 const RAIL_BUTTON_PX = 32
 const RAIL_ICON_PX = 18
 
@@ -596,7 +612,7 @@ export function DockSidebar({
     if (switcherOnly) closeFlyouts()
   }, [switcherOnly, closeFlyouts])
 
-  // 2026-10-21: when the panel comes back, the rail fades out over 160ms
+  // 2026-10-21: when the panel comes back, the rail fades out over 120ms
   // instead of vanishing in the frame the panel starts sliding in.
   const [railLeaving, setRailLeaving] = useState(false)
   const [lastSwitcherOnly, setLastSwitcherOnly] = useState(switcherOnly)
@@ -606,7 +622,7 @@ export function DockSidebar({
   }
   useEffect(() => {
     if (!railLeaving) return
-    const timer = setTimeout(() => setRailLeaving(false), 170)
+    const timer = setTimeout(() => setRailLeaving(false), 130)
     return () => clearTimeout(timer)
   }, [railLeaving])
 
@@ -939,8 +955,8 @@ export function DockSidebar({
   // ----- the item list -----
   const rows = useMemo<DockRow[]>(() => {
     const items: DockRow[] = [
-      // Same order as the panel (2026-10-21): Assistant, Spaces, the
-      // daily destinations, the work tools, then Chats.
+      // Same order as the panel (2026-10-21): Assistant, the daily
+      // destinations, the work tools, Spaces, then Chats and Settings.
       ...(onOpenRun || onNewChat ? [
         {
           item: {
@@ -956,30 +972,6 @@ export function DockSidebar({
           },
         },
       ] : []),
-      ...(SPACES_ENABLED && (!switcherOnly || totalSpaces > 0) ? [{ sep: true as const }, {
-        item: {
-          key: 'spaces', label: 'Spaces', icon: MessagesSquare, tourId: 'nav-spaces',
-          notification: spacesNotification.unread > 0
-            ? (spacesNotification.forYou > 0 ? 'alert' as const : 'muted' as const)
-            : undefined,
-          status: spacesNotification.unread > 0
-            ? `${spacesNotification.unread} unread${spacesNotification.forYou > 0 ? ` · ${spacesNotification.forYou} for you` : ''}`
-            : totalSpaces > 0 ? `${totalSpaces} space${totalSpaces === 1 ? '' : 's'}` : undefined,
-          running: activeNav === 'spaces' || spacesOpen,
-          onClick: () => {
-            if (!openLastSpace() && !switcherOnly) {
-              setChatsOpen(false)
-              setSpacesOpen(true)
-            }
-          },
-          switchTo: () => {
-            if (!openLastSpace() && !switcherOnly) {
-              setChatsOpen(false)
-              setSpacesOpen(true)
-            }
-          },
-        },
-      }, { sep: true as const }] : [{ sep: true as const }]),
       {
         item: {
           key: 'email', label: 'Email', icon: Mail, tourId: 'nav-email',
@@ -1015,7 +1007,6 @@ export function DockSidebar({
           onClick: () => { closeFlyouts(); knowledgeActions.openKnowledgeView() },
         },
       },
-      { sep: true },
       {
         item: {
           key: 'workspaces', label: 'Projects', icon: Folder, tourId: 'nav-workspaces',
@@ -1048,6 +1039,30 @@ export function DockSidebar({
           onClick: () => { closeFlyouts(); onOpenApp?.(folder) },
         },
       })),
+      ...(SPACES_ENABLED && (!switcherOnly || totalSpaces > 0) ? [{
+        item: {
+          key: 'spaces', label: 'Spaces', icon: MessagesSquare, tourId: 'nav-spaces',
+          notification: spacesNotification.unread > 0
+            ? (spacesNotification.forYou > 0 ? 'alert' as const : 'muted' as const)
+            : undefined,
+          status: spacesNotification.unread > 0
+            ? `${spacesNotification.unread} unread${spacesNotification.forYou > 0 ? ` · ${spacesNotification.forYou} for you` : ''}`
+            : totalSpaces > 0 ? `${totalSpaces} space${totalSpaces === 1 ? '' : 's'}` : undefined,
+          running: activeNav === 'spaces' || spacesOpen,
+          onClick: () => {
+            if (!openLastSpace() && !switcherOnly) {
+              setChatsOpen(false)
+              setSpacesOpen(true)
+            }
+          },
+          switchTo: () => {
+            if (!openLastSpace() && !switcherOnly) {
+              setChatsOpen(false)
+              setSpacesOpen(true)
+            }
+          },
+        },
+      }] : []),
       { sep: true },
       {
         item: {
@@ -1377,12 +1392,16 @@ export function DockSidebar({
           if (!row || row.sep) return null
           const item = row.item
           if ((item.key === 'chats' && chatsOpen) || (item.key === 'spaces' && spacesOpen)) return null
+          const tipKeys = DOCK_SHORTCUTS[item.key]
           return (
             <span
               className="rowboat-dock-tip"
               style={{ left: DOCK_GUTTER_PX + 8, top: hoverTip.centerY, padding: item.status ? '6px 12px' : '4px 10px' }}
             >
-              <span>{item.label}</span>
+              <span className="flex items-center gap-2">
+                {item.label}
+                {tipKeys && <Keys keys={tipKeys} tone="dark" />}
+              </span>
               {item.status && (
                 <span className={cn('rowboat-dock-tip-status', item.statusAlert && 'rowboat-dock-tip-status-alert')}>
                   {item.status}
