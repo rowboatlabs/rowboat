@@ -1,7 +1,7 @@
 import { OpenBrowserContext } from '@/contexts/browser-context';
 import { WorkspaceSessionTabs } from './components/code/workspace-session-tabs'
 import { DocumentFileViewer } from '@/components/document-file-viewer'
-import { parseSpacesLink, readLastSpace, resolveSpacesLocation, serverLandingSpaceId, type SpacesLinkTarget } from '@/lib/spaces-navigation'
+import { isOrgView, parseSpacesLink, readLastSpace, resolveSpacesLocation, serverLandingSpaceId, type OrgView, type SpacesLinkTarget } from '@/lib/spaces-navigation'
 import { openServerDialog } from '@/lib/server-dialog'
 import { resolveSpacesLink } from '@/lib/spaces-link-open'
 import { ServerDialogs } from '@/components/spaces/server-dialogs'
@@ -663,7 +663,7 @@ type ViewState =
       spaceId?: string
       rail?: RailSelection
       /** An org-level surface instead of a space: Activity (layer 3, 2026-09-10). */
-      view?: 'activity' | 'browse'
+      view?: OrgView
       /** Scroll to this message once the pane paints (a notification or Activity click). */
       messageId?: string
       /** Its offset, when the producer fetched the message — the pane can load around it without asking. */
@@ -767,7 +767,8 @@ function parseDeepLink(input: string): ViewState | null {
       // through openSpacesLink, which looks things up first.
       const orgId = params.get('orgId')
       const spaceId = params.get('spaceId')
-      if (orgId && (params.get('view') === 'activity' || params.get('view') === 'browse')) return { type: 'spaces', orgId, view: params.get('view') as 'activity' | 'browse' }
+      const view = params.get('view')
+      if (orgId && isOrgView(view)) return { type: 'spaces', orgId, view }
       if (!orgId || !spaceId) return { type: 'spaces' }
       const threadRootId = params.get('threadRootId')
       const messageId = params.get('messageId')
@@ -4867,7 +4868,7 @@ function App() {
       case 'apps': return 'Apps'
       case 'spaces': {
         const org = spacesOrgs.find((o) => o.id === currentViewState.orgId)
-        if (org && currentViewState.view) return currentViewState.view === 'browse' ? 'Browse spaces' : 'Activity'
+        if (org && currentViewState.view) return currentViewState.view === 'browse' ? 'Browse spaces' : currentViewState.view === 'agents' ? 'Agents' : 'Activity'
         const space = org ? findSpace(org, currentViewState.spaceId) : undefined
         return org && space ? spaceDisplayName(org, space) : 'Spaces'
       }
@@ -5519,6 +5520,11 @@ function App() {
 
   const openActivity = useCallback((orgId: string) => {
     void navigateToView({ type: 'spaces', orgId, view: 'activity' })
+  }, [navigateToView])
+
+  /** Every agent in the org (2026-10-21). */
+  const openAgents = useCallback((orgId: string) => {
+    void navigateToView({ type: 'spaces', orgId, view: 'agents' })
   }, [navigateToView])
 
   /**
@@ -7650,6 +7656,7 @@ function App() {
                     // space (or thread) and lands on the row.
                     onOpenMessage={(target) => void navigateToView({ type: 'spaces', ...target })}
                     onOpenBrowse={openBrowse}
+                    onOpenAgents={openAgents}
                     onOpenActivity={openActivity}
                     onOpenSession={openAssistantRun}
                   />

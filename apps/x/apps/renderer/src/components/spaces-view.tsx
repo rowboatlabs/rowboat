@@ -16,7 +16,8 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { AgentBadge, MemberAvatar, MemberProfilePopover, OrgMonogram } from '@/components/spaces/atoms'
 import { openServerDialog } from '@/lib/server-dialog'
-import { isGroupChat } from '@/lib/spaces-navigation'
+import { isGroupChat, type OrgView } from '@/lib/spaces-navigation'
+import { AgentsView } from '@/components/spaces/agents-view'
 import { BookmarksPopover } from '@/components/spaces/bookmarks'
 import { FileColumn, TrashDialog, UploadFilesDialog } from '@/components/spaces/files-tab'
 import { GeneralStream } from '@/components/spaces/general-stream'
@@ -75,8 +76,8 @@ export { OrgMonogram } from '@/components/spaces/atoms'
 export type SpaceSelection = {
     orgId: string
     spaceId: string
-    /** An org-level surface instead of a space (spaceId is '' then): Activity, layer 3. */
-    view?: 'activity' | 'browse'
+    /** An org-level surface instead of a space (spaceId is '' then): Activity, Browse, Agents. */
+    view?: OrgView
 } | null
 
 /** Chat never squeezes below this beside a doc; the doc takes the rest. */
@@ -126,7 +127,7 @@ const WhiteboardPane = lazy(() => import('@/components/spaces/whiteboard-pane'))
 // Root view: the selected space (the org/space list lives in the app sidebar)
 // ---------------------------------------------------------------------------
 
-export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, onRailSelect, onOpenSession, onOpenMessage, onOpenActivity, onOpenBrowse, active = true }: {
+export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, onRailSelect, onOpenSession, onOpenMessage, onOpenActivity, onOpenBrowse, onOpenAgents, active = true }: {
     selection: SpaceSelection
     onSelect: (selection: SpaceSelection) => void
     /** Navigate to the destination and its rail together, without using the current space's selection. */
@@ -139,6 +140,8 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
     onOpenMessage?: (target: ActivityTarget) => void
     /** The org's Activity surface. */
     onOpenBrowse?: (orgId: string) => void
+    /** Every agent in the org (2026-10-21). */
+    onOpenAgents?: (orgId: string) => void
     onOpenActivity?: (orgId: string) => void
     /**
      * False while the view is kept mounted but hidden (the app shows another
@@ -228,6 +231,7 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
                 onOpenSession={onOpenSession}
                 onOpenActivity={onOpenActivity}
                 onOpenBrowse={onOpenBrowse}
+                onOpenAgents={onOpenAgents}
                 onOpenMessage={onOpenMessage}
                 active={active}
             />
@@ -238,7 +242,7 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
     if (selectedOrg) {
         return <div className="spaces-surface flex min-h-0 flex-1 flex-col">
             <header className="spaces-header flex shrink-0 items-center gap-2 border-b border-border">
-                <ServerSwitcher org={selectedOrg} onOpenSpace={onSwitchSpace} />
+                <ServerSwitcher org={selectedOrg} onOpenSpace={onSwitchSpace} {...(onOpenAgents ? { onOpenAgents } : {})} />
             </header>
             <div className="flex min-h-0 flex-1">
             <aside className="w-64 shrink-0 border-r border-border bg-[var(--rowboat-panel-soft)]">
@@ -248,7 +252,7 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
                     <span className="flex-1 px-1 text-[13px] font-semibold text-muted-foreground">Spaces</span>
                 </div>
                 <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-                    <ServerSpaceNavigation org={selectedOrg} spaceId="" onOpenSpace={onSwitchSpace} onOpenBrowse={onOpenBrowse} browseActive={selection?.view === 'browse'} showDiscussions={false} />
+                    <ServerSpaceNavigation org={selectedOrg} spaceId="" onOpenSpace={onSwitchSpace} onOpenBrowse={onOpenBrowse} browseActive={selection?.view === 'browse'} onOpenAgents={onOpenAgents} agentsActive={selection?.view === 'agents'} showDiscussions={false} />
                 </div>
                 </SpaceRailSections>
             </aside>
@@ -260,6 +264,8 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
                     {directory.error && <Button variant="outline" onClick={() => void loadSpaceDirectory(selectedOrg.id)}>Retry</Button>}
                     <Button variant="outline" onClick={() => onOpenBrowse?.(selectedOrg.id)}>Browse spaces</Button>
                 </div>
+            ) : selection?.view === 'agents' ? (
+                <AgentsView key={selectedOrg.id} org={selectedOrg} />
             ) : selection?.view === 'activity' && onOpenMessage ? (
                 <ActivityView org={selectedOrg} active={active} onOpenMessage={onOpenMessage} />
             ) : (
@@ -318,7 +324,7 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
 // One space: header across the top, then the space rail | the selected thing
 // ---------------------------------------------------------------------------
 
-function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSession, onOpenActivity, onOpenMessage, onOpenBrowse, active = true }: {
+function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSession, onOpenActivity, onOpenMessage, onOpenBrowse, onOpenAgents, active = true }: {
     org: OrgWithSpaces
     space: spaces.Space
     selection: RailSelection
@@ -326,6 +332,8 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     /** The quick switcher can land on another space entirely. */
     onSwitchSpace: (orgId: string, spaceId: string, selection?: RailSelection) => void
     onOpenBrowse?: (orgId: string) => void
+    /** Every agent in the org (2026-10-21). */
+    onOpenAgents?: (orgId: string) => void
     onOpenActivity?: (orgId: string) => void
     onOpenMessage?: (target: ActivityTarget) => void
     onOpenSession?: (sessionId: string) => void
@@ -973,7 +981,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
             {/* One per pane — covers the stream and thread panes alike. */}
             {active && <SelectionCopy />}
             <header className="spaces-header flex shrink-0 items-center gap-2 border-b border-border">
-                <ServerSwitcher org={org} onOpenSpace={onSwitchSpace} />
+                <ServerSwitcher org={org} onOpenSpace={onSwitchSpace} {...(onOpenAgents ? { onOpenAgents } : {})} />
                 {/* A group chat's name is the server's: no "/ #name" after it, just who is in it. */}
                 {!(groupChat && !isDirect) && <span aria-hidden="true" className="shrink-0 text-muted-foreground/50">/</span>}
                 {/* Click to keep the identity card and its copy actions open. */}
@@ -1220,6 +1228,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
             <div ref={paneRef} className="flex-1 min-h-0 flex">
                 <SpaceRail
                     onOpenBrowse={onOpenBrowse}
+                    onOpenAgents={onOpenAgents}
                     onOpenMessage={onOpenMessage}
                     active={active}
                     onOpenActivity={onOpenActivity}

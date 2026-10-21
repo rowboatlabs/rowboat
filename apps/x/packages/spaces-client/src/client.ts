@@ -430,6 +430,11 @@ export class SpacesClient {
     return (await this.request('POST', `/v1/agents/${encodeURIComponent(agentId)}/keys`, routes.createAgentKey.response)).key;
   }
 
+  /** Rename an agent this member owns (api.ts renameAgent, 2026-10-21). */
+  async renameAgent(agentId: string, displayName: string): Promise<Member> {
+    return (await this.request('PUT', `/v1/agents/${encodeURIComponent(agentId)}/name`, routes.renameAgent.response, { displayName })).agent;
+  }
+
   async revokeAgentKey(agentId: string, keyId: string): Promise<AgentKey> {
     return (
       await this.request('POST', `/v1/agents/${encodeURIComponent(agentId)}/keys/${encodeURIComponent(keyId)}/revoke`, routes.revokeAgentKey.response)
