@@ -2,7 +2,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from '@/components/ui/button'
 import { useSpaceDirectory, invalidateSpaceDirectory } from '@/hooks/use-space-directory'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Archive, Bell, ChevronRight, CornerDownRight, Hash, Lock, MessagesSquare, Pencil, Plus, UserPlus } from 'lucide-react'
+import { Archive, Bell, Bot, ChevronRight, CornerDownRight, Hash, Lock, MessagesSquare, Pencil, Plus, UserPlus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { SidebarGroup, SidebarGroupContent, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar'
 import {
@@ -97,7 +97,7 @@ export function SpacesSidebarSection({ active, activeSpace, onOpenSpace }: {
     </SidebarGroup>
 }
 
-function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onOpenBrowse, browseActive = false, activityActive = false, onChanged, renderDiscussions, showArchived = false, activeDiscussionCount }: {
+function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onOpenBrowse, browseActive = false, onOpenAgents, agentsActive = false, activityActive = false, onChanged, renderDiscussions, showArchived = false, activeDiscussionCount }: {
     org: OrgWithSpaces
     activeSpace: SpaceSelection
     unread: Map<string, SpaceBadge>
@@ -108,6 +108,9 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onOpen
     /** The org's Activity surface (layer 3); absent = no row. */
     onOpenBrowse?: (orgId: string) => void
     browseActive?: boolean
+    /** Every agent in the org (2026-10-21); absent = no row. */
+    onOpenAgents?: (orgId: string) => void
+    agentsActive?: boolean
     onOpenActivity?: (orgId: string) => void
     activityActive?: boolean
     onChanged: () => void
@@ -259,7 +262,8 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onOpen
                                     prefetchStream(org.id, space.id)
                                     prefetchMembers(org.id, space.id)
                                 }}
-                                className="min-w-0 flex-1 pl-1"
+                                // The row behind it carries the hover and the selection (CollapsibleSpace).
+                                className="min-w-0 flex-1 pl-1 hover:bg-transparent active:bg-transparent data-[active=true]:bg-transparent"
                             >
                                 {/* A space is a channel — # says so. */}
                                 {space.visibility === 'open' ? <Hash className="size-3.5 shrink-0 text-muted-foreground" /> : <Lock aria-label="Private space" className="size-3.5 shrink-0 text-muted-foreground" />}
@@ -287,6 +291,15 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onOpen
     return (
         <>
             {onOpenBrowse && <SidebarMenuItem><SidebarMenuButton isActive={browseActive} onClick={() => onOpenBrowse(org.id)} className="pl-6">Browse spaces</SidebarMenuButton></SidebarMenuItem>}
+            {onOpenAgents && (
+                <SidebarMenuItem>
+                    {/* 26px in: the space rows' arrow gutter plus their padding, so the icons line up. */}
+                    <SidebarMenuButton isActive={agentsActive} onClick={() => onOpenAgents(org.id)} className="pl-6.5">
+                        <Bot className="size-3.5 shrink-0 text-muted-foreground" />
+                        <span className="flex-1 truncate">Agents</span>
+                    </SidebarMenuButton>
+                </SidebarMenuItem>
+            )}
             {onOpenActivity && (
                 <SidebarMenuItem>
                     <SidebarMenuButton isActive={activityActive} onClick={() => onOpenActivity(org.id)} className="pl-6">
@@ -425,12 +438,15 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onOpen
 }
 
 /** Space and DM destinations; nested discussions are optional for legacy consumers. */
-export function ServerSpaceNavigation({ org, spaceId, onOpenSpace, onOpenActivity, onOpenBrowse, browseActive = false, activityActive = false, onOpenDiscussion, renderActiveDiscussions, activeDiscussionCount = 0, showArchived = false, showDiscussions = true }: {
+export function ServerSpaceNavigation({ org, spaceId, onOpenSpace, onOpenActivity, onOpenBrowse, browseActive = false, onOpenAgents, agentsActive = false, activityActive = false, onOpenDiscussion, renderActiveDiscussions, activeDiscussionCount = 0, showArchived = false, showDiscussions = true }: {
     org: OrgWithSpaces
     spaceId: string
     onOpenSpace: (orgId: string, spaceId: string) => void
     onOpenBrowse?: (orgId: string) => void
     browseActive?: boolean
+    /** Every agent in the org (2026-10-21); absent = no row. */
+    onOpenAgents?: (orgId: string) => void
+    agentsActive?: boolean
     onOpenActivity?: (orgId: string) => void
     activityActive?: boolean
     onOpenDiscussion?: (spaceId: string, selection: RailSelection) => void
@@ -441,9 +457,10 @@ export function ServerSpaceNavigation({ org, spaceId, onOpenSpace, onOpenActivit
 }) {
     const { refresh } = useSpacesOrgs()
     const unread = useSpacesUnreadCounts()
-    return <SidebarMenu>
+    // A hair between rows, so a hovered row's highlight never touches the selected one's.
+    return <SidebarMenu className="gap-0.5">
         <OrgRows org={org} activeSpace={{ orgId: org.id, spaceId }} unread={unread} showArchived={showArchived} activeDiscussionCount={activeDiscussionCount}
-            onOpenSpace={onOpenSpace} onOpenActivity={onOpenActivity} onOpenBrowse={onOpenBrowse} browseActive={browseActive} activityActive={activityActive} onChanged={() => void refresh()}
+            onOpenSpace={onOpenSpace} onOpenActivity={onOpenActivity} onOpenBrowse={onOpenBrowse} browseActive={browseActive} onOpenAgents={onOpenAgents} agentsActive={agentsActive} activityActive={activityActive} onChanged={() => void refresh()}
             renderDiscussions={showDiscussions && renderActiveDiscussions ? (id) => <SpaceDiscussions orgId={org.id} spaceId={id}
                 active={id === spaceId} activeCount={activeDiscussionCount} showArchived={showArchived} renderActive={renderActiveDiscussions}
                 onSelect={(selection) => onOpenDiscussion?.(id, selection)} /> : undefined} />
@@ -498,8 +515,10 @@ function CollapsibleSpace({ orgId, spaceId, name, showArchived, countOverride, d
     useSpaceExpansionVersion()
     const expanded = enabled && isSpaceExpanded(orgId, spaceId)
     const count = !enabled ? 0 : countOverride ?? feed.topics.filter((topic) => showArchived || !topic.archived).length
+    // The highlight spans the whole row, arrow gutter included (2026-10-21), so it
+    // lines up with the full-width rows above (Browse spaces, Agents).
     return <SidebarMenuItem>
-        <div className="flex items-center">
+        <div className="flex items-center rounded-md hover:bg-sidebar-accent has-[[data-active=true]]:bg-sidebar-accent">
             {count > 0 ? <button type="button" aria-label={`${expanded ? 'Collapse' : 'Expand'} #${name}`} aria-expanded={expanded}
                 className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent"
                 onClick={() => setSpaceExpanded(orgId, spaceId, !expanded)}>

@@ -4032,6 +4032,11 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), agentId: z.string(), keyId: z.string() }),
     res: z.object({ key: z.custom<SpacesTypes.AgentKey>() }),
   },
+  // Renaming an agent (2026-10-21, harbor renameAgent): its owner only.
+  'spaces:renameAgent': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), displayName: z.string() }),
+    res: z.object({ agent: z.custom<SpacesTypes.Member>() }),
+  },
   // Add existing org members, people or agents, to a space the caller is in
   // (2026-09-29). They learn of it by the space_added frame.
   'spaces:addMembers': {

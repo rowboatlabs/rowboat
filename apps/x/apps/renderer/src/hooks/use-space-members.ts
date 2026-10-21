@@ -208,6 +208,28 @@ export function useOrgRoster(orgId: string, spaceIds: readonly string[]): spaces
 }
 
 /**
+ * The rosters of several spaces of one org at once (the Agents page asks which
+ * of your spaces each agent is in, 2026-10-21). Same store and cache-then-
+ * refresh contract as useSpaceMembers; spaces not loaded yet map to [].
+ */
+export function useSpaceRosters(orgId: string, spaceIds: readonly string[]): ReadonlyMap<string, spaces.Member[]> {
+    const idsKey = spaceIds.join('|')
+    for (const id of spaceIds) hydrateMembers(key(orgId, id))
+    const state = useSyncExternalStore(subscribeMembers, () => memberState)
+    useEffect(() => {
+        for (const id of spaceIds) prefetchMembers(orgId, id)
+        // The joined key IS the dependency — the array identity changes every render.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [orgId, idsKey])
+    return useMemo(() => {
+        const out = new Map<string, spaces.Member[]>()
+        for (const id of spaceIds) out.set(id, state.get(key(orgId, id)) ?? EMPTY_MEMBERS)
+        return out
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [state, orgId, idsKey])
+}
+
+/**
  * The org roster for EVERY org at once (the assistant composer's @ menu lists
  * people across orgs). Same store, same cache-then-refresh contract as
  * useOrgRoster; one hook call for a variable number of orgs. Keyed on the

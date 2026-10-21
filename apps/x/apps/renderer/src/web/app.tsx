@@ -11,7 +11,7 @@ import type { ActivityTarget } from '@/lib/spaces-activity'
 import { openServerDialog } from '@/lib/server-dialog'
 import { requestJump } from '@/lib/spaces-jump'
 import { resolveSpacesLink, type SpacesPlace } from '@/lib/spaces-link-open'
-import { serverLandingSpaceId } from '@/lib/spaces-navigation'
+import { serverLandingSpaceId, type OrgView } from '@/lib/spaces-navigation'
 import { railForOpening, rememberRail } from '@/lib/spaces-rail-memory'
 import { readRailSelection, type RailSelection } from '@/lib/spaces-selection'
 import { noteSpaceVisit } from '@/lib/spaces-visits'
@@ -76,7 +76,7 @@ export function WebApp({ signInError }: { signInError: string | null }) {
         : null
     const rail = route.rail.kind === 'general' && location.rail?.kind === 'attachment' ? location.rail : route.rail
 
-    const go = useCallback((orgId: string, target: { spaceId?: string; view?: 'activity' | 'browse'; rail?: RailSelection }, replace = false) => {
+    const go = useCallback((orgId: string, target: { spaceId?: string; view?: OrgView; rail?: RailSelection }, replace = false) => {
         const found = getSpacesOrgs().find((o) => o.id === orgId)
         if (!found) return
         const path = routePath(orgKey(found), target)
@@ -178,6 +178,7 @@ export function WebApp({ signInError }: { signInError: string | null }) {
                                 onOpenMessage={onOpenMessage}
                                 onOpenActivity={(id) => go(id, { view: 'activity' })}
                                 onOpenBrowse={(id) => go(id, { view: 'browse' })}
+                                onOpenAgents={(id) => go(id, { view: 'agents' })}
                             />
                         </div>
                     </>
