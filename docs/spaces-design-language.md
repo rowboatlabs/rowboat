@@ -57,6 +57,10 @@ A separate global app rail, huddles, workspace theming controls, a new cross-spa
 
 The root message exposes reply counts and last-reply time, but the stream's summary does not provide a reliable roster of replying members. Participant avatars are therefore not fabricated or inferred from working agents. They can be added when the summary carries real participant data.
 
+## People and integrations
+
+As of 2026-10-19, the space header's member directory separates **People** from **Bots & AI integrations** in two tabs with independent counts. People is the default and contains only human accounts; all agent accounts, including service bots, appear in Bots & AI integrations. Within each tab, members who are here sort first, followed by alphabetical name order. Profile actions, provider badges, and membership controls retain their existing behavior. A person's agent posting on their behalf does not move that human account into the integrations tab.
+
 ## Geometry and typography
 
 | Element | Spaces specification | Reason |
