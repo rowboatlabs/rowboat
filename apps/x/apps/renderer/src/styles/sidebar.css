@@ -16,6 +16,21 @@
   --sb-dur: 300ms;
 }
 
+/* The sidebar floats as a rounded panel (2026-10-21): below the 40px
+   titlebar band (where the traffic lights and toolbar line up with the
+   content's header), 8px in from the left and bottom, 12px corners, a hairline
+   ring and a soft shadow — one object beside the content, not a strip of the
+   window. */
+.rowboat-sidebar[data-slot="sidebar-container"] { padding-top: 40px; }
+.rowboat-sidebar [data-slot="sidebar-inner"] {
+  border: none;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--sidebar-foreground) 8%, transparent),
+    0 4px 16px rgb(0 0 0 / .08);
+}
+
 /* The panel's contents fade out early and drift 8px as it clips away; on
    the way back they fade in over the opening. */
 [data-slot="sidebar-inner"] {

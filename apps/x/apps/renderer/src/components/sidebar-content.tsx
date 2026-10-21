@@ -43,7 +43,6 @@ import {
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
-  SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
@@ -903,13 +902,9 @@ export function SidebarContentPanel({
   const openUpgrade = () => { if (appUrl) window.open(`${appUrl}?intent=upgrade`) }
 
   return (
-    <Sidebar className="rowboat-sidebar border-r-0" {...props}>
-      <SidebarHeader className="titlebar-drag-region gap-0 pb-0">
-        {/* Clears the traffic lights and the fixed sidebar toggle. */}
-        <div className="h-8" />
-      </SidebarHeader>
+    <Sidebar variant="floating" className="rowboat-sidebar border-r-0" {...props}>
       <SidebarContent ref={contentRef} className="gap-0 pb-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <SidebarGroup className="pb-0 pt-1">
+        <SidebarGroup className="pb-0 pt-2">
           <SidebarMenu>
             {/* New chat and Search share one row (2026-10-21): the wide button
                 is the primary action, search a square beside it. */}

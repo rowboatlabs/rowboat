@@ -19,6 +19,7 @@ import { cn, compactPath, parentPath } from '@/lib/utils';
 import { SPACES_ENABLED } from '@/lib/feature-flags';
 import { SHORTCUTS, isRichTextTarget } from '@/lib/shortcuts';
 import { Keys } from '@/components/keys';
+import { useFullScreen } from '@/hooks/use-full-screen';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
 import { AssistantWorkspace } from './components/assistant/assistant-workspace';
 import { ASSISTANT_LAYOUT_KEY, chatLocation, defaultWindowSize, restoreAssistantLayout, useAssistantLayout, type ChatLocation } from './lib/assistant-layout';
@@ -811,8 +812,11 @@ function FixedSidebarToggle({
     return () => observer.disconnect()
   }, [onWidthChange])
   return (
-    <div ref={rootRef} className="fixed left-0 top-0 z-50 flex h-10 items-center gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-      <div aria-hidden="true" className="h-10 shrink-0" style={{ width: leftInsetPx }} />
+    // 38px tall, not 40: centred at 19px, the height of the traffic lights'
+    // centre (trafficLightPosition y 12 + half of their 14px), so the toggle
+    // sits level with them (2026-10-21).
+    <div ref={rootRef} className="fixed left-0 top-0 z-50 flex h-[38px] items-center gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+      <div aria-hidden="true" className="h-full shrink-0" style={{ width: leftInsetPx, transition: 'width 200ms ease' }} />
       <Tooltip delayDuration={400}>
         <TooltipTrigger asChild>
           <button
@@ -1079,6 +1083,7 @@ function App() {
       return true
     }
   })
+  const fullScreen = useFullScreen()
   const handleSidebarOpenChange = useCallback((open: boolean) => {
     setSidebarOpen(open)
     try {
@@ -8177,10 +8182,21 @@ function App() {
                 style={{ width: DOCK_GUTTER_PX }}
               />
             )}
+            {/* Expanded, the floating panel starts below the titlebar band
+                (2026-10-21); this keeps that band over it draggable. */}
+            {sidebarOpen && (
+              <div
+                aria-hidden="true"
+                className="titlebar-drag-region fixed left-0 top-0 z-20 h-10"
+                style={{ width: 'var(--sidebar-width)' }}
+              />
+            )}
             {/* Sidebar toggle — always present (both directions), rendered
                 last so its no-drag region paints over the drag regions. */}
             <FixedSidebarToggle
-              leftInsetPx={isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0}
+              // Full screen hides the traffic lights, so the toggle takes
+              // their place, in line with the sidebar's icons (2026-10-21).
+              leftInsetPx={isMac && !fullScreen ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 8}
               onNewChat={handleNewChatTab}
               onWidthChange={setTitlebarControlsWidthPx}
             />
