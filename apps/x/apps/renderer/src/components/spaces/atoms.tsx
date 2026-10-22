@@ -12,6 +12,7 @@ import { memberUrl, mentionToken } from '@x/shared/dist/spaces.js'
 import { avatarColorClass, initials, orgMonogram } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
 import { copySpacesLink } from '@/lib/spaces-copy-link'
+import { MemberAdminActions } from '@/components/spaces/member-admin'
 
 // Shared atoms for the Spaces surfaces: identity visuals, the segmented
 // control, and the @rowboat trigger. The server dialogs live in server-dialogs.tsx.
@@ -212,6 +213,7 @@ export function MemberProfilePopover({ id, children }: { id: string; children: R
                         <span className="truncate font-mono">{id}</span>
                     </button>
                 </div>
+                <MemberAdminActions member={member} onAct={() => setOpen(false)} />
             </PopoverContent>
         </Popover>
     )

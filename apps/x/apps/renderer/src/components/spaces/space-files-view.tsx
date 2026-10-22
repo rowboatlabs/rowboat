@@ -4,6 +4,8 @@ import { FileText, FolderPlus, MoreHorizontal, PenTool, Plus, Trash2, Upload } f
 import { spaces } from '@x/shared'
 import { FileListContextMenu } from '@/components/file-list-context-menu'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Button } from '@/components/ui/button'
+import { SpacesPage } from '@/components/spaces/page-shell'
 import { FileTree } from '@/components/spaces/files-tab'
 import type { RailSelection } from '@/lib/spaces-selection'
 
@@ -26,7 +28,7 @@ export function SpaceFilesView({ orgId, orgAddress, spaceId, entries, draftFolde
     onAddFolder: (path: string) => void
     onRemoveFolder: (path: string) => void
 }) {
-    const { member } = useSpaceAccess()
+    const { writable } = useSpaceAccess()
     const [creatingFile, setCreatingFile] = useState<{ prefix: string } | null>(null)
     const [creatingFolder, setCreatingFolder] = useState(false)
     const [creatingBoard, setCreatingBoard] = useState(false)
@@ -48,27 +50,36 @@ export function SpaceFilesView({ orgId, orgAddress, spaceId, entries, draftFolde
             if (files.length > 0) onUploadFiles(files)
             e.target.value = ''
         }} />
-            <section
-                className="spaces-files-view group/section flex min-h-0 flex-1 flex-col" aria-label="All files"
+            <div
+                className="spaces-files-view flex min-h-0 min-w-0 flex-1 flex-col"
                 onDragOver={(e) => { if (Array.from(e.dataTransfer.types).includes('Files')) e.preventDefault() }}
                 onDrop={(e) => {
-                    if (!member || !Array.from(e.dataTransfer.types).includes('Files')) return
+                    if (!writable || !Array.from(e.dataTransfer.types).includes('Files')) return
                     e.preventDefault()
                     const files = Array.from(e.dataTransfer.files)
                     if (files.length > 0) onUploadFiles(files)
                 }}
             >
-                <div className="spaces-pane-header flex shrink-0 items-center gap-2 border-b border-border"><h2 className="flex-1 text-[13px] font-semibold">All files <span className="ml-1 font-normal text-muted-foreground">{liveFiles}</span></h2>
+            <SpacesPage label="All files" title="Files" count={liveFiles}
+                subtitle="Docs, boards and uploads everyone in this space can open. Drop files anywhere here to upload."
+                actions={<>
                     <DropdownMenu>
-                        <DropdownMenuTrigger asChild disabled={!member}>
-                            <button
-                                type="button"
-                                aria-label="Add to files"
-                                title="New file, folder, board, or upload"
-                                className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-                            >
-                                <Plus className="size-3.5" />
-                            </button>
+                        <DropdownMenuTrigger asChild disabled={!writable}>
+                            <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label="Files options">
+                                <MoreHorizontal className="size-4" />
+                            </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={onOpenTrash}>
+                                <Trash2 className="size-3.5 mr-2" /> Trash
+                            </DropdownMenuItem>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild disabled={!writable}>
+                            <Button size="sm" aria-label="Add to files" title="New file, folder, board, or upload">
+                                <Plus className="size-4" /> New
+                            </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                             <DropdownMenuItem onClick={() => uploadInputRef.current?.click()}>
@@ -85,30 +96,14 @@ export function SpaceFilesView({ orgId, orgAddress, spaceId, entries, draftFolde
                             </DropdownMenuItem>
                         </DropdownMenuContent>
                     </DropdownMenu>
-                    <DropdownMenu>
-                        <DropdownMenuTrigger asChild disabled={!member}>
-                            <button
-                                type="button"
-                                aria-label="Files options"
-                                className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-                            >
-                                <MoreHorizontal className="size-3.5" />
-                            </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={onOpenTrash}>
-                                <Trash2 className="size-3.5 mr-2" /> Trash
-                            </DropdownMenuItem>
-                        </DropdownMenuContent>
-                    </DropdownMenu>
-                </div>
-                    <FileListContextMenu actions={member ? [
+                </>}>
+                    <FileListContextMenu actions={writable ? [
                         { label: 'New file', onSelect: () => { setCreatingBoard(false); setCreatingFile({ prefix: '' }) } },
                         { label: 'New folder', onSelect: () => { setCreatingBoard(false); setCreatingFolder(true) } },
                         { label: 'New board', onSelect: () => { setCreatingFile(null); setCreatingFolder(false); setCreatingBoard(true) } },
                         { label: 'Upload files…', onSelect: () => uploadInputRef.current?.click() },
                     ] : []}>
-                    <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3">
+                    <div className="-mx-1">
                         <FileTree
                             orgId={orgId}
                             orgAddress={orgAddress}
@@ -124,22 +119,22 @@ export function SpaceFilesView({ orgId, orgAddress, spaceId, entries, draftFolde
                                 onCreateFile(path)
                             }}
                             onCancelCreate={() => setCreatingFile(null)}
-                            onStartCreate={member ? (prefix) => setCreatingFile({ prefix }) : undefined}
+                            onStartCreate={writable ? (prefix) => setCreatingFile({ prefix }) : undefined}
                             creatingFolder={creatingFolder}
                             onCreateFolder={(path) => {
                                 setCreatingFolder(false)
                                 onAddFolder(path)
                             }}
                             onCancelCreateFolder={() => setCreatingFolder(false)}
-                            onRemoveFolder={member ? onRemoveFolder : undefined}
+                            onRemoveFolder={writable ? onRemoveFolder : undefined}
                         />
                         {creatingBoard && (
                             <div className="flex items-center gap-1.5 px-1 pt-1">
-                                <PenTool className="size-3 shrink-0 text-muted-foreground" />
+                                <PenTool className="size-4 shrink-0 text-muted-foreground" />
                                 <input
                                     autoFocus
                                     placeholder="Board name…"
-                                    className="h-7 min-w-0 flex-1 rounded-md border border-transparent bg-[var(--rowboat-wash)] px-2 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-border"
+                                    className="h-9 min-w-0 flex-1 rounded-md border border-transparent bg-[var(--rowboat-wash)] px-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-border"
                                     onKeyDown={(e) => {
                                         if (e.key === 'Enter') createBoard(e.currentTarget.value)
                                         else if (e.key === 'Escape') setCreatingBoard(false)
@@ -150,6 +145,7 @@ export function SpaceFilesView({ orgId, orgAddress, spaceId, entries, draftFolde
                         )}
                     </div>
                     </FileListContextMenu>
-            </section>
+            </SpacesPage>
+            </div>
     </>
 }

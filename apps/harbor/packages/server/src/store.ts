@@ -12,7 +12,10 @@ import type {
   InvocationState,
   BlobInfo,
   ChangeSet,
+  InvitePolicy,
   Member,
+  MemberRole,
+  OrgSettings,
   Membership,
   MentionStamps,
   Message,
@@ -98,7 +101,8 @@ export interface StoredOrgImage {
 
 export interface StoredInvite {
   token: string;
-  spaceId: string;
+  /** The spaces it lists, in the order given; empty = the org and its default spaces only (2026-10-19). */
+  spaceIds: string[];
   createdBy: string;
   createdAt: string;
   expiresAt?: string;
@@ -242,6 +246,35 @@ export interface Store {
   // ceremony (and seeding); the oidc auth driver reads, never creates.
   getMemberByIdentity(iss: string, sub: string): Promise<Member | undefined>;
   putIdentity(iss: string, sub: string, memberId: string): Promise<void>;
+  /**
+   * Account deletion (2026-10-08, revised 2026-10-13): the person behind a
+   * member leaves for good. Stamps deactivated_at and drops the avatar — the
+   * name stays, so attribution reads — deletes their push tokens, and
+   * revokes the keys of agents they own. The identity row stays: it is what
+   * refuses the next sign-in (policy.ts canSignIn). Idempotent.
+   */
+  deactivateMember(memberId: string, at: string): Promise<void>;
+  /**
+   * An admin removes a member from the org (spec §4 Roles, 2026-10-19): the
+   * row stays, stamped removed_at, and an admin's role drops to member so a
+   * removed admin never counts toward, or comes back as, an admin. Push
+   * tokens go; keys of the member (an agent) and of agents they own are
+   * revoked. The identity row stays: it is how an invite finds the same row
+   * again (reactivateMember). Idempotent.
+   */
+  removeMemberFromOrg(memberId: string, at: string): Promise<void>;
+  /** Clear removed_at: the same identity accepted an invite (2026-10-19). */
+  reactivateMember(memberId: string): Promise<void>;
+  /**
+   * Set the admin bit. Demoting the org's last active admin answers
+   * 'last_admin' and writes nothing, decided under a row lock so two admins
+   * demoting each other cannot both pass (spec §4 Roles: at least one admin).
+   */
+  setMemberRole(memberId: string, role: MemberRole): Promise<'ok' | 'last_admin'>;
+
+  // org settings (2026-10-19): one row per org once an admin sets one; no row = the defaults.
+  getOrgSettings(): Promise<OrgSettings>;
+  setInvitePolicy(policy: InvitePolicy, by: string, at: string): Promise<void>;
 
   // spaces — `kind` (migration 014) rides the row; a direct space also
   // stores its direct key, and putSpace MUST refuse a second direct space
@@ -253,6 +286,8 @@ export interface Store {
   listSpacesFor(memberId: string, opts?: { includeDirect?: boolean }): Promise<Space[]>;
   /** Every space on the org, DMs included — operator-side reads only (the mentions backfill). */
   listAllSpaces(): Promise<Space[]>;
+  /** The org's default spaces (spec §5 answer 3), oldest first — archived ones included; the caller skips them. */
+  listDefaultSpaces(): Promise<Space[]>;
   /** How many spaces of each kind the org holds — what makes it a group chat (policy.ts isGroupChat). */
   countSpacesByKind(): Promise<{ shared: number; direct: number }>;
   /** The DM whose participants encode to `directKey` (directKeyFor), if it exists. */
@@ -262,6 +297,8 @@ export interface Store {
   getMembership(spaceId: string, memberId: string): Promise<Membership | undefined>;
   listMemberships(spaceId: string): Promise<Membership[]>;
   putMembership(membership: Membership): Promise<void>;
+  /** Delete the space row; every space-keyed table cascades from it (migration 039). */
+  deleteSpace(spaceId: string): Promise<void>;
   deleteMembership(spaceId: string, memberId: string): Promise<void>;
 
   // push (push.ts): per-device Expo tokens, per-member notify level.
@@ -294,6 +331,10 @@ export interface Store {
   /** First write wins — re-uploading the same bytes never changes the recorded mime/uploader. */
   putSpaceBlob(blob: StoredSpaceBlob): Promise<void>;
   getSpaceBlob(spaceId: string, hash: string): Promise<StoredSpaceBlob | undefined>;
+  /** Every hash a space has registered — read before the space is deleted, while the rows exist. */
+  listSpaceBlobHashes(spaceId: string): Promise<string[]>;
+  /** Of `hashes`, the ones no space of this org and no profile image or logo still uses: bytes safe to delete. */
+  unreferencedBlobs(hashes: string[]): Promise<string[]>;
 
   // profile images (org-scoped registry; bytes live in the BlobStore)
   /** First write wins, as putSpaceBlob. */

@@ -34,7 +34,7 @@ const RUNNING: readonly spaces.InvocationState[] = ['working', 'waiting']
 
 export function InvocationLines({ messageId }: { messageId: string }) {
     const { byMessage, orgId, selfId, isAdmin } = useContext(InvocationsContext)
-    const { member } = useSpaceAccess()
+    const { writable } = useSpaceAccess()
     const names = useMemberNames()
     const list = (byMessage.get(messageId) ?? []).filter((i) => i.state !== 'done')
     const running = list.filter((i) => RUNNING.includes(i.state)).map((i) => i.agentId)
@@ -60,8 +60,8 @@ export function InvocationLines({ messageId }: { messageId: string }) {
             {list.map((invocation) => {
                 const name = names.get(invocation.agentId) ?? 'The agent'
                 const mine = invocation.trigger.authorId === selfId
-                const canCancel = member && mine && (invocation.state === 'queued' || invocation.state === 'pending')
-                const canStop = member && RUNNING.includes(invocation.state) && (mine || isAdmin) && caps.get(invocation.agentId)?.stop === true
+                const canCancel = writable && mine && (invocation.state === 'queued' || invocation.state === 'pending')
+                const canStop = writable && RUNNING.includes(invocation.state) && (mine || isAdmin) && caps.get(invocation.agentId)?.stop === true
                 const { Icon, text, tone } = describe(invocation, name)
                 return (
                     <div key={invocation.id} data-invocation={invocation.state} className={cn('flex items-center gap-1.5 text-[12.5px]', tone)}>

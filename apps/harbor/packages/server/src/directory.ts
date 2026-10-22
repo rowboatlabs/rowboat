@@ -152,7 +152,7 @@ export class OrgDirectory {
          from member_identities mi
          join members m on m.org_id = mi.org_id and m.id = mi.member_id
          join orgs o on o.id = mi.org_id
-        where mi.iss = $1 and mi.sub = $2
+        where mi.iss = $1 and mi.sub = $2 and m.deactivated_at is null and m.removed_at is null
         order by o.created_at, o.id`,
       [iss, sub],
     );

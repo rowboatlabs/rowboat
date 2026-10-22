@@ -292,7 +292,9 @@ export function SpaceSearch({ orgId, spaceId, selfMemberId, onNavigate, classNam
                 {!focused && <kbd className="rounded border border-border bg-background px-1 text-[10px]">{chord('K', { shift: true })}</kbd>}
             </label>
             {open && (
-                <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-96 min-w-[26rem] overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-md">
+                // Spaces redesign (2026-10-21): the box sits at the header's right edge now,
+                // so results open leftward from it at a fixed width.
+                <div className="absolute right-0 top-full z-30 mt-1 max-h-96 w-[min(28rem,80vw)] overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-md animate-in fade-in-0 slide-in-from-top-1 duration-150">
                     {sections.map((s) => (
                         <div key={s.label}>
                             <div className="flex items-baseline justify-between px-2 pb-0.5 pt-1.5 text-[10.5px] font-medium uppercase tracking-wide text-muted-foreground/80">

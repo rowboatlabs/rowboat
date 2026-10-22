@@ -99,7 +99,11 @@ const webOrigins = (process.env.HARBOR_WEB_ORIGINS ?? (process.env.HARBOR_MODE =
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);
-const web = webOrigins.length > 0 ? { webOrigins } : {};
+// The web app the org link landings offer (http.ts, 2026-10-13): a link
+// opened in a browser with no desktop app goes on to <this>/open. Dev defaults
+// to the web app's dev server, like the origins above.
+const webAppUrl = process.env.HARBOR_WEB_APP_URL ?? (process.env.HARBOR_MODE === 'deployment' ? undefined : 'http://localhost:5174');
+const web = { ...(webOrigins.length > 0 ? { webOrigins } : {}), ...(webAppUrl ? { webAppUrl } : {}) };
 
 // Deployment mode (the managed fleet / any multi-org host): HARBOR_MODE=deployment
 // + DATABASE_URL + APEX_DOMAIN + AUTH_ISSUER. No seeding, no dev tokens —
@@ -135,6 +139,7 @@ if (process.env.HARBOR_MODE === 'deployment') {
     `  blobs      ${process.env.BLOBS_S3_BUCKET ? `s3 bucket ${process.env.BLOBS_S3_BUCKET}` : process.env.BLOBS_DIR ? `disk ${process.env.BLOBS_DIR}` : 'UNCONFIGURED — uploads will be refused (set BLOBS_S3_BUCKET or BLOBS_DIR)'}`,
   );
   console.log(`  web        ${webOrigins.length > 0 ? webOrigins.join(', ') : 'no browser origins (set HARBOR_WEB_ORIGINS)'}`);
+  console.log(`  web app    ${webAppUrl ? `${webAppUrl} (links opened in a browser offer it)` : 'none — links opened in a browser offer only the desktop app (set HARBOR_WEB_APP_URL)'}`);
   console.log(`  internal   ${process.env.HARBOR_INTERNAL_KEY ? 'GET /internal/stats (operator key set)' : 'off (set HARBOR_INTERNAL_KEY)'}`);
   console.log(`  platforms  ${process.env.HARBOR_INTEGRATION_KEY ? 'Replicas, Agent37, Conductor, PostHog and Cal.com agents can be added (sealing key set)' : 'off — Replicas, Agent37, Conductor, PostHog and Cal.com agents need HARBOR_INTEGRATION_KEY'}`);
   console.log(`  listening  :${deployment.port}`);

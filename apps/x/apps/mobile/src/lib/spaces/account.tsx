@@ -46,10 +46,11 @@ interface SpacesAccount {
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
   /**
-   * Permanently delete the Rowboat account (App Store 5.1.1(v)), then sign
-   * out locally. Throws with a readable message when the server refuses.
+   * Request account deletion (App Store 5.1.1(v)), then sign out locally.
+   * Resolves to the date the account is gone by. Throws with a readable
+   * message when a server refuses.
    */
-  deleteAccount: () => Promise<void>;
+  deleteAccount: () => Promise<{ deleteBy: string }>;
   refreshOrgs: () => Promise<void>;
   /** Fresh bearer for Harbor calls (auto-refreshes near expiry). */
   getAccessToken: (opts?: { forceRefresh?: boolean }) => Promise<string>;
@@ -136,23 +137,27 @@ export function SpacesAccountProvider({ children }: { children: ReactNode }) {
     setStatus('signedOut');
   }, [persist, orgs, getAccessToken]);
 
-  // DELETE /v1/account on rowboatx-backend: cancels billing, removes org
-  // memberships, deletes the auth user, revokes Sign in with Apple. Push
-  // tokens go first, while the account can still authenticate.
+  // Account deletion, minimal v1 (2026-10-08, revised 2026-10-13). Two
+  // calls, Spaces first while the login still works: the apex deactivates
+  // you in every org (out of every space, name kept on what you wrote, push
+  // tokens gone), then rowboatx-backend bans the login, records the request
+  // and emails the date. The account and its data are deleted by hand before
+  // that date. Both calls are idempotent, so a retry after a failure is safe.
   const deleteAccount = useCallback(async () => {
-    if (orgs?.length) await unregisterFromHarbor(orgs, getAccessToken).catch(() => {});
     const token = await getAccessToken();
-    const res = await fetch(`${ACCOUNT_API_URL}/v1/account`, {
-      method: 'DELETE',
-      headers: { authorization: `Bearer ${token}` },
-    });
+    const headers = { authorization: `Bearer ${token}` };
+    const apex = await fetch(`${APEX_URL}/v1/me`, { method: 'DELETE', headers });
+    if (!apex.ok) throw new Error(`Couldn't remove you from your orgs (${apex.status}). Please try again.`);
+    const res = await fetch(`${ACCOUNT_API_URL}/v1/account`, { method: 'DELETE', headers });
     if (res.status === 404) throw new Error("Account deletion isn't available yet. Please try again later.");
     if (!res.ok) {
       const detail = await res.json().then((j: { message?: string; error?: string }) => j.message ?? j.error).catch(() => undefined);
       throw new Error(detail ?? `Couldn't delete your account (${res.status}). Please try again.`);
     }
+    const { deleteBy } = (await res.json()) as { deleteBy: string };
     await signOut();
-  }, [orgs, getAccessToken, signOut]);
+    return { deleteBy };
+  }, [getAccessToken, signOut]);
 
   const value = useMemo(
     () => ({ status, orgs, orgsError, signIn, signOut, deleteAccount, refreshOrgs, getAccessToken }),

@@ -18,7 +18,10 @@ import {
   type Approval,
   type Invocation,
   type InvocationOptionValues,
+  type InvitePolicy,
   type Member,
+  type MemberRole,
+  type OrgSettings,
   type Membership,
   type StreamEvent,
   type Message,
@@ -35,6 +38,7 @@ import {
   type Topic,
   type TopicListing,
   type UnreadSnapshot,
+  type UpdateProfile,
 } from '@rowboat/spaces-protocol';
 import type { z } from 'zod';
 
@@ -205,7 +209,7 @@ export class SpacesClient {
   }
 
   private async request<S extends z.ZodType>(
-    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
     path: string,
     responseSchema: S,
     body?: unknown,
@@ -272,6 +276,11 @@ export class SpacesClient {
   /** Who this token is on the org — the only client-side source of our memberId under OAuth. */
   async me(): Promise<{ member: Member }> {
     return this.request('GET', routes.me.path, routes.me.response);
+  }
+
+  /** Your name and title on this org (CONTRACT.md, 2026-10-19). Leave a field out to keep it; an empty title removes it. */
+  async updateProfile(input: UpdateProfile): Promise<Member> {
+    return (await this.request('PUT', routes.updateMe.path, routes.updateMe.response, input)).member;
   }
 
   // --- profile images (CONTRACT.md, 2026-10-02) ------------------------------
@@ -358,6 +367,35 @@ export class SpacesClient {
     ).space;
   }
 
+  /** Archive a shared space, admin only (api.ts archiveSpace, 2026-10-13). Already archived = no-op. */
+  async archiveSpace(spaceId: string): Promise<Space> {
+    return (await this.request('POST', this.space(spaceId, '/archive'), routes.archiveSpace.response, { actingMode: 'direct' })).space;
+  }
+
+  async unarchiveSpace(spaceId: string): Promise<Space> {
+    return (await this.request('POST', this.space(spaceId, '/unarchive'), routes.unarchiveSpace.response, { actingMode: 'direct' })).space;
+  }
+
+  /** Open or close a shared space, admin only (api.ts setSpaceVisibility, 2026-10-19). Same value = no-op. */
+  async setSpaceVisibility(spaceId: string, visibility: Space['visibility']): Promise<Space> {
+    return (await this.request('POST', this.space(spaceId, '/visibility'), routes.setSpaceVisibility.response, { visibility, actingMode: 'direct' })).space;
+  }
+
+  /** Remove someone from a shared space, admin only (api.ts removeMember, 2026-10-19). Not in it = `false`. */
+  async removeMember(spaceId: string, memberId: string): Promise<boolean> {
+    return (await this.request('POST', this.space(spaceId, `/members/${encodeURIComponent(memberId)}/remove`), routes.removeMember.response, { actingMode: 'direct' })).removed;
+  }
+
+  /** Make a shared open space a default space, or take it off, admin only (api.ts setDefaultSpace, 2026-10-19). */
+  async setDefaultSpace(spaceId: string, isDefault: boolean): Promise<Space> {
+    return (await this.request('POST', this.space(spaceId, '/default'), routes.setDefaultSpace.response, { isDefault, actingMode: 'direct' })).space;
+  }
+
+  /** Delete a shared space and everything in it, admin only (api.ts deleteSpace, 2026-10-14). No undo. */
+  async deleteSpace(spaceId: string): Promise<void> {
+    await this.request('DELETE', this.space(spaceId, ''), routes.deleteSpace.response);
+  }
+
   /** The agents this member manages, with their keys' metadata (api.ts listAgents). */
   async listAgents(): Promise<AgentListing[]> {
     return (await this.request('GET', routes.listAgents.path, routes.listAgents.response)).agents;
@@ -392,6 +430,11 @@ export class SpacesClient {
     return (await this.request('POST', `/v1/agents/${encodeURIComponent(agentId)}/keys`, routes.createAgentKey.response)).key;
   }
 
+  /** Rename an agent this member owns (api.ts renameAgent, 2026-10-21). */
+  async renameAgent(agentId: string, displayName: string): Promise<Member> {
+    return (await this.request('PUT', `/v1/agents/${encodeURIComponent(agentId)}/name`, routes.renameAgent.response, { displayName })).agent;
+  }
+
   async revokeAgentKey(agentId: string, keyId: string): Promise<AgentKey> {
     return (
       await this.request('POST', `/v1/agents/${encodeURIComponent(agentId)}/keys/${encodeURIComponent(keyId)}/revoke`, routes.revokeAgentKey.response)
@@ -412,6 +455,26 @@ export class SpacesClient {
     return (await this.request('GET', this.space(spaceId, '/members'), routes.listMembers.response)).members;
   }
 
+  /** Remove someone from the org, admin only (api.ts removeOrgMember, 2026-10-19). A later invite brings them back. */
+  async removeOrgMember(memberId: string): Promise<Member> {
+    return (await this.request('POST', `/v1/members/${encodeURIComponent(memberId)}/remove`, routes.removeOrgMember.response, { actingMode: 'direct' })).member;
+  }
+
+  /** Promote or demote an admin (api.ts setMemberRole, 2026-10-19). The org keeps at least one. */
+  async setMemberRole(memberId: string, role: MemberRole): Promise<Member> {
+    return (await this.request('POST', `/v1/members/${encodeURIComponent(memberId)}/role`, routes.setMemberRole.response, { role, actingMode: 'direct' })).member;
+  }
+
+  /** The org's settings any member reads (api.ts getOrgSettings, 2026-10-19). */
+  async getOrgSettings(): Promise<OrgSettings> {
+    return (await this.request('GET', routes.getOrgSettings.path, routes.getOrgSettings.response)).settings;
+  }
+
+  /** Set who may invite, admin only (api.ts updateOrgSettings, 2026-10-19). */
+  async setInvitePolicy(invitePolicy: InvitePolicy): Promise<OrgSettings> {
+    return (await this.request('PATCH', routes.updateOrgSettings.path, routes.updateOrgSettings.response, { invitePolicy })).settings;
+  }
+
   /** The org roster: every member, people and agents, sorted by displayName (api.ts listOrgMembers; org-wide since 2026-09-29). */
   async listOrgMembers(): Promise<Member[]> {
     return (await this.request('GET', routes.listOrgMembers.path, routes.listOrgMembers.response)).members;
@@ -423,10 +486,11 @@ export class SpacesClient {
 
   // --- invites --------------------------------------------------------------
 
-  async createInvite(spaceId: string, expiresInHours?: number): Promise<CreateInviteResult> {
+  /** An invite to the org, listing spaces the caller is in (api.ts createInvite, 2026-10-19). None = the org's default spaces only. */
+  async createInvite(opts: { spaceIds?: string[]; expiresInHours?: number } = {}): Promise<CreateInviteResult> {
     return this.request('POST', routes.createInvite.path, routes.createInvite.response, {
-      spaceId,
-      ...(expiresInHours !== undefined ? { expiresInHours } : {}),
+      ...(opts.spaceIds ? { spaceIds: opts.spaceIds } : {}),
+      ...(opts.expiresInHours !== undefined ? { expiresInHours: opts.expiresInHours } : {}),
     });
   }
 

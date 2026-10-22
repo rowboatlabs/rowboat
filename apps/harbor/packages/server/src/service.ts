@@ -9,7 +9,7 @@ import { Invocations } from './core/invocations.js';
 import { Kernel, type ActorCtx, type BindIdentity, type OrgInfo } from './core/kernel.js';
 import { ReadState } from './core/read-state.js';
 import { Spaces } from './core/spaces.js';
-import type { AddMembersInput, RenameSpaceInput } from './core/spaces.js';
+import type { AddMembersInput, ArchiveSpaceInput, CreateInviteInput, RemoveMemberInput, RenameSpaceInput, SetDefaultSpaceInput, SetMemberRoleInput, SetSpaceVisibilityInput, UpdateOrgSettingsInput } from './core/spaces.js';
 import type { CreateTopicInput, DeleteMessageInput, EditMessageInput, EndPollInput, ManageTopicAction, NewMessage, PageOpts, ReactInput, VotePollInput } from './core/feed.js';
 import type { MarkReadInput, UnreadSnapshot } from './core/read-state.js';
 import type { SpaceHub } from './hub.js';
@@ -28,6 +28,8 @@ import type {
   CreateInviteResult,
   DeleteAssetResult,
   Member,
+  OrgSettings,
+  UpdateProfile,
   AgentKey,
   AgentCredential,
   AgentHook,
@@ -90,7 +92,7 @@ export class HarborService {
     notifier?: Notifier,
   ) {
     this.k = new Kernel(store, hub, org);
-    this.spaces = new Spaces(this.k);
+    this.spaces = new Spaces(this.k, blobs);
     this.assets = new Assets(this.k, blobs);
     this.images = new Images(this.k, blobs);
     this.invocations = new Invocations(this.k);
@@ -136,6 +138,9 @@ export class HarborService {
   me(ctx: ActorCtx): Promise<Member> {
     return this.spaces.me(ctx);
   }
+  updateProfile(ctx: ActorCtx, input: UpdateProfile): Promise<Member> {
+    return this.spaces.updateProfile(ctx, input);
+  }
   createAgent(input: { displayName: string; ownerId?: string }): Promise<Member> {
     return this.spaces.createAgent(input);
   }
@@ -156,6 +161,10 @@ export class HarborService {
   getAgentOptionDefaults(agentId: string): Promise<InvocationOptionValues> {
     return this.invocations.optionDefaults(agentId);
   }
+  renameAgent(ctx: ActorCtx, agentId: string, input: { displayName: string }): Promise<Member> {
+    return this.agents.rename(ctx, agentId, input);
+  }
+
   setAgentOptionDefaults(ctx: ActorCtx, agentId: string, defaults: InvocationOptionValues): Promise<InvocationOptionValues> {
     return this.agents.setOptionDefaults(ctx, agentId, defaults);
   }
@@ -213,11 +222,41 @@ export class HarborService {
   joinSpace(ctx: ActorCtx, spaceId: string): Promise<{ space: Space; membership: Membership }> {
     return this.spaces.joinSpace(ctx, spaceId);
   }
-  createSpace(ctx: ActorCtx, name: string, visibility: Space['visibility'] = 'private'): Promise<Space> {
-    return this.spaces.createSpace(ctx, name, visibility);
+  createSpace(ctx: ActorCtx, name: string, visibility: Space['visibility'] = 'private', opts: { isDefault?: boolean } = {}): Promise<Space> {
+    return this.spaces.createSpace(ctx, name, visibility, opts);
   }
   renameSpace(ctx: ActorCtx, spaceId: string, input: RenameSpaceInput): Promise<Space> {
     return this.spaces.renameSpace(ctx, spaceId, input);
+  }
+  archiveSpace(ctx: ActorCtx, spaceId: string, input: ArchiveSpaceInput): Promise<Space> {
+    return this.spaces.archiveSpace(ctx, spaceId, input);
+  }
+  unarchiveSpace(ctx: ActorCtx, spaceId: string, input: ArchiveSpaceInput): Promise<Space> {
+    return this.spaces.unarchiveSpace(ctx, spaceId, input);
+  }
+  setDefaultSpace(ctx: ActorCtx, spaceId: string, input: SetDefaultSpaceInput): Promise<Space> {
+    return this.spaces.setDefaultSpace(ctx, spaceId, input);
+  }
+  deleteSpace(ctx: ActorCtx, spaceId: string): Promise<void> {
+    return this.spaces.deleteSpace(ctx, spaceId);
+  }
+  setSpaceVisibility(ctx: ActorCtx, spaceId: string, input: SetSpaceVisibilityInput): Promise<Space> {
+    return this.spaces.setSpaceVisibility(ctx, spaceId, input);
+  }
+  removeMember(ctx: ActorCtx, spaceId: string, memberId: string, input: RemoveMemberInput): Promise<{ removed: boolean }> {
+    return this.spaces.removeMember(ctx, spaceId, memberId, input);
+  }
+  removeOrgMember(ctx: ActorCtx, memberId: string, input: RemoveMemberInput): Promise<Member> {
+    return this.spaces.removeOrgMember(ctx, memberId, input);
+  }
+  setMemberRole(ctx: ActorCtx, memberId: string, input: SetMemberRoleInput): Promise<Member> {
+    return this.spaces.setMemberRole(ctx, memberId, input);
+  }
+  getOrgSettings(ctx: ActorCtx): Promise<OrgSettings> {
+    return this.spaces.getOrgSettings(ctx);
+  }
+  updateOrgSettings(ctx: ActorCtx, input: UpdateOrgSettingsInput): Promise<OrgSettings> {
+    return this.spaces.updateOrgSettings(ctx, input);
   }
   openDirect(ctx: ActorCtx, otherMemberId: string): Promise<{ space: Space; created: boolean }> {
     return this.spaces.openDirect(ctx, otherMemberId);
@@ -234,8 +273,8 @@ export class HarborService {
   leaveSpace(ctx: ActorCtx, spaceId: string): Promise<void> {
     return this.spaces.leaveSpace(ctx, spaceId);
   }
-  createInvite(ctx: ActorCtx, spaceId: string, expiresInHours?: number): Promise<CreateInviteResult> {
-    return this.spaces.createInvite(ctx, spaceId, expiresInHours);
+  createInvite(ctx: ActorCtx, input: CreateInviteInput): Promise<CreateInviteResult> {
+    return this.spaces.createInvite(ctx, input);
   }
   resolveInvite(token: string): Promise<ResolveInviteResult> {
     return this.spaces.resolveInvite(token);
@@ -251,6 +290,9 @@ export class HarborService {
   }
   unregisterPush(ctx: ActorCtx, input: { token: string }): Promise<{ ok: true }> {
     return this.spaces.unregisterPush(ctx, input);
+  }
+  deactivateSelf(ctx: ActorCtx): Promise<void> {
+    return this.spaces.deactivateSelf(ctx);
   }
   publishPresence(
     ctx: ActorCtx,

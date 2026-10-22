@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Loader2, MoreHorizontal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -8,6 +8,8 @@ import { refreshSpacesAccountState, refreshSpacesOrgs, useSpacesAccountState } f
 import { consumeServerDialog, subscribeServerDialog, type ServerDialogRequest } from '@/lib/server-dialog'
 import { toast } from '@/lib/toast'
 import * as analytics from '@/lib/analytics'
+import { LOCAL_RUNTIME } from '@/lib/feature-flags'
+import { listNames } from '@/lib/spaces-invites'
 
 // The server dialogs, one host for the whole app (lib/server-dialog.ts is
 // how anything opens one). Two intents, two dialogs: CREATE a server, or
@@ -61,6 +63,7 @@ export function ServerDialogs({ onDone }: { onDone: ServerDialogDone }) {
                 <JoinServerDialog
                     key={key}
                     inviteUrl={request.inviteUrl}
+                    autoJoin={request.autoJoin === true}
                     onClose={close}
                     onDone={done}
                     onCreateInstead={() => swap({ kind: 'create' })}
@@ -115,10 +118,13 @@ function FooterLink({ onClick, children }: { onClick: () => void; children: Reac
     )
 }
 
+// The desktop signs in through the system browser and waits for it; the web
+// app (no core beside the page, so LOCAL_RUNTIME is off) signs in by leaving
+// the page, and comes back to it.
 function BrowserWait() {
     return (
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Loader2 className="size-3 animate-spin" /> Waiting for the browser sign-in…
+            <Loader2 className="size-3 animate-spin" /> {LOCAL_RUNTIME ? 'Waiting for the browser sign-in…' : 'Taking you to sign in…'}
         </div>
     )
 }
@@ -231,10 +237,12 @@ function CreateServerDialog({ onClose, onDone, onJoinInstead }: {
 // Join
 // ---------------------------------------------------------------------------
 
-interface InvitePreview { org: string; space: string; invitedBy?: string }
+/** An invite is to the org (2026-10-19): the org, and every space accepting joins. */
+interface InvitePreview { org: string; spaces: string[]; invitedBy?: string }
 
-function JoinServerDialog({ inviteUrl: initialUrl, onClose, onDone, onCreateInstead, onByAddress, onDev }: {
+function JoinServerDialog({ inviteUrl: initialUrl, autoJoin = false, onClose, onDone, onCreateInstead, onByAddress, onDev }: {
     inviteUrl?: string
+    autoJoin?: boolean
     onClose: () => void
     onDone: ServerDialogDone
     onCreateInstead: () => void
@@ -250,40 +258,50 @@ function JoinServerDialog({ inviteUrl: initialUrl, onClose, onDone, onCreateInst
     const [resolving, setResolving] = useState(false)
     const [busy, setBusy] = useState(false)
 
-    const resolve = async (next: string) => {
+    /** True when the invite is live and its card is showing. */
+    const resolve = async (next: string): Promise<boolean> => {
         setUrl(next)
         setPreview(null)
-        if (!/\/join\//.test(next)) return
+        if (!/\/join\//.test(next)) return false
         setResolving(true)
         try {
             const { resolved } = await window.ipc.invoke('spaces:resolveInviteLink', { url: next.trim() })
             if (resolved.state === 'ok') {
-                setPreview({ org: resolved.org.name, space: resolved.space.name, ...(resolved.invitedBy ? { invitedBy: resolved.invitedBy } : {}) })
-            } else {
-                toast(`This invite is ${resolved.state}`, 'error')
-                setEditing(true)
+                setPreview({ org: resolved.org.name, spaces: (resolved.spaces ?? []).map((s) => s.name), ...(resolved.invitedBy ? { invitedBy: resolved.invitedBy } : {}) })
+                return true
             }
+            toast(`This invite is ${resolved.state}`, 'error')
+            setEditing(true)
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not resolve the invite', 'error')
             setEditing(true)
         } finally {
             setResolving(false)
         }
+        return false
     }
 
-    // Runs once for the link the dialog opened on; typing goes through resolve directly.
+    // Runs once for the link the dialog opened on; typing goes through resolve
+    // directly. With autoJoin, Join was clicked before a sign-in, so the card
+    // goes straight on to joining, once.
+    const autoJoined = useRef(false)
     useEffect(() => {
-        if (initialUrl) void resolve(initialUrl)
+        if (!initialUrl) return
+        void resolve(initialUrl).then((live) => {
+            if (!live || !autoJoin || autoJoined.current) return
+            autoJoined.current = true
+            void join(initialUrl)
+        })
     }, [initialUrl])
 
-    const join = async () => {
-        if (!url.trim()) return
+    const join = async (target = url) => {
+        if (!target.trim()) return
         setBusy(true)
         try {
-            const { org, space } = await window.ipc.invoke('spaces:joinInvite', { url: url.trim() })
+            const { org, space } = await window.ipc.invoke('spaces:joinInvite', { url: target.trim() })
             analytics.spacesSpaceJoined('invite_link')
-            toast(`Joined ${space.name} on ${org.name}`, 'success')
-            onDone(org.id, space.id)
+            toast(space ? `Joined ${space.name} on ${org.name}` : `Joined ${org.name}`, 'success')
+            onDone(org.id, space?.id)
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not join', 'error')
         } finally {
@@ -298,21 +316,24 @@ function JoinServerDialog({ inviteUrl: initialUrl, onClose, onDone, onCreateInst
             onClose={onClose}
             footerLeft={
                 <>
-                    <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                            <button
-                                type="button"
-                                aria-label="More ways to join"
-                                className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground"
-                            >
-                                <MoreHorizontal className="size-3.5" />
-                            </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="start">
-                            <DropdownMenuItem onClick={onByAddress}>Add a server by address</DropdownMenuItem>
-                            <DropdownMenuItem onClick={onDev}>Add a dev server</DropdownMenuItem>
-                        </DropdownMenuContent>
-                    </DropdownMenu>
+                    {/* The rarer doors reach servers the web app can't (another host, a dev Harbor), so the browser offers neither. */}
+                    {LOCAL_RUNTIME && (
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <button
+                                    type="button"
+                                    aria-label="More ways to join"
+                                    className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground"
+                                >
+                                    <MoreHorizontal className="size-3.5" />
+                                </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="start">
+                                <DropdownMenuItem onClick={onByAddress}>Add a server by address</DropdownMenuItem>
+                                <DropdownMenuItem onClick={onDev}>Add a dev server</DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                    )}
                     <FooterLink onClick={onCreateInstead}>New here? Create a server</FooterLink>
                 </>
             }
@@ -342,9 +363,11 @@ function JoinServerDialog({ inviteUrl: initialUrl, onClose, onDone, onCreateInst
             {preview ? (
                 <div className="rounded-md border px-3 py-2.5 text-sm">
                     <div>
-                        You’re invited to <span className="font-medium">{preview.space}</span> on{' '}
-                        <span className="font-medium">{preview.org}</span>
+                        You’re invited to <span className="font-medium">{preview.org}</span>
                     </div>
+                    {preview.spaces.length > 0 && (
+                        <div className="text-xs text-muted-foreground">You’ll join {listNames(preview.spaces)}</div>
+                    )}
                     {preview.invitedBy && <div className="text-xs text-muted-foreground">Invited by {preview.invitedBy}</div>}
                 </div>
             ) : resolving ? (
@@ -356,7 +379,9 @@ function JoinServerDialog({ inviteUrl: initialUrl, onClose, onDone, onCreateInst
                 <FooterLink onClick={() => setEditing(true)}>Use a different link</FooterLink>
             )}
             {signedOut && url.trim() && (
-                <p className="text-xs text-muted-foreground">Joining signs you in with your Rowboat account in the browser.</p>
+                <p className="text-xs text-muted-foreground">
+                    {LOCAL_RUNTIME ? 'Joining signs you in with your Rowboat account in the browser.' : 'Joining signs you in with your Rowboat account first.'}
+                </p>
             )}
             {busy && signedOut && <BrowserWait />}
         </Shell>

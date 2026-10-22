@@ -10,24 +10,47 @@ export function ActivityRow({ item, names, spaceNames, onOpen, compact = false }
     const lead = item.actors[0]
     const who = actorLabel(item.actors, names)
     const excerpt = excerptOf(item.message.body, names, spaceNames)
-    return (
+    if (compact) return (
         <button type="button" onClick={onOpen}
-            className={cn('group flex w-full items-start gap-3 rounded-lg px-2 py-2 text-left hover:bg-accent/60', item.unread && 'bg-accent/30', compact && 'gap-1.5 px-1.5 py-1.5')}
+            className={cn('group flex w-full items-start gap-1.5 rounded-lg px-1.5 py-1.5 text-left hover:bg-accent/60', item.unread && 'bg-accent/30')}
             title={`${who} ${reasonLabel(item)}\n${excerpt}\n${new Date(item.at).toLocaleString()}`}>
             <span className="mt-[9px] flex w-1.5 shrink-0 justify-center">
                 {item.unread && <span className="size-1.5 rounded-full bg-[var(--stream-alert)]" aria-label="unread" />}
             </span>
-            <MemberAvatar id={lead?.memberId ?? ''} name={names.get(lead?.memberId ?? '') ?? who} size="sm" className={cn("mt-0.5 size-6 rounded-[5px] text-[9px]", compact && "size-5 text-[8px]")} />
+            <MemberAvatar id={lead?.memberId ?? ''} name={names.get(lead?.memberId ?? '') ?? who} size="sm" className="mt-0.5 size-5 rounded-[5px] text-[8px]" />
             <span className="min-w-0 flex-1">
                 <span className="flex items-baseline gap-2">
-                    <span className="min-w-0 truncate text-[13px]">
-                        <span className={cn('font-semibold', !item.unread && 'font-medium')}>{who}</span>
-                        {!compact && <span className="text-muted-foreground"> {reasonLabel(item)}</span>}
-                    </span>
+                    <span className="min-w-0 truncate text-[13px]"><span className={cn('font-semibold', !item.unread && 'font-medium')}>{who}</span></span>
                     <span className="ml-auto shrink-0 text-[11px] tabular-nums text-muted-foreground">{formatFeedTime(item.at)}</span>
                 </span>
-                {compact && <span className="block truncate text-[11px] text-muted-foreground">{reasonLabel(item)}</span>}
-                <span className={cn('mt-0.5 block text-[13px]', compact ? 'truncate text-xs' : 'line-clamp-2', item.unread ? 'text-foreground' : 'text-muted-foreground')}>
+                <span className="block truncate text-[11px] text-muted-foreground">{reasonLabel(item)}</span>
+                <span className={cn('mt-0.5 block truncate text-xs', item.unread ? 'text-foreground' : 'text-muted-foreground')}>
+                    {item.kind === 'reaction' && <span className="text-muted-foreground">You: </span>}
+                    {excerpt || <span className="italic text-muted-foreground">(no text)</span>}
+                </span>
+            </span>
+        </button>
+    )
+    // The Activity page's row (2026-10-21): 14px like the rest of the app, a
+    // 32px face, the unread dot in its own gutter so every row's text lines up.
+    return (
+        <button type="button" onClick={onOpen}
+            className={cn('group flex w-full items-start gap-3 rounded-xl px-3 py-3 text-left transition-colors hover:bg-accent/60',
+                item.unread && 'bg-[color-mix(in_srgb,var(--stream-link)_5%,transparent)]')}
+            title={`${who} ${reasonLabel(item)}\n${excerpt}\n${new Date(item.at).toLocaleString()}`}>
+            <span className="flex h-8 w-1.5 shrink-0 items-center justify-center">
+                {item.unread && <span className="size-1.5 rounded-full bg-[var(--stream-alert)]" aria-label="unread" />}
+            </span>
+            <MemberAvatar id={lead?.memberId ?? ''} name={names.get(lead?.memberId ?? '') ?? who} size="md" className="size-8 shrink-0 text-[11px]" />
+            <span className="min-w-0 flex-1">
+                <span className="flex items-baseline gap-3">
+                    <span className="min-w-0 truncate text-sm">
+                        <span className={cn('text-foreground', item.unread ? 'font-semibold' : 'font-medium')}>{who}</span>
+                        <span className="text-muted-foreground"> {reasonLabel(item)}</span>
+                    </span>
+                    <span className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">{formatFeedTime(item.at)}</span>
+                </span>
+                <span className={cn('mt-1 line-clamp-2 block text-sm leading-relaxed', item.unread ? 'text-foreground/90' : 'text-muted-foreground')}>
                     {item.kind === 'reaction' && <span className="text-muted-foreground">You: </span>}
                     {excerpt || <span className="italic text-muted-foreground">(no text)</span>}
                 </span>

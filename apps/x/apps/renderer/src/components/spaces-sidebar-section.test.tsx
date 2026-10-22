@@ -40,7 +40,8 @@ vi.mock('@/hooks/use-space-chat', async () => {
         },
     }
 })
-vi.mock('@/hooks/use-space-members', () => ({ prefetchMembers: vi.fn(), useSelfDisplayName: () => 'Me' }))
+vi.mock('@/hooks/use-space-members', () => ({ prefetchMembers: vi.fn(), useSelfDisplayName: () => 'Me', useOrgRoster: () => [] }))
+vi.mock('@/hooks/use-org-settings', () => ({ useOrgSettings: () => ({ invitePolicy: 'members' }), canInvite: () => true }))
 vi.mock('@/components/spaces-view', () => ({ OrgMonogram: () => null }))
 vi.mock('@/components/spaces/atoms', () => ({ MemberAvatar: () => null, OrgMonogram: () => null }))
 vi.mock('@/components/spaces/new-direct-dialog', () => ({ NewDirectDialog: () => null }))
@@ -75,8 +76,16 @@ describe('the sidebar server list', () => {
         expect(screen.queryByRole('region', { name: 'Activity across organizations' })).toBeNull()
         fireEvent.click(screen.getByRole('button', { name: 'Other server' }))
         expect(open).toHaveBeenCalledWith(other.id, 'welcome')
-        expect(screen.queryByRole('button', { name: 'Spaces' })).toBeNull()
-        expect(screen.getByRole('heading', { name: 'Spaces' })).toBeVisible()
+        // Spaces is a nav row; its chevron folds the servers (sidebar
+        // redesign, 2026-10-21) and the choice is remembered.
+        expect(screen.getByRole('button', { name: 'Spaces' })).toBeVisible()
+        const fold = screen.getByRole('button', { name: 'Hide spaces list' })
+        expect(fold).toHaveAttribute('aria-expanded', 'true')
+        fireEvent.click(fold)
+        expect(fold).toHaveAttribute('aria-expanded', 'false')
+        expect(window.localStorage.getItem('x:sidebar-section:spaces')).toBe('closed')
+        fireEvent.click(fold)
+        expect(fold).toHaveAttribute('aria-expanded', 'true')
     })
     it('can open an empty server and add a server when none are connected', () => {
         vi.mocked(useSpacesOrgs).mockReturnValue({ orgs: [{ ...org, spaces: [], directs: [] }] as unknown as OrgWithSpaces[], loading: false, refresh: vi.fn() })
@@ -148,8 +157,8 @@ describe('server and space navigation', () => {
         render(<SidebarProvider><ServerSpaceNavigation org={{ ...other, groupChat: true } as unknown as OrgWithSpaces} spaceId="welcome"
             onOpenSpace={vi.fn()} showDiscussions={false} /></SidebarProvider>)
         expect(screen.getByText('welcome')).toBeTruthy()
-        expect(screen.queryByRole('heading', { name: 'DMs' })).toBeNull()
-        expect(screen.queryByText('New DM')).toBeNull()
+        expect(screen.queryByRole('button', { name: 'Direct messages' })).toBeNull()
+        expect(screen.queryByRole('button', { name: 'New direct message' })).toBeNull()
         expect(screen.queryByText('Me')).toBeNull()
     })
     it('nests and expands legacy discussions while keeping every DM visible', () => {
@@ -168,7 +177,7 @@ describe('server and space navigation', () => {
         fireEvent.click(screen.getByLabelText('Collapse #founders'))
         expect(within(founders).queryByText('Discussion 3')).toBeNull()
         expect(screen.getByText('Person 0')).toBeTruthy()
-        expect(screen.getByRole('heading', { name: 'DMs' })).toBeTruthy()
+        expect(screen.getByRole('button', { name: 'Direct messages' })).toBeTruthy()
     })
     it('shows every space and DM without list expansion controls in the content-tab rail', () => {
         sessionStorage.setItem(`spaces:directsExpanded:${org.id}`, 'false')
@@ -178,11 +187,57 @@ describe('server and space navigation', () => {
         for (const space of org.spaces) expect(screen.getByText(space.name)).toBeTruthy()
         expect(screen.queryByText('View all')).toBeNull()
         expect(screen.queryByText('Show less')).toBeNull()
+        // Spaces redesign (2026-10-21): the section header's + replaces the "New space" row.
         const newSpace = screen.getByRole('button', { name: 'New space' })
-        expect(screen.getByText('founders').compareDocumentPosition(newSpace) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-        expect(newSpace.compareDocumentPosition(screen.getByRole('heading', { name: 'DMs' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+        expect(newSpace.compareDocumentPosition(screen.getByText('founders')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+        expect(screen.getByText('founders').compareDocumentPosition(screen.getByRole('button', { name: 'Direct messages' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+        expect(screen.queryByText('New DM')).toBeNull()
         fireEvent.click(newSpace)
         expect(screen.getByRole('dialog', { name: 'Create a space' })).toBeInTheDocument()
+    })
+    it('leads with Activity, Agents and Browse rows, and pins Invite people to the foot', () => {
+        const openActivity = vi.fn()
+        render(<SidebarProvider><ServerSpaceNavigation org={org as unknown as OrgWithSpaces} spaceId="main" onOpenSpace={vi.fn()}
+            onOpenActivity={openActivity} onOpenAgents={vi.fn()} onOpenBrowse={vi.fn()} showDiscussions={false} /></SidebarProvider>)
+        const order = ['Activity', 'Agents', 'Browse spaces', 'Spaces', 'Direct messages', 'Invite people']
+            .map((name) => screen.getByRole('button', { name }))
+        for (let i = 1; i < order.length; i++) expect(order[i - 1].compareDocumentPosition(order[i]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+        fireEvent.click(order[0])
+        expect(openActivity).toHaveBeenCalledWith(org.id)
+        expect(screen.queryByText('Invite')).toBeNull()
+    })
+    it('collapses each section from its header and remembers it', () => {
+        const view = render(<SidebarProvider><ServerSpaceNavigation org={org as unknown as OrgWithSpaces} spaceId="main"
+            onOpenSpace={vi.fn()} showDiscussions={false} /></SidebarProvider>)
+        const directs = screen.getByRole('button', { name: 'Direct messages' })
+        expect(directs).toHaveAttribute('aria-expanded', 'true')
+        fireEvent.click(directs)
+        expect(directs).toHaveAttribute('aria-expanded', 'false')
+        expect(document.getElementById(directs.getAttribute('aria-controls')!)).toHaveAttribute('inert')
+        expect(localStorage.getItem('spaces:sectionOpen:directs')).toBe('false')
+        expect(screen.getByRole('button', { name: 'Spaces' })).toHaveAttribute('aria-expanded', 'true')
+        view.unmount()
+        render(<SidebarProvider><ServerSpaceNavigation org={org as unknown as OrgWithSpaces} spaceId="main"
+            onOpenSpace={vi.fn()} showDiscussions={false} /></SidebarProvider>)
+        expect(screen.getByRole('button', { name: 'Direct messages' })).toHaveAttribute('aria-expanded', 'false')
+    })
+    it('folds archived spaces under one row at the foot of Spaces', () => {
+        const withArchived = { ...org, spaces: [...org.spaces, { id: 'old', name: 'old', createdAt: '2026-08-01', archived: true }] }
+        render(<SidebarProvider><ServerSpaceNavigation org={withArchived as unknown as OrgWithSpaces} spaceId="main"
+            onOpenSpace={vi.fn()} showDiscussions={false} /></SidebarProvider>)
+        const archived = screen.getByRole('button', { name: 'Archived (1)' })
+        expect(archived).toHaveAttribute('aria-expanded', 'false')
+        expect(screen.getByText('old').closest('[data-open]')).toHaveAttribute('inert')
+        fireEvent.click(archived)
+        expect(archived).toHaveAttribute('aria-expanded', 'true')
+        expect(screen.getByText('old').closest('[data-open]')).not.toHaveAttribute('inert')
+    })
+    it('opens rename from the row\'s options button as well as the context menu', () => {
+        render(<SidebarProvider><ServerSpaceNavigation org={org as unknown as OrgWithSpaces} spaceId="main"
+            onOpenSpace={vi.fn()} showDiscussions={false} /></SidebarProvider>)
+        fireEvent.keyDown(screen.getByRole('button', { name: 'Options for founders' }), { key: 'Enter' })
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Rename space' }))
+        expect(screen.getByDisplayValue('founders')).toBeInTheDocument()
     })
     it('moves every space from the rail\'s one expand-all / collapse-all control', () => {
         // The rail header's control, standing in for space-rail.tsx: the space

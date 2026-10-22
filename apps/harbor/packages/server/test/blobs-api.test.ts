@@ -154,6 +154,16 @@ describe('blob uploads over the render face', () => {
     expect(r.headers.get('content-disposition')).toBe('attachment; filename="..-weird-signups.csv"');
   });
 
+  it('keeps a ?name= beyond Latin-1 whole in filename*, with a Latin-1 fallback', async () => {
+    const r = await ramnique.get(
+      `/v1/spaces/${spaceId}/blobs/${blobHash(CSV_BYTES)}?name=${encodeURIComponent('signups (é) ✓.csv')}`,
+    );
+    expect(r.status).toBe(200);
+    expect(r.headers.get('content-disposition')).toBe(
+      `attachment; filename="signups (é)??.csv"; filename*=UTF-8''signups%20%28%C3%A9%29%E2%80%AF%E2%9C%93.csv`,
+    );
+  });
+
   it('unknown hashes are not_found; non-members are refused; other spaces cannot see the blob', async () => {
     const absent = blobHash(new TextEncoder().encode('never uploaded'));
     expect((await ramnique.get(`/v1/spaces/${spaceId}/blobs/${absent}`)).status).toBe(404);

@@ -65,13 +65,14 @@ everyone in the space. To point at a space, \`[#Its Name](#space:<spaceId>)\`
 | "react", "pin" | \`react\` (pin is the 📌 emoji) |
 | "start a poll", "vote" | \`post_message\` with \`poll\` / \`vote_poll\` |
 | "title this thread", "archive it", "make it about roadmap.md" | \`create_topic\` / \`manage_topic\` (\`attach_document\` with the file's assetId) |
+| "change my name", "set my title to Design lead" | \`update_profile\` — only what they asked to change; an empty title removes it. Their photo is set in the app, not here |
 | "mark everything read", "clear my unread", "I'm caught up" | \`mark_all_read\` (\`spaceId\` for one space) — after the summary, never instead of it; it cannot be undone |
 | "add X to roadmap.md" | \`list_spaces\` (its id) → \`read_asset\` → \`propose_change\` |
 | "start a new file" | \`create_asset\` — the only call that takes a path; it returns the id |
 | "rename / move / delete / restore a file" | \`move_asset\` (new path) / \`delete_asset\` / \`restore_asset\` — by assetId |
 | "share this image / PDF" | \`spaces-upload-blob\` (a local file) → reference it in a post or file |
 | "open that attachment" | \`spaces-download-blob\` → then parse it |
-| "new space", "rename it", "invite link" | \`create_space\` / \`rename_space\` / \`create_invite\` |
+| "new space", "rename it", "invite link", "invite them to the team" | \`create_space\` / \`rename_space\` / \`create_invite\` (to the org; \`spaceIds\` adds spaces your person is in) |
 | "send at 9am", "remind me" | \`schedule_message\` |
 | "draw / sketch / diagram X on the board", "what's on the whiteboard" | \`loadSkill\` \`whiteboard\` → \`whiteboard-read\` / \`whiteboard-draw\` |
 

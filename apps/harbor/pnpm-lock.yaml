@@ -38,6 +38,9 @@ importers:
       '@rowboat/spaces-protocol':
         specifier: workspace:*
         version: link:../protocol
+      content-disposition:
+        specifier: ^1.1.0
+        version: 1.1.0
       diff:
         specifier: ^8.0.2
         version: 8.0.4
@@ -60,6 +63,9 @@ importers:
         specifier: 4.2.1
         version: 4.2.1
     devDependencies:
+      '@types/content-disposition':
+        specifier: ^0.5.9
+        version: 0.5.9
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
@@ -496,6 +502,9 @@ packages:
 
   '@types/chai@5.2.3':
     resolution: {integrity: sha512-Mw558oeA9fFbv65/y4mHtXDs9bPnFMZAL/jxdPFUpOHHIXX91mcgEHbS5Lahr+pwZFR8A7GQleRWeI6cGFC2UA==}
+
+  '@types/content-disposition@0.5.9':
+    resolution: {integrity: sha512-8uYXI3Gw35MhiVYhG3s295oihrxRyytcRHjSjqnqZVDDy/xcGBRny7+Xj1Wgfhv5QzRtN2hB2dVRBUX9XW3UcQ==}
 
   '@types/deep-eql@4.0.2':
     resolution: {integrity: sha512-c9h9dVVMigMPc4bwTvC5dxqtqJZwQPePsWjPlpSOnojbor6pGqdk541lfA7AqFQr5pB1BRdq0juY9db81BwyFw==}
@@ -1598,6 +1607,8 @@ snapshots:
     dependencies:
       '@types/deep-eql': 4.0.2
       assertion-error: 2.0.1
+
+  '@types/content-disposition@0.5.9': {}
 
   '@types/deep-eql@4.0.2': {}
 

@@ -960,6 +960,130 @@ export const MIGRATIONS: Migration[] = [
       )`,
     ],
   },
+  {
+    // Account deletion, minimal v1 (2026-10-08, App Store 5.1.1(v), revised
+    // 2026-10-13 after review): the member row stays — name and attribution
+    // intact — and this marks it. Null = an active member.
+    id: '037-member-deactivated-at',
+    statements: [`alter table members add column if not exists deactivated_at text`],
+  },
+  {
+    // Archive is a space state (spec §6, 2026-09-22; built 2026-10-13): a
+    // flag on the row, nothing else in storage. Every existing space is live.
+    id: '038-archive-spaces',
+    statements: [`alter table spaces add column if not exists archived boolean not null default false`],
+  },
+  {
+    // Every space-keyed table hangs off its space (spec §6, the deletion
+    // doctrine, decided 2026-09-22; built 2026-10-13): a foreign key with
+    // cascade, so deleting a space is one statement and a new table cannot
+    // silently escape it (test/space-cascade.test.ts holds every table with
+    // a space_id to this). Nothing has ever deleted a space, so orphans can
+    // only come from hand surgery; they are unreachable, and are dropped
+    // first so the constraint can be added. Plain constraints, not NOT VALID
+    // + VALIDATE: this entry runs in one transaction, where the two-step
+    // buys nothing. invites and agent_connection_threads get the space_id
+    // index the cascade's lookup needs; every other table already leads an
+    // index with it.
+    id: '039-space-cascade-fks',
+    statements: [
+      ...[
+        'memberships',
+        'assets',
+        'asset_versions',
+        'asset_search',
+        'change_sets',
+        'events',
+        'topics',
+        'messages',
+        'reactions',
+        'poll_votes',
+        'space_blobs',
+        'invites',
+        'space_read_marks',
+        'thread_read_marks',
+        'invocations',
+        'approvals',
+        'agent_connection_threads',
+        'message_hops',
+        'agent_hooks',
+      ].flatMap((table) => [
+        `delete from ${table} t where not exists (select 1 from spaces s where s.id = t.space_id)`,
+        `alter table ${table} add constraint ${table}_space_fk foreign key (space_id) references spaces(id) on delete cascade`,
+      ]),
+      `create index if not exists invites_space on invites (space_id)`,
+      `create index if not exists agent_connection_threads_space on agent_connection_threads (space_id)`,
+    ],
+  },
+  {
+    // A member's title (spec §4 Member profile, v1 = name, title, avatar;
+    // built 2026-10-19). Null = none.
+    id: '040-member-title',
+    statements: [`alter table members add column if not exists title text`],
+  },
+  {
+    // Default spaces (spec §5 answer 3, built 2026-10-19): a flag on the
+    // space row. The CHECK keeps the rule in the schema as 023 does for DMs:
+    // only a shared open space can be a default, so an invite to the org is
+    // never a back door into a private space. No backfill: every org's first
+    // space was created private, and turning a private space open is not a
+    // migration's call — an admin marks the defaults.
+    id: '041-default-spaces',
+    statements: [
+      `alter table spaces add column if not exists is_default boolean not null default false`,
+      `alter table spaces add constraint spaces_default_open_check check (not is_default or (kind = 'shared' and visibility = 'open'))`,
+      `create index if not exists spaces_default on spaces (org_id) where is_default`,
+    ],
+  },
+  {
+    // An invite is to the org with an optional list of spaces (spec §4
+    // Invites, amended 2026-09-22; built 2026-10-19). The list moves to its
+    // own table, cascading from both ends: deleting a listed space drops it
+    // from the list and the invite still admits to the org; deleting the
+    // invite drops its list. invites gains org_id, because an invite that
+    // lists nothing no longer reaches its org through a space. invites.space_id
+    // stays, null on every new invite and read by nothing: 039 names it, and
+    // an applied migration is never edited.
+    id: '042-org-invites',
+    statements: [
+      `alter table invites add column if not exists org_id text`,
+      `update invites i set org_id = s.org_id from spaces s where s.id = i.space_id`,
+      `delete from invites where org_id is null`,
+      `alter table invites alter column org_id set not null`,
+      `alter table invites alter column space_id drop not null`,
+      `create table invite_spaces (
+        token text not null,
+        space_id text not null,
+        position int not null,
+        primary key (token, space_id),
+        constraint invite_spaces_token_fk foreign key (token) references invites(token) on delete cascade,
+        constraint invite_spaces_space_fk foreign key (space_id) references spaces(id) on delete cascade
+      )`,
+      `create index invite_spaces_space on invite_spaces (space_id)`,
+      `insert into invite_spaces (token, space_id, position) select token, space_id, 0 from invites where space_id is not null`,
+      `update invites set space_id = null`,
+    ],
+  },
+  {
+    // Admin controls (spec §4 Roles, built 2026-10-19). An admin removes a
+    // member from the org: the row stays, stamped, so attribution reads and
+    // an invite accepted by the same identity reactivates it. Null = active.
+    id: '043-member-removed-at',
+    statements: [`alter table members add column if not exists removed_at text`],
+  },
+  {
+    // The org's settings an admin sets (spec §4 Roles, 2026-10-19): who may
+    // invite. One row per org once set; no row = members may.
+    id: '044-org-settings',
+    statements: [
+      `create table org_settings (
+        org_id text primary key,
+        invite_policy text not null default 'members' check (invite_policy in ('members', 'admins')),
+        set_by text not null,
+        set_at text not null
+      )`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

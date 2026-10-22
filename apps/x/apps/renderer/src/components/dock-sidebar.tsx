@@ -1,6 +1,9 @@
 import { SidebarChatContextMenu } from "./sidebar-chat-context-menu"
 "use client"
 
+import { Keys } from '@/components/keys'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { SHORTCUTS, type ShortcutKeys } from '@/lib/shortcuts'
 import { isGroupChat, readLastSpace, resolveSpacesLocation } from '@/lib/spaces-navigation'
 
 import * as React from "react"
@@ -33,6 +36,9 @@ import { Bell,
   Video,
   type LucideIcon,
 } from "lucide-react"
+// Spaces and Chats use Phosphor's chat bubbles (2026-10-22: picked over
+// Lucide's squares after trying Phosphor across the whole sidebar).
+import { ChatCircle, ChatsCircle, type IconProps } from "@phosphor-icons/react"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -99,8 +105,26 @@ import z from "zod"
 // Geometry
 // ---------------------------------------------------------------------------
 
-/** Rail width = horizontal space the content panes leave for it. */
-export const DOCK_GUTTER_PX = 48
+/** The rail floats like the open panel (2026-10-22): 48px wide, 8px in from
+ *  the window's left edge, with an 8px gap before the content. */
+const RAIL_LEFT_PX = 8
+const RAIL_WIDTH_PX = 48
+/** Horizontal space the content panes leave for the rail (inset + rail + gap). */
+export const DOCK_GUTTER_PX = RAIL_LEFT_PX + RAIL_WIDTH_PX + 8
+
+/** Each tile's chord, shown in its tooltip (2026-10-21). */
+const DOCK_SHORTCUTS: Record<string, ShortcutKeys | undefined> = {
+  assistant: SHORTCUTS.assistant,
+  email: SHORTCUTS.email,
+  meetings: SHORTCUTS.meetings,
+  home: SHORTCUTS.todo,
+  brain: SHORTCUTS.brain,
+  workspaces: SHORTCUTS.projects,
+  agents: SHORTCUTS.agents,
+  apps: SHORTCUTS.apps,
+  spaces: SHORTCUTS.spaces,
+  settings: SHORTCUTS.settings,
+}
 const RAIL_BUTTON_PX = 32
 const RAIL_ICON_PX = 18
 
@@ -109,7 +133,7 @@ const RAIL_ICON_PX = 18
 export { LAST_SPACE_STORAGE_KEY } from '@/lib/spaces-navigation'
 
 /** Where flyout panels (Chats / Spaces) sit, just right of the rail. */
-const DOCK_FLYOUT_LEFT_PX = DOCK_GUTTER_PX + 8
+const DOCK_FLYOUT_LEFT_PX = DOCK_GUTTER_PX
 
 // ---------------------------------------------------------------------------
 // Shared shapes (mirrors what App.tsx already passes around)
@@ -517,7 +541,7 @@ function SyncActivityLog({ onErrors }: { onErrors: (errors: Map<string, string>)
 type DockItemDef = {
   key: string
   label: string
-  icon: LucideIcon
+  icon: LucideIcon | React.ComponentType<IconProps>
   /** Shorter name for the ⌥Tab switcher cell, when the full label truncates. */
   switcherLabel?: string
   tourId?: string
@@ -596,6 +620,20 @@ export function DockSidebar({
     if (switcherOnly) closeFlyouts()
   }, [switcherOnly, closeFlyouts])
 
+  // 2026-10-21: when the panel comes back, the rail fades out over 120ms
+  // instead of vanishing in the frame the panel starts sliding in.
+  const [railLeaving, setRailLeaving] = useState(false)
+  const [lastSwitcherOnly, setLastSwitcherOnly] = useState(switcherOnly)
+  if (lastSwitcherOnly !== switcherOnly) {
+    setLastSwitcherOnly(switcherOnly)
+    setRailLeaving(switcherOnly)
+  }
+  useEffect(() => {
+    if (!railLeaving) return
+    const timer = setTimeout(() => setRailLeaving(false), 130)
+    return () => clearTimeout(timer)
+  }, [railLeaving])
+
   // ----- data: account / billing -----
   const [hasOauthError, setHasOauthError] = useState(false)
   const [isRowboatConnected, setIsRowboatConnected] = useState(false)
@@ -605,6 +643,22 @@ export function DockSidebar({
   const appUrl = useRowboatConfig()?.appUrl ?? null
   const { billing, refresh: refreshBilling } = useBilling(isRowboatConnected)
   const currentBillingPlan = billing ? getBillingPlanData(billing.catalog, billing.subscriptionPlanId) : null
+
+  // The avatar at the rail's foot: your first name from the Gmail account,
+  // else from the email address — the same as the panel's footer.
+  const [gmailName, setGmailName] = useState('')
+  useEffect(() => {
+    let cancelled = false
+    window.ipc.invoke('gmail:getAccountName', {})
+      .then((res) => { if (!cancelled && res?.name) setGmailName(res.name) })
+      .catch(() => { /* fall back to the email address */ })
+    return () => { cancelled = true }
+  }, [])
+  const emailName = (billing?.userEmail?.split('@')[0] ?? '').split(/[._+-]/)[0] ?? ''
+  const accountName = gmailName.trim().split(/\s+/)[0]
+    || (emailName ? emailName.charAt(0).toUpperCase() + emailName.slice(1) : '')
+    || (isRowboatConnected ? 'Rowboat' : 'Not signed in')
+  const accountInitial = accountName === 'Not signed in' ? '?' : accountName.charAt(0).toUpperCase()
 
   useEffect(() => {
     let mounted = true
@@ -925,9 +979,8 @@ export function DockSidebar({
   // ----- the item list -----
   const rows = useMemo<DockRow[]>(() => {
     const items: DockRow[] = [
-      // The top section: Assistant (resumes the most recent chat, falling
-      // back to a fresh one — white tile), then Projects and Spaces, then a
-      // divider before the destinations.
+      // Same order as the panel (2026-10-21): Assistant, the daily
+      // destinations, the work tools, Spaces, then Chats and Settings.
       ...(onOpenRun || onNewChat ? [
         {
           item: {
@@ -943,38 +996,6 @@ export function DockSidebar({
           },
         },
       ] : []),
-      {
-        item: {
-          key: 'workspaces', label: 'Projects', icon: Folder, tourId: 'nav-workspaces',
-          running: activeNav === 'workspaces' || activeNav === 'code',
-          onClick: () => { closeFlyouts(); knowledgeActions.openWorkspaceAt() },
-        },
-      },
-      ...(SPACES_ENABLED && (!switcherOnly || totalSpaces > 0) ? [{
-        item: {
-          key: 'spaces', label: 'Spaces', icon: MessagesSquare, tourId: 'nav-spaces',
-          notification: spacesNotification.unread > 0
-            ? (spacesNotification.forYou > 0 ? 'alert' as const : 'muted' as const)
-            : undefined,
-          status: spacesNotification.unread > 0
-            ? `${spacesNotification.unread} unread${spacesNotification.forYou > 0 ? ` · ${spacesNotification.forYou} for you` : ''}`
-            : totalSpaces > 0 ? `${totalSpaces} space${totalSpaces === 1 ? '' : 's'}` : undefined,
-          running: activeNav === 'spaces' || spacesOpen,
-          onClick: () => {
-            if (!openLastSpace() && !switcherOnly) {
-              setChatsOpen(false)
-              setSpacesOpen(true)
-            }
-          },
-          switchTo: () => {
-            if (!openLastSpace() && !switcherOnly) {
-              setChatsOpen(false)
-              setSpacesOpen(true)
-            }
-          },
-        },
-      }] : []),
-      { sep: true as const },
       {
         item: {
           key: 'email', label: 'Email', icon: Mail, tourId: 'nav-email',
@@ -997,6 +1018,13 @@ export function DockSidebar({
       },
       {
         item: {
+          key: 'home', label: 'Todo', icon: ListTodo, tourId: 'nav-home',
+          running: activeNav === 'home',
+          onClick: () => { closeFlyouts(); onOpenHome?.() },
+        },
+      },
+      {
+        item: {
           key: 'brain', label: 'Brain', icon: FileText, tourId: 'nav-knowledge',
           status: knowledgeUpdatedLabel ?? undefined,
           running: activeNav === 'knowledge',
@@ -1005,12 +1033,11 @@ export function DockSidebar({
       },
       {
         item: {
-          key: 'home', label: 'Todo', icon: ListTodo, tourId: 'nav-home',
-          running: activeNav === 'home',
-          onClick: () => { closeFlyouts(); onOpenHome?.() },
+          key: 'workspaces', label: 'Projects', icon: Folder, tourId: 'nav-workspaces',
+          running: activeNav === 'workspaces' || activeNav === 'code',
+          onClick: () => { closeFlyouts(); knowledgeActions.openWorkspaceAt() },
         },
       },
-      { sep: true },
       {
         item: {
           key: 'agents', label: 'Background agents', switcherLabel: 'Agents', icon: Bot, tourId: 'nav-agents',
@@ -1036,10 +1063,34 @@ export function DockSidebar({
           onClick: () => { closeFlyouts(); onOpenApp?.(folder) },
         },
       })),
+      ...(SPACES_ENABLED && (!switcherOnly || totalSpaces > 0) ? [{
+        item: {
+          key: 'spaces', label: 'Spaces', icon: ChatsCircle, tourId: 'nav-spaces',
+          notification: spacesNotification.unread > 0
+            ? (spacesNotification.forYou > 0 ? 'alert' as const : 'muted' as const)
+            : undefined,
+          status: spacesNotification.unread > 0
+            ? `${spacesNotification.unread} unread${spacesNotification.forYou > 0 ? ` · ${spacesNotification.forYou} for you` : ''}`
+            : totalSpaces > 0 ? `${totalSpaces} space${totalSpaces === 1 ? '' : 's'}` : undefined,
+          running: activeNav === 'spaces' || spacesOpen,
+          onClick: () => {
+            if (!openLastSpace() && !switcherOnly) {
+              setChatsOpen(false)
+              setSpacesOpen(true)
+            }
+          },
+          switchTo: () => {
+            if (!openLastSpace() && !switcherOnly) {
+              setChatsOpen(false)
+              setSpacesOpen(true)
+            }
+          },
+        },
+      }] : []),
       { sep: true },
       {
         item: {
-          key: 'chats', label: 'Chats', icon: MessageSquare, tourId: 'nav-chats',
+          key: 'chats', label: 'Chats', icon: ChatCircle, tourId: 'nav-chats',
           running: chatsOpen,
           // Tile click opens the flyout; the switcher lands on all chats.
           onClick: () => { setSpacesOpen(false); setChatsOpen((v) => !v) },
@@ -1209,7 +1260,8 @@ export function DockSidebar({
         if (totalSpaces === 0) return null
         return (
           <>
-            {orgs.flatMap((org) => org.spaces.map((space) => (
+            {/* Archived spaces stay out of the quick picker; the Spaces nav files them under Archived. */}
+            {orgs.flatMap((org) => org.spaces.filter((space) => !space.archived).map((space) => (
               <ContextMenuItem key={`${org.id}/${space.id}`} onClick={() => onOpenSpace?.(org.id, space.id)}>
                 <MessagesSquare className="mr-2 size-3.5 text-muted-foreground" />
                 <span className="truncate">{space.name}</span>
@@ -1284,16 +1336,33 @@ export function DockSidebar({
   // ----- render -----
   return (
     <>
-      {!switcherOnly && (
-      <div data-dock-root="" className="rowboat-dock titlebar-no-drag" style={{ width: DOCK_GUTTER_PX }}>
+      {(!switcherOnly || railLeaving) && (
+      <div data-dock-root="" data-leaving={railLeaving || undefined} className="rowboat-dock titlebar-no-drag" style={{ left: RAIL_LEFT_PX, width: RAIL_WIDTH_PX }}>
         <div
-          className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto px-2 pb-2 pt-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="flex min-h-0 flex-1 flex-col items-center gap-0.5 overflow-y-auto px-2 pb-2 pt-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           onMouseLeave={() => setHoverTip(null)}
         >
+        {/* New chat on top, framed like the panel's New chat button (2026-10-22). */}
+        {onNewChat && (
+          <Tooltip delayDuration={300}>
+            <TooltipTrigger asChild>
+              <button type="button" aria-label="New chat" className="sb-square mb-2" onClick={() => { closeFlyouts(); onNewChat() }}>
+                <SquarePen />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right" sideOffset={12} className="flex items-center gap-2">
+              New chat <Keys keys={SHORTCUTS.newChat} tone="dark" />
+            </TooltipContent>
+          </Tooltip>
+        )}
         {rows.map((row, i) => {
+          // A gap, not a rule, before Chats — as the panel spaces its sections.
           if (row.sep) {
-            return <div key={`sep-${i}`} className="my-1 h-px w-5 shrink-0 bg-border" />
+            return <div key={`sep-${i}`} className="h-2.5 shrink-0" aria-hidden="true" />
           }
+          // Settings lives in the account menu at the rail's foot; the row
+          // stays in `rows` so the ⌥Tab switcher still offers it.
+          if (row.item.key === 'settings') return null
           const item = row.item
           const Icon = item.icon
           const tile = (
@@ -1302,10 +1371,10 @@ export function DockSidebar({
               type="button"
               aria-label={item.label}
               data-tour-id={item.tourId}
+              data-active={item.running || undefined}
               className={cn(
-                'relative flex shrink-0 items-center justify-center rounded-md text-sidebar-foreground/70 transition-colors',
-                'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-                item.running && 'bg-sidebar-accent text-sidebar-accent-foreground',
+                'rowboat-dock-tile relative flex shrink-0 items-center justify-center rounded-lg text-sidebar-foreground/65',
+                'hover:bg-sidebar-accent hover:text-sidebar-foreground',
               )}
               style={{ width: RAIL_BUTTON_PX, height: RAIL_BUTTON_PX }}
               onMouseEnter={(e) => {
@@ -1335,25 +1404,85 @@ export function DockSidebar({
               <ContextMenuContent>{menu}</ContextMenuContent>
             </ContextMenu>
           ) : tile
-          // The Settings tile doubles as the anchor for the sync-activity popover.
-          if (item.key === 'settings') {
-            return (
-              <Popover key="settings-popover" open={syncLogOpen} onOpenChange={setSyncLogOpen}>
-                <PopoverAnchor asChild>{wrapped}</PopoverAnchor>
-                <PopoverContent side="right" align="end" sideOffset={16} className="w-96 p-0">
-                  <div className="border-b p-3">
-                    <h4 className="text-sm font-semibold">Sync Activity</h4>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      {isSyncing || hasServiceErrors ? syncStatusLabel : 'All services up to date'}
-                    </p>
-                  </div>
-                  <SyncActivityLog onErrors={setServiceErrors} />
-                </PopoverContent>
-              </Popover>
-            )
-          }
           return wrapped
         })}
+        </div>
+        {/* The account at the foot (2026-10-22), as in the panel: your avatar
+            opens plan, accounts, sync, tour and Settings. It carries the old
+            Settings tile's "!" as a dot, and anchors the sync log. */}
+        <div className="flex shrink-0 justify-center pb-2 pt-1">
+          <Popover open={syncLogOpen} onOpenChange={setSyncLogOpen}>
+            <PopoverAnchor asChild>
+              <span className="inline-flex">
+                <DropdownMenu>
+                  <Tooltip delayDuration={300}>
+                    <TooltipTrigger asChild>
+                      <DropdownMenuTrigger asChild>
+                        <button type="button" aria-label={`${accountName}: account and settings`} className={cn('sb-avatar-button', isSyncing && 'is-syncing')}>
+                          <span className="sb-avatar" aria-hidden="true">
+                            {accountInitial}
+                            {(outOfCredits || hasOauthError) && <span className={cn('sb-avatar-flag', outOfCredits && 'is-alert')} />}
+                          </span>
+                        </button>
+                      </DropdownMenuTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent side="right" sideOffset={12}>{accountName} · {settingsStatus}</TooltipContent>
+                  </Tooltip>
+                  <DropdownMenuContent side="right" align="end" sideOffset={12} className="sb-menu w-[248px] rounded-xl p-1.5">
+                    <div className="flex items-center gap-2.5 px-2 pb-2 pt-1.5">
+                      <span className="sb-avatar size-8! text-[13px]!" aria-hidden="true">{accountInitial}</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-[13px] font-semibold">{accountName}</div>
+                        <div className="truncate text-[11.5px] text-muted-foreground">{billing?.userEmail ?? 'Not signed in'}</div>
+                      </div>
+                    </div>
+                    {isRowboatConnected ? (
+                      appUrl && (
+                        <DropdownMenuItem onSelect={() => window.open(`${appUrl}?intent=upgrade`)}>
+                          <ArrowUpRight />
+                          {outOfCredits
+                            ? 'Out of credits · Upgrade'
+                            : !billing?.subscriptionPlanId || currentBillingPlan?.category === 'free' || currentBillingPlan?.category === 'starter'
+                              ? `${currentBillingPlan?.displayName ?? 'Free'} plan · Upgrade`
+                              : `${currentBillingPlan?.displayName ?? 'Plan'} · Manage`}
+                        </DropdownMenuItem>
+                      )
+                    ) : (
+                      <DropdownMenuItem disabled={loggingIn} onSelect={() => void handleRowboatLogin()}>
+                        <LogIn />
+                        {loggingIn ? 'Signing in…' : 'Sign in to Rowboat'}
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuItem onSelect={() => setConnectionsSettingsOpen(true)}>
+                      <Plug /> Connect accounts
+                      {hasOauthError && <span className="ml-auto size-1.5 rounded-full bg-amber-500" />}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => setSyncLogOpen(true)}>
+                      <History /> Sync activity
+                    </DropdownMenuItem>
+                    {onStartTour && (
+                      <DropdownMenuItem onSelect={onStartTour}>
+                        <MascotFaceIcon className="size-4" /> Take a tour
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuItem onSelect={() => setSettingsOpen(true)}>
+                      <Settings /> Settings
+                      <Keys keys={SHORTCUTS.settings} className="ml-auto" />
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </span>
+            </PopoverAnchor>
+            <PopoverContent side="right" align="end" sideOffset={16} className="w-96 p-0">
+              <div className="border-b p-3">
+                <h4 className="text-sm font-semibold">Sync Activity</h4>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {isSyncing || hasServiceErrors ? syncStatusLabel : 'All services up to date'}
+                </p>
+              </div>
+              <SyncActivityLog onErrors={setServiceErrors} />
+            </PopoverContent>
+          </Popover>
         </div>
         {(() => {
           // The status tooltip, rendered as a fixed sibling so the scroll
@@ -1364,12 +1493,16 @@ export function DockSidebar({
           if (!row || row.sep) return null
           const item = row.item
           if ((item.key === 'chats' && chatsOpen) || (item.key === 'spaces' && spacesOpen)) return null
+          const tipKeys = DOCK_SHORTCUTS[item.key]
           return (
             <span
               className="rowboat-dock-tip"
-              style={{ left: DOCK_GUTTER_PX + 8, top: hoverTip.centerY, padding: item.status ? '6px 12px' : '4px 10px' }}
+              style={{ left: DOCK_GUTTER_PX, top: hoverTip.centerY, padding: item.status ? '6px 12px' : '4px 10px' }}
             >
-              <span>{item.label}</span>
+              <span className="flex items-center gap-2">
+                {item.label}
+                {tipKeys && <Keys keys={tipKeys} tone="dark" />}
+              </span>
               {item.status && (
                 <span className={cn('rowboat-dock-tip-status', item.statusAlert && 'rowboat-dock-tip-status-alert')}>
                   {item.status}
@@ -1451,7 +1584,7 @@ export function DockSidebar({
       {/* First-time-action credit rewards (feature-flagged, signed-in only).
           The expanded panel carries its own copy, so dock mode only. */}
       {!switcherOnly && (
-      <div className="titlebar-no-drag fixed bottom-2 z-30 w-60" style={{ left: DOCK_GUTTER_PX + 8 }}>
+      <div className="titlebar-no-drag fixed bottom-2 z-30 w-60" style={{ left: DOCK_GUTTER_PX }}>
         <SidebarCreditRewards
           onOpenEmail={onOpenEmail}
           onOpenMeetings={onOpenMeetings}
@@ -1905,7 +2038,7 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, 
           </button>
         )
       })()}
-      {org.spaces.map((space) => {
+      {org.spaces.filter((space) => !space.archived).map((space) => {
         const active = activeSpace?.orgId === org.id && activeSpace.spaceId === space.id
         const badge = unread.get(`${org.id}/${space.id}`) ?? NO_BADGE
         if (renamingId === space.id) {

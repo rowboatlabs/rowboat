@@ -10,13 +10,23 @@ export const LAST_SPACE_STORAGE_KEY = 'x:last-space'
  * of the location too, so re-entering the section restores the whole thing
  * rather than dropping the reader back on the stream.
  */
+/**
+ * The org-level surfaces that replace a space in the pane: Activity, Browse
+ * spaces, and Agents (2026-10-21, every agent in the org).
+ */
+export type OrgView = 'activity' | 'browse' | 'agents'
+
+export function isOrgView(value: unknown): value is OrgView {
+    return value === 'activity' || value === 'browse' || value === 'agents'
+}
+
 export type SpaceLocation = {
     orgId: string
     spaceId: string
     /** What was open inside the space (a discussion, a file, a board). */
     rail?: RailSelection
-    /** An org-level surface instead of a space (spaceId is '' then): Activity. */
-    view?: 'activity' | 'browse'
+    /** An org-level surface instead of a space (spaceId is '' then). */
+    view?: OrgView
 }
 
 /**
@@ -60,7 +70,7 @@ function readLocation(previous: unknown): SpaceLocation | null {
     const { orgId, spaceId, rail, view } = previous as Partial<SpaceLocation>
     if (typeof orgId !== 'string' || typeof spaceId !== 'string') return null
     const checked = rail ? readRailSelection(rail) : undefined
-    return { orgId, spaceId, ...(checked && checked.kind !== 'general' ? { rail: checked } : {}), ...(view === 'activity' || view === 'browse' ? { view } : {}) }
+    return { orgId, spaceId, ...(checked && checked.kind !== 'general' ? { rail: checked } : {}), ...(isOrgView(view) ? { view } : {}) }
 }
 
 /**
@@ -75,10 +85,10 @@ export function readLastSpace(): unknown {
 
 /**
  * The org link landings (Harbor http.ts) hand a browser-opened link into the
- * app as rowboat://open?type=spaces&org=<address>&…: a space, a file in it, a
- * message in it (root or reply), or a person. What they name is resolved
- * before navigating — the org by address from the signed-in list, a reply's
- * thread from the org, a person's DM created on first use.
+ * app as rowboat://open?type=spaces&org=<address>&…, and into the web app as
+ * its /open with the same query (2026-10-13): a space, a file in it, a
+ * message in it (root or reply), a person, or an invite. What they name is
+ * resolved before navigating (spaces-link-open.ts).
  */
 export interface SpacesLinkTarget {
   orgAddress: string

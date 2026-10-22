@@ -10,7 +10,7 @@ import { Composer, type AgentOptions } from '@/components/spaces/composer'
 import { ForwardDialog } from '@/components/spaces/forward-dialog'
 import { DayDivider, MessageRow, NewDivider, TypingIndicator, type ThreadRowData } from '@/components/spaces/message-row'
 import { MembershipLine } from '@/components/spaces/membership-line'
-import type { SpacePresence, StreamState } from '@/hooks/use-space-chat'
+import type { ChatMessage, SpacePresence, StreamState } from '@/hooks/use-space-chat'
 import {
     STREAM_READ_KEY, ingestStreamMessage, jumpToLatest, loadNewerStreamMessages,
     loadOlderStreamMessages, loadStreamAround, prefetchThread, removeStreamMessage, updateStreamMessage,
@@ -46,10 +46,52 @@ import { toast } from '@/lib/toast'
 import { toast as notify } from 'sonner'
 import * as analytics from '@/lib/analytics'
 import { containsRowboatAddress } from '@/lib/spaces-mentions'
+import { directAvatarId, isSelfDirect } from '@/lib/spaces-direct'
 
 // The space's one stream: ROOT messages in order; each message's flat thread
 // lives behind its reply chip (annotation model — replying creates nothing,
 // a Discussion is a deliberate annotation on a thread).
+
+/** More new rows than this in one update is a catch-up (reconnect, resync), not live arrival. */
+const LIVE_ARRIVAL_MAX = 3
+
+/**
+ * Spaces redesign (2026-10-21): which rows arrived LIVE at the tail, so only
+ * those play the rise-in. Everything present when the stream first paints is
+ * the baseline; after that a new id counts when it lands past the newest
+ * offset seen (an older page prepends below it, so it never counts), the
+ * window is attached to the tail, and few enough rows came at once. The
+ * viewer's own confirmed send is skipped: its pending echo already rose in,
+ * and the confirm only swaps the id. Kept as state adjusted during render
+ * (React's "derive from props" pattern), keyed by the ids on screen.
+ */
+type Arrivals = { key: string; ids: string; seen: ReadonlySet<string>; live: ReadonlySet<string>; maxOffset: number }
+const settledMax = (ms: ChatMessage[]) => ms.reduce((max, m) => (!m.pending && !m.failed && m.offset > max ? m.offset : max), 0)
+function nextArrivals(cur: Arrivals | null, messages: ChatMessage[], key: string, ids: string, detached: boolean, selfMemberId: string): Arrivals {
+    if (!cur || cur.key !== key) return { key, ids, seen: new Set(messages.map((m) => m.id)), live: new Set(), maxOffset: settledMax(messages) }
+    const fresh = messages.filter((m) => !cur.seen.has(m.id))
+    if (fresh.length === 0) return { ...cur, ids }
+    const seen = new Set(cur.seen)
+    for (const m of fresh) seen.add(m.id)
+    const live = new Set(cur.live)
+    if (!detached && fresh.length <= LIVE_ARRIVAL_MAX) {
+        for (const m of fresh) {
+            const ownConfirm = !m.pending && m.author.memberId === selfMemberId && m.author.actingMode === 'direct'
+            if (!ownConfirm && (m.pending || m.offset > cur.maxOffset)) live.add(m.id)
+        }
+    }
+    return { key, ids, seen, live, maxOffset: Math.max(cur.maxOffset, settledMax(fresh)) }
+}
+function useLiveArrivals(messages: ChatMessage[], key: string, ready: boolean, detached: boolean, selfMemberId: string): ReadonlySet<string> {
+    const [arrivals, setArrivals] = useState<Arrivals | null>(null)
+    if (!ready) return arrivals?.key === key ? arrivals.live : EMPTY_IDS
+    const ids = messages.map((m) => m.id).join('\n')
+    if (arrivals && arrivals.key === key && arrivals.ids === ids) return arrivals.live
+    const next = nextArrivals(arrivals, messages, key, ids, detached, selfMemberId)
+    setArrivals(next)
+    return next.live
+}
+const EMPTY_IDS: ReadonlySet<string> = new Set()
 
 /** The first frame renders a short tail — markdown is the paint cost; the full window follows right after. */
 const FIRST_PAINT_CAP = 16
@@ -67,7 +109,7 @@ const AUTO_POST_HOLD_MS = 5_000
 const shortLabel = (label: string, max = 40): string => (label.length > max ? `${label.slice(0, max - 1)}…` : label)
 
 export function GeneralStream({
-    org, space, stream, presence, memberNames, onOpenThread, onOpenSession, onClose, visible = true, composeActive = true, showHeader = true,
+    org, space, stream, presence, memberNames, onOpenThread, openThreadId, onOpenSession, onClose, visible = true, composeActive = true, showHeader = true,
 }: {
     org: OrgWithSpaces
     space: spaces.Space
@@ -76,6 +118,8 @@ export function GeneralStream({
     memberNames: Map<string, string>
     /** Open a thread pane on this root (replying to a fresh message included — no draft state exists). */
     onOpenThread: (rootMessageId: string) => void
+    /** The root of the thread open beside the stream — its reply line stays tinted (spaces redesign, 2026-10-21). */
+    openThreadId?: string | null
     /** Navigate to a chat session — the working strip's "Open chat" affordance. */
     onOpenSession?: (sessionId: string) => void
     /** Set while a doc column sits beside the chat: closes THIS column, the doc takes the width. */
@@ -91,7 +135,7 @@ export function GeneralStream({
     /** The content strip already labels a lone stream; split panes retain their headings. */
     showHeader?: boolean
 }) {
-    const { member } = useSpaceAccess()
+    const { member, writable } = useSpaceAccess()
     const [seed, setSeed] = useState<{ text: string; nonce: number; append?: boolean } | null>(null)
     const scrollRef = useRef<HTMLDivElement | null>(null)
     const bottomRef = useRef<HTMLDivElement | null>(null)
@@ -317,10 +361,10 @@ export function GeneralStream({
     const holdsRef = useRef(new Map<number, { timer: number; fire: () => void }>())
     const holdSeqRef = useRef(0)
     useEffect(() => {
-        if (member) return
+        if (writable) return
         for (const hold of holdsRef.current.values()) window.clearTimeout(hold.timer)
         holdsRef.current.clear()
-    }, [member])
+    }, [writable])
     const holdThenPostInThread = (rootMessageId: string, body: string, agent?: AgentOptions) => {
         const label = threadLabelFor(rootMessageId)
         const id = ++holdSeqRef.current
@@ -719,6 +763,7 @@ export function GeneralStream({
         if (!detached) setRenderCap((c) => Math.max(c, streamMessages.length + 10))
     }
     const hiddenCount = detached ? 0 : Math.max(0, streamMessages.length - renderCap)
+    const arrivingIds = useLiveArrivals(streamMessages, memoryKey, stream.ready, detached, org.memberId)
     const visibleMessages = hiddenCount > 0 ? streamMessages.slice(hiddenCount) : streamMessages
 
     // "Earlier" is one gesture with two gears: locally-hidden rows reveal
@@ -941,6 +986,8 @@ export function GeneralStream({
                 spaceNames={spaceNames}
                 continuation={isContinuation(prev, message)}
                 thread={thread}
+                threadOpen={!!thread && thread.rootMessageId === openThreadId}
+                arriving={arrivingIds.has(message.id)}
                 selfMemberId={org.memberId}
                 onOpenThread={onOpenThread}
                 onPrefetchThread={(id) => prefetchThread(org.id, space.id, id)}
@@ -1094,10 +1141,10 @@ export function GeneralStream({
                 )
             })()}
             </div>
-            {member && forwarding && (
+            {writable && forwarding && (
                 <ForwardDialog org={org} space={space} message={forwarding} memberNames={memberNames} onClose={() => setForwarding(null)} />
             )}
-            {member && <PollDialogHost openRef={openPollRef} onSubmit={createPoll} />}
+            {writable && <PollDialogHost openRef={openPollRef} onSubmit={createPoll} />}
             {picking && (
                 <ThreadPickerDialog
                     candidates={collectRouteCandidates(org.id, space.id, stream, memberNames, spaceNames)}
@@ -1133,8 +1180,12 @@ export function GeneralStream({
                     chips={tagChips}
                 />
             )}
-            {member ? <Composer
-                placeholder={LOCAL_RUNTIME ? `Message ${space.name} — @rowboat to ask your agent` : `Message ${space.name}`}
+            {writable ? <Composer
+                // Spaces redesign (2026-10-21): the @rowboat hint moved to the composer's
+                // Ask Rowboat chip, so the placeholder just names where you're writing.
+                placeholder={space.kind === 'direct'
+                    ? (isSelfDirect(space, org.memberId) ? 'Note to self' : `Message ${memberNames.get(directAvatarId(space, org.memberId)) ?? 'them'}`)
+                    : `Message #${space.name}`}
                 busy={routing}
                 draftKey={memoryKey}
                 onSend={post}
@@ -1166,7 +1217,7 @@ export function GeneralStream({
                         hint: 'Copy an invite link to this space',
                         run: async () => {
                             try {
-                                const result = await invokeSpace('spaces:createInvite', { orgId: org.id, spaceId: space.id })
+                                const result = await invokeSpace('spaces:createInvite', { orgId: org.id, spaceIds: [space.id] })
                                 await navigator.clipboard.writeText(result.link)
                                 analytics.spacesInviteLinkCopied()
                                 toast('Invite link copied to clipboard', 'success')

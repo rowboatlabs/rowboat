@@ -39,9 +39,11 @@ it('routes actions to their originating conversation even when another chat is a
   expect(actions.get('a')!.stop).not.toHaveBeenCalled()
   expect(actions.get('b')!.permission).toHaveBeenCalledWith('tool', 'allow')
   expect(actions.get('b')!.answer).toHaveBeenCalledWith('question', 'answer')
-  expect(second.getByLabelText('Move to sidebar')).toBeVisible()
-  expect(second.getByLabelText('Move to Assistant')).toBeVisible()
-  expect(second.queryByLabelText('Move to floating window')).not.toBeInTheDocument()
+  // Moving lives in the ⋯ menu (2026-10-22): the other two places, not this one.
+  fireEvent.pointerDown(second.getByLabelText('Chat options'), { button: 0, ctrlKey: false, pointerType: 'mouse' })
+  expect(await screen.findByRole('menuitem', { name: 'Move to sidebar' })).toBeVisible()
+  expect(screen.getByRole('menuitem', { name: 'Open in Assistant' })).toBeVisible()
+  expect(screen.queryByRole('menuitem', { name: 'Pop out as a window' })).not.toBeInTheDocument()
   expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
 })
 
@@ -60,5 +62,5 @@ it('seats the container controls at the end of its header row', () => {
   const header = document.querySelector('[data-chat-header]') as HTMLElement
   const close = within(header).getByLabelText('Close sidebar')
   expect(header.lastElementChild).toBe(close)
-  expect(within(header).getByLabelText('Move to floating window').compareDocumentPosition(close) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(within(header).getByLabelText('Chat options').compareDocumentPosition(close) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 })

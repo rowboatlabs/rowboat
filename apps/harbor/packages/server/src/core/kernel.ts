@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { monotonicFactory } from 'ulid';
 import { HarborError } from '../errors.js';
 import type { SpaceHub } from '../hub.js';
-import { canAccessSpace, canReadSpace, canWrite, enforce } from '../policy.js';
+import { canAccessSpace, canReadSpace, canWrite, canWriteSpace, enforce } from '../policy.js';
 import type { Store, StoredEvent } from '../store.js';
 
 // The transactional core every aggregate is built on: the store and the hub,
@@ -73,14 +73,24 @@ export class Kernel {
     return space;
   }
 
+  /**
+   * Whether the caller is in the org now: a member row that was neither
+   * deactivated nor removed (2026-10-19). A removed member's open socket
+   * still names them, so browsing open spaces asks this, not the row alone.
+   */
+  async isActiveOrgMember(ctx: ActorCtx): Promise<boolean> {
+    const member = await this.store.getMember(ctx.memberId);
+    return !!member && member.deactivatedAt === undefined && member.removedAt === undefined;
+  }
+
   async requireOrgMember(ctx: ActorCtx): Promise<void> {
-    if (!(await this.store.getMember(ctx.memberId))) throw new HarborError('not_a_member', 'you are not a member of this org');
+    if (!(await this.isActiveOrgMember(ctx))) throw new HarborError('not_a_member', 'you are not a member of this org');
   }
 
   async requireReadableSpace(ctx: ActorCtx, spaceId: string): Promise<Space> {
     const space = await this.requireSpace(spaceId);
     const membership = await this.store.getMembership(spaceId, ctx.memberId);
-    const orgMember = membership ? true : !!(await this.store.getMember(ctx.memberId));
+    const orgMember = membership ? true : await this.isActiveOrgMember(ctx);
     enforce(canReadSpace(space, membership, orgMember));
     return space;
   }
@@ -121,12 +131,24 @@ export class Kernel {
    * event. Same rule as the gate (policy.ts canAccessSpace), never a second
    * one. Acts that create the membership themselves (createSpace, openDirect,
    * acceptInvite) and operator passes use `locked`.
+   *
+   * It also refuses a write to an archived space (2026-10-13, policy.ts
+   * canWriteSpace), here rather than in each method so a new write path
+   * cannot forget it, and inside the transaction so a write that waited
+   * behind the archive is refused. Leave and unarchive pass
+   * `{ archived: 'allow' }`; archive does too, so archiving twice is a no-op.
    */
-  async lockedAs<T>(ctx: ActorCtx, spaceId: string, fn: (membership: Membership) => Promise<T>): Promise<T> {
+  async lockedAs<T>(
+    ctx: ActorCtx,
+    spaceId: string,
+    fn: (membership: Membership) => Promise<T>,
+    opts: { archived?: 'allow' } = {},
+  ): Promise<T> {
     return this.locked(spaceId, async () => {
       const space = await this.requireSpace(spaceId);
       const membership = await this.store.getMembership(spaceId, ctx.memberId);
       enforce(canAccessSpace(space, membership));
+      if (opts.archived !== 'allow') enforce(canWriteSpace(space));
       return fn(membership!);
     });
   }

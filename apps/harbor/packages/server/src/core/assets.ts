@@ -21,6 +21,7 @@ import { blobHash, type BlobStore } from '../blobs.js';
 import { HarborError } from '../errors.js';
 import { merge3 } from '../merge.js';
 import { dispositionFor, imageDimensions, resolveMime } from '../mime.js';
+import { canWriteSpace, enforce } from '../policy.js';
 import type { AssetRecord, AssetVersionData } from '../store.js';
 import { Kernel, type ActorCtx } from './kernel.js';
 
@@ -319,7 +320,8 @@ export class Assets {
     bytes: Uint8Array,
     opts: { declaredSha256: string; declaredMime?: string },
   ): Promise<BlobInfo> {
-    await this.k.requireMember(ctx, spaceId);
+    // Refused before the bytes are stored, not only at the lock (2026-10-13).
+    enforce(canWriteSpace(await this.k.requireMember(ctx, spaceId)));
     this.k.guardWrite();
     const blobs = this.requireBlobStore();
     const hash = blobHash(bytes);

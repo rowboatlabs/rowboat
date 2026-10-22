@@ -1,8 +1,11 @@
-import { setSpacePreview } from '@/lib/spaces-access'
+import { memberLabel } from '@/lib/spaces-direct'
+import { setSpaceArchived, setSpacePreview } from '@/lib/spaces-access'
 import { invalidateSpaceDirectory, updateDirectoryMembership, loadSpaceDirectory, getDirectorySpace } from '@/hooks/use-space-directory'
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import type { spaces } from '@x/shared'
 import { subscribeSpacesFeed } from '@/lib/spaces-feed'
+import { refreshOrgRoster } from '@/hooks/use-space-members'
+import { refreshOrgSettings } from '@/hooks/use-org-settings'
 import { SPACES_ENABLED } from '@/lib/feature-flags'
 import { getSpaceReadState, loadUnread, dropSpaceReadState } from '@/lib/spaces-read-state'
 
@@ -81,7 +84,8 @@ export function refreshSpacesOrgs(): Promise<void> {
                             if (!who) return
                             try {
                                 const { members } = await window.ipc.invoke('spaces:listMembers', { orgId: org.id, spaceId: dm.id })
-                                const name = members.find((m) => m.id === who)?.displayName ?? who
+                                const other = members.find((m) => m.id === who)
+                                const name = other ? memberLabel(other) : who
                                 directLabels[dm.id] = self ? `${name} (you)` : name
                             } catch {
                                 directLabels[dm.id] = previous?.directLabels[dm.id] ?? (self ? 'You' : who)
@@ -106,6 +110,7 @@ export function refreshSpacesOrgs(): Promise<void> {
                     }
                 }
                 for (const id of current) setSpacePreview(org.id, id, false)
+                for (const space of org.spaces) setSpaceArchived(org.id, space.id, space.archived === true)
             }
             orgsState = { orgs: withSpaces, loading: false }
             orgsRefreshedAt = Date.now()
@@ -461,8 +466,15 @@ function wireFeedBus(): void {
             return
         }
         if (frame.kind === 'org_changed') {
-            // A group chat became a workspace (2026-10-07): the listing carries the new shape.
+            // A group chat became a workspace (2026-10-07): the listing carries
+            // the new shape. Since 2026-10-19 also an admin's act — a role, the
+            // invite policy, a visibility, a removal — so the roster and the
+            // org's settings come again too.
             void refreshSpacesOrgs()
+            refreshOrgRoster(event.orgId)
+            void refreshOrgSettings(event.orgId)
+            invalidateSpaceDirectory(event.orgId)
+            void loadSpaceDirectory(event.orgId)
             return
         }
         if (frame.kind === 'space_added') {
@@ -479,6 +491,20 @@ function wireFeedBus(): void {
         if (frame.kind !== 'event') return
         // A rename lands as a durable event on the space's log — refresh the
         // org listing so the sidebar label follows on every device.
+        // Archived or back (harbor #1186, 2026-10-14): the event carries the
+        // row, so the sidebar and the space's write lock move before the refetch.
+        // A default flag or a visibility change (2026-10-19) carries the row the same way.
+        if (frame.event.type === 'space_archived' || frame.event.type === 'space_unarchived' || frame.event.type === 'space_default_changed' || frame.event.type === 'space_visibility_changed') {
+            const updated = frame.event.space
+            setSpaceArchived(event.orgId, updated.id, updated.archived === true)
+            orgsState = { ...orgsState, orgs: orgsState.orgs.map(o => o.id !== event.orgId ? o : {
+                ...o, spaces: o.spaces.map(s => s.id === updated.id ? updated : s),
+            }) }
+            emitOrgs()
+            void refreshSpacesOrgs()
+            invalidateSpaceDirectory(event.orgId)
+            void loadSpaceDirectory(event.orgId)
+        }
         if (frame.event.type === 'space_renamed') {
             void refreshSpacesOrgs()
             invalidateSpaceDirectory(event.orgId)

@@ -14,6 +14,7 @@ import { useOrgRoster, useSpaceMembers } from '@/hooks/use-space-members'
 import { useSpacesOrgs } from '@/hooks/use-spaces'
 import { assetWireUrl } from '@/lib/spaces-presentation'
 import { byRank, matchRank } from '@/lib/mention-rank'
+import { isDeparted } from '@/lib/spaces-direct'
 
 // The @ autocomplete behind every mention surface — the composer and the
 // inline message editor. The hook owns the popup's whole lifecycle off the
@@ -109,11 +110,12 @@ export function useMentionAutocomplete(editor: Editor | null) {
         // is a substring of most ULIDs and would drown the files below.
         // Ranking stays inside each group: this space's people still lead the org's.
         const rank = (m: spaces.Member) => (!q || m.id.toLowerCase().startsWith(q) ? 0 : matchRank(m.displayName, q))
-        people.push(...byRank(spaceMembers.map((m) => {
+        // Nobody names a deleted account (2026-10-13); a DM keeps one as a member.
+        people.push(...byRank(spaceMembers.filter((m) => !isDeparted(m)).map((m) => {
             const hint = m.id === selfMemberId ? 'you' : m.kind === 'agent' ? agentLabel(m.agentKind, m.agentConnection) : undefined
             return { row: { id: m.id, label: m.displayName, ...(hint ? { hint } : {}) }, rank: rank(m) }
         })))
-        people.push(...byRank(orgRoster.filter((m) => !inSpace.has(m.id)).map((m) => {
+        people.push(...byRank(orgRoster.filter((m) => !inSpace.has(m.id) && !isDeparted(m)).map((m) => {
             const hint = m.kind === 'agent' ? `${agentLabel(m.agentKind, m.agentConnection)} · not in this space` : 'not in this space'
             return { row: { id: m.id, label: m.displayName, hint }, rank: rank(m) }
         })))

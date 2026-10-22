@@ -23,6 +23,7 @@ import { fetchLinkPreview, peekLinkPreview, previewUrls } from '@/lib/spaces/lin
 const TAIL_ROWS = 8;
 const TAIL_WAIT_MS = 700;
 import { SpacesClient } from '@/lib/spaces/client';
+import { isDeparted, memberLabel, useProfiles } from '@/lib/spaces/profiles';
 import { SpacesLive } from '@x/spaces-client';
 import { useColors } from '@/theme/colors';
 
@@ -47,7 +48,8 @@ export default function SpaceChatScreen() {
   const streamCacheKey = `stream:${org}:${space}`;
   const [messages, setMessages] = useState<Message[] | null>(() => peekValue<Message[]>(streamCacheKey) ?? null);
   const [members, setMembers] = useState<Map<string, Member>>(() => new Map((peekRoster(org, space) ?? []).map((m) => [m.id, m])));
-  const memberNames = useMemo(() => new Map([...members].map(([id, m]) => [id, m.displayName])), [members]);
+  const profiles = useProfiles(client, members);
+  const memberNames = useMemo(() => new Map([...profiles].map(([id, m]) => [id, memberLabel(m)])), [profiles]);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [actionMessage, setActionMessage] = useState<Message | null>(null);
@@ -470,7 +472,7 @@ export default function SpaceChatScreen() {
             <MessageRow
               key={m.id}
               message={m}
-              member={members.get(m.author.memberId)}
+              member={profiles.get(m.author.memberId)}
               memberNames={memberNames}
               me={me}
               onToggleReaction={toggleReaction}
@@ -517,7 +519,7 @@ export default function SpaceChatScreen() {
         <SpaceComposer
           ref={composerRef}
           placeholder={`Message #${title ?? ''}`}
-          members={[...members.values()]}
+          members={[...members.values()].filter((m) => !isDeparted(m))}
           me={me}
           sending={sending}
           onSend={(body) => void send(body)}

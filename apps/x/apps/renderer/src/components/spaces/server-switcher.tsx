@@ -1,9 +1,15 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { orgUrl } from '@x/shared/dist/spaces.js'
 import { copySpacesLink } from '@/lib/spaces-copy-link'
-import { Bot, Check, ChevronsUpDown, Hash, Link as LinkIcon, LogIn, Plus, Trash2 } from 'lucide-react'
+import { Bot, Check, ChevronsUpDown, Hash, Link as LinkIcon, LogIn, Plus, Trash2, UserPlus } from 'lucide-react'
 import { OrgMonogram } from '@/components/spaces/atoms'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import {
+    DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator,
+    DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { useOrgRoster } from '@/hooks/use-space-members'
+import { setInvitePolicy, useOrgSettings } from '@/hooks/use-org-settings'
+import { toast } from '@/lib/toast'
 import { useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { isGroupChat, serverLandingSpaceId } from '@/lib/spaces-navigation'
 import { openServerDialog } from '@/lib/server-dialog'
@@ -11,9 +17,11 @@ import { AddChannelDialog } from './add-channel-dialog'
 import { AgentsDialog } from './agents-dialog'
 import { RemoveServerDialog } from './remove-server-dialog'
 
-export function ServerSwitcher({ org, onOpenSpace, onMenuOpenChange }: {
+export function ServerSwitcher({ org, onOpenSpace, onOpenAgents, onMenuOpenChange }: {
     org: OrgWithSpaces
     onOpenSpace: (orgId: string, spaceId: string) => void
+    /** The Agents page (2026-10-21); without it, Agents opens the dialog. */
+    onOpenAgents?: (orgId: string) => void
     onMenuOpenChange?: (open: boolean) => void
 }) {
     const { orgs, refresh } = useSpacesOrgs()
@@ -21,6 +29,16 @@ export function ServerSwitcher({ org, onOpenSpace, onMenuOpenChange }: {
     const [confirmRemove, setConfirmRemove] = useState(false)
     const [agentsOpen, setAgentsOpen] = useState(false)
     const [addingChannel, setAddingChannel] = useState(false)
+    // Who may create invite links is the org's admins' to set (harbor admin controls, 2026-10-19).
+    const spaceIds = useMemo(() => org.spaces.map((s) => s.id), [org.spaces])
+    const isAdmin = useOrgRoster(org.id, spaceIds).find((m) => m.id === org.memberId)?.role === 'admin'
+    const { invitePolicy } = useOrgSettings(org.id)
+    const changeInvitePolicy = (next: string) => {
+        if (next !== 'members' && next !== 'admins') return
+        setInvitePolicy(org.id, next).catch((err: unknown) => {
+            toast(err instanceof Error ? err.message : 'Could not change who can invite', 'error')
+        })
+    }
     const openServer = (server: OrgWithSpaces, spaceId?: string) => {
         onOpenSpace(server.id, spaceId ?? serverLandingSpaceId(server))
     }
@@ -53,6 +71,7 @@ export function ServerSwitcher({ org, onOpenSpace, onMenuOpenChange }: {
                 <DropdownMenuItem onSelect={(event) => {
                     event.preventDefault()
                     setMenuOpen(false)
+                    if (onOpenAgents) return onOpenAgents(org.id)
                     setAgentsOpen(true)
                     onMenuOpenChange?.(true)
                 }}><Bot className="size-4" /> Agents and bots</DropdownMenuItem>
@@ -62,6 +81,15 @@ export function ServerSwitcher({ org, onOpenSpace, onMenuOpenChange }: {
                     setAddingChannel(true)
                     onMenuOpenChange?.(true)
                 }}><Hash className="size-4" /> Add a channel</DropdownMenuItem>}
+                {isAdmin && <DropdownMenuSub>
+                    <DropdownMenuSubTrigger><UserPlus className="size-4" /> Who can invite</DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent>
+                        <DropdownMenuRadioGroup value={invitePolicy} onValueChange={changeInvitePolicy}>
+                            <DropdownMenuRadioItem value="members">Everyone</DropdownMenuRadioItem>
+                            <DropdownMenuRadioItem value="admins">Admins only</DropdownMenuRadioItem>
+                        </DropdownMenuRadioGroup>
+                    </DropdownMenuSubContent>
+                </DropdownMenuSub>}
                 <DropdownMenuSeparator />
                 {/* The dialogs are hosted once in App (lib/server-dialog.ts); a finished one lands in the new server itself. */}
                 <DropdownMenuItem onSelect={() => openServerDialog({ kind: 'create' })}><Plus className="size-4" /> Create a group chat</DropdownMenuItem>

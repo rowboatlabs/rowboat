@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import * as oauthClient from '../auth/oauth-client.js';
 import { ensureRowboatSession } from '../auth/oauth-flows.js';
 import { getSessionAccessToken, readSession } from '../auth/tokens.js';
-import { SpacesClient, SpacesRequestError } from '@x/spaces-client';
+import { parseInviteLink, SpacesClient, SpacesRequestError } from '@x/spaces-client';
 import {
   applyManagedListing,
   dropSessionOrgs,
@@ -44,17 +44,6 @@ const SCOPES = ['openid', 'email', 'profile'];
 const DANCE_TIMEOUT_MS = 5 * 60_000;
 
 export type OpenBrowser = (url: string) => Promise<void> | void;
-
-export function parseInviteLink(url: string): { baseUrl: string; token: string } | null {
-  try {
-    const u = new URL(url.trim());
-    const match = u.pathname.match(/^\/join\/([^/]+)$/);
-    if (!match?.[1]) return null;
-    return { baseUrl: u.origin, token: match[1] };
-  } catch {
-    return null;
-  }
-}
 
 /** The org's RFC 9728 metadata names its AS; absence means dev auth. */
 export async function discoverOrgIssuer(baseUrl: string): Promise<string | null> {
@@ -349,6 +338,14 @@ export async function resolveInviteLink(url: string): Promise<{ baseUrl: string;
 }
 
 /**
+ * Who the accept made us. An invite that joined no space (2026-10-19: an org
+ * with no default, nothing listed) carries no membership to read it from.
+ */
+async function memberIdAfterAccept(client: SpacesClient, result: AcceptInviteResult): Promise<string> {
+  return result.membership?.memberId ?? (await client.me()).member.id;
+}
+
+/**
  * The full join: parse → identity (the account session for a managed org —
  * signing in to Rowboat once if there is none; this install's own dance for
  * a foreign org it has no working auth on) → accept (the bind ceremony
@@ -385,7 +382,7 @@ export async function joinViaInviteLink(input: {
       name: health.org.name,
       address: health.org.address,
       issuer,
-      memberId: result.membership.memberId,
+      memberId: await memberIdAfterAccept(client, result),
     });
     invalidateManagedOrgsSync();
     return { org, result };
@@ -401,7 +398,7 @@ export async function joinViaInviteLink(input: {
     address: health.org.address,
     issuer: dance.issuer,
     clientId: dance.clientId,
-    memberId: result.membership.memberId,
+    memberId: await memberIdAfterAccept(client, result),
     tokens: dance.tokens,
   });
   return { org, result };

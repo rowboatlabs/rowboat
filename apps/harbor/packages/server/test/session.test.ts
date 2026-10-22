@@ -90,6 +90,15 @@ describe('the session cookie on an org', () => {
     expect(res.headers.get('content-disposition')).toBe('attachment; filename="note.txt"');
   });
 
+  it('serves a name outside Latin-1, like a macOS screenshot, in filename*', async () => {
+    const name = 'Screenshot 2026-10-06 at 6.20.42 PM.txt';
+    const res = await fetch(`${harbor.url}/v1/spaces/${spaceId}/blobs/${hash}?name=${encodeURIComponent(name)}`, { headers: { cookie } });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-disposition')).toBe(
+      `attachment; filename="Screenshot 2026-10-06 at 6.20.42?PM.txt"; filename*=UTF-8''${encodeURIComponent(name)}`,
+    );
+  });
+
   it('loses to a bearer: the header always wins', async () => {
     const res = await fetch(`${harbor.url}/v1/spaces`, { headers: { cookie: 'harbor_session=dev-nobody', origin: WEB, authorization: 'Bearer dev-ramnique' } });
     expect(res.status).toBe(200);

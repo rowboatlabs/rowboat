@@ -26,6 +26,8 @@ beforeAll(async () => {
       { id: 'ramnique', displayName: 'Ramnique' },
       { id: 'gagan', displayName: 'Gagan' },
     ],
+    // A seed space's creator is the org's admin, who may archive and delete.
+    seedSpaces: [{ name: 'Lobby', creator: 'ramnique' }],
   });
   harbor = { ...started, close: async () => { await started.close(); await db.close(); } };
   const client = new SpacesClient({ baseUrl: harbor.url, token: 'dev-ramnique' });
@@ -80,7 +82,7 @@ describe('harborChannelHandlers', () => {
   });
 
   it('resolves an invite before the org is added, by its base URL alone', async () => {
-    const invite = await table['spaces:createInvite']({ orgId, spaceId });
+    const invite = await table['spaces:createInvite']({ orgId, spaceIds: [spaceId] });
     const resolved = await table['spaces:resolveInvite']({ baseUrl: harbor.url, token: invite.token });
     expect(resolved).toMatchObject({ state: 'ok', space: { id: spaceId } });
   });
@@ -88,6 +90,38 @@ describe('harborChannelHandlers', () => {
   it('passes the activity query on without the org id', async () => {
     const page = await table['spaces:getActivity']({ orgId, unread: true });
     expect(Array.isArray(page.items)).toBe(true);
+  });
+
+  it('archives, unarchives and deletes a space', async () => {
+    const { space } = await table['spaces:createSpace']({ orgId, name: 'Doomed' });
+    expect((await table['spaces:archiveSpace']({ orgId, spaceId: space.id })).space.archived).toBe(true);
+    await expect(table['spaces:postMessage']({ orgId, spaceId: space.id, body: 'too late' })).rejects.toMatchObject({ code: 'forbidden' });
+    expect((await table['spaces:unarchiveSpace']({ orgId, spaceId: space.id })).space.archived).toBe(false);
+    expect(await table['spaces:deleteSpace']({ orgId, spaceId: space.id })).toEqual({ deleted: true });
+    const { spaces } = await table['spaces:listSpaces']({ orgId });
+    expect(spaces.map((s) => s.id)).not.toContain(space.id);
+  });
+
+  it('admin controls: visibility, removal from a space, roles, the invite policy, removal from the org', async () => {
+    const { space } = await table['spaces:createSpace']({ orgId, name: 'Admin' });
+    expect((await table['spaces:setSpaceVisibility']({ orgId, spaceId: space.id, visibility: 'open' })).space.visibility).toBe('open');
+    await table['spaces:addMembers']({ orgId, spaceId: space.id, memberIds: ['gagan'] });
+    expect(await table['spaces:removeMember']({ orgId, spaceId: space.id, memberId: 'gagan' })).toEqual({ removed: true });
+    expect((await table['spaces:setMemberRole']({ orgId, memberId: 'gagan', role: 'admin' })).member.role).toBe('admin');
+    expect((await table['spaces:setMemberRole']({ orgId, memberId: 'gagan', role: 'member' })).member.role).toBe('member');
+    expect((await table['spaces:getOrgSettings']({ orgId })).settings).toEqual({ invitePolicy: 'members' });
+    expect((await table['spaces:setInvitePolicy']({ orgId, invitePolicy: 'admins' })).settings).toEqual({ invitePolicy: 'admins' });
+    await table['spaces:setInvitePolicy']({ orgId, invitePolicy: 'members' });
+    expect((await table['spaces:removeOrgMember']({ orgId, memberId: 'gagan' })).member.removedAt).toEqual(expect.any(String));
+  });
+
+  it('makes a space a default, and an invite to the org joins it', async () => {
+    const { space } = await table['spaces:createSpace']({ orgId, name: 'Welcome', visibility: 'open' });
+    expect((await table['spaces:setDefaultSpace']({ orgId, spaceId: space.id, isDefault: true })).space.isDefault).toBe(true);
+    const invite = await table['spaces:createInvite']({ orgId });
+    const resolved = await table['spaces:resolveInvite']({ baseUrl: harbor.url, token: invite.token });
+    expect(resolved).toMatchObject({ state: 'ok', spaces: [{ id: space.id }] });
+    await table['spaces:setDefaultSpace']({ orgId, spaceId: space.id, isDefault: false });
   });
 
   it('fails for an org the host does not know', async () => {

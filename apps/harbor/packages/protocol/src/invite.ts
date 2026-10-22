@@ -47,11 +47,28 @@ export type InviteToken = z.infer<typeof InviteToken>;
 export const ResolveInvite = z.object({ token: InviteToken });
 export type ResolveInvite = z.infer<typeof ResolveInvite>;
 
+// Amended 2026-10-19 (spec §4 Invites, §5 answer 3 — team invites): an
+// invite is to the ORG, with an optional list of spaces. Accepting creates
+// the member (if new), then joins the org's default spaces and the listed
+// ones. A per-space link is the case of an invite that lists one space; there
+// is no second shape. `space` stays on both results as the LANDING space —
+// the first listed space, else the first default — so a client from before
+// this change still opens somewhere. It is absent only when the invite joins
+// no space at all (the org has no live default and the invite lists none):
+// the invitee is in the org and browses from there.
+
+/** A space an invite will join, as the pre-auth preview names it. */
+export const InviteSpace = z.object({ id: SpaceId, name: z.string() });
+export type InviteSpace = z.infer<typeof InviteSpace>;
+
 export const ResolveInviteResult = z.discriminatedUnion('state', [
   z.object({
     state: z.literal('ok'),
     org: z.object({ address: z.string(), name: z.string() }),
-    space: z.object({ id: SpaceId, name: z.string() }),
+    /** The landing space: `spaces[0]`, or absent when the invite joins none. */
+    space: InviteSpace.optional(),
+    /** Every space accepting joins, landing space first: the listed ones, then the org's defaults. */
+    spaces: z.array(InviteSpace).default([]),
     invitedBy: z.string().optional(),
   }),
   z.object({ state: z.literal('expired') }),
@@ -63,13 +80,23 @@ export const AcceptInvite = z.object({ token: InviteToken });
 export type AcceptInvite = z.infer<typeof AcceptInvite>;
 
 export const AcceptInviteResult = z.object({
-  membership: Membership,
-  space: Space,
+  /** The membership of the landing space; absent with it. */
+  membership: Membership.optional(),
+  /** The landing space: `spaces[0]`, or absent when the accept joined none. */
+  space: Space.optional(),
+  /** Every space the accept put the member in, landing space first — including ones they were already in. */
+  spaces: z.array(Space).default([]),
 });
 export type AcceptInviteResult = z.infer<typeof AcceptInviteResult>;
 
+/** At most this many spaces on one invite: a team's onboarding set, not the whole org. */
+export const MAX_INVITE_SPACES = 50;
+
 export const CreateInvite = z.object({
-  spaceId: SpaceId,
+  /** The spaces to list, each one the caller is in. None = the org and its default spaces only. */
+  spaceIds: z.array(SpaceId).max(MAX_INVITE_SPACES).optional(),
+  /** One space, as clients before 2026-10-19 send it: the same as `spaceIds: [spaceId]`. */
+  spaceId: SpaceId.optional(),
   /** Org policy may cap or ignore this. */
   expiresInHours: z.number().int().positive().max(24 * 30).optional(),
 });

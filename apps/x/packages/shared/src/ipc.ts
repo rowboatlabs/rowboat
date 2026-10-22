@@ -189,6 +189,7 @@ export const ipcSchemas = {
       installationId: z.string(),
       apiUrl: z.string(),
       appVersion: z.string(),
+      telemetryOptOut: z.boolean().optional(),
     }),
   },
   'workspace:getRoot': {
@@ -1374,6 +1375,21 @@ export const ipcSchemas = {
   'app:setLoginItemSettings': {
     req: z.object({
       openAtLogin: z.boolean(),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // Anonymous product telemetry opt-out (2026-10-13, #415).
+  'app:getTelemetrySettings': {
+    req: z.null(),
+    res: z.object({
+      optOut: z.boolean(),
+    }),
+  },
+  'app:setTelemetrySettings': {
+    req: z.object({
+      optOut: z.boolean(),
     }),
     res: z.object({
       success: z.literal(true),
@@ -3845,7 +3861,9 @@ export const ipcSchemas = {
   },
   'spaces:joinInvite': {
     req: z.object({ url: z.string() }),
-    res: z.object({ org: SpacesOrgSummary, space: z.custom<SpacesTypes.Space>() }),
+    // No space when the invite joined none (2026-10-19): the org has no
+    // default and the invite listed nothing; the app opens the org instead.
+    res: z.object({ org: SpacesOrgSummary, space: z.custom<SpacesTypes.Space>().optional() }),
   },
   'spaces:signInOrg': {
     req: z.object({ orgId: z.string() }),
@@ -3915,6 +3933,54 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), spaceId: z.string(), name: z.string() }),
     res: z.object({ space: z.custom<SpacesTypes.Space>() }),
   },
+  // Archive, unarchive and delete a shared space (2026-10-14, harbor #1186
+  // and #1189): admin only. A delete's departure reaches every window as
+  // the space_removed frame, the same as leaving.
+  'spaces:archiveSpace': {
+    req: z.object({ orgId: z.string(), spaceId: z.string() }),
+    res: z.object({ space: z.custom<SpacesTypes.Space>() }),
+  },
+  'spaces:unarchiveSpace': {
+    req: z.object({ orgId: z.string(), spaceId: z.string() }),
+    res: z.object({ space: z.custom<SpacesTypes.Space>() }),
+  },
+  'spaces:deleteSpace': {
+    req: z.object({ orgId: z.string(), spaceId: z.string() }),
+    res: z.object({ deleted: z.literal(true) }),
+  },
+  // Admin controls (2026-10-19, spec §4 Roles): removing someone from a
+  // space or the org, roles, a space's visibility, the invite policy. The
+  // org refuses a non-admin; the app hides the controls too.
+  'spaces:setSpaceVisibility': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), visibility: z.enum(['private', 'open']) }),
+    res: z.object({ space: z.custom<SpacesTypes.Space>() }),
+  },
+  'spaces:removeMember': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), memberId: z.string() }),
+    res: z.object({ removed: z.boolean() }),
+  },
+  'spaces:removeOrgMember': {
+    req: z.object({ orgId: z.string(), memberId: z.string() }),
+    res: z.object({ member: z.custom<SpacesTypes.Member>() }),
+  },
+  'spaces:setMemberRole': {
+    req: z.object({ orgId: z.string(), memberId: z.string(), role: z.enum(['admin', 'member']) }),
+    res: z.object({ member: z.custom<SpacesTypes.Member>() }),
+  },
+  'spaces:getOrgSettings': {
+    req: z.object({ orgId: z.string() }),
+    res: z.object({ settings: z.custom<SpacesTypes.OrgSettings>() }),
+  },
+  'spaces:setInvitePolicy': {
+    req: z.object({ orgId: z.string(), invitePolicy: z.enum(['members', 'admins']) }),
+    res: z.object({ settings: z.custom<SpacesTypes.OrgSettings>() }),
+  },
+  // Default spaces (2026-10-19, harbor setDefaultSpace): admin only, open
+  // spaces only. Everyone an invite admits joins every default.
+  'spaces:setDefaultSpace': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), isDefault: z.boolean() }),
+    res: z.object({ space: z.custom<SpacesTypes.Space>() }),
+  },
   // Agent members and their keys (2026-09-29): the caller's own agents, or
   // every agent for an admin. A key's secret crosses IPC once, on the
   // response that created it, for the Agents dialog to show and forget.
@@ -3966,6 +4032,11 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), agentId: z.string(), keyId: z.string() }),
     res: z.object({ key: z.custom<SpacesTypes.AgentKey>() }),
   },
+  // Renaming an agent (2026-10-21, harbor renameAgent): its owner only.
+  'spaces:renameAgent': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), displayName: z.string() }),
+    res: z.object({ agent: z.custom<SpacesTypes.Member>() }),
+  },
   // Add existing org members, people or agents, to a space the caller is in
   // (2026-09-29). They learn of it by the space_added frame.
   'spaces:addMembers': {
@@ -3989,8 +4060,10 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string() }),
     res: z.object({ members: z.array(z.custom<SpacesTypes.Member>()) }),
   },
+  // An invite to the org (2026-10-19): it lists spaces the caller is in, or
+  // none, and accepting also joins the org's default spaces.
   'spaces:createInvite': {
-    req: z.object({ orgId: z.string(), spaceId: z.string(), expiresInHours: z.number().optional() }),
+    req: z.object({ orgId: z.string(), spaceIds: z.array(z.string()).optional(), expiresInHours: z.number().optional() }),
     res: z.custom<SpacesTypes.CreateInviteResult>(),
   },
   // Pre-auth by design (spec §4): resolvable before the org has been added,

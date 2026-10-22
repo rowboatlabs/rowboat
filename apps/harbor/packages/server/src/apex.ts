@@ -136,10 +136,12 @@ export function buildApexApp(deps: ApexDeps): Hono {
     // Landing area: one space named after the org, so a fresh org is a group
     // chat — the conversation itself, no #general and no README to read past
     // (2026-10-07: onboarding as simple as a WhatsApp group; channels come
-    // when someone adds a second space). Attributed to the founder.
+    // when someone adds a second space). Attributed to the founder. It is
+    // open and the org's first default space (spec §5 answer 3, built
+    // 2026-10-19), so everyone an invite admits lands in it.
     if (member) {
       const service = await deps.serviceFor(org);
-      await service.createSpace({ memberId: member.id }, org.name);
+      await service.createSpace({ memberId: member.id }, org.name, 'open', { isDefault: true });
     }
     return c.json({
       org: { id: org.id, name: org.name, address: domain },
@@ -152,6 +154,25 @@ export function buildApexApp(deps: ApexDeps): Hono {
     const identity = await identityOf(c);
     // One statement over the identity table, whatever the number of orgs on the deployment (2026-09-22).
     return c.json({ orgs: await deps.directory.listOrgsForIdentity(identity.iss, identity.sub) });
+  });
+
+  /**
+   * Account deletion, minimal v1 (2026-10-08, App Store 5.1.1(v)): the caller
+   * leaves every org on the deployment — each member deactivated in place
+   * (core/spaces.ts deactivateSelf). The app calls this before the account
+   * API bans the login, while the token is still good. Idempotent: a repeat
+   * finds no orgs and returns an empty list.
+   */
+  app.delete('/v1/me', async (c) => {
+    const identity = await deps.auth.authenticate(c.req.header('authorization'));
+    const rows = await deps.directory.listOrgsForIdentity(identity.iss, identity.sub);
+    for (const row of rows) {
+      const org = await deps.directory.getById(row.id);
+      if (!org) continue;
+      const service = await deps.serviceFor(org);
+      await service.deactivateSelf({ memberId: row.memberId });
+    }
+    return c.json({ deactivated: rows.map((r) => r.id) });
   });
 
   return app;

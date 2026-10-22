@@ -76,6 +76,8 @@ export function buildHttpApp(deps: {
   webOrigins?: readonly string[];
   /** The session cookie's Domain: the apex on a deployment, so one cookie covers every org. */
   sessionCookieDomain?: string;
+  /** The Spaces web app, which a browser-opened org link offers beside the desktop app (the landings below). */
+  webAppUrl?: string;
 }): Hono<Env> {
   const { service, auth, consent } = deps;
   const maxBlobBytes = deps.maxBlobBytes ?? DEFAULT_MAX_BLOB_BYTES;
@@ -165,6 +167,11 @@ export function buildHttpApp(deps: {
 
   app.get(routes.me.path, async (c) => reply(c, routes.me.response, { member: await service.me(actor(c)) }));
 
+  app.put(routes.updateMe.path, async (c) => {
+    const input = await body(c, routes.updateMe.request);
+    return reply(c, routes.updateMe.response, { member: await service.updateProfile(actor(c), input) });
+  });
+
   // --- profile images (2026-10-02) -------------------------------------------
   // The body is the image; the limit is checked on the claim and again on the bytes.
   const imageBody = async (c: Context<Env>): Promise<Uint8Array> => {
@@ -240,6 +247,42 @@ export function buildHttpApp(deps: {
     return reply(c, routes.renameSpace.response, { space: await service.renameSpace(actor(c), spaceId, input) });
   });
 
+  app.post(routes.archiveSpace.path, async (c) => {
+    const { spaceId } = parseWith(routes.archiveSpace.params, c.req.param());
+    const input = await body(c, routes.archiveSpace.request);
+    return reply(c, routes.archiveSpace.response, { space: await service.archiveSpace(actor(c), spaceId, input) });
+  });
+
+  app.delete(routes.deleteSpace.path, async (c) => {
+    const { spaceId } = parseWith(routes.deleteSpace.params, c.req.param());
+    await service.deleteSpace(actor(c), spaceId);
+    return reply(c, routes.deleteSpace.response, { deleted: true });
+  });
+
+  app.post(routes.setSpaceVisibility.path, async (c) => {
+    const { spaceId } = parseWith(routes.setSpaceVisibility.params, c.req.param());
+    const input = await body(c, routes.setSpaceVisibility.request);
+    return reply(c, routes.setSpaceVisibility.response, { space: await service.setSpaceVisibility(actor(c), spaceId, input) });
+  });
+
+  app.post(routes.removeMember.path, async (c) => {
+    const { spaceId, memberId } = parseWith(routes.removeMember.params, c.req.param());
+    const input = await body(c, routes.removeMember.request);
+    return reply(c, routes.removeMember.response, await service.removeMember(actor(c), spaceId, memberId, input));
+  });
+
+  app.post(routes.unarchiveSpace.path, async (c) => {
+    const { spaceId } = parseWith(routes.unarchiveSpace.params, c.req.param());
+    const input = await body(c, routes.unarchiveSpace.request);
+    return reply(c, routes.unarchiveSpace.response, { space: await service.unarchiveSpace(actor(c), spaceId, input) });
+  });
+
+  app.post(routes.setDefaultSpace.path, async (c) => {
+    const { spaceId } = parseWith(routes.setDefaultSpace.params, c.req.param());
+    const input = await body(c, routes.setDefaultSpace.request);
+    return reply(c, routes.setDefaultSpace.response, { space: await service.setDefaultSpace(actor(c), spaceId, input) });
+  });
+
   app.post(routes.openDirect.path, async (c) => {
     const input = await body(c, routes.openDirect.request);
     return reply(c, routes.openDirect.response, await service.openDirect(actor(c), input.memberId));
@@ -258,6 +301,27 @@ export function buildHttpApp(deps: {
   app.get('/v1/spaces/:spaceId/members', async (c) => {
     const { spaceId } = parseWith(routes.listMembers.params, c.req.param());
     return reply(c, routes.listMembers.response, { members: await service.listMembers(actor(c), spaceId) });
+  });
+
+  app.post(routes.removeOrgMember.path, async (c) => {
+    const { memberId } = parseWith(routes.removeOrgMember.params, c.req.param());
+    const input = await body(c, routes.removeOrgMember.request);
+    return reply(c, routes.removeOrgMember.response, { member: await service.removeOrgMember(actor(c), memberId, input) });
+  });
+
+  app.post(routes.setMemberRole.path, async (c) => {
+    const { memberId } = parseWith(routes.setMemberRole.params, c.req.param());
+    const input = await body(c, routes.setMemberRole.request);
+    return reply(c, routes.setMemberRole.response, { member: await service.setMemberRole(actor(c), memberId, input) });
+  });
+
+  app.get(routes.getOrgSettings.path, async (c) => {
+    return reply(c, routes.getOrgSettings.response, { settings: await service.getOrgSettings(actor(c)) });
+  });
+
+  app.patch(routes.updateOrgSettings.path, async (c) => {
+    const input = await body(c, routes.updateOrgSettings.request);
+    return reply(c, routes.updateOrgSettings.response, { settings: await service.updateOrgSettings(actor(c), input) });
   });
 
   app.get(routes.listOrgMembers.path, async (c) => {
@@ -365,6 +429,12 @@ export function buildHttpApp(deps: {
     return reply(c, routes.setAgentCredential.response, { credential: await service.setAgentCredential(actor(c), agentId, input.secret) });
   });
 
+  app.put(routes.renameAgent.path, async (c) => {
+    const { agentId } = parseWith(routes.renameAgent.params, c.req.param());
+    const input = await body(c, routes.renameAgent.request);
+    return reply(c, routes.renameAgent.response, { agent: await service.renameAgent(actor(c), agentId, input) });
+  });
+
   app.put(routes.setAgentOptionDefaults.path, async (c) => {
     const { agentId } = parseWith(routes.setAgentOptionDefaults.params, c.req.param());
     const input = await body(c, routes.setAgentOptionDefaults.request);
@@ -418,7 +488,7 @@ export function buildHttpApp(deps: {
 
   app.post(routes.createInvite.path, async (c) => {
     const input = await body(c, routes.createInvite.request);
-    return reply(c, routes.createInvite.response, await service.createInvite(actor(c), input.spaceId, input.expiresInHours));
+    return reply(c, routes.createInvite.response, await service.createInvite(actor(c), input));
   });
 
   app.post(routes.resolveInvite.path, async (c) => {
@@ -437,6 +507,15 @@ export function buildHttpApp(deps: {
     return reply(c, routes.acceptInvite.response, result);
   });
 
+  // Where a browser-opened link goes (2026-10-13, Slack's pattern): the
+  // desktop app, launched at once, else the web app when this Harbor names
+  // one. The web app's /open takes the deep link's query unchanged, so both
+  // resolve the link the same way (the renderer's parseSpacesLink).
+  const openers = (query: string): Openers => ({
+    deep: `rowboat://open?${query}`,
+    ...(deps.webAppUrl ? { web: `${deps.webAppUrl.replace(/\/$/, '')}/open?${query}` } : {}),
+  });
+
   // The invite link's landing (2026-09-15): a browser-opened /join/<token>
   // hands the invite into the app as rowboat://open?type=spaces&org=…&invite=…
   // — the same deep-link grammar as the org link landings below, the org
@@ -447,24 +526,19 @@ export function buildHttpApp(deps: {
     const token = c.req.param('token');
     const resolved = await service.resolveInvite(token);
     if (resolved.state !== 'ok') return c.html(invitePage({ state: resolved.state }), 410);
-    const deep = `rowboat://open?type=spaces&org=${encodeURIComponent(service.org.address)}&invite=${encodeURIComponent(token)}`;
-    return c.html(invitePage({ state: 'ok', space: resolved.space.name, org: resolved.org.name, invitedBy: resolved.invitedBy, deep }));
+    const query = `type=spaces&org=${encodeURIComponent(service.org.address)}&invite=${encodeURIComponent(token)}`;
+    return c.html(invitePage({ state: 'ok', spaces: resolved.spaces.map((s) => s.name), org: resolved.org.name, invitedBy: resolved.invitedBy, ...openers(query) }));
   });
 
   // --- link landings ---------------------------------------------------------
   // Every org link (ids.ts grammar) opened in a browser lands here and is
-  // handed into the app as a rowboat:// deep link, the org named by its
-  // address. Nothing is looked up and nothing is rendered about the target,
-  // so a link says nothing to someone who cannot open it. The app itself
-  // intercepts these URLs before they ever reach a browser.
+  // handed on, the org named by its address. Nothing is looked up and nothing
+  // is rendered about the target, so a link says nothing to someone who
+  // cannot open it. The app itself intercepts these URLs before they ever
+  // reach a browser.
   const landing = (target: URLSearchParams) => {
     target.set('org', service.org.address);
-    const deep = `rowboat://open?type=spaces&${target.toString()}`;
-    return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Open in Rowboat</title>` +
-      `<style>body{font:15px/1.5 system-ui,sans-serif;margin:0;display:grid;place-items:center;min-height:100vh;color:#222;background:#fafafa}` +
-      `main{text-align:center;padding:2rem}a.b{display:inline-block;margin-top:1rem;padding:.6rem 1.1rem;border-radius:8px;background:#111;color:#fff;text-decoration:none}</style>` +
-      `<main><p>This link opens in Rowboat.</p><a class="b" href="${deep}">Open in Rowboat</a></main>` +
-      `<script>location.replace(${JSON.stringify(deep)})</script>`;
+    return landingPage(openers(`type=spaces&${target.toString()}`));
   };
   app.get('/', (c) => c.html(landing(new URLSearchParams())));
   app.get('/s/:spaceId', (c) => c.html(landing(new URLSearchParams({ spaceId: c.req.param('spaceId') }))));
@@ -758,28 +832,56 @@ function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!);
 }
 
+const PAGE_HEAD = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">`;
+const PAGE_STYLE =
+  `<style>body{font:15px/1.5 system-ui,sans-serif;margin:0;display:grid;place-items:center;min-height:100vh;color:#222;background:#fafafa}` +
+  `main{text-align:center;padding:2rem;max-width:26rem}h1{font-size:1.25rem;margin:0 0 .25rem}p{margin:.25rem 0}.m{color:#666}` +
+  `a.b{display:inline-block;margin-top:1rem;padding:.6rem 1.1rem;border-radius:8px;background:#111;color:#fff;text-decoration:none}` +
+  `.s{margin-top:1.25rem;font-size:13px;color:#666}.s+.s{margin-top:.25rem}.s a{color:inherit}</style>`;
+
+/** The desktop app's deep link, and the web app's address for the same link when the Harbor names one. */
+interface Openers {
+  deep: string;
+  web?: string;
+}
+
+/** Launch the desktop app at once; offer the download, and the web app. */
+function openerLinks(o: Openers): string {
+  return (
+    `<a class="b" href="${escapeHtml(o.deep)}">Open in Rowboat</a>` +
+    `<p class="s">Don't have the app? <a href="${DOWNLOAD_URL}">Download Rowboat</a>, then open this link again.</p>` +
+    (o.web ? `<p class="s">You can also <a href="${escapeHtml(o.web)}">open this link in your browser</a>.</p>` : '') +
+    `<script>location.replace(${JSON.stringify(o.deep)})</script>`
+  );
+}
+
+/** An org link's landing. */
+function landingPage(o: Openers): string {
+  return `${PAGE_HEAD}<title>Open in Rowboat</title>${PAGE_STYLE}<main><h1>This link opens in Rowboat</h1>${openerLinks(o)}</main>`;
+}
+
 type InvitePage =
-  | { state: 'ok'; space: string; org: string; invitedBy?: string; deep: string }
+  | ({ state: 'ok'; spaces: string[]; org: string; invitedBy?: string } & Openers)
   | { state: 'expired' | 'revoked' };
+
+/** "a", "a and b", "a, b and c". */
+function listNames(names: string[]): string {
+  return names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
 
 /** The /join landing: launch the app with the invite, or say why not. */
 function invitePage(page: InvitePage): string {
-  const style =
-    `<style>body{font:15px/1.5 system-ui,sans-serif;margin:0;display:grid;place-items:center;min-height:100vh;color:#222;background:#fafafa}` +
-    `main{text-align:center;padding:2rem;max-width:26rem}h1{font-size:1.25rem;margin:0 0 .25rem}p{margin:.25rem 0}.m{color:#666}` +
-    `a.b{display:inline-block;margin-top:1rem;padding:.6rem 1.1rem;border-radius:8px;background:#111;color:#fff;text-decoration:none}` +
-    `.s{margin-top:1.25rem;font-size:13px;color:#666}.s a{color:inherit}</style>`;
-  const head = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">`;
   if (page.state !== 'ok') {
     const why = page.state === 'expired' ? 'This invite has expired.' : 'This invite was revoked.';
-    return `${head}<title>Invite ${page.state}</title>${style}<main><h1>${why}</h1><p class="m">Ask whoever sent it for a new link.</p></main>`;
+    return `${PAGE_HEAD}<title>Invite ${page.state}</title>${PAGE_STYLE}<main><h1>${why}</h1><p class="m">Ask whoever sent it for a new link.</p></main>`;
   }
+  // An invite is to the org (2026-10-19): the org is the headline, the
+  // spaces accepting joins the line under it.
+  const joins = page.spaces.length > 0 ? `<p class="m">You'll join ${escapeHtml(listNames(page.spaces))}</p>` : '';
   const by = page.invitedBy ? `<p class="m">Invited by ${escapeHtml(page.invitedBy)}</p>` : '';
   return (
-    `${head}<title>Join ${escapeHtml(page.space)} on ${escapeHtml(page.org)}</title>${style}<main>` +
-    `<h1>You're invited to ${escapeHtml(page.space)}</h1><p class="m">on ${escapeHtml(page.org)}</p>${by}` +
-    `<a class="b" href="${page.deep}">Open in Rowboat</a>` +
-    `<p class="s">Don't have Rowboat? <a href="${DOWNLOAD_URL}">Download it</a>, then open this link again.</p></main>` +
-    `<script>location.replace(${JSON.stringify(page.deep)})</script>`
+    `${PAGE_HEAD}<title>Join ${escapeHtml(page.org)}</title>${PAGE_STYLE}<main>` +
+    `<h1>You're invited to ${escapeHtml(page.org)}</h1>${joins}${by}` +
+    `${openerLinks(page)}</main>`
   );
 }

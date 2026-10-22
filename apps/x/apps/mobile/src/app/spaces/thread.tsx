@@ -22,6 +22,7 @@ import { useSpacesAccount } from '@/lib/spaces/account';
 import { StatusBanner } from '@/components/status-banner';
 import { loadRoster, loadThread, peekRoster, peekThread, saveRoster, saveThread } from '@/lib/spaces/cache';
 import { SpacesClient } from '@/lib/spaces/client';
+import { isDeparted, memberLabel, useProfiles } from '@/lib/spaces/profiles';
 import { SpacesLive } from '@x/spaces-client';
 import { useColors } from '@/theme/colors';
 
@@ -48,7 +49,8 @@ export default function SpaceThreadScreen() {
   const [rootMessage, setRootMessage] = useState<Message | null>(initial?.root ?? null);
   const [replies, setReplies] = useState<Message[] | null>(initial?.messages ?? null);
   const [members, setMembers] = useState<Map<string, Member>>(() => new Map((peekRoster(org, space) ?? []).map((m) => [m.id, m])));
-  const memberNames = useMemo(() => new Map([...members].map(([id, m]) => [id, m.displayName])), [members]);
+  const profiles = useProfiles(client, members);
+  const memberNames = useMemo(() => new Map([...profiles].map(([id, m]) => [id, memberLabel(m)])), [profiles]);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [actionMessage, setActionMessage] = useState<Message | null>(null);
@@ -344,7 +346,7 @@ export default function SpaceThreadScreen() {
           ) : rootMessage ? (
             <RootMessage
               message={rootMessage}
-              member={members.get(rootMessage.author.memberId)}
+              member={profiles.get(rootMessage.author.memberId)}
               memberNames={memberNames}
               me={me}
               onToggleReaction={toggleReaction}
@@ -380,7 +382,7 @@ export default function SpaceThreadScreen() {
           {/* Root painted from the stream; replies still on their way. */}
           {rootMessage && replies === null && !error ? <ActivityIndicator style={{ marginTop: 16 }} /> : null}
           {visibleReplies?.map((m) => (
-            <MessageRow key={m.id} message={m} member={members.get(m.author.memberId)} memberNames={memberNames} me={me} onToggleReaction={toggleReaction} onLongPress={(m) => { setReactionsOnly(false); setActionMessage(m); }} onOpenAsset={openAssetLink}
+            <MessageRow key={m.id} message={m} member={profiles.get(m.author.memberId)} memberNames={memberNames} me={me} onToggleReaction={toggleReaction} onLongPress={(m) => { setReactionsOnly(false); setActionMessage(m); }} onOpenAsset={openAssetLink}
               onAddReaction={(m) => { setReactionsOnly(true); setActionMessage(m); }} onVote={vote} onRemoveVote={removeVote} onEndPoll={endPoll} />
           ))}
         </ScrollView>
@@ -391,7 +393,7 @@ export default function SpaceThreadScreen() {
         <SpaceComposer
           ref={composerRef}
           placeholder="Add a reply"
-          members={[...members.values()]}
+          members={[...members.values()].filter((m) => !isDeparted(m))}
           me={me}
           sending={sending}
           onSend={(body) => void send(body)}
@@ -431,7 +433,7 @@ function RootMessage({ message, member, memberNames, me, onToggleReaction, onLon
   onOpenAsset?: (link: { host: string; spaceId: string; assetId: string; label: string }) => void;
 }) {
   const colors = useColors();
-  const name = member?.displayName ?? message.author.memberId;
+  const name = member ? memberLabel(member) : message.author.memberId;
   const body = spaces.decorateMentions(message.body, memberNames);
   // Same authed blob-image rule the chat rows use — the default renderer
   // can't fetch Harbor blobs.

@@ -7,6 +7,9 @@
 #   DATABASE_POOL_MAX (optional; pg pool ceiling, default 10)
 #   HARBOR_WEB_ORIGINS (optional; comma-separated browser origins allowed to
 #     call the orgs and the apex cross-origin — the Spaces web app's)
+#   HARBOR_WEB_APP_URL (optional; the Spaces web app, e.g.
+#     https://spaces.rowboatlabs.com — an org link opened in a browser offers
+#     it beside the desktop app; without it, only the desktop app)
 #   HARBOR_INTERNAL_KEY (optional; bearer for GET /internal/stats — this
 #     instance's live counters; the once-a-minute log line prints regardless)
 #   HARBOR_INTEGRATION_KEY (optional; 64 hex characters, `openssl rand -hex 32`,

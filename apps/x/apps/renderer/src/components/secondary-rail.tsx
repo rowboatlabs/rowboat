@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { cn } from '@/lib/utils'
 
 // The shared shell for a section's secondary sidebar (Spaces' rail, Email's
@@ -25,6 +25,13 @@ const WIDTH_DEFAULT = 280
 const WIDTH_MIN = 220
 const WIDTH_MAX = 480
 
+/** Lets a control outside the rail (the Spaces header's "Show sidebar"
+ *  button, 2026-10-22) preview it the way hovering the edge does. */
+export interface SecondaryRailPeek {
+    enter: () => void
+    leave: () => void
+}
+
 export interface SecondaryRailContext {
     /** Docked: close. Peeked: the lock — dock it. Clears the peek first. */
     togglePin: () => void
@@ -33,7 +40,7 @@ export interface SecondaryRailContext {
     onMenuOpenChange: (open: boolean) => void
 }
 
-export function SecondaryRail({ open, onTogglePin, widthStorageKey, edgeDot = false, persistent, onWidthChange, className, children }: {
+export function SecondaryRail({ open, onTogglePin, widthStorageKey, edgeDot = false, edgeless = false, persistent, onWidthChange, peekRef, className, children }: {
     /** Docked (in the flow, pushing the content). False = the edge sliver + hover drawer. */
     open: boolean
     /** The lock: docks a peeked rail, closes a docked one. */
@@ -48,6 +55,11 @@ export function SecondaryRail({ open, onTogglePin, widthStorageKey, edgeDot = fa
     /** Reports the docked width — on mount and live through an edge drag —
      *  for a parent whose own pane must track the rail (Code's middle pane). */
     onWidthChange?: (width: number) => void
+    /** No edge sliver while collapsed: an outside control (peekRef) is the
+     *  only way in, so the two never compete (Spaces, 2026-10-22). */
+    edgeless?: boolean
+    /** Filled with this rail's peek controls, for an outside trigger. */
+    peekRef?: RefObject<SecondaryRailPeek | null>
     /** Extra classes for the aside — e.g. `border-r-0` when the neighboring
      *  pane draws the divider itself. */
     className?: string
@@ -114,6 +126,11 @@ export function SecondaryRail({ open, onTogglePin, widthStorageKey, edgeDot = fa
         if (open) setPeek(false)
     }, [open])
     useEffect(() => clearPeekTimer, [])
+    useEffect(() => {
+        if (!peekRef) return
+        peekRef.current = { enter: onEdgeEnter, leave: onEdgeLeave }
+        return () => { peekRef.current = null }
+    })
 
     const togglePin = () => {
         setPeek(false)
@@ -138,9 +155,10 @@ export function SecondaryRail({ open, onTogglePin, widthStorageKey, edgeDot = fa
             onMouseEnter={onEdgeEnter}
             onMouseLeave={onEdgeLeave}
             // No slide while the edge is being dragged — the width must track the cursor.
-            style={{ width: open ? width : EDGE_W, transition: resizingWidth ? undefined : 'width 200ms cubic-bezier(0.2,0,0,1)' }}
+            style={{ width: open ? width : edgeless ? 0 : EDGE_W, transition: resizingWidth ? undefined : 'width 200ms cubic-bezier(0.2,0,0,1)' }}
             className={cn(
                 'relative flex min-h-0 shrink-0 flex-col border-r border-border',
+                !open && edgeless && 'border-r-0',
                 // A step lighter than the main sidebar so the two rails read as
                 // distinct layers; at this subtle a shift the hairline to the
                 // canvas earns its place.
@@ -181,8 +199,10 @@ export function SecondaryRail({ open, onTogglePin, widthStorageKey, edgeDot = fa
                             inert={!peek}
                             style={{ width }}
                             className={cn(
-                                'absolute bottom-1.5 left-0 top-1.5 overflow-hidden rounded-r-xl border border-border bg-[var(--rowboat-panel-soft)] shadow-2xl transition-transform duration-200 ease-[cubic-bezier(0.2,0,0,1)]',
-                                peek ? 'pointer-events-auto translate-x-0' : '-translate-x-full',
+                                'absolute bottom-1.5 left-0 top-1.5 overflow-hidden rounded-r-xl border border-border bg-[var(--rowboat-panel-soft)] transition-[translate,box-shadow] duration-200 ease-[cubic-bezier(0.2,0,0,1)]',
+                                // The shadow only while out (2026-10-22): hidden off the edge, it
+                                // still spilled ~50px onto the content as a grey band.
+                                peek ? 'pointer-events-auto translate-x-0 shadow-2xl' : '-translate-x-full shadow-none',
                             )}
                         >
                             {body}

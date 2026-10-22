@@ -156,6 +156,8 @@ async function dispatch(
       // The same row /v1/me serves.
       return { member: await service.me(ctx), org: { name: service.org.name, address: service.org.address } };
     }
+    case 'update_profile':
+      return { member: await service.updateProfile(ctx, args as { displayName?: string; title?: string }) };
     case 'list_members': {
       const a = args as { spaceId?: string };
       const members = a.spaceId !== undefined
@@ -184,6 +186,35 @@ async function dispatch(
       const a = args as { spaceId: string; name: string };
       return { space: await service.renameSpace(ctx, a.spaceId, { name: a.name, ...attribution }) };
     }
+    case 'archive_space':
+      return { space: await service.archiveSpace(ctx, (args as { spaceId: string }).spaceId, attribution) };
+    case 'delete_space':
+      await service.deleteSpace(ctx, (args as { spaceId: string }).spaceId);
+      return { deleted: true };
+    case 'unarchive_space':
+      return { space: await service.unarchiveSpace(ctx, (args as { spaceId: string }).spaceId, attribution) };
+    case 'set_default_space': {
+      const a = args as { spaceId: string; isDefault: boolean };
+      return { space: await service.setDefaultSpace(ctx, a.spaceId, { isDefault: a.isDefault, ...attribution }) };
+    }
+    case 'set_space_visibility': {
+      const a = args as { spaceId: string; visibility: 'private' | 'open' };
+      return { space: await service.setSpaceVisibility(ctx, a.spaceId, { visibility: a.visibility, ...attribution }) };
+    }
+    case 'remove_member': {
+      const a = args as { spaceId: string; memberId: string };
+      return service.removeMember(ctx, a.spaceId, a.memberId, attribution);
+    }
+    case 'remove_org_member':
+      return { member: await service.removeOrgMember(ctx, (args as { memberId: string }).memberId, attribution) };
+    case 'set_member_role': {
+      const a = args as { memberId: string; role: 'admin' | 'member' };
+      return { member: await service.setMemberRole(ctx, a.memberId, { role: a.role, ...attribution }) };
+    }
+    case 'get_org_settings':
+      return { settings: await service.getOrgSettings(ctx) };
+    case 'set_invite_policy':
+      return { settings: await service.updateOrgSettings(ctx, { invitePolicy: (args as { invitePolicy: 'members' | 'admins' }).invitePolicy }) };
     case 'add_members': {
       const a = args as { spaceId: string; memberIds: string[] };
       return { memberships: await service.addMembers(ctx, a.spaceId, { memberIds: a.memberIds, ...attribution }) };
@@ -194,8 +225,8 @@ async function dispatch(
       return { left: true };
     }
     case 'create_invite': {
-      const a = args as { spaceId: string; expiresInHours?: number };
-      return service.createInvite(ctx, a.spaceId, a.expiresInHours);
+      const a = args as { spaceIds?: string[]; spaceId?: string; expiresInHours?: number };
+      return service.createInvite(ctx, a);
     }
     case 'list_spaces': {
       const a = args as { includeDirect?: boolean };
