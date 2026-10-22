@@ -138,14 +138,6 @@ export async function readdir(
       const itemPath = path.join(currentPath, item.name);
       const itemRelPath = path.posix.join(currentRelPath, item.name);
 
-      // Filter by extension if specified
-      if (opts?.allowedExtensions && opts.allowedExtensions.length > 0) {
-        const ext = path.extname(item.name);
-        if (!opts.allowedExtensions.includes(ext)) {
-          continue;
-        }
-      }
-
       let itemKind: z.infer<typeof workspace.NodeKind>;
       let itemStat: { size: number; mtimeMs: number } | undefined;
 
@@ -162,6 +154,9 @@ export async function readdir(
           await readDir(itemPath, itemRelPath);
         }
       } else if (item.isFile()) {
+        if (opts?.allowedExtensions?.length && !opts.allowedExtensions.includes(path.extname(item.name))) {
+          continue;
+        }
         itemKind = 'file';
         if (opts?.includeStats) {
           const stats = await fs.lstat(itemPath);
