@@ -32,9 +32,9 @@ const tab = (label: string) => screen.getByRole('button', { name: new RegExp(`^$
 describe('space content tabs', () => {
     it('navigates straight to each view, with no hover menu', () => {
         const onSelect = mount()
-        fireEvent.pointerEnter(tab('Discussions'), { pointerType: 'mouse' })
+        fireEvent.pointerEnter(tab('Threads'), { pointerType: 'mouse' })
         expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-        fireEvent.click(tab('Discussions'))
+        fireEvent.click(tab('Threads'))
         expect(onSelect).toHaveBeenLastCalledWith({ kind: 'discussions' })
         fireEvent.click(tab('Files'))
         expect(onSelect).toHaveBeenLastCalledWith({ kind: 'files' })
@@ -45,18 +45,18 @@ describe('space content tabs', () => {
     it('badges count live discussions and live unread files only', () => {
         mount()
         expect(tab('Messages')).toHaveAccessibleName('Messages 4 unread · 1 for you')
-        expect(tab('Discussions')).toHaveAccessibleName('Discussions 3 unread · 2 for you')
+        expect(tab('Threads')).toHaveAccessibleName('Threads 3 unread · 2 for you')
         expect(tab('Files')).toHaveAccessibleName('Files 1 unread · none for you')
     })
 
     it('uses DM badges in a direct conversation', () => {
         mount({ direct: true })
-        expect(tab('Discussions')).toHaveAccessibleName('Discussions 3 unread · all for you')
+        expect(tab('Threads')).toHaveAccessibleName('Threads 3 unread · all for you')
     })
 
     it.each([
         [{ kind: 'general' }, 'Messages'],
-        [{ kind: 'thread', rootMessageId: 'root-old' }, 'Discussions'],
+        [{ kind: 'thread', rootMessageId: 'root-old' }, 'Threads'],
         [{ kind: 'whiteboard', assetId: 'board' }, 'Files'],
     ] as [RailSelection, string][])('marks the view %o belongs to as current', (selection, label) => {
         mount({ selection })
