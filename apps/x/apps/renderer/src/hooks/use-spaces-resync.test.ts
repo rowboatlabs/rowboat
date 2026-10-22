@@ -37,6 +37,7 @@ beforeEach(() => {
     invoke.mockReset()
     invoke.mockImplementation(async (channel: string) => {
         if (channel === 'spaces:listOrgs') return { orgs }
+        if (channel === 'spaces:listOrgMembers') return { members: [] }
         if (channel === 'spaces:listSpaces') return { spaces: [{ id: 's1', name: 'Main', kind: 'shared', createdAt: '2026-01-01T00:00:00.000Z' }] }
         if (channel === 'spaces:subscribeSpace' || channel === 'spaces:unsubscribeSpace') return null
         throw new Error(`unexpected ${channel}`)
@@ -67,6 +68,7 @@ describe('listing resync', () => {
         emit({ orgId: 'org', frame: { kind: 'subscribed', spaceId: 's1', fromOffset: 7 } }) // the burst
         await vi.advanceTimersByTimeAsync(400)
         expect(listing()).toBe(2)
+        expect(invoke).toHaveBeenCalledWith('spaces:listOrgMembers', { orgId: 'org' })
     })
 
     it('the window regaining focus refetches when the listing is stale, not when fresh', async () => {
@@ -137,4 +139,16 @@ it('removal drops membership immediately and explicitly resubscribes an open pre
     const channels = invoke.mock.calls.map(([channel]) => channel)
     expect(channels.lastIndexOf('spaces:subscribeSpace')).toBeGreaterThan(channels.lastIndexOf('spaces:unsubscribeSpace'))
     release()
+})
+
+it('applies live profile updates and refreshes DM labels from the org listing', async () => {
+    await boot()
+    const members = await import('./use-space-members')
+    const update = vi.spyOn(members, 'applyProfileUpdate')
+    const member = { id: 'me', displayName: 'New name', role: 'member', kind: 'human' }
+    emit({ orgId: 'org', frame: { kind: 'profile_updated', member, at: '2026-10-22T00:00:00Z' } })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(update).toHaveBeenCalledWith('org', member)
+    expect(listing()).toBe(2)
+    update.mockRestore()
 })

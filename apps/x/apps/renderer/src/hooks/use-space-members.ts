@@ -92,7 +92,7 @@ async function loadMembers(orgId: string, spaceId: string, force = false): Promi
         const res = await window.ipc.invoke('spaces:listMembers', { orgId, spaceId })
         membersCacheOnly.delete(k)
         lastLoadedAt.set(k, Date.now())
-        setMembers(k, res.members)
+        if (!membersDirty.has(k)) setMembers(k, res.members)
     } catch {
         // org unreachable — cached names (or ids) stand until a retry.
     } finally {
@@ -147,13 +147,26 @@ async function loadOrgRoster(orgId: string, spaceIds: readonly string[]): Promis
         const res = await window.ipc.invoke('spaces:listOrgMembers', { orgId })
         membersCacheOnly.delete(k)
         lastLoadedAt.set(k, Date.now())
-        setMembers(k, res.members)
+        if (!membersDirty.has(k)) setMembers(k, res.members)
     } catch {
         // Org unreachable, or an older org without the route: the per-space
         // rosters the app has already fetched stand in for the directory.
         if (!memberState.has(k) || membersCacheOnly.has(k)) setMembers(k, unionOfRosters(orgId, spaceIds))
     } finally {
         membersLoading.delete(k)
+        if (membersDirty.delete(k)) void loadOrgRoster(orgId, spaceIds)
+    }
+}
+
+// Update every loaded roster without adding someone to a space they never joined
+// (2026-10-22, profile_updated). In-flight reads are retried to avoid stale rollback.
+export function applyProfileUpdate(orgId: string, member: spaces.Member): void {
+    for (const k of membersLoading) {
+        if (k === orgKey(orgId) || k.startsWith(`${orgId}/`)) membersDirty.add(k)
+    }
+    for (const [k, members] of memberState) {
+        if (k !== orgKey(orgId) && !k.startsWith(`${orgId}/`)) continue
+        if (members.some(m => m.id === member.id)) setMembers(k, members.map(m => m.id === member.id ? member : m))
     }
 }
 

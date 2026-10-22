@@ -1,4 +1,4 @@
-import type { ActingMode, Attribution, Membership, ServerFrame, Space, SpaceEvent } from '@rowboat/spaces-protocol';
+import type { ActingMode, Attribution, Member, Membership, ServerFrame, Space, SpaceEvent } from '@rowboat/spaces-protocol';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { monotonicFactory } from 'ulid';
 import { HarborError } from '../errors.js';
@@ -61,6 +61,14 @@ export class Kernel {
 
   now(): string {
     return new Date().toISOString();
+  }
+
+  // Profile changes are org facts, sent only to active org members after persistence (2026-10-22).
+  async publishProfile(member: Member): Promise<void> {
+    const frame: ServerFrame = { kind: 'profile_updated', member, at: this.now() };
+    for (const recipient of await this.store.listAllMembers()) {
+      if (!recipient.removedAt && !recipient.deactivatedAt) this.hub.publishToMember(recipient.id, frame);
+    }
   }
 
   guardWrite(): void {

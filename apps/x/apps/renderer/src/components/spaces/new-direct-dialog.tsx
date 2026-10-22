@@ -130,7 +130,7 @@ export function NewDirectDialog({ org, open, onOpenChange, onOpened }: {
                                     i === active && 'bg-accent',
                                 )}
                             >
-                                <MemberAvatar id={m.id} name={m.displayName} size="md" agent={m.kind === 'agent'} agentKind={m.agentKind} />
+                                <MemberAvatar orgId={org.id} avatarUrl={m.avatarUrl} id={m.id} name={m.displayName} size="md" agent={m.kind === 'agent'} agentKind={m.agentKind} />
                                 <span className="min-w-0 flex-1 truncate">
                                     {m.displayName}
                                     {m.id === org.memberId && <span className="text-muted-foreground"> (you) · notes to self</span>}

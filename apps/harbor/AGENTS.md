@@ -11,7 +11,7 @@ Two pnpm workspace packages under `packages/`:
 
 | `src/` | Owns |
 |---|---|
-| `core/kernel.ts` | store, hub, org, the read-only knob, the space lock with its publish-after-commit outbox, `append` / `nextOffset` / `appendNext`, `requireSpace` / `requireReadableSpace` / `requireMember`, `guardWrite`, `attributionOf` |
+| `core/kernel.ts` | store, hub, org, the read-only knob, the space lock with its publish-after-commit outbox, `append` / `nextOffset` / `appendNext`, `requireSpace` / `requireReadableSpace` / `requireMember`, `guardWrite`, `attributionOf`, `publishProfile` (org member notifications after profile persistence, 2026-10-22) |
 | `core/spaces.ts` | spaces, direct messages, invites and the bind ceremony, the roster, `me`, agent members (`createAgent`), push registration, the read-gated replay and membership-gated live relays |
 | `core/agents.ts` | agent members' owners and keys: add an agent, list the ones a member manages, create and revoke keys; a platform agent's alert hook (set, clear, and the pre-auth delivery's secret check) |
 | `core/invocations.ts` | invoking agent members (spec §8): the trigger `Feed.postMessage` runs in its transaction, the per-(agent, conversation) queue, the connector's operations, cancel and stop, and approvals (part 4: raised with their card in `Feed.postMessage`'s transaction, decided by a person, settled by the connector; `approval-card.ts` writes the card's text); its frames leave after the commit through its own outbox |
