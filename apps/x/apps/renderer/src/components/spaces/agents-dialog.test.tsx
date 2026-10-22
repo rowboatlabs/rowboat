@@ -36,6 +36,7 @@ const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
         case 'spaces:listAgents': return { agents: listing }
         case 'spaces:openDirect': return { space: { id: `DM-${args.memberId}`, kind: 'direct' }, created: true }
         case 'spaces:addAgent':
+            if (args.credential === 'attio_refused') throw new Error('Attio did not accept this key')
             if (args.credential === 'rpl_refused') throw new Error('Replicas did not accept this key: Invalid or missing API key')
             return { agent: { ...hermes, id: 'new', displayName: args.displayName, agentKind: args.kind, agentConnection: args.connection, ...(args.instance ? { agentInstance: args.instance } : {}) }, key: { ...key('k9', 'new'), secret: NEW_KEY } }
         case 'spaces:agent37Instances':
@@ -373,7 +374,7 @@ describe('AgentsDialog', () => {
         await screen.findByText('Hermes')
         fireEvent.click(screen.getByRole('button', { name: /Add bot/ }))
         expect(screen.getByRole('heading', { name: 'Add a bot' })).toBeInTheDocument()
-        expect(within(screen.getByRole('radiogroup', { name: 'Which service' })).getAllByRole('radio').map((r) => r.getAttribute('aria-label'))).toEqual(['PostHog', 'Cal.com'])
+        expect(within(screen.getByRole('radiogroup', { name: 'Which service' })).getAllByRole('radio').map((r) => r.getAttribute('aria-label'))).toEqual(['PostHog', 'Cal.com', 'Attio'])
         fireEvent.click(screen.getByRole('radio', { name: 'Cal.com' }))
         expect(screen.getByLabelText('Bot name')).toHaveValue('Cal')
         fireEvent.change(screen.getByLabelText('Cal.com API key'), { target: { value: 'cal_live_ab12' } })
@@ -381,6 +382,51 @@ describe('AgentsDialog', () => {
         await screen.findByRole('heading', { name: 'Connect Cal' })
         expect(invoke).toHaveBeenCalledWith('spaces:addAgent', { orgId: 'org-1', displayName: 'Cal', kind: 'cal', connection: 'cal', credential: 'cal_live_ab12' })
         expect(screen.getByText(/such as @Cal today/)).toBeInTheDocument()
+    })
+
+    it('adds Attio with read permissions and sharing guidance, and keeps a refused key editable', async () => {
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        await screen.findByText('Hermes')
+        fireEvent.click(screen.getByRole('button', { name: /Add bot/ }))
+        fireEvent.click(screen.getByRole('radio', { name: 'Attio' }))
+        expect(screen.getByLabelText('Bot name')).toHaveValue('Attio')
+        expect(screen.getByLabelText('Attio workspace API key')).toHaveAttribute('type', 'password')
+        expect(screen.getByRole('button', { name: 'Add bot' })).toBeDisabled()
+        expect(screen.getByText(/object_configuration:read and record_permission:read/)).toHaveTextContent('replies are visible to everyone in that space')
+        fireEvent.change(screen.getByLabelText('Attio workspace API key'), { target: { value: 'attio_refused' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Add bot' }))
+        expect(await screen.findByRole('alert')).toHaveTextContent('Attio did not accept this key')
+        expect(screen.getByRole('heading', { name: 'Add a bot' })).toBeInTheDocument()
+        fireEvent.change(screen.getByLabelText('Attio workspace API key'), { target: { value: 'attio_good' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Add bot' }))
+        await screen.findByRole('heading', { name: 'Connect Attio' })
+        expect(invoke).toHaveBeenCalledWith('spaces:addAgent', { orgId: 'org-1', displayName: 'Attio', kind: 'attio', connection: 'attio', credential: 'attio_good' })
+        expect(screen.getByText(/@Attio company acme.com/)).toBeInTheDocument()
+        expect(screen.getByText(/@Attio person jane@acme.com/)).toBeInTheDocument()
+        expect(screen.getByText(/@Attio record companies/)).toBeInTheDocument()
+        expect(screen.queryByText(/Send its alerts/)).toBeNull()
+    })
+
+    it.each([true, false])('shows Attio as a bot and restricts credential replacement to its owner (owner: %s)', async (owner) => {
+        roster = [person('me', 'Ramnique', 'admin'), person('harsh', 'Harsh')]
+        const attio = { ...cal, id: 'attio', displayName: 'Attio', agentKind: 'attio', agentConnection: 'attio', ownerId: owner ? 'me' : 'harsh' }
+        listing = [{ agent: attio, keys: [], credential: { hint: '…ab12', setBy: attio.ownerId!, setAt: '2026-10-12T10:00:00Z', rejectedAt: '2026-10-12T11:00:00Z', rejectedReason: 'Attio rejected this key.' } }]
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        expect(await screen.findByRole('region', { name: 'Bots' })).toHaveTextContent('Attio bot')
+        fireEvent.click(screen.getByRole('button', { name: /Attio/ }))
+        expect(await screen.findByText(/Attio key …ab12/)).toBeInTheDocument()
+        expect(screen.getByText(/replace it to bring the agent back/)).toBeInTheDocument()
+        expect(screen.getByText(/@Attio company acme.com/)).toBeInTheDocument()
+        expect(screen.queryByLabelText('Space for alerts')).toBeNull()
+        expect(screen.queryByText(/Send its alerts/)).toBeNull()
+        if (owner) {
+            fireEvent.click(screen.getByRole('button', { name: 'Replace' }))
+            fireEvent.change(screen.getByLabelText('New Attio key'), { target: { value: 'attio_replacement' } })
+            fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+            await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:setAgentCredential', { orgId: 'org-1', agentId: 'attio', secret: 'attio_replacement' }))
+        } else {
+            expect(screen.queryByRole('button', { name: 'Replace' })).toBeNull()
+        }
     })
 
     it('lets the owner send a bot’s alerts to a space, shows the address once, and turns them off', async () => {

@@ -57,6 +57,7 @@ export const KINDS: Record<string, { label: string; logo?: Logo; bot?: boolean }
     // Integrations (2026-10-03) show the generic mark until their official ones are added.
     posthog: { label: 'PostHog', bot: true },
     cal: { label: 'Cal.com', bot: true },
+    attio: { label: 'Attio', bot: true },
     custom: { label: 'Agent' },
     // Ro (Harbor spec §8 Jev, 2026-10-07): the agent Harbor itself is, run on
     // TypeSafe's Jev through Rowboat's OpenRouter key. People meet it as Ro,
@@ -72,6 +73,7 @@ export const PLATFORMS: Record<string, { label: string; logo?: Logo }> = {
     replicas: { label: 'Replicas', logo: { light: replicasLogo, dark: replicasLogoDark } },
     posthog: { label: 'PostHog' },
     cal: { label: 'Cal.com' },
+    attio: { label: 'Attio' },
     conductor: { label: 'Conductor', logo: { light: conductorLogo, dark: conductorLogoDark } },
     agent37: { label: 'Agent37', logo: { light: agent37Logo, dark: agent37LogoDark } },
 }
@@ -581,6 +583,39 @@ export const AGENT_SETUPS: readonly AgentSetup[] = [
             note: 'In Cal.com, Settings → Developer → Webhooks → New, with this as the Subscriber URL and the booking events you want. Ping test posts a hello.',
         },
         setup: integrationSetup('Cal', 'today'),
+    },
+    {
+        id: 'attio',
+        label: 'Attio',
+        description: 'Your Attio CRM: look up companies, people and records',
+        connection: 'attio',
+        kinds: ['attio'],
+        bot: true,
+        defaultName: 'Attio',
+        credential: {
+            label: 'Attio workspace API key',
+            placeholder: 'Paste your Attio workspace API key',
+            note: 'Create a workspace API key in Attio with object_configuration:read and record_permission:read permissions. Harbor checks it with Attio and keeps it sealed. Anyone who can mention this bot can read CRM data available to its key; replies are visible to everyone in that space.',
+        },
+        docsUrl: 'https://docs.attio.com/rest-api/guides/authentication',
+        setup: () => [{
+            id: 'commands',
+            label: 'Commands',
+            steps: [
+                {
+                    title: 'Look up CRM records',
+                    note: 'Mention the bot with help for its commands. It reads Attio with your workspace key and replies in the thread. Use its current name if you rename it.',
+                    code: {
+                        caption: 'Example messages',
+                        text: '@Attio help\n@Attio company acme.com\n@Attio person jane@acme.com\n@Attio record companies <record-id>',
+                    },
+                },
+                {
+                    title: 'Choose who can read your CRM',
+                    note: 'Anyone who can mention this bot can read CRM data available to its key. Replies are visible to everyone in that space. The owner can replace the workspace API key on the bot’s page.',
+                },
+            ],
+        }],
     },
     {
         id: 'custom',
