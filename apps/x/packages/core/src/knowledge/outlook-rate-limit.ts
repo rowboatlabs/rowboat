@@ -30,6 +30,8 @@
  *   - State is an in-memory singleton (not persisted across restarts).
  */
 
+import { isRateLimitStatus, parseRetryAfter } from './retry-after.js';
+
 export type OutlookCooldownSource = 'graph' | 'default';
 
 export interface OutlookCooldownInfo {
@@ -58,35 +60,10 @@ const DEADLINE_CAP_MS = 6 * 60 * 60_000;
 // the first pass back doesn't re-trip the quota with a full burst.
 const POST_COOLDOWN_GRACE_MS = 60_000;
 
-/** Checks if an HTTP response status represents rate limiting (429). */
-export function isRateLimitStatus(status: number): boolean {
-    return status === 429;
-}
-
-/**
- * Parses the Retry-After header from Microsoft Graph into an epoch-ms deadline.
- * Supports delta-seconds (e.g. "120") and RFC 1123 HTTP-date (e.g. "Wed, 21 Oct 2026 07:28:00 GMT").
- * Returns null if the header is absent, invalid, or represents a time in the past.
- */
-export function parseRetryAfter(header: string | null | undefined, now: number = Date.now()): number | null {
-    if (!header) return null;
-    const trimmed = header.trim();
-    if (!trimmed) return null;
-
-    // 1. Try delta-seconds
-    const seconds = Number(trimmed);
-    if (Number.isFinite(seconds) && seconds > 0) {
-        return now + seconds * 1000;
-    }
-
-    // 2. Try HTTP-date
-    const asDate = Date.parse(trimmed);
-    if (Number.isFinite(asDate) && asDate > now) {
-        return asDate;
-    }
-
-    return null;
-}
+// The 429 check and the Retry-After parser moved to retry-after.ts so Granola
+// can share them (2026-10-23, #555); re-exported so callers and tests keep
+// their import path.
+export { isRateLimitStatus, parseRetryAfter };
 
 /**
  * How long the single in-request retry should wait, or null when the deadline
