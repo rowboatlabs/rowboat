@@ -1298,7 +1298,7 @@
 .rowboat-dock {
   position: fixed;
   /* Below the titlebar band, floating like the open panel (2026-10-22): 8px
-     in from the left (inline style) and bottom, 12px corners, a hairline ring
+     in from the left (inline style) and bottom, 16px corners, a hairline ring
      and a soft shadow, so collapsing reads as the same panel, narrower. */
   top: 2.5rem;
   bottom: 8px;
@@ -1307,7 +1307,7 @@
   flex-direction: column;
   box-sizing: border-box;
   background: var(--sidebar);
-  border-radius: 12px;
+  border-radius: 16px;
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--sidebar-foreground) 8%, transparent),
     0 4px 16px rgb(0 0 0 / .08);

@@ -2716,6 +2716,7 @@ function App() {
   })
   const { layout: assistantLayout, dispatch: dispatchAssistantLayout, place: placeAssistantChat } = useAssistantLayout(chatTabs.map((tab) => tab.id))
   const [assistantPageHost, setAssistantPageHost] = useState<HTMLDivElement | null>(null)
+  const [assistantHeaderHost, setAssistantHeaderHost] = useState<HTMLDivElement | null>(null)
   const chatTabsRef = useRef(chatTabs)
   chatTabsRef.current = chatTabs
   // A tab's current chat identity (see ChatTab.chatId). Session-scoped maps
@@ -7366,7 +7367,9 @@ function App() {
                 collapsedLeftPaddingPx={collapsedLeftPaddingPx}
               >
                 {isFullScreenChat ? (
-                  <span className="self-center px-3 text-sm font-medium">Assistant</span>
+                  // The chat's own title, ▾ history and actions land here
+                  // (assistant/chat.tsx), one bar instead of two (2026-10-22).
+                  <div ref={setAssistantHeaderHost} className="flex min-w-0 flex-1 items-stretch" />
                 ) : currentViewState.type === 'file' && selectedPath ? (
                   <TabBar
                     tabs={openFilePaths.includes(selectedPath) ? openFilePaths : [...openFilePaths, selectedPath]}
@@ -7447,7 +7450,7 @@ function App() {
                       <button
                         type="button"
                         onClick={toggleChatSidebar}
-                        className="titlebar-no-drag ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                        className="titlebar-no-drag ml-auto flex h-8 w-8 shrink-0 items-center justify-center self-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
                         aria-label="Open chat sidebar"
                       >
                         <MessageSquare className="size-4" />
@@ -7965,7 +7968,7 @@ function App() {
             </SidebarInset>
 
               <AssistantWorkspace
-                layout={assistantLayout} dispatch={dispatchAssistantLayout} pageHost={assistantPageHost} pageVisible={activeMiddle === 'chat'}
+                layout={assistantLayout} dispatch={dispatchAssistantLayout} pageHost={assistantPageHost} pageHeaderHost={isFullScreenChat ? assistantHeaderHost : null} pageVisible={activeMiddle === 'chat'}
                 legacyPane={isCodePaneActive} workspaceSessionId={activeCodeSession?.session.id ?? null}
                 onMoveChat={moveAssistantChat} onNewChatAt={newChatAt} onSelectChatAt={selectChatAt} onFocusChat={switchChatTab}
                 onHideSidebar={() => dispatchAssistantLayout({ type: 'hide-sidebar' })} onCloseChat={closeAssistantChat}
