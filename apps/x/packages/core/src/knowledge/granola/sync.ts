@@ -7,6 +7,7 @@ import { IGranolaConfigRepo } from './repo.js';
 import { serviceLogger } from '../../services/service_logger.js';
 import { limitEventItems } from '../limit_event_items.js';
 import { publishMeetingNotesReadyEvent } from '../meeting-events.js';
+import { callWithRateLimit, httpStatusErrorFrom } from '../rate-limited-call.js';
 import {
     GetDocumentsResponse,
     SyncState,
@@ -22,7 +23,7 @@ const SYNC_DIR = path.join(WorkDir, 'knowledge', 'Meetings', 'granola');
 const STATE_FILE = path.join(WorkDir, 'granola_sync_state.json');
 const SYNC_INTERVAL_MS = 5 * 60 * 1000; // Check every 5 minutes
 const API_DELAY_MS = 1000; // 1 second delay between API calls
-const RATE_LIMIT_RETRY_DELAY_MS = 60 * 1000; // Wait 1 minute on rate limit
+const RATE_LIMIT_RETRY_DELAY_MS = 60 * 1000; // Fallback wait on a 429 with no Retry-After; doubles per retry
 const MAX_RETRIES = 3; // Maximum retries for rate-limited requests
 const MAX_BATCH_SIZE = 10; // Process max 10 documents per folder per sync
 const LOOKBACK_DAYS = 7; // Only sync documents from the last 1 week
@@ -99,46 +100,6 @@ function sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function callWithRateLimit<T>(
-    operation: () => Promise<T>,
-    operationName: string
-): Promise<T | null> {
-    let retries = 0;
-    let delay = RATE_LIMIT_RETRY_DELAY_MS;
-
-    while (retries < MAX_RETRIES) {
-        try {
-            const result = await operation();
-            return result;
-        } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-
-            // Check if it's a rate limit error (429 Too Many Requests)
-            if (errorMessage.includes('429') ||
-                errorMessage.includes('Too Many Requests') ||
-                errorMessage.includes('too many requests') ||
-                errorMessage.includes('rate limit')) {
-
-                retries++;
-                console.log(`[Granola] Rate limit hit for ${operationName}. Retry ${retries}/${MAX_RETRIES} in ${delay/1000}s...`);
-
-                if (retries >= MAX_RETRIES) {
-                    console.error(`[Granola] Max retries reached for ${operationName}. Skipping.`);
-                    return null;
-                }
-
-                await sleep(delay);
-                delay *= 2; // Exponential backoff
-            } else {
-                // Not a rate limit error, throw it
-                throw error;
-            }
-        }
-    }
-
-    return null;
-}
-
 // --- API Client ---
 
 function getHeaders(accessToken: string): Record<string, string> {
@@ -165,8 +126,9 @@ async function apiCall<T>(
     if (!response.ok) {
         const errorText = await response.text().catch(() => 'no body');
         console.error(`[Granola] API error ${response.status}: ${response.statusText} - ${errorText.slice(0, 200)}`);
-        // Throw error with status code so rate limit handler can detect 429
-        throw new Error(`${response.status}: ${response.statusText}`);
+        // Carry the status and Retry-After so the retry loop can honor the
+        // server's own deadline instead of guessing (2026-10-23, #555).
+        throw httpStatusErrorFrom(response);
     }
 
     const data = await response.json() as T;
@@ -181,7 +143,8 @@ async function getDocuments(accessToken: string, limit: number, offset: number) 
             offset,
             include_last_viewed_panel: true,
         }),
-        'get-documents'
+        'get-documents',
+        { label: 'Granola', maxRetries: MAX_RETRIES, initialDelayMs: RATE_LIMIT_RETRY_DELAY_MS },
     );
     if (!response) return null;
 
