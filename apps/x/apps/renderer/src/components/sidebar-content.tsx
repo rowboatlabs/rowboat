@@ -239,7 +239,6 @@ function formatEventTime(ts: string): string {
 }
 
 function SyncStatusBar() {
-  const { state } = useSidebar()
   const [activeServices, setActiveServices] = useState<Map<string, string>>(new Map())
   const [serviceErrors, setServiceErrors] = useState<Map<string, string>>(new Map())
   const [popoverOpen, setPopoverOpen] = useState(false)
@@ -344,7 +343,6 @@ function SyncStatusBar() {
   }, [popoverOpen])
 
   const isSyncing = activeServices.size > 0
-  const isCollapsed = state === "collapsed"
   const errorEntries = Array.from(serviceErrors.entries())
   const primaryErrorService = errorEntries[0]?.[0] ?? null
   const hasServiceErrors = errorEntries.length > 0
@@ -363,15 +361,8 @@ function SyncStatusBar() {
   // the account row instead of its own footer strip; it opens the same log.
   return (
     <>
-      {isCollapsed && isSyncing && (
-        <div
-          className="fixed bottom-4 z-40 flex h-8 w-8 items-center justify-center rounded-full border border-border bg-background shadow-sm"
-          style={{ left: "0.5rem" }}
-          aria-label="Syncing"
-        >
-          <LoaderIcon className="h-4 w-4 animate-spin text-muted-foreground" />
-        </div>
-      )}
+      {/* Collapsed, the rail's avatar shows syncing as a turning ring
+          (dock-sidebar.tsx, 2026-10-22), where this floating spinner sat. */}
       <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
         <Tooltip delayDuration={400}>
           <TooltipTrigger asChild>

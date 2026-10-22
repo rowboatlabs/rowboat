@@ -2,6 +2,7 @@ import { SidebarChatContextMenu } from "./sidebar-chat-context-menu"
 "use client"
 
 import { Keys } from '@/components/keys'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { SHORTCUTS, type ShortcutKeys } from '@/lib/shortcuts'
 import { isGroupChat, readLastSpace, resolveSpacesLocation } from '@/lib/spaces-navigation'
 
@@ -101,8 +102,12 @@ import z from "zod"
 // Geometry
 // ---------------------------------------------------------------------------
 
-/** Rail width = horizontal space the content panes leave for it. */
-export const DOCK_GUTTER_PX = 48
+/** The rail floats like the open panel (2026-10-22): 48px wide, 8px in from
+ *  the window's left edge, with an 8px gap before the content. */
+const RAIL_LEFT_PX = 8
+const RAIL_WIDTH_PX = 48
+/** Horizontal space the content panes leave for the rail (inset + rail + gap). */
+export const DOCK_GUTTER_PX = RAIL_LEFT_PX + RAIL_WIDTH_PX + 8
 
 /** Each tile's chord, shown in its tooltip (2026-10-21). */
 const DOCK_SHORTCUTS: Record<string, ShortcutKeys | undefined> = {
@@ -125,7 +130,7 @@ const RAIL_ICON_PX = 18
 export { LAST_SPACE_STORAGE_KEY } from '@/lib/spaces-navigation'
 
 /** Where flyout panels (Chats / Spaces) sit, just right of the rail. */
-const DOCK_FLYOUT_LEFT_PX = DOCK_GUTTER_PX + 8
+const DOCK_FLYOUT_LEFT_PX = DOCK_GUTTER_PX
 
 // ---------------------------------------------------------------------------
 // Shared shapes (mirrors what App.tsx already passes around)
@@ -635,6 +640,22 @@ export function DockSidebar({
   const appUrl = useRowboatConfig()?.appUrl ?? null
   const { billing, refresh: refreshBilling } = useBilling(isRowboatConnected)
   const currentBillingPlan = billing ? getBillingPlanData(billing.catalog, billing.subscriptionPlanId) : null
+
+  // The avatar at the rail's foot: your first name from the Gmail account,
+  // else from the email address — the same as the panel's footer.
+  const [gmailName, setGmailName] = useState('')
+  useEffect(() => {
+    let cancelled = false
+    window.ipc.invoke('gmail:getAccountName', {})
+      .then((res) => { if (!cancelled && res?.name) setGmailName(res.name) })
+      .catch(() => { /* fall back to the email address */ })
+    return () => { cancelled = true }
+  }, [])
+  const emailName = (billing?.userEmail?.split('@')[0] ?? '').split(/[._+-]/)[0] ?? ''
+  const accountName = gmailName.trim().split(/\s+/)[0]
+    || (emailName ? emailName.charAt(0).toUpperCase() + emailName.slice(1) : '')
+    || (isRowboatConnected ? 'Rowboat' : 'Not signed in')
+  const accountInitial = accountName === 'Not signed in' ? '?' : accountName.charAt(0).toUpperCase()
 
   useEffect(() => {
     let mounted = true
@@ -1313,15 +1334,32 @@ export function DockSidebar({
   return (
     <>
       {(!switcherOnly || railLeaving) && (
-      <div data-dock-root="" data-leaving={railLeaving || undefined} className="rowboat-dock titlebar-no-drag" style={{ width: DOCK_GUTTER_PX }}>
+      <div data-dock-root="" data-leaving={railLeaving || undefined} className="rowboat-dock titlebar-no-drag" style={{ left: RAIL_LEFT_PX, width: RAIL_WIDTH_PX }}>
         <div
-          className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto px-2 pb-2 pt-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="flex min-h-0 flex-1 flex-col items-center gap-0.5 overflow-y-auto px-2 pb-2 pt-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           onMouseLeave={() => setHoverTip(null)}
         >
+        {/* New chat on top, framed like the panel's New chat button (2026-10-22). */}
+        {onNewChat && (
+          <Tooltip delayDuration={300}>
+            <TooltipTrigger asChild>
+              <button type="button" aria-label="New chat" className="sb-square mb-2" onClick={() => { closeFlyouts(); onNewChat() }}>
+                <SquarePen />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right" sideOffset={12} className="flex items-center gap-2">
+              New chat <Keys keys={SHORTCUTS.newChat} tone="dark" />
+            </TooltipContent>
+          </Tooltip>
+        )}
         {rows.map((row, i) => {
+          // A gap, not a rule, before Chats — as the panel spaces its sections.
           if (row.sep) {
-            return <div key={`sep-${i}`} className="my-1 h-px w-5 shrink-0 bg-border" />
+            return <div key={`sep-${i}`} className="h-2.5 shrink-0" aria-hidden="true" />
           }
+          // Settings lives in the account menu at the rail's foot; the row
+          // stays in `rows` so the ⌥Tab switcher still offers it.
+          if (row.item.key === 'settings') return null
           const item = row.item
           const Icon = item.icon
           const tile = (
@@ -1363,25 +1401,85 @@ export function DockSidebar({
               <ContextMenuContent>{menu}</ContextMenuContent>
             </ContextMenu>
           ) : tile
-          // The Settings tile doubles as the anchor for the sync-activity popover.
-          if (item.key === 'settings') {
-            return (
-              <Popover key="settings-popover" open={syncLogOpen} onOpenChange={setSyncLogOpen}>
-                <PopoverAnchor asChild>{wrapped}</PopoverAnchor>
-                <PopoverContent side="right" align="end" sideOffset={16} className="w-96 p-0">
-                  <div className="border-b p-3">
-                    <h4 className="text-sm font-semibold">Sync Activity</h4>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      {isSyncing || hasServiceErrors ? syncStatusLabel : 'All services up to date'}
-                    </p>
-                  </div>
-                  <SyncActivityLog onErrors={setServiceErrors} />
-                </PopoverContent>
-              </Popover>
-            )
-          }
           return wrapped
         })}
+        </div>
+        {/* The account at the foot (2026-10-22), as in the panel: your avatar
+            opens plan, accounts, sync, tour and Settings. It carries the old
+            Settings tile's "!" as a dot, and anchors the sync log. */}
+        <div className="flex shrink-0 justify-center pb-2 pt-1">
+          <Popover open={syncLogOpen} onOpenChange={setSyncLogOpen}>
+            <PopoverAnchor asChild>
+              <span className="inline-flex">
+                <DropdownMenu>
+                  <Tooltip delayDuration={300}>
+                    <TooltipTrigger asChild>
+                      <DropdownMenuTrigger asChild>
+                        <button type="button" aria-label={`${accountName}: account and settings`} className={cn('sb-avatar-button', isSyncing && 'is-syncing')}>
+                          <span className="sb-avatar" aria-hidden="true">
+                            {accountInitial}
+                            {(outOfCredits || hasOauthError) && <span className={cn('sb-avatar-flag', outOfCredits && 'is-alert')} />}
+                          </span>
+                        </button>
+                      </DropdownMenuTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent side="right" sideOffset={12}>{accountName} · {settingsStatus}</TooltipContent>
+                  </Tooltip>
+                  <DropdownMenuContent side="right" align="end" sideOffset={12} className="sb-menu w-[248px] rounded-xl p-1.5">
+                    <div className="flex items-center gap-2.5 px-2 pb-2 pt-1.5">
+                      <span className="sb-avatar size-8! text-[13px]!" aria-hidden="true">{accountInitial}</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-[13px] font-semibold">{accountName}</div>
+                        <div className="truncate text-[11.5px] text-muted-foreground">{billing?.userEmail ?? 'Not signed in'}</div>
+                      </div>
+                    </div>
+                    {isRowboatConnected ? (
+                      appUrl && (
+                        <DropdownMenuItem onSelect={() => window.open(`${appUrl}?intent=upgrade`)}>
+                          <ArrowUpRight />
+                          {outOfCredits
+                            ? 'Out of credits · Upgrade'
+                            : !billing?.subscriptionPlanId || currentBillingPlan?.category === 'free' || currentBillingPlan?.category === 'starter'
+                              ? `${currentBillingPlan?.displayName ?? 'Free'} plan · Upgrade`
+                              : `${currentBillingPlan?.displayName ?? 'Plan'} · Manage`}
+                        </DropdownMenuItem>
+                      )
+                    ) : (
+                      <DropdownMenuItem disabled={loggingIn} onSelect={() => void handleRowboatLogin()}>
+                        <LogIn />
+                        {loggingIn ? 'Signing in…' : 'Sign in to Rowboat'}
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuItem onSelect={() => setConnectionsSettingsOpen(true)}>
+                      <Plug /> Connect accounts
+                      {hasOauthError && <span className="ml-auto size-1.5 rounded-full bg-amber-500" />}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => setSyncLogOpen(true)}>
+                      <History /> Sync activity
+                    </DropdownMenuItem>
+                    {onStartTour && (
+                      <DropdownMenuItem onSelect={onStartTour}>
+                        <MascotFaceIcon className="size-4" /> Take a tour
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuItem onSelect={() => setSettingsOpen(true)}>
+                      <Settings /> Settings
+                      <Keys keys={SHORTCUTS.settings} className="ml-auto" />
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </span>
+            </PopoverAnchor>
+            <PopoverContent side="right" align="end" sideOffset={16} className="w-96 p-0">
+              <div className="border-b p-3">
+                <h4 className="text-sm font-semibold">Sync Activity</h4>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {isSyncing || hasServiceErrors ? syncStatusLabel : 'All services up to date'}
+                </p>
+              </div>
+              <SyncActivityLog onErrors={setServiceErrors} />
+            </PopoverContent>
+          </Popover>
         </div>
         {(() => {
           // The status tooltip, rendered as a fixed sibling so the scroll
@@ -1396,7 +1494,7 @@ export function DockSidebar({
           return (
             <span
               className="rowboat-dock-tip"
-              style={{ left: DOCK_GUTTER_PX + 8, top: hoverTip.centerY, padding: item.status ? '6px 12px' : '4px 10px' }}
+              style={{ left: DOCK_GUTTER_PX, top: hoverTip.centerY, padding: item.status ? '6px 12px' : '4px 10px' }}
             >
               <span className="flex items-center gap-2">
                 {item.label}
@@ -1483,7 +1581,7 @@ export function DockSidebar({
       {/* First-time-action credit rewards (feature-flagged, signed-in only).
           The expanded panel carries its own copy, so dock mode only. */}
       {!switcherOnly && (
-      <div className="titlebar-no-drag fixed bottom-2 z-30 w-60" style={{ left: DOCK_GUTTER_PX + 8 }}>
+      <div className="titlebar-no-drag fixed bottom-2 z-30 w-60" style={{ left: DOCK_GUTTER_PX }}>
         <SidebarCreditRewards
           onOpenEmail={onOpenEmail}
           onOpenMeetings={onOpenMeetings}
