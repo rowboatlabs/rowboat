@@ -37,6 +37,7 @@ import spacesSkill from "./spaces/skill.js";
 import whiteboardSkill from "./whiteboard/skill.js";
 import chartsSkill from "./charts/skill.js";
 import voiceSkill from "./voice/skill.js";
+import manageSkillsSkill from "./manage-skills/skill.js";
 
 const CURRENT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const CATALOG_PREFIX = "src/runtime/assembly/skills";
@@ -251,6 +252,13 @@ const definitions: SkillDefinition[] = [
     content: voiceSkill,
     tools: ["text-to-speech", "transcribe-audio"],
   },
+  {
+    id: "manage-skills",
+    title: "Manage Skills",
+    summary: "Learn from this session: create, edit or delete skills you wrote, or keep learned notes on top of any other skill (e.g. the user's deck preferences on create-presentations). Load when the user corrects how you did a task, a reusable technique emerged, a loaded skill was wrong, or the user asks you to make/change/forget a skill.",
+    content: manageSkillsSkill,
+    tools: ["skill-manage"],
+  },
 ];
 
 type SkillEntry = SkillDefinition & { catalogPath: string; skillFile?: string };
@@ -463,6 +471,12 @@ export function resolveSkill(identifier: string): ResolvedSkill | null {
 
   // Bundled wins over disk on any alias collision.
   return aliasMap.get(normalized) ?? diskAliasMap.get(normalized) ?? null;
+}
+
+// Lookups for agent-skills.ts: a new agent skill may not reuse any loaded
+// skill's id, and learned notes only make sense on a skill that can load.
+export function isSkillIdTaken(id: string): boolean {
+  return getSkillEntries().some((entry) => entry.id === id);
 }
 
 /**

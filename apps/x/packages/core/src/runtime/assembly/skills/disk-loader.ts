@@ -72,6 +72,9 @@ export function loadDiskSkills(): DiskSkill[] {
     }
 
     for (const entry of entries) {
+      // Dot entries are bookkeeping, not skills: the agent-skills manifest,
+      // learned notes and archive (agent-skills.ts) live beside the skills.
+      if (entry.name.startsWith(".")) continue;
       const dir = path.join(root, entry.name);
       // entry.isDirectory() is false for a symlink to a directory, so stat the
       // full path (statSync follows symlinks) to accept symlinked skill folders.
