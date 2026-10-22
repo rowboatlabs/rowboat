@@ -16,8 +16,8 @@ import type { SpacePresence, StreamState } from '@/hooks/use-space-chat'
 vi.mock('@/components/spaces/composer', () => ({ Composer: () => null }))
 vi.mock('@/components/spaces/message-row', () => ({
     DayDivider: () => null,
-    MessageRow: ({ message, arriving, threadOpen }: { message: { id: string; body: string }; arriving?: boolean; threadOpen?: boolean }) => (
-        <div data-mid={message.id} data-arriving={arriving || undefined} data-thread-open={threadOpen || undefined}>{message.body}</div>
+    MessageRow: ({ message, arriving, threadOpen, sentFrom, continuation }: { message: { id: string; body: string }; arriving?: boolean; threadOpen?: boolean; sentFrom?: { label: string } | null; continuation?: boolean }) => (
+        <div data-mid={message.id} data-arriving={arriving || undefined} data-thread-open={threadOpen || undefined} data-sent-from={sentFrom?.label} data-continuation={continuation || undefined}>{message.body}</div>
     ),
     NewDivider: () => null,
     TypingIndicator: () => null,
@@ -77,7 +77,7 @@ const msg = (offset: number): spaces.Message =>
     }) as spaces.Message
 const range = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => msg(from + i))
 const streamOf = (messages: spaces.Message[], patch: Partial<StreamState> = {}): StreamState => ({
-    messages, topicsByRoot: new Map(), events: [], hasMore: false, loadingOlder: false, hasMoreAfter: false, newerSince: 0, ready: true, ...patch,
+    messages, topicsByRoot: new Map(), threadRoots: new Map(), events: [], hasMore: false, loadingOlder: false, hasMoreAfter: false, newerSince: 0, ready: true, ...patch,
 })
 const org = { id: 'org', memberId: 'me', address: 'org.example', name: 'Org', spaces: [], directs: [], directLabels: {} } as unknown as OrgWithSpaces
 const space = { id: 'space', name: 'Space', createdAt: '2026-09-01T00:00:00Z', kind: 'shared' } as spaces.Space
@@ -299,5 +299,20 @@ describe('GeneralStream live arrivals (spaces redesign 2026-10-21)', () => {
             memberNames={new Map()} onOpenThread={vi.fn()} openThreadId="m1" />)
         await screen.findByText('body 2')
         expect([...document.querySelectorAll('[data-thread-open]')].map((el) => el.getAttribute('data-mid'))).toEqual(['m1'])
+    })
+
+    it('names each sent reply\'s thread from its discussion, its root, or a placeholder, and never runs it on', async () => {
+        const root = { ...msg(1), id: 'old-root', body: 'Fix the login bug\nmore', replyCount: 3 } as spaces.Message
+        const fromRoot = { ...msg(5), id: 'sent', threadRoot: 'old-root', alsoInStream: true, body: 'PR is up' } as spaces.Message
+        const named = { ...msg(6), id: 'named', threadRoot: 'r1', alsoInStream: true, body: 'shipped' } as spaces.Message
+        const unknown = { ...msg(7), id: 'unknown', threadRoot: 'r2', alsoInStream: true, body: 'done' } as spaces.Message
+        const topic = { id: 't1', rootMessageId: 'r1', title: 'Launch', archived: false } as spaces.Topic
+        render(<GeneralStream org={org} space={space} presence={presence} memberNames={new Map()} onOpenThread={vi.fn()}
+            stream={streamOf([msg(4), fromRoot, named, unknown], { threadRoots: new Map([['old-root', root]]), topicsByRoot: new Map([['r1', topic]]) })} />)
+        await screen.findByText('done')
+        const label = (id: string) => document.querySelector(`[data-mid="${id}"]`)?.getAttribute('data-sent-from')
+        expect([label('m4'), label('sent'), label('named'), label('unknown')]).toEqual([null, 'Fix the login bug', 'Launch', 'a thread'])
+        // Same author, minutes apart: a sent reply still draws its own header.
+        expect(document.querySelector('[data-mid="sent"]')?.hasAttribute('data-continuation')).toBe(false)
     })
 })

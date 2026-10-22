@@ -1084,6 +1084,17 @@ export const MIGRATIONS: Migration[] = [
       )`,
     ],
   },
+  {
+    // Sending a reply to the stream (2026-10-22, Slack's "Also send to
+    // channel"): the reply stays in its thread and also lists in the stream.
+    // The stream's read path takes those rows too, so its index does.
+    id: '045-also-in-stream',
+    statements: [
+      `alter table messages add column if not exists also_in_stream boolean not null default false`,
+      `create index if not exists messages_stream_listed on messages (space_id, stream_offset) where thread_root is null or also_in_stream`,
+      `drop index if exists messages_stream`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

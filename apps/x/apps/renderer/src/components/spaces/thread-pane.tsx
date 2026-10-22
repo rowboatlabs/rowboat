@@ -21,7 +21,7 @@ import { MemberName, MemberText } from '@/components/spaces/member-text'
 import { SpaceMarkdown } from '@/components/spaces/space-markdown'
 import { MessageRow, NewDivider, TypingIndicator } from '@/components/spaces/message-row'
 import type { ChatMessage, SpacePresence } from '@/hooks/use-space-chat'
-import { buildPendingMessage, getThreadSnapshot, ingestTopic, putThreadSnapshot, removeTopicByRoot, updateStreamMessage, usePresenceSender } from '@/hooks/use-space-chat'
+import { buildPendingMessage, getThreadSnapshot, ingestStreamMessage, ingestTopic, putThreadSnapshot, removeTopicByRoot, updateStreamMessage, usePresenceSender } from '@/hooks/use-space-chat'
 import { useTopicAgentPermissionWait } from '@/hooks/use-topic-agent-permission'
 import { useSpaceAgentActivity } from '@/lib/spaces-agent-activity'
 import { useSpaceNames, type OrgWithSpaces } from '@/hooks/use-spaces'
@@ -138,6 +138,11 @@ export function ThreadPane({
     const parkedTopRef = useRef<number | null>(null)
     /** Composer prefill (quote-reply, mention-from-profile); a new nonce re-applies it. */
     const [seed, setSeed] = useState<{ text: string; nonce: number; append?: boolean } | null>(null)
+    // Slack's "Also send to channel" (2026-10-22): the next reply also lists
+    // in the stream. One reply at a time, so it clears once that reply leaves.
+    const [alsoInStream, setAlsoInStream] = useState(false)
+    const alsoInStreamRef = useRef(false)
+    alsoInStreamRef.current = alsoInStream
     const { onType } = usePresenceSender(org.id, space.id, rootMessageId, visible && member)
     // The plain-text faces (quotes, titles, copies) name a space token by its current name.
     const spaceNames = useSpaceNames(org.id)
@@ -621,7 +626,7 @@ export function ThreadPane({
     // Optimistic send, same shape as the stream's: render now (dimmed as
     // pending), confirm — or fail into a retry/discard row — in the
     // background. The composer never waits on the round trip.
-    const post = async (body: string, agent?: AgentOptions) => {
+    const post = async (body: string, agent?: AgentOptions, retryInStream?: boolean) => {
         // Sending settles a routed reply: whatever leaves this box is the person's own.
         clearStagedThreadDraft(draftKey)
         if (hasMoreAfterRef.current) {
@@ -629,11 +634,16 @@ export function ThreadPane({
             // The snap toasts its own failure; a reply must not land in an old window.
             if (hasMoreAfterRef.current) return
         }
-        const pending = buildPendingMessage(space.id, org.memberId, body, rootMessageId)
+        // A retry keeps its own choice; a new reply takes the box's, and clears it.
+        const sendToStream = retryInStream ?? alsoInStreamRef.current
+        if (retryInStream === undefined) setAlsoInStream(false)
+        const pending = { ...buildPendingMessage(space.id, org.memberId, body, rootMessageId), ...(sendToStream ? { alsoInStream: true } : {}) }
         setMessages((prev) => [...prev, pending])
-        void invokeSpace('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body, ...agentOptionsPayload(agent) })
+        void invokeSpace('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body, ...(sendToStream ? { alsoInStream: true } : {}), ...agentOptionsPayload(agent) })
             .then((result) => {
                 noteInvocations(org.id, space.id, result.invocations)
+                // The stream shows it now, not when the live frame lands.
+                if (result.message.alsoInStream) ingestStreamMessage(org.id, space.id, result.message)
                 setMessages((prev) => {
                     const rest = prev.filter((m) => m.id !== pending.id)
                     // A jump landed while the send was in flight: the reply lives
@@ -661,7 +671,7 @@ export function ThreadPane({
 
     const retryFailed = (message: spaces.Message) => {
         setMessages((prev) => prev.filter((m) => m.id !== message.id))
-        void post(message.body)
+        void post(message.body, undefined, !!message.alsoInStream)
     }
     const discardFailed = (message: spaces.Message) => setMessages((prev) => prev.filter((m) => m.id !== message.id))
 
@@ -1431,6 +1441,10 @@ export function ThreadPane({
                     },
                 ]}
             /> : <JoinSpacePrompt />}
+            {writable && <label className="flex w-fit cursor-pointer items-center gap-2 px-4 pb-2 text-xs text-muted-foreground">
+                <input type="checkbox" className="size-3.5 accent-[var(--stream-link)]" checked={alsoInStream} onChange={(event) => setAlsoInStream(event.target.checked)} />
+                Also send to stream
+            </label>}
 
         </div>
     )

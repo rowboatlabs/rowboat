@@ -18,7 +18,7 @@ import {
 } from '@/hooks/use-space-chat'
 import { useSpaceNames, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { subscribeComposeInsert } from '@/lib/spaces-compose'
-import { applyReaction, dayKey, formatDayLabel, isContinuation } from '@/lib/spaces-conventions'
+import { applyReaction, dayKey, formatDayLabel, isContinuation, threadLabelOf } from '@/lib/spaces-conventions'
 import { consumeJump, jumpFailureMessage, resolveJumpOffset, scrollToMessage, subscribeJump, type JumpAnchor } from '@/lib/spaces-jump'
 import { PollDialogHost } from '@/components/spaces/poll-dialog'
 import { applyPollVote, myPollVotes, postPoll } from '@/lib/spaces-poll'
@@ -542,7 +542,15 @@ export function GeneralStream({
 
     // Reply creates NOTHING: the thread pane opens on the message itself —
     // a thread with zero replies is just a thread (annotation model).
-    const replyInThread = (parent: spaces.Message) => onOpenThread(parent.id)
+    // A reply sent to the stream (2026-10-22) answers in its own thread.
+    const replyInThread = (parent: spaces.Message) => onOpenThread(parent.threadRoot ?? parent.id)
+    const sentFromFor = (message: spaces.Message): { label: string } | null => {
+        if (message.threadRoot === undefined) return null
+        const topic = stream.topicsByRoot.get(message.threadRoot)
+        const root = stream.messages.find((m) => m.id === message.threadRoot) ?? stream.threadRoots.get(message.threadRoot)
+        const label = topic ? topic.title : root && !root.deletedAt ? threadLabelOf(root.body) : 'a thread'
+        return { label: resolveMentions(label, memberNames, spaceNames) }
+    }
 
     // The working strip's "Open chat": the thread's agent session, one click.
     const openAgentChat = async (rootMessageId: string) => {
@@ -984,8 +992,9 @@ export function GeneralStream({
                 message={message}
                 memberNames={memberNames}
                 spaceNames={spaceNames}
-                continuation={isContinuation(prev, message)}
+                continuation={message.threadRoot === undefined && prev?.threadRoot === undefined && isContinuation(prev, message)}
                 thread={thread}
+                sentFrom={sentFromFor(message)}
                 threadOpen={!!thread && thread.rootMessageId === openThreadId}
                 arriving={arrivingIds.has(message.id)}
                 selfMemberId={org.memberId}

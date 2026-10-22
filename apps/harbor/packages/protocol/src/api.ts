@@ -59,6 +59,12 @@ const NewMessage = z.object({
    * container — a topic exists only via createTopic.
    */
   threadRoot: MessageId.optional(),
+  /**
+   * Replies only (2026-10-22): the reply also lists in the stream, with its
+   * thread named above it. For a result or a decision people outside the
+   * thread need, never for progress. Refused without threadRoot.
+   */
+  alsoInStream: z.boolean().optional(),
   /** Reply-to-activity-row provenance (root posts only): the change-set this message answers. */
   anchorChangeSetId: ChangeSetId.optional(),
   body: z.string().min(1).max(65_536),
@@ -957,6 +963,12 @@ export const routes = {
     response: z.object({
       messages: z.array(Message),
       topics: z.array(Topic),
+      /**
+       * The roots of this page's sent replies (2026-10-22, alsoInStream), so
+       * a client can name each one's thread; `topics` carries their topic
+       * rows too. Absent from older orgs.
+       */
+      threadRoots: z.array(Message).default([]),
       hasMore: z.boolean(),
       /** Newer rows exist above this page. Optional on the wire so a client reading an older org treats absence as false. */
       hasMoreAfter: z.boolean().optional(),

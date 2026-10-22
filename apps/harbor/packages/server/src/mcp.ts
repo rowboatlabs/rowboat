@@ -364,12 +364,14 @@ async function dispatch(
       const a = args as {
         spaceId: string;
         threadRoot?: string;
+        alsoInStream?: boolean;
         body: string;
         poll?: z.infer<typeof NewPoll>;
         agentOptions?: Record<string, Record<string, string | boolean>>;
       };
       const { message, invocations } = await service.postMessage(ctx, a.spaceId, {
         ...(a.threadRoot ? { threadRoot: a.threadRoot } : {}),
+        ...(a.alsoInStream ? { alsoInStream: true } : {}),
         body: a.body,
         ...(a.poll !== undefined ? { poll: a.poll } : {}),
         ...(a.agentOptions ? { agentOptions: a.agentOptions } : {}),

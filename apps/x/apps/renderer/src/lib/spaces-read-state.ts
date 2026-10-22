@@ -409,6 +409,9 @@ function applyFrame(orgId: string, frame: spaces.ServerFrame): void {
                         if (addressesMe) s.unreadRootMentions += 1
                     }
                 } else {
+                    // A reply also sent to the stream (2026-10-22) is one more
+                    // stream row; its mention is counted by its thread, as on the org.
+                    if (m.alsoInStream && !mine && m.offset > s.readOffset) s.unreadRoots += 1
                     const t = s.threads.get(m.threadRoot)
                     if (t) {
                         if (m.offset > t.lastReplyOffset) t.lastReplyOffset = m.offset

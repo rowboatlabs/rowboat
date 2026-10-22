@@ -463,6 +463,12 @@ export const Message = z.object({
    * followed thread is unread when this exceeds the member's mark.
    */
   lastReplyOffset: StreamOffset.optional(),
+  /**
+   * A reply its author also sent to the stream (2026-10-22, Slack's "Also
+   * send to channel"): it lives in its thread AND lists in the stream at its
+   * own offset. Set at post time, immutable; replies only.
+   */
+  alsoInStream: z.boolean().optional(),
   /** Provenance when this root was posted in reply to an activity row (a change-set). */
   anchorChangeSetId: ChangeSetId.optional(),
   /** Set when the author deleted the message (deleter == author, so no separate attribution). */

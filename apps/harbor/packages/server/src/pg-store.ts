@@ -242,6 +242,7 @@ interface MessageRow {
   mentions: string[] | null;
   mentions_here: boolean | null;
   mentions_rowboat: boolean | null;
+  also_in_stream?: boolean | null;
 }
 
 function rowToMessage(r: MessageRow): Message {
@@ -249,6 +250,7 @@ function rowToMessage(r: MessageRow): Message {
     id: r.id,
     spaceId: r.space_id,
     ...(r.thread_root !== null ? { threadRoot: r.thread_root } : {}),
+    ...(r.also_in_stream ? { alsoInStream: true } : {}),
     author: r.author,
     body: r.body,
     postedAt: r.posted_at,
@@ -1037,7 +1039,8 @@ export class PgStore implements Store {
   }
 
   async listStream(spaceId: string, opts?: MessageWindow): Promise<Message[]> {
-    return this.windowMessages('space_id = $1 and thread_root is null', [spaceId], opts);
+    // Roots, and replies also sent to the stream (2026-10-22).
+    return this.windowMessages('space_id = $1 and (thread_root is null or also_in_stream)', [spaceId], opts);
   }
 
   async listThread(spaceId: string, rootMessageId: string, opts?: MessageWindow): Promise<Message[]> {
@@ -1103,8 +1106,8 @@ export class PgStore implements Store {
 
   async appendMessage(message: Message): Promise<void> {
     await this.sql.query(
-      `insert into messages (id, space_id, thread_root, author, body, posted_at, stream_offset, reply_count, last_reply_at, anchor_change_set_id, poll, mentions, mentions_here, mentions_rowboat, search_text, approval)
-       values ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14, $15, $16::jsonb)`,
+      `insert into messages (id, space_id, thread_root, author, body, posted_at, stream_offset, reply_count, last_reply_at, anchor_change_set_id, poll, mentions, mentions_here, mentions_rowboat, search_text, approval, also_in_stream)
+       values ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14, $15, $16::jsonb, $17)`,
       [
         message.id,
         message.spaceId,
@@ -1122,6 +1125,7 @@ export class PgStore implements Store {
         message.mentionsRowboat,
         searchTextFor(message.body),
         message.approval ? JSON.stringify(message.approval) : null,
+        message.alsoInStream ?? false,
       ],
     );
   }
@@ -1420,7 +1424,7 @@ export class PgStore implements Store {
   async countUnreadRoots(spaceId: string, memberId: string, afterOffset: number): Promise<number> {
     const rows = await this.sql.query<{ n: number }>(
       `select count(*)::int as n from messages
-       where space_id = $1 and thread_root is null and deleted_at is null
+       where space_id = $1 and (thread_root is null or also_in_stream) and deleted_at is null
          and stream_offset > $2 and author_member_id <> $3`,
       [spaceId, afterOffset, memberId],
     );

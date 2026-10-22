@@ -397,7 +397,7 @@ export class HarborService {
     ctx: ActorCtx,
     spaceId: string,
     opts?: PageOpts,
-  ): Promise<{ messages: Message[]; topics: Topic[]; hasMore: boolean; hasMoreAfter: boolean; readOffset: number; events: StreamEvent[] }> {
+  ): Promise<{ messages: Message[]; topics: Topic[]; threadRoots: Message[]; hasMore: boolean; hasMoreAfter: boolean; readOffset: number; events: StreamEvent[] }> {
     return this.feed.listStream(ctx, spaceId, opts);
   }
   listThread(

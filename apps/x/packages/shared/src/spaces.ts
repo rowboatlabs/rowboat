@@ -164,10 +164,12 @@ export interface SpacesAssetEntry {
   state?: 'deleted';
 }
 
-/** A stream page: roots only, plus the topic rows annotating this page's roots. */
+/** A stream page: roots and replies sent to the stream, plus the topic rows annotating this page's threads. */
 export interface SpacesStreamPage {
   messages: Message[];
   topics: Topic[];
+  /** The roots this page's sent replies name and it does not hold (2026-10-22); absent from an older org. */
+  threadRoots?: Message[];
   /** Older roots exist below the returned window (listStream is windowed, newest-first). */
   hasMore: boolean;
   /** Newer roots exist above it — only after an around / after page; absent on an older org. */
