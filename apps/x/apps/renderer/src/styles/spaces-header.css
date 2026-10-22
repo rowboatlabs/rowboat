@@ -93,6 +93,14 @@
 .spaces-facepile > * { box-shadow: 0 0 0 2px var(--background); }
 .spaces-facepile > * + * { margin-left: -6px; }
 
+/* "Show sidebar" fades in when the rail is tucked away (2026-10-22). */
+@keyframes spaces-rail-reveal-in {
+  from { opacity: 0; transform: translateX(-4px); }
+  to { opacity: 1; transform: none; }
+}
+.spaces-rail-reveal { animation: spaces-rail-reveal-in 180ms ease-out; }
+@media (prefers-reduced-motion: reduce) { .spaces-rail-reveal { animation: none; } }
+
 /* Menu rows inside the title and people popovers. */
 .spaces-menu-row {
   display: flex;

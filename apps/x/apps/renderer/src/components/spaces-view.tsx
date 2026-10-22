@@ -9,7 +9,9 @@ import '@/styles/spaces-header.css'
 import { ThreadResizeHandle, THREAD_DEFAULT_WIDTH, THREAD_MIN_WIDTH, THREAD_DIVIDER_WIDTH, STREAM_MIN_WIDTH } from '@/components/spaces/thread-resize-handle'
 import { getViewerType } from '@/lib/file-types'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { Archive, ArchiveRestore, Bookmark, Check, ChevronDown, ChevronLeft, ChevronRight, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Lock, Link as LinkIcon, Loader2, PenTool, Plus, Star, Trash2, UserPlus, Users } from 'lucide-react'
+import type { SecondaryRailPeek } from '@/components/secondary-rail'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { Archive, ArchiveRestore, Bookmark, Check, ChevronDown, ChevronLeft, ChevronRight, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Lock, Link as LinkIcon, Loader2, PanelLeft, PenTool, Plus, Star, Trash2, UserPlus, Users } from 'lucide-react'
 import { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -39,7 +41,7 @@ import { SpaceFilesView } from '@/components/spaces/space-files-view'
 import { SpaceSearch } from '@/components/spaces/space-search'
 import { railKey, type RailSelection } from '@/lib/spaces-selection'
 import { ThreadPane } from '@/components/spaces/thread-pane'
-import { STREAM_READ_KEY, useSpacePresence, useStream } from '@/hooks/use-space-chat'
+import { STREAM_READ_KEY, useSpacePresence, useSpacesUnreadCounts, useStream } from '@/hooks/use-space-chat'
 import { refreshMembers, useOrgRoster, useSpaceMembers } from '@/hooks/use-space-members'
 import { findSpace, refreshSpacesAccountState, refreshSpacesOrgs, useSpaceFeed, useSpaceLive, useSpaceNames, useSpacesAccountState, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { noteListingFromEntries } from '@/hooks/use-space-boards'
@@ -734,6 +736,9 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         localStorage.setItem(railPinKey, pin ? '1' : '0')
         setRailPinned(pin)
     }
+    const railPeekRef = useRef<SecondaryRailPeek | null>(null)
+    const railUnread = useSpacesUnreadCounts()
+    const railHasUnread = [...railUnread].some(([key, badge]) => key.startsWith(`${org.id}/`) && badge.unread > 0)
 
     // Selecting places the thing in its column (see placeSelection). The
     // rail stays where it is — it is a sidebar, not a flyout.
@@ -975,6 +980,25 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                 people and the board. The old Invite button, bookmark icon and ⋯
                 menu folded into those — every action is still one or two clicks. */}
             <header className="spaces-header flex shrink-0 items-center gap-3 border-b border-border">
+                {/* With the rail tucked away, this is the way back (2026-10-22),
+                    replacing the hidden 10px edge sliver: hover previews the
+                    rail, click docks it. It carries the sliver's unread dot. */}
+                {!railOpen && <Tooltip delayDuration={500}>
+                    <TooltipTrigger asChild>
+                        <button
+                            type="button"
+                            aria-label="Show sidebar"
+                            onClick={() => { railPeekRef.current?.leave(); toggleRailPin() }}
+                            onMouseEnter={() => railPeekRef.current?.enter()}
+                            onMouseLeave={() => railPeekRef.current?.leave()}
+                            className="spaces-header-button spaces-rail-reveal relative -mr-1"
+                        >
+                            <PanelLeft className="size-4" />
+                            {railHasUnread && <span aria-hidden="true" className="absolute right-1 top-1 size-1.5 rounded-full bg-foreground" />}
+                        </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" sideOffset={6}>Show sidebar</TooltipContent>
+                </Tooltip>}
                 <ServerSwitcher org={org} onOpenSpace={onSwitchSpace} {...(onOpenAgents ? { onOpenAgents } : {})} />
                 {/* A group chat's name is the server's: no "/ #name" after it, just who is in it. */}
                 {!(groupChat && !isDirect) && <span aria-hidden="true" className="-mx-1 shrink-0 text-muted-foreground/50">/</span>}
@@ -1188,6 +1212,8 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                     spaceId={space.id}
                     open={railOpen}
                     onTogglePin={toggleRailPin}
+                    peekRef={railPeekRef}
+                    edgeless
                 />
                 <div className="flex min-w-0 min-h-0 flex-1 flex-col">
                     {selection.kind === 'discussions' && <SpaceDiscussionsView orgId={org.id} orgAddress={org.address} spaceId={space.id}
