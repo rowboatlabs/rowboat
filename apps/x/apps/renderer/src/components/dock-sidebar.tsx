@@ -36,6 +36,9 @@ import { Bell,
   Video,
   type LucideIcon,
 } from "lucide-react"
+// Spaces and Chats use Phosphor's chat bubbles (2026-10-22: picked over
+// Lucide's squares after trying Phosphor across the whole sidebar).
+import { ChatCircle, ChatsCircle, type IconProps } from "@phosphor-icons/react"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -538,7 +541,7 @@ function SyncActivityLog({ onErrors }: { onErrors: (errors: Map<string, string>)
 type DockItemDef = {
   key: string
   label: string
-  icon: LucideIcon
+  icon: LucideIcon | React.ComponentType<IconProps>
   /** Shorter name for the ⌥Tab switcher cell, when the full label truncates. */
   switcherLabel?: string
   tourId?: string
@@ -1062,7 +1065,7 @@ export function DockSidebar({
       })),
       ...(SPACES_ENABLED && (!switcherOnly || totalSpaces > 0) ? [{
         item: {
-          key: 'spaces', label: 'Spaces', icon: MessagesSquare, tourId: 'nav-spaces',
+          key: 'spaces', label: 'Spaces', icon: ChatsCircle, tourId: 'nav-spaces',
           notification: spacesNotification.unread > 0
             ? (spacesNotification.forYou > 0 ? 'alert' as const : 'muted' as const)
             : undefined,
@@ -1087,7 +1090,7 @@ export function DockSidebar({
       { sep: true },
       {
         item: {
-          key: 'chats', label: 'Chats', icon: MessageSquare, tourId: 'nav-chats',
+          key: 'chats', label: 'Chats', icon: ChatCircle, tourId: 'nav-chats',
           running: chatsOpen,
           // Tile click opens the flyout; the switcher lands on all chats.
           onClick: () => { setSpacesOpen(false); setChatsOpen((v) => !v) },
