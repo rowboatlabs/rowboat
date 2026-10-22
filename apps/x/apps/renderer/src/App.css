@@ -1297,18 +1297,20 @@
 
 .rowboat-dock {
   position: fixed;
-  /* Below the titlebar band: the traffic lights are wider than the rail, so
-     the h-10 top row stays one full-width surface (the gutter strip in App
-     paints its left segment) and the rail hangs underneath, Linear-style. */
+  /* Below the titlebar band, floating like the open panel (2026-10-22): 8px
+     in from the left (inline style) and bottom, 16px corners, a hairline ring
+     and a soft shadow, so collapsing reads as the same panel, narrower. */
   top: 2.5rem;
-  bottom: 0;
-  left: 0;
+  bottom: 8px;
   z-index: 30;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
   background: var(--sidebar);
-  border-right: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--sidebar-foreground) 8%, transparent),
+    0 4px 16px rgb(0 0 0 / .08);
 }
 
 .rowboat-dock-badge {
