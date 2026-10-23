@@ -4206,6 +4206,8 @@ export const ipcSchemas = {
       orgId: z.string(),
       spaceId: z.string(),
       threadRoot: z.string().optional(),
+      /** Replies only: also list the reply in the stream (2026-10-22). */
+      alsoInStream: z.boolean().optional(),
       anchorChangeSetId: z.string().optional(),
       body: z.string(),
       /** Present = the message carries a poll; body must be its markdown fallback. */

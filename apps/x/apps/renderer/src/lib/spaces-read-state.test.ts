@@ -6,7 +6,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // The org's snapshot reports mentions per space WITH the threads folded in;
 // the store keeps the roots' share apart so the halves can be shown apart.
 
-vi.mock('@/lib/spaces-feed', () => ({ subscribeSpacesFeed: () => () => {} }))
+const feed = vi.hoisted(() => ({ listeners: [] as Array<(event: unknown) => void> }))
+vi.mock('@/lib/spaces-feed', () => ({ subscribeSpacesFeed: (fn: (event: unknown) => void) => { feed.listeners.push(fn); return () => {} } }))
 
 import { NO_BADGE, forgetOrg, loadUnread, markStreamRead, markThreadRead, spaceBadge, streamBadge, threadBadge } from '@/lib/spaces-read-state'
 
@@ -68,6 +69,21 @@ describe('badges', () => {
         await vi.advanceTimersByTimeAsync(2_000)
         expect(invoke).toHaveBeenCalledTimes(1)
         vi.useRealTimers()
+    })
+
+    it('a reply sent to the stream counts in the stream; a quiet one does not (2026-10-22)', () => {
+        const reply = (offset: number, alsoInStream: boolean) => {
+            for (const fn of feed.listeners) fn({ orgId: 'org', frame: { kind: 'event', spaceId: 'road', offset, at: '2026-10-22T10:00:00Z', event: { type: 'message', message: {
+                id: `r${offset}`, spaceId: 'road', threadRoot: 'launch-checklist', author: { memberId: 'harsh', actingMode: 'agent' }, body: 'done',
+                postedAt: '2026-10-22T10:00:00Z', offset, replyCount: 0, reactions: [], mentions: ['me'], mentionsHere: false, mentionsRowboat: false,
+                ...(alsoInStream ? { alsoInStream: true } : {}),
+            } } } })
+        }
+        reply(31, false)
+        expect(streamBadge('org', 'road', false)).toEqual({ unread: 6, forYou: 1 })
+        reply(32, true)
+        // One more stream row; its mention belongs to its thread, as on the org.
+        expect(streamBadge('org', 'road', false)).toEqual({ unread: 7, forYou: 1 })
     })
 
     it('an unknown space has no badge', () => {

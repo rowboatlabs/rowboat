@@ -316,8 +316,9 @@ export const createInvite = tool({
 export const readStream = tool({
   name: 'read_stream',
   description:
-    "A window of the space's message stream: ROOT messages only, newest window first, returned " +
-    'oldest first (default 50). Each message carries `replyCount` — a nonzero count means a flat ' +
+    "A window of the space's message stream: ROOT messages, plus replies their authors also sent " +
+    'to the stream (`alsoInStream`, with `threadRoot` naming their thread), newest window first, returned ' +
+    'oldest first (default 50). Each root carries `replyCount` — a nonzero count means a flat ' +
     'thread hangs under it (read_thread). `topics` holds the annotation rows for these roots ' +
     "(a stated goal + archived flag). When `truncated` is true, older messages exist — pass " +
     '`beforeOffset` (the oldest offset you received) to page back before summarising. To read ' +
@@ -400,11 +401,16 @@ export const postMessage = tool({
     'to post a new root into the stream. Posting never creates a topic (use create_topic to give a ' +
     'thread a goal). Replying to an archived topic revives it. Attach a `poll` to post a poll ' +
     '(question + 2–10 answers; the body must still carry a plain-text rendering of it for clients ' +
-    'that cannot show the card). Works on a DM exactly as on a space. ' +
+    'that cannot show the card). Works on a DM exactly as on a space. Set alsoInStream on a reply ' +
+    'to also show it in the stream, under its thread\'s name: use it for the outcome of your work ' +
+    '(the result, a decision you need, a hand-off) so people who do not follow the thread see it, ' +
+    'at most once per request, and never for progress updates. ' +
     MENTION_GRAMMAR,
   input: z.object({
     spaceId: SpaceId,
     threadRoot: MessageId.optional(),
+    /** Replies only: also list this reply in the stream (2026-10-22). */
+    alsoInStream: z.boolean().optional(),
     body: z.string().min(1).max(65_536),
     poll: NewPoll.optional(),
     /** Options for agents the message mentions, keyed by agent member id (their declared options; see get_invocations). */

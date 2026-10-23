@@ -433,6 +433,7 @@ describe('feed: the stream, threads, and topic annotations', () => {
     expect(stream.body).toEqual({
       messages: [],
       topics: [],
+      threadRoots: [],
       hasMore: false,
       hasMoreAfter: false,
       readOffset: 0,

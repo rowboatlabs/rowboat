@@ -62,6 +62,22 @@ describe('conversation message interactions', () => {
         expect(onOpenThread).toHaveBeenCalledWith(message.id)
     })
 
+    it('names a sent reply\'s thread above it and opens that thread (2026-10-22)', () => {
+        const onOpenThread = vi.fn()
+        const sent = { ...message, id: 'reply-1', threadRoot: 'root-1', alsoInStream: true } as spaces.Message
+        render(<MessageRow message={sent} memberNames={memberNames} continuation={false} onOpenThread={onOpenThread} sentFrom={{ label: 'Fix the login bug' }} />)
+        fireEvent.click(screen.getByRole('button', { name: 'Replied in Fix the login bug' }))
+        expect(onOpenThread).toHaveBeenCalledWith('root-1')
+    })
+
+    it('marks a sent reply in its thread', () => {
+        const sent = { ...message, id: 'reply-1', threadRoot: 'root-1', alsoInStream: true } as spaces.Message
+        const { rerender } = render(<MessageRow message={sent} memberNames={memberNames} continuation={false} dense />)
+        expect(screen.getByText('· Also sent to stream')).toBeInTheDocument()
+        rerender(<MessageRow message={{ ...sent, alsoInStream: undefined }} memberNames={memberNames} continuation={false} dense />)
+        expect(screen.queryByText('· Also sent to stream')).not.toBeInTheDocument()
+    })
+
     it('tints the reply line while its thread is open (spaces redesign 2026-10-21)', () => {
         const thread = { rootMessageId: message.id, replyCount: 3, lastActivityAt: message.postedAt, archived: false, unreadCount: 0, workingAgents: [] }
         const { rerender } = render(<MessageRow message={message} memberNames={memberNames} continuation={false} onOpenThread={vi.fn()} thread={thread} />)

@@ -253,6 +253,7 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit 
     'spaces:postMessage': async (args) =>
       getClient(args.orgId).postMessage(args.spaceId, {
         ...(args.threadRoot ? { threadRoot: args.threadRoot } : {}),
+        ...(args.threadRoot && args.alsoInStream ? { alsoInStream: true } : {}),
         ...(args.anchorChangeSetId ? { anchorChangeSetId: args.anchorChangeSetId } : {}),
         body: args.body,
         ...(args.poll ? { poll: args.poll } : {}),

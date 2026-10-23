@@ -229,24 +229,34 @@ export class Feed {
     ctx: ActorCtx,
     spaceId: string,
     opts?: PageOpts,
-  ): Promise<{ messages: Message[]; topics: Topic[]; hasMore: boolean; hasMoreAfter: boolean; readOffset: number; events: StreamEvent[] }> {
+  ): Promise<{ messages: Message[]; topics: Topic[]; threadRoots: Message[]; hasMore: boolean; hasMoreAfter: boolean; readOffset: number; events: StreamEvent[] }> {
     await this.k.requireReadableSpace(ctx, spaceId);
     // Newest page by default — never the full history.
-    const { rows: roots, hasMore, hasMoreAfter, span } = await this.pageOf((w) => this.k.store.listStream(spaceId, w), opts);
+    const { rows, hasMore, hasMoreAfter, span } = await this.pageOf((w) => this.k.store.listStream(spaceId, w), opts);
     // The join lines between these messages (2026-09-29, the Matrix model):
     // each belongs to the page holding the next message after it, so paging
     // either way never shows one twice or drops one. An empty older page
     // (upTo 0) holds none.
     const events = span.upTo === 0 ? [] : await this.k.store.listMembershipEvents(spaceId, span.after, span.upTo);
-    // The page's topic badges, one batched decoration.
+    // A sent reply (alsoInStream, 2026-10-22) is shown under its thread's
+    // name, so the page carries the roots it names that it does not hold.
+    const onPage = new Set(rows.map((m) => m.id));
+    const named = [...new Set(rows.flatMap((m) => (m.threadRoot !== undefined && !onPage.has(m.threadRoot) ? [m.threadRoot] : [])))];
+    const threadRoots: Message[] = [];
+    for (const id of named) {
+      const root = await this.k.store.getMessage(spaceId, id);
+      if (root) threadRoots.push(root);
+    }
+    // The topic badges of the page's roots and of the threads it names, one batched decoration.
     const topics: Topic[] = [];
-    for (const m of roots) {
-      const topic = await this.k.store.getTopicByRoot(spaceId, m.id);
+    for (const id of [...rows.filter((m) => m.threadRoot === undefined).map((m) => m.id), ...threadRoots.map((m) => m.id)]) {
+      const topic = await this.k.store.getTopicByRoot(spaceId, id);
       if (topic) topics.push(topic);
     }
     return {
-      messages: await this.foldPage(spaceId, roots),
+      messages: await this.foldPage(spaceId, rows),
       topics,
+      threadRoots: await this.foldPage(spaceId, threadRoots),
       hasMore,
       hasMoreAfter,
       readOffset: await this.k.store.getStreamReadMark(spaceId, ctx.memberId),
@@ -387,6 +397,7 @@ export class Feed {
           id,
           spaceId,
           threadRoot: root.id,
+          ...(input.alsoInStream ? { alsoInStream: true } : {}),
           author,
           body: input.body,
           postedAt: at,
@@ -427,6 +438,7 @@ export class Feed {
 
       // A new root in the stream. Never a container — createTopic is the
       // deliberate ceremony.
+      if (input.alsoInStream) throw new HarborError('invalid_request', 'alsoInStream is for replies; a root is already in the stream');
       if (input.anchorChangeSetId) {
         const anchor = await this.k.store.getChangeSet(spaceId, input.anchorChangeSetId);
         if (!anchor) throw new HarborError('invalid_request', 'anchorChangeSetId does not exist in this space');

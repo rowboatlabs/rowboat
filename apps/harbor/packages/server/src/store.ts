@@ -373,9 +373,10 @@ export interface Store {
   listTopics(spaceId: string, includeArchived: boolean): Promise<Topic[]>;
   getMessage(spaceId: string, messageId: string): Promise<Message | undefined>;
   /**
-   * The stream: ROOT messages only (threadRoot null), oldest first. With
-   * opts: the NEWEST `limit` roots whose offset is below `beforeOffset`
-   * (when given) — still returned oldest first.
+   * The stream: ROOT messages, and replies also sent to the stream
+   * (alsoInStream, 2026-10-22), oldest first. With opts: the NEWEST `limit`
+   * rows whose offset is below `beforeOffset` (when given) — still returned
+   * oldest first.
    */
   listStream(spaceId: string, opts?: MessageWindow): Promise<Message[]>;
   /** One flat thread's replies (threadRoot = rootMessageId), same window semantics as listStream. */
@@ -468,9 +469,13 @@ export interface Store {
     offset: number,
     at: string,
   ): Promise<number>;
-  /** Roots after `afterOffset` that are neither the member's nor tombstoned. */
+  /** Stream rows (roots, and replies also sent to the stream, 2026-10-22) after `afterOffset` that are neither the member's nor tombstoned. */
   countUnreadRoots(spaceId: string, memberId: string, afterOffset: number): Promise<number>;
-  /** Of those, the ones addressed to the member: a mention token naming them, or @here. */
+  /**
+   * Of the roots, the ones addressed to the member: a mention token naming
+   * them, or @here. Sent replies stay out: a mention follows its thread, so
+   * the thread's count already holds it.
+   */
   countUnreadRootMentions(spaceId: string, memberId: string, afterOffset: number): Promise<number>;
   /** Followed threads with ≥1 live reply past the member's mark by someone else, newest activity first. */
   listUnreadFollowedThreads(spaceId: string, memberId: string): Promise<UnreadThreadRow[]>;

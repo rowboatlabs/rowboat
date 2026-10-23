@@ -263,3 +263,34 @@ describe('stream store — join lines', () => {
         expect(offsets(cached.events)).toEqual([95.5, 100.5])
     })
 })
+
+describe('stream store — replies sent to the stream (2026-10-22)', () => {
+    const reply = (offset: number, rootId: string, alsoInStream: boolean): spaces.Message => ({
+        ...msg(offset), id: `r${offset}`, threadRoot: rootId, ...(alsoInStream ? { alsoInStream: true } : {}),
+    })
+
+    it('takes a sent reply into the window, leaves a quiet one in its thread, and fetches a root it cannot name', async () => {
+        const { hook } = await open()
+        const base = invoke.getMockImplementation()!
+        invoke.mockImplementation(async (channel: string, args: { messageId?: string }) =>
+            channel === 'spaces:getMessage' ? { message: { ...msg(3), id: args.messageId, body: 'Fix the login bug' } } : base(channel, args))
+        act(() => live({ type: 'message', message: reply(101, 'm95', false) }))
+        expect(ids(hook.result.current.messages)).toEqual(ids(range(91, 100)))
+        await act(async () => live({ type: 'message', message: reply(102, 'm3', true) }))
+        expect(ids(hook.result.current.messages).at(-1)).toBe('r102')
+        expect(hook.result.current.threadRoots.get('m3')?.body).toBe('Fix the login bug')
+        // A root the window holds needs no fetch.
+        await act(async () => live({ type: 'message', message: reply(103, 'm95', true) }))
+        expect(invoke.mock.calls.filter(([c]) => c === 'spaces:getMessage')).toHaveLength(1)
+    })
+
+    it('keeps the roots a page names', async () => {
+        const base = invoke.getMockImplementation()!
+        invoke.mockImplementation(async (channel: string, args: { beforeOffset?: number }) => {
+            const page = await base(channel, args)
+            return args.beforeOffset === undefined ? { ...page, threadRoots: [{ ...msg(2), body: 'Old thread' }] } : page
+        })
+        const { hook } = await open()
+        expect(hook.result.current.threadRoots.get('m2')?.body).toBe('Old thread')
+    })
+})

@@ -47,7 +47,7 @@ function threadRows(topics: readonly spaces.TopicListing[], roots: readonly Chat
     const archivedRoots = new Set(topics.filter((topic) => topic.archived).map((topic) => topic.rootMessageId))
     if (filter !== 'named' && !archived) {
         for (const root of roots) {
-            if (root.pending || root.failed || root.replyCount === 0 || archivedRoots.has(root.id)) continue
+            if (root.pending || root.failed || root.threadRoot !== undefined || root.replyCount === 0 || archivedRoots.has(root.id)) continue
             const row = rows.get(root.id)
             if (row) row.root = root
             else rows.set(root.id, { rootMessageId: root.id, root, activityAt: root.lastReplyAt ?? root.postedAt })

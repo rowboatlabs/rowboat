@@ -12,7 +12,7 @@ import type { SpacePresence } from '@/hooks/use-space-chat'
 // a detached window (load-around). jsdom has no layout, so the list's
 // geometry is faked.
 
-vi.mock('@/components/spaces/composer', () => ({ Composer: () => null }))
+vi.mock('@/components/spaces/composer', () => ({ Composer: ({ onSend }: { onSend: (body: string) => void }) => <button onClick={() => onSend('PR is up')}>Send</button> }))
 vi.mock('@/components/spaces/message-row', () => ({
     MessageRow: ({ message, onCopyLink }: { message: spaces.Message; onCopyLink?: (message: spaces.Message) => void }) => (
         <div data-mid={message.id}>
@@ -38,8 +38,12 @@ vi.mock('@/components/spaces/poll-dialog', () => ({ PollDialogHost: () => null }
 vi.mock('@/components/spaces/forward-dialog', () => ({ ForwardDialog: () => null }))
 vi.mock('@/components/spaces/attach-document-dialog', () => ({ AttachDocumentDialog: () => null }))
 vi.mock('@/hooks/use-space-chat', () => ({
-    buildPendingMessage: vi.fn(),
+    buildPendingMessage: vi.fn((spaceId: string, memberId: string, body: string, threadRoot?: string) => ({
+        id: `pending-${body}`, spaceId, threadRoot, author: { memberId, actingMode: 'direct' }, body, postedAt: '2026-09-01T00:00:00Z',
+        offset: 1e9, replyCount: 0, reactions: [], mentions: [], mentionsHere: false, mentionsRowboat: false, pending: true,
+    })),
     getThreadSnapshot: () => null,
+    ingestStreamMessage: vi.fn(),
     ingestTopic: vi.fn(),
     putThreadSnapshot: vi.fn(),
     removeTopicByRoot: vi.fn(),
@@ -70,6 +74,7 @@ vi.mock('@/lib/analytics', () => ({
 import { ThreadPane } from './thread-pane'
 import { requestJump } from '@/lib/spaces-jump'
 import { toast } from '@/lib/toast'
+import { ingestStreamMessage } from '@/hooks/use-space-chat'
 
 // scrollToMessage scrolls the row into view and flashes it — neither exists in jsdom.
 const scrollIntoView = vi.fn()
@@ -121,6 +126,7 @@ beforeEach(() => {
             invoke: vi.fn(async (channel: string) => {
                 if (channel === 'spaces:listThread') return { root, topic: null, messages: replies, hasMore: false, following: false, readOffset: null }
                 if (channel === 'spaces:topicSession') return { sessionId: null }
+                if (channel === 'spaces:postMessage') return { message: { ...replies[0]!, id: 'sent', body: 'PR is up', alsoInStream: true, offset: 99 }, invocations: [] }
                 return {}
             }),
         },
@@ -171,6 +177,22 @@ it('wires a copy action for each reply that links to the reply, not its thread r
         if (previous) Object.defineProperty(navigator, 'clipboard', previous)
         else Reflect.deleteProperty(navigator, 'clipboard')
     }
+})
+
+it('sends the next reply to the stream when the box is ticked, then clears it (2026-10-22)', async () => {
+    mount()
+    const send = await screen.findByRole('button', { name: 'Send' })
+    const box = screen.getByRole('checkbox', { name: 'Also send to stream' })
+    fireEvent.click(send)
+    const posts = () => vi.mocked(window.ipc.invoke).mock.calls.filter(([c]) => c === 'spaces:postMessage').map(([, args]) => args as Record<string, unknown>)
+    await waitFor(() => expect(posts()).toHaveLength(1))
+    expect(posts()[0]!.alsoInStream).toBeUndefined()
+    fireEvent.click(box)
+    fireEvent.click(send)
+    await waitFor(() => expect(posts()).toHaveLength(2))
+    expect(posts()[1]).toMatchObject({ threadRoot: 'root', body: 'PR is up', alsoInStream: true })
+    expect(box).not.toBeChecked()
+    await waitFor(() => expect(ingestStreamMessage).toHaveBeenCalledWith('org', 'space', expect.objectContaining({ id: 'sent' })))
 })
 
 describe('ThreadPane scroll position', () => {

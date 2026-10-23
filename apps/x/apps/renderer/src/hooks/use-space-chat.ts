@@ -65,6 +65,11 @@ export interface StreamState {
     /** Topic annotations for loaded roots, by rootMessageId. */
     topicsByRoot: ReadonlyMap<string, spaces.Topic>
     /**
+     * Roots that sent replies in the window name but the window may not hold
+     * (2026-10-22, alsoInStream), by id: the thread line above each one.
+     */
+    threadRoots: ReadonlyMap<string, spaces.Message>
+    /**
      * Join and leave lines for the loaded window, oldest first (2026-09-29):
      * the log's membership events, drawn between messages by offset. Facts
      * never change once logged, so merging is a union by offset.
@@ -89,7 +94,7 @@ export interface StreamState {
 }
 
 const EMPTY_STREAM: StreamState = {
-    messages: [], topicsByRoot: new Map(), events: [], hasMore: false, loadingOlder: false, hasMoreAfter: false, newerSince: 0, ready: false,
+    messages: [], topicsByRoot: new Map(), threadRoots: new Map(), events: [], hasMore: false, loadingOlder: false, hasMoreAfter: false, newerSince: 0, ready: false,
 }
 
 let streamState: ReadonlyMap<string, StreamState> = new Map()
@@ -116,6 +121,13 @@ function withEvents(current: readonly spaces.StreamEvent[], incoming: readonly s
 }
 
 /** Fold a page's topic rows into the per-root map (annotation removed = caller deletes). */
+function withThreadRoots(current: ReadonlyMap<string, spaces.Message>, incoming: spaces.Message[] | undefined): ReadonlyMap<string, spaces.Message> {
+    if (!incoming || incoming.length === 0) return current
+    const next = new Map(current)
+    for (const m of incoming) next.set(m.id, m)
+    return next
+}
+
 function withTopics(current: ReadonlyMap<string, spaces.Topic>, incoming: spaces.Topic[]): ReadonlyMap<string, spaces.Topic> {
     if (incoming.length === 0) return current
     const next = new Map(current)
@@ -143,6 +155,8 @@ interface StreamCache {
     v: number
     messages: spaces.Message[]
     topics: spaces.Topic[]
+    /** The roots the tail's sent replies name (2026-10-22); absent from older caches. */
+    threadRoots?: spaces.Message[]
     hasMore: boolean
     /** The tail's join lines (2026-09-29); absent from older caches, read as none. */
     events?: spaces.StreamEvent[]
@@ -162,7 +176,8 @@ function persistStream(k: string): void {
     const payload: StreamCache = {
         v: CACHE_VERSION,
         messages: tail,
-        topics: tail.map((m) => state.topicsByRoot.get(m.id)).filter((t): t is spaces.Topic => !!t),
+        topics: tail.map((m) => state.topicsByRoot.get(m.threadRoot ?? m.id)).filter((t): t is spaces.Topic => !!t),
+        threadRoots: tail.flatMap((m) => (m.threadRoot !== undefined && state.threadRoots.has(m.threadRoot) ? [state.threadRoots.get(m.threadRoot)!] : [])),
         hasMore,
         events: state.events.filter((e) => e.offset > floor),
     }
@@ -196,6 +211,7 @@ function hydrateStream(k: string): void {
             ...EMPTY_STREAM,
             messages: cached.messages,
             topicsByRoot: new Map((cached.topics ?? []).map((t) => [t.rootMessageId, t])),
+            threadRoots: new Map((cached.threadRoots ?? []).map((m) => [m.id, m])),
             events: Array.isArray(cached.events) ? cached.events : [],
             hasMore: cached.hasMore,
             ready: true,
@@ -249,6 +265,7 @@ async function loadStream(orgId: string, spaceId: string): Promise<void> {
         setStream(k, {
             messages: [...mergeMessages(settled, res.messages), ...carried],
             topicsByRoot: withTopics(prev?.topicsByRoot ?? new Map(), res.topics),
+            threadRoots: withThreadRoots(prev?.threadRoots ?? new Map(), res.threadRoots),
             events: withEvents(prev?.events ?? [], res.events),
             hasMore: reachesDeeper && prev ? prev.hasMore : res.hasMore,
             ready: true,
@@ -286,6 +303,7 @@ export async function loadOlderStreamMessages(orgId: string, spaceId: string): P
         setStream(k, {
             messages: mergeMessages(cur.messages, res.messages),
             topicsByRoot: withTopics(cur.topicsByRoot, res.topics),
+            threadRoots: withThreadRoots(cur.threadRoots, res.threadRoots),
             events: withEvents(cur.events, res.events),
             hasMore: res.hasMore,
             loadingOlder: false,
@@ -322,6 +340,7 @@ export async function loadStreamAround(orgId: string, spaceId: string, offset: n
     setStream(k, {
         messages: res.messages,
         topicsByRoot: withTopics(prev?.topicsByRoot ?? new Map(), res.topics),
+        threadRoots: withThreadRoots(prev?.threadRoots ?? new Map(), res.threadRoots),
         events: res.events ?? [],
         hasMore: res.hasMore,
         loadingOlder: false,
@@ -350,6 +369,7 @@ export async function loadNewerStreamMessages(orgId: string, spaceId: string): P
         setStream(k, {
             messages: mergeMessages(cur.messages, res.messages),
             topicsByRoot: withTopics(cur.topicsByRoot, res.topics),
+            threadRoots: withThreadRoots(cur.threadRoots, res.threadRoots),
             events: withEvents(cur.events, res.events),
             hasMoreAfter,
             // The head reached: everything counted while detached is in the window now.
@@ -391,7 +411,8 @@ export function updateStreamMessage(orgId: string, spaceId: string, message: spa
  * never comes) and the dedupe makes whichever copy arrives second a no-op.
  */
 export function ingestStreamMessage(orgId: string, spaceId: string, message: spaces.Message): void {
-    if (message.threadRoot !== undefined) return
+    // Replies stay in their threads, unless sent to the stream too (2026-10-22).
+    if (message.threadRoot !== undefined && !message.alsoInStream) return
     const k = key(orgId, spaceId)
     const state = streamState.get(k)
     if (!state) return
@@ -412,6 +433,24 @@ export function ingestStreamMessage(orgId: string, spaceId: string, message: spa
             : undefined
     const rest = echoed ? state.messages.filter((m) => m.id !== echoed.id) : state.messages
     setStream(k, { messages: [...rest, message].sort((a, b) => a.offset - b.offset) })
+}
+
+/**
+ * A reply sent to the stream names its thread (2026-10-22). A live one may
+ * name a root the window does not hold: fetch it once, so the thread line
+ * reads its title or first line instead of a placeholder.
+ */
+export async function noteSentReplyRoot(orgId: string, spaceId: string, rootId: string): Promise<void> {
+    const k = key(orgId, spaceId)
+    const state = streamState.get(k)
+    if (!state || state.threadRoots.has(rootId) || state.messages.some((m) => m.id === rootId)) return
+    try {
+        const { message } = await window.ipc.invoke('spaces:getMessage', { orgId, spaceId, messageId: rootId })
+        const cur = streamState.get(k)
+        if (cur) setStream(k, { threadRoots: withThreadRoots(cur.threadRoots, [message]) })
+    } catch {
+        // The line keeps its placeholder; the next page load carries the root.
+    }
 }
 
 /** A reply landed somewhere: bump its root's chip denorm in place (no refetch). */
@@ -538,6 +577,10 @@ function wireBus(): void {
                 // the count BEFORE this reply), then bump the chip.
                 ingestThreadReply(event.orgId, frame.spaceId, message)
                 noteReplyActivity(event.orgId, frame.spaceId, message)
+                if (message.alsoInStream) {
+                    ingestStreamMessage(event.orgId, frame.spaceId, message)
+                    void noteSentReplyRoot(event.orgId, frame.spaceId, message.threadRoot)
+                }
             }
         } else if (frame.event.type === 'membership') {
             // A join or leave line. Detached, it belongs to a page above the
