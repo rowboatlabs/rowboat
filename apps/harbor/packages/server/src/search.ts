@@ -155,7 +155,16 @@ function extractFromJson(content: string, pick: ((obj: Record<string, unknown>) 
   const out: string[] = [];
   let size = 0;
   const walk = (node: unknown): void => {
-    if (size >= EXTRACT_CAP || node === null || typeof node !== 'object') return;
+    if (size >= EXTRACT_CAP || node === null) return;
+    // A leaf is a string anywhere — an array item as much as a property value (2026-10-22).
+    if (typeof node === 'string') {
+      if (!pick && node.length > 1) {
+        out.push(node);
+        size += node.length;
+      }
+      return;
+    }
+    if (typeof node !== 'object') return;
     if (Array.isArray(node)) {
       for (const item of node) walk(item);
       return;
@@ -165,13 +174,6 @@ function extractFromJson(content: string, pick: ((obj: Record<string, unknown>) 
       for (const s of pick(obj)) {
         out.push(s);
         size += s.length;
-      }
-    } else {
-      for (const v of Object.values(obj)) {
-        if (typeof v === 'string' && v.length > 1) {
-          out.push(v);
-          size += v.length;
-        }
       }
     }
     for (const v of Object.values(obj)) walk(v);
