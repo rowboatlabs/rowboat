@@ -6333,6 +6333,7 @@ function App() {
       return acc
     }, [])
   ), [knowledgeFiles])
+  const knowledgeFilePathsKey = knowledgeFilePaths.join('\n')
 
   // Compute visible files (files whose parent directories are expanded)
   const visibleKnowledgeFiles = React.useMemo(() => {
@@ -7136,7 +7137,11 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [isGraphOpen, isBrainGraphOpen, knowledgeFilePaths])
+    // Keyed on the list of notes, not the array (2026-10-22): the tree hands
+    // back a new array on every file change, and each rebuild re-read all
+    // notes and restarted the layout, freezing the Brain graph.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isGraphOpen, isBrainGraphOpen, knowledgeFilePathsKey])
 
   // The active chat's view state, backed by the sessions hook (legacy
   // standalone states remain only as the pre-load fallback until stage 7).
