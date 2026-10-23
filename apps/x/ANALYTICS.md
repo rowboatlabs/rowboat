@@ -298,6 +298,8 @@ For GitHub Actions / packaged builds: set both as workflow env vars (from secret
 
 If unset, analytics no-op silently — you'll see `[Analytics] POSTHOG_KEY not set; analytics disabled` in the process hosting core.
 
+**Desktop user opt-out:** Settings → Advanced → "Share anonymous usage analytics" persists `analyticsEnabled: false` and `telemetryOptOut: true` in `~/.rowboat/config/app_settings.json`. When off, the main-process client (`packages/core/src/analytics/posthog.ts`) captures nothing and the renderer starts PostHog with `opt_out_capturing_by_default`; toggling applies live to both. Both settings surfaces update the same preference; environment opt-outs always take precedence. The bundled child server re-reads the shared setting before each analytics operation, so a change gates subsequent events without an app restart. Events queued before opt-out may still be delivered. Analytics remains enabled by default; there is no onboarding prompt. This setting does not control the separate iOS analytics client.
+
 ### Telemetry opt-out (2026-10-13, #415)
 
 Users and operators can disable product analytics collection in either of the following ways:
@@ -305,7 +307,7 @@ Users and operators can disable product analytics collection in either of the fo
 - **Settings UI**: toggle "Anonymous usage analytics" under Settings → Appearance/System (persisted as `telemetryOptOut: true` in `~/.rowboat/config/app_settings.json`).
 
 When opted out:
-- `packages/core/src/analytics/posthog.ts` logs `[Analytics] Telemetry opted out; analytics disabled`, returns `null` for `getClient()`, no-ops `capture()` and `identify()`, returns default values for feature flags, and shuts down any active client.
+- `packages/core/src/analytics/posthog.ts` logs `[Analytics] Telemetry opted out; analytics disabled`, returns `null` for `getClient()`, no-ops `capture()` and `identify()`, returns default values for feature flags, and shuts down any active client when changed through either settings surface.
 - The renderer receives `telemetryOptOut: true` via the `analytics:bootstrap` IPC response and calls `posthog.opt_out_capturing()`.
 
 `installationId`: stored in `~/.rowboat/config/installation.json`, generated on first run.

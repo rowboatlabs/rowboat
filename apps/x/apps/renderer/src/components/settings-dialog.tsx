@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import posthog from "posthog-js"
 import { cn, compactPath, parentPath } from "@/lib/utils"
 import { SPACES_ENABLED } from "@/lib/feature-flags"
 import * as analytics from "@/lib/analytics"
@@ -440,10 +441,12 @@ function TelemetryOptOutSetting() {
     setOptOut(nextOptOut)
     try {
       await window.ipc.invoke("app:setTelemetrySettings", { optOut: nextOptOut })
-      if (nextOptOut) {
+      const settings = await window.ipc.invoke("app:getTelemetrySettings", null)
+      setOptOut(settings.optOut)
+      if (settings.optOut) {
         posthog.opt_out_capturing()
       } else {
-        posthog.opt_in_capturing()
+        posthog.opt_in_capturing({ captureEventName: false })
       }
     } catch {
       setOptOut(!nextOptOut)
@@ -1770,10 +1773,18 @@ function AdvancedSettings({ dialogOpen }: { dialogOpen: boolean }) {
   // chatDays null = never delete chats (transcript cleanup still runs).
   const [retentionEnabled, setRetentionEnabled] = useState(true)
   const [retentionChatDays, setRetentionChatDays] = useState<number | null>(60)
+  const [analyticsEnabled, setAnalyticsEnabled] = useState(true)
 
   useEffect(() => {
     if (!dialogOpen) return
     let cancelled = false
+    window.ipc.invoke("analytics:getSettings", null)
+      .then((settings) => {
+        if (!cancelled) setAnalyticsEnabled(settings.enabled)
+      })
+      .catch(() => {
+        if (!cancelled) toast.error("Failed to load analytics settings")
+      })
     window.ipc.invoke("turnLimits:getSettings", null)
       .then((settings) => {
         if (cancelled) return
@@ -1801,6 +1812,22 @@ function AdvancedSettings({ dialogOpen }: { dialogOpen: boolean }) {
       })
     return () => { cancelled = true }
   }, [dialogOpen])
+
+  const saveAnalytics = useCallback(async (enabled: boolean) => {
+    const previous = analyticsEnabled
+    setAnalyticsEnabled(enabled)
+    try {
+      await window.ipc.invoke("analytics:setSettings", { enabled })
+      // Apply to the renderer's PostHog instance right away.
+      const settings = await window.ipc.invoke("analytics:getSettings", null)
+      setAnalyticsEnabled(settings.enabled)
+      if (settings.enabled) posthog.opt_in_capturing({ captureEventName: false })
+      else posthog.opt_out_capturing()
+    } catch {
+      setAnalyticsEnabled(previous)
+      toast.error("Failed to save analytics setting")
+    }
+  }, [analyticsEnabled])
 
   const saveRetention = useCallback(async (patch: { enabled?: boolean; chatDays?: number | null }) => {
     try {
@@ -1963,6 +1990,23 @@ function AdvancedSettings({ dialogOpen }: { dialogOpen: boolean }) {
             </Select>
           </div>
         )}
+      </div>
+
+      <div className="space-y-2">
+        <div className="rounded-md border px-3 py-3 flex items-center gap-4">
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium">Share anonymous usage analytics</div>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              Helps improve Rowboat by sending product usage events (which features are used,
+              app version) to PostHog. Turn off to stop all analytics from this app.
+            </div>
+          </div>
+          <Switch
+            checked={analyticsEnabled}
+            onCheckedChange={(checked) => void saveAnalytics(checked)}
+            aria-label="Share anonymous usage analytics"
+          />
+        </div>
       </div>
     </div>
   )
