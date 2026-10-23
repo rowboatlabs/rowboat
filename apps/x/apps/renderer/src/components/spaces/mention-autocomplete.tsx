@@ -15,6 +15,7 @@ import { useSpacesOrgs } from '@/hooks/use-spaces'
 import { assetWireUrl } from '@/lib/spaces-presentation'
 import { byRank, matchRank } from '@/lib/mention-rank'
 import { isDeparted } from '@/lib/spaces-direct'
+import { pastedMemberMentions, pastedMemberMentionsKey } from './pasted-member-mentions'
 
 // The @ autocomplete behind every mention surface — the composer and the
 // inline message editor. The hook owns the popup's whole lifecycle off the
@@ -68,6 +69,12 @@ export function useMentionAutocomplete(editor: Editor | null) {
     const spaceMembers = useSpaceMembers(orgId, spaceId)
     const orgRoster = useOrgRoster(orgId, sharedIds)
     const listings = useOrgListings(listingOrgs).get(orgId)
+
+    useEffect(() => {
+        if (!editor) return
+        editor.registerPlugin(pastedMemberMentions([...spaceMembers, ...orgRoster]))
+        return () => { editor.unregisterPlugin(pastedMemberMentionsKey) }
+    }, [editor, spaceMembers, orgRoster])
 
     // Open on "@" at a word start; stay open while the query grows. A plain
     // caret move only retargets the match — clicking beside an "@word" that

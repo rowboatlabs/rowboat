@@ -36,6 +36,7 @@ const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
         case 'spaces:listAgents': return { agents: listing }
         case 'spaces:openDirect': return { space: { id: `DM-${args.memberId}`, kind: 'direct' }, created: true }
         case 'spaces:addAgent':
+            if (args.credential === 'greptile_refused') throw new Error('Greptile did not accept this key')
             if (args.credential === 'rpl_refused') throw new Error('Replicas did not accept this key: Invalid or missing API key')
             return { agent: { ...hermes, id: 'new', displayName: args.displayName, agentKind: args.kind, agentConnection: args.connection, ...(args.instance ? { agentInstance: args.instance } : {}) }, key: { ...key('k9', 'new'), secret: NEW_KEY } }
         case 'spaces:agent37Instances':
@@ -373,7 +374,7 @@ describe('AgentsDialog', () => {
         await screen.findByText('Hermes')
         fireEvent.click(screen.getByRole('button', { name: /Add bot/ }))
         expect(screen.getByRole('heading', { name: 'Add a bot' })).toBeInTheDocument()
-        expect(within(screen.getByRole('radiogroup', { name: 'Which service' })).getAllByRole('radio').map((r) => r.getAttribute('aria-label'))).toEqual(['PostHog', 'Cal.com'])
+        expect(within(screen.getByRole('radiogroup', { name: 'Which service' })).getAllByRole('radio').map((r) => r.getAttribute('aria-label'))).toEqual(['PostHog', 'Cal.com', 'Greptile'])
         fireEvent.click(screen.getByRole('radio', { name: 'Cal.com' }))
         expect(screen.getByLabelText('Bot name')).toHaveValue('Cal')
         fireEvent.change(screen.getByLabelText('Cal.com API key'), { target: { value: 'cal_live_ab12' } })
@@ -381,6 +382,37 @@ describe('AgentsDialog', () => {
         await screen.findByRole('heading', { name: 'Connect Cal' })
         expect(invoke).toHaveBeenCalledWith('spaces:addAgent', { orgId: 'org-1', displayName: 'Cal', kind: 'cal', connection: 'cal', credential: 'cal_live_ab12' })
         expect(screen.getByText(/such as @Cal today/)).toBeInTheDocument()
+    })
+
+    it('adds Greptile under Bots with a sealed credential and review commands', async () => {
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        await screen.findByText('Hermes')
+        fireEvent.click(screen.getByRole('button', { name: /Add bot/ }))
+        fireEvent.click(screen.getByRole('radio', { name: 'Greptile' }))
+        expect(screen.getByLabelText('Bot name')).toHaveValue('Greptile')
+        expect(screen.getByRole('button', { name: 'Add bot' })).toBeDisabled()
+        expect(screen.getByText(/may consume your review allowance/)).toBeInTheDocument()
+        fireEvent.change(screen.getByLabelText('Greptile organization API key'), { target: { value: 'greptile_test' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Add bot' }))
+        await screen.findByRole('heading', { name: 'Connect Greptile' })
+        expect(invoke).toHaveBeenCalledWith('spaces:addAgent', { orgId: 'org-1', displayName: 'Greptile', kind: 'greptile', connection: 'greptile', credential: 'greptile_test' })
+        expect(screen.getByText(/@Greptile status/)).toBeInTheDocument()
+        expect(screen.queryByLabelText('Space for alerts')).toBeNull()
+    })
+
+    it('keeps Greptile setup editable after a rejected credential', async () => {
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        await screen.findByText('Hermes')
+        fireEvent.click(screen.getByRole('button', { name: /Add bot/ }))
+        fireEvent.click(screen.getByRole('radio', { name: 'Greptile' }))
+        fireEvent.change(screen.getByLabelText('Greptile organization API key'), { target: { value: 'greptile_refused' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Add bot' }))
+        expect(await screen.findByText('Greptile did not accept this key')).toBeInTheDocument()
+        expect(screen.getByLabelText('Bot name')).toHaveValue('Greptile')
+        expect(screen.getByLabelText('Greptile organization API key')).toHaveValue('greptile_refused')
+        fireEvent.change(screen.getByLabelText('Greptile organization API key'), { target: { value: 'good' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Add bot' }))
+        await screen.findByRole('heading', { name: 'Connect Greptile' })
     })
 
     it('lets the owner send a bot’s alerts to a space, shows the address once, and turns them off', async () => {

@@ -158,3 +158,13 @@ describe('useMentionAutocomplete', () => {
         expect(composerMarkdown(editor)).toBe('cc [@Ada Lovelace](#member:01HADA) ')
     })
 })
+
+it('resolves a pasted command using the loaded organization roster', async () => {
+    const { result } = await mountAndType('@')
+    await waitFor(() => expect(ids(result.current.candidates)).toContain('01HBOT'))
+    act(() => {
+        editor.commands.clearContent()
+        editor.view.pasteText('@Hermes help', new Event('paste') as ClipboardEvent)
+    })
+    expect(composerMarkdown(editor)).toBe('[@Hermes](#member:01HBOT) help')
+})
