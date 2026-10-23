@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { mcpTools, type Member } from '@rowboat/spaces-protocol';
 import type { RunningHarbor } from '../src/server.js';
-import { agentClient, restClient, startTestHarbor } from './helpers.js';
+import { agentClient, liveClient, restClient, startTestHarbor } from './helpers.js';
 
 // Your own name and title (spec §4 Member profile; built 2026-10-19): PUT
 // /v1/me on the render face and update_profile on the agent face. Only you
@@ -110,4 +110,29 @@ describe('update_profile, the agent-face twin', () => {
     expect(result.isError).toBe(true);
     expect(JSON.parse((result.content as Array<{ text: string }>)[0]!.text).code).toBe('invalid_request');
   });
+});
+
+// Profiles reach people outside the editor's spaces, without a space subscription (2026-10-22).
+it('broadcasts persisted profile updates to active org members only', async () => {
+  const viewer = await liveClient(harbor, 'dev-ramnique');
+  const editor = await liveClient(harbor, 'dev-gagan');
+  const departed = { id: 'departed', displayName: 'Departed', role: 'member', kind: 'human', removedAt: new Date().toISOString() } as Member;
+  await harbor.store.putMember(departed);
+  await harbor.store.removeMemberFromOrg(departed.id, new Date().toISOString());
+  const received: unknown[] = [];
+  const unsubscribe = harbor.hub.subscribeMember('departed', frame => received.push(frame));
+  try {
+    const updated = await as('dev-gagan').put('/v1/me', { title: 'Profile test' });
+    for (const client of [viewer, editor]) {
+      await client.until(frames => frames.some(f => f.kind === 'profile_updated' && f.member.title === 'Profile test'));
+      const frame = client.frames.find(f => f.kind === 'profile_updated');
+      expect(frame).toMatchObject({ member: updated.body.member });
+    }
+    expect((await as('dev-ramnique').get('/v1/members')).body.members).toContainEqual(updated.body.member);
+    expect(received).toEqual([]);
+    const publish = vi.spyOn(harbor.hub, 'publishToMember');
+    await as('dev-gagan').put('/v1/me', { title: 'Profile test' });
+    expect(publish).not.toHaveBeenCalled();
+    publish.mockRestore();
+  } finally { unsubscribe(); viewer.close(); editor.close(); }
 });

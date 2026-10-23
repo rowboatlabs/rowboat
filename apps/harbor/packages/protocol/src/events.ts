@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ChangeSet } from './changeset.js';
-import { Attribution, Membership, Message, MessageDeletion, MessageEdit, PollEnd, PollVote, Reaction, Space, SpaceKind, Topic, TopicRemoval } from './core.js';
+import { Attribution, Member, Membership, Message, MessageDeletion, MessageEdit, PollEnd, PollVote, Reaction, Space, SpaceKind, Topic, TopicRemoval } from './core.js';
 import { AssetId, MemberId, MessageId, SpaceId, StreamOffset } from './ids.js';
 import { Approval } from './approval.js';
 import { Invocation, InvocationId } from './invocation.js';
@@ -259,6 +259,8 @@ export const ServerFrame = z.discriminatedUnion('kind', [
     by: MemberId,
     at: z.iso.datetime(),
   }),
+  // Org profiles bypass space subscriptions; missed updates are recovered by roster reads (2026-10-22).
+  z.object({ kind: z.literal('profile_updated'), member: Member, at: z.iso.datetime() }),
   /**
    * Addressed to EVERY member of the org (2026-10-07): the org's shape
    * changed — a second space made a group chat a workspace, DMs on; or,

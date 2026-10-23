@@ -4,7 +4,7 @@ import { invalidateSpaceDirectory, updateDirectoryMembership, loadSpaceDirectory
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import type { spaces } from '@x/shared'
 import { subscribeSpacesFeed } from '@/lib/spaces-feed'
-import { refreshOrgRoster } from '@/hooks/use-space-members'
+import { applyProfileUpdate, refreshOrgRoster } from '@/hooks/use-space-members'
 import { refreshOrgSettings } from '@/hooks/use-org-settings'
 import { SPACES_ENABLED } from '@/lib/feature-flags'
 import { getSpaceReadState, loadUnread, dropSpaceReadState } from '@/lib/spaces-read-state'
@@ -150,6 +150,8 @@ function resyncListing(): void {
     listingResyncTimer = setTimeout(() => {
         listingResyncTimer = null
         void refreshSpacesOrgs()
+        // Profile frames are ephemeral too; focus/reconnect repairs missed changes (2026-10-22).
+        for (const org of orgsState.orgs) refreshOrgRoster(org.id)
     }, 300)
 }
 
@@ -462,6 +464,11 @@ function wireFeedBus(): void {
                     await window.ipc.invoke('spaces:subscribeSpace', { orgId: event.orgId, spaceId: frame.spaceId, afterOffset: liveHeads.get(liveKey(event.orgId, frame.spaceId)) })
                 }
             })().catch(() => {})
+            void refreshSpacesOrgs()
+            return
+        }
+        if (frame.kind === 'profile_updated') {
+            applyProfileUpdate(event.orgId, frame.member)
             void refreshSpacesOrgs()
             return
         }

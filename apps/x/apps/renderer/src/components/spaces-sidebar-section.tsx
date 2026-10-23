@@ -144,7 +144,8 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onOpen
     const [inviteOpen, setInviteOpen] = useState(false)
     // Under an admins-only invite policy (2026-10-19) a member's invite is refused, so Invite hides.
     const orgSpaceIds = useMemo(() => org.spaces.map((s) => s.id), [org.spaces])
-    const selfIsAdmin = useOrgRoster(org.id, orgSpaceIds).find((m) => m.id === org.memberId)?.role === 'admin'
+    const profileRoster = useOrgRoster(org.id, orgSpaceIds)
+    const selfIsAdmin = profileRoster.find((m) => m.id === org.memberId)?.role === 'admin'
     const mayInvite = canInvite(useOrgSettings(org.id), selfIsAdmin)
     // A dead OAuth session shows as a gentle "Sign in again" (org.authError, from core);
     // an unreachable org shows Retry.
@@ -406,8 +407,8 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onOpen
                         const active = activeSpace?.orgId === org.id && activeSpace.spaceId === dm.id
                         const badge = unread.get(`${org.id}/${dm.id}`) ?? NO_BADGE
                         const self = isSelfDirect(dm, org.memberId)
-                        const label = self ? selfName : spaceDisplayName(org, dm)
                         const other = directAvatarId(dm, org.memberId)
+                        const label = self ? selfName : profileRoster.find(m => m.id === other)?.displayName ?? spaceDisplayName(org, dm)
                         return (
                             <SidebarMenuItem key={dm.id}>
                                 <SidebarMenuButton
@@ -419,7 +420,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onOpen
                                     }}
                                     className="spaces-rail-row"
                                 >
-                                    <MemberAvatar id={other} name={label} size="sm" />
+                                    <MemberAvatar orgId={org.id} avatarUrl={profileRoster.find(m => m.id === other)?.avatarUrl} id={other} name={label} size="sm" />
                                     <span className={cn('flex-1 truncate', badge.unread > 0 && !active && 'font-semibold text-foreground')}>
                                         {label}
                                         {self && <span className="ml-1.5 font-normal text-muted-foreground">you</span>}
@@ -439,7 +440,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onOpen
                                     ? `Notes to self need a newer server — ${org.name} hasn't been updated yet`
                                     : 'Notes to self — only you (and your agent) can see this'}
                             >
-                                <MemberAvatar id={org.memberId} name={selfName} size="sm" />
+                                <MemberAvatar orgId={org.id} avatarUrl={profileRoster.find(m => m.id === org.memberId)?.avatarUrl} id={org.memberId} name={selfName} size="sm" />
                                 <span className="flex-1 truncate">
                                     {selfName}
                                     <span className="ml-1.5 font-normal text-muted-foreground">{openingSelf ? 'opening…' : 'you'}</span>

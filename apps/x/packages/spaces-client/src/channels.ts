@@ -16,6 +16,7 @@ import type { SpaceSubscriptions } from './subscriptions.js';
 type IPCChannels = ipc.IPCChannels;
 
 export type HarborChannel =
+  | 'spaces:getProfile' | 'spaces:updateProfile' | 'spaces:setAvatar' | 'spaces:clearAvatar' | 'spaces:getProfileImage'
   | 'spaces:listSpaces' | 'spaces:browseSpaces' | 'spaces:joinSpace' | 'spaces:createSpace' | 'spaces:renameSpace'
   | 'spaces:archiveSpace' | 'spaces:unarchiveSpace' | 'spaces:deleteSpace' | 'spaces:setSpaceVisibility' | 'spaces:setDefaultSpace'
   | 'spaces:removeMember' | 'spaces:removeOrgMember' | 'spaces:setMemberRole' | 'spaces:getOrgSettings' | 'spaces:setInvitePolicy'
@@ -51,6 +52,16 @@ export interface HarborChannelDeps {
 
 export function harborChannelHandlers({ getClient, getLive, subscriptions, emit }: HarborChannelDeps): HarborChannelHandlers {
   return {
+    'spaces:getProfile': (args) => getClient(args.orgId).me(),
+    'spaces:updateProfile': async ({ orgId, ...input }) => ({ member: await getClient(orgId).updateProfile(input) }),
+    'spaces:setAvatar': async (args) => ({ member: await getClient(args.orgId).setAvatar({ bytes: Uint8Array.from(atob(args.bytes), c => c.charCodeAt(0)), mime: args.mime }) }),
+    'spaces:clearAvatar': async (args) => ({ member: await getClient(args.orgId).clearAvatar() }),
+    'spaces:getProfileImage': async (args) => {
+      const { bytes, mime } = await getClient(args.orgId).fetchProfileImage(args.hash);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      return { src: `data:${mime};base64,${btoa(binary)}` };
+    },
     'spaces:listSpaces': async (args) => {
       const { spaces, groupChat } = await getClient(args.orgId).listing({ includeDirect: args.includeDirect ?? false });
       return { spaces, ...(groupChat !== undefined ? { groupChat } : {}) };
