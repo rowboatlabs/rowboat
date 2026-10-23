@@ -12,6 +12,7 @@ export const PUSH_CHANNELS = [
   'oauth:didConnect',
   'composio:didConnect',
   'chatgpt:statusChanged',
+  'antigravity:statusChanged',
   'terminal:data',
   'terminal:exit',
   'voice:tts-chunk',
