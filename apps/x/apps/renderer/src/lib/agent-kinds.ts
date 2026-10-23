@@ -58,6 +58,7 @@ export const KINDS: Record<string, { label: string; logo?: Logo; bot?: boolean }
     posthog: { label: 'PostHog', bot: true },
     cal: { label: 'Cal.com', bot: true },
     attio: { label: 'Attio', bot: true },
+    greptile: { label: 'Greptile', bot: true },
     custom: { label: 'Agent' },
     // Ro (Harbor spec §8 Jev, 2026-10-07): the agent Harbor itself is, run on
     // TypeSafe's Jev through Rowboat's OpenRouter key. People meet it as Ro,
@@ -74,6 +75,7 @@ export const PLATFORMS: Record<string, { label: string; logo?: Logo }> = {
     posthog: { label: 'PostHog' },
     cal: { label: 'Cal.com' },
     attio: { label: 'Attio' },
+    greptile: { label: 'Greptile' },
     conductor: { label: 'Conductor', logo: { light: conductorLogo, dark: conductorLogoDark } },
     agent37: { label: 'Agent37', logo: { light: agent37Logo, dark: agent37LogoDark } },
 }
@@ -615,6 +617,36 @@ export const AGENT_SETUPS: readonly AgentSetup[] = [
                     note: 'Anyone who can mention this bot can read CRM data available to its key. Replies are visible to everyone in that space. The owner can replace the workspace API key on the bot’s page.',
                 },
             ],
+        }],
+    },
+    {
+        id: 'greptile',
+        label: 'Greptile',
+        description: 'Request code reviews and read Greptile findings',
+        connection: 'greptile',
+        kinds: ['greptile'],
+        bot: true,
+        defaultName: 'Greptile',
+        credential: {
+            label: 'Greptile organization API key',
+            placeholder: 'Paste your Greptile organization API key',
+            note: 'Repositories must already be connected in Greptile. Harbor verifies this key and keeps it sealed. Anyone who can mention this bot can read data available to its key and request reviews, which may consume your review allowance. Replies are visible to everyone who can read the space.',
+        },
+        docsUrl: 'https://www.greptile.com/docs/mcp-v2/tools#get_me',
+        setup: () => [{
+            id: 'commands',
+            label: 'Commands',
+            steps: [{
+                title: 'Request a review and check its progress',
+                note: 'Use the bot’s current name if you rename it. Review requests are queued by Greptile; use status to read results. GitHub.com and GitLab.com repositories are supported.',
+                code: {
+                    caption: 'Example messages',
+                    text: '@Greptile help\n@Greptile repos\n@Greptile prs https://github.com/owner/repo\n@Greptile review https://github.com/owner/repo/pull/42\n@Greptile status https://github.com/owner/repo/pull/42\n@Greptile comments https://github.com/owner/repo/pull/42',
+                },
+            }, {
+                title: 'Choose who can use your Greptile account',
+                note: 'People and agents who can mention this bot can read its repositories and request reviews. Its owner can replace the key on the bot’s page. This bot does not edit code or merge pull requests.',
+            }],
         }],
     },
     {

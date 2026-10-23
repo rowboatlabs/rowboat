@@ -1,3 +1,4 @@
+import { Tabs } from 'radix-ui'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ArrowLeft, Bot, Check, ChevronRight, Hash, Loader2, MessageSquare, Plus } from 'lucide-react'
 import type { spaces } from '@x/shared'
@@ -402,69 +403,77 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                         }}
                     >
                         <Header
-                            title={addingBot ? 'Add a bot' : 'Add an agent'}
+                            title="Add an agent or bot"
                             description={addingBot ? 'Choose the service. It answers commands with your key for it.' : 'Choose what runs it. The steps to connect it come next.'}
                             onBack={back}
                         />
                         <Body>
-                            <div role="radiogroup" aria-label={addingBot ? 'Which service' : 'How it connects'} className="grid grid-cols-2 gap-2">
-                                {offered.map((k) => (
-                                    <SetupTile
-                                        key={k.id}
-                                        setup={k}
-                                        selected={k.id === setup.id}
-                                        onSelect={() => {
-                                            setChosen(k.id)
-                                            setAddError(null)
-                                        }}
+                            <Tabs.Root value={addingBot ? 'bots' : 'agents'} onValueChange={value => startAdding(value === 'bots')}>
+                                <Tabs.List aria-label="What to add" className="mb-4 flex rounded-lg bg-muted p-1">
+                                    <Tabs.Trigger type="button" value="agents" disabled={busy} className="flex-1 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">Agents</Tabs.Trigger>
+                                    <Tabs.Trigger type="button" value="bots" disabled={busy} className="flex-1 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">Bots</Tabs.Trigger>
+                                </Tabs.List>
+                                <Tabs.Content value={addingBot ? 'bots' : 'agents'} className="outline-none">
+                                    <div role="radiogroup" aria-label={addingBot ? 'Which service' : 'How it connects'} className="grid grid-cols-2 gap-2">
+                                        {offered.map((k) => (
+                                            <SetupTile
+                                                key={k.id}
+                                                setup={k}
+                                                selected={k.id === setup.id}
+                                                onSelect={() => {
+                                                    setChosen(k.id)
+                                                    setAddError(null)
+                                                }}
+                                            />
+                                        ))}
+                                    </div>
+                                    {setup.kinds.length > 1 && !setup.bindsInstance && <KindChoice label={setup.kindChoice ?? 'Agent'} kinds={setup.kinds} selected={kind} onSelect={setChosenKind} />}
+                                    <label className="mt-4 flex flex-col gap-1.5">
+                                        <span className="text-xs font-medium text-foreground">Name</span>
+                                        <Input
+                                            value={shownName}
+                                            onChange={(e) => {
+                                                setNameEdited(true)
+                                                setName(e.target.value)
+                                            }}
+                                            placeholder="e.g. Scout"
+                                            aria-label={addingBot ? 'Bot name' : 'Agent name'}
+                                            className="h-9 text-sm"
+                                            maxLength={128}
+                                            autoFocus
+                                        />
+                                        <span className="text-[11px] text-muted-foreground">How it appears in Spaces, and what people type to mention it.</span>
+                                    </label>
+                                    {setup.credential && (
+                                        <label className="mt-4 flex flex-col gap-1.5">
+                                            <span className="text-xs font-medium text-foreground">{setup.credential.label}</span>
+                                            <Input
+                                                type="password"
+                                                value={credential}
+                                                onChange={(e) => {
+                                                    setCredential(e.target.value)
+                                                    setAddError(null)
+                                                }}
+                                                placeholder={setup.credential.placeholder}
+                                                aria-label={setup.credential.label}
+                                                className="h-9 text-sm"
+                                                autoComplete="off"
+                                            />
+                                            <span className="text-[11px] text-muted-foreground">{setup.credential.note}</span>
+                                        </label>
+                                    )}
+                                    {setup.bindsInstance && <InstancePicker credential={credential} choice={instance} onChoice={setInstance} />}
+                                    <SpacePicker
+                                        spaces={org.spaces}
+                                        skipped={skippedSpaces}
+                                        onChange={setSkippedSpaces}
+                                        direct={setup.wantsHomeChannel || isGroupChat(org) ? null : withDirect}
+                                        onDirectChange={setWithDirect}
                                     />
-                                ))}
-                            </div>
-                            {setup.kinds.length > 1 && !setup.bindsInstance && <KindChoice label={setup.kindChoice ?? 'Agent'} kinds={setup.kinds} selected={kind} onSelect={setChosenKind} />}
-                            <label className="mt-4 flex flex-col gap-1.5">
-                                <span className="text-xs font-medium text-foreground">Name</span>
-                                <Input
-                                    value={shownName}
-                                    onChange={(e) => {
-                                        setNameEdited(true)
-                                        setName(e.target.value)
-                                    }}
-                                    placeholder="e.g. Scout"
-                                    aria-label={addingBot ? 'Bot name' : 'Agent name'}
-                                    className="h-9 text-sm"
-                                    maxLength={128}
-                                    autoFocus
-                                />
-                                <span className="text-[11px] text-muted-foreground">How it appears in Spaces, and what people type to mention it.</span>
-                            </label>
-                            {setup.credential && (
-                                <label className="mt-4 flex flex-col gap-1.5">
-                                    <span className="text-xs font-medium text-foreground">{setup.credential.label}</span>
-                                    <Input
-                                        type="password"
-                                        value={credential}
-                                        onChange={(e) => {
-                                            setCredential(e.target.value)
-                                            setAddError(null)
-                                        }}
-                                        placeholder={setup.credential.placeholder}
-                                        aria-label={setup.credential.label}
-                                        className="h-9 text-sm"
-                                        autoComplete="off"
-                                    />
-                                    <span className="text-[11px] text-muted-foreground">{setup.credential.note}</span>
-                                </label>
-                            )}
-                            {setup.bindsInstance && <InstancePicker credential={credential} choice={instance} onChoice={setInstance} />}
-                            <SpacePicker
-                                spaces={org.spaces}
-                                skipped={skippedSpaces}
-                                onChange={setSkippedSpaces}
-                                direct={setup.wantsHomeChannel || isGroupChat(org) ? null : withDirect}
-                                onDirectChange={setWithDirect}
-                            />
-                            {progress && <div className="mt-3 text-xs text-muted-foreground">{progress}</div>}
-                            {addError && <div role="alert" className="mt-3 text-xs text-destructive">{addError}</div>}
+                                    {progress && <div className="mt-3 text-xs text-muted-foreground">{progress}</div>}
+                                    {addError && <div role="alert" className="mt-3 text-xs text-destructive">{addError}</div>}
+                                </Tabs.Content>
+                            </Tabs.Root>
                         </Body>
                         <Footer>
                             <Button type="button" size="sm" variant="ghost" onClick={back}>Cancel</Button>
