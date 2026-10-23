@@ -41,6 +41,7 @@ import { syncModelProviderPersonProperties } from "@x/core/dist/analytics/model-
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
 import { WorkDir } from "@x/core/dist/config/config.js";
 import { prepareCoreData, initCoreServices } from "@x/core/dist/boot/services.js";
+import { initSystemCertificates } from "@x/core/dist/security/system-ca.js";
 import { startServerHost, stopServerHost, childServerMode, serverHostMode, whenServerReady } from "./server-host.js";
 import { getAgentSlackCliStatus } from "@x/core/dist/slack/agent-slack-exec.js";
 import { resolveWorkspacePath } from "@x/core/dist/workspace/workspace.js";
@@ -180,6 +181,10 @@ function initializeExecutionEnvironment(): void {
   }
 }
 initializeExecutionEnvironment();
+
+// Merge host operating system root certificates (macOS Keychain / Windows Certificate Store)
+// into Node's TLS defaults so corporate TLS-inspection proxies (e.g., Zscaler) are trusted.
+initSystemCertificates();
 
 // Path resolution differs between development and production:
 const preloadPath = app.isPackaged

@@ -19,6 +19,7 @@ import {
   type RowboatServer,
 } from '@x/server';
 import { WorkDir } from '@x/core/dist/config/config.js';
+import { writeSystemCaBundle } from '@x/core/dist/security/system-ca.js';
 import { createRelayAuthServer } from '@x/core/dist/auth/loopback-server.js';
 import type { Server as HttpServer } from 'node:http';
 import { broadcastToWindows, findMainAppWindow, onWorkspaceChange, sessionsIndexReady } from './ipc.js';
@@ -235,8 +236,16 @@ async function launchChild(): Promise<ChildServer> {
     (app.isPackaged
       ? path.join(__dirname, 'rowboat-server.cjs')
       : path.resolve(app.getAppPath(), '../server/dist/standalone.js'));
+  const caBundle = !process.env.NODE_EXTRA_CA_CERTS
+    ? writeSystemCaBundle(path.join(WorkDir, 'system-ca.pem'))
+    : null;
   const child = spawn(process.execPath, [entry], {
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', ROWBOAT_PARENT_PID: String(process.pid) },
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: '1',
+      ROWBOAT_PARENT_PID: String(process.pid),
+      ...(caBundle ? { NODE_EXTRA_CA_CERTS: caBundle } : {}),
+    },
     stdio: ['ignore', 'inherit', 'inherit'],
   });
   child.on('exit', (code) => {
