@@ -65,6 +65,8 @@ As of 2026-10-19, the space header's member directory separates **People** from 
 
 Pasting a command or prose resolves exact, case-insensitive member names to visible mention chips when the loaded organization roster identifies one active member (2026-10-23). Duplicate or unknown names stay as text; code, links, quoted text, and the reserved broadcast/assistant names are not automatically converted.
 
+The Agents page uses one full-card “New agent or bot” action (2026-10-23). Its creation dialog presents Agents and Bots as equally visible keyboard-accessible tabs; switching category resets the setup fields and credentials.
+
 ## Geometry and typography
 
 | Element | Spaces specification | Reason |

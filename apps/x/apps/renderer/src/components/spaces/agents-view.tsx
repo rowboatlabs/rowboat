@@ -349,23 +349,16 @@ function SpacesBadge({ names }: { names: string[] }) {
 
 function NewAgentCard({ onAdd }: { onAdd: (bot: boolean) => void }) {
     return (
-        <li className="flex min-h-[188px] flex-col rounded-xl border border-dashed border-black/20 transition-colors hover:border-black/35 hover:bg-[#fafafa] [.dark_&]:border-border [.dark_&]:hover:border-foreground/25 [.dark_&]:hover:bg-transparent">
+        <li className="flex min-h-[188px] flex-col">
             <button
                 type="button"
                 onClick={() => onAdd(false)}
-                className="flex flex-1 flex-col items-center justify-center gap-2 rounded-t-xl text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+                className="flex flex-1 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-black/20 px-4 py-6 text-sm text-muted-foreground transition-colors hover:border-black/35 hover:bg-[#fafafa] hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring [.dark_&]:border-border [.dark_&]:hover:border-foreground/25 [.dark_&]:hover:bg-transparent"
             >
                 <span className="flex size-9 items-center justify-center rounded-full border border-black/15 bg-[#f5f5f5] [.dark_&]:border-border [.dark_&]:bg-transparent">
                     <Plus className="size-4" />
                 </span>
-                New agent
-            </button>
-            <button
-                type="button"
-                onClick={() => onAdd(true)}
-                className="pb-3 text-[11px] text-muted-foreground/80 transition-colors hover:text-foreground"
-            >
-                or add a bot
+                New agent or bot
             </button>
         </li>
     )
