@@ -18,13 +18,13 @@
 
 /* The sidebar floats as a rounded panel (2026-10-21): below the 40px
    titlebar band (where the traffic lights and toolbar line up with the
-   content's header), 8px in from the left and bottom, 12px corners, a hairline
+   content's header), 8px in from the left and bottom, 16px corners, a hairline
    ring and a soft shadow — one object beside the content, not a strip of the
    window. */
 .rowboat-sidebar[data-slot="sidebar-container"] { padding-top: 40px; }
 .rowboat-sidebar [data-slot="sidebar-inner"] {
   border: none;
-  border-radius: 12px;
+  border-radius: 16px;
   overflow: hidden;
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--sidebar-foreground) 8%, transparent),
@@ -408,6 +408,33 @@
   box-shadow: none;
 }
 .sb-plan-pill.is-alert:hover { background: color-mix(in srgb, var(--destructive) 88%, black); }
+/* The avatar at the collapsed rail's foot: a round button around it. */
+.sb-avatar-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+}
+.sb-avatar-button:hover,
+.sb-avatar-button[data-state="open"] { background: var(--sidebar-accent); }
+.sb-avatar-button:active .sb-avatar { transform: scale(.94); }
+.sb-avatar-button:focus-visible { outline: 2px solid var(--sidebar-ring); outline-offset: -2px; }
+/* Syncing: a thin ring turns around the avatar. */
+.sb-avatar-button { position: relative; }
+.sb-avatar-button.is-syncing::after {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  border-radius: 999px;
+  border: 1.5px solid transparent;
+  border-top-color: color-mix(in srgb, var(--sidebar-foreground) 55%, transparent);
+  animation: sb-spin 900ms linear infinite;
+  pointer-events: none;
+}
+@keyframes sb-spin { to { transform: rotate(360deg); } }
+
 .sb-sync {
   width: 28px !important;
   height: 28px !important;

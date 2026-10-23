@@ -1,13 +1,15 @@
-import { useCallback } from 'react'
-import { ArrowUpRight, Bug, ChevronDown, MessageSquare, MoreHorizontal, Plus } from 'lucide-react'
+import { useCallback, useState, type ReactNode } from 'react'
+import { ArrowUpRight, BarChart3, Bug, ChevronDown, MessageSquare, MoreHorizontal, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { TokenUsageMenu } from '@/components/token-usage-menu'
+import { TokenUsageDialog } from '@/components/token-usage-menu'
+import { Keys } from '@/components/keys'
+import { SHORTCUTS } from '@/lib/shortcuts'
 import type { TokenUsage } from '@/lib/chat-conversation'
-import { hasTokenUsage } from '@/lib/token-usage'
+import { formatTokenCount, hasTokenUsage, totalTokensOf } from '@/lib/token-usage'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -32,6 +34,9 @@ export interface ChatHeaderProps {
   sessionUsage?: TokenUsage
   onSelectRun?: (runId: string) => void
   onOpenChatHistory?: () => void
+  /** Where this chat can move (sidebar, Assistant, a floating window) — items
+   *  in the ⋯ menu rather than icons of their own (2026-10-22). */
+  moveTargets?: ReadonlyArray<{ label: string; icon: ReactNode; onSelect: () => void }>
 }
 
 /**
@@ -49,7 +54,9 @@ export function ChatHeader({
   sessionUsage,
   onSelectRun,
   onOpenChatHistory,
+  moveTargets = [],
 }: ChatHeaderProps) {
+  const [usageOpen, setUsageOpen] = useState(false)
   const hasHistory = recentRuns.length > 0 || Boolean(onOpenChatHistory)
   const showUsage = hasTokenUsage(sessionUsage)
 
@@ -85,7 +92,9 @@ export function ChatHeader({
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className="titlebar-no-drag flex min-w-0 flex-1 self-stretch items-center gap-2 rounded-md px-3 text-sm font-medium text-foreground outline-none hover:bg-accent/60"
+              // Hugs the title (2026-10-22): stretched across the bar, its hover
+              // lit the whole header once the header became the top bar.
+              className="titlebar-no-drag flex h-8 min-w-0 max-w-full shrink items-center gap-2 rounded-md px-2.5 text-sm font-medium text-foreground outline-none hover:bg-accent/60"
               aria-label="Chat history"
             >
               <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
@@ -123,19 +132,12 @@ export function ChatHeader({
           </DropdownMenuContent>
         </DropdownMenu>
       ) : (
-        <div className="flex min-w-0 flex-1 self-stretch items-center gap-2 px-3 text-sm font-medium text-foreground">
+        <div className="flex min-w-0 shrink items-center gap-2 px-2.5 text-sm font-medium text-foreground">
           <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
           <span className="truncate">{activeTitle}</span>
         </div>
       )}
-      {showUsage && (
-        <TokenUsageMenu
-          usage={sessionUsage}
-          scope="session"
-          className="titlebar-no-drag my-1 shrink-0"
-          align="end"
-        />
-      )}
+      <span className="min-w-2 flex-1" aria-hidden="true" />
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
@@ -148,7 +150,7 @@ export function ChatHeader({
             <Plus className="size-5" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent side="bottom">New chat</TooltipContent>
+        <TooltipContent side="bottom" className="flex items-center gap-2">New chat <Keys keys={SHORTCUTS.newChat} tone="dark" /></TooltipContent>
       </Tooltip>
       <DropdownMenu>
         <Tooltip>
@@ -166,7 +168,23 @@ export function ChatHeader({
           </TooltipTrigger>
           <TooltipContent side="bottom">Chat options</TooltipContent>
         </Tooltip>
-        <DropdownMenuContent align="end" className="min-w-48">
+        {/* One menu for the less frequent actions (2026-10-22): usage, where
+            the chat lives, and the debug log — five icons became New chat + ⋯. */}
+        <DropdownMenuContent align="end" className="min-w-52">
+          {showUsage && sessionUsage && (
+            <DropdownMenuItem onSelect={() => setUsageOpen(true)}>
+              <BarChart3 className="size-4" />
+              Token usage
+              <span className="ml-auto text-xs tabular-nums text-muted-foreground">{formatTokenCount(totalTokensOf(sessionUsage))}</span>
+            </DropdownMenuItem>
+          )}
+          {moveTargets.map((target) => (
+            <DropdownMenuItem key={target.label} onSelect={target.onSelect}>
+              {target.icon}
+              {target.label}
+            </DropdownMenuItem>
+          ))}
+          {(showUsage || moveTargets.length > 0) && <DropdownMenuSeparator />}
           <DropdownMenuItem
             disabled={!activeRunId}
             onSelect={() => {
@@ -178,6 +196,9 @@ export function ChatHeader({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      {showUsage && sessionUsage && (
+        <TokenUsageDialog usage={sessionUsage} scope="session" open={usageOpen} onOpenChange={setUsageOpen} />
+      )}
     </>
   )
 }

@@ -317,6 +317,18 @@ Once configured, Rowboat can invoke these tools during its work, subject to your
 
 ---
 
+## Build the desktop package
+
+Use Node 22 or 24 for Electron packaging. The packaging hook rejects other versions before building; Node 26 can exit during Electron ZIP extraction without producing an app.
+
+```bash
+cd apps/harbor && pnpm install --frozen-lockfile && pnpm -r build
+cd ../x && pnpm install --frozen-lockfile
+cd apps/main && npm run package
+```
+
+The unpacked application is written under `apps/x/apps/main/out/`. For an unsigned local build, set `ROWBOAT_SKIP_CODE_SIGNING=1` when running the package command.
+
 ## Run your own Harbor
 
 Harbor is the Spaces server. It is open source, in this repo at [`apps/harbor`](apps/harbor), and it is what Rowboat's hosted servers run. One process serves one org or many, on top of Postgres.

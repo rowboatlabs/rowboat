@@ -35,7 +35,7 @@ export function SpaceContentTabs({ orgId, spaceId, direct, topics, entries, unre
 
     const tabs: { id: Tab; label: string; badge: SpaceBadge; go: RailSelection }[] = [
         { id: 'messages', label: 'Messages', badge: streamBadge(orgId, spaceId, direct), go: { kind: 'general' } },
-        { id: 'discussions', label: 'Discussions', badge: discussionBadge, go: { kind: 'discussions' } },
+        { id: 'discussions', label: 'Threads', badge: discussionBadge, go: { kind: 'discussions' } },
         { id: 'files', label: 'Files', badge: filesBadge, go: { kind: 'files' } },
     ]
 

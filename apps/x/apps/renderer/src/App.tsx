@@ -14,7 +14,7 @@ import { RunEvent } from '@x/shared/src/runs.js';
 import type { ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
-import { CheckIcon, LoaderIcon, PanelLeftIcon, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon, SquarePen, MessageSquare } from 'lucide-react';
+import { CheckIcon, LoaderIcon, PanelLeftIcon, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon, MessageSquare } from 'lucide-react';
 import { cn, compactPath, parentPath } from '@/lib/utils';
 import { SPACES_ENABLED } from '@/lib/feature-flags';
 import { SHORTCUTS, isRichTextTarget } from '@/lib/shortcuts';
@@ -791,14 +791,13 @@ function parseDeepLink(input: string): ViewState | null {
 /** Sidebar toggle (fixed position, top-left) — one persistent control that
     swaps between the expanded panel and the icon rail, in both directions.
     Reports its rendered width so collapsed-mode headers can pad past the
-    whole cluster (its contents vary: new chat, caffeinate). */
+    whole cluster (toggle and caffeinate; New chat moved into the panel and
+    the rail, 2026-10-22). */
 function FixedSidebarToggle({
   leftInsetPx,
-  onNewChat,
   onWidthChange,
 }: {
   leftInsetPx: number
-  onNewChat?: () => void
   onWidthChange?: (px: number) => void
 }) {
   const { toggleSidebar, state } = useSidebar()
@@ -838,34 +837,6 @@ function FixedSidebarToggle({
           state, and this cluster is the one control group present on every
           view, sidebar expanded or docked. */}
       <CaffeinateToggle />
-      {/* 2026-10-21: the expanded sidebar has its own New chat row, so this
-          one (last in the cluster) fades out while expanded. It keeps its slot: the
-          cluster's width (and the header padding measured from it) must not
-          change mid-collapse, or the header jumps a frame late. */}
-      {onNewChat && (
-        <Tooltip delayDuration={400}>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              onClick={onNewChat}
-              tabIndex={state === 'collapsed' ? undefined : -1}
-              aria-hidden={state === 'collapsed' ? undefined : true}
-              style={{
-                opacity: state === 'collapsed' ? 1 : 0,
-                pointerEvents: state === 'collapsed' ? undefined : 'none',
-                transition: 'opacity 180ms ease',
-              }}
-              className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-              aria-label="New chat"
-            >
-              <SquarePen className="size-[17px]" strokeWidth={1.5} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" sideOffset={6} className="flex items-center gap-2">
-            New chat <Keys keys={SHORTCUTS.newChat} tone="dark" />
-          </TooltipContent>
-        </Tooltip>
-      )}
     </div>
   )
 }
@@ -2745,6 +2716,7 @@ function App() {
   })
   const { layout: assistantLayout, dispatch: dispatchAssistantLayout, place: placeAssistantChat } = useAssistantLayout(chatTabs.map((tab) => tab.id))
   const [assistantPageHost, setAssistantPageHost] = useState<HTMLDivElement | null>(null)
+  const [assistantHeaderHost, setAssistantHeaderHost] = useState<HTMLDivElement | null>(null)
   const chatTabsRef = useRef(chatTabs)
   chatTabsRef.current = chatTabs
   // A tab's current chat identity (see ChatTab.chatId). Session-scoped maps
@@ -6361,6 +6333,7 @@ function App() {
       return acc
     }, [])
   ), [knowledgeFiles])
+  const knowledgeFilePathsKey = knowledgeFilePaths.join('\n')
 
   // Compute visible files (files whose parent directories are expanded)
   const visibleKnowledgeFiles = React.useMemo(() => {
@@ -7164,7 +7137,11 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [isGraphOpen, isBrainGraphOpen, knowledgeFilePaths])
+    // Keyed on the list of notes, not the array (2026-10-22): the tree hands
+    // back a new array on every file change, and each rebuild re-read all
+    // notes and restarted the layout, freezing the Brain graph.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isGraphOpen, isBrainGraphOpen, knowledgeFilePathsKey])
 
   // The active chat's view state, backed by the sessions hook (legacy
   // standalone states remain only as the pre-load fallback until stage 7).
@@ -7395,7 +7372,9 @@ function App() {
                 collapsedLeftPaddingPx={collapsedLeftPaddingPx}
               >
                 {isFullScreenChat ? (
-                  <span className="self-center px-3 text-sm font-medium">Assistant</span>
+                  // The chat's own title, ▾ history and actions land here
+                  // (assistant/chat.tsx), one bar instead of two (2026-10-22).
+                  <div ref={setAssistantHeaderHost} className="flex min-w-0 flex-1 items-stretch" />
                 ) : currentViewState.type === 'file' && selectedPath ? (
                   <TabBar
                     tabs={openFilePaths.includes(selectedPath) ? openFilePaths : [...openFilePaths, selectedPath]}
@@ -7476,7 +7455,7 @@ function App() {
                       <button
                         type="button"
                         onClick={toggleChatSidebar}
-                        className="titlebar-no-drag ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                        className="titlebar-no-drag ml-auto flex h-8 w-8 shrink-0 items-center justify-center self-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
                         aria-label="Open chat sidebar"
                       >
                         <MessageSquare className="size-4" />
@@ -7994,7 +7973,7 @@ function App() {
             </SidebarInset>
 
               <AssistantWorkspace
-                layout={assistantLayout} dispatch={dispatchAssistantLayout} pageHost={assistantPageHost} pageVisible={activeMiddle === 'chat'}
+                layout={assistantLayout} dispatch={dispatchAssistantLayout} pageHost={assistantPageHost} pageHeaderHost={isFullScreenChat ? assistantHeaderHost : null} pageVisible={activeMiddle === 'chat'}
                 legacyPane={isCodePaneActive} workspaceSessionId={activeCodeSession?.session.id ?? null}
                 onMoveChat={moveAssistantChat} onNewChatAt={newChatAt} onSelectChatAt={selectChatAt} onFocusChat={switchChatTab}
                 onHideSidebar={() => dispatchAssistantLayout({ type: 'hide-sidebar' })} onCloseChat={closeAssistantChat}
@@ -8175,29 +8154,19 @@ function App() {
                 icon rail (the traffic lights are wider than the rail, so the
                 band must be one uninterrupted surface — the rail itself starts
                 below it) and keeps that corner draggable. */}
-            {!sidebarOpen && (
-              <div
-                aria-hidden="true"
-                className="titlebar-drag-region fixed left-0 top-0 z-20 h-10 border-b border-border bg-background animate-in fade-in duration-200"
-                style={{ width: DOCK_GUTTER_PX }}
-              />
-            )}
-            {/* Expanded, the floating panel starts below the titlebar band
-                (2026-10-21); this keeps that band over it draggable. */}
-            {sidebarOpen && (
-              <div
-                aria-hidden="true"
-                className="titlebar-drag-region fixed left-0 top-0 z-20 h-10"
-                style={{ width: 'var(--sidebar-width)' }}
-              />
-            )}
+            {/* The panel and the rail both float below the titlebar band
+                (2026-10-21/22); this keeps the band over them draggable. */}
+            <div
+              aria-hidden="true"
+              className="titlebar-drag-region fixed left-0 top-0 z-20 h-10"
+              style={{ width: sidebarOpen ? 'var(--sidebar-width)' : DOCK_GUTTER_PX }}
+            />
             {/* Sidebar toggle — always present (both directions), rendered
                 last so its no-drag region paints over the drag regions. */}
             <FixedSidebarToggle
               // Full screen hides the traffic lights, so the toggle takes
               // their place, in line with the sidebar's icons (2026-10-21).
               leftInsetPx={isMac && !fullScreen ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 8}
-              onNewChat={handleNewChatTab}
               onWidthChange={setTitlebarControlsWidthPx}
             />
             <MenuSidebarToggleBridge />

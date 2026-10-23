@@ -2,7 +2,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from '@/components/ui/button'
 import { useSpaceDirectory, invalidateSpaceDirectory } from '@/hooks/use-space-directory'
 import { useEffect, useId, useMemo, useState, type ReactNode } from 'react'
-import { Archive, Bell, Bot, ChevronDown, ChevronRight, Compass, CornerDownRight, Hash, Lock, LogIn, MessagesSquare, MoreHorizontal, Pencil, Plus, RotateCw, UserPlus } from 'lucide-react'
+import { Archive, Bell, Bot, ChevronDown, ChevronRight, Compass, CornerDownRight, Hash, Lock, LogIn, MoreHorizontal, Pencil, Plus, RotateCw, UserPlus } from 'lucide-react'
+// Phosphor's chat bubbles for Spaces (2026-10-22), matching the dock.
+import { ChatsCircle } from '@phosphor-icons/react'
 import { cn } from '@/lib/utils'
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar'
 import { SidebarNavSection } from '@/components/sidebar-section'
@@ -83,7 +85,7 @@ export function SpacesSidebarSection({ active, activeSpace, onOpenSpace, onOpenS
     for (const badge of serverBadges.values()) { total.unread += badge.unread; total.forYou += badge.forYou }
     const onAServer = active && orgs.some((org) => org.id === activeSpace?.orgId)
     return <SidebarNavSection id="spaces" label="Spaces" tourId="nav-spaces"
-        icon={<MessagesSquare />}
+        icon={<ChatsCircle />}
         active={active && !onAServer}
         onOpen={onOpenSpaces}
         foldedBadge={<UnreadBadge badge={total} />}
