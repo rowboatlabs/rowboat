@@ -1090,6 +1090,22 @@ export const MIGRATIONS: Migration[] = [
     id: '045-message-summary',
     statements: [`alter table messages add column if not exists summary text`],
   },
+  {
+    // Who has replied, on roots (2026-10-25, "managing sessions" in Main):
+    // the Threads view shows and filters by a thread's participants. Same
+    // recompute as reply_count; the backfill is refreshReplyStats over all.
+    id: '046-reply-authors',
+    statements: [
+      `alter table messages add column if not exists reply_authors jsonb not null default '[]'::jsonb`,
+      `update messages r set reply_authors = s.authors
+        from (select thread_root, jsonb_agg(author_member_id order by first_offset) as authors
+              from (select thread_root, author_member_id, min(stream_offset) as first_offset
+                    from messages where thread_root is not null and deleted_at is null
+                    group by thread_root, author_member_id) a
+              group by thread_root) s
+        where r.id = s.thread_root`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

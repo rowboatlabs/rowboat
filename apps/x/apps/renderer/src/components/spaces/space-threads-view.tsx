@@ -1,13 +1,14 @@
 import { useSpaceAccess } from '@/lib/spaces-access'
 import { invokeSpace } from '@/lib/spaces-invoke'
-import { useMemo, useState } from 'react'
-import { Archive, ArchiveRestore, Bot, Link as LinkIcon, MessageSquare, MessageSquareOff, MessagesSquare, MoreHorizontal, Pencil } from 'lucide-react'
+import { useCallback, useMemo, useState } from 'react'
+import { Archive, ArchiveRestore, Bot, Check, ChevronDown, Link as LinkIcon, MessageSquare, MessageSquareOff, MessagesSquare, MoreHorizontal, Pencil, Users } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { messageUrl } from '@x/shared/dist/spaces.js'
 import { copySpacesLink } from '@/lib/spaces-copy-link'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { UnreadBadge } from '@/components/spaces/unread-badge'
+import { MemberAvatar } from '@/components/spaces/atoms'
 import { refreshSpaceFeed } from '@/hooks/use-spaces'
 import { prefetchThread, type ChatMessage, type SpacePresence } from '@/hooks/use-space-chat'
 import { threadBadge, useReadStateVersion } from '@/lib/spaces-read-state'
@@ -28,6 +29,36 @@ import { FilterTabs, SpacesEmpty, SpacesPage } from '@/components/spaces/page-sh
  * window, so "Load older" pages the stream itself rather than a new route.
  */
 type ThreadsFilter = 'all' | 'named' | 'mine'
+
+/**
+ * The participant filter (2026-10-25, "managing sessions" in Main) is sticky
+ * per space: kept in localStorage so leaving the Threads view, or the app,
+ * and coming back finds the same subset.
+ */
+const participantKey = (orgId: string, spaceId: string) => `spaces:threads-participant:${orgId}:${spaceId}`
+
+function useStickyParticipant(orgId: string, spaceId: string): [string | null, (memberId: string | null) => void] {
+    const key = participantKey(orgId, spaceId)
+    const read = () => { try { return window.localStorage.getItem(key) } catch { return null } }
+    const [state, setState] = useState(() => ({ key, value: read() }))
+    // Switching spaces remounts nothing, so re-read when the key changes.
+    const value = state.key === key ? state.value : read()
+    if (state.key !== key) setState({ key, value })
+    const set = useCallback((memberId: string | null) => {
+        try {
+            if (memberId) window.localStorage.setItem(key, memberId)
+            else window.localStorage.removeItem(key)
+        } catch { /* storage unavailable: the filter still holds for this visit */ }
+        setState({ key, value: memberId })
+    }, [key])
+    return [value, set]
+}
+
+/** A thread's participants: the root's author, then everyone who replied, in first-reply order. */
+function participantsOf(root: spaces.Message | undefined): string[] {
+    if (!root) return []
+    return [...new Set([root.author.memberId, ...(root.replyAuthors ?? [])])]
+}
 
 interface ThreadRow {
     rootMessageId: string
@@ -79,11 +110,21 @@ export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMembe
     const { writable } = useSpaceAccess()
     useReadStateVersion()
     const [filter, setFilter] = useState<ThreadsFilter>('all')
+    const [participant, setParticipant] = useStickyParticipant(orgId, spaceId)
     const [archived, setArchived] = useState(false)
     const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null)
     const [pending, setPending] = useState<string | null>(null)
     const showArchived = filter === 'named' && archived
-    const rows = useMemo(() => threadRows(topics, roots, filter, showArchived, selfMemberId), [topics, roots, filter, showArchived, selfMemberId])
+    const allRows = useMemo(() => threadRows(topics, roots, filter, showArchived, selfMemberId), [topics, roots, filter, showArchived, selfMemberId])
+    const rows = useMemo(() => participant ? allRows.filter((row) => participantsOf(row.root).includes(participant)) : allRows, [allRows, participant])
+    const nameOf = (memberId: string) => memberNames.get(memberId) ?? 'Unknown member'
+    // The menu offers whoever appears in the threads on screen, plus a sticky
+    // choice that the loaded window doesn't reach yet so it can be cleared.
+    const participantOptions = useMemo(() => {
+        const ids = new Set(allRows.flatMap((row) => participantsOf(row.root)))
+        if (participant) ids.add(participant)
+        return [...ids].sort((a, b) => (memberNames.get(a) ?? '').localeCompare(memberNames.get(b) ?? ''))
+    }, [allRows, participant, memberNames])
     const archivedCount = topics.filter((topic) => topic.archived).length
     const manage = async (id: string, action: spaces.SpacesManageTopicAction) => {
         setPending(id)
@@ -102,6 +143,25 @@ export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMembe
                 options={[{ value: 'all', label: 'All' }, { value: 'named', label: 'Named' }, { value: 'mine', label: 'By me' }]} />
             {filter === 'named' && <FilterTabs label="Show" value={archived ? 'archived' : 'active'} onChange={(value) => setArchived(value === 'archived')}
                 options={[{ value: 'active', label: 'Active' }, { value: 'archived', label: 'Archived', count: archivedCount }]} />}
+            <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                    <Button type="button" size="sm" variant="ghost" aria-label={participant ? `Participant: ${nameOf(participant)}` : 'Filter by participant'}
+                        className={cn('h-8 gap-1.5 px-2.5 text-[13px]', participant ? 'bg-accent text-foreground' : 'text-muted-foreground')}>
+                        {participant ? <MemberAvatar id={participant} name={nameOf(participant)} size="sm" className="rounded-full" /> : <Users className="size-3.5" />}
+                        {participant ? nameOf(participant) : 'Everyone'}
+                        <ChevronDown className="size-3.5 opacity-60" />
+                    </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="max-h-80 overflow-y-auto">
+                    <DropdownMenuItem onSelect={() => setParticipant(null)}>
+                        <Users className="mr-2 size-3.5" />Everyone{!participant && <Check className="ml-auto size-3.5" />}
+                    </DropdownMenuItem>
+                    {participantOptions.length > 0 && <DropdownMenuSeparator />}
+                    {participantOptions.map((id) => <DropdownMenuItem key={id} onSelect={() => setParticipant(id)}>
+                        <MemberAvatar id={id} name={nameOf(id)} size="sm" className="mr-2 rounded-full" />{nameOf(id)}{participant === id && <Check className="ml-auto size-3.5" />}
+                    </DropdownMenuItem>)}
+                </DropdownMenuContent>
+            </DropdownMenu>
         </>}>
         <ul className="flex flex-col gap-0.5">
             {rows.map(({ rootMessageId, topic, root, activityAt }) => {
@@ -112,6 +172,7 @@ export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMembe
                 const working = (presence.working.get(rootMessageId)?.length ?? 0) > 0
                 const copyLink = () => void copySpacesLink(messageUrl(orgAddress, spaceId, rootMessageId))
                 const Icon = topic ? MessagesSquare : MessageSquare
+                const people = participantsOf(root)
                 return <li key={rootMessageId}><ContextMenu>
                     <ContextMenuTrigger asChild>
                         <div className="group relative flex items-center rounded-xl transition-colors hover:bg-accent/60 has-[[data-state=open]]:bg-accent/60">
@@ -136,6 +197,7 @@ export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMembe
                                         {working && <span className="inline-flex shrink-0 items-center gap-1 text-[var(--stream-link)]"><Bot className="size-3.5" aria-hidden /> Rowboat is working</span>}
                                     </span>
                                 </span>
+                                {people.length > 0 && <ParticipantStack ids={people} nameOf={nameOf} />}
                                 <UnreadBadge badge={badge} direct={direct} />
                             </button>}
                             {!(topic && renaming?.id === topic.id) && <DropdownMenu>
@@ -169,6 +231,10 @@ export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMembe
                 ? <SpacesEmpty icon={<Archive />} title="No archived discussions">Archived discussions stay readable here.</SpacesEmpty>
                 : filter === 'named'
                     ? <SpacesEmpty icon={<MessagesSquare />} title="No named threads yet">Give a thread a title from its ⋯ menu, or type /discussion in a reply, and it shows up here.</SpacesEmpty>
+                    : participant
+                        ? <SpacesEmpty icon={<Users />} title={`No threads with ${nameOf(participant)}`}>
+                            Threads {nameOf(participant)} started or replied to show up here. <button type="button" className="underline" onClick={() => setParticipant(null)}>Show everyone</button>
+                        </SpacesEmpty>
                     : filter === 'mine'
                         ? <SpacesEmpty icon={<MessageSquare />} title="No threads started by you">Threads whose first message you posted show up here.</SpacesEmpty>
                         : <SpacesEmpty icon={<MessageSquare />} title="No threads yet">Reply to a message to start a thread.</SpacesEmpty>)}
@@ -176,4 +242,19 @@ export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMembe
             {loadingOlder ? 'Loading…' : 'Load older threads'}
         </Button>}
     </SpacesPage>
+}
+
+/**
+ * A thread's participants as overlapping circles (2026-10-25, "managing
+ * sessions" in Main: asked for circular, so people are round here too, unlike
+ * the stream's square tiles). Names ride the title; the row's label stays the title.
+ */
+function ParticipantStack({ ids, nameOf, max = 4 }: { ids: string[]; nameOf: (memberId: string) => string; max?: number }) {
+    const shown = ids.slice(0, max)
+    return <span aria-hidden title={ids.map(nameOf).join(', ')} className="flex shrink-0 items-center -space-x-1.5">
+        {shown.map((id) => <MemberAvatar key={id} id={id} name={nameOf(id)} size="md" className="rounded-full ring-2 ring-background" />)}
+        {ids.length > max && <span className="inline-flex size-7 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground ring-2 ring-background">
+            +{ids.length - max}
+        </span>}
+    </span>
 }

@@ -393,6 +393,7 @@ export class Feed {
           postedAt: at,
           offset,
           replyCount: 0,
+          replyAuthors: [],
           reactions: [],
           ...(poll ? { poll } : {}),
           ...(raising && opts.approval ? { approval: this.invocations!.approvalFor(raising, id, opts.approval.request) } : {}),
@@ -442,6 +443,7 @@ export class Feed {
         postedAt: at,
         offset,
         replyCount: 0,
+        replyAuthors: [],
         ...(input.anchorChangeSetId ? { anchorChangeSetId: input.anchorChangeSetId } : {}),
         reactions: [],
         ...(poll ? { poll } : {}),
@@ -502,6 +504,7 @@ export class Feed {
           postedAt: at,
           offset,
           replyCount: 0,
+          replyAuthors: [],
           reactions: [],
           ...stampFields(stamps),
         };

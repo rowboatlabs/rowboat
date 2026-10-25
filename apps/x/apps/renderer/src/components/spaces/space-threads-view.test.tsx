@@ -11,23 +11,23 @@ vi.mock('@/lib/spaces-read-state', () => ({ useReadStateVersion: () => 0, thread
 vi.mock('@/lib/toast', () => ({ toast: vi.fn() }))
 const invoke = vi.fn(async () => ({}))
 beforeEach(() => { Object.defineProperty(window, 'ipc', { configurable: true, value: { invoke } }) })
-afterEach(() => { cleanup(); vi.clearAllMocks() })
+afterEach(() => { cleanup(); vi.clearAllMocks(); window.localStorage.clear() })
 const topics = [
     { id: 'live', rootMessageId: 'root-live', title: 'Launch', archived: false, lastActivityAt: '2026-09-15T10:00:00Z' },
     { id: 'archived', rootMessageId: 'root-archived', title: 'Old launch', archived: true, lastActivityAt: '2026-09-14T10:00:00Z' },
 ] as spaces.TopicListing[]
-const root = (id: string, memberId: string, body: string, replyCount: number, lastReplyAt?: string) =>
-    ({ id, spaceId: 'dm', author: { memberId, actingMode: 'direct' }, body, postedAt: '2026-09-01T10:00:00Z', offset: 1, replyCount, lastReplyAt, mentions: [], mentionsHere: false, mentionsRowboat: false, reactions: [] }) as spaces.Message
+const root = (id: string, memberId: string, body: string, replyCount: number, lastReplyAt?: string, replyAuthors: string[] = []) =>
+    ({ id, spaceId: 'dm', author: { memberId, actingMode: 'direct' }, body, postedAt: '2026-09-01T10:00:00Z', offset: 1, replyCount, lastReplyAt, replyAuthors, mentions: [], mentionsHere: false, mentionsRowboat: false, reactions: [] }) as spaces.Message
 const roots = [
-    root('root-mine', 'me', 'Fix the login bug\nmore detail', 4, '2026-09-16T10:00:00Z'),
-    root('root-theirs', 'ana', 'Plan the release', 2, '2026-09-13T10:00:00Z'),
+    root('root-mine', 'me', 'Fix the login bug\nmore detail', 4, '2026-09-16T10:00:00Z', ['me']),
+    root('root-theirs', 'ana', 'Plan the release', 2, '2026-09-13T10:00:00Z', ['bo', 'me']),
     root('root-quiet', 'me', 'No replies here', 0),
     root('root-archived', 'me', 'Archived root', 1, '2026-09-14T10:00:00Z'),
 ]
 function mount(onLoadOlder = vi.fn()) {
     const onOpen = vi.fn()
     render(<SpaceThreadsView orgId="org" orgAddress="spaces.example.com" spaceId="dm" direct selfMemberId="me" topics={topics} roots={roots}
-        hasMore loadingOlder={false} onLoadOlder={onLoadOlder} loaded memberNames={new Map([['me', 'Arjun'], ['ana', 'Ana']])} spaceNames={new Map()}
+        hasMore loadingOlder={false} onLoadOlder={onLoadOlder} loaded memberNames={new Map([['me', 'Arjun'], ['ana', 'Ana'], ['bo', 'Bo']])} spaceNames={new Map()}
         presence={{ working: new Map(), typing: new Map(), here: [] }} onOpen={onOpen} />)
     return onOpen
 }
@@ -54,6 +54,26 @@ describe('threads view', () => {
         fireEvent.click(screen.getByRole('button', { name: 'By me' }))
         expect(screen.getAllByRole('button', { name: / replies/ }).map((row) => row.textContent)).toEqual([expect.stringMatching(/^Fix the login bug/)])
         expect(screen.queryByRole('button', { name: /^Archived/ })).not.toBeInTheDocument()
+    })
+    it('shows each thread\'s participants, root author first', () => {
+        mount()
+        const row = screen.getByRole('button', { name: /^Plan the release/ })
+        expect(row.querySelector('[title="Ana, Bo, Arjun"]')).not.toBeNull()
+    })
+    it('filters by participant and keeps the choice after leaving and coming back', () => {
+        mount()
+        fireEvent.pointerDown(screen.getByRole('button', { name: 'Filter by participant' }), { button: 0, ctrlKey: false })
+        expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Everyone', 'ANAna', 'ARArjun', 'BOBo'])
+        fireEvent.click(screen.getByRole('menuitem', { name: /Bo$/ }))
+        expect(screen.getAllByRole('button', { name: / replies/ }).map((row) => row.textContent)).toEqual([expect.stringMatching(/^Plan the release/)])
+        cleanup()
+        mount()
+        expect(screen.getByRole('button', { name: 'Participant: Bo' })).toBeInTheDocument()
+        expect(screen.getAllByRole('button', { name: / replies/ })).toHaveLength(1)
+        fireEvent.pointerDown(screen.getByRole('button', { name: 'Participant: Bo' }), { button: 0, ctrlKey: false })
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Everyone' }))
+        expect(screen.getAllByRole('button', { name: / replies/ })).toHaveLength(3)
+        expect(window.localStorage.getItem('spaces:threads-participant:org:dm')).toBeNull()
     })
     it('pages older threads from the stream', () => {
         const onLoadOlder = vi.fn()

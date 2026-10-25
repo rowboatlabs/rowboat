@@ -22,6 +22,7 @@ function msg(over: Partial<spaces.Message> & { id: string }): spaces.Message {
         postedAt: '2026-08-19T10:20:00Z',
         offset: 1,
         replyCount: 0,
+        replyAuthors: [],
         reactions: [],
         mentions: [],
         mentionsHere: false,

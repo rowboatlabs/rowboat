@@ -42,7 +42,7 @@ const live = (event: object) => emit({ orgId: 'org', frame: { kind: 'event', spa
 
 const msg = (offset: number): spaces.Message => ({
     id: `m${offset}`, spaceId: 'space', author: { memberId: 'alex', actingMode: 'direct' }, body: `body ${offset}`,
-    postedAt: '2026-09-14T09:00:00Z', offset, replyCount: 0, mentions: [], mentionsHere: false, mentionsRowboat: false, reactions: [],
+    postedAt: '2026-09-14T09:00:00Z', offset, replyCount: 0, replyAuthors: [], mentions: [], mentionsHere: false, mentionsRowboat: false, reactions: [],
 })
 const range = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => msg(from + i))
 const ids = (messages: readonly { id: string }[]) => messages.map((m) => m.id)

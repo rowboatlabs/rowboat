@@ -466,6 +466,13 @@ export const Message = z.object({
    */
   lastReplyOffset: StreamOffset.optional(),
   /**
+   * Who has replied (2026-10-25, "managing sessions" in Main): the distinct
+   * authors of LIVE replies, in first-reply order, so the Threads view can
+   * show a thread's participants and filter by one without loading replies.
+   * Maintained by the same denorm refresh as replyCount; [] on replies.
+   */
+  replyAuthors: z.array(MemberId).default([]),
+  /**
    * The author's short version of a long message (2026-10-25, the threads
    * discussion in Main): clients show it first with "Show more" for the full
    * body. Markdown; the body's mention stamps cover it. Redacted with the body.

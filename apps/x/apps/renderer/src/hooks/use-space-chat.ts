@@ -47,6 +47,7 @@ export function buildPendingMessage(spaceId: string, memberId: string, body: str
         postedAt: new Date().toISOString(),
         offset: Number.MAX_SAFE_INTEGER - 1_000_000 + pendingSeq,
         replyCount: 0,
+        replyAuthors: [],
         mentions: [],
         mentionsHere: false,
         mentionsRowboat: false,
@@ -424,7 +425,12 @@ function noteReplyActivity(orgId: string, spaceId: string, reply: spaces.Message
     if (!root) return
     setStream(k, {
         messages: state.messages.map((m) =>
-            m.id === rootId ? { ...m, replyCount: (m.replyCount ?? 0) + 1, lastReplyAt: reply.postedAt } : m,
+            m.id === rootId ? {
+                ...m,
+                replyCount: (m.replyCount ?? 0) + 1,
+                lastReplyAt: reply.postedAt,
+                replyAuthors: (m.replyAuthors ?? []).includes(reply.author.memberId) ? m.replyAuthors : [...(m.replyAuthors ?? []), reply.author.memberId],
+            } : m,
         ),
     })
 }
