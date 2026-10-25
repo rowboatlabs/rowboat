@@ -1084,6 +1084,12 @@ export const MIGRATIONS: Migration[] = [
       )`,
     ],
   },
+  {
+    // A message's summary (2026-10-25): the author's short version of a long
+    // body, shown first with "Show more". Content, so deletion blanks it.
+    id: '045-message-summary',
+    statements: [`alter table messages add column if not exists summary text`],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

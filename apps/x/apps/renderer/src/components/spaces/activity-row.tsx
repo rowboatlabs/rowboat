@@ -9,7 +9,8 @@ type Item = spaces.SpacesActivityItem
 export function ActivityRow({ item, names, spaceNames, onOpen, compact = false }: { compact?: boolean; item: Item; names: ReadonlyMap<string, string>; spaceNames: ReadonlyMap<string, string>; onOpen: () => void }) {
     const lead = item.actors[0]
     const who = actorLabel(item.actors, names)
-    const excerpt = excerptOf(item.message.body, names, spaceNames)
+    // A long message's summary is its point (2026-10-25); Activity shows that.
+    const excerpt = excerptOf(item.message.summary ?? item.message.body, names, spaceNames)
     if (compact) return (
         <button type="button" onClick={onOpen}
             className={cn('group flex w-full items-start gap-1.5 rounded-lg px-1.5 py-1.5 text-left hover:bg-accent/60', item.unread && 'bg-accent/30')}

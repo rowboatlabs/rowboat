@@ -263,3 +263,16 @@ describe('stream store — join lines', () => {
         expect(offsets(cached.events)).toEqual([95.5, 100.5])
     })
 })
+
+describe('stream store — summaries (2026-10-25)', () => {
+    it('a live edit replaces the summary, and one without a summary removes it', async () => {
+        const { hook } = await open()
+        const edit = (summary?: string) => live({ type: 'message_edited', edit: {
+            messageId: 'm100', body: 'long body', at: '2026-10-25T10:00:00Z', mentions: [], mentionsHere: false, mentionsRowboat: false, ...(summary ? { summary } : {}),
+        } })
+        act(() => edit('the point'))
+        expect(hook.result.current.messages.find((m) => m.id === 'm100')?.summary).toBe('the point')
+        act(() => edit())
+        expect(hook.result.current.messages.find((m) => m.id === 'm100')).not.toHaveProperty('summary')
+    })
+})

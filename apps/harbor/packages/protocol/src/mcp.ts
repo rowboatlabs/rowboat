@@ -400,12 +400,16 @@ export const postMessage = tool({
     'to post a new root into the stream. Posting never creates a topic (use create_topic to give a ' +
     'thread a goal). Replying to an archived topic revives it. Attach a `poll` to post a poll ' +
     '(question + 2–10 answers; the body must still carry a plain-text rendering of it for clients ' +
-    'that cannot show the card). Works on a DM exactly as on a space. ' +
+    'that cannot show the card). Works on a DM exactly as on a space. When the body is long (more than ' +
+    'a few lines: a plan, research, a report), also pass `summary`: one or two lines with the outcome, ' +
+    'which people see first, with "Show more" for the full body. ' +
     MENTION_GRAMMAR,
   input: z.object({
     spaceId: SpaceId,
     threadRoot: MessageId.optional(),
     body: z.string().min(1).max(65_536),
+    /** One or two lines with the outcome of a long body; shown first (2026-10-25). */
+    summary: z.string().min(1).max(1_000).optional(),
     poll: NewPoll.optional(),
     /** Options for agents the message mentions, keyed by agent member id (their declared options; see get_invocations). */
     agentOptions: z.record(MemberId, InvocationOptionValues).optional(),
@@ -443,9 +447,15 @@ export const editMessage = tool({
   description:
     "Rewrite the body of one of your person's own messages in place (author-only: you act as " +
     'them, so their messages and nothing else). The old text is gone everywhere; the message ' +
-    'shows an edited mark. Poll messages and deleted messages refuse. Returns the updated message. ' +
+    'shows an edited mark. Poll messages and deleted messages refuse. Pass `summary` to replace the ' +
+    "message's summary, or null to remove it; leave it out to keep it. Returns the updated message. " +
     MENTION_GRAMMAR,
-  input: z.object({ spaceId: SpaceId, messageId: MessageId, body: z.string().min(1).max(65_536) }),
+  input: z.object({
+    spaceId: SpaceId,
+    messageId: MessageId,
+    body: z.string().min(1).max(65_536),
+    summary: z.string().min(1).max(1_000).nullable().optional(),
+  }),
   output: z.object({ message: Message }),
 });
 

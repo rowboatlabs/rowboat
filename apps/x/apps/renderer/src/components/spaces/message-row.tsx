@@ -22,6 +22,7 @@ import { MessageLinkPreview } from '@/components/spaces/link-preview-card'
 import { ApprovalCard } from '@/components/spaces/approval-card'
 import { PollCard } from '@/components/spaces/poll-card'
 import { SpaceMarkdown, useSpaceRefs } from '@/components/spaces/space-markdown'
+import { isLongBody } from '@/lib/spaces-conventions'
 import { frequentEmoji, noteEmojiUsed } from '@/lib/emoji-data'
 import { PIN_EMOJI } from '@/lib/spaces-corpus'
 import {
@@ -242,6 +243,11 @@ function MessageRowImpl({
     // `initial` seeds the editor once; `text` is its live markdown; `baseline`
     // is what an untouched draft serializes to (see MessageEditBox.onChange).
     const [edit, setEdit] = useState<{ initial: string; text: string; images: ImageEmbed[]; baseline: string | null } | null>(null)
+    // A long body shows collapsed until the reader asks (2026-10-25): its
+    // summary when the author wrote one, else its first lines.
+    const [expanded, setExpanded] = useState(false)
+    const long = isLongBody(message.body)
+    const collapsed = long && !expanded
     const refs = useSpaceRefs()
     // A thumbnail address for an extracted embed: the org's blob links render
     // through the app:// cache (their https wire form doesn't), anything
@@ -410,11 +416,30 @@ function MessageRowImpl({
                     />
                 ) : (
                     <div className={cn(MESSAGE_PROSE, message.pending && 'opacity-60')}>
-                        <SpaceMarkdown body={message.body} />
-                        {message.editedAt && (
-                            <span title={formatFullTimestamp(message.editedAt)} className="text-[10.5px] text-muted-foreground/70">(edited)</span>
+                        {long && message.summary ? (
+                            // The author's summary first; expanded, it stays on top as the TL;DR.
+                            <div data-summary className={cn(!collapsed && 'mb-2 border-l-2 border-border pl-3 text-muted-foreground')}>
+                                <SpaceMarkdown body={message.summary} />
+                            </div>
+                        ) : null}
+                        {collapsed && !message.summary ? (
+                            <div data-clamped className="relative max-h-[13.5rem] overflow-hidden">
+                                <SpaceMarkdown body={message.body} />
+                                <span aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-background to-transparent" />
+                            </div>
+                        ) : !collapsed ? (
+                            <SpaceMarkdown body={message.body} />
+                        ) : null}
+                        {long && (
+                            <button type="button" aria-expanded={expanded} onClick={() => setExpanded((v) => !v)}
+                                className="mt-0.5 text-xs font-medium text-[var(--stream-link)] hover:underline">
+                                {expanded ? 'Show less' : 'Show more'}
+                            </button>
                         )}
-                        <MessageLinkPreview body={message.body} messageId={message.id} />
+                        {message.editedAt && (
+                            <span title={formatFullTimestamp(message.editedAt)} className="ml-1 text-[10.5px] text-muted-foreground/70">(edited)</span>
+                        )}
+                        {!collapsed && <MessageLinkPreview body={message.body} messageId={message.id} />}
                     </div>
                 )}
                 {message.failed && (

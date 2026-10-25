@@ -242,6 +242,12 @@ interface MessageRow {
   mentions: string[] | null;
   mentions_here: boolean | null;
   mentions_rowboat: boolean | null;
+  summary?: string | null;
+}
+
+/** What search indexes for a message: its summary (2026-10-25) and its body. */
+function withSummary(body: string, summary: string | undefined): string {
+  return summary ? `${summary}\n${body}` : body;
 }
 
 function rowToMessage(r: MessageRow): Message {
@@ -251,6 +257,7 @@ function rowToMessage(r: MessageRow): Message {
     ...(r.thread_root !== null ? { threadRoot: r.thread_root } : {}),
     author: r.author,
     body: r.body,
+    ...(r.summary ? { summary: r.summary } : {}),
     postedAt: r.posted_at,
     offset: r.stream_offset,
     replyCount: r.reply_count,
@@ -1103,8 +1110,8 @@ export class PgStore implements Store {
 
   async appendMessage(message: Message): Promise<void> {
     await this.sql.query(
-      `insert into messages (id, space_id, thread_root, author, body, posted_at, stream_offset, reply_count, last_reply_at, anchor_change_set_id, poll, mentions, mentions_here, mentions_rowboat, search_text, approval)
-       values ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14, $15, $16::jsonb)`,
+      `insert into messages (id, space_id, thread_root, author, body, posted_at, stream_offset, reply_count, last_reply_at, anchor_change_set_id, poll, mentions, mentions_here, mentions_rowboat, search_text, approval, summary)
+       values ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14, $15, $16::jsonb, $17)`,
       [
         message.id,
         message.spaceId,
@@ -1120,8 +1127,9 @@ export class PgStore implements Store {
         JSON.stringify(message.mentions),
         message.mentionsHere,
         message.mentionsRowboat,
-        searchTextFor(message.body),
+        searchTextFor(withSummary(message.body, message.summary)),
         message.approval ? JSON.stringify(message.approval) : null,
+        message.summary ?? null,
       ],
     );
   }
@@ -1141,18 +1149,19 @@ export class PgStore implements Store {
     );
   }
 
-  async markMessageEdited(spaceId: string, messageId: string, body: string, editedAt: string, stamps: MentionStamps): Promise<void> {
+  async markMessageEdited(spaceId: string, messageId: string, body: string, editedAt: string, stamps: MentionStamps, summary?: string): Promise<void> {
     await this.sql.query(
-      `update messages set body = $3, edited_at = $4, mentions = $5::jsonb, mentions_here = $6, mentions_rowboat = $7, search_text = $8
+      `update messages set body = $3, edited_at = $4, mentions = $5::jsonb, mentions_here = $6, mentions_rowboat = $7, search_text = $8, summary = $9
        where space_id = $1 and id = $2`,
-      [spaceId, messageId, body, editedAt, JSON.stringify(stamps.members), stamps.here, stamps.rowboat, searchTextFor(body)],
+      [spaceId, messageId, body, editedAt, JSON.stringify(stamps.members), stamps.here, stamps.rowboat, searchTextFor(withSummary(body, summary)), summary ?? null],
     );
-    // Rewrite the stored message event too — replay must serve the edit, stamps included.
+    // Rewrite the stored message event too — replay must serve the edit, stamps and summary included.
     await this.sql.query(
-      `update events set event = jsonb_set(event, '{message}', (event->'message') || jsonb_build_object(
-         'body', $3::text, 'editedAt', $4::text, 'mentions', $5::jsonb, 'mentionsHere', $6::boolean, 'mentionsRowboat', $7::boolean))
+      `update events set event = jsonb_set(event, '{message}', ((event->'message') #- '{summary}') || jsonb_build_object(
+         'body', $3::text, 'editedAt', $4::text, 'mentions', $5::jsonb, 'mentionsHere', $6::boolean, 'mentionsRowboat', $7::boolean)
+         || case when $8::text is null then '{}'::jsonb else jsonb_build_object('summary', $8::text) end)
        where space_id = $1 and event->>'type' = 'message' and event->'message'->>'id' = $2`,
-      [spaceId, messageId, body, editedAt, JSON.stringify(stamps.members), stamps.here, stamps.rowboat],
+      [spaceId, messageId, body, editedAt, JSON.stringify(stamps.members), stamps.here, stamps.rowboat, summary ?? null],
     );
   }
 
@@ -1171,7 +1180,7 @@ export class PgStore implements Store {
 
   async markMessageDeleted(spaceId: string, messageId: string, deletedAt: string): Promise<void> {
     await this.sql.query(
-      `update messages set body = '', deleted_at = $3, poll = null, approval = null, mentions = '[]'::jsonb, mentions_here = false, mentions_rowboat = false, search_text = ''
+      `update messages set body = '', summary = null, deleted_at = $3, poll = null, approval = null, mentions = '[]'::jsonb, mentions_here = false, mentions_rowboat = false, search_text = ''
        where space_id = $1 and id = $2`,
       [spaceId, messageId, deletedAt],
     );
@@ -1180,7 +1189,7 @@ export class PgStore implements Store {
     // Redact the stored message event too — replay must never resurrect the
     // body (nor a poll, which is content the same way).
     await this.sql.query(
-      `update events set event = jsonb_set(event, '{message}', ((event->'message') #- '{poll}' #- '{approval}') || jsonb_build_object(
+      `update events set event = jsonb_set(event, '{message}', ((event->'message') #- '{poll}' #- '{approval}' #- '{summary}') || jsonb_build_object(
          'body', '', 'deletedAt', $3::text, 'mentions', '[]'::jsonb, 'mentionsHere', false, 'mentionsRowboat', false))
        where space_id = $1 and event->>'type' = 'message' and event->'message'->>'id' = $2`,
       [spaceId, messageId, deletedAt],

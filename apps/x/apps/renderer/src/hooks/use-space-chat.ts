@@ -502,6 +502,14 @@ async function ensureStream(orgId: string, spaceId: string): Promise<void> {
     else if (!current?.ready || streamCacheOnly.has(k)) await loadStream(orgId, spaceId)
 }
 
+/** The summary an edit leaves (2026-10-25): the frame carries it, and its absence means none. */
+function withEditedSummary<M extends spaces.Message>(message: M, summary: string | undefined): M {
+    const next = { ...message }
+    if (summary) next.summary = summary
+    else delete next.summary
+    return next
+}
+
 let busWired = false
 function wireBus(): void {
     if (busWired) return
@@ -601,7 +609,7 @@ function wireBus(): void {
                 setStream(k, {
                     messages: state.messages.map((m) =>
                         m.id === edit.messageId
-                            ? { ...m, body: edit.body, editedAt: edit.at, mentions: edit.mentions, mentionsHere: edit.mentionsHere, mentionsRowboat: edit.mentionsRowboat }
+                            ? withEditedSummary({ ...m, body: edit.body, editedAt: edit.at, mentions: edit.mentions, mentionsHere: edit.mentionsHere, mentionsRowboat: edit.mentionsRowboat }, edit.summary)
                             : m,
                     ),
                 })
