@@ -466,6 +466,17 @@ export const Message = z.object({
    */
   lastReplyOffset: StreamOffset.optional(),
   /**
+   * Who has posted in this ROOT message's thread (2026-10-25, the threads
+   * discussion in Main): the root's author first, then each member who has
+   * replied, in the order they first replied. A listing showed reply counts
+   * but had no roster, so faces in the Threads list had to be guessed; now
+   * they are read. Folded at read like reactions, so it carries the current
+   * truth wherever messages are listed; empty on replies and on stored
+   * message events. A tombstoned reply drops its author out of the list when
+   * nothing else of theirs remains.
+   */
+  participants: z.array(MemberId).default([]),
+  /**
    * The author's short version of a long message (2026-10-25, the threads
    * discussion in Main): clients show it first with "Show more" for the full
    * body. Markdown; the body's mention stamps cover it. Redacted with the body.

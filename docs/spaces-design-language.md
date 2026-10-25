@@ -57,7 +57,9 @@ A separate global app rail, huddles, workspace theming controls, a new cross-spa
 | Sectioned navigation | Space rail | Activity, Agents, Browse rows; collapsible Spaces and Direct messages sections; 32 px rows and selected-state tint |
 | Theme-aware surfaces | Existing application color variables | Scoped semantic styles reuse light and dark colors |
 
-The root message exposes reply counts and last-reply time, but the stream's summary does not provide a reliable roster of replying members. Participant avatars are therefore not fabricated or inferred from working agents. They can be added when the summary carries real participant data.
+The root message exposes reply counts and last-reply time. Until 2026-10-25 the stream's summary carried no roster of replying members, so participant avatars were not fabricated or inferred from working agents; the condition for adding them was real participant data. `Message.participants` is now that data (apps/harbor/CONTRACT.md, 2026-10-25): the root's author followed by each replier, in first-reply order.
+
+The Threads list shows them as a stack of faces at the row's right and filters the list by them. **These faces are circles**, which the stream reserves for agents: a stack of overlapping squares reads as a stack of tiles rather than as a group of people, and inside a stack an agent is still told apart by the kind mark in its corner. The rule holds everywhere else — in a message's gutter, a person is a near-square tile and a circle means AI.
 
 ## People and integrations
 

@@ -33,6 +33,7 @@ function message(over: Partial<ChatMessage> & { id: string }): ChatMessage {
         mentionsHere: false,
         mentionsRowboat: false,
         reactions: [],
+        participants: [],
         ...over,
     }
 }

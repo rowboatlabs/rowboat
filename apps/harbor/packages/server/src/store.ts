@@ -390,6 +390,13 @@ export interface Store {
    */
   refreshReplyStats(spaceId: string, rootMessageId: string): Promise<void>;
   /**
+   * Who has replied in each of the given threads (2026-10-25), one row per
+   * (root, member), ordered by the member's first live reply — the
+   * participants fold. Tombstoned replies don't count, so a member whose
+   * only reply was deleted drops out, as they do from `replyCount`.
+   */
+  listThreadRepliers(spaceId: string, rootMessageIds: string[]): Promise<{ rootMessageId: string; memberId: string }[]>;
+  /**
    * Tombstone: blanks the row's body and summary and sets deletedAt — and redacts the
    * stored `message` event the same way. That event rewrite is the one
    * mutation the log allows: a deleted body must be unrecoverable, replay

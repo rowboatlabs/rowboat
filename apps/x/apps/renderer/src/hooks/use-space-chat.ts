@@ -51,6 +51,7 @@ export function buildPendingMessage(spaceId: string, memberId: string, body: str
         mentionsHere: false,
         mentionsRowboat: false,
         reactions: [],
+        participants: [],
         pending: true,
     }
 }
@@ -424,7 +425,16 @@ function noteReplyActivity(orgId: string, spaceId: string, reply: spaces.Message
     if (!root) return
     setStream(k, {
         messages: state.messages.map((m) =>
-            m.id === rootId ? { ...m, replyCount: (m.replyCount ?? 0) + 1, lastReplyAt: reply.postedAt } : m,
+            m.id === rootId
+                ? {
+                      ...m,
+                      replyCount: (m.replyCount ?? 0) + 1,
+                      lastReplyAt: reply.postedAt,
+                      // The thread's faces move with the chip (2026-10-25): the
+                      // replier joins the root's participants, in reply order.
+                      participants: [...new Set([...(m.participants?.length ? m.participants : [m.author.memberId]), reply.author.memberId])],
+                  }
+                : m,
         ),
     })
 }
