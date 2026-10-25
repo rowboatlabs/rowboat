@@ -1,6 +1,6 @@
 import { useSpaceAccess } from '@/lib/spaces-access'
 import { useRef, useState } from 'react'
-import { FileText, FolderPlus, MoreHorizontal, PenTool, Plus, Trash2, Upload } from 'lucide-react'
+import { FileText, FolderPlus, ListTodo, MoreHorizontal, PenTool, Plus, Trash2, Upload } from 'lucide-react'
 import { spaces } from '@x/shared'
 import { FileListContextMenu } from '@/components/file-list-context-menu'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
@@ -8,10 +8,11 @@ import { Button } from '@/components/ui/button'
 import { SpacesPage } from '@/components/spaces/page-shell'
 import { FileTree } from '@/components/spaces/files-tab'
 import type { RailSelection } from '@/lib/spaces-selection'
+import { todoListPathForName } from '@/lib/todo-list'
 
 /** Full-space file browser. Retains the tree's creation, move, rename and trash actions. */
 export function SpaceFilesView({ orgId, orgAddress, spaceId, entries, draftFolders, unreadAssetIds, selection, onSelect,
-    onCreateFile, onCreateBoard, onUploadFiles, onOpenTrash, onAddFolder, onRemoveFolder,
+    onCreateFile, onCreateBoard, onCreateTodoList, onUploadFiles, onOpenTrash, onAddFolder, onRemoveFolder,
 }: {
     orgId: string
     orgAddress: string
@@ -23,6 +24,7 @@ export function SpaceFilesView({ orgId, orgAddress, spaceId, entries, draftFolde
     onSelect: (selection: RailSelection) => void
     onCreateFile: (path: string) => void
     onCreateBoard: (path: string) => void
+    onCreateTodoList: (path: string) => void
     onUploadFiles: (files: File[]) => void
     onOpenTrash: () => void
     onAddFolder: (path: string) => void
@@ -31,17 +33,24 @@ export function SpaceFilesView({ orgId, orgAddress, spaceId, entries, draftFolde
     const { writable } = useSpaceAccess()
     const [creatingFile, setCreatingFile] = useState<{ prefix: string } | null>(null)
     const [creatingFolder, setCreatingFolder] = useState(false)
-    const [creatingBoard, setCreatingBoard] = useState(false)
+    /** The name row for a new board or todo list. */
+    const [naming, setNaming] = useState<'board' | 'todo' | null>(null)
     const uploadInputRef = useRef<HTMLInputElement | null>(null)
     const selectedAssetId = selection.kind === 'file' || selection.kind === 'whiteboard' ? selection.assetId : null
     const openEntry = (assetId: string) => {
         const entry = entries.find((e) => e.id === assetId)
         onSelect(entry && spaces.isWhiteboardPath(entry.path) ? { kind: 'whiteboard', assetId } : { kind: 'file', assetId })
     }
-    const createBoard = (name: string) => {
-        setCreatingBoard(false)
-        const path = spaces.whiteboardPathForName(name)
-        if (path) onCreateBoard(path)
+    const createNamed = (name: string) => {
+        const kind = naming
+        setNaming(null)
+        if (kind === 'board') {
+            const path = spaces.whiteboardPathForName(name)
+            if (path) onCreateBoard(path)
+        } else if (kind === 'todo') {
+            const path = todoListPathForName(name)
+            if (path) onCreateTodoList(path)
+        }
     }
     const liveFiles = entries.filter((e) => !e.state).length
     return <>
@@ -77,7 +86,7 @@ export function SpaceFilesView({ orgId, orgAddress, spaceId, entries, draftFolde
                     </DropdownMenu>
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild disabled={!writable}>
-                            <Button size="sm" aria-label="Add to files" title="New file, folder, board, or upload">
+                            <Button size="sm" aria-label="Add to files" title="New file, folder, board, todo list, or upload">
                                 <Plus className="size-4" /> New
                             </Button>
                         </DropdownMenuTrigger>
@@ -85,22 +94,26 @@ export function SpaceFilesView({ orgId, orgAddress, spaceId, entries, draftFolde
                             <DropdownMenuItem onClick={() => uploadInputRef.current?.click()}>
                                 <Upload className="size-3.5 mr-2" /> Upload files…
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => { setCreatingBoard(false); setCreatingFile({ prefix: '' }) }}>
+                            <DropdownMenuItem onClick={() => { setNaming(null); setCreatingFile({ prefix: '' }) }}>
                                 <FileText className="size-3.5 mr-2" /> New file
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => { setCreatingBoard(false); setCreatingFolder(true) }}>
+                            <DropdownMenuItem onClick={() => { setNaming(null); setCreatingFolder(true) }}>
                                 <FolderPlus className="size-3.5 mr-2" /> New folder
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => { setCreatingFile(null); setCreatingFolder(false); setCreatingBoard(true) }}>
+                            <DropdownMenuItem onClick={() => { setCreatingFile(null); setCreatingFolder(false); setNaming('board') }}>
                                 <PenTool className="size-3.5 mr-2" /> New board
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => { setCreatingFile(null); setCreatingFolder(false); setNaming('todo') }}>
+                                <ListTodo className="size-3.5 mr-2" /> New todo list
                             </DropdownMenuItem>
                         </DropdownMenuContent>
                     </DropdownMenu>
                 </>}>
                     <FileListContextMenu actions={writable ? [
-                        { label: 'New file', onSelect: () => { setCreatingBoard(false); setCreatingFile({ prefix: '' }) } },
-                        { label: 'New folder', onSelect: () => { setCreatingBoard(false); setCreatingFolder(true) } },
-                        { label: 'New board', onSelect: () => { setCreatingFile(null); setCreatingFolder(false); setCreatingBoard(true) } },
+                        { label: 'New file', onSelect: () => { setNaming(null); setCreatingFile({ prefix: '' }) } },
+                        { label: 'New folder', onSelect: () => { setNaming(null); setCreatingFolder(true) } },
+                        { label: 'New board', onSelect: () => { setCreatingFile(null); setCreatingFolder(false); setNaming('board') } },
+                        { label: 'New todo list', onSelect: () => { setCreatingFile(null); setCreatingFolder(false); setNaming('todo') } },
                         { label: 'Upload files…', onSelect: () => uploadInputRef.current?.click() },
                     ] : []}>
                     <div className="-mx-1">
@@ -128,18 +141,21 @@ export function SpaceFilesView({ orgId, orgAddress, spaceId, entries, draftFolde
                             onCancelCreateFolder={() => setCreatingFolder(false)}
                             onRemoveFolder={writable ? onRemoveFolder : undefined}
                         />
-                        {creatingBoard && (
+                        {naming && (
                             <div className="flex items-center gap-1.5 px-1 pt-1">
-                                <PenTool className="size-4 shrink-0 text-muted-foreground" />
+                                {naming === 'board'
+                                    ? <PenTool className="size-4 shrink-0 text-muted-foreground" />
+                                    : <ListTodo className="size-4 shrink-0 text-muted-foreground" />}
                                 <input
                                     autoFocus
-                                    placeholder="Board name…"
+                                    key={naming}
+                                    placeholder={naming === 'board' ? 'Board name…' : 'Todo list name…'}
                                     className="h-9 min-w-0 flex-1 rounded-md border border-transparent bg-[var(--rowboat-wash)] px-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-border"
                                     onKeyDown={(e) => {
-                                        if (e.key === 'Enter') createBoard(e.currentTarget.value)
-                                        else if (e.key === 'Escape') setCreatingBoard(false)
+                                        if (e.key === 'Enter') createNamed(e.currentTarget.value)
+                                        else if (e.key === 'Escape') setNaming(null)
                                     }}
-                                    onBlur={(e) => (e.currentTarget.value.trim() ? createBoard(e.currentTarget.value) : setCreatingBoard(false))}
+                                    onBlur={(e) => (e.currentTarget.value.trim() ? createNamed(e.currentTarget.value) : setNaming(null))}
                                 />
                             </div>
                         )}
