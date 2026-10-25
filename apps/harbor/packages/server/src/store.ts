@@ -390,14 +390,14 @@ export interface Store {
    */
   refreshReplyStats(spaceId: string, rootMessageId: string): Promise<void>;
   /**
-   * Tombstone: blanks the row's body and sets deletedAt — and redacts the
+   * Tombstone: blanks the row's body and summary and sets deletedAt — and redacts the
    * stored `message` event the same way. That event rewrite is the one
    * mutation the log allows: a deleted body must be unrecoverable, replay
    * included. The message_deleted event itself is appended by the service.
    */
   markMessageDeleted(spaceId: string, messageId: string, deletedAt: string): Promise<void>;
-  /** Body + the re-stamped addresses (mentions.ts), row and stored event alike; search text follows the body. */
-  markMessageEdited(spaceId: string, messageId: string, body: string, editedAt: string, stamps: MentionStamps): Promise<void>;
+  /** Body, summary (absent = none) + the re-stamped addresses (mentions.ts), row and stored event alike; search text follows them. */
+  markMessageEdited(spaceId: string, messageId: string, body: string, editedAt: string, stamps: MentionStamps, summary?: string): Promise<void>;
   /** Stamps only (the backfill): derived data, no content change, no event. */
   restampMessage(spaceId: string, messageId: string, stamps: MentionStamps): Promise<void>;
 

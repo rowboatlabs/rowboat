@@ -389,6 +389,7 @@ export class Feed {
           threadRoot: root.id,
           author,
           body: input.body,
+          ...(input.summary ? { summary: input.summary } : {}),
           postedAt: at,
           offset,
           replyCount: 0,
@@ -437,6 +438,7 @@ export class Feed {
         spaceId,
         author,
         body: input.body,
+        ...(input.summary ? { summary: input.summary } : {}),
         postedAt: at,
         offset,
         replyCount: 0,
@@ -544,8 +546,9 @@ export class Feed {
     stamps: MentionStamps,
     by: Attribution,
     at: string,
+    summary: string | undefined,
   ): Promise<Message> {
-    await this.k.store.markMessageEdited(spaceId, message.id, body, at, stamps);
+    await this.k.store.markMessageEdited(spaceId, message.id, body, at, stamps, summary);
     await this.k.appendNext(spaceId, at, {
       type: 'message_edited',
       edit: {
@@ -553,12 +556,14 @@ export class Feed {
         messageId: message.id,
         ...threadRootOf(message),
         body,
+        ...(summary ? { summary } : {}),
         by,
         at,
         ...stampFields(stamps),
       },
     });
-    return { ...message, body, editedAt: at, ...stampFields(stamps) };
+    const { summary: _was, ...rest } = message;
+    return { ...rest, body, ...(summary ? { summary } : {}), editedAt: at, ...stampFields(stamps) };
   }
 
   /**
@@ -583,7 +588,7 @@ export class Feed {
           // A poll's body is its immutable fallback rendering — left alone.
           const body = m.poll ? m.body : legacyToTokens(m.body, names);
           if (body !== m.body) {
-            await this.applyEdit(space.id, m, body, await this.stampsFor(space.id, body), m.author, this.k.now());
+            await this.applyEdit(space.id, m, body, await this.stampsFor(space.id, body), m.author, this.k.now(), m.summary);
             out.messages += 1;
             continue;
           }
@@ -654,7 +659,7 @@ export class Feed {
         },
       });
       // A poll is content: redacted with the body (the store already dropped it). A tombstone addresses nobody.
-      const { poll: _poll, approval: _approval, ...rest } = message;
+      const { poll: _poll, approval: _approval, summary: _summary, ...rest } = message;
       return this.foldLive(spaceId, { ...rest, body: '', deletedAt: at, mentions: [], mentionsHere: false, mentionsRowboat: false });
     });
   }
@@ -685,10 +690,12 @@ export class Feed {
       // The Discord posture: a poll message is immutable once posted — its
       // body is the poll's fallback rendering, and votes were cast on it.
       if (message.poll) throw new HarborError('invalid_request', 'poll messages cannot be edited');
-      if (message.body === input.body) return this.foldLive(spaceId, message);
+      // The summary (2026-10-25): left out = kept, null = removed.
+      const summary = input.summary === undefined ? message.summary : (input.summary ?? undefined);
+      if (message.body === input.body && message.summary === summary) return this.foldLive(spaceId, message);
 
       const at = this.k.now();
-      const edited = await this.applyEdit(spaceId, message, input.body, stamps, by, at);
+      const edited = await this.applyEdit(spaceId, message, input.body, stamps, by, at, summary);
       // A newly mentioned member follows the thread from the edit on.
       await this.followMentioned(spaceId, message.threadRoot ?? message.id, stamps, ctx.memberId, at);
       return this.foldLive(spaceId, edited);

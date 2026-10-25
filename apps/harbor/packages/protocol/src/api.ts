@@ -62,6 +62,8 @@ const NewMessage = z.object({
   /** Reply-to-activity-row provenance (root posts only): the change-set this message answers. */
   anchorChangeSetId: ChangeSetId.optional(),
   body: z.string().min(1).max(65_536),
+  /** A short version of a long body, shown first with "Show more" (2026-10-25). */
+  summary: z.string().min(1).max(1_000).optional(),
   /** Present = this message carries a poll (immutable once posted; editMessage refuses). */
   poll: NewPoll.optional(),
   actingMode: ActingMode,
@@ -1054,6 +1056,8 @@ export const routes = {
     params: z.object({ spaceId: SpaceId, messageId: MessageId }),
     request: z.object({
       body: z.string().min(1).max(65_536),
+      /** The summary (2026-10-25): absent = keep it, a string = replace it, null = remove it. */
+      summary: z.string().min(1).max(1_000).nullable().optional(),
       actingMode: ActingMode,
       agentName: z.string().max(64).optional(),
     }),
