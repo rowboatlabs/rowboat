@@ -429,7 +429,11 @@ function noteReplyActivity(orgId: string, spaceId: string, reply: spaces.Message
                 ...m,
                 replyCount: (m.replyCount ?? 0) + 1,
                 lastReplyAt: reply.postedAt,
-                replyAuthors: (m.replyAuthors ?? []).includes(reply.author.memberId) ? m.replyAuthors : [...(m.replyAuthors ?? []), reply.author.memberId],
+                // Only extend a list Harbor keeps: a root with replies and no
+                // authors is an older Harbor, which the Threads list reads
+                // from the thread instead (lib/spaces-thread-participants).
+                replyAuthors: (m.replyCount ?? 0) > 0 && (m.replyAuthors?.length ?? 0) === 0 ? m.replyAuthors
+                    : (m.replyAuthors ?? []).includes(reply.author.memberId) ? m.replyAuthors : [...(m.replyAuthors ?? []), reply.author.memberId],
             } : m,
         ),
     })

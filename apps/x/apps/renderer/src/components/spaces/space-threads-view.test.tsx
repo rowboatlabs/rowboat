@@ -4,6 +4,7 @@ import type { spaces } from '@x/shared'
 import { SpaceThreadsView } from './space-threads-view'
 import { refreshSpaceFeed } from '@/hooks/use-spaces'
 import { toast } from '@/lib/toast'
+import { resetFallbackReplyAuthors } from '@/lib/spaces-thread-participants'
 
 vi.mock('@/hooks/use-spaces', () => ({ refreshSpaceFeed: vi.fn(async () => {}) }))
 vi.mock('@/hooks/use-space-chat', () => ({ prefetchThread: vi.fn() }))
@@ -11,7 +12,7 @@ vi.mock('@/lib/spaces-read-state', () => ({ useReadStateVersion: () => 0, thread
 vi.mock('@/lib/toast', () => ({ toast: vi.fn() }))
 const invoke = vi.fn(async () => ({}))
 beforeEach(() => { Object.defineProperty(window, 'ipc', { configurable: true, value: { invoke } }) })
-afterEach(() => { cleanup(); vi.clearAllMocks(); window.localStorage.clear() })
+afterEach(() => { cleanup(); vi.clearAllMocks(); window.localStorage.clear(); resetFallbackReplyAuthors() })
 const topics = [
     { id: 'live', rootMessageId: 'root-live', title: 'Launch', archived: false, lastActivityAt: '2026-09-15T10:00:00Z' },
     { id: 'archived', rootMessageId: 'root-archived', title: 'Old launch', archived: true, lastActivityAt: '2026-09-14T10:00:00Z' },
@@ -24,9 +25,9 @@ const roots = [
     root('root-quiet', 'me', 'No replies here', 0),
     root('root-archived', 'me', 'Archived root', 1, '2026-09-14T10:00:00Z'),
 ]
-function mount(onLoadOlder = vi.fn()) {
+function mount(onLoadOlder = vi.fn(), shown = roots) {
     const onOpen = vi.fn()
-    render(<SpaceThreadsView orgId="org" orgAddress="spaces.example.com" spaceId="dm" direct selfMemberId="me" topics={topics} roots={roots}
+    render(<SpaceThreadsView orgId="org" orgAddress="spaces.example.com" spaceId="dm" direct selfMemberId="me" topics={topics} roots={shown}
         hasMore loadingOlder={false} onLoadOlder={onLoadOlder} loaded memberNames={new Map([['me', 'Arjun'], ['ana', 'Ana'], ['bo', 'Bo']])} spaceNames={new Map()}
         presence={{ working: new Map(), typing: new Map(), here: [] }} onOpen={onOpen} />)
     return onOpen
@@ -59,6 +60,15 @@ describe('threads view', () => {
         mount()
         const row = screen.getByRole('button', { name: /^Plan the release/ })
         expect(row.querySelector('[title="Ana, Bo, Arjun"]')).not.toBeNull()
+    })
+    it('reads the repliers from the thread when Harbor sends no reply authors', async () => {
+        const reply = (memberId: string) => ({ ...root(`r-${memberId}`, memberId, 'reply', 0), threadRoot: 'root-old' })
+        invoke.mockImplementation((async () => ({ root: roots[0], topic: null, messages: [reply('bo'), reply('me'), reply('bo')], hasMore: false })) as never)
+        mount(vi.fn(), [root('root-old', 'ana', 'From an older Harbor', 3, '2026-09-16T10:00:00Z')])
+        const row = screen.getByRole('button', { name: /^From an older Harbor/ })
+        await waitFor(() => expect(row.querySelector('[title="Ana, Bo, Arjun"]')).not.toBeNull())
+        expect(invoke).toHaveBeenCalledWith('spaces:listThread', { orgId: 'org', spaceId: 'dm', rootMessageId: 'root-old', afterOffset: 1, limit: 200 })
+        expect(invoke).toHaveBeenCalledTimes(1)
     })
     it('filters by participant and keeps the choice after leaving and coming back', () => {
         mount()

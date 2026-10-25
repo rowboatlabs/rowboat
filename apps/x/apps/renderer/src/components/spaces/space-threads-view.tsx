@@ -12,6 +12,7 @@ import { MemberAvatar } from '@/components/spaces/atoms'
 import { refreshSpaceFeed } from '@/hooks/use-spaces'
 import { prefetchThread, type ChatMessage, type SpacePresence } from '@/hooks/use-space-chat'
 import { threadBadge, useReadStateVersion } from '@/lib/spaces-read-state'
+import { useFallbackReplyAuthors } from '@/lib/spaces-thread-participants'
 import { threadLabelOf } from '@/lib/spaces-conventions'
 import { formatFeedTime, resolveMentions } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
@@ -55,9 +56,9 @@ function useStickyParticipant(orgId: string, spaceId: string): [string | null, (
 }
 
 /** A thread's participants: the root's author, then everyone who replied, in first-reply order. */
-function participantsOf(root: spaces.Message | undefined): string[] {
+function participantsOf(root: spaces.Message | undefined, replyAuthors: (root: spaces.Message) => readonly string[]): string[] {
     if (!root) return []
-    return [...new Set([root.author.memberId, ...(root.replyAuthors ?? [])])]
+    return [...new Set([root.author.memberId, ...replyAuthors(root)])]
 }
 
 interface ThreadRow {
@@ -116,15 +117,15 @@ export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMembe
     const [pending, setPending] = useState<string | null>(null)
     const showArchived = filter === 'named' && archived
     const allRows = useMemo(() => threadRows(topics, roots, filter, showArchived, selfMemberId), [topics, roots, filter, showArchived, selfMemberId])
-    const rows = useMemo(() => participant ? allRows.filter((row) => participantsOf(row.root).includes(participant)) : allRows, [allRows, participant])
+    const shownRoots = useMemo(() => allRows.flatMap((row) => row.root ? [row.root] : []), [allRows])
+    const replyAuthors = useFallbackReplyAuthors(orgId, spaceId, shownRoots)
+    const rows = participant ? allRows.filter((row) => participantsOf(row.root, replyAuthors).includes(participant)) : allRows
     const nameOf = (memberId: string) => memberNames.get(memberId) ?? 'Unknown member'
     // The menu offers whoever appears in the threads on screen, plus a sticky
     // choice that the loaded window doesn't reach yet so it can be cleared.
-    const participantOptions = useMemo(() => {
-        const ids = new Set(allRows.flatMap((row) => participantsOf(row.root)))
-        if (participant) ids.add(participant)
-        return [...ids].sort((a, b) => (memberNames.get(a) ?? '').localeCompare(memberNames.get(b) ?? ''))
-    }, [allRows, participant, memberNames])
+    const participantIds = new Set(allRows.flatMap((row) => participantsOf(row.root, replyAuthors)))
+    if (participant) participantIds.add(participant)
+    const participantOptions = [...participantIds].sort((a, b) => (memberNames.get(a) ?? '').localeCompare(memberNames.get(b) ?? ''))
     const archivedCount = topics.filter((topic) => topic.archived).length
     const manage = async (id: string, action: spaces.SpacesManageTopicAction) => {
         setPending(id)
@@ -172,7 +173,7 @@ export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMembe
                 const working = (presence.working.get(rootMessageId)?.length ?? 0) > 0
                 const copyLink = () => void copySpacesLink(messageUrl(orgAddress, spaceId, rootMessageId))
                 const Icon = topic ? MessagesSquare : MessageSquare
-                const people = participantsOf(root)
+                const people = participantsOf(root, replyAuthors)
                 return <li key={rootMessageId}><ContextMenu>
                     <ContextMenuTrigger asChild>
                         <div className="group relative flex items-center rounded-xl transition-colors hover:bg-accent/60 has-[[data-state=open]]:bg-accent/60">
