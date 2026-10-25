@@ -13,6 +13,7 @@ import {
     McpServerList,
 } from "@x/shared/dist/mcp.js";
 import { spacesMcpServers } from "../spaces/orgs.js";
+import { streamableHttpRequestInit } from "./streamable-http-request.js";
 
 type mcpState = {
     state: z.infer<typeof connectionState>,
@@ -70,9 +71,7 @@ async function getClient(serverName: string): Promise<Client> {
         } else {
             // Forward any configured headers (e.g. Authorization) so
             // auth-protected remote MCP servers can be reached.
-            const requestInit = config.headers
-                ? { headers: config.headers }
-                : undefined;
+            const requestInit = streamableHttpRequestInit(config.headers);
             try {
                 transport = new StreamableHTTPClientTransport(new URL(config.url), {
                     requestInit,
