@@ -4,30 +4,35 @@ import type { spaces } from '@x/shared'
 import { SpaceThreadsView } from './space-threads-view'
 import { refreshSpaceFeed } from '@/hooks/use-spaces'
 import { toast } from '@/lib/toast'
+import { DEFAULT_THREADS_FILTER, setThreadsFilter } from '@/lib/spaces-threads-filter'
 
 vi.mock('@/hooks/use-spaces', () => ({ refreshSpaceFeed: vi.fn(async () => {}) }))
 vi.mock('@/hooks/use-space-chat', () => ({ prefetchThread: vi.fn() }))
 vi.mock('@/lib/spaces-read-state', () => ({ useReadStateVersion: () => 0, threadBadge: () => ({ unread: 0, forYou: 0 }) }))
 vi.mock('@/lib/toast', () => ({ toast: vi.fn() }))
 const invoke = vi.fn(async () => ({}))
-beforeEach(() => { Object.defineProperty(window, 'ipc', { configurable: true, value: { invoke } }) })
+beforeEach(() => {
+    Object.defineProperty(window, 'ipc', { configurable: true, value: { invoke } })
+    // The view's filter is sticky by design — every test starts from Anyone/All.
+    setThreadsFilter('org', 'dm', DEFAULT_THREADS_FILTER)
+})
 afterEach(() => { cleanup(); vi.clearAllMocks() })
 const topics = [
     { id: 'live', rootMessageId: 'root-live', title: 'Launch', archived: false, lastActivityAt: '2026-09-15T10:00:00Z' },
     { id: 'archived', rootMessageId: 'root-archived', title: 'Old launch', archived: true, lastActivityAt: '2026-09-14T10:00:00Z' },
 ] as spaces.TopicListing[]
-const root = (id: string, memberId: string, body: string, replyCount: number, lastReplyAt?: string) =>
-    ({ id, spaceId: 'dm', author: { memberId, actingMode: 'direct' }, body, postedAt: '2026-09-01T10:00:00Z', offset: 1, replyCount, lastReplyAt, mentions: [], mentionsHere: false, mentionsRowboat: false, reactions: [] }) as spaces.Message
+const root = (id: string, memberId: string, body: string, replyCount: number, lastReplyAt?: string, participants: string[] = [memberId]) =>
+    ({ id, spaceId: 'dm', author: { memberId, actingMode: 'direct' }, body, postedAt: '2026-09-01T10:00:00Z', offset: 1, replyCount, lastReplyAt, mentions: [], mentionsHere: false, mentionsRowboat: false, reactions: [], participants }) as spaces.Message
 const roots = [
-    root('root-mine', 'me', 'Fix the login bug\nmore detail', 4, '2026-09-16T10:00:00Z'),
-    root('root-theirs', 'ana', 'Plan the release', 2, '2026-09-13T10:00:00Z'),
+    root('root-mine', 'me', 'Fix the login bug\nmore detail', 4, '2026-09-16T10:00:00Z', ['me', 'ana']),
+    root('root-theirs', 'ana', 'Plan the release', 2, '2026-09-13T10:00:00Z', ['ana', 'bo']),
     root('root-quiet', 'me', 'No replies here', 0),
     root('root-archived', 'me', 'Archived root', 1, '2026-09-14T10:00:00Z'),
 ]
 function mount(onLoadOlder = vi.fn()) {
     const onOpen = vi.fn()
     render(<SpaceThreadsView orgId="org" orgAddress="spaces.example.com" spaceId="dm" direct selfMemberId="me" topics={topics} roots={roots}
-        hasMore loadingOlder={false} onLoadOlder={onLoadOlder} loaded memberNames={new Map([['me', 'Arjun'], ['ana', 'Ana']])} spaceNames={new Map()}
+        hasMore loadingOlder={false} onLoadOlder={onLoadOlder} loaded memberNames={new Map([['me', 'Arjun'], ['ana', 'Ana'], ['bo', 'Bo']])} spaceNames={new Map()}
         presence={{ working: new Map(), typing: new Map(), here: [] }} onOpen={onOpen} />)
     return onOpen
 }
@@ -79,6 +84,43 @@ describe('threads view', () => {
         fireEvent.click(screen.getByRole('menuitem', { name: 'Archive' }))
         await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:manageTopic', { orgId: 'org', spaceId: 'dm', topicId: 'live', action: { action: 'archive' } }))
         await waitFor(() => expect(refreshSpaceFeed).toHaveBeenCalledWith('org', 'dm'))
+    })
+    it('shows the thread participants as faces and narrows to one, remembering the pick', () => {
+        mount()
+        expect(screen.getByLabelText('In this thread: Arjun, Ana')).toBeInTheDocument()
+        expect(screen.getByLabelText('In this thread: Ana, Bo')).toBeInTheDocument()
+        fireEvent.pointerDown(screen.getByRole('button', { name: 'Filter by participant' }), { button: 0, ctrlKey: false })
+        fireEvent.click(screen.getByRole('menuitem', { name: /Bo$/ }))
+        // The menu stays open for a second pick; Escape closes it.
+        fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
+        expect(screen.getAllByRole('button', { name: / replies/ }).map((row) => row.textContent)).toEqual([
+            expect.stringMatching(/^Plan the release/),
+        ])
+        expect(JSON.parse(window.localStorage.getItem('spaces:threads-filter:org/dm')!)).toEqual({ tab: 'all', participants: ['bo'] })
+        // Navigating out and back: the page remounts with the same filter.
+        cleanup()
+        mount()
+        expect(screen.getByRole('button', { name: 'Filter by participant' })).toHaveTextContent('Bo')
+        expect(screen.getAllByRole('button', { name: / replies/ })).toHaveLength(1)
+        fireEvent.pointerDown(screen.getByRole('button', { name: 'Filter by participant' }), { button: 0, ctrlKey: false })
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Anyone' }))
+        expect(screen.getAllByRole('button', { name: / replies/ })).toHaveLength(3)
+        expect(window.localStorage.getItem('spaces:threads-filter:org/dm')).toBeNull()
+    })
+    it('keeps the tab across a remount and combines it with the participant', () => {
+        mount()
+        fireEvent.click(screen.getByRole('button', { name: 'By me' }))
+        cleanup()
+        mount()
+        expect(screen.getByRole('button', { name: 'By me' })).toHaveAttribute('aria-pressed', 'true')
+        expect(screen.getAllByRole('button', { name: / replies/ }).map((row) => row.textContent)).toEqual([expect.stringMatching(/^Fix the login bug/)])
+        // The people offered are the ones on this tab's threads — Bo replies only to Ana's thread.
+        fireEvent.pointerDown(screen.getByRole('button', { name: 'Filter by participant' }), { button: 0, ctrlKey: false })
+        const items = screen.getAllByRole('menuitem').map((item) => item.textContent)
+        expect(items).toHaveLength(3)
+        expect(items[0]).toBe('Anyone')
+        expect(items[1]).toContain('Ana')
+        expect(items[2]).toContain('Arjun')
     })
     it('reports a failed lifecycle action instead of hiding the discussion', async () => {
         invoke.mockRejectedValueOnce(new Error('Could not reach server'))

@@ -135,11 +135,19 @@ export class Feed {
     const cardIds = messages.filter((m) => m.approval).map((m) => m.id);
     const approvals = new Map<string, Approval>();
     for (const a of await this.k.store.listApprovalsForMessages(spaceId, cardIds)) approvals.set(a.messageId, a);
+    // A thread's faces (2026-10-25): the root's author plus its repliers, in
+    // first-post order. Queried only for the roots that have replies — a page
+    // of plain stream messages costs nothing, like the poll fold above.
+    const repliers = new Map<string, string[]>();
+    for (const r of await this.k.store.listThreadRepliers(spaceId, messages.filter(isThreadRoot).map((m) => m.id))) {
+      repliers.set(r.rootMessageId, [...(repliers.get(r.rootMessageId) ?? []), r.memberId]);
+    }
     return messages.map((m) => ({
       ...m,
       reactions: foldReactions(byMessage.get(m.id) ?? []),
       ...(m.poll ? { poll: foldPollVotes(m.poll, votesByMessage.get(m.id) ?? []) } : {}),
       ...(m.approval && !m.deletedAt ? { approval: approvals.get(m.id) ?? m.approval } : {}),
+      ...(m.threadRoot === undefined ? { participants: [...new Set([m.author.memberId, ...(repliers.get(m.id) ?? [])])] } : {}),
     }));
   }
 
@@ -315,6 +323,10 @@ export class Feed {
     if (message.approval && !message.deletedAt) {
       folded.approval = (await this.k.store.listApprovalsForMessages(spaceId, [message.id]))[0] ?? message.approval;
     }
+    if (message.threadRoot === undefined) {
+      const repliers = isThreadRoot(message) ? await this.k.store.listThreadRepliers(spaceId, [message.id]) : [];
+      folded.participants = [...new Set([message.author.memberId, ...repliers.map((r) => r.memberId)])];
+    }
     return folded;
   }
 
@@ -394,6 +406,7 @@ export class Feed {
           offset,
           replyCount: 0,
           reactions: [],
+          participants: [],
           ...(poll ? { poll } : {}),
           ...(raising && opts.approval ? { approval: this.invocations!.approvalFor(raising, id, opts.approval.request) } : {}),
           ...stampFields(stamps),
@@ -444,6 +457,7 @@ export class Feed {
         replyCount: 0,
         ...(input.anchorChangeSetId ? { anchorChangeSetId: input.anchorChangeSetId } : {}),
         reactions: [],
+        participants: [],
         ...(poll ? { poll } : {}),
         ...stampFields(stamps),
       };
@@ -503,6 +517,7 @@ export class Feed {
           offset,
           replyCount: 0,
           reactions: [],
+          participants: [],
           ...stampFields(stamps),
         };
         await this.k.store.appendMessage(root);
@@ -969,6 +984,11 @@ export class Feed {
 }
 
 /** A topic listing's activity stamp: the newest reply, else the root's post. */
+/** A root with replies: the only message whose participants need a lookup (2026-10-25). */
+function isThreadRoot(m: Message): boolean {
+  return m.threadRoot === undefined && m.replyCount > 0;
+}
+
 function activityOf(root: Message | undefined, topic: Topic): string {
   return root?.lastReplyAt ?? root?.postedAt ?? topic.createdAt;
 }

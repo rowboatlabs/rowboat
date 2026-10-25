@@ -23,6 +23,7 @@ const msg = (author = 'harsh'): Message =>
     offset: 1,
     replyCount: 0,
     reactions: [],
+    participants: [],
     mentions: [],
     mentionsHere: false,
     mentionsRowboat: false,

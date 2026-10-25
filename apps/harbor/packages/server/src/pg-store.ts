@@ -266,8 +266,10 @@ function rowToMessage(r: MessageRow): Message {
     ...(r.anchor_change_set_id !== null ? { anchorChangeSetId: r.anchor_change_set_id } : {}),
     ...(r.deleted_at !== null ? { deletedAt: r.deleted_at } : {}),
     ...(r.edited_at !== null ? { editedAt: r.edited_at } : {}),
-    // Live reaction state is folded in by the service on reads; rows carry none.
+    // Live reaction state and a thread's participants are folded in by the
+    // service on reads; rows carry neither.
     reactions: [],
+    participants: [],
     // The poll definition rides the row; live votes fold in on reads too.
     ...(r.poll !== null && r.poll !== undefined ? { poll: r.poll } : {}),
     // An approval card's approval as raised; the current one folds in on reads (spec §8 part 4).
@@ -1147,6 +1149,19 @@ export class PgStore implements Store {
        where r.space_id = $1 and r.id = $2`,
       [spaceId, rootMessageId],
     );
+  }
+
+  async listThreadRepliers(spaceId: string, rootMessageIds: string[]): Promise<{ rootMessageId: string; memberId: string }[]> {
+    if (rootMessageIds.length === 0) return [];
+    const rows = await this.sql.query<{ thread_root: string; author_member_id: string }>(
+      `select thread_root, author_member_id
+         from messages
+        where space_id = $1 and thread_root = any($2::text[]) and deleted_at is null
+        group by thread_root, author_member_id
+        order by min(stream_offset)`,
+      [spaceId, rootMessageIds],
+    );
+    return rows.map((r) => ({ rootMessageId: r.thread_root, memberId: r.author_member_id }));
   }
 
   async markMessageEdited(spaceId: string, messageId: string, body: string, editedAt: string, stamps: MentionStamps, summary?: string): Promise<void> {

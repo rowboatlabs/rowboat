@@ -28,6 +28,7 @@ const msg = (body: string, author = 'harsh', opts: { agent?: boolean; threadRoot
     offset: 2,
     replyCount: 0,
     reactions: [],
+    participants: [],
     ...(({ members, here, rowboat }) => ({ mentions: members, mentionsHere: here, mentionsRowboat: rowboat }))(parseMentions(body)),
   }) as Message;
 
