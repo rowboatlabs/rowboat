@@ -433,7 +433,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             {/* One column that may shrink: long setup lines wrap inside it instead of widening the dialog. */}
-            <DialogContent className={cn('grid-cols-[minmax(0,1fr)] gap-0 overflow-hidden p-0', screen.name === 'connect' || screen.name === 'agent' ? 'sm:max-w-2xl' : 'sm:max-w-xl')}>
+            <DialogContent className={cn('grid-cols-[minmax(0,1fr)] gap-0 overflow-hidden p-0', screen.name === 'agent' ? 'sm:max-w-3xl' : screen.name === 'connect' ? 'sm:max-w-2xl' : 'sm:max-w-xl')}>
                 {screen.name === 'list' && (
                     <>
                         <Header
