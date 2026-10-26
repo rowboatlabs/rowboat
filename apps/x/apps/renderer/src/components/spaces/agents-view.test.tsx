@@ -16,12 +16,15 @@ const agent = (id: string, displayName: string, ownerId: string | undefined, age
 
 let roster: spaces.Member[]
 let spaceMembers: Record<string, spaces.Member[]>
+// Create agent (2026-10-26): the kinds this org's Harbor creates on Rowboat's own account; none = the card reads New agent.
+let managedKinds: string[] = []
 const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
     switch (channel) {
         case 'spaces:listOrgMembers': return { members: roster }
         case 'spaces:listMembers': return { members: spaceMembers[args.spaceId!] ?? [] }
         case 'spaces:listAgents': return { agents: roster.filter((m) => m.kind === 'agent' && m.ownerId === 'me').map((a) => ({ agent: a, keys: [] })) }
         case 'spaces:getAgentCapabilities': return { capabilities: { stop: false, options: [] }, defaults: {} }
+        case 'spaces:managedAgentKinds': return { kinds: managedKinds }
         case 'spaces:renameAgent':
             roster = roster.map((m) => (m.id === args.agentId ? { ...m, displayName: args.displayName! } : m))
             return { agent: roster.find((m) => m.id === args.agentId) }
@@ -48,6 +51,7 @@ const gone = agent('gone', 'Gone', 'harsh', 'custom', 'contract', { removedAt: '
 
 beforeEach(() => {
     invoke.mockClear()
+    managedKinds = []
     window.localStorage.clear()
     roster = [person('me', 'Ramnique'), person('harsh', 'Harsh'), hermes, scout, ro, gone]
     spaceMembers = { S1: [person('me', 'Ramnique'), hermes, scout], S2: [hermes] }
@@ -125,5 +129,19 @@ describe('AgentsView', () => {
         expect(await screen.findByRole('radiogroup', { name: 'How it connects' })).toBeInTheDocument()
         fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
         await waitFor(() => expect(screen.queryByRole('radiogroup', { name: 'How it connects' })).toBeNull())
+    })
+
+    it('when the org’s Harbor creates agents, the card creates one, and adding one you run is the small print', async () => {
+        managedKinds = ['hermes', 'claude-code', 'codex']
+        show()
+        await screen.findByText('Herald')
+        fireEvent.click(await screen.findByRole('button', { name: /Create agent/ }))
+        const kinds = await screen.findByRole('radiogroup', { name: 'Agent' })
+        expect(within(kinds).getAllByRole('radio').map((r) => r.getAttribute('aria-label'))).toEqual(['Hermes', 'Claude Code', 'Codex'])
+        // Back closes the dialog: it was opened past the list.
+        fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+        await waitFor(() => expect(screen.queryByRole('radiogroup', { name: 'Agent' })).toBeNull())
+        fireEvent.click(screen.getByRole('button', { name: 'or add one you run' }))
+        expect(await screen.findByRole('radiogroup', { name: 'How it connects' })).toBeInTheDocument()
     })
 })
