@@ -5,16 +5,13 @@ import * as React from "react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   AppWindow,
-  ArrowUpRight,
   Bot,
-  ChevronRight,
   FileText,
   Folder,
   AlertTriangle,
   LayoutGrid,
   ListTodo,
   Mic,
-  MoreVertical,
   PanelLeftClose,
   Pencil,
   Pin,
@@ -22,8 +19,10 @@ import {
   Plug,
   LoaderIcon,
   Mail,
-  MessageSquare,
+  MoreHorizontal,
+  Search,
   Settings,
+  SquarePen,
   Square,
   Video,
   CircleAlert,
@@ -38,15 +37,12 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
-  SidebarGroupContent,
-  SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
@@ -58,6 +54,7 @@ import {
   PopoverContent,
   PopoverTrigger,
   PopoverArrow,
+  PopoverAnchor,
 } from "@/components/ui/popover"
 import {
   Tooltip,
@@ -82,6 +79,9 @@ import { isOutOfCredits, CREDIT_EXHAUSTED_EVENT, CREDIT_REPLENISHED_EVENT } from
 import { SettingsDialog } from "@/components/settings-dialog"
 import { SidebarCreditRewards } from "@/components/sidebar-credit-rewards"
 import { SpacesSidebarSection } from "@/components/spaces-sidebar-section"
+import { SidebarSection } from "@/components/sidebar-section"
+import { Keys } from "@/components/keys"
+import { SHORTCUTS } from "@/lib/shortcuts"
 import { useCodeSessions } from "@/components/code/use-code-sessions"
 import { useUnreadCodeSessions } from "@/components/code/session-read-state"
 import { UnreadBadge } from "@/components/spaces/unread-badge"
@@ -95,6 +95,7 @@ import { toast } from "@/lib/toast"
 import { getBillingPlanData } from "@x/shared/dist/billing.js"
 import { ServiceEvent } from "@x/shared/src/service-events.js"
 import z from "zod"
+import "@/styles/sidebar.css"
 
 interface TreeNode {
   path: string
@@ -153,6 +154,10 @@ const MAX_SYNC_EVENTS = 1000
 const RUN_STALE_MS = 2 * 60 * 60 * 1000
 const PINNED_CHATS_STORAGE_KEY = 'x:pinned-chats'
 const MAX_PINNED_CHATS = 3
+const MIN_CHATS = 10
+const MAX_CHATS = 60
+/** One chat row: 32px tall plus the 2px gap (styles/sidebar.css). */
+const CHAT_ROW_PX = 34
 
 const SERVICE_LABELS: Record<string, string> = {
   gmail: "Syncing Gmail",
@@ -214,6 +219,8 @@ type SidebarContentPanelProps = {
   onOpenEmail?: (threadId?: string) => void
   onOpenHome?: () => void
   onNewChat?: () => void
+  /** Opens the command palette (⌘K). */
+  onOpenSearch?: () => void
   onVoiceNoteCreated?: (path: string) => void
   /** Starts the mascot-guided product tour. */
   onStartTour?: () => void
@@ -232,7 +239,6 @@ function formatEventTime(ts: string): string {
 }
 
 function SyncStatusBar() {
-  const { state } = useSidebar()
   const [activeServices, setActiveServices] = useState<Map<string, string>>(new Map())
   const [serviceErrors, setServiceErrors] = useState<Map<string, string>>(new Map())
   const [popoverOpen, setPopoverOpen] = useState(false)
@@ -337,7 +343,6 @@ function SyncStatusBar() {
   }, [popoverOpen])
 
   const isSyncing = activeServices.size > 0
-  const isCollapsed = state === "collapsed"
   const errorEntries = Array.from(serviceErrors.entries())
   const primaryErrorService = errorEntries[0]?.[0] ?? null
   const hasServiceErrors = errorEntries.length > 0
@@ -352,100 +357,92 @@ function SyncStatusBar() {
         : "Recent sync issues"
       : "All caught up"
 
+  // Sidebar redesign (2026-10-21): sync status is a small mark at the right of
+  // the account row instead of its own footer strip; it opens the same log.
   return (
     <>
-      {isCollapsed && isSyncing && (
-        <div
-          className="fixed bottom-4 z-40 flex h-8 w-8 items-center justify-center rounded-full border border-border bg-background shadow-sm"
-          style={{ left: "0.5rem" }}
-          aria-label="Syncing"
-        >
-          <LoaderIcon className="h-4 w-4 animate-spin text-muted-foreground" />
-        </div>
-      )}
-      <SidebarFooter className="border-t border-border px-2 py-2">
-        <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
-          <PopoverTrigger asChild>
-            <button
-              type="button"
-              className={cn(
-                "flex w-full items-center justify-between rounded-md px-2 py-1 text-xs hover:bg-sidebar-accent",
-                hasServiceErrors && !isSyncing ? "text-red-600 dark:text-red-400" : "text-muted-foreground",
-              )}
-            >
-              <span className="flex items-center gap-2 min-w-0">
+      {/* Collapsed, the rail's avatar shows syncing as a turning ring
+          (dock-sidebar.tsx, 2026-10-22), where this floating spinner sat. */}
+      <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
+        <Tooltip delayDuration={400}>
+          <TooltipTrigger asChild>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                aria-label={`Sync activity: ${statusLabel}`}
+                className={cn("sb-row-action sb-sync", hasServiceErrors && !isSyncing && "text-destructive!")}
+              >
                 {isSyncing ? (
-                  <LoaderIcon className="h-3 w-3 shrink-0 animate-spin" />
+                  <LoaderIcon className="animate-spin" />
                 ) : hasServiceErrors ? (
-                  <AlertTriangle className="h-3 w-3 shrink-0" />
+                  <AlertTriangle />
                 ) : (
-                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/60" />
+                  <span className="size-1.5 rounded-full bg-emerald-500/80" />
                 )}
-                <span className="truncate">{statusLabel}</span>
-              </span>
-              <ChevronRight className="h-3 w-3 shrink-0" />
-            </button>
-          </PopoverTrigger>
-          <PopoverContent
-            side="right"
-            align="end"
-            sideOffset={4}
-            className="w-96 p-0"
-          >
-            <div className="p-3 border-b">
-              <h4 className="font-semibold text-sm">Sync Activity</h4>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {isSyncing || hasServiceErrors ? statusLabel : "All services up to date"}
-              </p>
-            </div>
-            <div className="max-h-80 overflow-y-auto p-2">
-              {logLoading ? (
-                <div className="flex items-center justify-center py-4">
-                  <LoaderIcon className="h-4 w-4 animate-spin text-muted-foreground" />
-                </div>
-              ) : logEvents.length === 0 ? (
-                <div className="py-4 text-center text-xs text-muted-foreground">
-                  No recent activity.
-                </div>
-              ) : (
-                <div className="space-y-0.5">
-                  {logEvents.map((event, idx) => (
-                    <div
-                      key={`${event.runId}-${event.ts}-${idx}`}
-                      className="flex items-start gap-2 rounded px-2 py-1 text-xs hover:bg-accent"
-                    >
-                      <span className="shrink-0 text-[10px] leading-4 text-muted-foreground/70">
-                        {formatEventTime(event.ts)}
+              </button>
+            </PopoverTrigger>
+          </TooltipTrigger>
+          <TooltipContent side="top" sideOffset={6}>{statusLabel}</TooltipContent>
+        </Tooltip>
+        <PopoverContent
+          side="right"
+          align="end"
+          sideOffset={12}
+          className="w-96 p-0"
+        >
+          <div className="p-3 border-b">
+            <h4 className="font-semibold text-sm">Sync Activity</h4>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {isSyncing || hasServiceErrors ? statusLabel : "All services up to date"}
+            </p>
+          </div>
+          <div className="max-h-80 overflow-y-auto p-2">
+            {logLoading ? (
+              <div className="flex items-center justify-center py-4">
+                <LoaderIcon className="h-4 w-4 animate-spin text-muted-foreground" />
+              </div>
+            ) : logEvents.length === 0 ? (
+              <div className="py-4 text-center text-xs text-muted-foreground">
+                No recent activity.
+              </div>
+            ) : (
+              <div className="space-y-0.5">
+                {logEvents.map((event, idx) => (
+                  <div
+                    key={`${event.runId}-${event.ts}-${idx}`}
+                    className="flex items-start gap-2 rounded px-2 py-1 text-xs hover:bg-accent"
+                  >
+                    <span className="shrink-0 text-[10px] leading-4 text-muted-foreground/70">
+                      {formatEventTime(event.ts)}
+                    </span>
+                    <span className="shrink-0">
+                      <span className={cn(
+                        "inline-block rounded px-1 py-0.5 text-[10px] font-medium leading-none",
+                        event.level === 'error' ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" :
+                        event.level === 'warn' ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400" :
+                        "bg-muted text-muted-foreground"
+                      )}>
+                        {SERVICE_LABELS[event.service]?.split(" ").slice(-1)[0] || event.service}
                       </span>
-                      <span className="shrink-0">
-                        <span className={cn(
-                          "inline-block rounded px-1 py-0.5 text-[10px] font-medium leading-none",
-                          event.level === 'error' ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" :
-                          event.level === 'warn' ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400" :
-                          "bg-muted text-muted-foreground"
-                        )}>
-                          {SERVICE_LABELS[event.service]?.split(" ").slice(-1)[0] || event.service}
-                        </span>
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="leading-4 text-foreground/80">{event.message}</p>
-                        {event.type === 'error' && (
-                          <p
-                            className="truncate text-[11px] leading-4 text-red-600/90 dark:text-red-400/90"
-                            title={event.error}
-                          >
-                            {summarizeServiceError(event.error)}
-                          </p>
-                        )}
-                      </div>
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="leading-4 text-foreground/80">{event.message}</p>
+                      {event.type === 'error' && (
+                        <p
+                          className="truncate text-[11px] leading-4 text-red-600/90 dark:text-red-400/90"
+                          title={event.error}
+                        >
+                          {summarizeServiceError(event.error)}
+                        </p>
+                      )}
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </PopoverContent>
-        </Popover>
-      </SidebarFooter>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </PopoverContent>
+      </Popover>
     </>
   )
 }
@@ -459,6 +456,7 @@ export function SidebarContentPanel({
   onOpenApps,
   onOpenApp,
   onOpenSpace,
+  onOpenSpaces,
   activeSpace,
   recentRuns = [],
   onOpenRun,
@@ -469,6 +467,7 @@ export function SidebarContentPanel({
   onOpenEmail,
   onOpenHome,
   onNewChat,
+  onOpenSearch,
   onVoiceNoteCreated,
   onStartTour,
   activeNav,
@@ -485,7 +484,7 @@ export function SidebarContentPanel({
   const [showOauthAlert, setShowOauthAlert] = useState(true)
   const [connectionsSettingsOpen, setConnectionsSettingsOpen] = useState(false)
   const [openConnectionsAfterClose, setOpenConnectionsAfterClose] = useState(false)
-  const connectorsButtonRef = useRef<HTMLButtonElement | null>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [isRowboatConnected, setIsRowboatConnected] = useState(false)
   const [creditPopoverOpen, setCreditPopoverOpen] = useState(false)
   // 2026-10-07: the sidebar collapses offcanvas, sliding the plan card off-screen,
@@ -501,11 +500,26 @@ export function SidebarContentPanel({
   const { billing, refresh: refreshBilling } = useBilling(isRowboatConnected)
   const currentBillingPlan = billing ? getBillingPlanData(billing.catalog, billing.subscriptionPlanId) : null
 
+  // The Gmail account's display name, for the footer.
+  const [gmailName, setGmailName] = useState('')
+  useEffect(() => {
+    let cancelled = false
+    window.ipc.invoke('gmail:getAccountName', {})
+      .then((res) => { if (!cancelled && res?.name) setGmailName(res.name) })
+      .catch(() => { /* fall back to the email address */ })
+    return () => { cancelled = true }
+  }, [])
+
   // Nav previews: unread important emails + next upcoming meetings (top 2 each).
   const [unreadEmailCount, setUnreadEmailCount] = useState(0)
   const [emailThreads, setEmailThreads] = useState<SidebarEmailThread[]>([])
   const [meetings, setMeetings] = useState<UpcomingMeeting[]>([])
-  const [chatsExpanded, setChatsExpanded] = useState(true)
+  // A minute clock for "in 12m" and trial days, so they stay current.
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const tick = setInterval(() => setNow(Date.now()), 60 * 1000)
+    return () => clearInterval(tick)
+  }, [])
   useEffect(() => {
     let cancelled = false
     const loadEmail = async () => {
@@ -620,6 +634,7 @@ export function SidebarContentPanel({
   }, [pinnedChatIds, recentRuns])
 
   // Chats: pinned first, then the most recently modified, 10 rows total.
+  const [chatLimit, setChatLimit] = useState(MIN_CHATS)
   const recentChats = React.useMemo(() => {
     const chatRecency = (r: { createdAt: string; modifiedAt?: string }) => {
       const ms = new Date(r.modifiedAt ?? r.createdAt).getTime()
@@ -628,8 +643,33 @@ export function SidebarContentPanel({
     const sorted = [...recentRuns].sort((a, b) => chatRecency(b) - chatRecency(a))
     const pinned = sorted.filter((r) => pinnedChatIds.includes(r.id))
     const rest = sorted.filter((r) => !pinnedChatIds.includes(r.id))
-    return [...pinned, ...rest.slice(0, Math.max(0, 10 - pinned.length))]
-  }, [recentRuns, pinnedChatIds])
+    return [...pinned, ...rest.slice(0, Math.max(0, chatLimit - pinned.length))]
+  }, [recentRuns, pinnedChatIds, chatLimit])
+
+  // Chats fill whatever height the sidebar has left (2026-10-21): fold Spaces
+  // or make the window taller and more recent chats show, never fewer than 10.
+  const contentRef = useRef<HTMLDivElement | null>(null)
+  const runCount = recentRuns.length
+  useEffect(() => {
+    const el = contentRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => {
+      // Free room = the box's height minus where its last section ends
+      // (scrollHeight can't say: it never drops below the box's height).
+      const last = Array.from(el.children).reverse().find((c) => (c as HTMLElement).offsetHeight > 0)
+      if (!last) return
+      const used = last.getBoundingClientRect().bottom - el.getBoundingClientRect().top + el.scrollTop
+      const slack = el.clientHeight - used - parseFloat(getComputedStyle(el).paddingBottom)
+      setChatLimit((n) => {
+        if (slack >= CHAT_ROW_PX) return Math.max(n, Math.min(n + Math.floor(slack / CHAT_ROW_PX), runCount, MAX_CHATS))
+        if (slack < 0 && n > MIN_CHATS) return Math.max(MIN_CHATS, n - Math.ceil(-slack / CHAT_ROW_PX))
+        return n
+      })
+    })
+    observer.observe(el)
+    for (const child of Array.from(el.children)) observer.observe(child)
+    return () => observer.disconnect()
+  }, [runCount])
 
   // Apps pinned to the sidebar (right-click an app card in the Apps view).
   // Names resolve via apps:list; until then rows show the folder slug, and
@@ -651,6 +691,13 @@ export function SidebarContentPanel({
   const pinnedApps = pinnedAppFolders
     .filter((f) => pinnedAppNames === null || pinnedAppNames.has(f))
     .map((f) => ({ folder: f, name: pinnedAppNames?.get(f) ?? f }))
+
+  // Chats that arrive after the list first loads slide in; the first load
+  // doesn't animate.
+  const [chatBaseline, setChatBaseline] = useState<ReadonlySet<string> | null>(null)
+  if (chatBaseline === null && recentChats.length > 0) {
+    setChatBaseline(new Set(recentChats.map((chat) => chat.id)))
+  }
 
   // Chat pending delete confirmation, if any.
   const [deleteChatTarget, setDeleteChatTarget] = useState<{ id: string; title: string } | null>(null)
@@ -811,325 +858,321 @@ export function SidebarContentPanel({
   const recordingMeeting = previewMeeting != null && recordingMeetingSource === previewMeeting.source
     ? previewMeeting
     : null
-  const meetingSublabel = meetingIsRecording
-    ? (recordingMeeting?.summary ?? 'Recording…')
+
+  // Sidebar redesign (2026-10-21): every row is one height. What used to be a
+  // grey second line (sender, next meeting, last update) is a count or time at
+  // the row's right, with the full line in a tooltip.
+  const meetingMeta = previewMeeting ? formatMeetingMeta(previewMeeting, now) : null
+  const meetingTip = meetingIsRecording
+    ? `Recording · ${recordingMeeting?.summary ?? 'meeting'}`
     : (previewMeeting ? `${previewMeeting.summary} · ${formatMeetingTime(previewMeeting)}` : null)
+  const emailTip = previewEmail ? `${formatEmailFrom(previewEmail.from)} · ${previewEmail.subject}` : null
+  const bgFailed = bgTaskSummaries.filter((t) => t.lastRunError).length
+  const bgActive = bgTaskSummaries.filter((t) => t.active).length
+
+  // The footer's one account row: who you are, your plan, and everything that
+  // used to be stacked under the chats (plan card, Connect Accounts, tour,
+  // Settings, sync) behind it.
+  const planName = billing
+    ? (currentBillingPlan?.displayName ?? (billing.subscriptionPlanId ? 'Unknown plan' : 'No plan'))
+    : null
+  const trialDays = billing?.subscriptionStatus === 'trialing' && billing.trialExpiresAt
+    ? Math.max(0, Math.ceil((new Date(billing.trialExpiresAt).getTime() - now) / (1000 * 60 * 60 * 24)))
+    : null
+  const trialLabel = trialDays === null ? null : trialDays === 0 ? 'Trial ends today' : trialDays === 1 ? '1 day left' : `${trialDays} days left`
+  const upgradeLabel = billing && (!billing.subscriptionPlanId || currentBillingPlan?.category === 'free' || currentBillingPlan?.category === 'starter') ? 'Upgrade' : 'Manage'
+  const userEmail = billing?.userEmail ?? null
+  // Your first name: from the connected Gmail account, else read off the
+  // email address ("gagan.p@…" → "Gagan"). The account API has no name.
+  const accountName = firstName(gmailName) || nameFromEmail(userEmail) || (isRowboatConnected ? 'Rowboat' : 'Not signed in')
+  const accountInitial = accountName === 'Not signed in' ? '?' : accountName.charAt(0).toUpperCase()
+  // The pill beside the name: Upgrade on a trial or a free plan, otherwise
+  // Manage; red once credits run out.
+  const pillLabel = outOfCredits || billing?.subscriptionStatus === 'trialing' ? 'Upgrade' : upgradeLabel
+  const pillTip = outOfCredits ? 'Out of credits' : [planName, trialLabel].filter(Boolean).join(' · ')
+  const openUpgrade = () => { if (appUrl) window.open(`${appUrl}?intent=upgrade`) }
 
   return (
-    <Sidebar className="rowboat-sidebar border-r-0" {...props}>
-      <SidebarHeader className="titlebar-drag-region gap-0 pb-0">
-        {/* Just clears the traffic lights + fixed toggle row (voice note and
-            compose live up there now); nav starts right below. */}
-        <div className="h-8" />
-      </SidebarHeader>
-      <SidebarContent className="gap-0">
-        {/* Ordered to mirror the dock: Assistant, Projects, Spaces, then the
-            destinations, then Chats. Same glyphs as the dock tiles. */}
-        <SidebarGroup className="flex flex-col pb-0">
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  isActive={activeNav === 'assistant'}
-                  onClick={() => {
-                    if (onOpenAssistant) onOpenAssistant()
-                    else if (lastChat && onOpenRun) onOpenRun(lastChat.id)
-                    else onNewChat?.()
-                  }}
-                >
-                  <MascotFaceIcon className="size-4 shrink-0" />
-                  <span className="flex-1 truncate">Assistant</span>
+    <Sidebar variant="floating" className="rowboat-sidebar border-r-0" {...props}>
+      <SidebarContent ref={contentRef} className="gap-0 pb-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <SidebarGroup className="pb-0 pt-2">
+          <SidebarMenu>
+            {/* New chat and Search share one row (2026-10-21): the wide button
+                is the primary action, search a square beside it. */}
+            <SidebarMenuItem className="flex items-center gap-1.5">
+              {onNewChat && (
+                <SidebarMenuButton className="sb-primary min-w-0 flex-1" onClick={onNewChat}>
+                  <SquarePen />
+                  <span className="flex-1 truncate">New chat</span>
+                  <Keys keys={SHORTCUTS.newChat} className="sb-row-keys" />
                 </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  data-tour-id="nav-workspaces"
-                  isActive={activeNav === 'workspaces' || activeNav === 'code'}
-                  onClick={() => knowledgeActions.openWorkspaceAt()}
-                >
-                  <Folder className="size-4 shrink-0" />
-                  <span className="flex-1 truncate">Projects</span>
+              )}
+              {onOpenSearch && (
+                <Tooltip delayDuration={400}>
+                  <TooltipTrigger asChild>
+                    <button type="button" className="sb-square" aria-label="Search" onClick={onOpenSearch}>
+                      <Search />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" sideOffset={6} className="flex items-center gap-2">Search <Keys keys={SHORTCUTS.search} tone="dark" /></TooltipContent>
+                </Tooltip>
+              )}
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarGroup>
+
+        <SidebarGroup className="pb-0 pt-3">
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                isActive={activeNav === 'assistant'}
+                onClick={() => {
+                  if (onOpenAssistant) onOpenAssistant()
+                  else if (lastChat && onOpenRun) onOpenRun(lastChat.id)
+                  else onNewChat?.()
+                }}
+              >
+                <MascotFaceIcon className="sb-icon" />
+                <span className="flex-1 truncate">Assistant</span>
+                <Keys keys={SHORTCUTS.assistant} className="sb-row-keys" />
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarGroup>
+
+        <SidebarGroup className="pb-0 pt-0.5">
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <RowTip tip={emailTip}>
+                <SidebarMenuButton data-tour-id="nav-email" isActive={activeNav === 'email'} onClick={() => onOpenEmail?.()}>
+                  <Mail />
+                  <span className="flex-1 truncate">Email</span>
+                  {unreadEmailCount > 0 && <span className="sb-count">{unreadEmailCount > 99 ? '99+' : unreadEmailCount}</span>}
+                  <Keys keys={SHORTCUTS.email} className="sb-row-keys" />
+                </SidebarMenuButton>
+              </RowTip>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <RowTip tip={meetingTip}>
+                <SidebarMenuButton data-tour-id="nav-meetings" isActive={activeNav === 'meetings'} onClick={onOpenMeetings}>
+                  <Mic className={cn(meetingIsRecording && 'text-red-500!')} />
+                  <span className="flex-1 truncate">Meetings</span>
+                  {meetingIsRecording
+                    ? <span className="w-12 shrink-0" aria-hidden="true" />
+                    : meetingMeta && <span className="sb-meta">{meetingMeta}</span>}
+                  {/* With a meeting coming up, hover shows its buttons instead. */}
+                  {!meetingIsRecording && !previewMeeting && <Keys keys={SHORTCUTS.meetings} className="sb-row-keys" />}
+                </SidebarMenuButton>
+              </RowTip>
+              {meetingIsRecording ? (
+                <div className="absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-1.5">
+                  <span className="relative flex size-2" aria-hidden="true">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
+                    <span className="relative inline-flex size-2 rounded-full bg-red-500" />
+                  </span>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label="Stop recording"
+                        disabled={meetingIsBusy}
+                        onClick={(e) => { e.stopPropagation(); onToggleMeetingRecording?.() }}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        className="sb-row-action text-destructive! disabled:opacity-50"
+                      >
+                        {meetingIsBusy ? <LoaderIcon className="animate-spin" /> : <Square className="size-3! fill-current" />}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="right" sideOffset={8}>
+                      {meetingRecordingState === 'connecting' ? 'Starting…' : meetingRecordingState === 'stopping' ? 'Stopping…' : 'Stop recording'}
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+              ) : previewMeeting ? (
+                <div className="sb-row-actions">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label="Take notes"
+                        onClick={(e) => { e.stopPropagation(); triggerMeetingCapture(previewMeeting, false) }}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        className="sb-row-action"
+                      >
+                        <Mic />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="right" sideOffset={8}>Take notes</TooltipContent>
+                  </Tooltip>
+                  {previewMeeting.conferenceLink && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          aria-label="Join & take notes"
+                          onClick={(e) => { e.stopPropagation(); triggerMeetingCapture(previewMeeting, true) }}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          className="sb-row-action"
+                        >
+                          <Video />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="right" sideOffset={8}>Join & take notes</TooltipContent>
+                    </Tooltip>
+                  )}
+                </div>
+              ) : null}
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton data-tour-id="nav-home" isActive={activeNav === 'home'} onClick={onOpenHome}>
+                <ListTodo />
+                <span className="flex-1 truncate">Todo</span>
+                <Keys keys={SHORTCUTS.todo} className="sb-row-keys" />
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <RowTip tip={knowledgeUpdatedLabel}>
+                <SidebarMenuButton data-tour-id="nav-knowledge" isActive={activeNav === 'knowledge'} onClick={() => knowledgeActions.openKnowledgeView()}>
+                  <FileText />
+                  <span className="flex-1 truncate">Brain</span>
+                  <Keys keys={SHORTCUTS.brain} className="sb-row-keys" />
+                </SidebarMenuButton>
+              </RowTip>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarGroup>
+
+        <SidebarGroup className="pb-0 pt-0.5">
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                data-tour-id="nav-workspaces"
+                isActive={activeNav === 'workspaces' || activeNav === 'code'}
+                onClick={() => knowledgeActions.openWorkspaceAt()}
+              >
+                <Folder />
+                <span className="flex-1 truncate">Projects</span>
+                <span className="sb-meta flex items-center gap-2">
                   {hasWorkingProjectSession && (
                     <span role="status" aria-label="Project session working" className="code-working-dot size-2 shrink-0 rounded-full bg-[var(--rowboat-git)]" />
                   )}
                   <UnreadBadge badge={{ unread: unreadProjectCount, forYou: unreadProjectCount }} direct />
+                </span>
+                <Keys keys={SHORTCUTS.projects} className="sb-row-keys" />
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <RowTip tip={bgAgentsLabel}>
+                <SidebarMenuButton data-tour-id="nav-agents" isActive={activeNav === 'agents'} onClick={onOpenBgTasks}>
+                  <Bot />
+                  <span className="flex-1 truncate">Background agents</span>
+                  {bgFailed > 0
+                    ? <span className="sb-meta is-alert">{bgFailed} failed</span>
+                    : bgActive > 0 && <span className="sb-meta">{bgActive} active</span>}
+                  <Keys keys={SHORTCUTS.agents} className="sb-row-keys" />
                 </SidebarMenuButton>
+              </RowTip>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton data-tour-id="nav-apps" isActive={activeNav === 'apps'} onClick={onOpenApps}>
+                <LayoutGrid />
+                <span className="flex-1 truncate">Apps</span>
+                <Keys keys={SHORTCUTS.apps} className="sb-row-keys" />
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            {pinnedApps.map(({ folder, name }) => (
+              <SidebarMenuItem key={folder}>
+                <ContextMenu>
+                  <ContextMenuTrigger asChild>
+                    <SidebarMenuButton onClick={() => onOpenApp?.(folder)}>
+                      <AppWindow />
+                      <span className="flex-1 truncate">{name}</span>
+                    </SidebarMenuButton>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent>
+                    <ContextMenuItem onClick={() => unpinApp(folder)}>
+                      <PanelLeftClose className="mr-2 size-3.5" />
+                      Remove from sidebar
+                    </ContextMenuItem>
+                  </ContextMenuContent>
+                </ContextMenu>
               </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
+            ))}
+          </SidebarMenu>
         </SidebarGroup>
 
-        {/* Server shortcuts under the Spaces heading. */}
+        {/* Trying Spaces right after Apps (2026-10-21). */}
         {SPACES_ENABLED && (
-          <>
-            <SpacesSidebarSection active={activeNav === 'spaces'} activeSpace={activeSpace}
-              onOpenSpace={(orgId, spaceId) => onOpenSpace?.(orgId, spaceId)} />
-            <div className="mx-3 my-2 border-t border-border" />
-          </>
+          <SpacesSidebarSection active={activeNav === 'spaces'} activeSpace={activeSpace}
+            onOpenSpace={(orgId, spaceId) => onOpenSpace?.(orgId, spaceId)} onOpenSpaces={onOpenSpaces} />
         )}
 
-        {/* Primary navigation */}
-        <SidebarGroup className="flex flex-col">
-          <SidebarGroupContent>
+        <SidebarSection id="chats" label="Chats" tourId="nav-chats">
+          {recentChats.length === 0 ? (
+            <p className="px-2.5 py-1.5 text-[12.5px] text-sidebar-foreground/45">
+              Your recent chats show up here.
+            </p>
+          ) : (
             <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  data-tour-id="nav-email"
-                  isActive={activeNav === 'email'}
-                  onClick={() => onOpenEmail?.()}
-                  className={previewEmail ? 'h-auto items-start py-1' : undefined}
-                >
-                  <Mail className={cn('size-4 shrink-0', previewEmail && 'mt-0.5')} />
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate">Email</span>
-                    {previewEmail && (
-                      <span className="truncate text-[11px] text-muted-foreground">
-                        {formatEmailFrom(previewEmail.from)} · {previewEmail.subject}
-                      </span>
-                    )}
-                  </div>
-                  {unreadEmailCount > 0 && (
-                    <span className="shrink-0 self-center rounded-full bg-sidebar-accent px-1.5 text-[10px] font-medium text-sidebar-accent-foreground tabular-nums">
-                      {unreadEmailCount}
-                    </span>
-                  )}
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  data-tour-id="nav-meetings"
-                  isActive={activeNav === 'meetings'}
-                  onClick={onOpenMeetings}
-                  className={meetingSublabel ? 'h-auto items-start py-1' : undefined}
-                >
-                  <Mic className={cn('size-4 shrink-0', meetingSublabel && 'mt-1', meetingIsRecording && 'text-red-500')} />
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate">Meetings</span>
-                    {meetingSublabel && (
-                      <span className={cn(
-                        'truncate text-[11px]',
-                        meetingIsRecording ? 'text-red-500' : 'text-muted-foreground',
-                      )}>
-                        {meetingSublabel}
-                      </span>
-                    )}
-                  </div>
-                </SidebarMenuButton>
-                {meetingIsRecording ? (
-                  <div className="absolute inset-y-0 right-1 flex items-center gap-1.5">
-                    <span className="relative flex size-2">
-                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
-                      <span className="relative inline-flex size-2 rounded-full bg-red-500" />
-                    </span>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          aria-label="Stop recording"
-                          disabled={meetingIsBusy}
-                          onClick={(e) => { e.stopPropagation(); onToggleMeetingRecording?.() }}
-                          onMouseDown={(e) => e.stopPropagation()}
-                          className="flex aspect-square w-5 items-center justify-center rounded-md text-destructive hover:bg-destructive/10 disabled:opacity-50"
+              {recentChats.map((chat) => {
+                const pinned = pinnedChatIds.includes(chat.id)
+                const title = chat.title || '(Untitled chat)'
+                return (
+                  <SidebarMenuItem key={chat.id} className={chatBaseline && !chatBaseline.has(chat.id) ? 'sb-row-in' : undefined}>
+                    {renamingChatId === chat.id ? (
+                      <div className="flex h-8 items-center gap-2.5 rounded-lg bg-sidebar-accent pl-2.5 pr-1">
+                        <span className="size-4 shrink-0" aria-hidden="true" />
+                        <input
+                          autoFocus
+                          aria-label="Chat name"
+                          value={renameDraft}
+                          onChange={(e) => setRenameDraft(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault()
+                              commitChatRename(chat.id)
+                            } else if (e.key === 'Escape') {
+                              e.preventDefault()
+                              setRenamingChatId(null)
+                            }
+                          }}
+                          onBlur={() => commitChatRename(chat.id)}
+                          className="h-6 min-w-0 flex-1 rounded-md bg-background px-1.5 text-sm text-sidebar-foreground outline-none ring-1 ring-sidebar-ring/60"
+                        />
+                      </div>
+                    ) : (
+                      <>
+                        <SidebarChatContextMenu
+                          pinned={pinned}
+                          onOpen={onOpenRun ? () => onOpenRun(chat.id) : undefined}
+                          onTogglePin={() => toggleChatPin(chat.id)}
+                          onRename={onRenameRun ? () => { setRenameDraft(chat.title || ''); setRenamingChatId(chat.id) } : undefined}
+                          onRequestDelete={onDeleteRun ? () => setDeleteChatTarget({ id: chat.id, title }) : undefined}
                         >
-                          {meetingIsBusy ? <LoaderIcon className="size-4 animate-spin" /> : <Square className="size-3.5 fill-current" />}
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">
-                        {meetingRecordingState === 'connecting' ? 'Starting…' : meetingRecordingState === 'stopping' ? 'Stopping…' : 'Stop recording'}
-                      </TooltipContent>
-                    </Tooltip>
-                  </div>
-                ) : previewMeeting ? (
-                  <div className="absolute inset-y-0 right-1 flex items-center gap-0.5 opacity-0 transition-opacity group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          aria-label="Take notes"
-                          onClick={(e) => { e.stopPropagation(); triggerMeetingCapture(previewMeeting, false) }}
-                          onMouseDown={(e) => e.stopPropagation()}
-                          className="flex aspect-square w-5 items-center justify-center rounded-md text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                        >
-                          <Mic className="size-4" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">Take notes</TooltipContent>
-                    </Tooltip>
-                    {previewMeeting.conferenceLink && (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <button
-                            type="button"
-                            aria-label="Join & take notes"
-                            onClick={(e) => { e.stopPropagation(); triggerMeetingCapture(previewMeeting, true) }}
-                            onMouseDown={(e) => e.stopPropagation()}
-                            className="flex aspect-square w-5 items-center justify-center rounded-md text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                          >
-                            <Video className="size-4" />
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom">Join & take notes</TooltipContent>
-                      </Tooltip>
-                    )}
-                  </div>
-                ) : null}
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  data-tour-id="nav-knowledge"
-                  isActive={activeNav === 'knowledge'}
-                  onClick={() => knowledgeActions.openKnowledgeView()}
-                  className={knowledgeUpdatedLabel ? 'h-auto items-start py-1' : undefined}
-                >
-                  <FileText className={cn('size-4 shrink-0', knowledgeUpdatedLabel && 'mt-0.5')} />
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate">Brain</span>
-                    {knowledgeUpdatedLabel && (
-                      <span className="truncate text-[11px] text-muted-foreground">{knowledgeUpdatedLabel}</span>
-                    )}
-                  </div>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton data-tour-id="nav-home" isActive={activeNav === 'home'} onClick={onOpenHome}>
-                  <ListTodo className="size-4 shrink-0" />
-                  <span className="flex-1 truncate">Todo</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-
-            <div className="mx-3 my-2 border-t border-border" />
-
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  data-tour-id="nav-agents"
-                  isActive={activeNav === 'agents'}
-                  onClick={onOpenBgTasks}
-                  className={bgAgentsLabel ? 'h-auto items-start py-1' : undefined}
-                >
-                  <Bot className={cn('size-4 shrink-0', bgAgentsLabel && 'mt-0.5')} />
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate">Background agents</span>
-                    {bgAgentsLabel && (
-                      <span className={cn(
-                        'truncate text-[11px]',
-                        bgTaskSummaries.some((t) => t.lastRunError) ? 'text-destructive' : 'text-muted-foreground',
-                      )}>
-                        {bgAgentsLabel}
-                      </span>
-                    )}
-                  </div>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  data-tour-id="nav-apps"
-                  isActive={activeNav === 'apps'}
-                  onClick={onOpenApps}
-                >
-                  <LayoutGrid className="size-4 shrink-0" />
-                  <span className="flex-1 truncate">Apps</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              {pinnedApps.map(({ folder, name }) => (
-                <SidebarMenuItem key={folder}>
-                  <ContextMenu>
-                    <ContextMenuTrigger asChild>
-                      <SidebarMenuButton onClick={() => onOpenApp?.(folder)} className="pl-7">
-                        <AppWindow className="size-4 shrink-0 text-muted-foreground" />
-                        <span className="flex-1 truncate">{name}</span>
-                      </SidebarMenuButton>
-                    </ContextMenuTrigger>
-                    <ContextMenuContent>
-                      <ContextMenuItem onClick={() => unpinApp(folder)}>
-                        <PanelLeftClose className="mr-2 size-3.5" />
-                        Remove from sidebar
-                      </ContextMenuItem>
-                    </ContextMenuContent>
-                  </ContextMenu>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        <div className="mx-3 my-2 border-t border-border" />
-
-        {/* Chats */}
-        <SidebarGroup className="flex flex-col">
-          <SidebarGroupContent>
-            <button
-              type="button"
-              data-tour-id="nav-chats"
-              onClick={() => setChatsExpanded((v) => !v)}
-              className="flex w-full items-center gap-1.5 px-3 py-1 text-[13px] text-muted-foreground"
-            >
-              <ChevronRight className={cn('size-3 transition-transform', chatsExpanded && 'rotate-90')} />
-              <span className="flex-1 text-left">Chats</span>
-            </button>
-            {chatsExpanded && (
-              recentChats.length === 0 ? (
-                <div className="px-4 pb-2 text-[11.5px] italic text-muted-foreground">
-                  Your recent chats show up here.
-                </div>
-              ) : (
-                <SidebarMenu>
-                  {recentChats.map((chat) => (
-                    <SidebarMenuItem key={chat.id}>
-                      {renamingChatId === chat.id ? (
-                        <div className="flex h-8 items-center gap-2 rounded-md px-2">
-                          <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
-                          <input
-                            autoFocus
-                            value={renameDraft}
-                            onChange={(e) => setRenameDraft(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault()
-                                commitChatRename(chat.id)
-                              } else if (e.key === 'Escape') {
-                                e.preventDefault()
-                                setRenamingChatId(null)
-                              }
-                            }}
-                            onBlur={() => commitChatRename(chat.id)}
-                            className="h-6 min-w-0 flex-1 rounded-sm border border-border bg-background px-1.5 text-sm outline-none focus:ring-1 focus:ring-ring"
-                          />
-                        </div>
-                      ) : (
-                        <>
-                          <SidebarChatContextMenu
-                            pinned={pinnedChatIds.includes(chat.id)}
-                            onOpen={onOpenRun ? () => onOpenRun(chat.id) : undefined}
-                            onTogglePin={() => toggleChatPin(chat.id)}
-                            onRename={onRenameRun ? () => { setRenameDraft(chat.title || ''); setRenamingChatId(chat.id) } : undefined}
-                            onRequestDelete={onDeleteRun ? () => setDeleteChatTarget({ id: chat.id, title: chat.title || '(Untitled chat)' }) : undefined}
-                          >
-                            <SidebarMenuButton onClick={() => onOpenRun?.(chat.id)} className={onRenameRun ? 'pr-7' : undefined}>
-                              <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
-                              <span className="flex-1 truncate">{chat.title || '(Untitled chat)'}</span>
-                              {pinnedChatIds.includes(chat.id) && (
-                                <Pin className="size-3 shrink-0 text-muted-foreground/70 transition-opacity group-hover/menu-item:opacity-0" />
-                              )}
-                            </SidebarMenuButton>
-                          </SidebarChatContextMenu>
-                          {onRenameRun && (
+                          <SidebarMenuButton onClick={() => onOpenRun?.(chat.id)}>
+                            <span className="sb-icon flex items-center justify-center" aria-hidden="true">
+                              {pinned && <Pin className="size-3.5" />}
+                            </span>
+                            <span className="flex-1 truncate">{title}</span>
+                          </SidebarMenuButton>
+                        </SidebarChatContextMenu>
+                        {onRenameRun && (
+                          <div className="sb-row-actions">
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
                                 <button
                                   type="button"
                                   aria-label="Chat options"
                                   onClick={(e) => e.stopPropagation()}
-                                  className="absolute right-1.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/menu-item:opacity-100 data-[state=open]:opacity-100"
+                                  className="sb-row-action"
                                 >
-                                  <MoreVertical className="size-4" />
+                                  <MoreHorizontal />
                                 </button>
                               </DropdownMenuTrigger>
-                              <DropdownMenuContent side="right" align="start">
+                              <DropdownMenuContent side="right" align="start" sideOffset={6}>
                                 <DropdownMenuItem onClick={() => toggleChatPin(chat.id)}>
                                   <Pin className="mr-2 size-3.5" />
-                                  {pinnedChatIds.includes(chat.id) ? 'Unpin' : 'Pin'}
+                                  {pinned ? 'Unpin' : 'Pin'}
                                 </DropdownMenuItem>
                                 <DropdownMenuItem
                                   onClick={() => {
@@ -1143,7 +1186,7 @@ export function SidebarContentPanel({
                                 {onDeleteRun && (
                                   <DropdownMenuItem
                                     className="text-destructive focus:text-destructive"
-                                    onClick={() => setDeleteChatTarget({ id: chat.id, title: chat.title || '(Untitled chat)' })}
+                                    onClick={() => setDeleteChatTarget({ id: chat.id, title })}
                                   >
                                     <Trash2 className="mr-2 size-3.5" />
                                     Delete
@@ -1151,27 +1194,24 @@ export function SidebarContentPanel({
                                 )}
                               </DropdownMenuContent>
                             </DropdownMenu>
-                          )}
-                        </>
-                      )}
-                    </SidebarMenuItem>
-                  ))}
-                  {onOpenChatHistory && (
-                    <SidebarMenuItem>
-                      <SidebarMenuButton
-                        onClick={() => onOpenChatHistory()}
-                        className="text-muted-foreground"
-                      >
-                        <ArrowUpRight className="size-4 shrink-0 text-muted-foreground" />
-                        <span className="flex-1 truncate">View all</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  )}
-                </SidebarMenu>
-              )
-            )}
-          </SidebarGroupContent>
-        </SidebarGroup>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </SidebarMenuItem>
+                )
+              })}
+              {onOpenChatHistory && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton className="sb-quiet" onClick={() => onOpenChatHistory()}>
+                    <span className="sb-icon" aria-hidden="true" />
+                    <span className="flex-1 truncate">View all</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
+            </SidebarMenu>
+          )}
+        </SidebarSection>
         <AlertDialog open={!!deleteChatTarget} onOpenChange={(open) => { if (!open) setDeleteChatTarget(null) }}>
           <AlertDialogContent>
             <AlertDialogHeader>
@@ -1203,192 +1243,190 @@ export function SidebarContentPanel({
         onOpenApps={onOpenApps}
         onConnectAccounts={() => setConnectionsSettingsOpen(true)}
       />
-      {/* Billing / upgrade CTA or Log in CTA */}
-      {isRowboatConnected && billing ? (() => {
-        const upgradeLabel = !billing.subscriptionPlanId || currentBillingPlan?.category === 'free' || currentBillingPlan?.category === 'starter' ? 'Upgrade' : 'Manage'
-        if (outOfCredits) {
-          return (
-            <div className="px-3 py-2">
-              <Popover open={creditPopoverOpen && !sidebarCollapsed} onOpenChange={setCreditPopoverOpen}>
-                <div className="flex items-center justify-between rounded-lg border border-red-500/50 bg-red-500/10 px-3 py-2">
-                  <PopoverTrigger asChild>
-                    <button type="button" className="flex min-w-0 flex-1 items-center gap-2 text-left">
-                      <AlertTriangle className="size-4 shrink-0 text-red-500" />
-                      <div className="min-w-0">
-                        <span className="text-xs font-medium capitalize text-sidebar-foreground">
-                          {currentBillingPlan?.displayName ?? (billing.subscriptionPlanId ? 'Unknown' : 'No plan')}
-                        </span>
-                        <p className="text-[10px] text-red-500">Out of credits</p>
-                      </div>
-                    </button>
-                  </PopoverTrigger>
-                  <button
-                    onClick={() => appUrl && window.open(`${appUrl}?intent=upgrade`)}
-                    className="shrink-0 rounded-md bg-sidebar-foreground/10 px-2.5 py-1 text-[11px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-foreground/20"
-                  >
-                    {upgradeLabel}
+      <SidebarFooter className="gap-0 px-2 pb-2 pt-1">
+        {/* The out-of-credits notice anchors to the account row and opens by
+            itself once per episode, as the plan card's did. */}
+        <Popover open={creditPopoverOpen && outOfCredits && !sidebarCollapsed} onOpenChange={setCreditPopoverOpen}>
+          <PopoverAnchor asChild>
+            <div className="sb-account-bar">
+              {/* Name and plan pill share one hover surface (2026-10-21). */}
+              <div className="sb-account-group">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button type="button" className="sb-account" aria-label={`${accountName}: account and settings`}>
+                    <span className="sb-avatar" aria-hidden="true">
+                      {accountInitial}
+                      {(outOfCredits || hasOauthError) && <span className={cn('sb-avatar-flag', outOfCredits && 'is-alert')} />}
+                    </span>
+                    <span className="sb-account-name">{accountName}</span>
                   </button>
-                </div>
-                <PopoverContent side="top" align="start" sideOffset={10} className="w-72">
-                  <PopoverArrow className="fill-popover" />
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-red-500/15 text-red-500">
-                        <CircleAlert className="size-4" />
-                      </span>
-                      <h4 className="text-sm font-bold text-foreground">You&apos;ve run out of credits</h4>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  side="top"
+                  align="start"
+                  sideOffset={8}
+                  className="sb-menu w-[248px] rounded-xl p-1.5"
+                >
+                  <div className="flex items-center gap-2.5 px-2 pb-2 pt-1.5">
+                    <span className="sb-avatar size-8! text-[13px]!" aria-hidden="true">{accountInitial}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[13px] font-semibold">{accountName}</div>
+                      <div className="truncate text-[11.5px] text-muted-foreground">{userEmail ?? 'Not signed in'}</div>
                     </div>
+                  </div>
+                  {isRowboatConnected ? (
+                    billing && (
+                      <div className="mb-1 flex items-center gap-3 rounded-lg bg-foreground/[0.04] px-2.5 py-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-[13px] font-medium capitalize">{planName}</div>
+                          <div className={cn('truncate text-[11.5px]', outOfCredits ? 'text-destructive' : 'text-muted-foreground')}>
+                            {outOfCredits ? 'Out of credits' : (trialLabel ?? 'Current plan')}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={openUpgrade}
+                          className="h-7 shrink-0 rounded-md bg-foreground/[0.08] px-2.5 text-xs font-medium transition-colors hover:bg-foreground/[0.14]"
+                        >
+                          {upgradeLabel}
+                        </button>
+                      </div>
+                    )
+                  ) : (
                     <button
                       type="button"
-                      aria-label="Close"
-                      onClick={() => setCreditPopoverOpen(false)}
-                      className="rounded-md p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                      onClick={handleRowboatLogin}
+                      disabled={loggingIn}
+                      className="mb-1 flex h-9 w-full items-center justify-center rounded-lg bg-foreground text-[13px] font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-50"
                     >
-                      <X className="size-4" />
+                      {loggingIn ? 'Signing in…' : 'Sign in to Rowboat'}
                     </button>
-                  </div>
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    Upgrade your plan to continue using all features.
-                  </p>
-                  <button
-                    onClick={() => { appUrl && window.open(`${appUrl}?intent=upgrade`); setCreditPopoverOpen(false) }}
-                    className="mt-3 w-full rounded-md bg-red-500 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-red-600"
-                  >
-                    Upgrade now
-                  </button>
-                </PopoverContent>
-              </Popover>
+                  )}
+                  <DropdownMenuItem onSelect={() => setConnectionsSettingsOpen(true)}>
+                    <Plug />
+                    Connect accounts
+                    {hasOauthError && <AlertTriangle className="ml-auto text-amber-500" aria-label="Needs attention" />}
+                  </DropdownMenuItem>
+                  {onStartTour && (
+                    <DropdownMenuItem onSelect={onStartTour}>
+                      <MascotFaceIcon className="size-4" />
+                      Take a tour
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem onSelect={() => setSettingsOpen(true)}>
+                    <Settings />
+                    Settings
+                    <Keys keys={SHORTCUTS.settings} className="ml-auto" />
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              {!isRowboatConnected ? (
+                <button type="button" className="sb-plan-pill" onClick={handleRowboatLogin} disabled={loggingIn}>
+                  {loggingIn ? 'Signing in…' : 'Sign in'}
+                </button>
+              ) : billing && (
+                <Tooltip delayDuration={400}>
+                  <TooltipTrigger asChild>
+                    <button type="button" className={cn('sb-plan-pill', outOfCredits && 'is-alert')} onClick={openUpgrade}>
+                      {pillLabel}
+                    </button>
+                  </TooltipTrigger>
+                  {pillTip && <TooltipContent side="top" sideOffset={6}>{pillTip}</TooltipContent>}
+                </Tooltip>
+              )}
+              </div>
+              <span className="flex-1" aria-hidden="true" />
+              <SyncStatusBar />
             </div>
-          )
-        }
-        return (
-          <div className="px-3 py-2">
-            <div className="flex items-center justify-between rounded-lg border border-sidebar-border bg-sidebar-accent/20 px-3 py-2">
-              <div className="min-w-0">
-                <span className="text-xs font-medium capitalize text-sidebar-foreground">
-                  {currentBillingPlan?.displayName ?? (billing.subscriptionPlanId ? 'Unknown' : 'No plan')}
+          </PopoverAnchor>
+          <PopoverContent side="top" align="start" sideOffset={10} className="w-72">
+            <PopoverArrow className="fill-popover" />
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-red-500/15 text-red-500">
+                  <CircleAlert className="size-4" />
                 </span>
-                {billing.subscriptionStatus === 'trialing' && billing.trialExpiresAt && (() => {
-                  const days = Math.max(0, Math.ceil((new Date(billing.trialExpiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
-                  return (
-                    <p className="text-[10px] text-sidebar-foreground/60">
-                      {days === 0 ? 'Trial expires today' : days === 1 ? '1 day left' : `${days} days left`}
-                    </p>
-                  )
-                })()}
+                <h4 className="text-sm font-bold text-foreground">You&apos;ve run out of credits</h4>
               </div>
               <button
-                onClick={() => appUrl && window.open(`${appUrl}?intent=upgrade`)}
-                className="shrink-0 rounded-md bg-sidebar-foreground/10 px-2.5 py-1 text-[11px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-foreground/20"
+                type="button"
+                aria-label="Close"
+                onClick={() => setCreditPopoverOpen(false)}
+                className="rounded-md p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
               >
-                {upgradeLabel}
+                <X className="size-4" />
               </button>
             </div>
-          </div>
-        )
-      })() : null}
-      {/* Sign in CTA */}
-      {!isRowboatConnected && (
-        <div className="px-3 py-2">
-          <button
-            onClick={handleRowboatLogin}
-            disabled={loggingIn}
-            className="flex w-full items-center justify-center rounded-lg border border-sidebar-border bg-sidebar-accent/20 px-3 py-2.5 text-xs font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent/40 disabled:opacity-50"
+            <p className="mt-2 text-xs text-muted-foreground">
+              Upgrade your plan to continue using all features.
+            </p>
+            <button
+              onClick={() => { openUpgrade(); setCreditPopoverOpen(false) }}
+              className="mt-3 w-full rounded-md bg-red-500 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-red-600"
+            >
+              Upgrade now
+            </button>
+          </PopoverContent>
+        </Popover>
+      </SidebarFooter>
+      {hasOauthError && (
+        <AlertDialog open={showOauthAlert} onOpenChange={setShowOauthAlert}>
+          <AlertDialogContent
+            onCloseAutoFocus={(event) => {
+              event.preventDefault()
+              if (openConnectionsAfterClose) {
+                setOpenConnectionsAfterClose(false)
+                setConnectionsSettingsOpen(true)
+              }
+            }}
           >
-            {loggingIn ? 'Signing in…' : 'Sign in to Rowboat'}
-          </button>
-        </div>
-      )}
-      {/* Bottom actions */}
-      <div className="border-t border-border px-2 py-2">
-        <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-2">
-            <button
-              ref={connectorsButtonRef}
-              onClick={() => setConnectionsSettingsOpen(true)}
-              className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
-            >
-              <Plug className="size-4" />
-              <span>Connect Accounts</span>
-            </button>
-            {hasOauthError && (
-              <AlertDialog
-                open={showOauthAlert}
-                onOpenChange={setShowOauthAlert}
+            <AlertDialogHeader>
+              <AlertDialogTitle>Reconnect your accounts</AlertDialogTitle>
+              <AlertDialogDescription>
+                One or more connected accounts need attention. Open Connected accounts
+                to review the status and reconnect if needed.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel
+                onClick={() => {
+                  setOpenConnectionsAfterClose(false)
+                  setShowOauthAlert(false)
+                }}
               >
-                <AlertDialogTrigger asChild>
-                  <button
-                    type="button"
-                    className="inline-flex items-center"
-                    aria-label="OAuth connection issues"
-                  >
-                    <AlertTriangle className="size-3 text-amber-500/90 animate-pulse" />
-                  </button>
-                </AlertDialogTrigger>
-                <AlertDialogContent
-                  onCloseAutoFocus={(event) => {
-                    event.preventDefault()
-                    if (openConnectionsAfterClose) {
-                      setOpenConnectionsAfterClose(false)
-                      setConnectionsSettingsOpen(true)
-                    }
-                    connectorsButtonRef.current?.focus()
-                  }}
-                >
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Reconnect your accounts</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      One or more connected accounts need attention. Open Connected accounts
-                      to review the status and reconnect if needed.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel
-                      onClick={() => {
-                        setOpenConnectionsAfterClose(false)
-                        setShowOauthAlert(false)
-                      }}
-                    >
-                      Dismiss
-                    </AlertDialogCancel>
-                    <AlertDialogAction
-                      onClick={() => {
-                        setOpenConnectionsAfterClose(true)
-                        setShowOauthAlert(false)
-                      }}
-                    >
-                      View connected accounts
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            )}
-          </div>
-          {onStartTour && (
-            <button
-              onClick={onStartTour}
-              className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
-            >
-              <MascotFaceIcon className="size-4" />
-              <span>Take a tour</span>
-            </button>
-          )}
-          <SettingsDialog>
-            <button className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors">
-              <Settings className="size-4" />
-              <span>Settings</span>
-            </button>
-          </SettingsDialog>
-        </div>
-      </div>
+                Dismiss
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  setOpenConnectionsAfterClose(true)
+                  setShowOauthAlert(false)
+                }}
+              >
+                View connected accounts
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
       <SettingsDialog
         defaultTab="connections"
         open={connectionsSettingsOpen}
         onOpenChange={setConnectionsSettingsOpen}
       />
-      <SyncStatusBar />
       <SidebarRail />
     </Sidebar>
+  )
+}
+
+/** A row's full detail (sender, next meeting, last update) after a short hover. */
+function RowTip({ tip, children }: { tip: string | null | undefined; children: React.ReactElement }) {
+  if (!tip) return children
+  return (
+    <Tooltip delayDuration={700}>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent side="right" sideOffset={10} className="max-w-72 truncate">{tip}</TooltipContent>
+    </Tooltip>
   )
 }
 
@@ -1461,6 +1499,15 @@ function isSameLocalDay(a: Date, b: Date): boolean {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
 }
 
+/** The short time at the Meetings row's right: "Now", "in 12m", or the clock time. */
+function formatMeetingMeta(event: UpcomingMeeting, now: number): string {
+  if (event.isAllDay) return 'All day'
+  const minutes = Math.round((event.start.getTime() - now) / 60000)
+  if (minutes <= 0) return 'Now'
+  if (minutes < 60) return `in ${minutes}m`
+  return formatMeetingTime(event)
+}
+
 function formatMeetingTime(event: UpcomingMeeting): string {
   if (event.isAllDay) return 'All day'
   const now = new Date()
@@ -1493,6 +1540,15 @@ type SidebarEmailThread = {
   subject: string
   from: string
   date: string
+}
+
+function firstName(name: string): string {
+  return name.trim().replace(/^["']|["']$/g, '').split(/\s+/)[0] ?? ''
+}
+
+function nameFromEmail(email: string | null): string {
+  const first = email?.split('@')[0]?.split(/[._+-]/)[0] ?? ''
+  return first ? first.charAt(0).toUpperCase() + first.slice(1) : ''
 }
 
 function formatEmailFrom(from: string): string {

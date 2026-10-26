@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { CheckCheck, Loader2, RefreshCw } from 'lucide-react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { Bell, CheckCheck, Loader2, RefreshCw } from 'lucide-react'
 import type { spaces } from '@x/shared'
-import { Segmented } from '@/components/spaces/atoms'
-import { DayDivider } from '@/components/spaces/message-row'
+import { Button } from '@/components/ui/button'
+import { Switch } from '@/components/ui/switch'
+import { FilterTabs, SpacesEmpty, SpacesPage } from '@/components/spaces/page-shell'
 import { useSpaceNames, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { dayKey, formatDayLabel } from '@/lib/spaces-conventions'
 import { subscribeSpacesFeed } from '@/lib/spaces-feed'
+import { activityFor, affectsActivity } from '@/lib/spaces-activity-cache'
 import { loadUnread } from '@/lib/spaces-read-state'
 import { toast } from '@/lib/toast'
 import { targetOf, type ActivityTarget } from '@/lib/spaces-activity'
@@ -47,13 +49,25 @@ export function ActivityView({ org, active = true, onOpenMessage }: {
     active?: boolean
     onOpenMessage: (target: ActivityTarget) => void
 }) {
-    const [tab, setTab] = useState<Tab>('all')
-    const [unreadOnly, setUnreadOnly] = useState(false)
-    const [page, setPage] = useState<Page | null>(null)
-    const [loading, setLoading] = useState(true)
+    const cache = activityFor(org.id)
+    const [tab, setTabState] = useState<Tab>(cache.tab)
+    const [unreadOnly, setUnreadOnlyState] = useState(cache.unreadOnly)
+    const setTab = (next: Tab) => { cache.tab = next; setTabState(next) }
+    const setUnreadOnly = (next: boolean) => { cache.unreadOnly = next; setUnreadOnlyState(next) }
+    const cacheKey = `${tab}:${unreadOnly ? 'unread' : 'all'}`
+    const [page, setPage] = useState<Page | null>(() => cache.pages.get(cacheKey) ?? null)
+    const [shownKey, setShownKey] = useState(cacheKey)
+    // A filter change paints that filter's cached page at once (or nothing,
+    // never the previous filter's rows) while it loads.
+    if (shownKey !== cacheKey) {
+        setShownKey(cacheKey)
+        setPage(cache.pages.get(cacheKey) ?? null)
+    }
+    const [loading, setLoading] = useState(false)
     const [more, setMore] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const generation = useRef(0)
+    const unreadId = useId()
 
     const query = useMemo(
         () => ({ orgId: org.id, ...(TAB_KINDS[tab] ? { kinds: TAB_KINDS[tab] } : {}), ...(unreadOnly ? { unread: true } : {}), limit: PAGE }),
@@ -66,6 +80,9 @@ export function ActivityView({ org, active = true, onOpenMessage }: {
         setError(null)
         try {
             const next = await window.ipc.invoke('spaces:getActivity', query)
+            const entry = activityFor(query.orgId)
+            entry.pages.set(cacheKey, next)
+            entry.stale.delete(cacheKey)
             if (gen !== generation.current) return
             setPage(next)
         } catch (err) {
@@ -74,15 +91,18 @@ export function ActivityView({ org, active = true, onOpenMessage }: {
         } finally {
             if (gen === generation.current) setLoading(false)
         }
-    }, [query])
+    }, [query, cacheKey])
 
+    // Fetch only what the cache can't answer: a filter never loaded, or one a
+    // feed event has made stale since.
     useEffect(() => {
+        const entry = activityFor(org.id)
+        if (entry.pages.has(cacheKey) && !entry.stale.has(cacheKey)) return
         void load()
-    }, [load])
+    }, [org.id, cacheKey, load])
 
-    // Live: the org's notify frames, our own read marks moving, and reactions
-    // or deletions in any space the app is subscribed to — coalesced into one
-    // refetch of the first page. The org's query is the truth, not a fold.
+    // Live while showing: the same events, coalesced into one quiet refetch
+    // of the first page. The org's query is the truth, not a fold.
     useEffect(() => {
         if (!active) return
         let timer: ReturnType<typeof setTimeout> | null = null
@@ -95,9 +115,7 @@ export function ActivityView({ org, active = true, onOpenMessage }: {
         }
         const off = subscribeSpacesFeed((event) => {
             if (event.orgId !== org.id || !('frame' in event)) return
-            const frame = event.frame
-            if (frame.kind === 'notify' || frame.kind === 'read_mark') schedule()
-            else if (frame.kind === 'event' && (frame.event.type === 'reaction' || frame.event.type === 'message_deleted' || frame.event.type === 'message_edited')) schedule()
+            if (affectsActivity(event.frame)) schedule()
         })
         return () => {
             off()
@@ -129,7 +147,11 @@ export function ActivityView({ org, active = true, onOpenMessage }: {
         setMore(true)
         try {
             const next = await window.ipc.invoke('spaces:getActivity', { ...query, cursor: page.nextCursor })
-            setPage((prev) => (prev ? { ...next, items: [...prev.items, ...next.items], names: { ...prev.names, ...next.names } } : next))
+            setPage((prev) => {
+                const merged = prev ? { ...next, items: [...prev.items, ...next.items], names: { ...prev.names, ...next.names } } : next
+                activityFor(org.id).pages.set(cacheKey, merged)
+                return merged
+            })
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Could not load more')
         } finally {
@@ -142,55 +164,55 @@ export function ActivityView({ org, active = true, onOpenMessage }: {
     const groups = useMemo(() => groupByDay(page?.items ?? []), [page?.items])
 
     return (
-        <div className="flex min-h-0 flex-1 flex-col">
-            <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border px-5 py-3">
-                <h2 className="text-[15px] font-semibold">Activity</h2>
-                <Segmented value={tab} options={TABS} onChange={setTab} size="sm" />
-                <label className="flex cursor-pointer select-none items-center gap-1.5 text-xs text-muted-foreground">
-                    <input type="checkbox" className="size-3.5 accent-[var(--stream-alert)]" checked={unreadOnly} onChange={(e) => setUnreadOnly(e.target.checked)} />
+        <SpacesPage
+            label="Activity"
+            title="Activity"
+            subtitle="Mentions, DMs, replies in threads you follow, and reactions to your messages."
+            actions={<>
+                <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" onClick={() => void load()} title="Refresh" aria-label="Refresh">
+                    <RefreshCw className={cn('size-4', loading && 'animate-spin')} />
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => void markAllRead()} disabled={clearing} title="Mark everything read — every space, thread and reaction">
+                    <CheckCheck className="size-4" /> Mark all read
+                </Button>
+            </>}
+            toolbar={<>
+                <FilterTabs label="Show" value={tab} options={TABS} onChange={setTab} />
+                <label htmlFor={unreadId} className="ml-auto flex cursor-pointer select-none items-center gap-2 text-[13px] text-muted-foreground">
                     Unread only
+                    <Switch id={unreadId} checked={unreadOnly} onCheckedChange={setUnreadOnly} className="h-5 w-8 [&_[data-slot=switch-thumb]]:size-4" />
                 </label>
-                <button type="button" onClick={() => void markAllRead()} disabled={clearing} title="Mark everything read — every space, thread and reaction"
-                    className="ml-auto flex items-center gap-1 rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50">
-                    <CheckCheck className="size-3.5" /> Mark all read
-                </button>
-                <button type="button" onClick={() => void load()} title="Refresh" aria-label="Refresh"
-                    className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground">
-                    <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} />
-                </button>
-            </div>
-            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-                {error && <p className="px-2 py-4 text-sm text-destructive">{error}</p>}
-                {!error && page && page.items.length === 0 && !loading && (
-                    <p className="px-2 py-10 text-center text-sm text-muted-foreground">
-                        {unreadOnly ? 'Nothing unread for you.' : 'Nothing for you yet. Mentions, DMs, replies in threads you follow and reactions on your messages land here.'}
-                    </p>
-                )}
-                {!page && loading && (
-                    <p className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" /> Loading…</p>
-                )}
-                {groups.map((group) => (
-                    <section key={group.day} className="mb-2">
-                        <div className="py-2"><DayDivider label={formatDayLabel(group.items[0]!.at)} /></div>
-                        <ul className="flex flex-col gap-0.5">
-                            {group.items.map((item) => (
-                                <li key={item.id}>
-                                    <ActivityRow item={item} names={names} spaceNames={spaceNames} onOpen={() => onOpenMessage(targetOf(org.id, item))} />
-                                </li>
-                            ))}
-                        </ul>
-                    </section>
-                ))}
-                {page?.nextCursor && (
-                    <div className="flex justify-center py-3">
-                        <button type="button" onClick={() => void loadMore()} disabled={more}
-                            className="rounded-md border border-border px-3 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50">
-                            {more ? 'Loading…' : 'Show older'}
-                        </button>
-                    </div>
-                )}
-            </div>
-        </div>
+            </>}
+        >
+            {error && <p className="py-4 text-sm text-destructive">{error}</p>}
+            {!error && page && page.items.length === 0 && !loading && (
+                <SpacesEmpty icon={<Bell />} title={unreadOnly ? 'You’re all caught up' : 'Nothing here yet'}>
+                    {unreadOnly ? 'Nothing unread for you.' : 'Mentions, DMs, replies in threads you follow and reactions on your messages land here.'}
+                </SpacesEmpty>
+            )}
+            {!page && loading && (
+                <p className="flex items-center gap-2 px-3 py-12 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" /> Loading…</p>
+            )}
+            {groups.map((group) => (
+                <section key={group.day} className="mb-4">
+                    <h2 className="px-3 pb-1.5 pt-2 text-[13px] font-medium text-muted-foreground">{formatDayLabel(group.items[0]!.at)}</h2>
+                    <ul className="flex flex-col gap-0.5">
+                        {group.items.map((item) => (
+                            <li key={item.id}>
+                                <ActivityRow item={item} names={names} spaceNames={spaceNames} onOpen={() => onOpenMessage(targetOf(org.id, item))} />
+                            </li>
+                        ))}
+                    </ul>
+                </section>
+            ))}
+            {page?.nextCursor && (
+                <div className="flex justify-center py-3">
+                    <Button variant="outline" size="sm" onClick={() => void loadMore()} disabled={more}>
+                        {more ? 'Loading…' : 'Show older'}
+                    </Button>
+                </div>
+            )}
+        </SpacesPage>
     )
 }
 

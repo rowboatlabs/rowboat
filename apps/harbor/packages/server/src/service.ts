@@ -177,6 +177,10 @@ export class HarborService {
   getAgentOptionDefaults(agentId: string): Promise<InvocationOptionValues> {
     return this.invocations.optionDefaults(agentId);
   }
+  renameAgent(ctx: ActorCtx, agentId: string, input: { displayName: string }): Promise<Member> {
+    return this.agents.rename(ctx, agentId, input);
+  }
+
   setAgentOptionDefaults(ctx: ActorCtx, agentId: string, defaults: InvocationOptionValues): Promise<InvocationOptionValues> {
     return this.agents.setOptionDefaults(ctx, agentId, defaults);
   }

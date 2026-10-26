@@ -35,7 +35,7 @@ function seedDisplayName(identity: BindIdentity): string {
 }
 
 /** A profile field is one line: rosters and mentions have no room for a newline. */
-function oneLine(value: string): string {
+export function oneLine(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
 

@@ -274,6 +274,16 @@ export function canCreateAgentKey(actor: Member, agent: Member): Decision {
   return { code: 'forbidden', message: 'only the agent’s owner can create its keys' };
 }
 
+/**
+ * Renaming an agent is its owner's (spec §4 Agent members, amended
+ * 2026-10-21): the name was theirs to pick when they added it. Admins remove
+ * an agent from the org; they don't rename it.
+ */
+export function canRenameAgent(actor: Member, agent: Member): Decision {
+  if (agent.kind === 'agent' && agent.ownerId !== undefined && agent.ownerId === actor.id) return null;
+  return { code: 'forbidden', message: 'only the agent’s owner can rename it' };
+}
+
 /** Pointing an agent's alerts at a space (spec §8 Alerts, 2026-10-03): the owner, as with its keys. */
 export function canSetAgentHook(actor: Member, agent: Member): Decision {
   if (agent.kind === 'agent' && agent.ownerId !== undefined && agent.ownerId === actor.id) return null;

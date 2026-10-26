@@ -64,6 +64,8 @@ const NewMessage = z.object({
   /** Reply-to-activity-row provenance (root posts only): the change-set this message answers. */
   anchorChangeSetId: ChangeSetId.optional(),
   body: z.string().min(1).max(65_536),
+  /** A short version of a long body, shown first with "Show more" (2026-10-25). */
+  summary: z.string().min(1).max(1_000).optional(),
   /** Present = this message carries a poll (immutable once posted; editMessage refuses). */
   poll: NewPoll.optional(),
   actingMode: ActingMode,
@@ -536,6 +538,19 @@ export const routes = {
     params: z.object({ agentId: MemberId }),
     request: z.object({ secret: z.string().min(1).max(512) }),
     response: z.object({ credential: AgentCredential }),
+  },
+  /**
+   * Rename an agent (spec §4 Agent members, amended 2026-10-21): its owner
+   * only, app only like the rest of an agent's settings. Folded to one line,
+   * at least one character; the same name is a no-op. No event: rosters carry
+   * it on the next read, as a person's rename does.
+   */
+  renameAgent: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/name',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ displayName: z.string().max(128) }),
+    response: z.object({ agent: Member }),
   },
   /** Another key for an agent (rotation: create, switch, revoke the old one). Owner only. */
   createAgentKey: {
@@ -1087,6 +1102,8 @@ export const routes = {
     params: z.object({ spaceId: SpaceId, messageId: MessageId }),
     request: z.object({
       body: z.string().min(1).max(65_536),
+      /** The summary (2026-10-25): absent = keep it, a string = replace it, null = remove it. */
+      summary: z.string().min(1).max(1_000).nullable().optional(),
       actingMode: ActingMode,
       agentName: z.string().max(64).optional(),
     }),

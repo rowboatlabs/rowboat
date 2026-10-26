@@ -52,6 +52,31 @@ describe('conversation message interactions', () => {
         expect(screen.getAllByTitle('Add reaction').length).toBeGreaterThan(0)
     })
 
+    it('shows a long message\'s summary first, then the full body under it on Show more (2026-10-25)', () => {
+        const long = { ...message, body: Array.from({ length: 12 }, (_, i) => `Step ${i + 1}`).join('\n'), summary: 'Fixed token refresh; PR #12' } as spaces.Message
+        const { container } = render(<MessageRow message={long} memberNames={memberNames} continuation={false} />)
+        expect(screen.getByText('Fixed token refresh; PR #12')).toBeInTheDocument()
+        expect(screen.queryByText(/Step 12/)).not.toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Show more' }))
+        expect(screen.getByText('Fixed token refresh; PR #12')).toBeInTheDocument()
+        expect(screen.getByText(/Step 12/)).toBeInTheDocument()
+        expect(container.querySelector('[data-summary]')?.compareDocumentPosition(screen.getByText(/Step 12/))).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+        fireEvent.click(screen.getByRole('button', { name: 'Show less' }))
+        expect(screen.queryByText(/Step 12/)).not.toBeInTheDocument()
+    })
+
+    it('clamps a long message without a summary, and leaves a short one alone', () => {
+        const long = { ...message, body: Array.from({ length: 12 }, (_, i) => `Step ${i + 1}`).join('\n') } as spaces.Message
+        const { container, rerender } = render(<MessageRow message={long} memberNames={memberNames} continuation={false} />)
+        expect(container.querySelector('[data-clamped]')).not.toBeNull()
+        fireEvent.click(screen.getByRole('button', { name: 'Show more' }))
+        expect(container.querySelector('[data-clamped]')).toBeNull()
+        rerender(<MessageRow message={{ ...message, summary: 'ignored' } as spaces.Message} memberNames={memberNames} continuation={false} />)
+        expect(screen.queryByText('ignored')).not.toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: 'Show more' })).not.toBeInTheDocument()
+        expect(screen.getByText(message.body)).toBeInTheDocument()
+    })
+
     it('opens the existing root from the reply summary without making body clicks navigate', () => {
         const onOpenThread = vi.fn()
         render(<MessageRow message={message} memberNames={memberNames} continuation={false} onOpenThread={onOpenThread}
@@ -60,6 +85,24 @@ describe('conversation message interactions', () => {
         expect(onOpenThread).not.toHaveBeenCalled()
         fireEvent.click(screen.getByRole('button', { name: /3 replies.*Last reply/ }))
         expect(onOpenThread).toHaveBeenCalledWith(message.id)
+    })
+
+    it('tints the reply line while its thread is open (spaces redesign 2026-10-21)', () => {
+        const thread = { rootMessageId: message.id, replyCount: 3, lastActivityAt: message.postedAt, archived: false, unreadCount: 0, workingAgents: [] }
+        const { rerender } = render(<MessageRow message={message} memberNames={memberNames} continuation={false} onOpenThread={vi.fn()} thread={thread} />)
+        const line = () => screen.getByRole('button', { name: /3 replies/ })
+        expect(line()).not.toHaveAttribute('data-open')
+        rerender(<MessageRow message={message} memberNames={memberNames} continuation={false} onOpenThread={vi.fn()} thread={thread} threadOpen />)
+        expect(line()).toHaveAttribute('data-open')
+    })
+
+    it('plays the arrival entrance once, then drops it', () => {
+        const { container } = render(<MessageRow message={message} memberNames={memberNames} continuation={false} arriving />)
+        const row = container.querySelector('[data-mid="message-1"]') as HTMLElement
+        expect(row).toHaveClass('spaces-message--arriving')
+        // jsdom has no AnimationEvent, so React listens on the prefixed name.
+        fireEvent(row, new Event('webkitAnimationEnd', { bubbles: true }))
+        expect(row).not.toHaveClass('spaces-message--arriving')
     })
 
     it('keeps unconfirmed messages free of server actions', () => {

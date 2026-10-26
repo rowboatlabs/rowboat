@@ -152,7 +152,7 @@ function RemoveFromSpaceDialog({ orgId, space, member, onClose }: {
     )
 }
 
-function RemoveFromOrgDialog({ orgId, orgName, member, onClose }: {
+export function RemoveFromOrgDialog({ orgId, orgName, member, onClose }: {
     orgId: string
     orgName: string
     member: spaces.Member

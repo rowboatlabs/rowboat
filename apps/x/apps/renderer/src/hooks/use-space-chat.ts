@@ -47,6 +47,7 @@ export function buildPendingMessage(spaceId: string, memberId: string, body: str
         postedAt: new Date().toISOString(),
         offset: Number.MAX_SAFE_INTEGER - 1_000_000 + pendingSeq,
         replyCount: 0,
+        replyAuthors: [],
         mentions: [],
         mentionsHere: false,
         mentionsRowboat: false,
@@ -424,7 +425,16 @@ function noteReplyActivity(orgId: string, spaceId: string, reply: spaces.Message
     if (!root) return
     setStream(k, {
         messages: state.messages.map((m) =>
-            m.id === rootId ? { ...m, replyCount: (m.replyCount ?? 0) + 1, lastReplyAt: reply.postedAt } : m,
+            m.id === rootId ? {
+                ...m,
+                replyCount: (m.replyCount ?? 0) + 1,
+                lastReplyAt: reply.postedAt,
+                // Only extend a list Harbor keeps: a root with replies and no
+                // authors is an older Harbor, which the Threads list reads
+                // from the thread instead (lib/spaces-thread-participants).
+                replyAuthors: (m.replyCount ?? 0) > 0 && (m.replyAuthors?.length ?? 0) === 0 ? m.replyAuthors
+                    : (m.replyAuthors ?? []).includes(reply.author.memberId) ? m.replyAuthors : [...(m.replyAuthors ?? []), reply.author.memberId],
+            } : m,
         ),
     })
 }
@@ -500,6 +510,14 @@ async function ensureStream(orgId: string, spaceId: string): Promise<void> {
     // last visit left detached goes back to the tail.
     if (current?.hasMoreAfter) await jumpToLatest(orgId, spaceId)
     else if (!current?.ready || streamCacheOnly.has(k)) await loadStream(orgId, spaceId)
+}
+
+/** The summary an edit leaves (2026-10-25): the frame carries it, and its absence means none. */
+function withEditedSummary<M extends spaces.Message>(message: M, summary: string | undefined): M {
+    const next = { ...message }
+    if (summary) next.summary = summary
+    else delete next.summary
+    return next
 }
 
 let busWired = false
@@ -601,7 +619,7 @@ function wireBus(): void {
                 setStream(k, {
                     messages: state.messages.map((m) =>
                         m.id === edit.messageId
-                            ? { ...m, body: edit.body, editedAt: edit.at, mentions: edit.mentions, mentionsHere: edit.mentionsHere, mentionsRowboat: edit.mentionsRowboat }
+                            ? withEditedSummary({ ...m, body: edit.body, editedAt: edit.at, mentions: edit.mentions, mentionsHere: edit.mentionsHere, mentionsRowboat: edit.mentionsRowboat }, edit.summary)
                             : m,
                     ),
                 })

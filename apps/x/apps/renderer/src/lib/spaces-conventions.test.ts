@@ -5,6 +5,7 @@ import {
     artifactsForThread,
     formatDayLabel,
     isContinuation,
+    isLongBody,
     mergeMessages,
     stripThreadRef,
     threadLabelOf,
@@ -21,6 +22,7 @@ function msg(over: Partial<spaces.Message> & { id: string }): spaces.Message {
         postedAt: '2026-08-19T10:20:00Z',
         offset: 1,
         replyCount: 0,
+        replyAuthors: [],
         reactions: [],
         mentions: [],
         mentionsHere: false,
@@ -166,3 +168,14 @@ it('carries live reaction offsets without regressing on replay', () => {
     const next = applyReaction(first, { emoji: '✅', memberId: 'another', action: 'added', offset: 105 })
     expect(next[0]?.lastOffset).toBe(105)
 })
+
+describe('isLongBody (2026-10-25)', () => {
+    it('is long past eight non-blank lines or 700 characters, and ignores image embeds', () => {
+        expect(isLongBody('short')).toBe(false)
+        expect(isLongBody(Array.from({ length: 8 }, (_, i) => `line ${i}`).join('\n\n'))).toBe(false)
+        expect(isLongBody(Array.from({ length: 9 }, (_, i) => `line ${i}`).join('\n'))).toBe(true)
+        expect(isLongBody('x'.repeat(701))).toBe(true)
+        expect(isLongBody(`look ![shot](https://x/${'a'.repeat(800)}.png)`)).toBe(false)
+    })
+})
+

@@ -22,6 +22,7 @@ import {
   isGroupChat,
   canAddAgent,
   canCreateAgentKey,
+  canRenameAgent,
   canRevokeAgentKey,
   canSetAgentHook,
   canClearAgentHook,
@@ -190,6 +191,10 @@ describe('policy', () => {
     expect(canCreateAgentKey(admin, hermes)).toMatchObject({ code: 'forbidden' });
     expect(canCreateAgentKey(other, hermes)).toMatchObject({ code: 'forbidden' });
     expect(canCreateAgentKey(admin, replicas)).toMatchObject({ code: 'forbidden' });
+    expect(canRenameAgent(owner, hermes)).toBeNull();
+    expect(canRenameAgent(admin, hermes)).toMatchObject({ code: 'forbidden' });
+    expect(canRenameAgent(other, hermes)).toMatchObject({ code: 'forbidden' });
+    expect(canRenameAgent(owner, owner)).toMatchObject({ code: 'forbidden' });
     expect(canRevokeAgentKey(owner, hermes)).toBeNull();
     expect(canRevokeAgentKey(admin, hermes)).toBeNull();
     expect(canRevokeAgentKey(other, hermes)).toMatchObject({ code: 'forbidden' });

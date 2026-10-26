@@ -17,6 +17,7 @@ vi.mock('@/components/spaces/message-row', () => ({ DayDivider: ({ label }: { la
 import { RecentActivity } from './recent-activity'
 import { ActivityView } from './activity-view'
 import { actorLabel, excerptOf, reasonLabel } from '@/lib/spaces-activity'
+import { resetActivityCache } from '@/lib/spaces-activity-cache'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 
 const org = { id: 'org-1', name: 'Rowboat Labs', memberId: 'ramnique', spaces: [], directs: [] } as unknown as OrgWithSpaces
@@ -35,11 +36,18 @@ const page: spaces.SpacesActivityPage = {
     names: { ramnique: 'Ramnique', harsh: 'Harsh', arjun: 'Arjun' },
 }
 
-const feed = vi.hoisted(() => ({ listener: null as ((event: spaces.SpacesBusEvent) => void) | null }))
-vi.mock('@/lib/spaces-feed', () => ({ subscribeSpacesFeed: (listener: (event: spaces.SpacesBusEvent) => void) => { feed.listener = listener; return () => { feed.listener = null } } }))
+// `listener` is the latest subscriber (what RecentActivity's tests watch);
+// `all` holds every live one, including the Activity cache's per-org listener.
+const feed = vi.hoisted(() => ({ listener: null as ((event: spaces.SpacesBusEvent) => void) | null, all: new Set<(event: spaces.SpacesBusEvent) => void>() }))
+vi.mock('@/lib/spaces-feed', () => ({ subscribeSpacesFeed: (listener: (event: spaces.SpacesBusEvent) => void) => {
+    feed.listener = listener
+    feed.all.add(listener)
+    return () => { feed.listener = null; feed.all.delete(listener) }
+} }))
 
 const invoke = vi.fn()
 beforeEach(() => {
+    resetActivityCache()
     invoke.mockReset()
     invoke.mockImplementation(async (channel: string) => {
         if (channel === 'spaces:getActivity') return page
@@ -99,6 +107,32 @@ describe('ActivityView', () => {
         render(<ActivityView org={org} active={false} onOpenMessage={vi.fn()} />)
         await screen.findByText('hey @Ramnique look')
         expect(invoke).not.toHaveBeenCalledWith('spaces:markActivitySeen', expect.anything())
+    })
+
+    // 2026-10-21: the view unmounts whenever a channel opens; coming back
+    // paints the last page and keeps the filter, with no refetch.
+    it('coming back paints the cached page and filter without refetching', async () => {
+        const first = render(<ActivityView org={org} onOpenMessage={vi.fn()} />)
+        await screen.findByText('hey @Ramnique look')
+        fireEvent.click(screen.getByText('Mentions'))
+        await waitFor(() => expect(invoke).toHaveBeenCalledTimes(2))
+        first.unmount()
+        render(<ActivityView org={org} onOpenMessage={vi.fn()} />)
+        expect(screen.getByText('hey @Ramnique look')).toBeTruthy()
+        expect(screen.queryByText('Loading…')).toBeNull()
+        expect(screen.getByText('Mentions').getAttribute('aria-pressed')).toBe('true')
+        await act(async () => {})
+        expect(invoke).toHaveBeenCalledTimes(2)
+    })
+
+    it('refetches on return only when something changed while away', async () => {
+        const first = render(<ActivityView org={org} onOpenMessage={vi.fn()} />)
+        await screen.findByText('hey @Ramnique look')
+        first.unmount()
+        act(() => { for (const listener of feed.all) listener({ orgId: org.id, frame: { kind: 'notify' } } as spaces.SpacesBusEvent) })
+        render(<ActivityView org={org} onOpenMessage={vi.fn()} />)
+        expect(screen.getByText('hey @Ramnique look')).toBeTruthy()
+        await waitFor(() => expect(invoke).toHaveBeenCalledTimes(2))
     })
 })
 

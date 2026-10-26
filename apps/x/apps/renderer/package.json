@@ -23,6 +23,7 @@
     "@eigenpal/docx-editor-react": "^1.0.3",
     "@excalidraw/excalidraw": "^0.18.1",
     "@lezer/highlight": "^1.2.3",
+    "@phosphor-icons/react": "2.1.10",
     "@radix-ui/react-avatar": "^1.1.11",
     "@radix-ui/react-collapsible": "^1.1.12",
     "@radix-ui/react-context-menu": "^2.2.16",

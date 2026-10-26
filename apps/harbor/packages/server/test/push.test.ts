@@ -22,6 +22,7 @@ const msg = (author = 'harsh'): Message =>
     postedAt: new Date().toISOString(),
     offset: 1,
     replyCount: 0,
+    replyAuthors: [],
     reactions: [],
     mentions: [],
     mentionsHere: false,

@@ -17,9 +17,11 @@ import { AddChannelDialog } from './add-channel-dialog'
 import { AgentsDialog } from './agents-dialog'
 import { RemoveServerDialog } from './remove-server-dialog'
 
-export function ServerSwitcher({ org, onOpenSpace, onMenuOpenChange }: {
+export function ServerSwitcher({ org, onOpenSpace, onOpenAgents, onMenuOpenChange }: {
     org: OrgWithSpaces
     onOpenSpace: (orgId: string, spaceId: string) => void
+    /** The Agents page (2026-10-21); without it, Agents opens the dialog. */
+    onOpenAgents?: (orgId: string) => void
     onMenuOpenChange?: (open: boolean) => void
 }) {
     const { orgs, refresh } = useSpacesOrgs()
@@ -69,6 +71,7 @@ export function ServerSwitcher({ org, onOpenSpace, onMenuOpenChange }: {
                 <DropdownMenuItem onSelect={(event) => {
                     event.preventDefault()
                     setMenuOpen(false)
+                    if (onOpenAgents) return onOpenAgents(org.id)
                     setAgentsOpen(true)
                     onMenuOpenChange?.(true)
                 }}><Bot className="size-4" /> Agents and bots</DropdownMenuItem>
