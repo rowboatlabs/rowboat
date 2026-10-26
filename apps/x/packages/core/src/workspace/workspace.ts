@@ -369,7 +369,16 @@ export async function copy(
 
   // Check if destination exists
   if (!overwrite) {
-    await fs.access(toPath);
+    try {
+      await fs.access(toPath);
+      throw new Error('Destination already exists');
+    } catch (err: unknown) {
+      if (err && typeof err === 'object' && 'code' in err && err.code === 'ENOENT') {
+        // destination does not exist
+      } else {
+        throw err;
+      }
+    }
   }
 
   // Create parent directory for destination
