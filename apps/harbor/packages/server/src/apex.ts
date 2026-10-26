@@ -1,6 +1,9 @@
 import { Hono } from 'hono';
 import { protectedResourceMetadata, wwwAuthenticate, type AuthDriver } from './auth.js';
 import { consentPageHtml } from './consent.js';
+import { webCors } from './cors.js';
+import { routes } from '@rowboat/spaces-protocol';
+import { clearedSessionCookie, sessionCookie, sessionToken, type SessionCookieConfig } from './session.js';
 import type { OrgConfig, OrgDirectory } from './directory.js';
 import { HarborError } from './errors.js';
 import { publicOrigin } from './origin.js';
@@ -47,6 +50,8 @@ export interface ApexDeps {
    * https://<apexDomain>/oauth/consent.
    */
   consentPublishableKey?: string;
+  /** Browser origins allowed to call the apex cross-origin (cors.ts). */
+  webOrigins?: readonly string[];
 }
 
 export function buildApexApp(deps: ApexDeps): Hono {
@@ -57,6 +62,31 @@ export function buildApexApp(deps: ApexDeps): Hono {
     if (!(err instanceof HarborError)) console.error('[harbor] apex error:', err);
     if (e.code === 'unauthorized') c.header('WWW-Authenticate', wwwAuthenticate(publicOrigin(c)));
     return c.json(e.toBody(), e.status as 400);
+  });
+
+  app.use('*', webCors(deps.webOrigins ?? []));
+  // The web app's session (session.ts) is minted here, scoped to the apex
+  // domain, so one cookie covers the apex and every org beneath it.
+  const session: SessionCookieConfig = { webOrigins: new Set(deps.webOrigins ?? []), domain: deps.apexDomain };
+  /** The header, else the session cookie from a listed origin. */
+  const identityOf = (c: { req: { header(name: string): string | undefined } }) => {
+    const authorization = c.req.header('authorization');
+    const cookie = authorization ? undefined : sessionToken({ cookie: c.req.header('cookie'), origin: c.req.header('origin') }, session.webOrigins);
+    return deps.auth.authenticate(authorization, cookie);
+  };
+
+  app.post(routes.createSession.path, async (c) => {
+    const authorization = c.req.header('authorization');
+    if (!authorization?.startsWith('Bearer ')) throw new HarborError('unauthorized', 'a session starts from a bearer in the Authorization header');
+    await deps.auth.authenticate(authorization);
+    const cookie = sessionCookie(authorization.slice('Bearer '.length), session);
+    c.header('set-cookie', cookie.header);
+    return c.json({ ok: true, ...(cookie.expiresAt ? { expiresAt: cookie.expiresAt } : {}) });
+  });
+
+  app.delete(routes.deleteSession.path, (c) => {
+    c.header('set-cookie', clearedSessionCookie(session));
+    return c.json({ ok: true });
   });
 
   app.get('/v1/health', (c) => c.json({ ok: true, apex: deps.apexDomain }));
@@ -76,7 +106,7 @@ export function buildApexApp(deps: ApexDeps): Hono {
 
   /** Create an org: {name, slug} → org at slug.<apexDomain>, caller = first admin. */
   app.post('/v1/orgs', async (c) => {
-    const identity = await deps.auth.authenticate(c.req.header('authorization'));
+    const identity = await identityOf(c);
     const body = (await c.req.json().catch(() => ({}))) as { name?: unknown; slug?: unknown };
     const name = typeof body.name === 'string' ? body.name.trim() : '';
     const slug = typeof body.slug === 'string' ? body.slug.trim().toLowerCase() : '';
@@ -103,18 +133,15 @@ export function buildApexApp(deps: ApexDeps): Hono {
     }
     const store = new PgStore(deps.db, org.id);
     const member = await store.getMemberByIdentity(identity.iss, identity.sub);
-    // Landing area: a first space with a welcome README, so a fresh org is a
-    // place rather than an empty list. Attributed to the founder — every act
-    // belongs to a member, and this is theirs.
+    // Landing area: one space named after the org, so a fresh org is a group
+    // chat — the conversation itself, no #general and no README to read past
+    // (2026-10-07: onboarding as simple as a WhatsApp group; channels come
+    // when someone adds a second space). Attributed to the founder. It is
+    // open and the org's first default space (spec §5 answer 3, built
+    // 2026-10-19), so everyone an invite admits lands in it.
     if (member) {
       const service = await deps.serviceFor(org);
-      const space = await service.createSpace({ memberId: member.id }, 'general');
-      await service.createAsset({ memberId: member.id }, space.id, {
-        path: 'README.md',
-        newContent: welcomeReadme(org.name),
-        reason: 'seed the landing page',
-        actingMode: 'direct',
-      });
+      await service.createSpace({ memberId: member.id }, org.name, 'open', { isDefault: true });
     }
     return c.json({
       org: { id: org.id, name: org.name, address: domain },
@@ -124,30 +151,31 @@ export function buildApexApp(deps: ApexDeps): Hono {
 
   /** The caller's orgs on this deployment — what the app lists after sign-in. */
   app.get('/v1/orgs', async (c) => {
-    const identity = await deps.auth.authenticate(c.req.header('authorization'));
+    const identity = await identityOf(c);
     // One statement over the identity table, whatever the number of orgs on the deployment (2026-09-22).
     return c.json({ orgs: await deps.directory.listOrgsForIdentity(identity.iss, identity.sub) });
   });
 
+  /**
+   * Account deletion, minimal v1 (2026-10-08, App Store 5.1.1(v)): the caller
+   * leaves every org on the deployment — each member deactivated in place
+   * (core/spaces.ts deactivateSelf). The app calls this before the account
+   * API bans the login, while the token is still good. Idempotent: a repeat
+   * finds no orgs and returns an empty list.
+   */
+  app.delete('/v1/me', async (c) => {
+    const identity = await deps.auth.authenticate(c.req.header('authorization'));
+    const rows = await deps.directory.listOrgsForIdentity(identity.iss, identity.sub);
+    for (const row of rows) {
+      const org = await deps.directory.getById(row.id);
+      if (!org) continue;
+      const service = await deps.serviceFor(org);
+      await service.deactivateSelf({ memberId: row.memberId });
+    }
+    return c.json({ deactivated: rows.map((r) => r.id) });
+  });
+
   return app;
-}
-
-function welcomeReadme(orgName: string): string {
-  return `# Welcome to ${orgName}
-
-This is your team's shared corner. **general** is its first space — talk and files in one place, for you, your teammates, and everyone's agents.
-
-## What happens here
-
-- **Talk in Messages.** The open stream is where the team thinks out loud. A message that gets replies becomes its own topic.
-- **Files are the record.** Anything the team agrees on — plans, notes, decisions — lives here as files everyone (and everyone's agent) can read and propose changes to. This README is one: edit it, replace it, make it yours.
-- **Ask @rowboat.** Mention @rowboat in any message and *your* agent picks it up — summarize a thread, draft a doc, fold a decision into a file.
-- **Invite your team.** Share an invite link from the space menu. Each person signs in with their own account, and each person's agent acts as them — never as a bot with special powers.
-
-## When to make more spaces
-
-Start here in general. When one project or team-area grows its own steady stream of talk and files, give it a space of its own — spaces are cheap, attention isn't.
-`;
 }
 
 function adminDisplayName(identity: { sub: string; email?: string; name?: string }): string {

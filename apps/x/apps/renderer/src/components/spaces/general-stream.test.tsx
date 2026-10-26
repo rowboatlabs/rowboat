@@ -1,3 +1,5 @@
+import { SpaceAccessContext } from '@/lib/spaces-access'
+import { markStreamRead } from '@/lib/spaces-read-state'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { spaces } from '@x/shared'
@@ -14,7 +16,9 @@ import type { SpacePresence, StreamState } from '@/hooks/use-space-chat'
 vi.mock('@/components/spaces/composer', () => ({ Composer: () => null }))
 vi.mock('@/components/spaces/message-row', () => ({
     DayDivider: () => null,
-    MessageRow: ({ message }: { message: { id: string; body: string } }) => <div data-mid={message.id}>{message.body}</div>,
+    MessageRow: ({ message, arriving, threadOpen }: { message: { id: string; body: string }; arriving?: boolean; threadOpen?: boolean }) => (
+        <div data-mid={message.id} data-arriving={arriving || undefined} data-thread-open={threadOpen || undefined}>{message.body}</div>
+    ),
     NewDivider: () => null,
     TypingIndicator: () => null,
 }))
@@ -73,7 +77,7 @@ const msg = (offset: number): spaces.Message =>
     }) as spaces.Message
 const range = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => msg(from + i))
 const streamOf = (messages: spaces.Message[], patch: Partial<StreamState> = {}): StreamState => ({
-    messages, topicsByRoot: new Map(), hasMore: false, loadingOlder: false, hasMoreAfter: false, newerSince: 0, ready: true, ...patch,
+    messages, topicsByRoot: new Map(), events: [], hasMore: false, loadingOlder: false, hasMoreAfter: false, newerSince: 0, ready: true, ...patch,
 })
 const org = { id: 'org', memberId: 'me', address: 'org.example', name: 'Org', spaces: [], directs: [], directLabels: {} } as unknown as OrgWithSpaces
 const space = { id: 'space', name: 'Space', createdAt: '2026-09-01T00:00:00Z', kind: 'shared' } as spaces.Space
@@ -212,5 +216,88 @@ describe('GeneralStream jump to a row outside the window', () => {
         rerender(streamOf(range(90, 100)))
         await act(async () => {})
         expect(getMessage).toHaveBeenCalledTimes(1)
+    })
+})
+
+
+it('renders preview content and an explicit Join action without marking it read', () => {
+    vi.mocked(markStreamRead).mockClear()
+    const join = vi.fn()
+    render(<SpaceAccessContext.Provider value={{ member: false, writable: false, archived: false, join, joining: false }}>
+        <GeneralStream org={org} space={space} stream={streamOf([msg(1)])} presence={presence} memberNames={new Map()}
+            onOpenThread={vi.fn()} />
+    </SpaceAccessContext.Provider>)
+    expect(screen.getByText('body 1')).toBeInTheDocument()
+    expect(vi.mocked(markStreamRead)).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Join space' }))
+    expect(join).toHaveBeenCalledTimes(1)
+})
+
+describe('GeneralStream join lines (2026-09-29)', () => {
+    const names = new Map([['alex', 'Alex'], ['sam', 'Sam'], ['kim', 'Kim']])
+    const joined = (offset: number, memberId: string, by?: string): spaces.StreamEvent => ({
+        offset,
+        at: '2026-09-14T09:00:00Z',
+        event: {
+            type: 'membership',
+            action: 'joined',
+            membership: { spaceId: 'space', memberId, joinedAt: '2026-09-14T09:00:00Z' },
+            ...(by ? { by: { memberId: by, actingMode: 'direct' as const } } : {}),
+        },
+    })
+    const show = (stream: StreamState, where: spaces.Space = space) =>
+        render(<GeneralStream org={org} space={where} stream={stream} presence={presence} memberNames={names} onOpenThread={vi.fn()} />)
+    const drawn = () => [...document.querySelectorAll('[data-mid], .spaces-membership-line')].map((el) => el.textContent)
+
+    it('draws each line before the first message after it, and the newest after the last', async () => {
+        show(streamOf([msg(2), msg(5)], { events: [joined(1, 'alex'), joined(3, 'sam', 'alex'), joined(7, 'kim')] }))
+        await screen.findByText('body 5')
+        expect(drawn()).toEqual(['Alex joined', 'body 2', 'Alex added Sam', 'body 5', 'Kim joined'])
+    })
+
+    it('keeps the empty-space copy when only lines exist, and draws none in a DM', async () => {
+        show(streamOf([], { events: [joined(1, 'alex')] }))
+        expect(screen.getByText(/Nothing here yet/)).toBeTruthy()
+        expect(drawn()).toEqual(['Alex joined'])
+        cleanup()
+        show(streamOf([msg(2)], { events: [joined(1, 'alex')] }), { ...space, kind: 'direct', participants: ['me', 'alex'] } as spaces.Space)
+        await screen.findByText('body 2')
+        expect(drawn()).toEqual(['body 2'])
+    })
+})
+
+describe('GeneralStream live arrivals (spaces redesign 2026-10-21)', () => {
+    const arriving = () => [...document.querySelectorAll('[data-arriving]')].map((el) => el.getAttribute('data-mid'))
+
+    it('rises in only rows that land live at the tail — not the first paint, an older page, or a catch-up burst', async () => {
+        const { rerender } = mount(streamOf(range(10, 12)))
+        await screen.findByText('body 12')
+        expect(arriving()).toEqual([])
+        rerender(streamOf(range(10, 13)))
+        expect(arriving()).toEqual(['m13'])
+        // An older page prepends below the newest offset seen: no entrance.
+        rerender(streamOf(range(5, 13)))
+        expect(arriving()).toEqual(['m13'])
+        // A burst bigger than live traffic is a resync.
+        rerender(streamOf(range(5, 20)))
+        expect(arriving()).toEqual(['m13'])
+    })
+
+    it('skips the confirm of the viewer\'s own send (its pending echo already rose in)', async () => {
+        const { rerender } = mount(streamOf(range(1, 2)))
+        await screen.findByText('body 2')
+        const pending = { ...msg(999), id: 'pending-1', author: { memberId: 'me', actingMode: 'direct' }, pending: true } as spaces.Message
+        rerender(streamOf([...range(1, 2), pending]))
+        expect(arriving()).toEqual(['pending-1'])
+        const confirmed = { ...msg(3), author: { memberId: 'me', actingMode: 'direct' } } as spaces.Message
+        rerender(streamOf([...range(1, 2), confirmed]))
+        expect(arriving()).toEqual([])
+    })
+
+    it('marks the root whose thread is open', async () => {
+        render(<GeneralStream org={org} space={space} stream={streamOf([{ ...msg(1), replyCount: 2 } as spaces.Message, msg(2)])} presence={presence}
+            memberNames={new Map()} onOpenThread={vi.fn()} openThreadId="m1" />)
+        await screen.findByText('body 2')
+        expect([...document.querySelectorAll('[data-thread-open]')].map((el) => el.getAttribute('data-mid'))).toEqual(['m1'])
     })
 })

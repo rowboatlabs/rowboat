@@ -25,6 +25,7 @@ vi.mock('@/components/spaces/message-row', () => ({
 }))
 vi.mock('@/components/spaces/artifacts', () => ({ ArtifactsSummary: () => null }))
 vi.mock('@/components/spaces/atoms', () => ({
+    AgentMark: () => null,
     MemberAvatar: () => <span />,
     MemberProfilePopover: ({ children }: { children: ReactNode }) => <>{children}</>,
 }))

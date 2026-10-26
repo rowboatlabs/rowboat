@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { ChevronDownIcon, LoaderIcon } from 'lucide-react'
-import { Streamdown } from 'streamdown'
+import { Streamdown } from '@/components/streamdown'
 import { Collapsible, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Shimmer } from '@/components/ai-elements/shimmer'
 import {

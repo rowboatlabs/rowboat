@@ -3,6 +3,9 @@ import { routes } from '@rowboat/spaces-protocol';
 import type { z } from 'zod';
 import { authenticateRequest, protectedResourceMetadata, wwwAuthenticate, type AuthIdentity, type OrgAuth } from './auth.js';
 import { consentPageHtml } from './consent.js';
+import { webCors } from './cors.js';
+import { clearedSessionCookie, sessionCookie, sessionToken, type SessionCookieConfig } from './session.js';
+import { MAX_PROFILE_IMAGE_BYTES } from './core/images.js';
 import { HarborError } from './errors.js';
 import { publicOrigin } from './origin.js';
 import type { HarborService } from './service.js';
@@ -12,10 +15,12 @@ import type { HarborService } from './service.js';
 // too before they leave, so contract drift fails loudly in the stub instead of
 // silently in a client.
 
-type Env = { Variables: { memberId: string; identity?: AuthIdentity } };
+type Env = { Variables: { memberId: string; agent?: boolean; identity?: AuthIdentity; viaSession?: boolean } };
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 /** Uploads only (raw-bytes route). 100MB across the board — dogfood decision 2026-08-24. */
 const DEFAULT_MAX_BLOB_BYTES = 100 * 1024 * 1024;
+/** A service's alert is a small JSON event (spec §8 Alerts, 2026-10-03). */
+const MAX_HOOK_BYTES = 256 * 1024;
 
 function parseWith<S extends z.ZodType>(schema: S, value: unknown): z.infer<S> {
   const r = schema.safeParse(value);
@@ -44,8 +49,20 @@ function reply<S extends z.ZodType>(c: Context<Env>, schema: S, data: z.infer<S>
   return c.json(r.data as object);
 }
 
-function actor(c: Context<Env>): { memberId: string } {
-  return { memberId: c.get('memberId') };
+/** A blob or an image read: the routes a browser loads with no Origin (an <img>, a link opened in a tab). */
+function blobRead(method: string, path: string): boolean {
+  return (method === 'GET' || method === 'HEAD') && /^\/v1\/(spaces\/[^/]+\/blobs|images)\/[0-9a-f]{64}$/.test(path);
+}
+
+/** A served blob's body: its stream (a store that streams), else its bytes. */
+function bodyOf(result: { bytes?: Uint8Array; stream?: ReadableStream<Uint8Array> }): ArrayBuffer | ReadableStream<Uint8Array> {
+  if (result.stream) return result.stream;
+  const bytes = result.bytes!;
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
+
+function actor(c: Context<Env>): { memberId: string; agent?: boolean } {
+  return { memberId: c.get('memberId'), ...(c.get('agent') ? { agent: true } : {}) };
 }
 
 export function buildHttpApp(deps: {
@@ -55,6 +72,12 @@ export function buildHttpApp(deps: {
   consent?: { issuer: string; publishableKey: string };
   /** Upload cap for the raw-bytes blob route (default 100MB). */
   maxBlobBytes?: number;
+  /** Browser origins allowed to call this org cross-origin (cors.ts), and to use the session cookie (session.ts). */
+  webOrigins?: readonly string[];
+  /** The session cookie's Domain: the apex on a deployment, so one cookie covers every org. */
+  sessionCookieDomain?: string;
+  /** The Spaces web app, which a browser-opened org link offers beside the desktop app (the landings below). */
+  webAppUrl?: string;
 }): Hono<Env> {
   const { service, auth, consent } = deps;
   const maxBlobBytes = deps.maxBlobBytes ?? DEFAULT_MAX_BLOB_BYTES;
@@ -68,6 +91,12 @@ export function buildHttpApp(deps: {
     if (e.code === 'unauthorized' && auth.metadata()) c.header('WWW-Authenticate', wwwAuthenticate(publicOrigin(c)));
     return c.json(e.toBody(), e.status as 400);
   });
+
+  app.use('*', webCors(deps.webOrigins ?? []));
+  const session: SessionCookieConfig = {
+    webOrigins: new Set(deps.webOrigins ?? []),
+    ...(deps.sessionCookieDomain ? { domain: deps.sessionCookieDomain } : {}),
+  };
 
   // RFC 9728 protected-resource metadata: the org names its authorization
   // server here (the org is only ever a resource server — spec §4). 404 under
@@ -92,21 +121,101 @@ export function buildHttpApp(deps: {
   // legitimately authenticated-but-not-yet-a-member: it gets the identity and
   // the handler runs the bind ceremony instead.
   app.use('/v1/*', async (c, next) => {
-    if (c.req.path === routes.resolveInvite.path || c.req.path === '/v1/health') return next();
-    const credentials = { authorization: c.req.header('authorization'), queryToken: new URL(c.req.url).searchParams.get('token') };
+    if (c.req.path === routes.resolveInvite.path || c.req.path === '/v1/health' || c.req.path === routes.createSession.path) return next();
+    // A service's alert carries no bearer: the secret in its address is the credential (spec §8 Alerts, 2026-10-03).
+    if (c.req.path.startsWith('/v1/hooks/')) return next();
+    const authorization = c.req.header('authorization');
+    const query = new URL(c.req.url).searchParams.get('token');
+    // The web app's cookie (session.ts) counts only when neither the header
+    // nor a query token came, and only from a listed origin. A blob read may
+    // come with no Origin at all: an <img>, or a link opened in a tab.
+    const cookie = authorization || query
+      ? undefined
+      : sessionToken({ cookie: c.req.header('cookie'), origin: c.req.header('origin') }, session.webOrigins, { originless: blobRead(c.req.method, c.req.path) });
+    if (cookie) c.set('viaSession', true);
+    const credentials = { authorization, queryToken: query ?? cookie };
     if (c.req.path === routes.acceptInvite.path) {
       const { identity, member } = await authenticateRequest(auth, credentials, { allowUnmapped: true });
       c.set('identity', identity);
       if (member) c.set('memberId', member.id);
       return next();
     }
-    c.set('memberId', (await authenticateRequest(auth, credentials)).member.id);
+    const { member } = await authenticateRequest(auth, credentials);
+    c.set('memberId', member.id);
+    // An agent presenting its own key acts as itself (2026-09-29).
+    if (member.kind === 'agent') c.set('agent', true);
     return next();
   });
 
   app.get('/v1/health', (c) => c.json({ ok: true, org: { name: service.org.name, address: service.org.address } }));
 
+  // The web app's session (session.ts): the bearer in, the cookie out. The
+  // token only has to be valid here; membership is checked per org on use.
+  app.post(routes.createSession.path, async (c) => {
+    const authorization = c.req.header('authorization');
+    if (!authorization?.startsWith('Bearer ')) throw new HarborError('unauthorized', 'a session starts from a bearer in the Authorization header');
+    await auth.authenticate(authorization);
+    const cookie = sessionCookie(authorization.slice('Bearer '.length), session);
+    c.header('set-cookie', cookie.header);
+    return reply(c, routes.createSession.response, { ok: true, ...(cookie.expiresAt ? { expiresAt: cookie.expiresAt } : {}) });
+  });
+
+  app.delete(routes.deleteSession.path, (c) => {
+    c.header('set-cookie', clearedSessionCookie(session));
+    return reply(c, routes.deleteSession.response, { ok: true });
+  });
+
   app.get(routes.me.path, async (c) => reply(c, routes.me.response, { member: await service.me(actor(c)) }));
+
+  app.put(routes.updateMe.path, async (c) => {
+    const input = await body(c, routes.updateMe.request);
+    return reply(c, routes.updateMe.response, { member: await service.updateProfile(actor(c), input) });
+  });
+
+  // --- profile images (2026-10-02) -------------------------------------------
+  // The body is the image; the limit is checked on the claim and again on the bytes.
+  const imageBody = async (c: Context<Env>): Promise<Uint8Array> => {
+    if (Number(c.req.header('content-length') ?? '0') > MAX_PROFILE_IMAGE_BYTES) {
+      throw new HarborError('payload_too_large', `profile images are limited to ${MAX_PROFILE_IMAGE_BYTES} bytes`);
+    }
+    return new Uint8Array(await c.req.arrayBuffer());
+  };
+
+  app.put(routes.setAvatar.path, async (c) =>
+    reply(c, routes.setAvatar.response, { member: await service.setAvatar(actor(c), await imageBody(c), publicOrigin(c)) }));
+
+  app.delete(routes.clearAvatar.path, async (c) =>
+    reply(c, routes.clearAvatar.response, { member: await service.clearAvatar(actor(c)) }));
+
+  app.get(routes.getOrgLogo.path, async (c) => {
+    const logoUrl = await service.orgLogoUrl(actor(c), publicOrigin(c));
+    return reply(c, routes.getOrgLogo.response, logoUrl ? { logoUrl } : {});
+  });
+
+  app.put(routes.setOrgLogo.path, async (c) =>
+    reply(c, routes.setOrgLogo.response, await service.setOrgLogo(actor(c), await imageBody(c), publicOrigin(c))));
+
+  app.delete(routes.clearOrgLogo.path, async (c) =>
+    reply(c, routes.clearOrgLogo.response, await service.clearOrgLogo(actor(c))));
+
+  // Immutable by address → cache forever, privately. Always an image (sniffed at upload).
+  app.get(routes.getImage.path, async (c) => {
+    const { hash } = parseWith(routes.getImage.params, c.req.param());
+    // On the session cookie the bytes come through Harbor, so a browser caches
+    // them forever and needs no CORS from the store (2026-10-12).
+    const result = await service.getImage(actor(c), hash, { inline: c.get('viaSession') === true });
+    if (result.url) {
+      c.header('cache-control', 'private, max-age=240');
+      return c.redirect(result.url, 302);
+    }
+    c.header('content-type', result.blob.mime);
+    c.header('content-length', String(result.blob.size));
+    c.header('content-disposition', 'inline');
+    c.header('cache-control', 'private, max-age=31536000, immutable');
+    c.header('x-content-type-options', 'nosniff');
+    c.header('content-security-policy', "default-src 'none'");
+    return c.body(bodyOf(result));
+  });
 
   // --- spaces & membership ---------------------------------------------------
 
@@ -116,7 +225,7 @@ export function buildHttpApp(deps: {
       ...(c.req.query('includeDirect') !== undefined ? { includeDirect: c.req.query('includeDirect') } : {}),
     });
     const spaces = await service.listSpaces(actor(c), { includeDirect: q.includeDirect ?? false });
-    return reply(c, routes.listSpaces.response, { spaces });
+    return reply(c, routes.listSpaces.response, { spaces, groupChat: await service.isGroupChat() });
   });
 
   app.get(routes.browseSpaces.path, async (c) =>
@@ -136,6 +245,42 @@ export function buildHttpApp(deps: {
     const { spaceId } = parseWith(routes.renameSpace.params, c.req.param());
     const input = await body(c, routes.renameSpace.request);
     return reply(c, routes.renameSpace.response, { space: await service.renameSpace(actor(c), spaceId, input) });
+  });
+
+  app.post(routes.archiveSpace.path, async (c) => {
+    const { spaceId } = parseWith(routes.archiveSpace.params, c.req.param());
+    const input = await body(c, routes.archiveSpace.request);
+    return reply(c, routes.archiveSpace.response, { space: await service.archiveSpace(actor(c), spaceId, input) });
+  });
+
+  app.delete(routes.deleteSpace.path, async (c) => {
+    const { spaceId } = parseWith(routes.deleteSpace.params, c.req.param());
+    await service.deleteSpace(actor(c), spaceId);
+    return reply(c, routes.deleteSpace.response, { deleted: true });
+  });
+
+  app.post(routes.setSpaceVisibility.path, async (c) => {
+    const { spaceId } = parseWith(routes.setSpaceVisibility.params, c.req.param());
+    const input = await body(c, routes.setSpaceVisibility.request);
+    return reply(c, routes.setSpaceVisibility.response, { space: await service.setSpaceVisibility(actor(c), spaceId, input) });
+  });
+
+  app.post(routes.removeMember.path, async (c) => {
+    const { spaceId, memberId } = parseWith(routes.removeMember.params, c.req.param());
+    const input = await body(c, routes.removeMember.request);
+    return reply(c, routes.removeMember.response, await service.removeMember(actor(c), spaceId, memberId, input));
+  });
+
+  app.post(routes.unarchiveSpace.path, async (c) => {
+    const { spaceId } = parseWith(routes.unarchiveSpace.params, c.req.param());
+    const input = await body(c, routes.unarchiveSpace.request);
+    return reply(c, routes.unarchiveSpace.response, { space: await service.unarchiveSpace(actor(c), spaceId, input) });
+  });
+
+  app.post(routes.setDefaultSpace.path, async (c) => {
+    const { spaceId } = parseWith(routes.setDefaultSpace.params, c.req.param());
+    const input = await body(c, routes.setDefaultSpace.request);
+    return reply(c, routes.setDefaultSpace.response, { space: await service.setDefaultSpace(actor(c), spaceId, input) });
   });
 
   app.post(routes.openDirect.path, async (c) => {
@@ -158,6 +303,27 @@ export function buildHttpApp(deps: {
     return reply(c, routes.listMembers.response, { members: await service.listMembers(actor(c), spaceId) });
   });
 
+  app.post(routes.removeOrgMember.path, async (c) => {
+    const { memberId } = parseWith(routes.removeOrgMember.params, c.req.param());
+    const input = await body(c, routes.removeOrgMember.request);
+    return reply(c, routes.removeOrgMember.response, { member: await service.removeOrgMember(actor(c), memberId, input) });
+  });
+
+  app.post(routes.setMemberRole.path, async (c) => {
+    const { memberId } = parseWith(routes.setMemberRole.params, c.req.param());
+    const input = await body(c, routes.setMemberRole.request);
+    return reply(c, routes.setMemberRole.response, { member: await service.setMemberRole(actor(c), memberId, input) });
+  });
+
+  app.get(routes.getOrgSettings.path, async (c) => {
+    return reply(c, routes.getOrgSettings.response, { settings: await service.getOrgSettings(actor(c)) });
+  });
+
+  app.patch(routes.updateOrgSettings.path, async (c) => {
+    const input = await body(c, routes.updateOrgSettings.request);
+    return reply(c, routes.updateOrgSettings.response, { settings: await service.updateOrgSettings(actor(c), input) });
+  });
+
   app.get(routes.listOrgMembers.path, async (c) => {
     return reply(c, routes.listOrgMembers.response, { members: await service.listOrgMembers(actor(c)) });
   });
@@ -168,11 +334,183 @@ export function buildHttpApp(deps: {
     return reply(c, routes.leaveSpace.response, { left: true });
   });
 
+  // --- invocations (spec §8): the connector's operations, on an agent's own key ----
+
+  app.get(routes.listAgentInvocations.path, async (c) =>
+    reply(c, routes.listAgentInvocations.response, {
+      invocations: await service.listAgentInvocations(actor(c)),
+      approvals: await service.listApprovalDecisions(actor(c)),
+    }));
+
+  // Approvals (spec §8 part 4, 2026-10-01): the connector raises and settles; a person decides, REST only.
+  app.post(routes.requestApproval.path, async (c) => {
+    const { invocationId } = parseWith(routes.requestApproval.params, c.req.param());
+    const request = await body(c, routes.requestApproval.request);
+    return reply(c, routes.requestApproval.response, await service.requestApproval(actor(c), invocationId, request));
+  });
+
+  app.post(routes.applyApproval.path, async (c) => {
+    const { approvalId } = parseWith(routes.applyApproval.params, c.req.param());
+    return reply(c, routes.applyApproval.response, { approval: await service.applyApproval(actor(c), approvalId) });
+  });
+
+  app.post(routes.closeApproval.path, async (c) => {
+    const { approvalId } = parseWith(routes.closeApproval.params, c.req.param());
+    const close = await body(c, routes.closeApproval.request);
+    return reply(c, routes.closeApproval.response, { approval: await service.closeApproval(actor(c), approvalId, close) });
+  });
+
+  app.post(routes.decideApproval.path, async (c) => {
+    const { spaceId, approvalId } = parseWith(routes.decideApproval.params, c.req.param());
+    const decision = await body(c, routes.decideApproval.request);
+    return reply(c, routes.decideApproval.response, { approval: await service.decideApproval(actor(c), spaceId, approvalId, decision) });
+  });
+
+  app.post(routes.acknowledgeInvocation.path, async (c) => {
+    const { invocationId } = parseWith(routes.acknowledgeInvocation.params, c.req.param());
+    return reply(c, routes.acknowledgeInvocation.response, { invocation: await service.acknowledgeInvocation(actor(c), invocationId) });
+  });
+
+  app.post(routes.updateInvocation.path, async (c) => {
+    const { invocationId } = parseWith(routes.updateInvocation.params, c.req.param());
+    const update = await body(c, routes.updateInvocation.request);
+    return reply(c, routes.updateInvocation.response, { invocation: await service.updateInvocation(actor(c), invocationId, update) });
+  });
+
+  app.post(routes.declareCapabilities.path, async (c) => {
+    const capabilities = await body(c, routes.declareCapabilities.request);
+    return reply(c, routes.declareCapabilities.response, { capabilities: await service.declareCapabilities(actor(c), capabilities) });
+  });
+
+  // --- invocations: people's side ----------------------------------------------------
+
+  app.get(routes.getAgentCapabilities.path, async (c) => {
+    const { agentId } = parseWith(routes.getAgentCapabilities.params, c.req.param());
+    return reply(c, routes.getAgentCapabilities.response, {
+      capabilities: await service.getAgentCapabilities(agentId),
+      defaults: await service.getAgentOptionDefaults(agentId),
+    });
+  });
+
+  app.get(routes.listInvocations.path, async (c) => {
+    const { spaceId } = parseWith(routes.listInvocations.params, c.req.param());
+    const q = parseWith(routes.listInvocations.query, c.req.query());
+    return reply(c, routes.listInvocations.response, { invocations: await service.listInvocations(actor(c), spaceId, q.threadRootId) });
+  });
+
+  app.post(routes.cancelInvocation.path, async (c) => {
+    const { invocationId } = parseWith(routes.cancelInvocation.params, c.req.param());
+    return reply(c, routes.cancelInvocation.response, { invocation: await service.cancelInvocation(actor(c), invocationId) });
+  });
+
+  // --- agents and their keys (render face only: secrets never cross a tool) ----
+
+  app.get(routes.listAgents.path, async (c) =>
+    reply(c, routes.listAgents.response, { agents: await service.listAgents(actor(c)) }));
+
+  app.post(routes.createAgent.path, async (c) => {
+    const input = await body(c, routes.createAgent.request);
+    return reply(
+      c,
+      routes.createAgent.response,
+      await service.addAgent(actor(c), {
+        displayName: input.displayName,
+        kind: input.kind,
+        connection: input.connection,
+        ...(input.credential !== undefined ? { credential: input.credential } : {}),
+        ...(input.instance !== undefined ? { instance: input.instance } : {}),
+      }),
+    );
+  });
+
+  // Managed agents (spec §8 Maritime, 2026-10-26): created on the platform Rowboat's own account runs.
+  app.get(routes.managedAgentKinds.path, async (c) => reply(c, routes.managedAgentKinds.response, { kinds: await service.managedAgentKinds(actor(c)) }));
+
+  app.post(routes.createManagedAgent.path, async (c) => {
+    const input = await body(c, routes.createManagedAgent.request);
+    return reply(
+      c,
+      routes.createManagedAgent.response,
+      await service.createManagedAgent(actor(c), {
+        displayName: input.displayName,
+        kind: input.kind,
+        ...(input.anthropicApiKey !== undefined ? { anthropicApiKey: input.anthropicApiKey } : {}),
+        ...(input.env !== undefined ? { env: input.env } : {}),
+      }),
+    );
+  });
+
+  app.delete(routes.deleteManagedAgent.path, async (c) => {
+    const { agentId } = parseWith(routes.deleteManagedAgent.params, c.req.param());
+    return reply(c, routes.deleteManagedAgent.response, { hosting: await service.deleteManagedAgent(actor(c), agentId) });
+  });
+
+  app.put(routes.setAgentCredential.path, async (c) => {
+    const { agentId } = parseWith(routes.setAgentCredential.params, c.req.param());
+    const input = await body(c, routes.setAgentCredential.request);
+    return reply(c, routes.setAgentCredential.response, { credential: await service.setAgentCredential(actor(c), agentId, input.secret) });
+  });
+
+  app.put(routes.renameAgent.path, async (c) => {
+    const { agentId } = parseWith(routes.renameAgent.params, c.req.param());
+    const input = await body(c, routes.renameAgent.request);
+    return reply(c, routes.renameAgent.response, { agent: await service.renameAgent(actor(c), agentId, input) });
+  });
+
+  app.put(routes.setAgentOptionDefaults.path, async (c) => {
+    const { agentId } = parseWith(routes.setAgentOptionDefaults.params, c.req.param());
+    const input = await body(c, routes.setAgentOptionDefaults.request);
+    return reply(c, routes.setAgentOptionDefaults.response, { defaults: await service.setAgentOptionDefaults(actor(c), agentId, input.defaults) });
+  });
+
+  app.put(routes.setAgentHook.path, async (c) => {
+    const { agentId } = parseWith(routes.setAgentHook.params, c.req.param());
+    const input = await body(c, routes.setAgentHook.request);
+    const { hook, token } = await service.setAgentHook(actor(c), agentId, input.spaceId);
+    return reply(c, routes.setAgentHook.response, { hook, url: `${publicOrigin(c)}/v1/hooks/${agentId}/${token}` });
+  });
+
+  app.delete(routes.clearAgentHook.path, async (c) => {
+    const { agentId } = parseWith(routes.clearAgentHook.params, c.req.param());
+    await service.clearAgentHook(actor(c), agentId);
+    return reply(c, routes.clearAgentHook.response, {});
+  });
+
+  app.post(routes.receiveAgentHook.path, async (c) => {
+    const { agentId, token } = parseWith(routes.receiveAgentHook.params, c.req.param());
+    if (Number(c.req.header('content-length') ?? '0') > MAX_HOOK_BYTES) throw new HarborError('payload_too_large', `alerts are limited to ${MAX_HOOK_BYTES} bytes`);
+    const text = await c.req.text();
+    if (text.length > MAX_HOOK_BYTES) throw new HarborError('payload_too_large', `alerts are limited to ${MAX_HOOK_BYTES} bytes`);
+    let payload: unknown;
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      throw new HarborError('invalid_request', 'an alert is a JSON body');
+    }
+    return reply(c, routes.receiveAgentHook.response, { posted: await service.receiveAgentHook(agentId, token, payload) });
+  });
+
+  app.post(routes.createAgentKey.path, async (c) => {
+    const { agentId } = parseWith(routes.createAgentKey.params, c.req.param());
+    return reply(c, routes.createAgentKey.response, { key: await service.createAgentKey(actor(c), agentId) });
+  });
+
+  app.post(routes.revokeAgentKey.path, async (c) => {
+    const { agentId, keyId } = parseWith(routes.revokeAgentKey.params, c.req.param());
+    return reply(c, routes.revokeAgentKey.response, { key: await service.revokeAgentKey(actor(c), agentId, keyId) });
+  });
+
+  app.post(routes.addMembers.path, async (c) => {
+    const { spaceId } = parseWith(routes.addMembers.params, c.req.param());
+    const input = await body(c, routes.addMembers.request);
+    return reply(c, routes.addMembers.response, { memberships: await service.addMembers(actor(c), spaceId, input) });
+  });
+
   // --- invites ---------------------------------------------------------------
 
   app.post(routes.createInvite.path, async (c) => {
     const input = await body(c, routes.createInvite.request);
-    return reply(c, routes.createInvite.response, await service.createInvite(actor(c), input.spaceId, input.expiresInHours));
+    return reply(c, routes.createInvite.response, await service.createInvite(actor(c), input));
   });
 
   app.post(routes.resolveInvite.path, async (c) => {
@@ -191,6 +529,15 @@ export function buildHttpApp(deps: {
     return reply(c, routes.acceptInvite.response, result);
   });
 
+  // Where a browser-opened link goes (2026-10-13, Slack's pattern): the
+  // desktop app, launched at once, else the web app when this Harbor names
+  // one. The web app's /open takes the deep link's query unchanged, so both
+  // resolve the link the same way (the renderer's parseSpacesLink).
+  const openers = (query: string): Openers => ({
+    deep: `rowboat://open?${query}`,
+    ...(deps.webAppUrl ? { web: `${deps.webAppUrl.replace(/\/$/, '')}/open?${query}` } : {}),
+  });
+
   // The invite link's landing (2026-09-15): a browser-opened /join/<token>
   // hands the invite into the app as rowboat://open?type=spaces&org=…&invite=…
   // — the same deep-link grammar as the org link landings below, the org
@@ -201,24 +548,19 @@ export function buildHttpApp(deps: {
     const token = c.req.param('token');
     const resolved = await service.resolveInvite(token);
     if (resolved.state !== 'ok') return c.html(invitePage({ state: resolved.state }), 410);
-    const deep = `rowboat://open?type=spaces&org=${encodeURIComponent(service.org.address)}&invite=${encodeURIComponent(token)}`;
-    return c.html(invitePage({ state: 'ok', space: resolved.space.name, org: resolved.org.name, invitedBy: resolved.invitedBy, deep }));
+    const query = `type=spaces&org=${encodeURIComponent(service.org.address)}&invite=${encodeURIComponent(token)}`;
+    return c.html(invitePage({ state: 'ok', spaces: resolved.spaces.map((s) => s.name), org: resolved.org.name, invitedBy: resolved.invitedBy, ...openers(query) }));
   });
 
   // --- link landings ---------------------------------------------------------
   // Every org link (ids.ts grammar) opened in a browser lands here and is
-  // handed into the app as a rowboat:// deep link, the org named by its
-  // address. Nothing is looked up and nothing is rendered about the target,
-  // so a link says nothing to someone who cannot open it. The app itself
-  // intercepts these URLs before they ever reach a browser.
+  // handed on, the org named by its address. Nothing is looked up and nothing
+  // is rendered about the target, so a link says nothing to someone who
+  // cannot open it. The app itself intercepts these URLs before they ever
+  // reach a browser.
   const landing = (target: URLSearchParams) => {
     target.set('org', service.org.address);
-    const deep = `rowboat://open?type=spaces&${target.toString()}`;
-    return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Open in Rowboat</title>` +
-      `<style>body{font:15px/1.5 system-ui,sans-serif;margin:0;display:grid;place-items:center;min-height:100vh;color:#222;background:#fafafa}` +
-      `main{text-align:center;padding:2rem}a.b{display:inline-block;margin-top:1rem;padding:.6rem 1.1rem;border-radius:8px;background:#111;color:#fff;text-decoration:none}</style>` +
-      `<main><p>This link opens in Rowboat.</p><a class="b" href="${deep}">Open in Rowboat</a></main>` +
-      `<script>location.replace(${JSON.stringify(deep)})</script>`;
+    return landingPage(openers(`type=spaces&${target.toString()}`));
   };
   app.get('/', (c) => c.html(landing(new URLSearchParams())));
   app.get('/s/:spaceId', (c) => c.html(landing(new URLSearchParams({ spaceId: c.req.param('spaceId') }))));
@@ -336,8 +678,12 @@ export function buildHttpApp(deps: {
     const { spaceId, hash } = parseWith(routes.getBlob.params, c.req.param());
     const q = parseWith(routes.getBlob.query, {
       ...(c.req.query('name') !== undefined ? { name: c.req.query('name') } : {}),
+      ...(c.req.query('download') !== undefined ? { download: c.req.query('download') } : {}),
     });
-    const result = await service.downloadBlob(actor(c), spaceId, hash, q.name);
+    const result = await service.downloadBlob(actor(c), spaceId, hash, q.name, {
+      inline: c.get('viaSession') === true,
+      attachment: q.download === '1',
+    });
     if (result.url) {
       // Do not cache the redirect itself beyond the presign window.
       c.header('cache-control', 'private, max-age=240');
@@ -349,8 +695,7 @@ export function buildHttpApp(deps: {
     c.header('cache-control', 'private, max-age=31536000, immutable');
     c.header('x-content-type-options', 'nosniff');
     c.header('content-security-policy', "default-src 'none'");
-    const bytes = result.bytes!;
-    return c.body(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
+    return c.body(bodyOf(result));
   });
 
   // --- feed ------------------------------------------------------------------
@@ -509,28 +854,56 @@ function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!);
 }
 
+const PAGE_HEAD = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">`;
+const PAGE_STYLE =
+  `<style>body{font:15px/1.5 system-ui,sans-serif;margin:0;display:grid;place-items:center;min-height:100vh;color:#222;background:#fafafa}` +
+  `main{text-align:center;padding:2rem;max-width:26rem}h1{font-size:1.25rem;margin:0 0 .25rem}p{margin:.25rem 0}.m{color:#666}` +
+  `a.b{display:inline-block;margin-top:1rem;padding:.6rem 1.1rem;border-radius:8px;background:#111;color:#fff;text-decoration:none}` +
+  `.s{margin-top:1.25rem;font-size:13px;color:#666}.s+.s{margin-top:.25rem}.s a{color:inherit}</style>`;
+
+/** The desktop app's deep link, and the web app's address for the same link when the Harbor names one. */
+interface Openers {
+  deep: string;
+  web?: string;
+}
+
+/** Launch the desktop app at once; offer the download, and the web app. */
+function openerLinks(o: Openers): string {
+  return (
+    `<a class="b" href="${escapeHtml(o.deep)}">Open in Rowboat</a>` +
+    `<p class="s">Don't have the app? <a href="${DOWNLOAD_URL}">Download Rowboat</a>, then open this link again.</p>` +
+    (o.web ? `<p class="s">You can also <a href="${escapeHtml(o.web)}">open this link in your browser</a>.</p>` : '') +
+    `<script>location.replace(${JSON.stringify(o.deep)})</script>`
+  );
+}
+
+/** An org link's landing. */
+function landingPage(o: Openers): string {
+  return `${PAGE_HEAD}<title>Open in Rowboat</title>${PAGE_STYLE}<main><h1>This link opens in Rowboat</h1>${openerLinks(o)}</main>`;
+}
+
 type InvitePage =
-  | { state: 'ok'; space: string; org: string; invitedBy?: string; deep: string }
+  | ({ state: 'ok'; spaces: string[]; org: string; invitedBy?: string } & Openers)
   | { state: 'expired' | 'revoked' };
+
+/** "a", "a and b", "a, b and c". */
+function listNames(names: string[]): string {
+  return names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
 
 /** The /join landing: launch the app with the invite, or say why not. */
 function invitePage(page: InvitePage): string {
-  const style =
-    `<style>body{font:15px/1.5 system-ui,sans-serif;margin:0;display:grid;place-items:center;min-height:100vh;color:#222;background:#fafafa}` +
-    `main{text-align:center;padding:2rem;max-width:26rem}h1{font-size:1.25rem;margin:0 0 .25rem}p{margin:.25rem 0}.m{color:#666}` +
-    `a.b{display:inline-block;margin-top:1rem;padding:.6rem 1.1rem;border-radius:8px;background:#111;color:#fff;text-decoration:none}` +
-    `.s{margin-top:1.25rem;font-size:13px;color:#666}.s a{color:inherit}</style>`;
-  const head = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">`;
   if (page.state !== 'ok') {
     const why = page.state === 'expired' ? 'This invite has expired.' : 'This invite was revoked.';
-    return `${head}<title>Invite ${page.state}</title>${style}<main><h1>${why}</h1><p class="m">Ask whoever sent it for a new link.</p></main>`;
+    return `${PAGE_HEAD}<title>Invite ${page.state}</title>${PAGE_STYLE}<main><h1>${why}</h1><p class="m">Ask whoever sent it for a new link.</p></main>`;
   }
+  // An invite is to the org (2026-10-19): the org is the headline, the
+  // spaces accepting joins the line under it.
+  const joins = page.spaces.length > 0 ? `<p class="m">You'll join ${escapeHtml(listNames(page.spaces))}</p>` : '';
   const by = page.invitedBy ? `<p class="m">Invited by ${escapeHtml(page.invitedBy)}</p>` : '';
   return (
-    `${head}<title>Join ${escapeHtml(page.space)} on ${escapeHtml(page.org)}</title>${style}<main>` +
-    `<h1>You're invited to ${escapeHtml(page.space)}</h1><p class="m">on ${escapeHtml(page.org)}</p>${by}` +
-    `<a class="b" href="${page.deep}">Open in Rowboat</a>` +
-    `<p class="s">Don't have Rowboat? <a href="${DOWNLOAD_URL}">Download it</a>, then open this link again.</p></main>` +
-    `<script>location.replace(${JSON.stringify(page.deep)})</script>`
+    `${PAGE_HEAD}<title>Join ${escapeHtml(page.org)}</title>${PAGE_STYLE}<main>` +
+    `<h1>You're invited to ${escapeHtml(page.org)}</h1>${joins}${by}` +
+    `${openerLinks(page)}</main>`
   );
 }

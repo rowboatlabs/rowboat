@@ -2,7 +2,21 @@ import { z } from 'zod';
 import { addressesRowboat, mapMentionTokens, mentionsAsText } from '@rowboat/spaces-protocol';
 import type {
   AcceptInviteResult,
+  AgentCredential,
+  AgentHook,
+  AgentHosting,
+  AgentKey,
+  AgentKeySecret,
+  AgentListing,
   Asset,
+  ConnectorCapabilities,
+  Approval,
+  ApprovalChoice,
+  ApprovalState,
+  Invocation,
+  InvocationOption,
+  InvocationOptionValues,
+  InvocationState,
   BlobInfo,
   ChangeSet,
   CreateAssetResult,
@@ -12,6 +26,9 @@ import type {
   ConflictRegion,
   CreateInviteResult,
   Member,
+  Membership,
+  MembershipEvent,
+  OrgSettings,
   Message,
   Poll,
   PollAnswer,
@@ -25,6 +42,7 @@ import type {
   ResolveInviteResult,
   SearchKind,
   SearchResults,
+  StreamEvent,
   MessageSearchHit,
   TopicSearchHit,
   AssetSearchHit,
@@ -48,7 +66,21 @@ import type {
 
 export type {
   AcceptInviteResult,
+  AgentCredential,
+  AgentHook,
+  AgentHosting,
+  AgentKey,
+  AgentKeySecret,
+  AgentListing,
   Asset,
+  ConnectorCapabilities,
+  Approval,
+  ApprovalChoice,
+  ApprovalState,
+  Invocation,
+  InvocationOption,
+  InvocationOptionValues,
+  InvocationState,
   BlobInfo,
   ChangeSet,
   CreateAssetResult,
@@ -58,6 +90,9 @@ export type {
   ConflictRegion,
   CreateInviteResult,
   Member,
+  Membership,
+  MembershipEvent,
+  OrgSettings,
   Message,
   Poll,
   PollAnswer,
@@ -71,6 +106,7 @@ export type {
   ResolveInviteResult,
   SearchKind,
   SearchResults,
+  StreamEvent,
   MessageSearchHit,
   TopicSearchHit,
   AssetSearchHit,
@@ -140,6 +176,8 @@ export interface SpacesStreamPage {
   hasMoreAfter?: boolean;
   /** The caller's stream mark (0 = never marked) — the New divider's anchor. */
   readOffset: number;
+  /** Join and leave lines between the page's messages (2026-09-29); empty from an older org. */
+  events: StreamEvent[];
 }
 
 /** One flat thread: the root, its annotation (null = a plain thread), windowed replies. */
@@ -156,6 +194,8 @@ export interface SpacesThreadPage {
 
 export interface SpacesPostResult {
   message: Message;
+  /** The agents the message invoked, or was refused to (Harbor spec §8, 2026-09-30); absent from older orgs. */
+  invocations?: Invocation[];
 }
 
 /** Promote (rootMessageId) or post + annotate (body) — exactly one of the two. */

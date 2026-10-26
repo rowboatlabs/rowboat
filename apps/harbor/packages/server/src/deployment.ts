@@ -15,6 +15,7 @@ import { PgStore } from './pg-store.js';
 import { buildOrgRuntime, type OrgRuntime } from './runtime.js';
 import type { SqlDb } from './sql.js';
 import { attachLive } from './ws.js';
+import { HARBOR_RUN_CONNECTIONS, BUILT_IN_CONNECTION } from '@rowboat/spaces-protocol';
 
 // The multi-org deployment (spec §4 "Deployment and tenancy"): one process,
 // 1..N orgs, resolved from the Host header (X-Forwarded-Host wins — every
@@ -55,6 +56,10 @@ export interface DeploymentOptions {
   blobs?: (orgId: string) => BlobStore;
   /** Upload cap for the raw-bytes blob route (default 100MB). */
   maxBlobBytes?: number;
+  /** Browser origins allowed to call every org and the apex cross-origin (cors.ts). */
+  webOrigins?: readonly string[];
+  /** The Spaces web app, offered by every org's link landings (http.ts). */
+  webAppUrl?: string;
   /**
    * The operator face (internal.ts). `key` enables GET /internal/stats; `log`
    * prints the live-load line once a minute — independent of the key, the
@@ -121,6 +126,9 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
               ...(options.blobs ? { blobs: options.blobs(org.id) } : {}),
               ...(org.issuer && options.consentPublishableKey ? { consentPublishableKey: options.consentPublishableKey } : {}),
               ...(options.maxBlobBytes !== undefined ? { maxBlobBytes: options.maxBlobBytes } : {}),
+              ...(options.webOrigins ? { webOrigins: options.webOrigins } : {}),
+              ...(apexDomain ? { sessionCookieDomain: apexDomain } : {}),
+              ...(options.webAppUrl ? { webAppUrl: options.webAppUrl } : {}),
             });
       runtimes.set(org.id, pending);
       // A failed build is not cached — the next request tries again.
@@ -152,6 +160,7 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
             apexDomain,
             issuer: options.issuer,
             ...(options.consentPublishableKey ? { consentPublishableKey: options.consentPublishableKey } : {}),
+            ...(options.webOrigins ? { webOrigins: options.webOrigins } : {}),
             serviceFor: async (org) => {
               const runtime = await runtimeForOrg(org);
               if (!runtime) throw new HarborError('internal', 'the new org has no runtime on this deployment');
@@ -197,6 +206,23 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
   const closeLive = attachLive(server, async (host) => (await runtimeFor(host))?.live, { stats });
 
   await new Promise<void>((resolve) => server.listen(options.port ?? 0, resolve));
+
+  // An org's runtime is otherwise built on its first request, but the
+  // connectors Harbor runs (spec §8 Connectors, 2026-09-30) must pick up
+  // their agents' mentions after a restart whether or not anyone visits:
+  // build, at boot, the runtime of every org that has such an agent. Jev is
+  // in every org with the key (spec §8 Jev, 2026-10-07), so only the orgs
+  // where someone has added it to a space are woken for it.
+  const connectorOrgs = await options.db.query<{ org_id: string }>(
+    `select distinct m.org_id from members m
+     where m.kind = 'agent' and (m.agent_connection = any($1::text[]) or (m.agent_connection = $2 and exists (
+       select 1 from memberships ms join spaces s on s.id = ms.space_id where ms.member_id = m.id and s.org_id = m.org_id)))`,
+    [[...HARBOR_RUN_CONNECTIONS], BUILT_IN_CONNECTION],
+  );
+  for (const { org_id } of connectorOrgs) {
+    const org = await directory.getById(org_id);
+    if (org) runtimeForOrg(org).catch((err) => console.error(`[harbor] could not start org ${org_id} at boot:`, err));
+  }
   const port = (server.address() as AddressInfo).port;
 
   return {
@@ -209,6 +235,7 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
     close: async () => {
       closeLive();
       stats.close();
+      await Promise.allSettled([...runtimes.values()].map(async (pending) => (await pending)?.close()));
       await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
     },
   };

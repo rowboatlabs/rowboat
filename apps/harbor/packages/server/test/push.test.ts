@@ -11,7 +11,7 @@ import type { Message, Space } from '@rowboat/spaces-protocol';
 // registration — against the store with a mocked Expo endpoint.
 
 const space = (kind: 'shared' | 'direct'): Space =>
-  ({ id: '01HZZZZZZZZZZZZZZZZZZZZZZZ', name: 'general', createdAt: new Date().toISOString(), kind, visibility: 'private' }) as Space;
+  ({ id: '01HZZZZZZZZZZZZZZZZZZZZZZZ', name: 'general', createdAt: new Date().toISOString(), kind, visibility: 'private', archived: false }) as Space;
 
 const msg = (author = 'harsh'): Message =>
   ({
@@ -22,6 +22,7 @@ const msg = (author = 'harsh'): Message =>
     postedAt: new Date().toISOString(),
     offset: 1,
     replyCount: 0,
+    replyAuthors: [],
     reactions: [],
     mentions: [],
     mentionsHere: false,
@@ -50,7 +51,7 @@ describe('PushSender.send', () => {
     const s = space('shared');
     await store.putSpace(s);
     for (const id of ['harsh', 'gagan']) {
-      await store.putMember({ id, displayName: id[0]!.toUpperCase() + id.slice(1), role: 'member' });
+      await store.putMember({ id, displayName: id[0]!.toUpperCase() + id.slice(1), role: 'member', kind: 'human' });
       await store.putMembership({ spaceId: s.id, memberId: id, joinedAt: new Date().toISOString() });
     }
     await store.putPushToken('gagan', 'ExponentPushToken[g1]', new Date().toISOString());
@@ -90,7 +91,7 @@ describe('PushSender.send', () => {
     const store = (await freshStore()).store;
     const s = space('shared');
     await store.putSpace(s);
-    await store.putMember({ id: 'gagan', displayName: 'Gagan', role: 'member' });
+    await store.putMember({ id: 'gagan', displayName: 'Gagan', role: 'member', kind: 'human' });
     await store.putMembership({ spaceId: s.id, memberId: 'gagan', joinedAt: new Date().toISOString() });
     await store.putPushToken('gagan', 'ExponentPushToken[dead]', new Date().toISOString());
     await store.setPushLevel('gagan', 'all');

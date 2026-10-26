@@ -151,10 +151,10 @@ export function DrawerContent(props: DrawerContentComponentProps) {
         />
         ) : null}
         <FootRow
-          icon="sf:bell"
-          label="Notifications"
+          icon="sf:gearshape"
+          label="Settings"
           onPress={() => {
-            router.push('/notifications');
+            router.push('/spaces/settings');
             props.navigation.closeDrawer();
           }}
         />

@@ -1,3 +1,5 @@
+import { invokeSpace } from '@/lib/spaces-invoke'
+import { useSpaceAccess, canActInSpace } from '@/lib/spaces-access'
 import { FileConflictNotice, useSpaceFileSave } from './file-conflict'
 import { splitFrontmatter, joinFrontmatter } from '@/lib/frontmatter'
 import { MarkdownEditor } from '@/components/markdown-editor'
@@ -70,6 +72,7 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
     /** Remove an empty (draft) folder. */
     onRemoveFolder?: (path: string) => void
 }) {
+    const { writable } = useSpaceAccess()
     const tree = useMemo(() => buildFileTree(entries, draftFolders), [entries, draftFolders])
     const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
     const [newPath, setNewPath] = useState('')
@@ -86,6 +89,7 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
     const entryById = useMemo(() => new Map(entries.map((e) => [e.id, e])), [entries])
     const dragHasAsset = (e: React.DragEvent) => Array.from(e.dataTransfer.types).includes(ASSET_DRAG_MIME)
     const dropInto = (e: React.DragEvent, dir: string) => {
+        if (!writable) return
         e.preventDefault()
         e.stopPropagation()
         setDropTarget(null)
@@ -98,7 +102,7 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
     }
     const dirDragProps = (dir: string) => ({
         onDragOver: (e: React.DragEvent) => {
-            if (!dragHasAsset(e)) return
+            if (!writable || !dragHasAsset(e)) return
             e.preventDefault()
             e.stopPropagation()
             e.dataTransfer.dropEffect = 'move'
@@ -118,7 +122,7 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
         setRenaming(null)
         if (!toPath || toPath === entry.path) return
         try {
-            const res = await window.ipc.invoke('spaces:moveAsset', {
+            const res = await invokeSpace('spaces:moveAsset', {
                 orgId, spaceId, assetId: entry.id, toPath, baseVersion: entry.version,
             })
             if (res.outcome === 'conflict') toast(`${entry.path} changed meanwhile — try again`, 'error')
@@ -137,7 +141,8 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
         })
 
     const renderNode = (node: FileTreeNode, depth: number): ReactNode => {
-        const pad = { paddingLeft: `${8 + depth * 12}px` }
+        // Spaces redesign (2026-10-21): the tree is the Files page's body now, at the app's 14px row size.
+        const pad = { paddingLeft: `${10 + depth * 18}px` }
         if (node.kind === 'dir') {
             const open = !collapsed.has(node.path)
             const empty = node.children.length === 0
@@ -151,18 +156,18 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                                     style={pad}
                                     onClick={() => toggle(node.path)}
                                     className={cn(
-                                        'flex h-7 w-full items-center gap-1.5 rounded-md pr-7 text-[13px] text-foreground/90 hover:bg-accent/50',
+                                        'flex h-9 w-full items-center gap-2 rounded-lg pr-9 text-sm text-foreground/90 transition-colors hover:bg-accent/60',
                                         dropTarget === node.path && 'bg-accent ring-1 ring-inset ring-foreground/40',
                                     )}
                                 >
                                     {open
-                                        ? <FolderOpen className="size-3 shrink-0 text-muted-foreground" />
-                                        : <Folder className="size-3 shrink-0 text-muted-foreground" />}
+                                        ? <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
+                                        : <Folder className="size-4 shrink-0 text-muted-foreground" />}
                                     <ClippedText text={node.name} />
                                 </button>
                             </ContextMenuTrigger>
                             <ContextMenuContent>
-                                <ContextMenuItem onSelect={() => onStartCreate?.(`${node.path}/`)}>
+                                <ContextMenuItem disabled={!writable} onSelect={() => onStartCreate?.(`${node.path}/`)}>
                                     <Plus className="size-3.5 mr-2" /> New file
                                 </ContextMenuItem>
                                 {empty && onRemoveFolder && (
@@ -180,13 +185,13 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                                 <button
                                     type="button"
                                     aria-label="Folder actions"
-                                    className="absolute right-1 top-1 inline-flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-background hover:text-foreground focus-visible:opacity-100 group-hover/dirrow:opacity-100 data-[state=open]:opacity-100"
+                                    className="absolute right-1.5 top-1.5 inline-flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-0 hover:bg-background hover:text-foreground focus-visible:opacity-100 group-hover/dirrow:opacity-100 data-[state=open]:opacity-100"
                                 >
                                     <MoreHorizontal className="size-3.5" />
                                 </button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                                <DropdownMenuItem onClick={() => onStartCreate?.(`${node.path}/`)}>
+                                <DropdownMenuItem disabled={!writable} onClick={() => onStartCreate?.(`${node.path}/`)}>
                                     <Plus className="size-3.5 mr-2" /> New file
                                 </DropdownMenuItem>
                                 {empty && onRemoveFolder && (
@@ -204,10 +209,10 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                         <div className="relative">
                             {/* Indent guide: a faint dotted line under the folder's icon
                                 column, spanning its children — nesting reads without carets. */}
-                            <span aria-hidden className="pointer-events-none absolute bottom-1 top-0 border-l border-dotted border-foreground/25" style={{ left: `${8 + depth * 12 + 6}px` }} />
+                            <span aria-hidden className="pointer-events-none absolute bottom-1 top-0 border-l border-dotted border-foreground/25" style={{ left: `${10 + depth * 18 + 8}px` }} />
                             {node.children.map((child) => renderNode(child, depth + 1))}
                             {empty && (
-                                <div style={{ paddingLeft: `${8 + (depth + 1) * 12}px` }} className="py-0.5 pr-2 text-[11px] italic text-muted-foreground/70">
+                                <div style={{ paddingLeft: `${10 + (depth + 1) * 18}px` }} className="py-1 pr-2 text-xs italic text-muted-foreground/70">
                                     empty — files added here keep it
                                 </div>
                             )}
@@ -252,7 +257,7 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                         <button
                             type="button"
                             style={pad}
-                            draggable
+                            draggable={writable}
                             onDragStart={(e) => {
                                 e.dataTransfer.setData(ASSET_DRAG_MIME, entry.id)
                                 e.dataTransfer.effectAllowed = 'move'
@@ -260,15 +265,15 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                             onDragEnd={() => setDropTarget(null)}
                             onClick={() => onOpenFile(entry.id)}
                             className={cn(
-                                'flex h-7 w-full items-center gap-1.5 rounded-md pr-7 text-[13px] text-left',
-                                active ? 'bg-accent font-medium text-foreground' : 'text-foreground/90 hover:bg-accent/50',
+                                'flex h-9 w-full items-center gap-2 rounded-lg pr-9 text-sm text-left transition-colors',
+                                active ? 'bg-accent font-medium text-foreground' : 'text-foreground/90 hover:bg-accent/60',
                             )}
                         >
-                            <span className="w-3 shrink-0" />
-                            {board && <PenTool className="size-3 shrink-0 text-muted-foreground" />}
+                            <span className="w-4 shrink-0" />
+                            {board && <PenTool className="size-4 shrink-0 text-muted-foreground" />}
                             {!board && blob && (isImageMime(blob.mime)
-                                ? <ImageIcon className="size-3 shrink-0 text-muted-foreground" />
-                                : <FileText className="size-3 shrink-0 text-muted-foreground" />)}
+                                ? <ImageIcon className="size-4 shrink-0 text-muted-foreground" />
+                                : <FileText className="size-4 shrink-0 text-muted-foreground" />)}
                             <ClippedText
                                 text={board ? spaces.whiteboardDisplayName(node.name) : node.name}
                                 detail={blob ? `${blob.mime} · ${formatBytes(blob.size)}` : null}
@@ -290,11 +295,11 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                         <ContextMenuItem onSelect={() => void copySpacesLink(spaces.assetUrl(orgAddress, spaceId, entry.id))}>
                             <LinkIcon className="size-3.5 mr-2" /> Copy link
                         </ContextMenuItem>
-                        <ContextMenuItem onSelect={() => setRenaming({ assetId: entry.id, value: entry.path })}>
+                        <ContextMenuItem disabled={!writable} onSelect={() => setRenaming({ assetId: entry.id, value: entry.path })}>
                             <Pencil className="size-3.5 mr-2" /> Rename / move
                         </ContextMenuItem>
                         <ContextMenuSeparator />
-                        <ContextMenuItem onSelect={() => setDeleting(entry)}>
+                        <ContextMenuItem disabled={!writable} onSelect={() => setDeleting(entry)}>
                             <Trash2 className="size-3.5 mr-2" /> Delete…
                         </ContextMenuItem>
                     </ContextMenuContent>
@@ -304,7 +309,7 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                         <button
                             type="button"
                             aria-label="File actions"
-                            className="absolute right-1 top-1 inline-flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-background hover:text-foreground focus-visible:opacity-100 group-hover/filerow:opacity-100 data-[state=open]:opacity-100"
+                            className="absolute right-1.5 top-1.5 inline-flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-0 hover:bg-background hover:text-foreground focus-visible:opacity-100 group-hover/filerow:opacity-100 data-[state=open]:opacity-100"
                         >
                             <MoreHorizontal className="size-3.5" />
                         </button>
@@ -319,11 +324,11 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                         <DropdownMenuItem onClick={() => void copySpacesLink(spaces.assetUrl(orgAddress, spaceId, entry.id))}>
                             <LinkIcon className="size-3.5 mr-2" /> Copy link
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => setRenaming({ assetId: entry.id, value: entry.path })}>
+                        <DropdownMenuItem disabled={!writable} onClick={() => setRenaming({ assetId: entry.id, value: entry.path })}>
                             <Pencil className="size-3.5 mr-2" /> Rename / move
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem onClick={() => setDeleting(entry)}>
+                        <DropdownMenuItem disabled={!writable} onClick={() => setDeleting(entry)}>
                             <Trash2 className="size-3.5 mr-2" /> Delete…
                         </DropdownMenuItem>
                     </DropdownMenuContent>
@@ -346,7 +351,7 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                 />
             )}
             {tree.map((node) => renderNode(node, 0))}
-            {tree.length === 0 && !creating && !creatingFolder && <div className="px-2 py-1 text-xs text-muted-foreground">No files yet.</div>}
+            {tree.length === 0 && !creating && !creatingFolder && <div className="px-3 py-10 text-sm text-muted-foreground">No files yet. Use New, or drop files here.</div>}
             {creating && (
                 <div className="flex items-center gap-1 px-1 pt-1">
                     <Input
@@ -423,12 +428,14 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
     /** A canonical link to a file in ANOTHER space (by org address — the owner knows whether the reader is in it). */
     onOpenSpaceFile?: (orgAddress: string, spaceId: string, assetId: string) => void
 }) {
+    const { writable } = useSpaceAccess()
     const draftRef = { orgId: org.id, spaceId: space.id, assetId }
     const [asset, setAsset] = useState<spaces.ReadAssetResult | null>(null)
     const [missing, setMissing] = useState(false)
     // A draft left open on an earlier mount resumes here — the column paints in
     // edit mode, on that text, before the read comes back.
-    const [draft, setDraft] = useState<DraftState | null>(() => readSpaceDraft(draftRef))
+    const [storedDraft, setDraft] = useState<DraftState | null>(() => writable ? readSpaceDraft(draftRef) : null)
+    const draft = writable ? storedDraft : null
     const [applying, setApplying] = useState(false)
     const [historyOpen, setHistoryOpen] = useState(false)
     const [diffView, setDiffView] = useState<{ title: string; unified: string; restorable: number | null } | null>(null)
@@ -437,7 +444,7 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
 
     const load = useCallback(async () => {
         try {
-            const res = await window.ipc.invoke('spaces:readAsset', { orgId: org.id, spaceId: space.id, assetId })
+            const res = await invokeSpace('spaces:readAsset', { orgId: org.id, spaceId: space.id, assetId })
             setAsset(res)
             setMissing(false)
         } catch {
@@ -462,7 +469,7 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
     // painted state was is what an unmount leaves behind. There is no cleanup on
     // unmount by design; clearing is the draft going null (applied, discarded).
     useEffect(() => {
-        writeSpaceDraft({ orgId: org.id, spaceId: space.id, assetId }, draft)
+        if (writable) writeSpaceDraft({ orgId: org.id, spaceId: space.id, assetId }, draft)
     }, [org.id, space.id, assetId, draft])
     useEffect(() => {
         if (!crumbBack || editing) return
@@ -478,15 +485,17 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
     }, [crumbBack, editing])
 
     const beginEdit = () => {
+        if (!canActInSpace(org.id, space.id)) return
         if (!asset) return
         setDraft({ baseVersion: asset.version, text: asset.content, reason: '', conflict: null })
     }
 
     const apply = async () => {
+        if (!canActInSpace(org.id, space.id)) return
         if (!draft) return
         setApplying(true)
         try {
-            const result = await window.ipc.invoke('spaces:proposeChange', {
+            const result = await invokeSpace('spaces:proposeChange', {
                 orgId: org.id,
                 spaceId: space.id,
                 input: {
@@ -523,7 +532,7 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
     // the row can never disagree.
     const showDiff = async (from: number, to: number, restorable: number | null) => {
         try {
-            const res = await window.ipc.invoke('spaces:diff', { orgId: org.id, spaceId: space.id, assetId, from, to })
+            const res = await invokeSpace('spaces:diff', { orgId: org.id, spaceId: space.id, assetId, from, to })
             setDiffView({ title: `${path} · v${from} → v${to}`, unified: res.unified, restorable })
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not load the diff', 'error')
@@ -534,11 +543,12 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
     // The viewer reports the task's index in document order; toggleTaskAt maps
     // it back to the source line (skipping fenced code) and flips it.
     const toggleTask = async (index: number) => {
+        if (!canActInSpace(org.id, space.id)) return
         if (!asset) return
         const next = toggleTaskAt(asset.content, index)
         if (next === null) return
         try {
-            const result = await window.ipc.invoke('spaces:proposeChange', {
+            const result = await invokeSpace('spaces:proposeChange', {
                 orgId: org.id,
                 spaceId: space.id,
                 input: { assetId, baseVersion: asset.version, newContent: next },
@@ -593,8 +603,7 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
                     return undefined
                 }
             })()
-            void window.ipc
-                .invoke('spaces:saveBlob', { ...blobRef, ...(name ? { suggestedName: name } : {}) })
+            void invokeSpace('spaces:saveBlob', { ...blobRef, ...(name ? { suggestedName: name } : {}) })
                 .then((res) => { if (res.saved) toast('Saved', 'success') })
                 .catch((err: unknown) => toast(err instanceof Error ? err.message : 'Could not download', 'error'))
             return true
@@ -624,14 +633,14 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
         if (!asset) return
         setReplacing(true)
         try {
-            const uploaded = await window.ipc.invoke('spaces:uploadBlob', {
+            const uploaded = await invokeSpace('spaces:uploadBlob', {
                 orgId: org.id,
                 spaceId: space.id,
                 ...(await uploadInputFor(file)),
                 name: file.name,
                 ...(file.type ? { mime: file.type } : {}),
             })
-            const result = await window.ipc.invoke('spaces:proposeChange', {
+            const result = await invokeSpace('spaces:proposeChange', {
                 orgId: org.id,
                 spaceId: space.id,
                 input: { assetId, baseVersion: asset.version, blob: uploaded.blob.hash, reason: `replace with ${file.name}` },
@@ -664,7 +673,7 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
         setEditingPath(null)
         if (!asset || !toPath || toPath === path) return
         try {
-            const res = await window.ipc.invoke('spaces:moveAsset', {
+            const res = await invokeSpace('spaces:moveAsset', {
                 orgId: org.id, spaceId: space.id, assetId, toPath, baseVersion: asset.version,
             })
             if (res.outcome === 'conflict') {
@@ -750,14 +759,14 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
                                 <button
                                     type="button"
                                     className="hover:text-foreground flex items-center gap-1"
-                                    disabled={replacing}
+                                    disabled={!writable || replacing}
                                     onClick={() => replaceInputRef.current?.click()}
                                 >
                                     {replacing ? <Loader2 className="size-3 animate-spin" /> : <Upload className="size-3" />} Replace
                                 </button>
                             </>
                         ) : (
-                            <button type="button" className="hover:text-foreground flex items-center gap-1" onClick={beginEdit}>
+                            <button type="button" className="hover:text-foreground flex items-center gap-1" disabled={!writable} onClick={beginEdit}>
                                 <Pencil className="size-3" /> Edit
                             </button>
                         )}
@@ -784,18 +793,18 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
                                 <DropdownMenuItem onClick={() => void copySpacesLink(spaces.assetUrl(org.address, space.id, assetId))}>
                                     <LinkIcon className="size-3.5 mr-2" /> Copy link
                                 </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => setEditingPath(path)}>
+                                <DropdownMenuItem disabled={!writable} onClick={() => setEditingPath(path)}>
                                     <Pencil className="size-3.5 mr-2" /> Rename / move
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
-                                <DropdownMenuItem onClick={() => setDeleteOpen(true)}>
+                                <DropdownMenuItem disabled={!writable} onClick={() => setDeleteOpen(true)}>
                                     <Trash2 className="size-3.5 mr-2" /> Delete…
                                 </DropdownMenuItem>
                             </DropdownMenuContent>
                         </DropdownMenu>
                     </>
                 )}
-                {deleteOpen && asset && (
+                {writable && deleteOpen && asset && (
                     <DeleteAssetDialog
                         orgId={org.id}
                         spaceId={space.id}
@@ -863,13 +872,13 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
                             onChange={(text) => setDraft({ ...draft, text: joinFrontmatter(splitFrontmatter(draft.text).raw, text), conflict: null })}
                             onExport={async (format) => {
                                 try {
-                                    await window.ipc.invoke('export:note', { markdown: draft.text, format, title: fileName })
+                                    await invokeSpace('export:note', { markdown: draft.text, format, title: fileName })
                                 } catch (err) {
                                     toast(err instanceof Error ? err.message : 'Could not export', 'error')
                                 }
                             }}
                             onImageUpload={async (file) => {
-                                const uploaded = await window.ipc.invoke('spaces:uploadBlob', {
+                                const uploaded = await invokeSpace('spaces:uploadBlob', {
                                     orgId: org.id, spaceId: space.id, name: file.name,
                                     ...(await uploadInputFor(file)),
                                     ...(file.type ? { mime: file.type } : {}),
@@ -925,7 +934,7 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
                         <div className="px-5 py-4 max-w-3xl">
                             <RichMarkdownViewer
                                 content={renderedContent}
-                                onToggleTask={(i) => void toggleTask(i)}
+                                onToggleTask={writable ? (i) => void toggleTask(i) : undefined}
                                 onOpenLink={openLink}
                             />
                         </div>
@@ -974,7 +983,7 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
                     )}
                 </DialogContent>
             </Dialog>
-            {restoreTarget !== null && asset && (
+            {writable && restoreTarget !== null && asset && (
                 <RestoreVersionDialog
                     orgId={org.id}
                     spaceId={space.id}
@@ -1041,12 +1050,12 @@ function HistoryPanel({ org, space, assetId, memberNames, refreshTick, currentVe
     onShowDiff: (from: number, to: number, restorable: number | null) => void
     onRestore: (version: number) => void
 }) {
+    const { writable } = useSpaceAccess()
     const [changeSets, setChangeSets] = useState<spaces.ChangeSet[]>([])
 
     useEffect(() => {
         let cancelled = false
-        void window.ipc
-            .invoke('spaces:assetHistory', { orgId: org.id, spaceId: space.id, assetId, limit: 100 })
+        void invokeSpace('spaces:assetHistory', { orgId: org.id, spaceId: space.id, assetId, limit: 100 })
             .then((res) => {
                 if (!cancelled) setChangeSets(res.changeSets)
             })
@@ -1085,7 +1094,7 @@ function HistoryPanel({ org, space, assetId, memberNames, refreshTick, currentVe
                                 <Clock className="size-2.5" /> {formatFeedTime(cs.committedAt)} · v{cs.resultVersion}
                             </div>
                         </button>
-                        {isRestorableChangeSet(cs, currentVersion) && (
+                        {writable && isRestorableChangeSet(cs, currentVersion) && (
                             <button
                                 type="button"
                                 aria-label={`Restore to v${cs.resultVersion}`}
@@ -1133,10 +1142,10 @@ export function RestoreVersionDialog({ orgId, spaceId, assetId, path, version, c
             // Read the head immediately before proposing so the base is as
             // fresh as possible: a restore that three-way-merges someone's
             // concurrent edit isn't the verbatim restore that was asked for.
-            const current = await window.ipc.invoke('spaces:readAsset', { orgId, spaceId, assetId })
+            const current = await invokeSpace('spaces:readAsset', { orgId, spaceId, assetId })
             setHead(current.version)
-            const snapshot = await window.ipc.invoke('spaces:readAsset', { orgId, spaceId, assetId, version })
-            const result = await window.ipc.invoke('spaces:proposeChange', {
+            const snapshot = await invokeSpace('spaces:readAsset', { orgId, spaceId, assetId, version })
+            const result = await invokeSpace('spaces:proposeChange', {
                 orgId,
                 spaceId,
                 input: {
@@ -1210,7 +1219,7 @@ export function DeleteAssetDialog({ orgId, spaceId, entry, onClose, onDeleted }:
     const confirm = async () => {
         setBusy(true)
         try {
-            const res = await window.ipc.invoke('spaces:deleteAsset', {
+            const res = await invokeSpace('spaces:deleteAsset', {
                 orgId, spaceId, assetId: entry.id, baseVersion: entry.version,
             })
             if (res.outcome === 'conflict') {
@@ -1262,7 +1271,7 @@ export function TrashDialog({ org, space, onClose }: {
 
     const load = useCallback(async () => {
         try {
-            const res = await window.ipc.invoke('spaces:listAssets', { orgId: org.id, spaceId: space.id, includeDeleted: true })
+            const res = await invokeSpace('spaces:listAssets', { orgId: org.id, spaceId: space.id, includeDeleted: true })
             setEntries(res.entries.filter((e) => e.state === 'deleted'))
         } catch {
             setEntries([])
@@ -1276,7 +1285,7 @@ export function TrashDialog({ org, space, onClose }: {
     const restore = async (entry: spaces.SpacesAssetEntry) => {
         setRestoring(entry.id)
         try {
-            await window.ipc.invoke('spaces:restoreAsset', { orgId: org.id, spaceId: space.id, assetId: entry.id })
+            await invokeSpace('spaces:restoreAsset', { orgId: org.id, spaceId: space.id, assetId: entry.id })
             toast(`Restored ${entry.path}`, 'success')
             await load()
         } catch (err) {
@@ -1370,7 +1379,7 @@ export function UploadFilesDialog({ org, space, files, entries, defaultFolder, o
                     getBlob: async () => {
                         const cached = uploadedHashes.current.get(row.file)
                         if (cached) return cached
-                        const uploaded = await window.ipc.invoke('spaces:uploadBlob', {
+                        const uploaded = await invokeSpace('spaces:uploadBlob', {
                             orgId: org.id, spaceId: space.id,
                             ...(await uploadInputFor(row.file)), name: row.name,
                             ...(row.file.type ? { mime: row.file.type } : {}),

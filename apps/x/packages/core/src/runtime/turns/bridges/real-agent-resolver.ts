@@ -12,7 +12,12 @@ import {
     loadUserWorkDir,
     loadWorkspaceContext,
 } from "../../assembly/workspace-context.js";
-import { carriesSkillsForward, loadAgent } from "../../assembly/registry.js";
+import {
+    carriesSkillsForward,
+    hasWorkspaceContext,
+    loadAgent,
+} from "../../assembly/registry.js";
+import { HARNESS_TOOL } from "../../assembly/copilot/base-tools.js";
 import { BuiltinTools } from "../../tools/catalog.js";
 import { skillToolNames } from "../../assembly/skills/index.js";
 import { ModeFlags } from "../../assembly/capabilities/types.js";
@@ -107,6 +112,23 @@ const CompositionOverrides = ModeFlags.extend({
     activeSkills: z.array(z.string()).optional(),
 });
 
+// The harness (Claude Code / Codex) runs INSIDE a directory, so the
+// assistant is only offered it once this chat has one: a Code session's
+// pinned cwd, or the work directory the user picked beside the composer.
+// Without one the run would silently land in whatever repo happens to be
+// the default, which is not a choice the user made here (2026-09-30).
+// Agents with no work-directory concept (the to-do item agent, background
+// tasks) resolve their repo from their own pin and keep the tool.
+function harnessAvailable(
+    agentId: string | null | undefined,
+    context: { codeCwd: string | null; userWorkDir: string | null },
+): boolean {
+    if (!hasWorkspaceContext(agentId)) {
+        return true;
+    }
+    return Boolean(context.codeCwd ?? context.userWorkDir);
+}
+
 export interface RealAgentResolverDeps {
     load?: typeof loadAgent;
     builtins?: typeof BuiltinTools;
@@ -178,11 +200,16 @@ export class RealAgentResolver {
             ...modeFlags,
         });
 
+        const harness = harnessAvailable(requested.agentId, {
+            codeCwd: modeFlags.codeCwd,
+            userWorkDir: workspace.userWorkDir,
+        });
         const tools = await this.resolveTools(agent, {
             subagent: subagent ?? false,
+            harness,
         });
         if (carriesSkillsForward(requested.agentId) && activeSkills?.length) {
-            await this.appendSkillTools(tools, activeSkills);
+            await this.appendSkillTools(tools, activeSkills, { harness });
         }
         return ResolvedAgent.parse({
             agentId: requested.agentId,
@@ -201,11 +228,17 @@ export class RealAgentResolver {
     private async appendSkillTools(
         tools: Array<z.infer<typeof ToolDescriptor>>,
         activeSkills: string[],
+        options: { harness: boolean },
     ): Promise<void> {
         const attached = new Set(tools.map((tool) => tool.name));
         for (const skillId of activeSkills) {
             for (const name of this.skillTools(skillId)) {
                 if (attached.has(name)) {
+                    continue;
+                }
+                // A skill declaring the harness must not route around the
+                // work-directory gate (disk skills declare their own tools).
+                if (!options.harness && name === HARNESS_TOOL) {
                     continue;
                 }
                 const builtin = this.builtins[name];
@@ -223,7 +256,7 @@ export class RealAgentResolver {
 
     private async resolveTools(
         agent: z.infer<typeof Agent>,
-        options: { subagent: boolean },
+        options: { subagent: boolean; harness: boolean },
     ): Promise<Array<z.infer<typeof ToolDescriptor>>> {
         const tools: Array<z.infer<typeof ToolDescriptor>> = [];
         for (const [name, attachment] of Object.entries(agent.tools ?? {})) {
@@ -253,6 +286,10 @@ export class RealAgentResolver {
                 options.subagent &&
                 attachment.name === SPAWN_AGENT_TOOL_NAME
             ) {
+                continue;
+            }
+            // No work directory for this chat, no harness (see above).
+            if (!options.harness && attachment.name === HARNESS_TOOL) {
                 continue;
             }
             const builtin = this.builtins[attachment.name];

@@ -15,7 +15,7 @@ const SPACE = '01HZZZZZZZZZZZZZZZZZZZZZZZ';
 const ROOT = '01HXXXXXXXXXXXXXXXXXXXXXXX';
 
 const space = (kind: 'shared' | 'direct'): Space =>
-  ({ id: SPACE, name: 'general', createdAt: new Date().toISOString(), kind, visibility: 'private' }) as Space;
+  ({ id: SPACE, name: 'general', createdAt: new Date().toISOString(), kind, visibility: 'private', archived: false }) as Space;
 
 const msg = (body: string, author = 'harsh', opts: { agent?: boolean; threadRoot?: string } = {}): Message =>
   ({
@@ -27,6 +27,7 @@ const msg = (body: string, author = 'harsh', opts: { agent?: boolean; threadRoot
     postedAt: new Date().toISOString(),
     offset: 2,
     replyCount: 0,
+    replyAuthors: [],
     reactions: [],
     ...(({ members, here, rowboat }) => ({ mentions: members, mentionsHere: here, mentionsRowboat: rowboat }))(parseMentions(body)),
   }) as Message;
@@ -70,7 +71,7 @@ describe('decideNotifications + Notifier', () => {
     const s = space('shared');
     await store.putSpace(s);
     for (const id of ['harsh', 'gagan', 'arjun']) {
-      await store.putMember({ id, displayName: id[0]!.toUpperCase() + id.slice(1), role: 'member' });
+      await store.putMember({ id, displayName: id[0]!.toUpperCase() + id.slice(1), role: 'member', kind: 'human' });
       await store.putMembership({ spaceId: s.id, memberId: id, joinedAt: new Date().toISOString() });
     }
     await store.setThreadFollowing(s.id, ROOT, 'gagan', true, new Date().toISOString());
@@ -159,7 +160,8 @@ async function start(): Promise<void> {
       { id: 'harsh', displayName: 'Harsh' },
       { id: 'arjun', displayName: 'Arjun' },
     ],
-    seedSpaces: [{ name: 'Main', creator: 'ramnique' }],
+    // Two spaces: a one-space org is a group chat, where DMs are off (2026-10-07).
+    seedSpaces: [{ name: 'Main', creator: 'ramnique' }, { name: 'Ops', creator: 'ramnique' }],
   });
   ramnique = restClient(harbor, 'dev-ramnique');
   harsh = restClient(harbor, 'dev-harsh');

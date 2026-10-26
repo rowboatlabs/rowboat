@@ -29,6 +29,7 @@ describe('schema migrations', () => {
       await migrate(db);
       await db.query(`alter table reactions drop column stream_offset`);
       await db.query(`delete from schema_migrations where id = '021-reaction-read-offsets'`);
+      await db.query(`insert into spaces (id, name, created_at) values ('space', 'Space', '2026-09-15T10:00:00Z')`);
       const by = { memberId: 'reader', actingMode: 'direct' };
       await db.query(`insert into reactions (space_id, message_id, emoji, member_id, attribution, at)
         values ('space', 'message', '✅', 'reader', $1::jsonb, '2026-09-15T10:00:00Z')`, [JSON.stringify(by)]);
@@ -73,6 +74,8 @@ describe('schema migrations', () => {
     // The legacy stream, a marker-anchored thread (pre-004 style, with the
     // machine COPY of the parent as its seed), a first-line-titled standalone
     // topic (an accident of the reply gesture), and an explicitly-renamed one.
+    // Its space: 039 drops rows whose space does not exist (2026-10-13).
+    await db.query(`insert into spaces (id, name, created_at) values ('s1', 'Roadboard', '2026-08-20T09:00:00Z')`);
     await topic('t-gen', 'messages', '2026-08-20T09:00:00Z');
     await topic('t-thread-a', 'The parent text', '2026-08-20T10:01:00Z');
     await topic('t-standalone', 'standalone opener', '2026-08-20T10:02:00Z');
@@ -149,7 +152,7 @@ describe('schema migrations', () => {
     // The legacy row survived and picked up the role default via 002.
     const store = new PgStore(db);
     const member = await store.getMember('ramnique');
-    expect(member).toEqual({ id: 'ramnique', displayName: 'Ramnique', role: 'member' });
+    expect(member).toEqual({ id: 'ramnique', displayName: 'Ramnique', role: 'member', kind: 'human' });
     await db.close();
   });
 });
@@ -159,7 +162,9 @@ describe('open-space migration', () => {
     const db = await pgliteDb();
     try {
       await db.query('create table schema_migrations (id text primary key, applied_at text not null)');
-      for (const migration of MIGRATIONS.filter((m) => m.id !== '023-open-spaces')) {
+      // Everything before 023, as a database that predates it; later entries
+      // (040's default-space CHECK) build on its column.
+      for (const migration of MIGRATIONS.slice(0, MIGRATIONS.findIndex((m) => m.id === '023-open-spaces'))) {
         for (const statement of migration.statements) await db.query(statement);
         await db.query('insert into schema_migrations values ($1, $2)', [migration.id, '2026-09-22T00:00:00Z']);
       }
@@ -181,6 +186,30 @@ describe('open-space migration', () => {
       await db.query("update spaces set visibility = 'open' where id = 'legacy-shared'");
       await migrate(db);
       expect(await db.query("select visibility from spaces where id = 'legacy-shared'")).toEqual([{ visibility: 'open' }]);
+    } finally { await db.close(); }
+  });
+});
+
+describe('Agent37 effort key migration', () => {
+  it('moves an Agent37 agent’s Reasoning default to Effort, and leaves every other agent’s options alone', async () => {
+    const db = await pgliteDb();
+    try {
+      await db.query('create table schema_migrations (id text primary key, applied_at text not null)');
+      for (const migration of MIGRATIONS.filter((m) => m.id !== '035-agent37-effort-key')) {
+        for (const statement of migration.statements) await db.query(statement);
+        await db.query('insert into schema_migrations values ($1, $2)', [migration.id, '2026-10-07T00:00:00Z']);
+      }
+      await db.query(`insert into members (org_id, id, display_name, role, kind, agent_kind, agent_connection, agent_instance) values
+        ('o', 'a37', 'Hermes', 'member', 'agent', 'hermes', 'agent37', 'inst1'),
+        ('o', 'rpl', 'Claude', 'member', 'agent', 'claude-code', 'replicas', null)`);
+      await db.query(`insert into agent_option_defaults (org_id, agent_id, data, set_by, set_at) values
+        ('o', 'a37', '{"reasoning":"high"}', 'ramnique', '2026-10-07T00:00:00Z'),
+        ('o', 'rpl', '{"reasoning":"x","environment":"env-api"}', 'ramnique', '2026-10-07T00:00:00Z')`);
+      await migrate(db);
+      expect(await db.query('select agent_id, data from agent_option_defaults order by agent_id')).toEqual([
+        { agent_id: 'a37', data: { effort: 'high' } },
+        { agent_id: 'rpl', data: { reasoning: 'x', environment: 'env-api' } },
+      ]);
     } finally { await db.close(); }
   });
 });

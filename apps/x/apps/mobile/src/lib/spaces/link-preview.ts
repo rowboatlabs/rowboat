@@ -2,6 +2,8 @@
 // RN fetch has no CORS wall, so the phone fetches pages directly). Failures
 // are nulls, never errors: a card is decoration.
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 export interface LinkPreview {
   url: string;
   title?: string;
@@ -18,6 +20,27 @@ const CACHE_TTL_MS = 30 * 60 * 1000;
 const CACHE_MAX = 200;
 
 const cache = new Map<string, { at: number; preview: LinkPreview | null }>();
+
+// Persisted so a cold launch paints cards with the messages instead of popping
+// them in a beat later (that pop was a visible jump). Stale-but-shown for a
+// week; refetched after CACHE_TTL_MS like before.
+const DISK_KEY = 'rowboat.spaces.linkPreviews.v1';
+const SHOW_STALE_MS = 7 * 24 * 60 * 60 * 1000;
+void AsyncStorage.getItem(DISK_KEY)
+  .then((raw) => {
+    if (!raw) return;
+    for (const [href, entry] of JSON.parse(raw) as [string, { at: number; preview: LinkPreview | null }][]) {
+      if (!cache.has(href) && Date.now() - entry.at < SHOW_STALE_MS) cache.set(href, entry);
+    }
+  })
+  .catch(() => {});
+let persistTimer: ReturnType<typeof setTimeout> | undefined;
+function persistSoon(): void {
+  if (persistTimer) clearTimeout(persistTimer);
+  persistTimer = setTimeout(() => {
+    void AsyncStorage.setItem(DISK_KEY, JSON.stringify([...cache.entries()])).catch(() => {});
+  }, 1000);
+}
 
 /** The message's links worth a card, in order — skips code and image embeds. */
 export const MAX_UNFURLS = 3;
@@ -83,6 +106,16 @@ function clip(text: string | null, max: number): string | undefined {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
+/** Synchronous cache hit — lets a card paint on first render (no layout jump). */
+export function peekLinkPreview(rawUrl: string): LinkPreview | null | undefined {
+  try {
+    const hit = cache.get(new URL(rawUrl).href);
+    return hit && Date.now() - hit.at < SHOW_STALE_MS ? hit.preview : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function fetchLinkPreview(rawUrl: string): Promise<LinkPreview | null> {
   let target: URL;
   try {
@@ -145,6 +178,10 @@ export async function fetchLinkPreview(rawUrl: string): Promise<LinkPreview | nu
     const oldest = cache.keys().next().value;
     if (oldest !== undefined) cache.delete(oldest);
   }
-  cache.set(target.href, { at: Date.now(), preview });
-  return preview;
+  // A failed refetch never erases a card we already had.
+  const previous = cache.get(target.href)?.preview ?? null;
+  cache.delete(target.href);
+  cache.set(target.href, { at: Date.now(), preview: preview ?? previous });
+  persistSoon();
+  return preview ?? previous;
 }

@@ -2,14 +2,15 @@
   "expo": {
     "name": "Rowboat",
     "slug": "rowboat-mobile",
-    "version": "0.1.0",
+    "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "rowboat",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "bundleIdentifier": "com.rowboat.app.mobile",
+      "bundleIdentifier": "com.rowboatlabs.spaces",
       "supportsTablet": false,
+      "usesAppleSignIn": true,
       "infoPlist": {
         "NSCameraUsageDescription": "The camera is used to scan the pairing code shown in Rowboat on your Mac.",
         "NSMicrophoneUsageDescription": "The microphone is used to talk to your Rowboat agents with voice.",
@@ -46,7 +47,13 @@
       ],
       "expo-secure-store",
       "expo-font",
-      "expo-image"
+      "expo-image",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Rowboat uses your photos to share them in a space."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

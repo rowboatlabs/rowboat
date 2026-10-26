@@ -9,6 +9,7 @@ import {
   type SpaceMentionTarget,
   type SpacesMentionTargets,
 } from '@/lib/mention-targets'
+import { isDeparted } from '@/lib/spaces-direct'
 
 /**
  * What the assistant composer's @ menu can name in Spaces: every shared
@@ -42,7 +43,7 @@ export function useSpacesMentionTargets(): SpacesMentionTargets {
         }
       }
       for (const member of rosters.get(org.id) ?? []) {
-        if (member.id === org.memberId) continue
+        if (member.id === org.memberId || isDeparted(member)) continue
         members.push({ kind: 'member', orgId: org.id, orgName: org.name, memberId: member.id, displayName: member.displayName })
       }
     }

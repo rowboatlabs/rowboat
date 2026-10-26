@@ -2,16 +2,16 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { MemberAvatar } from '@/components/spaces/atoms'
+import { AgentBadge, MemberAvatar } from '@/components/spaces/atoms'
 import { useOrgRoster } from '@/hooks/use-space-members'
 import { refreshSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
-import { isSelfDirect, otherParticipant } from '@/lib/spaces-direct'
+import { isDeparted, isSelfDirect, otherParticipant } from '@/lib/spaces-direct'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 
 // "New message": pick a person, land in the DM. Get-or-create on the org, so
 // picking someone you already talk to just opens that conversation. The
-// candidates are everyone you share a space with on this org.
+// candidates are everyone on this org (the org-wide roster, 2026-09-29).
 
 export function NewDirectDialog({ org, open, onOpenChange, onOpened }: {
     org: OrgWithSpaces
@@ -42,7 +42,8 @@ export function NewDirectDialog({ org, open, onOpenChange, onOpened }: {
         const me = roster.find((m) => m.id === org.memberId)
         const self = me && (!q || 'you'.includes(q) || 'me'.includes(q) || me.displayName.toLowerCase().includes(q)) ? [me] : []
         const others = roster
-            .filter((m) => m.id !== org.memberId && (!q || m.displayName.toLowerCase().includes(q)))
+            // A deleted account is never offered (2026-10-13): Harbor refuses the DM.
+            .filter((m) => m.id !== org.memberId && !isDeparted(m) && (!q || m.displayName.toLowerCase().includes(q)))
             .sort((a, b) => Number(existing.has(b.id)) - Number(existing.has(a.id)))
         return self.concat(others)
     }, [roster, org.memberId, query, existing])
@@ -113,7 +114,7 @@ export function NewDirectDialog({ org, open, onOpenChange, onOpened }: {
                     {candidates.length === 0 ? (
                         <div className="px-2 py-6 text-center text-xs text-muted-foreground">
                             {roster.length === 0
-                                ? 'Nobody to message yet — you can DM anyone you share a space with, or yourself.'
+                                ? `Nobody else is in ${org.name} yet — you can still message yourself.`
                                 : 'No one matches.'}
                         </div>
                     ) : (
@@ -129,11 +130,12 @@ export function NewDirectDialog({ org, open, onOpenChange, onOpened }: {
                                     i === active && 'bg-accent',
                                 )}
                             >
-                                <MemberAvatar id={m.id} name={m.displayName} size="md" />
+                                <MemberAvatar id={m.id} name={m.displayName} size="md" agent={m.kind === 'agent'} agentKind={m.agentKind} />
                                 <span className="min-w-0 flex-1 truncate">
                                     {m.displayName}
                                     {m.id === org.memberId && <span className="text-muted-foreground"> (you) · notes to self</span>}
                                 </span>
+                                {m.kind === 'agent' && <AgentBadge agentKind={m.agentKind} agentConnection={m.agentConnection} />}
                                 {opening === m.id ? (
                                     <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
                                 ) : existing.has(m.id) ? (

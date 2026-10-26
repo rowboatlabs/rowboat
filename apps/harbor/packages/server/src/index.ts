@@ -21,7 +21,7 @@ export { SpaceHub } from './hub.js';
 export { merge3 } from './merge.js';
 export type { MergeResult, MergeConflictRegion } from './merge.js';
 export { HarborError } from './errors.js';
-export { enforce, canAccessSpace, canWrite, canChangeMembership, canRenameSpace, isAuthor, canBind } from './policy.js';
+export { enforce, canAccessSpace, canWrite, canWriteSpace, canChangeMembership, canRenameSpace, canArchiveSpace, canDeleteSpace, isAuthor, canBind } from './policy.js';
 export type { Decision } from './policy.js';
 export { DevAuthDriver, ensureMember, bindAuth, authenticateRequest, wwwAuthenticate, protectedResourceMetadata, DEV_ISSUER } from './auth.js';
 export type { AuthDriver, AuthIdentity, OrgAuth, Principal, RequestCredentials } from './auth.js';

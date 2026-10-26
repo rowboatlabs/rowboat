@@ -42,7 +42,7 @@ describe('open-space transactional boundaries', () => {
     await store.init();
     hub = new SpaceHub();
     service = new HarborService(store, hub, { name: 'Race org', address: 'race.test' }, new MemoryBlobStore());
-    for (const id of ['owner', 'reader']) await store.putMember({ id, displayName: id, role: 'member' });
+    for (const id of ['owner', 'reader']) await store.putMember({ id, displayName: id, role: 'member', kind: 'human' });
     spaceId = (await service.createSpace({ memberId: 'owner' }, 'Open', 'open')).id;
     root = (await service.postMessage({ memberId: 'owner' }, spaceId, { body: 'root', actingMode: 'direct' })).message.id;
   });
@@ -62,14 +62,17 @@ describe('open-space transactional boundaries', () => {
     } finally { store.failAppend = false; unsubSpace(); unsubMember(); }
   });
 
-  it.each(['blob upload', 'message', 'asset', 'invite'])('rechecks membership under the lock for %s', async (operation) => {
+  // Invites are not here (2026-10-19): an invite is to the org and writes
+  // to no space's log, and acceptance joins a listed space only while its
+  // inviter is still in it (team-invites.test.ts), which covers a removal
+  // that lands after the invite as well as one racing it.
+  it.each(['blob upload', 'message', 'asset'])('rechecks membership under the lock for %s', async (operation) => {
     const ctx = { memberId: 'reader' };
     const bytes = Buffer.from('late upload');
     const calls: Record<string, () => Promise<unknown>> = {
       'blob upload': () => service.uploadBlob(ctx, spaceId, bytes, { declaredSha256: blobHash(bytes) }),
       message: () => service.postMessage(ctx, spaceId, { body: 'late', actingMode: 'direct' }),
       asset: () => service.createAsset(ctx, spaceId, { path: 'late.md', newContent: 'late', actingMode: 'direct' }),
-      invite: () => service.createInvite(ctx, spaceId),
     };
     await service.joinSpace(ctx, spaceId);
     const head = await store.head(spaceId);

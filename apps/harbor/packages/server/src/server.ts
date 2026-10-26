@@ -7,7 +7,7 @@ import { internalHandler } from './internal.js';
 import { LiveStats } from './stats.js';
 import { DEFAULT_ORG_ID } from './pg-store.js';
 import type { PushSender } from './push.js';
-import { buildOrgRuntime } from './runtime.js';
+import { buildOrgRuntime, type OrgRuntimeInput } from './runtime.js';
 import type { HarborService } from './service.js';
 import type { Store } from './store.js';
 import { attachLive } from './ws.js';
@@ -46,6 +46,10 @@ export interface HarborOptions {
   blobs?: BlobStore;
   /** Upload cap for the raw-bytes blob route (default 100MB). */
   maxBlobBytes?: number;
+  /** Browser origins allowed to call the org cross-origin (cors.ts). */
+  webOrigins?: readonly string[];
+  /** The Spaces web app, offered by the org's link landings (http.ts). */
+  webAppUrl?: string;
   /** Live-face heartbeat cadence (default 25s). A test knob; production keeps the default. */
   liveHeartbeatMs?: number;
   /** Test knob: unsent-bytes ceiling before a stalled socket is terminated (ws.ts). */
@@ -57,6 +61,8 @@ export interface HarborOptions {
    * tests leave it off.
    */
   internal?: { key?: string; log?: boolean };
+  /** Managed hosting: a stand-in provider and tick for tests (runtime.ts). */
+  hosting?: OrgRuntimeInput['hosting'];
   /** Auth driver; defaults to dev tokens (never expose publicly). Pass an OidcAuthDriver for real deployments. */
   auth?: AuthDriver;
   /**
@@ -100,6 +106,9 @@ export async function startHarbor(options: HarborOptions): Promise<RunningHarbor
     ...(options.pushSender ? { pushSender: options.pushSender } : {}),
     ...(options.consent ? { consentPublishableKey: options.consent.publishableKey } : {}),
     ...(options.maxBlobBytes !== undefined ? { maxBlobBytes: options.maxBlobBytes } : {}),
+    ...(options.webOrigins ? { webOrigins: options.webOrigins } : {}),
+    ...(options.webAppUrl ? { webAppUrl: options.webAppUrl } : {}),
+    ...(options.hosting ? { hosting: options.hosting } : {}),
   });
   await seedOrg(runtime.service, store, options);
 
@@ -130,6 +139,7 @@ export async function startHarbor(options: HarborOptions): Promise<RunningHarbor
     close: async () => {
       closeLive();
       stats.close();
+      await runtime.close();
       await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
     },
   };
@@ -148,7 +158,7 @@ async function seedOrg(
 ): Promise<void> {
   for (const m of options.seedMembers ?? []) {
     const existing = await store.getMember(m.id);
-    await store.putMember({ id: m.id, displayName: m.displayName, role: existing?.role ?? 'member' });
+    await store.putMember({ ...existing, id: m.id, displayName: m.displayName, role: existing?.role ?? 'member', kind: 'human' });
   }
   for (const seed of options.seedSpaces ?? []) {
     const creator = await ensureMember(store, seed.creator);
@@ -158,7 +168,7 @@ async function seedOrg(
     const space = await service.createSpace({ memberId: seed.creator }, seed.name);
     for (const m of options.seedMembers ?? []) {
       if (m.id === seed.creator) continue;
-      const invite = await service.createInvite({ memberId: seed.creator }, space.id);
+      const invite = await service.createInvite({ memberId: seed.creator }, { spaceIds: [space.id] });
       await service.acceptInvite({ memberId: m.id }, invite.token);
     }
     for (const asset of seed.assets ?? []) {

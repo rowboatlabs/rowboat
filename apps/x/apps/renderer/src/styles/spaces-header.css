@@ -1,0 +1,144 @@
+/* Spaces header — redesign (2026-10-21). The space's title menu, the view
+   tabs as one segmented control, a search box that widens on focus, the
+   members face pile and the board button. Motion stays under 300ms and turns
+   off under reduced motion. */
+
+.spaces-title-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  min-width: 0;
+  max-width: 320px;
+  padding: 0 8px 0 6px;
+  border-radius: 8px;
+  transition: background-color 120ms ease;
+}
+.spaces-title-button:hover,
+.spaces-title-button[data-state="open"] { background: var(--accent); }
+.spaces-title-button .spaces-title-chevron { transition: transform 200ms cubic-bezier(.2, 0, 0, 1); }
+.spaces-title-button[data-state="open"] .spaces-title-chevron { transform: rotate(180deg); }
+
+/* Segmented control: the tabs sit on a faint track, the selected one on a raised chip. */
+.spaces-segmented {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--foreground) 5%, transparent);
+}
+.spaces-segmented-indicator {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 0;
+  border-radius: 7px;
+  background: var(--background);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08), 0 0 0 1px color-mix(in srgb, var(--foreground) 8%, transparent);
+  pointer-events: none;
+}
+.dark .spaces-segmented-indicator {
+  background: color-mix(in srgb, var(--foreground) 12%, var(--background));
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.4), inset 0 0 0 1px color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+.spaces-segmented-indicator.is-animated {
+  transition: transform 260ms cubic-bezier(.2, .8, .2, 1), width 260ms cubic-bezier(.2, .8, .2, 1);
+}
+.spaces-segmented-tab {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 7px;
+  font-size: 13px;
+  white-space: nowrap;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: color 160ms ease;
+}
+.spaces-segmented-tab:hover { color: var(--foreground); }
+.spaces-segmented-tab.is-selected { color: var(--foreground); font-weight: 500; }
+.spaces-segmented-tab:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+
+/* Search: compact until you use it. */
+.spaces-header-search { width: 200px; transition: width 260ms cubic-bezier(.2, .8, .2, 1); }
+.spaces-header-search:focus-within { width: min(360px, 40vw); }
+
+/* Header icon buttons and the face pile share one shape. */
+.spaces-header-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  min-width: 32px;
+  flex-shrink: 0;
+  padding: 0 8px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease, transform 120ms ease;
+}
+.spaces-header-button:hover,
+.spaces-header-button[data-state="open"],
+.spaces-header-button[aria-pressed="true"] { background: var(--accent); color: var(--foreground); }
+.spaces-header-button:active { transform: scale(.96); }
+
+.spaces-facepile > * { box-shadow: 0 0 0 2px var(--background); }
+.spaces-facepile > * + * { margin-left: -6px; }
+
+/* "Show sidebar" fades in when the rail is tucked away (2026-10-22). */
+@keyframes spaces-rail-reveal-in {
+  from { opacity: 0; transform: translateX(-4px); }
+  to { opacity: 1; transform: none; }
+}
+.spaces-rail-reveal { animation: spaces-rail-reveal-in 180ms ease-out; }
+@media (prefers-reduced-motion: reduce) { .spaces-rail-reveal { animation: none; } }
+
+/* Menu rows inside the title and people popovers. */
+.spaces-menu-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  padding: 6px 10px;
+  border-radius: 7px;
+  text-align: left;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color 100ms ease;
+}
+.spaces-menu-row:hover, .spaces-menu-row:focus-visible { background: var(--accent); outline: none; }
+.spaces-menu-row:disabled { opacity: .5; cursor: default; background: transparent; }
+.spaces-menu-row > svg { width: 15px; height: 15px; flex-shrink: 0; color: var(--muted-foreground); }
+.spaces-menu-row--danger { color: var(--destructive); }
+.spaces-menu-row--danger > svg { color: currentColor; }
+.spaces-menu-hint { margin-left: auto; font-size: 11.5px; color: var(--muted-foreground); }
+.spaces-menu-label { padding: 6px 10px 2px; font-size: 11.5px; color: var(--muted-foreground); }
+.spaces-menu-sep { height: 1px; margin: 6px 4px; background: var(--border); }
+
+/* A popover that swaps to a sub-view (bookmarks, invite) slides it in. */
+@keyframes spaces-subview-in {
+  from { opacity: 0; transform: translateX(8px); }
+  to { opacity: 1; transform: none; }
+}
+.spaces-subview { animation: spaces-subview-in 200ms cubic-bezier(.2, .8, .2, 1); }
+
+@media (max-width: 900px) {
+  .spaces-header-search { width: 36px; }
+  .spaces-header-search:focus-within { width: min(320px, 60vw); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spaces-segmented-indicator.is-animated,
+  .spaces-header-search,
+  .spaces-title-button .spaces-title-chevron { transition: none; }
+  .spaces-subview { animation: none; }
+}

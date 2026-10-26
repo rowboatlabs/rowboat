@@ -7,6 +7,12 @@
 // code_agent_run and launch-code-task are here for the legacy code-mode path
 // (runs/), which shares buildCopilotAgent and cannot gain tools mid-run;
 // revisit once code-mode migrates to the turns runtime.
+
+// The harness: one Claude Code / Codex run inside a directory. Named on its
+// own because a chat only gets it once it HAS a directory — RealAgentResolver
+// drops it from work-directory agents that have none (2026-09-30).
+export const HARNESS_TOOL = "code_agent_run";
+
 export const COPILOT_BASE_TOOLS: readonly string[] = [
     "loadSkill",
     // Blocking user question (async, requiresHuman) — resolved as a special
@@ -40,6 +46,6 @@ export const COPILOT_BASE_TOOLS: readonly string[] = [
     "paste-at-cursor",
     "executeCommand",
     "spawn-agent",
-    "code_agent_run",
+    HARNESS_TOOL,
     "launch-code-task",
 ];

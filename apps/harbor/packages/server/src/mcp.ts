@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { mcpTools, NewPoll, type ActingMode, type ActivityItem, type ActivityKind, type SearchKind, relabelMentions, type Message } from '@rowboat/spaces-protocol';
+import { mcpTools, NewPoll, type ActingMode, type ReadAssetResult, type ActivityItem, type ActivityKind, type SearchKind, relabelMentions, type Message } from '@rowboat/spaces-protocol';
 import { z } from 'zod';
 import { authenticateRequest, wwwAuthenticate, type OrgAuth } from './auth.js';
 import { HarborError } from './errors.js';
@@ -30,17 +30,22 @@ interface McpActor {
   memberId: string;
   actingMode: ActingMode;
   agentName?: string;
+  /** An agent member on its own key (2026-09-29): acts as itself, so always direct. */
+  agent?: boolean;
 }
 
 export async function handleMcpRequest(req: IncomingMessage, res: ServerResponse, deps: Deps): Promise<void> {
   let actor: McpActor;
   try {
     const { member } = await authenticateRequest(deps.auth, { authorization: req.headers.authorization });
-    actor = {
-      memberId: member.id,
-      actingMode: req.headers['x-acting-mode'] === 'scheduled' ? 'scheduled' : 'agent',
-      ...(typeof req.headers['x-agent-name'] === 'string' ? { agentName: req.headers['x-agent-name'] } : {}),
-    };
+    actor = member.kind === 'agent'
+      // An agent member on its own key is not a person's agent: no "via".
+      ? { memberId: member.id, actingMode: 'direct', agent: true }
+      : {
+          memberId: member.id,
+          actingMode: req.headers['x-acting-mode'] === 'scheduled' ? 'scheduled' : 'agent',
+          ...(typeof req.headers['x-agent-name'] === 'string' ? { agentName: req.headers['x-agent-name'] } : {}),
+        };
   } catch (err) {
     const e = err instanceof HarborError ? err : new HarborError('unauthorized', 'unauthorized');
     const headers: Record<string, string> = { 'content-type': 'application/json' };
@@ -52,7 +57,7 @@ export async function handleMcpRequest(req: IncomingMessage, res: ServerResponse
     return;
   }
 
-  const server = buildMcpServer(deps.service, actor);
+  const server = buildMcpServer(deps.service, actor, publicOriginOf(req));
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,
@@ -74,7 +79,7 @@ export async function handleMcpRequest(req: IncomingMessage, res: ServerResponse
   }
 }
 
-function buildMcpServer(service: HarborService, actor: McpActor): Server {
+function buildMcpServer(service: HarborService, actor: McpActor, origin: string): Server {
   const server = new Server({ name: 'harbor-stub', version: '0.0.1' }, { capabilities: { tools: {} } });
 
   server.setRequestHandler(ListToolsRequestSchema, () => ({
@@ -97,7 +102,7 @@ function buildMcpServer(service: HarborService, actor: McpActor): Server {
     try {
       const result = await dispatch(service, actor, request.params.name, parsed.data);
       return {
-        content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+        content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }, ...binaryNote(origin, request.params.name, parsed.data, result)],
         structuredContent: result as Record<string, unknown>,
       };
     } catch (err) {
@@ -116,13 +121,29 @@ function errorResult(text: string) {
   return { content: [{ type: 'text' as const, text }], isError: true };
 }
 
+// A binary file's bytes never pass through a tool (spec §8, Files); its read says where they are
+// (2026-10-08). Told only that the bytes were "not readable over this face", Hermes answered that it
+// could not read a PNG in its space (2026-10-06), when its own key could download it. The structured
+// result is unchanged, so both faces still return the same object.
+function binaryNote(origin: string, tool: string, args: unknown, result: unknown) {
+  if (tool !== 'read_asset') return [];
+  const { blob } = result as ReadAssetResult;
+  if (!blob) return [];
+  const { spaceId } = args as { spaceId: string };
+  return [{
+    type: 'text' as const,
+    text: `This file is binary, so read_asset carries no bytes. Download them with the bearer you call this ` +
+      `server with: GET ${origin}/v1/spaces/${spaceId}/blobs/${blob.hash}`,
+  }];
+}
+
 async function dispatch(
   service: HarborService,
   actor: McpActor,
   name: string,
   args: unknown,
 ): Promise<unknown> {
-  const ctx = { memberId: actor.memberId };
+  const ctx = { memberId: actor.memberId, ...(actor.agent ? { agent: true } : {}) };
   // Every write is attributed as the token's member acting in the declared
   // mode (PARITY 2026-09-09: an agent's vote/reaction/edit is the member's act).
   const attribution = {
@@ -135,6 +156,8 @@ async function dispatch(
       // The same row /v1/me serves.
       return { member: await service.me(ctx), org: { name: service.org.name, address: service.org.address } };
     }
+    case 'update_profile':
+      return { member: await service.updateProfile(ctx, args as { displayName?: string; title?: string }) };
     case 'list_members': {
       const a = args as { spaceId?: string };
       const members = a.spaceId !== undefined
@@ -163,14 +186,47 @@ async function dispatch(
       const a = args as { spaceId: string; name: string };
       return { space: await service.renameSpace(ctx, a.spaceId, { name: a.name, ...attribution }) };
     }
+    case 'archive_space':
+      return { space: await service.archiveSpace(ctx, (args as { spaceId: string }).spaceId, attribution) };
+    case 'delete_space':
+      await service.deleteSpace(ctx, (args as { spaceId: string }).spaceId);
+      return { deleted: true };
+    case 'unarchive_space':
+      return { space: await service.unarchiveSpace(ctx, (args as { spaceId: string }).spaceId, attribution) };
+    case 'set_default_space': {
+      const a = args as { spaceId: string; isDefault: boolean };
+      return { space: await service.setDefaultSpace(ctx, a.spaceId, { isDefault: a.isDefault, ...attribution }) };
+    }
+    case 'set_space_visibility': {
+      const a = args as { spaceId: string; visibility: 'private' | 'open' };
+      return { space: await service.setSpaceVisibility(ctx, a.spaceId, { visibility: a.visibility, ...attribution }) };
+    }
+    case 'remove_member': {
+      const a = args as { spaceId: string; memberId: string };
+      return service.removeMember(ctx, a.spaceId, a.memberId, attribution);
+    }
+    case 'remove_org_member':
+      return { member: await service.removeOrgMember(ctx, (args as { memberId: string }).memberId, attribution) };
+    case 'set_member_role': {
+      const a = args as { memberId: string; role: 'admin' | 'member' };
+      return { member: await service.setMemberRole(ctx, a.memberId, { role: a.role, ...attribution }) };
+    }
+    case 'get_org_settings':
+      return { settings: await service.getOrgSettings(ctx) };
+    case 'set_invite_policy':
+      return { settings: await service.updateOrgSettings(ctx, { invitePolicy: (args as { invitePolicy: 'members' | 'admins' }).invitePolicy }) };
+    case 'add_members': {
+      const a = args as { spaceId: string; memberIds: string[] };
+      return { memberships: await service.addMembers(ctx, a.spaceId, { memberIds: a.memberIds, ...attribution }) };
+    }
     case 'leave_space': {
       const a = args as { spaceId: string };
       await service.leaveSpace(ctx, a.spaceId);
       return { left: true };
     }
     case 'create_invite': {
-      const a = args as { spaceId: string; expiresInHours?: number };
-      return service.createInvite(ctx, a.spaceId, a.expiresInHours);
+      const a = args as { spaceIds?: string[]; spaceId?: string; expiresInHours?: number };
+      return service.createInvite(ctx, a);
     }
     case 'list_spaces': {
       const a = args as { includeDirect?: boolean };
@@ -187,6 +243,7 @@ async function dispatch(
             assets: await service.listAssets(ctx, space.id),
           })),
         ),
+        groupChat: await service.isGroupChat(),
       };
     }
     case 'read_stream': {
@@ -304,19 +361,47 @@ async function dispatch(
       });
     }
     case 'post_message': {
-      const a = args as { spaceId: string; threadRoot?: string; body: string; poll?: z.infer<typeof NewPoll> };
-      const { message } = await service.postMessage(ctx, a.spaceId, {
+      const a = args as {
+        spaceId: string;
+        threadRoot?: string;
+        body: string;
+        summary?: string;
+        poll?: z.infer<typeof NewPoll>;
+        agentOptions?: Record<string, Record<string, string | boolean>>;
+      };
+      const { message, invocations } = await service.postMessage(ctx, a.spaceId, {
         ...(a.threadRoot ? { threadRoot: a.threadRoot } : {}),
         body: a.body,
+        ...(a.summary ? { summary: a.summary } : {}),
         ...(a.poll !== undefined ? { poll: a.poll } : {}),
+        ...(a.agentOptions ? { agentOptions: a.agentOptions } : {}),
         actingMode: actor.actingMode,
         ...(actor.agentName ? { agentName: actor.agentName } : {}),
       });
-      return { messageId: message.id, ...(message.threadRoot !== undefined ? { threadRoot: message.threadRoot } : {}) };
+      return {
+        messageId: message.id,
+        ...(message.threadRoot !== undefined ? { threadRoot: message.threadRoot } : {}),
+        // A refused hand-off comes back to the agent that posted it (spec §8).
+        ...(invocations.length > 0
+          ? { invocations: invocations.map((i) => ({ agentId: i.agentId, state: i.state, ...(i.refusal ? { refusal: i.refusal } : {}) })) }
+          : {}),
+      };
     }
+    case 'get_invocations': {
+      const a = args as { spaceId: string; threadRootId?: string };
+      return { invocations: await service.listInvocations(ctx, a.spaceId, a.threadRootId) };
+    }
+    case 'stop_invocation':
+      return { invocation: await service.cancelInvocation(ctx, (args as { invocationId: string }).invocationId) };
     case 'edit_message': {
-      const a = args as { spaceId: string; messageId: string; body: string };
-      return { message: await service.editMessage(ctx, a.spaceId, a.messageId, { body: a.body, ...attribution }) };
+      const a = args as { spaceId: string; messageId: string; body: string; summary?: string | null };
+      return {
+        message: await service.editMessage(ctx, a.spaceId, a.messageId, {
+          body: a.body,
+          ...(a.summary !== undefined ? { summary: a.summary } : {}),
+          ...attribution,
+        }),
+      };
     }
     case 'delete_message': {
       const a = args as { spaceId: string; messageId: string };
@@ -440,5 +525,9 @@ async function spaceNamesFor(service: HarborService, ctx: ActorCtx): Promise<Map
 }
 
 function relabel(message: Message, names: ReadonlyMap<string, string>, spaceNames?: ReadonlyMap<string, string>): Message {
-  return { ...message, body: relabelMentions(message.body, names, spaceNames) };
+  return {
+    ...message,
+    body: relabelMentions(message.body, names, spaceNames),
+    ...(message.summary ? { summary: relabelMentions(message.summary, names, spaceNames) } : {}),
+  };
 }

@@ -3,6 +3,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { ClientFrame, type ServerFrame } from '@rowboat/spaces-protocol';
 import { authenticateRequest, type OrgAuth } from './auth.js';
 import { HarborError } from './errors.js';
+import { sessionToken } from './session.js';
 import type { SpaceHub } from './hub.js';
 import type { HarborService } from './service.js';
 import type { LiveStats } from './stats.js';
@@ -30,6 +31,8 @@ export interface LiveDeps {
   service: HarborService;
   hub: SpaceHub;
   auth: OrgAuth;
+  /** Origins whose upgrades may authenticate with the session cookie (session.ts). */
+  webOrigins: ReadonlySet<string>;
 }
 
 const DEFAULT_HEARTBEAT_MS = 25_000;
@@ -92,7 +95,14 @@ export function attachLive(
           socket.destroy();
           return;
         }
-        const credentials = { authorization: req.headers.authorization, queryToken: url.searchParams.get('token') };
+        // The web app opens the socket on its session cookie (session.ts):
+        // only from a listed origin, and a browser always sends Origin on
+        // an upgrade, so another site can't open a socket in someone's name.
+        const query = url.searchParams.get('token');
+        const cookie = req.headers.authorization || query
+          ? undefined
+          : sessionToken({ cookie: req.headers.cookie, origin: req.headers.origin }, deps.webOrigins);
+        const credentials = { authorization: req.headers.authorization, queryToken: query ?? cookie };
         memberId = (await authenticateRequest(deps.auth, credentials)).member.id;
       } catch (err) {
         const status = err instanceof HarborError && err.status === 403 ? '403 Forbidden' : '401 Unauthorized';

@@ -2,9 +2,19 @@ import type { ActivityKind, Attribution } from '@rowboat/spaces-protocol';
 import type { ActivityQuery, ActivityRow } from './store.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type {
+  AgentKey,
   BlobInfo,
+  ConnectorCapabilities,
+  Approval,
+  ApprovalState,
+  Invocation,
+  InvocationOptionValues,
+  InvocationState,
   ChangeSet,
+  InvitePolicy,
   Member,
+  MemberRole,
+  OrgSettings,
   Membership,
   MentionStamps,
   Message,
@@ -24,11 +34,16 @@ import {
   type AssetVersionData,
   type MessageSearchRow,
   type Store,
+  type StoredAgentCredential,
+  StoredAgentHosting,
+  type StoredAgentHook,
+  type StoredAgentKey,
   type StoredEvent,
   type StoredInvite,
   type StoredPollVote,
   type StoredReaction,
   type StoredSpaceBlob,
+  type StoredOrgImage,
   type ThreadReadMark,
   type UnreadThreadRow,
 } from './store.js';
@@ -49,16 +64,110 @@ import {
 interface MemberRow {
   id: string;
   display_name: string;
+  title: string | null;
   avatar_url: string | null;
   role: Member['role'];
+  kind: Member['kind'];
+  owner_id: string | null;
+  agent_kind: string | null;
+  agent_connection: string | null;
+  agent_instance: string | null;
+  deactivated_at: string | null;
+  removed_at: string | null;
 }
+
+interface AgentKeyRow {
+  id: string;
+  agent_id: string;
+  hash: string;
+  created_by: string;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
+
+function rowToAgentKey(r: AgentKeyRow): StoredAgentKey {
+  return {
+    id: r.id,
+    agentId: r.agent_id,
+    hash: r.hash,
+    createdBy: r.created_by,
+    createdAt: r.created_at,
+    ...(r.last_used_at !== null ? { lastUsedAt: r.last_used_at } : {}),
+    ...(r.revoked_at !== null ? { revokedAt: r.revoked_at } : {}),
+  };
+}
+
+interface AgentCredentialRow {
+  agent_id: string;
+  sealed: string;
+  hint: string;
+  set_by: string;
+  set_at: string;
+  rejected_at: string | null;
+  rejected_reason: string | null;
+}
+
+function rowToAgentCredential(r: AgentCredentialRow): StoredAgentCredential {
+  return {
+    agentId: r.agent_id,
+    sealed: r.sealed,
+    hint: r.hint,
+    setBy: r.set_by,
+    setAt: r.set_at,
+    ...(r.rejected_at !== null ? { rejectedAt: r.rejected_at } : {}),
+    ...(r.rejected_reason !== null ? { rejectedReason: r.rejected_reason } : {}),
+  };
+}
+
+interface AgentHostingRow {
+  id: string;
+  agent_id: string | null;
+  provider: string;
+  status: string;
+  external_id: string | null;
+  external_user_id: string;
+  kind: string;
+  display_name: string;
+  error: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+function rowToAgentHosting(r: AgentHostingRow): StoredAgentHosting {
+  return {
+    id: r.id,
+    ...(r.agent_id !== null ? { agentId: r.agent_id } : {}),
+    provider: r.provider as StoredAgentHosting['provider'],
+    status: r.status as StoredAgentHosting['status'],
+    ...(r.external_id !== null ? { externalId: r.external_id } : {}),
+    externalUserId: r.external_user_id,
+    kind: r.kind,
+    displayName: r.display_name,
+    ...(r.error !== null ? { error: r.error } : {}),
+    createdBy: r.created_by,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+const HOSTING_COLUMNS = 'id, agent_id, provider, status, external_id, external_user_id, kind, display_name, error, created_by, created_at, updated_at';
 
 function rowToMember(r: MemberRow): Member {
   return {
     id: r.id,
     displayName: r.display_name,
+    ...(r.title !== null ? { title: r.title } : {}),
     ...(r.avatar_url !== null ? { avatarUrl: r.avatar_url } : {}),
     role: r.role,
+    kind: r.kind,
+    ...(r.owner_id !== null ? { ownerId: r.owner_id } : {}),
+    ...(r.agent_kind !== null ? { agentKind: r.agent_kind } : {}),
+    ...(r.agent_connection !== null ? { agentConnection: r.agent_connection } : {}),
+    ...(r.agent_instance !== null ? { agentInstance: r.agent_instance } : {}),
+    ...(r.deactivated_at !== null ? { deactivatedAt: r.deactivated_at } : {}),
+    ...(r.removed_at !== null ? { removedAt: r.removed_at } : {}),
   };
 }
 
@@ -69,6 +178,8 @@ interface SpaceRow {
   kind: Space['kind'];
   visibility: Space['visibility'];
   direct_key: string | null;
+  archived: boolean;
+  is_default: boolean;
 }
 
 function rowToSpace(r: SpaceRow): Space {
@@ -78,6 +189,8 @@ function rowToSpace(r: SpaceRow): Space {
     createdAt: r.created_at,
     kind: r.kind,
     visibility: r.visibility,
+    archived: r.archived,
+    isDefault: r.is_default,
     ...(r.kind === 'direct' && r.direct_key !== null ? { participants: JSON.parse(r.direct_key) as string[] } : {}),
   };
 }
@@ -155,14 +268,22 @@ interface MessageRow {
   reply_count: number;
   last_reply_at: string | null;
   last_reply_offset: number | null;
+  reply_authors?: string[] | null;
   anchor_change_set_id: string | null;
   deleted_at: string | null;
   edited_at: string | null;
   poll: Poll | null;
+  approval?: Approval | null;
   stream_offset: number;
   mentions: string[] | null;
   mentions_here: boolean | null;
   mentions_rowboat: boolean | null;
+  summary?: string | null;
+}
+
+/** What search indexes for a message: its summary (2026-10-25) and its body. */
+function withSummary(body: string, summary: string | undefined): string {
+  return summary ? `${summary}\n${body}` : body;
 }
 
 function rowToMessage(r: MessageRow): Message {
@@ -172,11 +293,13 @@ function rowToMessage(r: MessageRow): Message {
     ...(r.thread_root !== null ? { threadRoot: r.thread_root } : {}),
     author: r.author,
     body: r.body,
+    ...(r.summary ? { summary: r.summary } : {}),
     postedAt: r.posted_at,
     offset: r.stream_offset,
     replyCount: r.reply_count,
     ...(r.last_reply_at !== null ? { lastReplyAt: r.last_reply_at } : {}),
     ...(r.last_reply_offset !== null && r.last_reply_offset !== undefined ? { lastReplyOffset: r.last_reply_offset } : {}),
+    replyAuthors: r.reply_authors ?? [],
     ...(r.anchor_change_set_id !== null ? { anchorChangeSetId: r.anchor_change_set_id } : {}),
     ...(r.deleted_at !== null ? { deletedAt: r.deleted_at } : {}),
     ...(r.edited_at !== null ? { editedAt: r.edited_at } : {}),
@@ -184,6 +307,8 @@ function rowToMessage(r: MessageRow): Message {
     reactions: [],
     // The poll definition rides the row; live votes fold in on reads too.
     ...(r.poll !== null && r.poll !== undefined ? { poll: r.poll } : {}),
+    // An approval card's approval as raised; the current one folds in on reads (spec §8 part 4).
+    ...(r.approval !== null && r.approval !== undefined ? { approval: r.approval } : {}),
     mentions: r.mentions ?? [],
     mentionsHere: r.mentions_here ?? false,
     mentionsRowboat: r.mentions_rowboat ?? false,
@@ -321,7 +446,7 @@ export class PgStore implements Store {
 
   async getMember(id: string): Promise<Member | undefined> {
     const rows = await this.sql.query<MemberRow>(
-      'select id, display_name, avatar_url, role from members where org_id = $1 and id = $2',
+      'select id, display_name, title, avatar_url, role, kind, owner_id, agent_kind, agent_connection, agent_instance, deactivated_at, removed_at from members where org_id = $1 and id = $2',
       [this.orgId, id],
     );
     return rows[0] ? rowToMember(rows[0]) : undefined;
@@ -329,7 +454,7 @@ export class PgStore implements Store {
 
   async listAllMembers(): Promise<Member[]> {
     const rows = await this.sql.query<MemberRow>(
-      'select id, display_name, avatar_url, role from members where org_id = $1 order by id',
+      'select id, display_name, title, avatar_url, role, kind, owner_id, agent_kind, agent_connection, agent_instance, deactivated_at, removed_at from members where org_id = $1 order by id',
       [this.orgId],
     );
     return rows.map(rowToMember);
@@ -337,7 +462,7 @@ export class PgStore implements Store {
 
   async listSpaceMembers(spaceId: string): Promise<Member[]> {
     const rows = await this.sql.query<MemberRow>(
-      `select m.id, m.display_name, m.avatar_url, m.role from memberships ms
+      `select m.id, m.display_name, m.title, m.avatar_url, m.role, m.kind, m.owner_id, m.agent_kind, m.agent_connection, m.agent_instance, m.deactivated_at, m.removed_at from memberships ms
        join members m on m.org_id = $1 and m.id = ms.member_id
        where ms.space_id = $2
        order by ms.joined_at, ms.member_id`,
@@ -346,30 +471,21 @@ export class PgStore implements Store {
     return rows.map(rowToMember);
   }
 
-  async listMembersSharingSpace(memberId: string): Promise<Member[]> {
-    const rows = await this.sql.query<MemberRow>(
-      `select m.id, m.display_name, m.avatar_url, m.role from members m
-       where m.org_id = $1 and (m.id = $2 or exists (
-         select 1 from memberships mine
-         join memberships theirs on theirs.space_id = mine.space_id
-         where mine.member_id = $2 and theirs.member_id = m.id))
-       order by m.id`,
-      [this.orgId, memberId],
-    );
-    return rows.map(rowToMember);
-  }
-
   async putMember(member: Member): Promise<void> {
+    // Kind, owner, and an agent's kind and connection are written once and
+    // never updated: a person never becomes an agent or back, ownership has no
+    // transfer yet, and reaching an agent another way is a new agent (spec §4
+    // Agent members, 2026-09-29 and 2026-09-30).
     await this.sql.query(
-      `insert into members (org_id, id, display_name, avatar_url, role) values ($1, $2, $3, $4, $5)
-       on conflict (org_id, id) do update set display_name = excluded.display_name, avatar_url = excluded.avatar_url, role = excluded.role`,
-      [this.orgId, member.id, member.displayName, member.avatarUrl ?? null, member.role],
+      `insert into members (org_id, id, display_name, title, avatar_url, role, kind, owner_id, agent_kind, agent_connection, agent_instance) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       on conflict (org_id, id) do update set display_name = excluded.display_name, title = excluded.title, avatar_url = excluded.avatar_url, role = excluded.role`,
+      [this.orgId, member.id, member.displayName, member.title ?? null, member.avatarUrl ?? null, member.role, member.kind, member.ownerId ?? null, member.agentKind ?? null, member.agentConnection ?? null, member.agentInstance ?? null],
     );
   }
 
   async getMemberByIdentity(iss: string, sub: string): Promise<Member | undefined> {
     const rows = await this.sql.query<MemberRow>(
-      `select m.id, m.display_name, m.avatar_url, m.role from member_identities mi
+      `select m.id, m.display_name, m.title, m.avatar_url, m.role, m.kind, m.owner_id, m.agent_kind, m.agent_connection, m.agent_instance, m.deactivated_at, m.removed_at from member_identities mi
        join members m on m.org_id = mi.org_id and m.id = mi.member_id
        where mi.org_id = $1 and mi.iss = $2 and mi.sub = $3`,
       [this.orgId, iss, sub],
@@ -385,15 +501,87 @@ export class PgStore implements Store {
     );
   }
 
+  async deactivateMember(memberId: string, at: string): Promise<void> {
+    await this.transaction(async (tx) => {
+      await tx.query(
+        `update members set avatar_url = null, deactivated_at = coalesce(deactivated_at, $3)
+         where org_id = $1 and id = $2`,
+        [this.orgId, memberId, at],
+      );
+      await tx.query('delete from push_tokens where org_id = $1 and member_id = $2', [this.orgId, memberId]);
+      await tx.query(
+        `update agent_keys set revoked_at = coalesce(revoked_at, $3)
+         where org_id = $1 and agent_id in (select id from members where org_id = $1 and owner_id = $2)`,
+        [this.orgId, memberId, at],
+      );
+    });
+  }
+
+  async removeMemberFromOrg(memberId: string, at: string): Promise<void> {
+    await this.transaction(async (tx) => {
+      await tx.query(
+        `update members set role = 'member', removed_at = coalesce(removed_at, $3)
+         where org_id = $1 and id = $2`,
+        [this.orgId, memberId, at],
+      );
+      await tx.query('delete from push_tokens where org_id = $1 and member_id = $2', [this.orgId, memberId]);
+      await tx.query(
+        `update agent_keys set revoked_at = coalesce(revoked_at, $3)
+         where org_id = $1 and agent_id in (select id from members where org_id = $1 and (id = $2 or owner_id = $2))`,
+        [this.orgId, memberId, at],
+      );
+    });
+  }
+
+  async reactivateMember(memberId: string): Promise<void> {
+    await this.sql.query('update members set removed_at = null where org_id = $1 and id = $2', [this.orgId, memberId]);
+  }
+
+  async setMemberRole(memberId: string, role: MemberRole): Promise<'ok' | 'last_admin'> {
+    return this.transaction(async (tx) => {
+      if (role === 'member') {
+        // Lock the active admins' rows: two admins demoting each other at
+        // once serialize here, and the second sees one admin left.
+        const admins = await tx.query<{ id: string }>(
+          `select id from members
+           where org_id = $1 and role = 'admin' and removed_at is null and deactivated_at is null
+           for update`,
+          [this.orgId],
+        );
+        if (admins.some((a) => a.id === memberId) && admins.length <= 1) return 'last_admin';
+      }
+      await tx.query('update members set role = $3 where org_id = $1 and id = $2', [this.orgId, memberId, role]);
+      return 'ok';
+    });
+  }
+
+  async getOrgSettings(): Promise<OrgSettings> {
+    const rows = await this.sql.query<{ invite_policy: InvitePolicy }>(
+      'select invite_policy from org_settings where org_id = $1',
+      [this.orgId],
+    );
+    return { invitePolicy: rows[0]?.invite_policy ?? 'members' };
+  }
+
+  async setInvitePolicy(policy: InvitePolicy, by: string, at: string): Promise<void> {
+    await this.sql.query(
+      `insert into org_settings (org_id, invite_policy, set_by, set_at) values ($1, $2, $3, $4)
+       on conflict (org_id) do update set invite_policy = excluded.invite_policy, set_by = excluded.set_by, set_at = excluded.set_at`,
+      [this.orgId, policy, by, at],
+    );
+  }
+
   // --- spaces ----------------------------------------------------------------
 
   async putSpace(space: Space): Promise<void> {
     // ON CONFLICT names the primary key only: a second direct space with the
     // same direct_key trips the partial unique index (migration 014) and
-    // raises — the service treats that as "lost the race, re-read".
+    // raises — the service treats that as "lost the race, re-read". Name,
+    // archive and visibility (2026-10-19) change; kind never does, and the
+    // schema keeps a DM private.
     await this.sql.query(
-      `insert into spaces (org_id, id, name, created_at, kind, visibility, direct_key) values ($1, $2, $3, $4, $5, $6, $7)
-       on conflict (id) do update set name = excluded.name`,
+      `insert into spaces (org_id, id, name, created_at, kind, visibility, direct_key, archived, is_default) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       on conflict (id) do update set name = excluded.name, archived = excluded.archived, is_default = excluded.is_default, visibility = excluded.visibility`,
       [
         this.orgId,
         space.id,
@@ -402,6 +590,8 @@ export class PgStore implements Store {
         space.kind,
         space.visibility,
         space.kind === 'direct' ? directKeyFor(space.participants ?? []) : null,
+        space.archived,
+        space.isDefault === true,
       ],
     );
   }
@@ -410,7 +600,7 @@ export class PgStore implements Store {
     // Org-scoped on purpose: this is what makes a foreign org's space ids
     // (and invite tokens, which resolve through here) not_found.
     const rows = await this.sql.query<SpaceRow>(
-      'select id, name, created_at, kind, visibility, direct_key from spaces where org_id = $1 and id = $2',
+      'select id, name, created_at, kind, visibility, direct_key, archived, is_default from spaces where org_id = $1 and id = $2',
       [this.orgId, id],
     );
     return rows[0] ? rowToSpace(rows[0]) : undefined;
@@ -418,7 +608,7 @@ export class PgStore implements Store {
 
   async browseSpaces(memberId: string): Promise<Array<{ space: Space; joined: boolean }>> {
     const rows = await this.sql.query<SpaceRow & { joined: boolean }>(
-      `select s.id, s.name, s.created_at, s.kind, s.visibility, s.direct_key,
+      `select s.id, s.name, s.created_at, s.kind, s.visibility, s.direct_key, s.archived, s.is_default,
         exists (select 1 from memberships m where m.space_id = s.id and m.member_id = $2) as joined
        from spaces s where s.org_id = $1 and s.kind = 'shared' and s.visibility = 'open'
        order by lower(s.name), s.id`,
@@ -429,7 +619,7 @@ export class PgStore implements Store {
 
   async listSpacesFor(memberId: string, opts: { includeDirect?: boolean } = {}): Promise<Space[]> {
     const rows = await this.sql.query<SpaceRow>(
-      `select s.id, s.name, s.created_at, s.kind, s.visibility, s.direct_key from spaces s
+      `select s.id, s.name, s.created_at, s.kind, s.visibility, s.direct_key, s.archived, s.is_default from spaces s
        join memberships m on m.space_id = s.id
        where s.org_id = $1 and m.member_id = $2 and ($3::boolean or s.kind <> 'direct')
        order by s.created_at, s.id`,
@@ -440,15 +630,32 @@ export class PgStore implements Store {
 
   async listAllSpaces(): Promise<Space[]> {
     const rows = await this.sql.query<SpaceRow>(
-      'select id, name, created_at, kind, visibility, direct_key from spaces where org_id = $1 order by created_at, id',
+      'select id, name, created_at, kind, visibility, direct_key, archived, is_default from spaces where org_id = $1 order by created_at, id',
       [this.orgId],
     );
     return rows.map(rowToSpace);
   }
 
+  async listDefaultSpaces(): Promise<Space[]> {
+    const rows = await this.sql.query<SpaceRow>(
+      'select id, name, created_at, kind, visibility, direct_key, archived, is_default from spaces where org_id = $1 and is_default order by created_at, id',
+      [this.orgId],
+    );
+    return rows.map(rowToSpace);
+  }
+
+  async countSpacesByKind(): Promise<{ shared: number; direct: number }> {
+    const rows = await this.sql.query<{ shared: string; direct: string }>(
+      `select count(*) filter (where kind = 'shared') as shared, count(*) filter (where kind = 'direct') as direct
+         from spaces where org_id = $1`,
+      [this.orgId],
+    );
+    return { shared: Number(rows[0]?.shared ?? 0), direct: Number(rows[0]?.direct ?? 0) };
+  }
+
   async getDirectSpace(directKey: string): Promise<Space | undefined> {
     const rows = await this.sql.query<SpaceRow>(
-      `select id, name, created_at, kind, visibility, direct_key from spaces
+      `select id, name, created_at, kind, visibility, direct_key, archived, is_default from spaces
        where org_id = $1 and kind = 'direct' and direct_key = $2`,
       [this.orgId, directKey],
     );
@@ -480,6 +687,10 @@ export class PgStore implements Store {
        on conflict (space_id, member_id) do nothing`,
       [membership.spaceId, membership.memberId, membership.joinedAt],
     );
+  }
+
+  async deleteSpace(spaceId: string): Promise<void> {
+    await this.sql.query('delete from spaces where org_id = $1 and id = $2', [this.orgId, spaceId]);
   }
 
   async deleteMembership(spaceId: string, memberId: string): Promise<void> {
@@ -636,6 +847,74 @@ export class PgStore implements Store {
       `insert into space_blobs (space_id, hash, size, mime, width, height, uploaded_by, uploaded_at)
        values ($1, $2, $3, $4, $5, $6, $7, $8) on conflict (space_id, hash) do nothing`,
       [blob.spaceId, blob.hash, blob.size, blob.mime, blob.width ?? null, blob.height ?? null, blob.uploadedBy, blob.uploadedAt],
+    );
+  }
+
+  async listSpaceBlobHashes(spaceId: string): Promise<string[]> {
+    const rows = await this.sql.query<{ hash: string }>('select hash from space_blobs where space_id = $1', [spaceId]);
+    return rows.map((r) => r.hash);
+  }
+
+  async unreferencedBlobs(hashes: string[]): Promise<string[]> {
+    if (hashes.length === 0) return [];
+    // Scoped to this org on purpose: every org's bytes live under its own
+    // prefix (main.ts blobStoreFactory), so only this org's references can
+    // keep them. Avatars and the logo are registered in org_images; org_logos
+    // is checked too so a logo is never lost to a registry gap.
+    const rows = await this.sql.query<{ hash: string }>(
+      `select h.hash from unnest($2::text[]) as h(hash)
+       where not exists (select 1 from space_blobs b join spaces s on s.id = b.space_id where b.hash = h.hash and s.org_id = $1)
+         and not exists (select 1 from org_images i where i.org_id = $1 and i.hash = h.hash)
+         and not exists (select 1 from org_logos l where l.org_id = $1 and l.hash = h.hash)`,
+      [this.orgId, hashes],
+    );
+    return rows.map((r) => r.hash);
+  }
+
+  async putOrgImage(image: StoredOrgImage): Promise<void> {
+    await this.sql.query(
+      `insert into org_images (org_id, hash, size, mime, width, height, uploaded_by, uploaded_at)
+       values ($1, $2, $3, $4, $5, $6, $7, $8) on conflict (org_id, hash) do nothing`,
+      [this.orgId, image.hash, image.size, image.mime, image.width ?? null, image.height ?? null, image.uploadedBy, image.uploadedAt],
+    );
+  }
+
+  async getOrgImage(hash: string): Promise<StoredOrgImage | undefined> {
+    const rows = await this.sql.query<{
+      hash: string;
+      size: number | string;
+      mime: string;
+      width: number | null;
+      height: number | null;
+      uploaded_by: string;
+      uploaded_at: string;
+    }>('select * from org_images where org_id = $1 and hash = $2', [this.orgId, hash]);
+    const r = rows[0];
+    if (!r) return undefined;
+    return {
+      hash: r.hash,
+      size: Number(r.size),
+      mime: r.mime,
+      ...(r.width !== null && r.height !== null ? { width: Number(r.width), height: Number(r.height) } : {}),
+      uploadedBy: r.uploaded_by,
+      uploadedAt: r.uploaded_at,
+    };
+  }
+
+  async getOrgLogo(): Promise<string | undefined> {
+    const rows = await this.sql.query<{ hash: string }>('select hash from org_logos where org_id = $1', [this.orgId]);
+    return rows[0]?.hash;
+  }
+
+  async setOrgLogo(hash: string | null, by: string, at: string): Promise<void> {
+    if (hash === null) {
+      await this.sql.query('delete from org_logos where org_id = $1', [this.orgId]);
+      return;
+    }
+    await this.sql.query(
+      `insert into org_logos (org_id, hash, set_by, set_at) values ($1, $2, $3, $4)
+       on conflict (org_id) do update set hash = excluded.hash, set_by = excluded.set_by, set_at = excluded.set_at`,
+      [this.orgId, hash, by, at],
     );
   }
 
@@ -868,8 +1147,8 @@ export class PgStore implements Store {
 
   async appendMessage(message: Message): Promise<void> {
     await this.sql.query(
-      `insert into messages (id, space_id, thread_root, author, body, posted_at, stream_offset, reply_count, last_reply_at, anchor_change_set_id, poll, mentions, mentions_here, mentions_rowboat, search_text)
-       values ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14, $15)`,
+      `insert into messages (id, space_id, thread_root, author, body, posted_at, stream_offset, reply_count, last_reply_at, anchor_change_set_id, poll, mentions, mentions_here, mentions_rowboat, search_text, approval, summary)
+       values ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14, $15, $16::jsonb, $17)`,
       [
         message.id,
         message.spaceId,
@@ -885,7 +1164,9 @@ export class PgStore implements Store {
         JSON.stringify(message.mentions),
         message.mentionsHere,
         message.mentionsRowboat,
-        searchTextFor(message.body),
+        searchTextFor(withSummary(message.body, message.summary)),
+        message.approval ? JSON.stringify(message.approval) : null,
+        message.summary ?? null,
       ],
     );
   }
@@ -895,28 +1176,34 @@ export class PgStore implements Store {
       `update messages r set
          reply_count = coalesce(s.cnt, 0),
          last_reply_at = s.last_at,
-         last_reply_offset = s.last_offset
+         last_reply_offset = s.last_offset,
+         reply_authors = coalesce(a.authors, '[]'::jsonb)
        from (select count(*) filter (where deleted_at is null) as cnt,
                     max(posted_at) as last_at,
                     max(stream_offset) filter (where deleted_at is null) as last_offset
-             from messages where space_id = $1 and thread_root = $2) s
+             from messages where space_id = $1 and thread_root = $2) s,
+            (select jsonb_agg(author_member_id order by first_offset) as authors
+             from (select author_member_id, min(stream_offset) as first_offset
+                   from messages where space_id = $1 and thread_root = $2 and deleted_at is null
+                   group by author_member_id) f) a
        where r.space_id = $1 and r.id = $2`,
       [spaceId, rootMessageId],
     );
   }
 
-  async markMessageEdited(spaceId: string, messageId: string, body: string, editedAt: string, stamps: MentionStamps): Promise<void> {
+  async markMessageEdited(spaceId: string, messageId: string, body: string, editedAt: string, stamps: MentionStamps, summary?: string): Promise<void> {
     await this.sql.query(
-      `update messages set body = $3, edited_at = $4, mentions = $5::jsonb, mentions_here = $6, mentions_rowboat = $7, search_text = $8
+      `update messages set body = $3, edited_at = $4, mentions = $5::jsonb, mentions_here = $6, mentions_rowboat = $7, search_text = $8, summary = $9
        where space_id = $1 and id = $2`,
-      [spaceId, messageId, body, editedAt, JSON.stringify(stamps.members), stamps.here, stamps.rowboat, searchTextFor(body)],
+      [spaceId, messageId, body, editedAt, JSON.stringify(stamps.members), stamps.here, stamps.rowboat, searchTextFor(withSummary(body, summary)), summary ?? null],
     );
-    // Rewrite the stored message event too — replay must serve the edit, stamps included.
+    // Rewrite the stored message event too — replay must serve the edit, stamps and summary included.
     await this.sql.query(
-      `update events set event = jsonb_set(event, '{message}', (event->'message') || jsonb_build_object(
-         'body', $3::text, 'editedAt', $4::text, 'mentions', $5::jsonb, 'mentionsHere', $6::boolean, 'mentionsRowboat', $7::boolean))
+      `update events set event = jsonb_set(event, '{message}', ((event->'message') #- '{summary}') || jsonb_build_object(
+         'body', $3::text, 'editedAt', $4::text, 'mentions', $5::jsonb, 'mentionsHere', $6::boolean, 'mentionsRowboat', $7::boolean)
+         || case when $8::text is null then '{}'::jsonb else jsonb_build_object('summary', $8::text) end)
        where space_id = $1 and event->>'type' = 'message' and event->'message'->>'id' = $2`,
-      [spaceId, messageId, body, editedAt, JSON.stringify(stamps.members), stamps.here, stamps.rowboat],
+      [spaceId, messageId, body, editedAt, JSON.stringify(stamps.members), stamps.here, stamps.rowboat, summary ?? null],
     );
   }
 
@@ -935,7 +1222,7 @@ export class PgStore implements Store {
 
   async markMessageDeleted(spaceId: string, messageId: string, deletedAt: string): Promise<void> {
     await this.sql.query(
-      `update messages set body = '', deleted_at = $3, poll = null, mentions = '[]'::jsonb, mentions_here = false, mentions_rowboat = false, search_text = ''
+      `update messages set body = '', summary = null, deleted_at = $3, poll = null, approval = null, mentions = '[]'::jsonb, mentions_here = false, mentions_rowboat = false, search_text = ''
        where space_id = $1 and id = $2`,
       [spaceId, messageId, deletedAt],
     );
@@ -944,7 +1231,7 @@ export class PgStore implements Store {
     // Redact the stored message event too — replay must never resurrect the
     // body (nor a poll, which is content the same way).
     await this.sql.query(
-      `update events set event = jsonb_set(event, '{message}', ((event->'message') #- '{poll}') || jsonb_build_object(
+      `update events set event = jsonb_set(event, '{message}', ((event->'message') #- '{poll}' #- '{approval}' #- '{summary}') || jsonb_build_object(
          'body', '', 'deletedAt', $3::text, 'mentions', '[]'::jsonb, 'mentionsHere', false, 'mentionsRowboat', false))
        where space_id = $1 and event->>'type' = 'message' and event->'message'->>'id' = $2`,
       [spaceId, messageId, deletedAt],
@@ -1060,28 +1347,46 @@ export class PgStore implements Store {
   // --- invites ---------------------------------------------------------------
 
   async putInvite(invite: StoredInvite): Promise<void> {
-    await this.sql.query(
-      `insert into invites (token, space_id, created_by, created_at, expires_at, revoked)
-       values ($1, $2, $3, $4, $5, $6)
-       on conflict (token) do update set expires_at = excluded.expires_at, revoked = excluded.revoked`,
-      [invite.token, invite.spaceId, invite.createdBy, invite.createdAt, invite.expiresAt ?? null, invite.revoked],
-    );
+    // The invite and its list in one transaction: an invite never exists
+    // without the spaces it was made to list.
+    const write = async () => {
+      await this.sql.query(
+        `insert into invites (token, org_id, created_by, created_at, expires_at, revoked)
+         values ($1, $2, $3, $4, $5, $6)
+         on conflict (token) do update set expires_at = excluded.expires_at, revoked = excluded.revoked`,
+        [invite.token, this.orgId, invite.createdBy, invite.createdAt, invite.expiresAt ?? null, invite.revoked],
+      );
+      for (const [position, spaceId] of invite.spaceIds.entries()) {
+        await this.sql.query(
+          `insert into invite_spaces (token, space_id, position) values ($1, $2, $3) on conflict do nothing`,
+          [invite.token, spaceId, position],
+        );
+      }
+    };
+    if (this.als.getStore()) await write();
+    else await this.transaction(write);
   }
 
   async getInvite(token: string): Promise<StoredInvite | undefined> {
+    // Org-scoped: another org's token is not_found here.
     const rows = await this.sql.query<{
       token: string;
-      space_id: string;
       created_by: string;
       created_at: string;
       expires_at: string | null;
       revoked: boolean;
-    }>('select * from invites where token = $1', [token]);
+      space_ids: string[];
+    }>(
+      `select i.token, i.created_by, i.created_at, i.expires_at, i.revoked,
+         coalesce(array(select l.space_id from invite_spaces l where l.token = i.token order by l.position, l.space_id), '{}') as space_ids
+       from invites i where i.org_id = $1 and i.token = $2`,
+      [this.orgId, token],
+    );
     const r = rows[0];
     if (!r) return undefined;
     return {
       token: r.token,
-      spaceId: r.space_id,
+      spaceIds: r.space_ids,
       createdBy: r.created_by,
       createdAt: r.created_at,
       ...(r.expires_at !== null ? { expiresAt: r.expires_at } : {}),
@@ -1378,6 +1683,395 @@ export class PgStore implements Store {
     const rows = await this.sql.query<{ stream_offset: number; at: string; event: StoredEvent['event'] }>(
       'select stream_offset, at, event from events where space_id = $1 and stream_offset > $2 order by stream_offset',
       [spaceId, afterOffset],
+    );
+    return rows.map((r) => ({ offset: r.stream_offset, at: r.at, event: r.event }));
+  }
+
+  // --- agent keys ------------------------------------------------------------
+
+  async listAgents(ownerId: string | null): Promise<Member[]> {
+    const rows = await this.sql.query<MemberRow>(
+      `select id, display_name, title, avatar_url, role, kind, owner_id, agent_kind, agent_connection, agent_instance, deactivated_at, removed_at from members
+       where org_id = $1 and kind = 'agent' and ($2::text is null or owner_id = $2)
+       order by lower(display_name), id`,
+      [this.orgId, ownerId],
+    );
+    return rows.map(rowToMember);
+  }
+
+  async putAgentKey(key: StoredAgentKey): Promise<void> {
+    await this.sql.query(
+      `insert into agent_keys (org_id, id, agent_id, hash, created_by, created_at) values ($1, $2, $3, $4, $5, $6)`,
+      [this.orgId, key.id, key.agentId, key.hash, key.createdBy, key.createdAt],
+    );
+  }
+
+  async getAgentKey(id: string): Promise<StoredAgentKey | undefined> {
+    const rows = await this.sql.query<AgentKeyRow>('select * from agent_keys where org_id = $1 and id = $2', [this.orgId, id]);
+    return rows[0] ? rowToAgentKey(rows[0]) : undefined;
+  }
+
+  async getAgentKeyByHash(hash: string): Promise<StoredAgentKey | undefined> {
+    const rows = await this.sql.query<AgentKeyRow>('select * from agent_keys where org_id = $1 and hash = $2', [this.orgId, hash]);
+    return rows[0] ? rowToAgentKey(rows[0]) : undefined;
+  }
+
+  async listAgentKeys(agentIds: string[]): Promise<AgentKey[]> {
+    if (agentIds.length === 0) return [];
+    const rows = await this.sql.query<AgentKeyRow>(
+      'select * from agent_keys where org_id = $1 and agent_id = any($2::text[]) order by created_at, id',
+      [this.orgId, agentIds],
+    );
+    return rows.map((r) => {
+      const { hash: _hash, ...key } = rowToAgentKey(r);
+      return key;
+    });
+  }
+
+  async revokeAgentKey(id: string, at: string): Promise<void> {
+    await this.sql.query('update agent_keys set revoked_at = coalesce(revoked_at, $3) where org_id = $1 and id = $2', [this.orgId, id, at]);
+  }
+
+  async touchAgentKey(id: string, at: string, since: string): Promise<void> {
+    await this.sql.query(
+      'update agent_keys set last_used_at = $3 where org_id = $1 and id = $2 and (last_used_at is null or last_used_at < $4)',
+      [this.orgId, id, at, since],
+    );
+  }
+
+  // --- invocations -------------------------------------------------------------
+
+  async insertInvocation(invocation: Invocation, messageOffset: number): Promise<void> {
+    await this.sql.query(
+      `insert into invocations (org_id, id, agent_id, space_id, thread_root_id, message_id, message_offset, state, created_at, data)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [
+        this.orgId,
+        invocation.id,
+        invocation.agentId,
+        invocation.conversation.spaceId,
+        invocation.conversation.threadRootId,
+        invocation.trigger.messageId,
+        messageOffset,
+        invocation.state,
+        invocation.createdAt,
+        JSON.stringify(invocation),
+      ],
+    );
+  }
+
+  async putInvocation(invocation: Invocation): Promise<void> {
+    await this.sql.query('update invocations set state = $3, data = $4 where org_id = $1 and id = $2', [
+      this.orgId,
+      invocation.id,
+      invocation.state,
+      JSON.stringify(invocation),
+    ]);
+  }
+
+  async getInvocation(id: string): Promise<Invocation | undefined> {
+    const rows = await this.sql.query<{ data: Invocation }>('select data from invocations where org_id = $1 and id = $2', [this.orgId, id]);
+    return rows[0]?.data;
+  }
+
+  async listInvocationsForAgent(agentId: string, states: InvocationState[]): Promise<Invocation[]> {
+    const rows = await this.sql.query<{ data: Invocation }>(
+      'select data from invocations where org_id = $1 and agent_id = $2 and state = any($3::text[]) order by created_at, id',
+      [this.orgId, agentId, states],
+    );
+    return rows.map((r) => r.data);
+  }
+
+  async listConversationInvocations(agentId: string, spaceId: string, threadRootId: string): Promise<Invocation[]> {
+    const rows = await this.sql.query<{ data: Invocation }>(
+      `select data from invocations
+       where space_id = $1 and thread_root_id = $2 and org_id = $3 and agent_id = $4
+       order by message_offset, id`,
+      [spaceId, threadRootId, this.orgId, agentId],
+    );
+    return rows.map((r) => r.data);
+  }
+
+  async listSpaceInvocations(spaceId: string, threadRootId: string | null, limit: number): Promise<Invocation[]> {
+    const rows = await this.sql.query<{ data: Invocation }>(
+      `select data from invocations
+       where space_id = $1 and org_id = $2 and ($3::text is null or thread_root_id = $3)
+       order by message_offset desc, id desc limit $4`,
+      [spaceId, this.orgId, threadRootId, limit],
+    );
+    return rows.map((r) => r.data);
+  }
+
+  // --- approvals (spec §8 part 4, 2026-10-01) ------------------------------------
+
+  async insertApproval(approval: Approval): Promise<void> {
+    await this.sql.query(
+      `insert into approvals (org_id, id, invocation_id, agent_id, space_id, message_id, request_key, state, applied, created_at, data)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [
+        this.orgId,
+        approval.id,
+        approval.invocationId,
+        approval.agentId,
+        approval.conversation.spaceId,
+        approval.messageId,
+        approval.requestKey,
+        approval.state,
+        approval.appliedAt !== undefined,
+        approval.createdAt,
+        JSON.stringify(approval),
+      ],
+    );
+  }
+
+  async putApproval(approval: Approval): Promise<void> {
+    await this.sql.query('update approvals set state = $3, applied = $4, data = $5 where org_id = $1 and id = $2', [
+      this.orgId,
+      approval.id,
+      approval.state,
+      approval.appliedAt !== undefined,
+      JSON.stringify(approval),
+    ]);
+  }
+
+  async getApproval(id: string): Promise<Approval | undefined> {
+    const rows = await this.sql.query<{ data: Approval }>('select data from approvals where org_id = $1 and id = $2', [this.orgId, id]);
+    return rows[0]?.data;
+  }
+
+  async getApprovalByRequest(invocationId: string, requestKey: string): Promise<Approval | undefined> {
+    const rows = await this.sql.query<{ data: Approval }>(
+      'select data from approvals where org_id = $1 and invocation_id = $2 and request_key = $3',
+      [this.orgId, invocationId, requestKey],
+    );
+    return rows[0]?.data;
+  }
+
+  async listInvocationApprovals(invocationId: string, states: ApprovalState[]): Promise<Approval[]> {
+    const rows = await this.sql.query<{ data: Approval }>(
+      'select data from approvals where org_id = $1 and invocation_id = $2 and state = any($3::text[]) order by created_at, id',
+      [this.orgId, invocationId, states],
+    );
+    return rows.map((r) => r.data);
+  }
+
+  async listUnappliedDecisions(agentId: string): Promise<Approval[]> {
+    const rows = await this.sql.query<{ data: Approval }>(
+      `select data from approvals where org_id = $1 and agent_id = $2 and state in ('allowed', 'denied') and not applied
+       order by created_at, id`,
+      [this.orgId, agentId],
+    );
+    return rows.map((r) => r.data);
+  }
+
+  async listApprovalsForMessages(spaceId: string, messageIds: string[]): Promise<Approval[]> {
+    if (messageIds.length === 0) return [];
+    const rows = await this.sql.query<{ data: Approval }>(
+      'select data from approvals where space_id = $1 and org_id = $2 and message_id = any($3::text[])',
+      [spaceId, this.orgId, messageIds],
+    );
+    return rows.map((r) => r.data);
+  }
+
+  async getMessageHops(spaceId: string, messageId: string): Promise<number> {
+    const rows = await this.sql.query<{ depth: number }>(
+      'select depth from message_hops where space_id = $1 and message_id = $2',
+      [spaceId, messageId],
+    );
+    return rows[0]?.depth ?? 0;
+  }
+  async putMessageHops(spaceId: string, messageId: string, depth: number): Promise<void> {
+    await this.sql.query(
+      `insert into message_hops (space_id, message_id, depth) values ($1, $2, $3)
+       on conflict (space_id, message_id) do update set depth = excluded.depth`,
+      [spaceId, messageId, depth],
+    );
+  }
+
+  async sharesSharedSpace(a: string, b: string): Promise<boolean> {
+    const rows = await this.sql.query<{ shares: boolean }>(
+      `select exists (
+         select 1 from memberships ma
+         join memberships mb on mb.space_id = ma.space_id
+         join spaces s on s.id = ma.space_id
+         where s.org_id = $1 and s.kind = 'shared' and ma.member_id = $2 and mb.member_id = $3
+       ) as shares`,
+      [this.orgId, a, b],
+    );
+    return rows[0]?.shares === true;
+  }
+
+  async getAgentCapabilities(agentId: string): Promise<ConnectorCapabilities | undefined> {
+    const rows = await this.sql.query<{ data: ConnectorCapabilities }>(
+      'select data from agent_capabilities where org_id = $1 and agent_id = $2',
+      [this.orgId, agentId],
+    );
+    return rows[0]?.data;
+  }
+
+  async getAgentOptionDefaults(agentId: string): Promise<InvocationOptionValues | undefined> {
+    const rows = await this.sql.query<{ data: InvocationOptionValues }>(
+      'select data from agent_option_defaults where org_id = $1 and agent_id = $2',
+      [this.orgId, agentId],
+    );
+    return rows[0]?.data;
+  }
+
+  async putAgentOptionDefaults(agentId: string, defaults: InvocationOptionValues, by: string, at: string): Promise<void> {
+    await this.sql.query(
+      `insert into agent_option_defaults (org_id, agent_id, data, set_by, set_at) values ($1, $2, $3, $4, $5)
+       on conflict (org_id, agent_id) do update set data = excluded.data, set_by = excluded.set_by, set_at = excluded.set_at`,
+      [this.orgId, agentId, JSON.stringify(defaults), by, at],
+    );
+  }
+
+  async putAgentCapabilities(agentId: string, capabilities: ConnectorCapabilities, at: string): Promise<void> {
+    await this.sql.query(
+      `insert into agent_capabilities (org_id, agent_id, data, updated_at) values ($1, $2, $3, $4)
+       on conflict (org_id, agent_id) do update set data = excluded.data, updated_at = excluded.updated_at`,
+      [this.orgId, agentId, JSON.stringify(capabilities), at],
+    );
+  }
+
+  // --- connectors Harbor runs (spec §8 Connectors, 2026-09-30) ---
+
+  async listAgentsByConnection(connections: readonly string[]): Promise<Member[]> {
+    if (connections.length === 0) return [];
+    const rows = await this.sql.query<MemberRow>(
+      `select id, display_name, title, avatar_url, role, kind, owner_id, agent_kind, agent_connection, agent_instance, deactivated_at, removed_at from members
+       where org_id = $1 and kind = 'agent' and removed_at is null and agent_connection = any($2::text[]) order by id`,
+      [this.orgId, [...connections]],
+    );
+    return rows.map(rowToMember);
+  }
+  async getAgentCredential(agentId: string): Promise<StoredAgentCredential | undefined> {
+    const rows = await this.sql.query<AgentCredentialRow>(
+      `select agent_id, sealed, hint, set_by, set_at, rejected_at, rejected_reason from agent_connection_credentials
+       where org_id = $1 and agent_id = $2`,
+      [this.orgId, agentId],
+    );
+    return rows[0] ? rowToAgentCredential(rows[0]) : undefined;
+  }
+  async listAgentCredentials(agentIds: string[]): Promise<StoredAgentCredential[]> {
+    if (agentIds.length === 0) return [];
+    const rows = await this.sql.query<AgentCredentialRow>(
+      `select agent_id, sealed, hint, set_by, set_at, rejected_at, rejected_reason from agent_connection_credentials
+       where org_id = $1 and agent_id = any($2::text[])`,
+      [this.orgId, agentIds],
+    );
+    return rows.map(rowToAgentCredential);
+  }
+  async getAgentHook(agentId: string): Promise<StoredAgentHook | undefined> {
+    return (await this.listAgentHooks([agentId]))[0];
+  }
+  async listAgentHooks(agentIds: string[]): Promise<StoredAgentHook[]> {
+    if (agentIds.length === 0) return [];
+    const rows = await this.sql.query<{ agent_id: string; token_hash: string; space_id: string; set_by: string; set_at: string }>(
+      'select agent_id, token_hash, space_id, set_by, set_at from agent_hooks where org_id = $1 and agent_id = any($2::text[])',
+      [this.orgId, agentIds],
+    );
+    return rows.map((r) => ({ agentId: r.agent_id, tokenHash: r.token_hash, spaceId: r.space_id, setBy: r.set_by, setAt: r.set_at }));
+  }
+  async putAgentHook(hook: StoredAgentHook): Promise<void> {
+    await this.sql.query(
+      `insert into agent_hooks (org_id, agent_id, token_hash, space_id, set_by, set_at) values ($1, $2, $3, $4, $5, $6)
+       on conflict (org_id, agent_id) do update set token_hash = excluded.token_hash, space_id = excluded.space_id,
+         set_by = excluded.set_by, set_at = excluded.set_at`,
+      [this.orgId, hook.agentId, hook.tokenHash, hook.spaceId, hook.setBy, hook.setAt],
+    );
+  }
+  async deleteAgentHook(agentId: string): Promise<void> {
+    await this.sql.query('delete from agent_hooks where org_id = $1 and agent_id = $2', [this.orgId, agentId]);
+  }
+  async putAgentCredential(credential: StoredAgentCredential): Promise<void> {
+    await this.sql.query(
+      `insert into agent_connection_credentials (org_id, agent_id, sealed, hint, set_by, set_at) values ($1, $2, $3, $4, $5, $6)
+       on conflict (org_id, agent_id) do update set sealed = excluded.sealed, hint = excluded.hint, set_by = excluded.set_by,
+         set_at = excluded.set_at, rejected_at = null, rejected_reason = null`,
+      [this.orgId, credential.agentId, credential.sealed, credential.hint, credential.setBy, credential.setAt],
+    );
+  }
+  async rejectAgentCredential(agentId: string, at: string, reason: string): Promise<boolean> {
+    const rows = await this.sql.query<{ agent_id: string }>(
+      `update agent_connection_credentials set rejected_at = $3, rejected_reason = $4
+       where org_id = $1 and agent_id = $2 and rejected_at is null returning agent_id`,
+      [this.orgId, agentId, at, reason.slice(0, 280)],
+    );
+    return rows.length > 0;
+  }
+  async getConnectionThread(agentId: string, spaceId: string, threadRootId: string): Promise<unknown | undefined> {
+    const rows = await this.sql.query<{ data: unknown }>(
+      'select data from agent_connection_threads where org_id = $1 and agent_id = $2 and space_id = $3 and thread_root_id = $4',
+      [this.orgId, agentId, spaceId, threadRootId],
+    );
+    return rows[0]?.data;
+  }
+  async putConnectionThread(agentId: string, spaceId: string, threadRootId: string, data: unknown, at: string): Promise<void> {
+    await this.sql.query(
+      `insert into agent_connection_threads (org_id, agent_id, space_id, thread_root_id, data, updated_at) values ($1, $2, $3, $4, $5, $6)
+       on conflict (org_id, agent_id, space_id, thread_root_id) do update set data = excluded.data, updated_at = excluded.updated_at`,
+      [this.orgId, agentId, spaceId, threadRootId, JSON.stringify(data), at],
+    );
+  }
+  async getAgentHosting(agentId: string): Promise<StoredAgentHosting | undefined> {
+    const rows = await this.sql.query<AgentHostingRow>(`select ${HOSTING_COLUMNS} from agent_hosting where org_id = $1 and agent_id = $2`, [this.orgId, agentId]);
+    return rows[0] ? rowToAgentHosting(rows[0]) : undefined;
+  }
+  async getHosting(id: string): Promise<StoredAgentHosting | undefined> {
+    const rows = await this.sql.query<AgentHostingRow>(`select ${HOSTING_COLUMNS} from agent_hosting where org_id = $1 and id = $2`, [this.orgId, id]);
+    return rows[0] ? rowToAgentHosting(rows[0]) : undefined;
+  }
+  async listAgentHostings(agentIds: string[]): Promise<StoredAgentHosting[]> {
+    if (agentIds.length === 0) return [];
+    const rows = await this.sql.query<AgentHostingRow>(
+      `select ${HOSTING_COLUMNS} from agent_hosting where org_id = $1 and agent_id = any($2::text[]) order by created_at`,
+      [this.orgId, agentIds],
+    );
+    return rows.map(rowToAgentHosting);
+  }
+  async listHostingsByStatus(statuses: readonly string[]): Promise<StoredAgentHosting[]> {
+    if (statuses.length === 0) return [];
+    const rows = await this.sql.query<AgentHostingRow>(
+      `select ${HOSTING_COLUMNS} from agent_hosting where org_id = $1 and status = any($2::text[]) order by created_at`,
+      [this.orgId, [...statuses]],
+    );
+    return rows.map(rowToAgentHosting);
+  }
+  async putHosting(h: StoredAgentHosting): Promise<void> {
+    await this.sql.query(
+      `insert into agent_hosting (org_id, id, agent_id, provider, status, external_id, external_user_id, kind, display_name, error, created_by, created_at, updated_at)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       on conflict (org_id, id) do update set agent_id = excluded.agent_id, status = excluded.status, external_id = excluded.external_id,
+         display_name = excluded.display_name, error = excluded.error, updated_at = excluded.updated_at`,
+      [this.orgId, h.id, h.agentId ?? null, h.provider, h.status, h.externalId ?? null, h.externalUserId, h.kind, h.displayName, h.error ?? null, h.createdBy, h.createdAt, h.updatedAt],
+    );
+  }
+  async getConnectorKey(agentId: string): Promise<{ keyId: string; sealed: string } | undefined> {
+    const rows = await this.sql.query<{ key_id: string; sealed: string }>(
+      'select key_id, sealed from agent_connector_keys where org_id = $1 and agent_id = $2',
+      [this.orgId, agentId],
+    );
+    return rows[0] ? { keyId: rows[0].key_id, sealed: rows[0].sealed } : undefined;
+  }
+  async putConnectorKey(agentId: string, keyId: string, sealed: string, at: string): Promise<void> {
+    await this.sql.query(
+      `insert into agent_connector_keys (org_id, agent_id, key_id, sealed, created_at) values ($1, $2, $3, $4, $5)
+       on conflict (org_id, agent_id) do update set key_id = excluded.key_id, sealed = excluded.sealed, created_at = excluded.created_at`,
+      [this.orgId, agentId, keyId, sealed, at],
+    );
+  }
+
+  // A range scan on the primary key, filtered in the row. Unindexed on
+  // purpose (2026-09-29): a page's range is small unless its window spans a
+  // long, reply-heavy stretch; the trigger for a partial index on the type is
+  // a slow stream load.
+  async listMembershipEvents(spaceId: string, afterOffset: number, upToOffset: number | null): Promise<StoredEvent[]> {
+    const rows = await this.sql.query<{ stream_offset: number; at: string; event: StoredEvent['event'] }>(
+      `select stream_offset, at, event from events
+       where space_id = $1 and stream_offset > $2 and ($3::int is null or stream_offset <= $3)
+         and event->>'type' = 'membership'
+       order by stream_offset`,
+      [spaceId, afterOffset, upToOffset],
     );
     return rows.map((r) => ({ offset: r.stream_offset, at: r.at, event: r.event }));
   }

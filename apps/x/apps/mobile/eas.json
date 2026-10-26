@@ -27,10 +27,11 @@
   "submit": {
     "production": {
       "ios": {
-        "ascAppId": "6809176622",
-        "ascApiKeyPath": "/Users/gagan/.rowboat/asc/AuthKey_F27A4L437P.p8",
-        "ascApiKeyId": "F27A4L437P",
-        "ascApiKeyIssuerId": "4f6e9138-1db7-420b-b324-e7ab9644d894"
+        "ascAppId": "6818016444",
+        "ascApiKeyPath": "/Users/gagan/.rowboat/asc/AuthKey_ZN4J5NLDZ3.p8",
+        "ascApiKeyId": "ZN4J5NLDZ3",
+        "ascApiKeyIssuerId": "a27c51f4-015d-4fb9-b9b0-60063a72b63c",
+        "appleTeamId": "9526N79222"
       }
     }
   }

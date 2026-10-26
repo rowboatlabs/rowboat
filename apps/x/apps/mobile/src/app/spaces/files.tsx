@@ -6,7 +6,7 @@ import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } 
 
 import { useSpacesAccount } from '@/lib/spaces/account';
 import { SpacesClient } from '@/lib/spaces/client';
-import { SpacesLive } from '@/lib/spaces/live';
+import { SpacesLive } from '@x/spaces-client';
 import { useColors } from '@/theme/colors';
 
 // A space's files (S3, read-only): entries grouped into a collapsible tree on
@@ -141,6 +141,7 @@ export default function SpaceFilesScreen() {
 
   return (
     <ScrollView
+      contentInsetAdjustmentBehavior="automatic"
       style={{ flex: 1, backgroundColor: colors.background }}
       contentContainerStyle={{ paddingVertical: 8 }}
       refreshControl={

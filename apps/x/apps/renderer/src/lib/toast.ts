@@ -1,59 +1,17 @@
-/**
- * Simple toast notification system
- */
+import { toast as sonner } from 'sonner'
 
-type ToastType = 'success' | 'error' | 'info';
+// The app's short notices, drawn by sonner, whose <Toaster /> both apps
+// mount (App.tsx on the desktop, web/app.tsx in the browser). Until
+// 2026-10-15 this kept its own list that nothing rendered, so about 250
+// calls, every "Could not join" and "Copied" among them, were silent.
+// An identical message replaces the one already showing instead of
+// stacking, so a dialog that checks as you type says a thing once.
 
-interface Toast {
-  id: string;
-  message: string;
-  type: ToastType;
-}
+type ToastType = 'success' | 'error' | 'info'
 
-let toasts: Toast[] = [];
-const listeners: Set<() => void> = new Set();
-
-/**
- * Show a toast notification
- */
 export function toast(message: string, type: ToastType = 'info'): void {
-  const id = `${Date.now()}-${Math.random()}`;
-  toasts.push({ id, message, type });
-  notifyListeners();
-
-  // Auto-remove after 3 seconds
-  setTimeout(() => {
-    toasts = toasts.filter(t => t.id !== id);
-    notifyListeners();
-  }, 3000);
+    const id = `${type}:${message}`
+    if (type === 'success') sonner.success(message, { id })
+    else if (type === 'error') sonner.error(message, { id })
+    else sonner(message, { id })
 }
-
-/**
- * Get current toasts
- */
-export function getToasts(): Toast[] {
-  return [...toasts];
-}
-
-/**
- * Subscribe to toast changes
- */
-export function subscribe(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
-}
-
-function notifyListeners(): void {
-  listeners.forEach(listener => listener());
-}
-
-/**
- * Remove a toast by ID
- */
-export function removeToast(id: string): void {
-  toasts = toasts.filter(t => t.id !== id);
-  notifyListeners();
-}
-

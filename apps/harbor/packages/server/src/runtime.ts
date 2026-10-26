@@ -2,6 +2,10 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { getRequestListener } from '@hono/node-server';
 import { bindAuth, type AuthDriver, type OrgAuth } from './auth.js';
 import type { BlobStore } from './blobs.js';
+import { HostedConnectors } from './connectors/host.js';
+import { jevApiKey } from './connectors/jev/index.js';
+import { maritimeProvisioner } from './connectors/maritime/provisioning.js';
+import type { HostingProvider } from './core/hosting.js';
 import { buildHttpApp } from './http.js';
 import type { SpaceHub } from './hub.js';
 import { handleMcpRequest } from './mcp.js';
@@ -36,6 +40,22 @@ export interface OrgRuntimeInput {
   consentPublishableKey?: string;
   /** Upload cap for the raw-bytes blob route (default 100MB). */
   maxBlobBytes?: number;
+  /** Browser origins allowed to call the render face cross-origin (cors.ts), and to use the session cookie (session.ts). */
+  webOrigins?: readonly string[];
+  /** The session cookie's Domain: the apex on a deployment. */
+  sessionCookieDomain?: string;
+  /** The Spaces web app, which an org link opened in a browser offers beside the desktop app (http.ts, the landings). */
+  webAppUrl?: string;
+  /** Managed hosting (spec §8 Maritime, 2026-10-26): a stand-in provider and tick in tests; absent = from HARBOR_MARITIME_API_KEY. */
+  hosting?: { provider: HostingProvider; tickMs?: number };
+}
+
+/** The managed-hosting provider the deployment's own Maritime key makes, or none. */
+function hostingFromEnv(): HostingProvider | undefined {
+  const apiKey = process.env.HARBOR_MARITIME_API_KEY;
+  if (!apiKey) return undefined;
+  const cap = Number(process.env.HARBOR_MARITIME_LLM_CAP_CENTS);
+  return maritimeProvisioner({ apiKey, ...(Number.isFinite(cap) && cap > 0 ? { llmCapCents: cap } : {}) });
 }
 
 export interface OrgRuntime {
@@ -45,6 +65,8 @@ export interface OrgRuntime {
   handle(req: IncomingMessage, res: ServerResponse): void;
   /** What the live face needs for a connection to this org. */
   live: LiveDeps;
+  /** Stops the connectors Harbor runs for this org. */
+  close(): Promise<void>;
 }
 
 export async function buildOrgRuntime(input: OrgRuntimeInput): Promise<OrgRuntime> {
@@ -58,6 +80,28 @@ export async function buildOrgRuntime(input: OrgRuntimeInput): Promise<OrgRuntim
   );
   // The mentions backfill (service.migrateMentions): idempotent, ledgered once per org, before the faces serve.
   await service.migrateMentions();
+  // Connectors Harbor runs (spec §8 Connectors, 2026-09-30): one per agent whose
+  // connection is a platform, from boot, and for each such agent added later.
+  const connectors = new HostedConnectors({ store, hub, service, orgId: input.orgId });
+  service.attachConnectors({
+    verify: (connection, secret, target) => connectors.verify(connection, secret, target),
+    save: (agentId, secret, setBy) => connectors.save(agentId, secret, setBy),
+    added: (agent) => connectors.ensure(agent),
+    alert: (connection, payload) => connectors.alert(connection, payload),
+  });
+  // Managed hosting (spec §8 Maritime, 2026-10-26): agents Rowboat's own account creates, when the deployment has its key.
+  const provider = input.hosting?.provider ?? hostingFromEnv();
+  if (provider) {
+    service.attachHosting(provider, {
+      save: (agentId, secret, setBy) => connectors.save(agentId, secret, setBy),
+      added: (agent) => connectors.ensure(agent),
+      stop: (agentId) => connectors.stop(agentId),
+    });
+  }
+  // Jev (spec §8 Jev, 2026-10-07): every org has it once the deployment has its key.
+  if (jevApiKey()) await service.ensureJev();
+  await connectors.startAll();
+  if (provider) service.startHosting(input.hosting?.tickMs);
   const auth = bindAuth(input.auth, store);
   const issuer = input.auth.metadata?.()?.authorizationServers[0];
   const render = getRequestListener(
@@ -66,6 +110,9 @@ export async function buildOrgRuntime(input: OrgRuntimeInput): Promise<OrgRuntim
       auth,
       ...(input.consentPublishableKey && issuer ? { consent: { issuer, publishableKey: input.consentPublishableKey } } : {}),
       ...(input.maxBlobBytes !== undefined ? { maxBlobBytes: input.maxBlobBytes } : {}),
+      ...(input.webOrigins ? { webOrigins: input.webOrigins } : {}),
+      ...(input.sessionCookieDomain ? { sessionCookieDomain: input.sessionCookieDomain } : {}),
+      ...(input.webAppUrl ? { webAppUrl: input.webAppUrl } : {}),
     }).fetch,
   );
   return {
@@ -78,6 +125,10 @@ export async function buildOrgRuntime(input: OrgRuntimeInput): Promise<OrgRuntim
       }
       render(req, res);
     },
-    live: { service, hub, auth },
+    live: { service, hub, auth, webOrigins: new Set(input.webOrigins ?? []) },
+    close: async () => {
+      await service.stopHosting();
+      await connectors.stopAll();
+    },
   };
 }

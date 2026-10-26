@@ -1,9 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { clearSpacesCache } from '@/lib/spaces/cache';
 import * as SecureStore from 'expo-secure-store';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import { danceForTokens, discoverIssuer, refreshTokens, type SpacesTokens } from './oauth';
-import { registerWithHarbor } from '@/lib/push';
+import { registerWithHarbor, unregisterFromHarbor } from '@/lib/push';
 
 // Spaces account state: ONE sign-in against the deployment's AS (discovered
 // from the apex), tokens in the keychain, orgs from apex GET /v1/orgs.
@@ -11,6 +12,9 @@ import { registerWithHarbor } from '@/lib/push';
 
 /** The hosted deployment. Overridable for local Harbor dev. */
 export const APEX_URL = process.env.EXPO_PUBLIC_SPACES_APEX ?? 'https://spaces.x.rowboatlabs.com';
+
+/** Rowboat account API (rowboatx-backend) — owns the user record and billing. */
+export const ACCOUNT_API_URL = process.env.EXPO_PUBLIC_ACCOUNT_API ?? 'https://api.x.rowboatlabs.com';
 
 const ACCOUNT_KEY = 'rowboat.spaces.account.v1';
 /** Last-seen org list — painted instantly on launch, refreshed in the background. */
@@ -41,6 +45,12 @@ interface SpacesAccount {
   orgsError: string | null;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
+  /**
+   * Request account deletion (App Store 5.1.1(v)), then sign out locally.
+   * Resolves to the date the account is gone by. Throws with a readable
+   * message when a server refuses.
+   */
+  deleteAccount: () => Promise<{ deleteBy: string }>;
   refreshOrgs: () => Promise<void>;
   /** Fresh bearer for Harbor calls (auto-refreshes near expiry). */
   getAccessToken: (opts?: { forceRefresh?: boolean }) => Promise<string>;
@@ -116,16 +126,42 @@ export function SpacesAccountProvider({ children }: { children: ReactNode }) {
   }, [persist]);
 
   const signOut = useCallback(async () => {
+    // Forget this device's push token on every org BEFORE the tokens go —
+    // otherwise the phone keeps buzzing for an account it no longer shows.
+    if (orgs?.length) await unregisterFromHarbor(orgs, getAccessToken).catch(() => {});
     await persist(null);
     void AsyncStorage.removeItem(ORGS_CACHE_KEY).catch(() => {});
+    void clearSpacesCache();
     setOrgs(null);
     setOrgsError(null);
     setStatus('signedOut');
-  }, [persist]);
+  }, [persist, orgs, getAccessToken]);
+
+  // Account deletion, minimal v1 (2026-10-08, revised 2026-10-13). Two
+  // calls, Spaces first while the login still works: the apex deactivates
+  // you in every org (out of every space, name kept on what you wrote, push
+  // tokens gone), then rowboatx-backend bans the login, records the request
+  // and emails the date. The account and its data are deleted by hand before
+  // that date. Both calls are idempotent, so a retry after a failure is safe.
+  const deleteAccount = useCallback(async () => {
+    const token = await getAccessToken();
+    const headers = { authorization: `Bearer ${token}` };
+    const apex = await fetch(`${APEX_URL}/v1/me`, { method: 'DELETE', headers });
+    if (!apex.ok) throw new Error(`Couldn't remove you from your orgs (${apex.status}). Please try again.`);
+    const res = await fetch(`${ACCOUNT_API_URL}/v1/account`, { method: 'DELETE', headers });
+    if (res.status === 404) throw new Error("Account deletion isn't available yet. Please try again later.");
+    if (!res.ok) {
+      const detail = await res.json().then((j: { message?: string; error?: string }) => j.message ?? j.error).catch(() => undefined);
+      throw new Error(detail ?? `Couldn't delete your account (${res.status}). Please try again.`);
+    }
+    const { deleteBy } = (await res.json()) as { deleteBy: string };
+    await signOut();
+    return { deleteBy };
+  }, [getAccessToken, signOut]);
 
   const value = useMemo(
-    () => ({ status, orgs, orgsError, signIn, signOut, refreshOrgs, getAccessToken }),
-    [status, orgs, orgsError, signIn, signOut, refreshOrgs, getAccessToken],
+    () => ({ status, orgs, orgsError, signIn, signOut, deleteAccount, refreshOrgs, getAccessToken }),
+    [status, orgs, orgsError, signIn, signOut, deleteAccount, refreshOrgs, getAccessToken],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

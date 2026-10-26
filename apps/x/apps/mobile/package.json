@@ -8,9 +8,11 @@
     "@rowboat/spaces-protocol": "link:../../../harbor/packages/protocol",
     "@x/client": "workspace:*",
     "@x/shared": "workspace:*",
+    "@x/spaces-client": "workspace:*",
     "expo": "~57.0.19",
     "expo-blur": "~57.0.2",
     "expo-camera": "~57.0.2",
+    "expo-clipboard": "~57.0.1",
     "expo-constants": "~57.0.17",
     "expo-crypto": "~57.0.2",
     "expo-device": "~57.0.1",
@@ -18,6 +20,8 @@
     "expo-glass-effect": "~57.0.1",
     "expo-haptics": "~57.0.2",
     "expo-image": "~57.0.4",
+    "expo-image-manipulator": "~57.0.20",
+    "expo-image-picker": "~57.0.17",
     "expo-linking": "~57.0.9",
     "expo-notifications": "~57.0.17",
     "expo-router": "~57.0.18",
@@ -33,6 +37,7 @@
     "react-dom": "19.2.3",
     "react-native": "0.86.3",
     "react-native-gesture-handler": "~2.32.0",
+    "react-native-keyboard-controller": "1.21.9",
     "react-native-markdown-display": "^7.0.2",
     "react-native-mathjax-svg": "^0.9.9",
     "react-native-reanimated": "4.5.1",
@@ -55,7 +60,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "eas-build-post-install": "cd ../../../harbor && pnpm install --filter ./packages/protocol --no-frozen-lockfile && pnpm --filter ./packages/protocol run build && cd ../x && pnpm --filter @x/shared --filter @x/client run build"
+    "eas-build-post-install": "cd ../../../harbor && pnpm install --filter ./packages/protocol --no-frozen-lockfile && pnpm --filter ./packages/protocol run build && cd ../x && pnpm --filter @x/shared --filter @x/spaces-client --filter @x/client run build"
   },
   "private": true
 }

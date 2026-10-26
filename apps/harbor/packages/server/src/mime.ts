@@ -5,6 +5,8 @@
 // stored-XSS posture, adopted). The mime recorded at upload is authoritative
 // everywhere; a client's declared content-type is a fallback, not a fact.
 
+import contentDisposition from 'content-disposition';
+
 const SNIFFS: Array<{ mime: string; test: (b: Uint8Array) => boolean }> = [
   { mime: 'image/jpeg', test: (b) => startsWith(b, [0xff, 0xd8, 0xff]) },
   { mime: 'image/png', test: (b) => startsWith(b, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) },
@@ -49,15 +51,21 @@ export function servesInline(mime: string): boolean {
  * passes it from the asset path or the link label); quotes/control chars and
  * path separators are stripped so it can never break the header or the save
  * path.
+ *
+ * A header value is Latin-1 at most, yet macOS names every screenshot with a
+ * U+202F before "PM": such a name failed the header write and the blob never
+ * served (2026-10-20). `content-disposition` (Express's) encodes it: a name
+ * beyond Latin-1 rides RFC 6266's `filename*` whole, with a Latin-1 stand-in.
  */
-export function dispositionFor(mime: string, name?: string): string {
-  const base = servesInline(mime) ? 'inline' : 'attachment';
-  const clean = name
+export function dispositionFor(mime: string, name?: string, opts: { attachment?: boolean } = {}): string {
+  const type = !opts.attachment && servesInline(mime) ? 'inline' : 'attachment';
+  const stripped = name
     ?.replace(/[/\\]/g, '-')
     .replace(/[\x00-\x1f\x7f"%;]/g, '')
-    .trim()
-    .slice(0, 255);
-  return clean ? `${base}; filename="${clean}"` : base;
+    .trim();
+  // By code point: a cut through a surrogate pair would make the name unencodable.
+  const clean = stripped ? Array.from(stripped).slice(0, 255).join('') : '';
+  return clean ? contentDisposition(clean, { type }) : type;
 }
 
 // ---------------------------------------------------------------------------

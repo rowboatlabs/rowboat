@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { containsRowboatAddress } from './spaces-mentions'
+import { containsRowboatAddress, mentionedMemberIds } from './spaces-mentions'
 
 describe('containsRowboatAddress', () => {
     it('is the token the composer emits, anywhere outside code', () => {
@@ -19,5 +19,11 @@ describe('containsRowboatAddress', () => {
         expect(containsRowboatAddress('the trigger is `[@rowboat](#rowboat)` in a message')).toBe(false)
         expect(containsRowboatAddress('```\n[@rowboat](#rowboat) do the thing\n```')).toBe(false)
         expect(containsRowboatAddress('```ts\nsend("[@rowboat](#rowboat) hi")')).toBe(false) // unterminated fence
+    })
+})
+
+describe('mentionedMemberIds (2026-09-30)', () => {
+    it('reads the member tokens a draft names, once each, in order — never @rowboat or a bare @word', () => {
+        expect(mentionedMemberIds('[@Echo](#member:echo) and [@Harsh](#member:harsh), again [@Echo](#member:echo), [@rowboat](#rowboat) @plain')).toEqual(['echo', 'harsh'])
     })
 })
