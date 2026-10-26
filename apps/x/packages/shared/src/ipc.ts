@@ -4011,6 +4011,33 @@ export const ipcSchemas = {
     req: z.object({ key: z.string(), kind: z.string(), name: z.string(), monthlyBudgetUsd: z.number(), autoSleep: z.boolean() }),
     res: z.object({ instance: z.object({ id: z.string(), name: z.string().nullable(), template: z.string(), status: z.string(), kind: z.string().optional() }) }),
   },
+  // Adding a Maritime agent (2026-10-26): list the agents the key being pasted reaches, before Harbor is asked to add one. The key is not kept.
+  'spaces:maritimeAgents': {
+    req: z.object({ key: z.string() }),
+    res: z.object({ agents: z.array(z.object({ id: z.string(), name: z.string(), framework: z.string(), templateId: z.string().nullable(), status: z.string(), kind: z.string().optional() })) }),
+  },
+  // Managed agents (2026-10-26): the kinds this org's Harbor creates on Rowboat's own
+  // Maritime account (none when the deployment has no key: no Create button), creating
+  // one, and deleting its hosting. The Anthropic key for Claude Code goes to the agent's
+  // environment on Maritime and is kept nowhere; the `env` variables the same way.
+  'spaces:managedAgentKinds': {
+    req: z.object({ orgId: z.string() }),
+    res: z.object({ kinds: z.array(z.string()) }),
+  },
+  'spaces:createManagedAgent': {
+    req: z.object({
+      orgId: z.string(),
+      displayName: z.string(),
+      kind: z.string(),
+      anthropicApiKey: z.string().optional(),
+      env: z.array(z.object({ key: z.string(), value: z.string(), secret: z.boolean().optional() })).optional(),
+    }),
+    res: z.object({ agent: z.custom<SpacesTypes.Member>(), key: z.custom<SpacesTypes.AgentKeySecret>(), hosting: z.custom<SpacesTypes.AgentHosting>() }),
+  },
+  'spaces:deleteManagedAgent': {
+    req: z.object({ orgId: z.string(), agentId: z.string() }),
+    res: z.object({ hosting: z.custom<SpacesTypes.AgentHosting>() }),
+  },
   'spaces:setAgentCredential': {
     req: z.object({ orgId: z.string(), agentId: z.string(), secret: z.string() }),
     res: z.object({ credential: z.custom<SpacesTypes.AgentCredential>() }),

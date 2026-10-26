@@ -22,6 +22,7 @@ export type HarborChannel =
   | 'spaces:addMembers' | 'spaces:openDirect' | 'spaces:listMembers' | 'spaces:listOrgMembers'
   | 'spaces:listAgents' | 'spaces:addAgent' | 'spaces:setAgentCredential' | 'spaces:setAgentHook' | 'spaces:clearAgentHook'
   | 'spaces:createAgentKey' | 'spaces:revokeAgentKey' | 'spaces:renameAgent'
+  | 'spaces:managedAgentKinds' | 'spaces:createManagedAgent' | 'spaces:deleteManagedAgent'
   | 'spaces:createInvite' | 'spaces:resolveInvite' | 'spaces:acceptInvite'
   | 'spaces:listAssets' | 'spaces:createAsset' | 'spaces:moveAsset' | 'spaces:deleteAsset' | 'spaces:restoreAsset'
   | 'spaces:readAsset' | 'spaces:proposeChange' | 'spaces:assetHistory' | 'spaces:diff'
@@ -134,6 +135,9 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit 
     'spaces:createAgentKey': async (args) => ({ key: await getClient(args.orgId).createAgentKey(args.agentId) }),
     'spaces:revokeAgentKey': async (args) => ({ key: await getClient(args.orgId).revokeAgentKey(args.agentId, args.keyId) }),
     'spaces:renameAgent': async (args) => ({ agent: await getClient(args.orgId).renameAgent(args.agentId, args.displayName) }),
+    'spaces:managedAgentKinds': async (args) => ({ kinds: await getClient(args.orgId).managedAgentKinds() }),
+    'spaces:createManagedAgent': async ({ orgId, ...input }) => getClient(orgId).createManagedAgent(input),
+    'spaces:deleteManagedAgent': async (args) => ({ hosting: await getClient(args.orgId).deleteManagedAgent(args.agentId) }),
 
     'spaces:createInvite': async (args) => getClient(args.orgId).createInvite({
       ...(args.spaceIds ? { spaceIds: args.spaceIds } : {}),

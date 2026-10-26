@@ -7,6 +7,7 @@ import { attioPlatform } from './attio/index.js';
 import { calPlatform } from './cal/index.js';
 import { conductorPlatform } from './conductor/index.js';
 import { jevPlatform } from './jev/index.js';
+import { maritimePlatform } from './maritime/index.js';
 import { posthogPlatform } from './posthog/index.js';
 import { replicasPlatform } from './replicas/index.js';
 
@@ -75,6 +76,7 @@ export const PLATFORMS: Record<string, ConnectorPlatform> = {
   replicas: replicasPlatform(),
   agent37: agent37Platform(),
   conductor: conductorPlatform(),
+  maritime: maritimePlatform(),
   posthog: posthogPlatform(),
   cal: calPlatform(),
   attio: attioPlatform(),

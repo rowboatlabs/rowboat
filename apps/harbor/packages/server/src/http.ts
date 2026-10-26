@@ -423,6 +423,28 @@ export function buildHttpApp(deps: {
     );
   });
 
+  // Managed agents (spec §8 Maritime, 2026-10-26): created on the platform Rowboat's own account runs.
+  app.get(routes.managedAgentKinds.path, async (c) => reply(c, routes.managedAgentKinds.response, { kinds: await service.managedAgentKinds(actor(c)) }));
+
+  app.post(routes.createManagedAgent.path, async (c) => {
+    const input = await body(c, routes.createManagedAgent.request);
+    return reply(
+      c,
+      routes.createManagedAgent.response,
+      await service.createManagedAgent(actor(c), {
+        displayName: input.displayName,
+        kind: input.kind,
+        ...(input.anthropicApiKey !== undefined ? { anthropicApiKey: input.anthropicApiKey } : {}),
+        ...(input.env !== undefined ? { env: input.env } : {}),
+      }),
+    );
+  });
+
+  app.delete(routes.deleteManagedAgent.path, async (c) => {
+    const { agentId } = parseWith(routes.deleteManagedAgent.params, c.req.param());
+    return reply(c, routes.deleteManagedAgent.response, { hosting: await service.deleteManagedAgent(actor(c), agentId) });
+  });
+
   app.put(routes.setAgentCredential.path, async (c) => {
     const { agentId } = parseWith(routes.setAgentCredential.params, c.req.param());
     const input = await body(c, routes.setAgentCredential.request);

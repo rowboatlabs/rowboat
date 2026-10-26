@@ -83,6 +83,7 @@ export function standingParagraph(input: { invocation: Invocation; agentId: stri
     'and otherwise write their name; never mention to thank, acknowledge or sign off. ' +
     `If you have not loaded the rowboat-spaces skill in this session, load it now, or read it at ${SKILL_URL}: ` +
     'it covers your setup, the tools and files. ' +
+    'Your final message is posted to this thread for you when you finish: write your reply as your answer, never post it with post_message, or it arrives twice. ' +
     `Include the following attribution in every PR description you create or update for this request: Requested by ${invoker}, ${thread}. ` +
     'Do not post to Slack.'
   );

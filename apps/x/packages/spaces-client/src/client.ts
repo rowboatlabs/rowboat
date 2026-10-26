@@ -12,6 +12,7 @@ import {
   type AgentKey,
   type AgentCredential,
   type AgentHook,
+  type AgentHosting,
   type AgentKeySecret,
   type AgentListing,
   type ConnectorCapabilities,
@@ -410,6 +411,26 @@ export class SpacesClient {
    */
   async addAgent(input: { displayName: string; kind?: string; connection?: string; credential?: string; instance?: string }): Promise<{ agent: Member; key: AgentKeySecret }> {
     return this.request('POST', routes.createAgent.path, routes.createAgent.response, input);
+  }
+
+  /** The kinds of agent this org's Harbor creates on Rowboat's own platform account (api.ts managedAgentKinds, 2026-10-26); none = no managed hosting. */
+  async managedAgentKinds(): Promise<string[]> {
+    return (await this.request('GET', routes.managedAgentKinds.path, routes.managedAgentKinds.response)).kinds;
+  }
+
+  /** Create a managed agent (api.ts createManagedAgent): the member, its first key, and its hosting, `deploying` at first. */
+  async createManagedAgent(input: {
+    displayName: string;
+    kind: string;
+    anthropicApiKey?: string;
+    env?: Array<{ key: string; value: string; secret?: boolean }>;
+  }): Promise<{ agent: Member; key: AgentKeySecret; hosting: AgentHosting }> {
+    return this.request('POST', routes.createManagedAgent.path, routes.createManagedAgent.response, input);
+  }
+
+  /** Delete a managed agent's hosting (api.ts deleteManagedAgent): its keys go at once, the platform's resources in the background. */
+  async deleteManagedAgent(agentId: string): Promise<AgentHosting> {
+    return (await this.request('DELETE', `/v1/agents/${encodeURIComponent(agentId)}/hosting`, routes.deleteManagedAgent.response)).hosting;
   }
 
   /** Replace a platform agent's credential (owner only); Harbor checks it with the platform first. */

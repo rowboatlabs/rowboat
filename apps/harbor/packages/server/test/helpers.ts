@@ -115,6 +115,10 @@ export function restClient(harbor: RunningHarbor, token: string) {
       });
       return { status: res.status, body: (await res.json()) as any };
     },
+    async delete(path: string) {
+      const res = await fetch(`${harbor.url}${path}`, { method: 'DELETE', headers: { authorization: `Bearer ${token}` } });
+      return { status: res.status, body: (await res.json()) as any };
+    },
   };
 }
 

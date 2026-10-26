@@ -4,6 +4,8 @@ import { bindAuth, type AuthDriver, type OrgAuth } from './auth.js';
 import type { BlobStore } from './blobs.js';
 import { HostedConnectors } from './connectors/host.js';
 import { jevApiKey } from './connectors/jev/index.js';
+import { maritimeProvisioner } from './connectors/maritime/provisioning.js';
+import type { HostingProvider } from './core/hosting.js';
 import { buildHttpApp } from './http.js';
 import type { SpaceHub } from './hub.js';
 import { handleMcpRequest } from './mcp.js';
@@ -44,6 +46,16 @@ export interface OrgRuntimeInput {
   sessionCookieDomain?: string;
   /** The Spaces web app, which an org link opened in a browser offers beside the desktop app (http.ts, the landings). */
   webAppUrl?: string;
+  /** Managed hosting (spec §8 Maritime, 2026-10-26): a stand-in provider and tick in tests; absent = from HARBOR_MARITIME_API_KEY. */
+  hosting?: { provider: HostingProvider; tickMs?: number };
+}
+
+/** The managed-hosting provider the deployment's own Maritime key makes, or none. */
+function hostingFromEnv(): HostingProvider | undefined {
+  const apiKey = process.env.HARBOR_MARITIME_API_KEY;
+  if (!apiKey) return undefined;
+  const cap = Number(process.env.HARBOR_MARITIME_LLM_CAP_CENTS);
+  return maritimeProvisioner({ apiKey, ...(Number.isFinite(cap) && cap > 0 ? { llmCapCents: cap } : {}) });
 }
 
 export interface OrgRuntime {
@@ -77,9 +89,19 @@ export async function buildOrgRuntime(input: OrgRuntimeInput): Promise<OrgRuntim
     added: (agent) => connectors.ensure(agent),
     alert: (connection, payload) => connectors.alert(connection, payload),
   });
+  // Managed hosting (spec §8 Maritime, 2026-10-26): agents Rowboat's own account creates, when the deployment has its key.
+  const provider = input.hosting?.provider ?? hostingFromEnv();
+  if (provider) {
+    service.attachHosting(provider, {
+      save: (agentId, secret, setBy) => connectors.save(agentId, secret, setBy),
+      added: (agent) => connectors.ensure(agent),
+      stop: (agentId) => connectors.stop(agentId),
+    });
+  }
   // Jev (spec §8 Jev, 2026-10-07): every org has it once the deployment has its key.
   if (jevApiKey()) await service.ensureJev();
   await connectors.startAll();
+  if (provider) service.startHosting(input.hosting?.tickMs);
   const auth = bindAuth(input.auth, store);
   const issuer = input.auth.metadata?.()?.authorizationServers[0];
   const render = getRequestListener(
@@ -104,6 +126,9 @@ export async function buildOrgRuntime(input: OrgRuntimeInput): Promise<OrgRuntim
       render(req, res);
     },
     live: { service, hub, auth, webOrigins: new Set(input.webOrigins ?? []) },
-    close: () => connectors.stopAll(),
+    close: async () => {
+      await service.stopHosting();
+      await connectors.stopAll();
+    },
   };
 }
