@@ -1065,10 +1065,52 @@ export const MIGRATIONS: Migration[] = [
     ],
   },
   {
+    // Admin controls (spec §4 Roles, built 2026-10-19). An admin removes a
+    // member from the org: the row stays, stamped, so attribution reads and
+    // an invite accepted by the same identity reactivates it. Null = active.
+    id: '043-member-removed-at',
+    statements: [`alter table members add column if not exists removed_at text`],
+  },
+  {
+    // The org's settings an admin sets (spec §4 Roles, 2026-10-19): who may
+    // invite. One row per org once set; no row = members may.
+    id: '044-org-settings',
+    statements: [
+      `create table org_settings (
+        org_id text primary key,
+        invite_policy text not null default 'members' check (invite_policy in ('members', 'admins')),
+        set_by text not null,
+        set_at text not null
+      )`,
+    ],
+  },
+  {
+    // A message's summary (2026-10-25): the author's short version of a long
+    // body, shown first with "Show more". Content, so deletion blanks it.
+    id: '045-message-summary',
+    statements: [`alter table messages add column if not exists summary text`],
+  },
+  {
+    // Who has replied, on roots (2026-10-25, "managing sessions" in Main):
+    // the Threads view shows and filters by a thread's participants. Same
+    // recompute as reply_count; the backfill is refreshReplyStats over all.
+    id: '046-reply-authors',
+    statements: [
+      `alter table messages add column if not exists reply_authors jsonb not null default '[]'::jsonb`,
+      `update messages r set reply_authors = s.authors
+        from (select thread_root, jsonb_agg(author_member_id order by first_offset) as authors
+              from (select thread_root, author_member_id, min(stream_offset) as first_offset
+                    from messages where thread_root is not null and deleted_at is null
+                    group by thread_root, author_member_id) a
+              group by thread_root) s
+        where r.id = s.thread_root`,
+    ],
+  },
+  {
     // Managed agents (spec §8 Maritime, 2026-10-26): the hosting Rowboat's own account runs for an agent.
     // One row per managed agent, written before the platform is asked (so an interrupted creation is found),
     // bound to its member once the member exists. The platform's agent id and the end-user key Rowboat named it by.
-    id: '043-agent-hosting',
+    id: '047-agent-hosting',
     statements: [
       `create table agent_hosting (
         org_id text not null,
@@ -1088,26 +1130,6 @@ export const MIGRATIONS: Migration[] = [
       )`,
       `create unique index agent_hosting_agent on agent_hosting (org_id, agent_id) where agent_id is not null`,
       `create index agent_hosting_status on agent_hosting (org_id, status)`,
-    ],
-  },
-  {
-    // Admin controls (spec §4 Roles, built 2026-10-19). An admin removes a
-    // member from the org: the row stays, stamped, so attribution reads and
-    // an invite accepted by the same identity reactivates it. Null = active.
-    id: '043-member-removed-at',
-    statements: [`alter table members add column if not exists removed_at text`],
-  },
-  {
-    // The org's settings an admin sets (spec §4 Roles, 2026-10-19): who may
-    // invite. One row per org once set; no row = members may.
-    id: '044-org-settings',
-    statements: [
-      `create table org_settings (
-        org_id text primary key,
-        invite_policy text not null default 'members' check (invite_policy in ('members', 'admins')),
-        set_by text not null,
-        set_at text not null
-      )`,
     ],
   },
 ];

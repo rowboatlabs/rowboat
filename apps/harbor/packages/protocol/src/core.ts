@@ -130,9 +130,10 @@ export const AGENT_PAIRS: ReadonlyArray<{ kind: string; connection: string }> = 
   // Integrations (2026-10-03): the service's own API, called on a command, its kind and connection one name.
   { kind: 'posthog', connection: 'posthog' },
   { kind: 'cal', connection: 'cal' },
+  { kind: 'attio', connection: 'attio' },
 ];
 /** Connections whose connector Harbor runs, calling the platform with a credential it holds (spec §8 Connectors). */
-export const HARBOR_RUN_CONNECTIONS: readonly string[] = ['replicas', 'agent37', 'conductor', 'maritime', 'posthog', 'cal'];
+export const HARBOR_RUN_CONNECTIONS: readonly string[] = ['replicas', 'agent37', 'conductor', 'maritime', 'posthog', 'cal', 'attio'];
 /**
  * Connections whose agent is one instance on the platform (2026-10-05): the
  * agent is added with it, and Harbor checks the instance runs the agent's kind.
@@ -443,6 +444,8 @@ export const MessageEdit = z.object({
   messageId: MessageId,
   threadRoot: MessageId.optional(),
   body: z.string().min(1).max(65_536),
+  /** The message's summary after the edit (2026-10-25); absent = it has none. */
+  summary: z.string().min(1).max(1_000).optional(),
   by: Attribution,
   at: z.iso.datetime(),
   /** The re-stamped addresses (mentions.ts) — folding clients update them with the body. */
@@ -487,6 +490,19 @@ export const Message = z.object({
    * followed thread is unread when this exceeds the member's mark.
    */
   lastReplyOffset: StreamOffset.optional(),
+  /**
+   * Who has replied (2026-10-25, "managing sessions" in Main): the distinct
+   * authors of LIVE replies, in first-reply order, so the Threads view can
+   * show a thread's participants and filter by one without loading replies.
+   * Maintained by the same denorm refresh as replyCount; [] on replies.
+   */
+  replyAuthors: z.array(MemberId).default([]),
+  /**
+   * The author's short version of a long message (2026-10-25, the threads
+   * discussion in Main): clients show it first with "Show more" for the full
+   * body. Markdown; the body's mention stamps cover it. Redacted with the body.
+   */
+  summary: z.string().min(1).max(1_000).optional(),
   /** Provenance when this root was posted in reply to an activity row (a change-set). */
   anchorChangeSetId: ChangeSetId.optional(),
   /** Set when the author deleted the message (deleter == author, so no separate attribution). */

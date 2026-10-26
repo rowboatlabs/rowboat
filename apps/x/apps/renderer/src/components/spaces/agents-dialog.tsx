@@ -233,10 +233,18 @@ function KindChoice({ label, kinds, selected, onSelect }: { label: string; kinds
 }
 
 /** A platform agent's key: its end, whether the platform rejected it, and Replace for the owner. */
-export function AgentsDialog({ org, open, onOpenChange }: {
+/**
+ * Where the dialog opens. The Agents page (2026-10-21) lists every agent
+ * itself and opens this straight at adding one or at one agent's page; then
+ * Back, Cancel and Done close the dialog instead of showing the list.
+ */
+export type AgentsDialogStart = { name: 'add'; bot: boolean } | { name: 'agent'; agentId: string }
+
+export function AgentsDialog({ org, open, onOpenChange, start }: {
     org: OrgWithSpaces
     open: boolean
     onOpenChange: (open: boolean) => void
+    start?: AgentsDialogStart
 }) {
     const spaceIds = useMemo(() => org.spaces.map((s) => s.id), [org.spaces])
     const roster = useOrgRoster(org.id, spaceIds)
@@ -284,22 +292,7 @@ export function AgentsDialog({ org, open, onOpenChange }: {
         }
     }, [org.id])
 
-    useEffect(() => {
-        if (!open) return
-        setScreen({ name: 'list' })
-        setAgents(null)
-        void load()
-        // An org whose Harbor creates no agents (no Maritime key, or older) just has no Create button.
-        window.ipc.invoke('spaces:managedAgentKinds', { orgId: org.id }).then(({ kinds }) => setManagedKinds(kinds.filter((k) => MANAGED_KINDS.some((m) => m.kind === k)))).catch(() => setManagedKinds([]))
-    }, [open, load, org.id])
-
-    const offeredKinds = MANAGED_KINDS.filter((m) => managedKinds.includes(m.kind))
-    const chosenManaged = createKind && managedKinds.includes(createKind) ? createKind : offeredKinds[0]?.kind ?? 'hermes'
-    const createName = nameEdited ? name : kindInfo(chosenManaged).label
-    const parsedEnv = parseEnv(envText)
-    const createReady = createName.trim() !== '' && (chosenManaged !== 'claude-code' || anthropicKey.trim() !== '') && !('bad' in parsedEnv)
-
-    const startAdding = (bot: boolean) => {
+    const startAdding = useCallback((bot: boolean) => {
         setChosen(null)
         setChosenKind(null)
         setName('')
@@ -310,7 +303,29 @@ export function AgentsDialog({ org, open, onOpenChange }: {
         setSkippedSpaces(new Set())
         setWithDirect(true)
         setScreen({ name: 'add', bot })
-    }
+    }, [])
+
+    const startName = start?.name
+    const startBot = start?.name === 'add' && start.bot
+    const startAgentId = start?.name === 'agent' ? start.agentId : undefined
+    useEffect(() => {
+        if (!open) return
+        if (startName === 'add') startAdding(startBot)
+        else setScreen(startAgentId ? { name: 'agent', agentId: startAgentId } : { name: 'list' })
+        setAgents(null)
+        void load()
+        // An org whose Harbor creates no agents (no Maritime key, or older) just has no Create button.
+        window.ipc.invoke('spaces:managedAgentKinds', { orgId: org.id }).then(({ kinds }) => setManagedKinds(kinds.filter((k) => MANAGED_KINDS.some((m) => m.kind === k)))).catch(() => setManagedKinds([]))
+    }, [open, load, startAdding, startName, startBot, startAgentId, org.id])
+
+    // Back to the list, or out of the dialog when it was opened past the list.
+    const back = () => (start ? onOpenChange(false) : setScreen({ name: 'list' }))
+
+    const offeredKinds = MANAGED_KINDS.filter((m) => managedKinds.includes(m.kind))
+    const chosenManaged = createKind && managedKinds.includes(createKind) ? createKind : offeredKinds[0]?.kind ?? 'hermes'
+    const createName = nameEdited ? name : kindInfo(chosenManaged).label
+    const parsedEnv = parseEnv(envText)
+    const createReady = createName.trim() !== '' && (chosenManaged !== 'claude-code' || anthropicKey.trim() !== '') && !('bad' in parsedEnv)
 
     const startCreating = () => {
         setCreateKind(null)
@@ -504,7 +519,7 @@ export function AgentsDialog({ org, open, onOpenChange }: {
                         <Header
                             title={addingBot ? 'Add a bot' : 'Add an agent'}
                             description={addingBot ? 'Choose the service. It answers commands with your key for it.' : 'Choose what runs it. The steps to connect it come next.'}
-                            onBack={() => setScreen({ name: 'list' })}
+                            onBack={back}
                         />
                         <Body>
                             <div role="radiogroup" aria-label={addingBot ? 'Which service' : 'How it connects'} className="grid grid-cols-2 gap-2">
@@ -568,7 +583,7 @@ export function AgentsDialog({ org, open, onOpenChange }: {
                             {addError && <div role="alert" className="mt-3 text-xs text-destructive">{addError}</div>}
                         </Body>
                         <Footer>
-                            <Button type="button" size="sm" variant="ghost" onClick={() => setScreen({ name: 'list' })}>Cancel</Button>
+                            <Button type="button" size="sm" variant="ghost" onClick={back}>Cancel</Button>
                             <Button type="submit" size="sm" disabled={!ready || busy}>
                                 {busy && <Loader2 className="size-3.5 animate-spin" />}
                                 {addingBot ? 'Add bot' : 'Add agent'}
@@ -588,7 +603,7 @@ export function AgentsDialog({ org, open, onOpenChange }: {
                         <Header
                             title="Create an agent"
                             description="Rowboat runs it for you, on Maritime. Pick what it runs and a name; it's ready in a minute or two, with nothing to connect."
-                            onBack={() => setScreen({ name: 'list' })}
+                            onBack={back}
                         />
                         <Body>
                             <div role="radiogroup" aria-label="Agent" className="grid grid-cols-2 gap-2">
@@ -681,7 +696,7 @@ export function AgentsDialog({ org, open, onOpenChange }: {
                             {addError && <div role="alert" className="mt-3 text-xs text-destructive">{addError}</div>}
                         </Body>
                         <Footer>
-                            <Button type="button" size="sm" variant="ghost" onClick={() => setScreen({ name: 'list' })}>Cancel</Button>
+                            <Button type="button" size="sm" variant="ghost" onClick={back}>Cancel</Button>
                             <Button type="submit" size="sm" disabled={!createReady || busy}>
                                 {busy && <Loader2 className="size-3.5 animate-spin" />}
                                 Create agent
@@ -709,7 +724,7 @@ export function AgentsDialog({ org, open, onOpenChange }: {
                             />
                         </Body>
                         <Footer>
-                            <Button size="sm" onClick={() => setScreen({ name: 'list' })}>Done</Button>
+                            <Button size="sm" onClick={back}>Done</Button>
                         </Footer>
                     </>
                 )}
@@ -725,13 +740,13 @@ export function AgentsDialog({ org, open, onOpenChange }: {
                                 title={agent.displayName}
                                 description={`${agentLabel(agent.agentKind, agent.agentConnection)} · ${owner}`}
                                 icon={<AgentLogo logo={kindInfo(agent.agentKind ?? 'custom').logo ?? setupFor(agent).logo} className="size-5" />}
-                                onBack={() => setScreen({ name: 'list' })}
+                                onBack={back}
                             />
                             <Body>
                                 <AgentPage org={org} listing={listing} isAdmin={isAdmin} onChanged={load} />
                             </Body>
                             <Footer>
-                                <Button size="sm" onClick={() => setScreen({ name: 'list' })}>Done</Button>
+                                <Button size="sm" onClick={back}>Done</Button>
                             </Footer>
                         </>
                     )
