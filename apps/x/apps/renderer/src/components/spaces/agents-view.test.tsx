@@ -131,7 +131,7 @@ describe('AgentsView', () => {
         await waitFor(() => expect(screen.queryByRole('radiogroup', { name: 'How it connects' })).toBeNull())
     })
 
-    it('when the org’s Harbor creates agents, the card creates one, and adding one you run is the small print', async () => {
+    it('when the org’s Harbor creates agents, the card creates one, and adding one you run is its second button', async () => {
         managedKinds = ['hermes', 'claude-code', 'codex']
         show()
         await screen.findByText('Herald')
@@ -141,7 +141,7 @@ describe('AgentsView', () => {
         // Back closes the dialog: it was opened past the list.
         fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
         await waitFor(() => expect(screen.queryByRole('radiogroup', { name: 'Agent' })).toBeNull())
-        fireEvent.click(screen.getByRole('button', { name: 'or add one you run' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Add an agent you run' }))
         expect(await screen.findByRole('radiogroup', { name: 'How it connects' })).toBeInTheDocument()
     })
 })

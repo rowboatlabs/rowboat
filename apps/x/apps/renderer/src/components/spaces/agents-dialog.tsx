@@ -584,6 +584,11 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                             {addError && <div role="alert" className="mt-3 text-xs text-destructive">{addError}</div>}
                         </Body>
                         <Footer>
+                            {!addingBot && offeredKinds.length > 0 && (
+                                <button type="button" onClick={startCreating} className="mr-auto text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">
+                                    Want Rowboat to run it? Create one instead
+                                </button>
+                            )}
                             <Button type="button" size="sm" variant="ghost" onClick={back}>Cancel</Button>
                             <Button type="submit" size="sm" disabled={!ready || busy}>
                                 {busy && <Loader2 className="size-3.5 animate-spin" />}
@@ -697,6 +702,9 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                             {addError && <div role="alert" className="mt-3 text-xs text-destructive">{addError}</div>}
                         </Body>
                         <Footer>
+                            <button type="button" onClick={() => startAdding(false)} className="mr-auto text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">
+                                Already running one? Add it instead
+                            </button>
                             <Button type="button" size="sm" variant="ghost" onClick={back}>Cancel</Button>
                             <Button type="submit" size="sm" disabled={!createReady || busy}>
                                 {busy && <Loader2 className="size-3.5 animate-spin" />}
