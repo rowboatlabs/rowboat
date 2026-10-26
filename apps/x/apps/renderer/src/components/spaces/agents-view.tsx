@@ -1,5 +1,5 @@
-import { useMemo, useRef, useState, type ReactNode } from 'react'
-import { Bot, Hash, KeyRound, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Bot, Hash, KeyRound, MoreHorizontal, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Input } from '@/components/ui/input'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -54,6 +54,13 @@ export function AgentsView({ org }: { org: OrgWithSpaces }) {
     const [filter, setFilter] = useState<Filter>('all')
     const [dialog, setDialog] = useState<AgentsDialogStart | null>(null)
     const [removing, setRemoving] = useState<spaces.Member | null>(null)
+    // Create agent (2026-10-26): offered when the org's Harbor creates agents on Rowboat's own Maritime account.
+    const [creates, setCreates] = useState(false)
+    useEffect(() => {
+        let gone = false
+        window.ipc.invoke('spaces:managedAgentKinds', { orgId: org.id }).then(({ kinds }) => { if (!gone) setCreates(kinds.length > 0) }).catch(() => { if (!gone) setCreates(false) })
+        return () => { gone = true }
+    }, [org.id])
 
     const isAdmin = roster.find((m) => m.id === org.memberId)?.role === 'admin'
     const names = useMemo(() => new Map(roster.map((m) => [m.id, m.displayName])), [roster])
@@ -112,7 +119,7 @@ export function AgentsView({ org }: { org: OrgWithSpaces }) {
 
                 <Group title="Yours" count={mine.length}>
                     {mine.map(card)}
-                    <NewAgentCard onAdd={(bot) => setDialog({ name: 'add', bot })} />
+                    <NewAgentCard creates={creates} onCreate={() => setDialog({ name: 'create' })} onAdd={(bot) => setDialog({ name: 'add', bot })} />
                 </Group>
 
                 {filter === 'all' && others.length > 0 && (
@@ -347,26 +354,34 @@ function SpacesBadge({ names }: { names: string[] }) {
     )
 }
 
-function NewAgentCard({ onAdd }: { onAdd: (bot: boolean) => void }) {
+/**
+ * The card that adds one. When the org's Harbor creates agents (Rowboat's own
+ * Maritime account), the card's main action creates one and adding one you
+ * run moves to the small print; otherwise New agent, as before.
+ */
+function NewAgentCard({ creates, onCreate, onAdd }: { creates: boolean; onCreate: () => void; onAdd: (bot: boolean) => void }) {
+    const small = 'text-[11px] text-muted-foreground/80 transition-colors hover:text-foreground'
     return (
         <li className="flex min-h-[188px] flex-col rounded-xl border border-dashed border-black/20 transition-colors hover:border-black/35 hover:bg-[#fafafa] [.dark_&]:border-border [.dark_&]:hover:border-foreground/25 [.dark_&]:hover:bg-transparent">
             <button
                 type="button"
-                onClick={() => onAdd(false)}
+                onClick={() => (creates ? onCreate() : onAdd(false))}
                 className="flex flex-1 flex-col items-center justify-center gap-2 rounded-t-xl text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
             >
                 <span className="flex size-9 items-center justify-center rounded-full border border-black/15 bg-[#f5f5f5] [.dark_&]:border-border [.dark_&]:bg-transparent">
-                    <Plus className="size-4" />
+                    {creates ? <Sparkles className="size-4" /> : <Plus className="size-4" />}
                 </span>
-                New agent
+                {creates ? 'Create agent' : 'New agent'}
             </button>
-            <button
-                type="button"
-                onClick={() => onAdd(true)}
-                className="pb-3 text-[11px] text-muted-foreground/80 transition-colors hover:text-foreground"
-            >
-                or add a bot
-            </button>
+            <span className="flex items-center justify-center gap-1 pb-3">
+                {creates && (
+                    <>
+                        <button type="button" onClick={() => onAdd(false)} className={small}>or add one you run</button>
+                        <span className="text-[11px] text-muted-foreground/60">·</span>
+                    </>
+                )}
+                <button type="button" onClick={() => onAdd(true)} className={small}>{creates ? 'add a bot' : 'or add a bot'}</button>
+            </span>
         </li>
     )
 }

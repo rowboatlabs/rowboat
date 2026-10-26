@@ -238,7 +238,7 @@ function KindChoice({ label, kinds, selected, onSelect }: { label: string; kinds
  * itself and opens this straight at adding one or at one agent's page; then
  * Back, Cancel and Done close the dialog instead of showing the list.
  */
-export type AgentsDialogStart = { name: 'add'; bot: boolean } | { name: 'agent'; agentId: string }
+export type AgentsDialogStart = { name: 'add'; bot: boolean } | { name: 'create' } | { name: 'agent'; agentId: string }
 
 export function AgentsDialog({ org, open, onOpenChange, start }: {
     org: OrgWithSpaces
@@ -305,29 +305,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
         setScreen({ name: 'add', bot })
     }, [])
 
-    const startName = start?.name
-    const startBot = start?.name === 'add' && start.bot
-    const startAgentId = start?.name === 'agent' ? start.agentId : undefined
-    useEffect(() => {
-        if (!open) return
-        if (startName === 'add') startAdding(startBot)
-        else setScreen(startAgentId ? { name: 'agent', agentId: startAgentId } : { name: 'list' })
-        setAgents(null)
-        void load()
-        // An org whose Harbor creates no agents (no Maritime key, or older) just has no Create button.
-        window.ipc.invoke('spaces:managedAgentKinds', { orgId: org.id }).then(({ kinds }) => setManagedKinds(kinds.filter((k) => MANAGED_KINDS.some((m) => m.kind === k)))).catch(() => setManagedKinds([]))
-    }, [open, load, startAdding, startName, startBot, startAgentId, org.id])
-
-    // Back to the list, or out of the dialog when it was opened past the list.
-    const back = () => (start ? onOpenChange(false) : setScreen({ name: 'list' }))
-
-    const offeredKinds = MANAGED_KINDS.filter((m) => managedKinds.includes(m.kind))
-    const chosenManaged = createKind && managedKinds.includes(createKind) ? createKind : offeredKinds[0]?.kind ?? 'hermes'
-    const createName = nameEdited ? name : kindInfo(chosenManaged).label
-    const parsedEnv = parseEnv(envText)
-    const createReady = createName.trim() !== '' && (chosenManaged !== 'claude-code' || anthropicKey.trim() !== '') && !('bad' in parsedEnv)
-
-    const startCreating = () => {
+    const startCreating = useCallback(() => {
         setCreateKind(null)
         setName('')
         setNameEdited(false)
@@ -338,7 +316,30 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
         setSkippedSpaces(new Set())
         setWithDirect(true)
         setScreen({ name: 'create' })
-    }
+    }, [])
+
+    const startName = start?.name
+    const startBot = start?.name === 'add' && start.bot
+    const startAgentId = start?.name === 'agent' ? start.agentId : undefined
+    useEffect(() => {
+        if (!open) return
+        if (startName === 'add') startAdding(startBot)
+        else if (startName === 'create') startCreating()
+        else setScreen(startAgentId ? { name: 'agent', agentId: startAgentId } : { name: 'list' })
+        setAgents(null)
+        void load()
+        // An org whose Harbor creates no agents (no Maritime key, or older) just has no Create button.
+        window.ipc.invoke('spaces:managedAgentKinds', { orgId: org.id }).then(({ kinds }) => setManagedKinds(kinds.filter((k) => MANAGED_KINDS.some((m) => m.kind === k)))).catch(() => setManagedKinds([]))
+    }, [open, load, startAdding, startCreating, startName, startBot, startAgentId, org.id])
+
+    // Back to the list, or out of the dialog when it was opened past the list.
+    const back = () => (start ? onOpenChange(false) : setScreen({ name: 'list' }))
+
+    const offeredKinds = MANAGED_KINDS.filter((m) => managedKinds.includes(m.kind))
+    const chosenManaged = createKind && managedKinds.includes(createKind) ? createKind : offeredKinds[0]?.kind ?? 'hermes'
+    const createName = nameEdited ? name : kindInfo(chosenManaged).label
+    const parsedEnv = parseEnv(envText)
+    const createReady = createName.trim() !== '' && (chosenManaged !== 'claude-code' || anthropicKey.trim() !== '') && !('bad' in parsedEnv)
 
     // The new agent into the spaces picked on the form, and your DM with it; one that refuses doesn't undo the agent.
     const settle = async (agent: spaces.Member, homeChannel: boolean) => {
