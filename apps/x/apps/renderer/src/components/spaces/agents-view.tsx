@@ -356,8 +356,9 @@ function SpacesBadge({ names }: { names: string[] }) {
 
 /**
  * The card that adds one. When the org's Harbor creates agents (Rowboat's own
- * Maritime account), the card's main action creates one and adding one you
- * run moves to the small print; otherwise New agent, as before.
+ * Maritime account), the card's main action creates one and a second button
+ * adds one you run (both in plain sight, 2026-10-26); otherwise New agent, as
+ * before. A bot is the small print either way.
  */
 function NewAgentCard({ creates, onCreate, onAdd }: { creates: boolean; onCreate: () => void; onAdd: (bot: boolean) => void }) {
     const small = 'text-[11px] text-muted-foreground/80 transition-colors hover:text-foreground'
@@ -373,15 +374,16 @@ function NewAgentCard({ creates, onCreate, onAdd }: { creates: boolean; onCreate
                 </span>
                 {creates ? 'Create agent' : 'New agent'}
             </button>
-            <span className="flex items-center justify-center gap-1 pb-3">
-                {creates && (
-                    <>
-                        <button type="button" onClick={() => onAdd(false)} className={small}>or add one you run</button>
-                        <span className="text-[11px] text-muted-foreground/60">·</span>
-                    </>
-                )}
-                <button type="button" onClick={() => onAdd(true)} className={small}>{creates ? 'add a bot' : 'or add a bot'}</button>
-            </span>
+            {creates && (
+                <button
+                    type="button"
+                    onClick={() => onAdd(false)}
+                    className="mx-3 flex items-center justify-center gap-1.5 rounded-md border border-black/15 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-[#f0f0f0] hover:text-foreground [.dark_&]:border-border [.dark_&]:hover:bg-accent"
+                >
+                    <Plus className="size-3" /> Add an agent you run
+                </button>
+            )}
+            <button type="button" onClick={() => onAdd(true)} className={cn(small, 'py-2.5')}>or add a bot</button>
         </li>
     )
 }

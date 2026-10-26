@@ -545,6 +545,25 @@ describe('AgentsDialog', () => {
         })
     })
 
+    it('the create and add screens each offer the other way', async () => {
+        managedKinds = ['hermes', 'claude-code', 'codex']
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        fireEvent.click(await screen.findByRole('button', { name: /Create agent/ }))
+        await screen.findByRole('radiogroup', { name: 'Agent' })
+        fireEvent.click(screen.getByRole('button', { name: 'Already running one? Add it instead' }))
+        await screen.findByRole('radiogroup', { name: 'How it connects' })
+        fireEvent.click(screen.getByRole('button', { name: 'Want Rowboat to run it? Create one instead' }))
+        await screen.findByRole('radiogroup', { name: 'Agent' })
+    })
+
+    it('offers no way to create from Add agent on a Harbor that creates none', async () => {
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        await screen.findByText('Hermes')
+        fireEvent.click(screen.getByRole('button', { name: /Add agent/ }))
+        await screen.findByRole('radiogroup', { name: 'How it connects' })
+        expect(screen.queryByRole('button', { name: /Create one instead/ })).toBeNull()
+    })
+
     it('shows Maritime’s refusal under the form; nothing was created', async () => {
         managedKinds = ['hermes']
         render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
