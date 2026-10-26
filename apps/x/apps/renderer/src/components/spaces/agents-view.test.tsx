@@ -118,11 +118,19 @@ describe('AgentsView', () => {
         expect(screen.queryByRole('button', { name: 'Ro options' })).toBeNull()
     })
 
-    it('New agent opens straight at adding one', async () => {
+    it('the single New agent or bot card offers both kinds in the dialog', async () => {
         show()
         await screen.findByText('Herald')
-        fireEvent.click(screen.getByRole('button', { name: /New agent/ }))
+        fireEvent.click(screen.getByRole('button', { name: 'New agent or bot' }))
+        expect(screen.queryByRole('button', { name: 'or add a bot' })).toBeNull()
         expect(await screen.findByRole('radiogroup', { name: 'How it connects' })).toBeInTheDocument()
+        expect(screen.getByRole('tab', { name: 'Agents' })).toHaveAttribute('aria-selected', 'true')
+        fireEvent.mouseDown(screen.getByRole('tab', { name: 'Bots' }), { button: 0, ctrlKey: false })
+        expect(screen.getByRole('tab', { name: 'Bots' })).toHaveAttribute('aria-selected', 'true')
+        expect(screen.getByRole('radio', { name: 'Greptile' })).toBeInTheDocument()
+        expect(screen.queryByRole('radio', { name: 'Hermes' })).toBeNull()
+        fireEvent.mouseDown(screen.getByRole('tab', { name: 'Agents' }), { button: 0, ctrlKey: false })
+        expect(screen.getByRole('radio', { name: 'Hermes' })).toBeInTheDocument()
         fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
         await waitFor(() => expect(screen.queryByRole('radiogroup', { name: 'How it connects' })).toBeNull())
     })
