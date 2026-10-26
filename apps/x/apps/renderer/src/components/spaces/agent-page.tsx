@@ -3,6 +3,7 @@ import { KeyRound, Loader2, Trash2 } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { HostingManagement } from '@/components/spaces/agent-hosting'
 import { ConnectAgent, CopyField } from '@/components/spaces/agent-setup'
 import { refreshAgentCapabilities } from '@/hooks/use-space-invocations'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
@@ -104,7 +105,10 @@ export function AgentPage({ org, listing, isAdmin, onChanged }: {
             <DefaultsSection orgId={org.id} agent={agent} canEdit={mine} />
 
             {hosting ? (
-                <HostingSection orgId={org.id} agent={agent} hosting={hosting} canDelete={mine || isAdmin} onChanged={onChanged} />
+                <>
+                    <HostingSection orgId={org.id} agent={agent} hosting={hosting} canDelete={mine || isAdmin} onChanged={onChanged} />
+                    {hosting.status === 'ready' && (mine || isAdmin) && <HostingManagement orgId={org.id} agent={agent} hermes={agent.agentKind === 'hermes'} />}
+                </>
             ) : (
                 <Section
                     title="Setup"

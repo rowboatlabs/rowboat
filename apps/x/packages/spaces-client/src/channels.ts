@@ -23,6 +23,11 @@ export type HarborChannel =
   | 'spaces:listAgents' | 'spaces:addAgent' | 'spaces:setAgentCredential' | 'spaces:setAgentHook' | 'spaces:clearAgentHook'
   | 'spaces:createAgentKey' | 'spaces:revokeAgentKey' | 'spaces:renameAgent'
   | 'spaces:managedAgentKinds' | 'spaces:createManagedAgent' | 'spaces:deleteManagedAgent'
+  | 'spaces:getHosting' | 'spaces:setHostingEnv' | 'spaces:deleteHostingEnv' | 'spaces:hostingPower'
+  | 'spaces:runHostingCommand' | 'spaces:getHostingCommand' | 'spaces:cancelHostingCommand' | 'spaces:getHostingLogs'
+  | 'spaces:listHostingFiles' | 'spaces:readHostingFile' | 'spaces:writeHostingFile' | 'spaces:makeHostingDir' | 'spaces:moveHostingFile' | 'spaces:deleteHostingFile'
+  | 'spaces:listHostingSkills' | 'spaces:installHostingSkill' | 'spaces:removeHostingSkill'
+  | 'spaces:listHostingTriggers' | 'spaces:createHostingTrigger' | 'spaces:updateHostingTrigger' | 'spaces:deleteHostingTrigger'
   | 'spaces:createInvite' | 'spaces:resolveInvite' | 'spaces:acceptInvite'
   | 'spaces:listAssets' | 'spaces:createAsset' | 'spaces:moveAsset' | 'spaces:deleteAsset' | 'spaces:restoreAsset'
   | 'spaces:readAsset' | 'spaces:proposeChange' | 'spaces:assetHistory' | 'spaces:diff'
@@ -138,6 +143,39 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit 
     'spaces:managedAgentKinds': async (args) => ({ kinds: await getClient(args.orgId).managedAgentKinds() }),
     'spaces:createManagedAgent': async ({ orgId, ...input }) => getClient(orgId).createManagedAgent(input),
     'spaces:deleteManagedAgent': async (args) => ({ hosting: await getClient(args.orgId).deleteManagedAgent(args.agentId) }),
+    'spaces:getHosting': async (args) => getClient(args.orgId).getHosting(args.agentId),
+    'spaces:setHostingEnv': async (args) => ({ env: await getClient(args.orgId).setHostingEnv(args.agentId, args.key, args.value, args.secret ?? false) }),
+    'spaces:deleteHostingEnv': async (args) => ({ env: await getClient(args.orgId).deleteHostingEnv(args.agentId, args.key) }),
+    'spaces:hostingPower': async (args) => ({ machine: await getClient(args.orgId).hostingPower(args.agentId, args.action) }),
+    'spaces:runHostingCommand': async (args) => ({ execution: await getClient(args.orgId).runHostingCommand(args.agentId, args.command, args.timeoutSeconds) }),
+    'spaces:getHostingCommand': async (args) => ({ execution: await getClient(args.orgId).getHostingCommand(args.agentId, args.executionId) }),
+    'spaces:cancelHostingCommand': async (args) => ({ execution: await getClient(args.orgId).cancelHostingCommand(args.agentId, args.executionId) }),
+    'spaces:getHostingLogs': async ({ orgId, agentId, ...opts }) => getClient(orgId).getHostingLogs(agentId, opts),
+    'spaces:listHostingFiles': async (args) => getClient(args.orgId).listHostingFiles(args.agentId, args.path ?? '/'),
+    'spaces:readHostingFile': async (args) => getClient(args.orgId).readHostingFile(args.agentId, args.path),
+    'spaces:writeHostingFile': async (args) => {
+      await getClient(args.orgId).writeHostingFile(args.agentId, args.path, args.content);
+      return {};
+    },
+    'spaces:makeHostingDir': async (args) => {
+      await getClient(args.orgId).makeHostingDir(args.agentId, args.path);
+      return {};
+    },
+    'spaces:moveHostingFile': async (args) => {
+      await getClient(args.orgId).moveHostingFile(args.agentId, args.from, args.to);
+      return {};
+    },
+    'spaces:deleteHostingFile': async (args) => {
+      await getClient(args.orgId).deleteHostingFile(args.agentId, args.path);
+      return {};
+    },
+    'spaces:listHostingSkills': async (args) => ({ skills: await getClient(args.orgId).listHostingSkills(args.agentId, args.q) }),
+    'spaces:installHostingSkill': async (args) => ({ skills: await getClient(args.orgId).installHostingSkill(args.agentId, args.name) }),
+    'spaces:removeHostingSkill': async (args) => ({ skills: await getClient(args.orgId).removeHostingSkill(args.agentId, args.name) }),
+    'spaces:listHostingTriggers': async (args) => ({ triggers: await getClient(args.orgId).listHostingTriggers(args.agentId) }),
+    'spaces:createHostingTrigger': async ({ orgId, agentId, ...input }) => ({ triggers: await getClient(orgId).createHostingTrigger(agentId, input) }),
+    'spaces:updateHostingTrigger': async ({ orgId, agentId, triggerId, ...input }) => ({ triggers: await getClient(orgId).updateHostingTrigger(agentId, triggerId, input) }),
+    'spaces:deleteHostingTrigger': async (args) => ({ triggers: await getClient(args.orgId).deleteHostingTrigger(args.agentId, args.triggerId) }),
 
     'spaces:createInvite': async (args) => getClient(args.orgId).createInvite({
       ...(args.spaceIds ? { spaceIds: args.spaceIds } : {}),
