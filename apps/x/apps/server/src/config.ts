@@ -9,6 +9,10 @@ export const DEFAULT_PORT = 3220;
 export const ServerConfig = z.object({
   lanEnabled: z.boolean().default(false),
   port: z.number().int().positive().default(DEFAULT_PORT),
+  // (2026-10-13, #1144) Working directory boundary for remote server executeCommand.
+  shell: z.object({
+    allowedRoots: z.array(z.string()),
+  }).optional(),
 });
 export type ServerConfig = z.infer<typeof ServerConfig>;
 
