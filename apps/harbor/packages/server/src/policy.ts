@@ -302,6 +302,22 @@ export function canRevokeAgentKey(actor: Member, agent: Member): Decision {
   return { code: 'forbidden', message: 'only the agent’s owner or an admin can revoke its keys' };
 }
 
+/**
+ * A personal agent is its owner's alone (spec §4 Agent members, 2026-10-26):
+ * nobody else adds it to a space or opens a DM with it. Everyone still sees
+ * it on the roster and reads its replies. A channel agent, or any person,
+ * passes.
+ */
+export function canReachPersonalAgent(actorId: string, member: Member, act: 'add' | 'message'): Decision {
+  if (member.kind !== 'agent' || member.personal !== true || member.ownerId === actorId) return null;
+  return {
+    code: 'forbidden',
+    message: act === 'add'
+      ? `${member.displayName} is a personal agent: only its owner can add it to a space`
+      : `${member.displayName} is a personal agent: only its owner can message it`,
+  };
+}
+
 /** The agents a member manages, and so sees on the Agents screen: an admin, every one; anyone else, their own. */
 export function agentsManagedBy(actor: Member): 'all' | 'owned' {
   return actor.role === 'admin' ? 'all' : 'owned';
@@ -313,12 +329,21 @@ export function agentsManagedBy(actor: Member): 'all' | 'owned' {
 export const AGENT_HOP_LIMIT = 3;
 
 /**
- * Whether a mention may invoke an agent, or why not. You must share a shared
- * space with the agent: a DM alone does not count (PR #1130's rule for
- * Replicas, generalized). Past the hop limit an agent's hand-off is refused.
- * A refusal is a recorded outcome shown under the message, not an error.
+ * Whether a mention may invoke an agent, or why not. A personal agent answers
+ * its owner only (spec §4 Agent members, 2026-10-26): another person, another
+ * agent and Ro are all refused. You must share a shared space with the agent:
+ * a DM alone does not count (PR #1130's rule for Replicas, generalized). Past
+ * the hop limit an agent's hand-off is refused. A refusal is a recorded
+ * outcome shown under the message, not an error.
  */
-export function invocationRefusal(sharesSharedSpace: boolean, depth: number): InvocationRefusal | null {
+export function invocationRefusal(
+  sharesSharedSpace: boolean,
+  depth: number,
+  invoked: { agent: Member; authorId: string },
+): InvocationRefusal | null {
+  if (invoked.agent.personal === true && invoked.agent.ownerId !== invoked.authorId) {
+    return { reason: 'not_permitted', message: `${invoked.agent.displayName} is a personal agent: only its owner can ask it for something.` };
+  }
   if (!sharesSharedSpace) {
     return { reason: 'not_permitted', message: 'You need to share a space with this agent to ask it for something.' };
   }

@@ -1106,6 +1106,16 @@ export const MIGRATIONS: Migration[] = [
         where r.id = s.thread_root`,
     ],
   },
+  {
+    // Personal agents (spec §4 Agent members, 2026-10-26): only the owner may
+    // invoke one, add it to a space or DM it. Written once at creation, like
+    // the kind and connection; every existing agent is a channel agent.
+    id: '047-agent-personal',
+    statements: [
+      `alter table members add column if not exists personal boolean not null default false`,
+      `alter table members add constraint members_personal_check check (kind = 'agent' or not personal)`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

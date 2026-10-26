@@ -172,6 +172,26 @@ describe('AgentsDialog', () => {
         expect(invoke).toHaveBeenCalledWith('spaces:openDirect', { orgId: 'org-1', memberId: 'new' }) // your DM with it, ticked by default
     })
 
+    it('adds a personal agent: named for you until you type one, sent as personal (2026-10-26)', async () => {
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        await screen.findByText('Hermes')
+        fireEvent.click(screen.getByRole('button', { name: /Add agent/ }))
+        fireEvent.click(screen.getByRole('radio', { name: 'Custom' }))
+        expect(screen.getByRole('radio', { name: 'Channel' })).toHaveAttribute('aria-checked', 'true')
+        expect(screen.getByLabelText('Agent name')).toHaveValue('Agent')
+        fireEvent.click(screen.getByRole('radio', { name: 'Personal' }))
+        expect(screen.getByLabelText('Agent name')).toHaveValue("Ramnique's Agent")
+        fireEvent.click(screen.getByRole('button', { name: 'Add agent' }))
+        await screen.findByRole('heading', { name: "Connect Ramnique's Agent" })
+        expect(invoke).toHaveBeenCalledWith('spaces:addAgent', { orgId: 'org-1', displayName: "Ramnique's Agent", kind: 'custom', connection: 'contract', personal: true })
+    })
+
+    it('marks a personal agent in the list', async () => {
+        listing = [{ agent: { ...hermes, personal: true }, keys: [key('k1', 'hermes')] }]
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        expect(await screen.findByText('Hermes · Personal · Yours · 1 key')).toBeInTheDocument()
+    })
+
     it('switching kind keeps a typed name; Back returns to the list', async () => {
         render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
         await screen.findByText('Hermes')

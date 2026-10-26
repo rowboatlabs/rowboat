@@ -100,6 +100,12 @@ export function agentLabel(kind: string | undefined, connection: string | undefi
     return platform ? `${what} · via ${platform.label}` : what
 }
 
+/** "Gagan's Claude Code": a personal agent's suggested name, from its owner's first name (2026-10-26). */
+export function personalAgentName(ownerName: string | undefined, base: string): string {
+    const first = ownerName?.trim().split(/\s+/)[0]
+    return first ? `${first}'s ${base}` : base
+}
+
 /** Something to paste, with Copy. `secret` values read as their ends on screen and copy whole. */
 export interface SetupValue {
     label?: string

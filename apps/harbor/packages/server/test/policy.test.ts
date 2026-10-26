@@ -21,6 +21,7 @@ import {
   canOpenDirect,
   isGroupChat,
   canAddAgent,
+  canReachPersonalAgent,
   canCreateAgentKey,
   canRenameAgent,
   canRevokeAgentKey,
@@ -207,10 +208,18 @@ describe('policy', () => {
   });
 
   it('invocations: a shared space to invoke, three hops, the invoker cancels, invoker or admin stops when the connector can', () => {
-    expect(invocationRefusal(true, 0)).toBeNull();
-    expect(invocationRefusal(true, AGENT_HOP_LIMIT)).toBeNull();
-    expect(invocationRefusal(true, AGENT_HOP_LIMIT + 1)).toMatchObject({ reason: 'hop_limit' });
-    expect(invocationRefusal(false, 0)).toMatchObject({ reason: 'not_permitted' });
+    const helper: Member = { id: 'helper', displayName: 'Helper', role: 'member', kind: 'agent', ownerId: 'harsh' };
+    const byHarsh = { agent: helper, authorId: 'harsh' };
+    expect(invocationRefusal(true, 0, byHarsh)).toBeNull();
+    expect(invocationRefusal(true, AGENT_HOP_LIMIT, byHarsh)).toBeNull();
+    expect(invocationRefusal(true, AGENT_HOP_LIMIT + 1, byHarsh)).toMatchObject({ reason: 'hop_limit' });
+    expect(invocationRefusal(false, 0, byHarsh)).toMatchObject({ reason: 'not_permitted' });
+    // A channel agent answers anyone; a personal one its owner only (2026-10-26).
+    expect(invocationRefusal(true, 0, { agent: helper, authorId: 'gagan' })).toBeNull();
+    const mine: Member = { ...helper, personal: true };
+    expect(invocationRefusal(true, 0, { agent: mine, authorId: 'harsh' })).toBeNull();
+    expect(invocationRefusal(true, 0, { agent: mine, authorId: 'gagan' })).toMatchObject({ reason: 'not_permitted', message: expect.stringContaining('personal agent') });
+    expect(invocationRefusal(true, 1, { agent: mine, authorId: 'other-agent' })).toMatchObject({ reason: 'not_permitted' });
     const inv = { trigger: { authorId: 'harsh' } } as Invocation;
     const person = (id: string, role: Member['role'] = 'member'): Member => ({ id, displayName: id, role, kind: 'human' });
     expect(canCancelQueuedInvocation({ memberId: 'harsh' }, inv)).toBeNull();
@@ -242,5 +251,19 @@ describe('profiles (2026-10-19)', () => {
     expect(canEditProfile({ id: 'm1', displayName: 'Ada', role: 'member', kind: 'human' })).toBeNull();
     expect(canEditProfile({ id: 'm1', displayName: 'Ada', role: 'admin', kind: 'human' })).toBeNull();
     expect(canEditProfile({ id: 'a1', displayName: 'Bot', role: 'member', kind: 'agent', ownerId: 'm1' })).toMatchObject({ code: 'forbidden' });
+  });
+});
+
+describe('personal agents (2026-10-26)', () => {
+  const person: Member = { id: 'gagan', displayName: 'Gagan', role: 'member', kind: 'human' };
+  const channel: Member = { id: 'scout', displayName: 'Scout', role: 'member', kind: 'agent', ownerId: 'harsh' };
+  const personal: Member = { ...channel, id: 'mine', displayName: "Harsh's Claude Code", personal: true };
+  it('only the owner adds or messages a personal agent; channel agents and people are anyone’s', () => {
+    expect(canReachPersonalAgent('harsh', personal, 'add')).toBeNull();
+    expect(canReachPersonalAgent('harsh', personal, 'message')).toBeNull();
+    expect(canReachPersonalAgent('gagan', personal, 'add')).toMatchObject({ code: 'forbidden', message: expect.stringContaining('add it to a space') });
+    expect(canReachPersonalAgent('gagan', personal, 'message')).toMatchObject({ code: 'forbidden', message: expect.stringContaining('message it') });
+    expect(canReachPersonalAgent('gagan', channel, 'add')).toBeNull();
+    expect(canReachPersonalAgent('harsh', person, 'message')).toBeNull();
   });
 });

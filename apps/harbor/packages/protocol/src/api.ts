@@ -478,6 +478,8 @@ export const routes = {
       credential: z.string().min(1).max(512).optional(),
       /** The platform instance the agent is (INSTANCE_CONNECTIONS only, 2026-10-05). */
       instance: z.string().min(1).max(128).optional(),
+      /** Only the owner may use it (spec §4 Agent members, 2026-10-26); absent = a channel agent, as before. */
+      personal: z.boolean().default(false),
     }),
     response: z.object({ agent: Member, key: AgentKeySecret }),
   },

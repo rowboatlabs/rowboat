@@ -224,6 +224,7 @@ export const addMembers = tool({
   description:
     'Add existing org members, people or agents, to a shared space your person is in. Take ' +
     'memberIds from list_members. Anyone already in is a no-op. Direct messages cannot be added to. ' +
+    "Someone else's personal agent (personal: true) can be added only by its owner. " +
     'Only when your person asked for it.',
   input: z.object({ spaceId: SpaceId, memberIds: z.array(MemberId).min(1).max(100) }),
   output: z.object({ memberships: z.array(Membership) }),
