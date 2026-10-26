@@ -1,4 +1,18 @@
-import { MARITIME_AGENTS, type AgentCredential, type AgentHosting, type AgentKeySecret, type Member } from '@rowboat/spaces-protocol';
+import {
+  MARITIME_AGENTS,
+  type AgentCredential,
+  type AgentHosting,
+  type AgentKeySecret,
+  type HostingEnvVar,
+  type HostingExecution,
+  type HostingFileEntry,
+  type HostingLogLine,
+  type HostingMachine,
+  type HostingPowerAction,
+  type HostingSkill,
+  type HostingTrigger,
+  type Member,
+} from '@rowboat/spaces-protocol';
 import { HarborError } from '../errors.js';
 import { canAddAgent, canRevokeAgentKey, enforce } from '../policy.js';
 import type { StoredAgentHosting } from '../store.js';
@@ -38,6 +52,50 @@ export interface HostingProvider {
   deprovision(externalUserId: string): Promise<void>;
   /** The platform credential the agent's connector presents: the deployment's own key. */
   credential(): string;
+  /** The management calls on one agent's VM, by the platform's id for it. */
+  manage(externalId: string): HostingOps;
+}
+
+/**
+ * Managing one VM (the management area, 2026-10-27): what the platform lets
+ * Harbor do to a managed agent's machine on the deployment's own key. Shapes
+ * are the protocol's; the provider turns the platform's into them. A platform
+ * refusal is thrown as a PlatformRefusal, which the rules turn into
+ * `invalid_request` with the platform's sentence.
+ */
+export interface HostingOps {
+  machine(): Promise<HostingMachine>;
+  env(): Promise<HostingEnvVar[]>;
+  setEnv(key: string, value: string, secret: boolean): Promise<void>;
+  deleteEnv(key: string): Promise<void>;
+  power(action: HostingPowerAction): Promise<HostingMachine>;
+  run(command: string, timeoutSeconds: number): Promise<HostingExecution>;
+  execution(executionId: string): Promise<HostingExecution>;
+  cancel(executionId: string): Promise<HostingExecution>;
+  logs(opts: { limit: number; before?: string; level?: string }): Promise<{ logs: HostingLogLine[]; nextBefore?: string }>;
+  files(path: string): Promise<HostingFileEntry[]>;
+  readFile(path: string): Promise<string | undefined>;
+  writeFile(path: string, content: string): Promise<void>;
+  mkdir(path: string): Promise<void>;
+  move(from: string, to: string): Promise<void>;
+  deleteFile(path: string): Promise<void>;
+  skills(q?: string): Promise<HostingSkill[]>;
+  installSkill(name: string): Promise<void>;
+  removeSkill(name: string): Promise<void>;
+  triggers(): Promise<HostingTrigger[]>;
+  createTrigger(input: { type: string; config: Record<string, unknown>; enabled?: boolean }): Promise<void>;
+  updateTrigger(triggerId: string, input: { config?: Record<string, unknown>; enabled?: boolean }): Promise<void>;
+  deleteTrigger(triggerId: string): Promise<void>;
+}
+
+/** The platform said no, in its own words; `gone` when it no longer has the thing asked about. */
+export class PlatformRefusal extends Error {
+  constructor(
+    message: string,
+    readonly gone = false,
+  ) {
+    super(message);
+  }
 }
 
 /** What the connector host does for managed agents: seal their credential, start and stop their connector. */
@@ -56,6 +114,12 @@ const CHECK_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_TICK_MS = 10_000;
 
 const EXTERNAL_PREFIX = 'rowboat-';
+/** A file read through the page is text, and at most this long; longer is cut and flagged. */
+const FILE_READ_MAX = 1_000_000;
+/** The default for a command run from the page; the route caps at an hour. */
+const COMMAND_TIMEOUT_S = 600;
+/** The kinds whose VM has skills and triggers the platform manages (Hermes's gateway runs both). */
+const SKILLED_KINDS: ReadonlySet<string> = new Set(['hermes']);
 
 function publicShape(row: StoredAgentHosting): AgentHosting {
   return {
@@ -200,6 +264,169 @@ export class Hosting {
     await this.k.store.putHosting(next);
     void this.tick();
     return publicShape(next);
+  }
+
+  // --- managing the VM (the management area, 2026-10-27) ----------------------------------
+
+  /**
+   * The managed agent behind `agentId` for the actor to manage: the owner or
+   * an admin, a hosting that reached the platform, and the provider's calls on
+   * it. `kinds` narrows to agents whose VM has the feature (skills, triggers).
+   */
+  private async managed(ctx: ActorCtx, agentId: string, kinds?: ReadonlySet<string>): Promise<{ row: StoredAgentHosting; ops: HostingOps }> {
+    const actor = await this.k.store.getMember(ctx.memberId);
+    if (!actor) throw new HarborError('not_a_member', 'not a member of this org');
+    const agent = await this.k.store.getMember(agentId);
+    if (!agent || agent.kind !== 'agent') throw new HarborError('not_found', 'no such agent');
+    enforce(canRevokeAgentKey(actor, agent));
+    const row = await this.k.store.getAgentHosting(agentId);
+    if (!row) throw new HarborError('not_found', 'this agent is not one Rowboat hosts');
+    if (!this.provider) throw new HarborError('invalid_request', 'this Harbor runs no managed hosting');
+    if (!row.externalId || row.status === 'creating') throw new HarborError('invalid_request', 'the agent is still being created');
+    if (row.status === 'deleting' || row.status === 'deleted') throw new HarborError('invalid_request', 'the agent has been deleted from the platform');
+    if (kinds && !kinds.has(row.kind)) throw new HarborError('invalid_request', `${row.kind} agents have none on Maritime`);
+    return { row, ops: this.provider.manage(row.externalId) };
+  }
+
+  /** A platform call, with its refusal turned into Harbor's error. */
+  private async platform<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
+    } catch (err) {
+      if (err instanceof PlatformRefusal) throw new HarborError(err.gone ? 'not_found' : 'invalid_request', `Maritime: ${err.message.slice(0, 500)}`);
+      throw err;
+    }
+  }
+
+  /** The page's one read: the hosting, the machine as the platform sees it (none while it is still being set up), and the environment. */
+  async get(ctx: ActorCtx, agentId: string): Promise<{ hosting: AgentHosting; machine?: HostingMachine; env: HostingEnvVar[] }> {
+    const { row, ops } = await this.managed(ctx, agentId);
+    const [machine, env] = await this.platform(() => Promise.all([ops.machine().catch(() => undefined), ops.env()]));
+    return { hosting: publicShape(row), ...(machine ? { machine } : {}), env };
+  }
+
+  async setEnv(ctx: ActorCtx, agentId: string, key: string, value: string, secret: boolean): Promise<HostingEnvVar[]> {
+    const { ops } = await this.managed(ctx, agentId);
+    this.k.guardWrite();
+    await this.platform(() => ops.setEnv(key, value, secret));
+    return this.platform(() => ops.env());
+  }
+
+  async deleteEnv(ctx: ActorCtx, agentId: string, key: string): Promise<HostingEnvVar[]> {
+    const { ops } = await this.managed(ctx, agentId);
+    this.k.guardWrite();
+    await this.platform(() => ops.deleteEnv(key));
+    return this.platform(() => ops.env());
+  }
+
+  async power(ctx: ActorCtx, agentId: string, action: HostingPowerAction): Promise<HostingMachine> {
+    const { ops } = await this.managed(ctx, agentId);
+    this.k.guardWrite();
+    return this.platform(() => ops.power(action));
+  }
+
+  async run(ctx: ActorCtx, agentId: string, command: string, timeoutSeconds = COMMAND_TIMEOUT_S): Promise<HostingExecution> {
+    const { ops } = await this.managed(ctx, agentId);
+    this.k.guardWrite();
+    return this.platform(() => ops.run(command, timeoutSeconds));
+  }
+
+  async execution(ctx: ActorCtx, agentId: string, executionId: string): Promise<HostingExecution> {
+    const { ops } = await this.managed(ctx, agentId);
+    return this.platform(() => ops.execution(executionId));
+  }
+
+  async cancel(ctx: ActorCtx, agentId: string, executionId: string): Promise<HostingExecution> {
+    const { ops } = await this.managed(ctx, agentId);
+    this.k.guardWrite();
+    return this.platform(() => ops.cancel(executionId));
+  }
+
+  async logs(ctx: ActorCtx, agentId: string, opts: { limit?: number; before?: string; level?: string }): Promise<{ logs: HostingLogLine[]; nextBefore?: string }> {
+    const { ops } = await this.managed(ctx, agentId);
+    return this.platform(() => ops.logs({ limit: opts.limit ?? 100, ...(opts.before ? { before: opts.before } : {}), ...(opts.level ? { level: opts.level } : {}) }));
+  }
+
+  async files(ctx: ActorCtx, agentId: string, path: string): Promise<{ path: string; entries: HostingFileEntry[] }> {
+    const { ops } = await this.managed(ctx, agentId);
+    const entries = await this.platform(() => ops.files(path));
+    return { path, entries };
+  }
+
+  async readFile(ctx: ActorCtx, agentId: string, path: string): Promise<{ path: string; content: string; truncated: boolean }> {
+    const { ops } = await this.managed(ctx, agentId);
+    const content = await this.platform(() => ops.readFile(path));
+    if (content === undefined) throw new HarborError('not_found', 'no such file on the agent');
+    return { path, content: content.slice(0, FILE_READ_MAX), truncated: content.length > FILE_READ_MAX };
+  }
+
+  async writeFile(ctx: ActorCtx, agentId: string, path: string, content: string): Promise<void> {
+    const { ops } = await this.managed(ctx, agentId);
+    this.k.guardWrite();
+    await this.platform(() => ops.writeFile(path, content));
+  }
+
+  async mkdir(ctx: ActorCtx, agentId: string, path: string): Promise<void> {
+    const { ops } = await this.managed(ctx, agentId);
+    this.k.guardWrite();
+    await this.platform(() => ops.mkdir(path));
+  }
+
+  async moveFile(ctx: ActorCtx, agentId: string, from: string, to: string): Promise<void> {
+    const { ops } = await this.managed(ctx, agentId);
+    this.k.guardWrite();
+    await this.platform(() => ops.move(from, to));
+  }
+
+  async deleteFile(ctx: ActorCtx, agentId: string, path: string): Promise<void> {
+    const { ops } = await this.managed(ctx, agentId);
+    this.k.guardWrite();
+    await this.platform(() => ops.deleteFile(path));
+  }
+
+  async skills(ctx: ActorCtx, agentId: string, q?: string): Promise<HostingSkill[]> {
+    const { ops } = await this.managed(ctx, agentId, SKILLED_KINDS);
+    return this.platform(() => ops.skills(q));
+  }
+
+  async installSkill(ctx: ActorCtx, agentId: string, name: string): Promise<HostingSkill[]> {
+    const { ops } = await this.managed(ctx, agentId, SKILLED_KINDS);
+    this.k.guardWrite();
+    await this.platform(() => ops.installSkill(name));
+    return this.platform(() => ops.skills());
+  }
+
+  async removeSkill(ctx: ActorCtx, agentId: string, name: string): Promise<HostingSkill[]> {
+    const { ops } = await this.managed(ctx, agentId, SKILLED_KINDS);
+    this.k.guardWrite();
+    await this.platform(() => ops.removeSkill(name));
+    return this.platform(() => ops.skills());
+  }
+
+  async triggers(ctx: ActorCtx, agentId: string): Promise<HostingTrigger[]> {
+    const { ops } = await this.managed(ctx, agentId, SKILLED_KINDS);
+    return this.platform(() => ops.triggers());
+  }
+
+  async createTrigger(ctx: ActorCtx, agentId: string, input: { type: string; config: Record<string, unknown>; enabled?: boolean }): Promise<HostingTrigger[]> {
+    const { ops } = await this.managed(ctx, agentId, SKILLED_KINDS);
+    this.k.guardWrite();
+    await this.platform(() => ops.createTrigger(input));
+    return this.platform(() => ops.triggers());
+  }
+
+  async updateTrigger(ctx: ActorCtx, agentId: string, triggerId: string, input: { config?: Record<string, unknown>; enabled?: boolean }): Promise<HostingTrigger[]> {
+    const { ops } = await this.managed(ctx, agentId, SKILLED_KINDS);
+    this.k.guardWrite();
+    await this.platform(() => ops.updateTrigger(triggerId, input));
+    return this.platform(() => ops.triggers());
+  }
+
+  async deleteTrigger(ctx: ActorCtx, agentId: string, triggerId: string): Promise<HostingTrigger[]> {
+    const { ops } = await this.managed(ctx, agentId, SKILLED_KINDS);
+    this.k.guardWrite();
+    await this.platform(() => ops.deleteTrigger(triggerId));
+    return this.platform(() => ops.triggers());
   }
 
   // --- the worker ------------------------------------------------------------------------

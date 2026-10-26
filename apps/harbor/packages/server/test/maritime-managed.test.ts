@@ -5,7 +5,7 @@ import { maritimePlatform } from '../src/connectors/maritime/index.js';
 import { HERMES_IMAGE, maritimeProvisioner } from '../src/connectors/maritime/provisioning.js';
 import { PLATFORMS } from '../src/connectors/platforms.js';
 import { startHarbor, type RunningHarbor } from '../src/server.js';
-import { FakeMaritime, GOOD_KEY, hermesTurn } from './fake-maritime.js';
+import { AGENT_ID, FakeMaritime, GOOD_KEY, hermesTurn } from './fake-maritime.js';
 import { freshStore, restClient } from './helpers.js';
 
 // Managed Maritime agents (spec §8 Maritime, 2026-10-26), end to end: a real
@@ -178,6 +178,111 @@ describe('managed Maritime agents', () => {
     fake.refuse = undefined;
     expect(r).toMatchObject({ status: 400, body: { message: expect.stringMatching(/^Maritime: You are on the free plan/) } });
     expect(((await org.as('dev-ramnique').get('/v1/agents')).body.agents as AgentListing[]).length).toBe(before);
+  });
+
+  // The management area (2026-10-27): the owner or an admin manages the VM through Harbor, on the deployment's key.
+  it('manages the VM: the page’s read, the environment with secrets withheld, power, and only the owner or an admin', async () => {
+    const { agent } = (await org.as('dev-ramnique').post('/v1/agents/managed', { displayName: 'Ops', kind: 'hermes', env: [{ key: 'REPO', value: 'rowboat', secret: false }] })).body as { agent: Member };
+    await org.hostingStatus(agent.id, 'ready');
+    const me = org.as('dev-ramnique');
+
+    const page = await me.get(`/v1/agents/${agent.id}/hosting`);
+    expect(page.status).toBe(200);
+    expect(page.body.hosting.status).toBe('ready');
+    // The readiness check ran a command, which woke the VM: the page shows the platform's word as it is.
+    expect(page.body.machine).toEqual({ status: 'active' });
+    expect(page.body.env).toEqual([
+      { key: 'PATH', secret: false, value: expect.stringMatching(/^\/opt\/hermes\/bin:/) },
+      { key: 'REPO', secret: false, value: 'rowboat' },
+    ]);
+
+    // A secret is kept by the platform and never read back; a plain value is; a second put replaces.
+    expect((await me.put(`/v1/agents/${agent.id}/hosting/env/GH_TOKEN`, { value: 'ghp_x', secret: true })).body.env).toContainEqual({ key: 'GH_TOKEN', secret: true });
+    expect((await me.put(`/v1/agents/${agent.id}/hosting/env/REPO`, { value: 'spaces' })).body.env).toContainEqual({ key: 'REPO', secret: false, value: 'spaces' });
+    expect((await me.put(`/v1/agents/${agent.id}/hosting/env/bad-key`, { value: 'x' })).status).toBe(400);
+    const afterDelete = await me.delete(`/v1/agents/${agent.id}/hosting/env/REPO`);
+    expect(afterDelete.body.env.map((v: { key: string }) => v.key)).toEqual(['PATH', 'GH_TOKEN']);
+
+    // Power: the platform's word for the machine comes back each time.
+    expect((await me.post(`/v1/agents/${agent.id}/hosting/power`, { action: 'sleep' })).body.machine.status).toBe('sleeping');
+    expect((await me.post(`/v1/agents/${agent.id}/hosting/power`, { action: 'wake' })).body.machine.status).toBe('active');
+    expect((await me.post(`/v1/agents/${agent.id}/hosting/power`, { action: 'restart' })).body.machine.status).toBe('active');
+    expect((await me.post(`/v1/agents/${agent.id}/hosting/power`, { action: 'reload' })).status).toBe(200);
+    expect(fake.power.filter((p) => p.agentId === agent.agentInstance).map((p) => p.action)).toEqual(['sleep', 'start', 'restart', 'reload-env']);
+
+    // Harsh is a member, not the owner: nothing of this is his.
+    expect((await org.as('dev-harsh').get(`/v1/agents/${agent.id}/hosting`)).status).toBe(403);
+    expect((await org.as('dev-harsh').post(`/v1/agents/${agent.id}/hosting/power`, { action: 'sleep' })).status).toBe(403);
+    // An agent on the person's own Maritime account is not one Rowboat hosts.
+    const own = (await me.post('/v1/agents', { displayName: 'Own', kind: 'hermes', connection: 'maritime', credential: GOOD_KEY, instance: AGENT_ID })).body.agent as Member;
+    expect((await me.get(`/v1/agents/${own.id}/hosting`)).status).toBe(404);
+  });
+
+  it('runs a command on the VM, reads it until it ends, and cancels one', async () => {
+    const { agent } = (await org.as('dev-ramnique').post('/v1/agents/managed', { displayName: 'Shell', kind: 'codex' })).body as { agent: Member };
+    await org.hostingStatus(agent.id, 'ready');
+    const me = org.as('dev-ramnique');
+    const run = await me.post(`/v1/agents/${agent.id}/hosting/commands`, { command: 'echo hello' });
+    expect(run.status).toBe(200);
+    expect(run.body.execution.status).toBe('running');
+    const done = await me.get(`/v1/agents/${agent.id}/hosting/commands/${run.body.execution.id}`);
+    expect(done.body.execution).toMatchObject({ id: run.body.execution.id, status: 'completed', exitCode: 0, stdout: 'hello\n' });
+    expect(fake.submits().at(-1)!.script).toBe('echo hello');
+    const cancelled = await me.delete(`/v1/agents/${agent.id}/hosting/commands/${run.body.execution.id}`);
+    expect(cancelled.body.execution.status).toBe('cancelled');
+    expect((await me.get(`/v1/agents/${agent.id}/hosting/commands/nope`)).status).toBe(404);
+  });
+
+  it('reads the VM’s logs, newest first, paged by the platform’s cursor', async () => {
+    const { agent } = (await org.as('dev-ramnique').post('/v1/agents/managed', { displayName: 'Logger', kind: 'hermes' })).body as { agent: Member };
+    await org.hostingStatus(agent.id, 'ready');
+    const me = org.as('dev-ramnique');
+    const first = await me.get(`/v1/agents/${agent.id}/hosting/logs?limit=2`);
+    expect(first.body.logs.map((l: { id: string }) => l.id)).toEqual(['log-5', 'log-4']);
+    expect(first.body.logs[0]).toMatchObject({ level: 'warning', message: 'line 5', source: 'agent' });
+    expect(first.body.nextBefore).toBe('log-4');
+    const next = await me.get(`/v1/agents/${agent.id}/hosting/logs?limit=2&before=log-4`);
+    expect(next.body.logs.map((l: { id: string }) => l.id)).toEqual(['log-3', 'log-2']);
+  });
+
+  it('browses the VM’s files: write, list, read, a new directory, move, delete', async () => {
+    const { agent } = (await org.as('dev-ramnique').post('/v1/agents/managed', { displayName: 'Files', kind: 'hermes' })).body as { agent: Member };
+    await org.hostingStatus(agent.id, 'ready');
+    const me = org.as('dev-ramnique');
+    expect((await me.put(`/v1/agents/${agent.id}/hosting/files/content`, { path: '/data/notes/a.txt', content: 'hi' })).body).toEqual({ ok: true });
+    expect((await me.get(`/v1/agents/${agent.id}/hosting/files?path=/data/notes`)).body).toEqual({ path: '/data/notes', entries: [{ name: 'a.txt', path: '/data/notes/a.txt', kind: 'file', size: 2 }] });
+    expect((await me.get(`/v1/agents/${agent.id}/hosting/files/content?path=/data/notes/a.txt`)).body).toEqual({ path: '/data/notes/a.txt', content: 'hi', truncated: false });
+    await me.post(`/v1/agents/${agent.id}/hosting/files/mkdir`, { path: '/data/notes/sub' });
+    await me.post(`/v1/agents/${agent.id}/hosting/files/move`, { from: '/data/notes/a.txt', to: '/data/notes/b.txt' });
+    const listed = (await me.get(`/v1/agents/${agent.id}/hosting/files?path=/data/notes`)).body.entries as Array<{ name: string; kind: string }>;
+    expect(listed.map((e) => `${e.kind}:${e.name}`).sort()).toEqual(['dir:sub', 'file:b.txt']);
+    expect((await me.delete(`/v1/agents/${agent.id}/hosting/files?path=/data/notes/b.txt`)).body).toEqual({ ok: true });
+    expect((await me.get(`/v1/agents/${agent.id}/hosting/files/content?path=/data/notes/b.txt`)).status).toBe(404);
+  });
+
+  it('skills on a Hermes agent: the VM’s, the catalog’s matches, install and remove; a coding agent has none', async () => {
+    const { agent } = (await org.as('dev-ramnique').post('/v1/agents/managed', { displayName: 'Skilled', kind: 'hermes' })).body as { agent: Member };
+    await org.hostingStatus(agent.id, 'ready');
+    const me = org.as('dev-ramnique');
+    expect((await me.get(`/v1/agents/${agent.id}/hosting/skills`)).body.skills).toEqual([{ name: 'rowboat-spaces', installed: true, version: '1.0.0', description: 'The rowboat-spaces skill' }]);
+    expect((await me.get(`/v1/agents/${agent.id}/hosting/skills?q=git`)).body.skills).toEqual([{ name: 'github', installed: false, description: 'github from the catalog' }]);
+    expect((await me.post(`/v1/agents/${agent.id}/hosting/skills`, { name: 'github' })).body.skills.map((s: { name: string }) => s.name)).toEqual(['rowboat-spaces', 'github']);
+    expect((await me.delete(`/v1/agents/${agent.id}/hosting/skills/github`)).body.skills.map((s: { name: string }) => s.name)).toEqual(['rowboat-spaces']);
+    const coder = (await me.post('/v1/agents/managed', { displayName: 'Coder Two', kind: 'codex' })).body.agent as Member;
+    await org.hostingStatus(coder.id, 'ready');
+    expect(await me.get(`/v1/agents/${coder.id}/hosting/skills`)).toMatchObject({ status: 400, body: { message: expect.stringMatching(/codex agents have none/) } });
+  });
+
+  it('triggers on a Hermes agent: a schedule with its prompt, switched off, deleted', async () => {
+    const { agent } = (await org.as('dev-ramnique').post('/v1/agents/managed', { displayName: 'Timer', kind: 'hermes' })).body as { agent: Member };
+    await org.hostingStatus(agent.id, 'ready');
+    const me = org.as('dev-ramnique');
+    const config = { schedule: '0 9 * * 1-5', prompt: 'Summarize #main and post it there.' };
+    const made = await me.post(`/v1/agents/${agent.id}/hosting/triggers`, { type: 'cron', config });
+    expect(made.body.triggers).toEqual([{ id: expect.stringMatching(/^trg-/), type: 'cron', enabled: true, config }]);
+    const id = made.body.triggers[0].id;
+    expect((await me.put(`/v1/agents/${agent.id}/hosting/triggers/${id}`, { enabled: false })).body.triggers[0].enabled).toBe(false);
+    expect((await me.delete(`/v1/agents/${agent.id}/hosting/triggers/${id}`)).body.triggers).toEqual([]);
   });
 
   it('deletes: keys go at once, the platform’s end user goes in the background, and only the owner or an admin may', async () => {

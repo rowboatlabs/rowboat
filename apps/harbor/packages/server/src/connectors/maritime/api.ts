@@ -66,6 +66,8 @@ export interface MaritimeAgent {
   templateId: string | null;
   /** `sleeping`, `active`, `deploying`, `error`, `stopped`. */
   status: string;
+  /** Maritime's billing tier (`always_on`, …), when the record says. */
+  tier?: string;
 }
 
 /** One execution (`POST /exec` with `detached`), as submitted, polled and cancelled. */
@@ -91,6 +93,28 @@ export interface MaritimeApi {
   writeFile(agentId: string, path: string, content: string): Promise<void>;
   /** Read a file on the agent as text; undefined when there is no such file. */
   readFile(agentId: string, path: string): Promise<string | undefined>;
+  // --- managing a VM (the management area, 2026-10-27): the shapes are Maritime's, passed through lightly ---
+  restart(agentId: string): Promise<MaritimeAgent>;
+  sleep(agentId: string): Promise<MaritimeAgent>;
+  /** Apply environment variables to the running VM without a reboot. */
+  reloadEnv(agentId: string): Promise<MaritimeAgent>;
+  listEnv(agentId: string): Promise<MaritimeEnvVar[]>;
+  createEnv(agentId: string, input: { key: string; value: string; isSecret: boolean }): Promise<MaritimeEnvVar>;
+  updateEnv(agentId: string, key: string, input: { value: string; isSecret: boolean }): Promise<MaritimeEnvVar>;
+  deleteEnv(agentId: string, key: string): Promise<void>;
+  logs(agentId: string, opts: { limit?: number; before?: string; level?: string }): Promise<Array<Record<string, unknown>>>;
+  listFiles(agentId: string, path: string): Promise<unknown>;
+  mkdir(agentId: string, path: string): Promise<void>;
+  moveFile(agentId: string, from: string, to: string): Promise<void>;
+  deleteFile(agentId: string, path: string): Promise<void>;
+  listSkills(agentId: string): Promise<unknown>;
+  searchSkills(agentId: string, q: string, limit?: number): Promise<unknown>;
+  installSkill(agentId: string, name: string): Promise<unknown>;
+  removeSkill(agentId: string, name: string): Promise<void>;
+  listTriggers(agentId: string): Promise<Array<Record<string, unknown>>>;
+  createTrigger(agentId: string, input: { type: string; config: Record<string, unknown>; enabled?: boolean }): Promise<Record<string, unknown>>;
+  updateTrigger(agentId: string, triggerId: string, input: { config?: Record<string, unknown>; enabled?: boolean }): Promise<Record<string, unknown>>;
+  deleteTrigger(agentId: string, triggerId: string): Promise<void>;
   /** Create or update an end user: the record Rowboat names a managed agent by (`/docs/sdk/end-users`). */
   upsertEndUser(externalId: string, input: { displayName?: string; metadata?: Record<string, unknown>; tags?: string[] }): Promise<void>;
   /** The end user's agent, created exactly once: a repeat call returns the one it has. */
@@ -101,6 +125,14 @@ export interface MaritimeApi {
   deleteEndUser(externalId: string): Promise<void>;
 }
 
+/** An environment variable as Maritime lists it; a secret's `value` is whatever Maritime chooses to show, never trusted as the secret. */
+export interface MaritimeEnvVar {
+  key: string;
+  value: string;
+  isSecret: boolean;
+  warning?: string;
+}
+
 export interface CreateAgentInput {
   name: string;
   templateId?: string;
@@ -109,6 +141,8 @@ export interface CreateAgentInput {
   instructions?: string;
   useMaritimeLlm?: boolean;
   env?: Array<{ key: string; value: string; secret?: boolean }>;
+  /** Seconds idle before Maritime snapshots the VM; its default when unset. */
+  idleTtlSeconds?: number;
 }
 
 export function maritimeApi(key: string, base = MARITIME_API): MaritimeApi {
@@ -140,6 +174,7 @@ export function maritimeApi(key: string, base = MARITIME_API): MaritimeApi {
     framework: String(a.framework ?? ''),
     templateId: typeof a.templateId === 'string' ? a.templateId : null,
     status: String(a.status ?? ''),
+    ...(typeof a.tier === 'string' ? { tier: a.tier } : {}),
   });
 
   return {
@@ -176,6 +211,73 @@ export function maritimeApi(key: string, base = MARITIME_API): MaritimeApi {
         throw err;
       }
     },
+    async restart(agentId) {
+      return shape(await call<Record<string, unknown>>(`/api/agents/${id(agentId)}/restart`, { method: 'POST', timeoutMs: 120_000 }));
+    },
+    async sleep(agentId) {
+      return shape(await call<Record<string, unknown>>(`/api/agents/${id(agentId)}/sleep`, { method: 'POST', timeoutMs: 60_000 }));
+    },
+    async reloadEnv(agentId) {
+      return shape(await call<Record<string, unknown>>(`/api/agents/${id(agentId)}/reload-env`, { method: 'POST', timeoutMs: 60_000 }));
+    },
+    async listEnv(agentId) {
+      const rows = await call<unknown>(`/api/agents/${id(agentId)}/env`);
+      return (Array.isArray(rows) ? rows : []).map(envVar);
+    },
+    async createEnv(agentId, input) {
+      return envVar(await call<Record<string, unknown>>(`/api/agents/${id(agentId)}/env`, { method: 'POST', body: input }));
+    },
+    async updateEnv(agentId, key, input) {
+      return envVar(await call<Record<string, unknown>>(`/api/agents/${id(agentId)}/env/${id(key)}`, { method: 'PUT', body: input }));
+    },
+    async deleteEnv(agentId, key) {
+      await call<unknown>(`/api/agents/${id(agentId)}/env/${id(key)}`, { method: 'DELETE' });
+    },
+    async logs(agentId, opts) {
+      const q = new URLSearchParams();
+      if (opts.limit !== undefined) q.set('limit', String(opts.limit));
+      if (opts.before !== undefined) q.set('before', opts.before);
+      if (opts.level !== undefined) q.set('level', opts.level);
+      const rows = await call<unknown>(`/api/agents/${id(agentId)}/logs${q.size ? `?${q}` : ''}`);
+      return Array.isArray(rows) ? (rows as Array<Record<string, unknown>>) : [];
+    },
+    async listFiles(agentId, path) {
+      return call<unknown>(`/api/agents/${id(agentId)}/files/list?path=${id(path)}`, { timeoutMs: 60_000 });
+    },
+    async mkdir(agentId, path) {
+      await call<unknown>(`/api/agents/${id(agentId)}/files/mkdir`, { method: 'POST', body: { path }, timeoutMs: 60_000 });
+    },
+    async moveFile(agentId, from, to) {
+      await call<unknown>(`/api/agents/${id(agentId)}/files/move`, { method: 'POST', body: { from, to, source: from, destination: to }, timeoutMs: 60_000 });
+    },
+    async deleteFile(agentId, path) {
+      await call<unknown>(`/api/agents/${id(agentId)}/files/delete?path=${id(path)}`, { method: 'DELETE', timeoutMs: 60_000 });
+    },
+    async listSkills(agentId) {
+      return call<unknown>(`/api/agents/${id(agentId)}/skills`, { timeoutMs: 60_000 });
+    },
+    async searchSkills(agentId, q, limit = 20) {
+      return call<unknown>(`/api/agents/${id(agentId)}/skills/search?q=${id(q)}&limit=${limit}`, { timeoutMs: 60_000 });
+    },
+    async installSkill(agentId, name) {
+      return call<unknown>(`/api/agents/${id(agentId)}/skills/install`, { method: 'POST', body: { name, slug: name }, timeoutMs: 120_000 });
+    },
+    async removeSkill(agentId, name) {
+      await call<unknown>(`/api/agents/${id(agentId)}/skills/${id(name)}`, { method: 'DELETE', timeoutMs: 60_000 });
+    },
+    async listTriggers(agentId) {
+      const rows = await call<unknown>(`/api/agents/${id(agentId)}/triggers`);
+      return Array.isArray(rows) ? (rows as Array<Record<string, unknown>>) : [];
+    },
+    async createTrigger(agentId, input) {
+      return call<Record<string, unknown>>(`/api/agents/${id(agentId)}/triggers`, { method: 'POST', body: input });
+    },
+    async updateTrigger(agentId, triggerId, input) {
+      return call<Record<string, unknown>>(`/api/agents/${id(agentId)}/triggers/${id(triggerId)}`, { method: 'PUT', body: input });
+    },
+    async deleteTrigger(agentId, triggerId) {
+      await call<unknown>(`/api/agents/${id(agentId)}/triggers/${id(triggerId)}`, { method: 'DELETE' });
+    },
     async upsertEndUser(externalId, input) {
       await call<unknown>(`/api/v1/end-users/${id(externalId)}`, {
         method: 'PUT',
@@ -197,6 +299,7 @@ export function maritimeApi(key: string, base = MARITIME_API): MaritimeApi {
           ...(input.imageName !== undefined ? { imageName: input.imageName } : {}),
           ...(input.instructions !== undefined ? { instructions: input.instructions } : {}),
           ...(input.useMaritimeLlm !== undefined ? { useMaritimeLlm: input.useMaritimeLlm } : {}),
+          ...(input.idleTtlSeconds !== undefined ? { idleTtlSeconds: input.idleTtlSeconds } : {}),
           ...(input.env && input.env.length > 0 ? { initialEnvVars: input.env.map((e) => ({ key: e.key, value: e.value, isSecret: e.secret ?? true })) } : {}),
         },
       });
@@ -213,6 +316,15 @@ export function maritimeApi(key: string, base = MARITIME_API): MaritimeApi {
         throw err;
       }
     },
+  };
+}
+
+function envVar(body: Record<string, unknown>): MaritimeEnvVar {
+  return {
+    key: String(body.key ?? ''),
+    value: typeof body.value === 'string' ? body.value : '',
+    isSecret: body.isSecret === true,
+    ...(typeof body.warning === 'string' && body.warning ? { warning: body.warning } : {}),
   };
 }
 

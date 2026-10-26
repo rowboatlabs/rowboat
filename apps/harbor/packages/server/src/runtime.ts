@@ -55,7 +55,12 @@ function hostingFromEnv(): HostingProvider | undefined {
   const apiKey = process.env.HARBOR_MARITIME_API_KEY;
   if (!apiKey) return undefined;
   const cap = Number(process.env.HARBOR_MARITIME_LLM_CAP_CENTS);
-  return maritimeProvisioner({ apiKey, ...(Number.isFinite(cap) && cap > 0 ? { llmCapCents: cap } : {}) });
+  const idle = Number(process.env.HARBOR_MARITIME_IDLE_SECONDS);
+  return maritimeProvisioner({
+    apiKey,
+    ...(Number.isFinite(cap) && cap > 0 ? { llmCapCents: cap } : {}),
+    ...(Number.isFinite(idle) && idle > 0 ? { idleSeconds: idle } : {}),
+  });
 }
 
 export interface OrgRuntime {
