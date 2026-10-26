@@ -209,6 +209,7 @@ describe('mentions', () => {
       postedAt: new Date().toISOString(),
       offset: head + 1,
       replyCount: 0,
+      replyAuthors: [],
       reactions: [],
       mentions: [],
       mentionsHere: false,

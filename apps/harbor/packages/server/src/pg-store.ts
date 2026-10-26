@@ -233,6 +233,7 @@ interface MessageRow {
   reply_count: number;
   last_reply_at: string | null;
   last_reply_offset: number | null;
+  reply_authors?: string[] | null;
   anchor_change_set_id: string | null;
   deleted_at: string | null;
   edited_at: string | null;
@@ -263,6 +264,7 @@ function rowToMessage(r: MessageRow): Message {
     replyCount: r.reply_count,
     ...(r.last_reply_at !== null ? { lastReplyAt: r.last_reply_at } : {}),
     ...(r.last_reply_offset !== null && r.last_reply_offset !== undefined ? { lastReplyOffset: r.last_reply_offset } : {}),
+    replyAuthors: r.reply_authors ?? [],
     ...(r.anchor_change_set_id !== null ? { anchorChangeSetId: r.anchor_change_set_id } : {}),
     ...(r.deleted_at !== null ? { deletedAt: r.deleted_at } : {}),
     ...(r.edited_at !== null ? { editedAt: r.edited_at } : {}),
@@ -1139,11 +1141,16 @@ export class PgStore implements Store {
       `update messages r set
          reply_count = coalesce(s.cnt, 0),
          last_reply_at = s.last_at,
-         last_reply_offset = s.last_offset
+         last_reply_offset = s.last_offset,
+         reply_authors = coalesce(a.authors, '[]'::jsonb)
        from (select count(*) filter (where deleted_at is null) as cnt,
                     max(posted_at) as last_at,
                     max(stream_offset) filter (where deleted_at is null) as last_offset
-             from messages where space_id = $1 and thread_root = $2) s
+             from messages where space_id = $1 and thread_root = $2) s,
+            (select jsonb_agg(author_member_id order by first_offset) as authors
+             from (select author_member_id, min(stream_offset) as first_offset
+                   from messages where space_id = $1 and thread_root = $2 and deleted_at is null
+                   group by author_member_id) f) a
        where r.space_id = $1 and r.id = $2`,
       [spaceId, rootMessageId],
     );

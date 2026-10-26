@@ -384,7 +384,7 @@ export interface Store {
   appendMessage(message: Message): Promise<void>;
   /**
    * Recompute a root's reply denorm (replyCount = live replies, lastReplyAt =
-   * newest reply) from the truth. Called inside the space lock whenever a
+   * newest reply, replyAuthors = who replied) from the truth. Called inside the space lock whenever a
    * reply is appended or tombstoned — recompute beats deltas because deletes
    * and replays can't drift it.
    */
