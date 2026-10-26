@@ -222,6 +222,82 @@ export const AgentHosting = z.object({
 });
 export type AgentHosting = z.infer<typeof AgentHosting>;
 
+/**
+ * Managing a managed agent's VM (spec §8 Maritime, the management area,
+ * 2026-10-27): what the platform says about the machine, its environment
+ * variables, a command run on it, its logs, files, skills and triggers. The
+ * owner or an admin, render face only, through Harbor with the deployment's
+ * own platform key. Shapes are Harbor's, not the platform's, kept small.
+ */
+export const HostingMachine = z.object({
+  /** The platform's word: `sleeping`, `active`, `deploying`, `error`, `stopped`, … */
+  status: z.string().max(32),
+  /** The platform's billing tier, when it says one. */
+  tier: z.string().max(32).optional(),
+});
+export type HostingMachine = z.infer<typeof HostingMachine>;
+
+export const HostingEnvVar = z.object({
+  key: z.string().min(1).max(256),
+  /** Absent for a secret: the platform keeps it, nobody reads it back. */
+  value: z.string().max(4096).optional(),
+  secret: z.boolean(),
+  /** The platform's note on the variable, when it has one. */
+  warning: z.string().max(500).optional(),
+});
+export type HostingEnvVar = z.infer<typeof HostingEnvVar>;
+
+export const HostingPowerAction = z.enum(['restart', 'sleep', 'wake', 'reload']);
+export type HostingPowerAction = z.infer<typeof HostingPowerAction>;
+
+/** One command run on the VM: submitted at once, then read until it ends. */
+export const HostingExecution = z.object({
+  id: z.string().max(128),
+  /** `running`, `completed`, `cancelled`, `failed`. */
+  status: z.string().max(32),
+  exitCode: z.number().int().nullable().optional(),
+  stdout: z.string().optional(),
+  stderr: z.string().optional(),
+});
+export type HostingExecution = z.infer<typeof HostingExecution>;
+
+export const HostingLogLine = z.object({
+  id: z.string().max(128),
+  level: z.string().max(32),
+  message: z.string(),
+  timestamp: z.string().max(64),
+  source: z.string().max(64),
+});
+export type HostingLogLine = z.infer<typeof HostingLogLine>;
+
+export const HostingFileEntry = z.object({
+  name: z.string().max(512),
+  path: z.string().max(2048),
+  kind: z.enum(['file', 'dir', 'other']),
+  size: z.number().int().nonnegative().optional(),
+  modifiedAt: z.string().max(64).optional(),
+});
+export type HostingFileEntry = z.infer<typeof HostingFileEntry>;
+
+/** A skill on the VM, or one the platform's catalog offers (`installed` false). */
+export const HostingSkill = z.object({
+  name: z.string().max(256),
+  description: z.string().max(2000).optional(),
+  version: z.string().max(64).optional(),
+  installed: z.boolean(),
+});
+export type HostingSkill = z.infer<typeof HostingSkill>;
+
+/** A trigger the platform fires on the agent: a schedule (cron) with the prompt it sends. */
+export const HostingTrigger = z.object({
+  id: z.string().max(128),
+  type: z.string().max(32),
+  enabled: z.boolean(),
+  /** The platform's config for the trigger, passed through: `schedule`, `prompt`, … */
+  config: z.record(z.string(), z.unknown()),
+});
+export type HostingTrigger = z.infer<typeof HostingTrigger>;
+
 /** An agent with its keys, as the Agents screen lists them, its platform credential and alert hook when Harbor runs its connector, and its hosting when Rowboat runs it. */
 export const AgentListing = z.object({ agent: Member, keys: z.array(AgentKey), credential: AgentCredential.optional(), hook: AgentHook.optional(), hosting: AgentHosting.optional() });
 export type AgentListing = z.infer<typeof AgentListing>;

@@ -45,10 +45,18 @@ export const AGENT_ID = 'agt-1';
 export class FakeMaritime {
   readonly received: Received[] = [];
   readonly files = new Map<string, string>();
+  /** Directories made through the files API, so an empty one lists. */
+  readonly dirs = new Set<string>();
   readonly executions = new Map<string, FakeExecution>();
   agent = { id: AGENT_ID, name: 'Scout', framework: 'hermes', templateId: 'hermes' as string | null, status: 'sleeping' };
   /** Agents created through the end-user route (managed agents), by id; each deploys for two reads, then sleeps. */
   readonly created = new Map<string, { id: string; name: string; framework: string; templateId: string | null; status: string; reads: number; endUser: string }>();
+  /** The management area (2026-10-27), per agent id: environment variables, skills, triggers; logs are canned. */
+  readonly env = new Map<string, Map<string, { value: string; isSecret: boolean }>>();
+  readonly skills = new Map<string, Set<string>>();
+  readonly triggers = new Map<string, Map<string, { type: string; config: Record<string, unknown>; enabled: boolean }>>();
+  /** Every power call, in order: `restart`, `sleep`, `start`, `reload-env`, by agent id. */
+  readonly power: Array<{ agentId: string; action: string }> = [];
   /** End users by external id, with what was last put and whether a policy was set. */
   readonly endUsers = new Map<string, { body: Record<string, unknown>; policy?: Record<string, unknown>; agentId?: string }>();
   /** What the next submitted turn does (a one-line Hermes answer by default). */
@@ -144,6 +152,8 @@ export class FakeMaritime {
           endUser: externalId!,
         };
         this.created.set(created.id, created);
+        const vars = Array.isArray(body?.initialEnvVars) ? (body.initialEnvVars as Array<{ key: string; value: string; isSecret?: boolean }>) : [];
+        this.env.set(created.id, new Map(vars.map((v) => [v.key, { value: v.value, isSecret: v.isSecret === true }])));
         this.endUsers.set(externalId!, { ...(record ?? { body: {} }), agentId: created.id });
         return send(201, created);
       }
@@ -176,19 +186,166 @@ export class FakeMaritime {
       const { reads: _reads, endUser: _endUser, ...shape } = managed;
       return send(200, shape);
     }
+    // --- the management area (2026-10-27) ---
+    const record = managed ?? this.agent;
+    const setStatus = (status: string) => {
+      record.status = status;
+    };
+    if (req.method === 'POST' && (rest === 'restart' || rest === 'sleep' || rest === 'stop' || rest === 'reload-env')) {
+      this.power.push({ agentId: agentId!, action: rest });
+      if (rest === 'sleep') setStatus('sleeping');
+      else if (rest === 'stop') setStatus('stopped');
+      else setStatus('active');
+      const { reads: _r, endUser: _e, ...shape } = managed ?? { ...this.agent, reads: 0, endUser: '' };
+      return send(200, { ...shape, tier: 'always_on' });
+    }
+    const envOf = () => {
+      let m = this.env.get(agentId!);
+      if (!m) {
+        m = new Map();
+        this.env.set(agentId!, m);
+      }
+      return m;
+    };
+    const envRow = (key: string, v: { value: string; isSecret: boolean }) => ({ id: `env-${key}`, agentId, key, value: v.isSecret ? '••••' : v.value, isSecret: v.isSecret });
+    if (req.method === 'GET' && rest === 'env') return send(200, [...envOf()].map(([k, v]) => envRow(k, v)));
+    if (req.method === 'POST' && rest === 'env') {
+      const key = String(body?.key ?? '');
+      if (!/^[A-Z_][A-Z0-9_]*$/.test(key)) return send(422, { detail: 'Invalid env var key' });
+      if (envOf().has(key)) return send(409, { detail: `Env var ${key} already exists` });
+      envOf().set(key, { value: String(body?.value ?? ''), isSecret: body?.isSecret === true });
+      return send(201, envRow(key, envOf().get(key)!));
+    }
+    const envKey = rest.match(/^env\/([^/]+)$/);
+    if (envKey) {
+      const key = decodeURIComponent(envKey[1]!);
+      if (req.method === 'PUT') {
+        if (!envOf().has(key)) return send(404, { detail: 'Env var not found' });
+        envOf().set(key, { value: String(body?.value ?? ''), isSecret: body?.isSecret === true });
+        return send(200, envRow(key, envOf().get(key)!));
+      }
+      if (req.method === 'DELETE') {
+        if (!envOf().delete(key)) return send(404, { detail: 'Env var not found' });
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+    }
+    if (req.method === 'GET' && rest.startsWith('logs')) {
+      const limit = Number(url.searchParams.get('limit') ?? 100);
+      const before = url.searchParams.get('before');
+      const all = Array.from({ length: 5 }, (_, i) => ({ id: `log-${5 - i}`, agentId, level: i === 0 ? 'warning' : 'info', message: `line ${5 - i}`, timestamp: `2026-10-27T10:00:0${5 - i}Z`, source: 'agent' }));
+      const from = before ? all.findIndex((l) => l.id === before) + 1 : 0;
+      return send(200, all.slice(from, from + limit));
+    }
+    if (req.method === 'GET' && rest.startsWith('files/list')) {
+      const dir = url.searchParams.get('path') ?? '/';
+      const base = dir.endsWith('/') ? dir : `${dir}/`;
+      const seen = new Map<string, { name: string; path: string; type: string; size?: number }>();
+      for (const [path, content] of this.files) {
+        if (!path.startsWith(base)) continue;
+        const restPath = path.slice(base.length);
+        const [head, ...tail] = restPath.split('/');
+        if (!head) continue;
+        if (tail.length === 0) seen.set(head, { name: head, path, type: 'file', size: content.length });
+        else if (!seen.has(head)) seen.set(head, { name: head, path: `${base}${head}`, type: 'directory' });
+      }
+      for (const d of this.dirs) {
+        if (d.startsWith(base) && !d.slice(base.length).includes('/') && d !== base) seen.set(d.slice(base.length), { name: d.slice(base.length), path: d, type: 'directory' });
+      }
+      return send(200, { path: dir, entries: [...seen.values()] });
+    }
+    if (req.method === 'POST' && rest === 'files/mkdir') {
+      this.dirs.add(String(body?.path ?? '').replace(/\/$/, ''));
+      return send(200, { ok: true });
+    }
+    if (req.method === 'POST' && rest === 'files/move') {
+      const from = String(body?.from ?? body?.source ?? '');
+      const to = String(body?.to ?? body?.destination ?? '');
+      const content = this.files.get(from);
+      if (content === undefined) return send(404, { detail: 'File not found' });
+      this.files.delete(from);
+      this.files.set(to, content);
+      return send(200, { ok: true });
+    }
+    if (req.method === 'DELETE' && rest.startsWith('files/delete')) {
+      const path = url.searchParams.get('path') ?? '';
+      if (!this.files.delete(path) && !this.dirs.delete(path)) return send(404, { detail: 'File not found' });
+      return send(200, { ok: true });
+    }
+    const skillsOf = () => {
+      let set = this.skills.get(agentId!);
+      if (!set) {
+        set = new Set(['rowboat-spaces']);
+        this.skills.set(agentId!, set);
+      }
+      return set;
+    };
+    if (req.method === 'GET' && rest === 'skills') return send(200, { skills: [...skillsOf()].map((name) => ({ name, version: '1.0.0', description: `The ${name} skill` })) });
+    if (req.method === 'GET' && rest.startsWith('skills/search')) {
+      const q = (url.searchParams.get('q') ?? '').toLowerCase();
+      const catalog = ['github', 'gmail', 'notion-notes'].filter((n) => n.includes(q));
+      return send(200, { results: catalog.map((name) => ({ slug: name, description: `${name} from the catalog` })) });
+    }
+    if (req.method === 'POST' && rest === 'skills/install') {
+      const name = String(body?.name ?? body?.slug ?? '');
+      if (!name) return send(422, { detail: 'name required' });
+      skillsOf().add(name);
+      return send(200, { ok: true, name });
+    }
+    const skillName = rest.match(/^skills\/([^/]+)$/);
+    if (skillName && req.method === 'DELETE') {
+      if (!skillsOf().delete(decodeURIComponent(skillName[1]!))) return send(404, { detail: 'Skill not found' });
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+    const triggersOf = () => {
+      let m = this.triggers.get(agentId!);
+      if (!m) {
+        m = new Map();
+        this.triggers.set(agentId!, m);
+      }
+      return m;
+    };
+    const triggerRow = (id: string, t: { type: string; config: Record<string, unknown>; enabled: boolean }) => ({ id, agentId, ...t });
+    if (req.method === 'GET' && rest === 'triggers') return send(200, [...triggersOf()].map(([id, t]) => triggerRow(id, t)));
+    if (req.method === 'POST' && rest === 'triggers') {
+      const id = `trg-${++this.sequence}`;
+      const t = { type: String(body?.type ?? ''), config: (body?.config as Record<string, unknown>) ?? {}, enabled: body?.enabled !== false };
+      triggersOf().set(id, t);
+      return send(201, triggerRow(id, t));
+    }
+    const triggerId = rest.match(/^triggers\/([^/]+)$/);
+    if (triggerId) {
+      const t = triggersOf().get(triggerId[1]!);
+      if (!t) return send(404, { detail: 'Trigger not found' });
+      if (req.method === 'PUT') {
+        if (body?.config && typeof body.config === 'object') t.config = body.config as Record<string, unknown>;
+        if (typeof body?.enabled === 'boolean') t.enabled = body.enabled;
+        return send(200, triggerRow(triggerId[1]!, t));
+      }
+      if (req.method === 'DELETE') {
+        triggersOf().delete(triggerId[1]!);
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+    }
     if (req.method === 'POST' && rest === 'start') {
       if (this.awakeLimit > 0) {
         this.awakeLimit--;
         return send(429, { detail: { code: 'awake_limit_reached', message: 'The plan allows 1 machine awake at once', awake: 1, maxAwake: 1 }, retryAfterSeconds: 0.01 });
       }
+      this.power.push({ agentId: agentId!, action: 'start' });
       // Maritime refuses to start an agent that is awake (seen live 2026-10-26).
-      if (this.agent.status === 'active') return send(409, { detail: `Agent ${this.agent.id} is already running` });
-      this.agent.status = 'active';
-      return send(200, this.agent);
+      if (record.status === 'active') return send(409, { detail: `Agent ${record.id} is already running` });
+      record.status = 'active';
+      return send(200, managed ? { ...managed, reads: undefined, endUser: undefined } : this.agent);
     }
     if (req.method === 'POST' && rest === 'exec') {
-      if (this.agent.status === 'error') return send(409, { detail: 'Agent is in an error state. Start it to recover.' });
-      this.agent.status = 'active';
+      if (record.status === 'error') return send(409, { detail: 'Agent is in an error state. Start it to recover.' });
+      record.status = 'active';
       const command = body?.command;
       const script = Array.isArray(command) && command[0] === 'sh' && command[1] === '-c' ? String(command[2]) : String(command);
       const execution: FakeExecution = {
@@ -207,6 +364,14 @@ export class FakeMaritime {
         generation: 0,
       };
       this.executions.set(execution.executionId, execution);
+      if (!execution.files.out && !execution.files.last) {
+        // Not a turn: a command from the page, or a readiness check. It ran, and said what it echoed.
+        const echoed = script.match(/echo ([A-Za-z0-9_-]+)/)?.[1] ?? '';
+        const failed = /\bfalse\b|exit 1/.test(script);
+        Object.assign(execution, { status: failed ? 'failed' : 'completed', exitCode: failed ? 1 : 0, stdout: echoed ? `${echoed}\n` : `ran: ${script}\n`, stderr: '' });
+        const { executionId, status, exitCode, stdout, stderr } = execution;
+        return send(200, body?.detached ? { executionId, status: 'running' } : { executionId, status, exitCode, stdout, stderr });
+      }
       if (body?.detached) {
         const turn = this.nextTurn ?? hermesTurn('Done.');
         this.nextTurn = undefined;

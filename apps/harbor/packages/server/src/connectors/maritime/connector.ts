@@ -36,7 +36,8 @@ const EXEC_TIMEOUT_S = 3600;
 export interface PollTiming {
   pollMs: number;
 }
-const DEFAULT_TIMING: PollTiming = { pollMs: 3_000 };
+/** One execution read a second while a turn runs: an answer lands within a second of the CLI ending (was 3 s; 2026-10-27). */
+const DEFAULT_TIMING: PollTiming = { pollMs: 1_000 };
 
 /** The connector's record for one thread (agent_connection_threads.data). */
 export interface ThreadRecord {

@@ -4038,6 +4038,91 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), agentId: z.string() }),
     res: z.object({ hosting: z.custom<SpacesTypes.AgentHosting>() }),
   },
+  // Managing a managed agent's VM from its page (2026-10-27): one Harbor call each, the owner or an admin.
+  'spaces:getHosting': {
+    req: z.object({ orgId: z.string(), agentId: z.string() }),
+    res: z.object({ hosting: z.custom<SpacesTypes.AgentHosting>(), machine: z.custom<SpacesTypes.HostingMachine>().optional(), env: z.array(z.custom<SpacesTypes.HostingEnvVar>()) }),
+  },
+  'spaces:setHostingEnv': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), key: z.string(), value: z.string(), secret: z.boolean().optional() }),
+    res: z.object({ env: z.array(z.custom<SpacesTypes.HostingEnvVar>()) }),
+  },
+  'spaces:deleteHostingEnv': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), key: z.string() }),
+    res: z.object({ env: z.array(z.custom<SpacesTypes.HostingEnvVar>()) }),
+  },
+  'spaces:hostingPower': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), action: z.enum(['restart', 'sleep', 'wake', 'reload']) }),
+    res: z.object({ machine: z.custom<SpacesTypes.HostingMachine>() }),
+  },
+  'spaces:runHostingCommand': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), command: z.string(), timeoutSeconds: z.number().optional() }),
+    res: z.object({ execution: z.custom<SpacesTypes.HostingExecution>() }),
+  },
+  'spaces:getHostingCommand': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), executionId: z.string() }),
+    res: z.object({ execution: z.custom<SpacesTypes.HostingExecution>() }),
+  },
+  'spaces:cancelHostingCommand': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), executionId: z.string() }),
+    res: z.object({ execution: z.custom<SpacesTypes.HostingExecution>() }),
+  },
+  'spaces:getHostingLogs': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), limit: z.number().optional(), before: z.string().optional(), level: z.string().optional() }),
+    res: z.object({ logs: z.array(z.custom<SpacesTypes.HostingLogLine>()), nextBefore: z.string().optional() }),
+  },
+  'spaces:listHostingFiles': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), path: z.string().optional() }),
+    res: z.object({ path: z.string(), entries: z.array(z.custom<SpacesTypes.HostingFileEntry>()) }),
+  },
+  'spaces:readHostingFile': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), path: z.string() }),
+    res: z.object({ path: z.string(), content: z.string(), truncated: z.boolean() }),
+  },
+  'spaces:writeHostingFile': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), path: z.string(), content: z.string() }),
+    res: z.object({}),
+  },
+  'spaces:makeHostingDir': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), path: z.string() }),
+    res: z.object({}),
+  },
+  'spaces:moveHostingFile': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), from: z.string(), to: z.string() }),
+    res: z.object({}),
+  },
+  'spaces:deleteHostingFile': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), path: z.string() }),
+    res: z.object({}),
+  },
+  'spaces:listHostingSkills': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), q: z.string().optional() }),
+    res: z.object({ skills: z.array(z.custom<SpacesTypes.HostingSkill>()) }),
+  },
+  'spaces:installHostingSkill': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), name: z.string() }),
+    res: z.object({ skills: z.array(z.custom<SpacesTypes.HostingSkill>()) }),
+  },
+  'spaces:removeHostingSkill': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), name: z.string() }),
+    res: z.object({ skills: z.array(z.custom<SpacesTypes.HostingSkill>()) }),
+  },
+  'spaces:listHostingTriggers': {
+    req: z.object({ orgId: z.string(), agentId: z.string() }),
+    res: z.object({ triggers: z.array(z.custom<SpacesTypes.HostingTrigger>()) }),
+  },
+  'spaces:createHostingTrigger': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), type: z.string(), config: z.record(z.string(), z.unknown()), enabled: z.boolean().optional() }),
+    res: z.object({ triggers: z.array(z.custom<SpacesTypes.HostingTrigger>()) }),
+  },
+  'spaces:updateHostingTrigger': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), triggerId: z.string(), config: z.record(z.string(), z.unknown()).optional(), enabled: z.boolean().optional() }),
+    res: z.object({ triggers: z.array(z.custom<SpacesTypes.HostingTrigger>()) }),
+  },
+  'spaces:deleteHostingTrigger': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), triggerId: z.string() }),
+    res: z.object({ triggers: z.array(z.custom<SpacesTypes.HostingTrigger>()) }),
+  },
   'spaces:setAgentCredential': {
     req: z.object({ orgId: z.string(), agentId: z.string(), secret: z.string() }),
     res: z.object({ credential: z.custom<SpacesTypes.AgentCredential>() }),

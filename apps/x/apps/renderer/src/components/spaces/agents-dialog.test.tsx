@@ -34,6 +34,11 @@ let options: Record<string, spaces.InvocationOption[]> = {}
 let defaults: Record<string, Record<string, string | boolean>> = {}
 const ENVIRONMENT: spaces.InvocationOption = { type: 'select', key: 'environment', label: 'Environment', choices: [{ id: 'env-web', label: 'web-app' }, { id: 'env-api', label: 'api' }] }
 const PLAN: spaces.InvocationOption = { type: 'toggle', key: 'plan_first', label: 'Plan first' }
+// The management area (2026-10-27): what the stand-in Harbor says about a managed VM.
+let machineStatus = 'active'
+let envVars: spaces.HostingEnvVar[] = []
+let triggerList: spaces.HostingTrigger[] = []
+let installedSkills: spaces.HostingSkill[] = []
 const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
     switch (channel) {
         case 'spaces:listOrgMembers': return { members: roster }
@@ -59,6 +64,31 @@ const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
             listing = [...listing, { agent, keys: [key('k9', 'new')], credential: { hint: '…rbmk', setBy: 'me', setAt: '2026-10-26T10:00:00Z' }, hosting: hosting('deploying') }]
             return { agent, key: { ...key('k9', 'new'), secret: NEW_KEY }, hosting: hosting('deploying') }
         }
+        case 'spaces:getHosting': return { hosting: hosting('ready'), machine: { status: machineStatus, tier: 'always_on' }, env: envVars }
+        case 'spaces:hostingPower': machineStatus = args.action === 'sleep' ? 'sleeping' : 'active'; return { machine: { status: machineStatus } }
+        case 'spaces:setHostingEnv': {
+            const row: spaces.HostingEnvVar = { key: args.key!, secret: Boolean(args.secret), ...(args.secret ? {} : { value: args.value! }) }
+            envVars = [...envVars.filter((v) => v.key !== args.key), row]
+            return { env: envVars }
+        }
+        case 'spaces:deleteHostingEnv': envVars = envVars.filter((v) => v.key !== args.key); return { env: envVars }
+        case 'spaces:runHostingCommand': return { execution: { id: 'x1', status: 'running' } }
+        case 'spaces:getHostingCommand': return { execution: { id: 'x1', status: 'completed', exitCode: 0, stdout: `ran ${'echo hello'}\n` } }
+        case 'spaces:cancelHostingCommand': return { execution: { id: 'x1', status: 'cancelled' } }
+        case 'spaces:getHostingLogs': return { logs: [{ id: 'l1', level: 'info', message: 'gateway booted', timestamp: '2026-10-27T10:00:00Z', source: 'agent' }] }
+        case 'spaces:listHostingFiles': return { path: args.path, entries: [{ name: 'skills', path: `${args.path}/skills`, kind: 'dir' }, { name: 'config.yaml', path: `${args.path}/config.yaml`, kind: 'file', size: 377 }] }
+        case 'spaces:readHostingFile': return { path: args.path, content: 'model: gpt-5.4', truncated: false }
+        case 'spaces:writeHostingFile': return {}
+        case 'spaces:makeHostingDir': return {}
+        case 'spaces:moveHostingFile': return {}
+        case 'spaces:deleteHostingFile': return {}
+        case 'spaces:listHostingSkills': return { skills: args.q ? [{ name: 'github', installed: installedSkills.some((s) => s.name === 'github'), description: 'GitHub from the catalog' }] : installedSkills }
+        case 'spaces:installHostingSkill': installedSkills = [...installedSkills, { name: args.name!, installed: true }]; return { skills: installedSkills }
+        case 'spaces:removeHostingSkill': installedSkills = installedSkills.filter((s) => s.name !== args.name); return { skills: installedSkills }
+        case 'spaces:listHostingTriggers': return { triggers: triggerList }
+        case 'spaces:createHostingTrigger': triggerList = [...triggerList, { id: `t${triggerList.length + 1}`, type: args.type!, enabled: true, config: args.config as unknown as Record<string, unknown> }]; return { triggers: triggerList }
+        case 'spaces:updateHostingTrigger': triggerList = triggerList.map((t) => (t.id === args.triggerId ? { ...t, enabled: Boolean(args.enabled) } : t)); return { triggers: triggerList }
+        case 'spaces:deleteHostingTrigger': triggerList = triggerList.filter((t) => t.id !== args.triggerId); return { triggers: triggerList }
         case 'spaces:deleteManagedAgent': {
             listing = listing.map((l) => (l.agent.id === args.agentId ? { ...l, keys: l.keys.map((k) => ({ ...k, revokedAt: '2026-10-26T11:00:00Z' })), hosting: hosting('deleting', { updatedAt: '2026-10-26T11:00:00Z' }) } : l))
             return { hosting: hosting('deleting') }
@@ -82,6 +112,10 @@ beforeEach(() => {
     window.localStorage.clear()
     roster = [person('me', 'Ramnique'), person('harsh', 'Harsh')]
     managedKinds = []
+    machineStatus = 'active'
+    envVars = [{ key: 'PATH', secret: false, value: '/opt/hermes/bin:/usr/bin' }]
+    triggerList = []
+    installedSkills = [{ name: 'rowboat-spaces', installed: true, version: '1.0.0' }]
     options = {}
     defaults = {}
     listing = [{ agent: hermes, keys: [key('k1', 'hermes', { lastUsedAt: '2026-09-29T10:30:00Z' }), key('k0', 'hermes', { revokedAt: '2026-09-28T10:00:00Z' })] }]
@@ -597,6 +631,79 @@ describe('AgentsDialog', () => {
         expect(await screen.findByRole('status')).toHaveTextContent('Removing from Maritime')
         expect(screen.queryByRole('button', { name: /Delete/ })).toBeNull()
         expect(screen.getByText('No active keys.')).toBeInTheDocument()
+    })
+
+    // The management area (2026-10-27): the owner manages the VM from the page.
+    const jarvis = { ...hermes, id: 'jv', displayName: 'Jarvis', agentConnection: 'maritime', agentInstance: 'agt-m1' } as spaces.Member
+    const openJarvis = async () => {
+        listing = [{ agent: jarvis, keys: [key('k8', 'jv')], hosting: hosting('ready') }]
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        fireEvent.click(await screen.findByRole('button', { name: /Jarvis/ }))
+        await screen.findByText(/Maritime says the machine is/)
+    }
+
+    it('shows the machine as Maritime sees it, and puts it to sleep and wakes it', async () => {
+        await openJarvis()
+        expect(screen.getByText(/Maritime says the machine is/)).toHaveTextContent('active on the always on tier')
+        fireEvent.click(screen.getByRole('button', { name: 'Sleep' }))
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:hostingPower', { orgId: 'org-1', agentId: 'jv', action: 'sleep' }))
+        expect(await screen.findByRole('button', { name: 'Wake' })).toBeInTheDocument()
+        expect(screen.getByText(/Maritime says the machine is/)).toHaveTextContent('sleeping')
+    })
+
+    it('environment variables: a secret is added without ever showing, and deleted on a second click', async () => {
+        await openJarvis()
+        fireEvent.click(screen.getByRole('button', { name: 'Environment variables' }))
+        const list = await screen.findByRole('list', { name: 'Environment variables' })
+        expect(within(list).getByText('PATH')).toBeInTheDocument()
+        fireEvent.change(screen.getByLabelText('Variable name'), { target: { value: 'gh_token' } })
+        fireEvent.change(screen.getByLabelText('Variable value'), { target: { value: 'ghp_x' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:setHostingEnv', { orgId: 'org-1', agentId: 'jv', key: 'GH_TOKEN', value: 'ghp_x', secret: true }))
+        expect(await within(list).findByText('GH_TOKEN')).toBeInTheDocument()
+        expect(within(list).getByText(/\(secret\)/)).toBeInTheDocument()
+        expect(within(list).queryByText('ghp_x')).toBeNull()
+        fireEvent.click(within(list).getAllByRole('button', { name: 'Delete' })[1]!)
+        fireEvent.click(within(list).getByRole('button', { name: 'Confirm delete' }))
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:deleteHostingEnv', { orgId: 'org-1', agentId: 'jv', key: 'GH_TOKEN' }))
+    })
+
+    it('runs a command and shows its output and exit status', async () => {
+        await openJarvis()
+        fireEvent.click(screen.getByRole('button', { name: 'Run a command' }))
+        fireEvent.change(await screen.findByLabelText('Command'), { target: { value: 'echo hello' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Run' }))
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:runHostingCommand', { orgId: 'org-1', agentId: 'jv', command: 'echo hello' }))
+        expect(await screen.findByLabelText('Command output', {}, { timeout: 3000 })).toHaveTextContent('ran echo hello')
+        expect(screen.getByText('Exited 0.')).toBeInTheDocument()
+    })
+
+    it('logs, files, skills and automations load when their fold is opened', async () => {
+        await openJarvis()
+        fireEvent.click(screen.getByRole('button', { name: 'Logs' }))
+        expect(await screen.findByText(/gateway booted/)).toBeInTheDocument()
+
+        fireEvent.click(screen.getByRole('button', { name: 'Files' }))
+        const files = await screen.findByRole('list', { name: 'Files' })
+        expect(invoke).toHaveBeenCalledWith('spaces:listHostingFiles', { orgId: 'org-1', agentId: 'jv', path: '/opt/data' })
+        fireEvent.click(within(files).getByRole('button', { name: /config\.yaml/ }))
+        expect(await screen.findByLabelText('File content')).toHaveValue('model: gpt-5.4')
+
+        fireEvent.click(screen.getByRole('button', { name: 'Skills' }))
+        expect(await within(await screen.findByRole('list', { name: 'Installed skills' })).findByText('rowboat-spaces')).toBeInTheDocument()
+        fireEvent.change(screen.getByLabelText('Skill search'), { target: { value: 'git' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Search' }))
+        const catalog = await screen.findByRole('list', { name: 'Catalog skills' })
+        fireEvent.click(within(catalog).getByRole('button', { name: 'Install' }))
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:installHostingSkill', { orgId: 'org-1', agentId: 'jv', name: 'github' }))
+
+        fireEvent.click(screen.getByRole('button', { name: 'Automations' }))
+        expect(await screen.findByText('No triggers.')).toBeInTheDocument()
+        fireEvent.change(screen.getByLabelText('Schedule'), { target: { value: '0 9 * * 1-5' } })
+        fireEvent.change(screen.getByLabelText('Prompt'), { target: { value: 'Summarize #main and post it there' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:createHostingTrigger', { orgId: 'org-1', agentId: 'jv', type: 'cron', config: { schedule: '0 9 * * 1-5', prompt: 'Summarize #main and post it there' } }))
+        expect(await within(await screen.findByRole('list', { name: 'Triggers' })).findByText('0 9 * * 1-5')).toBeInTheDocument()
     })
 
     it('lets an admin revoke someone else’s agent’s key, but not mint one', async () => {

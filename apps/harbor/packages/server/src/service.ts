@@ -34,6 +34,7 @@ import type {
   AgentKey,
   AgentCredential,
   AgentHosting,
+  HostingPowerAction,
   AgentHook,
   AgentKeySecret,
   AgentListing,
@@ -214,6 +215,70 @@ export class HarborService {
   /** Delete a managed agent's hosting: the owner or an admin; its keys go now, the platform's resources in the background. */
   deleteManagedAgent(ctx: ActorCtx, agentId: string): Promise<AgentHosting> {
     return this.hosting.deleteManaged(ctx, agentId);
+  }
+  /** Managing a managed agent's VM (the management area, 2026-10-27): the owner or an admin, through the deployment's key. */
+  getHosting(ctx: ActorCtx, agentId: string) {
+    return this.hosting.get(ctx, agentId);
+  }
+  setHostingEnv(ctx: ActorCtx, agentId: string, key: string, value: string, secret: boolean) {
+    return this.hosting.setEnv(ctx, agentId, key, value, secret);
+  }
+  deleteHostingEnv(ctx: ActorCtx, agentId: string, key: string) {
+    return this.hosting.deleteEnv(ctx, agentId, key);
+  }
+  hostingPower(ctx: ActorCtx, agentId: string, action: HostingPowerAction) {
+    return this.hosting.power(ctx, agentId, action);
+  }
+  runHostingCommand(ctx: ActorCtx, agentId: string, command: string, timeoutSeconds?: number) {
+    return this.hosting.run(ctx, agentId, command, timeoutSeconds);
+  }
+  getHostingCommand(ctx: ActorCtx, agentId: string, executionId: string) {
+    return this.hosting.execution(ctx, agentId, executionId);
+  }
+  cancelHostingCommand(ctx: ActorCtx, agentId: string, executionId: string) {
+    return this.hosting.cancel(ctx, agentId, executionId);
+  }
+  getHostingLogs(ctx: ActorCtx, agentId: string, opts: { limit?: number; before?: string; level?: string }) {
+    return this.hosting.logs(ctx, agentId, opts);
+  }
+  listHostingFiles(ctx: ActorCtx, agentId: string, path: string) {
+    return this.hosting.files(ctx, agentId, path);
+  }
+  readHostingFile(ctx: ActorCtx, agentId: string, path: string) {
+    return this.hosting.readFile(ctx, agentId, path);
+  }
+  writeHostingFile(ctx: ActorCtx, agentId: string, path: string, content: string) {
+    return this.hosting.writeFile(ctx, agentId, path, content);
+  }
+  makeHostingDir(ctx: ActorCtx, agentId: string, path: string) {
+    return this.hosting.mkdir(ctx, agentId, path);
+  }
+  moveHostingFile(ctx: ActorCtx, agentId: string, from: string, to: string) {
+    return this.hosting.moveFile(ctx, agentId, from, to);
+  }
+  deleteHostingFile(ctx: ActorCtx, agentId: string, path: string) {
+    return this.hosting.deleteFile(ctx, agentId, path);
+  }
+  listHostingSkills(ctx: ActorCtx, agentId: string, q?: string) {
+    return this.hosting.skills(ctx, agentId, q);
+  }
+  installHostingSkill(ctx: ActorCtx, agentId: string, name: string) {
+    return this.hosting.installSkill(ctx, agentId, name);
+  }
+  removeHostingSkill(ctx: ActorCtx, agentId: string, name: string) {
+    return this.hosting.removeSkill(ctx, agentId, name);
+  }
+  listHostingTriggers(ctx: ActorCtx, agentId: string) {
+    return this.hosting.triggers(ctx, agentId);
+  }
+  createHostingTrigger(ctx: ActorCtx, agentId: string, input: { type: string; config: Record<string, unknown>; enabled?: boolean }) {
+    return this.hosting.createTrigger(ctx, agentId, input);
+  }
+  updateHostingTrigger(ctx: ActorCtx, agentId: string, triggerId: string, input: { config?: Record<string, unknown>; enabled?: boolean }) {
+    return this.hosting.updateTrigger(ctx, agentId, triggerId, input);
+  }
+  deleteHostingTrigger(ctx: ActorCtx, agentId: string, triggerId: string) {
+    return this.hosting.deleteTrigger(ctx, agentId, triggerId);
   }
   addAgent(
     ctx: ActorCtx,
