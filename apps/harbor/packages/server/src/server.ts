@@ -7,7 +7,7 @@ import { internalHandler } from './internal.js';
 import { LiveStats } from './stats.js';
 import { DEFAULT_ORG_ID } from './pg-store.js';
 import type { PushSender } from './push.js';
-import { buildOrgRuntime } from './runtime.js';
+import { buildOrgRuntime, type OrgRuntimeInput } from './runtime.js';
 import type { HarborService } from './service.js';
 import type { Store } from './store.js';
 import { attachLive } from './ws.js';
@@ -61,6 +61,8 @@ export interface HarborOptions {
    * tests leave it off.
    */
   internal?: { key?: string; log?: boolean };
+  /** Managed hosting: a stand-in provider and tick for tests (runtime.ts). */
+  hosting?: OrgRuntimeInput['hosting'];
   /** Auth driver; defaults to dev tokens (never expose publicly). Pass an OidcAuthDriver for real deployments. */
   auth?: AuthDriver;
   /**
@@ -106,6 +108,7 @@ export async function startHarbor(options: HarborOptions): Promise<RunningHarbor
     ...(options.maxBlobBytes !== undefined ? { maxBlobBytes: options.maxBlobBytes } : {}),
     ...(options.webOrigins ? { webOrigins: options.webOrigins } : {}),
     ...(options.webAppUrl ? { webAppUrl: options.webAppUrl } : {}),
+    ...(options.hosting ? { hosting: options.hosting } : {}),
   });
   await seedOrg(runtime.service, store, options);
 

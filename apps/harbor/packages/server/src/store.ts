@@ -2,6 +2,7 @@ import type { ActivityKind } from '@rowboat/spaces-protocol';
 import type {
   AgentCredential,
   AgentHook,
+  AgentHosting,
   AgentKey,
   Attribution,
   ConnectorCapabilities,
@@ -134,6 +135,20 @@ export interface StoredAgentKey extends AgentKey {
 export interface StoredAgentCredential extends AgentCredential {
   agentId: string;
   sealed: string;
+}
+
+/**
+ * A managed agent's hosting as stored (spec §8 Maritime, 2026-10-26): what its
+ * owner sees, plus the row's own id, the member it is bound to once that
+ * exists, the end-user key Rowboat named the agent by on the platform, and
+ * what was asked for.
+ */
+export interface StoredAgentHosting extends AgentHosting {
+  id: string;
+  agentId?: string;
+  externalUserId: string;
+  kind: string;
+  displayName: string;
 }
 
 /** An alert hook as stored (spec §8 Alerts, 2026-10-03): what its owner sees, plus the hash of its secret. */
@@ -537,6 +552,15 @@ export interface Store {
   /** The agent key a connector hands its agent's workspaces: which key, and its sealed secret. */
   getConnectorKey(agentId: string): Promise<{ keyId: string; sealed: string } | undefined>;
   putConnectorKey(agentId: string, keyId: string, sealed: string, at: string): Promise<void>;
+
+  // --- managed agents (spec §8 Maritime, 2026-10-26) ---
+  getAgentHosting(agentId: string): Promise<StoredAgentHosting | undefined>;
+  getHosting(id: string): Promise<StoredAgentHosting | undefined>;
+  listAgentHostings(agentIds: string[]): Promise<StoredAgentHosting[]>;
+  /** Every hosting row in one of these states: what the worker drives. */
+  listHostingsByStatus(statuses: readonly string[]): Promise<StoredAgentHosting[]>;
+  /** Insert or replace a hosting row by its id. */
+  putHosting(hosting: StoredAgentHosting): Promise<void>;
 
   // --- invocations (spec §8 Invoking agent members, 2026-09-30) ---
   /** A new invocation, with its triggering message's offset: the queue's order. */

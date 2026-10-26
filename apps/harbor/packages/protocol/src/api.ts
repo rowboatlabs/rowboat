@@ -12,7 +12,9 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { ActingMode, AgentCredential, AgentHook, AgentKey, AgentKeySecret, AgentListing, Attribution, InvitePolicy, Member, MemberRole, Membership, Message, OrgSettings, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic, UpdateProfile } from './core.js';
+import { ActingMode, AgentCredential, AgentHook, AgentKey, AgentKeySecret, AgentListing, Attribution, InvitePolicy, Member, MemberRole, Membership, Message, OrgSettings, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic, UpdateProfile,
+  AgentHosting,
+} from './core.js';
 import { AssetId, AssetPath, BlobHash, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 import {
   AcceptInvite,
@@ -478,6 +480,50 @@ export const routes = {
       instance: z.string().min(1).max(128).optional(),
     }),
     response: z.object({ agent: Member, key: AgentKeySecret }),
+  },
+  /**
+   * The kinds of agent this Harbor creates on Rowboat's own platform account
+   * (spec §8 Maritime, 2026-10-26): MARITIME_AGENTS when the deployment has the
+   * platform key, none otherwise. What the app's Create button offers.
+   */
+  managedAgentKinds: {
+    method: 'GET',
+    path: '/v1/agents/managed',
+    response: z.object({ kinds: z.array(z.string()) }),
+  },
+  /**
+   * Create a managed agent (spec §8 Maritime, 2026-10-26): Rowboat's own
+   * account on the platform runs it. The caller becomes its owner and gets its
+   * first key as with createAgent; the agent's hosting starts `deploying` and
+   * the listing shows it move to `ready`. `kind` is one of MARITIME_AGENTS.
+   * Claude Code needs the person's `anthropicApiKey`, which goes straight to
+   * the agent's environment on the platform and is kept nowhere else; `env`
+   * adds variables the same way. Render face only. Refused with
+   * `invalid_request` when this Harbor runs no managed hosting, or when the
+   * platform refuses (its own sentence, such as a plan limit).
+   */
+  createManagedAgent: {
+    method: 'POST',
+    path: '/v1/agents/managed',
+    request: z.object({
+      displayName: z.string().trim().min(1).max(128),
+      kind: z.string().min(1).max(32),
+      anthropicApiKey: z.string().min(1).max(512).optional(),
+      env: z.array(z.object({ key: z.string().regex(/^[A-Z_][A-Z0-9_]{0,63}$/), value: z.string().max(4096), secret: z.boolean().optional() })).max(20).optional(),
+    }),
+    response: z.object({ agent: Member, key: AgentKeySecret, hosting: AgentHosting }),
+  },
+  /**
+   * Delete a managed agent's hosting: the owner or an admin. Its keys are
+   * revoked at once and its hosting marked `deleting`; the platform's
+   * resources go in the background and the listing shows `deleted` once the
+   * platform confirms. The member stays, to be removed like any member.
+   */
+  deleteManagedAgent: {
+    method: 'DELETE',
+    path: '/v1/agents/:agentId/hosting',
+    params: z.object({ agentId: MemberId }),
+    response: z.object({ hosting: AgentHosting }),
   },
   /**
    * Replace a platform agent's credential (spec §8 Connectors, 2026-09-30).

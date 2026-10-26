@@ -57,6 +57,14 @@ export class HostedConnectors {
     this.running.set(agent.id, platform.start(this.env(agent)));
   }
 
+  /** Stop one agent's connector (a managed agent being deleted, 2026-10-26). Idempotent. */
+  async stop(agentId: string): Promise<void> {
+    const running = this.running.get(agentId);
+    if (!running) return;
+    this.running.delete(agentId);
+    await running.stop();
+  }
+
   async stopAll(): Promise<void> {
     const running = [...this.running.values()];
     this.running.clear();

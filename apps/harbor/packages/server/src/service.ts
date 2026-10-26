@@ -1,6 +1,7 @@
 import type { z } from 'zod';
 import type { BlobStore } from './blobs.js';
 import { Agents, type AgentConnectorHooks } from './core/agents.js';
+import { Hosting, type HostingHooks, type HostingProvider } from './core/hosting.js';
 import { Assets } from './core/assets.js';
 import { Images } from './core/images.js';
 import { Feed } from './core/feed.js';
@@ -32,6 +33,7 @@ import type {
   UpdateProfile,
   AgentKey,
   AgentCredential,
+  AgentHosting,
   AgentHook,
   AgentKeySecret,
   AgentListing,
@@ -80,6 +82,7 @@ export class HarborService {
   private readonly feed: Feed;
   private readonly readState: ReadState;
   private readonly agents: Agents;
+  private readonly hosting: Hosting;
   private readonly invocations: Invocations;
 
   constructor(
@@ -99,6 +102,7 @@ export class HarborService {
     this.feed = new Feed(this.k, this.assets, notifier, this.invocations);
     this.readState = new ReadState(this.k, this.spaces, this.feed);
     this.agents = new Agents(this.k, this.spaces);
+    this.hosting = new Hosting(this.k, this.spaces, this.agents);
   }
 
   /** The kernel's clock, for code outside the core that stamps rows (connectors/host.ts). */
@@ -109,6 +113,18 @@ export class HarborService {
   /** The connector host, for creating agents Harbor reaches through a platform (runtime.ts). */
   attachConnectors(hooks: AgentConnectorHooks): void {
     this.agents.attachConnectors(hooks);
+  }
+
+  /** Managed hosting (spec §8 Maritime, 2026-10-26): the platform Rowboat's own account creates agents on, when the deployment has its key (runtime.ts). */
+  attachHosting(provider: HostingProvider, hooks: HostingHooks): void {
+    this.hosting.attach(provider, hooks);
+  }
+  /** The hosting worker: follows each managed agent from creation to ready, and through deletion. */
+  startHosting(tickMs?: number): void {
+    this.hosting.start(tickMs);
+  }
+  stopHosting(): Promise<void> {
+    return this.hosting.stop();
   }
 
   /** Jev, the agent Harbor itself is (spec §8 Jev, 2026-10-07): created once per org, when the deployment has its key (runtime.ts). */
@@ -175,8 +191,25 @@ export class HarborService {
   }
 
   // --- agents and their keys (core/agents.ts) --------------------------------------
-  listAgents(ctx: ActorCtx): Promise<AgentListing[]> {
-    return this.agents.list(ctx);
+  async listAgents(ctx: ActorCtx): Promise<AgentListing[]> {
+    const listing = await this.agents.list(ctx);
+    const hosting = await this.hosting.listFor(listing.map((l) => l.agent.id));
+    return listing.map((l) => (hosting.has(l.agent.id) ? { ...l, hosting: hosting.get(l.agent.id)! } : l));
+  }
+  /** The kinds of agent this Harbor creates on Rowboat's own platform account: none without the deployment's key. */
+  managedAgentKinds(ctx: ActorCtx): Promise<string[]> {
+    return this.hosting.kinds(ctx);
+  }
+  /** Create a managed agent on the platform Rowboat's account runs (spec §8 Maritime, 2026-10-26). */
+  createManagedAgent(
+    ctx: ActorCtx,
+    input: { displayName: string; kind: string; anthropicApiKey?: string; env?: Array<{ key: string; value: string; secret?: boolean }> },
+  ): Promise<{ agent: Member; key: AgentKeySecret; hosting: AgentHosting }> {
+    return this.hosting.createManaged(ctx, input);
+  }
+  /** Delete a managed agent's hosting: the owner or an admin; its keys go now, the platform's resources in the background. */
+  deleteManagedAgent(ctx: ActorCtx, agentId: string): Promise<AgentHosting> {
+    return this.hosting.deleteManaged(ctx, agentId);
   }
   addAgent(
     ctx: ActorCtx,

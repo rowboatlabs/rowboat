@@ -118,24 +118,28 @@ export const REPLICAS_CODING_AGENTS = ['claude-code', 'codex', 'cursor', 'openco
 export const CONDUCTOR_CODING_AGENTS = ['claude-code'] as const;
 /** The general agents Agent37 hosts that Harbor drives through its API (2026-10-01): coding harnesses wait. */
 export const AGENT37_AGENTS = ['hermes', 'openclaw'] as const;
+/** The runtimes Maritime hosts that Harbor drives through its exec API (2026-10-26): each turn is the runtime's own CLI, run in the agent's VM. */
+export const MARITIME_AGENTS = ['hermes', 'claude-code', 'codex'] as const;
 export const AGENT_PAIRS: ReadonlyArray<{ kind: string; connection: string }> = [
   { kind: 'custom', connection: 'contract' },
   { kind: 'hermes', connection: 'plugin' },
   ...REPLICAS_CODING_AGENTS.map((kind) => ({ kind, connection: 'replicas' })),
   ...AGENT37_AGENTS.map((kind) => ({ kind, connection: 'agent37' })),
   ...CONDUCTOR_CODING_AGENTS.map((kind) => ({ kind, connection: 'conductor' })),
+  ...MARITIME_AGENTS.map((kind) => ({ kind, connection: 'maritime' })),
   // Integrations (2026-10-03): the service's own API, called on a command, its kind and connection one name.
   { kind: 'posthog', connection: 'posthog' },
   { kind: 'cal', connection: 'cal' },
 ];
 /** Connections whose connector Harbor runs, calling the platform with a credential it holds (spec §8 Connectors). */
-export const HARBOR_RUN_CONNECTIONS: readonly string[] = ['replicas', 'agent37', 'conductor', 'posthog', 'cal'];
+export const HARBOR_RUN_CONNECTIONS: readonly string[] = ['replicas', 'agent37', 'conductor', 'maritime', 'posthog', 'cal'];
 /**
  * Connections whose agent is one instance on the platform (2026-10-05): the
  * agent is added with it, and Harbor checks the instance runs the agent's kind.
- * An Agent37 instance keeps its own memory and files, so it is the agent.
+ * An Agent37 instance keeps its own memory and files, so it is the agent. A
+ * Maritime agent is a VM with a persistent volume (2026-10-26): the same.
  */
-export const INSTANCE_CONNECTIONS: readonly string[] = ['agent37'];
+export const INSTANCE_CONNECTIONS: readonly string[] = ['agent37', 'maritime'];
 /**
  * An agent Harbor itself is (2026-10-07, Jev): built into the org, on the
  * deployment's own key, so no person adds it, owns it or holds a key for it.
@@ -196,8 +200,29 @@ export const AgentHook = z.object({
 });
 export type AgentHook = z.infer<typeof AgentHook>;
 
-/** An agent with its keys, as the Agents screen lists them, and its platform credential and alert hook when Harbor runs its connector. */
-export const AgentListing = z.object({ agent: Member, keys: z.array(AgentKey), credential: AgentCredential.optional(), hook: AgentHook.optional() });
+/**
+ * A managed agent's hosting (spec §8 Maritime, 2026-10-26): Rowboat's own
+ * account on the platform runs it, created from the app rather than connected
+ * to. `creating` until the platform has it, `deploying` while it boots,
+ * `checking` while Harbor proves it answers a command, then `ready`; `failed`
+ * says why; `deleting` until the platform confirms, then `deleted`.
+ */
+export const HostingStatus = z.enum(['creating', 'deploying', 'checking', 'ready', 'failed', 'deleting', 'deleted']);
+export type HostingStatus = z.infer<typeof HostingStatus>;
+export const AgentHosting = z.object({
+  provider: z.literal('maritime'),
+  status: HostingStatus,
+  /** The platform's own id for the agent, once it exists there. */
+  externalId: z.string().max(128).optional(),
+  error: z.string().max(1000).optional(),
+  createdBy: MemberId,
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+});
+export type AgentHosting = z.infer<typeof AgentHosting>;
+
+/** An agent with its keys, as the Agents screen lists them, its platform credential and alert hook when Harbor runs its connector, and its hosting when Rowboat runs it. */
+export const AgentListing = z.object({ agent: Member, keys: z.array(AgentKey), credential: AgentCredential.optional(), hook: AgentHook.optional(), hosting: AgentHosting.optional() });
 export type AgentListing = z.infer<typeof AgentListing>;
 
 /**

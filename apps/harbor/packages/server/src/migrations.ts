@@ -1065,6 +1065,32 @@ export const MIGRATIONS: Migration[] = [
     ],
   },
   {
+    // Managed agents (spec §8 Maritime, 2026-10-26): the hosting Rowboat's own account runs for an agent.
+    // One row per managed agent, written before the platform is asked (so an interrupted creation is found),
+    // bound to its member once the member exists. The platform's agent id and the end-user key Rowboat named it by.
+    id: '043-agent-hosting',
+    statements: [
+      `create table agent_hosting (
+        org_id text not null,
+        id text not null,
+        agent_id text,
+        provider text not null,
+        status text not null,
+        external_id text,
+        external_user_id text not null,
+        kind text not null,
+        display_name text not null,
+        error text,
+        created_by text not null,
+        created_at text not null,
+        updated_at text not null,
+        primary key (org_id, id)
+      )`,
+      `create unique index agent_hosting_agent on agent_hosting (org_id, agent_id) where agent_id is not null`,
+      `create index agent_hosting_status on agent_hosting (org_id, status)`,
+    ],
+  },
+  {
     // Admin controls (spec §4 Roles, built 2026-10-19). An admin removes a
     // member from the org: the row stays, stamped, so attribution reads and
     // an invite accepted by the same identity reactivates it. Null = active.
