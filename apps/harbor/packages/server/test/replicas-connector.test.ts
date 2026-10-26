@@ -315,6 +315,13 @@ describe('the Replicas connector', () => {
     fake.chatter = false;
     expect(ended.state).toBe('done');
     expect((await org.thread(message.id)).find((m) => m.author.memberId === claude.id)!.body).toBe('Hi Ramnique!');
+    const workspace = [...fake.workspaces.values()].find((w) => w.name === `spaces-${message.id}`);
+    expect(workspace).toBeDefined();
+    const creates = fake.creates().length;
+    const { invocations: followUp } = await org.post(`${mention(claude)} thanks, one more thing`, { threadRoot: message.id });
+    expect((await org.ended(followUp[0]!.id)).state).toBe('done');
+    expect(fake.creates()).toHaveLength(creates);
+    expect(fake.sends().at(-1)!.path).toBe(`/v1/replica/${workspace!.id}/messages`);
   });
 
   it('picks a dropped stream back up', async () => {
