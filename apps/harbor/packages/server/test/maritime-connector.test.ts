@@ -161,6 +161,10 @@ describe('the Maritime connector with Hermes', () => {
     expect(execution.script).toContain(`-c 'rb-${org.spaceId.toLowerCase()}-${message.id.toLowerCase()}' --create-if-missing`);
     expect(execution.script).toContain('--format stream-json');
     expect(execution.script).toMatch(/export HERMES_HOME=\/opt\/data HOME=\/opt\/data ROWBOAT_URL='http:\/\/localhost:\d+' ROWBOAT_AGENT_KEY='rbk_/);
+    // The Spaces MCP server in Hermes's config, by placeholder, and the two values in its .env, where Hermes's gateway reads them from.
+    expect(execution.script).toContain(`hermes config set mcp_servers.rowboat.url '\${ROWBOAT_URL}/mcp'`);
+    expect(execution.script).toContain('hermes config set ROWBOAT_URL "$ROWBOAT_URL"');
+    expect(execution.script).toContain('hermes config set ROWBOAT_AGENT_KEY "$ROWBOAT_AGENT_KEY"');
     const key = execution.script.match(/ROWBOAT_AGENT_KEY='(rbk_[^']+)'/)![1]!;
     expect((await org.as(key).get('/v1/me')).status).toBe(200); // the VM acts as the agent
 

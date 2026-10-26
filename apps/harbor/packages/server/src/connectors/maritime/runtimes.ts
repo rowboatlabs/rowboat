@@ -106,9 +106,12 @@ const hermes: Runtime = {
     ].filter(Boolean).join(' ');
     // Maritime's init rewrites config.yaml on every boot of the Hermes framework (measured 2026-10-26),
     // so the Spaces MCP server is put back before a turn whenever it is not Rowboat's. The `${…}`
-    // placeholders are Hermes's own: it fills them from its environment, which the turn sets, so the
-    // check is for the placeholders, never for a literal address: a VM set up by hand or an earlier
-    // probe can carry a different Rowboat (seen live 2026-10-26, posting to the wrong org).
+    // placeholders are Hermes's own, and the check is for the placeholders, never for a literal
+    // address: a VM set up by hand or an earlier probe can carry a different Rowboat (seen live
+    // 2026-10-26, posting to the wrong org). Hermes 0.22 runs the turn through its gateway, which
+    // fills the placeholders from the profile's `.env`, not from the turn's environment (the
+    // first managed agent on prod, 2026-10-26: "not set in this profile's .env or secret source"),
+    // so the two values are written there too, with `hermes config set`, whenever they differ.
     return [
       'set -e',
       `export HERMES_HOME=/opt/data HOME=/opt/data ROWBOAT_URL=${q(input.orgUrl)} ROWBOAT_AGENT_KEY=${q(input.agentKey)}`,
@@ -117,6 +120,7 @@ const hermes: Runtime = {
       // The gateway runs as the hermes user; a turn run as root would leave root-owned session files behind.
       'if [ "$(id -u)" = 0 ] && [ -x /command/s6-setuidgid ]; then chown -R hermes:hermes /opt/data/rowboat 2>/dev/null || true; run() { /command/s6-setuidgid hermes env HERMES_HOME=/opt/data HOME=/opt/data PATH="$PATH" ROWBOAT_URL="$ROWBOAT_URL" ROWBOAT_AGENT_KEY="$ROWBOAT_AGENT_KEY" "$@"; }; else run() { "$@"; }; fi',
       `{ grep -q 'ROWBOAT_URL}/mcp' /opt/data/config.yaml && grep -q 'Bearer \${ROWBOAT_AGENT_KEY}' /opt/data/config.yaml; } 2>/dev/null || { run hermes config set mcp_servers.rowboat.url '\${ROWBOAT_URL}/mcp' >/dev/null 2>&1 || true; run hermes config set mcp_servers.rowboat.headers.Authorization 'Bearer \${ROWBOAT_AGENT_KEY}' >/dev/null 2>&1 || true; }`,
+      `{ grep -F ROWBOAT_URL /opt/data/.env | grep -qF "$ROWBOAT_URL" && grep -F ROWBOAT_AGENT_KEY /opt/data/.env | grep -qF "$ROWBOAT_AGENT_KEY"; } 2>/dev/null || { run hermes config set ROWBOAT_URL "$ROWBOAT_URL" >/dev/null 2>&1 || true; run hermes config set ROWBOAT_AGENT_KEY "$ROWBOAT_AGENT_KEY" >/dev/null 2>&1 || true; }`,
       'cd /opt/data/workspace',
       `run hermes chat --query-file ${q(input.promptPath)} --oneshot --format stream-json -c ${q(input.session ?? 'rowboat')} --create-if-missing ${flags} > ${q(input.outPath)} 2> ${q(input.errPath)}`,
     ].join('\n');
