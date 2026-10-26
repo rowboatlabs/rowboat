@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { KeyRound, Loader2 } from 'lucide-react'
+import { KeyRound, Loader2, Trash2 } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -17,6 +17,11 @@ import { toast } from '@/lib/toast'
 // environment?". The setup steps are the ones shown when it was added; Harbor
 // keeps only a key's hash, so the key reads as a placeholder until its owner
 // makes a new one here, which fills the steps in.
+//
+// A managed agent (2026-10-26), one Rowboat created on its own Maritime
+// account, has nothing to set up: its page shows its hosting instead, from
+// deploying to ready, and lets its owner or an admin delete it from Maritime.
+// Its platform key is Rowboat's, so there is no key to replace.
 
 /** Stands in for the key in the setup steps: the real one was shown once, when it was made. */
 export const KEY_PLACEHOLDER = 'YOUR_AGENT_KEY'
@@ -44,7 +49,7 @@ export function AgentPage({ org, listing, isAdmin, onChanged }: {
     /** Reload the listing after a change to keys or the platform key. */
     onChanged: () => Promise<void>
 }) {
-    const { agent, keys, credential, hook } = listing
+    const { agent, keys, credential, hook, hosting } = listing
     const setup = setupFor(agent)
     const mine = agent.ownerId === org.memberId
     const live = keys.filter((k) => !k.revokedAt)
@@ -98,16 +103,20 @@ export function AgentPage({ org, listing, isAdmin, onChanged }: {
         <div className="flex min-w-0 flex-col gap-6">
             <DefaultsSection orgId={org.id} agent={agent} canEdit={mine} />
 
-            <Section
-                title="Setup"
-                note={
-                    secret
-                        ? 'This is the only time this key is shown. The steps below use it.'
-                        : `A key is shown only once, when it is made. Where the steps say ${KEY_PLACEHOLDER}, use that key${mine ? ', or make a new one to fill them in' : ''}.`
-                }
-            >
-                <ConnectAgent org={org} setup={setup} {...(agent.agentKind ? { agentKind: agent.agentKind } : {})} {...(agent.agentInstance ? { agentInstance: agent.agentInstance } : {})} agentId={agent.id} agentName={agent.displayName} agentKey={secret ?? KEY_PLACEHOLDER} />
-            </Section>
+            {hosting ? (
+                <HostingSection orgId={org.id} agent={agent} hosting={hosting} canDelete={mine || isAdmin} onChanged={onChanged} />
+            ) : (
+                <Section
+                    title="Setup"
+                    note={
+                        secret
+                            ? 'This is the only time this key is shown. The steps below use it.'
+                            : `A key is shown only once, when it is made. Where the steps say ${KEY_PLACEHOLDER}, use that key${mine ? ', or make a new one to fill them in' : ''}.`
+                    }
+                >
+                    <ConnectAgent org={org} setup={setup} {...(agent.agentKind ? { agentKind: agent.agentKind } : {})} {...(agent.agentInstance ? { agentInstance: agent.agentInstance } : {})} agentId={agent.id} agentName={agent.displayName} agentKey={secret ?? KEY_PLACEHOLDER} />
+                </Section>
+            )}
 
             {setup.alerts && (
                 <AlertsSection org={org} agent={agent} hook={hook} note={setup.alerts.note} canSet={mine} canClear={mine || isAdmin} onChanged={onChanged} />
@@ -140,14 +149,89 @@ export function AgentPage({ org, listing, isAdmin, onChanged }: {
                         {busy ? <Loader2 className="size-3.5 animate-spin" /> : <KeyRound className="size-3.5" />} New key
                     </Button>
                 )}
-                {credential && <CredentialRow orgId={org.id} agent={agent} credential={credential} canReplace={mine} onReplaced={onChanged} />}
-                {agent.agentInstance && (
+                {credential && !hosting && <CredentialRow orgId={org.id} agent={agent} credential={credential} canReplace={mine} onReplaced={onChanged} />}
+                {agent.agentInstance && !hosting && (
                     <p className="mt-1 text-[11px] text-muted-foreground">
                         {PLATFORMS[agent.agentConnection ?? '']?.label ?? 'Platform'} instance {agent.agentInstance}: this agent is that instance, and stays on it.
                     </p>
                 )}
             </Section>
         </div>
+    )
+}
+
+/** The hosting states that are still moving: the page re-reads the listing while in one. */
+const MOVING: ReadonlySet<string> = new Set(['creating', 'deploying', 'checking', 'deleting'])
+const HOSTING_POLL_MS = 4_000
+
+function hostingLine(hosting: spaces.AgentHosting, name: string): string {
+    switch (hosting.status) {
+        case 'creating':
+            return 'Being created on Maritime…'
+        case 'deploying':
+            return 'Deploying on Maritime… a new agent takes a minute or three.'
+        case 'checking':
+            return 'Deployed. Waiting for it to take its first command…'
+        case 'ready':
+            return `Running on Rowboat's Maritime account since ${when(hosting.updatedAt)}. It sleeps between turns and wakes when mentioned.`
+        case 'failed':
+            return `Could not be set up: ${hosting.error ?? 'Maritime gave no reason'}. Delete it and create it again.`
+        case 'deleting':
+            return 'Removing from Maritime… its keys are already revoked.'
+        case 'deleted':
+            return `Removed from Maritime on ${when(hosting.updatedAt)}. Its keys are revoked; remove ${name} from spaces like any member.`
+    }
+}
+
+/**
+ * A managed agent's hosting (2026-10-26): where Maritime stands with it, kept
+ * fresh while it moves, and Delete for its owner or an admin, on a second click.
+ */
+function HostingSection({ orgId, agent, hosting, canDelete, onChanged }: {
+    orgId: string
+    agent: spaces.Member
+    hosting: spaces.AgentHosting
+    canDelete: boolean
+    onChanged: () => Promise<void>
+}) {
+    const [busy, setBusy] = useState(false)
+    const [confirming, setConfirming] = useState(false)
+    const moving = MOVING.has(hosting.status)
+
+    useEffect(() => {
+        if (!moving) return
+        const timer = setInterval(() => void onChanged(), HOSTING_POLL_MS)
+        return () => clearInterval(timer)
+    }, [moving, onChanged])
+
+    const remove = async () => {
+        if (busy) return
+        setBusy(true)
+        try {
+            await window.ipc.invoke('spaces:deleteManagedAgent', { orgId, agentId: agent.id })
+            await onChanged()
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not delete the agent', 'error')
+        } finally {
+            setBusy(false)
+            setConfirming(false)
+        }
+    }
+
+    const gone = hosting.status === 'deleting' || hosting.status === 'deleted'
+    return (
+        <Section title="Hosting" note="Rowboat created this agent on its own Maritime account and runs each turn inside its VM, with the Spaces tools. Nothing to set up.">
+            <p role="status" className={`text-[11px] ${hosting.status === 'failed' ? 'text-destructive' : 'text-muted-foreground'}`}>
+                {moving && <Loader2 className="mr-1 inline size-3 animate-spin align-[-2px]" />}
+                {hostingLine(hosting, agent.displayName)}
+            </p>
+            {canDelete && !gone && (
+                <Button size="sm" variant="outline" className="self-start text-destructive" disabled={busy} onClick={() => (confirming ? void remove() : setConfirming(true))}>
+                    {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+                    {confirming ? 'Confirm delete' : 'Delete from Maritime'}
+                </Button>
+            )}
+        </Section>
     )
 }
 

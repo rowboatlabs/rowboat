@@ -26,6 +26,10 @@ const ROTATED = 'rbk_R0tat3dR0tat3dR0tat3dR0tat3dR0tat3dR0tat3d'
 let roster: spaces.Member[]
 const joinedSpaces = new Set<string>()
 let listing: spaces.AgentListing[]
+// Create agent (2026-10-26): the kinds this org's Harbor creates; none = no Create button.
+let managedKinds: string[] = []
+const hosting = (status: spaces.AgentHosting['status'], extra: Partial<spaces.AgentHosting> = {}): spaces.AgentHosting =>
+    ({ provider: 'maritime', status, externalId: 'agt-m1', createdBy: 'me', createdAt: '2026-10-26T10:00:00Z', updatedAt: '2026-10-26T10:00:00Z', ...extra })
 let options: Record<string, spaces.InvocationOption[]> = {}
 let defaults: Record<string, Record<string, string | boolean>> = {}
 const ENVIRONMENT: spaces.InvocationOption = { type: 'select', key: 'environment', label: 'Environment', choices: [{ id: 'env-web', label: 'web-app' }, { id: 'env-api', label: 'api' }] }
@@ -46,6 +50,18 @@ const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
                 { id: 'ef56gh78ij', name: 'coder', template: 'agent37-codex', status: 'running' },
             ] }
         case 'spaces:agent37CreateInstance': return { instance: { id: 'zz99', name: args.name, template: 'agent37-openclaw', status: 'running', kind: 'openclaw' } }
+        case 'spaces:managedAgentKinds': return { kinds: managedKinds }
+        case 'spaces:createManagedAgent': {
+            if (args.displayName === 'Over') throw new Error('Maritime: You are on the free plan, which includes 3 agents (you have 3). Upgrade to a paid plan to create more.')
+            const agent = { ...hermes, id: 'new', displayName: args.displayName, agentKind: args.kind, agentConnection: 'maritime', agentInstance: 'agt-m1' } as spaces.Member
+            // The listing shows it deploying from here on, as Harbor's would.
+            listing = [...listing, { agent, keys: [key('k9', 'new')], credential: { hint: '…rbmk', setBy: 'me', setAt: '2026-10-26T10:00:00Z' }, hosting: hosting('deploying') }]
+            return { agent, key: { ...key('k9', 'new'), secret: NEW_KEY }, hosting: hosting('deploying') }
+        }
+        case 'spaces:deleteManagedAgent': {
+            listing = listing.map((l) => (l.agent.id === args.agentId ? { ...l, keys: l.keys.map((k) => ({ ...k, revokedAt: '2026-10-26T11:00:00Z' })), hosting: hosting('deleting', { updatedAt: '2026-10-26T11:00:00Z' }) } : l))
+            return { hosting: hosting('deleting') }
+        }
         case 'spaces:setAgentCredential': return { credential: { hint: `…${args.secret!.slice(-4)}`, setBy: 'me', setAt: '2026-09-30T12:00:00Z' } }
         case 'spaces:createAgentKey': return { key: { ...key('k2', args.agentId!), secret: ROTATED } }
         case 'spaces:revokeAgentKey': return { key: key(args.keyId!, args.agentId!, { revokedAt: '2026-09-29T11:00:00Z' }) }
@@ -64,6 +80,7 @@ beforeEach(() => {
     joinedSpaces.clear()
     window.localStorage.clear()
     roster = [person('me', 'Ramnique'), person('harsh', 'Harsh')]
+    managedKinds = []
     options = {}
     defaults = {}
     listing = [{ agent: hermes, keys: [key('k1', 'hermes', { lastUsedAt: '2026-09-29T10:30:00Z' }), key('k0', 'hermes', { revokedAt: '2026-09-28T10:00:00Z' })] }]
@@ -81,6 +98,9 @@ describe('AgentsDialog', () => {
         expect(screen.getByText('Hermes · Yours · 1 key')).toBeInTheDocument()
         expect(screen.queryByText(/Key made/)).toBeNull()
         expect(screen.getByRole('button', { name: /Add agent/ })).toBeInTheDocument()
+        // This org's Harbor creates no agents (no Maritime key): nothing to create.
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:managedAgentKinds', { orgId: 'org-1' }))
+        expect(screen.queryByRole('button', { name: /Create agent/ })).toBeNull()
         expect(screen.queryByRole('radiogroup')).toBeNull()
         expect(screen.queryByText(/only time its key is shown/)).toBeNull()
     })
@@ -89,7 +109,7 @@ describe('AgentsDialog', () => {
         render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
         await screen.findByText('Hermes')
         fireEvent.click(screen.getByRole('button', { name: /Add agent/ }))
-        expect(setupsOffered()).toEqual(['Hermes', 'Replicas', 'Agent37', 'Conductor', 'Custom'])
+        expect(setupsOffered()).toEqual(['Hermes', 'Replicas', 'Agent37', 'Maritime', 'Conductor', 'Custom'])
         expect(screen.getByRole('radio', { name: 'Hermes' })).toHaveAttribute('aria-checked', 'true')
         // The name suggests the kind's own.
         expect(screen.getByLabelText('Agent name')).toHaveValue('Hermes')
@@ -413,6 +433,105 @@ describe('AgentsDialog', () => {
         expect(invoke).not.toHaveBeenCalledWith('spaces:revokeAgentKey', expect.anything())
         fireEvent.click(screen.getByRole('button', { name: 'Confirm revoke' }))
         await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:revokeAgentKey', { orgId: 'org-1', agentId: 'hermes', keyId: 'k1' }))
+    })
+
+    // Create agent (2026-10-26): Rowboat runs it on its own Maritime account; the page follows it to ready, and deletes it.
+    it('creates a Hermes agent on Rowboat’s Maritime: a kind, a name, the spaces; then its page shows it deploying, and ready once it is', async () => {
+        managedKinds = ['hermes', 'claude-code', 'codex']
+        const orgWithSpaces = { ...org, spaces: [{ id: 'eng', name: 'eng', kind: 'channel' }, { id: 'design', name: 'design', kind: 'channel' }] } as unknown as OrgWithSpaces
+        render(<AgentsDialog org={orgWithSpaces} open onOpenChange={vi.fn()} />)
+        await screen.findByText('Hermes')
+        fireEvent.click(await screen.findByRole('button', { name: /Create agent/ }))
+        await screen.findByRole('heading', { name: 'Create an agent' })
+        const kinds = screen.getByRole('radiogroup', { name: 'Agent' })
+        expect(within(kinds).getAllByRole('radio').map((r) => r.getAttribute('aria-label'))).toEqual(['Hermes', 'Claude Code', 'Codex'])
+        expect(within(kinds).getByRole('radio', { name: 'Hermes' })).toHaveAttribute('aria-checked', 'true')
+        // No key to paste: Rowboat's own account runs it.
+        expect(screen.queryByLabelText(/API key/)).toBeNull()
+        expect(screen.getByLabelText('Agent name')).toHaveValue('Hermes')
+        fireEvent.change(screen.getByLabelText('Agent name'), { target: { value: 'Scout' } })
+        fireEvent.click(within(screen.getByRole('list', { name: 'Add it to' })).getByRole('checkbox', { name: '#design' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Create agent' }))
+
+        // Straight to its page: nothing to connect.
+        await screen.findByRole('heading', { name: 'Scout' })
+        expect(invoke).toHaveBeenCalledWith('spaces:createManagedAgent', { orgId: 'org-1', displayName: 'Scout', kind: 'hermes' })
+        expect(invoke).toHaveBeenCalledWith('spaces:addMembers', { orgId: 'org-1', spaceId: 'eng', memberIds: ['new'] })
+        expect(invoke).not.toHaveBeenCalledWith('spaces:addMembers', { orgId: 'org-1', spaceId: 'design', memberIds: ['new'] })
+        expect(invoke).toHaveBeenCalledWith('spaces:openDirect', { orgId: 'org-1', memberId: 'new' })
+        expect(screen.getByRole('status')).toHaveTextContent('Deploying on Maritime')
+        // No setup steps, and Rowboat's Maritime key is not the owner's to see or replace.
+        expect(screen.queryByText('Nothing to set up on Maritime')).toBeNull()
+        expect(screen.queryByText(/Maritime key …/)).toBeNull()
+        expect(screen.queryByRole('button', { name: 'Replace' })).toBeNull()
+
+        // The page keeps asking while it moves; once Maritime has it up and taking commands, it says so.
+        listing = listing.map((l) => (l.agent.id === 'new' ? { ...l, hosting: hosting('ready', { updatedAt: '2026-10-26T10:03:00Z' }) } : l))
+        await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(/Running on Rowboat's Maritime account since .*2026\. It sleeps between turns/), { timeout: 6_000 })
+        // The list reads it like any agent of yours.
+        fireEvent.click(screen.getByRole('button', { name: 'Done' }))
+        await screen.findByText('Hermes · via Maritime · Yours · 1 key')
+    }, 10_000)
+
+    it('creates Claude Code with the person’s Anthropic key and environment variables, which travel once', async () => {
+        managedKinds = ['hermes', 'claude-code', 'codex']
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        fireEvent.click(await screen.findByRole('button', { name: /Create agent/ }))
+        fireEvent.click(screen.getByRole('radio', { name: 'Claude Code' }))
+        expect(screen.getByLabelText('Agent name')).toHaveValue('Claude Code')
+        // Not without the key it runs on.
+        expect(screen.getByRole('button', { name: 'Create agent' })).toBeDisabled()
+        fireEvent.change(screen.getByLabelText('Anthropic API key'), { target: { value: 'sk-ant-1' } })
+        expect(screen.getByRole('button', { name: 'Create agent' })).toBeEnabled()
+        fireEvent.click(screen.getByRole('button', { name: 'Environment variables' }))
+        fireEvent.change(screen.getByLabelText('Environment variables'), { target: { value: 'GH_TOKEN=ghp_x\nnot a variable' } })
+        expect(screen.getByText('Not a KEY=value line: not a variable')).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Create agent' })).toBeDisabled()
+        fireEvent.change(screen.getByLabelText('Environment variables'), { target: { value: 'GH_TOKEN=ghp_x\n\n# a comment\nREPO=rowboat' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Create agent' }))
+        await screen.findByRole('heading', { name: 'Claude Code' })
+        expect(invoke).toHaveBeenCalledWith('spaces:createManagedAgent', {
+            orgId: 'org-1',
+            displayName: 'Claude Code',
+            kind: 'claude-code',
+            anthropicApiKey: 'sk-ant-1',
+            env: [{ key: 'GH_TOKEN', value: 'ghp_x' }, { key: 'REPO', value: 'rowboat' }],
+        })
+    })
+
+    it('shows Maritime’s refusal under the form; nothing was created', async () => {
+        managedKinds = ['hermes']
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        fireEvent.click(await screen.findByRole('button', { name: /Create agent/ }))
+        // Only what this Harbor creates is offered.
+        expect(within(screen.getByRole('radiogroup', { name: 'Agent' })).getAllByRole('radio')).toHaveLength(1)
+        fireEvent.change(screen.getByLabelText('Agent name'), { target: { value: 'Over' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Create agent' }))
+        expect(await screen.findByRole('alert')).toHaveTextContent('Maritime: You are on the free plan')
+        expect(screen.getByRole('heading', { name: 'Create an agent' })).toBeInTheDocument()
+        expect(invoke).not.toHaveBeenCalledWith('spaces:addMembers', expect.anything())
+    })
+
+    it('deletes a managed agent from Maritime on a second click; an admin may, a member may not', async () => {
+        const scoutM = { ...scout, id: 'sm', displayName: 'Scout', agentKind: 'codex', agentConnection: 'maritime', agentInstance: 'agt-m1' } as spaces.Member
+        listing = [{ agent: scoutM, keys: [key('k7', 'sm')], hosting: hosting('ready') }]
+        const { unmount } = render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        // Harsh's agent: another member may look, not delete; an admin may.
+        await screen.findByText(/Codex · via Maritime · Owned by Harsh/)
+        fireEvent.click(screen.getByRole('button', { name: /Scout/ }))
+        expect(await screen.findByRole('status')).toHaveTextContent(/Running on Rowboat's Maritime account/)
+        expect(screen.queryByRole('button', { name: /Delete/ })).toBeNull()
+        unmount()
+        roster = [person('me', 'Ramnique', 'admin'), person('harsh', 'Harsh')]
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        fireEvent.click(await screen.findByRole('button', { name: /Scout/ }))
+        fireEvent.click(await screen.findByRole('button', { name: 'Delete from Maritime' }))
+        expect(invoke).not.toHaveBeenCalledWith('spaces:deleteManagedAgent', expect.anything())
+        fireEvent.click(screen.getByRole('button', { name: 'Confirm delete' }))
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:deleteManagedAgent', { orgId: 'org-1', agentId: 'sm' }))
+        expect(await screen.findByRole('status')).toHaveTextContent('Removing from Maritime')
+        expect(screen.queryByRole('button', { name: /Delete/ })).toBeNull()
+        expect(screen.getByText('No active keys.')).toBeInTheDocument()
     })
 
     it('lets an admin revoke someone else’s agent’s key, but not mint one', async () => {
