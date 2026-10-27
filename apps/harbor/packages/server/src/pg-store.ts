@@ -1121,6 +1121,10 @@ export class PgStore implements Store {
     return this.windowMessages('space_id = $1 and thread_root is null', [spaceId], opts);
   }
 
+  async listConversation(spaceId: string, opts?: MessageWindow): Promise<Message[]> {
+    return this.windowMessages('space_id = $1', [spaceId], opts);
+  }
+
   async listThread(spaceId: string, rootMessageId: string, opts?: MessageWindow): Promise<Message[]> {
     return this.windowMessages('space_id = $1 and thread_root = $2', [spaceId, rootMessageId], opts);
   }

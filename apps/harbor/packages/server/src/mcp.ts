@@ -247,8 +247,9 @@ async function dispatch(
       };
     }
     case 'read_stream': {
-      const a = args as { spaceId: string; beforeOffset?: number; afterOffset?: number; aroundOffset?: number; limit?: number };
+      const a = args as { spaceId: string; beforeOffset?: number; afterOffset?: number; aroundOffset?: number; limit?: number; includeReplies?: boolean };
       const { messages, topics, hasMore, hasMoreAfter } = await service.listStream(ctx, a.spaceId, {
+        ...(a.includeReplies ? { replies: true } : {}),
         ...(a.beforeOffset !== undefined ? { beforeOffset: a.beforeOffset } : {}),
         ...(a.afterOffset !== undefined ? { afterOffset: a.afterOffset } : {}),
         ...(a.aroundOffset !== undefined ? { aroundOffset: a.aroundOffset } : {}),

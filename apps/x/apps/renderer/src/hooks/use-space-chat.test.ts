@@ -276,3 +276,47 @@ describe('stream store — summaries (2026-10-25)', () => {
         expect(hook.result.current.messages.find((m) => m.id === 'm100')).not.toHaveProperty('summary')
     })
 })
+
+describe('stream store — the inline view (2026-10-25)', () => {
+    const reply = (offset: number, rootId: string): spaces.Message => ({ ...msg(offset), id: `r${offset}`, threadRoot: rootId })
+
+    it('reads with replies, takes live replies, and fetches a root it cannot name', async () => {
+        const view = await import('@/lib/spaces-stream-view')
+        view.setStreamView('org', 'space', 'inline')
+        try {
+            const base = invoke.getMockImplementation()!
+            invoke.mockImplementation(async (channel: string, args: { messageId?: string }) =>
+                channel === 'spaces:getMessage' ? { message: { ...msg(3), id: args.messageId, body: 'Fix the login bug' } } : base(channel, args))
+            const { hook } = await open()
+            expect(listStreamCalls().at(-1)).toMatchObject({ replies: true })
+            await act(async () => live({ type: 'message', message: reply(101, 'm3') }))
+            expect(ids(hook.result.current.messages).at(-1)).toBe('r101')
+            expect(hook.result.current.threadRoots.get('m3')?.body).toBe('Fix the login bug')
+            // A root the window holds needs no fetch.
+            await act(async () => live({ type: 'message', message: reply(102, 'm95') }))
+            expect(invoke.mock.calls.filter(([c]) => c === 'spaces:getMessage')).toHaveLength(1)
+        } finally {
+            view.setStreamView('org', 'space', 'threads')
+        }
+    })
+
+    it('the threads view leaves live replies in their threads and reads roots only', async () => {
+        const { hook } = await open()
+        expect(listStreamCalls().at(-1)).not.toHaveProperty('replies')
+        act(() => live({ type: 'message', message: reply(101, 'm95') }))
+        expect(ids(hook.result.current.messages)).toEqual(ids(range(91, 100)))
+    })
+
+    it('switching views reads the other window, and switching back refetches what it missed', async () => {
+        const view = await import('@/lib/spaces-stream-view')
+        const { hook } = await open()
+        const before = listStreamCalls().length
+        await act(async () => view.setStreamView('org', 'space', 'inline'))
+        expect(listStreamCalls().length).toBe(before + 1)
+        expect(listStreamCalls().at(-1)).toMatchObject({ replies: true })
+        await act(async () => view.setStreamView('org', 'space', 'threads'))
+        expect(listStreamCalls().length).toBe(before + 2)
+        expect(listStreamCalls().at(-1)).not.toHaveProperty('replies')
+        expect(ids(hook.result.current.messages)).toEqual(ids(range(91, 100)))
+    })
+})

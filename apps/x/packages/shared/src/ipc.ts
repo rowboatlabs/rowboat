@@ -4320,6 +4320,8 @@ export const ipcSchemas = {
       spaceId: z.string(),
       /** Page back: only roots below this offset. Absent = the latest page. */
       beforeOffset: z.number().optional(),
+      /** The inline view (2026-10-25): every reply lists with the roots. */
+      replies: z.boolean().optional(),
       afterOffset: z.number().optional(),
       aroundOffset: z.number().optional(),
       limit: z.number().optional(),

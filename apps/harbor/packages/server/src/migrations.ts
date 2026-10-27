@@ -1161,6 +1161,12 @@ export const MIGRATIONS: Migration[] = [
       `update agent_hosting set trial_ends_at = to_char((created_at::timestamptz + interval '30 days') at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') where funding = 'trial'`,
     ],
   },
+  {
+    // The inline view (2026-10-25): the stream read with replies pages every
+    // message of a space by offset, which the roots-only index cannot serve.
+    id: '050-messages-space-offset',
+    statements: [`create index if not exists messages_space_offset on messages (space_id, stream_offset)`],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

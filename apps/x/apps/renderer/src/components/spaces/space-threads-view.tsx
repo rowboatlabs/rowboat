@@ -79,7 +79,7 @@ function threadRows(topics: readonly spaces.TopicListing[], roots: readonly Chat
     const archivedRoots = new Set(topics.filter((topic) => topic.archived).map((topic) => topic.rootMessageId))
     if (filter !== 'named' && !archived) {
         for (const root of roots) {
-            if (root.pending || root.failed || root.replyCount === 0 || archivedRoots.has(root.id)) continue
+            if (root.pending || root.failed || root.threadRoot !== undefined || root.replyCount === 0 || archivedRoots.has(root.id)) continue
             const row = rows.get(root.id)
             if (row) row.root = root
             else rows.set(root.id, { rootMessageId: root.id, root, activityAt: root.lastReplyAt ?? root.postedAt })
@@ -90,7 +90,7 @@ function threadRows(topics: readonly spaces.TopicListing[], roots: readonly Chat
         .sort((a, b) => b.activityAt.localeCompare(a.activityAt) || a.rootMessageId.localeCompare(b.rootMessageId))
 }
 
-export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMemberId, topics, roots, hasMore, loadingOlder, onLoadOlder, loaded, memberNames, spaceNames, presence, onOpen }: {
+export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMemberId, topics, roots, hasMore, loadingOlder, onLoadOlder, loaded, memberNames, spaceNames, presence, inline = false, onOpen }: {
     orgId: string
     orgAddress: string
     spaceId: string
@@ -106,6 +106,8 @@ export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMembe
     memberNames: ReadonlyMap<string, string>
     spaceNames: ReadonlyMap<string, string>
     presence: SpacePresence
+    /** The space shows replies inline (2026-10-25): a row lands on its first message in the stream and opens the conversation beside it. */
+    inline?: boolean
     onOpen: (rootMessageId: string) => void
 }) {
     const { writable } = useSpaceAccess()
@@ -220,7 +222,7 @@ export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMembe
                         </div>
                     </ContextMenuTrigger>
                     <ContextMenuContent>
-                        <ContextMenuItem onSelect={() => onOpen(rootMessageId)}><Icon className="mr-2 size-3.5" />Open thread</ContextMenuItem>
+                        <ContextMenuItem onSelect={() => onOpen(rootMessageId)}><Icon className="mr-2 size-3.5" />{inline ? 'Open conversation' : 'Open thread'}</ContextMenuItem>
                         <ContextMenuItem onSelect={copyLink}><LinkIcon className="mr-2 size-3.5" />Copy link</ContextMenuItem>
                     </ContextMenuContent>
                 </ContextMenu></li>

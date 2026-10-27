@@ -77,6 +77,16 @@ describe('conversation message interactions', () => {
         expect(screen.getByText(message.body)).toBeInTheDocument()
     })
 
+    it('quotes what an inline reply answers, and the quote goes where the caller says (2026-10-25)', () => {
+        const onClick = vi.fn()
+        const reply = { ...message, id: 'reply-1', threadRoot: 'root-1' } as spaces.Message
+        render(<MessageRow message={reply} memberNames={memberNames} continuation={false} inline inThread={{ author: 'Sam', label: 'Fix the login bug', onClick }} onReplyInThread={vi.fn()} />)
+        fireEvent.click(screen.getByRole('button', { name: 'Sam Fix the login bug' }))
+        expect(onClick).toHaveBeenCalledOnce()
+        // Inline there is no thread: the action reads Reply, never Open thread.
+        expect(screen.getByTitle('Reply')).toBeInTheDocument()
+    })
+
     it('opens the existing root from the reply summary without making body clicks navigate', () => {
         const onOpenThread = vi.fn()
         render(<MessageRow message={message} memberNames={memberNames} continuation={false} onOpenThread={onOpenThread}

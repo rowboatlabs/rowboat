@@ -741,12 +741,18 @@ export class SpacesClient {
     return q.size > 0 ? `?${q.toString()}` : '';
   }
 
-  /** The stream (roots only), windowed newest-first: without beforeOffset the LATEST page — never the full history. */
+  /**
+   * The stream, windowed newest-first: without beforeOffset the LATEST page —
+   * never the full history. Roots only, unless `replies` (the inline view,
+   * 2026-10-25) lists every reply too.
+   */
   async listStream(
     spaceId: string,
-    opts?: MessageWindowOpts,
+    opts?: MessageWindowOpts & { replies?: boolean },
   ): Promise<{ messages: Message[]; topics: Topic[]; hasMore: boolean; hasMoreAfter?: boolean; readOffset: number; events: StreamEvent[] }> {
-    return this.request('GET', this.space(spaceId, `/stream${this.windowQuery(opts)}`), routes.listStream.response);
+    const query = this.windowQuery(opts);
+    const replies = opts?.replies ? `${query ? '&' : '?'}replies=true` : '';
+    return this.request('GET', this.space(spaceId, `/stream${query}${replies}`), routes.listStream.response);
   }
 
   /** One flat thread: root + topic row (null = plain thread) + windowed replies. A reply id resolves to its root. */
