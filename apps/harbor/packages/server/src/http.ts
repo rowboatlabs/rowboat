@@ -437,6 +437,7 @@ export function buildHttpApp(deps: {
         kind: input.kind,
         ...(input.anthropicApiKey !== undefined ? { anthropicApiKey: input.anthropicApiKey } : {}),
         ...(input.env !== undefined ? { env: input.env } : {}),
+        personal: input.personal,
       }),
     );
   });
@@ -560,6 +561,12 @@ export function buildHttpApp(deps: {
     const { agentId } = parseWith(routes.renameAgent.params, c.req.param());
     const input = await body(c, routes.renameAgent.request);
     return reply(c, routes.renameAgent.response, { agent: await service.renameAgent(actor(c), agentId, input) });
+  });
+
+  app.put(routes.setAgentPersonal.path, async (c) => {
+    const { agentId } = parseWith(routes.setAgentPersonal.params, c.req.param());
+    const input = await body(c, routes.setAgentPersonal.request);
+    return reply(c, routes.setAgentPersonal.response, { agent: await service.setAgentPersonal(actor(c), agentId, input) });
   });
 
   app.put(routes.setAgentOptionDefaults.path, async (c) => {

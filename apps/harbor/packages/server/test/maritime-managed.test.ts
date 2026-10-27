@@ -141,6 +141,13 @@ describe('managed Maritime agents', () => {
     expect(listed?.credential?.hint).toBeDefined(); // the deployment's key, sealed for this agent
   });
 
+  it('creates a personal agent when asked, as Add does; a channel one otherwise', async () => {
+    const r = await org.as('dev-ramnique').post('/v1/agents/managed', { displayName: 'Ramnique’s Hermes', kind: 'hermes', personal: true });
+    expect(r.status).toBe(200);
+    expect(r.body.agent).toMatchObject({ ownerId: 'ramnique', personal: true });
+    expect(await org.harbor.store.getMember(r.body.agent.id)).toMatchObject({ personal: true });
+  });
+
   it('follows the deploy to ready and then runs a turn on it', async () => {
     const r = await org.as('dev-ramnique').post('/v1/agents/managed', { displayName: 'Scout Two', kind: 'hermes' });
     const agent = r.body.agent as Member;
