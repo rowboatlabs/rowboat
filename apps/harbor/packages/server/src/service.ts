@@ -1,6 +1,7 @@
 import type { z } from 'zod';
 import type { BlobStore } from './blobs.js';
 import { Agents, type AgentConnectorHooks } from './core/agents.js';
+import { Hosting, type HostingHooks, type HostingProvider } from './core/hosting.js';
 import { Assets } from './core/assets.js';
 import { Images } from './core/images.js';
 import { Feed } from './core/feed.js';
@@ -32,6 +33,8 @@ import type {
   UpdateProfile,
   AgentKey,
   AgentCredential,
+  AgentHosting,
+  HostingPowerAction, LlmProvider,
   AgentHook,
   AgentKeySecret,
   AgentListing,
@@ -80,6 +83,7 @@ export class HarborService {
   private readonly feed: Feed;
   private readonly readState: ReadState;
   private readonly agents: Agents;
+  private readonly hosting: Hosting;
   private readonly invocations: Invocations;
 
   constructor(
@@ -99,6 +103,7 @@ export class HarborService {
     this.feed = new Feed(this.k, this.assets, notifier, this.invocations);
     this.readState = new ReadState(this.k, this.spaces, this.feed);
     this.agents = new Agents(this.k, this.spaces);
+    this.hosting = new Hosting(this.k, this.spaces, this.agents);
   }
 
   /** The kernel's clock, for code outside the core that stamps rows (connectors/host.ts). */
@@ -109,6 +114,18 @@ export class HarborService {
   /** The connector host, for creating agents Harbor reaches through a platform (runtime.ts). */
   attachConnectors(hooks: AgentConnectorHooks): void {
     this.agents.attachConnectors(hooks);
+  }
+
+  /** Managed hosting (spec §8 Maritime, 2026-10-26): the platform Rowboat's own account creates agents on, when the deployment has its key (runtime.ts). */
+  attachHosting(provider: HostingProvider, hooks: HostingHooks, options: { trialMs?: number } = {}): void {
+    this.hosting.attach(provider, hooks, options);
+  }
+  /** The hosting worker: follows each managed agent from creation to ready, and through deletion. */
+  startHosting(tickMs?: number): void {
+    this.hosting.start(tickMs);
+  }
+  stopHosting(): Promise<void> {
+    return this.hosting.stop();
   }
 
   /** Jev, the agent Harbor itself is (spec §8 Jev, 2026-10-07): created once per org, when the deployment has its key (runtime.ts). */
@@ -164,6 +181,9 @@ export class HarborService {
   renameAgent(ctx: ActorCtx, agentId: string, input: { displayName: string }): Promise<Member> {
     return this.agents.rename(ctx, agentId, input);
   }
+  setAgentPersonal(ctx: ActorCtx, agentId: string, input: { personal: boolean }): Promise<Member> {
+    return this.agents.setPersonal(ctx, agentId, input);
+  }
 
   setAgentOptionDefaults(ctx: ActorCtx, agentId: string, defaults: InvocationOptionValues): Promise<InvocationOptionValues> {
     return this.agents.setOptionDefaults(ctx, agentId, defaults);
@@ -179,12 +199,104 @@ export class HarborService {
   }
 
   // --- agents and their keys (core/agents.ts) --------------------------------------
-  listAgents(ctx: ActorCtx): Promise<AgentListing[]> {
-    return this.agents.list(ctx);
+  async listAgents(ctx: ActorCtx): Promise<AgentListing[]> {
+    const listing = await this.agents.list(ctx);
+    const hosting = await this.hosting.listFor(listing.map((l) => l.agent.id));
+    return listing.map((l) => (hosting.has(l.agent.id) ? { ...l, hosting: hosting.get(l.agent.id)! } : l));
+  }
+  /** The kinds of agent this Harbor creates on Rowboat's own platform account: none without the deployment's key. */
+  managedAgentKinds(ctx: ActorCtx): Promise<string[]> {
+    return this.hosting.kinds(ctx);
+  }
+  /** Create a managed agent on the platform Rowboat's account runs (spec §8 Maritime, 2026-10-26). */
+  createManagedAgent(
+    ctx: ActorCtx,
+    input: { displayName: string; kind: string; anthropicApiKey?: string; env?: Array<{ key: string; value: string; secret?: boolean }>; personal?: boolean },
+  ): Promise<{ agent: Member; key: AgentKeySecret; hosting: AgentHosting }> {
+    return this.hosting.createManaged(ctx, input);
+  }
+  /** Delete a managed agent's hosting: the owner or an admin; its keys go now, the platform's resources in the background. */
+  deleteManagedAgent(ctx: ActorCtx, agentId: string): Promise<AgentHosting> {
+    return this.hosting.deleteManaged(ctx, agentId);
+  }
+  /** Managing a managed agent's VM (the management area, 2026-10-27): the owner or an admin, through the deployment's key. */
+  getHosting(ctx: ActorCtx, agentId: string) {
+    return this.hosting.get(ctx, agentId);
+  }
+  /** The owner's own provider key for a managed agent, the end of its trial (2026-10-27). */
+  setHostingLlm(ctx: ActorCtx, agentId: string, input: { provider: LlmProvider; apiKey: string; model?: string }) {
+    return this.hosting.setLlm(ctx, agentId, input);
+  }
+  /** For a managed agent's connector before a turn: on Rowboat's trial credit, and whether that is over. */
+  hostingFundingOf(agentId: string) {
+    return this.hosting.fundingOf(agentId);
+  }
+  closeHostingTrial(agentId: string, reason: 'exhausted' | 'expired') {
+    return this.hosting.closeTrial(agentId, reason);
+  }
+  setHostingEnv(ctx: ActorCtx, agentId: string, key: string, value: string, secret: boolean) {
+    return this.hosting.setEnv(ctx, agentId, key, value, secret);
+  }
+  deleteHostingEnv(ctx: ActorCtx, agentId: string, key: string) {
+    return this.hosting.deleteEnv(ctx, agentId, key);
+  }
+  hostingPower(ctx: ActorCtx, agentId: string, action: HostingPowerAction) {
+    return this.hosting.power(ctx, agentId, action);
+  }
+  runHostingCommand(ctx: ActorCtx, agentId: string, command: string, timeoutSeconds?: number) {
+    return this.hosting.run(ctx, agentId, command, timeoutSeconds);
+  }
+  getHostingCommand(ctx: ActorCtx, agentId: string, executionId: string) {
+    return this.hosting.execution(ctx, agentId, executionId);
+  }
+  cancelHostingCommand(ctx: ActorCtx, agentId: string, executionId: string) {
+    return this.hosting.cancel(ctx, agentId, executionId);
+  }
+  getHostingLogs(ctx: ActorCtx, agentId: string, opts: { limit?: number; before?: string; level?: string }) {
+    return this.hosting.logs(ctx, agentId, opts);
+  }
+  listHostingFiles(ctx: ActorCtx, agentId: string, path: string) {
+    return this.hosting.files(ctx, agentId, path);
+  }
+  readHostingFile(ctx: ActorCtx, agentId: string, path: string) {
+    return this.hosting.readFile(ctx, agentId, path);
+  }
+  writeHostingFile(ctx: ActorCtx, agentId: string, path: string, content: string) {
+    return this.hosting.writeFile(ctx, agentId, path, content);
+  }
+  makeHostingDir(ctx: ActorCtx, agentId: string, path: string) {
+    return this.hosting.mkdir(ctx, agentId, path);
+  }
+  moveHostingFile(ctx: ActorCtx, agentId: string, from: string, to: string) {
+    return this.hosting.moveFile(ctx, agentId, from, to);
+  }
+  deleteHostingFile(ctx: ActorCtx, agentId: string, path: string) {
+    return this.hosting.deleteFile(ctx, agentId, path);
+  }
+  listHostingSkills(ctx: ActorCtx, agentId: string, q?: string) {
+    return this.hosting.skills(ctx, agentId, q);
+  }
+  installHostingSkill(ctx: ActorCtx, agentId: string, name: string) {
+    return this.hosting.installSkill(ctx, agentId, name);
+  }
+  removeHostingSkill(ctx: ActorCtx, agentId: string, name: string) {
+    return this.hosting.removeSkill(ctx, agentId, name);
+  }
+  listHostingTriggers(ctx: ActorCtx, agentId: string) {
+    return this.hosting.triggers(ctx, agentId);
+  }
+  createHostingTrigger(ctx: ActorCtx, agentId: string, input: { type: string; config: Record<string, unknown>; enabled?: boolean }) {
+    return this.hosting.createTrigger(ctx, agentId, input);
+  }
+  updateHostingTrigger(ctx: ActorCtx, agentId: string, triggerId: string, input: { config?: Record<string, unknown>; enabled?: boolean }) {
+    return this.hosting.updateTrigger(ctx, agentId, triggerId, input);
+  }
+  deleteHostingTrigger(ctx: ActorCtx, agentId: string, triggerId: string) {
+    return this.hosting.deleteTrigger(ctx, agentId, triggerId);
   }
   addAgent(
     ctx: ActorCtx,
-    input: { displayName: string; kind: string; connection: string; credential?: string; instance?: string },
+    input: { displayName: string; kind: string; connection: string; credential?: string; instance?: string; personal?: boolean },
   ): Promise<{ agent: Member; key: AgentKeySecret }> {
     return this.agents.add(ctx, input);
   }

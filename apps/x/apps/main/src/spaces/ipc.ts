@@ -13,6 +13,7 @@ import { startSpaceNotifications } from '@x/core/dist/spaces/notify.js';
 import { resolveResponseSession, startSpaceResponseIndex } from '@x/core/dist/spaces/response-index.js';
 import { SpaceSubscriptions, harborChannelHandlers, type HarborChannel } from '@x/spaces-client';
 import { createAgent37Instance, listAgent37Instances } from '@x/core/dist/spaces/agent37.js';
+import { listMaritimeAgents } from '@x/core/dist/spaces/maritime.js';
 import { fetchLinkPreview } from './link-preview.js';
 
 type IPCChannels = ipc.IPCChannels;
@@ -27,7 +28,7 @@ type InvokeHandler<K extends keyof IPCChannels> = (
 type SpacesHostChannel =
   | 'spaces:listOrgs' | 'spaces:addOrg' | 'spaces:resolveInviteLink' | 'spaces:joinInvite' | 'spaces:signInOrg'
   | 'spaces:accountState' | 'spaces:signInRowboat' | 'spaces:addOrgByAddress' | 'spaces:createOrg' | 'spaces:apexInfo'
-  | 'spaces:removeOrg' | 'spaces:agent37Instances' | 'spaces:agent37CreateInstance' | 'spaces:uploadBlob'
+  | 'spaces:removeOrg' | 'spaces:agent37Instances' | 'spaces:agent37CreateInstance' | 'spaces:maritimeAgents' | 'spaces:uploadBlob'
   | 'spaces:saveBlob' | 'spaces:saveAsset' | 'spaces:saveImageUrl' | 'spaces:linkPreview' | 'spaces:invokeRowboat'
   | 'spaces:topicSession' | 'spaces:responseSession' | 'spaces:stopRowboat' | 'spaces:schedule'
   | 'spaces:listScheduled' | 'spaces:cancelScheduled' | 'spaces:bounceLive';
@@ -165,6 +166,7 @@ export const spacesIpcHandlers: SpacesHandlers = {
 
   'spaces:agent37Instances': async (_event, { key }) => ({ instances: await listAgent37Instances(key) }),
   'spaces:agent37CreateInstance': async (_event, { key, ...input }) => ({ instance: await createAgent37Instance(key, input) }),
+  'spaces:maritimeAgents': async (_event, { key }) => ({ agents: await listMaritimeAgents(key) }),
 
   // Upload phase 1. Pastes arrive as bytes; drag-drop / picker sends the
   // absolute path (via electronUtils.getPathForFile) so big files never cross

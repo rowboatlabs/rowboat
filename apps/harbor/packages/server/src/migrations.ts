@@ -1084,6 +1084,83 @@ export const MIGRATIONS: Migration[] = [
       )`,
     ],
   },
+  {
+    // A message's summary (2026-10-25): the author's short version of a long
+    // body, shown first with "Show more". Content, so deletion blanks it.
+    id: '045-message-summary',
+    statements: [`alter table messages add column if not exists summary text`],
+  },
+  {
+    // Who has replied, on roots (2026-10-25, "managing sessions" in Main):
+    // the Threads view shows and filters by a thread's participants. Same
+    // recompute as reply_count; the backfill is refreshReplyStats over all.
+    id: '046-reply-authors',
+    statements: [
+      `alter table messages add column if not exists reply_authors jsonb not null default '[]'::jsonb`,
+      `update messages r set reply_authors = s.authors
+        from (select thread_root, jsonb_agg(author_member_id order by first_offset) as authors
+              from (select thread_root, author_member_id, min(stream_offset) as first_offset
+                    from messages where thread_root is not null and deleted_at is null
+                    group by thread_root, author_member_id) a
+              group by thread_root) s
+        where r.id = s.thread_root`,
+    ],
+  },
+  {
+    // Managed agents (spec §8 Maritime, 2026-10-26): the hosting Rowboat's own account runs for an agent.
+    // One row per managed agent, written before the platform is asked (so an interrupted creation is found),
+    // bound to its member once the member exists. The platform's agent id and the end-user key Rowboat named it by.
+    id: '047-agent-hosting',
+    statements: [
+      `create table agent_hosting (
+        org_id text not null,
+        id text not null,
+        agent_id text,
+        provider text not null,
+        status text not null,
+        external_id text,
+        external_user_id text not null,
+        kind text not null,
+        display_name text not null,
+        error text,
+        created_by text not null,
+        created_at text not null,
+        updated_at text not null,
+        primary key (org_id, id)
+      )`,
+      `create unique index agent_hosting_agent on agent_hosting (org_id, agent_id) where agent_id is not null`,
+      `create index agent_hosting_status on agent_hosting (org_id, status)`,
+    ],
+  },
+  {
+    // Personal agents (spec §4 Agent members, 2026-10-26): only the owner may
+    // invoke one, add it to a space or DM it. Written once at creation, like
+    // the kind and connection; every existing agent is a channel agent.
+    id: '048-agent-personal',
+    statements: [
+      `alter table members add column if not exists personal boolean not null default false`,
+      `alter table members add constraint members_personal_check check (kind = 'agent' or not personal)`,
+    ],
+  },
+  {
+    // Trial credit, then the owner's key (spec §8 Maritime, 2026-10-27): who pays for a managed agent's model calls.
+    // Rows so far: Claude Code already runs on its owner's Anthropic key; the rest are on Rowboat's credit, with a
+    // trial that ends thirty days after creation unless something closes it first.
+    id: '049-agent-hosting-funding',
+    statements: [
+      `alter table agent_hosting add column funding text not null default 'trial'`,
+      `alter table agent_hosting add column trial_ends_at text`,
+      `alter table agent_hosting add column trial_closed_at text`,
+      `alter table agent_hosting add column trial_closed_reason text`,
+      `alter table agent_hosting add column llm_provider text`,
+      `alter table agent_hosting add column llm_key_hint text`,
+      `alter table agent_hosting add column llm_model text`,
+      `alter table agent_hosting add column llm_set_by text`,
+      `alter table agent_hosting add column llm_set_at text`,
+      `update agent_hosting set funding = 'own', llm_provider = 'anthropic', llm_key_hint = '', llm_set_by = created_by, llm_set_at = created_at where kind = 'claude-code'`,
+      `update agent_hosting set trial_ends_at = to_char((created_at::timestamptz + interval '30 days') at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') where funding = 'trial'`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

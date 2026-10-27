@@ -1,9 +1,10 @@
-import { useMemo, useRef, useState, type ReactNode } from 'react'
-import { Bot, Hash, KeyRound, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Bot, Hash, KeyRound, MoreHorizontal, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Input } from '@/components/ui/input'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { AccessBadge } from '@/components/spaces/agent-access'
 import { AgentsDialog, type AgentsDialogStart } from '@/components/spaces/agents-dialog'
 import { MemberAvatar } from '@/components/spaces/atoms'
 import { RemoveFromOrgDialog } from '@/components/spaces/member-admin'
@@ -54,6 +55,13 @@ export function AgentsView({ org }: { org: OrgWithSpaces }) {
     const [filter, setFilter] = useState<Filter>('all')
     const [dialog, setDialog] = useState<AgentsDialogStart | null>(null)
     const [removing, setRemoving] = useState<spaces.Member | null>(null)
+    // Create agent (2026-10-26): offered when the org's Harbor creates agents on Rowboat's own Maritime account.
+    const [creates, setCreates] = useState(false)
+    useEffect(() => {
+        let gone = false
+        window.ipc.invoke('spaces:managedAgentKinds', { orgId: org.id }).then(({ kinds }) => { if (!gone) setCreates(kinds.length > 0) }).catch(() => { if (!gone) setCreates(false) })
+        return () => { gone = true }
+    }, [org.id])
 
     const isAdmin = roster.find((m) => m.id === org.memberId)?.role === 'admin'
     const names = useMemo(() => new Map(roster.map((m) => [m.id, m.displayName])), [roster])
@@ -112,7 +120,7 @@ export function AgentsView({ org }: { org: OrgWithSpaces }) {
 
                 <Group title="Yours" count={mine.length}>
                     {mine.map(card)}
-                    <NewAgentCard onAdd={(bot) => setDialog({ name: 'add', bot })} />
+                    <NewAgentCard creates={creates} onCreate={() => setDialog({ name: 'create' })} onAdd={(bot) => setDialog({ name: 'add', bot })} />
                 </Group>
 
                 {filter === 'all' && others.length > 0 && (
@@ -252,8 +260,11 @@ function AgentCard({ orgId, agent, owner, spaceNames, isAdmin, onOpenSettings, o
                 // The whole card opens the agent; the menu and rename sit above it.
                 <button type="button" aria-label={`Open ${shownName}`} onClick={onOpenSettings} className="absolute inset-0 rounded-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring" />
             )}
-            <div className="flex items-start justify-between">
+            <div className="flex items-start justify-between gap-2">
                 <AgentFace agent={{ ...agent, displayName: shownName }} />
+                <div className="flex items-center gap-1">
+                {/* Channel or personal, on every agent with an owner (2026-10-27). */}
+                <AccessBadge agent={agent} {...(typeof owner === 'object' ? { ownerName: owner.name } : {})} />
                 {(yours || canOpen || canRemove) && (
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -288,6 +299,7 @@ function AgentCard({ orgId, agent, owner, spaceNames, isAdmin, onOpenSettings, o
                         </DropdownMenuContent>
                     </DropdownMenu>
                 )}
+                </div>
             </div>
 
             <div className="mt-5 min-w-0">
@@ -308,7 +320,9 @@ function AgentCard({ orgId, agent, owner, spaceNames, isAdmin, onOpenSettings, o
                 ) : (
                     <div className="truncate text-sm font-medium" title={shownName}>{shownName}</div>
                 )}
-                <div className="mt-0.5 truncate text-xs text-[var(--rowboat-ink-secondary)]">{agentLabel(agent.agentKind, agent.agentConnection)}</div>
+                <div className="mt-0.5 truncate text-xs text-[var(--rowboat-ink-secondary)]">
+                    {agentLabel(agent.agentKind, agent.agentConnection)}
+                </div>
             </div>
 
             <div className="mt-auto flex items-center justify-between gap-2 pt-4 text-xs text-muted-foreground">
@@ -347,26 +361,36 @@ function SpacesBadge({ names }: { names: string[] }) {
     )
 }
 
-function NewAgentCard({ onAdd }: { onAdd: (bot: boolean) => void }) {
+/**
+ * The card that adds one. When the org's Harbor creates agents (Rowboat's own
+ * Maritime account), the card's main action creates one and a second button
+ * adds one you run (both in plain sight, 2026-10-26); otherwise New agent, as
+ * before. A bot is the small print either way.
+ */
+function NewAgentCard({ creates, onCreate, onAdd }: { creates: boolean; onCreate: () => void; onAdd: (bot: boolean) => void }) {
+    const small = 'text-[11px] text-muted-foreground/80 transition-colors hover:text-foreground'
     return (
         <li className="flex min-h-[188px] flex-col rounded-xl border border-dashed border-black/20 transition-colors hover:border-black/35 hover:bg-[#fafafa] [.dark_&]:border-border [.dark_&]:hover:border-foreground/25 [.dark_&]:hover:bg-transparent">
             <button
                 type="button"
-                onClick={() => onAdd(false)}
+                onClick={() => (creates ? onCreate() : onAdd(false))}
                 className="flex flex-1 flex-col items-center justify-center gap-2 rounded-t-xl text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
             >
                 <span className="flex size-9 items-center justify-center rounded-full border border-black/15 bg-[#f5f5f5] [.dark_&]:border-border [.dark_&]:bg-transparent">
-                    <Plus className="size-4" />
+                    {creates ? <Sparkles className="size-4" /> : <Plus className="size-4" />}
                 </span>
-                New agent
+                {creates ? 'Create agent' : 'New agent'}
             </button>
-            <button
-                type="button"
-                onClick={() => onAdd(true)}
-                className="pb-3 text-[11px] text-muted-foreground/80 transition-colors hover:text-foreground"
-            >
-                or add a bot
-            </button>
+            {creates && (
+                <button
+                    type="button"
+                    onClick={() => onAdd(false)}
+                    className="mx-3 flex items-center justify-center gap-1.5 rounded-md border border-black/15 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-[#f0f0f0] hover:text-foreground [.dark_&]:border-border [.dark_&]:hover:bg-accent"
+                >
+                    <Plus className="size-3" /> Add an agent you run
+                </button>
+            )}
+            <button type="button" onClick={() => onAdd(true)} className={cn(small, 'py-2.5')}>or add a bot</button>
         </li>
     )
 }

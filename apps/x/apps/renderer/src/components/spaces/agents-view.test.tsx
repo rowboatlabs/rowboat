@@ -16,12 +16,15 @@ const agent = (id: string, displayName: string, ownerId: string | undefined, age
 
 let roster: spaces.Member[]
 let spaceMembers: Record<string, spaces.Member[]>
+// Create agent (2026-10-26): the kinds this org's Harbor creates on Rowboat's own account; none = the card reads New agent.
+let managedKinds: string[] = []
 const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
     switch (channel) {
         case 'spaces:listOrgMembers': return { members: roster }
         case 'spaces:listMembers': return { members: spaceMembers[args.spaceId!] ?? [] }
         case 'spaces:listAgents': return { agents: roster.filter((m) => m.kind === 'agent' && m.ownerId === 'me').map((a) => ({ agent: a, keys: [] })) }
         case 'spaces:getAgentCapabilities': return { capabilities: { stop: false, options: [] }, defaults: {} }
+        case 'spaces:managedAgentKinds': return { kinds: managedKinds }
         case 'spaces:renameAgent':
             roster = roster.map((m) => (m.id === args.agentId ? { ...m, displayName: args.displayName! } : m))
             return { agent: roster.find((m) => m.id === args.agentId) }
@@ -48,6 +51,7 @@ const gone = agent('gone', 'Gone', 'harsh', 'custom', 'contract', { removedAt: '
 
 beforeEach(() => {
     invoke.mockClear()
+    managedKinds = []
     window.localStorage.clear()
     roster = [person('me', 'Ramnique'), person('harsh', 'Harsh'), hermes, scout, ro, gone]
     spaceMembers = { S1: [person('me', 'Ramnique'), hermes, scout], S2: [hermes] }
@@ -71,6 +75,17 @@ describe('AgentsView', () => {
         expect(screen.getByText('Claude Code · via Replicas')).toBeInTheDocument()
         // A removed agent is gone from the page.
         expect(screen.queryByText('Gone')).toBeNull()
+    })
+
+    it('marks each card with a people or lock icon, naming Channel or Personal on hover and saying whose a personal one is; a built-in agent has neither (2026-10-27)', async () => {
+        roster = roster.map((m) => (m.id === 'scout' ? { ...m, personal: true } : m))
+        show()
+        await screen.findByText('Scout')
+        const card = (name: string) => screen.getByTitle(name).closest('li')!
+        // Icons only: the word is on hover (and in the accessible name).
+        expect(within(card('Herald')).getByRole('img', { name: /^Channel: Anyone who shares a space with it/ })).toHaveTextContent('')
+        expect(within(card('Scout')).getByRole('img', { name: /^Personal: Only Harsh can use it/ })).toHaveTextContent('')
+        expect(within(card('Ro')).queryByLabelText(/^(Channel|Personal):/)).toBeNull()
     })
 
     it('shows how many of your spaces each agent is in', async () => {
@@ -125,5 +140,19 @@ describe('AgentsView', () => {
         expect(await screen.findByRole('radiogroup', { name: 'How it connects' })).toBeInTheDocument()
         fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
         await waitFor(() => expect(screen.queryByRole('radiogroup', { name: 'How it connects' })).toBeNull())
+    })
+
+    it('when the org’s Harbor creates agents, the card creates one, and adding one you run is its second button', async () => {
+        managedKinds = ['hermes', 'claude-code', 'codex']
+        show()
+        await screen.findByText('Herald')
+        fireEvent.click(await screen.findByRole('button', { name: /Create agent/ }))
+        const kinds = await screen.findByRole('radiogroup', { name: 'Agent' })
+        expect(within(kinds).getAllByRole('radio').map((r) => r.getAttribute('aria-label'))).toEqual(['Hermes', 'Claude Code', 'Codex'])
+        // Back closes the dialog: it was opened past the list.
+        fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+        await waitFor(() => expect(screen.queryByRole('radiogroup', { name: 'Agent' })).toBeNull())
+        fireEvent.click(screen.getByRole('button', { name: 'Add an agent you run' }))
+        expect(await screen.findByRole('radiogroup', { name: 'How it connects' })).toBeInTheDocument()
     })
 })

@@ -76,6 +76,31 @@ export const PLATFORMS: Record<string, { label: string; logo?: Logo }> = {
     attio: { label: 'Attio' },
     conductor: { label: 'Conductor', logo: { light: conductorLogo, dark: conductorLogoDark } },
     agent37: { label: 'Agent37', logo: { light: agent37Logo, dark: agent37LogoDark } },
+    // No official mark yet (2026-10-26): the generic one.
+    maritime: { label: 'Maritime' },
+}
+
+/**
+ * Managed agents (2026-10-26): the kinds Rowboat creates on its own Maritime account,
+ * one line each for the Create screen. The order is the Create screen's; the org's
+ * Harbor says which of them it offers (none without Rowboat's Maritime key).
+ */
+export const MANAGED_KINDS: ReadonlyArray<{ kind: string; description: string }> = [
+    { kind: 'hermes', description: 'A general agent with tools, memory and skills. Starts on Rowboat’s trial credit; add your own key on its page.' },
+    { kind: 'claude-code', description: 'Anthropic’s coding agent, on your Anthropic API key' },
+    { kind: 'codex', description: 'OpenAI’s coding agent. Starts on Rowboat’s trial credit; add your OpenAI key on its page.' },
+]
+
+/**
+ * The providers a managed kind runs on with its owner's key (2026-10-27), the
+ * first offered first. Harbor's `LLM_PROVIDERS` is the rule; this is what the
+ * page offers, with how each is named and what its keys look like.
+ */
+export const LLM_PROVIDERS_FOR_KIND: Readonly<Record<string, readonly ('openai' | 'anthropic' | 'openrouter')[]>> = { hermes: ['openai', 'anthropic', 'openrouter'], codex: ['openai'], 'claude-code': ['anthropic'] }
+export const LLM_PROVIDER_INFO: Readonly<Record<'openai' | 'anthropic' | 'openrouter', { label: string; keyPlaceholder: string; modelPlaceholder: string }>> = {
+    openai: { label: 'OpenAI', keyPlaceholder: 'sk-…', modelPlaceholder: 'gpt-5.4' },
+    anthropic: { label: 'Anthropic', keyPlaceholder: 'sk-ant-…', modelPlaceholder: 'claude-sonnet-4-5' },
+    openrouter: { label: 'OpenRouter', keyPlaceholder: 'sk-or-…', modelPlaceholder: 'anthropic/claude-sonnet-4-5' },
 }
 
 /** A platform instance as people see it: its name, then its id. */
@@ -98,6 +123,12 @@ export function agentLabel(kind: string | undefined, connection: string | undefi
     // A bot is its own platform: "PostHog bot", not "PostHog · via PostHog".
     if (isBot(kind)) return `${what} bot`
     return platform ? `${what} · via ${platform.label}` : what
+}
+
+/** "Gagan's Claude Code": a personal agent's suggested name, from its owner's first name (2026-10-26). */
+export function personalAgentName(ownerName: string | undefined, base: string): string {
+    const first = ownerName?.trim().split(/\s+/)[0]
+    return first ? `${first}'s ${base}` : base
 }
 
 /** Something to paste, with Copy. `secret` values read as their ends on screen and copy whole. */
@@ -483,6 +514,31 @@ function agent37Setup({ orgUrl, agentKey, kind, instance }: SetupContext): Setup
     ]
 }
 
+// Maritime (2026-10-26): Harbor runs the connector and drives the runtime's own CLI through
+// Maritime's exec API, so connecting is the Maritime key and which of its agents this one is.
+// Nothing is set up on the agent's side: the Spaces MCP server, on a key Harbor keeps for the
+// agent, is passed to every turn, and Hermes's config gets it back whenever Maritime's boot
+// has wiped it (the plan's section 11).
+function maritimeSetup({ kind }: SetupContext): SetupRoute[] {
+    const what = kindInfo(kind ?? 'hermes').label
+    return [
+        {
+            id: 'maritime',
+            label: 'Maritime',
+            steps: [
+                {
+                    title: 'Nothing to set up on Maritime',
+                    note: `Rowboat runs ${what} inside the agent's VM for each turn, with the Spaces tools and the thread's session, and wakes the VM when it sleeps. The agent's model access stays as it is on Maritime: the metered proxy, or the key set in its environment variables.`,
+                },
+                {
+                    title: 'Keep the key scoped',
+                    note: 'The key needs the deploy, secrets and manage scopes (Maritime → Settings → API keys). Revoking it on Maritime stops the agent at once; replace it on this page.',
+                },
+            ],
+        },
+    ]
+}
+
 export const AGENT_SETUPS: readonly AgentSetup[] = [
     {
         id: 'hermes',
@@ -529,6 +585,22 @@ export const AGENT_SETUPS: readonly AgentSetup[] = [
         docsUrl: 'https://www.agent37.com/docs/agents-api/concepts',
         bindsInstance: true,
         setup: agent37Setup,
+    },
+    {
+        id: 'maritime',
+        label: 'Maritime',
+        description: 'Hermes, Claude Code or Codex in a Maritime VM, on your Maritime account',
+        connection: 'maritime',
+        kinds: ['hermes', 'claude-code', 'codex'],
+        defaultName: '',
+        credential: {
+            label: 'Maritime API key',
+            placeholder: 'Paste an mk_ key from maritime.sh → Settings → API keys',
+            note: 'With the deploy, secrets and manage scopes. Harbor checks it with Maritime and keeps it sealed. Nobody sees it again, you included.',
+        },
+        docsUrl: 'https://maritime.sh/docs/sdk/agents',
+        bindsInstance: true,
+        setup: maritimeSetup,
     },
     {
         id: 'conductor',

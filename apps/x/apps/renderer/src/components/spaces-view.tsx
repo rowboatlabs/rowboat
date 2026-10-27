@@ -8,6 +8,7 @@ import '@/styles/spaces.css'
 import '@/styles/spaces-header.css'
 import { ThreadResizeHandle, THREAD_DEFAULT_WIDTH, THREAD_MIN_WIDTH, THREAD_DIVIDER_WIDTH, STREAM_MIN_WIDTH } from '@/components/spaces/thread-resize-handle'
 import { getViewerType } from '@/lib/file-types'
+import { isTodoListPath, NEW_TODO_LIST_CONTENT } from '@/lib/todo-list'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import type { SecondaryRailPeek } from '@/components/secondary-rail'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -763,6 +764,17 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
             .then((asset) => openFile(asset.id))
             .catch((err) => toast(err instanceof Error ? err.message : 'Could not create the file', 'error'))
     }
+    /** "New todo list": born with one section, opens in the todo editor (a taken name opens that list). */
+    const createTodoList = (path: string) => {
+        const existing = entries.find((e) => e.path === path && !e.state)
+        if (existing) {
+            openFile(existing.id)
+            return
+        }
+        createFile({ path, newContent: NEW_TODO_LIST_CONTENT, reason: 'new todo list' })
+            .then((asset) => openFile(asset.id))
+            .catch((err) => toast(err instanceof Error ? err.message : 'Could not create the todo list', 'error'))
+    }
     /** A canonical link into another space the reader is in: the org address names the org, App does the navigation. */
     const resolveSpace = (orgAddress: string, _spaceId: string): string | null => {
         const target = orgs.find((o) => o.address === orgAddress)
@@ -1227,7 +1239,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                         {!filesLoaded && <p className="px-5 py-2 text-xs text-muted-foreground">Loading files…</p>}
                         <SpaceFilesView orgId={org.id} orgAddress={org.address} spaceId={space.id} entries={entries} draftFolders={draftFolders}
                             unreadAssetIds={unreadAssetIds} selection={selection} onSelect={select} onCreateFile={createNamedFile}
-                            onCreateBoard={createBoard} onUploadFiles={setUploadFiles} onOpenTrash={() => setTrashOpen(true)}
+                            onCreateBoard={createBoard} onCreateTodoList={createTodoList} onUploadFiles={setUploadFiles} onOpenTrash={() => setTrashOpen(true)}
                             onAddFolder={addFolder} onRemoveFolder={removeFolder} />
                     </>}
                 {/* The columns. Chat on the left — the stream, or an open
@@ -1349,7 +1361,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                             </Suspense>
                         ) : centerAssetId ? (
                             <div
-                                className={cn('flex min-w-0 min-h-0 flex-1', !split && !getViewerType(entryById.get(centerAssetId)?.path ?? '') && 'mx-auto max-w-[880px]')}
+                                className={cn('flex min-w-0 min-h-0 flex-1', !split && !getViewerType(entryById.get(centerAssetId)?.path ?? '') && !isTodoListPath(entryById.get(centerAssetId)?.path ?? '') && 'mx-auto max-w-[880px]')}
                                 // Beside the stream the markdown editor steps its headings
                                 // down to the compact scale (see editor.css).
                                 data-split-pane={split ? '' : undefined}

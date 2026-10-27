@@ -365,12 +365,14 @@ async function dispatch(
         spaceId: string;
         threadRoot?: string;
         body: string;
+        summary?: string;
         poll?: z.infer<typeof NewPoll>;
         agentOptions?: Record<string, Record<string, string | boolean>>;
       };
       const { message, invocations } = await service.postMessage(ctx, a.spaceId, {
         ...(a.threadRoot ? { threadRoot: a.threadRoot } : {}),
         body: a.body,
+        ...(a.summary ? { summary: a.summary } : {}),
         ...(a.poll !== undefined ? { poll: a.poll } : {}),
         ...(a.agentOptions ? { agentOptions: a.agentOptions } : {}),
         actingMode: actor.actingMode,
@@ -392,8 +394,14 @@ async function dispatch(
     case 'stop_invocation':
       return { invocation: await service.cancelInvocation(ctx, (args as { invocationId: string }).invocationId) };
     case 'edit_message': {
-      const a = args as { spaceId: string; messageId: string; body: string };
-      return { message: await service.editMessage(ctx, a.spaceId, a.messageId, { body: a.body, ...attribution }) };
+      const a = args as { spaceId: string; messageId: string; body: string; summary?: string | null };
+      return {
+        message: await service.editMessage(ctx, a.spaceId, a.messageId, {
+          body: a.body,
+          ...(a.summary !== undefined ? { summary: a.summary } : {}),
+          ...attribution,
+        }),
+      };
     }
     case 'delete_message': {
       const a = args as { spaceId: string; messageId: string };
@@ -517,5 +525,9 @@ async function spaceNamesFor(service: HarborService, ctx: ActorCtx): Promise<Map
 }
 
 function relabel(message: Message, names: ReadonlyMap<string, string>, spaceNames?: ReadonlyMap<string, string>): Message {
-  return { ...message, body: relabelMentions(message.body, names, spaceNames) };
+  return {
+    ...message,
+    body: relabelMentions(message.body, names, spaceNames),
+    ...(message.summary ? { summary: relabelMentions(message.summary, names, spaceNames) } : {}),
+  };
 }

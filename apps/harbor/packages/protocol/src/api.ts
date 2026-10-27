@@ -12,7 +12,18 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { ActingMode, AgentCredential, AgentHook, AgentKey, AgentKeySecret, AgentListing, Attribution, InvitePolicy, Member, MemberRole, Membership, Message, OrgSettings, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic, UpdateProfile } from './core.js';
+import { ActingMode, AgentCredential, AgentHook, AgentKey, AgentKeySecret, AgentListing, Attribution, InvitePolicy, Member, MemberRole, Membership, Message, OrgSettings, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic, UpdateProfile,
+  AgentHosting,
+  HostingEnvVar,
+  HostingExecution,
+  HostingFileEntry,
+  HostingLogLine,
+  HostingMachine,
+  HostingPowerAction,
+  HostingSkill,
+  HostingTrigger,
+  HostingSpend, LlmProvider,
+} from './core.js';
 import { AssetId, AssetPath, BlobHash, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 import {
   AcceptInvite,
@@ -62,6 +73,8 @@ const NewMessage = z.object({
   /** Reply-to-activity-row provenance (root posts only): the change-set this message answers. */
   anchorChangeSetId: ChangeSetId.optional(),
   body: z.string().min(1).max(65_536),
+  /** A short version of a long body, shown first with "Show more" (2026-10-25). */
+  summary: z.string().min(1).max(1_000).optional(),
   /** Present = this message carries a poll (immutable once posted; editMessage refuses). */
   poll: NewPoll.optional(),
   actingMode: ActingMode,
@@ -476,8 +489,228 @@ export const routes = {
       credential: z.string().min(1).max(512).optional(),
       /** The platform instance the agent is (INSTANCE_CONNECTIONS only, 2026-10-05). */
       instance: z.string().min(1).max(128).optional(),
+      /** Only the owner may use it (spec §4 Agent members, 2026-10-26); absent = a channel agent, as before. */
+      personal: z.boolean().default(false),
     }),
     response: z.object({ agent: Member, key: AgentKeySecret }),
+  },
+  /**
+   * The kinds of agent this Harbor creates on Rowboat's own platform account
+   * (spec §8 Maritime, 2026-10-26): MARITIME_AGENTS when the deployment has the
+   * platform key, none otherwise. What the app's Create button offers.
+   */
+  managedAgentKinds: {
+    method: 'GET',
+    path: '/v1/agents/managed',
+    response: z.object({ kinds: z.array(z.string()) }),
+  },
+  /**
+   * Create a managed agent (spec §8 Maritime, 2026-10-26): Rowboat's own
+   * account on the platform runs it. The caller becomes its owner and gets its
+   * first key as with createAgent; the agent's hosting starts `deploying` and
+   * the listing shows it move to `ready`. `kind` is one of MARITIME_AGENTS.
+   * Claude Code needs the person's `anthropicApiKey`, which goes straight to
+   * the agent's environment on the platform and is kept nowhere else; `env`
+   * adds variables the same way. Render face only. Refused with
+   * `invalid_request` when this Harbor runs no managed hosting, or when the
+   * platform refuses (its own sentence, such as a plan limit).
+   */
+  createManagedAgent: {
+    method: 'POST',
+    path: '/v1/agents/managed',
+    request: z.object({
+      displayName: z.string().trim().min(1).max(128),
+      kind: z.string().min(1).max(32),
+      anthropicApiKey: z.string().min(1).max(512).optional(),
+      env: z.array(z.object({ key: z.string().regex(/^[A-Z_][A-Z0-9_]{0,63}$/), value: z.string().max(4096), secret: z.boolean().optional() })).max(20).optional(),
+      /** A personal agent, as on createAgent (spec §4 Agent members, 2026-10-27). */
+      personal: z.boolean().default(false),
+    }),
+    response: z.object({ agent: Member, key: AgentKeySecret, hosting: AgentHosting }),
+  },
+  /**
+   * Delete a managed agent's hosting: the owner or an admin. Its keys are
+   * revoked at once and its hosting marked `deleting`; the platform's
+   * resources go in the background and the listing shows `deleted` once the
+   * platform confirms. The member stays, to be removed like any member.
+   */
+  deleteManagedAgent: {
+    method: 'DELETE',
+    path: '/v1/agents/:agentId/hosting',
+    params: z.object({ agentId: MemberId }),
+    response: z.object({ hosting: AgentHosting }),
+  },
+  /**
+   * Managing a managed agent's VM (spec §8 Maritime, the management area,
+   * 2026-10-27): the owner or an admin, on a hosting that is `ready`, through
+   * Harbor with the deployment's own platform key. Render face only. Each
+   * answers `not_found` for an agent Rowboat does not host and
+   * `invalid_request` with the platform's own sentence when it refuses.
+   * getHosting is the page's one read: the hosting, the machine as the
+   * platform sees it, and the environment with secrets' values withheld.
+   */
+  getHosting: {
+    method: 'GET',
+    path: '/v1/agents/:agentId/hosting',
+    params: z.object({ agentId: MemberId }),
+    response: z.object({ hosting: AgentHosting, machine: HostingMachine.optional(), env: z.array(HostingEnvVar), spend: HostingSpend.optional() }),
+  },
+  /**
+   * The owner's own provider key for a managed agent (2026-10-27): the end of
+   * its trial. The key goes to the agent's environment on the platform and
+   * nowhere else; Harbor keeps the provider and the key's last characters.
+   * `provider` is one of `LLM_PROVIDERS[kind]`; `model` is the runtime's
+   * default from then on. Answers the hosting as it now stands: `own`, with
+   * the trial closed. Also how a key is replaced.
+   */
+  setHostingLlm: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/hosting/llm',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ provider: LlmProvider, apiKey: z.string().min(8).max(512), model: z.string().max(128).optional() }),
+    response: z.object({ hosting: AgentHosting }),
+  },
+  /** Set one environment variable, creating or replacing it; `secret` is kept by the platform and never read back. A restart or reload applies it. */
+  setHostingEnv: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/hosting/env/:key',
+    params: z.object({ agentId: MemberId, key: z.string().regex(/^[A-Z_][A-Z0-9_]{0,255}$/) }),
+    request: z.object({ value: z.string().max(4096), secret: z.boolean().optional() }),
+    response: z.object({ env: z.array(HostingEnvVar) }),
+  },
+  deleteHostingEnv: {
+    method: 'DELETE',
+    path: '/v1/agents/:agentId/hosting/env/:key',
+    params: z.object({ agentId: MemberId, key: z.string().regex(/^[A-Z_][A-Z0-9_]{0,255}$/) }),
+    response: z.object({ env: z.array(HostingEnvVar) }),
+  },
+  /** `restart` reboots the VM, `sleep` snapshots it, `wake` restores it, `reload` applies environment variables without a reboot. */
+  hostingPower: {
+    method: 'POST',
+    path: '/v1/agents/:agentId/hosting/power',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ action: HostingPowerAction }),
+    response: z.object({ machine: HostingMachine }),
+  },
+  /** Run one shell command on the VM, detached: the answer is the execution to read until it ends. Not a shell: nothing persists between commands. */
+  runHostingCommand: {
+    method: 'POST',
+    path: '/v1/agents/:agentId/hosting/commands',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ command: z.string().min(1).max(8192), timeoutSeconds: z.number().int().min(1).max(3600).optional() }),
+    response: z.object({ execution: HostingExecution }),
+  },
+  getHostingCommand: {
+    method: 'GET',
+    path: '/v1/agents/:agentId/hosting/commands/:executionId',
+    params: z.object({ agentId: MemberId, executionId: z.string().min(1).max(128) }),
+    response: z.object({ execution: HostingExecution }),
+  },
+  cancelHostingCommand: {
+    method: 'DELETE',
+    path: '/v1/agents/:agentId/hosting/commands/:executionId',
+    params: z.object({ agentId: MemberId, executionId: z.string().min(1).max(128) }),
+    response: z.object({ execution: HostingExecution }),
+  },
+  /** The VM's logs as the platform keeps them, newest first; `before` pages back by the platform's cursor. */
+  getHostingLogs: {
+    method: 'GET',
+    path: '/v1/agents/:agentId/hosting/logs',
+    params: z.object({ agentId: MemberId }),
+    query: z.object({ limit: z.coerce.number().int().min(1).max(500).optional(), before: z.string().max(128).optional(), level: z.string().max(32).optional() }),
+    response: z.object({ logs: z.array(HostingLogLine), nextBefore: z.string().max(128).optional() }),
+  },
+  /** The VM's files: a directory listing, a text file's content, writing a text file, a new directory, a move, a deletion. */
+  listHostingFiles: {
+    method: 'GET',
+    path: '/v1/agents/:agentId/hosting/files',
+    params: z.object({ agentId: MemberId }),
+    query: z.object({ path: z.string().max(2048).optional() }),
+    response: z.object({ path: z.string(), entries: z.array(HostingFileEntry) }),
+  },
+  readHostingFile: {
+    method: 'GET',
+    path: '/v1/agents/:agentId/hosting/files/content',
+    params: z.object({ agentId: MemberId }),
+    query: z.object({ path: z.string().min(1).max(2048) }),
+    /** Text only, up to 1 MB; `truncated` when the file was longer. */
+    response: z.object({ path: z.string(), content: z.string(), truncated: z.boolean() }),
+  },
+  writeHostingFile: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/hosting/files/content',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ path: z.string().min(1).max(2048), content: z.string().max(1_000_000) }),
+    response: z.object({ ok: z.literal(true) }),
+  },
+  makeHostingDir: {
+    method: 'POST',
+    path: '/v1/agents/:agentId/hosting/files/mkdir',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ path: z.string().min(1).max(2048) }),
+    response: z.object({ ok: z.literal(true) }),
+  },
+  moveHostingFile: {
+    method: 'POST',
+    path: '/v1/agents/:agentId/hosting/files/move',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ from: z.string().min(1).max(2048), to: z.string().min(1).max(2048) }),
+    response: z.object({ ok: z.literal(true) }),
+  },
+  deleteHostingFile: {
+    method: 'DELETE',
+    path: '/v1/agents/:agentId/hosting/files',
+    params: z.object({ agentId: MemberId }),
+    query: z.object({ path: z.string().min(1).max(2048) }),
+    response: z.object({ ok: z.literal(true) }),
+  },
+  /** Skills on a Hermes agent: the VM's and, with `q`, the platform catalog's matches; install by name; remove. Other kinds answer `invalid_request`. */
+  listHostingSkills: {
+    method: 'GET',
+    path: '/v1/agents/:agentId/hosting/skills',
+    params: z.object({ agentId: MemberId }),
+    query: z.object({ q: z.string().max(200).optional() }),
+    response: z.object({ skills: z.array(HostingSkill) }),
+  },
+  installHostingSkill: {
+    method: 'POST',
+    path: '/v1/agents/:agentId/hosting/skills',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ name: z.string().min(1).max(256) }),
+    response: z.object({ skills: z.array(HostingSkill) }),
+  },
+  removeHostingSkill: {
+    method: 'DELETE',
+    path: '/v1/agents/:agentId/hosting/skills/:name',
+    params: z.object({ agentId: MemberId, name: z.string().min(1).max(256) }),
+    response: z.object({ skills: z.array(HostingSkill) }),
+  },
+  /** Triggers the platform fires on a Hermes agent: a cron schedule and the prompt it sends; the agent's reply goes where the prompt tells it, through its Spaces tools. */
+  listHostingTriggers: {
+    method: 'GET',
+    path: '/v1/agents/:agentId/hosting/triggers',
+    params: z.object({ agentId: MemberId }),
+    response: z.object({ triggers: z.array(HostingTrigger) }),
+  },
+  createHostingTrigger: {
+    method: 'POST',
+    path: '/v1/agents/:agentId/hosting/triggers',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ type: z.string().min(1).max(32), config: z.record(z.string(), z.unknown()), enabled: z.boolean().optional() }),
+    response: z.object({ triggers: z.array(HostingTrigger) }),
+  },
+  updateHostingTrigger: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/hosting/triggers/:triggerId',
+    params: z.object({ agentId: MemberId, triggerId: z.string().min(1).max(128) }),
+    request: z.object({ config: z.record(z.string(), z.unknown()).optional(), enabled: z.boolean().optional() }),
+    response: z.object({ triggers: z.array(HostingTrigger) }),
+  },
+  deleteHostingTrigger: {
+    method: 'DELETE',
+    path: '/v1/agents/:agentId/hosting/triggers/:triggerId',
+    params: z.object({ agentId: MemberId, triggerId: z.string().min(1).max(128) }),
+    response: z.object({ triggers: z.array(HostingTrigger) }),
   },
   /**
    * Replace a platform agent's credential (spec §8 Connectors, 2026-09-30).
@@ -502,6 +735,20 @@ export const routes = {
     path: '/v1/agents/:agentId/name',
     params: z.object({ agentId: MemberId }),
     request: z.object({ displayName: z.string().max(128) }),
+    response: z.object({ agent: Member }),
+  },
+  /**
+   * Switch an agent between channel and personal (spec §4 Agent members,
+   * amended 2026-10-27): its owner only, app only like its name. The same
+   * value is a no-op. No event, as with a rename: rosters carry it on the
+   * next read. Work already queued for it finishes; the rule applies to what
+   * is asked of it after.
+   */
+  setAgentPersonal: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/personal',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ personal: z.boolean() }),
     response: z.object({ agent: Member }),
   },
   /** Another key for an agent (rotation: create, switch, revoke the old one). Owner only. */
@@ -1054,6 +1301,8 @@ export const routes = {
     params: z.object({ spaceId: SpaceId, messageId: MessageId }),
     request: z.object({
       body: z.string().min(1).max(65_536),
+      /** The summary (2026-10-25): absent = keep it, a string = replace it, null = remove it. */
+      summary: z.string().min(1).max(1_000).nullable().optional(),
       actingMode: ActingMode,
       agentName: z.string().max(64).optional(),
     }),

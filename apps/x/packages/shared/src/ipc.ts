@@ -3892,7 +3892,8 @@ export const ipcSchemas = {
   },
   // Self-serve org creation on the managed deployment's apex (free for now —
   // billing/limits parked by decision 2026-08-20). Browser sign-in, then the
-  // caller is the org's first admin. The address is generated in core
+  // caller is the org's first admin. The host generates the address with
+  // spaces-client (2026-10-27: share the generator with the web host)
   // (name-derived prefix + always-appended random suffix — decision
   // 2026-09-07): the user names the server; nobody picks a slug.
   'spaces:createOrg': {
@@ -3998,6 +3999,8 @@ export const ipcSchemas = {
       connection: z.string().optional(),
       credential: z.string().optional(),
       instance: z.string().optional(),
+      // Only its owner may use it (Harbor spec §4 Agent members, 2026-10-26).
+      personal: z.boolean().optional(),
     }),
     res: z.object({ agent: z.custom<SpacesTypes.Member>(), key: z.custom<SpacesTypes.AgentKeySecret>() }),
   },
@@ -4010,6 +4013,124 @@ export const ipcSchemas = {
   'spaces:agent37CreateInstance': {
     req: z.object({ key: z.string(), kind: z.string(), name: z.string(), monthlyBudgetUsd: z.number(), autoSleep: z.boolean() }),
     res: z.object({ instance: z.object({ id: z.string(), name: z.string().nullable(), template: z.string(), status: z.string(), kind: z.string().optional() }) }),
+  },
+  // Adding a Maritime agent (2026-10-26): list the agents the key being pasted reaches, before Harbor is asked to add one. The key is not kept.
+  'spaces:maritimeAgents': {
+    req: z.object({ key: z.string() }),
+    res: z.object({ agents: z.array(z.object({ id: z.string(), name: z.string(), framework: z.string(), templateId: z.string().nullable(), status: z.string(), kind: z.string().optional() })) }),
+  },
+  // Managed agents (2026-10-26): the kinds this org's Harbor creates on Rowboat's own
+  // Maritime account (none when the deployment has no key: no Create button), creating
+  // one, and deleting its hosting. The Anthropic key for Claude Code goes to the agent's
+  // environment on Maritime and is kept nowhere; the `env` variables the same way.
+  'spaces:managedAgentKinds': {
+    req: z.object({ orgId: z.string() }),
+    res: z.object({ kinds: z.array(z.string()) }),
+  },
+  'spaces:createManagedAgent': {
+    req: z.object({
+      orgId: z.string(),
+      displayName: z.string(),
+      kind: z.string(),
+      anthropicApiKey: z.string().optional(),
+      env: z.array(z.object({ key: z.string(), value: z.string(), secret: z.boolean().optional() })).optional(),
+      personal: z.boolean().optional(),
+    }),
+    res: z.object({ agent: z.custom<SpacesTypes.Member>(), key: z.custom<SpacesTypes.AgentKeySecret>(), hosting: z.custom<SpacesTypes.AgentHosting>() }),
+  },
+  'spaces:deleteManagedAgent': {
+    req: z.object({ orgId: z.string(), agentId: z.string() }),
+    res: z.object({ hosting: z.custom<SpacesTypes.AgentHosting>() }),
+  },
+  /** The owner's own provider key for a managed agent (2026-10-27): the end of its trial; also how a key is replaced. */
+  'spaces:setHostingLlm': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), provider: z.custom<SpacesTypes.LlmProvider>(), apiKey: z.string(), model: z.string().optional() }),
+    res: z.object({ hosting: z.custom<SpacesTypes.AgentHosting>() }),
+  },
+  // Managing a managed agent's VM from its page (2026-10-27): one Harbor call each, the owner or an admin.
+  'spaces:getHosting': {
+    req: z.object({ orgId: z.string(), agentId: z.string() }),
+    res: z.object({ hosting: z.custom<SpacesTypes.AgentHosting>(), machine: z.custom<SpacesTypes.HostingMachine>().optional(), env: z.array(z.custom<SpacesTypes.HostingEnvVar>()), spend: z.custom<SpacesTypes.HostingSpend>().optional() }),
+  },
+  'spaces:setHostingEnv': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), key: z.string(), value: z.string(), secret: z.boolean().optional() }),
+    res: z.object({ env: z.array(z.custom<SpacesTypes.HostingEnvVar>()) }),
+  },
+  'spaces:deleteHostingEnv': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), key: z.string() }),
+    res: z.object({ env: z.array(z.custom<SpacesTypes.HostingEnvVar>()) }),
+  },
+  'spaces:hostingPower': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), action: z.enum(['restart', 'sleep', 'wake', 'reload']) }),
+    res: z.object({ machine: z.custom<SpacesTypes.HostingMachine>() }),
+  },
+  'spaces:runHostingCommand': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), command: z.string(), timeoutSeconds: z.number().optional() }),
+    res: z.object({ execution: z.custom<SpacesTypes.HostingExecution>() }),
+  },
+  'spaces:getHostingCommand': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), executionId: z.string() }),
+    res: z.object({ execution: z.custom<SpacesTypes.HostingExecution>() }),
+  },
+  'spaces:cancelHostingCommand': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), executionId: z.string() }),
+    res: z.object({ execution: z.custom<SpacesTypes.HostingExecution>() }),
+  },
+  'spaces:getHostingLogs': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), limit: z.number().optional(), before: z.string().optional(), level: z.string().optional() }),
+    res: z.object({ logs: z.array(z.custom<SpacesTypes.HostingLogLine>()), nextBefore: z.string().optional() }),
+  },
+  'spaces:listHostingFiles': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), path: z.string().optional() }),
+    res: z.object({ path: z.string(), entries: z.array(z.custom<SpacesTypes.HostingFileEntry>()) }),
+  },
+  'spaces:readHostingFile': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), path: z.string() }),
+    res: z.object({ path: z.string(), content: z.string(), truncated: z.boolean() }),
+  },
+  'spaces:writeHostingFile': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), path: z.string(), content: z.string() }),
+    res: z.object({}),
+  },
+  'spaces:makeHostingDir': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), path: z.string() }),
+    res: z.object({}),
+  },
+  'spaces:moveHostingFile': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), from: z.string(), to: z.string() }),
+    res: z.object({}),
+  },
+  'spaces:deleteHostingFile': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), path: z.string() }),
+    res: z.object({}),
+  },
+  'spaces:listHostingSkills': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), q: z.string().optional() }),
+    res: z.object({ skills: z.array(z.custom<SpacesTypes.HostingSkill>()) }),
+  },
+  'spaces:installHostingSkill': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), name: z.string() }),
+    res: z.object({ skills: z.array(z.custom<SpacesTypes.HostingSkill>()) }),
+  },
+  'spaces:removeHostingSkill': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), name: z.string() }),
+    res: z.object({ skills: z.array(z.custom<SpacesTypes.HostingSkill>()) }),
+  },
+  'spaces:listHostingTriggers': {
+    req: z.object({ orgId: z.string(), agentId: z.string() }),
+    res: z.object({ triggers: z.array(z.custom<SpacesTypes.HostingTrigger>()) }),
+  },
+  'spaces:createHostingTrigger': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), type: z.string(), config: z.record(z.string(), z.unknown()), enabled: z.boolean().optional() }),
+    res: z.object({ triggers: z.array(z.custom<SpacesTypes.HostingTrigger>()) }),
+  },
+  'spaces:updateHostingTrigger': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), triggerId: z.string(), config: z.record(z.string(), z.unknown()).optional(), enabled: z.boolean().optional() }),
+    res: z.object({ triggers: z.array(z.custom<SpacesTypes.HostingTrigger>()) }),
+  },
+  'spaces:deleteHostingTrigger': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), triggerId: z.string() }),
+    res: z.object({ triggers: z.array(z.custom<SpacesTypes.HostingTrigger>()) }),
   },
   'spaces:setAgentCredential': {
     req: z.object({ orgId: z.string(), agentId: z.string(), secret: z.string() }),
@@ -4056,6 +4177,11 @@ export const ipcSchemas = {
   // Renaming an agent (2026-10-21, harbor renameAgent): its owner only.
   'spaces:renameAgent': {
     req: z.object({ orgId: z.string(), agentId: z.string(), displayName: z.string() }),
+    res: z.object({ agent: z.custom<SpacesTypes.Member>() }),
+  },
+  // Switching an agent between channel and personal (2026-10-27, harbor setAgentPersonal): its owner only.
+  'spaces:setAgentPersonal': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), personal: z.boolean() }),
     res: z.object({ agent: z.custom<SpacesTypes.Member>() }),
   },
   // Add existing org members, people or agents, to a space the caller is in

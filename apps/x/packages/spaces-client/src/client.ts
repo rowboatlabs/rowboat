@@ -12,6 +12,17 @@ import {
   type AgentKey,
   type AgentCredential,
   type AgentHook,
+  type AgentHosting,
+  type HostingEnvVar,
+  HostingSpend,
+  LlmProvider,
+  type HostingExecution,
+  type HostingFileEntry,
+  type HostingLogLine,
+  type HostingMachine,
+  type HostingPowerAction,
+  type HostingSkill,
+  type HostingTrigger,
   type AgentKeySecret,
   type AgentListing,
   type ConnectorCapabilities,
@@ -415,10 +426,108 @@ export class SpacesClient {
    * secret, the only time it is shown. `kind`/`connection` say what it is and
    * how Harbor reaches it (2026-09-30); a platform agent (Replicas) also
    * brings the platform's `credential`, which Harbor checks and seals, and an
-   * Agent37 agent its `instance` (2026-10-05).
+   * Agent37 agent its `instance` (2026-10-05). `personal` makes it usable
+   * by this member only (2026-10-26).
    */
-  async addAgent(input: { displayName: string; kind?: string; connection?: string; credential?: string; instance?: string }): Promise<{ agent: Member; key: AgentKeySecret }> {
+  async addAgent(input: { displayName: string; kind?: string; connection?: string; credential?: string; instance?: string; personal?: boolean }): Promise<{ agent: Member; key: AgentKeySecret }> {
     return this.request('POST', routes.createAgent.path, routes.createAgent.response, input);
+  }
+
+  /** The kinds of agent this org's Harbor creates on Rowboat's own platform account (api.ts managedAgentKinds, 2026-10-26); none = no managed hosting. */
+  async managedAgentKinds(): Promise<string[]> {
+    return (await this.request('GET', routes.managedAgentKinds.path, routes.managedAgentKinds.response)).kinds;
+  }
+
+  /** Create a managed agent (api.ts createManagedAgent): the member, its first key, and its hosting, `deploying` at first. */
+  async createManagedAgent(input: {
+    displayName: string;
+    kind: string;
+    anthropicApiKey?: string;
+    env?: Array<{ key: string; value: string; secret?: boolean }>;
+    personal?: boolean;
+  }): Promise<{ agent: Member; key: AgentKeySecret; hosting: AgentHosting }> {
+    return this.request('POST', routes.createManagedAgent.path, routes.createManagedAgent.response, input);
+  }
+
+  /** Delete a managed agent's hosting (api.ts deleteManagedAgent): its keys go at once, the platform's resources in the background. */
+  async deleteManagedAgent(agentId: string): Promise<AgentHosting> {
+    return (await this.request('DELETE', `/v1/agents/${encodeURIComponent(agentId)}/hosting`, routes.deleteManagedAgent.response)).hosting;
+  }
+
+  // --- Managing a managed agent's VM (api.ts getHosting and the hosting routes, 2026-10-27) ---
+  private hostingPath(agentId: string, rest = ''): string {
+    return `/v1/agents/${encodeURIComponent(agentId)}/hosting${rest}`;
+  }
+  async getHosting(agentId: string): Promise<{ hosting: AgentHosting; machine?: HostingMachine; env: HostingEnvVar[]; spend?: HostingSpend }> {
+    return this.request('GET', this.hostingPath(agentId), routes.getHosting.response);
+  }
+  /** The owner's own provider key for a managed agent (2026-10-27): the end of its trial; also how a key is replaced. */
+  async setHostingLlm(agentId: string, input: { provider: LlmProvider; apiKey: string; model?: string }): Promise<AgentHosting> {
+    return (await this.request('PUT', this.hostingPath(agentId, '/llm'), routes.setHostingLlm.response, input)).hosting;
+  }
+  async setHostingEnv(agentId: string, key: string, value: string, secret: boolean): Promise<HostingEnvVar[]> {
+    return (await this.request('PUT', this.hostingPath(agentId, `/env/${encodeURIComponent(key)}`), routes.setHostingEnv.response, { value, secret })).env;
+  }
+  async deleteHostingEnv(agentId: string, key: string): Promise<HostingEnvVar[]> {
+    return (await this.request('DELETE', this.hostingPath(agentId, `/env/${encodeURIComponent(key)}`), routes.deleteHostingEnv.response)).env;
+  }
+  async hostingPower(agentId: string, action: HostingPowerAction): Promise<HostingMachine> {
+    return (await this.request('POST', this.hostingPath(agentId, '/power'), routes.hostingPower.response, { action })).machine;
+  }
+  async runHostingCommand(agentId: string, command: string, timeoutSeconds?: number): Promise<HostingExecution> {
+    return (await this.request('POST', this.hostingPath(agentId, '/commands'), routes.runHostingCommand.response, { command, ...(timeoutSeconds !== undefined ? { timeoutSeconds } : {}) })).execution;
+  }
+  async getHostingCommand(agentId: string, executionId: string): Promise<HostingExecution> {
+    return (await this.request('GET', this.hostingPath(agentId, `/commands/${encodeURIComponent(executionId)}`), routes.getHostingCommand.response)).execution;
+  }
+  async cancelHostingCommand(agentId: string, executionId: string): Promise<HostingExecution> {
+    return (await this.request('DELETE', this.hostingPath(agentId, `/commands/${encodeURIComponent(executionId)}`), routes.cancelHostingCommand.response)).execution;
+  }
+  async getHostingLogs(agentId: string, opts: { limit?: number; before?: string; level?: string } = {}): Promise<{ logs: HostingLogLine[]; nextBefore?: string }> {
+    const q = new URLSearchParams();
+    if (opts.limit !== undefined) q.set('limit', String(opts.limit));
+    if (opts.before) q.set('before', opts.before);
+    if (opts.level) q.set('level', opts.level);
+    return this.request('GET', this.hostingPath(agentId, `/logs${q.size ? `?${q}` : ''}`), routes.getHostingLogs.response);
+  }
+  async listHostingFiles(agentId: string, path: string): Promise<{ path: string; entries: HostingFileEntry[] }> {
+    return this.request('GET', this.hostingPath(agentId, `/files?path=${encodeURIComponent(path)}`), routes.listHostingFiles.response);
+  }
+  async readHostingFile(agentId: string, path: string): Promise<{ path: string; content: string; truncated: boolean }> {
+    return this.request('GET', this.hostingPath(agentId, `/files/content?path=${encodeURIComponent(path)}`), routes.readHostingFile.response);
+  }
+  async writeHostingFile(agentId: string, path: string, content: string): Promise<void> {
+    await this.request('PUT', this.hostingPath(agentId, '/files/content'), routes.writeHostingFile.response, { path, content });
+  }
+  async makeHostingDir(agentId: string, path: string): Promise<void> {
+    await this.request('POST', this.hostingPath(agentId, '/files/mkdir'), routes.makeHostingDir.response, { path });
+  }
+  async moveHostingFile(agentId: string, from: string, to: string): Promise<void> {
+    await this.request('POST', this.hostingPath(agentId, '/files/move'), routes.moveHostingFile.response, { from, to });
+  }
+  async deleteHostingFile(agentId: string, path: string): Promise<void> {
+    await this.request('DELETE', this.hostingPath(agentId, `/files?path=${encodeURIComponent(path)}`), routes.deleteHostingFile.response);
+  }
+  async listHostingSkills(agentId: string, q?: string): Promise<HostingSkill[]> {
+    return (await this.request('GET', this.hostingPath(agentId, `/skills${q ? `?q=${encodeURIComponent(q)}` : ''}`), routes.listHostingSkills.response)).skills;
+  }
+  async installHostingSkill(agentId: string, name: string): Promise<HostingSkill[]> {
+    return (await this.request('POST', this.hostingPath(agentId, '/skills'), routes.installHostingSkill.response, { name })).skills;
+  }
+  async removeHostingSkill(agentId: string, name: string): Promise<HostingSkill[]> {
+    return (await this.request('DELETE', this.hostingPath(agentId, `/skills/${encodeURIComponent(name)}`), routes.removeHostingSkill.response)).skills;
+  }
+  async listHostingTriggers(agentId: string): Promise<HostingTrigger[]> {
+    return (await this.request('GET', this.hostingPath(agentId, '/triggers'), routes.listHostingTriggers.response)).triggers;
+  }
+  async createHostingTrigger(agentId: string, input: { type: string; config: Record<string, unknown>; enabled?: boolean }): Promise<HostingTrigger[]> {
+    return (await this.request('POST', this.hostingPath(agentId, '/triggers'), routes.createHostingTrigger.response, input)).triggers;
+  }
+  async updateHostingTrigger(agentId: string, triggerId: string, input: { config?: Record<string, unknown>; enabled?: boolean }): Promise<HostingTrigger[]> {
+    return (await this.request('PUT', this.hostingPath(agentId, `/triggers/${encodeURIComponent(triggerId)}`), routes.updateHostingTrigger.response, input)).triggers;
+  }
+  async deleteHostingTrigger(agentId: string, triggerId: string): Promise<HostingTrigger[]> {
+    return (await this.request('DELETE', this.hostingPath(agentId, `/triggers/${encodeURIComponent(triggerId)}`), routes.deleteHostingTrigger.response)).triggers;
   }
 
   /** Replace a platform agent's credential (owner only); Harbor checks it with the platform first. */
@@ -442,6 +551,11 @@ export class SpacesClient {
   /** Rename an agent this member owns (api.ts renameAgent, 2026-10-21). */
   async renameAgent(agentId: string, displayName: string): Promise<Member> {
     return (await this.request('PUT', `/v1/agents/${encodeURIComponent(agentId)}/name`, routes.renameAgent.response, { displayName })).agent;
+  }
+
+  /** Switch an agent this member owns between channel and personal (api.ts setAgentPersonal, 2026-10-27). */
+  async setAgentPersonal(agentId: string, personal: boolean): Promise<Member> {
+    return (await this.request('PUT', `/v1/agents/${encodeURIComponent(agentId)}/personal`, routes.setAgentPersonal.response, { personal })).agent;
   }
 
   async revokeAgentKey(agentId: string, keyId: string): Promise<AgentKey> {

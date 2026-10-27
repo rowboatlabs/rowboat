@@ -419,8 +419,141 @@ export function buildHttpApp(deps: {
         connection: input.connection,
         ...(input.credential !== undefined ? { credential: input.credential } : {}),
         ...(input.instance !== undefined ? { instance: input.instance } : {}),
+        personal: input.personal,
       }),
     );
+  });
+
+  // Managed agents (spec §8 Maritime, 2026-10-26): created on the platform Rowboat's own account runs.
+  app.get(routes.managedAgentKinds.path, async (c) => reply(c, routes.managedAgentKinds.response, { kinds: await service.managedAgentKinds(actor(c)) }));
+
+  app.post(routes.createManagedAgent.path, async (c) => {
+    const input = await body(c, routes.createManagedAgent.request);
+    return reply(
+      c,
+      routes.createManagedAgent.response,
+      await service.createManagedAgent(actor(c), {
+        displayName: input.displayName,
+        kind: input.kind,
+        ...(input.anthropicApiKey !== undefined ? { anthropicApiKey: input.anthropicApiKey } : {}),
+        ...(input.env !== undefined ? { env: input.env } : {}),
+        personal: input.personal,
+      }),
+    );
+  });
+
+  app.delete(routes.deleteManagedAgent.path, async (c) => {
+    const { agentId } = parseWith(routes.deleteManagedAgent.params, c.req.param());
+    return reply(c, routes.deleteManagedAgent.response, { hosting: await service.deleteManagedAgent(actor(c), agentId) });
+  });
+
+  // Managing a managed agent's VM (the management area, 2026-10-27).
+  app.get(routes.getHosting.path, async (c) => {
+    const { agentId } = parseWith(routes.getHosting.params, c.req.param());
+    return reply(c, routes.getHosting.response, await service.getHosting(actor(c), agentId));
+  });
+  app.put(routes.setHostingLlm.path, async (c) => {
+    const { agentId } = parseWith(routes.setHostingLlm.params, c.req.param());
+    const input = await body(c, routes.setHostingLlm.request);
+    return reply(c, routes.setHostingLlm.response, { hosting: await service.setHostingLlm(actor(c), agentId, input) });
+  });
+  app.put(routes.setHostingEnv.path, async (c) => {
+    const { agentId, key } = parseWith(routes.setHostingEnv.params, c.req.param());
+    const input = await body(c, routes.setHostingEnv.request);
+    return reply(c, routes.setHostingEnv.response, { env: await service.setHostingEnv(actor(c), agentId, key, input.value, input.secret ?? false) });
+  });
+  app.delete(routes.deleteHostingEnv.path, async (c) => {
+    const { agentId, key } = parseWith(routes.deleteHostingEnv.params, c.req.param());
+    return reply(c, routes.deleteHostingEnv.response, { env: await service.deleteHostingEnv(actor(c), agentId, key) });
+  });
+  app.post(routes.hostingPower.path, async (c) => {
+    const { agentId } = parseWith(routes.hostingPower.params, c.req.param());
+    const input = await body(c, routes.hostingPower.request);
+    return reply(c, routes.hostingPower.response, { machine: await service.hostingPower(actor(c), agentId, input.action) });
+  });
+  app.post(routes.runHostingCommand.path, async (c) => {
+    const { agentId } = parseWith(routes.runHostingCommand.params, c.req.param());
+    const input = await body(c, routes.runHostingCommand.request);
+    return reply(c, routes.runHostingCommand.response, { execution: await service.runHostingCommand(actor(c), agentId, input.command, input.timeoutSeconds) });
+  });
+  app.get(routes.getHostingCommand.path, async (c) => {
+    const { agentId, executionId } = parseWith(routes.getHostingCommand.params, c.req.param());
+    return reply(c, routes.getHostingCommand.response, { execution: await service.getHostingCommand(actor(c), agentId, executionId) });
+  });
+  app.delete(routes.cancelHostingCommand.path, async (c) => {
+    const { agentId, executionId } = parseWith(routes.cancelHostingCommand.params, c.req.param());
+    return reply(c, routes.cancelHostingCommand.response, { execution: await service.cancelHostingCommand(actor(c), agentId, executionId) });
+  });
+  app.get(routes.getHostingLogs.path, async (c) => {
+    const { agentId } = parseWith(routes.getHostingLogs.params, c.req.param());
+    const q = parseWith(routes.getHostingLogs.query, c.req.query());
+    return reply(c, routes.getHostingLogs.response, await service.getHostingLogs(actor(c), agentId, q));
+  });
+  app.get(routes.listHostingFiles.path, async (c) => {
+    const { agentId } = parseWith(routes.listHostingFiles.params, c.req.param());
+    const q = parseWith(routes.listHostingFiles.query, c.req.query());
+    return reply(c, routes.listHostingFiles.response, await service.listHostingFiles(actor(c), agentId, q.path ?? '/'));
+  });
+  app.get(routes.readHostingFile.path, async (c) => {
+    const { agentId } = parseWith(routes.readHostingFile.params, c.req.param());
+    const q = parseWith(routes.readHostingFile.query, c.req.query());
+    return reply(c, routes.readHostingFile.response, await service.readHostingFile(actor(c), agentId, q.path));
+  });
+  app.put(routes.writeHostingFile.path, async (c) => {
+    const { agentId } = parseWith(routes.writeHostingFile.params, c.req.param());
+    const input = await body(c, routes.writeHostingFile.request);
+    await service.writeHostingFile(actor(c), agentId, input.path, input.content);
+    return reply(c, routes.writeHostingFile.response, { ok: true });
+  });
+  app.post(routes.makeHostingDir.path, async (c) => {
+    const { agentId } = parseWith(routes.makeHostingDir.params, c.req.param());
+    const input = await body(c, routes.makeHostingDir.request);
+    await service.makeHostingDir(actor(c), agentId, input.path);
+    return reply(c, routes.makeHostingDir.response, { ok: true });
+  });
+  app.post(routes.moveHostingFile.path, async (c) => {
+    const { agentId } = parseWith(routes.moveHostingFile.params, c.req.param());
+    const input = await body(c, routes.moveHostingFile.request);
+    await service.moveHostingFile(actor(c), agentId, input.from, input.to);
+    return reply(c, routes.moveHostingFile.response, { ok: true });
+  });
+  app.delete(routes.deleteHostingFile.path, async (c) => {
+    const { agentId } = parseWith(routes.deleteHostingFile.params, c.req.param());
+    const q = parseWith(routes.deleteHostingFile.query, c.req.query());
+    await service.deleteHostingFile(actor(c), agentId, q.path);
+    return reply(c, routes.deleteHostingFile.response, { ok: true });
+  });
+  app.get(routes.listHostingSkills.path, async (c) => {
+    const { agentId } = parseWith(routes.listHostingSkills.params, c.req.param());
+    const q = parseWith(routes.listHostingSkills.query, c.req.query());
+    return reply(c, routes.listHostingSkills.response, { skills: await service.listHostingSkills(actor(c), agentId, q.q) });
+  });
+  app.post(routes.installHostingSkill.path, async (c) => {
+    const { agentId } = parseWith(routes.installHostingSkill.params, c.req.param());
+    const input = await body(c, routes.installHostingSkill.request);
+    return reply(c, routes.installHostingSkill.response, { skills: await service.installHostingSkill(actor(c), agentId, input.name) });
+  });
+  app.delete(routes.removeHostingSkill.path, async (c) => {
+    const { agentId, name } = parseWith(routes.removeHostingSkill.params, c.req.param());
+    return reply(c, routes.removeHostingSkill.response, { skills: await service.removeHostingSkill(actor(c), agentId, name) });
+  });
+  app.get(routes.listHostingTriggers.path, async (c) => {
+    const { agentId } = parseWith(routes.listHostingTriggers.params, c.req.param());
+    return reply(c, routes.listHostingTriggers.response, { triggers: await service.listHostingTriggers(actor(c), agentId) });
+  });
+  app.post(routes.createHostingTrigger.path, async (c) => {
+    const { agentId } = parseWith(routes.createHostingTrigger.params, c.req.param());
+    const input = await body(c, routes.createHostingTrigger.request);
+    return reply(c, routes.createHostingTrigger.response, { triggers: await service.createHostingTrigger(actor(c), agentId, input) });
+  });
+  app.put(routes.updateHostingTrigger.path, async (c) => {
+    const { agentId, triggerId } = parseWith(routes.updateHostingTrigger.params, c.req.param());
+    const input = await body(c, routes.updateHostingTrigger.request);
+    return reply(c, routes.updateHostingTrigger.response, { triggers: await service.updateHostingTrigger(actor(c), agentId, triggerId, input) });
+  });
+  app.delete(routes.deleteHostingTrigger.path, async (c) => {
+    const { agentId, triggerId } = parseWith(routes.deleteHostingTrigger.params, c.req.param());
+    return reply(c, routes.deleteHostingTrigger.response, { triggers: await service.deleteHostingTrigger(actor(c), agentId, triggerId) });
   });
 
   app.put(routes.setAgentCredential.path, async (c) => {
@@ -433,6 +566,12 @@ export function buildHttpApp(deps: {
     const { agentId } = parseWith(routes.renameAgent.params, c.req.param());
     const input = await body(c, routes.renameAgent.request);
     return reply(c, routes.renameAgent.response, { agent: await service.renameAgent(actor(c), agentId, input) });
+  });
+
+  app.put(routes.setAgentPersonal.path, async (c) => {
+    const { agentId } = parseWith(routes.setAgentPersonal.params, c.req.param());
+    const input = await body(c, routes.setAgentPersonal.request);
+    return reply(c, routes.setAgentPersonal.response, { agent: await service.setAgentPersonal(actor(c), agentId, input) });
   });
 
   app.put(routes.setAgentOptionDefaults.path, async (c) => {

@@ -1,4 +1,4 @@
-import { harborChannelHandlers, parseInviteLink, SpacesClient, SpaceSubscriptions } from '@x/spaces-client'
+import { generatedOrgSlug, harborChannelHandlers, parseInviteLink, SpacesClient, SpaceSubscriptions } from '@x/spaces-client'
 import { blobAppUrl } from '@/lib/spaces-presentation'
 import type { ipc, spaces } from '@x/shared'
 import { beginSignIn, getAccessToken, hasSession } from './account'
@@ -93,16 +93,23 @@ export function webChannelHandlers(emit: (event: spaces.SpacesBusEvent) => void)
         },
 
         'spaces:createOrg': async (args) => {
-            const res = await fetch(`${APEX_URL}/v1/orgs`, {
-                method: 'POST',
-                headers: { authorization: `Bearer ${await getAccessToken()}`, 'content-type': 'application/json' },
-                body: JSON.stringify({ name: args.name }),
-            })
-            const json = (await res.json().catch(() => ({}))) as { org?: { id: string }; message?: string }
-            if (!res.ok || !json.org) throw new Error(json.message ?? `Could not create the server (${res.status}).`)
-            const created = (await orgs.loadOrgs()).find((org) => org.id === json.org!.id)
-            if (!created) throw new Error('The server was created but is not listed yet. Reload to see it.')
-            return { org: created }
+            let failure = 'Could not create the server.'
+            for (let attempt = 0; attempt < 3; attempt++) {
+                const res = await fetch(`${APEX_URL}/v1/orgs`, {
+                    method: 'POST',
+                    headers: { authorization: `Bearer ${await getAccessToken()}`, 'content-type': 'application/json' },
+                    body: JSON.stringify({ name: args.name, slug: generatedOrgSlug(args.name) }),
+                })
+                const json = (await res.json().catch(() => ({}))) as { org?: { id: string }; message?: string }
+                if (res.ok && json.org) {
+                    const created = (await orgs.loadOrgs()).find((org) => org.id === json.org!.id)
+                    if (!created) throw new Error('The server was created but is not listed yet. Reload to see it.')
+                    return { org: created }
+                }
+                failure = json.message ?? `Could not create the server (${res.status}).`
+                if (!/is taken/.test(failure)) break
+            }
+            throw new Error(failure)
         },
 
         // A browser has the bytes, never a path (electronUtils.getPathForFile is '').

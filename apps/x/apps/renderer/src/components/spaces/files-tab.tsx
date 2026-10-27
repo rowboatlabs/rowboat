@@ -5,8 +5,10 @@ import { splitFrontmatter, joinFrontmatter } from '@/lib/frontmatter'
 import { MarkdownEditor } from '@/components/markdown-editor'
 import { SpaceDocumentViewer } from './document-viewer'
 import { getViewerType } from '@/lib/file-types'
+import { isTodoListPath, todoListDisplayName } from '@/lib/todo-list'
+import { TodoListView } from './todo-list-view'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowLeft, Check, Clock, Copy, Download, Eye, FileText, Folder, FolderOpen, History, Image as ImageIcon, Link as LinkIcon, Loader2, MoreHorizontal, Pencil, PenTool, Plus, RotateCcw, Trash2, Upload, X } from 'lucide-react'
+import { ArrowLeft, Check, Clock, Copy, Download, Eye, FileText, Folder, FolderOpen, History, Image as ImageIcon, Link as LinkIcon, ListTodo, Loader2, MoreHorizontal, Pencil, PenTool, Plus, RotateCcw, Trash2, Upload, X } from 'lucide-react'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
@@ -232,6 +234,7 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
         // A board is a file at whiteboards/<name>.excalidraw — same tree,
         // pen icon, extension dropped from the label.
         const board = spaces.isWhiteboardPath(node.path)
+        const todo = isTodoListPath(node.path)
         if (renaming?.assetId === entry.id) {
             return (
                 <div key={entry.id} style={pad} className="py-0.5 pr-2">
@@ -271,11 +274,12 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                         >
                             <span className="w-4 shrink-0" />
                             {board && <PenTool className="size-4 shrink-0 text-muted-foreground" />}
+                            {todo && <ListTodo className="size-4 shrink-0 text-muted-foreground" />}
                             {!board && blob && (isImageMime(blob.mime)
                                 ? <ImageIcon className="size-4 shrink-0 text-muted-foreground" />
                                 : <FileText className="size-4 shrink-0 text-muted-foreground" />)}
                             <ClippedText
-                                text={board ? spaces.whiteboardDisplayName(node.name) : node.name}
+                                text={board ? spaces.whiteboardDisplayName(node.name) : todo ? todoListDisplayName(node.name) : node.name}
                                 detail={blob ? `${blob.mime} · ${formatBytes(blob.size)}` : null}
                                 className="flex-1"
                             />
@@ -767,7 +771,7 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
                             </>
                         ) : (
                             <button type="button" className="hover:text-foreground flex items-center gap-1" disabled={!writable} onClick={beginEdit}>
-                                <Pencil className="size-3" /> Edit
+                                <Pencil className="size-3" /> {isTodoListPath(path) ? 'Edit as text' : 'Edit'}
                             </button>
                         )}
                         <button
@@ -863,8 +867,9 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
                 />
             )}
             <div className="flex-1 min-h-0 flex">
-                <div className="flex-1 min-w-0 min-h-0 overflow-y-auto">
-                    {draft && /\.md$/i.test(path) ? (
+                <div className={cn('flex-1 min-w-0 min-h-0 overflow-y-auto', isTodoListPath(path) && !draft && 'flex flex-col')}>
+                    {/* A todo list edits as text: the rich editor would rewrite its lines. */}
+                    {draft && /\.md$/i.test(path) && !isTodoListPath(path) ? (
                         <MarkdownEditor
                             content={splitFrontmatter(draft.text).body}
                             frontmatter={splitFrontmatter(draft.text).raw}
@@ -892,6 +897,19 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
                             spellCheck={false}
                             className="w-full h-full min-h-full rounded-none border-0 font-mono text-sm resize-none focus-visible:ring-0 px-5 py-4"
                             onChange={(e) => setDraft({ ...draft, text: e.target.value, conflict: null })}
+                        />
+                    ) : asset && !blob && isTodoListPath(path) ? (
+                        <TodoListView
+                            key={`${org.id}:${space.id}:${assetId}`}
+                            orgId={org.id}
+                            spaceId={space.id}
+                            assetId={assetId}
+                            content={asset.content}
+                            version={asset.version}
+                            onSaved={() => {
+                                void load()
+                                onChanged()
+                            }}
                         />
                     ) : asset && getViewerType(path) ? (
                         <SpaceDocumentViewer

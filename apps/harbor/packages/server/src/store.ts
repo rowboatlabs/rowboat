@@ -2,6 +2,7 @@ import type { ActivityKind } from '@rowboat/spaces-protocol';
 import type {
   AgentCredential,
   AgentHook,
+  AgentHosting,
   AgentKey,
   Attribution,
   ConnectorCapabilities,
@@ -136,6 +137,20 @@ export interface StoredAgentCredential extends AgentCredential {
   sealed: string;
 }
 
+/**
+ * A managed agent's hosting as stored (spec §8 Maritime, 2026-10-26): what its
+ * owner sees, plus the row's own id, the member it is bound to once that
+ * exists, the end-user key Rowboat named the agent by on the platform, and
+ * what was asked for.
+ */
+export interface StoredAgentHosting extends AgentHosting {
+  id: string;
+  agentId?: string;
+  externalUserId: string;
+  kind: string;
+  displayName: string;
+}
+
 /** An alert hook as stored (spec §8 Alerts, 2026-10-03): what its owner sees, plus the hash of its secret. */
 export interface StoredAgentHook extends AgentHook {
   agentId: string;
@@ -230,6 +245,8 @@ export interface Store {
   // members (org-level)
   getMember(id: string): Promise<Member | undefined>;
   putMember(member: Member): Promise<void>;
+  /** Switch an agent between channel and personal (2026-10-27): the one write of the flag after creation. */
+  setAgentPersonal(id: string, personal: boolean): Promise<void>;
   /** The whole org roster — operator-side reads only (the mentions backfill). */
   listAllMembers(): Promise<Member[]>;
   /** A space's roster in join order — one statement (2026-09-22). */
@@ -384,20 +401,20 @@ export interface Store {
   appendMessage(message: Message): Promise<void>;
   /**
    * Recompute a root's reply denorm (replyCount = live replies, lastReplyAt =
-   * newest reply) from the truth. Called inside the space lock whenever a
+   * newest reply, replyAuthors = who replied) from the truth. Called inside the space lock whenever a
    * reply is appended or tombstoned — recompute beats deltas because deletes
    * and replays can't drift it.
    */
   refreshReplyStats(spaceId: string, rootMessageId: string): Promise<void>;
   /**
-   * Tombstone: blanks the row's body and sets deletedAt — and redacts the
+   * Tombstone: blanks the row's body and summary and sets deletedAt — and redacts the
    * stored `message` event the same way. That event rewrite is the one
    * mutation the log allows: a deleted body must be unrecoverable, replay
    * included. The message_deleted event itself is appended by the service.
    */
   markMessageDeleted(spaceId: string, messageId: string, deletedAt: string): Promise<void>;
-  /** Body + the re-stamped addresses (mentions.ts), row and stored event alike; search text follows the body. */
-  markMessageEdited(spaceId: string, messageId: string, body: string, editedAt: string, stamps: MentionStamps): Promise<void>;
+  /** Body, summary (absent = none) + the re-stamped addresses (mentions.ts), row and stored event alike; search text follows them. */
+  markMessageEdited(spaceId: string, messageId: string, body: string, editedAt: string, stamps: MentionStamps, summary?: string): Promise<void>;
   /** Stamps only (the backfill): derived data, no content change, no event. */
   restampMessage(spaceId: string, messageId: string, stamps: MentionStamps): Promise<void>;
 
@@ -537,6 +554,15 @@ export interface Store {
   /** The agent key a connector hands its agent's workspaces: which key, and its sealed secret. */
   getConnectorKey(agentId: string): Promise<{ keyId: string; sealed: string } | undefined>;
   putConnectorKey(agentId: string, keyId: string, sealed: string, at: string): Promise<void>;
+
+  // --- managed agents (spec §8 Maritime, 2026-10-26) ---
+  getAgentHosting(agentId: string): Promise<StoredAgentHosting | undefined>;
+  getHosting(id: string): Promise<StoredAgentHosting | undefined>;
+  listAgentHostings(agentIds: string[]): Promise<StoredAgentHosting[]>;
+  /** Every hosting row in one of these states: what the worker drives. */
+  listHostingsByStatus(statuses: readonly string[]): Promise<StoredAgentHosting[]>;
+  /** Insert or replace a hosting row by its id. */
+  putHosting(hosting: StoredAgentHosting): Promise<void>;
 
   // --- invocations (spec §8 Invoking agent members, 2026-09-30) ---
   /** A new invocation, with its triggering message's offset: the queue's order. */

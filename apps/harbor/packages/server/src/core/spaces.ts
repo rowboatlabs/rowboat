@@ -17,7 +17,7 @@ import { randomBytes } from 'node:crypto';
 import type { z } from 'zod';
 import type { BlobStore } from '../blobs.js';
 import { HarborError } from '../errors.js';
-import { canArchiveSpace, canBind, canDeleteSpace, canChangeMembership, canEditProfile, canInvite, canJoinSpace, canListOnInvite, canOpenDirect, canReachMember, canRemoveFromOrg, canRemoveFromSpace, canRenameSpace, canSetDefaultSpace, canSetOrgSettings, canSetRole, canSetSpaceVisibility, canSignIn, canWriteSpace, enforce, isGroupChat } from '../policy.js';
+import { canArchiveSpace, canBind, canDeleteSpace, canChangeMembership, canEditProfile, canInvite, canJoinSpace, canListOnInvite, canOpenDirect, canReachMember, canReachPersonalAgent, canRemoveFromOrg, canRemoveFromSpace, canRenameSpace, canSetDefaultSpace, canSetOrgSettings, canSetRole, canSetSpaceVisibility, canSignIn, canWriteSpace, enforce, isGroupChat } from '../policy.js';
 import { DIRECT_SPACE_NAME, directKeyFor, type PushLevel, type StoredEvent, type StoredInvite } from '../store.js';
 import { Kernel, type ActorCtx, type BindIdentity } from './kernel.js';
 
@@ -101,7 +101,7 @@ export class Spaces {
    * its own: the integration that owns the agent calls this and gates who may.
    * The first is the Replicas coding agent (PR #1130).
    */
-  async createAgent(input: { displayName: string; ownerId?: string; agentKind?: string; agentConnection?: string; agentInstance?: string }): Promise<Member> {
+  async createAgent(input: { displayName: string; ownerId?: string; agentKind?: string; agentConnection?: string; agentInstance?: string; personal?: boolean }): Promise<Member> {
     const displayName = input.displayName.trim();
     if (!Member.shape.displayName.safeParse(displayName).success) {
       throw new HarborError('invalid_request', 'an agent needs a display name of 1 to 128 characters');
@@ -118,6 +118,8 @@ export class Spaces {
       agentKind: input.agentKind ?? 'custom',
       agentConnection: input.agentConnection ?? 'contract',
       ...(input.agentInstance ? { agentInstance: input.agentInstance } : {}),
+      // Personal is its owner's (spec §4 Agent members, 2026-10-26): an ownerless agent can't be.
+      ...(input.personal && input.ownerId ? { personal: true } : {}),
     };
     await this.k.store.putMember(member);
     return member;
@@ -374,6 +376,7 @@ export class Spaces {
       const other = await this.k.store.getMember(otherMemberId);
       if (!other) throw new HarborError('not_found', 'no such member on this org');
       enforce(canReachMember(other));
+      enforce(canReachPersonalAgent(ctx.memberId, other, 'message'));
     }
     const participants = self ? [ctx.memberId] : [ctx.memberId, otherMemberId].sort();
     const key = directKeyFor(participants);
@@ -448,6 +451,7 @@ export class Spaces {
       const member = await this.k.store.getMember(id);
       if (!member) throw new HarborError('not_found', `no member ${id} in this org`);
       enforce(canReachMember(member));
+      enforce(canReachPersonalAgent(ctx.memberId, member, 'add'));
     }
     const by = this.k.attributionOf(ctx, input);
     const at = this.k.now();
