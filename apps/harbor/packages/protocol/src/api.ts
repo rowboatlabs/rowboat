@@ -523,6 +523,8 @@ export const routes = {
       kind: z.string().min(1).max(32),
       anthropicApiKey: z.string().min(1).max(512).optional(),
       env: z.array(z.object({ key: z.string().regex(/^[A-Z_][A-Z0-9_]{0,63}$/), value: z.string().max(4096), secret: z.boolean().optional() })).max(20).optional(),
+      /** A personal agent, as on createAgent (spec §4 Agent members, 2026-10-27). */
+      personal: z.boolean().default(false),
     }),
     response: z.object({ agent: Member, key: AgentKeySecret, hosting: AgentHosting }),
   },
@@ -733,6 +735,20 @@ export const routes = {
     path: '/v1/agents/:agentId/name',
     params: z.object({ agentId: MemberId }),
     request: z.object({ displayName: z.string().max(128) }),
+    response: z.object({ agent: Member }),
+  },
+  /**
+   * Switch an agent between channel and personal (spec §4 Agent members,
+   * amended 2026-10-27): its owner only, app only like its name. The same
+   * value is a no-op. No event, as with a rename: rosters carry it on the
+   * next read. Work already queued for it finishes; the rule applies to what
+   * is asked of it after.
+   */
+  setAgentPersonal: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/personal',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ personal: z.boolean() }),
     response: z.object({ agent: Member }),
   },
   /** Another key for an agent (rotation: create, switch, revoke the old one). Owner only. */

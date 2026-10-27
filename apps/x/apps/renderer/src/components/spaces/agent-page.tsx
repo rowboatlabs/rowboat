@@ -5,9 +5,11 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { CommandsScreen, EnvScreen, FilesScreen, HostingDangerRows, LogsScreen, MachineBlock, SkillsScreen, TriggersScreen } from '@/components/spaces/agent-hosting'
 import { HOME, useHostingState, type HostingState } from '@/components/spaces/agent-hosting-state'
+import { AccessChoice } from '@/components/spaces/agent-access'
 import { ConnectAgent, CopyField } from '@/components/spaces/agent-setup'
 import { AgentTabs, ConfirmButton, DangerRow, DangerZone, Empty, FormCard, Row, Rows, ScreenHeader, Tag, type AgentTab } from '@/components/spaces/agent-tabs'
 import { refreshAgentCapabilities } from '@/hooks/use-space-invocations'
+import { refreshOrgRoster } from '@/hooks/use-space-members'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { BUILT_IN_CONNECTION, LLM_PROVIDER_INFO, LLM_PROVIDERS_FOR_KIND, PLATFORMS, setupFor } from '@/lib/agent-kinds'
 import { toast } from '@/lib/toast'
@@ -30,6 +32,9 @@ import { toast } from '@/lib/toast'
 // for good; Claude Code runs on the owner's key from the start. Whatever
 // cannot be undone, on any agent, is on the Danger zone tab and asks once
 // more.
+//
+// Who can use it (2026-10-27): Overview says whether it is a channel or a
+// personal agent, and its owner switches it there, either way, any time.
 
 /** Stands in for the key in the setup steps: the real one was shown once, when it was made. */
 export const KEY_PLACEHOLDER = 'YOUR_AGENT_KEY'
@@ -123,6 +128,7 @@ export function AgentPage({ org, listing, isAdmin, onChanged }: {
             content: (
                 <>
                     {hosting && <HostingOverview orgId={org.id} agent={agent} hosting={hosting} canManage={canManage} state={hostingState} onChanged={onChanged} />}
+                    {agent.ownerId && <AccessSection orgId={org.id} agent={agent} canSwitch={mine} onChanged={onChanged} />}
                     <div className="flex flex-col gap-2">
                         <ScreenHeader
                             title="Keys"
@@ -238,6 +244,45 @@ export function AgentPage({ org, listing, isAdmin, onChanged }: {
     }
 
     return <AgentTabs tabs={tabs} value={tab} onChange={setTab} />
+}
+
+/** Channel or personal: its owner switches it; everyone else reads which it is. */
+function AccessSection({ orgId, agent, canSwitch, onChanged }: { orgId: string; agent: spaces.Member; canSwitch: boolean; onChanged: () => Promise<void> }) {
+    const [busy, setBusy] = useState(false)
+    const personal = agent.personal === true
+    const choose = async (next: boolean) => {
+        if (busy) return
+        setBusy(true)
+        try {
+            await window.ipc.invoke('spaces:setAgentPersonal', { orgId, agentId: agent.id, personal: next })
+            // Pickers read the roster: someone else's personal agent leaves them, a channel one comes back.
+            refreshOrgRoster(orgId)
+            await onChanged()
+            toast(next ? `${agent.displayName} is now personal` : `${agent.displayName} is now a channel agent`, 'success')
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not change who can use it', 'error')
+        } finally {
+            setBusy(false)
+        }
+    }
+    if (canSwitch) {
+        return (
+            <AccessChoice
+                personal={personal}
+                onChange={(next) => void choose(next)}
+                disabled={busy}
+                note={personal ? 'It stays in its spaces; others see it and its replies but can’t ask it anything.' : 'Anyone who shares a space with it can mention it or DM it.'}
+            />
+        )
+    }
+    return (
+        <div className="flex flex-col gap-0.5">
+            <h3 className="text-sm font-semibold text-foreground">Who can use it</h3>
+            <p className="text-xs leading-snug text-muted-foreground">
+                {personal ? 'Personal: only its owner can mention it or DM it. You see it and its replies.' : 'Channel: anyone who shares a space with it can mention it or DM it.'}
+            </p>
+        </div>
+    )
 }
 
 /** The VM's tabs on a ready managed agent's page: one per part of the machine, Skills and Automations for Hermes only. */

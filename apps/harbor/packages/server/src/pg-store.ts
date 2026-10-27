@@ -504,15 +504,20 @@ export class PgStore implements Store {
 
   async putMember(member: Member): Promise<void> {
     // Kind, owner, and an agent's kind, connection and personal flag are
-    // written once and never updated: a person never becomes an agent or back,
-    // ownership has no transfer yet, reaching an agent another way is a new
-    // agent, and switching personal is not built (spec §4 Agent members,
-    // 2026-09-29, 2026-09-30 and 2026-10-26).
+    // written once here and never updated: a person never becomes an agent or
+    // back, ownership has no transfer yet, and reaching an agent another way
+    // is a new agent (spec §4 Agent members, 2026-09-29, 2026-09-30 and
+    // 2026-10-26). Personal changes only through setAgentPersonal (2026-10-27),
+    // so an upsert from a stale copy never flips it.
     await this.sql.query(
       `insert into members (org_id, id, display_name, title, avatar_url, role, kind, owner_id, agent_kind, agent_connection, agent_instance, personal) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        on conflict (org_id, id) do update set display_name = excluded.display_name, title = excluded.title, avatar_url = excluded.avatar_url, role = excluded.role`,
       [this.orgId, member.id, member.displayName, member.title ?? null, member.avatarUrl ?? null, member.role, member.kind, member.ownerId ?? null, member.agentKind ?? null, member.agentConnection ?? null, member.agentInstance ?? null, member.personal === true],
     );
+  }
+
+  async setAgentPersonal(id: string, personal: boolean): Promise<void> {
+    await this.sql.query(`update members set personal = $3 where org_id = $1 and id = $2 and kind = 'agent'`, [this.orgId, id, personal]);
   }
 
   async getMemberByIdentity(iss: string, sub: string): Promise<Member | undefined> {

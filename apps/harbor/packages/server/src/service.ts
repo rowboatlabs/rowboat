@@ -181,6 +181,9 @@ export class HarborService {
   renameAgent(ctx: ActorCtx, agentId: string, input: { displayName: string }): Promise<Member> {
     return this.agents.rename(ctx, agentId, input);
   }
+  setAgentPersonal(ctx: ActorCtx, agentId: string, input: { personal: boolean }): Promise<Member> {
+    return this.agents.setPersonal(ctx, agentId, input);
+  }
 
   setAgentOptionDefaults(ctx: ActorCtx, agentId: string, defaults: InvocationOptionValues): Promise<InvocationOptionValues> {
     return this.agents.setOptionDefaults(ctx, agentId, defaults);
@@ -208,7 +211,7 @@ export class HarborService {
   /** Create a managed agent on the platform Rowboat's account runs (spec §8 Maritime, 2026-10-26). */
   createManagedAgent(
     ctx: ActorCtx,
-    input: { displayName: string; kind: string; anthropicApiKey?: string; env?: Array<{ key: string; value: string; secret?: boolean }> },
+    input: { displayName: string; kind: string; anthropicApiKey?: string; env?: Array<{ key: string; value: string; secret?: boolean }>; personal?: boolean },
   ): Promise<{ agent: Member; key: AgentKeySecret; hosting: AgentHosting }> {
     return this.hosting.createManaged(ctx, input);
   }

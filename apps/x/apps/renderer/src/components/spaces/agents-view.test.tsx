@@ -77,6 +77,17 @@ describe('AgentsView', () => {
         expect(screen.queryByText('Gone')).toBeNull()
     })
 
+    it('marks each card with a people or lock icon, naming Channel or Personal on hover and saying whose a personal one is; a built-in agent has neither (2026-10-27)', async () => {
+        roster = roster.map((m) => (m.id === 'scout' ? { ...m, personal: true } : m))
+        show()
+        await screen.findByText('Scout')
+        const card = (name: string) => screen.getByTitle(name).closest('li')!
+        // Icons only: the word is on hover (and in the accessible name).
+        expect(within(card('Herald')).getByRole('img', { name: /^Channel: Anyone who shares a space with it/ })).toHaveTextContent('')
+        expect(within(card('Scout')).getByRole('img', { name: /^Personal: Only Harsh can use it/ })).toHaveTextContent('')
+        expect(within(card('Ro')).queryByLabelText(/^(Channel|Personal):/)).toBeNull()
+    })
+
     it('shows how many of your spaces each agent is in', async () => {
         show()
         await screen.findByText('2 spaces')

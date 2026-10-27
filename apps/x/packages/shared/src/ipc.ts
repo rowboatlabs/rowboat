@@ -4033,6 +4033,7 @@ export const ipcSchemas = {
       kind: z.string(),
       anthropicApiKey: z.string().optional(),
       env: z.array(z.object({ key: z.string(), value: z.string(), secret: z.boolean().optional() })).optional(),
+      personal: z.boolean().optional(),
     }),
     res: z.object({ agent: z.custom<SpacesTypes.Member>(), key: z.custom<SpacesTypes.AgentKeySecret>(), hosting: z.custom<SpacesTypes.AgentHosting>() }),
   },
@@ -4154,6 +4155,11 @@ export const ipcSchemas = {
   // Renaming an agent (2026-10-21, harbor renameAgent): its owner only.
   'spaces:renameAgent': {
     req: z.object({ orgId: z.string(), agentId: z.string(), displayName: z.string() }),
+    res: z.object({ agent: z.custom<SpacesTypes.Member>() }),
+  },
+  // Switching an agent between channel and personal (2026-10-27, harbor setAgentPersonal): its owner only.
+  'spaces:setAgentPersonal': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), personal: z.boolean() }),
     res: z.object({ agent: z.custom<SpacesTypes.Member>() }),
   },
   // Add existing org members, people or agents, to a space the caller is in

@@ -8,6 +8,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { AgentPage } from '@/components/spaces/agent-page'
 import { InstancePicker, type InstanceChoice } from '@/components/spaces/agent-instance-picker'
 import { MaritimeAgentPicker } from '@/components/spaces/agent-maritime-picker'
+import { AccessChoice, accessLabel } from '@/components/spaces/agent-access'
 import { AgentLogo, ConnectAgent } from '@/components/spaces/agent-setup'
 import { MemberAvatar } from '@/components/spaces/atoms'
 import { refreshMembers, refreshOrgRoster, useOrgRoster } from '@/hooks/use-space-members'
@@ -42,8 +43,9 @@ import { cn } from '@/lib/utils'
 // delete it from Maritime. Add agent stays for an agent the person runs.
 //
 // Personal agents (Harbor spec §4 Agent members, 2026-10-26): chosen on Add
-// and never changed. Only the owner can use one; everyone else sees it and
-// its replies. Its name starts as "<your first name>'s <kind>".
+// and on Create (2026-10-27), switched later from the agent's page. Only the
+// owner can use one; everyone else sees it and its replies. Its name starts
+// as "<your first name>'s <kind>".
 
 type Screen =
     | { name: 'list' }
@@ -214,39 +216,6 @@ function PickRow({ on, label, text, icon, onClick }: { on: boolean; label: strin
     )
 }
 
-/** Channel or personal (2026-10-26): who may use it, fixed once it is added. */
-function AccessChoice({ personal, onChange }: { personal: boolean; onChange: (personal: boolean) => void }) {
-    const options = [
-        { value: false, label: 'Channel', description: 'Anyone in its spaces can mention it.' },
-        { value: true, label: 'Personal', description: 'Only you can use it. Others see it and its replies.' },
-    ] as const
-    return (
-        <div className="mt-4 flex flex-col gap-1.5">
-            <span className="text-xs font-medium text-foreground">Who can use it</span>
-            <div role="radiogroup" aria-label="Who can use it" className="grid grid-cols-2 gap-2">
-                {options.map((o) => (
-                    <button
-                        key={o.label}
-                        type="button"
-                        role="radio"
-                        aria-checked={o.value === personal}
-                        aria-label={o.label}
-                        onClick={() => onChange(o.value)}
-                        className={cn(
-                            'flex min-w-0 flex-col items-start rounded-lg border px-2.5 py-2 text-left',
-                            o.value === personal ? 'border-foreground/50 bg-accent' : 'border-border hover:bg-accent/50',
-                        )}
-                    >
-                        <span className="text-xs font-medium text-foreground">{o.label}</span>
-                        <span className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{o.description}</span>
-                    </button>
-                ))}
-            </div>
-            <span className="text-[11px] text-muted-foreground">You can't change this after it's added.</span>
-        </div>
-    )
-}
-
 /** The agent a platform runs (Replicas's coding agent, Agent37's Hermes or OpenClaw): its kind. */
 function KindChoice({ label, kinds, selected, onSelect }: { label: string; kinds: readonly string[]; selected: string; onSelect: (kind: string) => void }) {
     return (
@@ -363,6 +332,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
         setAddError(null)
         setSkippedSpaces(new Set())
         setWithDirect(true)
+        setPersonal(false)
         setScreen({ name: 'create' })
     }, [])
 
@@ -385,7 +355,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
 
     const offeredKinds = MANAGED_KINDS.filter((m) => managedKinds.includes(m.kind))
     const chosenManaged = createKind && managedKinds.includes(createKind) ? createKind : offeredKinds[0]?.kind ?? 'hermes'
-    const createName = nameEdited ? name : kindInfo(chosenManaged).label
+    const createName = nameEdited ? name : personal ? personalAgentName(ownName, kindInfo(chosenManaged).label) : kindInfo(chosenManaged).label
     const parsedEnv = parseEnv(envText)
     const createReady = createName.trim() !== '' && (chosenManaged !== 'claude-code' || anthropicKey.trim() !== '') && !('bad' in parsedEnv)
 
@@ -421,6 +391,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                 kind: chosenManaged,
                 ...(chosenManaged === 'claude-code' ? { anthropicApiKey: anthropicKey.trim() } : {}),
                 ...(parsedEnv.env.length > 0 ? { env: parsedEnv.env } : {}),
+                ...(personal ? { personal: true } : {}),
             })
             setAnthropicKey('')
             setEnvText('')
@@ -523,7 +494,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                                                         <div className="truncate text-sm font-medium">{agent.displayName}</div>
                                                                         <div className="truncate text-[11px] text-muted-foreground">
                                                                             {agentLabel(agent.agentKind, agent.agentConnection)}
-                                                                            {agent.personal && ' · Personal'}
+                                                                            {accessLabel(agent) && ` · ${accessLabel(agent)}`}
                                                                             {' · '}
                                                                             {agent.ownerId ? (mine ? 'Yours' : `Owned by ${names.get(agent.ownerId) ?? 'another member'}`) : 'Managed by admins'}
                                                                             {' · '}
@@ -588,7 +559,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                 ))}
                             </div>
                             {setup.kinds.length > 1 && !setup.bindsInstance && <KindChoice label={setup.kindChoice ?? 'Agent'} kinds={setup.kinds} selected={kind} onSelect={setChosenKind} />}
-                            <AccessChoice personal={personal} onChange={setPersonal} />
+                            <AccessChoice className="mt-4" personal={personal} onChange={setPersonal} note="You can change this later from its page." />
                             <label className="mt-4 flex flex-col gap-1.5">
                                 <span className="text-xs font-medium text-foreground">Name</span>
                                 <Input
@@ -679,6 +650,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                     />
                                 ))}
                             </div>
+                            <AccessChoice className="mt-4" personal={personal} onChange={setPersonal} note="You can change this later from its page." />
                             <label className="mt-4 flex flex-col gap-1.5">
                                 <span className="text-xs font-medium text-foreground">Name</span>
                                 <Input
@@ -750,6 +722,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                 onChange={setSkippedSpaces}
                                 direct={isGroupChat(org) ? null : withDirect}
                                 onDirectChange={setWithDirect}
+                                personal={personal}
                             />
                             {progress && <div className="mt-3 text-xs text-muted-foreground">{progress}</div>}
                             {addError && <div role="alert" className="mt-3 text-xs text-destructive">{addError}</div>}
@@ -800,7 +773,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                         <>
                             <Header
                                 title={agent.displayName}
-                                description={`${agentLabel(agent.agentKind, agent.agentConnection)}${agent.personal ? ' · Personal' : ''} · ${owner}`}
+                                description={`${agentLabel(agent.agentKind, agent.agentConnection)}${accessLabel(agent) ? ` · ${accessLabel(agent)}` : ''} · ${owner}`}
                                 icon={<AgentLogo logo={kindInfo(agent.agentKind ?? 'custom').logo ?? setupFor(agent).logo} className="size-5" />}
                                 onBack={back}
                             />

@@ -2,7 +2,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { BUILT_IN_CONNECTION, HARBOR_RUN_CONNECTIONS, INSTANCE_CONNECTIONS, JEV_KIND, isAgentPair, type AgentCredential, type AgentHook, type AgentKey, type AgentKeySecret, type AgentListing, type InvocationOptionValues, type Member } from '@rowboat/spaces-protocol';
 import { hashAgentKey, mintAgentKeySecret } from '../agent-keys.js';
 import { HarborError } from '../errors.js';
-import { agentsManagedBy, canAddAgent, canClearAgentHook, canCreateAgentKey, canRenameAgent, canRevokeAgentKey, canSetAgentHook, enforce } from '../policy.js';
+import { agentsManagedBy, canAddAgent, canClearAgentHook, canCreateAgentKey, canRenameAgent, canRevokeAgentKey, canSetAgentHook, canSetAgentPersonal, enforce } from '../policy.js';
 import type { StoredAgentKey } from '../store.js';
 import type { Kernel, ActorCtx } from './kernel.js';
 import { oneLine, type Spaces } from './spaces.js';
@@ -159,6 +159,22 @@ export class Agents {
     const updated: Member = { ...agent, displayName };
     await this.k.store.putMember(updated);
     return updated;
+  }
+
+  /**
+   * Switch an agent between channel and personal (spec §4 Agent members,
+   * amended 2026-10-27): the owner only. Like a rename, an org fact with no
+   * event. The invocation rule reads the flag when a message arrives, so what
+   * is already queued finishes and everything asked after follows the new
+   * setting; Jev's candidates read it the same way.
+   */
+  async setPersonal(ctx: ActorCtx, agentId: string, input: { personal: boolean }): Promise<Member> {
+    const agent = await this.agent(agentId);
+    enforce(canSetAgentPersonal(await this.actor(ctx), agent));
+    if ((agent.personal === true) === input.personal) return agent; // idempotent no-op: no write
+    this.k.guardWrite();
+    await this.k.store.setAgentPersonal(agentId, input.personal);
+    return this.agent(agentId);
   }
 
   /**
