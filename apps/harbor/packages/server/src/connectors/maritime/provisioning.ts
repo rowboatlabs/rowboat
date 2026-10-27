@@ -119,6 +119,29 @@ export function maritimeOps(api: MaritimeApi, agentId: string): HostingOps {
     const a = await api.agent(agentId);
     return { status: a.status, ...(a.tier ? { tier: a.tier } : {}) };
   };
+  // An awake VM refuses to start ("already running"): it is what was asked for.
+  const awake = async () => {
+    try {
+      await api.start(agentId);
+    } catch (err) {
+      if (!(err instanceof MaritimeError && err.alreadyRunning)) throw err;
+    }
+  };
+  /**
+   * Maritime runs exec, the file calls and the skill calls inside the container, so on a VM asleep
+   * since its last turn they are refused (seen live 2026-10-27: "unreachable"). A refusal on a machine
+   * that is not up is answered the way a turn starts: wake it, then once more.
+   */
+  const onVm = async <T>(op: () => Promise<T>): Promise<T> => {
+    try {
+      return await op();
+    } catch (err) {
+      if (!(err instanceof MaritimeError) || err.gone || err.rejectsKey || err.mustWait) throw err;
+      if ((await api.agent(agentId)).status === 'active') throw err;
+      await awake();
+      return op();
+    }
+  };
   return {
     machine: () => refusing(machine),
     env: () => refusing(async () => shapeEnv(await api.listEnv(agentId))),
@@ -132,18 +155,13 @@ export function maritimeOps(api: MaritimeApi, agentId: string): HostingOps {
     power: (action) =>
       refusing(async () => {
         if (action === 'wake') {
-          // An awake VM refuses to start ("already running"): it is what was asked for.
-          try {
-            await api.start(agentId);
-          } catch (err) {
-            if (!(err instanceof MaritimeError && err.alreadyRunning)) throw err;
-          }
+          await awake();
           return machine();
         }
         const a = action === 'restart' ? await api.restart(agentId) : action === 'sleep' ? await api.sleep(agentId) : await api.reloadEnv(agentId);
         return { status: a.status, ...(a.tier ? { tier: a.tier } : {}) };
       }),
-    run: (command, timeoutSeconds) => refusing(async () => shapeExecution(await api.exec(agentId, ['sh', '-c', command], { detached: true, timeoutSeconds }))),
+    run: (command, timeoutSeconds) => refusing(() => onVm(async () => shapeExecution(await api.exec(agentId, ['sh', '-c', command], { detached: true, timeoutSeconds })))),
     execution: (executionId) => refusing(async () => shapeExecution(await api.execution(agentId, executionId))),
     cancel: (executionId) => refusing(async () => shapeExecution(await api.cancelExecution(agentId, executionId))),
     logs: (opts) =>
@@ -153,21 +171,21 @@ export function maritimeOps(api: MaritimeApi, agentId: string): HostingOps {
         const last = logs.at(-1);
         return { logs, ...(logs.length >= opts.limit && last ? { nextBefore: last.id || last.timestamp } : {}) };
       }),
-    files: (path) => refusing(async () => shapeFiles(await api.listFiles(agentId, path), path)),
-    readFile: (path) => refusing(() => api.readFile(agentId, path)),
-    writeFile: (path, content) => refusing(() => api.writeFile(agentId, path, content)),
-    mkdir: (path) => refusing(() => api.mkdir(agentId, path)),
-    move: (from, to) => refusing(() => api.moveFile(agentId, from, to)),
-    deleteFile: (path) => refusing(() => api.deleteFile(agentId, path)),
+    files: (path) => refusing(() => onVm(async () => shapeFiles(await api.listFiles(agentId, path), path))),
+    readFile: (path) => refusing(() => onVm(() => api.readFile(agentId, path))),
+    writeFile: (path, content) => refusing(() => onVm(() => api.writeFile(agentId, path, content))),
+    mkdir: (path) => refusing(() => onVm(() => api.mkdir(agentId, path))),
+    move: (from, to) => refusing(() => onVm(() => api.moveFile(agentId, from, to))),
+    deleteFile: (path) => refusing(() => onVm(() => api.deleteFile(agentId, path))),
     skills: (q) =>
-      refusing(async () => {
+      refusing(() => onVm(async () => {
         const installed = shapeSkills(await api.listSkills(agentId), true);
         if (!q) return installed;
         const have = new Set(installed.map((s) => s.name));
         return shapeSkills(await api.searchSkills(agentId, q), false).map((s) => ({ ...s, installed: have.has(s.name) }));
-      }),
-    installSkill: (name) => refusing(async () => void (await api.installSkill(agentId, name))),
-    removeSkill: (name) => refusing(() => api.removeSkill(agentId, name)),
+      })),
+    installSkill: (name) => refusing(() => onVm(async () => void (await api.installSkill(agentId, name)))),
+    removeSkill: (name) => refusing(() => onVm(() => api.removeSkill(agentId, name))),
     triggers: () => refusing(async () => (await api.listTriggers(agentId)).map(shapeTrigger)),
     createTrigger: (input) => refusing(async () => void (await api.createTrigger(agentId, input))),
     updateTrigger: (triggerId, input) => refusing(async () => void (await api.updateTrigger(agentId, triggerId, input))),

@@ -180,9 +180,9 @@ export class FakeMaritime {
 
     if (req.method === 'GET' && rest === '') {
       if (!managed) return send(200, this.agent);
-      // A fresh deploy takes a couple of reads, then the agent sleeps, as a Maritime deploy ends.
+      // A fresh deploy takes a couple of reads, then the agent is up, as a Maritime deploy ends; it sleeps later, on its own.
       managed.reads++;
-      if (managed.status === 'deploying' && managed.reads >= 2) managed.status = 'sleeping';
+      if (managed.status === 'deploying' && managed.reads >= 2) managed.status = 'active';
       const { reads: _reads, endUser: _endUser, ...shape } = managed;
       return send(200, shape);
     }
@@ -191,6 +191,8 @@ export class FakeMaritime {
     const setStatus = (status: string) => {
       record.status = status;
     };
+    // Maritime runs exec, the file calls and the skill calls inside the container: a VM that is not up refuses them.
+    if (/^(exec$|files\/|skills)/.test(rest) && record.status !== 'active') return send(409, { detail: `Agent ${record.id} is unreachable: the machine is not running` });
     if (req.method === 'POST' && (rest === 'restart' || rest === 'sleep' || rest === 'stop' || rest === 'reload-env')) {
       this.power.push({ agentId: agentId!, action: rest });
       if (rest === 'sleep') setStatus('sleeping');
@@ -344,8 +346,6 @@ export class FakeMaritime {
       return send(200, managed ? { ...managed, reads: undefined, endUser: undefined } : this.agent);
     }
     if (req.method === 'POST' && rest === 'exec') {
-      if (record.status === 'error') return send(409, { detail: 'Agent is in an error state. Start it to recover.' });
-      record.status = 'active';
       const command = body?.command;
       const script = Array.isArray(command) && command[0] === 'sh' && command[1] === '-c' ? String(command[2]) : String(command);
       const execution: FakeExecution = {
@@ -394,7 +394,6 @@ export class FakeMaritime {
       return send(200, { executionId, status, ...(status === 'running' ? {} : { exitCode }), stdout, stderr });
     }
     if (req.method === 'PUT' && rest === 'files/write') {
-      this.agent.status = 'active';
       this.files.set(String(body?.path), String(body?.content ?? ''));
       return send(200, { ok: true });
     }

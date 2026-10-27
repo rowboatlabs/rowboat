@@ -231,6 +231,16 @@ describe('managed Maritime agents', () => {
     const cancelled = await me.delete(`/v1/agents/${agent.id}/hosting/commands/${run.body.execution.id}`);
     expect(cancelled.body.execution.status).toBe('cancelled');
     expect((await me.get(`/v1/agents/${agent.id}/hosting/commands/nope`)).status).toBe(404);
+
+    // Asleep since its last turn: the platform refuses a command on a VM that is not up ("unreachable", seen live
+    // 2026-10-27), so the page's call starts it and tries again, as a turn does. Files the same.
+    await me.post(`/v1/agents/${agent.id}/hosting/power`, { action: 'sleep' });
+    const woken = await me.post(`/v1/agents/${agent.id}/hosting/commands`, { command: 'echo awake' });
+    expect(woken.status).toBe(200);
+    expect((await me.get(`/v1/agents/${agent.id}/hosting`)).body.machine.status).toBe('active');
+    await me.post(`/v1/agents/${agent.id}/hosting/power`, { action: 'sleep' });
+    expect((await me.get(`/v1/agents/${agent.id}/hosting/files?path=/data`)).status).toBe(200);
+    expect(fake.power.filter((p) => p.agentId === agent.agentInstance).map((p) => p.action)).toEqual(['sleep', 'start', 'sleep', 'start']);
   });
 
   it('reads the VM’s logs, newest first, paged by the platform’s cursor', async () => {
