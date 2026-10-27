@@ -4361,6 +4361,8 @@ export const ipcSchemas = {
       poll: z.custom<SpacesTypes.SpacesNewPollInput>().optional(),
       /** Options picked for agents the message mentions, keyed by agent member id (2026-09-30). */
       agentOptions: z.record(z.string(), z.record(z.string(), z.union([z.string(), z.boolean()]))).optional(),
+      /** A thread reply for the people only: it follows up no agent (Harbor spec §8, 2026-10-27). */
+      peopleOnly: z.boolean().optional(),
     }),
     res: z.custom<SpacesPostResult>(),
   },

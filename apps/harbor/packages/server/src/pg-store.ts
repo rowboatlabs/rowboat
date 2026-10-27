@@ -310,6 +310,7 @@ interface MessageRow {
   mentions_here: boolean | null;
   mentions_rowboat: boolean | null;
   summary?: string | null;
+  people_only?: boolean | null;
 }
 
 /** What search indexes for a message: its summary (2026-10-25) and its body. */
@@ -340,6 +341,7 @@ function rowToMessage(r: MessageRow): Message {
     ...(r.poll !== null && r.poll !== undefined ? { poll: r.poll } : {}),
     // An approval card's approval as raised; the current one folds in on reads (spec §8 part 4).
     ...(r.approval !== null && r.approval !== undefined ? { approval: r.approval } : {}),
+    ...(r.people_only ? { peopleOnly: true as const } : {}),
     mentions: r.mentions ?? [],
     mentionsHere: r.mentions_here ?? false,
     mentionsRowboat: r.mentions_rowboat ?? false,
@@ -1188,8 +1190,8 @@ export class PgStore implements Store {
 
   async appendMessage(message: Message): Promise<void> {
     await this.sql.query(
-      `insert into messages (id, space_id, thread_root, author, body, posted_at, stream_offset, reply_count, last_reply_at, anchor_change_set_id, poll, mentions, mentions_here, mentions_rowboat, search_text, approval, summary)
-       values ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14, $15, $16::jsonb, $17)`,
+      `insert into messages (id, space_id, thread_root, author, body, posted_at, stream_offset, reply_count, last_reply_at, anchor_change_set_id, poll, mentions, mentions_here, mentions_rowboat, search_text, approval, summary, people_only)
+       values ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14, $15, $16::jsonb, $17, $18)`,
       [
         message.id,
         message.spaceId,
@@ -1208,6 +1210,7 @@ export class PgStore implements Store {
         searchTextFor(withSummary(message.body, message.summary)),
         message.approval ? JSON.stringify(message.approval) : null,
         message.summary ?? null,
+        message.peopleOnly === true,
       ],
     );
   }

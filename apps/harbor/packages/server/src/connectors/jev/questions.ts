@@ -42,7 +42,7 @@ export interface TagInput {
   here: boolean;
   /** Agents with a turn queued or running in this thread: a tag would only queue another. */
   busyAgents: ReadonlySet<string>;
-  /** False past the hop limit: a tag could not start an agent's turn. */
+  /** False past the hop limit, where a tag could not start an agent's turn, and for a reply sent to people only (2026-10-27). */
   agentsAllowed: boolean;
 }
 

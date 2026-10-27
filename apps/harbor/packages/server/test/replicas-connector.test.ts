@@ -162,7 +162,8 @@ describe('the Replicas connector', () => {
     const root = message.id;
     expect((await org.ended(first[0]!.id)).state).toBe('done');
     const creates = fake.creates().length;
-    await org.post("it's the session cookie", { threadRoot: root });
+    // Sent to people only: a reply that mentions nobody would follow up the agent itself (spec §8, 2026-10-27).
+    await org.post("it's the session cookie", { threadRoot: root, peopleOnly: true });
     const { invocations } = await org.post(`${mention(claude)} also add a test`, { threadRoot: root });
     expect((await org.ended(invocations[0]!.id)).state).toBe('done');
     expect(fake.creates()).toHaveLength(creates);
