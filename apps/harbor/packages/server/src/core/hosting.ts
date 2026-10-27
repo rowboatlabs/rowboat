@@ -188,7 +188,7 @@ export class Hosting {
    */
   async createManaged(
     ctx: ActorCtx,
-    input: { displayName: string; kind: string; anthropicApiKey?: string; env?: Array<{ key: string; value: string; secret?: boolean }> },
+    input: { displayName: string; kind: string; anthropicApiKey?: string; env?: Array<{ key: string; value: string; secret?: boolean }>; personal?: boolean },
   ): Promise<{ agent: Member; key: AgentKeySecret; hosting: AgentHosting }> {
     const actor = await this.k.store.getMember(ctx.memberId);
     if (!actor) throw new HarborError('not_a_member', 'not a member of this org');
@@ -237,6 +237,8 @@ export class Hosting {
       agentKind: input.kind,
       agentConnection: 'maritime',
       agentInstance: externalId,
+      // Channel or personal, as on Add (spec §4 Agent members, 2026-10-27).
+      ...(input.personal ? { personal: true } : {}),
     });
     await this.hooks.save(agent.id, this.provider.credential(), ctx.memberId);
     row = { ...row, agentId: agent.id, externalId, status: 'deploying', updatedAt: this.k.now() };

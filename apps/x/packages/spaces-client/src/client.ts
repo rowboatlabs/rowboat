@@ -433,6 +433,7 @@ export class SpacesClient {
     kind: string;
     anthropicApiKey?: string;
     env?: Array<{ key: string; value: string; secret?: boolean }>;
+    personal?: boolean;
   }): Promise<{ agent: Member; key: AgentKeySecret; hosting: AgentHosting }> {
     return this.request('POST', routes.createManagedAgent.path, routes.createManagedAgent.response, input);
   }
@@ -535,6 +536,11 @@ export class SpacesClient {
   /** Rename an agent this member owns (api.ts renameAgent, 2026-10-21). */
   async renameAgent(agentId: string, displayName: string): Promise<Member> {
     return (await this.request('PUT', `/v1/agents/${encodeURIComponent(agentId)}/name`, routes.renameAgent.response, { displayName })).agent;
+  }
+
+  /** Switch an agent this member owns between channel and personal (api.ts setAgentPersonal, 2026-10-27). */
+  async setAgentPersonal(agentId: string, personal: boolean): Promise<Member> {
+    return (await this.request('PUT', `/v1/agents/${encodeURIComponent(agentId)}/personal`, routes.setAgentPersonal.response, { personal })).agent;
   }
 
   async revokeAgentKey(agentId: string, keyId: string): Promise<AgentKey> {

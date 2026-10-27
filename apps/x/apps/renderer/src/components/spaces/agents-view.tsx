@@ -4,6 +4,7 @@ import type { spaces } from '@x/shared'
 import { Input } from '@/components/ui/input'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { AccessBadge } from '@/components/spaces/agent-access'
 import { AgentsDialog, type AgentsDialogStart } from '@/components/spaces/agents-dialog'
 import { MemberAvatar } from '@/components/spaces/atoms'
 import { RemoveFromOrgDialog } from '@/components/spaces/member-admin'
@@ -259,8 +260,11 @@ function AgentCard({ orgId, agent, owner, spaceNames, isAdmin, onOpenSettings, o
                 // The whole card opens the agent; the menu and rename sit above it.
                 <button type="button" aria-label={`Open ${shownName}`} onClick={onOpenSettings} className="absolute inset-0 rounded-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring" />
             )}
-            <div className="flex items-start justify-between">
+            <div className="flex items-start justify-between gap-2">
                 <AgentFace agent={{ ...agent, displayName: shownName }} />
+                <div className="flex items-center gap-1">
+                {/* Channel or personal, on every agent with an owner (2026-10-27). */}
+                <AccessBadge agent={agent} {...(typeof owner === 'object' ? { ownerName: owner.name } : {})} />
                 {(yours || canOpen || canRemove) && (
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -295,6 +299,7 @@ function AgentCard({ orgId, agent, owner, spaceNames, isAdmin, onOpenSettings, o
                         </DropdownMenuContent>
                     </DropdownMenu>
                 )}
+                </div>
             </div>
 
             <div className="mt-5 min-w-0">
@@ -317,8 +322,6 @@ function AgentCard({ orgId, agent, owner, spaceNames, isAdmin, onOpenSettings, o
                 )}
                 <div className="mt-0.5 truncate text-xs text-[var(--rowboat-ink-secondary)]">
                     {agentLabel(agent.agentKind, agent.agentConnection)}
-                    {/* Only its owner can use it (2026-10-26); everyone sees it here. */}
-                    {agent.personal && ' · Personal'}
                 </div>
             </div>
 

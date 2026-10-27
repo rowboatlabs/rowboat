@@ -57,6 +57,11 @@ const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
             ] }
         case 'spaces:agent37CreateInstance': return { instance: { id: 'zz99', name: args.name, template: 'agent37-openclaw', status: 'running', kind: 'openclaw' } }
         case 'spaces:managedAgentKinds': return { kinds: managedKinds }
+        case 'spaces:setAgentPersonal': {
+            const on = (args as unknown as { personal: boolean }).personal
+            listing = listing.map((l) => (l.agent.id === args.agentId ? { ...l, agent: { ...l.agent, personal: on } } : l))
+            return { agent: listing.find((l) => l.agent.id === args.agentId)!.agent }
+        }
         case 'spaces:createManagedAgent': {
             if (args.displayName === 'Over') throw new Error('Maritime: You are on the free plan, which includes 3 agents (you have 3). Upgrade to a paid plan to create more.')
             const agent = { ...hermes, id: 'new', displayName: args.displayName, agentKind: args.kind, agentConnection: 'maritime', agentInstance: 'agt-m1' } as spaces.Member
@@ -130,7 +135,7 @@ describe('AgentsDialog', () => {
     it('opens on the list: a roster to click into, and Add agent — nothing else', async () => {
         render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
         await screen.findByText('Hermes')
-        expect(screen.getByText('Hermes · Yours · 1 key')).toBeInTheDocument()
+        expect(screen.getByText('Hermes · Channel · Yours · 1 key')).toBeInTheDocument()
         expect(screen.queryByText(/Key made/)).toBeNull()
         expect(screen.getByRole('button', { name: /Add agent/ })).toBeInTheDocument()
         // This org's Harbor creates no agents (no Maritime key): nothing to create.
@@ -246,6 +251,38 @@ describe('AgentsDialog', () => {
         expect(await screen.findByText('Hermes · Personal · Yours · 1 key')).toBeInTheDocument()
     })
 
+    it('creates a personal agent on Maritime too, named for you (2026-10-27)', async () => {
+        managedKinds = ['hermes', 'claude-code', 'codex']
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        fireEvent.click(await screen.findByRole('button', { name: /Create agent/ }))
+        await screen.findByRole('heading', { name: 'Create an agent' })
+        expect(screen.getByRole('radio', { name: 'Channel' })).toHaveAttribute('aria-checked', 'true')
+        fireEvent.click(screen.getByRole('radio', { name: 'Personal' }))
+        expect(screen.getByLabelText('Agent name')).toHaveValue("Ramnique's Hermes")
+        fireEvent.click(screen.getByRole('button', { name: 'Create agent' }))
+        await screen.findByRole('heading', { name: "Ramnique's Hermes" })
+        expect(invoke).toHaveBeenCalledWith('spaces:createManagedAgent', { orgId: 'org-1', displayName: "Ramnique's Hermes", kind: 'hermes', personal: true })
+    })
+
+    it('its owner switches it between channel and personal from its page (2026-10-27)', async () => {
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        fireEvent.click(await screen.findByRole('button', { name: /Hermes/ }))
+        const access = await screen.findByRole('radiogroup', { name: 'Who can use it' })
+        expect(within(access).getByRole('radio', { name: 'Channel' })).toHaveAttribute('aria-checked', 'true')
+        fireEvent.click(within(access).getByRole('radio', { name: 'Personal' }))
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:setAgentPersonal', { orgId: 'org-1', agentId: 'hermes', personal: true }))
+        await waitFor(() => expect(within(screen.getByRole('radiogroup', { name: 'Who can use it' })).getByRole('radio', { name: 'Personal' })).toHaveAttribute('aria-checked', 'true'))
+        expect(screen.getByText(/Hermes · Personal · Yours/)).toBeInTheDocument()
+    })
+
+    it('someone else’s agent says which it is, with no switch', async () => {
+        listing = [{ agent: { ...scout, personal: true }, keys: [key('k5', 'scout')] }]
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        fireEvent.click(await screen.findByRole('button', { name: /Scout/ }))
+        expect(await screen.findByText(/Personal: only its owner can mention it or DM it/)).toBeInTheDocument()
+        expect(screen.queryByRole('radiogroup', { name: 'Who can use it' })).toBeNull()
+    })
+
     it('switching kind keeps a typed name; Back returns to the list', async () => {
         render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
         await screen.findByText('Hermes')
@@ -254,7 +291,7 @@ describe('AgentsDialog', () => {
         fireEvent.click(screen.getByRole('radio', { name: 'Custom' }))
         expect(screen.getByLabelText('Agent name')).toHaveValue('Athena')
         fireEvent.click(screen.getByRole('button', { name: 'Back' }))
-        expect(await screen.findByText('Hermes · Yours · 1 key')).toBeInTheDocument()
+        expect(await screen.findByText('Hermes · Channel · Yours · 1 key')).toBeInTheDocument()
     })
 
     it('an agent’s page shows its setup any time, its key a placeholder until a new one fills it in', async () => {
@@ -434,7 +471,7 @@ describe('AgentsDialog', () => {
         listing = [{ agent: claude, keys: [key('k3', 'claude')], credential: { hint: '…ab12', setBy: 'me', setAt: '2026-09-30T10:00:00Z', rejectedAt: '2026-09-30T11:00:00Z', rejectedReason: 'Replicas rejected this agent\'s API key.' } }]
         render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
         await screen.findByText('Claude')
-        expect(screen.getByText(/Claude Code · via Replicas · Yours · 1 key/)).toBeInTheDocument()
+        expect(screen.getByText(/Claude Code · via Replicas · Channel · Yours · 1 key/)).toBeInTheDocument()
         expect(screen.getByText(/Key rejected/)).toBeInTheDocument() // flagged on the list, too
         fireEvent.click(screen.getByRole('button', { name: /Claude/ }))
         expect(await screen.findByText(/Replicas key …ab12/)).toBeInTheDocument()
@@ -517,7 +554,7 @@ describe('AgentsDialog', () => {
         await screen.findByText('Cal')
         // Bots are listed apart from agents, and labelled as bots.
         expect(within(screen.getByRole('region', { name: 'Agents' })).getByText('Hermes')).toBeInTheDocument()
-        expect(within(screen.getByRole('region', { name: 'Bots' })).getByText('Cal.com bot · Yours · 1 key')).toBeInTheDocument()
+        expect(within(screen.getByRole('region', { name: 'Bots' })).getByText('Cal.com bot · Channel · Yours · 1 key')).toBeInTheDocument()
         fireEvent.click(screen.getByRole('button', { name: /Cal/ }))
         fireEvent.click(await screen.findByRole('tab', { name: 'Alerts' }))
         expect(screen.queryByRole('tab', { name: 'Danger zone' })).toBeNull() // nothing to turn off yet
@@ -579,7 +616,7 @@ describe('AgentsDialog', () => {
         await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(/Running on Rowboat's Maritime account since .*2026\. It sleeps between turns/), { timeout: 6_000 })
         // The list reads it like any agent of yours.
         fireEvent.click(screen.getByRole('button', { name: 'Done' }))
-        await screen.findByText('Hermes · via Maritime · Yours · 1 key')
+        await screen.findByText('Hermes · via Maritime · Channel · Yours · 1 key')
     }, 10_000)
 
     it('creates Claude Code with the person’s Anthropic key and environment variables, which travel once', async () => {
@@ -645,7 +682,7 @@ describe('AgentsDialog', () => {
         listing = [{ agent: scoutM, keys: [key('k7', 'sm')], hosting: hosting('ready') }]
         const { unmount } = render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
         // Harsh's agent: another member may look, not delete; an admin may.
-        await screen.findByText(/Codex · via Maritime · Owned by Harsh/)
+        await screen.findByText(/Codex · via Maritime · Channel · Owned by Harsh/)
         fireEvent.click(screen.getByRole('button', { name: /Scout/ }))
         expect(await screen.findByRole('status')).toHaveTextContent(/Running on Rowboat's Maritime account/)
         expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Overview']) // not theirs to manage
@@ -776,7 +813,7 @@ describe('AgentsDialog', () => {
         roster = [person('me', 'Ramnique', 'admin'), person('harsh', 'Harsh')]
         listing = [{ agent: scout, keys: [key('k5', 'scout')] }]
         render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
-        await screen.findByText('Agent · Owned by Harsh · 1 key')
+        await screen.findByText('Agent · Channel · Owned by Harsh · 1 key')
         fireEvent.click(screen.getByRole('button', { name: /Scout/ }))
         await screen.findByRole('heading', { name: 'Scout' })
         expect(screen.queryByRole('button', { name: /New key/ })).not.toBeInTheDocument()

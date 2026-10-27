@@ -5,8 +5,9 @@ import type { RunningHarbor } from '../src/server.js';
 import { agentClient, restClient, startTestHarbor } from './helpers.js';
 
 // Personal agents (spec §4 Agent members, 2026-10-26): chosen when the agent
-// is added. Everyone sees it on the roster and reads its replies; only its
-// owner invokes it, adds it to a space, or DMs it.
+// is added, switched by its owner after (2026-10-27). Everyone sees it on the
+// roster and reads its replies; only its owner invokes it, adds it to a
+// space, or DMs it.
 
 let harbor: RunningHarbor;
 let spaceId: string;
@@ -132,5 +133,38 @@ describe('who may invoke it', () => {
   it('leaves a channel agent invocable by anyone in the space', async () => {
     const { invocations } = await post('dev-gagan', `${mention(channel)} summarise`);
     expect(invocations[0]).toMatchObject({ agentId: channel.id, state: 'pending' });
+  });
+});
+
+describe('switching it (2026-10-27)', () => {
+  const setPersonal = (token: string, agent: Member, value: boolean) => as(token).put(`/v1/agents/${agent.id}/personal`, { personal: value });
+
+  it('is its owner’s alone to switch', async () => {
+    const r = await setPersonal('dev-gagan', channel, true);
+    expect(r.status).toBe(403);
+    expect(r.body.message).toContain('only the agent’s owner');
+    expect((await harbor.store.getMember(channel.id))?.personal).toBeUndefined();
+  });
+
+  it('turns a channel agent personal: from then on only its owner can ask it', async () => {
+    const r = await setPersonal('dev-harsh', channel, true);
+    expect(r.status).toBe(200);
+    expect(r.body.agent).toMatchObject({ id: channel.id, personal: true });
+    const roster = (await as('dev-gagan').get('/v1/members')).body.members as Member[];
+    expect(roster.find((m) => m.id === channel.id)).toMatchObject({ personal: true });
+    const { invocations } = await post('dev-gagan', `${mention(channel)} one more`);
+    expect(invocations[0]).toMatchObject({ agentId: channel.id, state: 'refused', refusal: { reason: 'not_permitted' } });
+  });
+
+  it('turns it back: anyone in its spaces can ask it again; the same value twice is a no-op', async () => {
+    expect((await setPersonal('dev-harsh', channel, false)).body.agent.personal).toBeUndefined();
+    expect((await setPersonal('dev-harsh', channel, false)).status).toBe(200);
+    const { invocations } = await post('dev-gagan', `${mention(channel)} and again`);
+    expect(invocations[0]).toMatchObject({ agentId: channel.id });
+    expect(invocations[0]?.refusal).toBeUndefined();
+  });
+
+  it('refuses a person, who is not an agent', async () => {
+    expect((await as('dev-gagan').put('/v1/agents/harsh/personal', { personal: true })).status).toBe(404);
   });
 });
