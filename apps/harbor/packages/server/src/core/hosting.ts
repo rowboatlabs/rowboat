@@ -106,7 +106,7 @@ export interface HostingOps {
   spend(): Promise<HostingSpend>;
   /** The owner's own key into the agent's environment, with what its runtime needs to use it, applied. */
   setLlm(input: { kind: string; provider: LlmProvider; apiKey: string; model?: string }): Promise<void>;
-  /** Nothing more on Rowboat's credit: the platform's cap for this agent goes to zero, for good. */
+  /** A trial over with no key: the platform's cap for this agent goes to zero, for good; the platform then keeps it asleep. */
   stopFunding(): Promise<void>;
 }
 
@@ -359,9 +359,10 @@ export class Hosting {
 
   /**
    * The owner's own key (2026-10-27): the end of the trial, and the only way
-   * out of it. The key goes to the platform, the funding stops there, then
-   * the record says `own`; a failure before the record leaves the trial as it
-   * was, and a retry does the same again. Also how a key is replaced.
+   * out of it. The key goes to the platform, which takes the proxy token and
+   * the cap with it (the provider's doing), then the record says `own`; a
+   * failure before the record leaves the trial as it was, and a retry does
+   * the same again. Also how a key is replaced.
    */
   async setLlm(ctx: ActorCtx, agentId: string, input: { provider: LlmProvider; apiKey: string; model?: string }): Promise<AgentHosting> {
     const { row, ops } = await this.managed(ctx, agentId);
@@ -372,7 +373,6 @@ export class Hosting {
     const model = input.model?.trim() || undefined;
     this.k.guardWrite();
     await this.platform(() => ops.setLlm({ kind: row.kind, provider: input.provider, apiKey, ...(model ? { model } : {}) }));
-    if (row.funding === 'trial' && !row.trial?.closedAt) await this.platform(() => ops.stopFunding());
     const at = this.k.now();
     const next: StoredAgentHosting = {
       ...row,

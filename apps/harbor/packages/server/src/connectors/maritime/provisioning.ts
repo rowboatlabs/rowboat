@@ -25,6 +25,9 @@ export const LLM_SETUP: Record<'openai' | 'anthropic' | 'openrouter', { keyVar: 
   openrouter: { keyVar: 'OPENROUTER_API_KEY', baseUrl: 'https://openrouter.ai/api/v1' },
 };
 
+/** What takes the platform's proxy token's place when the owner's key is for another provider: a value the proxy refuses. */
+export const PROXY_TOKEN_DUD = 'disabled-by-rowboat-owner-key';
+
 export interface MaritimeProvisionerOptions {
   /** Rowboat's `mk_` key for its Maritime account: deploy, secrets and manage scopes. */
   apiKey: string;
@@ -186,8 +189,11 @@ export function maritimeOps(api: MaritimeApi, agentId: string): HostingOps {
       }),
     // The owner's key, the way each runtime finds it: the provider's own variable, the provider's address where the
     // platform had pointed the runtime at its proxy, and two of Rowboat's for the turn script (runtimes.ts) to put the
-    // provider and model back into Hermes's config after the platform's boot rewrite. Then a reload, so the gateway
-    // and the templates read the new environment without waiting for a restart.
+    // provider and model back into Hermes's config after the platform's boot rewrite. The platform's proxy token in
+    // OPENAI_API_KEY goes too, replaced by the owner's key or by a dud, so the proxy refuses rather than bills; and the
+    // agent's own cap is lifted, since the platform puts a capped agent to sleep and gates its wakes (its docs), which
+    // would hold an agent on its owner's key down for the rest of the month. Then a reload, so the gateway and the
+    // templates read the new environment without waiting for a restart.
     setLlm: ({ provider, apiKey, model }) =>
       refusing(async () => {
         const have = new Set((await api.listEnv(agentId)).map((v) => v.key));
@@ -198,8 +204,10 @@ export function maritimeOps(api: MaritimeApi, agentId: string): HostingOps {
         const { keyVar, baseUrl } = LLM_SETUP[provider];
         await put(keyVar, apiKey, true);
         if (provider === 'openai') await put('OPENAI_BASE_URL', baseUrl, false);
+        else await put('OPENAI_API_KEY', PROXY_TOKEN_DUD, true);
         await put('ROWBOAT_LLM_PROVIDER', provider, false);
         await put('ROWBOAT_LLM_MODEL', model ?? '', false);
+        await api.setSpendLimit(agentId, null);
         try {
           await api.reloadEnv(agentId);
         } catch (err) {

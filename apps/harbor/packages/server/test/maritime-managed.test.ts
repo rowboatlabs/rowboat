@@ -326,7 +326,10 @@ describe('managed Maritime agents', () => {
     expect(vars.get('ANTHROPIC_API_KEY')).toEqual({ value: 'sk-ant-api03-mine-wxyz', isSecret: true });
     expect(vars.get('ROWBOAT_LLM_PROVIDER')?.value).toBe('anthropic');
     expect(vars.get('ROWBOAT_LLM_MODEL')?.value).toBe('claude-sonnet-4-5');
-    expect(fake.spend.get(agent.agentInstance!)?.limit).toBe(0);
+    // The platform's proxy token is gone (a dud the proxy refuses, the key being Anthropic's), and the agent's own cap is
+    // lifted: the platform puts a capped agent to sleep and gates its wakes, which must not hold an agent on its owner's key.
+    expect(vars.get('OPENAI_API_KEY')).toEqual({ value: 'disabled-by-rowboat-owner-key', isSecret: true });
+    expect(fake.spend.get(agent.agentInstance!)?.limit).toBeNull();
     expect(fake.power.filter((p) => p.agentId === agent.agentInstance).map((p) => p.action)).toContain('reload-env');
     // The page: on the owner's key there is no spend to show, and the key's value is never read back.
     const page = await me.get(`/v1/agents/${agent.id}/hosting`);
@@ -346,6 +349,7 @@ describe('managed Maritime agents', () => {
     expect((await me.put(`/v1/agents/${codex.agent.id}/hosting/llm`, { provider: 'anthropic', apiKey: 'sk-ant-api03-no-no-no' })).status).toBe(400);
     expect((await me.put(`/v1/agents/${codex.agent.id}/hosting/llm`, { provider: 'openai', apiKey: 'sk-proj-openai-key-1234' })).status).toBe(200);
     expect(fake.env.get(codex.agent.agentInstance!)!.get('OPENAI_BASE_URL')?.value).toBe('https://api.openai.com/v1');
+    expect(fake.env.get(codex.agent.agentInstance!)!.get('OPENAI_API_KEY')).toEqual({ value: 'sk-proj-openai-key-1234', isSecret: true });
     // Harsh is a member, not the owner.
     expect((await org.as('dev-harsh').put(`/v1/agents/${agent.id}/hosting/llm`, { provider: 'openai', apiKey: 'sk-proj-harsh-key-0000' })).status).toBe(403);
   });
@@ -371,8 +375,9 @@ describe('managed Maritime agents', () => {
     const again = await org.post(`${mention(agent)} again`);
     expect((await org.ended(again.invocations[0]!.id)).error).toMatch(/used up my Rowboat trial credit/);
     expect(asks()).toBe(asked);
-    // The owner's key reopens nothing: the agent simply runs on it.
+    // The owner's key reopens nothing; the agent simply runs on it, with the cap that held it asleep lifted.
     expect((await me.put(`/v1/agents/${agent.id}/hosting/llm`, { provider: 'openai', apiKey: 'sk-proj-openai-key-5678' })).body.hosting).toMatchObject({ funding: 'own', trial: { closedReason: 'exhausted' } });
+    expect(fake.spend.get(agent.agentInstance!)?.limit).toBeNull();
     fake.nextTurn = hermesTurn('Back.');
     const back = await org.post(`${mention(agent)} back?`);
     expect((await org.ended(back.invocations[0]!.id)).state).toBe('done');
