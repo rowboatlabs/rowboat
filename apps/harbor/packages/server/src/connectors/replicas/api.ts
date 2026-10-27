@@ -141,6 +141,8 @@ export function replicasApi(key: string, base = REPLICAS_API): ReplicasApi {
           name: input.name,
           environment_id: input.environmentId,
           coding_agent: input.codingAgent,
+          // Keep thread history and follow-ups: the API now defaults to delete_when_done (2026-10-26 OpenAPI).
+          lifecycle_policy: 'default',
           message: input.message,
           plan_mode: input.planMode,
           ...(input.model ? { model: input.model } : {}),

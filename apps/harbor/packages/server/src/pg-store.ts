@@ -35,6 +35,7 @@ import {
   type MessageSearchRow,
   type Store,
   type StoredAgentCredential,
+  StoredAgentHosting,
   type StoredAgentHook,
   type StoredAgentKey,
   type StoredEvent,
@@ -119,6 +120,40 @@ function rowToAgentCredential(r: AgentCredentialRow): StoredAgentCredential {
     ...(r.rejected_reason !== null ? { rejectedReason: r.rejected_reason } : {}),
   };
 }
+
+interface AgentHostingRow {
+  id: string;
+  agent_id: string | null;
+  provider: string;
+  status: string;
+  external_id: string | null;
+  external_user_id: string;
+  kind: string;
+  display_name: string;
+  error: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+function rowToAgentHosting(r: AgentHostingRow): StoredAgentHosting {
+  return {
+    id: r.id,
+    ...(r.agent_id !== null ? { agentId: r.agent_id } : {}),
+    provider: r.provider as StoredAgentHosting['provider'],
+    status: r.status as StoredAgentHosting['status'],
+    ...(r.external_id !== null ? { externalId: r.external_id } : {}),
+    externalUserId: r.external_user_id,
+    kind: r.kind,
+    displayName: r.display_name,
+    ...(r.error !== null ? { error: r.error } : {}),
+    createdBy: r.created_by,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+const HOSTING_COLUMNS = 'id, agent_id, provider, status, external_id, external_user_id, kind, display_name, error, created_by, created_at, updated_at';
 
 function rowToMember(r: MemberRow): Member {
   return {
@@ -1979,6 +2014,39 @@ export class PgStore implements Store {
       `insert into agent_connection_threads (org_id, agent_id, space_id, thread_root_id, data, updated_at) values ($1, $2, $3, $4, $5, $6)
        on conflict (org_id, agent_id, space_id, thread_root_id) do update set data = excluded.data, updated_at = excluded.updated_at`,
       [this.orgId, agentId, spaceId, threadRootId, JSON.stringify(data), at],
+    );
+  }
+  async getAgentHosting(agentId: string): Promise<StoredAgentHosting | undefined> {
+    const rows = await this.sql.query<AgentHostingRow>(`select ${HOSTING_COLUMNS} from agent_hosting where org_id = $1 and agent_id = $2`, [this.orgId, agentId]);
+    return rows[0] ? rowToAgentHosting(rows[0]) : undefined;
+  }
+  async getHosting(id: string): Promise<StoredAgentHosting | undefined> {
+    const rows = await this.sql.query<AgentHostingRow>(`select ${HOSTING_COLUMNS} from agent_hosting where org_id = $1 and id = $2`, [this.orgId, id]);
+    return rows[0] ? rowToAgentHosting(rows[0]) : undefined;
+  }
+  async listAgentHostings(agentIds: string[]): Promise<StoredAgentHosting[]> {
+    if (agentIds.length === 0) return [];
+    const rows = await this.sql.query<AgentHostingRow>(
+      `select ${HOSTING_COLUMNS} from agent_hosting where org_id = $1 and agent_id = any($2::text[]) order by created_at`,
+      [this.orgId, agentIds],
+    );
+    return rows.map(rowToAgentHosting);
+  }
+  async listHostingsByStatus(statuses: readonly string[]): Promise<StoredAgentHosting[]> {
+    if (statuses.length === 0) return [];
+    const rows = await this.sql.query<AgentHostingRow>(
+      `select ${HOSTING_COLUMNS} from agent_hosting where org_id = $1 and status = any($2::text[]) order by created_at`,
+      [this.orgId, [...statuses]],
+    );
+    return rows.map(rowToAgentHosting);
+  }
+  async putHosting(h: StoredAgentHosting): Promise<void> {
+    await this.sql.query(
+      `insert into agent_hosting (org_id, id, agent_id, provider, status, external_id, external_user_id, kind, display_name, error, created_by, created_at, updated_at)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       on conflict (org_id, id) do update set agent_id = excluded.agent_id, status = excluded.status, external_id = excluded.external_id,
+         display_name = excluded.display_name, error = excluded.error, updated_at = excluded.updated_at`,
+      [this.orgId, h.id, h.agentId ?? null, h.provider, h.status, h.externalId ?? null, h.externalUserId, h.kind, h.displayName, h.error ?? null, h.createdBy, h.createdAt, h.updatedAt],
     );
   }
   async getConnectorKey(agentId: string): Promise<{ keyId: string; sealed: string } | undefined> {
