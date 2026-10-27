@@ -4153,6 +4153,27 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), agentId: z.string(), keyId: z.string() }),
     res: z.object({ key: z.custom<SpacesTypes.AgentKey>() }),
   },
+  // Profile bytes use base64 across the JSON RPC boundary (2026-10-22, Spaces profiles).
+  'spaces:getProfile': {
+    req: z.object({ orgId: z.string() }),
+    res: z.object({ member: z.custom<SpacesTypes.Member>() }),
+  },
+  'spaces:updateProfile': {
+    req: z.object({ orgId: z.string(), displayName: z.string().max(128).optional(), title: z.string().max(128).optional() }),
+    res: z.object({ member: z.custom<SpacesTypes.Member>() }),
+  },
+  'spaces:setAvatar': {
+    req: z.object({ orgId: z.string(), bytes: z.string().max(1398104), mime: z.enum(['image/png', 'image/jpeg', 'image/webp', 'image/gif']) }),
+    res: z.object({ member: z.custom<SpacesTypes.Member>() }),
+  },
+  'spaces:clearAvatar': {
+    req: z.object({ orgId: z.string() }),
+    res: z.object({ member: z.custom<SpacesTypes.Member>() }),
+  },
+  'spaces:getProfileImage': {
+    req: z.object({ orgId: z.string(), hash: z.string().regex(/^[a-f0-9]{64}$/) }),
+    res: z.object({ src: z.string() }),
+  },
   // Renaming an agent (2026-10-21, harbor renameAgent): its owner only.
   'spaces:renameAgent': {
     req: z.object({ orgId: z.string(), agentId: z.string(), displayName: z.string() }),

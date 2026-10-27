@@ -11,7 +11,7 @@ Two pnpm workspace packages under `packages/`:
 
 | `src/` | Owns |
 |---|---|
-| `core/kernel.ts` | store, hub, org, the read-only knob, the space lock with its publish-after-commit outbox, `append` / `nextOffset` / `appendNext`, `requireSpace` / `requireReadableSpace` / `requireMember`, `guardWrite`, `attributionOf` |
+| `core/kernel.ts` | store, hub, org, the read-only knob, the space lock with its publish-after-commit outbox, `append` / `nextOffset` / `appendNext`, `requireSpace` / `requireReadableSpace` / `requireMember`, `guardWrite`, `attributionOf`, `publishProfile` (org member notifications after profile persistence, 2026-10-22) |
 | `core/spaces.ts` | spaces, direct messages, invites and the bind ceremony, the roster, `me`, agent members (`createAgent`), push registration, the read-gated replay and membership-gated live relays |
 | `core/agents.ts` | agent members' owners and keys: add an agent, list the ones a member manages, create and revoke keys; a platform agent's alert hook (set, clear, and the pre-auth delivery's secret check) |
 | `core/hosting.ts` | managed agents (spec §8 Maritime, 2026-10-26): the hosting record per agent Rowboat's own platform account runs, creation (intent, then the platform, then the member with the platform's id and the deployment's key sealed as its credential), deletion, the worker that follows the platform to `ready` and through `deleted`, and managing the VM (2026-10-27: environment, power, commands, logs, files, skills, triggers) for the owner or an admin; the platform's calls are a `HostingProvider`'s and its `HostingOps` (`connectors/maritime/provisioning.ts`) |

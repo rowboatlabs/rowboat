@@ -301,6 +301,15 @@ export class SpacesClient {
     return (await this.putBytes(routes.setAvatar.path, routes.setAvatar.response, image.bytes, { 'content-type': image.mime })).member;
   }
 
+  async fetchProfileImage(hash: string): Promise<{ bytes: Uint8Array; mime: string }> {
+    if (!/^[a-f0-9]{64}$/.test(hash)) throw new Error('Invalid profile image hash');
+    const res = await this.authorizedFetch(`${this.baseUrl}/v1/images/${hash}`);
+    if (!res.ok) throw new Error(`Profile image fetch failed with ${res.status}`);
+    const mime = res.headers.get('content-type')?.split(';')[0] ?? '';
+    if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(mime)) throw new Error('Invalid profile image type');
+    return { bytes: new Uint8Array(await res.arrayBuffer()), mime };
+  }
+
   async clearAvatar(): Promise<Member> {
     return (await this.request('DELETE', routes.clearAvatar.path, routes.clearAvatar.response)).member;
   }

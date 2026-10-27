@@ -128,3 +128,20 @@ describe('harborChannelHandlers', () => {
     await expect(table['spaces:listSpaces']({ orgId: 'nope' })).rejects.toThrow('unknown org nope');
   });
 });
+
+it('reads and edits a profile through the shared desktop/web channel table', async () => {
+  expect((await table['spaces:getProfile']({ orgId })).member.id).toBe('ramnique');
+  const { member } = await table['spaces:updateProfile']({ orgId, displayName: 'Ramnique P', title: 'Engineer' });
+  expect(member).toMatchObject({ id: 'ramnique', displayName: 'Ramnique P', title: 'Engineer' });
+  expect((await table['spaces:getProfile']({ orgId })).member).toEqual(member);
+  await expect(table['spaces:updateProfile']({ orgId: 'unknown', displayName: 'Wrong org' })).rejects.toThrow('unknown org');
+});
+
+it('uploads, reads, and clears an avatar through the shared handlers', async () => {
+  const bytes = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  const { member } = await table['spaces:setAvatar']({ orgId, bytes, mime: 'image/png' });
+  const hash = member.avatarUrl!.split('/').pop()!;
+  expect(await table['spaces:getProfileImage']({ orgId, hash })).toEqual({ src: `data:image/png;base64,${bytes}` });
+  expect((await table['spaces:clearAvatar']({ orgId })).member.avatarUrl).toBeUndefined();
+  await expect(table['spaces:getProfileImage']({ orgId, hash: '../other' })).rejects.toThrow('Invalid profile image hash');
+});

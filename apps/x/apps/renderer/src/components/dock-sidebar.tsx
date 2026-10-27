@@ -74,6 +74,7 @@ import { toast } from "@/lib/toast"
 import * as analytics from '@/lib/analytics'
 import { getPinnedApps, onPinnedAppsChanged, unpinApp } from "@/lib/pinned-apps"
 import { isOutOfCredits, CREDIT_EXHAUSTED_EVENT, CREDIT_REPLENISHED_EVENT } from "@/lib/credit-status"
+import { ProfileSettings } from "@/components/spaces/profile-settings"
 import { SettingsDialog } from "@/components/settings-dialog"
 import { SidebarCreditRewards } from "@/components/sidebar-credit-rewards"
 import { SPACES_ENABLED } from "@/lib/feature-flags"
@@ -86,7 +87,7 @@ import { UnreadBadge } from "@/components/spaces/unread-badge"
 import { MemberAvatar } from "@/components/spaces/atoms"
 import { NewDirectDialog } from "@/components/spaces/new-direct-dialog"
 import { directAvatarId, isSelfDirect, isSelfDirectUnsupported, markSelfDirectUnsupported, selfDirectFailureMessage, selfDirectRefused, spaceDisplayName } from "@/lib/spaces-direct"
-import { useSelfDisplayName } from "@/hooks/use-space-members"
+import { useOrgRoster, useOrgRosters, useSelfDisplayName } from "@/hooks/use-space-members"
 import { MascotFaceIcon } from "@/components/talking-head"
 import { extractConferenceLink } from "@/lib/calendar-event"
 import { useBilling } from "@/hooks/useBilling"
@@ -604,6 +605,7 @@ export function DockSidebar({
   const [spacesOpen, setSpacesOpen] = useState(false)
   const [switcherOpen, setSwitcherOpen] = useState(false)
   const [switcherIndex, setSwitcherIndex] = useState(0)
+  const [profileSettingsOpen, setProfileSettingsOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [connectionsSettingsOpen, setConnectionsSettingsOpen] = useState(false)
   const [syncLogOpen, setSyncLogOpen] = useState(false)
@@ -905,6 +907,7 @@ export function DockSidebar({
 
   // ----- data: spaces (safe when the flag is off — the store stays empty) -----
   const { orgs, loading: spacesLoading, refresh: refreshSpaces } = useSpacesOrgs()
+  const profileRosters = useOrgRosters(orgs.map(org => ({ id: org.id, spaceIds: org.spaces.map(s => s.id) })))
   const spacesUnread = useSpacesUnreadCounts()
   const spacesNotification = useMemo(() => {
     let unread = 0
@@ -1270,7 +1273,7 @@ export function DockSidebar({
             )))}
             {orgs.flatMap((org) => org.directs.map((dm) => (
               <ContextMenuItem key={`${org.id}/${dm.id}`} onClick={() => onOpenSpace?.(org.id, dm.id)}>
-                <MemberAvatar id={directAvatarId(dm, org.memberId)} name={spaceDisplayName(org, dm)} size="sm" className="mr-2 size-3.5 rounded-[3px] text-[7px]" />
+                <MemberAvatar orgId={org.id} avatarUrl={profileRosters.get(org.id)?.find(m => m.id === directAvatarId(dm, org.memberId))?.avatarUrl} id={directAvatarId(dm, org.memberId)} name={spaceDisplayName(org, dm)} size="sm" className="mr-2 size-3.5 rounded-[3px] text-[7px]" />
                 <span className="truncate">{spaceDisplayName(org, dm)}</span>
                 {orgs.length > 1 && <span className="ml-2 truncate text-xs text-muted-foreground">{org.name}</span>}
               </ContextMenuItem>
@@ -1453,6 +1456,7 @@ export function DockSidebar({
                         {loggingIn ? 'Signing in…' : 'Sign in to Rowboat'}
                       </DropdownMenuItem>
                     )}
+                    <DropdownMenuItem onSelect={() => setProfileSettingsOpen(true)}><Pencil /> Edit Spaces profile</DropdownMenuItem>
                     <DropdownMenuItem onSelect={() => setConnectionsSettingsOpen(true)}>
                       <Plug /> Connect accounts
                       {hasOauthError && <span className="ml-auto size-1.5 rounded-full bg-amber-500" />}
@@ -1646,6 +1650,7 @@ export function DockSidebar({
       </AlertDialog>
 
       {/* Settings dialogs (main + a connections-tab shortcut) */}
+      {profileSettingsOpen && <ProfileSettings onClose={() => setProfileSettingsOpen(false)} />}
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
       <SettingsDialog
         defaultTab="connections"
@@ -1950,6 +1955,7 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, 
     () => (selfDm ? [selfDm.id] : org.spaces.slice(0, 1).map((s) => s.id)),
     [selfDm, org.spaces],
   )
+  const profileRoster = useOrgRoster(org.id, selfRosterIds)
   const selfName = useSelfDisplayName(org.id, org.memberId, selfRosterIds)
     ?? (selfDm ? spaceDisplayName(org, selfDm).replace(/ \(you\)$/, '') : org.memberId)
   const [selfUnsupported, setSelfUnsupported] = useState(() => isSelfDirectUnsupported(org.id))
@@ -2109,7 +2115,7 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, 
         const active = activeSpace?.orgId === org.id && activeSpace.spaceId === dm.id
         const badge = unread.get(`${org.id}/${dm.id}`) ?? NO_BADGE
         const self = isSelfDirect(dm, org.memberId)
-        const label = self ? selfName : spaceDisplayName(org, dm)
+        const label = self ? selfName : profileRoster.find(m => m.id === directAvatarId(dm, org.memberId))?.displayName ?? spaceDisplayName(org, dm)
         return (
           <button
             key={dm.id}
@@ -2121,7 +2127,7 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, 
               active && 'bg-[var(--sidebar-accent)]',
             )}
           >
-            <MemberAvatar id={directAvatarId(dm, org.memberId)} name={label} size="sm" className="size-4 rounded-[3px] text-[8px]" />
+            <MemberAvatar orgId={org.id} avatarUrl={profileRoster.find(m => m.id === directAvatarId(dm, org.memberId))?.avatarUrl} id={directAvatarId(dm, org.memberId)} name={label} size="sm" className="size-4 rounded-[3px] text-[8px]" />
             <span className={cn('min-w-0 flex-1 truncate', badge.unread > 0 && !active && 'font-medium text-foreground')}>
               {label}
               {self && <span className="ml-1.5 font-normal text-muted-foreground">you</span>}
@@ -2142,7 +2148,7 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, 
             selfUnsupported && 'opacity-50',
           )}
         >
-          <MemberAvatar id={org.memberId} name={selfName} size="sm" className="size-4 rounded-[3px] text-[8px]" />
+          <MemberAvatar orgId={org.id} avatarUrl={profileRoster.find(m => m.id === org.memberId)?.avatarUrl} id={org.memberId} name={selfName} size="sm" className="size-4 rounded-[3px] text-[8px]" />
           <span className="min-w-0 flex-1 truncate">{selfName}<span className="ml-1.5 font-normal text-muted-foreground">you</span></span>
         </button>
       )}

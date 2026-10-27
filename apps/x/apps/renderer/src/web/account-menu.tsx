@@ -1,6 +1,9 @@
+import { ProfileSettings } from '@/components/spaces/profile-settings'
+import { useOrgRosters } from '@/hooks/use-space-members'
+import { useProfileImage } from '@/hooks/use-profile-image'
 import type { spaces } from '@x/shared'
 import { Bell, Download, LogOut } from 'lucide-react'
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useState, useSyncExternalStore } from 'react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Switch } from '@/components/ui/switch'
 import { useSpacesOrgs } from '@/hooks/use-spaces'
@@ -9,39 +12,33 @@ import { cn } from '@/lib/utils'
 import { sessionEmail, signOut } from './account'
 import { DEV_HARBOR } from './config'
 import { notificationState, subscribeNotificationState, turnOffNotifications, turnOnNotifications } from './notifications'
-import { getClient } from './orgs'
 
 // The web app's own chrome (2026-10-13): a slim rail beside Spaces, as
 // Slack's web client has, holding who you are and the way out. The desktop
 // keeps its account in its sidebar and Settings, which the web app never
-// loads. Photos are left out: no Rowboat surface shows them yet.
+// loads. Profiles are edited per organization (2026-10-22).
 
 const DOWNLOAD_URL = 'https://github.com/rowboatlabs/rowboat/releases/latest'
 
 /** Your member record on each server: name and role are per server (spec §4). */
 function useMyMembers(): Map<string, spaces.Member> {
     const { orgs } = useSpacesOrgs()
-    const ids = orgs.map((org) => org.id).join(' ')
-    const [members, setMembers] = useState(() => new Map<string, spaces.Member>())
-    useEffect(() => {
-        let cancelled = false
-        const orgIds = ids ? ids.split(' ') : []
-        void Promise.all(orgIds.map(async (id) => [id, await getClient(id).me().then((r) => r.member, () => null)] as const)).then((rows) => {
-            if (cancelled) return
-            const found = new Map<string, spaces.Member>()
-            for (const [id, member] of rows) if (member) found.set(id, member)
-            setMembers(found)
-        })
-        return () => { cancelled = true }
-    }, [ids])
+    const rosters = useOrgRosters(orgs.map(org => ({ id: org.id, spaceIds: org.spaces.map(s => s.id) })))
+    const members = new Map<string, spaces.Member>()
+    for (const org of orgs) {
+        const member = rosters.get(org.id)?.find(m => m.id === org.memberId)
+        if (member) members.set(org.id, member)
+    }
     return members
 }
 
 /** A person's tile: the stream's near-square, initials on the member's color. */
-function Face({ id, name, large }: { id: string; name: string; large?: boolean }) {
+function Face({ id, name, large, orgId, avatarUrl }: { id: string; name: string; large?: boolean; orgId?: string; avatarUrl?: string }) {
+    const src = useProfileImage(orgId, avatarUrl)
+    const [failed, setFailed] = useState<string>()
     return (
         <span aria-hidden className={cn('inline-flex shrink-0 items-center justify-center rounded-md font-semibold leading-none select-none', large ? 'size-9 text-[13px]' : 'size-8 text-xs', avatarColorClass(id))}>
-            {initials(name)}
+            {src && failed !== src ? <img src={src} alt="" className="size-full rounded-md object-cover" onError={() => setFailed(src)} /> : initials(name)}
         </span>
     )
 }
@@ -73,9 +70,11 @@ function NotificationsRow() {
 
 export function WebRail() {
     const { orgs } = useSpacesOrgs()
+    const [editing, setEditing] = useState(false)
     const members = useMyMembers()
     const email = sessionEmail()
     const me = orgs.map((org) => members.get(org.id)).find((member) => member !== undefined)
+    const profileOrg = orgs.find(org => members.get(org.id) === me)
     const name = me?.displayName ?? email?.split('@')[0] ?? 'You'
     const faceId = me?.id ?? email ?? 'you'
     return (
@@ -87,12 +86,12 @@ export function WebRail() {
             <Popover>
                 <PopoverTrigger asChild>
                     <button type="button" aria-label="Your account" title={name} className="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                        <Face id={faceId} name={name} />
+                        <Face id={faceId} name={name} orgId={profileOrg?.id} avatarUrl={me?.avatarUrl} />
                     </button>
                 </PopoverTrigger>
                 <PopoverContent side="right" align="end" sideOffset={10} className="w-72 p-0">
                     <div className="flex items-center gap-3 p-3">
-                        <Face id={faceId} name={name} large />
+                        <Face id={faceId} name={name} orgId={profileOrg?.id} avatarUrl={me?.avatarUrl} large />
                         <div className="min-w-0">
                             <div className="truncate text-sm font-semibold">{name}</div>
                             {email && <div className="truncate text-xs text-muted-foreground">{email}</div>}
@@ -113,6 +112,7 @@ export function WebRail() {
                         </div>
                     )}
                     <div className="border-t border-border p-1">
+                        <button type="button" className={ROW} onClick={() => setEditing(true)}>Edit Spaces profile</button>
                         <NotificationsRow />
                         <a href={DOWNLOAD_URL} target="_blank" rel="noreferrer" className={ROW}>
                             <Download className="size-4 text-muted-foreground" /> Get the desktop app
@@ -126,6 +126,7 @@ export function WebRail() {
                     </div>
                 </PopoverContent>
             </Popover>
+            {editing && <ProfileSettings onClose={() => setEditing(false)} />}
         </nav>
     )
 }

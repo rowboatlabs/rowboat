@@ -69,8 +69,8 @@ export class Spaces {
 
   /**
    * Your own name and title (spec §4 Member profile; built 2026-10-19). An
-   * org fact, not a space's: no event, no lock — rosters and `me` carry it on
-   * the next read, as the avatar does. Attribution keys on the id, so a
+   * org fact, not a space's: the profile_updated frame refreshes connected clients
+   * after persistence (2026-10-22). Rosters and `me` recover missed updates. Attribution keys on the id, so a
    * rename never touches history.
    */
   async updateProfile(ctx: ActorCtx, input: UpdateProfile): Promise<Member> {
@@ -90,6 +90,7 @@ export class Spaces {
     if (updated.displayName === member.displayName && updated.title === member.title) return member; // idempotent no-op: no write
     this.k.guardWrite();
     await this.k.store.putMember(updated);
+    await this.k.publishProfile(updated);
     return updated;
   }
 
