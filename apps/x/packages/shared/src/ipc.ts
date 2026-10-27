@@ -3892,7 +3892,8 @@ export const ipcSchemas = {
   },
   // Self-serve org creation on the managed deployment's apex (free for now —
   // billing/limits parked by decision 2026-08-20). Browser sign-in, then the
-  // caller is the org's first admin. The address is generated in core
+  // caller is the org's first admin. The host generates the address with
+  // spaces-client (2026-10-27: share the generator with the web host)
   // (name-derived prefix + always-appended random suffix — decision
   // 2026-09-07): the user names the server; nobody picks a slug.
   'spaces:createOrg': {
