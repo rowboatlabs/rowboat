@@ -94,7 +94,7 @@ export class Invocations {
       if (agent?.kind !== 'agent') continue;
       const threadRootId = message.threadRoot ?? message.id;
       const shares = space.kind === 'shared' || (await this.k.store.sharesSharedSpace(message.author.memberId, agentId));
-      const refusal = invocationRefusal(shares, depth);
+      const refusal = invocationRefusal(shares, depth, { agent, authorId: message.author.memberId });
       const now = this.k.now();
       // The owner's defaults fill what the invoker did not pick: a mention, a DM, an agent's hand-off alike.
       const options = { ...(await this.defaultsFor(agentId)), ...agentOptions?.[agentId] };

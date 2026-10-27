@@ -419,6 +419,7 @@ export function buildHttpApp(deps: {
         connection: input.connection,
         ...(input.credential !== undefined ? { credential: input.credential } : {}),
         ...(input.instance !== undefined ? { instance: input.instance } : {}),
+        personal: input.personal,
       }),
     );
   });

@@ -72,6 +72,7 @@ interface MemberRow {
   agent_kind: string | null;
   agent_connection: string | null;
   agent_instance: string | null;
+  personal: boolean;
   deactivated_at: string | null;
   removed_at: string | null;
 }
@@ -166,6 +167,7 @@ function rowToMember(r: MemberRow): Member {
     ...(r.agent_kind !== null ? { agentKind: r.agent_kind } : {}),
     ...(r.agent_connection !== null ? { agentConnection: r.agent_connection } : {}),
     ...(r.agent_instance !== null ? { agentInstance: r.agent_instance } : {}),
+    ...(r.personal ? { personal: true } : {}),
     ...(r.deactivated_at !== null ? { deactivatedAt: r.deactivated_at } : {}),
     ...(r.removed_at !== null ? { removedAt: r.removed_at } : {}),
   };
@@ -446,7 +448,7 @@ export class PgStore implements Store {
 
   async getMember(id: string): Promise<Member | undefined> {
     const rows = await this.sql.query<MemberRow>(
-      'select id, display_name, title, avatar_url, role, kind, owner_id, agent_kind, agent_connection, agent_instance, deactivated_at, removed_at from members where org_id = $1 and id = $2',
+      'select id, display_name, title, avatar_url, role, kind, owner_id, agent_kind, agent_connection, agent_instance, personal, deactivated_at, removed_at from members where org_id = $1 and id = $2',
       [this.orgId, id],
     );
     return rows[0] ? rowToMember(rows[0]) : undefined;
@@ -454,7 +456,7 @@ export class PgStore implements Store {
 
   async listAllMembers(): Promise<Member[]> {
     const rows = await this.sql.query<MemberRow>(
-      'select id, display_name, title, avatar_url, role, kind, owner_id, agent_kind, agent_connection, agent_instance, deactivated_at, removed_at from members where org_id = $1 order by id',
+      'select id, display_name, title, avatar_url, role, kind, owner_id, agent_kind, agent_connection, agent_instance, personal, deactivated_at, removed_at from members where org_id = $1 order by id',
       [this.orgId],
     );
     return rows.map(rowToMember);
@@ -462,7 +464,7 @@ export class PgStore implements Store {
 
   async listSpaceMembers(spaceId: string): Promise<Member[]> {
     const rows = await this.sql.query<MemberRow>(
-      `select m.id, m.display_name, m.title, m.avatar_url, m.role, m.kind, m.owner_id, m.agent_kind, m.agent_connection, m.agent_instance, m.deactivated_at, m.removed_at from memberships ms
+      `select m.id, m.display_name, m.title, m.avatar_url, m.role, m.kind, m.owner_id, m.agent_kind, m.agent_connection, m.agent_instance, m.personal, m.deactivated_at, m.removed_at from memberships ms
        join members m on m.org_id = $1 and m.id = ms.member_id
        where ms.space_id = $2
        order by ms.joined_at, ms.member_id`,
@@ -472,20 +474,21 @@ export class PgStore implements Store {
   }
 
   async putMember(member: Member): Promise<void> {
-    // Kind, owner, and an agent's kind and connection are written once and
-    // never updated: a person never becomes an agent or back, ownership has no
-    // transfer yet, and reaching an agent another way is a new agent (spec §4
-    // Agent members, 2026-09-29 and 2026-09-30).
+    // Kind, owner, and an agent's kind, connection and personal flag are
+    // written once and never updated: a person never becomes an agent or back,
+    // ownership has no transfer yet, reaching an agent another way is a new
+    // agent, and switching personal is not built (spec §4 Agent members,
+    // 2026-09-29, 2026-09-30 and 2026-10-26).
     await this.sql.query(
-      `insert into members (org_id, id, display_name, title, avatar_url, role, kind, owner_id, agent_kind, agent_connection, agent_instance) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      `insert into members (org_id, id, display_name, title, avatar_url, role, kind, owner_id, agent_kind, agent_connection, agent_instance, personal) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        on conflict (org_id, id) do update set display_name = excluded.display_name, title = excluded.title, avatar_url = excluded.avatar_url, role = excluded.role`,
-      [this.orgId, member.id, member.displayName, member.title ?? null, member.avatarUrl ?? null, member.role, member.kind, member.ownerId ?? null, member.agentKind ?? null, member.agentConnection ?? null, member.agentInstance ?? null],
+      [this.orgId, member.id, member.displayName, member.title ?? null, member.avatarUrl ?? null, member.role, member.kind, member.ownerId ?? null, member.agentKind ?? null, member.agentConnection ?? null, member.agentInstance ?? null, member.personal === true],
     );
   }
 
   async getMemberByIdentity(iss: string, sub: string): Promise<Member | undefined> {
     const rows = await this.sql.query<MemberRow>(
-      `select m.id, m.display_name, m.title, m.avatar_url, m.role, m.kind, m.owner_id, m.agent_kind, m.agent_connection, m.agent_instance, m.deactivated_at, m.removed_at from member_identities mi
+      `select m.id, m.display_name, m.title, m.avatar_url, m.role, m.kind, m.owner_id, m.agent_kind, m.agent_connection, m.agent_instance, m.personal, m.deactivated_at, m.removed_at from member_identities mi
        join members m on m.org_id = mi.org_id and m.id = mi.member_id
        where mi.org_id = $1 and mi.iss = $2 and mi.sub = $3`,
       [this.orgId, iss, sub],
@@ -1691,7 +1694,7 @@ export class PgStore implements Store {
 
   async listAgents(ownerId: string | null): Promise<Member[]> {
     const rows = await this.sql.query<MemberRow>(
-      `select id, display_name, title, avatar_url, role, kind, owner_id, agent_kind, agent_connection, agent_instance, deactivated_at, removed_at from members
+      `select id, display_name, title, avatar_url, role, kind, owner_id, agent_kind, agent_connection, agent_instance, personal, deactivated_at, removed_at from members
        where org_id = $1 and kind = 'agent' and ($2::text is null or owner_id = $2)
        order by lower(display_name), id`,
       [this.orgId, ownerId],
@@ -1938,7 +1941,7 @@ export class PgStore implements Store {
   async listAgentsByConnection(connections: readonly string[]): Promise<Member[]> {
     if (connections.length === 0) return [];
     const rows = await this.sql.query<MemberRow>(
-      `select id, display_name, title, avatar_url, role, kind, owner_id, agent_kind, agent_connection, agent_instance, deactivated_at, removed_at from members
+      `select id, display_name, title, avatar_url, role, kind, owner_id, agent_kind, agent_connection, agent_instance, personal, deactivated_at, removed_at from members
        where org_id = $1 and kind = 'agent' and removed_at is null and agent_connection = any($2::text[]) order by id`,
       [this.orgId, [...connections]],
     );

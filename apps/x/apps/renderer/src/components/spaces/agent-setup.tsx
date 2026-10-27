@@ -196,7 +196,7 @@ function StepBody({ step }: { step: SetupStep }) {
     )
 }
 
-export function ConnectAgent({ org, setup: kind, agentKind, agentInstance, agentId, agentName, agentKey }: {
+export function ConnectAgent({ org, setup: kind, agentKind, agentInstance, agentId, agentName, agentKey, canAddToSpaces = true }: {
     org: OrgWithSpaces
     setup: AgentSetup
     /** What the agent is, for a setup that offers several kinds (Agent37: Hermes or OpenClaw). */
@@ -206,6 +206,8 @@ export function ConnectAgent({ org, setup: kind, agentKind, agentInstance, agent
     agentId: string
     agentName: string
     agentKey: string
+    /** False for someone else's personal agent (2026-10-26): only its owner adds it to spaces. */
+    canAddToSpaces?: boolean
 }) {
     const wantsHome = kind.wantsHomeChannel === true
     // The home channel is the owner's DM with the agent; a result counts only for the agent it was opened for.
@@ -263,9 +265,11 @@ export function ConnectAgent({ org, setup: kind, agentKind, agentInstance, agent
                         <StepBody step={step} />
                     </Step>
                 ))}
-                <Step n={route.steps.length + 1} title="Add it to spaces" note={`Add ${agentName} to the spaces it should work in, then mention it there.`}>
-                    <AddToSpaces org={org} agentId={agentId} agentName={agentName} />
-                </Step>
+                {canAddToSpaces && (
+                    <Step n={route.steps.length + 1} title="Add it to spaces" note={`Add ${agentName} to the spaces it should work in, then mention it there.`}>
+                        <AddToSpaces org={org} agentId={agentId} agentName={agentName} />
+                    </Step>
+                )}
             </ol>
             <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
                 <span>Long values are shortened on screen; Copy copies them in full.</span>

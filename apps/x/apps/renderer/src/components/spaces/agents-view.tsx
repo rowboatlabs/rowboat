@@ -315,7 +315,11 @@ function AgentCard({ orgId, agent, owner, spaceNames, isAdmin, onOpenSettings, o
                 ) : (
                     <div className="truncate text-sm font-medium" title={shownName}>{shownName}</div>
                 )}
-                <div className="mt-0.5 truncate text-xs text-[var(--rowboat-ink-secondary)]">{agentLabel(agent.agentKind, agent.agentConnection)}</div>
+                <div className="mt-0.5 truncate text-xs text-[var(--rowboat-ink-secondary)]">
+                    {agentLabel(agent.agentKind, agent.agentConnection)}
+                    {/* Only its owner can use it (2026-10-26); everyone sees it here. */}
+                    {agent.personal && ' · Personal'}
+                </div>
             </div>
 
             <div className="mt-auto flex items-center justify-between gap-2 pt-4 text-xs text-muted-foreground">

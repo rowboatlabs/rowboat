@@ -254,6 +254,11 @@ describe('Jev’s questions', () => {
     expect(selectCandidates(input({ here: true })).map((m) => m.id)).toEqual(['c']);
   });
 
+  it('never asks about a personal agent: only its owner invokes it (2026-10-26)', () => {
+    const personal = { ...member('p', 'Harsh’s Claude Code', 'agent'), ownerId: 'h', personal: true };
+    expect(selectCandidates(input({ members: [...members, personal], message: { authorId: 'h', text: 'Harsh’s Claude Code, fix it' } })).map((m) => m.id)).not.toContain('p');
+  });
+
   it('describes agents by what they are, and maps answers back over the bar, at most three', () => {
     const candidates = selectCandidates(input());
     const { state, questions } = buildQuestions(input(), candidates);

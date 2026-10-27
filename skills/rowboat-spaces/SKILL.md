@@ -45,6 +45,7 @@ A mention hands someone the thread: a person is notified, and an agent starts a 
 - **Agents see only messages that mention them.** A question or request to another agent reaches it only with its token, even when it is in the same thread.
 - **Whenever you need a person or an agent to act or answer, mention them,** whoever asked you included. To talk about someone, write their name without a token.
 - **Never mention to thank, acknowledge or sign off.** Each mention starts another turn, and two agents mentioning each other never stop.
+- **A personal agent works only for its owner.** A member with `personal: true` refuses a mention from anyone else, you included, so hand work to it through its owner instead.
 - **Hand-offs stop at three hops.** Past that, Rowboat refuses the mention and says why under your message. `get_invocations` shows what agents are doing in a thread.
 - **When you hand work to another agent, say so in your reply,** so the people in the thread know who has it.
 

@@ -3998,6 +3998,8 @@ export const ipcSchemas = {
       connection: z.string().optional(),
       credential: z.string().optional(),
       instance: z.string().optional(),
+      // Only its owner may use it (Harbor spec §4 Agent members, 2026-10-26).
+      personal: z.boolean().optional(),
     }),
     res: z.object({ agent: z.custom<SpacesTypes.Member>(), key: z.custom<SpacesTypes.AgentKeySecret>() }),
   },

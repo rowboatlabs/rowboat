@@ -14,6 +14,7 @@ import { useMyAvatar } from '@/lib/spaces/my-avatar';
 import { pickProfileImage } from '@/lib/spaces/profile-image';
 import { loadValue, peekValue, saveValue } from '@/lib/spaces/cache';
 import { isNetworkError } from '@/lib/spaces/errors';
+import { isOthersPersonalAgent } from '@/lib/spaces/profiles';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BottomSheet } from '@/components/bottom-sheet';
 import { useColors } from '@/theme/colors';
@@ -364,6 +365,8 @@ function OrgCard({ org, onSwitch }: { org: SpacesOrg; onSwitch: () => void }) {
   const orgMembers = useMemo(() => {
     const seen = new Map<string, Member>();
     for (const list of members.values()) for (const m of list) if (!seen.has(m.id)) seen.set(m.id, m);
+    // Someone else's personal agent can't be messaged (2026-10-26).
+    for (const m of [...seen.values()]) if (isOthersPersonalAgent(m, org.memberId)) seen.delete(m.id);
     // You first (the self-DM is your notes-to-self), then everyone by name.
     return [...seen.values()].sort((a, b) =>
       a.id === org.memberId ? -1 : b.id === org.memberId ? 1 : a.displayName.localeCompare(b.displayName),

@@ -13,7 +13,7 @@ import { MemberAvatar } from '@/components/spaces/atoms'
 import { refreshMembers, refreshOrgRoster, useOrgRoster } from '@/hooks/use-space-members'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { isGroupChat } from '@/lib/spaces-navigation'
-import { AGENT_SETUPS, MANAGED_KINDS, agentLabel, agentSetup, instanceLabel, isBot, kindInfo, setupFor, type AgentSetup } from '@/lib/agent-kinds'
+import { AGENT_SETUPS, MANAGED_KINDS, agentLabel, agentSetup, instanceLabel, isBot, kindInfo, personalAgentName, setupFor, type AgentSetup } from '@/lib/agent-kinds'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 
@@ -40,6 +40,10 @@ import { cn } from '@/lib/utils'
 // which goes to the agent's VM and nowhere else. There is nothing to connect:
 // the new agent's page shows it deploying, then ready, and lets its owner
 // delete it from Maritime. Add agent stays for an agent the person runs.
+//
+// Personal agents (Harbor spec §4 Agent members, 2026-10-26): chosen on Add
+// and never changed. Only the owner can use one; everyone else sees it and
+// its replies. Its name starts as "<your first name>'s <kind>".
 
 type Screen =
     | { name: 'list' }
@@ -145,12 +149,13 @@ function parseEnv(text: string): { env: Array<{ key: string; value: string }> } 
  * all by default, each one a tick. `direct` null hides the DM row (a setup that
  * opens the DM itself).
  */
-function SpacePicker({ spaces: list, skipped, onChange, direct, onDirectChange }: {
+function SpacePicker({ spaces: list, skipped, onChange, direct, onDirectChange, personal = false }: {
     spaces: spaces.Space[]
     skipped: ReadonlySet<string>
     onChange: (skipped: ReadonlySet<string>) => void
     direct: boolean | null
     onDirectChange: (on: boolean) => void
+    personal?: boolean
 }) {
     if (list.length === 0 && direct === null) return null
     const allIn = skipped.size === 0
@@ -187,7 +192,12 @@ function SpacePicker({ spaces: list, skipped, onChange, direct, onDirectChange }
                     )
                 })}
             </ul>
-            <span className="text-[11px] text-muted-foreground">Anyone in these spaces can mention it, or DM it. You can add it to more later from its page.</span>
+            <span className="text-[11px] text-muted-foreground">
+                {personal
+                    ? 'Everyone in these spaces sees it and its replies; only you can mention it or DM it.'
+                    : 'Anyone in these spaces can mention it, or DM it.'}
+                {' '}You can add it to more later from its page.
+            </span>
         </div>
     )
 }
@@ -201,6 +211,39 @@ function PickRow({ on, label, text, icon, onClick }: { on: boolean; label: strin
             {icon}
             <span className="min-w-0 flex-1 truncate text-xs text-foreground">{text ?? label}</span>
         </button>
+    )
+}
+
+/** Channel or personal (2026-10-26): who may use it, fixed once it is added. */
+function AccessChoice({ personal, onChange }: { personal: boolean; onChange: (personal: boolean) => void }) {
+    const options = [
+        { value: false, label: 'Channel', description: 'Anyone in its spaces can mention it.' },
+        { value: true, label: 'Personal', description: 'Only you can use it. Others see it and its replies.' },
+    ] as const
+    return (
+        <div className="mt-4 flex flex-col gap-1.5">
+            <span className="text-xs font-medium text-foreground">Who can use it</span>
+            <div role="radiogroup" aria-label="Who can use it" className="grid grid-cols-2 gap-2">
+                {options.map((o) => (
+                    <button
+                        key={o.label}
+                        type="button"
+                        role="radio"
+                        aria-checked={o.value === personal}
+                        aria-label={o.label}
+                        onClick={() => onChange(o.value)}
+                        className={cn(
+                            'flex min-w-0 flex-col items-start rounded-lg border px-2.5 py-2 text-left',
+                            o.value === personal ? 'border-foreground/50 bg-accent' : 'border-border hover:bg-accent/50',
+                        )}
+                    >
+                        <span className="text-xs font-medium text-foreground">{o.label}</span>
+                        <span className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{o.description}</span>
+                    </button>
+                ))}
+            </div>
+            <span className="text-[11px] text-muted-foreground">You can't change this after it's added.</span>
+        </div>
     )
 }
 
@@ -263,6 +306,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
     // The spaces a new agent joins on Add: every one of yours unless unticked (2026-10-08).
     const [skippedSpaces, setSkippedSpaces] = useState<ReadonlySet<string>>(new Set())
     const [withDirect, setWithDirect] = useState(true)
+    const [personal, setPersonal] = useState(false)
     const [progress, setProgress] = useState<string | null>(null)
     // Create agent: the kinds this org's Harbor creates (none until loaded, or on a Harbor with no Maritime key), and the form.
     const [managedKinds, setManagedKinds] = useState<string[]>([])
@@ -276,8 +320,11 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
     const setup = offered.find((k) => k.id === chosen) ?? offered[0]!
     // An agent that is one platform instance (Agent37) runs whatever its instance runs.
     const kind = setup.bindsInstance ? instance?.kind ?? setup.kinds[0]! : chosenKind && setup.kinds.includes(chosenKind) ? chosenKind : setup.kinds[0]!
-    // The name suggests the setup's own, or the kind's, until the person types one.
-    const shownName = nameEdited ? name : setup.defaultName || kindInfo(kind).label
+    // The name suggests the setup's own, or the kind's, until the person types
+    // one; a personal one's is yours ("Gagan's Claude Code", 2026-10-26).
+    const baseName = setup.defaultName || kindInfo(kind).label
+    const ownName = roster.find((m) => m.id === org.memberId)?.displayName
+    const shownName = nameEdited ? name : personal ? personalAgentName(ownName, baseName) : baseName
     const ready =
         shownName.trim() !== '' &&
         (!setup.credential || credential.trim() !== '') &&
@@ -302,6 +349,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
         setAddError(null)
         setSkippedSpaces(new Set())
         setWithDirect(true)
+        setPersonal(false)
         setScreen({ name: 'add', bot })
     }, [])
 
@@ -417,6 +465,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                 connection: setup.connection,
                 ...(setup.credential ? { credential: credential.trim() } : {}),
                 ...(instanceId ? { instance: instanceId } : {}),
+                ...(personal ? { personal: true } : {}),
             })
             setCredential('')
             setInstance(null)
@@ -474,6 +523,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                                                         <div className="truncate text-sm font-medium">{agent.displayName}</div>
                                                                         <div className="truncate text-[11px] text-muted-foreground">
                                                                             {agentLabel(agent.agentKind, agent.agentConnection)}
+                                                                            {agent.personal && ' · Personal'}
                                                                             {' · '}
                                                                             {agent.ownerId ? (mine ? 'Yours' : `Owned by ${names.get(agent.ownerId) ?? 'another member'}`) : 'Managed by admins'}
                                                                             {' · '}
@@ -537,6 +587,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                 ))}
                             </div>
                             {setup.kinds.length > 1 && !setup.bindsInstance && <KindChoice label={setup.kindChoice ?? 'Agent'} kinds={setup.kinds} selected={kind} onSelect={setChosenKind} />}
+                            <AccessChoice personal={personal} onChange={setPersonal} />
                             <label className="mt-4 flex flex-col gap-1.5">
                                 <span className="text-xs font-medium text-foreground">Name</span>
                                 <Input
@@ -579,6 +630,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                 onChange={setSkippedSpaces}
                                 direct={setup.wantsHomeChannel || isGroupChat(org) ? null : withDirect}
                                 onDirectChange={setWithDirect}
+                                personal={personal}
                             />
                             {progress && <div className="mt-3 text-xs text-muted-foreground">{progress}</div>}
                             {addError && <div role="alert" className="mt-3 text-xs text-destructive">{addError}</div>}
@@ -747,7 +799,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                         <>
                             <Header
                                 title={agent.displayName}
-                                description={`${agentLabel(agent.agentKind, agent.agentConnection)} · ${owner}`}
+                                description={`${agentLabel(agent.agentKind, agent.agentConnection)}${agent.personal ? ' · Personal' : ''} · ${owner}`}
                                 icon={<AgentLogo logo={kindInfo(agent.agentKind ?? 'custom').logo ?? setupFor(agent).logo} className="size-5" />}
                                 onBack={back}
                             />

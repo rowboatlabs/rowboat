@@ -84,3 +84,12 @@ export function memberLabel(member: Pick<spaces.Member, 'displayName' | 'deactiv
 export function isDeparted(member: Pick<spaces.Member, 'deactivatedAt' | 'removedAt'>): boolean {
     return !!member.deactivatedAt || !!member.removedAt
 }
+
+/**
+ * Someone else's personal agent (Harbor spec §4 Agent members, 2026-10-26):
+ * only its owner can mention it, add it or DM it, so everyone else's pickers
+ * leave it out. It still shows on rosters and on its replies.
+ */
+export function isOthersPersonalAgent(member: Pick<spaces.Member, 'personal' | 'ownerId'>, selfMemberId: string | undefined): boolean {
+    return member.personal === true && member.ownerId !== selfMemberId
+}

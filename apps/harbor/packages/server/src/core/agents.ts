@@ -87,7 +87,7 @@ export class Agents {
    */
   async add(
     ctx: ActorCtx,
-    input: { displayName: string; kind: string; connection: string; credential?: string; instance?: string },
+    input: { displayName: string; kind: string; connection: string; credential?: string; instance?: string; personal?: boolean },
   ): Promise<{ agent: Member; key: AgentKeySecret }> {
     enforce(canAddAgent(await this.actor(ctx)));
     if (!isAgentPair(input.kind, input.connection)) {
@@ -110,6 +110,7 @@ export class Agents {
       agentKind: input.kind,
       agentConnection: input.connection,
       ...(input.instance ? { agentInstance: input.instance } : {}),
+      ...(input.personal ? { personal: true } : {}),
     });
     if (platform) await this.hooks!.save(agent.id, input.credential!, ctx.memberId);
     const key = await this.mint(ctx, agent.id);

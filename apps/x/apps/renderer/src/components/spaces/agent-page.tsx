@@ -185,7 +185,7 @@ export function AgentPage({ org, listing, isAdmin, onChanged }: {
                             )
                         }
                     />
-                    <ConnectAgent org={org} setup={setup} {...(agent.agentKind ? { agentKind: agent.agentKind } : {})} {...(agent.agentInstance ? { agentInstance: agent.agentInstance } : {})} agentId={agent.id} agentName={agent.displayName} agentKey={secret ?? KEY_PLACEHOLDER} />
+                    <ConnectAgent org={org} setup={setup} {...(agent.agentKind ? { agentKind: agent.agentKind } : {})} {...(agent.agentInstance ? { agentInstance: agent.agentInstance } : {})} agentId={agent.id} agentName={agent.displayName} agentKey={secret ?? KEY_PLACEHOLDER} canAddToSpaces={mine || !agent.personal} />
                 </>
             ),
         })

@@ -65,6 +65,13 @@ export const Member = z.object({
    */
   agentInstance: z.string().min(1).max(128).optional(),
   /**
+   * A personal agent (spec §4 Agent members, 2026-10-26): only its owner may
+   * invoke it, add it to a space or DM it; everyone still sees it and its
+   * replies. Absent = a channel agent, which anyone sharing a space with it
+   * may invoke. Fixed at creation; independent of the kind and connection.
+   */
+  personal: z.boolean().optional(),
+  /**
    * When the person deleted their account (2026-10-08, App Store 5.1.1(v)).
    * The member stays, name and all, so their messages keep their author;
    * clients mark them deactivated and leave them out of pickers. Harbor
