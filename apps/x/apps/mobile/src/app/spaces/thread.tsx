@@ -7,7 +7,7 @@ import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useHeaderHeight } from 'expo-router/react-navigation';
 import { useKeyboardVisible } from '@/lib/use-keyboard-visible';
-import type { Member, Message } from '@rowboat/spaces-protocol';
+import type { Invocation, Member, Message } from '@rowboat/spaces-protocol';
 
 import { spaces } from '@x/shared';
 
@@ -56,6 +56,18 @@ export default function SpaceThreadScreen() {
   const [actionMessage, setActionMessage] = useState<Message | null>(null);
   const [reactionsOnly, setReactionsOnly] = useState(false);
   const [following, setFollowing] = useState<boolean | null>(initial?.following ?? null);
+  // Thread follow-ups (Harbor spec §8, 2026-10-27): a reply that mentions
+  // nobody goes to the agent you last invoked here. The line over the composer
+  // names it; its × sends the next reply to people only. Your invocations are
+  // read once on open and added from your own posts, which is all it needs.
+  const [invocations, setInvocations] = useState<Invocation[]>([]);
+  const [peopleOnly, setPeopleOnly] = useState(false);
+  const [draftMentions, setDraftMentions] = useState(false);
+  const followUp = useMemo(() => {
+    const id = spaces.followUpAgentId(invocations, root, me, members);
+    const agent = id ? members.get(id) : undefined;
+    return agent && !isOthersPersonalAgent(agent, me) ? agent : undefined;
+  }, [invocations, root, me, members]);
   const scrollRef = useRef<ScrollView>(null);
   const composerRef = useRef<SpaceComposerHandle>(null);
   const lastOffset = useRef<number | undefined>(undefined);
@@ -92,6 +104,10 @@ export default function SpaceThreadScreen() {
         setMembers(new Map(memberList.map((m) => [m.id, m])));
         saveRoster(org, space, memberList);
       })
+      .catch(() => {});
+    client
+      .listInvocations(space, root)
+      .then((list) => !cancelled && setInvocations(list))
       .catch(() => {});
     client
       .listThread(space, root)
@@ -180,8 +196,17 @@ export default function SpaceThreadScreen() {
   const send = async (body: string) => {
     if (sending) return;
     setSending(true);
+    // The × holds for one reply.
+    const toPeople = peopleOnly && followUp !== undefined && !spaces.mentionsAnyone(body);
+    setPeopleOnly(false);
     try {
-      const { message } = await client.postMessage(space, { body, threadRoot: root, actingMode: 'direct' });
+      const { message, invocations: started } = await client.postMessage(space, {
+        body,
+        threadRoot: root,
+        actingMode: 'direct',
+        ...(toPeople ? { peopleOnly: true } : {}),
+      });
+      setInvocations((prev) => [...prev, ...started]);
       setReplies((prev) => (prev && !prev.some((m) => m.id === message.id) ? [...prev, message] : prev));
       scrollToNewest();
     } catch (err) {
@@ -390,6 +415,32 @@ export default function SpaceThreadScreen() {
 
       {/* Composer */}
       <View style={{ paddingTop: 8, paddingBottom: keyboardVisible ? 16 : insets.bottom + 10 }}>
+        {followUp && !draftMentions ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 20, paddingBottom: 6 }}>
+            {peopleOnly ? (
+              <>
+                <Text style={{ fontSize: 13, color: colors.secondaryLabel }}>To people only ·</Text>
+                <Pressable onPress={() => setPeopleOnly(false)} hitSlop={8} accessibilityRole="button">
+                  <Text style={{ fontSize: 13, color: colors.label }}>Include {memberLabel(followUp)}</Text>
+                </Pressable>
+              </>
+            ) : (
+              <>
+                <Text style={{ fontSize: 13, color: colors.secondaryLabel }}>
+                  Replying to <Text style={{ fontWeight: '600', color: colors.label }}>{memberLabel(followUp)}</Text>
+                </Text>
+                <Pressable
+                  onPress={() => setPeopleOnly(true)}
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Send to people only, not ${memberLabel(followUp)}`}
+                >
+                  <Image source="sf:xmark" style={{ width: 10, height: 10 }} tintColor={colors.secondaryLabel} />
+                </Pressable>
+              </>
+            )}
+          </View>
+        ) : null}
         <SpaceComposer
           ref={composerRef}
           placeholder="Add a reply"
@@ -399,6 +450,7 @@ export default function SpaceThreadScreen() {
           onSend={(body) => void send(body)}
           onPickMedia={uploadMedia}
           onEdit={saveEdit}
+          onDraftChange={(draft) => setDraftMentions(spaces.mentionsAnyone(draft))}
         />
       </View>
 

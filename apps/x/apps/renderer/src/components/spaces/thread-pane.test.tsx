@@ -12,7 +12,20 @@ import type { SpacePresence } from '@/hooks/use-space-chat'
 // a detached window (load-around). jsdom has no layout, so the list's
 // geometry is faked.
 
-vi.mock('@/components/spaces/composer', () => ({ Composer: () => null }))
+// The composer is stubbed; its props are kept so a test can send through it.
+const follow = vi.hoisted(() => ({
+    composer: null as null | { onSend: (body: string) => Promise<unknown>; onDraftChange?: (draft: string) => void },
+    members: [] as unknown[],
+    invocations: new Map<string, unknown[]>(),
+}))
+vi.mock('@/components/spaces/composer', () => ({
+    Composer: (props: typeof follow.composer) => {
+        follow.composer = props
+        return null
+    },
+}))
+vi.mock('@/hooks/use-space-members', () => ({ useSpaceMembers: () => follow.members }))
+vi.mock('@/hooks/use-space-invocations', () => ({ noteInvocations: vi.fn(), useSpaceInvocations: () => follow.invocations }))
 vi.mock('@/components/spaces/message-row', () => ({
     MessageRow: ({ message, onCopyLink }: { message: spaces.Message; onCopyLink?: (message: spaces.Message) => void }) => (
         <div data-mid={message.id}>
@@ -38,7 +51,10 @@ vi.mock('@/components/spaces/poll-dialog', () => ({ PollDialogHost: () => null }
 vi.mock('@/components/spaces/forward-dialog', () => ({ ForwardDialog: () => null }))
 vi.mock('@/components/spaces/attach-document-dialog', () => ({ AttachDocumentDialog: () => null }))
 vi.mock('@/hooks/use-space-chat', () => ({
-    buildPendingMessage: vi.fn(),
+    buildPendingMessage: vi.fn((spaceId: string, memberId: string, body: string, threadRoot: string) => ({
+        id: `pending-${body}`, spaceId, body, threadRoot, offset: 1e9, pending: true,
+        author: { memberId, actingMode: 'direct' }, postedAt: '2026-10-27T09:00:00Z', replyCount: 0,
+    })),
     getThreadSnapshot: () => null,
     ingestTopic: vi.fn(),
     putThreadSnapshot: vi.fn(),
@@ -305,5 +321,64 @@ describe('ThreadPane jump to a reply outside the window', () => {
         // No around page was asked for, and nothing keeps trying.
         expect(org.calls('spaces:listThread').some(([, a]) => (a as { aroundOffset?: number }).aroundOffset !== undefined)).toBe(false)
         expect(screen.getByText('reply 2')).toBeTruthy()
+    })
+})
+
+describe('thread follow-ups (Harbor spec §8, 2026-10-27)', () => {
+    const hermes = { id: 'hermes', kind: 'agent', displayName: 'Hermes', ownerId: 'alex' }
+    const asked = {
+        id: 'inv1', agentId: 'hermes', state: 'done', depth: 0, createdAt: '2026-10-27T09:00:00Z', updatedAt: '2026-10-27T09:01:00Z',
+        conversation: { spaceId: 'space', threadRootId: 'root' }, trigger: { messageId: 'r1', authorId: 'me', body: 'hi' },
+        where: { spaceKind: 'shared', spaceName: 'Space' },
+    }
+    beforeEach(() => {
+        follow.members = [hermes]
+        follow.invocations = new Map([['r1', [asked]]])
+        const base = window.ipc.invoke as (channel: string, args: unknown) => Promise<unknown>
+        let n = 0
+        Object.defineProperty(window, 'ipc', {
+            configurable: true,
+            value: {
+                invoke: vi.fn(async (channel: string, args: unknown) => {
+                    if (channel !== 'spaces:postMessage') return base(channel, args)
+                    n += 1
+                    return { message: message(`p${n}`, (args as { body: string }).body, 30 + n, 'root'), invocations: [] }
+                }),
+            },
+        })
+    })
+    afterEach(() => {
+        follow.members = []
+        follow.invocations = new Map()
+    })
+    const posted = () => vi.mocked(window.ipc.invoke).mock.calls.filter(([c]) => c === 'spaces:postMessage').map(([, a]) => a as { body: string; peopleOnly?: boolean })
+
+    it('names the agent your next reply goes to, and its × sends one reply to people only', async () => {
+        mount()
+        expect(screen.getByText('Hermes')).toBeTruthy()
+        fireEvent.click(screen.getByRole('button', { name: 'Send to people only, not Hermes' }))
+        expect(screen.getByText('To people only')).toBeTruthy()
+        await act(async () => {
+            await follow.composer!.onSend('thanks all')
+        })
+        expect(posted().at(-1)).toMatchObject({ body: 'thanks all', peopleOnly: true })
+        // One reply only: the line is back, and the next goes to Hermes.
+        expect(screen.getByText('Hermes')).toBeTruthy()
+        await act(async () => {
+            await follow.composer!.onSend('one more')
+        })
+        expect(posted().at(-1)!.peopleOnly).toBeUndefined()
+    })
+
+    it('hides while the draft mentions anyone, and for an agent someone else invoked', async () => {
+        mount()
+        act(() => follow.composer!.onDraftChange!('[@Alex](#member:alex) can you?'))
+        expect(screen.queryByText('Hermes')).toBeNull()
+        act(() => follow.composer!.onDraftChange!('plain'))
+        expect(screen.getByText('Hermes')).toBeTruthy()
+        cleanup()
+        follow.invocations = new Map([['r1', [{ ...asked, trigger: { ...asked.trigger, authorId: 'alex' } }]]])
+        mount()
+        expect(screen.queryByText('Replying to')).toBeNull()
     })
 })

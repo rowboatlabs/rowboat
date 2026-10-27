@@ -1167,6 +1167,13 @@ export const MIGRATIONS: Migration[] = [
     id: '050-messages-space-offset',
     statements: [`create index if not exists messages_space_offset on messages (space_id, stream_offset)`],
   },
+  {
+    // Thread follow-ups (spec §8, 2026-10-27): a reply that mentions nobody
+    // invokes the agent its author last invoked there, unless its author sent
+    // it to people only. Kept so Ro, reading the message later, tags no agent.
+    id: '051-message-people-only',
+    statements: [`alter table messages add column if not exists people_only boolean not null default false`],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

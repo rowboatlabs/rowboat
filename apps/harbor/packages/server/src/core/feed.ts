@@ -411,6 +411,7 @@ export class Feed {
           reactions: [],
           ...(poll ? { poll } : {}),
           ...(raising && opts.approval ? { approval: this.invocations!.approvalFor(raising, id, opts.approval.request) } : {}),
+          ...(input.peopleOnly ? { peopleOnly: true as const } : {}),
           ...stampFields(stamps),
         };
         await this.k.store.appendMessage(message);

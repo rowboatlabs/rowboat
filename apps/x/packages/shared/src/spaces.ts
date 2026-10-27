@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { addressesRowboat, mapMentionTokens, mentionsAsText } from '@rowboat/spaces-protocol';
+import { JEV_KIND, addressesRowboat, mapMentionTokens, mentionsAsText, parseMentions } from '@rowboat/spaces-protocol';
 export { LLM_PROVIDERS } from '@rowboat/spaces-protocol';
 import type {
   AcceptInviteResult,
@@ -399,6 +399,33 @@ export type { MentionRef, MentionStamps, OrgLink } from '@rowboat/spaces-protoco
 /** Does the body deliberately address @rowboat — a token, never the bare word (spec §8)? */
 export function containsRowboatAddress(body: string): boolean {
   return addressesRowboat(body);
+}
+
+/** Does the body mention anyone: a member, @here or Ro? A reply that does follows up no agent (Harbor spec §8, 2026-10-27). */
+export function mentionsAnyone(body: string): boolean {
+  const stamps = parseMentions(body);
+  return stamps.members.length > 0 || stamps.here || stamps.rowboat;
+}
+
+/**
+ * The agent a person's reply in this thread goes to when it mentions nobody
+ * (Harbor spec §8, 2026-10-27): the one they most recently invoked there, a
+ * refused invocation and Ro aside. Harbor decides; the composer shows the same
+ * answer so the person can see it and send to people only instead.
+ */
+export function followUpAgentId(
+  invocations: Iterable<Invocation>,
+  threadRootId: string,
+  memberId: string,
+  members: ReadonlyMap<string, Pick<Member, 'agentKind'>>,
+): string | undefined {
+  let latest: Invocation | undefined;
+  for (const i of invocations) {
+    if (i.conversation.threadRootId !== threadRootId || i.trigger.authorId !== memberId || i.state === 'refused') continue;
+    if (members.get(i.agentId)?.agentKind === JEV_KIND) continue;
+    if (!latest || i.createdAt > latest.createdAt) latest = i;
+  }
+  return latest?.agentId;
 }
 
 /**

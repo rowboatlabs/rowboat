@@ -6,7 +6,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import { cn } from '@/lib/utils'
 import { Anchor, Archive, ArchiveRestore, ArrowDown, ArrowLeft, ArrowUp, Bell, BellOff, Bot, FileText, Link as LinkIcon, Loader2, MessageSquareOff, MoreHorizontal, Maximize2, Minimize2, Paperclip, Pencil, ShieldAlert, Square, Tag, Unlink, X } from 'lucide-react'
 import type { spaces } from '@x/shared'
-import { messageUrl } from '@x/shared/dist/spaces.js'
+import { followUpAgentId, mentionsAnyone, messageUrl } from '@x/shared/dist/spaces.js'
 import { copySpacesLink } from '@/lib/spaces-copy-link'
 import { Button } from '@/components/ui/button'
 import {
@@ -31,7 +31,10 @@ import {
 } from '@/lib/spaces-thread-draft'
 import { AUTO_TOAST, collectRouteCandidates, routeDraft, routeThreadLabel } from '@/lib/spaces-auto-route'
 import { agentOptionsPayload, postStreamMessage } from '@/lib/spaces-post'
-import { noteInvocations } from '@/hooks/use-space-invocations'
+import { noteInvocations, useSpaceInvocations } from '@/hooks/use-space-invocations'
+import { useSpaceMembers } from '@/hooks/use-space-members'
+import { isOthersPersonalAgent } from '@/lib/spaces-direct'
+import { FollowUpLine } from '@/components/spaces/follow-up-line'
 import { getStreamState, jumpToLatest } from '@/hooks/use-space-chat'
 import { AutoBanner } from '@/components/spaces/auto-banner'
 import { FindBanner } from '@/components/spaces/find-banner'
@@ -618,12 +621,30 @@ export function ThreadPane({
         }
     }
 
+    // Thread follow-ups (Harbor spec §8, 2026-10-27): a reply that mentions
+    // nobody goes to the agent you last invoked here. The line above the
+    // composer names it; its × sends the next reply to people only. Not shown
+    // for someone else's personal agent, which would refuse it anyway.
+    const roster = useSpaceMembers(org.id, space.id)
+    const invocationsByMessage = useSpaceInvocations(org.id, space.id)
+    const followUp = useMemo(() => {
+        const members = new Map(roster.map((m) => [m.id, m]))
+        const id = followUpAgentId([...invocationsByMessage.values()].flat(), rootMessageId, org.memberId, members)
+        const agent = id ? members.get(id) : undefined
+        return agent && !isOthersPersonalAgent(agent, org.memberId) ? agent : undefined
+    }, [roster, invocationsByMessage, rootMessageId, org.memberId])
+    const [peopleOnly, setPeopleOnly] = useState(false)
+    const [draftMentions, setDraftMentions] = useState(false)
+
     // Optimistic send, same shape as the stream's: render now (dimmed as
     // pending), confirm — or fail into a retry/discard row — in the
     // background. The composer never waits on the round trip.
     const post = async (body: string, agent?: AgentOptions) => {
         // Sending settles a routed reply: whatever leaves this box is the person's own.
         clearStagedThreadDraft(draftKey)
+        // The × holds for one reply.
+        const toPeople = peopleOnly && followUp !== undefined && !mentionsAnyone(body)
+        setPeopleOnly(false)
         if (hasMoreAfterRef.current) {
             await snapToLatest()
             // The snap toasts its own failure; a reply must not land in an old window.
@@ -631,7 +652,7 @@ export function ThreadPane({
         }
         const pending = buildPendingMessage(space.id, org.memberId, body, rootMessageId)
         setMessages((prev) => [...prev, pending])
-        void invokeSpace('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body, ...agentOptionsPayload(agent) })
+        void invokeSpace('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body, ...agentOptionsPayload(agent), ...(toPeople ? { peopleOnly: true } : {}) })
             .then((result) => {
                 noteInvocations(org.id, space.id, result.invocations)
                 setMessages((prev) => {
@@ -1338,10 +1359,14 @@ export function ThreadPane({
                     dismissTitle="Looks right: keep it here as a draft"
                 />
             )}
+            {writable && followUp && !draftMentions && (
+                <FollowUpLine agentName={followUp.displayName} peopleOnly={peopleOnly} onPeopleOnly={setPeopleOnly} />
+            )}
             {writable ? <Composer
                 placeholder="Reply…"
                 busy={false}
                 onSend={post}
+                onDraftChange={(draft) => setDraftMentions(mentionsAnyone(draft))}
                 onSchedule={!LOCAL_RUNTIME ? undefined : async (body, at) => {
                     clearStagedThreadDraft(draftKey)
                     await invokeSpace('spaces:schedule', {

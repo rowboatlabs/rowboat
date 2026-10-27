@@ -154,7 +154,8 @@ describe('the Conductor connector', () => {
     const { message, invocations: first } = await org.post(`${mention(claude)} fix checkout`);
     expect((await org.ended(first[0]!.id)).state).toBe('done');
     const creates = fake.creates().length;
-    await org.post("it's the session cookie", { threadRoot: message.id });
+    // Sent to people only: a reply that mentions nobody would follow up the agent itself (spec §8, 2026-10-27).
+    await org.post("it's the session cookie", { threadRoot: message.id, peopleOnly: true });
     fake.nextTurn = claudeTurn('Added the test.');
     const { invocations } = await org.post(`${mention(claude)} also add a test`, { threadRoot: message.id });
     expect((await org.ended(invocations[0]!.id)).state).toBe('done');

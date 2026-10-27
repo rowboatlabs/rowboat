@@ -175,6 +175,15 @@ describe('Jev', () => {
     expect(fake.calls.at(-1)!.state.members.find((m) => m.name === 'Scribe')).toMatchObject({ is: 'an agent' });
   });
 
+  it('tags no agent for a reply sent to people only (2026-10-27)', async () => {
+    const root = await post('Release notes are due Friday');
+    await settle();
+    const reply = await post('Scribe and Gagan, take a look', 'dev-harsh', { threadRoot: root.id, peopleOnly: true });
+    const tags = await until(async () => (await jevReplies(root.id)).find((m) => m.offset > reply.offset), 'Jev tags Gagan');
+    expect(tags.body).toBe('cc [@Gagan](#member:gagan)');
+    expect(fake.calls.at(-1)!.state.members.some((m) => m.name === 'Scribe')).toBe(false);
+  });
+
   it('carries the hand-off depth: an agent naming another in plain text hands it work one hop on', async () => {
     const { agent: alpha, key: alphaKey } = await addAgent('Alpha');
     const { agent: beta, key: betaKey } = await addAgent('Beta');

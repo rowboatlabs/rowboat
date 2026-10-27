@@ -1,5 +1,6 @@
 import {
   ConnectorCapabilities,
+  JEV_KIND,
   type ActingMode,
   type Approval,
   type ApprovalClose,
@@ -68,11 +69,13 @@ export class Invocations {
   // --- the trigger: Feed.postMessage calls this inside its space lock ------------
 
   /**
-   * The agents a new message invokes (v1: mentions only). Each mentioned
-   * agent member other than the author gets an invocation: refused (no
-   * shared space, or past the hop limit), pending (its conversation is free,
-   * or its turn is waiting on a person, which this answers), or queued.
-   * Edits never invoke. `depth` is the message's hand-off depth (handOffDepth).
+   * The agents a new message invokes: the agents it mentions, the agent in a
+   * DM, and in a shared space's thread the agent a person's unaddressed reply
+   * follows up (followedUp). Each agent member other than the author gets an
+   * invocation: refused (no shared space, personal, or past the hop limit),
+   * pending (its conversation is free, or its turn is waiting on a person,
+   * which this answers), or queued. Edits never invoke. `depth` is the
+   * message's hand-off depth (handOffDepth).
    */
   async onMessage(
     ctx: ActorCtx,
@@ -88,6 +91,10 @@ export class Invocations {
     // and a self-DM out: only an agent that is not the author is invoked.
     const invoked = new Set(message.mentions);
     if (space.kind === 'direct') for (const id of space.participants ?? []) invoked.add(id);
+    else {
+      const followed = await this.followedUp(ctx, space.id, message);
+      if (followed) invoked.add(followed);
+    }
     for (const agentId of invoked) {
       if (agentId === message.author.memberId) continue;
       const agent = await this.k.store.getMember(agentId);
@@ -124,6 +131,27 @@ export class Invocations {
       created.push(invocation);
     }
     return created;
+  }
+
+  /**
+   * The agent a thread reply follows up without a mention (spec §8, amended
+   * 2026-10-27): a person's own reply, acting directly, that mentions nobody
+   * (no member, @here or Ro) and is not sent to people only continues the
+   * conversation with the agent its author most recently invoked in that
+   * thread. Only that one, so a reply never starts two agents. A refused
+   * invocation does not count, since it never reached the agent, and neither
+   * does Ro, which tags and never converses (§8 Jev). Policy then applies as
+   * to a mention.
+   */
+  private async followedUp(ctx: ActorCtx, spaceId: string, message: Message): Promise<string | undefined> {
+    if (!message.threadRoot || message.peopleOnly || ctx.agent || message.author.actingMode !== 'direct') return undefined;
+    if (message.mentions.length > 0 || message.mentionsHere || message.mentionsRowboat) return undefined;
+    for (const i of await this.k.store.listSpaceInvocations(spaceId, message.threadRoot, LIST_LIMIT)) {
+      if (i.trigger.authorId !== message.author.memberId || i.state === 'refused') continue;
+      if ((await this.k.store.getMember(i.agentId))?.agentKind === JEV_KIND) continue;
+      return i.agentId;
+    }
+    return undefined;
   }
 
   /** Send what the lock held back. */

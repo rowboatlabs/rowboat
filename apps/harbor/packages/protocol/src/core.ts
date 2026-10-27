@@ -657,6 +657,8 @@ export const Message = z.object({
    * show the card.
    */
   approval: Approval.optional(),
+  /** A thread reply its author sent to people only (NewMessage.peopleOnly, 2026-10-27). Written once. */
+  peopleOnly: z.literal(true).optional(),
   /**
    * Who this message addresses — STAMPED by the org at post and edit from the
    * body's mention tokens (mentions.ts), never from names, and only ids that

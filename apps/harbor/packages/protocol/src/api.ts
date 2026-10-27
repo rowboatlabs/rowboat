@@ -87,6 +87,13 @@ const NewMessage = z.object({
    * an agent, that agent: spec §8, 2026-09-30).
    */
   agentOptions: z.record(MemberId, InvocationOptionValues).optional(),
+  /**
+   * A thread reply meant for the people in it (spec §8, 2026-10-27): it
+   * continues no agent's conversation, and Ro tags no agent for it. A reply
+   * that mentions nobody otherwise invokes the agent its author last invoked
+   * in that thread. Mentions still invoke. Ignored on a new root message.
+   */
+  peopleOnly: z.boolean().optional(),
 });
 
 /**

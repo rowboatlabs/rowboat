@@ -183,7 +183,8 @@ export class JevConnector implements RunningConnector {
       mentioned: message.mentions,
       here: message.mentionsHere,
       busyAgents,
-      agentsAllowed: depth <= AGENT_HOP_LIMIT,
+      // A reply sent to people only wants no agent (spec §8, 2026-10-27).
+      agentsAllowed: depth <= AGENT_HOP_LIMIT && !message.peopleOnly,
     };
     const candidates = selectCandidates(input);
     if (candidates.length === 0) return 'done';
