@@ -14,6 +14,8 @@ import {
   type AgentHook,
   type AgentHosting,
   type HostingEnvVar,
+  HostingSpend,
+  LlmProvider,
   type HostingExecution,
   type HostingFileEntry,
   type HostingLogLine,
@@ -446,8 +448,12 @@ export class SpacesClient {
   private hostingPath(agentId: string, rest = ''): string {
     return `/v1/agents/${encodeURIComponent(agentId)}/hosting${rest}`;
   }
-  async getHosting(agentId: string): Promise<{ hosting: AgentHosting; machine?: HostingMachine; env: HostingEnvVar[] }> {
+  async getHosting(agentId: string): Promise<{ hosting: AgentHosting; machine?: HostingMachine; env: HostingEnvVar[]; spend?: HostingSpend }> {
     return this.request('GET', this.hostingPath(agentId), routes.getHosting.response);
+  }
+  /** The owner's own provider key for a managed agent (2026-10-27): the end of its trial; also how a key is replaced. */
+  async setHostingLlm(agentId: string, input: { provider: LlmProvider; apiKey: string; model?: string }): Promise<AgentHosting> {
+    return (await this.request('PUT', this.hostingPath(agentId, '/llm'), routes.setHostingLlm.response, input)).hosting;
   }
   async setHostingEnv(agentId: string, key: string, value: string, secret: boolean): Promise<HostingEnvVar[]> {
     return (await this.request('PUT', this.hostingPath(agentId, `/env/${encodeURIComponent(key)}`), routes.setHostingEnv.response, { value, secret })).env;

@@ -1,4 +1,5 @@
 import {
+  LLM_PROVIDERS,
   MARITIME_AGENTS,
   type AgentCredential,
   type AgentHosting,
@@ -6,15 +7,19 @@ import {
   type HostingEnvVar,
   type HostingExecution,
   type HostingFileEntry,
+  type HostingFunding,
   type HostingLogLine,
   type HostingMachine,
   type HostingPowerAction,
   type HostingSkill,
+  type HostingSpend,
   type HostingTrigger,
+  type LlmProvider,
   type Member,
 } from '@rowboat/spaces-protocol';
 import { HarborError } from '../errors.js';
 import { canAddAgent, canRevokeAgentKey, enforce } from '../policy.js';
+import { credentialHint } from '../sealing.js';
 import type { StoredAgentHosting } from '../store.js';
 import type { Agents } from './agents.js';
 import type { ActorCtx, Kernel } from './kernel.js';
@@ -30,6 +35,17 @@ import type { Spaces } from './spaces.js';
 // agent takes a command, and marks it ready; deleting runs the same way in
 // reverse. The platform calls are a HostingProvider's; this module keeps the
 // rules and the records.
+//
+// Who pays for the model (2026-10-27): a new Hermes or Codex starts on
+// Rowboat's trial credit, the platform's funded LLM under the cap the
+// deployment sets, there to try the agent; Claude Code starts on its owner's
+// Anthropic key. The trial is one-shot. It closes when the platform reports
+// the cap reached (the connector asks before each turn and says so in the
+// thread), when thirty days pass, or the moment the owner adds a key, and
+// closing it sets the platform's cap for the agent to zero so nothing renews
+// next month. The owner's key goes to the agent's environment on the
+// platform with what its runtime needs to use it; Harbor keeps the provider
+// and the key's last characters.
 
 export interface ProvisionInput {
   hostingId: string;
@@ -86,6 +102,12 @@ export interface HostingOps {
   createTrigger(input: { type: string; config: Record<string, unknown>; enabled?: boolean }): Promise<void>;
   updateTrigger(triggerId: string, input: { config?: Record<string, unknown>; enabled?: boolean }): Promise<void>;
   deleteTrigger(triggerId: string): Promise<void>;
+  /** What the agent has drawn on Rowboat's credit this period, as the platform counts it. */
+  spend(): Promise<HostingSpend>;
+  /** The owner's own key into the agent's environment, with what its runtime needs to use it, applied. */
+  setLlm(input: { kind: string; provider: LlmProvider; apiKey: string; model?: string }): Promise<void>;
+  /** Nothing more on Rowboat's credit: the platform's cap for this agent goes to zero, for good. */
+  stopFunding(): Promise<void>;
 }
 
 /** The platform said no, in its own words; `gone` when it no longer has the thing asked about. */
@@ -112,6 +134,15 @@ const DEPLOY_TIMEOUT_MS = 20 * 60_000;
 /** How long a deployed agent may refuse a command before the hosting fails. */
 const CHECK_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_TICK_MS = 10_000;
+/** How long a trial lasts if nothing closes it first. */
+const TRIAL_MS = 30 * 24 * 60 * 60_000;
+
+/** What the agent answers, as a failed turn, once its trial is over: its owner reads it in the thread. */
+export function trialOverMessage(reason: 'exhausted' | 'expired'): string {
+  return reason === 'exhausted'
+    ? "I've used up my Rowboat trial credit. My owner needs to add an API key on my page for me to keep going."
+    : 'My Rowboat trial has ended. My owner needs to add an API key on my page for me to keep going.';
+}
 
 const EXTERNAL_PREFIX = 'rowboat-';
 /** A file read through the page is text, and at most this long; longer is cut and flagged. */
@@ -127,6 +158,9 @@ function publicShape(row: StoredAgentHosting): AgentHosting {
     status: row.status,
     ...(row.externalId ? { externalId: row.externalId } : {}),
     ...(row.error ? { error: row.error } : {}),
+    funding: row.funding,
+    ...(row.trial ? { trial: row.trial } : {}),
+    ...(row.llm ? { llm: row.llm } : {}),
     createdBy: row.createdBy,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -138,6 +172,7 @@ export class Hosting {
   private hooks: HostingHooks | undefined;
   private timer: NodeJS.Timeout | undefined;
   private ticking: Promise<void> | undefined;
+  private trialMs = TRIAL_MS;
 
   constructor(
     private readonly k: Kernel,
@@ -146,9 +181,10 @@ export class Hosting {
   ) {}
 
   /** Absent = this Harbor runs no managed hosting (no platform key in the deployment). */
-  attach(provider: HostingProvider, hooks: HostingHooks): void {
+  attach(provider: HostingProvider, hooks: HostingHooks, options: { trialMs?: number } = {}): void {
     this.provider = provider;
     this.hooks = hooks;
+    if (options.trialMs !== undefined) this.trialMs = options.trialMs;
   }
 
   get available(): boolean {
@@ -202,6 +238,10 @@ export class Hosting {
 
     const id = this.k.ulid();
     const now = this.k.now();
+    // Claude Code runs on the key it was given from the start; the rest on Rowboat's trial credit, for a while.
+    const funding: Pick<StoredAgentHosting, 'funding' | 'trial' | 'llm'> = input.anthropicApiKey
+      ? { funding: 'own', llm: { provider: 'anthropic', keyHint: credentialHint(input.anthropicApiKey), setBy: ctx.memberId, setAt: now } }
+      : { funding: 'trial', trial: { endsAt: new Date(Date.parse(now) + this.trialMs).toISOString() } };
     let row: StoredAgentHosting = {
       id,
       provider: 'maritime',
@@ -209,6 +249,7 @@ export class Hosting {
       externalUserId: `${EXTERNAL_PREFIX}${id.toLowerCase()}`,
       kind: input.kind,
       displayName,
+      ...funding,
       createdBy: ctx.memberId,
       createdAt: now,
       updatedAt: now,
@@ -298,11 +339,72 @@ export class Hosting {
     }
   }
 
-  /** The page's one read: the hosting, the machine as the platform sees it (none while it is still being set up), and the environment. */
-  async get(ctx: ActorCtx, agentId: string): Promise<{ hosting: AgentHosting; machine?: HostingMachine; env: HostingEnvVar[] }> {
+  /**
+   * The page's one read: the hosting, the machine as the platform sees it
+   * (none while it is still being set up), the environment, and on a trial
+   * what it has drawn so far. A trial the platform reports at its cap is
+   * closed here and now, so the page says so and nothing renews.
+   */
+  async get(ctx: ActorCtx, agentId: string): Promise<{ hosting: AgentHosting; machine?: HostingMachine; env: HostingEnvVar[]; spend?: HostingSpend }> {
     const { row, ops } = await this.managed(ctx, agentId);
-    const [machine, env] = await this.platform(() => Promise.all([ops.machine().catch(() => undefined), ops.env()]));
-    return { hosting: publicShape(row), ...(machine ? { machine } : {}), env };
+    const [machine, env, spend] = await this.platform(() =>
+      Promise.all([ops.machine().catch(() => undefined), ops.env(), row.funding === 'trial' ? ops.spend().catch(() => undefined) : Promise.resolve(undefined)]),
+    );
+    let hosting = row;
+    if (spend?.limitReached && row.funding === 'trial' && !row.trial?.closedAt) hosting = await this.endTrial(row, ops, 'exhausted');
+    return { hosting: publicShape(hosting), ...(machine ? { machine } : {}), env, ...(spend ? { spend } : {}) };
+  }
+
+  /**
+   * The owner's own key (2026-10-27): the end of the trial, and the only way
+   * out of it. The key goes to the platform, the funding stops there, then
+   * the record says `own`; a failure before the record leaves the trial as it
+   * was, and a retry does the same again. Also how a key is replaced.
+   */
+  async setLlm(ctx: ActorCtx, agentId: string, input: { provider: LlmProvider; apiKey: string; model?: string }): Promise<AgentHosting> {
+    const { row, ops } = await this.managed(ctx, agentId);
+    const allowed = LLM_PROVIDERS[row.kind] ?? [];
+    if (!allowed.includes(input.provider)) throw new HarborError('invalid_request', `${row.kind} does not run on ${input.provider}; it takes ${allowed.join(', ')}`);
+    const apiKey = input.apiKey.trim();
+    if (apiKey.length < 8) throw new HarborError('invalid_request', 'that is not an API key');
+    const model = input.model?.trim() || undefined;
+    this.k.guardWrite();
+    await this.platform(() => ops.setLlm({ kind: row.kind, provider: input.provider, apiKey, ...(model ? { model } : {}) }));
+    if (row.funding === 'trial' && !row.trial?.closedAt) await this.platform(() => ops.stopFunding());
+    const at = this.k.now();
+    const next: StoredAgentHosting = {
+      ...row,
+      funding: 'own',
+      ...(row.trial ? { trial: row.trial.closedAt ? row.trial : { ...row.trial, closedAt: at, closedReason: 'own_key' } } : {}),
+      llm: { provider: input.provider, keyHint: credentialHint(apiKey), ...(model ? { model } : {}), setBy: ctx.memberId, setAt: at },
+      updatedAt: at,
+    };
+    await this.k.store.putHosting(next);
+    return publicShape(next);
+  }
+
+  /** For the agent's connector before a turn: on Rowboat's trial credit, and whether that is over; nothing for an agent Rowboat does not host. */
+  async fundingOf(agentId: string): Promise<{ funding: HostingFunding; trialOver?: 'exhausted' | 'expired' } | undefined> {
+    const row = await this.k.store.getAgentHosting(agentId);
+    if (!row || row.status !== 'ready') return undefined;
+    const reason = row.trial?.closedReason;
+    return { funding: row.funding, ...(row.funding === 'trial' && (reason === 'exhausted' || reason === 'expired') ? { trialOver: reason } : {}) };
+  }
+
+  /** The connector saw the platform at the cap: the trial is over, for good. */
+  async closeTrial(agentId: string, reason: 'exhausted' | 'expired'): Promise<void> {
+    const row = await this.k.store.getAgentHosting(agentId);
+    if (!row || !this.provider || row.funding !== 'trial' || row.trial?.closedAt || !row.externalId) return;
+    await this.endTrial(row, this.provider.manage(row.externalId), reason);
+  }
+
+  /** The platform first, so nothing more goes on Rowboat's credit even if the record is not reached. */
+  private async endTrial(row: StoredAgentHosting, ops: HostingOps, reason: 'exhausted' | 'expired'): Promise<StoredAgentHosting> {
+    await ops.stopFunding();
+    const at = this.k.now();
+    const next: StoredAgentHosting = { ...row, trial: { ...(row.trial ?? { endsAt: at }), closedAt: at, closedReason: reason }, updatedAt: at };
+    await this.k.store.putHosting(next);
+    return next;
   }
 
   async setEnv(ctx: ActorCtx, agentId: string, key: string, value: string, secret: boolean): Promise<HostingEnvVar[]> {
@@ -449,6 +551,15 @@ export class Hosting {
         await this.step(provider, row);
       } catch (err) {
         console.log('[harbor] hosting: step failed', { id: row.id, status: row.status, error: (err as Error).message });
+      }
+    }
+    // A trial that ran out of time, with credit left or not, is over.
+    for (const row of await this.k.store.listHostingsByStatus(['ready'])) {
+      if (row.funding !== 'trial' || !row.trial || row.trial.closedAt || !row.externalId || Date.parse(row.trial.endsAt) > Date.now()) continue;
+      try {
+        await this.endTrial(row, provider.manage(row.externalId), 'expired');
+      } catch (err) {
+        console.log('[harbor] hosting: could not end an expired trial', { id: row.id, error: (err as Error).message });
       }
     }
   }

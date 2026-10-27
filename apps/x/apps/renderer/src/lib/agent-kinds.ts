@@ -86,10 +86,22 @@ export const PLATFORMS: Record<string, { label: string; logo?: Logo }> = {
  * Harbor says which of them it offers (none without Rowboat's Maritime key).
  */
 export const MANAGED_KINDS: ReadonlyArray<{ kind: string; description: string }> = [
-    { kind: 'hermes', description: 'A general agent with tools, memory and skills, on Maritime’s model access' },
+    { kind: 'hermes', description: 'A general agent with tools, memory and skills. Starts on Rowboat’s trial credit; add your own key on its page.' },
     { kind: 'claude-code', description: 'Anthropic’s coding agent, on your Anthropic API key' },
-    { kind: 'codex', description: 'OpenAI’s coding agent, as Maritime’s template sets it up' },
+    { kind: 'codex', description: 'OpenAI’s coding agent. Starts on Rowboat’s trial credit; add your OpenAI key on its page.' },
 ]
+
+/**
+ * The providers a managed kind runs on with its owner's key (2026-10-27), the
+ * first offered first. Harbor's `LLM_PROVIDERS` is the rule; this is what the
+ * page offers, with how each is named and what its keys look like.
+ */
+export const LLM_PROVIDERS_FOR_KIND: Readonly<Record<string, readonly ('openai' | 'anthropic' | 'openrouter')[]>> = { hermes: ['openai', 'anthropic', 'openrouter'], codex: ['openai'], 'claude-code': ['anthropic'] }
+export const LLM_PROVIDER_INFO: Readonly<Record<'openai' | 'anthropic' | 'openrouter', { label: string; keyPlaceholder: string; modelPlaceholder: string }>> = {
+    openai: { label: 'OpenAI', keyPlaceholder: 'sk-…', modelPlaceholder: 'gpt-5.4' },
+    anthropic: { label: 'Anthropic', keyPlaceholder: 'sk-ant-…', modelPlaceholder: 'claude-sonnet-4-5' },
+    openrouter: { label: 'OpenRouter', keyPlaceholder: 'sk-or-…', modelPlaceholder: 'anthropic/claude-sonnet-4-5' },
+}
 
 /** A platform instance as people see it: its name, then its id. */
 export function instanceLabel(i: { id: string; name: string | null }): string {

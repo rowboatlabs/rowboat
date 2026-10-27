@@ -121,6 +121,10 @@ const hermes: Runtime = {
       'if [ "$(id -u)" = 0 ] && [ -x /command/s6-setuidgid ]; then chown -R hermes:hermes /opt/data/rowboat 2>/dev/null || true; run() { /command/s6-setuidgid hermes env HERMES_HOME=/opt/data HOME=/opt/data PATH="$PATH" ROWBOAT_URL="$ROWBOAT_URL" ROWBOAT_AGENT_KEY="$ROWBOAT_AGENT_KEY" "$@"; }; else run() { "$@"; }; fi',
       `{ grep -q 'ROWBOAT_URL}/mcp' /opt/data/config.yaml && grep -q 'Bearer \${ROWBOAT_AGENT_KEY}' /opt/data/config.yaml; } 2>/dev/null || { run hermes config set mcp_servers.rowboat.url '\${ROWBOAT_URL}/mcp' >/dev/null 2>&1 || true; run hermes config set mcp_servers.rowboat.headers.Authorization 'Bearer \${ROWBOAT_AGENT_KEY}' >/dev/null 2>&1 || true; }`,
       `{ grep -F ROWBOAT_URL /opt/data/.env | grep -qF "$ROWBOAT_URL" && grep -F ROWBOAT_AGENT_KEY /opt/data/.env | grep -qF "$ROWBOAT_AGENT_KEY"; } 2>/dev/null || { run hermes config set ROWBOAT_URL "$ROWBOAT_URL" >/dev/null 2>&1 || true; run hermes config set ROWBOAT_AGENT_KEY "$ROWBOAT_AGENT_KEY" >/dev/null 2>&1 || true; }`,
+      // The owner's own key (2026-10-27): the platform's boot rewrite points Hermes at the platform's proxy, so the
+      // provider, its address, the model and the key go back into Hermes's config and .env before the turn, whenever
+      // they differ. ROWBOAT_LLM_PROVIDER and ROWBOAT_LLM_MODEL are set by Harbor with the key (provisioning.ts).
+      `if [ -n "$ROWBOAT_LLM_PROVIDER" ]; then case "$ROWBOAT_LLM_PROVIDER" in openai) LB=https://api.openai.com/v1; LK="$OPENAI_API_KEY"; LN=OPENAI_API_KEY;; anthropic) LB=https://api.anthropic.com; LK="$ANTHROPIC_API_KEY"; LN=ANTHROPIC_API_KEY;; openrouter) LB=https://openrouter.ai/api/v1; LK="$OPENROUTER_API_KEY"; LN=OPENROUTER_API_KEY;; *) LB=; LK=; LN=;; esac; if [ -n "$LB" ]; then { grep -q "provider: \"$ROWBOAT_LLM_PROVIDER\"" /opt/data/config.yaml && grep -q "base_url: \"$LB\"" /opt/data/config.yaml; } 2>/dev/null || { run hermes config set model.provider "$ROWBOAT_LLM_PROVIDER" >/dev/null 2>&1 || true; run hermes config set model.base_url "$LB" >/dev/null 2>&1 || true; }; [ -z "$ROWBOAT_LLM_MODEL" ] || grep -q "default: \"$ROWBOAT_LLM_MODEL\"" /opt/data/config.yaml 2>/dev/null || run hermes config set model.default "$ROWBOAT_LLM_MODEL" >/dev/null 2>&1 || true; [ -z "$LK" ] || grep -F "$LN" /opt/data/.env 2>/dev/null | grep -qF "$LK" || run hermes config set "$LN" "$LK" >/dev/null 2>&1 || true; fi; fi`,
       // The rowboat-spaces skill, once: without it the first turn of every session fetches it from GitHub (seen on prod 2026-10-26).
       `{ [ -d /opt/data/skills/rowboat-spaces ] || ls -d /opt/data/skills/*/rowboat-spaces >/dev/null 2>&1; } || run hermes skills install rowboatlabs/rowboat/skills/rowboat-spaces --yes >/dev/null 2>&1 || true`,
       'cd /opt/data/workspace',
@@ -166,7 +170,10 @@ const codex: Runtime = {
       'mkdir -p /data/rowboat /data/workspace',
       'cd /data/workspace',
       `PROMPT="$(cat ${q(input.promptPath)})"`,
-      `codex exec ${input.session ? `resume ${q(input.session)}` : ''} --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox -o ${q(input.lastPath)} ${flags} -- "$PROMPT" > ${q(input.outPath)} 2> ${q(input.errPath)}`,
+      // The owner's own key (2026-10-27): Codex's built-in openai provider on OPENAI_API_KEY and OPENAI_BASE_URL, which
+      // Harbor set with the key, instead of the template's provider on the platform's proxy; the owner's model when the turn picked none.
+      `OWN=""; [ "$ROWBOAT_LLM_PROVIDER" = openai ] && OWN='-c model_provider="openai"'; ${input.model ? '' : '[ -z "$ROWBOAT_LLM_MODEL" ] || OWN="$OWN -m $ROWBOAT_LLM_MODEL"; '}true`,
+      `codex exec ${input.session ? `resume ${q(input.session)}` : ''} --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox -o ${q(input.lastPath)} $OWN ${flags} -- "$PROMPT" > ${q(input.outPath)} 2> ${q(input.errPath)}`,
     ].join('\n');
   },
   read(out, last, err, exitCode) {
@@ -218,7 +225,8 @@ const claudeCode: Runtime = {
       '[ -n "$CLI" ] || for f in /app/node_modules/@anthropic-ai/claude-agent-sdk/cli.js /app/node_modules/@anthropic-ai/claude-code/cli.js; do [ -f "$f" ] && CLI="node $f" && break; done',
       '[ -n "$CLI" ] || { echo "no Claude Code CLI found in this VM" >&2; exit 127; }',
       `PROMPT="$(cat ${q(input.promptPath)})"`,
-      `$CLI -p --output-format stream-json --verbose --dangerously-skip-permissions --mcp-config /data/rowboat/mcp.json ${flags} -- "$PROMPT" > ${q(input.outPath)} 2> ${q(input.errPath)}`,
+      `OWN=""; ${input.model ? '' : '[ -z "$ROWBOAT_LLM_MODEL" ] || OWN="--model $ROWBOAT_LLM_MODEL"; '}true`,
+      `$CLI -p --output-format stream-json --verbose --dangerously-skip-permissions --mcp-config /data/rowboat/mcp.json $OWN ${flags} -- "$PROMPT" > ${q(input.outPath)} 2> ${q(input.errPath)}`,
     ].join('\n');
   },
   read(out, _last, err, exitCode) {

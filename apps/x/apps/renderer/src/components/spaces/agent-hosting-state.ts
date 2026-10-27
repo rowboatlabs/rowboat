@@ -20,6 +20,9 @@ export type HostingState = {
     setMachine: (m: spaces.HostingMachine) => void
     env: spaces.HostingEnvVar[] | null
     setEnv: (env: spaces.HostingEnvVar[]) => void
+    /** On a trial: what the agent has drawn on Rowboat's credit, as the platform counts it. */
+    spend: spaces.HostingSpend | undefined
+    setSpend: (spend: spaces.HostingSpend | undefined) => void
     skills: spaces.HostingSkill[] | null
     setSkills: (skills: spaces.HostingSkill[]) => void
     loadSkills: () => Promise<void>
@@ -34,6 +37,7 @@ export type HostingState = {
 export function useHostingState(orgId: string, agentId: string, live: boolean): HostingState {
     const [machine, setMachine] = useState<spaces.HostingMachine | undefined>(undefined)
     const [env, setEnv] = useState<spaces.HostingEnvVar[] | null>(null)
+    const [spend, setSpend] = useState<spaces.HostingSpend | undefined>(undefined)
     const [skills, setSkills] = useState<spaces.HostingSkill[] | null>(null)
     const [triggers, setTriggers] = useState<spaces.HostingTrigger[] | null>(null)
     const [filesEpoch, setFilesEpoch] = useState(0)
@@ -48,6 +52,7 @@ export function useHostingState(orgId: string, agentId: string, live: boolean): 
                 if (gone) return
                 setMachine(page.machine)
                 setEnv(page.env)
+                setSpend(page.spend)
             })
             .catch((err: unknown) => {
                 if (gone) return
@@ -86,7 +91,7 @@ export function useHostingState(orgId: string, agentId: string, live: boolean): 
     }, [orgId, agentId])
 
     return useMemo(
-        () => ({ machine, setMachine, env, setEnv, skills, setSkills, loadSkills, triggers, setTriggers, loadTriggers, filesEpoch, bumpFiles: () => setFilesEpoch((e) => e + 1) }),
-        [machine, env, skills, loadSkills, triggers, loadTriggers, filesEpoch],
+        () => ({ machine, setMachine, env, setEnv, spend, setSpend, skills, setSkills, loadSkills, triggers, setTriggers, loadTriggers, filesEpoch, bumpFiles: () => setFilesEpoch((e) => e + 1) }),
+        [machine, env, spend, skills, loadSkills, triggers, loadTriggers, filesEpoch],
     )
 }

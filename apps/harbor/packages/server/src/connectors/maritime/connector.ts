@@ -3,6 +3,7 @@ import { HarborError } from '../../errors.js';
 import type { ConnectorEnv, RunningConnector } from '../platforms.js';
 import { quietly, requestPrompt, sleep } from '../common/request.js';
 import { MaritimeError, type Execution, type MaritimeApi } from './api.js';
+import { trialOverMessage } from '../../core/hosting.js';
 import { RUNTIMES, type Runtime, type TurnReading } from './runtimes.js';
 
 // The Maritime connector (spec §8 Connectors, Maritime, 2026-10-26): one per
@@ -167,6 +168,7 @@ export class MaritimeConnector implements RunningConnector {
     if (!this.maritimeAgentId) return this.fail(invocation, 'This Maritime agent has no Maritime agent id. Its owner needs to add it again with one.');
     let record = await this.record(spaceId, threadRootId);
     if (this.stops.has(invocation.id)) return this.cancelled(invocation);
+    if (!(await this.fundedForTurn(invocation))) return;
     await this.report(invocation, { state: 'working', activity: 'Waking the agent on Maritime' });
     const awake = await this.wake(invocation);
     if (!awake) return;
@@ -178,6 +180,30 @@ export class MaritimeConnector implements RunningConnector {
     await this.save(spaceId, threadRootId, record);
     const prompt = await requestPrompt(this.env, invocation, record.deliveredOffset);
     await this.submit(invocation, record, prompt);
+  }
+
+  /**
+   * A managed agent on Rowboat's trial credit (2026-10-27): before a turn, is
+   * the trial over? Harbor's record says so once it is; until then the
+   * platform's own count decides, and a cap reached closes the trial for good.
+   * The answer goes to the thread as the turn's failure, where the owner reads
+   * it. An agent Rowboat does not host, or one on its owner's key, just runs.
+   */
+  private async fundedForTurn(invocation: Invocation): Promise<boolean> {
+    const funding = await this.safe(() => this.env.service.hostingFundingOf(this.env.agent.id), undefined);
+    if (!funding || funding.funding !== 'trial') return true;
+    let over = funding.trialOver;
+    if (!over) {
+      const spend = await this.withMaritime(invocation, (api) => api.spendLimit(this.maritimeAgentId), { recover: true });
+      if (spend === undefined) return false;
+      if (spend.limitReached) {
+        over = 'exhausted';
+        await this.safe(() => this.env.service.closeHostingTrial(this.env.agent.id, 'exhausted'), undefined);
+      }
+    }
+    if (!over) return true;
+    await this.fail(invocation, trialOverMessage(over));
+    return false;
   }
 
   /** Write the request and submit the turn, then follow it. */

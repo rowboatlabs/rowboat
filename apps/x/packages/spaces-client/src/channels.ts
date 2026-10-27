@@ -22,7 +22,7 @@ export type HarborChannel =
   | 'spaces:addMembers' | 'spaces:openDirect' | 'spaces:listMembers' | 'spaces:listOrgMembers'
   | 'spaces:listAgents' | 'spaces:addAgent' | 'spaces:setAgentCredential' | 'spaces:setAgentHook' | 'spaces:clearAgentHook'
   | 'spaces:createAgentKey' | 'spaces:revokeAgentKey' | 'spaces:renameAgent'
-  | 'spaces:managedAgentKinds' | 'spaces:createManagedAgent' | 'spaces:deleteManagedAgent'
+  | 'spaces:managedAgentKinds' | 'spaces:createManagedAgent' | 'spaces:deleteManagedAgent' | 'spaces:setHostingLlm'
   | 'spaces:getHosting' | 'spaces:setHostingEnv' | 'spaces:deleteHostingEnv' | 'spaces:hostingPower'
   | 'spaces:runHostingCommand' | 'spaces:getHostingCommand' | 'spaces:cancelHostingCommand' | 'spaces:getHostingLogs'
   | 'spaces:listHostingFiles' | 'spaces:readHostingFile' | 'spaces:writeHostingFile' | 'spaces:makeHostingDir' | 'spaces:moveHostingFile' | 'spaces:deleteHostingFile'
@@ -143,6 +143,7 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit 
     'spaces:managedAgentKinds': async (args) => ({ kinds: await getClient(args.orgId).managedAgentKinds() }),
     'spaces:createManagedAgent': async ({ orgId, ...input }) => getClient(orgId).createManagedAgent(input),
     'spaces:deleteManagedAgent': async (args) => ({ hosting: await getClient(args.orgId).deleteManagedAgent(args.agentId) }),
+    'spaces:setHostingLlm': async ({ orgId, agentId, ...input }) => ({ hosting: await getClient(orgId).setHostingLlm(agentId, input) }),
     'spaces:getHosting': async (args) => getClient(args.orgId).getHosting(args.agentId),
     'spaces:setHostingEnv': async (args) => ({ env: await getClient(args.orgId).setHostingEnv(args.agentId, args.key, args.value, args.secret ?? false) }),
     'spaces:deleteHostingEnv': async (args) => ({ env: await getClient(args.orgId).deleteHostingEnv(args.agentId, args.key) }),

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { addressesRowboat, mapMentionTokens, mentionsAsText } from '@rowboat/spaces-protocol';
+export { LLM_PROVIDERS } from '@rowboat/spaces-protocol';
 import type {
   AcceptInviteResult,
   AgentCredential,
@@ -13,6 +14,11 @@ import type {
   HostingPowerAction,
   HostingSkill,
   HostingTrigger,
+  HostingFunding,
+  HostingLlm,
+  HostingSpend,
+  HostingTrial,
+  LlmProvider,
   AgentKey,
   AgentKeySecret,
   AgentListing,
@@ -85,6 +91,11 @@ export type {
   HostingPowerAction,
   HostingSkill,
   HostingTrigger,
+  HostingFunding,
+  HostingLlm,
+  HostingSpend,
+  HostingTrial,
+  LlmProvider,
   AgentKey,
   AgentKeySecret,
   AgentListing,

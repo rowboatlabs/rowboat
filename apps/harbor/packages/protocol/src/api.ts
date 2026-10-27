@@ -22,6 +22,7 @@ import { ActingMode, AgentCredential, AgentHook, AgentKey, AgentKeySecret, Agent
   HostingPowerAction,
   HostingSkill,
   HostingTrigger,
+  HostingSpend, LlmProvider,
 } from './core.js';
 import { AssetId, AssetPath, BlobHash, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 import {
@@ -550,7 +551,22 @@ export const routes = {
     method: 'GET',
     path: '/v1/agents/:agentId/hosting',
     params: z.object({ agentId: MemberId }),
-    response: z.object({ hosting: AgentHosting, machine: HostingMachine.optional(), env: z.array(HostingEnvVar) }),
+    response: z.object({ hosting: AgentHosting, machine: HostingMachine.optional(), env: z.array(HostingEnvVar), spend: HostingSpend.optional() }),
+  },
+  /**
+   * The owner's own provider key for a managed agent (2026-10-27): the end of
+   * its trial. The key goes to the agent's environment on the platform and
+   * nowhere else; Harbor keeps the provider and the key's last characters.
+   * `provider` is one of `LLM_PROVIDERS[kind]`; `model` is the runtime's
+   * default from then on. Answers the hosting as it now stands: `own`, with
+   * the trial closed. Also how a key is replaced.
+   */
+  setHostingLlm: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/hosting/llm',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ provider: LlmProvider, apiKey: z.string().min(8).max(512), model: z.string().max(128).optional() }),
+    response: z.object({ hosting: AgentHosting }),
   },
   /** Set one environment variable, creating or replacing it; `secret` is kept by the platform and never read back. A restart or reload applies it. */
   setHostingEnv: {

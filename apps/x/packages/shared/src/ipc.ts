@@ -4040,10 +4040,15 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), agentId: z.string() }),
     res: z.object({ hosting: z.custom<SpacesTypes.AgentHosting>() }),
   },
+  /** The owner's own provider key for a managed agent (2026-10-27): the end of its trial; also how a key is replaced. */
+  'spaces:setHostingLlm': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), provider: z.custom<SpacesTypes.LlmProvider>(), apiKey: z.string(), model: z.string().optional() }),
+    res: z.object({ hosting: z.custom<SpacesTypes.AgentHosting>() }),
+  },
   // Managing a managed agent's VM from its page (2026-10-27): one Harbor call each, the owner or an admin.
   'spaces:getHosting': {
     req: z.object({ orgId: z.string(), agentId: z.string() }),
-    res: z.object({ hosting: z.custom<SpacesTypes.AgentHosting>(), machine: z.custom<SpacesTypes.HostingMachine>().optional(), env: z.array(z.custom<SpacesTypes.HostingEnvVar>()) }),
+    res: z.object({ hosting: z.custom<SpacesTypes.AgentHosting>(), machine: z.custom<SpacesTypes.HostingMachine>().optional(), env: z.array(z.custom<SpacesTypes.HostingEnvVar>()), spend: z.custom<SpacesTypes.HostingSpend>().optional() }),
   },
   'spaces:setHostingEnv': {
     req: z.object({ orgId: z.string(), agentId: z.string(), key: z.string(), value: z.string(), secret: z.boolean().optional() }),

@@ -34,7 +34,7 @@ import type {
   AgentKey,
   AgentCredential,
   AgentHosting,
-  HostingPowerAction,
+  HostingPowerAction, LlmProvider,
   AgentHook,
   AgentKeySecret,
   AgentListing,
@@ -117,8 +117,8 @@ export class HarborService {
   }
 
   /** Managed hosting (spec §8 Maritime, 2026-10-26): the platform Rowboat's own account creates agents on, when the deployment has its key (runtime.ts). */
-  attachHosting(provider: HostingProvider, hooks: HostingHooks): void {
-    this.hosting.attach(provider, hooks);
+  attachHosting(provider: HostingProvider, hooks: HostingHooks, options: { trialMs?: number } = {}): void {
+    this.hosting.attach(provider, hooks, options);
   }
   /** The hosting worker: follows each managed agent from creation to ready, and through deletion. */
   startHosting(tickMs?: number): void {
@@ -219,6 +219,17 @@ export class HarborService {
   /** Managing a managed agent's VM (the management area, 2026-10-27): the owner or an admin, through the deployment's key. */
   getHosting(ctx: ActorCtx, agentId: string) {
     return this.hosting.get(ctx, agentId);
+  }
+  /** The owner's own provider key for a managed agent, the end of its trial (2026-10-27). */
+  setHostingLlm(ctx: ActorCtx, agentId: string, input: { provider: LlmProvider; apiKey: string; model?: string }) {
+    return this.hosting.setLlm(ctx, agentId, input);
+  }
+  /** For a managed agent's connector before a turn: on Rowboat's trial credit, and whether that is over. */
+  hostingFundingOf(agentId: string) {
+    return this.hosting.fundingOf(agentId);
+  }
+  closeHostingTrial(agentId: string, reason: 'exhausted' | 'expired') {
+    return this.hosting.closeTrial(agentId, reason);
   }
   setHostingEnv(ctx: ActorCtx, agentId: string, key: string, value: string, secret: boolean) {
     return this.hosting.setEnv(ctx, agentId, key, value, secret);

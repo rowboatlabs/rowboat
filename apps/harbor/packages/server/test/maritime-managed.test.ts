@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { routes, type AgentListing, type Invocation, type Member, type Message } from '@rowboat/spaces-protocol';
+import { routes, type AgentHosting, type AgentListing, type Invocation, type Member, type Message } from '@rowboat/spaces-protocol';
 import { MemoryBlobStore } from '../src/blobs.js';
 import { maritimePlatform } from '../src/connectors/maritime/index.js';
 import { HERMES_IMAGE, maritimeProvisioner } from '../src/connectors/maritime/provisioning.js';
@@ -32,6 +32,8 @@ class Org {
   constructor(
     private readonly store: Awaited<ReturnType<typeof freshStore>>,
     private readonly hosting: boolean = true,
+    /** How long a trial lasts on this Harbor; the default is thirty days. */
+    private readonly trialMs?: number,
   ) {}
 
   async start(): Promise<this> {
@@ -43,7 +45,7 @@ class Org {
         { id: 'harsh', displayName: 'Harsh' },
       ],
       blobs: new MemoryBlobStore(),
-      ...(this.hosting ? { hosting: { provider: maritimeProvisioner({ apiKey: GOOD_KEY, base: fake.url, llmCapCents: 500 }), tickMs: 50 } } : {}),
+      ...(this.hosting ? { hosting: { provider: maritimeProvisioner({ apiKey: GOOD_KEY, base: fake.url, llmCapCents: 500 }), tickMs: 50, ...(this.trialMs !== undefined ? { trialMs: this.trialMs } : {}) } } : {}),
     });
     return this;
   }
@@ -285,6 +287,90 @@ describe('managed Maritime agents', () => {
     expect((await me.delete(`/v1/agents/${agent.id}/hosting/triggers/${id}`)).body.triggers).toEqual([]);
   });
 
+  // Trial credit, then the owner's key (2026-10-27).
+  it('starts Hermes on Rowboat’s trial credit and Claude Code on its owner’s key, and shows the trial’s spend', async () => {
+    const me = org.as('dev-ramnique');
+    const { agent } = (await me.post('/v1/agents/managed', { displayName: 'Trial', kind: 'hermes' })).body as { agent: Member };
+    const ready = await org.hostingStatus(agent.id, 'ready');
+    expect(ready.hosting?.funding).toBe('trial');
+    const endsIn = Date.parse(ready.hosting!.trial!.endsAt) - Date.parse(ready.hosting!.createdAt);
+    expect(endsIn).toBeGreaterThan(29 * 24 * 3600_000);
+    expect(endsIn).toBeLessThan(31 * 24 * 3600_000);
+    expect(ready.hosting?.llm).toBeUndefined();
+    const page = await me.get(`/v1/agents/${agent.id}/hosting`);
+    expect(page.body.spend).toEqual({ spentCents: 120, limitCents: 500, limitReached: false, periodEnd: '2026-11-01T00:00:00Z' });
+
+    const claude = (await me.post('/v1/agents/managed', { displayName: 'Own', kind: 'claude-code', anthropicApiKey: 'sk-ant-api03-ownkey-abcd' })).body as { hosting: AgentHosting };
+    expect(claude.hosting.funding).toBe('own');
+    expect(claude.hosting.llm).toMatchObject({ provider: 'anthropic', keyHint: expect.stringMatching(/abcd$/), setBy: 'ramnique' });
+    expect(claude.hosting.trial).toBeUndefined();
+  });
+
+  it('the owner’s key goes to the VM with what the runtime needs, the trial closes on the platform and in the record; the kind decides the providers', async () => {
+    const me = org.as('dev-ramnique');
+    const { agent } = (await me.post('/v1/agents/managed', { displayName: 'Keyed', kind: 'hermes' })).body as { agent: Member };
+    await org.hostingStatus(agent.id, 'ready');
+    expect((await me.put(`/v1/agents/${agent.id}/hosting/llm`, { provider: 'openai', apiKey: 'short' })).status).toBe(400);
+    const set = await me.put(`/v1/agents/${agent.id}/hosting/llm`, { provider: 'anthropic', apiKey: 'sk-ant-api03-mine-wxyz', model: 'claude-sonnet-4-5' });
+    expect(set.status).toBe(200);
+    expect(set.body.hosting).toMatchObject({ funding: 'own', llm: { provider: 'anthropic', keyHint: expect.stringMatching(/wxyz$/), model: 'claude-sonnet-4-5', setBy: 'ramnique' }, trial: { closedReason: 'own_key' } });
+    expect(set.body.hosting.trial.closedAt).toBeDefined();
+    const vars = fake.env.get(agent.agentInstance!)!;
+    expect(vars.get('ANTHROPIC_API_KEY')).toEqual({ value: 'sk-ant-api03-mine-wxyz', isSecret: true });
+    expect(vars.get('ROWBOAT_LLM_PROVIDER')?.value).toBe('anthropic');
+    expect(vars.get('ROWBOAT_LLM_MODEL')?.value).toBe('claude-sonnet-4-5');
+    expect(fake.spend.get(agent.agentInstance!)?.limit).toBe(0);
+    expect(fake.power.filter((p) => p.agentId === agent.agentInstance).map((p) => p.action)).toContain('reload-env');
+    // The page: on the owner's key there is no spend to show, and the key's value is never read back.
+    const page = await me.get(`/v1/agents/${agent.id}/hosting`);
+    expect(page.body.hosting.funding).toBe('own');
+    expect(page.body.spend).toBeUndefined();
+    expect(page.body.env).toContainEqual({ key: 'ANTHROPIC_API_KEY', secret: true });
+    // A turn now carries the owner's provider into Hermes's config.
+    await me.post(`/v1/spaces/${org.spaceId}/members`, { memberIds: [agent.id], actingMode: 'direct' });
+    fake.nextTurn = hermesTurn('On my own key.');
+    const { invocations } = await org.post(`${mention(agent)} hi`);
+    expect((await org.ended(invocations[0]!.id)).state).toBe('done');
+    expect(fake.submits().at(-1)!.script).toContain('hermes config set model.provider "$ROWBOAT_LLM_PROVIDER"');
+
+    // Codex takes OpenAI only, and gets OpenAI's address where the template had the platform's proxy.
+    const codex = (await me.post('/v1/agents/managed', { displayName: 'Cx', kind: 'codex' })).body as { agent: Member };
+    await org.hostingStatus(codex.agent.id, 'ready');
+    expect((await me.put(`/v1/agents/${codex.agent.id}/hosting/llm`, { provider: 'anthropic', apiKey: 'sk-ant-api03-no-no-no' })).status).toBe(400);
+    expect((await me.put(`/v1/agents/${codex.agent.id}/hosting/llm`, { provider: 'openai', apiKey: 'sk-proj-openai-key-1234' })).status).toBe(200);
+    expect(fake.env.get(codex.agent.agentInstance!)!.get('OPENAI_BASE_URL')?.value).toBe('https://api.openai.com/v1');
+    // Harsh is a member, not the owner.
+    expect((await org.as('dev-harsh').put(`/v1/agents/${agent.id}/hosting/llm`, { provider: 'openai', apiKey: 'sk-proj-harsh-key-0000' })).status).toBe(403);
+  });
+
+  it('a turn on a trial at its cap fails with the agent’s own word and closes the trial for good', async () => {
+    const me = org.as('dev-ramnique');
+    const { agent } = (await me.post('/v1/agents/managed', { displayName: 'Spent', kind: 'hermes' })).body as { agent: Member };
+    await org.hostingStatus(agent.id, 'ready');
+    await me.post(`/v1/spaces/${org.spaceId}/members`, { memberIds: [agent.id], actingMode: 'direct' });
+    fake.spend.set(agent.agentInstance!, { limit: 500, spent: 512, reached: true });
+    const execs = () => fake.received.filter((x) => x.method === 'POST' && x.path === `/api/agents/${agent.agentInstance}/exec`).length;
+    const before = execs();
+    const { invocations } = await org.post(`${mention(agent)} anything`);
+    const ended = await org.ended(invocations[0]!.id);
+    expect(ended.state).toBe('failed');
+    expect(ended.error).toBe("I've used up my Rowboat trial credit. My owner needs to add an API key on my page for me to keep going.");
+    expect(execs()).toBe(before); // nothing submitted
+    expect((await org.listing(agent.id))?.hosting?.trial).toMatchObject({ closedReason: 'exhausted' });
+    expect(fake.spend.get(agent.agentInstance!)?.limit).toBe(0);
+    // Closed in the record: the next mention is answered without asking the platform.
+    const asks = () => fake.received.filter((x) => x.method === 'GET' && x.path === `/api/agents/${agent.agentInstance}/llm-spend-limit`).length;
+    const asked = asks();
+    const again = await org.post(`${mention(agent)} again`);
+    expect((await org.ended(again.invocations[0]!.id)).error).toMatch(/used up my Rowboat trial credit/);
+    expect(asks()).toBe(asked);
+    // The owner's key reopens nothing: the agent simply runs on it.
+    expect((await me.put(`/v1/agents/${agent.id}/hosting/llm`, { provider: 'openai', apiKey: 'sk-proj-openai-key-5678' })).body.hosting).toMatchObject({ funding: 'own', trial: { closedReason: 'exhausted' } });
+    fake.nextTurn = hermesTurn('Back.');
+    const back = await org.post(`${mention(agent)} back?`);
+    expect((await org.ended(back.invocations[0]!.id)).state).toBe('done');
+  });
+
   it('deletes: keys go at once, the platform’s end user goes in the background, and only the owner or an admin may', async () => {
     const r = await org.as('dev-ramnique').post('/v1/agents/managed', { displayName: 'Gone Soon', kind: 'hermes' });
     const { agent, key } = r.body as { agent: Member; key: { secret: string } };
@@ -330,5 +416,27 @@ describe('the hosting worker after a restart', () => {
     await org.hostingStatus(agent.id, 'ready');
     await org.harbor.close();
     await store.db.close();
+  });
+});
+
+describe('a trial that runs out of time', () => {
+  let org: Org;
+  beforeAll(async () => {
+    org = await new Org(await freshStore(), true, 150).start();
+  });
+  afterAll(async () => {
+    await org.harbor.close();
+  });
+
+  it('is closed by the worker, with the platform’s cap for the agent set to nothing', async () => {
+    const me = org.as('dev-ramnique');
+    const { agent } = (await me.post('/v1/agents/managed', { displayName: 'Old', kind: 'hermes' })).body as { agent: Member };
+    await org.hostingStatus(agent.id, 'ready');
+    const closed = await until(async () => {
+      const l = await org.listing(agent.id);
+      return l?.hosting?.trial?.closedReason === 'expired' ? l : undefined;
+    }, 'the trial to expire');
+    expect(closed.hosting?.funding).toBe('trial');
+    expect(fake.spend.get(agent.agentInstance!)?.limit).toBe(0);
   });
 });

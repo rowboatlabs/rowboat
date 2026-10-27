@@ -47,7 +47,7 @@ export interface OrgRuntimeInput {
   /** The Spaces web app, which an org link opened in a browser offers beside the desktop app (http.ts, the landings). */
   webAppUrl?: string;
   /** Managed hosting (spec §8 Maritime, 2026-10-26): a stand-in provider and tick in tests; absent = from HARBOR_MARITIME_API_KEY. */
-  hosting?: { provider: HostingProvider; tickMs?: number };
+  hosting?: { provider: HostingProvider; tickMs?: number; trialMs?: number };
 }
 
 /** The managed-hosting provider the deployment's own Maritime key makes, or none. */
@@ -97,11 +97,15 @@ export async function buildOrgRuntime(input: OrgRuntimeInput): Promise<OrgRuntim
   // Managed hosting (spec §8 Maritime, 2026-10-26): agents Rowboat's own account creates, when the deployment has its key.
   const provider = input.hosting?.provider ?? hostingFromEnv();
   if (provider) {
-    service.attachHosting(provider, {
-      save: (agentId, secret, setBy) => connectors.save(agentId, secret, setBy),
-      added: (agent) => connectors.ensure(agent),
-      stop: (agentId) => connectors.stop(agentId),
-    });
+    service.attachHosting(
+      provider,
+      {
+        save: (agentId, secret, setBy) => connectors.save(agentId, secret, setBy),
+        added: (agent) => connectors.ensure(agent),
+        stop: (agentId) => connectors.stop(agentId),
+      },
+      input.hosting?.trialMs !== undefined ? { trialMs: input.hosting.trialMs } : {},
+    );
   }
   // Jev (spec §8 Jev, 2026-10-07): every org has it once the deployment has its key.
   if (jevApiKey()) await service.ensureJev();

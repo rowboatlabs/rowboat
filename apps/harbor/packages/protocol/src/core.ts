@@ -217,12 +217,56 @@ export type AgentHook = z.infer<typeof AgentHook>;
  */
 export const HostingStatus = z.enum(['creating', 'deploying', 'checking', 'ready', 'failed', 'deleting', 'deleted']);
 export type HostingStatus = z.infer<typeof HostingStatus>;
+/**
+ * Who pays for a managed agent's model calls (spec §8 Maritime, 2026-10-27):
+ * Rowboat's trial credit on the platform, there to try the agent, or the
+ * owner's own provider key, where every agent is meant to end up. The trial
+ * is one-shot: it closes when its cap is reached, when it expires, or the
+ * moment a key is added, and never reopens.
+ */
+export const HostingFunding = z.enum(['trial', 'own']);
+export type HostingFunding = z.infer<typeof HostingFunding>;
+export const LlmProvider = z.enum(['openai', 'anthropic', 'openrouter']);
+export type LlmProvider = z.infer<typeof LlmProvider>;
+/** The providers each managed kind runs on with its owner's key; the first is the one offered first. */
+export const LLM_PROVIDERS: Readonly<Record<string, readonly LlmProvider[]>> = { hermes: ['openai', 'anthropic', 'openrouter'], codex: ['openai'], 'claude-code': ['anthropic'] };
+export const HostingTrial = z.object({
+  /** When the trial ends by time, whatever is left of its credit. */
+  endsAt: z.iso.datetime(),
+  closedAt: z.iso.datetime().optional(),
+  closedReason: z.enum(['exhausted', 'expired', 'own_key']).optional(),
+});
+export type HostingTrial = z.infer<typeof HostingTrial>;
+export const HostingLlm = z.object({
+  provider: LlmProvider,
+  /** The key's last characters: enough to recognise it, never to use it. */
+  keyHint: z.string().max(16),
+  /** The runtime's default model from then on, when the owner named one. */
+  model: z.string().max(128).optional(),
+  setBy: MemberId,
+  setAt: z.iso.datetime(),
+});
+export type HostingLlm = z.infer<typeof HostingLlm>;
+/** What the platform says the agent has drawn on Rowboat's credit this period. */
+export const HostingSpend = z.object({
+  spentCents: z.number(),
+  limitCents: z.number().optional(),
+  limitReached: z.boolean(),
+  periodEnd: z.string().max(64).optional(),
+});
+export type HostingSpend = z.infer<typeof HostingSpend>;
+
 export const AgentHosting = z.object({
   provider: z.literal('maritime'),
   status: HostingStatus,
   /** The platform's own id for the agent, once it exists there. */
   externalId: z.string().max(128).optional(),
   error: z.string().max(1000).optional(),
+  funding: HostingFunding,
+  /** The trial, for an agent that started on one: when it ends, and once closed, why. */
+  trial: HostingTrial.optional(),
+  /** The owner's key, once the agent runs on one. */
+  llm: HostingLlm.optional(),
   createdBy: MemberId,
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),

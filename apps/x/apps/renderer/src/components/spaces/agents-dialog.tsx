@@ -508,7 +508,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                             <section key={heading} aria-label={heading}>
                                                 <h3 className="mb-1 text-[11px] font-medium text-muted-foreground">{heading}</h3>
                                                 <ul className="-mx-2 flex flex-col">
-                                                    {group.map(({ agent, keys, credential }) => {
+                                                    {group.map(({ agent, keys, credential, hosting }) => {
                                                         const mine = agent.ownerId === org.memberId
                                                         const live = keys.filter((k) => !k.revokedAt)
                                                         return (
@@ -529,6 +529,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                                                             {' · '}
                                                                             {live.length === 0 ? 'no active keys' : live.length === 1 ? '1 key' : `${live.length} keys`}
                                                                             {credential?.rejectedAt && <span className="text-destructive">{' · '}Key rejected</span>}
+                                                                            {hosting?.funding === 'trial' && (hosting.trial?.closedAt ? <span className="text-destructive">{' · '}trial over</span> : <span>{' · '}trial credit</span>)}
                                                                         </div>
                                                                     </div>
                                                                     <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
@@ -660,7 +661,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                     >
                         <Header
                             title="Create an agent"
-                            description="Rowboat runs it for you, on Maritime. Pick what it runs and a name; it's ready in a minute or two, with nothing to connect."
+                            description="Rowboat runs it for you, on Maritime. Pick what it runs and a name; it's ready in a minute or two, with nothing to connect. Hermes and Codex start on Rowboat's trial credit; add your own key on the agent's page any time, and the trial ends then."
                             onBack={back}
                         />
                         <Body>

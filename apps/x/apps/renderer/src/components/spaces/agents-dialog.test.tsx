@@ -29,7 +29,9 @@ let listing: spaces.AgentListing[]
 // Create agent (2026-10-26): the kinds this org's Harbor creates; none = no Create button.
 let managedKinds: string[] = []
 const hosting = (status: spaces.AgentHosting['status'], extra: Partial<spaces.AgentHosting> = {}): spaces.AgentHosting =>
-    ({ provider: 'maritime', status, externalId: 'agt-m1', createdBy: 'me', createdAt: '2026-10-26T10:00:00Z', updatedAt: '2026-10-26T10:00:00Z', ...extra })
+    ({ provider: 'maritime', status, externalId: 'agt-m1', funding: 'trial', trial: { endsAt: '2026-11-25T10:00:00Z' }, createdBy: 'me', createdAt: '2026-10-26T10:00:00Z', updatedAt: '2026-10-26T10:00:00Z', ...extra })
+// Rowboat's credit (2026-10-27): what the stand-in Harbor says a trial agent has drawn.
+let spend: spaces.HostingSpend | undefined = { spentCents: 120, limitCents: 500, limitReached: false, periodEnd: '2026-11-01T00:00:00Z' }
 let options: Record<string, spaces.InvocationOption[]> = {}
 let defaults: Record<string, Record<string, string | boolean>> = {}
 const ENVIRONMENT: spaces.InvocationOption = { type: 'select', key: 'environment', label: 'Environment', choices: [{ id: 'env-web', label: 'web-app' }, { id: 'env-api', label: 'api' }] }
@@ -64,7 +66,12 @@ const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
             listing = [...listing, { agent, keys: [key('k9', 'new')], credential: { hint: '…rbmk', setBy: 'me', setAt: '2026-10-26T10:00:00Z' }, hosting: hosting('deploying') }]
             return { agent, key: { ...key('k9', 'new'), secret: NEW_KEY }, hosting: hosting('deploying') }
         }
-        case 'spaces:getHosting': return { hosting: hosting('ready'), machine: { status: machineStatus, tier: 'always_on' }, env: envVars }
+        case 'spaces:getHosting': return { hosting: listing.find((l) => l.agent.id === args.agentId)?.hosting ?? hosting('ready'), machine: { status: machineStatus, tier: 'always_on' }, env: envVars, ...(spend ? { spend } : {}) }
+        case 'spaces:setHostingLlm': {
+            const own = hosting('ready', { funding: 'own', trial: { endsAt: '2026-11-25T10:00:00Z', closedAt: '2026-10-27T10:00:00Z', closedReason: 'own_key' }, llm: { provider: args.provider as spaces.LlmProvider, keyHint: `…${args.apiKey!.slice(-4)}`, ...(args.model ? { model: args.model } : {}), setBy: 'me', setAt: '2026-10-27T10:00:00Z' } })
+            listing = listing.map((l) => (l.agent.id === args.agentId ? { ...l, hosting: own } : l))
+            return { hosting: own }
+        }
         case 'spaces:hostingPower': machineStatus = args.action === 'sleep' ? 'sleeping' : 'active'; return { machine: { status: machineStatus } }
         case 'spaces:setHostingEnv': {
             const row: spaces.HostingEnvVar = { key: args.key!, secret: Boolean(args.secret), ...(args.secret ? {} : { value: args.value! }) }
@@ -113,6 +120,7 @@ beforeEach(() => {
     roster = [person('me', 'Ramnique'), person('harsh', 'Harsh')]
     managedKinds = []
     machineStatus = 'active'
+    spend = { spentCents: 120, limitCents: 500, limitReached: false, periodEnd: '2026-11-01T00:00:00Z' }
     envVars = [{ key: 'PATH', secret: false, value: '/opt/hermes/bin:/usr/bin' }]
     triggerList = []
     installedSkills = [{ name: 'rowboat-spaces', installed: true, version: '1.0.0' }]
@@ -770,6 +778,60 @@ describe('AgentsDialog', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Confirm delete' }))
         await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:deleteHostingFile', { orgId: 'org-1', agentId: 'jv', path: '/opt/data/workspace/old' }))
         expect(screen.getByRole('tab', { name: /^Automations/ })).toHaveTextContent('Automations0')
+    })
+
+    // Trial credit, then the owner's key (2026-10-27): first thing on Overview.
+    it('shows the trial’s credit and the way out of it; the owner’s key ends the trial and the agent runs on it', async () => {
+        await openJarvis()
+        const access = screen.getByRole('group', { name: 'Model access' })
+        expect(within(access).getByText("On Rowboat's trial credit")).toBeInTheDocument()
+        expect(within(access).getByText(/\$1\.20 of \$5\.00 used this month/)).toBeInTheDocument()
+        expect(within(access).getByRole('progressbar', { name: 'Trial credit used' })).toHaveAttribute('aria-valuenow', '24')
+        fireEvent.click(within(access).getByRole('button', { name: 'Add your API key' }))
+        // Hermes takes three providers; the key never shows; the model is optional.
+        fireEvent.change(screen.getByLabelText('Provider'), { target: { value: 'anthropic' } })
+        fireEvent.change(screen.getByLabelText('API key'), { target: { value: 'sk-ant-api03-mine-wxyz' } })
+        fireEvent.change(screen.getByLabelText('Model'), { target: { value: 'claude-sonnet-4-5' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Use this key' }))
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:setHostingLlm', { orgId: 'org-1', agentId: 'jv', provider: 'anthropic', apiKey: 'sk-ant-api03-mine-wxyz', model: 'claude-sonnet-4-5' }))
+        expect(await screen.findByText('Runs on your Anthropic key …wxyz')).toBeInTheDocument()
+        expect(screen.getByText(/Model claude-sonnet-4-5/)).toBeInTheDocument()
+        expect(screen.queryByText(/trial credit/)).toBeNull()
+        expect(screen.getByRole('button', { name: 'Replace key' })).toBeInTheDocument()
+    })
+
+    it('a trial at its cap says so in red, with the same way out; a member without the agent sees why it is silent', async () => {
+        listing = [{ agent: jarvis, keys: [key('k8', 'jv')], hosting: hosting('ready', { trial: { endsAt: '2026-11-25T10:00:00Z', closedAt: '2026-10-27T09:00:00Z', closedReason: 'exhausted' } }) }]
+        spend = undefined
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        expect(await screen.findByRole('button', { name: /Jarvis/ })).toHaveTextContent('Hermes · via Maritime · Yours · 1 key · trial over')
+        fireEvent.click(screen.getByRole('button', { name: /Jarvis/ }))
+        const access = await screen.findByRole('group', { name: 'Model access' })
+        expect(within(access).getByText('Trial credit used up')).toBeInTheDocument()
+        expect(within(access).getByText(/Jarvis answers nothing until you add your own API key/)).toBeInTheDocument()
+        expect(within(access).getByRole('button', { name: 'Add your API key' })).toBeEnabled()
+    })
+
+    it('Codex offers OpenAI only; Claude Code is on its owner’s key from the start', async () => {
+        const cx = { ...jarvis, id: 'cx', displayName: 'Cx', agentKind: 'codex' } as spaces.Member
+        const cc = { ...jarvis, id: 'cc', displayName: 'Cc', agentKind: 'claude-code' } as spaces.Member
+        listing = [
+            { agent: cx, keys: [key('k1', 'cx')], hosting: hosting('ready') },
+            { agent: cc, keys: [key('k2', 'cc')], hosting: { provider: 'maritime', status: 'ready', externalId: 'agt-m2', funding: 'own', llm: { provider: 'anthropic', keyHint: '…ab12', setBy: 'me', setAt: '2026-10-26T10:00:00Z' }, createdBy: 'me', createdAt: '2026-10-26T10:00:00Z', updatedAt: '2026-10-26T10:00:00Z' } },
+        ]
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        expect(await screen.findByRole('button', { name: /Cx/ })).toHaveTextContent('Codex · via Maritime · Yours · 1 key · trial credit')
+        expect(screen.getByRole('button', { name: /Cc/ })).toHaveTextContent(/Claude Code · via Maritime · Yours · 1 key$/)
+        fireEvent.click(screen.getByRole('button', { name: /Cx/ }))
+        const access = await screen.findByRole('group', { name: 'Model access' })
+        fireEvent.click(within(access).getByRole('button', { name: 'Add your API key' }))
+        expect(screen.queryByLabelText('Provider')).toBeNull()
+        expect(screen.getByText('OpenAI')).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+        fireEvent.click(await screen.findByRole('button', { name: /Cc/ }))
+        expect(await screen.findByText('Runs on your Anthropic key …ab12')).toBeInTheDocument()
+        expect(screen.queryByText(/trial/)).toBeNull()
     })
 
     it('lets an admin revoke someone else’s agent’s key, but not mint one', async () => {

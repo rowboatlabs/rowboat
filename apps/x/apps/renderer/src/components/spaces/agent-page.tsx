@@ -6,10 +6,10 @@ import { Input } from '@/components/ui/input'
 import { CommandsScreen, EnvScreen, FilesScreen, HostingDangerRows, LogsScreen, MachineBlock, SkillsScreen, TriggersScreen } from '@/components/spaces/agent-hosting'
 import { HOME, useHostingState, type HostingState } from '@/components/spaces/agent-hosting-state'
 import { ConnectAgent, CopyField } from '@/components/spaces/agent-setup'
-import { AgentTabs, ConfirmButton, DangerRow, DangerZone, Empty, Row, Rows, ScreenHeader, type AgentTab } from '@/components/spaces/agent-tabs'
+import { AgentTabs, ConfirmButton, DangerRow, DangerZone, Empty, FormCard, Row, Rows, ScreenHeader, Tag, type AgentTab } from '@/components/spaces/agent-tabs'
 import { refreshAgentCapabilities } from '@/hooks/use-space-invocations'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
-import { BUILT_IN_CONNECTION, PLATFORMS, setupFor } from '@/lib/agent-kinds'
+import { BUILT_IN_CONNECTION, LLM_PROVIDER_INFO, LLM_PROVIDERS_FOR_KIND, PLATFORMS, setupFor } from '@/lib/agent-kinds'
 import { toast } from '@/lib/toast'
 
 // One agent's page in the Agents dialog (2026-10-01; tabs 2026-10-27): a rail
@@ -24,8 +24,12 @@ import { toast } from '@/lib/toast'
 // A managed agent (2026-10-26), one Rowboat created on its own Maritime
 // account, has nothing to set up: Overview shows its machine, from deploying
 // to ready, and once ready its owner or an admin gets a tab for each part of
-// the VM (agent-hosting.tsx). Whatever cannot be undone, on any agent, is on
-// the Danger zone tab and asks once more.
+// the VM (agent-hosting.tsx). Who pays for its model comes first on Overview
+// (2026-10-27): a new Hermes or Codex is on Rowboat's trial credit, there to
+// try it, and the one thing to do is add your own key, which ends the trial
+// for good; Claude Code runs on the owner's key from the start. Whatever
+// cannot be undone, on any agent, is on the Danger zone tab and asks once
+// more.
 
 /** Stands in for the key in the setup steps: the real one was shown once, when it was made. */
 export const KEY_PLACEHOLDER = 'YOUR_AGENT_KEY'
@@ -129,7 +133,7 @@ export function AgentPage({ org, listing, isAdmin, onChanged }: {
                             }
                             action={
                                 mine && (
-                                    <Button size="sm" disabled={busy} onClick={() => void newKey()}>
+                                    <Button size="sm" variant={hosting ? 'outline' : 'default'} disabled={busy} onClick={() => void newKey()}>
                                         {busy ? <Loader2 className="size-3.5 animate-spin" /> : <KeyRound className="size-3.5" />} New key
                                     </Button>
                                 )
@@ -296,14 +300,139 @@ function HostingOverview({ orgId, agent, hosting, canManage, state, onChanged }:
         const timer = setInterval(() => void onChanged(), HOSTING_POLL_MS)
         return () => clearInterval(timer)
     }, [moving, onChanged])
+    const gone = hosting.status === 'deleting' || hosting.status === 'deleted'
     return (
-        <div className="flex flex-col gap-2">
-            <ScreenHeader title="Machine" note="Rowboat created this agent on its own Maritime account and runs each turn inside its VM, with the Spaces tools. Nothing to set up." />
-            {hosting.status === 'ready' && canManage && <MachineBlock orgId={orgId} agentId={agent.id} state={state} />}
-            <p role="status" className={`text-[11px] ${hosting.status === 'failed' ? 'text-destructive' : 'text-muted-foreground'}`}>
-                {moving && <Loader2 className="mr-1 inline size-3 animate-spin align-[-2px]" />}
-                {hostingLine(hosting, agent.displayName)}
-            </p>
+        <>
+            {!gone && hosting.externalId && <FundingBlock orgId={orgId} agent={agent} hosting={hosting} state={state} canManage={canManage} onChanged={onChanged} />}
+            <div className="flex flex-col gap-2">
+                <ScreenHeader title="Machine" note="Rowboat created this agent on its own Maritime account and runs each turn inside its VM, with the Spaces tools. Nothing to set up." />
+                {hosting.status === 'ready' && canManage && <MachineBlock orgId={orgId} agentId={agent.id} state={state} />}
+                <p role="status" className={`text-[11px] ${hosting.status === 'failed' ? 'text-destructive' : 'text-muted-foreground'}`}>
+                    {moving && <Loader2 className="mr-1 inline size-3 animate-spin align-[-2px]" />}
+                    {hostingLine(hosting, agent.displayName)}
+                </p>
+            </div>
+        </>
+    )
+}
+
+const money = (cents: number) => `$${(cents / 100).toFixed(2)}`
+
+/**
+ * Who pays for the model (2026-10-27), first thing on Overview. On the trial:
+ * what it has drawn and when it ends, and the one way out, the owner's key.
+ * Once the trial is over: that, in red, and the same way out. On the owner's
+ * key: which, and Replace. The key goes to Maritime and nowhere else.
+ */
+function FundingBlock({ orgId, agent, hosting, state, canManage, onChanged }: {
+    orgId: string
+    agent: spaces.Member
+    hosting: spaces.AgentHosting
+    state: HostingState
+    canManage: boolean
+    onChanged: () => Promise<void>
+}) {
+    const kind = agent.agentKind ?? ''
+    const providers = LLM_PROVIDERS_FOR_KIND[kind] ?? []
+    const [editing, setEditing] = useState(false)
+    const [provider, setProvider] = useState<spaces.LlmProvider>(hosting.llm?.provider ?? providers[0] ?? 'openai')
+    const [apiKey, setApiKey] = useState('')
+    const [model, setModel] = useState(hosting.llm?.model ?? '')
+    const [busy, setBusy] = useState(false)
+    const ready = hosting.status === 'ready'
+    const closed = hosting.funding === 'trial' ? hosting.trial?.closedReason : undefined
+    const spend = state.spend
+    const info = LLM_PROVIDER_INFO[provider]
+
+    const save = async () => {
+        if (busy || apiKey.trim().length < 8) return
+        setBusy(true)
+        try {
+            await window.ipc.invoke('spaces:setHostingLlm', { orgId, agentId: agent.id, provider, apiKey: apiKey.trim(), ...(model.trim() ? { model: model.trim() } : {}) })
+            setApiKey('')
+            setEditing(false)
+            state.setSpend(undefined)
+            toast(`${agent.displayName} now runs on your ${info.label} key`, 'success')
+            await onChanged()
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not save the key', 'error')
+        } finally {
+            setBusy(false)
+        }
+    }
+
+    const form = editing && (
+        <FormCard title={hosting.funding === 'own' ? 'Replace the key' : 'Your API key'} onSubmit={() => void save()}>
+            <div className="flex flex-wrap items-center gap-1.5">
+                {providers.length > 1 ? (
+                    <select aria-label="Provider" value={provider} disabled={busy} onChange={(e) => setProvider(e.target.value as spaces.LlmProvider)} className="h-8 rounded-md border border-border bg-background px-2 text-xs">
+                        {providers.map((p) => (
+                            <option key={p} value={p}>{LLM_PROVIDER_INFO[p].label}</option>
+                        ))}
+                    </select>
+                ) : (
+                    <span className="text-xs text-foreground">{info.label}</span>
+                )}
+                <Input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={info.keyPlaceholder} aria-label="API key" className="h-8 min-w-0 flex-1 basis-48 font-mono text-xs" autoComplete="off" autoFocus />
+                <Input value={model} onChange={(e) => setModel(e.target.value)} placeholder={`Model, e.g. ${info.modelPlaceholder}`} aria-label="Model" className="h-8 w-52 font-mono text-xs" />
+                <Button type="submit" size="sm" disabled={apiKey.trim().length < 8 || busy}>
+                    {busy && <Loader2 className="size-3.5 animate-spin" />}
+                    Use this key
+                </Button>
+                <Button type="button" size="sm" variant="ghost" onClick={() => (setEditing(false), setApiKey(''))}>
+                    Cancel
+                </Button>
+            </div>
+            <p className="text-[11px] text-muted-foreground">The key goes to {agent.displayName}'s environment on Maritime and nowhere else; Rowboat keeps its last characters. {hosting.funding === 'trial' ? 'The trial ends the moment it is saved.' : ''}</p>
+        </FormCard>
+    )
+
+    if (hosting.funding === 'own') {
+        const llm = hosting.llm
+        return (
+            <div role="group" aria-label="Model access" className="flex flex-col gap-2">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-border p-3">
+                    <div className="min-w-0 flex-1 basis-56">
+                        <p className="text-sm font-semibold text-foreground">Runs on your {llm ? LLM_PROVIDER_INFO[llm.provider].label : ''} key{llm?.keyHint ? ` ${llm.keyHint}` : ''}</p>
+                        <p className="text-[11px] text-muted-foreground">{llm?.model ? `Model ${llm.model}. ` : ''}You pay the provider; Rowboat pays for the machine.</p>
+                    </div>
+                    {canManage && !editing && (
+                        <Button size="sm" variant="outline" disabled={!ready} onClick={() => setEditing(true)}>
+                            Replace key
+                        </Button>
+                    )}
+                </div>
+                {form}
+            </div>
+        )
+    }
+
+    const limit = spend?.limitCents
+    const pct = spend && limit ? Math.min(100, Math.round((spend.spentCents / limit) * 100)) : undefined
+    return (
+        <div role="group" aria-label="Model access" className="flex flex-col gap-2">
+            <div className={`flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border p-3 ${closed ? 'border-destructive/40 bg-destructive/5' : 'border-border'}`}>
+                <div className="min-w-0 flex-1 basis-56">
+                    <p className="text-sm font-semibold text-foreground">{closed === 'exhausted' ? 'Trial credit used up' : closed === 'expired' ? 'Trial ended' : "On Rowboat's trial credit"}</p>
+                    <p className="text-[11px] text-muted-foreground">
+                        {closed
+                            ? `${agent.displayName} answers nothing until you add your own API key.`
+                            : `${spend ? `${money(spend.spentCents)}${limit ? ` of ${money(limit)}` : ''} used this month. ` : ''}Ends ${when(hosting.trial?.endsAt)}, or the moment you add your own key. There to try ${agent.displayName}; it runs on your key from then on.`}
+                    </p>
+                    {pct !== undefined && !closed && (
+                        <div role="progressbar" aria-label="Trial credit used" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} className="mt-1.5 h-1.5 w-full max-w-64 overflow-hidden rounded bg-muted">
+                            <div className="h-full rounded bg-foreground" style={{ width: `${pct}%` }} />
+                        </div>
+                    )}
+                </div>
+                {canManage && !editing && (
+                    <Button size="sm" disabled={!ready} onClick={() => setEditing(true)}>
+                        <KeyRound className="size-3.5" /> Add your API key
+                    </Button>
+                )}
+                {!canManage && closed && <Tag tone="warn">owner needed</Tag>}
+            </div>
+            {form}
         </div>
     )
 }

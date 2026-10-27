@@ -451,6 +451,11 @@ export function buildHttpApp(deps: {
     const { agentId } = parseWith(routes.getHosting.params, c.req.param());
     return reply(c, routes.getHosting.response, await service.getHosting(actor(c), agentId));
   });
+  app.put(routes.setHostingLlm.path, async (c) => {
+    const { agentId } = parseWith(routes.setHostingLlm.params, c.req.param());
+    const input = await body(c, routes.setHostingLlm.request);
+    return reply(c, routes.setHostingLlm.response, { hosting: await service.setHostingLlm(actor(c), agentId, input) });
+  });
   app.put(routes.setHostingEnv.path, async (c) => {
     const { agentId, key } = parseWith(routes.setHostingEnv.params, c.req.param());
     const input = await body(c, routes.setHostingEnv.request);
