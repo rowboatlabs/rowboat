@@ -3,7 +3,7 @@ import { invokeSpace } from '@/lib/spaces-invoke'
 import type { spaces } from '@x/shared'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { buildPendingMessage, failPendingStreamMessage, ingestStreamMessage, resolvePendingStreamMessage } from '@/hooks/use-space-chat'
-import { markStreamRead } from '@/lib/spaces-read-state'
+import { markStreamRead, noteThread } from '@/lib/spaces-read-state'
 import { maybeInvokeRowboat, type RowboatTurnOptions } from '@/lib/spaces-rowboat'
 import { threadLabelOf } from '@/lib/spaces-conventions'
 import { containsRowboatAddress } from '@/lib/spaces-mentions'
@@ -44,3 +44,30 @@ export function postStreamMessage(org: OrgWithSpaces, space: spaces.Space, body:
             failPendingStreamMessage(org.id, space.id, pending.id, body)
         })
 }
+
+// A reply sent from the inline view (2026-10-25): it lands in the stream the
+// same optimistic way, and in its thread on the org. Replying follows the
+// thread and reads it up to the reply (the org's rule); mirrored here.
+export function postInlineReply(
+    org: OrgWithSpaces,
+    space: spaces.Space,
+    thread: { rootMessageId: string; label: string },
+    body: string,
+    agent?: RowboatTurnOptions & { members?: AgentMemberOptions },
+): void {
+    if (!canActInSpace(org.id, space.id)) return
+    const pending = buildPendingMessage(space.id, org.memberId, body, thread.rootMessageId)
+    ingestStreamMessage(org.id, space.id, pending)
+    void invokeSpace('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: thread.rootMessageId, body, ...agentOptionsPayload(agent) })
+        .then((result) => {
+            resolvePendingStreamMessage(org.id, space.id, pending.id, result.message)
+            noteInvocations(org.id, space.id, result.invocations)
+            noteThread(org.id, space.id, thread.rootMessageId, { following: true, readOffset: result.message.offset, lastReplyOffset: result.message.offset })
+            analytics.spacesMessagePosted({ kind: 'topic', mentionsRowboat: containsRowboatAddress(body) })
+            maybeInvokeRowboat(org, space, thread, result.message.id, body, agent)
+        })
+        .catch(() => {
+            failPendingStreamMessage(org.id, space.id, pending.id, body)
+        })
+}
+

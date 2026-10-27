@@ -323,7 +323,9 @@ export const readStream = tool({
     "(a stated goal + archived flag). When `truncated` is true, older messages exist — pass " +
     '`beforeOffset` (the oldest offset you received) to page back before summarising. To read ' +
     'around one message (a link, an activity item), pass its `offset` as `aroundOffset`; ' +
-    '`truncatedAfter` then says newer messages exist above the window (page forward with `afterOffset`).',
+    '`truncatedAfter` then says newer messages exist above the window (page forward with `afterOffset`). ' +
+    'Pass `includeReplies` to read the whole conversation in time order: every reply lists at its own ' +
+    'offset, with `threadRoot` naming its thread.',
   input: z.object({
     spaceId: SpaceId,
     /** Page back: only messages with offset below this. */
@@ -333,6 +335,8 @@ export const readStream = tool({
     /** Land on a message: half the window on each side of this offset. */
     aroundOffset: z.number().int().positive().optional(),
     limit: z.number().int().positive().max(200).optional(),
+    /** Also list every reply at its own offset (the conversation in time order); each carries `threadRoot`. */
+    includeReplies: z.boolean().optional(),
   }),
   output: z.object({
     messages: z.array(Message),

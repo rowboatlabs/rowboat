@@ -287,6 +287,7 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit 
 
     'spaces:listStream': async (args) =>
       getClient(args.orgId).listStream(args.spaceId, {
+        ...(args.replies ? { replies: true } : {}),
         ...(args.beforeOffset !== undefined ? { beforeOffset: args.beforeOffset } : {}),
         ...(args.afterOffset !== undefined ? { afterOffset: args.afterOffset } : {}),
         ...(args.aroundOffset !== undefined ? { aroundOffset: args.aroundOffset } : {}),

@@ -209,7 +209,8 @@ export function collectRouteCandidates(
         })
     }
     for (const message of stream.messages) {
-        if (message.pending || message.failed || out.has(message.id)) continue
+        // A reply in the inline view's window (2026-10-25) is not a thread of its own.
+        if (message.pending || message.failed || out.has(message.id) || message.threadRoot !== undefined) continue
         if (message.deletedAt || !message.body) continue
         const topic = stream.topicsByRoot.get(message.id)
         if (topic?.archived) continue

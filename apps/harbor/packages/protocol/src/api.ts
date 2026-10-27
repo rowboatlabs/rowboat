@@ -1200,10 +1200,22 @@ export const routes = {
       afterOffset: z.coerce.number().int().nonnegative().optional(),
       aroundOffset: z.coerce.number().int().positive().optional(),
       limit: z.coerce.number().int().positive().max(200).optional(),
+      /**
+       * `true` = the inline view (2026-10-25): every reply lists with the
+       * roots at its own offset, so a page is the space's conversation in
+       * time order. Absent or `false` = roots only, as ever.
+       */
+      replies: z.enum(['true', 'false']).transform((v) => v === 'true').optional(),
     }),
     response: z.object({
       messages: z.array(Message),
       topics: z.array(Topic),
+      /**
+       * With `replies`: the roots this page's replies belong to that the page
+       * does not hold, so a client can name each reply's thread; `topics`
+       * covers them too. Empty otherwise, and absent from older orgs.
+       */
+      threadRoots: z.array(Message).default([]),
       hasMore: z.boolean(),
       /** Newer rows exist above this page. Optional on the wire so a client reading an older org treats absence as false. */
       hasMoreAfter: z.boolean().optional(),

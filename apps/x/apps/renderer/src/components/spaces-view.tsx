@@ -12,7 +12,7 @@ import { isTodoListPath, NEW_TODO_LIST_CONTENT } from '@/lib/todo-list'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import type { SecondaryRailPeek } from '@/components/secondary-rail'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { Archive, ArchiveRestore, Bookmark, Check, ChevronDown, ChevronLeft, ChevronRight, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Lock, Link as LinkIcon, Loader2, PanelLeft, PenTool, Plus, Star, Trash2, UserPlus, Users } from 'lucide-react'
+import { Archive, ArchiveRestore, Bookmark, Check, ChevronDown, ChevronLeft, ChevronRight, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Lock, Link as LinkIcon, Loader2, MessagesSquare, PanelLeft, PenTool, Plus, Rows3, Star, Trash2, UserPlus, Users } from 'lucide-react'
 import { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -37,6 +37,7 @@ import { ServerSwitcher } from '@/components/spaces/server-switcher'
 import { ActivityView, type ActivityTarget } from '@/components/spaces/activity-view'
 import { OrgRail, SpaceRail } from '@/components/spaces/space-rail'
 import { SpaceContentTabs } from '@/components/spaces/space-content-tabs'
+import { getStreamView, setStreamView, useStreamView } from '@/lib/spaces-stream-view'
 import { SpaceThreadsView } from '@/components/spaces/space-threads-view'
 import { SpaceFilesView } from '@/components/spaces/space-files-view'
 import { SpaceSearch } from '@/components/spaces/space-search'
@@ -749,6 +750,13 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         placeSelection(next)
     }
     const openFile = (assetId: string) => select({ kind: 'file', assetId })
+    // Replies inline (2026-10-25): a space shown inline has no threads, so an
+    // open thread pane closes with the switch, and a reply link lands in the stream.
+    const streamView = useStreamView(org.id, space.id)
+    const setRepliesInline = (inline: boolean) => {
+        setStreamView(org.id, space.id, inline ? 'inline' : 'threads')
+        if (inline && selection.kind === 'thread') select({ kind: 'general' })
+    }
     /**
      * The tree's "+ New file": the file is born empty at the typed path (the
      * org refuses an occupied one, so a name already in use just opens that
@@ -798,7 +806,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     const openMessage = (orgId: string, spaceId: string, messageId: string) => {
         void invokeSpace('spaces:getMessage', { orgId, spaceId, messageId })
             .then(({ message }) => {
-                const rootId = message.threadRoot ?? STREAM_READ_KEY
+                const rootId = message.threadRoot === undefined || getStreamView(orgId, spaceId) === 'inline' ? STREAM_READ_KEY : message.threadRoot
                 if (orgId === org.id && spaceId === space.id) {
                     navigateToMessage(rootId, messageId, message.offset)
                     return
@@ -816,9 +824,11 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
 
     /** Search / pinned / saved landings: open the surface, then scroll + flash (the offset, when held, spares the pane a lookup). */
     const navigateToMessage = (rootMessageId: string, messageId: string, offset?: number) => {
-        requestJump({ topicId: rootMessageId, messageId, ...(offset !== undefined ? { offset } : {}) })
-        // STREAM_READ_KEY stands for the stream itself; anything else is a thread.
-        if (rootMessageId === STREAM_READ_KEY) select({ kind: 'general' })
+        // STREAM_READ_KEY stands for the stream itself; anything else is a thread,
+        // unless this space shows replies inline, where the stream holds them all.
+        const toStream = rootMessageId === STREAM_READ_KEY || streamView === 'inline'
+        requestJump({ topicId: toStream ? STREAM_READ_KEY : rootMessageId, messageId, ...(offset !== undefined ? { offset } : {}) })
+        if (toStream) select({ kind: 'general' })
         else select({ kind: 'thread', rootMessageId })
     }
 
@@ -1074,6 +1084,10 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                             <button type="button" className="spaces-menu-row" disabled={!member} onClick={() => { setTitleMenuOpen(false); markAllRead() }}>
                                 <Check /> Mark all as read
                             </button>
+                            {/* Replies inline or in threads (2026-10-25): this space's choice, kept on this device. */}
+                            <button type="button" className="spaces-menu-row" onClick={() => { setTitleMenuOpen(false); setRepliesInline(streamView !== 'inline') }}>
+                                {streamView === 'inline' ? <><MessagesSquare /> Show replies in threads</> : <><Rows3 /> Show replies inline</>}
+                            </button>
                             <button type="button" className="spaces-menu-row" onClick={() => { setTitleMenuOpen(false); void copySpacesLink(spaces.spaceUrl(org.address, space.id)) }}>
                                 <LinkIcon /> {isDirect ? 'Copy conversation link' : 'Copy space link'}
                             </button>
@@ -1231,7 +1245,15 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                     {selection.kind === 'discussions' && <SpaceThreadsView orgId={org.id} orgAddress={org.address} spaceId={space.id}
                         selfMemberId={org.memberId} topics={feed.topics} roots={stream.messages} hasMore={stream.hasMore} loadingOlder={stream.loadingOlder}
                         onLoadOlder={() => void loadOlderStreamMessages(org.id, space.id)} direct={isDirect} loaded={feed.loaded} memberNames={memberNames} spaceNames={spaceNames}
-                        presence={presence} onOpen={(rootMessageId) => select({ kind: 'thread', rootMessageId })} />}
+                        presence={presence} inline={streamView === 'inline'}
+                        onOpen={(rootMessageId) => {
+                            // Inline (2026-10-25): the row does both — the stream lands on the
+                            // conversation's first message, and the conversation opens beside it
+                            // to focus on. (A narrow window shows the pane first; the stream
+                            // scrolls when it is back.) The quote line above a reply only scrolls.
+                            if (streamView === 'inline') requestJump({ topicId: STREAM_READ_KEY, messageId: rootMessageId })
+                            select({ kind: 'thread', rootMessageId })
+                        }} />}
                     {selection.kind === 'files' && <>
                         {filesError && <div role="alert" className="flex items-center gap-3 px-5 py-2 text-xs text-destructive">
                             Could not refresh files. <button type="button" className="underline" onClick={() => setRefreshTick((tick) => tick + 1)}>Retry</button>

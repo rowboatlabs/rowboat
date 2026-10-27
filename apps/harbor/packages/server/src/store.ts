@@ -395,6 +395,8 @@ export interface Store {
    * (when given) — still returned oldest first.
    */
   listStream(spaceId: string, opts?: MessageWindow): Promise<Message[]>;
+  /** The inline view (2026-10-25): every message, roots and replies, by offset, same window semantics as listStream. */
+  listConversation(spaceId: string, opts?: MessageWindow): Promise<Message[]>;
   /** One flat thread's replies (threadRoot = rootMessageId), same window semantics as listStream. */
   listThread(spaceId: string, rootMessageId: string, opts?: MessageWindow): Promise<Message[]>;
   listMessagesBySpace(spaceId: string): Promise<Message[]>;
