@@ -131,12 +131,37 @@ interface AgentHostingRow {
   kind: string;
   display_name: string;
   error: string | null;
+  funding: string;
+  trial_ends_at: string | null;
+  trial_closed_at: string | null;
+  trial_closed_reason: string | null;
+  llm_provider: string | null;
+  llm_key_hint: string | null;
+  llm_model: string | null;
+  llm_set_by: string | null;
+  llm_set_at: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
 }
 
 function rowToAgentHosting(r: AgentHostingRow): StoredAgentHosting {
+  const trial: StoredAgentHosting['trial'] = r.trial_ends_at !== null
+    ? {
+        endsAt: r.trial_ends_at,
+        ...(r.trial_closed_at !== null ? { closedAt: r.trial_closed_at } : {}),
+        ...(r.trial_closed_reason !== null ? { closedReason: r.trial_closed_reason as NonNullable<StoredAgentHosting['trial']>['closedReason'] } : {}),
+      }
+    : undefined;
+  const llm: StoredAgentHosting['llm'] = r.llm_provider !== null && r.llm_set_by !== null && r.llm_set_at !== null
+    ? {
+        provider: r.llm_provider as NonNullable<StoredAgentHosting['llm']>['provider'],
+        keyHint: r.llm_key_hint ?? '',
+        ...(r.llm_model !== null ? { model: r.llm_model } : {}),
+        setBy: r.llm_set_by,
+        setAt: r.llm_set_at,
+      }
+    : undefined;
   return {
     id: r.id,
     ...(r.agent_id !== null ? { agentId: r.agent_id } : {}),
@@ -147,13 +172,17 @@ function rowToAgentHosting(r: AgentHostingRow): StoredAgentHosting {
     kind: r.kind,
     displayName: r.display_name,
     ...(r.error !== null ? { error: r.error } : {}),
+    funding: r.funding as StoredAgentHosting['funding'],
+    ...(trial ? { trial } : {}),
+    ...(llm ? { llm } : {}),
     createdBy: r.created_by,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
 }
 
-const HOSTING_COLUMNS = 'id, agent_id, provider, status, external_id, external_user_id, kind, display_name, error, created_by, created_at, updated_at';
+const HOSTING_COLUMNS =
+  'id, agent_id, provider, status, external_id, external_user_id, kind, display_name, error, funding, trial_ends_at, trial_closed_at, trial_closed_reason, llm_provider, llm_key_hint, llm_model, llm_set_by, llm_set_at, created_by, created_at, updated_at';
 
 function rowToMember(r: MemberRow): Member {
   return {
@@ -2047,11 +2076,17 @@ export class PgStore implements Store {
   }
   async putHosting(h: StoredAgentHosting): Promise<void> {
     await this.sql.query(
-      `insert into agent_hosting (org_id, id, agent_id, provider, status, external_id, external_user_id, kind, display_name, error, created_by, created_at, updated_at)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      `insert into agent_hosting (org_id, id, agent_id, provider, status, external_id, external_user_id, kind, display_name, error, created_by, created_at, updated_at,
+         funding, trial_ends_at, trial_closed_at, trial_closed_reason, llm_provider, llm_key_hint, llm_model, llm_set_by, llm_set_at)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
        on conflict (org_id, id) do update set agent_id = excluded.agent_id, status = excluded.status, external_id = excluded.external_id,
-         display_name = excluded.display_name, error = excluded.error, updated_at = excluded.updated_at`,
-      [this.orgId, h.id, h.agentId ?? null, h.provider, h.status, h.externalId ?? null, h.externalUserId, h.kind, h.displayName, h.error ?? null, h.createdBy, h.createdAt, h.updatedAt],
+         display_name = excluded.display_name, error = excluded.error, updated_at = excluded.updated_at,
+         funding = excluded.funding, trial_ends_at = excluded.trial_ends_at, trial_closed_at = excluded.trial_closed_at, trial_closed_reason = excluded.trial_closed_reason,
+         llm_provider = excluded.llm_provider, llm_key_hint = excluded.llm_key_hint, llm_model = excluded.llm_model, llm_set_by = excluded.llm_set_by, llm_set_at = excluded.llm_set_at`,
+      [
+        this.orgId, h.id, h.agentId ?? null, h.provider, h.status, h.externalId ?? null, h.externalUserId, h.kind, h.displayName, h.error ?? null, h.createdBy, h.createdAt, h.updatedAt,
+        h.funding, h.trial?.endsAt ?? null, h.trial?.closedAt ?? null, h.trial?.closedReason ?? null, h.llm?.provider ?? null, h.llm?.keyHint ?? null, h.llm?.model ?? null, h.llm?.setBy ?? null, h.llm?.setAt ?? null,
+      ],
     );
   }
   async getConnectorKey(agentId: string): Promise<{ keyId: string; sealed: string } | undefined> {

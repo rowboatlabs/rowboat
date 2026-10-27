@@ -1142,6 +1142,25 @@ export const MIGRATIONS: Migration[] = [
       `alter table members add constraint members_personal_check check (kind = 'agent' or not personal)`,
     ],
   },
+  {
+    // Trial credit, then the owner's key (spec §8 Maritime, 2026-10-27): who pays for a managed agent's model calls.
+    // Rows so far: Claude Code already runs on its owner's Anthropic key; the rest are on Rowboat's credit, with a
+    // trial that ends thirty days after creation unless something closes it first.
+    id: '049-agent-hosting-funding',
+    statements: [
+      `alter table agent_hosting add column funding text not null default 'trial'`,
+      `alter table agent_hosting add column trial_ends_at text`,
+      `alter table agent_hosting add column trial_closed_at text`,
+      `alter table agent_hosting add column trial_closed_reason text`,
+      `alter table agent_hosting add column llm_provider text`,
+      `alter table agent_hosting add column llm_key_hint text`,
+      `alter table agent_hosting add column llm_model text`,
+      `alter table agent_hosting add column llm_set_by text`,
+      `alter table agent_hosting add column llm_set_at text`,
+      `update agent_hosting set funding = 'own', llm_provider = 'anthropic', llm_key_hint = '', llm_set_by = created_by, llm_set_at = created_at where kind = 'claude-code'`,
+      `update agent_hosting set trial_ends_at = to_char((created_at::timestamptz + interval '30 days') at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') where funding = 'trial'`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

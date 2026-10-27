@@ -121,8 +121,20 @@ export interface MaritimeApi {
   createEndUserAgent(externalId: string, input: CreateAgentInput): Promise<MaritimeAgent>;
   /** Replace the end user's policy (caps and sizing), applied to every agent it owns. */
   setEndUserPolicy(externalId: string, policy: Record<string, number>): Promise<void>;
+  /** The LLM cap that applies to the agent and what it spent this period (`/api/agents/{id}/llm-spend-limit`). */
+  spendLimit(agentId: string): Promise<MaritimeSpendLimit>;
+  /** The agent's own monthly cap, over the end user's: 0 is nothing, null is no cap of its own. */
+  setSpendLimit(agentId: string, monthlyLimitCents: number | null): Promise<void>;
   /** Delete the end user with its agents; the platform finishes in the background. 404 counts as done. */
   deleteEndUser(externalId: string): Promise<void>;
+}
+
+/** The agent's LLM cap and spend this period, as `GET …/llm-spend-limit` answers. */
+export interface MaritimeSpendLimit {
+  spentThisMonthCents: number;
+  monthlyLimitCents?: number;
+  limitReached: boolean;
+  periodEnd?: string;
 }
 
 /** An environment variable as Maritime lists it; a secret's `value` is whatever Maritime chooses to show, never trusted as the secret. */
@@ -307,6 +319,19 @@ export function maritimeApi(key: string, base = MARITIME_API): MaritimeApi {
     },
     async setEndUserPolicy(externalId, policy) {
       await call<unknown>(`/api/v1/end-users/${id(externalId)}/policy`, { method: 'PUT', body: { policy } });
+    },
+    async spendLimit(agentId) {
+      const body = await call<Record<string, unknown>>(`/api/agents/${id(agentId)}/llm-spend-limit`);
+      const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+      return {
+        spentThisMonthCents: num(body.spentThisMonthCents) ?? 0,
+        ...(num(body.monthlyLimitCents) !== undefined ? { monthlyLimitCents: num(body.monthlyLimitCents)! } : {}),
+        limitReached: body.limitReached === true,
+        ...(typeof body.periodEnd === 'string' ? { periodEnd: body.periodEnd } : {}),
+      };
+    },
+    async setSpendLimit(agentId, monthlyLimitCents) {
+      await call<unknown>(`/api/agents/${id(agentId)}/llm-spend-limit`, { method: 'PUT', body: { monthlyLimitCents } });
     },
     async deleteEndUser(externalId) {
       try {

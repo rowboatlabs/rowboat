@@ -57,6 +57,8 @@ export class FakeMaritime {
   readonly triggers = new Map<string, Map<string, { type: string; config: Record<string, unknown>; enabled: boolean }>>();
   /** Every power call, in order: `restart`, `sleep`, `start`, `reload-env`, by agent id. */
   readonly power: Array<{ agentId: string; action: string }> = [];
+  /** Rowboat's credit (2026-10-27), per agent id: the cap that applies, the spend this period, and whether the cap is reached. */
+  readonly spend = new Map<string, { limit: number | null; spent: number; reached: boolean }>();
   /** End users by external id, with what was last put and whether a policy was set. */
   readonly endUsers = new Map<string, { body: Record<string, unknown>; policy?: Record<string, unknown>; agentId?: string }>();
   /** What the next submitted turn does (a one-line Hermes answer by default). */
@@ -198,6 +200,16 @@ export class FakeMaritime {
       else setStatus('active');
       const { reads: _r, endUser: _e, ...shape } = managed ?? { ...this.agent, reads: 0, endUser: '' };
       return send(200, { ...shape, tier: 'always_on' });
+    }
+    // Rowboat's credit: the cap that applies to the agent and its spend this period; a PUT sets the agent's own cap.
+    if (rest === 'llm-spend-limit') {
+      const s = this.spend.get(agentId!) ?? { limit: 500, spent: 120, reached: false };
+      if (req.method === 'PUT') {
+        const limit = body?.monthlyLimitCents === null ? null : Number(body?.monthlyLimitCents);
+        this.spend.set(agentId!, { ...s, limit, reached: limit !== null && s.spent >= limit });
+        return send(200, { ok: true });
+      }
+      return send(200, { monthlyLimitCents: s.limit, source: s.limit === null ? 'none' : 'agent', spentThisMonthCents: s.spent, limitReached: s.reached, periodStart: '2026-10-01T00:00:00Z', periodEnd: '2026-11-01T00:00:00Z' });
     }
     const envOf = () => {
       let m = this.env.get(agentId!);

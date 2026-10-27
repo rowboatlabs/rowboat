@@ -18,6 +18,13 @@ export const HERMES_IMAGE = 'nousresearch/hermes-agent:v0.22.5';
 /** Maritime launches the image's wrapper with a PATH that lacks the hermes binary (measured 2026-10-26). */
 const HERMES_PATH = '/opt/hermes/bin:/opt/hermes/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
 
+/** Where each provider's key goes and where its API is, for a runtime the platform had pointed at its own proxy. */
+export const LLM_SETUP: Record<'openai' | 'anthropic' | 'openrouter', { keyVar: string; baseUrl: string }> = {
+  openai: { keyVar: 'OPENAI_API_KEY', baseUrl: 'https://api.openai.com/v1' },
+  anthropic: { keyVar: 'ANTHROPIC_API_KEY', baseUrl: 'https://api.anthropic.com' },
+  openrouter: { keyVar: 'OPENROUTER_API_KEY', baseUrl: 'https://openrouter.ai/api/v1' },
+};
+
 export interface MaritimeProvisionerOptions {
   /** Rowboat's `mk_` key for its Maritime account: deploy, secrets and manage scopes. */
   apiKey: string;
@@ -172,6 +179,35 @@ export function maritimeOps(api: MaritimeApi, agentId: string): HostingOps {
     createTrigger: (input) => refusing(async () => void (await api.createTrigger(agentId, input))),
     updateTrigger: (triggerId, input) => refusing(async () => void (await api.updateTrigger(agentId, triggerId, input))),
     deleteTrigger: (triggerId) => refusing(() => api.deleteTrigger(agentId, triggerId)),
+    spend: () =>
+      refusing(async () => {
+        const s = await api.spendLimit(agentId);
+        return { spentCents: s.spentThisMonthCents, ...(s.monthlyLimitCents !== undefined ? { limitCents: s.monthlyLimitCents } : {}), limitReached: s.limitReached, ...(s.periodEnd ? { periodEnd: s.periodEnd } : {}) };
+      }),
+    // The owner's key, the way each runtime finds it: the provider's own variable, the provider's address where the
+    // platform had pointed the runtime at its proxy, and two of Rowboat's for the turn script (runtimes.ts) to put the
+    // provider and model back into Hermes's config after the platform's boot rewrite. Then a reload, so the gateway
+    // and the templates read the new environment without waiting for a restart.
+    setLlm: ({ provider, apiKey, model }) =>
+      refusing(async () => {
+        const have = new Set((await api.listEnv(agentId)).map((v) => v.key));
+        const put = async (key: string, value: string, isSecret: boolean) => {
+          if (have.has(key)) await api.updateEnv(agentId, key, { value, isSecret });
+          else await api.createEnv(agentId, { key, value, isSecret });
+        };
+        const { keyVar, baseUrl } = LLM_SETUP[provider];
+        await put(keyVar, apiKey, true);
+        if (provider === 'openai') await put('OPENAI_BASE_URL', baseUrl, false);
+        await put('ROWBOAT_LLM_PROVIDER', provider, false);
+        await put('ROWBOAT_LLM_MODEL', model ?? '', false);
+        try {
+          await api.reloadEnv(agentId);
+        } catch (err) {
+          // Asleep: the next start reads the environment anyway.
+          if (!(err instanceof MaritimeError)) throw err;
+        }
+      }),
+    stopFunding: () => refusing(() => api.setSpendLimit(agentId, 0)),
   };
 }
 
