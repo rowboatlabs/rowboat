@@ -20,6 +20,17 @@ export default function SpacesTabsLayout() {
       // Monochrome, like the rest of the app: the glass capsule and the filled
       // icon say which tab you're on, not a blue tint.
       tintColor={colors.label}
+      // Android's Material bar defaulted to a lavender ground, a dark slate
+      // pill and a label on the selected tab only (2026-10-28). Match the
+      // page instead, a faint pill, and every tab labelled.
+      {...(process.env.EXPO_OS === 'android'
+        ? {
+            backgroundColor: colors.background,
+            indicatorColor: colors.separator,
+            iconColor: colors.secondaryLabel,
+            labelVisibilityMode: 'labeled' as const,
+          }
+        : null)}
     >
       <NativeTabs.Trigger name="index">
         <NativeTabs.Trigger.Label>Home</NativeTabs.Trigger.Label>
