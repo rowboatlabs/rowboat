@@ -13,6 +13,7 @@ export * from './approval.js';
 export * from './invite.js';
 export * from './search.js';
 export * from './mentions.js';
+export * from './agent-prompt.js';
 export * from './api.js';
 export * from './mcp.js';
 export * from './errors.js';

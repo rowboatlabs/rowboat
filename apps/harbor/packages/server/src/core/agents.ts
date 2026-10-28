@@ -1,5 +1,5 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { BUILT_IN_CONNECTION, HARBOR_RUN_CONNECTIONS, INSTANCE_CONNECTIONS, JEV_KIND, isAgentPair, type AgentCredential, type AgentHook, type AgentKey, type AgentKeySecret, type AgentListing, type InvocationOptionValues, type Member } from '@rowboat/spaces-protocol';
+import { BUILT_IN_CONNECTION, HARBOR_RUN_CONNECTIONS, INSTANCE_CONNECTIONS, JEV_KIND, PERSONAL_ONLY_CONNECTIONS, isAgentPair, type AgentCredential, type AgentHook, type AgentKey, type AgentKeySecret, type AgentListing, type InvocationOptionValues, type Member } from '@rowboat/spaces-protocol';
 import { hashAgentKey, mintAgentKeySecret } from '../agent-keys.js';
 import { HarborError } from '../errors.js';
 import { agentsManagedBy, canAddAgent, canClearAgentHook, canCreateAgentKey, canRenameAgent, canRevokeAgentKey, canSetAgentHook, canSetAgentPersonal, enforce } from '../policy.js';
@@ -110,7 +110,8 @@ export class Agents {
       agentKind: input.kind,
       agentConnection: input.connection,
       ...(input.instance ? { agentInstance: input.instance } : {}),
-      ...(input.personal ? { personal: true } : {}),
+      // A local agent runs on its owner's computer: always personal (2026-10-28).
+      ...(input.personal || PERSONAL_ONLY_CONNECTIONS.includes(input.connection) ? { personal: true } : {}),
     });
     if (platform) await this.hooks!.save(agent.id, input.credential!, ctx.memberId);
     const key = await this.mint(ctx, agent.id);
@@ -172,6 +173,9 @@ export class Agents {
     const agent = await this.agent(agentId);
     enforce(canSetAgentPersonal(await this.actor(ctx), agent));
     if ((agent.personal === true) === input.personal) return agent; // idempotent no-op: no write
+    if (!input.personal && PERSONAL_ONLY_CONNECTIONS.includes(agent.agentConnection ?? '')) {
+      throw new HarborError('invalid_request', `${agent.displayName} runs on its owner’s computer, so only its owner can use it`);
+    }
     this.k.guardWrite();
     await this.k.store.setAgentPersonal(agentId, input.personal);
     return this.agent(agentId);
