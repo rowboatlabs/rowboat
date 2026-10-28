@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { ArrowLeft, Bot, Check, ChevronDown, ChevronRight, Hash, Loader2, MessageSquare, Plus, Sparkles } from 'lucide-react'
+import { ArrowLeft, Bot, Check, ChevronDown, ChevronRight, Hash, Loader2, MessageSquare, Plus } from 'lucide-react'
+import { BotIcon, ConnectIcon, RowboatRunsIcon, ThisComputerIcon } from '@/components/spaces/path-icons'
 import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -16,7 +17,7 @@ import { MemberAvatar } from '@/components/spaces/atoms'
 import { refreshMembers, refreshOrgRoster, useOrgRoster } from '@/hooks/use-space-members'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { isGroupChat } from '@/lib/spaces-navigation'
-import { AGENT_SETUPS, MANAGED_KINDS, agentLabel, agentSetup, instanceLabel, isBot, kindInfo, personalAgentName, setupFor, type AgentSetup } from '@/lib/agent-kinds'
+import { AGENT_SETUPS, KINDS, MANAGED_KINDS, PLATFORMS, agentLabel, agentSetup, instanceLabel, isBot, kindInfo, personalAgentName, setupFor, type AgentSetup, type Logo } from '@/lib/agent-kinds'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 
@@ -56,14 +57,15 @@ import { cn } from '@/lib/utils'
 
 type Screen =
     | { name: 'list' }
-    | { name: 'add'; bot: boolean }
+    | { name: 'choose' }
+    | { name: 'add'; bot: boolean; local?: boolean }
     | { name: 'create' }
     | { name: 'connect'; agentId: string; agentName: string; secret: string; setupId: string; kind: string; instance?: string }
     | { name: 'agent'; agentId: string }
 
-function Header({ title, description, icon, onBack }: { title: string; description: string; icon?: ReactNode; onBack?: () => void }) {
+function Header({ title, description, icon, onBack, large = false }: { title: string; description: string; icon?: ReactNode; onBack?: () => void; large?: boolean }) {
     return (
-        <DialogHeader className="gap-1 border-b border-border px-5 pt-5 pb-4 text-left">
+        <DialogHeader className={cn('gap-1 px-5 pt-5 text-left', large ? 'pb-1' : 'border-b border-border pb-4')}>
             <div className="flex min-w-0 items-center gap-2 pr-8">
                 {onBack && (
                     <button
@@ -76,9 +78,9 @@ function Header({ title, description, icon, onBack }: { title: string; descripti
                     </button>
                 )}
                 {icon}
-                <DialogTitle className="truncate text-sm">{title}</DialogTitle>
+                <DialogTitle className={cn('truncate', large ? 'text-lg font-semibold tracking-[-0.01em]' : 'text-sm')}>{title}</DialogTitle>
             </div>
-            <DialogDescription className="text-xs">{description}</DialogDescription>
+            <DialogDescription className={large ? 'text-[13px]' : 'text-xs'}>{description}</DialogDescription>
         </DialogHeader>
     )
 }
@@ -89,6 +91,47 @@ function Body({ children }: { children: ReactNode }) {
 
 function Footer({ children }: { children: ReactNode }) {
     return <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-3">{children}</div>
+}
+
+/**
+ * One way to get an agent, on the chooser (2026-10-28): its icon, what it is
+ * in a line, and the marks of what it runs.
+ */
+function PathRow({ icon, title, note, logos, more, onClick }: {
+    icon: ReactNode
+    title: string
+    note: string
+    logos: ReadonlyArray<Logo | undefined>
+    /** How many more it offers than the marks shown. */
+    more?: number
+    onClick: () => void
+}) {
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            className="group flex w-full items-center gap-4 rounded-lg border border-black/[0.07] bg-[#f7f7f7] px-4 py-3.5 text-left transition-colors hover:border-black/[0.14] hover:bg-[#f1f1f1] focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring [.dark_&]:border-white/[0.08] [.dark_&]:bg-white/[0.03] [.dark_&]:hover:bg-white/[0.06]"
+        >
+            <span className="shrink-0 text-foreground/80">{icon}</span>
+            <span className="min-w-0 flex-1">
+                <span className="block text-[13px] font-medium text-foreground">{title}</span>
+                <span className="mt-0.5 block text-xs leading-snug text-muted-foreground">{note}</span>
+            </span>
+            {/* Overlapping marks, each whole on its own tile; the ring is the row's own grey, so they read as cut-outs. */}
+            <span className="hidden shrink-0 items-center pl-1.5 sm:flex" aria-hidden>
+                {logos.map((logo, i) => (
+                    <span
+                        key={i}
+                        className="-ml-1.5 flex size-6 items-center justify-center rounded-md bg-white p-[3px] shadow-[0_0_0_1px_rgba(0,0,0,0.06)] ring-2 ring-[#f7f7f7] transition-colors group-hover:ring-[#f1f1f1] [.dark_&]:bg-neutral-800 [.dark_&]:ring-background [.dark_&]:group-hover:ring-background"
+                    >
+                        <AgentLogo logo={logo} className="size-full rounded-[3px] object-contain" />
+                    </span>
+                ))}
+                {more ? <span className="ml-1.5 text-[11px] tabular-nums text-muted-foreground">+{more}</span> : null}
+            </span>
+            <ChevronRight className="size-4 shrink-0 text-muted-foreground/50 transition-colors group-hover:text-foreground" />
+        </button>
+    )
 }
 
 function SetupTile({ setup, selected, onSelect }: { setup: AgentSetup; selected: boolean; onSelect: () => void }) {
@@ -224,9 +267,9 @@ function PickRow({ on, label, text, icon, onClick }: { on: boolean; label: strin
 }
 
 /** The agent a platform runs (Replicas's coding agent, Agent37's Hermes or OpenClaw): its kind. */
-function KindChoice({ label, kinds, selected, onSelect }: { label: string; kinds: readonly string[]; selected: string; onSelect: (kind: string) => void }) {
+function KindChoice({ label, kinds, selected, onSelect, first = false }: { label: string; kinds: readonly string[]; selected: string; onSelect: (kind: string) => void; first?: boolean }) {
     return (
-        <div className="mt-4 flex flex-col gap-1.5">
+        <div className={cn('flex flex-col gap-1.5', !first && 'mt-4')}>
             <span className="text-xs font-medium text-foreground">{label}</span>
             <div role="radiogroup" aria-label={label} className="flex flex-wrap gap-1.5">
                 {kinds.map((k) => (
@@ -257,7 +300,7 @@ function KindChoice({ label, kinds, selected, onSelect }: { label: string; kinds
  * itself and opens this straight at adding one or at one agent's page; then
  * Back, Cancel and Done close the dialog instead of showing the list.
  */
-export type AgentsDialogStart = { name: 'add'; bot: boolean } | { name: 'create' } | { name: 'agent'; agentId: string }
+export type AgentsDialogStart = { name: 'choose' } | { name: 'add'; bot: boolean } | { name: 'create' } | { name: 'agent'; agentId: string }
 
 export function AgentsDialog({ org, open, onOpenChange, start }: {
     org: OrgWithSpaces
@@ -296,7 +339,9 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
     const [envOpen, setEnvOpen] = useState(false)
     // Add bot offers the bots, Add agent the rest; until the person picks, the first, and its first kind.
     const addingBot = screen.name === 'add' && screen.bot
-    const offered = AGENT_SETUPS.filter((k) => (k.bot === true) === addingBot && (LOCAL_RUNTIME || !k.local))
+    // On this computer is its own path from the chooser (2026-10-28); Connect offers everything else you run.
+    const addingLocal = screen.name === 'add' && screen.local === true && LOCAL_RUNTIME
+    const offered = AGENT_SETUPS.filter((k) => (addingBot ? k.bot === true : addingLocal ? k.local === true : !k.bot && !k.local))
     const setup = offered.find((k) => k.id === chosen) ?? offered[0]!
     // An agent that is one platform instance (Agent37) runs whatever its instance runs.
     const kind = setup.bindsInstance ? instance?.kind ?? setup.kinds[0]! : chosenKind && setup.kinds.includes(chosenKind) ? chosenKind : setup.kinds[0]!
@@ -325,7 +370,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
         }
     }, [org.id])
 
-    const startAdding = useCallback((bot: boolean) => {
+    const startAdding = useCallback((bot: boolean, local = false) => {
         setChosen(null)
         setChosenKind(null)
         setName('')
@@ -338,7 +383,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
         setPersonal(false)
         setLocalCwd('')
         setLocalPolicy('yolo')
-        setScreen({ name: 'add', bot })
+        setScreen({ name: 'add', bot, ...(local ? { local: true } : {}) })
     }, [])
 
     const startCreating = useCallback(() => {
@@ -362,6 +407,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
         if (!open) return
         if (startName === 'add') startAdding(startBot)
         else if (startName === 'create') startCreating()
+        else if (startName === 'choose') setScreen({ name: 'choose' })
         else setScreen(startAgentId ? { name: 'agent', agentId: startAgentId } : { name: 'list' })
         setAgents(null)
         void load()
@@ -369,8 +415,15 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
         window.ipc.invoke('spaces:managedAgentKinds', { orgId: org.id }).then(({ kinds }) => setManagedKinds(kinds.filter((k) => MANAGED_KINDS.some((m) => m.kind === k)))).catch(() => setManagedKinds([]))
     }, [open, load, startAdding, startCreating, startName, startBot, startAgentId, org.id])
 
-    // Back to the list, or out of the dialog when it was opened past the list.
-    const back = () => (start ? onOpenChange(false) : setScreen({ name: 'list' }))
+    // Back to the chooser from one of its paths, else to the list, or out of the dialog when it was opened past the list.
+    const fromChooser = (screen.name === 'add' && !screen.bot) || screen.name === 'create'
+    const back = () => {
+        if (fromChooser && (start?.name === 'choose' || !start)) setScreen({ name: 'choose' })
+        else if (start) onOpenChange(false)
+        else setScreen({ name: 'list' })
+    }
+    // Cancel leaves the whole flow: out of the dialog when it was opened past the list, else to the list.
+    const cancel = () => (start ? onOpenChange(false) : setScreen({ name: 'list' }))
 
     const offeredKinds = MANAGED_KINDS.filter((m) => managedKinds.includes(m.kind))
     const chosenManaged = createKind && managedKinds.includes(createKind) ? createKind : offeredKinds[0]?.kind ?? 'hermes'
@@ -558,15 +611,57 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                             <Button size="sm" variant="outline" onClick={() => startAdding(true)}>
                                 <Plus className="size-3.5" /> Add bot
                             </Button>
-                            <Button size="sm" variant={offeredKinds.length > 0 ? 'outline' : 'default'} onClick={() => startAdding(false)}>
-                                <Plus className="size-3.5" /> Add agent
+                            <Button size="sm" onClick={() => setScreen({ name: 'choose' })}>
+                                <Plus className="size-3.5" /> New agent
                             </Button>
-                            {offeredKinds.length > 0 && (
-                                <Button size="sm" onClick={startCreating}>
-                                    <Sparkles className="size-3.5" /> Create agent
-                                </Button>
-                            )}
                         </Footer>
+                    </>
+                )}
+
+                {screen.name === 'choose' && (
+                    <>
+                        <Header large title="New agent" description="Where should it run?" {...(start?.name === 'choose' ? {} : { onBack: back })} />
+                        <Body>
+                            <div className="flex flex-col gap-2">
+                                {LOCAL_RUNTIME && (
+                                    <PathRow
+                                        icon={<ThisComputerIcon />}
+                                        title="On this computer"
+                                        note="Runs locally on your Claude Code or Codex login. Only you can use it, while this device is on."
+                                        logos={[KINDS['claude-code']?.logo, KINDS.codex?.logo]}
+                                        onClick={() => startAdding(false, true)}
+                                    />
+                                )}
+                                {offeredKinds.length > 0 && (
+                                    <PathRow
+                                        icon={<RowboatRunsIcon />}
+                                        title="Rowboat runs it"
+                                        note="Set up once, use it anytime from any device. Runs in the cloud."
+                                        logos={offeredKinds.map((m) => KINDS[m.kind]?.logo)}
+                                        onClick={startCreating}
+                                    />
+                                )}
+                                <PathRow
+                                    icon={<ConnectIcon />}
+                                    title="Connect one you already run"
+                                    note="Hermes, Replicas, Conductor, Agent37, Maritime, or a custom agent."
+                                    logos={[KINDS.hermes?.logo, PLATFORMS.replicas?.logo, PLATFORMS.conductor?.logo, PLATFORMS.agent37?.logo]}
+                                    more={2}
+                                    onClick={() => startAdding(false)}
+                                />
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => startAdding(true)}
+                                className="group mt-3 flex w-full items-center gap-4 rounded-lg px-4 py-2.5 text-left transition-colors hover:bg-accent/40"
+                            >
+                                <BotIcon className="size-5 shrink-0 text-muted-foreground" />
+                                <span className="min-w-0 flex-1 text-xs text-muted-foreground">
+                                    <span className="font-medium text-foreground">Looking for a bot?</span> PostHog, Cal.com, Attio
+                                </span>
+                                <ChevronRight className="size-4 shrink-0 text-muted-foreground/50 transition-colors group-hover:text-foreground" />
+                            </button>
+                        </Body>
                     </>
                 )}
 
@@ -579,12 +674,18 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                         }}
                     >
                         <Header
-                            title={addingBot ? 'Add a bot' : 'Add an agent'}
-                            description={addingBot ? 'Choose the service. It answers commands with your key for it.' : 'Choose what runs it. The steps to connect it come next.'}
+                            title={addingBot ? 'Add a bot' : addingLocal ? 'Run an agent on this computer' : 'Connect an agent you run'}
+                            description={
+                                addingBot
+                                    ? 'Choose the service. It answers commands with your key for it.'
+                                    : addingLocal
+                                      ? 'Runs locally on your login. Only you can use it.'
+                                      : 'Choose where it runs. The steps to connect it come next.'
+                            }
                             onBack={back}
                         />
                         <Body>
-                            <div role="radiogroup" aria-label={addingBot ? 'Which service' : 'How it connects'} className="grid grid-cols-2 gap-2">
+                            <div role="radiogroup" aria-label={addingBot ? 'Which service' : 'How it connects'} className={cn('grid grid-cols-2 gap-2', offered.length === 1 && 'hidden')}>
                                 {offered.map((k) => (
                                     <SetupTile
                                         key={k.id}
@@ -597,7 +698,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                     />
                                 ))}
                             </div>
-                            {setup.kinds.length > 1 && !setup.bindsInstance && <KindChoice label={setup.kindChoice ?? 'Agent'} kinds={setup.kinds} selected={kind} onSelect={setChosenKind} />}
+                            {setup.kinds.length > 1 && !setup.bindsInstance && <KindChoice label={setup.kindChoice ?? 'Agent'} kinds={setup.kinds} selected={kind} onSelect={setChosenKind} first={offered.length === 1} />}
                             {setup.local && (
                                 <div className="mt-4">
                                     <EngineCard engine={localEngine} />
@@ -659,12 +760,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                             {addError && <div role="alert" className="mt-3 text-xs text-destructive">{addError}</div>}
                         </Body>
                         <Footer>
-                            {!addingBot && offeredKinds.length > 0 && (
-                                <button type="button" onClick={startCreating} className="mr-auto text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">
-                                    Want Rowboat to run it? Create one instead
-                                </button>
-                            )}
-                            <Button type="button" size="sm" variant="ghost" onClick={back}>Cancel</Button>
+                            <Button type="button" size="sm" variant="ghost" onClick={cancel}>Cancel</Button>
                             <Button type="submit" size="sm" disabled={!ready || busy}>
                                 {busy && <Loader2 className="size-3.5 animate-spin" />}
                                 {addingBot ? 'Add bot' : setup.local && localEngine.status && !localEngine.status.installed ? `Enable ${localEngine.label} and add` : 'Add agent'}
@@ -779,10 +875,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                             {addError && <div role="alert" className="mt-3 text-xs text-destructive">{addError}</div>}
                         </Body>
                         <Footer>
-                            <button type="button" onClick={() => startAdding(false)} className="mr-auto text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">
-                                Already running one? Add it instead
-                            </button>
-                            <Button type="button" size="sm" variant="ghost" onClick={back}>Cancel</Button>
+                            <Button type="button" size="sm" variant="ghost" onClick={cancel}>Cancel</Button>
                             <Button type="submit" size="sm" disabled={!createReady || busy}>
                                 {busy && <Loader2 className="size-3.5 animate-spin" />}
                                 Create agent

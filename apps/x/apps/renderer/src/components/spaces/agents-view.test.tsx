@@ -148,26 +148,33 @@ describe('AgentsView', () => {
         expect(screen.queryByRole('button', { name: 'Ro options' })).toBeNull()
     })
 
-    it('New agent opens straight at adding one', async () => {
+    it('New agent asks where it runs; Cancel on the next screen closes it, Back returns to the question', async () => {
         show()
         await screen.findByText('Herald')
         fireEvent.click(screen.getByRole('button', { name: /New agent/ }))
+        expect(await screen.findByText('Where should it run?')).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: /^Connect one you already run/ }))
         expect(await screen.findByRole('radiogroup', { name: 'How it connects' })).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+        expect(await screen.findByText('Where should it run?')).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: /^On this computer/ }))
+        expect(await screen.findByRole('heading', { name: 'Run an agent on this computer' })).toBeInTheDocument()
         fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-        await waitFor(() => expect(screen.queryByRole('radiogroup', { name: 'How it connects' })).toBeNull())
+        await waitFor(() => expect(screen.queryByRole('heading', { name: 'Run an agent on this computer' })).toBeNull())
     })
 
-    it('when the org’s Harbor creates agents, the card creates one, and adding one you run is its second button', async () => {
-        managedKinds = ['hermes', 'claude-code', 'codex']
+    it('the card names the ways it offers; Rowboat runs it only when the org’s Harbor creates agents', async () => {
         show()
-        await screen.findByText('Herald')
-        fireEvent.click(await screen.findByRole('button', { name: /Create agent/ }))
+        expect(await screen.findByText('On this computer or one you already run')).toBeInTheDocument()
+        cleanup()
+        managedKinds = ['hermes', 'claude-code', 'codex']
+        org = orgWith()
+        show()
+        expect(await screen.findByText('On this computer, run by Rowboat, or one you already run')).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: /New agent/ }))
+        fireEvent.click(await screen.findByRole('button', { name: /^Rowboat runs it/ }))
         const kinds = await screen.findByRole('radiogroup', { name: 'Agent' })
         expect(within(kinds).getAllByRole('radio').map((r) => r.getAttribute('aria-label'))).toEqual(['Hermes', 'Claude Code', 'Codex'])
-        // Back closes the dialog: it was opened past the list.
-        fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-        await waitFor(() => expect(screen.queryByRole('radiogroup', { name: 'Agent' })).toBeNull())
-        fireEvent.click(screen.getByRole('button', { name: 'Add an agent you run' }))
-        expect(await screen.findByRole('radiogroup', { name: 'How it connects' })).toBeInTheDocument()
     })
+
 })
