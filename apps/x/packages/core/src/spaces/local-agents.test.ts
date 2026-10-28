@@ -13,10 +13,10 @@ import type { RunPromptArgs } from '../code-mode/acp/manager.js';
 // and plays back a turn.
 
 // Hoisted with the mocks: they run before the imports below.
-const h = vi.hoisted(() => {
-  const fs = require('fs') as typeof import('fs');
-  const os = require('os') as typeof import('os');
-  const path = require('path') as typeof import('path');
+const h = await vi.hoisted(async () => {
+  const fs = await import('fs');
+  const os = await import('os');
+  const path = await import('path');
   return {
     workDir: fs.mkdtempSync(path.join(os.tmpdir(), 'local-agents-')),
     harborUrl: '',
