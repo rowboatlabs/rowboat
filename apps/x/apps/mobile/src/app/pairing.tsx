@@ -1,11 +1,10 @@
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { router } from 'expo-router';
 import { Image } from '@/components/sf-image';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   Text,
@@ -82,7 +81,8 @@ export default function PairingScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['bottom']}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      {/* keyboard-controller's view, like the chats: React Native's own did nothing on Android (2026-10-28). */}
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
         <ScrollView contentContainerStyle={{ padding: 24, gap: 20 }} keyboardShouldPersistTaps="handled">
           {/* What this gives you */}
           <View style={{ alignItems: 'center', gap: 10, marginTop: 8 }}>
