@@ -20,6 +20,11 @@ import { useColors } from '@/theme/colors';
 // Text files can be edited: Save proposes a change on the version that was
 // read; the org applies it, merges it with edits made meanwhile, or reports a
 // conflict (then nothing is saved and the user can reload).
+const PLAIN_TEXT_EXTENSIONS = new Set([
+  'json', 'jsonl', 'csv', 'tsv', 'yaml', 'yml', 'toml', 'xml', 'html', 'css', 'log', 'env', 'ini', 'sql', 'sh',
+  'js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs', 'py', 'rb', 'go', 'rs', 'java', 'kt', 'swift', 'c', 'h', 'cpp', 'cs', 'php',
+]);
+
 export default function SpaceFileScreen() {
   const colors = useColors();
   const account = useSpacesAccount();
@@ -128,7 +133,10 @@ export default function SpaceFileScreen() {
     [navigation],
   );
 
-  const markdown = /\.(md|markdown)$/i.test(path);
+  // Markdown unless the name says it's code or data (2026-10-28): space notes
+  // are often saved without an extension, and those are markdown too.
+  const ext = /\.([a-z0-9]+)$/i.exec(path.split('/').pop() ?? '')?.[1]?.toLowerCase();
+  const markdown = !ext || !PLAIN_TEXT_EXTENSIONS.has(ext);
   const name = path.split('/').pop() || params.title || 'File';
   const mono = Platform.select({ ios: 'Menlo', default: 'monospace' });
 
