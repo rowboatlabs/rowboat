@@ -1,6 +1,6 @@
 import * as Haptics from 'expo-haptics';
-import { memo, useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import { memo, useMemo, useState, type ReactNode } from 'react';
+import { Linking, Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import type { Member, Message } from '@rowboat/spaces-protocol';
 
 import { Image } from 'expo-image';
@@ -23,6 +23,141 @@ export function parseAssetLink(url: string): { host: string; spaceId: string; as
   const m = ASSET_LINK_RE.exec(url);
   if (!m) return null;
   return { host: m[1]!, spaceId: m[2]!, assetId: decodeURIComponent(m[3]!), label: '' };
+}
+
+/**
+ * File links read as the file (2026-10-28): a bare link (pasted, or written by
+ * an agent) has only its URL as text, so it gets the file's name from the
+ * space's listing. Code is left alone.
+ */
+const BARE_ASSET_LINK_RE = /(^|[^(\[<])(https:\/\/[^\s/?#]+\/s\/[^\s/?#]+\/a\/[^\s)?#<>]+)/g;
+export function nameFileLinks(body: string, fileNames?: ReadonlyMap<string, string>): string {
+  const named = (url: string) => {
+    const link = parseAssetLink(url);
+    return ((link && fileNames?.get(link.assetId)?.split('/').pop()) || 'File').replace(/[[\]]/g, '');
+  };
+  return body
+    .split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/g)
+    .map((part, i) =>
+      i % 2 === 1
+        ? part
+        : part
+            // A link whose label is its own URL ([url](url), as the composer
+            // writes a pasted link) is as good as bare.
+            .replace(/\[(https:\/\/[^\]\s]+)\]\((https:\/\/[^)\s]+)\)/g, (m, label: string, url: string) =>
+              label === url && parseAssetLink(url) ? `[${named(url)}](${url})` : m,
+            )
+            .replace(BARE_ASSET_LINK_RE, (_m, lead: string, url: string) => `${lead}[${named(url)}](${url})`),
+    )
+    .join('');
+}
+
+/** What kind of file a name is, for the card's second line. */
+function fileKind(name: string): string {
+  const ext = /\.([a-z0-9]+)$/i.exec(name)?.[1]?.toLowerCase();
+  if (!ext || ext === 'md' || ext === 'markdown') return 'Document';
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'heic', 'svg'].includes(ext)) return 'Image';
+  if (ext === 'pdf') return 'PDF';
+  if (['csv', 'tsv', 'xlsx'].includes(ext)) return 'Spreadsheet';
+  return `${ext.toUpperCase()} file`;
+}
+
+const FILE_LINE_RE = /^\s*\[([^\]]+)\]\((https:\/\/[^\s/?#]+\/s\/[^\s/?#]+\/a\/[^\s)?#]+)\)\s*$/;
+type BodySegment = { kind: 'markdown'; text: string } | { kind: 'file'; name: string; url: string };
+
+/** Split a message into markdown and the file links that stand on their own line. */
+function splitFileCards(body: string): BodySegment[] {
+  const out: BodySegment[] = [];
+  let buffer: string[] = [];
+  let fence = false;
+  const flush = () => {
+    const text = buffer.join('\n');
+    if (text.trim()) out.push({ kind: 'markdown', text });
+    buffer = [];
+  };
+  for (const line of body.split('\n')) {
+    if (/^\s*(```|~~~)/.test(line)) fence = !fence;
+    const m = fence ? null : FILE_LINE_RE.exec(line);
+    if (m) {
+      flush();
+      out.push({ kind: 'file', name: m[1]!, url: m[2]! });
+    } else buffer.push(line);
+  }
+  flush();
+  return out;
+}
+
+/**
+ * A file shared on its own line (2026-10-28): a card — icon, name, and what it
+ * is and where it lives — instead of an inline link. Tapping opens the file.
+ */
+function FileCard({ name, path, onPress }: { name: string; path?: string; onPress?: () => void }) {
+  const colors = useColors();
+  const folder = path && path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : null;
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => ({
+        flexDirection: 'row', alignItems: 'center', gap: 10, alignSelf: 'flex-start', maxWidth: 320, minWidth: 220,
+        marginVertical: 4, paddingVertical: 10, paddingHorizontal: 12,
+        borderRadius: 12, borderCurve: 'continuous', borderWidth: 0.5, borderColor: colors.separator,
+        backgroundColor: pressed ? colors.separator : colors.secondaryBackground,
+      })}
+    >
+      <Image source="sf:doc.text" style={{ width: 22, height: 22 }} contentFit="contain" tintColor={colors.secondaryLabel} />
+      <View style={{ flexShrink: 1, gap: 1 }}>
+        <Text numberOfLines={1} style={{ fontSize: 15, fontWeight: '600', color: colors.label }}>{name}</Text>
+        <Text numberOfLines={1} style={{ fontSize: 12, color: colors.secondaryLabel }}>{[fileKind(name), folder].filter(Boolean).join(' · ')}</Text>
+      </View>
+    </Pressable>
+  );
+}
+
+/** A message body: markdown, with files on their own line as cards. */
+export function MessageBody({ body, fileNames, rules, onLinkPress }: {
+  body: string;
+  /** asset id → path in the space. */
+  fileNames?: ReadonlyMap<string, string>;
+  rules: Record<string, unknown>;
+  onLinkPress: (url: string) => boolean;
+}) {
+  const segments = useMemo(() => splitFileCards(body), [body]);
+  return (
+    <>
+      {segments.map((seg, i) =>
+        seg.kind === 'markdown' ? (
+          <ChatMarkdown key={i} extraRules={rules} onLinkPress={onLinkPress}>
+            {seg.text}
+          </ChatMarkdown>
+        ) : (
+          <FileCard key={i} name={seg.name} path={fileNames?.get(parseAssetLink(seg.url)?.assetId ?? '')} onPress={() => void onLinkPress(seg.url)} />
+        ),
+      )}
+    </>
+  );
+}
+
+/**
+ * Markdown link rule: a file link is a file label (📄 name, no underline);
+ * other links keep the default look. Taps go through onLinkPress either way.
+ */
+export function fileLinkRule(labelColor: string) {
+  return (node: { key: string; attributes: { href?: string } }, children: ReactNode, _parent: unknown, styles: { link?: object }, onLinkPress?: (url: string) => boolean) => {
+    const href = String(node.attributes.href ?? '');
+    const file = parseAssetLink(href) !== null;
+    return (
+      <Text
+        key={node.key}
+        style={file ? { fontWeight: '600', color: labelColor } : styles.link}
+        onPress={() => {
+          if (onLinkPress?.(href) !== false) void Linking.openURL(href).catch(() => {});
+        }}
+      >
+        {file ? '📄 ' : null}
+        {children}
+      </Text>
+    );
+  };
 }
 
 // Shared message presentation for the stream and thread screens: row, reaction
@@ -60,6 +195,7 @@ export const MessageRow = memo(function MessageRow({
   message,
   member,
   memberNames,
+  fileNames,
   me,
   onToggleReaction,
   onOpenThread,
@@ -76,6 +212,8 @@ export const MessageRow = memo(function MessageRow({
   member?: Member;
   /** id → displayName for the whole space — resolves @<memberId> mentions. */
   memberNames?: ReadonlyMap<string, string>;
+  /** asset id → file name, so bare file links show the file's name. */
+  fileNames?: ReadonlyMap<string, string>;
   me: string;
   onToggleReaction: (message: Message, emoji: string) => void;
   /** Omit on the thread screen (replies have no threads). */
@@ -101,8 +239,8 @@ export const MessageRow = memo(function MessageRow({
   const time = new Date(message.postedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   // Wire member addresses ("@01ABC…") → bold display names, code spans untouched.
   const body = useMemo(
-    () => (memberNames ? spaces.decorateMentions(message.body, memberNames) : message.body),
-    [message.body, memberNames],
+    () => nameFileLinks(memberNames ? spaces.decorateMentions(message.body, memberNames) : message.body, fileNames),
+    [message.body, memberNames, fileNames],
   );
 
   // Long-press a reaction chip → who reacted (opens on that emoji's tab).
@@ -112,8 +250,9 @@ export const MessageRow = memo(function MessageRow({
     () => ({
       image: (node: { key: string; attributes: { src?: string } }) =>
         node.attributes.src ? <SpaceBlobImage key={node.key} src={node.attributes.src} /> : null,
+      link: fileLinkRule(colors.label),
     }),
-    [],
+    [colors.label],
   );
 
   // Deleted messages are filtered out by the screens (Slack); one that still
@@ -190,8 +329,10 @@ export const MessageRow = memo(function MessageRow({
           />
         ) : (
           <>
-            <ChatMarkdown
-              extraRules={imageRule}
+            <MessageBody
+              body={body}
+              fileNames={fileNames}
+              rules={imageRule}
               onLinkPress={(url) => {
                 const blob = parseBlobLink(url);
                 if (blob && onOpenBlob) {
@@ -203,9 +344,7 @@ export const MessageRow = memo(function MessageRow({
                 onOpenAsset(link);
                 return false;
               }}
-            >
-              {body}
-            </ChatMarkdown>
+            />
             <MessageLinkPreviews body={message.body} />
           </>
         )}

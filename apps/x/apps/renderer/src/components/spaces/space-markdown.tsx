@@ -736,7 +736,59 @@ function fileLinkTarget(url: string, refs: SpaceRefs | null, assets: SpaceAssets
     return relative ? byPath(relative) : null
 }
 
-function SpaceAnchor({ href, children }: ComponentProps<'a'>) {
+/** A file named inside a sentence: an inline chip at text size, icon then name. */
+const FILE_CHIP_CLASS = 'inline-flex max-w-full items-center gap-1.5 rounded-md border border-border bg-muted/40 px-1.5 py-0.5 align-middle font-medium no-underline transition-colors'
+
+/** What kind of file a name is, for the card's second line. */
+function fileKind(name: string): string {
+    const ext = /\.([a-z0-9]+)$/i.exec(name)?.[1]?.toLowerCase()
+    if (!ext || ext === 'md' || ext === 'markdown') return 'Document'
+    if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) return 'Image'
+    if (ext === 'pdf') return 'PDF'
+    if (['csv', 'tsv', 'xlsx'].includes(ext)) return 'Spreadsheet'
+    return `${ext.toUpperCase()} file`
+}
+
+/**
+ * A file shared on its own (2026-10-28): the link is the whole message line,
+ * so it gets a card — icon tile, name, and what it is and where it lives —
+ * the same weight as an attachment instead of a small inline link.
+ */
+function FileCard({ name, path, muted, title, onOpen }: { name: string; path?: string; muted?: boolean; title: string; onOpen?: () => void }) {
+    const folder = path && path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : null
+    const detail = [fileKind(name), folder].filter(Boolean).join(' · ')
+    const body = (
+        <>
+            <FileText className="size-5 shrink-0 text-muted-foreground" />
+            <span className="flex min-w-0 flex-col text-left">
+                <span className={cn('truncate text-sm font-medium', muted ? 'text-muted-foreground' : 'text-foreground')}>{name}</span>
+                <span className="truncate text-xs text-muted-foreground">{muted ? title : detail}</span>
+            </span>
+        </>
+    )
+    const frame = 'my-1 flex w-fit min-w-[300px] max-w-md items-center gap-3 rounded-xl border border-border bg-muted/50 px-3 py-2.5 no-underline dark:border-white/10 dark:bg-white/[0.04]'
+    return onOpen ? (
+        <button type="button" onClick={onOpen} title={title} className={cn(frame, 'transition-colors hover:bg-accent dark:hover:bg-white/[0.08]')}>{body}</button>
+    ) : (
+        <span title={title} className={frame}>{body}</span>
+    )
+}
+
+/**
+ * A file link alone on its line is shared as a file (2026-10-28) — a card,
+ * whatever its label (the phone sends [name](link)). The line is marked by
+ * this link title before rendering, since the anchor can't see its line.
+ */
+const FILE_CARD_TITLE = 'rowboat:file-card'
+const FILE_LINE_RE = /^(\s*)\[([^\]\n]+)\]\((https:\/\/[^\s/?#)]+\/s\/[^\s/?#)]+\/a\/[^\s)?#]+|app:\/\/space-file\/[^\s)]+)\)\s*$/gm
+function markFileCards(body: string): string {
+    return body
+        .split(/(```[\s\S]*?(?:```|$))/g)
+        .map((part, i) => (i % 2 === 1 ? part : part.replace(FILE_LINE_RE, (_m, lead: string, text: string, url: string) => `${lead}[${text}](${url} "${FILE_CARD_TITLE}")`)))
+        .join('')
+}
+
+function SpaceAnchor({ href, title, children }: ComponentProps<'a'>) {
     const refs = useContext(SpaceRefsContext)
     const nav = useContext(SpaceNavContext)
     const assets = useContext(SpaceAssetsContext)
@@ -773,12 +825,21 @@ function SpaceAnchor({ href, children }: ComponentProps<'a'>) {
     if (!target && plainLabel(children) === url && isDirectImageUrl(url)) {
         return <ExternalImage src={url} alt="" />
     }
+    // A file link reads as the file (2026-10-28): a chip with its name. A bare
+    // link (pasted, or written by an agent) has only the URL as its text, so
+    // the name comes from the space's listing instead.
+    const bare = plainLabel(children) === url
+    const asCard = bare || title === FILE_CARD_TITLE
+    const filePath = target?.kind === 'open' ? assets.byId.get(target.assetId)?.path : undefined
+    const fileName = filePath?.split('/').pop() ?? (target?.kind === 'elsewhere' ? 'File in another space' : 'File')
+    const fileLabel = (): ReactNode => (bare ? fileName : children)
     if (target?.kind === 'muted' || (target && target.kind === 'elsewhere' && !nav?.onOpenSpaceFile) || (target?.kind === 'open' && !nav)) {
         const title = target.kind === 'muted' ? target.title : 'Not available here'
+        if (asCard) return <FileCard name={bare ? fileName : plainLabel(children) ?? fileName} path={filePath} muted title={title} />
         return (
-            <span title={title} className="inline-flex max-w-full items-baseline gap-1 align-baseline text-muted-foreground underline decoration-dotted underline-offset-2">
-                <FileText className="size-3 shrink-0 self-center" />
-                <span className="truncate">{children}</span>
+            <span title={title} className={cn(FILE_CHIP_CLASS, 'text-muted-foreground')}>
+                <FileText className="size-4 shrink-0" />
+                <span className="truncate">{fileLabel()}</span>
             </span>
         )
     }
@@ -786,15 +847,17 @@ function SpaceAnchor({ href, children }: ComponentProps<'a'>) {
         const open = target.kind === 'open'
             ? () => nav.onOpenFile(target.assetId)
             : () => nav.onOpenSpaceFile?.(target.orgId, target.spaceId, target.assetId)
+        const title = target.kind === 'open' ? target.title : 'Open in its space'
+        if (asCard) return <FileCard name={bare ? fileName : plainLabel(children) ?? fileName} path={filePath} title={title} onOpen={open} />
         return (
             <button
                 type="button"
                 onClick={open}
                 title={target.kind === 'open' ? target.title : 'Open in its space'}
-                className="inline-flex max-w-full items-baseline gap-1 align-baseline text-primary underline underline-offset-2 hover:opacity-80"
+                className={cn(FILE_CHIP_CLASS, 'text-foreground hover:bg-accent')}
             >
-                <FileText className="size-3 shrink-0 self-center" />
-                <span className="truncate">{children}</span>
+                <FileText className="size-4 shrink-0 text-muted-foreground" />
+                <span className="truncate">{fileLabel()}</span>
             </button>
         )
     }
@@ -815,7 +878,7 @@ export const SpaceMarkdown = memo(function SpaceMarkdown({ body, className }: { 
         // Pre-separator messages joined text and images in one paragraph —
         // normalize so every message gets text above, a clean tile row below.
         // Mentions last: their app links must never look like file links.
-        return rewriteMentionLinks(separateImageParagraphs(withFiles))
+        return rewriteMentionLinks(separateImageParagraphs(markFileCards(withFiles)))
     }, [body, refs, assets])
     return (
         <div className={cn(className)}>
