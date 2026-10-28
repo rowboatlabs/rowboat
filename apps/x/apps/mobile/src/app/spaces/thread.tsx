@@ -14,7 +14,7 @@ import { spaces } from '@x/shared';
 import { ChatMarkdown } from '@/components/markdown';
 import { MessageLinkPreviews } from '@/components/link-preview-card';
 import { SpaceBlobImage, parseBlobLink } from '@/components/space-blob-image';
-import { MessageActionSheet, MessageRow, applyReaction, fileLinkRule, nameFileLinks, parseAssetLink } from '@/components/space-message';
+import { MessageActionSheet, MessageBody, MessageRow, applyReaction, fileLinkRule, nameFileLinks, parseAssetLink } from '@/components/space-message';
 import { SpaceComposer, type SpaceComposerHandle } from '@/components/space-composer';
 import { PollCard, applyPollVote } from '@/components/poll-card';
 import { setActiveSpace } from '@/lib/push';
@@ -62,7 +62,7 @@ export default function SpaceThreadScreen() {
     let cancelled = false;
     client
       .listAssets(space)
-      .then((list) => !cancelled && setFileNames(new Map(list.map((a) => [a.id, a.path.split('/').pop() ?? a.path]))))
+      .then((list) => !cancelled && setFileNames(new Map(list.map((a) => [a.id, a.path]))))
       .catch(() => {});
     return () => {
       cancelled = true;
@@ -626,8 +626,10 @@ function RootMessage({ message, member, memberNames, fileNames, me, onToggleReac
         <PollCard message={message} poll={message.poll} me={me} onVote={onVote} onRemoveVote={onRemoveVote} onEndPoll={onEndPoll} />
       ) : (
         <>
-          <ChatMarkdown
-            extraRules={imageRule}
+          <MessageBody
+            body={body}
+            fileNames={fileNames}
+            rules={imageRule}
             onLinkPress={(url) => {
               const blob = parseBlobLink(url);
               if (blob && onOpenBlob) {
@@ -639,9 +641,7 @@ function RootMessage({ message, member, memberNames, fileNames, me, onToggleReac
               onOpenAsset(link);
               return false;
             }}
-          >
-            {body}
-          </ChatMarkdown>
+          />
           <MessageLinkPreviews body={message.body} />
         </>
       )}

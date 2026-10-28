@@ -34,7 +34,7 @@ const BARE_ASSET_LINK_RE = /(^|[^(\[<])(https:\/\/[^\s/?#]+\/s\/[^\s/?#]+\/a\/[^
 export function nameFileLinks(body: string, fileNames?: ReadonlyMap<string, string>): string {
   const named = (url: string) => {
     const link = parseAssetLink(url);
-    return ((link && fileNames?.get(link.assetId)) || 'File').replace(/[[\]]/g, '');
+    return ((link && fileNames?.get(link.assetId)?.split('/').pop()) || 'File').replace(/[[\]]/g, '');
   };
   return body
     .split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/g)
@@ -50,6 +50,91 @@ export function nameFileLinks(body: string, fileNames?: ReadonlyMap<string, stri
             .replace(BARE_ASSET_LINK_RE, (_m, lead: string, url: string) => `${lead}[${named(url)}](${url})`),
     )
     .join('');
+}
+
+/** What kind of file a name is, for the card's second line. */
+function fileKind(name: string): string {
+  const ext = /\.([a-z0-9]+)$/i.exec(name)?.[1]?.toLowerCase();
+  if (!ext || ext === 'md' || ext === 'markdown') return 'Document';
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'heic', 'svg'].includes(ext)) return 'Image';
+  if (ext === 'pdf') return 'PDF';
+  if (['csv', 'tsv', 'xlsx'].includes(ext)) return 'Spreadsheet';
+  return `${ext.toUpperCase()} file`;
+}
+
+const FILE_LINE_RE = /^\s*\[([^\]]+)\]\((https:\/\/[^\s/?#]+\/s\/[^\s/?#]+\/a\/[^\s)?#]+)\)\s*$/;
+type BodySegment = { kind: 'markdown'; text: string } | { kind: 'file'; name: string; url: string };
+
+/** Split a message into markdown and the file links that stand on their own line. */
+function splitFileCards(body: string): BodySegment[] {
+  const out: BodySegment[] = [];
+  let buffer: string[] = [];
+  let fence = false;
+  const flush = () => {
+    const text = buffer.join('\n');
+    if (text.trim()) out.push({ kind: 'markdown', text });
+    buffer = [];
+  };
+  for (const line of body.split('\n')) {
+    if (/^\s*(```|~~~)/.test(line)) fence = !fence;
+    const m = fence ? null : FILE_LINE_RE.exec(line);
+    if (m) {
+      flush();
+      out.push({ kind: 'file', name: m[1]!, url: m[2]! });
+    } else buffer.push(line);
+  }
+  flush();
+  return out;
+}
+
+/**
+ * A file shared on its own line (2026-10-28): a card — icon, name, and what it
+ * is and where it lives — instead of an inline link. Tapping opens the file.
+ */
+function FileCard({ name, path, onPress }: { name: string; path?: string; onPress?: () => void }) {
+  const colors = useColors();
+  const folder = path && path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : null;
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => ({
+        flexDirection: 'row', alignItems: 'center', gap: 10, alignSelf: 'flex-start', maxWidth: 320, minWidth: 220,
+        marginVertical: 4, paddingVertical: 10, paddingHorizontal: 12,
+        borderRadius: 12, borderCurve: 'continuous', borderWidth: 0.5, borderColor: colors.separator,
+        backgroundColor: pressed ? colors.separator : colors.secondaryBackground,
+      })}
+    >
+      <Image source="sf:doc.text" style={{ width: 22, height: 22 }} contentFit="contain" tintColor={colors.secondaryLabel} />
+      <View style={{ flexShrink: 1, gap: 1 }}>
+        <Text numberOfLines={1} style={{ fontSize: 15, fontWeight: '600', color: colors.label }}>{name}</Text>
+        <Text numberOfLines={1} style={{ fontSize: 12, color: colors.secondaryLabel }}>{[fileKind(name), folder].filter(Boolean).join(' · ')}</Text>
+      </View>
+    </Pressable>
+  );
+}
+
+/** A message body: markdown, with files on their own line as cards. */
+export function MessageBody({ body, fileNames, rules, onLinkPress }: {
+  body: string;
+  /** asset id → path in the space. */
+  fileNames?: ReadonlyMap<string, string>;
+  rules: Record<string, unknown>;
+  onLinkPress: (url: string) => boolean;
+}) {
+  const segments = useMemo(() => splitFileCards(body), [body]);
+  return (
+    <>
+      {segments.map((seg, i) =>
+        seg.kind === 'markdown' ? (
+          <ChatMarkdown key={i} extraRules={rules} onLinkPress={onLinkPress}>
+            {seg.text}
+          </ChatMarkdown>
+        ) : (
+          <FileCard key={i} name={seg.name} path={fileNames?.get(parseAssetLink(seg.url)?.assetId ?? '')} onPress={() => void onLinkPress(seg.url)} />
+        ),
+      )}
+    </>
+  );
 }
 
 /**
@@ -244,8 +329,10 @@ export const MessageRow = memo(function MessageRow({
           />
         ) : (
           <>
-            <ChatMarkdown
-              extraRules={imageRule}
+            <MessageBody
+              body={body}
+              fileNames={fileNames}
+              rules={imageRule}
               onLinkPress={(url) => {
                 const blob = parseBlobLink(url);
                 if (blob && onOpenBlob) {
@@ -257,9 +344,7 @@ export const MessageRow = memo(function MessageRow({
                 onOpenAsset(link);
                 return false;
               }}
-            >
-              {body}
-            </ChatMarkdown>
+            />
             <MessageLinkPreviews body={message.body} />
           </>
         )}

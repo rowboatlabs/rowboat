@@ -60,7 +60,7 @@ export default function SpaceChatScreen() {
     let cancelled = false;
     client
       .listAssets(space)
-      .then((list) => !cancelled && setFileNames(new Map(list.map((a) => [a.id, a.path.split('/').pop() ?? a.path]))))
+      .then((list) => !cancelled && setFileNames(new Map(list.map((a) => [a.id, a.path]))))
       .catch(() => {});
     return () => {
       cancelled = true;
