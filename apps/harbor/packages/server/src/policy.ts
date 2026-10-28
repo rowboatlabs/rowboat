@@ -284,6 +284,12 @@ export function canRenameAgent(actor: Member, agent: Member): Decision {
   return { code: 'forbidden', message: 'only the agent’s owner can rename it' };
 }
 
+/** An agent's description and instructions (spec §4 Agent members, 2026-10-29): the owner, as with its name. */
+export function canSetAgentProfile(actor: Member, agent: Member): Decision {
+  if (agent.kind === 'agent' && agent.ownerId !== undefined && agent.ownerId === actor.id) return null;
+  return { code: 'forbidden', message: 'only the agent’s owner can change its description and instructions' };
+}
+
 /** Switching an agent between channel and personal (spec §4 Agent members, 2026-10-27): the owner, as with its name. */
 export function canSetAgentPersonal(actor: Member, agent: Member): Decision {
   if (agent.kind === 'agent' && agent.ownerId !== undefined && agent.ownerId === actor.id) return null;

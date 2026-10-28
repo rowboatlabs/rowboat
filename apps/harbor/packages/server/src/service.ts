@@ -381,6 +381,10 @@ export class HarborService {
   listMembers(ctx: ActorCtx, spaceId: string): Promise<Member[]> {
     return this.spaces.listMembers(ctx, spaceId);
   }
+  /** An agent's description and instructions, by its owner (2026-10-29). */
+  setAgentProfile(ctx: ActorCtx, agentId: string, input: { title?: string; instructions?: string }): Promise<Member> {
+    return this.agents.setProfile(ctx, agentId, input);
+  }
   listOrgMembers(ctx: ActorCtx): Promise<Member[]> {
     return this.spaces.listOrgMembers(ctx);
   }

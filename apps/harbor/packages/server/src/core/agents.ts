@@ -2,7 +2,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { BUILT_IN_CONNECTION, HARBOR_RUN_CONNECTIONS, INSTANCE_CONNECTIONS, JEV_KIND, PERSONAL_ONLY_CONNECTIONS, isAgentPair, type AgentCredential, type AgentHook, type AgentKey, type AgentKeySecret, type AgentListing, type InvocationOptionValues, type Member } from '@rowboat/spaces-protocol';
 import { hashAgentKey, mintAgentKeySecret } from '../agent-keys.js';
 import { HarborError } from '../errors.js';
-import { agentsManagedBy, canAddAgent, canClearAgentHook, canCreateAgentKey, canRenameAgent, canRevokeAgentKey, canSetAgentHook, canSetAgentPersonal, enforce } from '../policy.js';
+import { agentsManagedBy, canAddAgent, canClearAgentHook, canCreateAgentKey, canRenameAgent, canRevokeAgentKey, canSetAgentHook, canSetAgentPersonal, canSetAgentProfile, enforce } from '../policy.js';
 import type { StoredAgentKey } from '../store.js';
 import type { Kernel, ActorCtx } from './kernel.js';
 import { oneLine, type Spaces } from './spaces.js';
@@ -159,6 +159,26 @@ export class Agents {
     this.k.guardWrite();
     const updated: Member = { ...agent, displayName };
     await this.k.store.putMember(updated);
+    return updated;
+  }
+
+  /**
+   * Set an agent's description and instructions (spec §4 Agent members,
+   * 2026-10-29): the owner only. A field left out keeps its value; an empty
+   * one clears it. The description is one line, like a person's title; the
+   * instructions keep their lines. An org fact like a rename, told to every
+   * member as a profile change so rosters show the new description.
+   */
+  async setProfile(ctx: ActorCtx, agentId: string, input: { title?: string; instructions?: string }): Promise<Member> {
+    const agent = await this.agent(agentId);
+    enforce(canSetAgentProfile(await this.actor(ctx), agent));
+    const title = input.title === undefined ? agent.title : oneLine(input.title) || undefined;
+    const instructions = input.instructions === undefined ? agent.instructions : input.instructions.trim() || undefined;
+    if (title === agent.title && instructions === agent.instructions) return agent; // idempotent no-op: no write
+    this.k.guardWrite();
+    await this.k.store.setAgentProfile(agentId, { title: title ?? null, instructions: instructions ?? null });
+    const updated = await this.agent(agentId);
+    await this.k.publishProfile(updated);
     return updated;
   }
 

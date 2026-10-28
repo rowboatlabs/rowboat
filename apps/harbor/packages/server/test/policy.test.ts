@@ -27,6 +27,7 @@ import {
   canRevokeAgentKey,
   canSetAgentHook,
   canSetAgentPersonal,
+  canSetAgentProfile,
   canClearAgentHook,
   canReadSpace,
   canJoinSpace,
@@ -200,6 +201,10 @@ describe('policy', () => {
     expect(canSetAgentPersonal(owner, hermes)).toBeNull();
     expect(canSetAgentPersonal(admin, hermes)).toMatchObject({ code: 'forbidden' });
     expect(canSetAgentPersonal(other, hermes)).toMatchObject({ code: 'forbidden' });
+    // Its description and personality (2026-10-29): the owner's, as its name is.
+    expect(canSetAgentProfile(owner, hermes)).toBeNull();
+    expect(canSetAgentProfile(admin, hermes)).toMatchObject({ code: 'forbidden' });
+    expect(canSetAgentProfile(other, hermes)).toMatchObject({ code: 'forbidden' });
     expect(canRevokeAgentKey(owner, hermes)).toBeNull();
     expect(canRevokeAgentKey(admin, hermes)).toBeNull();
     expect(canRevokeAgentKey(other, hermes)).toMatchObject({ code: 'forbidden' });
