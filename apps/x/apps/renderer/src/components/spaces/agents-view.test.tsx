@@ -15,12 +15,13 @@ const agent = (id: string, displayName: string, ownerId: string | undefined, age
     ({ id, displayName, role: 'member', kind: 'agent', ...(ownerId ? { ownerId } : {}), agentKind, agentConnection, ...extra }) as spaces.Member
 
 let roster: spaces.Member[]
+let online: string[] = []
 let spaceMembers: Record<string, spaces.Member[]>
 // Create agent (2026-10-26): the kinds this org's Harbor creates on Rowboat's own account; none = the card reads New agent.
 let managedKinds: string[] = []
 const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
     switch (channel) {
-        case 'spaces:listOrgMembers': return { members: roster }
+        case 'spaces:listOrgMembers': return { members: roster, online }
         case 'spaces:listMembers': return { members: spaceMembers[args.spaceId!] ?? [] }
         case 'spaces:listAgents': return { agents: roster.filter((m) => m.kind === 'agent' && m.ownerId === 'me').map((a) => ({ agent: a, keys: [] })) }
         case 'spaces:getAgentCapabilities': return { capabilities: { stop: false, options: [] }, defaults: {} }
@@ -86,6 +87,20 @@ describe('AgentsView', () => {
         expect(within(card('Herald')).getByRole('img', { name: /^Channel: Anyone who shares a space with it/ })).toHaveTextContent('')
         expect(within(card('Scout')).getByRole('img', { name: /^Personal: Only Harsh can use it/ })).toHaveTextContent('')
         expect(within(card('Ro')).queryByLabelText(/^(Channel|Personal):/)).toBeNull()
+    })
+
+    it('says when a local agent’s computer isn’t running it', async () => {
+        const mac = agent('mac', 'Ramnique’s Claude Code', 'me', 'claude-code', 'local', { personal: true })
+        const box = agent('box', 'Harsh’s Codex', 'harsh', 'codex', 'local', { personal: true })
+        roster = [...roster, mac, box]
+        online = ['box']
+        show()
+        await screen.findByText('Ramnique’s Claude Code')
+        await waitFor(() => expect(within(group('Yours')).getByText(/Claude Code · local/)).toHaveTextContent('Claude Code · local · Offline'))
+        expect(within(group('Everyone else’s')).getByText(/Codex · local/)).toHaveTextContent(/^Codex · local$/)
+        // Other agents have no presence: never offline.
+        expect(within(group('Yours')).getByText(/^Hermes/)).not.toHaveTextContent('Offline')
+        online = []
     })
 
     it('shows how many of your spaces each agent is in', async () => {

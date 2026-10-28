@@ -10,6 +10,8 @@ import { InstancePicker, type InstanceChoice } from '@/components/spaces/agent-i
 import { MaritimeAgentPicker } from '@/components/spaces/agent-maritime-picker'
 import { AccessChoice, accessLabel } from '@/components/spaces/agent-access'
 import { AgentLogo, ConnectAgent } from '@/components/spaces/agent-setup'
+import { EngineCard, LocalAgentFields, useLocalAgents, useLocalEngine } from '@/components/spaces/local-agent'
+import { LOCAL_RUNTIME } from '@/lib/feature-flags'
 import { MemberAvatar } from '@/components/spaces/atoms'
 import { refreshMembers, refreshOrgRoster, useOrgRoster } from '@/hooks/use-space-members'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
@@ -46,6 +48,11 @@ import { cn } from '@/lib/utils'
 // and on Create (2026-10-27), switched later from the agent's page. Only the
 // owner can use one; everyone else sees it and its replies. Its name starts
 // as "<your first name>'s <kind>".
+//
+// Local agents (2026-10-28): "On this computer" adds your own Claude Code or
+// Codex, which this app runs. Always personal; Add asks where it works and
+// how it approves instead of a key, and there is nothing to connect, so it
+// goes straight to its page. Desktop only.
 
 type Screen =
     | { name: 'list' }
@@ -277,6 +284,10 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
     const [withDirect, setWithDirect] = useState(true)
     const [personal, setPersonal] = useState(false)
     const [progress, setProgress] = useState<string | null>(null)
+    // On this computer: where it works (code mode's default project until picked), how it approves, and whether its engine is ready.
+    const local = useLocalAgents(open)
+    const [localCwd, setLocalCwd] = useState('')
+    const [localPolicy, setLocalPolicy] = useState<spaces.SpacesLocalAgent['policy']>('yolo')
     // Create agent: the kinds this org's Harbor creates (none until loaded, or on a Harbor with no Maritime key), and the form.
     const [managedKinds, setManagedKinds] = useState<string[]>([])
     const [createKind, setCreateKind] = useState<string | null>(null)
@@ -285,7 +296,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
     const [envOpen, setEnvOpen] = useState(false)
     // Add bot offers the bots, Add agent the rest; until the person picks, the first, and its first kind.
     const addingBot = screen.name === 'add' && screen.bot
-    const offered = AGENT_SETUPS.filter((k) => (k.bot === true) === addingBot)
+    const offered = AGENT_SETUPS.filter((k) => (k.bot === true) === addingBot && (LOCAL_RUNTIME || !k.local))
     const setup = offered.find((k) => k.id === chosen) ?? offered[0]!
     // An agent that is one platform instance (Agent37) runs whatever its instance runs.
     const kind = setup.bindsInstance ? instance?.kind ?? setup.kinds[0]! : chosenKind && setup.kinds.includes(chosenKind) ? chosenKind : setup.kinds[0]!
@@ -293,9 +304,15 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
     // one; a personal one's is yours ("Gagan's Claude Code", 2026-10-26).
     const baseName = setup.defaultName || kindInfo(kind).label
     const ownName = roster.find((m) => m.id === org.memberId)?.displayName
-    const shownName = nameEdited ? name : personal ? personalAgentName(ownName, baseName) : baseName
+    // A local agent is always personal: it runs on your computer.
+    const isPersonal = personal || setup.local === true
+    const shownName = nameEdited ? name : isPersonal ? personalAgentName(ownName, baseName) : baseName
+    const shownCwd = localCwd || local?.defaultCwd || ''
+    // Its engine: Add installs it when it isn't on this computer yet (2026-10-28), so nobody leaves for Settings.
+    const localEngine = useLocalEngine(kind === 'codex' ? 'codex' : 'claude-code', open && setup.local === true)
     const ready =
         shownName.trim() !== '' &&
+        (!setup.local || (shownCwd !== '' && !localEngine.installing)) &&
         (!setup.credential || credential.trim() !== '') &&
         (!setup.bindsInstance || (instance !== null && (instance.type === 'existing' || Number.isFinite(instance.monthlyBudgetUsd))))
 
@@ -319,6 +336,8 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
         setSkippedSpaces(new Set())
         setWithDirect(true)
         setPersonal(false)
+        setLocalCwd('')
+        setLocalPolicy('yolo')
         setScreen({ name: 'add', bot })
     }, [])
 
@@ -373,6 +392,8 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
             await window.ipc.invoke('spaces:openDirect', { orgId: org.id, memberId: agent.id }).catch(() => missed.push('your direct messages'))
         }
         if (missed.length > 0) toast(`Couldn't add ${agent.displayName} to ${missed.join(', ')}`, 'error')
+        // A short confirmation (2026-10-28): the screen moves on, so say it worked.
+        else toast(`${agent.displayName} added`, 'success', 2000)
         // Your new agent is on your roster (and so in Add people) right away.
         refreshOrgRoster(org.id)
         await load()
@@ -411,6 +432,24 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
         setBusy(true)
         setAddError(null)
         try {
+            // On this computer: main adds it and keeps its key; nothing to connect by hand.
+            if (setup.local) {
+                if (!localEngine.status?.installed) {
+                    setProgress(`Enabling ${localEngine.label} on this computer…`)
+                    await localEngine.install()
+                    setProgress(null)
+                }
+                const { agent } = await window.ipc.invoke('spaces:addLocalAgent', {
+                    orgId: org.id,
+                    displayName: shownName.trim(),
+                    kind: kind === 'codex' ? 'codex' : 'claude-code',
+                    cwd: shownCwd,
+                    policy: localPolicy,
+                })
+                await settle(agent, false)
+                setScreen({ name: 'agent', agentId: agent.id })
+                return
+            }
             // A new instance is created first, with the key being pasted; Harbor then checks it like any other.
             let instanceId: string | undefined
             if (setup.id === 'agent37' && instance?.type === 'new') {
@@ -559,7 +598,18 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                 ))}
                             </div>
                             {setup.kinds.length > 1 && !setup.bindsInstance && <KindChoice label={setup.kindChoice ?? 'Agent'} kinds={setup.kinds} selected={kind} onSelect={setChosenKind} />}
-                            <AccessChoice className="mt-4" personal={personal} onChange={setPersonal} note="You can change this later from its page." />
+                            {setup.local && (
+                                <div className="mt-4">
+                                    <EngineCard engine={localEngine} />
+                                </div>
+                            )}
+                            {setup.local ? (
+                                <p className="mt-4 text-[11px] leading-snug text-muted-foreground">
+                                    Personal: it runs on your computer, so only you can mention it or DM it. Others see it and its replies. It answers while Rowboat is open here.
+                                </p>
+                            ) : (
+                                <AccessChoice className="mt-4" personal={personal} onChange={setPersonal} note="You can change this later from its page." />
+                            )}
                             <label className="mt-4 flex flex-col gap-1.5">
                                 <span className="text-xs font-medium text-foreground">Name</span>
                                 <Input
@@ -594,6 +644,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                     <span className="text-[11px] text-muted-foreground">{setup.credential.note}</span>
                                 </label>
                             )}
+                            {setup.local && <LocalAgentFields cwd={shownCwd} onCwd={setLocalCwd} policy={localPolicy} onPolicy={setLocalPolicy} />}
                             {setup.id === 'agent37' && <InstancePicker credential={credential} choice={instance} onChoice={setInstance} />}
                             {setup.id === 'maritime' && <MaritimeAgentPicker credential={credential} choice={instance} onChoice={setInstance} />}
                             <SpacePicker
@@ -602,7 +653,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                 onChange={setSkippedSpaces}
                                 direct={setup.wantsHomeChannel || isGroupChat(org) ? null : withDirect}
                                 onDirectChange={setWithDirect}
-                                personal={personal}
+                                personal={isPersonal}
                             />
                             {progress && <div className="mt-3 text-xs text-muted-foreground">{progress}</div>}
                             {addError && <div role="alert" className="mt-3 text-xs text-destructive">{addError}</div>}
@@ -616,7 +667,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                             <Button type="button" size="sm" variant="ghost" onClick={back}>Cancel</Button>
                             <Button type="submit" size="sm" disabled={!ready || busy}>
                                 {busy && <Loader2 className="size-3.5 animate-spin" />}
-                                {addingBot ? 'Add bot' : 'Add agent'}
+                                {addingBot ? 'Add bot' : setup.local && localEngine.status && !localEngine.status.installed ? `Enable ${localEngine.label} and add` : 'Add agent'}
                             </Button>
                         </Footer>
                     </form>

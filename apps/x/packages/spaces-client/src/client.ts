@@ -29,6 +29,9 @@ import {
   type Approval,
   type Invocation,
   type InvocationOptionValues,
+  type InvocationUpdate,
+  type ApprovalRequest,
+  type ApprovalClose,
   type InvitePolicy,
   type Member,
   type MemberRole,
@@ -600,7 +603,46 @@ export class SpacesClient {
 
   /** The org roster: every member, people and agents, sorted by displayName (api.ts listOrgMembers; org-wide since 2026-09-29). */
   async listOrgMembers(): Promise<Member[]> {
-    return (await this.request('GET', routes.listOrgMembers.path, routes.listOrgMembers.response)).members;
+    return (await this.orgRoster()).members;
+  }
+
+  /** The roster with the agents connected now (`online`, local agents 2026-10-28; absent from older servers). */
+  async orgRoster(): Promise<{ members: Member[]; online?: string[] }> {
+    return this.request('GET', routes.listOrgMembers.path, routes.listOrgMembers.response);
+  }
+
+  // --- the connector's side (spec §8 Invoking agent members), on an agent's own key ---
+  // Used by the desktop's local agents (2026-10-28): the app is the connector
+  // for its owner's Claude Code or Codex.
+
+  /** This agent's open invocations, and approval decisions it has not confirmed applying. */
+  async listAgentInvocations(): Promise<{ invocations: Invocation[]; approvals: Approval[] }> {
+    return this.request('GET', routes.listAgentInvocations.path, routes.listAgentInvocations.response);
+  }
+
+  /** pending → working. Idempotent. */
+  async acknowledgeInvocation(invocationId: string): Promise<Invocation> {
+    return (await this.request('POST', `/v1/agent/invocations/${encodeURIComponent(invocationId)}/ack`, routes.acknowledgeInvocation.response)).invocation;
+  }
+
+  async updateInvocation(invocationId: string, update: InvocationUpdate): Promise<Invocation> {
+    return (await this.request('POST', `/v1/agent/invocations/${encodeURIComponent(invocationId)}/update`, routes.updateInvocation.response, update)).invocation;
+  }
+
+  async requestApproval(invocationId: string, request: ApprovalRequest): Promise<Approval> {
+    return (await this.request('POST', `/v1/agent/invocations/${encodeURIComponent(invocationId)}/approvals`, routes.requestApproval.response, request)).approval;
+  }
+
+  async applyApproval(approvalId: string): Promise<Approval> {
+    return (await this.request('POST', `/v1/agent/approvals/${encodeURIComponent(approvalId)}/applied`, routes.applyApproval.response)).approval;
+  }
+
+  async closeApproval(approvalId: string, state: ApprovalClose['state']): Promise<Approval> {
+    return (await this.request('POST', `/v1/agent/approvals/${encodeURIComponent(approvalId)}/close`, routes.closeApproval.response, { state })).approval;
+  }
+
+  async declareCapabilities(capabilities: ConnectorCapabilities): Promise<ConnectorCapabilities> {
+    return (await this.request('POST', routes.declareCapabilities.path, routes.declareCapabilities.response, capabilities)).capabilities;
   }
 
   async leaveSpace(spaceId: string): Promise<void> {

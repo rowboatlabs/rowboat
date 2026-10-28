@@ -9,9 +9,10 @@ import { AccessChoice } from '@/components/spaces/agent-access'
 import { ConnectAgent, CopyField } from '@/components/spaces/agent-setup'
 import { AgentTabs, ConfirmButton, DangerRow, DangerZone, Empty, FormCard, Row, Rows, ScreenHeader, Tag, type AgentTab } from '@/components/spaces/agent-tabs'
 import { refreshAgentCapabilities } from '@/hooks/use-space-invocations'
-import { refreshOrgRoster } from '@/hooks/use-space-members'
+import { refreshOrgRoster, useOrgRoster } from '@/hooks/use-space-members'
+import { LocalAgentSection } from '@/components/spaces/local-agent'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
-import { BUILT_IN_CONNECTION, LLM_PROVIDER_INFO, LLM_PROVIDERS_FOR_KIND, PLATFORMS, setupFor } from '@/lib/agent-kinds'
+import { BUILT_IN_CONNECTION, LLM_PROVIDER_INFO, LLM_PROVIDERS_FOR_KIND, LOCAL_CONNECTION, PLATFORMS, setupFor } from '@/lib/agent-kinds'
 import { toast } from '@/lib/toast'
 
 // One agent's page in the Agents dialog (2026-10-01; tabs 2026-10-27): a rail
@@ -35,6 +36,11 @@ import { toast } from '@/lib/toast'
 //
 // Who can use it (2026-10-27): Overview says whether it is a channel or a
 // personal agent, and its owner switches it there, either way, any time.
+//
+// A local agent (2026-10-28), its owner's own Claude Code or Codex that the
+// app runs: Overview says which computer runs it, and there its owner picks
+// the folder and approvals, or runs it on this one. No Setup tab: the app is
+// its connector. Always personal, so there is no switch.
 
 /** Stands in for the key in the setup steps: the real one was shown once, when it was made. */
 export const KEY_PLACEHOLDER = 'YOUR_AGENT_KEY'
@@ -76,6 +82,9 @@ export function AgentPage({ org, listing, isAdmin, onChanged }: {
     const [hookUrl, setHookUrl] = useState<string | null>(null)
     const [busy, setBusy] = useState(false)
     const hostingState = useHostingState(org.id, agent.id, Boolean(hosting) && ready && canManage)
+    const isLocal = agent.agentConnection === LOCAL_CONNECTION
+    const roster = useOrgRoster(org.id, [])
+    const ownerName = roster.find((m) => m.id === agent.ownerId)?.displayName ?? 'its owner'
 
     const newKey = async () => {
         if (busy) return
@@ -128,17 +137,26 @@ export function AgentPage({ org, listing, isAdmin, onChanged }: {
             content: (
                 <>
                     {hosting && <HostingOverview orgId={org.id} agent={agent} hosting={hosting} canManage={canManage} state={hostingState} onChanged={onChanged} />}
-                    {agent.ownerId && <AccessSection orgId={org.id} agent={agent} canSwitch={mine} onChanged={onChanged} />}
+                    {isLocal && <LocalAgentSection orgId={org.id} agent={agent} mine={mine} ownerName={ownerName} />}
+                    {agent.ownerId && !isLocal && <AccessSection orgId={org.id} agent={agent} canSwitch={mine} onChanged={onChanged} />}
+                    {isLocal && (
+                        <div className="flex flex-col gap-0.5">
+                            <h3 className="text-sm font-semibold text-foreground">Who can use it</h3>
+                            <p className="text-xs leading-snug text-muted-foreground">Personal: it runs on {mine ? 'your' : `${ownerName}’s`} computer, so only {mine ? 'you' : ownerName} can mention it or DM it. Everyone sees it and its replies.</p>
+                        </div>
+                    )}
                     <div className="flex flex-col gap-2">
                         <ScreenHeader
                             title="Keys"
                             note={
                                 hosting
                                     ? 'Each key lets whatever runs the agent act as it. Rowboat made the first one when it created the agent; it lives on the VM.'
-                                    : 'Each key lets whatever runs the agent act as it. Revoking one cuts that off at once.'
+                                    : isLocal
+                                      ? 'The computer that runs it holds its key. Running it on another computer makes a new key there and revokes this one.'
+                                      : 'Each key lets whatever runs the agent act as it. Revoking one cuts that off at once.'
                             }
                             action={
-                                mine && (
+                                mine && !isLocal && (
                                     <Button size="sm" variant={hosting ? 'outline' : 'default'} disabled={busy} onClick={() => void newKey()}>
                                         {busy ? <Loader2 className="size-3.5 animate-spin" /> : <KeyRound className="size-3.5" />} New key
                                     </Button>
@@ -172,7 +190,7 @@ export function AgentPage({ org, listing, isAdmin, onChanged }: {
         },
     ]
 
-    if (!hosting) {
+    if (!hosting && !isLocal) {
         tabs.push({
             id: 'setup',
             label: 'Setup',

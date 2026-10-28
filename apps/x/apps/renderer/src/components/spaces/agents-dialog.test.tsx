@@ -6,6 +6,7 @@ import type { OrgWithSpaces } from '@/hooks/use-spaces'
 vi.mock('@/lib/toast', () => ({ toast: vi.fn() }))
 
 import { AgentsDialog } from './agents-dialog'
+import { toast } from '@/lib/toast'
 
 afterEach(cleanup)
 
@@ -24,6 +25,8 @@ const HOOK_URL = 'https://rowboat.example/v1/hooks/cal/rbh_H00kH00kH00kH00kH00kH
 const ROTATED = 'rbk_R0tat3dR0tat3dR0tat3dR0tat3dR0tat3dR0tat3d'
 
 let roster: spaces.Member[]
+let provisionFails = false
+let claudeInstalled = true
 const joinedSpaces = new Set<string>()
 let listing: spaces.AgentListing[]
 // Create agent (2026-10-26): the kinds this org's Harbor creates; none = no Create button.
@@ -114,6 +117,16 @@ const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
         case 'spaces:listMembers': return { members: joinedSpaces.has(args.spaceId!) ? [{ id: 'new', displayName: 'Claude', kind: 'agent' }] : [] }
         case 'spaces:addMembers': joinedSpaces.add(args.spaceId!); return { memberships: [] }
         case 'spaces:setAgentOptionDefaults': return { defaults: (args as unknown as { defaults: Record<string, string | boolean> }).defaults }
+        // Local agents (2026-10-28): what this computer runs, and code mode's engines.
+        case 'spaces:localAgents': return { agents: [], defaultCwd: '/Users/me/code/rowboat' }
+        case 'codeMode:checkAgentStatus': return { claude: { installed: claudeInstalled, signedIn: true }, codex: { installed: false, signedIn: false } }
+        case 'dialog:openDirectory': return { path: '/Users/me/code/site' }
+        case 'codeMode:provisionEngine': return provisionFails ? { success: false, error: 'download failed' } : { success: true }
+        case 'spaces:addLocalAgent': {
+            const agent = { id: 'new', displayName: args.displayName, role: 'member', kind: 'agent', ownerId: 'me', agentKind: args.kind, agentConnection: 'local', personal: true } as spaces.Member
+            listing = [...listing, { agent, keys: [key('k9', 'new')] }]
+            return { agent }
+        }
     }
     throw new Error(`unexpected ${channel}`)
 })
@@ -153,12 +166,79 @@ describe('AgentsDialog', () => {
         expect(screen.queryByText(/only time its key is shown/)).toBeNull()
     })
 
+    it('adds your own Claude Code on this computer: always personal, a folder and approvals, nothing to connect', async () => {
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        await screen.findByText('Hermes')
+        fireEvent.click(screen.getByRole('button', { name: /Add agent/ }))
+        expect(screen.getByRole('radio', { name: 'On this computer' })).toHaveAttribute('aria-checked', 'true')
+        // Personal, with no switch: it runs on your computer.
+        expect(screen.queryByRole('radiogroup', { name: 'Who can use it' })).toBeNull()
+        expect(screen.getByText(/it runs on your computer, so only you can mention it/)).toBeInTheDocument()
+        expect(screen.getByLabelText('Agent name')).toHaveValue("Ramnique's Claude Code")
+        // Enabled and signed in here: the card says it is ready.
+        expect(await screen.findByText('Claude Code is ready on this computer')).toBeInTheDocument()
+        // Code mode's default project until you pick another folder.
+        expect(await screen.findByText('/Users/me/code/rowboat')).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Change…' }))
+        expect(await screen.findByText('/Users/me/code/site')).toBeInTheDocument()
+        // Approving everything is the default; the owner can ask to be asked.
+        expect(screen.getByRole('radio', { name: 'Approve everything' })).toHaveAttribute('aria-checked', 'true')
+        fireEvent.click(screen.getByRole('radio', { name: 'Ask before changes' }))
+
+        fireEvent.click(screen.getByRole('button', { name: 'Add agent' }))
+        await waitFor(() =>
+            expect(invoke).toHaveBeenCalledWith('spaces:addLocalAgent', { orgId: 'org-1', displayName: "Ramnique's Claude Code", kind: 'claude-code', cwd: '/Users/me/code/site', policy: 'auto-approve-reads' }),
+        )
+        // The app is its connector: no key to paste, straight to its page.
+        expect(invoke).not.toHaveBeenCalledWith('spaces:addAgent', expect.anything())
+        expect(await screen.findByRole('heading', { name: "Ramnique's Claude Code" })).toBeInTheDocument()
+        expect(toast).toHaveBeenCalledWith("Ramnique's Claude Code added", 'success', 2000)
+        expect(screen.queryByText(/only time its key is shown/)).toBeNull()
+    })
+
+    it('enables a local Codex during setup, then adds it', async () => {
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        await screen.findByText('Hermes')
+        fireEvent.click(screen.getByRole('button', { name: /Add agent/ }))
+        fireEvent.click(screen.getByRole('radio', { name: 'Codex' }))
+        // Not enabled here yet: the card says so and offers it, and Add enables it anyway. No trip to Settings.
+        const card = await screen.findByRole('status', { name: 'Codex on this computer' })
+        await within(card).findByText('Enable Codex for Rowboat')
+        expect(within(card).getByText(/installs the Codex engine and uses your own Codex login on this computer/)).toBeInTheDocument()
+        expect(within(card).getByRole('button', { name: 'Enable now' })).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Enable Codex and add' }))
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('codeMode:provisionEngine', { agent: 'codex' }))
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:addLocalAgent', expect.objectContaining({ kind: 'codex' })))
+        const order = invoke.mock.calls.map(([channel]) => channel)
+        expect(order.indexOf('codeMode:provisionEngine')).toBeLessThan(order.indexOf('spaces:addLocalAgent'))
+    })
+
+    it('says why when enabling the engine fails, and offers to try again', async () => {
+        // Claude Code here, so Codex's install in the test above stays its own.
+        claudeInstalled = false
+        provisionFails = true
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        await screen.findByText('Hermes')
+        fireEvent.click(screen.getByRole('button', { name: /Add agent/ }))
+        await screen.findByText('Enable Claude Code for Rowboat')
+        fireEvent.click(within(screen.getByRole('status', { name: 'Claude Code on this computer' })).getByRole('button', { name: 'Enable now' }))
+        const card = await screen.findByRole('alert', { name: 'Claude Code on this computer' })
+        expect(within(card).getByText('Couldn’t enable Claude Code')).toBeInTheDocument()
+        expect(within(card).getByText('download failed')).toBeInTheDocument()
+        expect(within(card).getByRole('button', { name: 'Try again' })).toBeInTheDocument()
+        expect(invoke).not.toHaveBeenCalledWith('spaces:addLocalAgent', expect.anything())
+        claudeInstalled = true
+        provisionFails = false
+    })
+
     it('adds a Hermes agent: pick how it connects and a name, then have Hermes connect itself', async () => {
         render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
         await screen.findByText('Hermes')
         fireEvent.click(screen.getByRole('button', { name: /Add agent/ }))
-        expect(setupsOffered()).toEqual(['Hermes', 'Replicas', 'Agent37', 'Maritime', 'Conductor', 'Custom'])
-        expect(screen.getByRole('radio', { name: 'Hermes' })).toHaveAttribute('aria-checked', 'true')
+        expect(setupsOffered()).toEqual(['On this computer', 'Hermes', 'Replicas', 'Agent37', 'Maritime', 'Conductor', 'Custom'])
+        // Your own coding agent on this computer comes first (2026-10-28).
+        expect(screen.getByRole('radio', { name: 'On this computer' })).toHaveAttribute('aria-checked', 'true')
+        fireEvent.click(screen.getByRole('radio', { name: 'Hermes' }))
         // The name suggests the kind's own.
         expect(screen.getByLabelText('Agent name')).toHaveValue('Hermes')
         fireEvent.click(screen.getByRole('button', { name: 'Add agent' }))

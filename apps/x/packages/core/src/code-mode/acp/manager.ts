@@ -1,5 +1,6 @@
 import * as os from 'os';
 import type { ApprovalPolicy, CodeRunEvent, CodingAgent, PermissionAsk, PermissionDecision, RunPromptResult } from './types.js';
+import type { McpServer } from '@agentclientprotocol/sdk';
 import { AcpClient, type CodeAgentModelOptions } from './client.js';
 import { PermissionBroker } from './permission-broker.js';
 import { readStoredSession, writeStoredSession, clearStoredSession } from './session-store.js';
@@ -21,6 +22,8 @@ export interface RunPromptArgs {
     onEvent: (event: CodeRunEvent) => void;
     /** Aborts the turn on stop; the manager cancels then force-kills the adapter. */
     signal?: AbortSignal;
+    /** MCP servers the session gets; fixed for a run's connection (a local Spaces agent's org tools, 2026-10-28). */
+    mcpServers?: McpServer[];
 }
 
 interface ActiveRun {
@@ -80,7 +83,7 @@ export class CodeModeManager {
     }
 
     async runPrompt(args: RunPromptArgs): Promise<RunPromptResult> {
-        const { runId, agent, cwd, prompt, policy, model, effort, ask, onEvent, signal } = args;
+        const { runId, agent, cwd, prompt, policy, model, effort, ask, onEvent, signal, mcpServers } = args;
 
         const broker = new PermissionBroker({
             policy,
@@ -88,7 +91,7 @@ export class CodeModeManager {
             onResolved: (a, decision, auto) => onEvent({ type: 'permission', ask: a, decision, auto }),
         });
 
-        const run = await this.ensureRun(runId, agent, cwd, broker, onEvent);
+        const run = await this.ensureRun(runId, agent, cwd, broker, onEvent, mcpServers);
         // Re-apply the session's model + effort each turn (idempotent): a warm
         // connection keeps the last selection, but a cold session/load resets it,
         // and the user may have changed it from the header since the last turn.
@@ -201,6 +204,7 @@ export class CodeModeManager {
         cwd: string,
         broker: PermissionBroker,
         onEvent: (event: CodeRunEvent) => void,
+        mcpServers?: McpServer[],
     ): Promise<ActiveRun> {
         const existing = this.runs.get(runId);
         if (existing && existing.agent === agent && existing.cwd === cwd) {
@@ -219,6 +223,7 @@ export class CodeModeManager {
             cwd,
             broker,
             onEvent: () => {},
+            ...(mcpServers ? { mcpServers } : {}),
         });
         // Dispose the client if startup fails (e.g. the startup-timeout fires) so the
         // spawned adapter process doesn't leak.

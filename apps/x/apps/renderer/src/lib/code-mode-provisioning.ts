@@ -21,7 +21,7 @@ let provChannelHooked = false
 
 function notifyProv() { provListeners.forEach((l) => l()) }
 
-export function startProvisioning(agent: 'claude' | 'codex', onDone: () => void | Promise<void>): void {
+export function startProvisioning(agent: 'claude' | 'codex', onDone: () => void | Promise<void>, onError?: (message: string) => void): void {
   if (provStore[agent] && !provStore[agent]!.error) return // already in flight
   provStore[agent] = { pct: null }
   notifyProv()
@@ -47,9 +47,13 @@ export function startProvisioning(agent: 'claude' | 'codex', onDone: () => void 
         void onDone()
       } else {
         provStore[agent] = { pct: null, error: res.error ?? 'Failed to enable' }
+        onError?.(provStore[agent]!.error!)
       }
     })
-    .catch((e) => { provStore[agent] = { pct: null, error: e instanceof Error ? e.message : 'Failed to enable' } })
+    .catch((e) => {
+      provStore[agent] = { pct: null, error: e instanceof Error ? e.message : 'Failed to enable' }
+      onError?.(provStore[agent]!.error!)
+    })
     .finally(notifyProv)
 }
 

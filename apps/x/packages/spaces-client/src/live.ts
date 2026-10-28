@@ -341,7 +341,14 @@ export class SpacesLive {
       // subscription), one of our own connections moved a read mark
       // (read_mark), or the org decided a message deserves our attention (notify).
       // org_changed (2026-10-07): the org's shape changed — a group chat became a workspace.
-      if (frame.kind === 'profile_updated' || frame.kind === 'space_added' || frame.kind === 'space_removed' || frame.kind === 'read_mark' || frame.kind === 'notify' || frame.kind === 'org_changed') {
+      // agent_presence (2026-10-28): an agent's connector came or went. And on
+      // an agent's own key (a local agent, 2026-10-28), its invocations, a stop,
+      // and its approvals' decisions.
+      if (
+        frame.kind === 'profile_updated' || frame.kind === 'space_added' || frame.kind === 'space_removed' || frame.kind === 'read_mark' ||
+        frame.kind === 'notify' || frame.kind === 'org_changed' || frame.kind === 'agent_presence' ||
+        frame.kind === 'invocation' || frame.kind === 'invocation_stop' || frame.kind === 'approval_decided'
+      ) {
         for (const h of this.memberHandlers) h(frame);
         return;
       }

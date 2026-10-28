@@ -4205,7 +4205,8 @@ export const ipcSchemas = {
   // org (GET /v1/members; the whole org since 2026-09-29).
   'spaces:listOrgMembers': {
     req: z.object({ orgId: z.string() }),
-    res: z.object({ members: z.array(z.custom<SpacesTypes.Member>()) }),
+    // `online`: the agents connected now (local agents, 2026-10-28); absent from older servers.
+    res: z.object({ members: z.array(z.custom<SpacesTypes.Member>()), online: z.array(z.string()).optional() }),
   },
   // An invite to the org (2026-10-19): it lists spaces the caller is in, or
   // none, and accepting also joins the org's default spaces.
@@ -4734,6 +4735,42 @@ export const ipcSchemas = {
   },
   'spaces:events': {
     req: z.custom<SpacesBusEvent>(),
+    res: z.null(),
+  },
+  // Local agents (2026-10-28): the owner's own Claude Code or Codex, run by
+  // this computer as a Spaces agent (core/spaces/local-agents.ts). The key
+  // never leaves main: adding one creates the member and keeps its key here.
+  'spaces:localAgents': {
+    req: z.object({}),
+    // `defaultCwd`: where a new one works unless its owner picks a folder (code mode's default project, else home).
+    res: z.object({ agents: z.array(z.custom<SpacesTypes.SpacesLocalAgent>()), defaultCwd: z.string() }),
+  },
+  'spaces:addLocalAgent': {
+    req: z.object({
+      orgId: z.string(),
+      displayName: z.string(),
+      kind: z.enum(['claude-code', 'codex']),
+      cwd: z.string(),
+      policy: z.enum(['ask', 'auto-approve-reads', 'yolo']),
+    }),
+    res: z.object({ agent: z.custom<SpacesTypes.Member>() }),
+  },
+  // Run an existing local agent here: a new key on this computer, every other one revoked.
+  'spaces:connectLocalAgent': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), cwd: z.string(), policy: z.enum(['ask', 'auto-approve-reads', 'yolo']) }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  'spaces:updateLocalAgent': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), cwd: z.string().optional(), policy: z.enum(['ask', 'auto-approve-reads', 'yolo']).optional() }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  'spaces:forgetLocalAgent': {
+    req: z.object({ orgId: z.string(), agentId: z.string() }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  // Pushed on every change in what this computer runs, or how its connections are.
+  'spaces:localAgentsChanged': {
+    req: z.object({ agents: z.array(z.custom<SpacesTypes.SpacesLocalAgent>()) }),
     res: z.null(),
   },
 } as const;

@@ -8,7 +8,7 @@ import { AccessBadge } from '@/components/spaces/agent-access'
 import { AgentsDialog, type AgentsDialogStart } from '@/components/spaces/agents-dialog'
 import { MemberAvatar } from '@/components/spaces/atoms'
 import { RemoveFromOrgDialog } from '@/components/spaces/member-admin'
-import { refreshOrgRoster, useOrgRoster, useSpaceRosters } from '@/hooks/use-space-members'
+import { isAgentOffline, refreshOrgRoster, useAgentsOnline, useOrgRoster, useSpaceRosters } from '@/hooks/use-space-members'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { BUILT_IN_CONNECTION, agentLabel, kindInfo } from '@/lib/agent-kinds'
 import { initials } from '@/lib/spaces-presentation'
@@ -219,6 +219,8 @@ function AgentCard({ orgId, agent, owner, spaceNames, isAdmin, onOpenSettings, o
     // The owner's settings, or an admin's off switch (revoking keys); Ro has no keys.
     const canOpen = !builtIn && (yours || isAdmin)
     const canRemove = isAdmin && !builtIn
+    // A local agent whose owner's computer isn't running it (2026-10-28).
+    const offline = isAgentOffline(agent, useAgentsOnline(orgId))
     const [renaming, setRenamingState] = useState(false)
     const renamingRef = useRef(false)
     const setRenaming = (on: boolean) => {
@@ -322,6 +324,7 @@ function AgentCard({ orgId, agent, owner, spaceNames, isAdmin, onOpenSettings, o
                 )}
                 <div className="mt-0.5 truncate text-xs text-[var(--rowboat-ink-secondary)]">
                     {agentLabel(agent.agentKind, agent.agentConnection)}
+                    {offline && <span className="text-muted-foreground"> · Offline</span>}
                 </div>
             </div>
 

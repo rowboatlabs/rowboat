@@ -283,6 +283,25 @@ export interface SpaceAgentActivity {
   turnId?: string;
 }
 
+/**
+ * A local agent this computer runs (Harbor spec §4 Agent members, 2026-10-28):
+ * its owner's Claude Code or Codex, as a Spaces agent. Its key, folder and
+ * approval policy stay on this computer (core/spaces/local-agents.ts); this
+ * is what the app shows, without the key.
+ */
+export interface SpacesLocalAgent {
+  orgId: string;
+  agentId: string;
+  kind: 'claude-code' | 'codex';
+  /** Where it works. */
+  cwd: string;
+  /** How it answers its own tool calls: code mode's policies. */
+  policy: 'ask' | 'auto-approve-reads' | 'yolo';
+  /** This computer's connection for it. */
+  status: 'connecting' | 'online' | 'offline' | 'error';
+  error?: string;
+}
+
 // What rides 'spaces:events': the org's live frames (per-space subscription
 // + member-addressed), and the agent-activity feed — the WHOLE list for the
 // org on every change, replaced wholesale by the renderer (queue-changed's

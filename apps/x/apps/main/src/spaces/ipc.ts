@@ -14,6 +14,7 @@ import { resolveResponseSession, startSpaceResponseIndex } from '@x/core/dist/sp
 import { SpaceSubscriptions, harborChannelHandlers, type HarborChannel } from '@x/spaces-client';
 import { createAgent37Instance, listAgent37Instances } from '@x/core/dist/spaces/agent37.js';
 import { listMaritimeAgents } from '@x/core/dist/spaces/maritime.js';
+import * as localAgents from '@x/core/dist/spaces/local-agents.js';
 import { fetchLinkPreview } from './link-preview.js';
 
 type IPCChannels = ipc.IPCChannels;
@@ -31,7 +32,8 @@ type SpacesHostChannel =
   | 'spaces:removeOrg' | 'spaces:agent37Instances' | 'spaces:agent37CreateInstance' | 'spaces:maritimeAgents' | 'spaces:uploadBlob'
   | 'spaces:saveBlob' | 'spaces:saveAsset' | 'spaces:saveImageUrl' | 'spaces:linkPreview' | 'spaces:invokeRowboat'
   | 'spaces:topicSession' | 'spaces:responseSession' | 'spaces:stopRowboat' | 'spaces:schedule'
-  | 'spaces:listScheduled' | 'spaces:cancelScheduled' | 'spaces:bounceLive';
+  | 'spaces:listScheduled' | 'spaces:cancelScheduled' | 'spaces:bounceLive'
+  | 'spaces:localAgents' | 'spaces:addLocalAgent' | 'spaces:connectLocalAgent' | 'spaces:updateLocalAgent' | 'spaces:forgetLocalAgent';
 
 type SpacesHandlers = { [K in HarborChannel | SpacesHostChannel]: InvokeHandler<K> };
 
@@ -69,6 +71,14 @@ onSpaceAgentActivity((event) => broadcastSpacesEvent(event));
 void startSpaceAgentActivity().catch((err) => console.error('[spaces] agent activity feed failed to start:', err));
 // The org's `notify` frames become OS notifications (unread arc, 2026-09-10).
 startSpaceNotifications();
+// Local agents (2026-10-28): this computer answers for its owner's Claude Code
+// or Codex agents while the app runs, window or not; windows hear every change.
+localAgents.onLocalAgentsChanged((agents) => {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed() && win.webContents) win.webContents.send('spaces:localAgentsChanged', { agents });
+  }
+});
+localAgents.startLocalAgents();
 // The per-response index ("which run posted this reply"): same bus, its own
 // consumer — see core/spaces/response-index.
 void startSpaceResponseIndex().catch((err) => console.error('[spaces] response index failed to start:', err));
@@ -252,6 +262,21 @@ export const spacesIpcHandlers: SpacesHandlers = {
   // mode this channel forwards to the server, which owns the sockets.
   'spaces:bounceLive': async () => {
     orgs.bounceAllLive();
+    return { success: true };
+  },
+
+  'spaces:localAgents': async () => ({ agents: localAgents.listLocalAgents(), defaultCwd: await localAgents.defaultLocalAgentFolder() }),
+  'spaces:addLocalAgent': async (_event, args) => localAgents.addLocalAgent(args),
+  'spaces:connectLocalAgent': async (_event, args) => {
+    await localAgents.connectLocalAgent(args);
+    return { success: true };
+  },
+  'spaces:updateLocalAgent': async (_event, args) => {
+    localAgents.updateLocalAgent(args);
+    return { success: true };
+  },
+  'spaces:forgetLocalAgent': async (_event, args) => {
+    localAgents.forgetLocalAgent(args);
     return { success: true };
   },
 };

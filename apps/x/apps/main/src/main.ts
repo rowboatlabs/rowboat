@@ -24,6 +24,7 @@ import {
   stopWorkspaceWatcher
 } from "./ipc.js";
 import { disposeAllTerminals } from "@x/core/dist/terminal/terminal.js";
+import { stopLocalAgents } from "@x/core/dist/spaces/local-agents.js";
 import * as spaceBlobCache from "./spaces/blob-cache.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname } from "node:path";
@@ -882,6 +883,8 @@ app.on("before-quit", () => {
   stopRunsWatcher();
   stopServicesWatcher();
 stopSkillsWatcher();
+  // Local agents stop answering: their sockets close, so Harbor shows them offline.
+  stopLocalAgents();
   // Tear down any live ACP coding-agent adapter processes so they don't outlive the app.
   try {
     container.resolve<CodeModeManager>('codeModeManager').disposeAll();
