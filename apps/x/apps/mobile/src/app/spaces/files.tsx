@@ -9,6 +9,7 @@ import { useSpacesAccount } from '@/lib/spaces/account';
 import { SpacesClient } from '@/lib/spaces/client';
 import { SpacesLive } from '@x/spaces-client';
 import { friendlyError } from '@/lib/spaces/errors';
+import { showFileActions } from '@/lib/spaces/file-actions';
 import { useColors } from '@/theme/colors';
 
 // A space's files (S3, read-only): entries grouped into a collapsible tree on
@@ -144,6 +145,15 @@ export default function SpaceFilesScreen() {
       <View key={`${node.kind}:${node.path}`}>
         <Pressable
           onPress={() => (node.kind === 'dir' ? toggle(node.path) : open(node))}
+          // Long-press a file: send it in the chat, copy or share its link (2026-10-28).
+          onLongPress={
+            node.kind === 'dir' || !node.entry
+              ? undefined
+              : () => {
+                  if (process.env.EXPO_OS === 'ios') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  showFileActions({ client, org, space, assetId: node.entry!.id, name: node.name, spaceName: title });
+                }
+          }
           style={({ pressed }) => ({
             flexDirection: 'row', alignItems: 'center', gap: 8,
             paddingVertical: 10, paddingRight: 16, paddingLeft: 16 + depth * 18,

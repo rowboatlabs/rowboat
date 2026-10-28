@@ -1,7 +1,8 @@
 import { Stack, useLocalSearchParams, useNavigation } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Platform, Pressable, ScrollView, Text, TextInput, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Alert, Image, Platform, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -9,6 +10,7 @@ import { ChatMarkdown } from '@/components/markdown';
 import { useSpacesAccount } from '@/lib/spaces/account';
 import { SpacesClient } from '@/lib/spaces/client';
 import { friendlyError } from '@/lib/spaces/errors';
+import { showFileActions } from '@/lib/spaces/file-actions';
 import { documentToRenderable } from '@/lib/note-markdown';
 import { SpacesLive } from '@x/spaces-client';
 import { useColors } from '@/theme/colors';
@@ -157,9 +159,14 @@ export default function SpaceFileScreen() {
             <ActivityIndicator size="small" />
           ) : editing ? (
             headerButton('Save', () => void save(), true)
-          ) : content !== null ? (
-            headerButton('Edit', () => setDraft(content))
-          ) : null,
+          ) : (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 18 }}>
+              <Pressable hitSlop={10} accessibilityLabel="Share file" onPress={() => showFileActions({ client, org, space, assetId, name })}>
+                <ExpoImage source="sf:square.and.arrow.up" style={{ width: 19, height: 22 }} contentFit="contain" tintColor={colors.label} />
+              </Pressable>
+              {content !== null ? headerButton('Edit', () => setDraft(content)) : null}
+            </View>
+          ),
       }}
     />
   );
