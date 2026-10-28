@@ -23,22 +23,24 @@ export default function SpacesTabsLayout() {
     >
       <NativeTabs.Trigger name="index">
         <NativeTabs.Trigger.Label>Home</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon sf={{ default: 'house', selected: 'house.fill' }} />
+        <NativeTabs.Trigger.Icon sf={{ default: 'house', selected: 'house.fill' }} md="home" />
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="dms">
         <NativeTabs.Trigger.Label>DMs</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon sf={{ default: 'paperplane', selected: 'paperplane.fill' }} />
+        <NativeTabs.Trigger.Icon sf={{ default: 'paperplane', selected: 'paperplane.fill' }} md="send" />
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="activity">
         <NativeTabs.Trigger.Label>Activity</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon sf={{ default: 'bell', selected: 'bell.fill' }} />
+        <NativeTabs.Trigger.Icon sf={{ default: 'bell', selected: 'bell.fill' }} md="notifications" />
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="more">
         <NativeTabs.Trigger.Label>More</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon sf="ellipsis" />
+        <NativeTabs.Trigger.Icon sf="ellipsis" md="more_horiz" />
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="jump" role="search">
         <NativeTabs.Trigger.Label>Search</NativeTabs.Trigger.Label>
+        {/* iOS draws the search role's own icon; Android needs one (2026-10-28). */}
+        {process.env.EXPO_OS === 'android' ? <NativeTabs.Trigger.Icon md="search" /> : null}
       </NativeTabs.Trigger>
     </NativeTabs>
   );

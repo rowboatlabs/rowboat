@@ -1,7 +1,7 @@
 import { Stack, router } from 'expo-router';
 import { DrawerActions } from 'expo-router/react-navigation';
 import { Pressable, useColorScheme } from 'react-native';
-import { Image } from 'expo-image';
+import { Image } from '@/components/sf-image';
 
 // Spaces is a stack inside the drawer: the org/space list → a space's chat
 // pushes with a native back button (same shape as the notes section).

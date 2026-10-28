@@ -1,6 +1,6 @@
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { router } from 'expo-router';
-import { Image } from 'expo-image';
+import { Image } from '@/components/sf-image';
 import { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,

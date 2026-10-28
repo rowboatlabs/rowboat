@@ -1,5 +1,5 @@
 import { Redirect, router, useLocalSearchParams, useNavigation } from 'expo-router';
-import { Image } from 'expo-image';
+import { Image } from '@/components/sf-image';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {

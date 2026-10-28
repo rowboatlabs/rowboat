@@ -17,9 +17,10 @@ const LightTheme = {
 };
 import Drawer from 'expo-router/drawer';
 import * as SplashScreen from 'expo-splash-screen';
+import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef } from 'react';
 import { Pressable, useColorScheme, useWindowDimensions } from 'react-native';
-import { Image } from 'expo-image';
+import { Image } from '@/components/sf-image';
 
 import { GlassHamburger } from '@/components/glass-hamburger';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -55,6 +56,9 @@ export default function RootLayout() {
           <SpacesAccountProvider>
           <PushRegistrar />
           <PushNavigator />
+          {/* Android leaves light status-bar icons on our light pages; follow the
+              app's scheme (2026-10-28). iOS already adapts on its own. */}
+          {process.env.EXPO_OS === 'android' ? <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} /> : null}
           <Drawer
             drawerContent={(props) => <DrawerContent {...props} />}
             screenOptions={{

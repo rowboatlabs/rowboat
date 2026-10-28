@@ -1,5 +1,5 @@
 import { BlurView } from 'expo-blur';
-import { Image } from 'expo-image';
+import { Image } from '@/components/sf-image';
 import { Pressable, useColorScheme } from 'react-native';
 
 // The one hamburger: glass circle, identical on every screen that opens the
