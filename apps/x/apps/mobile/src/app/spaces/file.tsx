@@ -10,7 +10,7 @@ import { ChatMarkdown } from '@/components/markdown';
 import { useSpacesAccount } from '@/lib/spaces/account';
 import { SpacesClient } from '@/lib/spaces/client';
 import { friendlyError } from '@/lib/spaces/errors';
-import { showFileActions } from '@/lib/spaces/file-actions';
+import { FileActionSheet } from '@/components/file-action-sheet';
 import { documentToRenderable } from '@/lib/note-markdown';
 import { SpacesLive } from '@x/spaces-client';
 import { useColors } from '@/theme/colors';
@@ -48,6 +48,7 @@ export default function SpaceFileScreen() {
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState<string | null>(null); // non-null while editing
   const [saving, setSaving] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const editing = draft !== null;
   const editingRef = useRef(false);
   editingRef.current = editing;
@@ -161,7 +162,7 @@ export default function SpaceFileScreen() {
             headerButton('Save', () => void save(), true)
           ) : (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 18 }}>
-              <Pressable hitSlop={10} accessibilityLabel="Share file" onPress={() => showFileActions({ client, org, space, assetId, name })}>
+              <Pressable hitSlop={10} accessibilityLabel="Share file" onPress={() => setSheetOpen(true)}>
                 <ExpoImage source="sf:square.and.arrow.up" style={{ width: 19, height: 22 }} contentFit="contain" tintColor={colors.label} />
               </Pressable>
               {content !== null ? headerButton('Edit', () => setDraft(content)) : null}
@@ -210,6 +211,7 @@ export default function SpaceFileScreen() {
           </Text>
         )
       ) : null}
+      <FileActionSheet file={sheetOpen ? { assetId, name, path } : null} client={client} org={org} space={space} onClose={() => setSheetOpen(false)} />
     </ScrollView>
   );
 }

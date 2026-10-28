@@ -9,7 +9,7 @@ import { useSpacesAccount } from '@/lib/spaces/account';
 import { SpacesClient } from '@/lib/spaces/client';
 import { SpacesLive } from '@x/spaces-client';
 import { friendlyError } from '@/lib/spaces/errors';
-import { showFileActions } from '@/lib/spaces/file-actions';
+import { FileActionSheet, type SheetFile } from '@/components/file-action-sheet';
 import { useColors } from '@/theme/colors';
 
 // A space's files (S3, read-only): entries grouped into a collapsible tree on
@@ -124,6 +124,7 @@ export default function SpaceFilesScreen() {
   }, [org, space]);
 
   const tree = useMemo(() => buildTree(entries ?? []), [entries]);
+  const [sheetFile, setSheetFile] = useState<SheetFile | null>(null);
 
   const open = (node: Node) => {
     if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
@@ -151,7 +152,7 @@ export default function SpaceFilesScreen() {
               ? undefined
               : () => {
                   if (process.env.EXPO_OS === 'ios') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                  showFileActions({ client, org, space, assetId: node.entry!.id, name: node.name, spaceName: title });
+                  setSheetFile({ assetId: node.entry!.id, name: node.name, path: node.path });
                 }
           }
           style={({ pressed }) => ({
@@ -204,6 +205,7 @@ export default function SpaceFilesScreen() {
       {entries?.length === 0 ? (
         <Text style={{ textAlign: 'center', marginTop: 48, fontSize: 14, color: colors.tertiaryLabel }}>No files yet.</Text>
       ) : null}
+      <FileActionSheet file={sheetFile} client={client} org={org} space={space} spaceName={title} onClose={() => setSheetFile(null)} />
     </ScrollView>
   );
 }
