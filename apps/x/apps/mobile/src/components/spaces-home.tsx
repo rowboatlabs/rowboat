@@ -2,7 +2,7 @@ import { router, useFocusEffect } from 'expo-router';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { ActionSheetIOS, ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
+import { ActionSheetIOS, ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, View, TextInput, LayoutAnimation } from 'react-native';
 
 import { useSpacesAccount, type SpacesOrg } from '@/lib/spaces/account';
 import { SpacesClient } from '@/lib/spaces/client';
@@ -10,11 +10,13 @@ import type { Member, Space, UnreadSnapshot } from '@rowboat/spaces-protocol';
 import { Avatar, AuthedImage } from '@/components/avatar';
 import { StatusBanner } from '@/components/status-banner';
 import { friendlyError } from '@/lib/spaces/errors';
+import { isOthersPersonalAgent, memberLabel } from '@/lib/spaces/profiles';
+import { useBlockedIds } from '@/lib/spaces/moderation';
 import { useMyAvatar } from '@/lib/spaces/my-avatar';
+import { useParentHeader } from '@/lib/use-parent-header';
 import { pickProfileImage } from '@/lib/spaces/profile-image';
 import { loadValue, peekValue, saveValue } from '@/lib/spaces/cache';
 import { isNetworkError } from '@/lib/spaces/errors';
-import { isOthersPersonalAgent } from '@/lib/spaces/profiles';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BottomSheet } from '@/components/bottom-sheet';
 import { useColors } from '@/theme/colors';
@@ -23,7 +25,9 @@ import { type } from '@/theme/type';
 // Spaces home: signed out → one sign-in button; signed in → the user's orgs as
 // inset-grouped cards (iOS Settings shape): org identity header, hairline-
 // separated space rows, account footer.
-export default function SpacesScreen() {
+export type SpacesTabKey = 'home' | 'dms' | 'more' | 'search';
+
+export function SpacesTab({ tab }: { tab: SpacesTabKey }) {
   const account = useSpacesAccount();
   const colors = useColors();
 
@@ -35,7 +39,7 @@ export default function SpacesScreen() {
     );
   }
   if (account.status === 'signedOut') return <SignIn />;
-  return <OrgList />;
+  return <OrgList tab={tab} />;
 }
 
 function SignIn() {
@@ -131,7 +135,7 @@ function FeatureRow({ icon, title, detail }: { icon: string; title: string; deta
   );
 }
 
-function OrgList() {
+function OrgList({ tab }: { tab: SpacesTabKey }) {
   const account = useSpacesAccount();
   const colors = useColors();
   const [refreshing, setRefreshing] = useState(false);
@@ -154,49 +158,98 @@ function OrgList() {
   const myAvatar = useMyAvatar(current);
 
 
-  return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: colors.groupedBackground }}
-      contentInsetAdjustmentBehavior="automatic"
-      contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 40, gap: 24 }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} />}
-    >
-      <StatusBanner error={account.orgsError} onRetry={() => void refresh()} />
-      {account.orgs === null && !account.orgsError ? <ActivityIndicator style={{ marginTop: 48 }} /> : null}
-      {current ? <OrgCard key={current.id} org={current} onSwitch={() => setSwitching(true)} /> : null}
-      {account.orgs?.length === 0 && !account.orgsError ? (
-        <View style={{ alignItems: 'center', marginTop: 56, gap: 10 }}>
-          <View style={{ width: 72, height: 72, borderRadius: 22, borderCurve: 'continuous', alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background }}>
-            <Image source="sf:person.2" style={{ width: 32, height: 32 }} tintColor={colors.secondaryLabel} />
-          </View>
-          <Text style={{ ...type.title, color: colors.label }}>No orgs yet</Text>
-          <Text style={{ ...type.body, lineHeight: 22, textAlign: 'center', color: colors.secondaryLabel, paddingHorizontal: 24 }}>
-            Ask a teammate for an invite link to join their space.
-          </Text>
-          <Pressable
-            onPress={() => router.push('/spaces/join')}
-            style={({ pressed }) => ({ marginTop: 8, paddingHorizontal: 22, paddingVertical: 13, borderRadius: 14, borderCurve: 'continuous', backgroundColor: colors.label, opacity: pressed ? 0.7 : 1 })}
-          >
-            <Text style={{ ...type.bodyStrong, color: colors.background }}>Join with a link</Text>
-          </Pressable>
-        </View>
-      ) : null}
+  // One screen per tab of the Spaces bar ((tabs)/_layout.tsx): Home, DMs,
+  // More, and the search tab — a jump list over spaces and people.
+  const [query, setQuery] = useState('');
+  const TITLES: Record<SpacesTabKey, string> = { home: 'Spaces', dms: 'Direct messages', more: 'More', search: 'Search' };
+  useParentHeader(TITLES[tab]);
 
-      {/* You + the one way in */}
-      <Card>
-        {who ? (
-          <CardRow first onPress={() => router.push('/spaces/account')}>
-            <Avatar id={current?.memberId ?? who} name={who} size={28} url={myAvatar} />
-            <Text numberOfLines={1} style={{ flex: 1, ...type.body, color: colors.label }}>{who}</Text>
-            <Chevron />
-          </CardRow>
-        ) : null}
-        <CardRow first={!who} onPress={() => router.push('/spaces/join')}>
-          <Glyph icon="sf:link" />
-          <Text style={{ flex: 1, ...type.body, color: colors.label }}>Join with an invite link</Text>
-          <Chevron />
-        </CardRow>
-      </Card>
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.groupedBackground }}>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentInsetAdjustmentBehavior="automatic"
+          keyboardDismissMode="on-drag"
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 32, gap: 24 }}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} />}
+        >
+          <StatusBanner error={account.orgsError} onRetry={() => void refresh()} />
+          {account.orgs === null && !account.orgsError ? <ActivityIndicator style={{ marginTop: 48 }} /> : null}
+
+          {tab === 'search' ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, borderRadius: 14, borderCurve: 'continuous', backgroundColor: colors.card }}>
+              <Image source="sf:magnifyingglass" style={{ width: 16, height: 16 }} tintColor={colors.tertiaryLabel} />
+              <TextInput
+                autoFocus
+                value={query}
+                onChangeText={setQuery}
+                placeholder="Jump to a space or person"
+                placeholderTextColor={colors.tertiaryLabel}
+                autoCorrect={false}
+                clearButtonMode="while-editing"
+                style={{ flex: 1, paddingVertical: 12, ...type.body, color: colors.label }}
+              />
+            </View>
+          ) : null}
+
+          {tab === 'more' ? (
+            <>
+              <Card>
+                {who ? (
+                  <CardRow first onPress={() => router.push('/spaces/account')}>
+                    <Avatar id={current?.memberId ?? who} name={who} size={28} url={myAvatar} />
+                    <Text numberOfLines={1} style={{ flex: 1, ...type.body, color: colors.label }}>{who}</Text>
+                    <Chevron />
+                  </CardRow>
+                ) : null}
+                <CardRow first={!who} onPress={() => router.push('/spaces/settings')}>
+                  <Glyph icon="sf:gearshape" />
+                  <Text style={{ flex: 1, ...type.body, color: colors.label }}>Settings</Text>
+                  <Chevron />
+                </CardRow>
+              </Card>
+              <Card>
+                <CardRow first onPress={() => router.push('/spaces/join')}>
+                  <Glyph icon="sf:link" />
+                  <Text style={{ flex: 1, ...type.body, color: colors.label }}>Join with an invite link</Text>
+                  <Chevron />
+                </CardRow>
+                <CardRow onPress={() => router.push('/pairing')}>
+                  <Glyph icon="sf:laptopcomputer" />
+                  <Text style={{ flex: 1, ...type.body, color: colors.label }}>Connect your Mac</Text>
+                  <Chevron />
+                </CardRow>
+              </Card>
+            </>
+          ) : current ? (
+            <OrgCard
+              key={current.id}
+              org={current}
+              onSwitch={() => setSwitching(true)}
+              mode={tab === 'dms' ? 'dms' : tab === 'search' ? 'search' : 'home'}
+              query={tab === 'search' ? query : ''}
+            />
+          ) : null}
+
+          {account.orgs?.length === 0 && !account.orgsError && tab !== 'more' ? (
+            <View style={{ alignItems: 'center', marginTop: 56, gap: 10 }}>
+              <View style={{ width: 72, height: 72, borderRadius: 22, borderCurve: 'continuous', alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background }}>
+                <Image source="sf:person.2" style={{ width: 32, height: 32 }} tintColor={colors.secondaryLabel} />
+              </View>
+              <Text style={{ ...type.title, color: colors.label }}>No orgs yet</Text>
+              <Text style={{ ...type.body, lineHeight: 22, textAlign: 'center', color: colors.secondaryLabel, paddingHorizontal: 24 }}>
+                Ask a teammate for an invite link to join their space.
+              </Text>
+              <Pressable
+                onPress={() => router.push('/spaces/join')}
+                style={({ pressed }) => ({ marginTop: 8, paddingHorizontal: 22, paddingVertical: 13, borderRadius: 14, borderCurve: 'continuous', backgroundColor: colors.label, opacity: pressed ? 0.7 : 1 })}
+              >
+                <Text style={{ ...type.bodyStrong, color: colors.background }}>Join with a link</Text>
+              </Pressable>
+            </View>
+          ) : null}
+        </ScrollView>
       <OrgSwitcher
         visible={switching}
         orgs={account.orgs ?? []}
@@ -208,7 +261,7 @@ function OrgList() {
         }}
         onClose={() => setSwitching(false)}
       />
-    </ScrollView>
+    </View>
   );
 }
 
@@ -264,7 +317,7 @@ function orgTint(id: string, dark: boolean): string {
   return `hsl(${ORG_HUES[h % ORG_HUES.length]}, 50%, ${dark ? 34 : 40}%)`;
 }
 
-function OrgCard({ org, onSwitch }: { org: SpacesOrg; onSwitch: () => void }) {
+function OrgCard({ org, onSwitch, mode = 'home', query = '' }: { org: SpacesOrg; onSwitch: () => void; mode?: 'home' | 'dms' | 'search'; query?: string }) {
   const account = useSpacesAccount();
   const colors = useColors();
   const dark = colors.isDark;
@@ -347,16 +400,46 @@ function OrgCard({ org, onSwitch }: { org: SpacesOrg; onSwitch: () => void }) {
   );
 
   const [openingDm, setOpeningDm] = useState<string | null>(null);
+  const blockedIds = useBlockedIds(org.address);
+  const blockedKey = [...blockedIds].join(',');
+
+  // Deleted accounts you share a DM with that has messages in it. A DM's
+  // stream also holds join events, so ask for its newest message instead.
+  const [talkedWith, setTalkedWith] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    let cancelled = false;
+    const gone = new Map<string, Member>();
+    for (const list of members.values()) for (const m of list) if (m.deactivatedAt && m.id !== org.memberId) gone.set(m.id, m);
+    void Promise.all(
+      [...gone.keys()].map(async (memberId) => {
+        const dm = dmWith(memberId);
+        if (!dm) return null;
+        const { messages } = await client.listStream(dm.id, { limit: 1 }).catch(() => ({ messages: [] }));
+        return messages.length > 0 ? memberId : null;
+      }),
+    ).then((ids) => !cancelled && setTalkedWith(new Set(ids.filter((x): x is string => x !== null))));
+    return () => {
+      cancelled = true;
+    };
+  }, [client, members, dmWith, org.memberId]);
 
   const openDm = async (m: Member) => {
     if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
+    const title = m.id === org.memberId ? `${m.displayName} (you)` : memberLabel(m);
+    // An existing DM opens as is (2026-10-19): Harbor refuses to start one
+    // with a deleted account, but the history you share stays readable.
+    const existing = dmWith(m.id);
+    if (existing) {
+      router.push({ pathname: '/spaces/chat', params: { org: org.address, space: existing.id, title, me: org.memberId } });
+      return;
+    }
     setOpeningDm(m.id);
     try {
       const { space } = await client.openDirect(m.id);
-      const title = m.id === org.memberId ? `${m.displayName} (you)` : m.displayName;
       router.push({ pathname: '/spaces/chat', params: { org: org.address, space: space.id, title, me: org.memberId } });
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      // A one-off refusal, not the screen's state: an alert the user dismisses.
+      Alert.alert("Couldn't open a conversation", friendlyError(err));
     } finally {
       setOpeningDm(null);
     }
@@ -365,20 +448,55 @@ function OrgCard({ org, onSwitch }: { org: SpacesOrg; onSwitch: () => void }) {
   const orgMembers = useMemo(() => {
     const seen = new Map<string, Member>();
     for (const list of members.values()) for (const m of list) if (!seen.has(m.id)) seen.set(m.id, m);
+    // A deleted account (2026-10-19) stays only where you two actually talked:
+    // a DM with messages in it. Otherwise there's nobody left to message.
+    for (const m of seen.values()) if (m.deactivatedAt && !talkedWith.has(m.id)) seen.delete(m.id);
+    // People you blocked (2026-10-20) leave the list; unblock from Account.
+    for (const id of blockedIds) seen.delete(id);
     // Someone else's personal agent can't be messaged (2026-10-26).
     for (const m of [...seen.values()]) if (isOthersPersonalAgent(m, org.memberId)) seen.delete(m.id);
     // You first (the self-DM is your notes-to-self), then everyone by name.
     return [...seen.values()].sort((a, b) =>
       a.id === org.memberId ? -1 : b.id === org.memberId ? 1 : a.displayName.localeCompare(b.displayName),
     );
-  }, [members, org.memberId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- blockedKey stands for blockedIds
+  }, [members, org.memberId, talkedWith, blockedKey]);
 
-  const people = orgMembers.length;
+  const people = orgMembers.filter((m) => !m.deactivatedAt).length;
+  // Collapsible sections (Slack): remembered per org; only on Home. A
+  // collapsed section still says how much is waiting inside it.
+  const collapseKey = `collapsed:${org.id}`;
+  const [collapsed, setCollapsed] = useState<{ spaces?: boolean; dms?: boolean }>(() => peekValue<{ spaces?: boolean; dms?: boolean }>(collapseKey) ?? {});
+  useEffect(() => {
+    void loadValue<{ spaces?: boolean; dms?: boolean }>(collapseKey).then((v) => v && setCollapsed(v));
+  }, [collapseKey]);
+  const toggle = (section: 'spaces' | 'dms') => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setCollapsed((prev) => {
+      const next = { ...prev, [section]: !prev[section] };
+      saveValue(collapseKey, next);
+      return next;
+    });
+  };
+  const canCollapse = mode === 'home';
+  const spacesClosed = canCollapse && Boolean(collapsed.spaces);
+  const dmsClosed = canCollapse && Boolean(collapsed.dms);
+  const sum = (badges: { unread: number; forYou: number }[]) =>
+    badges.reduce((t, b) => ({ unread: t.unread + b.unread, forYou: t.forYou + b.forYou }), { unread: 0, forYou: 0 });
+  const spacesWaiting = sum((spaces ?? []).map((sp) => badgeFor(sp.id, false)));
+  const dmsWaiting = sum(orgMembers.map((m) => { const dm = dmWith(m.id); return dm ? badgeFor(dm.id, true) : { unread: 0, forYou: 0 }; }));
+
+  // Search is a jump list: spaces and people whose names contain the query.
+  const q = query.trim().toLowerCase();
+  const shownSpaces = mode === 'dms' ? null : mode === 'search' && q ? (spaces?.filter((s) => s.name.toLowerCase().includes(q)) ?? null) : spaces;
+  const shownMembers = mode === 'search' && q ? orgMembers.filter((m) => m.displayName.toLowerCase().includes(q)) : orgMembers;
 
   return (
     <View style={{ gap: 24 }}>
+      {mode === 'home' ? (
+        <>
       {/* Org identity: a plain card — tile, name, one quiet line of facts. */}
-      <Card>
+      <Card radius={32 /* near-concentric with the 44pt logo and its 14pt inset */}>
         <Pressable
           onPress={() => {
             if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
@@ -400,16 +518,19 @@ function OrgCard({ org, onSwitch }: { org: SpacesOrg; onSwitch: () => void }) {
           <Image source="sf:chevron.up.chevron.down" style={{ width: 11, height: 15 }} tintColor={colors.tertiaryLabel} />
         </Pressable>
       </Card>
+        </>
+      ) : null}
 
       <StatusBanner error={error} />
       {spaces === null && !error ? <ActivityIndicator style={{ alignSelf: 'center', marginVertical: 16 }} /> : null}
 
       {/* Spaces */}
-      {spaces !== null ? (
+      {shownSpaces !== null && (mode !== 'search' || shownSpaces.length > 0) ? (
         <View style={{ gap: 8 }}>
-          <SectionLabel text="Spaces" />
+          <SectionLabel text="Spaces" collapsed={spacesClosed} onToggle={canCollapse ? () => toggle('spaces') : undefined} waiting={spacesWaiting} />
+          {spacesClosed ? null : (
           <Card>
-            {spaces.map((space, i) => {
+            {shownSpaces.map((space, i) => {
               const badge = badgeFor(space.id, false);
               return (
                 <CardRow
@@ -423,10 +544,11 @@ function OrgCard({ org, onSwitch }: { org: SpacesOrg; onSwitch: () => void }) {
                 </CardRow>
               );
             })}
-            {spaces.length === 0 ? (
+            {shownSpaces.length === 0 ? (
               <Text style={{ ...type.body, color: colors.tertiaryLabel, padding: 14 }}>No spaces in this org yet.</Text>
             ) : null}
           </Card>
+          )}
         </View>
       ) : null}
 
@@ -434,11 +556,12 @@ function OrgCard({ org, onSwitch }: { org: SpacesOrg; onSwitch: () => void }) {
           `direct` space — openDirect is get-or-create, idempotent). Your own
           row opens the self-DM: notes to self, on the org, for every device
           and your agent. */}
-      {orgMembers.length > 0 ? (
+      {shownMembers.length > 0 ? (
         <View style={{ gap: 8 }}>
-          <SectionLabel text="Direct messages" />
+          <SectionLabel text="Direct messages" collapsed={dmsClosed} onToggle={canCollapse ? () => toggle('dms') : undefined} waiting={dmsWaiting} />
+          {dmsClosed ? null : (
           <Card>
-            {orgMembers.map((m, i) => {
+            {shownMembers.map((m, i) => {
               const dm = dmWith(m.id);
               const badge = dm ? badgeFor(dm.id, true) : { unread: 0, forYou: 0 };
               const self = m.id === org.memberId;
@@ -448,13 +571,18 @@ function OrgCard({ org, onSwitch }: { org: SpacesOrg; onSwitch: () => void }) {
                   <Text numberOfLines={1} style={{ flex: 1, ...type.body, fontWeight: badge.unread > 0 ? '600' : '400', color: colors.label }}>
                     {m.displayName}
                     {self ? <Text style={{ fontWeight: '400', color: colors.tertiaryLabel }}> (you)</Text> : null}
+                    {m.deactivatedAt ? <Text style={{ fontWeight: '400', color: colors.tertiaryLabel }}> (deactivated)</Text> : null}
                   </Text>
                   {openingDm === m.id ? <ActivityIndicator size="small" /> : badge.unread > 0 ? <UnreadBadge badge={badge} /> : null}
                 </CardRow>
               );
             })}
           </Card>
+          )}
         </View>
+      ) : null}
+      {mode === 'search' && q && (shownSpaces?.length ?? 0) === 0 && shownMembers.length === 0 ? (
+        <Text style={{ ...type.body, textAlign: 'center', color: colors.tertiaryLabel, paddingTop: 24 }}>No spaces or people match “{query.trim()}”</Text>
       ) : null}
     </View>
   );
@@ -543,16 +671,45 @@ function OrgLogo({ org, size = 44, readOnly }: { org: SpacesOrg; size?: number; 
   );
 }
 
-/** Section header — the same small caps line Settings uses. */
-function SectionLabel({ text }: { text: string }) {
+/**
+ * Section header — the small caps line Settings uses. With onToggle it is a
+ * button: a chevron that points down when open and right when collapsed, and
+ * what's waiting inside when it is closed.
+ */
+function SectionLabel({ text, collapsed, onToggle, waiting }: {
+  text: string;
+  collapsed?: boolean;
+  onToggle?: () => void;
+  waiting?: { unread: number; forYou: number };
+}) {
   const colors = useColors();
-  return <Text style={{ ...type.section, color: colors.secondaryLabel, paddingHorizontal: 16 }}>{text}</Text>;
+  const label = <Text style={{ ...type.section, color: colors.secondaryLabel }}>{text}</Text>;
+  if (!onToggle) return <View style={{ paddingHorizontal: 16 }}>{label}</View>;
+  return (
+    <View style={{ gap: 14 }}>
+      <Pressable
+        onPress={() => {
+          if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
+          onToggle();
+        }}
+        hitSlop={{ top: 10, bottom: 10 }}
+        style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, minHeight: 22, opacity: pressed ? 0.6 : 1 })}
+      >
+        {label}
+        <Image source={collapsed ? 'sf:chevron.right' : 'sf:chevron.down'} style={{ width: 10, height: 10 }} contentFit="contain" tintColor={colors.tertiaryLabel} />
+        <View style={{ flex: 1 }} />
+        {collapsed && waiting ? <UnreadBadge badge={waiting} /> : null}
+      </Pressable>
+      {/* Closed, a hairline stands in for the list — it separates one closed section from the next. */}
+      {collapsed ? <View style={{ height: 0.5, marginHorizontal: 16, backgroundColor: colors.separator }} /> : null}
+    </View>
+  );
 }
 
 /** A flat grouped surface (iOS Settings): no shadow, no border — the ground does the work. */
-function Card({ children }: { children: ReactNode }) {
+function Card({ children, radius = 20 }: { children: ReactNode; radius?: number }) {
   const colors = useColors();
-  return <View style={{ borderRadius: 20, borderCurve: 'continuous', overflow: 'hidden', backgroundColor: colors.card }}>{children}</View>;
+  return <View style={{ borderRadius: radius, borderCurve: 'continuous', overflow: 'hidden', backgroundColor: colors.card }}>{children}</View>;
 }
 
 /** 46pt row with a hairline inset past the leading glyph. */

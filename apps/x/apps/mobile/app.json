@@ -53,7 +53,8 @@
         {
           "photosPermission": "Rowboat uses your photos to share them in a space."
         }
-      ]
+      ],
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": true,

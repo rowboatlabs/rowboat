@@ -237,10 +237,16 @@ export default function AccountScreen() {
         </Group>
       ) : null}
 
-      <Group>
+      {/* Billing is not done on the phone: a plain note, no link (App Store 3.1.1). */}
+      <Group footer="To manage billing, use Rowboat on your desktop or go to app.x.rowboatlabs.com.">
         <Row first onPress={() => router.push('/spaces/notifications')}>
           <Image source="sf:bell" style={{ width: 18, height: 18 }} tintColor={colors.secondaryLabel} />
           <Text style={{ flex: 1, fontSize: 16, color: colors.label }}>Notifications</Text>
+          <Image source="sf:chevron.right" style={{ width: 8, height: 13 }} tintColor={colors.tertiaryLabel} />
+        </Row>
+        <Row onPress={() => router.push('/spaces/blocked')}>
+          <Image source="sf:hand.raised" style={{ width: 18, height: 18 }} tintColor={colors.secondaryLabel} />
+          <Text style={{ flex: 1, fontSize: 16, color: colors.label }}>Blocked users</Text>
           <Image source="sf:chevron.right" style={{ width: 8, height: 13 }} tintColor={colors.tertiaryLabel} />
         </Row>
         <Row onPress={() => void account.signOut().then(() => router.replace('/spaces'))}>

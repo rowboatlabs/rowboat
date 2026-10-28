@@ -13,16 +13,21 @@ import { spaces } from '@x/shared';
 
 import { ChatMarkdown } from '@/components/markdown';
 import { MessageLinkPreviews } from '@/components/link-preview-card';
-import { SpaceBlobImage } from '@/components/space-blob-image';
+import { SpaceBlobImage, parseBlobLink } from '@/components/space-blob-image';
 import { MessageActionSheet, MessageRow, applyReaction, parseAssetLink } from '@/components/space-message';
 import { SpaceComposer, type SpaceComposerHandle } from '@/components/space-composer';
 import { PollCard, applyPollVote } from '@/components/poll-card';
 import { setActiveSpace } from '@/lib/push';
 import { useSpacesAccount } from '@/lib/spaces/account';
+import { AuthedImage } from '@/components/avatar';
 import { StatusBanner } from '@/components/status-banner';
+import { friendlyError, isNetworkError } from '@/lib/spaces/errors';
+import { blobLinkName, openBlobFile } from '@/lib/spaces/open-blob';
+import { postMessageReliably } from '@/lib/spaces/send';
 import { loadRoster, loadThread, peekRoster, peekThread, saveRoster, saveThread } from '@/lib/spaces/cache';
 import { SpacesClient } from '@/lib/spaces/client';
 import { isDeparted, isOthersPersonalAgent, memberLabel, useProfiles } from '@/lib/spaces/profiles';
+import { blockMember, reportMessage, useBlockedIds } from '@/lib/spaces/moderation';
 import { SpacesLive } from '@x/spaces-client';
 import { useColors } from '@/theme/colors';
 
@@ -35,7 +40,7 @@ export default function SpaceThreadScreen() {
   // The header is see-through (soft scroll edge): content insets itself.
   const headerHeight = useHeaderHeight();
   const account = useSpacesAccount();
-  const params = useLocalSearchParams<{ org: string; space: string; root: string; title: string; me: string }>();
+  const params = useLocalSearchParams<{ org: string; space: string; root: string; title: string; me: string; focus?: string }>();
   const { org, space, root, me } = params;
 
   const client = useMemo(
@@ -50,6 +55,9 @@ export default function SpaceThreadScreen() {
   const [replies, setReplies] = useState<Message[] | null>(initial?.messages ?? null);
   const [members, setMembers] = useState<Map<string, Member>>(() => new Map((peekRoster(org, space) ?? []).map((m) => [m.id, m])));
   const profiles = useProfiles(client, members);
+  // People you blocked (2026-10-20): their messages are hidden on this phone.
+  const blockedIds = useBlockedIds(org);
+  const blockedKey = [...blockedIds].join(',');
   const memberNames = useMemo(() => new Map([...profiles].map(([id, m]) => [id, memberLabel(m)])), [profiles]);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -73,8 +81,32 @@ export default function SpaceThreadScreen() {
   const lastOffset = useRef<number | undefined>(undefined);
   // Land on the root (what you tapped). Scroll down only for a reply that
   // arrives live or that you send — never because a refresh swapped the list.
+  // Opened from a notification or an Activity reply (focus=latest): you came
+  // for the newest reply, so land at the bottom and stay there while replies
+  // and previews load — until you scroll yourself. Opened by tapping a
+  // message, a thread lands on its root as before.
+  // The bell's answer: a line that says what tapping it just did.
+  const [note, setNote] = useState<string | null>(null);
+  const noteTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const flashNote = useCallback((text: string) => {
+    setNote(text);
+    if (noteTimer.current) clearTimeout(noteTimer.current);
+    noteTimer.current = setTimeout(() => setNote(null), 2200);
+  }, []);
+  useEffect(() => () => { if (noteTimer.current) clearTimeout(noteTimer.current); }, []);
+
+  const pinLatest = useRef(params.focus === 'latest');
+  const [revealed, setRevealed] = useState(params.focus !== 'latest');
+  const onThreadContentSize = useCallback(() => {
+    if (!pinLatest.current) return;
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollToEnd({ animated: false });
+      requestAnimationFrame(() => setRevealed(true));
+    });
+  }, []);
   const scrollToNewest = useCallback(() => {
-    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
+    // After the new row is laid out — an earlier scroll aims at the old end.
+    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 120);
   }, []);
 
   if (lastOffset.current === undefined && initial?.messages) {
@@ -127,7 +159,11 @@ export default function SpaceThreadScreen() {
   }, [client, org, space, root]);
 
   // Deleted replies vanish (Slack) — they anchor nothing.
-  const visibleReplies = useMemo(() => replies?.filter((m) => !m.deletedAt) ?? null, [replies]);
+  const visibleReplies = useMemo(
+    () => replies?.filter((m) => !m.deletedAt && !blockedIds.has(m.author.memberId)) ?? null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- blockedKey stands for blockedIds
+    [replies, blockedKey],
+  );
 
   // Write-through: whatever is on screen is what the next open paints.
   useEffect(() => {
@@ -180,6 +216,24 @@ export default function SpaceThreadScreen() {
   }, [replies === null, org, space, root]);
 
 
+  // A tapped attachment: this org's files download with the bearer and open
+  // in the share sheet (Quick Look, Save to Files); other hosts go to the browser.
+  const [openingFile, setOpeningFile] = useState(false);
+  const openBlobLink = useCallback(
+    (link: { host: string; spaceId: string; hash: string; url: string }) => {
+      if (link.host !== org) {
+        void Linking.openURL(link.url);
+        return;
+      }
+      if (openingFile) return;
+      setOpeningFile(true);
+      openBlobFile(client, link.spaceId, link.hash, blobLinkName(link.url, 'file'))
+        .catch((err) => Alert.alert("Couldn't open the file", friendlyError(err, "You're offline. Try again when you're back online.")))
+        .finally(() => setOpeningFile(false));
+    },
+    [client, org, openingFile],
+  );
+
   // A file link in a message: this org's files open in the file screen (by
   // id, so a rename never breaks it); any other host goes to the browser.
   const openAssetLink = useCallback(
@@ -193,24 +247,26 @@ export default function SpaceThreadScreen() {
     [org],
   );
 
-  const send = async (body: string) => {
-    if (sending) return;
+  const send = async (body: string): Promise<boolean> => {
+    if (sending) return false;
     setSending(true);
     // The × holds for one reply.
     const toPeople = peopleOnly && followUp !== undefined && !spaces.mentionsAnyone(body);
     setPeopleOnly(false);
     try {
-      const { message, invocations: started } = await client.postMessage(space, {
-        body,
-        threadRoot: root,
-        actingMode: 'direct',
-        ...(toPeople ? { peopleOnly: true } : {}),
-      });
+      const { message, invocations: started } = await postMessageReliably(
+        client,
+        space,
+        { body, threadRoot: root, ...(toPeople ? { peopleOnly: true } : {}) },
+        me,
+      );
       setInvocations((prev) => [...prev, ...started]);
       setReplies((prev) => (prev && !prev.some((m) => m.id === message.id) ? [...prev, message] : prev));
       scrollToNewest();
+      return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (!isNetworkError(err)) setError(err instanceof Error ? err.message : String(err));
+      return false;
     } finally {
       setSending(false);
     }
@@ -237,9 +293,17 @@ export default function SpaceThreadScreen() {
   const quote = useCallback((message: Message) => composerRef.current?.quote(spaces.resolveMentions(message.body, memberNames)), [memberNames]);
   const beginEdit = useCallback((message: Message) => composerRef.current?.beginEdit(message.id, message.body), []);
   const saveEdit = useCallback(
-    (id: string, body: string) => {
-      client.editMessage(space, id, { body, actingMode: 'direct' }).then(patchBoth).catch((err) => setError(err instanceof Error ? err.message : String(err)));
-    },
+    (id: string, body: string) =>
+      client.editMessage(space, id, { body, actingMode: 'direct' }).then(
+        (m) => {
+          patchBoth(m);
+          return true;
+        },
+        (err) => {
+          if (!isNetworkError(err)) setError(err instanceof Error ? err.message : String(err));
+          return false;
+        },
+      ),
     [client, space, patchBoth],
   );
   const confirmDelete = useCallback(
@@ -271,7 +335,9 @@ export default function SpaceThreadScreen() {
         qs.set('h', String(blob.height));
       }
       const link = `https://${org}/s/${space}/b/${blob.hash}?${qs.toString()}`;
-      return blob.mime.startsWith('image/') ? `![${file.name}](${link})` : `[${file.name}](${link})`;
+      // Brackets in a file name would end the markdown label early.
+      const label = file.name.replace(/[\[\]]/g, '_');
+      return blob.mime.startsWith('image/') ? `![${label}](${link})` : `[${label}](${link})`;
     },
     [client, org, space],
   );
@@ -343,10 +409,14 @@ export default function SpaceThreadScreen() {
                   if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
                   const next = !following;
                   setFollowing(next);
-                  client.followThread(space, root, next).catch(() => setFollowing(!next));
+                  flashNote(next ? 'Following — you’ll be notified of new replies' : 'Unfollowed — no notifications for this thread');
+                  client.followThread(space, root, next).catch(() => {
+                    setFollowing(!next);
+                    flashNote('Couldn’t change that. Try again.');
+                  });
                 }}
               >
-                <Image source={following ? 'sf:bell.fill' : 'sf:bell'} style={{ width: 20, height: 20 }} tintColor={colors.label} />
+                <Image source={following ? 'sf:bell.fill' : 'sf:bell.slash'} style={{ width: 20, height: 20 }} contentFit="contain" tintColor={following ? colors.label : colors.tertiaryLabel} />
               </Pressable>
             ),
         }}
@@ -358,11 +428,13 @@ export default function SpaceThreadScreen() {
       ) : (
         <ScrollView
           ref={scrollRef}
+          onContentSizeChange={onThreadContentSize}
+          onScrollBeginDrag={() => { pinLatest.current = false; }}
           contentInsetAdjustmentBehavior="automatic"
           keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="handled"
           alwaysBounceVertical
-          style={{ flex: 1 }}
+          style={{ flex: 1, opacity: revealed ? 1 : 0 }}
           contentContainerStyle={{ paddingVertical: 12 }}
         >
           <StatusBanner error={error} offlineText={replies ? "You're offline. Showing saved replies." : "You're offline. Replies will load when you're back online."} />
@@ -380,7 +452,7 @@ export default function SpaceThreadScreen() {
               onVote={vote}
               onRemoveVote={removeVote}
               onEndPoll={endPoll}
-              onOpenAsset={openAssetLink}
+              onOpenAsset={openAssetLink} onOpenBlob={openBlobLink}
             />
           ) : null}
           {rootMessage && visibleReplies !== null ? (
@@ -407,11 +479,19 @@ export default function SpaceThreadScreen() {
           {/* Root painted from the stream; replies still on their way. */}
           {rootMessage && replies === null && !error ? <ActivityIndicator style={{ marginTop: 16 }} /> : null}
           {visibleReplies?.map((m) => (
-            <MessageRow key={m.id} message={m} member={profiles.get(m.author.memberId)} memberNames={memberNames} me={me} onToggleReaction={toggleReaction} onLongPress={(m) => { setReactionsOnly(false); setActionMessage(m); }} onOpenAsset={openAssetLink}
+            <MessageRow key={m.id} message={m} member={profiles.get(m.author.memberId)} memberNames={memberNames} me={me} onToggleReaction={toggleReaction} onLongPress={(m) => { setReactionsOnly(false); setActionMessage(m); }} onOpenAsset={openAssetLink} onOpenBlob={openBlobLink}
               onAddReaction={(m) => { setReactionsOnly(true); setActionMessage(m); }} onVote={vote} onRemoveVote={removeVote} onEndPoll={endPoll} />
           ))}
         </ScrollView>
       )}
+
+      {note ? (
+        <View pointerEvents="none" style={{ position: 'absolute', top: headerHeight + 8, left: 0, right: 0, alignItems: 'center', zIndex: 5 }}>
+          <View style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16, backgroundColor: colors.label }}>
+            <Text style={{ fontSize: 13, fontWeight: '500', color: colors.background }}>{note}</Text>
+          </View>
+        </View>
+      ) : null}
 
       {/* Composer */}
       <View style={{ paddingTop: 8, paddingBottom: keyboardVisible ? 16 : insets.bottom + 10 }}>
@@ -447,7 +527,7 @@ export default function SpaceThreadScreen() {
           members={[...members.values()].filter((m) => !isDeparted(m) && !isOthersPersonalAgent(m, me))}
           me={me}
           sending={sending}
-          onSend={(body) => void send(body)}
+          onSend={send}
           onPickMedia={uploadMedia}
           onEdit={saveEdit}
           onDraftChange={(draft) => setDraftMentions(spaces.mentionsAnyone(draft))}
@@ -463,6 +543,8 @@ export default function SpaceThreadScreen() {
         onQuote={quote}
         onEdit={beginEdit}
         onDelete={confirmDelete}
+        onReport={(m) => reportMessage({ org, message: m, author: profiles.get(m.author.memberId), getAccessToken: () => account.getAccessToken() })}
+        onBlock={(m) => blockMember({ org, spaceId: space, member: { id: m.author.memberId, name: profiles.get(m.author.memberId)?.displayName ?? 'this person' }, getAccessToken: () => account.getAccessToken() })}
         linkFor={linkFor}
       />
     </KeyboardAvoidingView>
@@ -471,7 +553,7 @@ export default function SpaceThreadScreen() {
 
 // The root, Slack-style: 40pt avatar, bold name with the timestamp UNDER it,
 // full-size body, then reaction pills + the always-on emoji+ pill.
-function RootMessage({ message, member, memberNames, me, onToggleReaction, onLongPress, onAddReaction, onVote, onRemoveVote, onEndPoll, onOpenAsset }: {
+function RootMessage({ message, member, memberNames, me, onToggleReaction, onLongPress, onAddReaction, onVote, onRemoveVote, onEndPoll, onOpenAsset, onOpenBlob }: {
   message: Message;
   member?: Member;
   memberNames: ReadonlyMap<string, string>;
@@ -483,6 +565,7 @@ function RootMessage({ message, member, memberNames, me, onToggleReaction, onLon
   onRemoveVote: (message: Message) => void;
   onEndPoll: (message: Message) => void;
   onOpenAsset?: (link: { host: string; spaceId: string; assetId: string; label: string }) => void;
+  onOpenBlob?: (link: { host: string; spaceId: string; hash: string; url: string }) => void;
 }) {
   const colors = useColors();
   const name = member ? memberLabel(member) : message.author.memberId;
@@ -513,10 +596,11 @@ function RootMessage({ message, member, memberNames, me, onToggleReaction, onLon
         <View
           style={{
             width: 40, height: 40, borderRadius: 10, borderCurve: 'continuous',
-            alignItems: 'center', justifyContent: 'center', backgroundColor: colors.secondaryBackground,
+            alignItems: 'center', justifyContent: 'center', backgroundColor: colors.secondaryBackground, overflow: 'hidden',
           }}
         >
           <Text style={{ fontSize: 17, fontWeight: '600', color: colors.label }}>{(name[0] ?? '?').toUpperCase()}</Text>
+          {member?.avatarUrl ? <AuthedImage url={member.avatarUrl} style={{ position: 'absolute', top: 0, left: 0, width: 40, height: 40 }} /> : null}
         </View>
         <View>
           <Text style={{ fontSize: 16, fontWeight: '700', color: colors.label }}>{name}</Text>
@@ -530,6 +614,11 @@ function RootMessage({ message, member, memberNames, me, onToggleReaction, onLon
           <ChatMarkdown
             extraRules={imageRule}
             onLinkPress={(url) => {
+              const blob = parseBlobLink(url);
+              if (blob && onOpenBlob) {
+                onOpenBlob({ ...blob, url });
+                return false;
+              }
               const link = parseAssetLink(url);
               if (!link || !onOpenAsset) return true;
               onOpenAsset(link);

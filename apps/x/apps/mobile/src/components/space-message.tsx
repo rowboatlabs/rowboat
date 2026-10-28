@@ -10,7 +10,7 @@ import { spaces } from '@x/shared';
 import { ChatMarkdown } from '@/components/markdown';
 import { MessageLinkPreviews } from '@/components/link-preview-card';
 import { PollCard } from '@/components/poll-card';
-import { SpaceBlobImage } from '@/components/space-blob-image';
+import { SpaceBlobImage, parseBlobLink } from '@/components/space-blob-image';
 import { EmojiPicker } from '@/components/emoji-picker';
 import { AuthedImage } from '@/components/avatar';
 import { BottomSheet } from '@/components/bottom-sheet';
@@ -70,6 +70,7 @@ export const MessageRow = memo(function MessageRow({
   onRemoveVote,
   onEndPoll,
   onOpenAsset,
+  onOpenBlob,
 }: {
   message: Message;
   member?: Member;
@@ -90,6 +91,8 @@ export const MessageRow = memo(function MessageRow({
   onEndPoll?: (message: Message) => void;
   /** A tapped file link (https://<org>/s/<spaceId>/a/<assetId>) — the screen opens the file or hands it to the browser. */
   onOpenAsset?: (link: { host: string; spaceId: string; assetId: string; label: string }) => void;
+  /** A tapped attachment (https://<org>/s/<spaceId>/b/<hash>?name=…) — the screen downloads and opens it. */
+  onOpenBlob?: (link: { host: string; spaceId: string; hash: string; url: string }) => void;
 }) {
   const colors = useColors();
   const dark = colors.isDark;
@@ -190,6 +193,11 @@ export const MessageRow = memo(function MessageRow({
             <ChatMarkdown
               extraRules={imageRule}
               onLinkPress={(url) => {
+                const blob = parseBlobLink(url);
+                if (blob && onOpenBlob) {
+                  onOpenBlob({ ...blob, url });
+                  return false;
+                }
                 const link = parseAssetLink(url);
                 if (!link || !onOpenAsset) return true;
                 onOpenAsset(link);
@@ -354,6 +362,8 @@ export function MessageActionSheet({
   onQuote,
   onEdit,
   onDelete,
+  onReport,
+  onBlock,
   linkFor,
   reactionsOnly,
 }: {
@@ -367,6 +377,9 @@ export function MessageActionSheet({
   /** Author-only (the content plane is role-flat). */
   onEdit?: (message: Message) => void;
   onDelete?: (message: Message) => void;
+  /** Someone else's message only (App Store Guideline 1.2, 2026-10-20). */
+  onReport?: (message: Message) => void;
+  onBlock?: (message: Message) => void;
   /** The message's canonical link (https://<org>/s/<space>/m/<id>). */
   linkFor?: (message: Message) => string;
   /** The emoji+ pill's mode: just the reactions row. */
@@ -386,6 +399,8 @@ export function MessageActionSheet({
   if (linkFor) actions.push({ key: 'link', icon: 'sf:link', label: 'Copy link', run: () => void Clipboard.setStringAsync(linkFor(message)) });
   if (isAuthor && onEdit && !message.poll) actions.push({ key: 'edit', icon: 'sf:pencil', label: 'Edit message', run: () => onEdit(message) });
   if (isAuthor && onDelete) actions.push({ key: 'delete', icon: 'sf:trash', label: 'Delete message', destructive: true, run: () => onDelete(message) });
+  if (!isAuthor && onReport) actions.push({ key: 'report', icon: 'sf:flag', label: 'Report message', destructive: true, run: () => onReport(message) });
+  if (!isAuthor && onBlock) actions.push({ key: 'block', icon: 'sf:hand.raised', label: 'Block this person', destructive: true, run: () => onBlock(message) });
 
   return (
     <Modal transparent visible animationType="fade" onRequestClose={onClose}>
@@ -436,7 +451,9 @@ export function MessageActionSheet({
                   onPress={() => {
                     if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
                     onClose();
-                    a.run();
+                    // After the menu's fade-out (2026-10-20): presenting a sheet or
+                    // alert over a dismissing modal can crash on iOS.
+                    setTimeout(a.run, 350);
                   }}
                   style={({ pressed }) => ({
                     flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 46,

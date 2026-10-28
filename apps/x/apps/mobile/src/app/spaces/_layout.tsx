@@ -20,8 +20,9 @@ export default function SpacesLayout() {
         scrollEdgeEffects: { top: 'soft' },
       }}
     >
+      {/* The tabs (Home, DMs, Activity, More, search) share this header; the focused tab sets its title and right button. */}
       <Stack.Screen
-        name="index"
+        name="(tabs)"
         options={({ navigation }) => ({
           title: 'Spaces',
           headerLeft: () => (
@@ -46,6 +47,7 @@ export default function SpacesLayout() {
       <Stack.Screen name="settings" options={{ title: 'Settings', headerBackButtonDisplayMode: 'minimal' }} />
       <Stack.Screen name="notifications" options={{ title: 'Notifications', headerBackButtonDisplayMode: 'minimal' }} />
       <Stack.Screen name="account" options={{ title: 'Account', headerBackButtonDisplayMode: 'minimal' }} />
+      <Stack.Screen name="blocked" options={{ title: 'Blocked users', headerBackButtonDisplayMode: 'minimal' }} />
       <Stack.Screen name="join" options={{ title: 'Join a space', headerBackButtonDisplayMode: 'minimal' }} />
     </Stack>
   );

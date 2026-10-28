@@ -17,6 +17,9 @@ import { setActiveSpace } from '@/lib/push';
 import { useSpacesAccount } from '@/lib/spaces/account';
 import { STREAM_CACHE_LIMIT, loadRoster, loadValue, peekRoster, peekValue, saveRoster, saveValue, seedThreadRoot } from '@/lib/spaces/cache';
 import { StatusBanner } from '@/components/status-banner';
+import { friendlyError, isNetworkError } from '@/lib/spaces/errors';
+import { blobLinkName, openBlobFile } from '@/lib/spaces/open-blob';
+import { postMessageReliably } from '@/lib/spaces/send';
 import { fetchLinkPreview, peekLinkPreview, previewUrls } from '@/lib/spaces/link-preview';
 
 /** Rows whose link cards must be in before a channel is revealed, and how long we'll wait. */
@@ -24,6 +27,7 @@ const TAIL_ROWS = 8;
 const TAIL_WAIT_MS = 700;
 import { SpacesClient } from '@/lib/spaces/client';
 import { isDeparted, isOthersPersonalAgent, memberLabel, useProfiles } from '@/lib/spaces/profiles';
+import { blockMember, reportMessage, useBlockedIds } from '@/lib/spaces/moderation';
 import { SpacesLive } from '@x/spaces-client';
 import { useColors } from '@/theme/colors';
 
@@ -49,6 +53,9 @@ export default function SpaceChatScreen() {
   const [messages, setMessages] = useState<Message[] | null>(() => peekValue<Message[]>(streamCacheKey) ?? null);
   const [members, setMembers] = useState<Map<string, Member>>(() => new Map((peekRoster(org, space) ?? []).map((m) => [m.id, m])));
   const profiles = useProfiles(client, members);
+  // People you blocked (2026-10-20): their messages are hidden on this phone.
+  const blockedIds = useBlockedIds(org);
+  const blockedKey = [...blockedIds].join(',');
   const memberNames = useMemo(() => new Map([...profiles].map(([id, m]) => [id, memberLabel(m)])), [profiles]);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -92,10 +99,16 @@ export default function SpaceChatScreen() {
   const jumpToLatest = useCallback(() => {
     if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
     atBottom.current = true;
+    programmaticUntil.current = Date.now() + 800;
     listRef.current?.scrollToEnd({ animated: true });
   }, []);
+  // Our own scrolls end with a momentum-end event too; only a finger's
+  // scroll may change whether we're following the bottom.
+  const programmaticUntil = useRef(0);
   const settle = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const byHand = dragging.current || Date.now() > programmaticUntil.current;
     dragging.current = false;
+    if (!byHand) return;
     const { contentOffset, contentSize, layoutMeasurement, contentInset } = e.nativeEvent;
     atBottom.current = contentSize.height + (contentInset?.bottom ?? 0) - (contentOffset.y + layoutMeasurement.height) < 80;
   }, []);
@@ -217,7 +230,11 @@ export default function SpaceChatScreen() {
   // that grows later (link cards, images) pushes history UP, never the view.
   // Deleted messages vanish (Slack) unless replies still hang off them.
   messagesRef.current = messages;
-  const visible = useMemo(() => messages?.filter((m) => !m.deletedAt || m.replyCount > 0) ?? [], [messages]);
+  const visible = useMemo(
+    () => messages?.filter((m) => (!m.deletedAt || m.replyCount > 0) && !blockedIds.has(m.author.memberId)) ?? [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- blockedKey stands for blockedIds
+    [messages, blockedKey],
+  );
 
   // Live: one socket for this screen's lifetime, replay from the last offset
   // the initial fetch saw (subscribe waits until that fetch lands).
@@ -264,17 +281,27 @@ export default function SpaceChatScreen() {
   }, [messages === null, org, space]);
 
 
-  const send = async (body: string) => {
-    if (sending) return;
+  const send = async (body: string): Promise<boolean> => {
+    if (sending) return false;
     setSending(true);
     try {
-      const { message } = await client.postMessage(space, { body, actingMode: 'direct' });
+      const { message } = await postMessageReliably(client, space, { body }, me);
       foldMessage(message);
       // Your own message: always land on it, wherever you were scrolled.
+      // (2026-10-05) The old animated scroll started BEFORE the new row was
+      // laid out, aimed at the old end, and kept running over the follow-up
+      // jump — the message stayed just below the fold until you re-entered.
+      // Now: follow the bottom, and scroll once the row exists.
       atBottom.current = true;
-      requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
+      dragging.current = false;
+      programmaticUntil.current = Date.now() + 800;
+      setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 60);
+      setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 250);
+      return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      // Offline is said by the composer ("Not sent"); anything else is the org's words.
+      if (!isNetworkError(err)) setError(err instanceof Error ? err.message : String(err));
+      return false;
     } finally {
       setSending(false);
     }
@@ -360,7 +387,9 @@ export default function SpaceChatScreen() {
         qs.set('h', String(blob.height));
       }
       const link = `https://${org}/s/${space}/b/${blob.hash}?${qs.toString()}`;
-      return blob.mime.startsWith('image/') ? `![${file.name}](${link})` : `[${file.name}](${link})`;
+      // Brackets in a file name would end the markdown label early.
+      const label = file.name.replace(/[\[\]]/g, '_');
+      return blob.mime.startsWith('image/') ? `![${label}](${link})` : `[${label}](${link})`;
     },
     [client, org, space],
   );
@@ -368,9 +397,17 @@ export default function SpaceChatScreen() {
   const quote = useCallback((message: Message) => composerRef.current?.quote(spaces.resolveMentions(message.body, memberNames)), [memberNames]);
   const beginEdit = useCallback((message: Message) => composerRef.current?.beginEdit(message.id, message.body), []);
   const saveEdit = useCallback(
-    (id: string, body: string) => {
-      client.editMessage(space, id, { body, actingMode: 'direct' }).then(replaceMessage).catch((err) => setError(err instanceof Error ? err.message : String(err)));
-    },
+    (id: string, body: string) =>
+      client.editMessage(space, id, { body, actingMode: 'direct' }).then(
+        (m) => {
+          replaceMessage(m);
+          return true;
+        },
+        (err) => {
+          if (!isNetworkError(err)) setError(err instanceof Error ? err.message : String(err));
+          return false;
+        },
+      ),
     [client, space, replaceMessage],
   );
   const confirmDelete = useCallback(
@@ -389,6 +426,24 @@ export default function SpaceChatScreen() {
     [client, space, replaceMessage],
   );
   const linkFor = useCallback((message: Message) => `https://${org}/s/${space}/m/${message.id}`, [org, space]);
+
+  // A tapped attachment: this org's files download with the bearer and open
+  // in the share sheet (Quick Look, Save to Files); other hosts go to the browser.
+  const [openingFile, setOpeningFile] = useState(false);
+  const openBlobLink = useCallback(
+    (link: { host: string; spaceId: string; hash: string; url: string }) => {
+      if (link.host !== org) {
+        void Linking.openURL(link.url);
+        return;
+      }
+      if (openingFile) return;
+      setOpeningFile(true);
+      openBlobFile(client, link.spaceId, link.hash, blobLinkName(link.url, 'file'))
+        .catch((err) => Alert.alert("Couldn't open the file", friendlyError(err, "You're offline. Try again when you're back online.")))
+        .finally(() => setOpeningFile(false));
+    },
+    [client, org, openingFile],
+  );
 
   // A file link in a message: this org's files open in the file screen (by
   // id, so a rename never breaks it); any other host goes to the browser.
@@ -483,6 +538,7 @@ export default function SpaceChatScreen() {
               onRemoveVote={removeVote}
               onEndPoll={endPoll}
               onOpenAsset={openAssetLink}
+              onOpenBlob={openBlobLink}
             />
           ))}
         </ScrollView>
@@ -516,16 +572,28 @@ export default function SpaceChatScreen() {
 
       {/* Composer */}
       <View style={{ paddingTop: 8, paddingBottom: keyboardVisible ? 16 : insets.bottom + 10 }}>
+        {/* A deleted account only stays on a DM roster (shared spaces drop
+            it), so one here means the other person is gone (2026-10-19). */}
+        {[...members.values()].some((m) => m.deactivatedAt) ? (
+          <Text style={{ fontSize: 13, textAlign: 'center', color: colors.secondaryLabel, paddingHorizontal: 32, paddingVertical: 12 }}>
+            This account was deleted. You can still read your conversation.
+          </Text>
+        ) : members.size === 2 && [...members.keys()].some((id) => blockedIds.has(id)) ? (
+          <Text style={{ fontSize: 13, textAlign: 'center', color: colors.secondaryLabel, paddingHorizontal: 32, paddingVertical: 12 }}>
+            You blocked this person. Unblock them in Account → Blocked users.
+          </Text>
+        ) : (
         <SpaceComposer
           ref={composerRef}
           placeholder={`Message #${title ?? ''}`}
           members={[...members.values()].filter((m) => !isDeparted(m) && !isOthersPersonalAgent(m, me))}
           me={me}
           sending={sending}
-          onSend={(body) => void send(body)}
+          onSend={send}
           onPickMedia={uploadMedia}
           onEdit={saveEdit}
         />
+        )}
       </View>
 
       <MessageActionSheet
@@ -538,6 +606,8 @@ export default function SpaceChatScreen() {
         onQuote={quote}
         onEdit={beginEdit}
         onDelete={confirmDelete}
+        onReport={(m) => reportMessage({ org, message: m, author: profiles.get(m.author.memberId), getAccessToken: () => account.getAccessToken() })}
+        onBlock={(m) => blockMember({ org, spaceId: space, member: { id: m.author.memberId, name: profiles.get(m.author.memberId)?.displayName ?? 'this person' }, getAccessToken: () => account.getAccessToken() })}
         linkFor={linkFor}
       />
     </KeyboardAvoidingView>

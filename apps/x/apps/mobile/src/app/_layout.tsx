@@ -17,7 +17,7 @@ const LightTheme = {
 };
 import Drawer from 'expo-router/drawer';
 import * as SplashScreen from 'expo-splash-screen';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { Pressable, useColorScheme, useWindowDimensions } from 'react-native';
 import { Image } from 'expo-image';
 
@@ -40,6 +40,7 @@ SplashScreen.preventAutoHideAsync();
 // (pairing, note view) stacks on top.
 export default function RootLayout() {
   const colorScheme = useColorScheme();
+  const palette = colorScheme === 'dark' ? darkColors : lightColors;
   const { width } = useWindowDimensions();
   // Nothing else hides the native splash — without this the release build
   // sits on the logo forever (Expo Go masks it).
@@ -57,11 +58,19 @@ export default function RootLayout() {
           <Drawer
             drawerContent={(props) => <DrawerContent {...props} />}
             screenOptions={{
-              drawerType: 'slide',
-              drawerStyle: { width: 300 },
+              // 'front': the panel slides OVER the page, so its rounded corners
+              // show the real (dimmed) page behind them. With 'slide' the
+              // panel sits beside the page and the corners expose the root's
+              // ground instead — a faint square around the curve.
+              drawerType: 'front',
+              drawerStyle: {
+                width: 300, overflow: 'hidden', backgroundColor: palette.background,
+                borderTopRightRadius: 28, borderBottomRightRadius: 28, borderCurve: 'continuous',
+              },
               // A generous swipe zone (~30% of the screen) opens the drawer;
               // pushed screens keep their own edge back-gesture.
               swipeEdgeWidth: width * 0.3,
+              overlayColor: 'rgba(0,0,0,0.35)',
               headerShadowVisible: false,
               headerTintColor: colorScheme === 'dark' ? '#ffffff' : '#000000',
             }}
@@ -125,20 +134,31 @@ function PushRegistrar() {
 // spaceId / threadRootId (push.ts on the org); the org list maps id → address.
 function PushNavigator() {
   const account = useSpacesAccount();
+  // Each notification response is handled ONCE (2026-10-07). This effect
+  // re-runs whenever the org list refreshes, and getLastNotificationResponse
+  // answers the same tap every time — so each refresh pushed chat + thread
+  // again and the back button walked through the copies.
+  const handled = useRef(new Set<string>());
   useEffect(() => {
-    const open = (data: Record<string, unknown> | undefined) => {
+    const open = (r: Notifications.NotificationResponse) => {
+      const key = `${r.notification.request.identifier}:${r.notification.date}`;
+      if (handled.current.has(key)) return;
+      const data = r.notification.request.content.data as Record<string, unknown> | undefined;
       const orgId = typeof data?.orgId === 'string' ? data.orgId : null;
       const spaceId = typeof data?.spaceId === 'string' ? data.spaceId : null;
       const threadRootId = typeof data?.threadRootId === 'string' ? data.threadRootId : null;
       const org = account.orgs?.find((o) => o.id === orgId);
       if (!org || !spaceId) return;
+      handled.current.add(key);
       const base = { org: org.address, space: spaceId, me: org.memberId };
+      // From the tabs: back from the thread goes to the channel, then home.
+      if (router.canDismiss()) router.dismissAll();
       router.push({ pathname: '/spaces/chat', params: base });
-      if (threadRootId) router.push({ pathname: '/spaces/thread', params: { ...base, root: threadRootId, title: 'Thread' } });
+      if (threadRootId) router.push({ pathname: '/spaces/thread', params: { ...base, root: threadRootId, title: 'Thread', focus: 'latest' } });
     };
-    const sub = Notifications.addNotificationResponseReceivedListener((r) => open(r.notification.request.content.data as Record<string, unknown>));
+    const sub = Notifications.addNotificationResponseReceivedListener(open);
     // Cold start from a notification.
-    void Notifications.getLastNotificationResponseAsync().then((r) => r && open(r.notification.request.content.data as Record<string, unknown>));
+    void Notifications.getLastNotificationResponseAsync().then((r) => r && open(r));
     return () => sub.remove();
   }, [account.orgs]);
   return null;

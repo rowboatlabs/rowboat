@@ -1,8 +1,11 @@
 import { Image } from 'expo-image';
+import * as Clipboard from 'expo-clipboard';
+import * as DocumentPicker from 'expo-document-picker';
+import { File, Paths } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Keyboard, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActionSheetIOS, ActivityIndicator, Alert, Keyboard, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import type { Member } from '@rowboat/spaces-protocol';
 import { mentionToken } from '@rowboat/spaces-protocol';
 
@@ -71,11 +74,12 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
   members: Member[];
   me: string;
   sending: boolean;
-  onSend: (body: string) => void;
+  /** Resolve false when the send failed — the composer puts the draft back. */
+  onSend: (body: string) => Promise<boolean> | boolean | void;
   /** Upload a picked photo/video and return the markdown to insert (absent = no + button). */
   onPickMedia?: (file: { uri: string; mime: string; name: string }) => Promise<string>;
   /** Save an edit begun with beginEdit (absent = editing unsupported). */
-  onEdit?: (id: string, body: string) => void;
+  onEdit?: (id: string, body: string) => Promise<boolean> | boolean | void;
   /** Every change to the text, mentions as tokens: the thread's follow-up line follows it (2026-10-27). */
   onDraftChange?: (body: string) => void;
 }>(function SpaceComposer({ placeholder, members, me, sending, onSend, onPickMedia, onEdit, onDraftChange }, ref) {
@@ -90,7 +94,62 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
   const [inputKey, setInputKey] = useState(0);
   // Picked media rides as thumbnails above the field (iMessage/Slack); the
   // wire markdown joins the body only on send.
-  const [attachments, setAttachments] = useState<{ key: string; uri: string; md: string; video: boolean }[]>([]);
+  const [attachments, setAttachments] = useState<{ key: string; uri: string; md: string; video: boolean; file?: string }[]>([]);
+
+  // "+" → photos and videos, any file, or an image on the clipboard
+  // (2026-10-07: a text field can't take an image paste, so the menu does).
+  const openAttachMenu = async () => {
+    if (!onPickMedia || uploading) return;
+    if (process.env.EXPO_OS !== 'ios') {
+      void pickMedia();
+      return;
+    }
+    const clip = await Clipboard.hasImageAsync().catch(() => false);
+    const options = ['Photo or video', 'File', ...(clip ? ['Paste image'] : []), 'Cancel'];
+    ActionSheetIOS.showActionSheetWithOptions({ options, cancelButtonIndex: options.length - 1 }, (i) => {
+      if (i === 0) void pickMedia();
+      else if (i === 1) void pickFile();
+      else if (clip && i === 2) void pasteImage();
+    });
+  };
+
+  const pasteImage = async () => {
+    if (!onPickMedia || uploading) return;
+    setUploading(true);
+    try {
+      const image = await Clipboard.getImageAsync({ format: 'png' });
+      if (!image) return;
+      // A data URL → bytes on disk, so the upload path is the same as a picked photo.
+      const base64 = image.data.replace(/^data:[^,]*,/, '');
+      const file = new File(Paths.cache, `pasted-${Date.now()}.png`);
+      file.create({ overwrite: true });
+      file.write(Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)));
+      const md = await onPickMedia({ uri: file.uri, mime: 'image/png', name: 'pasted-image.png' });
+      setAttachments((prev) => [...prev, { key: `${Date.now()}`, uri: file.uri, md, video: false }]);
+    } catch (err) {
+      Alert.alert("Couldn't paste the image", err instanceof Error ? err.message : String(err));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const pickFile = async () => {
+    if (!onPickMedia || uploading) return;
+    const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: false });
+    const asset = result.canceled ? null : result.assets[0];
+    if (!asset) return;
+    setUploading(true);
+    try {
+      const mime = asset.mimeType ?? 'application/octet-stream';
+      const md = await onPickMedia({ uri: asset.uri, mime, name: asset.name });
+      const image = mime.startsWith('image/');
+      setAttachments((prev) => [...prev, { key: `${Date.now()}`, uri: asset.uri, md, video: false, ...(image ? {} : { file: asset.name }) }]);
+    } catch (err) {
+      Alert.alert("Couldn't attach the file", err instanceof Error ? err.message : String(err));
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const pickMedia = async () => {
     if (!onPickMedia || uploading) return;
@@ -112,6 +171,8 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
   };
 
   const [editing, setEditing] = useState<string | null>(null);
+  /** The last send failed and its draft is back in the box. */
+  const [failed, setFailed] = useState(false);
 
   useImperativeHandle(
     ref,
@@ -181,13 +242,32 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
     if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
     Keyboard.dismiss();
     const editingId = editing;
+    // Clear at once (it feels sent), but hold the draft: if the send fails
+    // it goes back in the box instead of vanishing (2026-10-03).
+    const draft = { text, picked, attachments };
+    setFailed(false);
     setEditing(null);
     setText('');
     setPicked(new Map());
     setAttachments([]);
     setInputKey((k) => k + 1);
-    if (editingId && onEdit) onEdit(editingId, body);
-    else onSend(body);
+    void Promise.resolve(editingId && onEdit ? onEdit(editingId, body) : onSend(body))
+      .catch(() => false)
+      .then((ok) => {
+        if (ok !== false) return;
+        setFailed(true);
+        // Don't clobber anything typed while the send was in flight.
+        let restored = false;
+        setText((now) => {
+          if (now.length > 0) return now;
+          restored = true;
+          return draft.text;
+        });
+        setPicked((now) => (now.size > 0 ? now : draft.picked));
+        setAttachments((now) => (now.length > 0 ? now : draft.attachments));
+        if (editingId) setEditing((now) => now ?? editingId);
+        if (restored) setInputKey((k) => k + 1);
+      });
   };
 
   // Picked mentions read as pills: bold spans inside the field.
@@ -236,6 +316,12 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
           ))}
         </ScrollView>
       ) : null}
+      {failed ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 18, paddingBottom: 6 }}>
+          <Image source="sf:exclamationmark.circle" style={{ width: 13, height: 13 }} tintColor={colors.destructive} />
+          <Text style={{ flex: 1, fontSize: 13, color: colors.destructive }}>Not sent. Check your connection and try again.</Text>
+        </View>
+      ) : null}
       {/* Slack's composer card: field on top, toolbar below (@ · send). */}
       <View
         style={{
@@ -258,8 +344,15 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
         {attachments.length > 0 ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingTop: 10, paddingBottom: 2 }}>
             {attachments.map((a) => (
-              <View key={a.key} style={{ width: 64, height: 64 }}>
-                <Image source={{ uri: a.uri }} style={{ width: 64, height: 64, borderRadius: 10 }} contentFit="cover" />
+              <View key={a.key} style={{ width: a.file ? 150 : 64, height: 64 }}>
+                {a.file ? (
+                  <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 10, borderRadius: 10, borderCurve: 'continuous', backgroundColor: colors.background, borderWidth: 0.5, borderColor: colors.separator }}>
+                    <Image source="sf:doc" style={{ width: 18, height: 22 }} tintColor={colors.secondaryLabel} />
+                    <Text numberOfLines={2} style={{ flex: 1, fontSize: 13, color: colors.label }}>{a.file}</Text>
+                  </View>
+                ) : (
+                  <Image source={{ uri: a.uri }} style={{ width: 64, height: 64, borderRadius: 10 }} contentFit="cover" />
+                )}
                 {a.video ? (
                   <View style={{ position: 'absolute', inset: 0, alignItems: 'center', justifyContent: 'center' }}>
                     <Image source="sf:play.circle.fill" style={{ width: 22, height: 22 }} tintColor="#ffffff" />
@@ -296,7 +389,7 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
             <Pressable
               hitSlop={8}
               disabled={uploading}
-              onPress={() => void pickMedia()}
+              onPress={() => void openAttachMenu()}
               style={{
                 width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center',
                 backgroundColor: colors.isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)',

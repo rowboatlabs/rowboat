@@ -1,5 +1,5 @@
 import type { DrawerContentComponentProps } from 'expo-router/drawer';
-import { router } from 'expo-router';
+import { router, usePathname, type Href } from 'expo-router';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -9,12 +9,17 @@ import { sessions as sessionsShared } from '@x/shared';
 
 import * as analytics from '@/lib/analytics';
 import { useConnection } from '@/lib/connection';
+import { Avatar } from '@/components/avatar';
+import { useSpacesAccount } from '@/lib/spaces/account';
+import { peekValue } from '@/lib/spaces/cache';
+import { useMyAvatar } from '@/lib/spaces/my-avatar';
 import { useColors } from '@/theme/colors';
+import { type } from '@/theme/type';
 
 type Entry = sessionsShared.SessionIndexEntry;
 
-// The drawer: chat history + search up top, Brain and the connection row at
-// the foot — the Claude-app sidebar, minimal.
+// The drawer: you, then where you can go (Spaces, Activity, Settings), then
+// your Mac — an invitation until it's paired, chat history and Brain after.
 export function DrawerContent(props: DrawerContentComponentProps) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -66,151 +71,143 @@ export function DrawerContent(props: DrawerContentComponentProps) {
   const paired = Boolean(pairing);
   const connected = status === 'connected';
 
-  return (
-    <View style={{ flex: 1, paddingTop: insets.top + 8, backgroundColor: colors.background }}>
-      {/* Search + new chat — the Mac chat's tools, present once paired */}
-      {paired ? (
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingBottom: 8 }}>
-        <View
-          style={{
-            flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6,
-            backgroundColor: colors.secondaryBackground, borderRadius: 10,
-            borderCurve: 'continuous', paddingHorizontal: 10, height: 36,
-          }}
-        >
-          <Image source="sf:magnifyingglass" style={{ width: 14, height: 14 }} tintColor={colors.tertiaryLabel} />
-          <TextInput
-            style={{ flex: 1, fontSize: 15, color: colors.label }}
-            placeholder="Search"
-            placeholderTextColor={colors.tertiaryLabel}
-            value={query}
-            onChangeText={setQuery}
-            returnKeyType="search"
-          />
-        </View>
-        <Pressable hitSlop={8} onPress={() => openChat()}>
-          <Image source="sf:square.and.pencil" style={{ width: 22, height: 22 }} tintColor={colors.label} />
-        </Pressable>
-      </View>
-      ) : null}
+  const account = useSpacesAccount();
+  const pathname = usePathname();
+  const selectedOrg = peekValue<string>('selectedOrg');
+  const org = account.orgs?.find((o) => o.id === selectedOrg) ?? account.orgs?.[0];
+  const myAvatar = useMyAvatar(org);
+  const go = (href: Href) => {
+    router.push(href);
+    props.navigation.closeDrawer();
+  };
+  const inSettings = /^\/spaces\/(settings|account|notifications)/.test(pathname) || pathname === '/notifications';
+  const inActivity = pathname.startsWith('/spaces/activity');
+  const inSpaces = pathname.startsWith('/spaces') && !inSettings && !inActivity;
 
-      {/* History */}
-      {paired ? (
-      <FlatList
-        data={filtered}
-        keyExtractor={(item) => item.sessionId}
-        contentContainerStyle={{ paddingHorizontal: 8, paddingBottom: 12 }}
-        renderItem={({ item }) => (
-          <Pressable
-            onPress={() => openChat(item.sessionId)}
-            style={({ pressed }) => ({
-              minHeight: 42, justifyContent: 'center',
-              paddingHorizontal: 10, borderRadius: 10, borderCurve: 'continuous',
-              backgroundColor: pressed ? (colors.secondaryBackground) : 'transparent',
-            })}
-          >
-            <Text numberOfLines={1} style={{ fontSize: 16, color: colors.label }}>
-              {item.title || 'New chat'}
-            </Text>
-          </Pressable>
-        )}
-        ListEmptyComponent={
-          <Text style={{ textAlign: 'center', marginTop: 32, fontSize: 14, color: colors.tertiaryLabel }}>
-            {query ? 'No matches' : 'No chats yet'}
-          </Text>
-        }
-      />
+  return (
+    <View style={{ flex: 1, paddingTop: insets.top + 10, paddingBottom: insets.bottom + 8, backgroundColor: colors.background }}>
+      {/* You — and the way to your account. */}
+      {org ? (
+        <Pressable
+          onPress={() => go('/spaces/account')}
+          style={({ pressed }) => ({
+            flexDirection: 'row', alignItems: 'center', gap: 12, marginHorizontal: 8, paddingHorizontal: 10, paddingVertical: 10,
+            borderRadius: 16, borderCurve: 'continuous', backgroundColor: pressed ? colors.secondaryBackground : 'transparent',
+          })}
+        >
+          <Avatar id={org.memberId} name={org.displayName} size={40} url={myAvatar} />
+          <View style={{ flex: 1, gap: 1 }}>
+            <Text numberOfLines={1} style={{ ...type.body, fontWeight: '700', color: colors.label }}>{org.displayName}</Text>
+            <Text numberOfLines={1} style={{ ...type.caption, color: colors.secondaryLabel }}>{org.name}</Text>
+          </View>
+        </Pressable>
       ) : (
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 32 }}>
-          <Image source="sf:bubble.left.and.bubble.right" style={{ width: 30, height: 30 }} tintColor={colors.tertiaryLabel} />
-          <Text style={{ fontSize: 14, fontWeight: '600', color: colors.secondaryLabel }}>Nothing here yet</Text>
-          <Text style={{ fontSize: 13, textAlign: 'center', lineHeight: 18, color: colors.tertiaryLabel }}>
-            Chats with your Mac and your Brain show up here once you connect your Mac.
-          </Text>
-        </View>
+        <Text style={{ ...type.title, color: colors.label, paddingHorizontal: 18, paddingVertical: 8 }}>Rowboat</Text>
       )}
 
-      {/* Foot: Brain, then the connection row */}
-      <View style={{ borderTopWidth: 0.5, borderTopColor: colors.separator, paddingTop: 6, paddingBottom: insets.bottom + 8, gap: 2 }}>
-        <FootRow
-          icon="sf:person.2"
-          label="Spaces"
-          onPress={() => {
-            router.push('/spaces');
-            props.navigation.closeDrawer();
-          }}
-        />
-        {paired ? (
-        <FootRow
-          icon="sf:brain"
-          label="Brain"
-          onPress={() => {
-            router.push('/notes');
-            props.navigation.closeDrawer();
-          }}
-        />
-        ) : null}
-        <FootRow
-          icon="sf:gearshape"
-          label="Settings"
-          onPress={() => {
-            router.push('/spaces/settings');
-            props.navigation.closeDrawer();
-          }}
-        />
-        {paired ? (
-        <FootRow
-          icon={connected ? 'sf:laptopcomputer' : 'sf:wifi.slash'}
-          label={connected ? (pairing?.name ?? 'Connected') : 'Reconnecting…'}
-          detail="Unpair"
-          detailColor={colors.destructive}
-          onDetail={() => {
-            analytics.mobileUnpaired('user');
-            void unpair().then(() => router.replace('/spaces'));
-          }}
-        />
-        ) : (
-        <FootRow
-          icon="sf:laptopcomputer"
-          label="Connect your Mac"
-          onPress={() => {
-            router.push('/pairing');
-            props.navigation.closeDrawer();
-          }}
-        />
-        )}
+      {/* Where you can go. */}
+      <View style={{ gap: 2, paddingTop: 14 }}>
+        <NavRow icon="sf:bubble.left.and.bubble.right" label="Spaces" active={inSpaces} onPress={() => go('/spaces')} />
+        <NavRow icon="sf:bell" label="Activity" active={inActivity} onPress={() => go('/spaces/activity')} />
+        <NavRow icon="sf:gearshape" label="Settings" active={inSettings} onPress={() => go('/spaces/settings')} />
       </View>
+
+      <View style={{ height: 0.5, marginHorizontal: 18, marginTop: 14, marginBottom: 18, backgroundColor: colors.separator }} />
+
+      {/* Your Mac: one quiet invitation until it's paired, then chat + Brain. */}
+      <Text style={{ fontSize: 12, fontWeight: '600', letterSpacing: 0.6, textTransform: 'uppercase', color: colors.tertiaryLabel, paddingHorizontal: 18, paddingBottom: 6 }}>Your Mac</Text>
+      {paired ? (
+        <>
+          <View style={{ gap: 2 }}>
+            <NavRow icon="sf:square.and.pencil" label="New chat" active={false} onPress={() => openChat()} />
+            <NavRow icon="sf:brain" label="Brain" active={pathname.startsWith('/notes')} onPress={() => go('/notes')} />
+          </View>
+          <View
+            style={{
+              flexDirection: 'row', alignItems: 'center', gap: 6, marginHorizontal: 12, marginTop: 10, marginBottom: 4,
+              backgroundColor: colors.secondaryBackground, borderRadius: 10, borderCurve: 'continuous', paddingHorizontal: 10, height: 36,
+            }}
+          >
+            <Image source="sf:magnifyingglass" style={{ width: 14, height: 14 }} tintColor={colors.tertiaryLabel} />
+            <TextInput
+              style={{ flex: 1, ...type.body, color: colors.label }}
+              placeholder="Search chats"
+              placeholderTextColor={colors.tertiaryLabel}
+              value={query}
+              onChangeText={setQuery}
+              returnKeyType="search"
+            />
+          </View>
+          <FlatList
+            style={{ flex: 1 }}
+            data={filtered}
+            keyExtractor={(item) => item.sessionId}
+            contentContainerStyle={{ paddingHorizontal: 8, paddingBottom: 12 }}
+            renderItem={({ item }) => (
+              <Pressable
+                onPress={() => openChat(item.sessionId)}
+                style={({ pressed }) => ({
+                  minHeight: 40, justifyContent: 'center', paddingHorizontal: 10, borderRadius: 10, borderCurve: 'continuous',
+                  backgroundColor: pressed ? colors.secondaryBackground : 'transparent',
+                })}
+              >
+                <Text numberOfLines={1} style={{ ...type.body, color: colors.label }}>{item.title || 'New chat'}</Text>
+              </Pressable>
+            )}
+            ListEmptyComponent={
+              <Text style={{ ...type.caption, color: colors.tertiaryLabel, paddingHorizontal: 10, paddingTop: 8 }}>
+                {query ? 'No matches' : 'No chats yet'}
+              </Text>
+            }
+          />
+          {/* The connection, and the way out of it. */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 18, paddingTop: 8, borderTopWidth: 0.5, borderTopColor: colors.separator }}>
+            <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: connected ? '#30d158' : colors.tertiaryLabel }} />
+            <Text numberOfLines={1} style={{ flex: 1, ...type.caption, color: colors.secondaryLabel }}>
+              {connected ? (pairing?.name ?? 'Connected') : 'Reconnecting…'}
+            </Text>
+            <Pressable
+              hitSlop={8}
+              onPress={() => {
+                analytics.mobileUnpaired('user');
+                void unpair().then(() => router.replace('/spaces'));
+              }}
+            >
+              <Text style={{ ...type.caption, color: colors.destructive }}>Unpair</Text>
+            </Pressable>
+          </View>
+        </>
+      ) : (
+        <>
+          <NavRow icon="sf:laptopcomputer" label="Connect your Mac" detail="Chat and Brain, on your phone" active={pathname === '/pairing'} onPress={() => go('/pairing')} />
+        </>
+      )}
     </View>
   );
 }
 
-function FootRow({ icon, label, onPress, detail, detailColor, onDetail }: {
-  icon: string;
-  label: string;
-  onPress?: () => void;
-  detail?: string;
-  detailColor?: string;
-  onDetail?: () => void;
-}) {
+/** A destination: glyph + label, tinted fill when it's where you are. */
+function NavRow({ icon, label, detail, active, onPress }: { icon: string; label: string; detail?: string; active: boolean; onPress: () => void }) {
   const colors = useColors();
   return (
     <Pressable
-      onPress={onPress}
+      onPress={() => {
+        if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
+        onPress();
+      }}
       style={({ pressed }) => ({
-        flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 42,
-        marginHorizontal: 8, paddingHorizontal: 8, borderRadius: 10, borderCurve: 'continuous',
-        backgroundColor: pressed && onPress ? colors.secondaryBackground : 'transparent',
+        flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: detail ? 54 : 44,
+        marginHorizontal: 8, paddingHorizontal: 10, borderRadius: 12, borderCurve: 'continuous',
+        backgroundColor: active || pressed ? colors.secondaryBackground : 'transparent',
       })}
     >
-      <View style={{ width: 28, alignItems: 'center' }}>
-        <Image source={icon} style={{ width: 18, height: 18 }} tintColor={colors.secondaryLabel} />
+      <View style={{ width: 24, alignItems: 'center' }}>
+        <Image source={icon} style={{ width: 20, height: 20 }} contentFit="contain" tintColor={active ? colors.label : colors.secondaryLabel} />
       </View>
-      <Text numberOfLines={1} style={{ flex: 1, fontSize: 16, color: colors.label }}>{label}</Text>
-      {detail ? (
-        <Pressable hitSlop={8} onPress={onDetail} style={{ paddingHorizontal: 4 }}>
-          <Text style={{ fontSize: 13, color: detailColor ?? colors.secondaryLabel }}>{detail}</Text>
-        </Pressable>
-      ) : null}
+      <View style={{ flex: 1, gap: 1 }}>
+        <Text numberOfLines={1} style={{ ...type.body, fontWeight: active ? '600' : '400', color: colors.label }}>{label}</Text>
+        {detail ? <Text numberOfLines={1} style={{ ...type.caption, color: colors.tertiaryLabel }}>{detail}</Text> : null}
+      </View>
     </Pressable>
   );
 }
