@@ -957,7 +957,16 @@ export const routes = {
   listOrgMembers: {
     method: 'GET',
     path: '/v1/members',
-    response: z.object({ members: z.array(Member) }),
+    response: z.object({
+      members: z.array(Member),
+      /**
+       * The agents holding a live connection now (local agents, 2026-10-28):
+       * only agents whose connector holds their own key, since an agent
+       * Harbor runs is always reachable. Kept fresh by `agent_presence`.
+       * Absent from servers before it.
+       */
+      online: z.array(MemberId).optional(),
+    }),
   },
   /**
    * Remove a member, person or agent, from the org (spec §4 Roles,

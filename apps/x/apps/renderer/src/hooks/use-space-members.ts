@@ -148,6 +148,7 @@ async function loadOrgRoster(orgId: string, spaceIds: readonly string[]): Promis
         membersCacheOnly.delete(k)
         lastLoadedAt.set(k, Date.now())
         if (!membersDirty.has(k)) setMembers(k, res.members)
+        if (res.online) setAgentsOnline(orgId, res.online)
     } catch {
         // Org unreachable, or an older org without the route: the per-space
         // rosters the app has already fetched stand in for the directory.
@@ -264,4 +265,42 @@ export function useOrgRosters(orgs: ReadonlyArray<{ id: string; spaceIds: readon
         return out
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [state, orgsKey])
+}
+
+// --- which agents are connected (local agents, 2026-10-28) ---
+// The roster's `online` is the snapshot, `agent_presence` frames keep it
+// fresh. Only agents whose connector holds their own key have presence; an
+// org that predates it says nothing, and then nothing is shown as offline.
+
+let onlineState: ReadonlyMap<string, ReadonlySet<string>> = new Map()
+const onlineListeners = new Set<() => void>()
+
+function setAgentsOnline(orgId: string, ids: readonly string[]): void {
+    onlineState = new Map(onlineState).set(orgId, new Set(ids))
+    for (const l of onlineListeners) l()
+}
+
+/** An `agent_presence` frame: one agent connected or left. */
+export function applyAgentPresence(orgId: string, agentId: string, online: boolean): void {
+    const next = new Set(onlineState.get(orgId) ?? [])
+    if (online) next.add(agentId)
+    else next.delete(agentId)
+    setAgentsOnline(orgId, [...next])
+}
+
+/** The org's connected agents, or null when its server doesn't say. */
+export function useAgentsOnline(orgId: string): ReadonlySet<string> | null {
+    const state = useSyncExternalStore(
+        (l) => {
+            onlineListeners.add(l)
+            return () => onlineListeners.delete(l)
+        },
+        () => onlineState,
+    )
+    return state.get(orgId) ?? null
+}
+
+/** Whether a local agent is offline: its owner's computer isn't running it now. False when unknown. */
+export function isAgentOffline(member: Pick<spaces.Member, 'id' | 'kind' | 'agentConnection'>, online: ReadonlySet<string> | null): boolean {
+    return member.kind === 'agent' && member.agentConnection === 'local' && online !== null && !online.has(member.id)
 }

@@ -136,9 +136,7 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit 
       members: await getClient(args.orgId).listMembers(args.spaceId),
     }),
 
-    'spaces:listOrgMembers': async (args) => ({
-      members: await getClient(args.orgId).listOrgMembers(),
-    }),
+    'spaces:listOrgMembers': async (args) => getClient(args.orgId).orgRoster(),
 
     'spaces:listAgents': async (args) => ({ agents: await getClient(args.orgId).listAgents() }),
     'spaces:addAgent': async ({ orgId, ...input }) => getClient(orgId).addAgent(input),

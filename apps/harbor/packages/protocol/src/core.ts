@@ -127,6 +127,13 @@ export const CONDUCTOR_CODING_AGENTS = ['claude-code'] as const;
 export const AGENT37_AGENTS = ['hermes', 'openclaw'] as const;
 /** The runtimes Maritime hosts that Harbor drives through its exec API (2026-10-26): each turn is the runtime's own CLI, run in the agent's VM. */
 export const MARITIME_AGENTS = ['hermes', 'claude-code', 'codex'] as const;
+/**
+ * The coding agents the desktop app runs on its owner's own computer
+ * (2026-10-28, local agents): the app holds the agent's key and drives the
+ * owner's own Claude Code or Codex, signed in as them. Harbor runs nothing.
+ */
+export const LOCAL_CODING_AGENTS = ['claude-code', 'codex'] as const;
+export const LOCAL_CONNECTION = 'local';
 export const AGENT_PAIRS: ReadonlyArray<{ kind: string; connection: string }> = [
   { kind: 'custom', connection: 'contract' },
   { kind: 'hermes', connection: 'plugin' },
@@ -134,6 +141,7 @@ export const AGENT_PAIRS: ReadonlyArray<{ kind: string; connection: string }> = 
   ...AGENT37_AGENTS.map((kind) => ({ kind, connection: 'agent37' })),
   ...CONDUCTOR_CODING_AGENTS.map((kind) => ({ kind, connection: 'conductor' })),
   ...MARITIME_AGENTS.map((kind) => ({ kind, connection: 'maritime' })),
+  ...LOCAL_CODING_AGENTS.map((kind) => ({ kind, connection: LOCAL_CONNECTION })),
   // Integrations (2026-10-03): the service's own API, called on a command, its kind and connection one name.
   { kind: 'posthog', connection: 'posthog' },
   { kind: 'cal', connection: 'cal' },
@@ -148,6 +156,12 @@ export const HARBOR_RUN_CONNECTIONS: readonly string[] = ['replicas', 'agent37',
  * Maritime agent is a VM with a persistent volume (2026-10-26): the same.
  */
 export const INSTANCE_CONNECTIONS: readonly string[] = ['agent37', 'maritime'];
+/**
+ * Connections whose agents are always personal (2026-10-28): a local agent
+ * runs commands on its owner's computer, so only its owner may invoke it.
+ * Added personal whatever the request says, and never switched to channel.
+ */
+export const PERSONAL_ONLY_CONNECTIONS: readonly string[] = [LOCAL_CONNECTION];
 /**
  * An agent Harbor itself is (2026-10-07, Jev): built into the org, on the
  * deployment's own key, so no person adds it, owns it or holds a key for it.

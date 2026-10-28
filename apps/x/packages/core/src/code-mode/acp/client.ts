@@ -15,6 +15,7 @@ import {
     type ReadTextFileResponse,
     type WriteTextFileRequest,
     type WriteTextFileResponse,
+    type McpServer,
 } from '@agentclientprotocol/sdk';
 import type { CodingAgent, CodeRunEvent } from './types.js';
 import type { PermissionBroker } from './permission-broker.js';
@@ -25,6 +26,8 @@ export interface AcpClientOptions {
     cwd: string;
     broker: PermissionBroker;
     onEvent: (event: CodeRunEvent) => void;
+    /** MCP servers every session on this connection gets (a local Spaces agent's org tools, 2026-10-28). */
+    mcpServers?: McpServer[];
 }
 
 // Deadline for the startup phases (initialize / session create+load). A healthy cold
@@ -157,6 +160,7 @@ export class AcpClient {
     readonly cwd: string;
     private broker: PermissionBroker;
     private onEvent: (event: CodeRunEvent) => void;
+    private readonly mcpServers: McpServer[];
     private child?: ChildProcess;
     private connection?: ClientSideConnection;
     private loadSession_ = false;
@@ -170,6 +174,7 @@ export class AcpClient {
         this.cwd = opts.cwd;
         this.broker = opts.broker;
         this.onEvent = opts.onEvent;
+        this.mcpServers = opts.mcpServers ?? [];
     }
 
     get loadSupported(): boolean {
@@ -243,7 +248,7 @@ export class AcpClient {
 
     async newSession(): Promise<string> {
         try {
-            const res = await this.withStartupTimeout(this.conn().newSession({ cwd: this.cwd, mcpServers: [] }));
+            const res = await this.withStartupTimeout(this.conn().newSession({ cwd: this.cwd, mcpServers: this.mcpServers }));
             return res.sessionId;
         } catch (e) {
             throw this.enrich(e, 'newSession');
@@ -255,7 +260,7 @@ export class AcpClient {
     // model picker before any real session exists.
     async describeModelOptions(): Promise<CodeAgentModelOptions> {
         try {
-            const res = await this.withStartupTimeout(this.conn().newSession({ cwd: this.cwd, mcpServers: [] }));
+            const res = await this.withStartupTimeout(this.conn().newSession({ cwd: this.cwd, mcpServers: this.mcpServers }));
             const r = res as { configOptions?: unknown; models?: unknown };
             const options = extractModelOptions(r.configOptions, r.models);
             return this.agent === 'claude' ? withClaudeAliases(options) : options;
@@ -266,7 +271,7 @@ export class AcpClient {
 
     async loadSession(sessionId: string): Promise<void> {
         try {
-            await this.withStartupTimeout(this.conn().loadSession({ sessionId, cwd: this.cwd, mcpServers: [] }));
+            await this.withStartupTimeout(this.conn().loadSession({ sessionId, cwd: this.cwd, mcpServers: this.mcpServers }));
         } catch (e) {
             throw this.enrich(e, 'loadSession');
         }

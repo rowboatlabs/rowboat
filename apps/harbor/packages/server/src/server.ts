@@ -54,6 +54,8 @@ export interface HarborOptions {
   liveHeartbeatMs?: number;
   /** Test knob: unsent-bytes ceiling before a stalled socket is terminated (ws.ts). */
   liveMaxBufferedBytes?: number;
+  /** Test knob: how long an agent may be away before it is announced offline (default 15s). */
+  agentPresenceGraceMs?: number;
   /**
    * The operator face (internal.ts). `key` enables GET /internal/stats; `log`
    * prints the live-load line once a minute — independent of the key, the
@@ -109,6 +111,7 @@ export async function startHarbor(options: HarborOptions): Promise<RunningHarbor
     ...(options.webOrigins ? { webOrigins: options.webOrigins } : {}),
     ...(options.webAppUrl ? { webAppUrl: options.webAppUrl } : {}),
     ...(options.hosting ? { hosting: options.hosting } : {}),
+    ...(options.agentPresenceGraceMs !== undefined ? { agentPresenceGraceMs: options.agentPresenceGraceMs } : {}),
   });
   await seedOrg(runtime.service, store, options);
 

@@ -10,7 +10,7 @@ import { MemberAvatar } from '@/components/spaces/atoms'
 import { caretContext, type CaretContext } from '@/components/spaces/composer-editor'
 import { useSpaceRefs } from '@/components/spaces/space-markdown'
 import { useOrgListings } from '@/hooks/use-space-boards'
-import { useOrgRoster, useSpaceMembers } from '@/hooks/use-space-members'
+import { isAgentOffline, useAgentsOnline, useOrgRoster, useSpaceMembers } from '@/hooks/use-space-members'
 import { useSpacesOrgs } from '@/hooks/use-spaces'
 import { assetWireUrl } from '@/lib/spaces-presentation'
 import { byRank, matchRank } from '@/lib/mention-rank'
@@ -96,6 +96,9 @@ export function useMentionAutocomplete(editor: Editor | null) {
         return { query: query.toLowerCase(), from: context.from - query.length - 1, to: context.from }
     }, [context, open])
 
+    // A local agent whose owner's computer isn't running it says so (2026-10-28): the mention waits until it is.
+    const online = useAgentsOnline(orgId)
+    const agentHint = (m: spaces.Member) => `${agentLabel(m.agentKind, m.agentConnection)}${m.personal ? ' · personal' : ''}${isAgentOffline(m, online) ? ' · offline' : ''}`
     const candidates = useMemo<MentionCandidate[]>(() => {
         if (!match) return []
         const q = match.query
@@ -114,11 +117,11 @@ export function useMentionAutocomplete(editor: Editor | null) {
         // Someone else's personal agent is left out too (2026-10-26): it answers its owner only.
         const pickable = (m: spaces.Member) => !isDeparted(m) && !isOthersPersonalAgent(m, selfMemberId)
         people.push(...byRank(spaceMembers.filter(pickable).map((m) => {
-            const hint = m.id === selfMemberId ? 'you' : m.kind === 'agent' ? `${agentLabel(m.agentKind, m.agentConnection)}${m.personal ? ' · personal' : ''}` : undefined
+            const hint = m.id === selfMemberId ? 'you' : m.kind === 'agent' ? agentHint(m) : undefined
             return { row: { id: m.id, label: m.displayName, ...(hint ? { hint } : {}) }, rank: rank(m) }
         })))
         people.push(...byRank(orgRoster.filter((m) => !inSpace.has(m.id) && pickable(m)).map((m) => {
-            const hint = m.kind === 'agent' ? `${agentLabel(m.agentKind, m.agentConnection)}${m.personal ? ' · personal' : ''} · not in this space` : 'not in this space'
+            const hint = m.kind === 'agent' ? `${agentHint(m)} · not in this space` : 'not in this space'
             return { row: { id: m.id, label: m.displayName, hint }, rank: rank(m) }
         })))
         // Shared spaces, as #Name references (a DM is nobody's to point at).
@@ -155,7 +158,9 @@ export function useMentionAutocomplete(editor: Editor | null) {
         // not be buried under every person whose name shares its letters.
         const fileQuota = Math.min(files.length, 4)
         return [...[...people, ...spaceRows].slice(0, MAX_ROWS - fileQuota), ...files].slice(0, MAX_ROWS)
-    }, [match, spaceMembers, orgRoster, org, listings, spaceId, selfMemberId])
+    // agentHint reads `online`; it changes with it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [match, spaceMembers, orgRoster, org, listings, spaceId, selfMemberId, online])
 
     // Reset the highlighted row whenever the query changes (adjust-on-change, not an effect).
     const query = match?.query ?? null

@@ -354,6 +354,15 @@ export const ServerFrame = z.discriminatedUnion('kind', [
    * unknown frame kinds by contract.
    */
   z.object({ kind: z.literal('invocation_state'), spaceId: SpaceId, invocation: Invocation }),
+  /**
+   * To every org member's connections (local agents, 2026-10-28): an agent
+   * whose connector holds its own key (anything Harbor does not run) opened
+   * its first live connection, or closed its last one. Offline is sent only
+   * after a short grace, so a reconnect does not flicker. Ephemeral, never
+   * replayed: the roster's `online` (listOrgMembers) is the snapshot. Older
+   * clients ignore unknown frame kinds by contract.
+   */
+  z.object({ kind: z.literal('agent_presence'), agentId: MemberId, online: z.boolean(), at: z.iso.datetime() }),
 ]);
 export type ServerFrame = z.infer<typeof ServerFrame>;
 

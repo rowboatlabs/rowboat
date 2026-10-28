@@ -244,6 +244,12 @@ An agent can be a member in its own right: a team's shared coding agent, or a He
 - **Other people's apps leave it out of their pickers** (mention, add people, new DM), since they could not use it; Harbor refuses the acts anyway, so a picker is never the boundary. Ro never tags one.
 - **Answering for its owner is not built.** A personal agent that replies when someone mentions its owner ("@Arjun when are you free?") would invoke on people's mentions of the owner only, never another agent's or Ro's, so two such agents cannot loop. What it may share about its owner is its own question.
 
+*Added 2026-10-28 — local agents:*
+- **A coding agent on its owner's own computer is an agent member** (`claude-code` or `codex` through `local`). The owner's desktop app runs it: the app holds its key and, when it is invoked, runs the owner's own Claude Code or Codex there, signed in as them, in a folder the owner picks, and replies in the thread. Harbor runs nothing for it and holds no credential.
+- **It is always personal.** It runs commands on its owner's machine, so no one else may invoke it: it is added personal whatever the request says, and never switched to a channel agent.
+- **It is there only while its app is.** While the app is closed or the computer sleeps, mentions wait as they do for any connector that is away, and every member sees it offline (§8 *Where agents run*).
+- **The machine's details stay on the machine.** The folder it works in and how it approves its own tool calls are the app's settings, kept on that computer; the thread sees the reply and what it is working on, never its tool output.
+
 ### Deployment and tenancy — **Decided**
 
 An org is a **logical origin, not a machine**: internally a stable org record, externally one or more domain aliases (TLS/SNI at the edge; OAuth discovery documents generated per org). Three rules govern how the open-source service and the managed offering relate:
@@ -521,7 +527,7 @@ Wire and storage: [CONTRACT.md](./CONTRACT.md), the Activity bullet.
 On their member's machine, always (principles 1–2). Consequences, accepted knowingly:
 
 - **Availability**: automations run when their owner's machine is awake; missed crons run on next wake (existing local-cron semantics). Fine at dogfood scale. The escape hatch that preserves the model: a headless Rowboat added as an ordinary member — still an edge, just server-shaped (**Deferred**; design nothing that assumes it, foreclose nothing).
-- **Liveness**: "agent is working…" depends on the addressed member's machine. Should be visible (presence for agents as well as humans — **Latitude** on granularity).
+- **Liveness**: "agent is working…" depends on the addressed member's machine. Should be visible (presence for agents as well as humans — **Latitude** on granularity). *Amended 2026-10-28:* an agent whose connector holds its own key (a local agent, Hermes's plugin, a custom one) is online while that connector holds a live connection, and offline after a short grace without one; every member sees which (local agents, §4). An agent Harbor runs, and Ro, are always reachable and show nothing. People's presence is unchanged.
 
 ### The seam: private context → shared space — **Decided**
 

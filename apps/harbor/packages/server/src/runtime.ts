@@ -48,6 +48,8 @@ export interface OrgRuntimeInput {
   webAppUrl?: string;
   /** Managed hosting (spec §8 Maritime, 2026-10-26): a stand-in provider and tick in tests; absent = from HARBOR_MARITIME_API_KEY. */
   hosting?: { provider: HostingProvider; tickMs?: number; trialMs?: number };
+  /** Test knob: how long an agent may be away before it is announced offline (default 15s). */
+  agentPresenceGraceMs?: number;
 }
 
 /** The managed-hosting provider the deployment's own Maritime key makes, or none. */
@@ -82,6 +84,7 @@ export async function buildOrgRuntime(input: OrgRuntimeInput): Promise<OrgRuntim
     input.org,
     input.blobs,
     new Notifier(store, hub, input.pushSender ?? new PushSender(store, input.orgId)),
+    input.agentPresenceGraceMs !== undefined ? { presenceGraceMs: input.agentPresenceGraceMs } : {},
   );
   // The mentions backfill (service.migrateMentions): idempotent, ledgered once per org, before the faces serve.
   await service.migrateMentions();
@@ -136,6 +139,7 @@ export async function buildOrgRuntime(input: OrgRuntimeInput): Promise<OrgRuntim
     },
     live: { service, hub, auth, webOrigins: new Set(input.webOrigins ?? []) },
     close: async () => {
+      service.closePresence();
       await service.stopHosting();
       await connectors.stopAll();
     },

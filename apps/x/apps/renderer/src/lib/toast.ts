@@ -9,9 +9,10 @@ import { toast as sonner } from 'sonner'
 
 type ToastType = 'success' | 'error' | 'info'
 
-export function toast(message: string, type: ToastType = 'info'): void {
-    const id = `${type}:${message}`
-    if (type === 'success') sonner.success(message, { id })
-    else if (type === 'error') sonner.error(message, { id })
-    else sonner(message, { id })
+/** `duration` in ms: how long it shows; sonner's default when absent. */
+export function toast(message: string, type: ToastType = 'info', duration?: number): void {
+    const options = { id: `${type}:${message}`, ...(duration ? { duration } : {}) }
+    if (type === 'success') sonner.success(message, options)
+    else if (type === 'error') sonner.error(message, options)
+    else sonner(message, options)
 }

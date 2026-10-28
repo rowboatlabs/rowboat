@@ -80,6 +80,9 @@ export const PLATFORMS: Record<string, { label: string; logo?: Logo }> = {
     maritime: { label: 'Maritime' },
 }
 
+/** Where a local agent runs (2026-10-28): not a platform, its owner's own computer. */
+export const LOCAL_CONNECTION = 'local'
+
 /**
  * Managed agents (2026-10-26): the kinds Rowboat creates on its own Maritime account,
  * one line each for the Create screen. The order is the Create screen's; the org's
@@ -122,6 +125,7 @@ export function agentLabel(kind: string | undefined, connection: string | undefi
     const what = kindInfo(kind).label
     // A bot is its own platform: "PostHog bot", not "PostHog · via PostHog".
     if (isBot(kind)) return `${what} bot`
+    if (connection === LOCAL_CONNECTION) return `${what} · local`
     return platform ? `${what} · via ${platform.label}` : what
 }
 
@@ -192,6 +196,12 @@ export interface AgentSetup {
     wantsHomeChannel?: boolean
     /** A bot rather than an agent (KINDS `bot`): offered under Add bot. */
     bot?: boolean
+    /**
+     * Runs on its owner's own computer (local agents, 2026-10-28): this app is its
+     * connector, so there is nothing to connect by hand, it is always personal,
+     * and Add asks for a folder and approvals instead. Desktop only.
+     */
+    local?: boolean
     /** The service can post alerts through the agent (Harbor spec §8 Alerts): where its address goes, on the agent's page. */
     alerts?: { note: string }
     setup: (ctx: SetupContext) => SetupRoute[]
@@ -540,6 +550,18 @@ function maritimeSetup({ kind }: SetupContext): SetupRoute[] {
 }
 
 export const AGENT_SETUPS: readonly AgentSetup[] = [
+    {
+        id: 'local',
+        label: 'On this computer',
+        description: 'Your own Claude Code or Codex, running here and signed in as you',
+        logo: { light: claudeCodeLogo, dark: claudeCodeLogoDark },
+        connection: 'local',
+        kinds: ['claude-code', 'codex'],
+        kindChoice: 'Coding agent',
+        defaultName: '',
+        local: true,
+        setup: () => [],
+    },
     {
         id: 'hermes',
         label: 'Hermes',

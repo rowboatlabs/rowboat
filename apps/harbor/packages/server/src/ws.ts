@@ -169,6 +169,8 @@ function handleConnection(
     if (frame.kind === 'space_removed') drop(frame.spaceId);
     send(frame);
   });
+  // An agent's presence follows its live connections (local agents, 2026-10-28).
+  void deps.service.liveOpened(memberId).catch(() => {});
 
   ws.on('message', (data) => {
     ws.sawLifeSinceLastBeat = true;
@@ -259,6 +261,7 @@ function handleConnection(
 
   ws.on('close', () => {
     unsubscribeMember();
+    deps.service.liveClosed(memberId);
     for (const spaceId of [...subscriptions.keys()]) drop(spaceId);
     stats?.connectionClosed();
   });

@@ -1,6 +1,7 @@
 import type { z } from 'zod';
 import type { BlobStore } from './blobs.js';
 import { Agents, type AgentConnectorHooks } from './core/agents.js';
+import { AgentPresence } from './core/agent-presence.js';
 import { Hosting, type HostingHooks, type HostingProvider } from './core/hosting.js';
 import { Assets } from './core/assets.js';
 import { Images } from './core/images.js';
@@ -85,6 +86,7 @@ export class HarborService {
   private readonly agents: Agents;
   private readonly hosting: Hosting;
   private readonly invocations: Invocations;
+  private readonly presence: AgentPresence;
 
   constructor(
     store: Store,
@@ -94,6 +96,8 @@ export class HarborService {
     blobs?: BlobStore,
     /** Absent = no notifications on this org (notify.ts: frames + push). */
     notifier?: Notifier,
+    /** Test knob: how long an agent may be away before it is announced offline (default 15s). */
+    options: { presenceGraceMs?: number } = {},
   ) {
     this.k = new Kernel(store, hub, org);
     this.spaces = new Spaces(this.k, blobs);
@@ -104,6 +108,7 @@ export class HarborService {
     this.readState = new ReadState(this.k, this.spaces, this.feed);
     this.agents = new Agents(this.k, this.spaces);
     this.hosting = new Hosting(this.k, this.spaces, this.agents);
+    this.presence = new AgentPresence(this.k, options.presenceGraceMs);
   }
 
   /** The kernel's clock, for code outside the core that stamps rows (connectors/host.ts). */
@@ -378,6 +383,21 @@ export class HarborService {
   }
   listOrgMembers(ctx: ActorCtx): Promise<Member[]> {
     return this.spaces.listOrgMembers(ctx);
+  }
+  /** Of these members, the agents whose connector is connected now (local agents, 2026-10-28). */
+  onlineAgents(members: readonly Member[]): string[] {
+    return this.presence.online(members);
+  }
+  /** A live connection opened or closed for a member (ws.ts): an agent's presence follows its connections. */
+  liveOpened(memberId: string): Promise<void> {
+    return this.presence.opened(memberId);
+  }
+  liveClosed(memberId: string): void {
+    this.presence.closed(memberId);
+  }
+  /** Drop the presence timers (runtime close). */
+  closePresence(): void {
+    this.presence.close();
   }
   addMembers(ctx: ActorCtx, spaceId: string, input: AddMembersInput): Promise<Membership[]> {
     return this.spaces.addMembers(ctx, spaceId, input);

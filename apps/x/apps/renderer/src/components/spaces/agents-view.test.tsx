@@ -15,12 +15,13 @@ const agent = (id: string, displayName: string, ownerId: string | undefined, age
     ({ id, displayName, role: 'member', kind: 'agent', ...(ownerId ? { ownerId } : {}), agentKind, agentConnection, ...extra }) as spaces.Member
 
 let roster: spaces.Member[]
+let online: string[] = []
 let spaceMembers: Record<string, spaces.Member[]>
 // Create agent (2026-10-26): the kinds this org's Harbor creates on Rowboat's own account; none = the card reads New agent.
 let managedKinds: string[] = []
 const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
     switch (channel) {
-        case 'spaces:listOrgMembers': return { members: roster }
+        case 'spaces:listOrgMembers': return { members: roster, online }
         case 'spaces:listMembers': return { members: spaceMembers[args.spaceId!] ?? [] }
         case 'spaces:listAgents': return { agents: roster.filter((m) => m.kind === 'agent' && m.ownerId === 'me').map((a) => ({ agent: a, keys: [] })) }
         case 'spaces:getAgentCapabilities': return { capabilities: { stop: false, options: [] }, defaults: {} }
@@ -88,6 +89,20 @@ describe('AgentsView', () => {
         expect(within(card('Ro')).queryByLabelText(/^(Channel|Personal):/)).toBeNull()
     })
 
+    it('says when a local agent’s computer isn’t running it', async () => {
+        const mac = agent('mac', 'Ramnique’s Claude Code', 'me', 'claude-code', 'local', { personal: true })
+        const box = agent('box', 'Harsh’s Codex', 'harsh', 'codex', 'local', { personal: true })
+        roster = [...roster, mac, box]
+        online = ['box']
+        show()
+        await screen.findByText('Ramnique’s Claude Code')
+        await waitFor(() => expect(within(group('Yours')).getByText(/Claude Code · local/)).toHaveTextContent('Claude Code · local · Offline'))
+        expect(within(group('Everyone else’s')).getByText(/Codex · local/)).toHaveTextContent(/^Codex · local$/)
+        // Other agents have no presence: never offline.
+        expect(within(group('Yours')).getByText(/^Hermes/)).not.toHaveTextContent('Offline')
+        online = []
+    })
+
     it('shows how many of your spaces each agent is in', async () => {
         show()
         await screen.findByText('2 spaces')
@@ -133,26 +148,33 @@ describe('AgentsView', () => {
         expect(screen.queryByRole('button', { name: 'Ro options' })).toBeNull()
     })
 
-    it('New agent opens straight at adding one', async () => {
+    it('New agent asks where it runs; Cancel on the next screen closes it, Back returns to the question', async () => {
         show()
         await screen.findByText('Herald')
         fireEvent.click(screen.getByRole('button', { name: /New agent/ }))
+        expect(await screen.findByText('Where should it run?')).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: /^Connect one you already run/ }))
         expect(await screen.findByRole('radiogroup', { name: 'How it connects' })).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+        expect(await screen.findByText('Where should it run?')).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: /^On this computer/ }))
+        expect(await screen.findByRole('heading', { name: 'Run an agent on this computer' })).toBeInTheDocument()
         fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-        await waitFor(() => expect(screen.queryByRole('radiogroup', { name: 'How it connects' })).toBeNull())
+        await waitFor(() => expect(screen.queryByRole('heading', { name: 'Run an agent on this computer' })).toBeNull())
     })
 
-    it('when the org’s Harbor creates agents, the card creates one, and adding one you run is its second button', async () => {
-        managedKinds = ['hermes', 'claude-code', 'codex']
+    it('the card names the ways it offers; Rowboat runs it only when the org’s Harbor creates agents', async () => {
         show()
-        await screen.findByText('Herald')
-        fireEvent.click(await screen.findByRole('button', { name: /Create agent/ }))
+        expect(await screen.findByText('On this computer or one you already run')).toBeInTheDocument()
+        cleanup()
+        managedKinds = ['hermes', 'claude-code', 'codex']
+        org = orgWith()
+        show()
+        expect(await screen.findByText('On this computer, run by Rowboat, or one you already run')).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: /New agent/ }))
+        fireEvent.click(await screen.findByRole('button', { name: /^Rowboat runs it/ }))
         const kinds = await screen.findByRole('radiogroup', { name: 'Agent' })
         expect(within(kinds).getAllByRole('radio').map((r) => r.getAttribute('aria-label'))).toEqual(['Hermes', 'Claude Code', 'Codex'])
-        // Back closes the dialog: it was opened past the list.
-        fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-        await waitFor(() => expect(screen.queryByRole('radiogroup', { name: 'Agent' })).toBeNull())
-        fireEvent.click(screen.getByRole('button', { name: 'Add an agent you run' }))
-        expect(await screen.findByRole('radiogroup', { name: 'How it connects' })).toBeInTheDocument()
     })
+
 })
