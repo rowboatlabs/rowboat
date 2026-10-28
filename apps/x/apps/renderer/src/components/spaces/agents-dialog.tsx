@@ -12,6 +12,7 @@ import { MaritimeAgentPicker } from '@/components/spaces/agent-maritime-picker'
 import { AccessChoice, accessLabel } from '@/components/spaces/agent-access'
 import { AgentLogo, ConnectAgent } from '@/components/spaces/agent-setup'
 import { EngineCard, LocalAgentFields, useLocalAgents, useLocalEngine } from '@/components/spaces/local-agent'
+import { PersonalityFields, saveAgentProfile } from '@/components/spaces/agent-personality'
 import { LOCAL_RUNTIME } from '@/lib/feature-flags'
 import { MemberAvatar } from '@/components/spaces/atoms'
 import { refreshMembers, refreshOrgRoster, useOrgRoster } from '@/hooks/use-space-members'
@@ -327,6 +328,9 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
     const [withDirect, setWithDirect] = useState(true)
     const [personal, setPersonal] = useState(false)
     const [progress, setProgress] = useState<string | null>(null)
+    // Its description and personality (2026-10-29): optional, saved right after it is added.
+    const [profileTitle, setProfileTitle] = useState('')
+    const [profileInstructions, setProfileInstructions] = useState('')
     // On this computer: where it works (code mode's default project until picked), how it approves, and whether its engine is ready.
     const local = useLocalAgents(open)
     const [localCwd, setLocalCwd] = useState('')
@@ -381,6 +385,8 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
         setSkippedSpaces(new Set())
         setWithDirect(true)
         setPersonal(false)
+        setProfileTitle('')
+        setProfileInstructions('')
         setLocalCwd('')
         setLocalPolicy('yolo')
         setScreen({ name: 'add', bot, ...(local ? { local: true } : {}) })
@@ -397,6 +403,8 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
         setSkippedSpaces(new Set())
         setWithDirect(true)
         setPersonal(false)
+        setProfileTitle('')
+        setProfileInstructions('')
         setScreen({ name: 'create' })
     }, [])
 
@@ -469,6 +477,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
             })
             setAnthropicKey('')
             setEnvText('')
+            await saveAgentProfile(org.id, agent.id, { title: profileTitle, instructions: profileInstructions })
             await settle(agent, false)
             setScreen({ name: 'agent', agentId: agent.id })
         } catch (err) {
@@ -499,6 +508,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                     cwd: shownCwd,
                     policy: localPolicy,
                 })
+                await saveAgentProfile(org.id, agent.id, { title: profileTitle, instructions: profileInstructions })
                 await settle(agent, false)
                 setScreen({ name: 'agent', agentId: agent.id })
                 return
@@ -532,6 +542,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
             })
             setCredential('')
             setInstance(null)
+            if (!addingBot) await saveAgentProfile(org.id, agent.id, { title: profileTitle, instructions: profileInstructions })
             await settle(agent, setup.wantsHomeChannel === true)
             setScreen({ name: 'connect', agentId: agent.id, agentName: agent.displayName, secret: key.secret, setupId: setup.id, kind, ...(agent.agentInstance ? { instance: agent.agentInstance } : {}) })
         } catch (err) {
@@ -727,6 +738,11 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                 />
                                 <span className="text-[11px] text-muted-foreground">How it appears in Spaces, and what people type to mention it.</span>
                             </label>
+                            {!addingBot && (
+                                <div className="mt-4">
+                                    <PersonalityFields name={shownName} kind={kindInfo(kind).label} title={profileTitle} onTitle={setProfileTitle} instructions={profileInstructions} onInstructions={setProfileInstructions} />
+                                </div>
+                            )}
                             {setup.credential && (
                                 <label className="mt-4 flex flex-col gap-1.5">
                                     <span className="text-xs font-medium text-foreground">{setup.credential.label}</span>
@@ -814,6 +830,9 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                 />
                                 <span className="text-[11px] text-muted-foreground">How it appears in Spaces, and what people type to mention it.</span>
                             </label>
+                            <div className="mt-4">
+                                <PersonalityFields name={createName} kind={kindInfo(chosenManaged).label} title={profileTitle} onTitle={setProfileTitle} instructions={profileInstructions} onInstructions={setProfileInstructions} />
+                            </div>
                             {chosenManaged === 'claude-code' && (
                                 <label className="mt-4 flex flex-col gap-1.5">
                                     <span className="text-xs font-medium text-foreground">Anthropic API key</span>

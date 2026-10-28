@@ -327,6 +327,8 @@ function AgentCard({ orgId, agent, owner, spaceNames, isAdmin, onOpenSettings, o
                     {agentLabel(agent.agentKind, agent.agentConnection)}
                     {offline && <span className="text-muted-foreground"> · Offline</span>}
                 </div>
+                {/* Its description, from its owner (2026-10-29). */}
+                {agent.title && <p className="mt-1.5 line-clamp-2 text-xs leading-snug text-muted-foreground" title={agent.title}>{agent.title}</p>}
             </div>
 
             <div className="mt-auto flex items-center justify-between gap-2 pt-4 text-xs text-muted-foreground">

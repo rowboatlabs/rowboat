@@ -160,6 +160,15 @@ describe('a mention', () => {
     updateLocalAgent({ orgId: 'org-1', agentId, cwd: workDir, policy: 'yolo' });
   });
 
+  it('gives Claude Code its owner’s instructions as its system prompt, not in the message (2026-10-29)', async () => {
+    await gagan.setAgentProfile(agentId, { instructions: 'You are terse. Run the tests first.' });
+    const { message } = await gagan.postMessage(spaceId, { body: mention('fix checkout'), actingMode: 'direct' });
+    await settled(message.id, 'done');
+    expect(prompts[0]!.systemPromptAppend).toContain('You are terse. Run the tests first.');
+    expect(prompts[0]!.prompt).not.toContain('You are terse');
+    await gagan.setAgentProfile(agentId, { instructions: '' });
+  });
+
   it('asks its owner in the thread before a tool call, and goes on with the decision', async () => {
     let decision: string | undefined;
     setTurn(async (args) => {

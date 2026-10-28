@@ -15,6 +15,7 @@ import { SpaceSubscriptions, harborChannelHandlers, type HarborChannel } from '@
 import { createAgent37Instance, listAgent37Instances } from '@x/core/dist/spaces/agent37.js';
 import { listMaritimeAgents } from '@x/core/dist/spaces/maritime.js';
 import * as localAgents from '@x/core/dist/spaces/local-agents.js';
+import { writeAgentInstructions } from '@x/core/dist/spaces/agent-instructions.js';
 import { fetchLinkPreview } from './link-preview.js';
 
 type IPCChannels = ipc.IPCChannels;
@@ -33,7 +34,7 @@ type SpacesHostChannel =
   | 'spaces:saveBlob' | 'spaces:saveAsset' | 'spaces:saveImageUrl' | 'spaces:linkPreview' | 'spaces:invokeRowboat'
   | 'spaces:topicSession' | 'spaces:responseSession' | 'spaces:stopRowboat' | 'spaces:schedule'
   | 'spaces:listScheduled' | 'spaces:cancelScheduled' | 'spaces:bounceLive'
-  | 'spaces:localAgents' | 'spaces:addLocalAgent' | 'spaces:connectLocalAgent' | 'spaces:updateLocalAgent' | 'spaces:forgetLocalAgent';
+  | 'spaces:writeAgentInstructions' | 'spaces:localAgents' | 'spaces:addLocalAgent' | 'spaces:connectLocalAgent' | 'spaces:updateLocalAgent' | 'spaces:forgetLocalAgent';
 
 type SpacesHandlers = { [K in HarborChannel | SpacesHostChannel]: InvokeHandler<K> };
 
@@ -265,6 +266,7 @@ export const spacesIpcHandlers: SpacesHandlers = {
     return { success: true };
   },
 
+  'spaces:writeAgentInstructions': async (_event, args) => ({ instructions: await writeAgentInstructions(args) }),
   'spaces:localAgents': async () => ({ agents: localAgents.listLocalAgents(), defaultCwd: await localAgents.defaultLocalAgentFolder() }),
   'spaces:addLocalAgent': async (_event, args) => localAgents.addLocalAgent(args),
   'spaces:connectLocalAgent': async (_event, args) => {
