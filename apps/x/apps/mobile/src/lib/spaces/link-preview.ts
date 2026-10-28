@@ -53,6 +53,9 @@ export function previewUrls(body: string): string[] {
   for (const m of stripped.matchAll(/https:\/\/[^\s<>)"'\]]+/g)) {
     const url = m[0]!.replace(/[.,;:!?]+$/, '');
     if (/\.(png|jpe?g|gif|webp|heic|svg)(\?|$)/i.test(url)) continue;
+    // A link to a file, attachment or message in a space opens in the app;
+    // a web preview of it says nothing (2026-10-28).
+    if (/^https:\/\/[^/]+\/s\/[^/]+\/[abm]\//.test(url)) continue;
     if (!found.includes(url)) found.push(url);
     if (found.length >= MAX_UNFURLS) break;
   }

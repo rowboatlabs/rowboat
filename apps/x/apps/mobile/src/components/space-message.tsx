@@ -32,16 +32,22 @@ export function parseAssetLink(url: string): { host: string; spaceId: string; as
  */
 const BARE_ASSET_LINK_RE = /(^|[^(\[<])(https:\/\/[^\s/?#]+\/s\/[^\s/?#]+\/a\/[^\s)?#<>]+)/g;
 export function nameFileLinks(body: string, fileNames?: ReadonlyMap<string, string>): string {
+  const named = (url: string) => {
+    const link = parseAssetLink(url);
+    return ((link && fileNames?.get(link.assetId)) || 'File').replace(/[[\]]/g, '');
+  };
   return body
     .split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/g)
     .map((part, i) =>
       i % 2 === 1
         ? part
-        : part.replace(BARE_ASSET_LINK_RE, (_m, lead: string, url: string) => {
-            const link = parseAssetLink(url);
-            const name = (link && fileNames?.get(link.assetId)) || 'File';
-            return `${lead}[${name.replace(/[[\]]/g, '')}](${url})`;
-          }),
+        : part
+            // A link whose label is its own URL ([url](url), as the composer
+            // writes a pasted link) is as good as bare.
+            .replace(/\[(https:\/\/[^\]\s]+)\]\((https:\/\/[^)\s]+)\)/g, (m, label: string, url: string) =>
+              label === url && parseAssetLink(url) ? `[${named(url)}](${url})` : m,
+            )
+            .replace(BARE_ASSET_LINK_RE, (_m, lead: string, url: string) => `${lead}[${named(url)}](${url})`),
     )
     .join('');
 }
