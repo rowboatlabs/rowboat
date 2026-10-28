@@ -26,18 +26,25 @@ function splitFences(markdown: string): string[] {
   return markdown.split(/(^```[^\n]*\n[\s\S]*?^```[ \t]*$)/m);
 }
 
+/** Task list items: the renderer has no checkboxes, so draw them as glyphs. */
+function taskGlyphs(text: string): string {
+  return text.replace(/^(\s*[-*+]\s+)\[ \]\s/gm, '$1☐︎ ').replace(/^(\s*[-*+]\s+)\[[xX]\]\s/gm, '$1☑︎ ');
+}
+
+/** A space file (plain markdown, no wiki links): checkboxes only, code left alone. */
+export function documentToRenderable(markdown: string): string {
+  return splitFences(markdown)
+    .map((part, i) => (i % 2 === 1 ? part : taskGlyphs(part)))
+    .join('');
+}
+
 function rewriteProse(text: string): string {
-  return (
-    text
-      // [[Path|Alias]] and [[Path]] → a link that opens the note. Embeds (![[…]]) included.
-      .replace(/!?\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_m, target: string, alias?: string) => {
-        const label = (alias ?? target.split('/').pop() ?? target).replace(/\.md$/, '').trim();
-        return `[${label.replace(/[[\]]/g, '')}](${NOTE_LINK}${encodeURIComponent(wikiTargetPath(target))})`;
-      })
-      // Task list items: the renderer has no checkboxes, so draw them as glyphs.
-      .replace(/^(\s*[-*+]\s+)\[ \]\s/gm, '$1☐︎ ')
-      .replace(/^(\s*[-*+]\s+)\[[xX]\]\s/gm, '$1☑︎ ')
-  );
+  // [[Path|Alias]] and [[Path]] → a link that opens the note. Embeds (![[…]]) included.
+  const linked = text.replace(/!?\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_m, target: string, alias?: string) => {
+    const label = (alias ?? target.split('/').pop() ?? target).replace(/\.md$/, '').trim();
+    return `[${label.replace(/[[\]]/g, '')}](${NOTE_LINK}${encodeURIComponent(wikiTargetPath(target))})`;
+  });
+  return taskGlyphs(linked);
 }
 
 function rewriteFence(block: string): string {
