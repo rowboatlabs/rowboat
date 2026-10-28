@@ -774,7 +774,21 @@ function FileCard({ name, path, muted, title, onOpen }: { name: string; path?: s
     )
 }
 
-function SpaceAnchor({ href, children }: ComponentProps<'a'>) {
+/**
+ * A file link alone on its line is shared as a file (2026-10-28) — a card,
+ * whatever its label (the phone sends [name](link)). The line is marked by
+ * this link title before rendering, since the anchor can't see its line.
+ */
+const FILE_CARD_TITLE = 'rowboat:file-card'
+const FILE_LINE_RE = /^(\s*)\[([^\]\n]+)\]\((https:\/\/[^\s/?#)]+\/s\/[^\s/?#)]+\/a\/[^\s)?#]+|app:\/\/space-file\/[^\s)]+)\)\s*$/gm
+function markFileCards(body: string): string {
+    return body
+        .split(/(```[\s\S]*?(?:```|$))/g)
+        .map((part, i) => (i % 2 === 1 ? part : part.replace(FILE_LINE_RE, (_m, lead: string, text: string, url: string) => `${lead}[${text}](${url} "${FILE_CARD_TITLE}")`)))
+        .join('')
+}
+
+function SpaceAnchor({ href, title, children }: ComponentProps<'a'>) {
     const refs = useContext(SpaceRefsContext)
     const nav = useContext(SpaceNavContext)
     const assets = useContext(SpaceAssetsContext)
@@ -815,12 +829,13 @@ function SpaceAnchor({ href, children }: ComponentProps<'a'>) {
     // link (pasted, or written by an agent) has only the URL as its text, so
     // the name comes from the space's listing instead.
     const bare = plainLabel(children) === url
+    const asCard = bare || title === FILE_CARD_TITLE
     const filePath = target?.kind === 'open' ? assets.byId.get(target.assetId)?.path : undefined
     const fileName = filePath?.split('/').pop() ?? (target?.kind === 'elsewhere' ? 'File in another space' : 'File')
     const fileLabel = (): ReactNode => (bare ? fileName : children)
     if (target?.kind === 'muted' || (target && target.kind === 'elsewhere' && !nav?.onOpenSpaceFile) || (target?.kind === 'open' && !nav)) {
         const title = target.kind === 'muted' ? target.title : 'Not available here'
-        if (bare) return <FileCard name={fileName} path={filePath} muted title={title} />
+        if (asCard) return <FileCard name={bare ? fileName : plainLabel(children) ?? fileName} path={filePath} muted title={title} />
         return (
             <span title={title} className={cn(FILE_CHIP_CLASS, 'text-muted-foreground')}>
                 <FileText className="size-4 shrink-0" />
@@ -833,7 +848,7 @@ function SpaceAnchor({ href, children }: ComponentProps<'a'>) {
             ? () => nav.onOpenFile(target.assetId)
             : () => nav.onOpenSpaceFile?.(target.orgId, target.spaceId, target.assetId)
         const title = target.kind === 'open' ? target.title : 'Open in its space'
-        if (bare) return <FileCard name={fileName} path={filePath} title={title} onOpen={open} />
+        if (asCard) return <FileCard name={bare ? fileName : plainLabel(children) ?? fileName} path={filePath} title={title} onOpen={open} />
         return (
             <button
                 type="button"
@@ -863,7 +878,7 @@ export const SpaceMarkdown = memo(function SpaceMarkdown({ body, className }: { 
         // Pre-separator messages joined text and images in one paragraph —
         // normalize so every message gets text above, a clean tile row below.
         // Mentions last: their app links must never look like file links.
-        return rewriteMentionLinks(separateImageParagraphs(withFiles))
+        return rewriteMentionLinks(separateImageParagraphs(markFileCards(withFiles)))
     }, [body, refs, assets])
     return (
         <div className={cn(className)}>
