@@ -14,7 +14,7 @@ import { spaces } from '@x/shared';
 import { ChatMarkdown } from '@/components/markdown';
 import { MessageLinkPreviews } from '@/components/link-preview-card';
 import { SpaceBlobImage, parseBlobLink } from '@/components/space-blob-image';
-import { MessageActionSheet, MessageRow, applyReaction, parseAssetLink } from '@/components/space-message';
+import { MessageActionSheet, MessageRow, applyReaction, fileLinkRule, nameFileLinks, parseAssetLink } from '@/components/space-message';
 import { SpaceComposer, type SpaceComposerHandle } from '@/components/space-composer';
 import { PollCard, applyPollVote } from '@/components/poll-card';
 import { setActiveSpace } from '@/lib/push';
@@ -55,6 +55,19 @@ export default function SpaceThreadScreen() {
   const [replies, setReplies] = useState<Message[] | null>(initial?.messages ?? null);
   const [members, setMembers] = useState<Map<string, Member>>(() => new Map((peekRoster(org, space) ?? []).map((m) => [m.id, m])));
   const profiles = useProfiles(client, members);
+  // File names by id (2026-10-28), so a bare file link in a message shows the
+  // file's name instead of its URL.
+  const [fileNames, setFileNames] = useState<ReadonlyMap<string, string>>(() => new Map());
+  useEffect(() => {
+    let cancelled = false;
+    client
+      .listAssets(space)
+      .then((list) => !cancelled && setFileNames(new Map(list.map((a) => [a.id, a.path.split('/').pop() ?? a.path]))))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [client, space]);
   // People you blocked (2026-10-20): their messages are hidden on this phone.
   const blockedIds = useBlockedIds(org);
   const blockedKey = [...blockedIds].join(',');
@@ -444,7 +457,7 @@ export default function SpaceThreadScreen() {
             <RootMessage
               message={rootMessage}
               member={profiles.get(rootMessage.author.memberId)}
-              memberNames={memberNames}
+              memberNames={memberNames} fileNames={fileNames}
               me={me}
               onToggleReaction={toggleReaction}
               onLongPress={(m) => { setReactionsOnly(false); setActionMessage(m); }}
@@ -479,7 +492,7 @@ export default function SpaceThreadScreen() {
           {/* Root painted from the stream; replies still on their way. */}
           {rootMessage && replies === null && !error ? <ActivityIndicator style={{ marginTop: 16 }} /> : null}
           {visibleReplies?.map((m) => (
-            <MessageRow key={m.id} message={m} member={profiles.get(m.author.memberId)} memberNames={memberNames} me={me} onToggleReaction={toggleReaction} onLongPress={(m) => { setReactionsOnly(false); setActionMessage(m); }} onOpenAsset={openAssetLink} onOpenBlob={openBlobLink}
+            <MessageRow key={m.id} message={m} member={profiles.get(m.author.memberId)} memberNames={memberNames} fileNames={fileNames} me={me} onToggleReaction={toggleReaction} onLongPress={(m) => { setReactionsOnly(false); setActionMessage(m); }} onOpenAsset={openAssetLink} onOpenBlob={openBlobLink}
               onAddReaction={(m) => { setReactionsOnly(true); setActionMessage(m); }} onVote={vote} onRemoveVote={removeVote} onEndPoll={endPoll} />
           ))}
         </ScrollView>
@@ -553,10 +566,11 @@ export default function SpaceThreadScreen() {
 
 // The root, Slack-style: 40pt avatar, bold name with the timestamp UNDER it,
 // full-size body, then reaction pills + the always-on emoji+ pill.
-function RootMessage({ message, member, memberNames, me, onToggleReaction, onLongPress, onAddReaction, onVote, onRemoveVote, onEndPoll, onOpenAsset, onOpenBlob }: {
+function RootMessage({ message, member, memberNames, fileNames, me, onToggleReaction, onLongPress, onAddReaction, onVote, onRemoveVote, onEndPoll, onOpenAsset, onOpenBlob }: {
   message: Message;
   member?: Member;
   memberNames: ReadonlyMap<string, string>;
+  fileNames?: ReadonlyMap<string, string>;
   me: string;
   onToggleReaction: (message: Message, emoji: string) => void;
   onLongPress: (message: Message) => void;
@@ -569,15 +583,16 @@ function RootMessage({ message, member, memberNames, me, onToggleReaction, onLon
 }) {
   const colors = useColors();
   const name = member ? memberLabel(member) : message.author.memberId;
-  const body = spaces.decorateMentions(message.body, memberNames);
+  const body = nameFileLinks(spaces.decorateMentions(message.body, memberNames), fileNames);
   // Same authed blob-image rule the chat rows use — the default renderer
   // can't fetch Harbor blobs.
   const imageRule = useMemo(
     () => ({
       image: (node: { key: string; attributes: { src?: string } }) =>
         node.attributes.src ? <SpaceBlobImage key={node.key} src={node.attributes.src} /> : null,
+      link: fileLinkRule(colors.label),
     }),
-    [],
+    [colors.label],
   );
   const posted = new Date(message.postedAt);
   const today = new Date().toDateString() === posted.toDateString();

@@ -53,6 +53,19 @@ export default function SpaceChatScreen() {
   const [messages, setMessages] = useState<Message[] | null>(() => peekValue<Message[]>(streamCacheKey) ?? null);
   const [members, setMembers] = useState<Map<string, Member>>(() => new Map((peekRoster(org, space) ?? []).map((m) => [m.id, m])));
   const profiles = useProfiles(client, members);
+  // File names by id (2026-10-28), so a bare file link in a message shows the
+  // file's name instead of its URL.
+  const [fileNames, setFileNames] = useState<ReadonlyMap<string, string>>(() => new Map());
+  useEffect(() => {
+    let cancelled = false;
+    client
+      .listAssets(space)
+      .then((list) => !cancelled && setFileNames(new Map(list.map((a) => [a.id, a.path.split('/').pop() ?? a.path]))))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [client, space]);
   // People you blocked (2026-10-20): their messages are hidden on this phone.
   const blockedIds = useBlockedIds(org);
   const blockedKey = [...blockedIds].join(',');
@@ -528,7 +541,7 @@ export default function SpaceChatScreen() {
               key={m.id}
               message={m}
               member={profiles.get(m.author.memberId)}
-              memberNames={memberNames}
+              memberNames={memberNames} fileNames={fileNames}
               me={me}
               onToggleReaction={toggleReaction}
               onOpenThread={openThread}

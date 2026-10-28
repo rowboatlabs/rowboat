@@ -1,6 +1,6 @@
 import * as Haptics from 'expo-haptics';
-import { memo, useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import { memo, useMemo, useState, type ReactNode } from 'react';
+import { Linking, Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import type { Member, Message } from '@rowboat/spaces-protocol';
 
 import { Image } from 'expo-image';
@@ -23,6 +23,50 @@ export function parseAssetLink(url: string): { host: string; spaceId: string; as
   const m = ASSET_LINK_RE.exec(url);
   if (!m) return null;
   return { host: m[1]!, spaceId: m[2]!, assetId: decodeURIComponent(m[3]!), label: '' };
+}
+
+/**
+ * File links read as the file (2026-10-28): a bare link (pasted, or written by
+ * an agent) has only its URL as text, so it gets the file's name from the
+ * space's listing. Code is left alone.
+ */
+const BARE_ASSET_LINK_RE = /(^|[^(\[<])(https:\/\/[^\s/?#]+\/s\/[^\s/?#]+\/a\/[^\s)?#<>]+)/g;
+export function nameFileLinks(body: string, fileNames?: ReadonlyMap<string, string>): string {
+  return body
+    .split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/g)
+    .map((part, i) =>
+      i % 2 === 1
+        ? part
+        : part.replace(BARE_ASSET_LINK_RE, (_m, lead: string, url: string) => {
+            const link = parseAssetLink(url);
+            const name = (link && fileNames?.get(link.assetId)) || 'File';
+            return `${lead}[${name.replace(/[[\]]/g, '')}](${url})`;
+          }),
+    )
+    .join('');
+}
+
+/**
+ * Markdown link rule: a file link is a file label (📄 name, no underline);
+ * other links keep the default look. Taps go through onLinkPress either way.
+ */
+export function fileLinkRule(labelColor: string) {
+  return (node: { key: string; attributes: { href?: string } }, children: ReactNode, _parent: unknown, styles: { link?: object }, onLinkPress?: (url: string) => boolean) => {
+    const href = String(node.attributes.href ?? '');
+    const file = parseAssetLink(href) !== null;
+    return (
+      <Text
+        key={node.key}
+        style={file ? { fontWeight: '600', color: labelColor } : styles.link}
+        onPress={() => {
+          if (onLinkPress?.(href) !== false) void Linking.openURL(href).catch(() => {});
+        }}
+      >
+        {file ? '📄 ' : null}
+        {children}
+      </Text>
+    );
+  };
 }
 
 // Shared message presentation for the stream and thread screens: row, reaction
@@ -60,6 +104,7 @@ export const MessageRow = memo(function MessageRow({
   message,
   member,
   memberNames,
+  fileNames,
   me,
   onToggleReaction,
   onOpenThread,
@@ -76,6 +121,8 @@ export const MessageRow = memo(function MessageRow({
   member?: Member;
   /** id → displayName for the whole space — resolves @<memberId> mentions. */
   memberNames?: ReadonlyMap<string, string>;
+  /** asset id → file name, so bare file links show the file's name. */
+  fileNames?: ReadonlyMap<string, string>;
   me: string;
   onToggleReaction: (message: Message, emoji: string) => void;
   /** Omit on the thread screen (replies have no threads). */
@@ -101,8 +148,8 @@ export const MessageRow = memo(function MessageRow({
   const time = new Date(message.postedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   // Wire member addresses ("@01ABC…") → bold display names, code spans untouched.
   const body = useMemo(
-    () => (memberNames ? spaces.decorateMentions(message.body, memberNames) : message.body),
-    [message.body, memberNames],
+    () => nameFileLinks(memberNames ? spaces.decorateMentions(message.body, memberNames) : message.body, fileNames),
+    [message.body, memberNames, fileNames],
   );
 
   // Long-press a reaction chip → who reacted (opens on that emoji's tab).
@@ -112,8 +159,9 @@ export const MessageRow = memo(function MessageRow({
     () => ({
       image: (node: { key: string; attributes: { src?: string } }) =>
         node.attributes.src ? <SpaceBlobImage key={node.key} src={node.attributes.src} /> : null,
+      link: fileLinkRule(colors.label),
     }),
-    [],
+    [colors.label],
   );
 
   // Deleted messages are filtered out by the screens (Slack); one that still

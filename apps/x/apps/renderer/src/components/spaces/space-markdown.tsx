@@ -736,6 +736,9 @@ function fileLinkTarget(url: string, refs: SpaceRefs | null, assets: SpaceAssets
     return relative ? byPath(relative) : null
 }
 
+/** A file in a message: a quiet bordered chip, icon then name. */
+const FILE_CHIP_CLASS = 'inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-muted/40 px-1.5 py-px align-middle text-[0.95em] font-medium no-underline transition-colors'
+
 function SpaceAnchor({ href, children }: ComponentProps<'a'>) {
     const refs = useContext(SpaceRefsContext)
     const nav = useContext(SpaceNavContext)
@@ -773,12 +776,20 @@ function SpaceAnchor({ href, children }: ComponentProps<'a'>) {
     if (!target && plainLabel(children) === url && isDirectImageUrl(url)) {
         return <ExternalImage src={url} alt="" />
     }
+    // A file link reads as the file (2026-10-28): a chip with its name. A bare
+    // link (pasted, or written by an agent) has only the URL as its text, so
+    // the name comes from the space's listing instead.
+    const fileLabel = (): ReactNode => {
+        if (plainLabel(children) !== url) return children
+        if (target?.kind === 'open') return assets.byId.get(target.assetId)?.path.split('/').pop() ?? 'File'
+        return target?.kind === 'elsewhere' ? 'File in another space' : 'File'
+    }
     if (target?.kind === 'muted' || (target && target.kind === 'elsewhere' && !nav?.onOpenSpaceFile) || (target?.kind === 'open' && !nav)) {
         const title = target.kind === 'muted' ? target.title : 'Not available here'
         return (
-            <span title={title} className="inline-flex max-w-full items-baseline gap-1 align-baseline text-muted-foreground underline decoration-dotted underline-offset-2">
-                <FileText className="size-3 shrink-0 self-center" />
-                <span className="truncate">{children}</span>
+            <span title={title} className={cn(FILE_CHIP_CLASS, 'text-muted-foreground')}>
+                <FileText className="size-3.5 shrink-0" />
+                <span className="truncate">{fileLabel()}</span>
             </span>
         )
     }
@@ -791,10 +802,10 @@ function SpaceAnchor({ href, children }: ComponentProps<'a'>) {
                 type="button"
                 onClick={open}
                 title={target.kind === 'open' ? target.title : 'Open in its space'}
-                className="inline-flex max-w-full items-baseline gap-1 align-baseline text-primary underline underline-offset-2 hover:opacity-80"
+                className={cn(FILE_CHIP_CLASS, 'text-foreground hover:bg-accent')}
             >
-                <FileText className="size-3 shrink-0 self-center" />
-                <span className="truncate">{children}</span>
+                <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+                <span className="truncate">{fileLabel()}</span>
             </button>
         )
     }
