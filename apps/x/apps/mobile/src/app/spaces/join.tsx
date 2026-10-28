@@ -72,7 +72,9 @@ export default function JoinScreen() {
       const org = new URL(resolved.baseUrl).host;
       const me = await client.me();
       router.replace('/spaces');
-      router.push({ pathname: '/spaces/chat', params: { org, space: result.space.id, title: result.space.name, me: me.member.id } });
+      // An invite that joined no space (2026-10-19: nothing listed, no
+      // default) leaves you on the server list, where the new org shows.
+      if (result.space) router.push({ pathname: '/spaces/chat', params: { org, space: result.space.id, title: result.space.name, me: me.member.id } });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -127,9 +129,13 @@ export default function JoinScreen() {
               <Image source="sf:number" style={{ width: 20, height: 20 }} tintColor={colors.label} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 17, fontWeight: '600', color: colors.label }}>{resolved.space.name}</Text>
+              {/* An invite is to the org (2026-10-19): the org, then the spaces it joins. */}
+              <Text style={{ fontSize: 17, fontWeight: '600', color: colors.label }}>{resolved.org.name}</Text>
               <Text style={{ fontSize: 13, color: colors.secondaryLabel }}>
-                {resolved.org.name}{resolved.invitedBy ? ` · invited by ${resolved.invitedBy}` : ''}
+                {[
+                  (resolved.spaces ?? []).map((s) => `#${s.name}`).join(', '),
+                  resolved.invitedBy ? `invited by ${resolved.invitedBy}` : '',
+                ].filter(Boolean).join(' · ')}
               </Text>
             </View>
           </View>

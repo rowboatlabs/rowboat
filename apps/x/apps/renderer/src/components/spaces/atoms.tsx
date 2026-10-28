@@ -1,8 +1,10 @@
+import { useProfileImage } from '@/hooks/use-profile-image'
+import { EditProfile } from './edit-profile'
+import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { useRef, useState, type ReactNode } from 'react'
-import { AtSign, Bot, Copy, Link as LinkIcon, Mail, MessageSquare } from 'lucide-react'
+import { AtSign, Bot, Copy, Link as LinkIcon, MessageSquare } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useMemberNames, useSpaceProfiles } from '@/components/spaces/member-text'
 import { useSpaceNav, useSpaceRefs } from '@/components/spaces/space-nav'
@@ -12,6 +14,7 @@ import { memberUrl, mentionToken } from '@x/shared/dist/spaces.js'
 import { avatarColorClass, initials, orgMonogram } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
 import { copySpacesLink } from '@/lib/spaces-copy-link'
+import { MemberAdminActions } from '@/components/spaces/member-admin'
 
 // Shared atoms for the Spaces surfaces: identity visuals, the segmented
 // control, and the @rowboat trigger. The server dialogs live in server-dialogs.tsx.
@@ -73,7 +76,7 @@ function KindCorner({ kind, size }: { kind: string | undefined; size: 'sm' | 'md
     )
 }
 
-export function MemberAvatar({ id, name, size = 'md', agent, agentKind, className }: {
+export function MemberAvatar({ id, name, size = 'md', agent, agentKind, className, orgId, avatarUrl }: {
     id: string
     name: string
     size?: 'sm' | 'md' | 'lg' | 'xl'
@@ -81,7 +84,13 @@ export function MemberAvatar({ id, name, size = 'md', agent, agentKind, classNam
     agent?: boolean
     agentKind?: string
     className?: string
+    orgId?: string
+    avatarUrl?: string
 }) {
+    const { byId } = useSpaceProfiles()
+    const refs = useSpaceRefs()
+    const photo = useProfileImage(orgId ?? refs?.orgId, avatarUrl ?? byId.get(id)?.avatarUrl)
+    const [failedPhoto, setFailedPhoto] = useState<string>()
     const inRoster = useAgent(id)
     const round = agent ?? inRoster !== undefined
     // Stream dialect: people are near-square tiles; circles stay reserved for AI.
@@ -94,7 +103,7 @@ export function MemberAvatar({ id, name, size = 'md', agent, agentKind, classNam
             title={name}
             className={cn('inline-flex shrink-0 items-center justify-center font-semibold leading-none select-none', dims, avatarColorClass(id), className, round && 'rounded-full')}
         >
-            {initials(name)}
+            {photo && failedPhoto !== photo ? <img src={photo} alt="" className="size-full rounded-[inherit] object-cover" onError={() => setFailedPhoto(photo)} /> : initials(name)}
         </span>
     )
     if (!round) return face
@@ -106,12 +115,7 @@ export function MemberAvatar({ id, name, size = 'md', agent, agentKind, classNam
     )
 }
 
-/**
- * Click-a-face profile: wraps any avatar/name in a popover with what the org
- * actually knows about the member — name, role, presence, id. Email renders
- * only if the wire record ever carries one (it doesn't today; the IdP claim
- * is discarded at invite binding), so the row lights up the day it exists.
- */
+// Shared profile panel for names, mentions, and directory entries (2026-10-22).
 export function MemberProfilePopover({ id, children }: { id: string; children: ReactNode }) {
     const names = useMemberNames()
     const { byId, here, selfId } = useSpaceProfiles()
@@ -120,7 +124,7 @@ export function MemberProfilePopover({ id, children }: { id: string; children: R
     const [open, setOpen] = useState(false)
     const member = byId.get(id)
     const name = member?.displayName ?? names.get(id) ?? id
-    const email = (member as (spaces.Member & { email?: string }) | undefined)?.email
+    const [editing, setEditing] = useState(false)
     const isHere = here.has(id)
     const copyId = () => {
         void navigator.clipboard.writeText(id).then(
@@ -139,46 +143,44 @@ export function MemberProfilePopover({ id, children }: { id: string; children: R
         nav.onOpenDirect?.(refs.orgId, id)
     } : null
     return (
-        <Popover open={open} onOpenChange={setOpen}>
-            <PopoverTrigger asChild>{children}</PopoverTrigger>
-            <PopoverContent align="start" className="w-64 p-0">
-                <div className="flex items-center gap-3 border-b border-border p-3">
+        <><Sheet open={open} onOpenChange={setOpen}>
+            <SheetTrigger asChild>{children}</SheetTrigger>
+            <SheetContent className="w-full overflow-y-auto p-6 sm:max-w-sm">
+                <SheetTitle>Profile</SheetTitle><SheetDescription className="sr-only">Member details and actions</SheetDescription>
+                <div className="flex flex-col items-start gap-5 border-b border-border pb-5">
                     <span className="relative shrink-0">
-                        <MemberAvatar id={id} name={name} size="lg" />
+                        <MemberAvatar id={id} name={name} size="xl" className="size-32 rounded-xl text-4xl" />
                         {/* An agent's corner holds its kind: its online dot sits at the top instead. */}
                         {isHere && (
                             <span className={cn('absolute -right-0.5 size-2.5 rounded-full bg-emerald-500 ring-2 ring-popover', member?.kind === 'agent' ? '-top-0.5' : '-bottom-0.5')} />
                         )}
                     </span>
-                    <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5">
-                            <span className="truncate text-sm font-semibold">{name}</span>
+                    <div className="min-w-0 w-full space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                            <span className="break-words text-2xl font-semibold">{name}</span>
                             {id === selfId && <span className="shrink-0 text-xs text-muted-foreground">(you)</span>}
                             {member?.kind === 'agent' && <AgentBadge agentKind={member.agentKind} agentConnection={member.agentConnection} />}
                             {member?.role === 'admin' && (
                                 <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[9.5px] font-medium uppercase tracking-wide text-muted-foreground">admin</span>
                             )}
                         </div>
+                        {member?.title && <p className="break-words text-sm text-muted-foreground">{member.title}</p>}
+                        {member?.role === 'member' && <p className="text-xs text-muted-foreground">Member</p>}
                         <div className={cn('text-xs', isHere ? 'text-emerald-600' : 'text-muted-foreground')}>
                             {isHere ? 'Here now' : 'Away'}
                         </div>
                     </div>
                 </div>
-                <div className="flex flex-col gap-1 p-2 text-xs text-muted-foreground">
-                    {email && (
-                        <div className="flex items-center gap-2 px-1 py-0.5">
-                            <Mail className="size-3 shrink-0" />
-                            <span className="truncate select-text">{email}</span>
-                        </div>
-                    )}
+                <div className="flex flex-col gap-2 text-sm">
+                    {id === selfId && refs && member?.kind !== 'agent' && <button type="button" className="rounded-md border px-3 py-2 text-left font-medium hover:bg-accent" onClick={() => { setOpen(false); setEditing(true) }}>Edit profile</button>}
                     {id !== selfId && message && (
                         <button
                             type="button"
                             onClick={message}
                             title="Open your direct message with them"
-                            className="flex items-center gap-2 rounded-md px-1 py-0.5 text-left hover:bg-accent hover:text-foreground"
+                            className="flex items-center gap-2 rounded-md px-3 py-2 text-left hover:bg-accent hover:text-foreground"
                         >
-                            <MessageSquare className="size-3 shrink-0" />
+                            <MessageSquare className="size-4 shrink-0" />
                             <span className="truncate">Message</span>
                         </button>
                     )}
@@ -187,9 +189,9 @@ export function MemberProfilePopover({ id, children }: { id: string; children: R
                             type="button"
                             onClick={mention}
                             title="Insert an @-mention into the composer"
-                            className="flex items-center gap-2 rounded-md px-1 py-0.5 text-left hover:bg-accent hover:text-foreground"
+                            className="flex items-center gap-2 rounded-md px-3 py-2 text-left hover:bg-accent hover:text-foreground"
                         >
-                            <AtSign className="size-3 shrink-0" />
+                            <AtSign className="size-4 shrink-0" />
                             <span className="truncate">Mention</span>
                         </button>
                     )}
@@ -197,23 +199,26 @@ export function MemberProfilePopover({ id, children }: { id: string; children: R
                         <button
                             type="button"
                             onClick={() => void copySpacesLink(memberUrl(refs.orgAddress, id))}
-                            className="flex items-center gap-2 rounded-md px-1 py-0.5 text-left hover:bg-accent hover:text-foreground"
+                            className="flex items-center gap-2 rounded-md px-3 py-2 text-left hover:bg-accent hover:text-foreground"
                         >
-                            <LinkIcon className="size-3 shrink-0" /> Copy member link
+                            <LinkIcon className="size-4 shrink-0" /> Copy member link
                         </button>
                     )}
                     <button
                         type="button"
                         onClick={copyId}
                         title="Copy member id"
-                        className="flex items-center gap-2 rounded-md px-1 py-0.5 text-left hover:bg-accent hover:text-foreground"
+                        className="flex items-center gap-2 rounded-md px-3 py-2 text-left hover:bg-accent hover:text-foreground"
                     >
-                        <Copy className="size-3 shrink-0" />
+                        <Copy className="size-4 shrink-0" />
                         <span className="truncate font-mono">{id}</span>
                     </button>
                 </div>
-            </PopoverContent>
-        </Popover>
+                <MemberAdminActions member={member} onAct={() => setOpen(false)} />
+            </SheetContent>
+        </Sheet>
+        {editing && refs && <EditProfile orgId={refs.orgId} onClose={() => setEditing(false)} />}
+        </>
     )
 }
 

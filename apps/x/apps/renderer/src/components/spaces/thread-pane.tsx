@@ -6,7 +6,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import { cn } from '@/lib/utils'
 import { Anchor, Archive, ArchiveRestore, ArrowDown, ArrowLeft, ArrowUp, Bell, BellOff, Bot, FileText, Link as LinkIcon, Loader2, MessageSquareOff, MoreHorizontal, Maximize2, Minimize2, Paperclip, Pencil, ShieldAlert, Square, Tag, Unlink, X } from 'lucide-react'
 import type { spaces } from '@x/shared'
-import { messageUrl } from '@x/shared/dist/spaces.js'
+import { followUpAgentId, mentionsAnyone, messageUrl } from '@x/shared/dist/spaces.js'
 import { copySpacesLink } from '@/lib/spaces-copy-link'
 import { Button } from '@/components/ui/button'
 import {
@@ -31,7 +31,10 @@ import {
 } from '@/lib/spaces-thread-draft'
 import { AUTO_TOAST, collectRouteCandidates, routeDraft, routeThreadLabel } from '@/lib/spaces-auto-route'
 import { agentOptionsPayload, postStreamMessage } from '@/lib/spaces-post'
-import { noteInvocations } from '@/hooks/use-space-invocations'
+import { noteInvocations, useSpaceInvocations } from '@/hooks/use-space-invocations'
+import { useSpaceMembers } from '@/hooks/use-space-members'
+import { isOthersPersonalAgent } from '@/lib/spaces-direct'
+import { FollowUpLine } from '@/components/spaces/follow-up-line'
 import { getStreamState, jumpToLatest } from '@/hooks/use-space-chat'
 import { AutoBanner } from '@/components/spaces/auto-banner'
 import { FindBanner } from '@/components/spaces/find-banner'
@@ -97,7 +100,7 @@ export function ThreadPane({
     /** False while kept mounted but off screen (read mode, hidden Spaces view) — no presence, no read marks. */
     visible?: boolean
 }) {
-    const { member } = useSpaceAccess()
+    const { member, writable } = useSpaceAccess()
     // The cached copy from the last open — plus any replies that streamed in
     // live while the pane was closed. Seeding paints the whole thread in the
     // first frame; the fetch below reconciles right behind it. A PARTIAL
@@ -618,12 +621,30 @@ export function ThreadPane({
         }
     }
 
+    // Thread follow-ups (Harbor spec §8, 2026-10-27): a reply that mentions
+    // nobody goes to the agent you last invoked here. The line above the
+    // composer names it; its × sends the next reply to people only. Not shown
+    // for someone else's personal agent, which would refuse it anyway.
+    const roster = useSpaceMembers(org.id, space.id)
+    const invocationsByMessage = useSpaceInvocations(org.id, space.id)
+    const followUp = useMemo(() => {
+        const members = new Map(roster.map((m) => [m.id, m]))
+        const id = followUpAgentId([...invocationsByMessage.values()].flat(), rootMessageId, org.memberId, members)
+        const agent = id ? members.get(id) : undefined
+        return agent && !isOthersPersonalAgent(agent, org.memberId) ? agent : undefined
+    }, [roster, invocationsByMessage, rootMessageId, org.memberId])
+    const [peopleOnly, setPeopleOnly] = useState(false)
+    const [draftMentions, setDraftMentions] = useState(false)
+
     // Optimistic send, same shape as the stream's: render now (dimmed as
     // pending), confirm — or fail into a retry/discard row — in the
     // background. The composer never waits on the round trip.
     const post = async (body: string, agent?: AgentOptions) => {
         // Sending settles a routed reply: whatever leaves this box is the person's own.
         clearStagedThreadDraft(draftKey)
+        // The × holds for one reply.
+        const toPeople = peopleOnly && followUp !== undefined && !mentionsAnyone(body)
+        setPeopleOnly(false)
         if (hasMoreAfterRef.current) {
             await snapToLatest()
             // The snap toasts its own failure; a reply must not land in an old window.
@@ -631,7 +652,7 @@ export function ThreadPane({
         }
         const pending = buildPendingMessage(space.id, org.memberId, body, rootMessageId)
         setMessages((prev) => [...prev, pending])
-        void invokeSpace('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body, ...agentOptionsPayload(agent) })
+        void invokeSpace('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body, ...agentOptionsPayload(agent), ...(toPeople ? { peopleOnly: true } : {}) })
             .then((result) => {
                 noteInvocations(org.id, space.id, result.invocations)
                 setMessages((prev) => {
@@ -983,7 +1004,8 @@ export function ThreadPane({
     const replyCountLabel = Math.max(visibleReplies.length, root?.replyCount ?? 0)
 
     return (
-        <div className="flex h-full min-h-0 flex-col bg-background">
+        // Spaces redesign (2026-10-21): spaces-thread-pane slides the pane in from the right on mount.
+        <div className="spaces-thread-pane flex h-full min-h-0 flex-col bg-background">
             <div className="spaces-pane-header flex shrink-0 items-center gap-1.5 border-b border-border">
                 {showBack && (
                     <>
@@ -1064,28 +1086,28 @@ export function ThreadPane({
                         <DropdownMenuSeparator />
                         {topic ? (
                             <>
-                                <DropdownMenuItem disabled={!member} onClick={() => setEditingTitle(topic.title)}>
+                                <DropdownMenuItem disabled={!writable} onClick={() => setEditingTitle(topic.title)}>
                                     <Pencil className="size-3.5 mr-2" /> Rename
                                 </DropdownMenuItem>
-                                <DropdownMenuItem disabled={!member} onClick={() => setAttaching(true)}>
+                                <DropdownMenuItem disabled={!writable} onClick={() => setAttaching(true)}>
                                     <Paperclip className="size-3.5 mr-2" /> {topic.documentAssetId ? 'Change linked file…' : 'Link a file…'}
                                 </DropdownMenuItem>
                                 {topic.documentAssetId && (
-                                    <DropdownMenuItem disabled={!member} onClick={() => void manage({ action: 'detach_document' })}>
+                                    <DropdownMenuItem disabled={!writable} onClick={() => void manage({ action: 'detach_document' })}>
                                         <Unlink className="size-3.5 mr-2" /> Unlink file
                                     </DropdownMenuItem>
                                 )}
                                 {topic.archived ? (
-                                    <DropdownMenuItem disabled={!member} onClick={() => void manage({ action: 'unarchive' })}><ArchiveRestore className="size-3.5 mr-2" /> Unarchive</DropdownMenuItem>
+                                    <DropdownMenuItem disabled={!writable} onClick={() => void manage({ action: 'unarchive' })}><ArchiveRestore className="size-3.5 mr-2" /> Unarchive</DropdownMenuItem>
                                 ) : (
-                                    <DropdownMenuItem disabled={!member} onClick={() => void manage({ action: 'archive' })}><Archive className="size-3.5 mr-2" /> Archive</DropdownMenuItem>
+                                    <DropdownMenuItem disabled={!writable} onClick={() => void manage({ action: 'archive' })}><Archive className="size-3.5 mr-2" /> Archive</DropdownMenuItem>
                                 )}
-                                <DropdownMenuItem disabled={!member} onClick={() => void manage({ action: 'remove' })}>
+                                <DropdownMenuItem disabled={!writable} onClick={() => void manage({ action: 'remove' })}>
                                     <MessageSquareOff className="size-3.5 mr-2" /> Convert back to thread
                                 </DropdownMenuItem>
                             </>
                         ) : (
-                            <DropdownMenuItem disabled={!member} onClick={() => setEditingTitle('')}>
+                            <DropdownMenuItem disabled={!writable} onClick={() => setEditingTitle('')}>
                                 <Tag className="size-3.5 mr-2" /> Make this a discussion…
                             </DropdownMenuItem>
                         )}
@@ -1264,7 +1286,7 @@ export function ThreadPane({
                                     <button
                                         className="flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:opacity-60"
                                         title="Stop your Rowboat"
-                                        disabled={!member || stopping}
+                                        disabled={!writable || stopping}
                                         onClick={() => void stopRowboat()}
                                     >
                                         {stopping ? <Loader2 className="size-2.5 animate-spin" /> : <Square className="size-2.5 fill-current" />} Stop
@@ -1304,7 +1326,7 @@ export function ThreadPane({
             )}
             </div>
 
-            {member && attaching && topic && (
+            {writable && attaching && topic && (
                 <AttachDocumentDialog
                     entries={entries}
                     current={topic.documentAssetId}
@@ -1315,10 +1337,10 @@ export function ThreadPane({
                     }}
                 />
             )}
-            {member && forwarding && (
+            {writable && forwarding && (
                 <ForwardDialog org={org} space={space} message={forwarding} memberNames={memberNames} onClose={() => setForwarding(null)} />
             )}
-            {member && <PollDialogHost openRef={openPollRef} onSubmit={createPoll} />}
+            {writable && <PollDialogHost openRef={openPollRef} onSubmit={createPoll} />}
             <FindBanner
                 orgId={org.id}
                 spaceId={space.id}
@@ -1337,10 +1359,14 @@ export function ThreadPane({
                     dismissTitle="Looks right: keep it here as a draft"
                 />
             )}
-            {member ? <Composer
+            {writable && followUp && !draftMentions && (
+                <FollowUpLine agentName={followUp.displayName} peopleOnly={peopleOnly} onPeopleOnly={setPeopleOnly} />
+            )}
+            {writable ? <Composer
                 placeholder="Reply…"
                 busy={false}
                 onSend={post}
+                onDraftChange={(draft) => setDraftMentions(mentionsAnyone(draft))}
                 onSchedule={!LOCAL_RUNTIME ? undefined : async (body, at) => {
                     clearStagedThreadDraft(draftKey)
                     await invokeSpace('spaces:schedule', {
@@ -1419,7 +1445,7 @@ export function ThreadPane({
                         hint: 'Copy an invite link to this space',
                         run: async () => {
                             try {
-                                const result = await invokeSpace('spaces:createInvite', { orgId: org.id, spaceId: space.id })
+                                const result = await invokeSpace('spaces:createInvite', { orgId: org.id, spaceIds: [space.id] })
                                 await navigator.clipboard.writeText(result.link)
                                 analytics.spacesInviteLinkCopied()
                                 toast('Invite link copied to clipboard', 'success')

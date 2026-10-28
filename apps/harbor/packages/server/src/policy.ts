@@ -1,4 +1,5 @@
-import type { ErrorCode, Invocation, InvocationRefusal, Member, Membership, Message, Space } from '@rowboat/spaces-protocol';
+import type { ErrorCode, Invocation, InvocationRefusal, InvitePolicy, Member, MemberRole, Membership, Message, Space } from '@rowboat/spaces-protocol';
+import { BUILT_IN_CONNECTION } from '@rowboat/spaces-protocol';
 import { HarborError } from './errors.js';
 
 // Who may do what. The service loads the facts (space, membership, message,
@@ -84,6 +85,86 @@ export function canDeleteSpace(actor: Member, space: Space): Decision {
 }
 
 /**
+ * Removing someone from a shared space is an admin act (spec §4 Roles,
+ * built 2026-10-19). A DM's membership is fixed; your own tool is leave.
+ */
+export function canRemoveFromSpace(actor: Member, space: Space, targetId: string): Decision {
+  if (space.kind === 'direct') return { code: 'invalid_request', message: 'a direct message has a fixed membership — nobody can be removed' };
+  if (actor.role !== 'admin') return { code: 'forbidden', message: 'only an admin can remove someone from a space' };
+  if (targetId === actor.id) return { code: 'invalid_request', message: 'to take yourself out of a space, leave it' };
+  return null;
+}
+
+/** Changing who may find a space is an admin act on a shared space (spec §4 Roles, 2026-10-19); a DM is private forever. */
+export function canSetSpaceVisibility(actor: Member, space: Space): Decision {
+  if (space.kind === 'direct') return { code: 'invalid_request', message: 'a direct message is always private' };
+  if (actor.role === 'admin') return null;
+  return { code: 'forbidden', message: 'only an admin can change who can see a space' };
+}
+
+/**
+ * Removing a member from the org (spec §4 Roles, 2026-10-19): an admin act,
+ * never on yourself (an org removal is not a way to leave, and it keeps the
+ * last admin from removing the org's last admin), and never on an agent
+ * Harbor itself is, which no person added.
+ */
+export function canRemoveFromOrg(actor: Member, target: Member): Decision {
+  if (actor.role !== 'admin') return { code: 'forbidden', message: 'only an admin can remove someone from the org' };
+  if (target.id === actor.id) return { code: 'invalid_request', message: 'you can’t remove yourself from the org' };
+  if (target.agentConnection === BUILT_IN_CONNECTION) return { code: 'invalid_request', message: `${target.displayName} is built into the org and can’t be removed` };
+  return null;
+}
+
+/**
+ * Default spaces are an admin's to set (spec §4 Roles, §5 answer 3; built
+ * 2026-10-19), and only a shared open space can be one, so an invite to the
+ * org is never a back door into a private space. Taking the flag off needs
+ * only the admin bit. The schema holds the same rule (migration 041).
+ */
+export function canSetDefaultSpace(actor: Member, space: Space, isDefault: boolean): Decision {
+  if (space.kind === 'direct') return { code: 'invalid_request', message: 'a direct message cannot be a default space' };
+  if (actor.role !== 'admin') return { code: 'forbidden', message: 'only an admin can choose the default spaces' };
+  if (isDefault && space.visibility !== 'open') return { code: 'invalid_request', message: 'only an open space can be a default space' };
+  return null;
+}
+
+/**
+ * Promoting and demoting (spec §4 Roles, 2026-10-19): an admin act on an
+ * active person. An agent is never an admin (spec §4 Agent members). The
+ * at-least-one-admin rule needs the count, so the store decides it.
+ */
+export function canSetRole(actor: Member, target: Member, role: MemberRole): Decision {
+  if (actor.role !== 'admin') return { code: 'forbidden', message: 'only an admin can change who is an admin' };
+  if (target.kind === 'agent' && role === 'admin') return { code: 'invalid_request', message: 'an agent can’t be an admin' };
+  if (target.removedAt !== undefined || target.deactivatedAt !== undefined) {
+    return { code: 'invalid_request', message: `${target.displayName} is no longer in the org` };
+  }
+  return null;
+}
+
+/** The org's settings are its admins' to set (spec §4 Roles, 2026-10-19). */
+export function canSetOrgSettings(actor: Member): Decision {
+  if (actor.role === 'admin') return null;
+  return { code: 'forbidden', message: 'only an admin can change the org’s settings' };
+}
+
+/** Creating an invite, under the org's policy (spec §4 Invites, built 2026-10-19). */
+export function canInvite(actor: Member, policy: InvitePolicy): Decision {
+  if (policy === 'members' || actor.role === 'admin') return null;
+  return { code: 'forbidden', message: 'only admins can invite people to this org' };
+}
+
+/**
+ * Listing a space on an invite requires being a member of it (spec §4
+ * Invites, amended 2026-09-22): for a private space that is the whole rule,
+ * for an open one it is harmless, and it needs no kind check. A DM is never
+ * listed — its membership is fixed.
+ */
+export function canListOnInvite(space: Space, membership: Membership | undefined): Decision {
+  return canChangeMembership(space, 'invite') ?? canAccessSpace(space, membership);
+}
+
+/**
  * An archived space refuses every write that would add to it (spec §6,
  * 2026-10-13). Asked by the space lock for every member's act; leaving and
  * unarchiving opt out, and personal state (read marks, follows) never asks.
@@ -145,19 +226,34 @@ export function canBind(identity: { email?: string }, org: { allowedEmailDomains
  * otherwise rebind the same row.
  */
 export function canSignIn(member: Member): Decision {
-  if (member.deactivatedAt === undefined) return null;
-  return { code: 'not_a_member', message: 'this account was deleted' };
+  if (member.deactivatedAt !== undefined) return { code: 'not_a_member', message: 'this account was deleted' };
+  // Removed by an admin (2026-10-19): refused as a sign-in; an invite
+  // reactivates the row instead (spaces.ts bindInvite), so it never asks.
+  if (member.removedAt !== undefined) return { code: 'not_a_member', message: 'you were removed from this org' };
+  return null;
 }
 
-/** Nobody adds, or opens a DM with, a deactivated member (2026-10-13). */
+/** Nobody adds, or opens a DM with, a deactivated or removed member (2026-10-13, 2026-10-19). */
 export function canReachMember(member: Member): Decision {
-  if (member.deactivatedAt === undefined) return null;
-  return { code: 'invalid_request', message: `${member.displayName} has deleted their account` };
+  if (member.deactivatedAt !== undefined) return { code: 'invalid_request', message: `${member.displayName} has deleted their account` };
+  if (member.removedAt !== undefined) return { code: 'invalid_request', message: `${member.displayName} is no longer in this org` };
+  return null;
 }
 
 export function canSetOrgLogo(actor: Member): Decision {
   if (actor.role === 'admin') return null;
   return { code: 'forbidden', message: 'only an admin can change the org’s logo' };
+}
+
+/**
+ * Only you edit your profile (spec §4 Member profile, 2026-09-22), and only a
+ * person has one to edit: an agent member is named by its owner when it is
+ * added (built 2026-10-19), so an agent's own key cannot rename it. A
+ * person's own assistant acting for them is the person, and may.
+ */
+export function canEditProfile(actor: Member): Decision {
+  if (actor.kind !== 'agent') return null;
+  return { code: 'forbidden', message: 'an agent’s name is set when it is added' };
 }
 
 // --- agent members and their keys (spec §4 Agent members, 2026-09-29) --------
@@ -178,6 +274,22 @@ export function canCreateAgentKey(actor: Member, agent: Member): Decision {
   return { code: 'forbidden', message: 'only the agent’s owner can create its keys' };
 }
 
+/**
+ * Renaming an agent is its owner's (spec §4 Agent members, amended
+ * 2026-10-21): the name was theirs to pick when they added it. Admins remove
+ * an agent from the org; they don't rename it.
+ */
+export function canRenameAgent(actor: Member, agent: Member): Decision {
+  if (agent.kind === 'agent' && agent.ownerId !== undefined && agent.ownerId === actor.id) return null;
+  return { code: 'forbidden', message: 'only the agent’s owner can rename it' };
+}
+
+/** Switching an agent between channel and personal (spec §4 Agent members, 2026-10-27): the owner, as with its name. */
+export function canSetAgentPersonal(actor: Member, agent: Member): Decision {
+  if (agent.kind === 'agent' && agent.ownerId !== undefined && agent.ownerId === actor.id) return null;
+  return { code: 'forbidden', message: 'only the agent’s owner can change who can use it' };
+}
+
 /** Pointing an agent's alerts at a space (spec §8 Alerts, 2026-10-03): the owner, as with its keys. */
 export function canSetAgentHook(actor: Member, agent: Member): Decision {
   if (agent.kind === 'agent' && agent.ownerId !== undefined && agent.ownerId === actor.id) return null;
@@ -196,6 +308,22 @@ export function canRevokeAgentKey(actor: Member, agent: Member): Decision {
   return { code: 'forbidden', message: 'only the agent’s owner or an admin can revoke its keys' };
 }
 
+/**
+ * A personal agent is its owner's alone (spec §4 Agent members, 2026-10-26):
+ * nobody else adds it to a space or opens a DM with it. Everyone still sees
+ * it on the roster and reads its replies. A channel agent, or any person,
+ * passes.
+ */
+export function canReachPersonalAgent(actorId: string, member: Member, act: 'add' | 'message'): Decision {
+  if (member.kind !== 'agent' || member.personal !== true || member.ownerId === actorId) return null;
+  return {
+    code: 'forbidden',
+    message: act === 'add'
+      ? `${member.displayName} is a personal agent: only its owner can add it to a space`
+      : `${member.displayName} is a personal agent: only its owner can message it`,
+  };
+}
+
 /** The agents a member manages, and so sees on the Agents screen: an admin, every one; anyone else, their own. */
 export function agentsManagedBy(actor: Member): 'all' | 'owned' {
   return actor.role === 'admin' ? 'all' : 'owned';
@@ -207,12 +335,21 @@ export function agentsManagedBy(actor: Member): 'all' | 'owned' {
 export const AGENT_HOP_LIMIT = 3;
 
 /**
- * Whether a mention may invoke an agent, or why not. You must share a shared
- * space with the agent: a DM alone does not count (PR #1130's rule for
- * Replicas, generalized). Past the hop limit an agent's hand-off is refused.
- * A refusal is a recorded outcome shown under the message, not an error.
+ * Whether a mention may invoke an agent, or why not. A personal agent answers
+ * its owner only (spec §4 Agent members, 2026-10-26): another person, another
+ * agent and Ro are all refused. You must share a shared space with the agent:
+ * a DM alone does not count (PR #1130's rule for Replicas, generalized). Past
+ * the hop limit an agent's hand-off is refused. A refusal is a recorded
+ * outcome shown under the message, not an error.
  */
-export function invocationRefusal(sharesSharedSpace: boolean, depth: number): InvocationRefusal | null {
+export function invocationRefusal(
+  sharesSharedSpace: boolean,
+  depth: number,
+  invoked: { agent: Member; authorId: string },
+): InvocationRefusal | null {
+  if (invoked.agent.personal === true && invoked.agent.ownerId !== invoked.authorId) {
+    return { reason: 'not_permitted', message: `${invoked.agent.displayName} is a personal agent: only its owner can ask it for something.` };
+  }
   if (!sharesSharedSpace) {
     return { reason: 'not_permitted', message: 'You need to share a space with this agent to ask it for something.' };
   }

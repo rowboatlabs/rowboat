@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { ArrowDownRight, ArrowUpLeft, ArrowRightToLine } from 'lucide-react'
 import { toast } from 'sonner'
 import { ChatHeader } from '@/components/chat-header'
@@ -10,7 +11,6 @@ import { createEmptyChatTabViewState, type ChatTabViewState } from '@/lib/chat-c
 import type { ChatLocation } from '@/lib/assistant-layout'
 import type { ChatTab } from '@/components/tab-bar'
 import type { ChatSidebarProps } from '@/components/chat-sidebar'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 export interface ChatServices extends ChatSidebarProps {
   onSubmitForTab: (id: string, ...args: Parameters<ChatSessionComposerProps['onSubmit']>) => void | Promise<void>
@@ -22,8 +22,8 @@ export interface ChatServices extends ChatSidebarProps {
 
 const destinations = [
   { location: 'sidebar', label: 'Move to sidebar', Icon: ArrowRightToLine },
-  { location: 'assistant', label: 'Move to Assistant', Icon: ArrowUpLeft },
-  { location: 'floating', label: 'Move to floating window', Icon: ArrowDownRight },
+  { location: 'assistant', label: 'Open in Assistant', Icon: ArrowUpLeft },
+  { location: 'floating', label: 'Pop out as a window', Icon: ArrowDownRight },
 ] as const
 
 /** One stable conversation instance. Its parent changes its host, never its
@@ -31,9 +31,12 @@ const destinations = [
  *  the container it sits in. A container whose controls share the header row
  *  (the sidebar's close button) passes them as `controls` rather than stacking
  *  a strip of its own above the chat. */
-export function Chat({ tab, location, visible, focused, services: p, onMove, onNew, onSelect, controls }: {
+export function Chat({ tab, location, visible, focused, services: p, onMove, onNew, onSelect, controls, headerHost }: {
   tab: ChatTab; location: ChatLocation; visible: boolean; focused: boolean; services: ChatServices
   onMove: (location: ChatLocation) => void; onNew: () => void; onSelect: (id: string) => void; controls?: ReactNode
+  /** The Assistant page's top bar (2026-10-22): the chat's title and actions
+   *  go there instead of a second bar under it. */
+  headerHost?: HTMLElement | null
 }) {
   const session = useSessionChat(tab.runId)
   const title = useSessionTitle(tab.runId) ?? p.getChatTabTitle(tab)
@@ -52,16 +55,17 @@ export function Chat({ tab, location, visible, focused, services: p, onMove, onN
   }
   const reportError = (error: unknown) => toast.error(error instanceof Error ? error.message : String(error))
   const action = (fn: () => Promise<unknown>) => { void fn().catch(reportError) }
+  const moveTargets = destinations.filter((destination) => destination.location !== location)
+    .map(({ location: target, label, Icon }) => ({ label, icon: <Icon className="size-4" />, onSelect: () => onMove(target) }))
+  const headerContent = <>
+    <ChatHeader activeTitle={title} activeRunId={tab.runId} sessionUsage={state.sessionUsage} moveTargets={moveTargets}
+      onNewChatTab={onNew} recentRuns={p.recentRuns} onSelectRun={onSelect} onOpenChatHistory={p.onOpenChatHistory} />
+    {controls}
+  </>
   return <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-[inherit] bg-background" data-canonical-chat={tab.chatId}>
-    <header data-chat-header className="rowboat-header titlebar-no-drag flex shrink-0 items-center border-b border-border px-1">
-      <ChatHeader activeTitle={title} activeRunId={tab.runId} sessionUsage={state.sessionUsage}
-        onNewChatTab={onNew} recentRuns={p.recentRuns} onSelectRun={onSelect} onOpenChatHistory={p.onOpenChatHistory} />
-      {destinations.filter((destination) => destination.location !== location).map(({ location, label, Icon }) => <Tooltip key={location}>
-        <TooltipTrigger asChild><button type="button" aria-label={label} onClick={() => onMove(location)} className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><Icon className="size-4" /></button></TooltipTrigger>
-        <TooltipContent side="bottom">{label}</TooltipContent>
-      </Tooltip>)}
-      {controls}
-    </header>
+    {headerHost
+      ? createPortal(<div data-chat-header className="flex min-w-0 flex-1 items-center">{headerContent}</div>, headerHost)
+      : <header data-chat-header className="rowboat-header titlebar-no-drag flex shrink-0 items-center border-b border-border px-1">{headerContent}</header>}
     <FileCardProvider onOpenKnowledgeFile={p.onOpenKnowledgeFile ?? (() => {})} onOpenFile={p.onOpenFile}>
       {session.error && <div role="alert" className="px-4 py-2 text-sm text-destructive">{session.error}</div>}
       <div className="relative min-h-0 flex-1">

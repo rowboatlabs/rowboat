@@ -13,20 +13,24 @@ import { isNetworkError } from '@/lib/spaces/errors';
 
 const LANDED_WINDOW_MS = 2 * 60 * 1000;
 
+type Posted = Awaited<ReturnType<SpacesClient['postMessage']>>;
+
 export async function postMessageReliably(
   client: SpacesClient,
   spaceId: string,
-  input: { body: string; threadRoot?: string },
+  input: { body: string; threadRoot?: string; peopleOnly?: boolean },
   me: string,
-): Promise<Message> {
-  const post = async () => (await client.postMessage(spaceId, { ...input, actingMode: 'direct' })).message;
+): Promise<Posted> {
+  const post = () => client.postMessage(spaceId, { ...input, actingMode: 'direct' });
   try {
     return await post();
   } catch (err) {
     if (!isNetworkError(err)) throw err;
     await new Promise((r) => setTimeout(r, 700));
     const landed = await findLanded(client, spaceId, input, me).catch(() => undefined);
-    if (landed) return landed;
+    // A send found after the fact has no invocations to hand back; the
+    // thread's invocation list catches up from the server.
+    if (landed) return { message: landed, invocations: [] };
     return post();
   }
 }

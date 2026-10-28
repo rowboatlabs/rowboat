@@ -12,6 +12,7 @@ export { SpaceSubscriptions } from './subscriptions.js';
 export type { SpaceSubscriptionsDeps, LiveSubscriber } from './subscriptions.js';
 export { harborChannelHandlers } from './channels.js';
 export { parseInviteLink } from './links.js';
+export { generatedOrgSlug } from './orgs.js';
 export type { HarborChannel, HarborChannelHandlers, HarborChannelDeps } from './channels.js';
 export {
   discoverIssuer,

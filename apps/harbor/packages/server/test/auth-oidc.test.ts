@@ -140,7 +140,7 @@ describe('invite-binding ceremony', () => {
       seedSpaces: [{ name: 'Roadboard', creator: 'ramnique' }],
     });
     const spaces = await harbor.service.listSpaces({ memberId: 'ramnique' });
-    const invite = await harbor.service.createInvite({ memberId: 'ramnique' }, spaces[0]!.id);
+    const invite = await harbor.service.createInvite({ memberId: 'ramnique' }, { spaceIds: [spaces[0]!.id] });
     const token = await as.mint({ sub: 'sub-harsh', email: 'harsh@rowboatlabs.com', name: 'Harsh Vardhan' });
     const rest = restClient(harbor, token);
 
@@ -191,9 +191,9 @@ describe('invite-binding ceremony', () => {
     const token = await as.mint({ sub: 'sub-gagan', email: 'gagan@rowboatlabs.com' });
     const rest = restClient(harbor, token);
 
-    const first = await harbor.service.createInvite({ memberId: 'ramnique' }, spaces[0]!.id);
+    const first = await harbor.service.createInvite({ memberId: 'ramnique' }, { spaceIds: [spaces[0]!.id] });
     const one = await rest.post('/v1/invites/accept', { token: first.token });
-    const second = await harbor.service.createInvite({ memberId: 'ramnique' }, spaces[1]!.id);
+    const second = await harbor.service.createInvite({ memberId: 'ramnique' }, { spaceIds: [spaces[1]!.id] });
     const two = await rest.post('/v1/invites/accept', { token: second.token });
     expect(two.body.membership.memberId).toBe(one.body.membership.memberId);
     // No name claim → displayName seeded from the email local-part.
@@ -211,7 +211,7 @@ describe('invite-binding ceremony', () => {
       seedSpaces: [{ name: 'Roadboard', creator: 'ramnique' }],
     });
     const spaces = await harbor.service.listSpaces({ memberId: 'ramnique' });
-    const invite = await harbor.service.createInvite({ memberId: 'ramnique' }, spaces[0]!.id);
+    const invite = await harbor.service.createInvite({ memberId: 'ramnique' }, { spaceIds: [spaces[0]!.id] });
 
     const outsider = restClient(harbor, await as.mint({ sub: 'sub-x', email: 'x@gmail.com' }));
     const refused = await outsider.post('/v1/invites/accept', { token: invite.token });

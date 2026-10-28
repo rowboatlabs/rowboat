@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ChangeSet } from './changeset.js';
-import { Attribution, Membership, Message, MessageDeletion, MessageEdit, PollEnd, PollVote, Reaction, Space, SpaceKind, Topic, TopicRemoval } from './core.js';
+import { Attribution, Member, Membership, Message, MessageDeletion, MessageEdit, PollEnd, PollVote, Reaction, Space, SpaceKind, Topic, TopicRemoval } from './core.js';
 import { AssetId, MemberId, MessageId, SpaceId, StreamOffset } from './ids.js';
 import { Approval } from './approval.js';
 import { Invocation, InvocationId } from './invocation.js';
@@ -140,6 +140,25 @@ export const SpaceEvent = z.discriminatedUnion('type', [
     space: Space,
     by: Attribution,
   }),
+  /**
+   * An admin changed the space's visibility (api.ts setSpaceVisibility,
+   * 2026-10-19) — the full row plus who did it, the shape of a rename.
+   */
+  z.object({
+    type: z.literal('space_visibility_changed'),
+    space: Space,
+    by: Attribution,
+  }),
+  /**
+   * An admin made the space a default space or took it off the defaults
+   * (api.ts setDefaultSpace, 2026-10-19) — the full row, whose `isDefault`
+   * says which, plus who did it. Clients older than it skip the event.
+   */
+  z.object({
+    type: z.literal('space_default_changed'),
+    space: Space,
+    by: Attribution,
+  }),
 ]);
 export type SpaceEvent = z.infer<typeof SpaceEvent>;
 
@@ -222,7 +241,7 @@ export const ServerFrame = z.discriminatedUnion('kind', [
   /**
    * Addressed to a MEMBER (2026-09-22), the mirror of `space_added`: your
    * membership of a space ended — you left it (on this device or another)
-   * today; an admin removed you tomorrow. The live face drops the space's
+   * or an admin removed you (2026-10-19), from the space or from the org. The live face drops the space's
    * subscription on this frame BEFORE forwarding it, so no frame of that
    * space reaches you after your departure, and a re-subscribe to a private space is refused.
    * Ephemeral, never replayed: the durable truth is the `membership` event
@@ -230,20 +249,27 @@ export const ServerFrame = z.discriminatedUnion('kind', [
    * the unknown frame by contract. Also sent when an admin deletes the space
    * (2026-10-14) — to every member, and for an open space to everyone in the
    * org, since anyone may be reading it; there is no log left to replay.
+   * And when an admin makes an open space private (2026-10-19), to every org
+   * member not in it, so nobody keeps reading a space they can no longer see.
    */
   z.object({
     kind: z.literal('space_removed'),
     spaceId: SpaceId,
-    /** Who ended it: yourself on leave, the remover once removal exists. */
+    /** Who ended it: yourself on leave, the admin on a removal. */
     by: MemberId,
     at: z.iso.datetime(),
   }),
+  // Org profiles bypass space subscriptions; missed updates are recovered by roster reads (2026-10-22).
+  z.object({ kind: z.literal('profile_updated'), member: Member, at: z.iso.datetime() }),
   /**
    * Addressed to EVERY member of the org (2026-10-07): the org's shape
-   * changed — today, a second space made a group chat a workspace, DMs on.
+   * changed — a second space made a group chat a workspace, DMs on; or,
+   * since 2026-10-19, an admin changed a role, the invite policy, a space's
+   * visibility, or removed someone from the org.
    * It reaches members the new space does not include, which is why it is
    * not a space event. Ephemeral, never replayed: refetch the listing
-   * (`groupChat` on listSpaces is the truth). Older clients drop the
+   * (`groupChat` on listSpaces is the truth), the roster and `me` (roles,
+   * removals) and the org's settings. Older clients drop the
    * unknown frame by contract.
    */
   z.object({ kind: z.literal('org_changed'), at: z.iso.datetime() }),

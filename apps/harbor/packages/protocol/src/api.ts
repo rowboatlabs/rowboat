@@ -12,7 +12,18 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { ActingMode, AgentCredential, AgentHook, AgentKey, AgentKeySecret, AgentListing, Attribution, Member, Membership, Message, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic } from './core.js';
+import { ActingMode, AgentCredential, AgentHook, AgentKey, AgentKeySecret, AgentListing, Attribution, InvitePolicy, Member, MemberRole, Membership, Message, OrgSettings, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic, UpdateProfile,
+  AgentHosting,
+  HostingEnvVar,
+  HostingExecution,
+  HostingFileEntry,
+  HostingLogLine,
+  HostingMachine,
+  HostingPowerAction,
+  HostingSkill,
+  HostingTrigger,
+  HostingSpend, LlmProvider,
+} from './core.js';
 import { AssetId, AssetPath, BlobHash, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 import {
   AcceptInvite,
@@ -62,6 +73,8 @@ const NewMessage = z.object({
   /** Reply-to-activity-row provenance (root posts only): the change-set this message answers. */
   anchorChangeSetId: ChangeSetId.optional(),
   body: z.string().min(1).max(65_536),
+  /** A short version of a long body, shown first with "Show more" (2026-10-25). */
+  summary: z.string().min(1).max(1_000).optional(),
   /** Present = this message carries a poll (immutable once posted; editMessage refuses). */
   poll: NewPoll.optional(),
   actingMode: ActingMode,
@@ -74,6 +87,13 @@ const NewMessage = z.object({
    * an agent, that agent: spec §8, 2026-09-30).
    */
   agentOptions: z.record(MemberId, InvocationOptionValues).optional(),
+  /**
+   * A thread reply meant for the people in it (spec §8, 2026-10-27): it
+   * continues no agent's conversation, and Ro tags no agent for it. A reply
+   * that mentions nobody otherwise invokes the agent its author last invoked
+   * in that thread. Mentions still invoke. Ignored on a new root message.
+   */
+  peopleOnly: z.boolean().optional(),
 });
 
 /**
@@ -203,6 +223,17 @@ export const routes = {
     path: '/v1/me',
     response: z.object({ member: Member }),
   },
+  /**
+   * Your own display name and title (spec §4 Member profile, 2026-10-19).
+   * Only you edit your profile; an agent member's name is its owner's choice
+   * at creation, so agents are refused. Unchanged fields are a no-op.
+   */
+  updateMe: {
+    method: 'PUT',
+    path: '/v1/me',
+    request: UpdateProfile,
+    response: z.object({ member: Member }),
+  },
   // --- profile images (2026-10-02) -------------------------------------------
   /**
    * Your own avatar. The body is the image itself (PNG, JPEG, WebP or GIF,
@@ -239,6 +270,23 @@ export const routes = {
     method: 'DELETE',
     path: '/v1/org/logo',
     response: z.object({ logoUrl: z.string().url().optional() }),
+  },
+  /** The org's settings (2026-10-19): today, who may invite. Any member reads them. */
+  getOrgSettings: {
+    method: 'GET',
+    path: '/v1/org/settings',
+    response: z.object({ settings: OrgSettings }),
+  },
+  /**
+   * Change the org's settings — admins only (spec §4 Roles, 2026-10-19).
+   * Fields left out stay as they are; an unchanged value is a no-op. Every
+   * member's connections get `org_changed`.
+   */
+  updateOrgSettings: {
+    method: 'PATCH',
+    path: '/v1/org/settings',
+    request: z.object({ invitePolicy: InvitePolicy.optional() }),
+    response: z.object({ settings: OrgSettings }),
   },
   /**
    * An avatar's or logo's bytes: a stream or a 302 to a short-lived presigned
@@ -367,6 +415,38 @@ export const routes = {
     response: z.object({ space: Space }),
   },
   /**
+   * Change a shared space's visibility (spec §4 Roles, 2026-10-19): an admin
+   * act by a member of the space, refused on a DM and on an archived space.
+   * The same value is a no-op with no event; a change appends
+   * `space_visibility_changed`. Every org member gets `org_changed`, so
+   * browse listings move; making a space private also sends `space_removed`
+   * to every org member not in it, ending any reading subscription.
+   */
+  setSpaceVisibility: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/visibility',
+    params: z.object({ spaceId: SpaceId }),
+    request: z.object({ visibility: SpaceVisibility, actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+    response: z.object({ space: Space }),
+  },
+  /**
+   * Make a space a default space, or take it off the defaults (spec §5
+   * answer 3, 2026-10-19): everyone who accepts an invite to the org joins
+   * every default space. An admin act, on a shared open space only — a
+   * private space or a DM refuses with `invalid_request`, so an invite is
+   * never a back door into either; taking a flag off is allowed on any
+   * shared space. The admin need not be a member. Archived spaces refuse.
+   * Setting the flag a space already has is a no-op with no event. Members
+   * learn by `space_default_changed` on the log.
+   */
+  setDefaultSpace: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/default',
+    params: z.object({ spaceId: SpaceId }),
+    request: z.object({ isDefault: z.boolean(), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+    response: z.object({ space: Space }),
+  },
+  /**
    * Delete a shared space (spec §6, 2026-10-14): an admin act, refused on a
    * DM, allowed on an archived space. The space and every row that hangs off
    * it go in one statement (the cascade, migration 039); blob bytes no other
@@ -416,8 +496,228 @@ export const routes = {
       credential: z.string().min(1).max(512).optional(),
       /** The platform instance the agent is (INSTANCE_CONNECTIONS only, 2026-10-05). */
       instance: z.string().min(1).max(128).optional(),
+      /** Only the owner may use it (spec §4 Agent members, 2026-10-26); absent = a channel agent, as before. */
+      personal: z.boolean().default(false),
     }),
     response: z.object({ agent: Member, key: AgentKeySecret }),
+  },
+  /**
+   * The kinds of agent this Harbor creates on Rowboat's own platform account
+   * (spec §8 Maritime, 2026-10-26): MARITIME_AGENTS when the deployment has the
+   * platform key, none otherwise. What the app's Create button offers.
+   */
+  managedAgentKinds: {
+    method: 'GET',
+    path: '/v1/agents/managed',
+    response: z.object({ kinds: z.array(z.string()) }),
+  },
+  /**
+   * Create a managed agent (spec §8 Maritime, 2026-10-26): Rowboat's own
+   * account on the platform runs it. The caller becomes its owner and gets its
+   * first key as with createAgent; the agent's hosting starts `deploying` and
+   * the listing shows it move to `ready`. `kind` is one of MARITIME_AGENTS.
+   * Claude Code needs the person's `anthropicApiKey`, which goes straight to
+   * the agent's environment on the platform and is kept nowhere else; `env`
+   * adds variables the same way. Render face only. Refused with
+   * `invalid_request` when this Harbor runs no managed hosting, or when the
+   * platform refuses (its own sentence, such as a plan limit).
+   */
+  createManagedAgent: {
+    method: 'POST',
+    path: '/v1/agents/managed',
+    request: z.object({
+      displayName: z.string().trim().min(1).max(128),
+      kind: z.string().min(1).max(32),
+      anthropicApiKey: z.string().min(1).max(512).optional(),
+      env: z.array(z.object({ key: z.string().regex(/^[A-Z_][A-Z0-9_]{0,63}$/), value: z.string().max(4096), secret: z.boolean().optional() })).max(20).optional(),
+      /** A personal agent, as on createAgent (spec §4 Agent members, 2026-10-27). */
+      personal: z.boolean().default(false),
+    }),
+    response: z.object({ agent: Member, key: AgentKeySecret, hosting: AgentHosting }),
+  },
+  /**
+   * Delete a managed agent's hosting: the owner or an admin. Its keys are
+   * revoked at once and its hosting marked `deleting`; the platform's
+   * resources go in the background and the listing shows `deleted` once the
+   * platform confirms. The member stays, to be removed like any member.
+   */
+  deleteManagedAgent: {
+    method: 'DELETE',
+    path: '/v1/agents/:agentId/hosting',
+    params: z.object({ agentId: MemberId }),
+    response: z.object({ hosting: AgentHosting }),
+  },
+  /**
+   * Managing a managed agent's VM (spec §8 Maritime, the management area,
+   * 2026-10-27): the owner or an admin, on a hosting that is `ready`, through
+   * Harbor with the deployment's own platform key. Render face only. Each
+   * answers `not_found` for an agent Rowboat does not host and
+   * `invalid_request` with the platform's own sentence when it refuses.
+   * getHosting is the page's one read: the hosting, the machine as the
+   * platform sees it, and the environment with secrets' values withheld.
+   */
+  getHosting: {
+    method: 'GET',
+    path: '/v1/agents/:agentId/hosting',
+    params: z.object({ agentId: MemberId }),
+    response: z.object({ hosting: AgentHosting, machine: HostingMachine.optional(), env: z.array(HostingEnvVar), spend: HostingSpend.optional() }),
+  },
+  /**
+   * The owner's own provider key for a managed agent (2026-10-27): the end of
+   * its trial. The key goes to the agent's environment on the platform and
+   * nowhere else; Harbor keeps the provider and the key's last characters.
+   * `provider` is one of `LLM_PROVIDERS[kind]`; `model` is the runtime's
+   * default from then on. Answers the hosting as it now stands: `own`, with
+   * the trial closed. Also how a key is replaced.
+   */
+  setHostingLlm: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/hosting/llm',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ provider: LlmProvider, apiKey: z.string().min(8).max(512), model: z.string().max(128).optional() }),
+    response: z.object({ hosting: AgentHosting }),
+  },
+  /** Set one environment variable, creating or replacing it; `secret` is kept by the platform and never read back. A restart or reload applies it. */
+  setHostingEnv: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/hosting/env/:key',
+    params: z.object({ agentId: MemberId, key: z.string().regex(/^[A-Z_][A-Z0-9_]{0,255}$/) }),
+    request: z.object({ value: z.string().max(4096), secret: z.boolean().optional() }),
+    response: z.object({ env: z.array(HostingEnvVar) }),
+  },
+  deleteHostingEnv: {
+    method: 'DELETE',
+    path: '/v1/agents/:agentId/hosting/env/:key',
+    params: z.object({ agentId: MemberId, key: z.string().regex(/^[A-Z_][A-Z0-9_]{0,255}$/) }),
+    response: z.object({ env: z.array(HostingEnvVar) }),
+  },
+  /** `restart` reboots the VM, `sleep` snapshots it, `wake` restores it, `reload` applies environment variables without a reboot. */
+  hostingPower: {
+    method: 'POST',
+    path: '/v1/agents/:agentId/hosting/power',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ action: HostingPowerAction }),
+    response: z.object({ machine: HostingMachine }),
+  },
+  /** Run one shell command on the VM, detached: the answer is the execution to read until it ends. Not a shell: nothing persists between commands. */
+  runHostingCommand: {
+    method: 'POST',
+    path: '/v1/agents/:agentId/hosting/commands',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ command: z.string().min(1).max(8192), timeoutSeconds: z.number().int().min(1).max(3600).optional() }),
+    response: z.object({ execution: HostingExecution }),
+  },
+  getHostingCommand: {
+    method: 'GET',
+    path: '/v1/agents/:agentId/hosting/commands/:executionId',
+    params: z.object({ agentId: MemberId, executionId: z.string().min(1).max(128) }),
+    response: z.object({ execution: HostingExecution }),
+  },
+  cancelHostingCommand: {
+    method: 'DELETE',
+    path: '/v1/agents/:agentId/hosting/commands/:executionId',
+    params: z.object({ agentId: MemberId, executionId: z.string().min(1).max(128) }),
+    response: z.object({ execution: HostingExecution }),
+  },
+  /** The VM's logs as the platform keeps them, newest first; `before` pages back by the platform's cursor. */
+  getHostingLogs: {
+    method: 'GET',
+    path: '/v1/agents/:agentId/hosting/logs',
+    params: z.object({ agentId: MemberId }),
+    query: z.object({ limit: z.coerce.number().int().min(1).max(500).optional(), before: z.string().max(128).optional(), level: z.string().max(32).optional() }),
+    response: z.object({ logs: z.array(HostingLogLine), nextBefore: z.string().max(128).optional() }),
+  },
+  /** The VM's files: a directory listing, a text file's content, writing a text file, a new directory, a move, a deletion. */
+  listHostingFiles: {
+    method: 'GET',
+    path: '/v1/agents/:agentId/hosting/files',
+    params: z.object({ agentId: MemberId }),
+    query: z.object({ path: z.string().max(2048).optional() }),
+    response: z.object({ path: z.string(), entries: z.array(HostingFileEntry) }),
+  },
+  readHostingFile: {
+    method: 'GET',
+    path: '/v1/agents/:agentId/hosting/files/content',
+    params: z.object({ agentId: MemberId }),
+    query: z.object({ path: z.string().min(1).max(2048) }),
+    /** Text only, up to 1 MB; `truncated` when the file was longer. */
+    response: z.object({ path: z.string(), content: z.string(), truncated: z.boolean() }),
+  },
+  writeHostingFile: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/hosting/files/content',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ path: z.string().min(1).max(2048), content: z.string().max(1_000_000) }),
+    response: z.object({ ok: z.literal(true) }),
+  },
+  makeHostingDir: {
+    method: 'POST',
+    path: '/v1/agents/:agentId/hosting/files/mkdir',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ path: z.string().min(1).max(2048) }),
+    response: z.object({ ok: z.literal(true) }),
+  },
+  moveHostingFile: {
+    method: 'POST',
+    path: '/v1/agents/:agentId/hosting/files/move',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ from: z.string().min(1).max(2048), to: z.string().min(1).max(2048) }),
+    response: z.object({ ok: z.literal(true) }),
+  },
+  deleteHostingFile: {
+    method: 'DELETE',
+    path: '/v1/agents/:agentId/hosting/files',
+    params: z.object({ agentId: MemberId }),
+    query: z.object({ path: z.string().min(1).max(2048) }),
+    response: z.object({ ok: z.literal(true) }),
+  },
+  /** Skills on a Hermes agent: the VM's and, with `q`, the platform catalog's matches; install by name; remove. Other kinds answer `invalid_request`. */
+  listHostingSkills: {
+    method: 'GET',
+    path: '/v1/agents/:agentId/hosting/skills',
+    params: z.object({ agentId: MemberId }),
+    query: z.object({ q: z.string().max(200).optional() }),
+    response: z.object({ skills: z.array(HostingSkill) }),
+  },
+  installHostingSkill: {
+    method: 'POST',
+    path: '/v1/agents/:agentId/hosting/skills',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ name: z.string().min(1).max(256) }),
+    response: z.object({ skills: z.array(HostingSkill) }),
+  },
+  removeHostingSkill: {
+    method: 'DELETE',
+    path: '/v1/agents/:agentId/hosting/skills/:name',
+    params: z.object({ agentId: MemberId, name: z.string().min(1).max(256) }),
+    response: z.object({ skills: z.array(HostingSkill) }),
+  },
+  /** Triggers the platform fires on a Hermes agent: a cron schedule and the prompt it sends; the agent's reply goes where the prompt tells it, through its Spaces tools. */
+  listHostingTriggers: {
+    method: 'GET',
+    path: '/v1/agents/:agentId/hosting/triggers',
+    params: z.object({ agentId: MemberId }),
+    response: z.object({ triggers: z.array(HostingTrigger) }),
+  },
+  createHostingTrigger: {
+    method: 'POST',
+    path: '/v1/agents/:agentId/hosting/triggers',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ type: z.string().min(1).max(32), config: z.record(z.string(), z.unknown()), enabled: z.boolean().optional() }),
+    response: z.object({ triggers: z.array(HostingTrigger) }),
+  },
+  updateHostingTrigger: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/hosting/triggers/:triggerId',
+    params: z.object({ agentId: MemberId, triggerId: z.string().min(1).max(128) }),
+    request: z.object({ config: z.record(z.string(), z.unknown()).optional(), enabled: z.boolean().optional() }),
+    response: z.object({ triggers: z.array(HostingTrigger) }),
+  },
+  deleteHostingTrigger: {
+    method: 'DELETE',
+    path: '/v1/agents/:agentId/hosting/triggers/:triggerId',
+    params: z.object({ agentId: MemberId, triggerId: z.string().min(1).max(128) }),
+    response: z.object({ triggers: z.array(HostingTrigger) }),
   },
   /**
    * Replace a platform agent's credential (spec §8 Connectors, 2026-09-30).
@@ -430,6 +730,33 @@ export const routes = {
     params: z.object({ agentId: MemberId }),
     request: z.object({ secret: z.string().min(1).max(512) }),
     response: z.object({ credential: AgentCredential }),
+  },
+  /**
+   * Rename an agent (spec §4 Agent members, amended 2026-10-21): its owner
+   * only, app only like the rest of an agent's settings. Folded to one line,
+   * at least one character; the same name is a no-op. No event: rosters carry
+   * it on the next read, as a person's rename does.
+   */
+  renameAgent: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/name',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ displayName: z.string().max(128) }),
+    response: z.object({ agent: Member }),
+  },
+  /**
+   * Switch an agent between channel and personal (spec §4 Agent members,
+   * amended 2026-10-27): its owner only, app only like its name. The same
+   * value is a no-op. No event, as with a rename: rosters carry it on the
+   * next read. Work already queued for it finishes; the rule applies to what
+   * is asked of it after.
+   */
+  setAgentPersonal: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/personal',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ personal: z.boolean() }),
+    response: z.object({ agent: Member }),
   },
   /** Another key for an agent (rotation: create, switch, revoke the old one). Owner only. */
   createAgentKey: {
@@ -605,6 +932,21 @@ export const routes = {
     response: z.object({ memberships: z.array(Membership) }),
   },
   /**
+   * Remove a member from a shared space (spec §4 Roles, 2026-10-19): an
+   * admin act by a member of the space, refused on a DM, allowed on an
+   * archived one. Appends a `removed` membership event with `by`; the
+   * removed member's connections get `space_removed`. Someone not in the
+   * space is a no-op (`removed: false`); removing yourself is refused —
+   * leave instead.
+   */
+  removeMember: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/members/:memberId/remove',
+    params: z.object({ spaceId: SpaceId, memberId: MemberId }),
+    request: z.object({ actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+    response: z.object({ removed: z.boolean() }),
+  },
+  /**
    * The org roster: every member of the org, people and agents, sorted by
    * display name (spec §5 answer 4, built 2026-09-29 — inside one org the org
    * is the trust boundary, as inside one Slack workspace). Until then it was
@@ -617,6 +959,37 @@ export const routes = {
     path: '/v1/members',
     response: z.object({ members: z.array(Member) }),
   },
+  /**
+   * Remove a member, person or agent, from the org (spec §4 Roles,
+   * 2026-10-19): admins only, never yourself, never Jev. The member leaves
+   * every shared space (a `removed` event with `by` on each, and
+   * `space_removed`), their push tokens go, keys of the agent and of agents
+   * they own are revoked, an admin becomes a member, and `removedAt` is
+   * stamped. Their DMs keep the membership, as with a deleted account. Their
+   * sign-in is `not_a_member` until an invite they accept reactivates the
+   * same row. Removing a removed member is a no-op. Every member's
+   * connections get `org_changed`.
+   */
+  removeOrgMember: {
+    method: 'POST',
+    path: '/v1/members/:memberId/remove',
+    params: z.object({ memberId: MemberId }),
+    request: z.object({ actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+    response: z.object({ member: Member }),
+  },
+  /**
+   * Promote or demote an admin (spec §4 Roles, 2026-10-19): admins only.
+   * Agents are never admins; the org always keeps one, so demoting its last
+   * admin — yourself included — is refused. The same role is a no-op. Every
+   * member's connections get `org_changed`.
+   */
+  setMemberRole: {
+    method: 'POST',
+    path: '/v1/members/:memberId/role',
+    params: z.object({ memberId: MemberId }),
+    request: z.object({ role: MemberRole, actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+    response: z.object({ member: Member }),
+  },
   leaveSpace: {
     method: 'POST',
     path: '/v1/spaces/:spaceId/leave',
@@ -625,6 +998,13 @@ export const routes = {
   },
 
   // --- invites -------------------------------------------------------------
+  /**
+   * An invite to the org, listing any spaces the caller is in (spec §4
+   * Invites, amended 2026-10-19). Any org member may create one; a listed
+   * DM refuses with `invalid_request`, a listed space the caller is not in
+   * or one that is archived with `forbidden`. Accepting joins the listed
+   * spaces and the org's defaults.
+   */
   createInvite: {
     method: 'POST',
     path: '/v1/invites',
@@ -827,10 +1207,22 @@ export const routes = {
       afterOffset: z.coerce.number().int().nonnegative().optional(),
       aroundOffset: z.coerce.number().int().positive().optional(),
       limit: z.coerce.number().int().positive().max(200).optional(),
+      /**
+       * `true` = the inline view (2026-10-25): every reply lists with the
+       * roots at its own offset, so a page is the space's conversation in
+       * time order. Absent or `false` = roots only, as ever.
+       */
+      replies: z.enum(['true', 'false']).transform((v) => v === 'true').optional(),
     }),
     response: z.object({
       messages: z.array(Message),
       topics: z.array(Topic),
+      /**
+       * With `replies`: the roots this page's replies belong to that the page
+       * does not hold, so a client can name each reply's thread; `topics`
+       * covers them too. Empty otherwise, and absent from older orgs.
+       */
+      threadRoots: z.array(Message).default([]),
       hasMore: z.boolean(),
       /** Newer rows exist above this page. Optional on the wire so a client reading an older org treats absence as false. */
       hasMoreAfter: z.boolean().optional(),
@@ -928,6 +1320,8 @@ export const routes = {
     params: z.object({ spaceId: SpaceId, messageId: MessageId }),
     request: z.object({
       body: z.string().min(1).max(65_536),
+      /** The summary (2026-10-25): absent = keep it, a string = replace it, null = remove it. */
+      summary: z.string().min(1).max(1_000).nullable().optional(),
       actingMode: ActingMode,
       agentName: z.string().max(64).optional(),
     }),

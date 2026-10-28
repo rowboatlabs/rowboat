@@ -294,6 +294,16 @@ describe('apex face (self-serve org creation)', () => {
     const roster = (await http('roadboard.spaces.test', token).get(`/v1/spaces/${spaces[0].id}/members`)).body.members;
     expect(roster.map((m: any) => m.id)).toEqual([created.body.member.id]);
 
+    // It is open and the org's first default (2026-10-19), so an invite to
+    // the org that lists nothing binds a newcomer straight into it.
+    expect(spaces[0]).toMatchObject({ visibility: 'open', isDefault: true });
+    const invite = (await http('roadboard.spaces.test', token).post('/v1/invites', {})).body;
+    const newcomer = await as.mint({ sub: 'sub-newcomer', email: 'new@rowboatlabs.com', name: 'Newcomer' });
+    const bound = await http('roadboard.spaces.test', newcomer).post('/v1/invites/accept', { token: invite.token });
+    expect(bound.status).toBe(200);
+    expect(bound.body.space.id).toBe(spaces[0].id);
+    expect(bound.body.spaces.map((s: any) => s.id)).toEqual([spaces[0].id]);
+
     // Still fully functional beyond the seed: create another space.
     expect((await http('roadboard.spaces.test', token).post('/v1/spaces', { name: 'General' })).status).toBe(200);
   });
@@ -316,6 +326,40 @@ describe('apex face (self-serve org creation)', () => {
     const anon = await http('spaces.test').post('/v1/orgs', { name: 'X', slug: 'nope' });
     expect(anon.status).toBe(401);
     expect((await http('spaces.test').get('/v1/health')).body.apex).toBe('spaces.test');
+  });
+});
+
+describe('org removal and reactivation (spec §4 Roles, 2026-10-19)', () => {
+  it('a removed member is refused, an old link does not bring them back, a new invite reactivates the same row', async () => {
+    const ram = await as.mint({ sub: 'sub-ram' });
+    const temp = await as.mint({ sub: 'sub-temp', email: 'temp@acme.example', name: 'Temp' });
+    const admin = http('acme.test', ram);
+    const org = http('acme.test', temp);
+    const spaceId = (await admin.post('/v1/spaces', { name: 'Contractors' })).body.space.id;
+    const before = (await admin.post('/v1/invites', { spaceId })).body;
+    const joined = await org.post('/v1/invites/accept', { token: before.token });
+    expect(joined.status).toBe(200);
+    const tempId = joined.body.membership.memberId;
+    const posted = await org.post(`/v1/spaces/${spaceId}/messages`, { body: 'hello', actingMode: 'direct' });
+
+    const removed = await admin.post(`/v1/members/${tempId}/remove`, { actingMode: 'direct' });
+    expect(removed.status).toBe(200);
+    expect((await org.get('/v1/spaces')).body.code).toBe('not_a_member');
+    expect((await http('spaces.test', temp).get('/v1/orgs')).body.orgs.map((o: any) => o.name)).not.toContain('Acme');
+
+    // The invite they joined with predates the removal: refused.
+    const stale = await org.post('/v1/invites/accept', { token: before.token });
+    expect(stale.status).toBe(403);
+    expect(stale.body.code).toBe('not_a_member');
+
+    const after = (await admin.post('/v1/invites', { spaceId })).body;
+    const back = await org.post('/v1/invites/accept', { token: after.token });
+    expect(back.status).toBe(200);
+    expect(back.body.membership.memberId).toBe(tempId);
+    const me = (await org.get('/v1/me')).body.member;
+    expect(me.id).toBe(tempId);
+    expect(me.removedAt).toBeUndefined();
+    expect(posted.body.message.author.memberId).toBe(tempId);
   });
 });
 

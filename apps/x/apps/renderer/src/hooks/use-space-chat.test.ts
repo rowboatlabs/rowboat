@@ -42,7 +42,7 @@ const live = (event: object) => emit({ orgId: 'org', frame: { kind: 'event', spa
 
 const msg = (offset: number): spaces.Message => ({
     id: `m${offset}`, spaceId: 'space', author: { memberId: 'alex', actingMode: 'direct' }, body: `body ${offset}`,
-    postedAt: '2026-09-14T09:00:00Z', offset, replyCount: 0, mentions: [], mentionsHere: false, mentionsRowboat: false, reactions: [],
+    postedAt: '2026-09-14T09:00:00Z', offset, replyCount: 0, replyAuthors: [], mentions: [], mentionsHere: false, mentionsRowboat: false, reactions: [],
 })
 const range = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => msg(from + i))
 const ids = (messages: readonly { id: string }[]) => messages.map((m) => m.id)
@@ -261,5 +261,62 @@ describe('stream store — join lines', () => {
         await open()
         const cached = JSON.parse(window.localStorage.getItem('spaces:general:org/space')!) as { events: spaces.StreamEvent[] }
         expect(offsets(cached.events)).toEqual([95.5, 100.5])
+    })
+})
+
+describe('stream store — summaries (2026-10-25)', () => {
+    it('a live edit replaces the summary, and one without a summary removes it', async () => {
+        const { hook } = await open()
+        const edit = (summary?: string) => live({ type: 'message_edited', edit: {
+            messageId: 'm100', body: 'long body', at: '2026-10-25T10:00:00Z', mentions: [], mentionsHere: false, mentionsRowboat: false, ...(summary ? { summary } : {}),
+        } })
+        act(() => edit('the point'))
+        expect(hook.result.current.messages.find((m) => m.id === 'm100')?.summary).toBe('the point')
+        act(() => edit())
+        expect(hook.result.current.messages.find((m) => m.id === 'm100')).not.toHaveProperty('summary')
+    })
+})
+
+describe('stream store — the inline view (2026-10-25)', () => {
+    const reply = (offset: number, rootId: string): spaces.Message => ({ ...msg(offset), id: `r${offset}`, threadRoot: rootId })
+
+    it('reads with replies, takes live replies, and fetches a root it cannot name', async () => {
+        const view = await import('@/lib/spaces-stream-view')
+        view.setStreamView('org', 'space', 'inline')
+        try {
+            const base = invoke.getMockImplementation()!
+            invoke.mockImplementation(async (channel: string, args: { messageId?: string }) =>
+                channel === 'spaces:getMessage' ? { message: { ...msg(3), id: args.messageId, body: 'Fix the login bug' } } : base(channel, args))
+            const { hook } = await open()
+            expect(listStreamCalls().at(-1)).toMatchObject({ replies: true })
+            await act(async () => live({ type: 'message', message: reply(101, 'm3') }))
+            expect(ids(hook.result.current.messages).at(-1)).toBe('r101')
+            expect(hook.result.current.threadRoots.get('m3')?.body).toBe('Fix the login bug')
+            // A root the window holds needs no fetch.
+            await act(async () => live({ type: 'message', message: reply(102, 'm95') }))
+            expect(invoke.mock.calls.filter(([c]) => c === 'spaces:getMessage')).toHaveLength(1)
+        } finally {
+            view.setStreamView('org', 'space', 'threads')
+        }
+    })
+
+    it('the threads view leaves live replies in their threads and reads roots only', async () => {
+        const { hook } = await open()
+        expect(listStreamCalls().at(-1)).not.toHaveProperty('replies')
+        act(() => live({ type: 'message', message: reply(101, 'm95') }))
+        expect(ids(hook.result.current.messages)).toEqual(ids(range(91, 100)))
+    })
+
+    it('switching views reads the other window, and switching back refetches what it missed', async () => {
+        const view = await import('@/lib/spaces-stream-view')
+        const { hook } = await open()
+        const before = listStreamCalls().length
+        await act(async () => view.setStreamView('org', 'space', 'inline'))
+        expect(listStreamCalls().length).toBe(before + 1)
+        expect(listStreamCalls().at(-1)).toMatchObject({ replies: true })
+        await act(async () => view.setStreamView('org', 'space', 'threads'))
+        expect(listStreamCalls().length).toBe(before + 2)
+        expect(listStreamCalls().at(-1)).not.toHaveProperty('replies')
+        expect(ids(hook.result.current.messages)).toEqual(ids(range(91, 100)))
     })
 })

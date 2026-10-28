@@ -10,7 +10,7 @@ import type { Member, Space, UnreadSnapshot } from '@rowboat/spaces-protocol';
 import { Avatar, AuthedImage } from '@/components/avatar';
 import { StatusBanner } from '@/components/status-banner';
 import { friendlyError } from '@/lib/spaces/errors';
-import { memberLabel } from '@/lib/spaces/profiles';
+import { isOthersPersonalAgent, memberLabel } from '@/lib/spaces/profiles';
 import { useBlockedIds } from '@/lib/spaces/moderation';
 import { useMyAvatar } from '@/lib/spaces/my-avatar';
 import { useParentHeader } from '@/lib/use-parent-header';
@@ -453,6 +453,8 @@ function OrgCard({ org, onSwitch, mode = 'home', query = '' }: { org: SpacesOrg;
     for (const m of seen.values()) if (m.deactivatedAt && !talkedWith.has(m.id)) seen.delete(m.id);
     // People you blocked (2026-10-20) leave the list; unblock from Account.
     for (const id of blockedIds) seen.delete(id);
+    // Someone else's personal agent can't be messaged (2026-10-26).
+    for (const m of [...seen.values()]) if (isOthersPersonalAgent(m, org.memberId)) seen.delete(m.id);
     // You first (the self-DM is your notes-to-self), then everyone by name.
     return [...seen.values()].sort((a, b) =>
       a.id === org.memberId ? -1 : b.id === org.memberId ? 1 : a.displayName.localeCompare(b.displayName),

@@ -362,6 +362,11 @@ module.exports = {
         // Hook signature: (forgeConfig, platform, arch)
         // Note: Console output only shows if DEBUG or CI env vars are set
         generateAssets: async (forgeConfig, platform, arch) => {
+            // Node 26 leaves Electron ZIP extraction unresolved and Forge exits 0
+            // without an artifact (Attio release verification, 2026-10-12).
+            if (![22, 24].includes(Number(process.versions.node.split('.')[0]))) {
+                throw new Error('Electron packaging requires Node 22 or 24. Switch Node versions and rerun npm run package.');
+            }
             const { execSync } = require('child_process');
             const fs = require('fs');
 

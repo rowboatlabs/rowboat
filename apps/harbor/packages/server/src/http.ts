@@ -167,6 +167,11 @@ export function buildHttpApp(deps: {
 
   app.get(routes.me.path, async (c) => reply(c, routes.me.response, { member: await service.me(actor(c)) }));
 
+  app.put(routes.updateMe.path, async (c) => {
+    const input = await body(c, routes.updateMe.request);
+    return reply(c, routes.updateMe.response, { member: await service.updateProfile(actor(c), input) });
+  });
+
   // --- profile images (2026-10-02) -------------------------------------------
   // The body is the image; the limit is checked on the claim and again on the bytes.
   const imageBody = async (c: Context<Env>): Promise<Uint8Array> => {
@@ -254,10 +259,28 @@ export function buildHttpApp(deps: {
     return reply(c, routes.deleteSpace.response, { deleted: true });
   });
 
+  app.post(routes.setSpaceVisibility.path, async (c) => {
+    const { spaceId } = parseWith(routes.setSpaceVisibility.params, c.req.param());
+    const input = await body(c, routes.setSpaceVisibility.request);
+    return reply(c, routes.setSpaceVisibility.response, { space: await service.setSpaceVisibility(actor(c), spaceId, input) });
+  });
+
+  app.post(routes.removeMember.path, async (c) => {
+    const { spaceId, memberId } = parseWith(routes.removeMember.params, c.req.param());
+    const input = await body(c, routes.removeMember.request);
+    return reply(c, routes.removeMember.response, await service.removeMember(actor(c), spaceId, memberId, input));
+  });
+
   app.post(routes.unarchiveSpace.path, async (c) => {
     const { spaceId } = parseWith(routes.unarchiveSpace.params, c.req.param());
     const input = await body(c, routes.unarchiveSpace.request);
     return reply(c, routes.unarchiveSpace.response, { space: await service.unarchiveSpace(actor(c), spaceId, input) });
+  });
+
+  app.post(routes.setDefaultSpace.path, async (c) => {
+    const { spaceId } = parseWith(routes.setDefaultSpace.params, c.req.param());
+    const input = await body(c, routes.setDefaultSpace.request);
+    return reply(c, routes.setDefaultSpace.response, { space: await service.setDefaultSpace(actor(c), spaceId, input) });
   });
 
   app.post(routes.openDirect.path, async (c) => {
@@ -278,6 +301,27 @@ export function buildHttpApp(deps: {
   app.get('/v1/spaces/:spaceId/members', async (c) => {
     const { spaceId } = parseWith(routes.listMembers.params, c.req.param());
     return reply(c, routes.listMembers.response, { members: await service.listMembers(actor(c), spaceId) });
+  });
+
+  app.post(routes.removeOrgMember.path, async (c) => {
+    const { memberId } = parseWith(routes.removeOrgMember.params, c.req.param());
+    const input = await body(c, routes.removeOrgMember.request);
+    return reply(c, routes.removeOrgMember.response, { member: await service.removeOrgMember(actor(c), memberId, input) });
+  });
+
+  app.post(routes.setMemberRole.path, async (c) => {
+    const { memberId } = parseWith(routes.setMemberRole.params, c.req.param());
+    const input = await body(c, routes.setMemberRole.request);
+    return reply(c, routes.setMemberRole.response, { member: await service.setMemberRole(actor(c), memberId, input) });
+  });
+
+  app.get(routes.getOrgSettings.path, async (c) => {
+    return reply(c, routes.getOrgSettings.response, { settings: await service.getOrgSettings(actor(c)) });
+  });
+
+  app.patch(routes.updateOrgSettings.path, async (c) => {
+    const input = await body(c, routes.updateOrgSettings.request);
+    return reply(c, routes.updateOrgSettings.response, { settings: await service.updateOrgSettings(actor(c), input) });
   });
 
   app.get(routes.listOrgMembers.path, async (c) => {
@@ -375,14 +419,159 @@ export function buildHttpApp(deps: {
         connection: input.connection,
         ...(input.credential !== undefined ? { credential: input.credential } : {}),
         ...(input.instance !== undefined ? { instance: input.instance } : {}),
+        personal: input.personal,
       }),
     );
+  });
+
+  // Managed agents (spec §8 Maritime, 2026-10-26): created on the platform Rowboat's own account runs.
+  app.get(routes.managedAgentKinds.path, async (c) => reply(c, routes.managedAgentKinds.response, { kinds: await service.managedAgentKinds(actor(c)) }));
+
+  app.post(routes.createManagedAgent.path, async (c) => {
+    const input = await body(c, routes.createManagedAgent.request);
+    return reply(
+      c,
+      routes.createManagedAgent.response,
+      await service.createManagedAgent(actor(c), {
+        displayName: input.displayName,
+        kind: input.kind,
+        ...(input.anthropicApiKey !== undefined ? { anthropicApiKey: input.anthropicApiKey } : {}),
+        ...(input.env !== undefined ? { env: input.env } : {}),
+        personal: input.personal,
+      }),
+    );
+  });
+
+  app.delete(routes.deleteManagedAgent.path, async (c) => {
+    const { agentId } = parseWith(routes.deleteManagedAgent.params, c.req.param());
+    return reply(c, routes.deleteManagedAgent.response, { hosting: await service.deleteManagedAgent(actor(c), agentId) });
+  });
+
+  // Managing a managed agent's VM (the management area, 2026-10-27).
+  app.get(routes.getHosting.path, async (c) => {
+    const { agentId } = parseWith(routes.getHosting.params, c.req.param());
+    return reply(c, routes.getHosting.response, await service.getHosting(actor(c), agentId));
+  });
+  app.put(routes.setHostingLlm.path, async (c) => {
+    const { agentId } = parseWith(routes.setHostingLlm.params, c.req.param());
+    const input = await body(c, routes.setHostingLlm.request);
+    return reply(c, routes.setHostingLlm.response, { hosting: await service.setHostingLlm(actor(c), agentId, input) });
+  });
+  app.put(routes.setHostingEnv.path, async (c) => {
+    const { agentId, key } = parseWith(routes.setHostingEnv.params, c.req.param());
+    const input = await body(c, routes.setHostingEnv.request);
+    return reply(c, routes.setHostingEnv.response, { env: await service.setHostingEnv(actor(c), agentId, key, input.value, input.secret ?? false) });
+  });
+  app.delete(routes.deleteHostingEnv.path, async (c) => {
+    const { agentId, key } = parseWith(routes.deleteHostingEnv.params, c.req.param());
+    return reply(c, routes.deleteHostingEnv.response, { env: await service.deleteHostingEnv(actor(c), agentId, key) });
+  });
+  app.post(routes.hostingPower.path, async (c) => {
+    const { agentId } = parseWith(routes.hostingPower.params, c.req.param());
+    const input = await body(c, routes.hostingPower.request);
+    return reply(c, routes.hostingPower.response, { machine: await service.hostingPower(actor(c), agentId, input.action) });
+  });
+  app.post(routes.runHostingCommand.path, async (c) => {
+    const { agentId } = parseWith(routes.runHostingCommand.params, c.req.param());
+    const input = await body(c, routes.runHostingCommand.request);
+    return reply(c, routes.runHostingCommand.response, { execution: await service.runHostingCommand(actor(c), agentId, input.command, input.timeoutSeconds) });
+  });
+  app.get(routes.getHostingCommand.path, async (c) => {
+    const { agentId, executionId } = parseWith(routes.getHostingCommand.params, c.req.param());
+    return reply(c, routes.getHostingCommand.response, { execution: await service.getHostingCommand(actor(c), agentId, executionId) });
+  });
+  app.delete(routes.cancelHostingCommand.path, async (c) => {
+    const { agentId, executionId } = parseWith(routes.cancelHostingCommand.params, c.req.param());
+    return reply(c, routes.cancelHostingCommand.response, { execution: await service.cancelHostingCommand(actor(c), agentId, executionId) });
+  });
+  app.get(routes.getHostingLogs.path, async (c) => {
+    const { agentId } = parseWith(routes.getHostingLogs.params, c.req.param());
+    const q = parseWith(routes.getHostingLogs.query, c.req.query());
+    return reply(c, routes.getHostingLogs.response, await service.getHostingLogs(actor(c), agentId, q));
+  });
+  app.get(routes.listHostingFiles.path, async (c) => {
+    const { agentId } = parseWith(routes.listHostingFiles.params, c.req.param());
+    const q = parseWith(routes.listHostingFiles.query, c.req.query());
+    return reply(c, routes.listHostingFiles.response, await service.listHostingFiles(actor(c), agentId, q.path ?? '/'));
+  });
+  app.get(routes.readHostingFile.path, async (c) => {
+    const { agentId } = parseWith(routes.readHostingFile.params, c.req.param());
+    const q = parseWith(routes.readHostingFile.query, c.req.query());
+    return reply(c, routes.readHostingFile.response, await service.readHostingFile(actor(c), agentId, q.path));
+  });
+  app.put(routes.writeHostingFile.path, async (c) => {
+    const { agentId } = parseWith(routes.writeHostingFile.params, c.req.param());
+    const input = await body(c, routes.writeHostingFile.request);
+    await service.writeHostingFile(actor(c), agentId, input.path, input.content);
+    return reply(c, routes.writeHostingFile.response, { ok: true });
+  });
+  app.post(routes.makeHostingDir.path, async (c) => {
+    const { agentId } = parseWith(routes.makeHostingDir.params, c.req.param());
+    const input = await body(c, routes.makeHostingDir.request);
+    await service.makeHostingDir(actor(c), agentId, input.path);
+    return reply(c, routes.makeHostingDir.response, { ok: true });
+  });
+  app.post(routes.moveHostingFile.path, async (c) => {
+    const { agentId } = parseWith(routes.moveHostingFile.params, c.req.param());
+    const input = await body(c, routes.moveHostingFile.request);
+    await service.moveHostingFile(actor(c), agentId, input.from, input.to);
+    return reply(c, routes.moveHostingFile.response, { ok: true });
+  });
+  app.delete(routes.deleteHostingFile.path, async (c) => {
+    const { agentId } = parseWith(routes.deleteHostingFile.params, c.req.param());
+    const q = parseWith(routes.deleteHostingFile.query, c.req.query());
+    await service.deleteHostingFile(actor(c), agentId, q.path);
+    return reply(c, routes.deleteHostingFile.response, { ok: true });
+  });
+  app.get(routes.listHostingSkills.path, async (c) => {
+    const { agentId } = parseWith(routes.listHostingSkills.params, c.req.param());
+    const q = parseWith(routes.listHostingSkills.query, c.req.query());
+    return reply(c, routes.listHostingSkills.response, { skills: await service.listHostingSkills(actor(c), agentId, q.q) });
+  });
+  app.post(routes.installHostingSkill.path, async (c) => {
+    const { agentId } = parseWith(routes.installHostingSkill.params, c.req.param());
+    const input = await body(c, routes.installHostingSkill.request);
+    return reply(c, routes.installHostingSkill.response, { skills: await service.installHostingSkill(actor(c), agentId, input.name) });
+  });
+  app.delete(routes.removeHostingSkill.path, async (c) => {
+    const { agentId, name } = parseWith(routes.removeHostingSkill.params, c.req.param());
+    return reply(c, routes.removeHostingSkill.response, { skills: await service.removeHostingSkill(actor(c), agentId, name) });
+  });
+  app.get(routes.listHostingTriggers.path, async (c) => {
+    const { agentId } = parseWith(routes.listHostingTriggers.params, c.req.param());
+    return reply(c, routes.listHostingTriggers.response, { triggers: await service.listHostingTriggers(actor(c), agentId) });
+  });
+  app.post(routes.createHostingTrigger.path, async (c) => {
+    const { agentId } = parseWith(routes.createHostingTrigger.params, c.req.param());
+    const input = await body(c, routes.createHostingTrigger.request);
+    return reply(c, routes.createHostingTrigger.response, { triggers: await service.createHostingTrigger(actor(c), agentId, input) });
+  });
+  app.put(routes.updateHostingTrigger.path, async (c) => {
+    const { agentId, triggerId } = parseWith(routes.updateHostingTrigger.params, c.req.param());
+    const input = await body(c, routes.updateHostingTrigger.request);
+    return reply(c, routes.updateHostingTrigger.response, { triggers: await service.updateHostingTrigger(actor(c), agentId, triggerId, input) });
+  });
+  app.delete(routes.deleteHostingTrigger.path, async (c) => {
+    const { agentId, triggerId } = parseWith(routes.deleteHostingTrigger.params, c.req.param());
+    return reply(c, routes.deleteHostingTrigger.response, { triggers: await service.deleteHostingTrigger(actor(c), agentId, triggerId) });
   });
 
   app.put(routes.setAgentCredential.path, async (c) => {
     const { agentId } = parseWith(routes.setAgentCredential.params, c.req.param());
     const input = await body(c, routes.setAgentCredential.request);
     return reply(c, routes.setAgentCredential.response, { credential: await service.setAgentCredential(actor(c), agentId, input.secret) });
+  });
+
+  app.put(routes.renameAgent.path, async (c) => {
+    const { agentId } = parseWith(routes.renameAgent.params, c.req.param());
+    const input = await body(c, routes.renameAgent.request);
+    return reply(c, routes.renameAgent.response, { agent: await service.renameAgent(actor(c), agentId, input) });
+  });
+
+  app.put(routes.setAgentPersonal.path, async (c) => {
+    const { agentId } = parseWith(routes.setAgentPersonal.params, c.req.param());
+    const input = await body(c, routes.setAgentPersonal.request);
+    return reply(c, routes.setAgentPersonal.response, { agent: await service.setAgentPersonal(actor(c), agentId, input) });
   });
 
   app.put(routes.setAgentOptionDefaults.path, async (c) => {
@@ -438,7 +627,7 @@ export function buildHttpApp(deps: {
 
   app.post(routes.createInvite.path, async (c) => {
     const input = await body(c, routes.createInvite.request);
-    return reply(c, routes.createInvite.response, await service.createInvite(actor(c), input.spaceId, input.expiresInHours));
+    return reply(c, routes.createInvite.response, await service.createInvite(actor(c), input));
   });
 
   app.post(routes.resolveInvite.path, async (c) => {
@@ -477,7 +666,7 @@ export function buildHttpApp(deps: {
     const resolved = await service.resolveInvite(token);
     if (resolved.state !== 'ok') return c.html(invitePage({ state: resolved.state }), 410);
     const query = `type=spaces&org=${encodeURIComponent(service.org.address)}&invite=${encodeURIComponent(token)}`;
-    return c.html(invitePage({ state: 'ok', space: resolved.space.name, org: resolved.org.name, invitedBy: resolved.invitedBy, ...openers(query) }));
+    return c.html(invitePage({ state: 'ok', spaces: resolved.spaces.map((s) => s.name), org: resolved.org.name, invitedBy: resolved.invitedBy, ...openers(query) }));
   });
 
   // --- link landings ---------------------------------------------------------
@@ -660,6 +849,7 @@ export function buildHttpApp(deps: {
       ...(c.req.query('afterOffset') !== undefined ? { afterOffset: c.req.query('afterOffset') } : {}),
       ...(c.req.query('aroundOffset') !== undefined ? { aroundOffset: c.req.query('aroundOffset') } : {}),
       ...(c.req.query('limit') !== undefined ? { limit: c.req.query('limit') } : {}),
+      ...(c.req.query('replies') !== undefined ? { replies: c.req.query('replies') } : {}),
     });
     return reply(c, routes.listStream.response, await service.listStream(actor(c), spaceId, q));
   });
@@ -811,8 +1001,13 @@ function landingPage(o: Openers): string {
 }
 
 type InvitePage =
-  | ({ state: 'ok'; space: string; org: string; invitedBy?: string } & Openers)
+  | ({ state: 'ok'; spaces: string[]; org: string; invitedBy?: string } & Openers)
   | { state: 'expired' | 'revoked' };
+
+/** "a", "a and b", "a, b and c". */
+function listNames(names: string[]): string {
+  return names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
 
 /** The /join landing: launch the app with the invite, or say why not. */
 function invitePage(page: InvitePage): string {
@@ -820,10 +1015,13 @@ function invitePage(page: InvitePage): string {
     const why = page.state === 'expired' ? 'This invite has expired.' : 'This invite was revoked.';
     return `${PAGE_HEAD}<title>Invite ${page.state}</title>${PAGE_STYLE}<main><h1>${why}</h1><p class="m">Ask whoever sent it for a new link.</p></main>`;
   }
+  // An invite is to the org (2026-10-19): the org is the headline, the
+  // spaces accepting joins the line under it.
+  const joins = page.spaces.length > 0 ? `<p class="m">You'll join ${escapeHtml(listNames(page.spaces))}</p>` : '';
   const by = page.invitedBy ? `<p class="m">Invited by ${escapeHtml(page.invitedBy)}</p>` : '';
   return (
-    `${PAGE_HEAD}<title>Join ${escapeHtml(page.space)} on ${escapeHtml(page.org)}</title>${PAGE_STYLE}<main>` +
-    `<h1>You're invited to ${escapeHtml(page.space)}</h1><p class="m">on ${escapeHtml(page.org)}</p>${by}` +
+    `${PAGE_HEAD}<title>Join ${escapeHtml(page.org)}</title>${PAGE_STYLE}<main>` +
+    `<h1>You're invited to ${escapeHtml(page.org)}</h1>${joins}${by}` +
     `${openerLinks(page)}</main>`
   );
 }

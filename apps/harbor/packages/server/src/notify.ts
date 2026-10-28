@@ -86,7 +86,8 @@ export async function decideNotifications(store: Store, space: Space, message: M
   for (const m of members) {
     if (m.id === message.author.memberId && message.author.actingMode === 'direct') continue;
     const kind = classifyFor(m.id, space, message, followers);
-    const text = buildNotifyText({ kind, space, authorName, body: message.body, names });
+    // A long message's summary is its point (2026-10-25): the notification reads that.
+    const text = buildNotifyText({ kind, space, authorName, body: message.summary ?? message.body, names });
     rows.push({ memberId: m.id, kind, ...text });
   }
   return rows;

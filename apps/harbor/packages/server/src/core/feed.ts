@@ -228,25 +228,39 @@ export class Feed {
   async listStream(
     ctx: ActorCtx,
     spaceId: string,
-    opts?: PageOpts,
-  ): Promise<{ messages: Message[]; topics: Topic[]; hasMore: boolean; hasMoreAfter: boolean; readOffset: number; events: StreamEvent[] }> {
+    opts?: PageOpts & { replies?: boolean },
+  ): Promise<{ messages: Message[]; topics: Topic[]; threadRoots: Message[]; hasMore: boolean; hasMoreAfter: boolean; readOffset: number; events: StreamEvent[] }> {
     await this.k.requireReadableSpace(ctx, spaceId);
-    // Newest page by default — never the full history.
-    const { rows: roots, hasMore, hasMoreAfter, span } = await this.pageOf((w) => this.k.store.listStream(spaceId, w), opts);
+    // Newest page by default — never the full history. With replies (the
+    // inline view, 2026-10-25) a page is every message in offset order.
+    const { rows, hasMore, hasMoreAfter, span } = await this.pageOf(
+      (w) => (opts?.replies ? this.k.store.listConversation(spaceId, w) : this.k.store.listStream(spaceId, w)),
+      opts,
+    );
     // The join lines between these messages (2026-09-29, the Matrix model):
     // each belongs to the page holding the next message after it, so paging
     // either way never shows one twice or drops one. An empty older page
     // (upTo 0) holds none.
     const events = span.upTo === 0 ? [] : await this.k.store.listMembershipEvents(spaceId, span.after, span.upTo);
-    // The page's topic badges, one batched decoration.
+    // A reply names its thread, so the page carries the roots its replies
+    // belong to that it does not hold.
+    const onPage = new Set(rows.map((m) => m.id));
+    const named = [...new Set(rows.flatMap((m) => (m.threadRoot !== undefined && !onPage.has(m.threadRoot) ? [m.threadRoot] : [])))];
+    const threadRoots: Message[] = [];
+    for (const id of named) {
+      const root = await this.k.store.getMessage(spaceId, id);
+      if (root) threadRoots.push(root);
+    }
+    // The topic badges of the page's roots and of the threads it names, one batched decoration.
     const topics: Topic[] = [];
-    for (const m of roots) {
-      const topic = await this.k.store.getTopicByRoot(spaceId, m.id);
+    for (const id of [...rows.filter((m) => m.threadRoot === undefined).map((m) => m.id), ...named]) {
+      const topic = await this.k.store.getTopicByRoot(spaceId, id);
       if (topic) topics.push(topic);
     }
     return {
-      messages: await this.foldPage(spaceId, roots),
+      messages: await this.foldPage(spaceId, rows),
       topics,
+      threadRoots: await this.foldPage(spaceId, threadRoots),
       hasMore,
       hasMoreAfter,
       readOffset: await this.k.store.getStreamReadMark(spaceId, ctx.memberId),
@@ -389,12 +403,15 @@ export class Feed {
           threadRoot: root.id,
           author,
           body: input.body,
+          ...(input.summary ? { summary: input.summary } : {}),
           postedAt: at,
           offset,
           replyCount: 0,
+          replyAuthors: [],
           reactions: [],
           ...(poll ? { poll } : {}),
           ...(raising && opts.approval ? { approval: this.invocations!.approvalFor(raising, id, opts.approval.request) } : {}),
+          ...(input.peopleOnly ? { peopleOnly: true as const } : {}),
           ...stampFields(stamps),
         };
         await this.k.store.appendMessage(message);
@@ -437,9 +454,11 @@ export class Feed {
         spaceId,
         author,
         body: input.body,
+        ...(input.summary ? { summary: input.summary } : {}),
         postedAt: at,
         offset,
         replyCount: 0,
+        replyAuthors: [],
         ...(input.anchorChangeSetId ? { anchorChangeSetId: input.anchorChangeSetId } : {}),
         reactions: [],
         ...(poll ? { poll } : {}),
@@ -500,6 +519,7 @@ export class Feed {
           postedAt: at,
           offset,
           replyCount: 0,
+          replyAuthors: [],
           reactions: [],
           ...stampFields(stamps),
         };
@@ -544,8 +564,9 @@ export class Feed {
     stamps: MentionStamps,
     by: Attribution,
     at: string,
+    summary: string | undefined,
   ): Promise<Message> {
-    await this.k.store.markMessageEdited(spaceId, message.id, body, at, stamps);
+    await this.k.store.markMessageEdited(spaceId, message.id, body, at, stamps, summary);
     await this.k.appendNext(spaceId, at, {
       type: 'message_edited',
       edit: {
@@ -553,12 +574,14 @@ export class Feed {
         messageId: message.id,
         ...threadRootOf(message),
         body,
+        ...(summary ? { summary } : {}),
         by,
         at,
         ...stampFields(stamps),
       },
     });
-    return { ...message, body, editedAt: at, ...stampFields(stamps) };
+    const { summary: _was, ...rest } = message;
+    return { ...rest, body, ...(summary ? { summary } : {}), editedAt: at, ...stampFields(stamps) };
   }
 
   /**
@@ -583,7 +606,7 @@ export class Feed {
           // A poll's body is its immutable fallback rendering — left alone.
           const body = m.poll ? m.body : legacyToTokens(m.body, names);
           if (body !== m.body) {
-            await this.applyEdit(space.id, m, body, await this.stampsFor(space.id, body), m.author, this.k.now());
+            await this.applyEdit(space.id, m, body, await this.stampsFor(space.id, body), m.author, this.k.now(), m.summary);
             out.messages += 1;
             continue;
           }
@@ -654,7 +677,7 @@ export class Feed {
         },
       });
       // A poll is content: redacted with the body (the store already dropped it). A tombstone addresses nobody.
-      const { poll: _poll, approval: _approval, ...rest } = message;
+      const { poll: _poll, approval: _approval, summary: _summary, ...rest } = message;
       return this.foldLive(spaceId, { ...rest, body: '', deletedAt: at, mentions: [], mentionsHere: false, mentionsRowboat: false });
     });
   }
@@ -685,10 +708,12 @@ export class Feed {
       // The Discord posture: a poll message is immutable once posted — its
       // body is the poll's fallback rendering, and votes were cast on it.
       if (message.poll) throw new HarborError('invalid_request', 'poll messages cannot be edited');
-      if (message.body === input.body) return this.foldLive(spaceId, message);
+      // The summary (2026-10-25): left out = kept, null = removed.
+      const summary = input.summary === undefined ? message.summary : (input.summary ?? undefined);
+      if (message.body === input.body && message.summary === summary) return this.foldLive(spaceId, message);
 
       const at = this.k.now();
-      const edited = await this.applyEdit(spaceId, message, input.body, stamps, by, at);
+      const edited = await this.applyEdit(spaceId, message, input.body, stamps, by, at, summary);
       // A newly mentioned member follows the thread from the edit on.
       await this.followMentioned(spaceId, message.threadRoot ?? message.id, stamps, ctx.memberId, at);
       return this.foldLive(spaceId, edited);

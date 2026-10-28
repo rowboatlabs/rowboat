@@ -5,8 +5,10 @@ import { splitFrontmatter, joinFrontmatter } from '@/lib/frontmatter'
 import { MarkdownEditor } from '@/components/markdown-editor'
 import { SpaceDocumentViewer } from './document-viewer'
 import { getViewerType } from '@/lib/file-types'
+import { isTodoListPath, todoListDisplayName } from '@/lib/todo-list'
+import { TodoListView } from './todo-list-view'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowLeft, Check, Clock, Copy, Download, Eye, FileText, Folder, FolderOpen, History, Image as ImageIcon, Link as LinkIcon, Loader2, MoreHorizontal, Pencil, PenTool, Plus, RotateCcw, Trash2, Upload, X } from 'lucide-react'
+import { ArrowLeft, Check, Clock, Copy, Download, Eye, FileText, Folder, FolderOpen, History, Image as ImageIcon, Link as LinkIcon, ListTodo, Loader2, MoreHorizontal, Pencil, PenTool, Plus, RotateCcw, Trash2, Upload, X } from 'lucide-react'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
@@ -72,7 +74,7 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
     /** Remove an empty (draft) folder. */
     onRemoveFolder?: (path: string) => void
 }) {
-    const { member } = useSpaceAccess()
+    const { writable } = useSpaceAccess()
     const tree = useMemo(() => buildFileTree(entries, draftFolders), [entries, draftFolders])
     const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
     const [newPath, setNewPath] = useState('')
@@ -89,7 +91,7 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
     const entryById = useMemo(() => new Map(entries.map((e) => [e.id, e])), [entries])
     const dragHasAsset = (e: React.DragEvent) => Array.from(e.dataTransfer.types).includes(ASSET_DRAG_MIME)
     const dropInto = (e: React.DragEvent, dir: string) => {
-        if (!member) return
+        if (!writable) return
         e.preventDefault()
         e.stopPropagation()
         setDropTarget(null)
@@ -102,7 +104,7 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
     }
     const dirDragProps = (dir: string) => ({
         onDragOver: (e: React.DragEvent) => {
-            if (!member || !dragHasAsset(e)) return
+            if (!writable || !dragHasAsset(e)) return
             e.preventDefault()
             e.stopPropagation()
             e.dataTransfer.dropEffect = 'move'
@@ -141,7 +143,8 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
         })
 
     const renderNode = (node: FileTreeNode, depth: number): ReactNode => {
-        const pad = { paddingLeft: `${8 + depth * 12}px` }
+        // Spaces redesign (2026-10-21): the tree is the Files page's body now, at the app's 14px row size.
+        const pad = { paddingLeft: `${10 + depth * 18}px` }
         if (node.kind === 'dir') {
             const open = !collapsed.has(node.path)
             const empty = node.children.length === 0
@@ -155,18 +158,18 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                                     style={pad}
                                     onClick={() => toggle(node.path)}
                                     className={cn(
-                                        'flex h-7 w-full items-center gap-1.5 rounded-md pr-7 text-[13px] text-foreground/90 hover:bg-accent/50',
+                                        'flex h-9 w-full items-center gap-2 rounded-lg pr-9 text-sm text-foreground/90 transition-colors hover:bg-accent/60',
                                         dropTarget === node.path && 'bg-accent ring-1 ring-inset ring-foreground/40',
                                     )}
                                 >
                                     {open
-                                        ? <FolderOpen className="size-3 shrink-0 text-muted-foreground" />
-                                        : <Folder className="size-3 shrink-0 text-muted-foreground" />}
+                                        ? <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
+                                        : <Folder className="size-4 shrink-0 text-muted-foreground" />}
                                     <ClippedText text={node.name} />
                                 </button>
                             </ContextMenuTrigger>
                             <ContextMenuContent>
-                                <ContextMenuItem disabled={!member} onSelect={() => onStartCreate?.(`${node.path}/`)}>
+                                <ContextMenuItem disabled={!writable} onSelect={() => onStartCreate?.(`${node.path}/`)}>
                                     <Plus className="size-3.5 mr-2" /> New file
                                 </ContextMenuItem>
                                 {empty && onRemoveFolder && (
@@ -184,13 +187,13 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                                 <button
                                     type="button"
                                     aria-label="Folder actions"
-                                    className="absolute right-1 top-1 inline-flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-background hover:text-foreground focus-visible:opacity-100 group-hover/dirrow:opacity-100 data-[state=open]:opacity-100"
+                                    className="absolute right-1.5 top-1.5 inline-flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-0 hover:bg-background hover:text-foreground focus-visible:opacity-100 group-hover/dirrow:opacity-100 data-[state=open]:opacity-100"
                                 >
                                     <MoreHorizontal className="size-3.5" />
                                 </button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                                <DropdownMenuItem disabled={!member} onClick={() => onStartCreate?.(`${node.path}/`)}>
+                                <DropdownMenuItem disabled={!writable} onClick={() => onStartCreate?.(`${node.path}/`)}>
                                     <Plus className="size-3.5 mr-2" /> New file
                                 </DropdownMenuItem>
                                 {empty && onRemoveFolder && (
@@ -208,10 +211,10 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                         <div className="relative">
                             {/* Indent guide: a faint dotted line under the folder's icon
                                 column, spanning its children — nesting reads without carets. */}
-                            <span aria-hidden className="pointer-events-none absolute bottom-1 top-0 border-l border-dotted border-foreground/25" style={{ left: `${8 + depth * 12 + 6}px` }} />
+                            <span aria-hidden className="pointer-events-none absolute bottom-1 top-0 border-l border-dotted border-foreground/25" style={{ left: `${10 + depth * 18 + 8}px` }} />
                             {node.children.map((child) => renderNode(child, depth + 1))}
                             {empty && (
-                                <div style={{ paddingLeft: `${8 + (depth + 1) * 12}px` }} className="py-0.5 pr-2 text-[11px] italic text-muted-foreground/70">
+                                <div style={{ paddingLeft: `${10 + (depth + 1) * 18}px` }} className="py-1 pr-2 text-xs italic text-muted-foreground/70">
                                     empty — files added here keep it
                                 </div>
                             )}
@@ -231,6 +234,7 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
         // A board is a file at whiteboards/<name>.excalidraw — same tree,
         // pen icon, extension dropped from the label.
         const board = spaces.isWhiteboardPath(node.path)
+        const todo = isTodoListPath(node.path)
         if (renaming?.assetId === entry.id) {
             return (
                 <div key={entry.id} style={pad} className="py-0.5 pr-2">
@@ -256,7 +260,7 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                         <button
                             type="button"
                             style={pad}
-                            draggable={member}
+                            draggable={writable}
                             onDragStart={(e) => {
                                 e.dataTransfer.setData(ASSET_DRAG_MIME, entry.id)
                                 e.dataTransfer.effectAllowed = 'move'
@@ -264,17 +268,18 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                             onDragEnd={() => setDropTarget(null)}
                             onClick={() => onOpenFile(entry.id)}
                             className={cn(
-                                'flex h-7 w-full items-center gap-1.5 rounded-md pr-7 text-[13px] text-left',
-                                active ? 'bg-accent font-medium text-foreground' : 'text-foreground/90 hover:bg-accent/50',
+                                'flex h-9 w-full items-center gap-2 rounded-lg pr-9 text-sm text-left transition-colors',
+                                active ? 'bg-accent font-medium text-foreground' : 'text-foreground/90 hover:bg-accent/60',
                             )}
                         >
-                            <span className="w-3 shrink-0" />
-                            {board && <PenTool className="size-3 shrink-0 text-muted-foreground" />}
+                            <span className="w-4 shrink-0" />
+                            {board && <PenTool className="size-4 shrink-0 text-muted-foreground" />}
+                            {todo && <ListTodo className="size-4 shrink-0 text-muted-foreground" />}
                             {!board && blob && (isImageMime(blob.mime)
-                                ? <ImageIcon className="size-3 shrink-0 text-muted-foreground" />
-                                : <FileText className="size-3 shrink-0 text-muted-foreground" />)}
+                                ? <ImageIcon className="size-4 shrink-0 text-muted-foreground" />
+                                : <FileText className="size-4 shrink-0 text-muted-foreground" />)}
                             <ClippedText
-                                text={board ? spaces.whiteboardDisplayName(node.name) : node.name}
+                                text={board ? spaces.whiteboardDisplayName(node.name) : todo ? todoListDisplayName(node.name) : node.name}
                                 detail={blob ? `${blob.mime} · ${formatBytes(blob.size)}` : null}
                                 className="flex-1"
                             />
@@ -294,11 +299,11 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                         <ContextMenuItem onSelect={() => void copySpacesLink(spaces.assetUrl(orgAddress, spaceId, entry.id))}>
                             <LinkIcon className="size-3.5 mr-2" /> Copy link
                         </ContextMenuItem>
-                        <ContextMenuItem disabled={!member} onSelect={() => setRenaming({ assetId: entry.id, value: entry.path })}>
+                        <ContextMenuItem disabled={!writable} onSelect={() => setRenaming({ assetId: entry.id, value: entry.path })}>
                             <Pencil className="size-3.5 mr-2" /> Rename / move
                         </ContextMenuItem>
                         <ContextMenuSeparator />
-                        <ContextMenuItem disabled={!member} onSelect={() => setDeleting(entry)}>
+                        <ContextMenuItem disabled={!writable} onSelect={() => setDeleting(entry)}>
                             <Trash2 className="size-3.5 mr-2" /> Delete…
                         </ContextMenuItem>
                     </ContextMenuContent>
@@ -308,7 +313,7 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                         <button
                             type="button"
                             aria-label="File actions"
-                            className="absolute right-1 top-1 inline-flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-background hover:text-foreground focus-visible:opacity-100 group-hover/filerow:opacity-100 data-[state=open]:opacity-100"
+                            className="absolute right-1.5 top-1.5 inline-flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-0 hover:bg-background hover:text-foreground focus-visible:opacity-100 group-hover/filerow:opacity-100 data-[state=open]:opacity-100"
                         >
                             <MoreHorizontal className="size-3.5" />
                         </button>
@@ -323,11 +328,11 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                         <DropdownMenuItem onClick={() => void copySpacesLink(spaces.assetUrl(orgAddress, spaceId, entry.id))}>
                             <LinkIcon className="size-3.5 mr-2" /> Copy link
                         </DropdownMenuItem>
-                        <DropdownMenuItem disabled={!member} onClick={() => setRenaming({ assetId: entry.id, value: entry.path })}>
+                        <DropdownMenuItem disabled={!writable} onClick={() => setRenaming({ assetId: entry.id, value: entry.path })}>
                             <Pencil className="size-3.5 mr-2" /> Rename / move
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem disabled={!member} onClick={() => setDeleting(entry)}>
+                        <DropdownMenuItem disabled={!writable} onClick={() => setDeleting(entry)}>
                             <Trash2 className="size-3.5 mr-2" /> Delete…
                         </DropdownMenuItem>
                     </DropdownMenuContent>
@@ -350,7 +355,7 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                 />
             )}
             {tree.map((node) => renderNode(node, 0))}
-            {tree.length === 0 && !creating && !creatingFolder && <div className="px-2 py-1 text-xs text-muted-foreground">No files yet.</div>}
+            {tree.length === 0 && !creating && !creatingFolder && <div className="px-3 py-10 text-sm text-muted-foreground">No files yet. Use New, or drop files here.</div>}
             {creating && (
                 <div className="flex items-center gap-1 px-1 pt-1">
                     <Input
@@ -427,14 +432,14 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
     /** A canonical link to a file in ANOTHER space (by org address — the owner knows whether the reader is in it). */
     onOpenSpaceFile?: (orgAddress: string, spaceId: string, assetId: string) => void
 }) {
-    const { member } = useSpaceAccess()
+    const { writable } = useSpaceAccess()
     const draftRef = { orgId: org.id, spaceId: space.id, assetId }
     const [asset, setAsset] = useState<spaces.ReadAssetResult | null>(null)
     const [missing, setMissing] = useState(false)
     // A draft left open on an earlier mount resumes here — the column paints in
     // edit mode, on that text, before the read comes back.
-    const [storedDraft, setDraft] = useState<DraftState | null>(() => member ? readSpaceDraft(draftRef) : null)
-    const draft = member ? storedDraft : null
+    const [storedDraft, setDraft] = useState<DraftState | null>(() => writable ? readSpaceDraft(draftRef) : null)
+    const draft = writable ? storedDraft : null
     const [applying, setApplying] = useState(false)
     const [historyOpen, setHistoryOpen] = useState(false)
     const [diffView, setDiffView] = useState<{ title: string; unified: string; restorable: number | null } | null>(null)
@@ -468,7 +473,7 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
     // painted state was is what an unmount leaves behind. There is no cleanup on
     // unmount by design; clearing is the draft going null (applied, discarded).
     useEffect(() => {
-        if (member) writeSpaceDraft({ orgId: org.id, spaceId: space.id, assetId }, draft)
+        if (writable) writeSpaceDraft({ orgId: org.id, spaceId: space.id, assetId }, draft)
     }, [org.id, space.id, assetId, draft])
     useEffect(() => {
         if (!crumbBack || editing) return
@@ -758,15 +763,15 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
                                 <button
                                     type="button"
                                     className="hover:text-foreground flex items-center gap-1"
-                                    disabled={!member || replacing}
+                                    disabled={!writable || replacing}
                                     onClick={() => replaceInputRef.current?.click()}
                                 >
                                     {replacing ? <Loader2 className="size-3 animate-spin" /> : <Upload className="size-3" />} Replace
                                 </button>
                             </>
                         ) : (
-                            <button type="button" className="hover:text-foreground flex items-center gap-1" disabled={!member} onClick={beginEdit}>
-                                <Pencil className="size-3" /> Edit
+                            <button type="button" className="hover:text-foreground flex items-center gap-1" disabled={!writable} onClick={beginEdit}>
+                                <Pencil className="size-3" /> {isTodoListPath(path) ? 'Edit as text' : 'Edit'}
                             </button>
                         )}
                         <button
@@ -792,18 +797,18 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
                                 <DropdownMenuItem onClick={() => void copySpacesLink(spaces.assetUrl(org.address, space.id, assetId))}>
                                     <LinkIcon className="size-3.5 mr-2" /> Copy link
                                 </DropdownMenuItem>
-                                <DropdownMenuItem disabled={!member} onClick={() => setEditingPath(path)}>
+                                <DropdownMenuItem disabled={!writable} onClick={() => setEditingPath(path)}>
                                     <Pencil className="size-3.5 mr-2" /> Rename / move
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
-                                <DropdownMenuItem disabled={!member} onClick={() => setDeleteOpen(true)}>
+                                <DropdownMenuItem disabled={!writable} onClick={() => setDeleteOpen(true)}>
                                     <Trash2 className="size-3.5 mr-2" /> Delete…
                                 </DropdownMenuItem>
                             </DropdownMenuContent>
                         </DropdownMenu>
                     </>
                 )}
-                {member && deleteOpen && asset && (
+                {writable && deleteOpen && asset && (
                     <DeleteAssetDialog
                         orgId={org.id}
                         spaceId={space.id}
@@ -862,8 +867,9 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
                 />
             )}
             <div className="flex-1 min-h-0 flex">
-                <div className="flex-1 min-w-0 min-h-0 overflow-y-auto">
-                    {draft && /\.md$/i.test(path) ? (
+                <div className={cn('flex-1 min-w-0 min-h-0 overflow-y-auto', isTodoListPath(path) && !draft && 'flex flex-col')}>
+                    {/* A todo list edits as text: the rich editor would rewrite its lines. */}
+                    {draft && /\.md$/i.test(path) && !isTodoListPath(path) ? (
                         <MarkdownEditor
                             content={splitFrontmatter(draft.text).body}
                             frontmatter={splitFrontmatter(draft.text).raw}
@@ -891,6 +897,19 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
                             spellCheck={false}
                             className="w-full h-full min-h-full rounded-none border-0 font-mono text-sm resize-none focus-visible:ring-0 px-5 py-4"
                             onChange={(e) => setDraft({ ...draft, text: e.target.value, conflict: null })}
+                        />
+                    ) : asset && !blob && isTodoListPath(path) ? (
+                        <TodoListView
+                            key={`${org.id}:${space.id}:${assetId}`}
+                            orgId={org.id}
+                            spaceId={space.id}
+                            assetId={assetId}
+                            content={asset.content}
+                            version={asset.version}
+                            onSaved={() => {
+                                void load()
+                                onChanged()
+                            }}
                         />
                     ) : asset && getViewerType(path) ? (
                         <SpaceDocumentViewer
@@ -933,7 +952,7 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
                         <div className="px-5 py-4 max-w-3xl">
                             <RichMarkdownViewer
                                 content={renderedContent}
-                                onToggleTask={member ? (i) => void toggleTask(i) : undefined}
+                                onToggleTask={writable ? (i) => void toggleTask(i) : undefined}
                                 onOpenLink={openLink}
                             />
                         </div>
@@ -982,7 +1001,7 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
                     )}
                 </DialogContent>
             </Dialog>
-            {member && restoreTarget !== null && asset && (
+            {writable && restoreTarget !== null && asset && (
                 <RestoreVersionDialog
                     orgId={org.id}
                     spaceId={space.id}
@@ -1049,7 +1068,7 @@ function HistoryPanel({ org, space, assetId, memberNames, refreshTick, currentVe
     onShowDiff: (from: number, to: number, restorable: number | null) => void
     onRestore: (version: number) => void
 }) {
-    const { member } = useSpaceAccess()
+    const { writable } = useSpaceAccess()
     const [changeSets, setChangeSets] = useState<spaces.ChangeSet[]>([])
 
     useEffect(() => {
@@ -1093,7 +1112,7 @@ function HistoryPanel({ org, space, assetId, memberNames, refreshTick, currentVe
                                 <Clock className="size-2.5" /> {formatFeedTime(cs.committedAt)} · v{cs.resultVersion}
                             </div>
                         </button>
-                        {member && isRestorableChangeSet(cs, currentVersion) && (
+                        {writable && isRestorableChangeSet(cs, currentVersion) && (
                             <button
                                 type="button"
                                 aria-label={`Restore to v${cs.resultVersion}`}

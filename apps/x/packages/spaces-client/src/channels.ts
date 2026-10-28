@@ -16,10 +16,19 @@ import type { SpaceSubscriptions } from './subscriptions.js';
 type IPCChannels = ipc.IPCChannels;
 
 export type HarborChannel =
+  | 'spaces:getProfile' | 'spaces:updateProfile' | 'spaces:setAvatar' | 'spaces:clearAvatar' | 'spaces:getProfileImage'
   | 'spaces:listSpaces' | 'spaces:browseSpaces' | 'spaces:joinSpace' | 'spaces:createSpace' | 'spaces:renameSpace'
+  | 'spaces:archiveSpace' | 'spaces:unarchiveSpace' | 'spaces:deleteSpace' | 'spaces:setSpaceVisibility' | 'spaces:setDefaultSpace'
+  | 'spaces:removeMember' | 'spaces:removeOrgMember' | 'spaces:setMemberRole' | 'spaces:getOrgSettings' | 'spaces:setInvitePolicy'
   | 'spaces:addMembers' | 'spaces:openDirect' | 'spaces:listMembers' | 'spaces:listOrgMembers'
   | 'spaces:listAgents' | 'spaces:addAgent' | 'spaces:setAgentCredential' | 'spaces:setAgentHook' | 'spaces:clearAgentHook'
-  | 'spaces:createAgentKey' | 'spaces:revokeAgentKey'
+  | 'spaces:createAgentKey' | 'spaces:revokeAgentKey' | 'spaces:renameAgent' | 'spaces:setAgentPersonal'
+  | 'spaces:managedAgentKinds' | 'spaces:createManagedAgent' | 'spaces:deleteManagedAgent' | 'spaces:setHostingLlm'
+  | 'spaces:getHosting' | 'spaces:setHostingEnv' | 'spaces:deleteHostingEnv' | 'spaces:hostingPower'
+  | 'spaces:runHostingCommand' | 'spaces:getHostingCommand' | 'spaces:cancelHostingCommand' | 'spaces:getHostingLogs'
+  | 'spaces:listHostingFiles' | 'spaces:readHostingFile' | 'spaces:writeHostingFile' | 'spaces:makeHostingDir' | 'spaces:moveHostingFile' | 'spaces:deleteHostingFile'
+  | 'spaces:listHostingSkills' | 'spaces:installHostingSkill' | 'spaces:removeHostingSkill'
+  | 'spaces:listHostingTriggers' | 'spaces:createHostingTrigger' | 'spaces:updateHostingTrigger' | 'spaces:deleteHostingTrigger'
   | 'spaces:createInvite' | 'spaces:resolveInvite' | 'spaces:acceptInvite'
   | 'spaces:listAssets' | 'spaces:createAsset' | 'spaces:moveAsset' | 'spaces:deleteAsset' | 'spaces:restoreAsset'
   | 'spaces:readAsset' | 'spaces:proposeChange' | 'spaces:assetHistory' | 'spaces:diff'
@@ -49,6 +58,16 @@ export interface HarborChannelDeps {
 
 export function harborChannelHandlers({ getClient, getLive, subscriptions, emit }: HarborChannelDeps): HarborChannelHandlers {
   return {
+    'spaces:getProfile': (args) => getClient(args.orgId).me(),
+    'spaces:updateProfile': async ({ orgId, ...input }) => ({ member: await getClient(orgId).updateProfile(input) }),
+    'spaces:setAvatar': async (args) => ({ member: await getClient(args.orgId).setAvatar({ bytes: Uint8Array.from(atob(args.bytes), c => c.charCodeAt(0)), mime: args.mime }) }),
+    'spaces:clearAvatar': async (args) => ({ member: await getClient(args.orgId).clearAvatar() }),
+    'spaces:getProfileImage': async (args) => {
+      const { bytes, mime } = await getClient(args.orgId).fetchProfileImage(args.hash);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      return { src: `data:${mime};base64,${btoa(binary)}` };
+    },
     'spaces:listSpaces': async (args) => {
       const { spaces, groupChat } = await getClient(args.orgId).listing({ includeDirect: args.includeDirect ?? false });
       return { spaces, ...(groupChat !== undefined ? { groupChat } : {}) };
@@ -64,6 +83,47 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit 
 
     'spaces:renameSpace': async (args) => ({
       space: await getClient(args.orgId).renameSpace(args.spaceId, args.name),
+    }),
+
+    'spaces:archiveSpace': async (args) => ({
+      space: await getClient(args.orgId).archiveSpace(args.spaceId),
+    }),
+
+    'spaces:unarchiveSpace': async (args) => ({
+      space: await getClient(args.orgId).unarchiveSpace(args.spaceId),
+    }),
+
+    'spaces:setDefaultSpace': async (args) => ({
+      space: await getClient(args.orgId).setDefaultSpace(args.spaceId, args.isDefault),
+    }),
+
+    'spaces:deleteSpace': async (args) => {
+      await getClient(args.orgId).deleteSpace(args.spaceId);
+      return { deleted: true as const };
+    },
+
+    'spaces:setSpaceVisibility': async (args) => ({
+      space: await getClient(args.orgId).setSpaceVisibility(args.spaceId, args.visibility),
+    }),
+
+    'spaces:removeMember': async (args) => ({
+      removed: await getClient(args.orgId).removeMember(args.spaceId, args.memberId),
+    }),
+
+    'spaces:removeOrgMember': async (args) => ({
+      member: await getClient(args.orgId).removeOrgMember(args.memberId),
+    }),
+
+    'spaces:setMemberRole': async (args) => ({
+      member: await getClient(args.orgId).setMemberRole(args.memberId, args.role),
+    }),
+
+    'spaces:getOrgSettings': async (args) => ({
+      settings: await getClient(args.orgId).getOrgSettings(),
+    }),
+
+    'spaces:setInvitePolicy': async (args) => ({
+      settings: await getClient(args.orgId).setInvitePolicy(args.invitePolicy),
     }),
 
     'spaces:addMembers': async (args) => ({
@@ -90,8 +150,50 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit 
     },
     'spaces:createAgentKey': async (args) => ({ key: await getClient(args.orgId).createAgentKey(args.agentId) }),
     'spaces:revokeAgentKey': async (args) => ({ key: await getClient(args.orgId).revokeAgentKey(args.agentId, args.keyId) }),
+    'spaces:renameAgent': async (args) => ({ agent: await getClient(args.orgId).renameAgent(args.agentId, args.displayName) }),
+    'spaces:setAgentPersonal': async (args) => ({ agent: await getClient(args.orgId).setAgentPersonal(args.agentId, args.personal) }),
+    'spaces:managedAgentKinds': async (args) => ({ kinds: await getClient(args.orgId).managedAgentKinds() }),
+    'spaces:createManagedAgent': async ({ orgId, ...input }) => getClient(orgId).createManagedAgent(input),
+    'spaces:deleteManagedAgent': async (args) => ({ hosting: await getClient(args.orgId).deleteManagedAgent(args.agentId) }),
+    'spaces:setHostingLlm': async ({ orgId, agentId, ...input }) => ({ hosting: await getClient(orgId).setHostingLlm(agentId, input) }),
+    'spaces:getHosting': async (args) => getClient(args.orgId).getHosting(args.agentId),
+    'spaces:setHostingEnv': async (args) => ({ env: await getClient(args.orgId).setHostingEnv(args.agentId, args.key, args.value, args.secret ?? false) }),
+    'spaces:deleteHostingEnv': async (args) => ({ env: await getClient(args.orgId).deleteHostingEnv(args.agentId, args.key) }),
+    'spaces:hostingPower': async (args) => ({ machine: await getClient(args.orgId).hostingPower(args.agentId, args.action) }),
+    'spaces:runHostingCommand': async (args) => ({ execution: await getClient(args.orgId).runHostingCommand(args.agentId, args.command, args.timeoutSeconds) }),
+    'spaces:getHostingCommand': async (args) => ({ execution: await getClient(args.orgId).getHostingCommand(args.agentId, args.executionId) }),
+    'spaces:cancelHostingCommand': async (args) => ({ execution: await getClient(args.orgId).cancelHostingCommand(args.agentId, args.executionId) }),
+    'spaces:getHostingLogs': async ({ orgId, agentId, ...opts }) => getClient(orgId).getHostingLogs(agentId, opts),
+    'spaces:listHostingFiles': async (args) => getClient(args.orgId).listHostingFiles(args.agentId, args.path ?? '/'),
+    'spaces:readHostingFile': async (args) => getClient(args.orgId).readHostingFile(args.agentId, args.path),
+    'spaces:writeHostingFile': async (args) => {
+      await getClient(args.orgId).writeHostingFile(args.agentId, args.path, args.content);
+      return {};
+    },
+    'spaces:makeHostingDir': async (args) => {
+      await getClient(args.orgId).makeHostingDir(args.agentId, args.path);
+      return {};
+    },
+    'spaces:moveHostingFile': async (args) => {
+      await getClient(args.orgId).moveHostingFile(args.agentId, args.from, args.to);
+      return {};
+    },
+    'spaces:deleteHostingFile': async (args) => {
+      await getClient(args.orgId).deleteHostingFile(args.agentId, args.path);
+      return {};
+    },
+    'spaces:listHostingSkills': async (args) => ({ skills: await getClient(args.orgId).listHostingSkills(args.agentId, args.q) }),
+    'spaces:installHostingSkill': async (args) => ({ skills: await getClient(args.orgId).installHostingSkill(args.agentId, args.name) }),
+    'spaces:removeHostingSkill': async (args) => ({ skills: await getClient(args.orgId).removeHostingSkill(args.agentId, args.name) }),
+    'spaces:listHostingTriggers': async (args) => ({ triggers: await getClient(args.orgId).listHostingTriggers(args.agentId) }),
+    'spaces:createHostingTrigger': async ({ orgId, agentId, ...input }) => ({ triggers: await getClient(orgId).createHostingTrigger(agentId, input) }),
+    'spaces:updateHostingTrigger': async ({ orgId, agentId, triggerId, ...input }) => ({ triggers: await getClient(orgId).updateHostingTrigger(agentId, triggerId, input) }),
+    'spaces:deleteHostingTrigger': async (args) => ({ triggers: await getClient(args.orgId).deleteHostingTrigger(args.agentId, args.triggerId) }),
 
-    'spaces:createInvite': async (args) => getClient(args.orgId).createInvite(args.spaceId, args.expiresInHours),
+    'spaces:createInvite': async (args) => getClient(args.orgId).createInvite({
+      ...(args.spaceIds ? { spaceIds: args.spaceIds } : {}),
+      ...(args.expiresInHours !== undefined ? { expiresInHours: args.expiresInHours } : {}),
+    }),
 
     // Pre-auth: works before the org has been added, so the join flow can show
     // what's being joined (spec §4). The token is unused on this route.
@@ -185,6 +287,7 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit 
 
     'spaces:listStream': async (args) =>
       getClient(args.orgId).listStream(args.spaceId, {
+        ...(args.replies ? { replies: true } : {}),
         ...(args.beforeOffset !== undefined ? { beforeOffset: args.beforeOffset } : {}),
         ...(args.afterOffset !== undefined ? { afterOffset: args.afterOffset } : {}),
         ...(args.aroundOffset !== undefined ? { aroundOffset: args.aroundOffset } : {}),
@@ -210,6 +313,7 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit 
         body: args.body,
         ...(args.poll ? { poll: args.poll } : {}),
         ...(args.agentOptions ? { agentOptions: args.agentOptions } : {}),
+        ...(args.peopleOnly ? { peopleOnly: true } : {}),
         actingMode: 'direct',
       }),
 

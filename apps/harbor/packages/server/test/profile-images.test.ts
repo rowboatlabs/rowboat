@@ -4,7 +4,7 @@ import { blobHash } from '../src/blobs.js';
 import { MAX_PROFILE_IMAGE_BYTES } from '../src/core/images.js';
 import { canSetOrgLogo } from '../src/policy.js';
 import type { RunningHarbor } from '../src/server.js';
-import { startTestHarbor } from './helpers.js';
+import { liveClient, startTestHarbor } from './helpers.js';
 
 // Profile images over the render face (2026-10-02): a member's avatar, the
 // org's logo, and the one route that serves both to the whole org.
@@ -48,6 +48,16 @@ describe('profile images over the render face', () => {
 
   afterAll(async () => {
     await harbor.close();
+  });
+
+  it('announces avatar replacement and removal on the member channel', async () => {
+    const live = await liveClient(harbor, 'dev-ramnique');
+    try {
+      const result = await gagan.putImage('/v1/me/avatar', PNG_A);
+      await live.until(frames => frames.some(f => f.kind === 'profile_updated' && f.member.avatarUrl === result.body.member.avatarUrl));
+      await gagan.del('/v1/me/avatar');
+      await live.until(frames => frames.some(f => f.kind === 'profile_updated' && f.member.id === 'gagan' && !f.member.avatarUrl));
+    } finally { live.close(); }
   });
 
   it('sets your avatar and shows it on me and the roster', async () => {

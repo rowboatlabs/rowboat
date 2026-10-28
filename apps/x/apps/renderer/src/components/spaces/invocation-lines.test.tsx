@@ -69,7 +69,7 @@ beforeEach(() => {
 const names = new Map([['echo', 'Echo'], ['harsh', 'Harsh']])
 function lines(list: spaces.Invocation[], viewer: { selfId: string; isAdmin?: boolean; member?: boolean }, orgId = `org-${Math.random()}`) {
     return render(
-        <SpaceAccessContext.Provider value={{ member: viewer.member ?? true, join: () => {}, joining: false }}>
+        <SpaceAccessContext.Provider value={{ member: viewer.member ?? true, writable: viewer.member ?? true, archived: false, join: () => {}, joining: false }}>
         <SpaceMembersProvider members={names}>
             <SpaceInvocationsProvider byMessage={new Map([['m1', list]])} orgId={orgId} selfId={viewer.selfId} isAdmin={viewer.isAdmin ?? false}>
                 <InvocationLines messageId="m1" />

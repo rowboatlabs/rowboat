@@ -9,6 +9,7 @@ import {
   type SpaceMentionTarget,
   type SpacesMentionTargets,
 } from '@/lib/mention-targets'
+import { isDeparted, isOthersPersonalAgent } from '@/lib/spaces-direct'
 
 /**
  * What the assistant composer's @ menu can name in Spaces: every shared
@@ -42,7 +43,8 @@ export function useSpacesMentionTargets(): SpacesMentionTargets {
         }
       }
       for (const member of rosters.get(org.id) ?? []) {
-        if (member.id === org.memberId || member.deactivatedAt) continue
+        // Someone else's personal agent can't be messaged (2026-10-26), so it isn't offered.
+        if (member.id === org.memberId || isDeparted(member) || isOthersPersonalAgent(member, org.memberId)) continue
         members.push({ kind: 'member', orgId: org.id, orgName: org.name, memberId: member.id, displayName: member.displayName })
       }
     }

@@ -65,7 +65,9 @@ export class Images {
     this.k.guardWrite();
     const hash = await this.register(ctx, bytes);
     const updated: Member = { ...member, avatarUrl: imageUrl(origin, hash) };
+    if (member.avatarUrl === updated.avatarUrl) return member;
     await this.k.store.putMember(updated);
+    await this.k.publishProfile(updated);
     return updated;
   }
 
@@ -75,6 +77,7 @@ export class Images {
     this.k.guardWrite();
     const { avatarUrl: _dropped, ...rest } = member;
     await this.k.store.putMember(rest);
+    await this.k.publishProfile(rest);
     return rest;
   }
 

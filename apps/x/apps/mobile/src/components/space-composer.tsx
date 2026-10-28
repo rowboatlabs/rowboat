@@ -4,7 +4,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { File, Paths } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
-import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { ActionSheetIOS, ActivityIndicator, Alert, Keyboard, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import type { Member } from '@rowboat/spaces-protocol';
 import { mentionToken } from '@rowboat/spaces-protocol';
@@ -80,7 +80,9 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
   onPickMedia?: (file: { uri: string; mime: string; name: string }) => Promise<string>;
   /** Save an edit begun with beginEdit (absent = editing unsupported). */
   onEdit?: (id: string, body: string) => Promise<boolean> | boolean | void;
-}>(function SpaceComposer({ placeholder, members, me, sending, onSend, onPickMedia, onEdit }, ref) {
+  /** Every change to the text, mentions as tokens: the thread's follow-up line follows it (2026-10-27). */
+  onDraftChange?: (body: string) => void;
+}>(function SpaceComposer({ placeholder, members, me, sending, onSend, onPickMedia, onEdit, onDraftChange }, ref) {
   const colors = useColors();
   const inputRef = useRef<TextInput>(null);
   const [text, setText] = useState('');
@@ -198,6 +200,14 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
     setText('');
     setInputKey((k) => k + 1);
   };
+
+  const onDraftChangeRef = useRef(onDraftChange);
+  useEffect(() => {
+    onDraftChangeRef.current = onDraftChange;
+  });
+  useEffect(() => {
+    onDraftChangeRef.current?.(tokenizeMentions(text, picked));
+  }, [text, picked]);
 
   const active = useMemo(() => activeMention(text, cursor), [text, cursor]);
   const suggestions = useMemo(() => {

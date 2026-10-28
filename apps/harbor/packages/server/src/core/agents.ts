@@ -2,10 +2,10 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { BUILT_IN_CONNECTION, HARBOR_RUN_CONNECTIONS, INSTANCE_CONNECTIONS, JEV_KIND, isAgentPair, type AgentCredential, type AgentHook, type AgentKey, type AgentKeySecret, type AgentListing, type InvocationOptionValues, type Member } from '@rowboat/spaces-protocol';
 import { hashAgentKey, mintAgentKeySecret } from '../agent-keys.js';
 import { HarborError } from '../errors.js';
-import { agentsManagedBy, canAddAgent, canClearAgentHook, canCreateAgentKey, canRevokeAgentKey, canSetAgentHook, enforce } from '../policy.js';
+import { agentsManagedBy, canAddAgent, canClearAgentHook, canCreateAgentKey, canRenameAgent, canRevokeAgentKey, canSetAgentHook, canSetAgentPersonal, enforce } from '../policy.js';
 import type { StoredAgentKey } from '../store.js';
 import type { Kernel, ActorCtx } from './kernel.js';
-import type { Spaces } from './spaces.js';
+import { oneLine, type Spaces } from './spaces.js';
 
 // Agent members and their keys (spec §4 Agent members, 2026-09-29). Any
 // person adds an agent and owns it; the owner alone creates its keys; the
@@ -87,7 +87,7 @@ export class Agents {
    */
   async add(
     ctx: ActorCtx,
-    input: { displayName: string; kind: string; connection: string; credential?: string; instance?: string },
+    input: { displayName: string; kind: string; connection: string; credential?: string; instance?: string; personal?: boolean },
   ): Promise<{ agent: Member; key: AgentKeySecret }> {
     enforce(canAddAgent(await this.actor(ctx)));
     if (!isAgentPair(input.kind, input.connection)) {
@@ -110,6 +110,7 @@ export class Agents {
       agentKind: input.kind,
       agentConnection: input.connection,
       ...(input.instance ? { agentInstance: input.instance } : {}),
+      ...(input.personal ? { personal: true } : {}),
     });
     if (platform) await this.hooks!.save(agent.id, input.credential!, ctx.memberId);
     const key = await this.mint(ctx, agent.id);
@@ -141,6 +142,39 @@ export class Agents {
     // The new key must still reach the agent's own instance.
     await this.hooks.verify(connection, secret, { kind: agent.agentKind ?? '', ...(agent.agentInstance ? { instance: agent.agentInstance } : {}) });
     return this.hooks.save(agentId, secret, ctx.memberId);
+  }
+
+  /**
+   * Rename an agent (spec §4 Agent members, amended 2026-10-21): the owner
+   * only. An org fact, like a person's rename: no event, no lock, and history
+   * keeps its attribution because it keys on the id.
+   */
+  async rename(ctx: ActorCtx, agentId: string, input: { displayName: string }): Promise<Member> {
+    const agent = await this.agent(agentId);
+    enforce(canRenameAgent(await this.actor(ctx), agent));
+    const displayName = oneLine(input.displayName);
+    if (!displayName) throw new HarborError('invalid_request', 'an agent’s name needs at least one character');
+    if (displayName === agent.displayName) return agent; // idempotent no-op: no write
+    this.k.guardWrite();
+    const updated: Member = { ...agent, displayName };
+    await this.k.store.putMember(updated);
+    return updated;
+  }
+
+  /**
+   * Switch an agent between channel and personal (spec §4 Agent members,
+   * amended 2026-10-27): the owner only. Like a rename, an org fact with no
+   * event. The invocation rule reads the flag when a message arrives, so what
+   * is already queued finishes and everything asked after follows the new
+   * setting; Jev's candidates read it the same way.
+   */
+  async setPersonal(ctx: ActorCtx, agentId: string, input: { personal: boolean }): Promise<Member> {
+    const agent = await this.agent(agentId);
+    enforce(canSetAgentPersonal(await this.actor(ctx), agent));
+    if ((agent.personal === true) === input.personal) return agent; // idempotent no-op: no write
+    this.k.guardWrite();
+    await this.k.store.setAgentPersonal(agentId, input.personal);
+    return this.agent(agentId);
   }
 
   /**

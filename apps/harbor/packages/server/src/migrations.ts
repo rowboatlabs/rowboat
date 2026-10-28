@@ -1015,6 +1015,165 @@ export const MIGRATIONS: Migration[] = [
       `create index if not exists agent_connection_threads_space on agent_connection_threads (space_id)`,
     ],
   },
+  {
+    // A member's title (spec §4 Member profile, v1 = name, title, avatar;
+    // built 2026-10-19). Null = none.
+    id: '040-member-title',
+    statements: [`alter table members add column if not exists title text`],
+  },
+  {
+    // Default spaces (spec §5 answer 3, built 2026-10-19): a flag on the
+    // space row. The CHECK keeps the rule in the schema as 023 does for DMs:
+    // only a shared open space can be a default, so an invite to the org is
+    // never a back door into a private space. No backfill: every org's first
+    // space was created private, and turning a private space open is not a
+    // migration's call — an admin marks the defaults.
+    id: '041-default-spaces',
+    statements: [
+      `alter table spaces add column if not exists is_default boolean not null default false`,
+      `alter table spaces add constraint spaces_default_open_check check (not is_default or (kind = 'shared' and visibility = 'open'))`,
+      `create index if not exists spaces_default on spaces (org_id) where is_default`,
+    ],
+  },
+  {
+    // An invite is to the org with an optional list of spaces (spec §4
+    // Invites, amended 2026-09-22; built 2026-10-19). The list moves to its
+    // own table, cascading from both ends: deleting a listed space drops it
+    // from the list and the invite still admits to the org; deleting the
+    // invite drops its list. invites gains org_id, because an invite that
+    // lists nothing no longer reaches its org through a space. invites.space_id
+    // stays, null on every new invite and read by nothing: 039 names it, and
+    // an applied migration is never edited.
+    id: '042-org-invites',
+    statements: [
+      `alter table invites add column if not exists org_id text`,
+      `update invites i set org_id = s.org_id from spaces s where s.id = i.space_id`,
+      `delete from invites where org_id is null`,
+      `alter table invites alter column org_id set not null`,
+      `alter table invites alter column space_id drop not null`,
+      `create table invite_spaces (
+        token text not null,
+        space_id text not null,
+        position int not null,
+        primary key (token, space_id),
+        constraint invite_spaces_token_fk foreign key (token) references invites(token) on delete cascade,
+        constraint invite_spaces_space_fk foreign key (space_id) references spaces(id) on delete cascade
+      )`,
+      `create index invite_spaces_space on invite_spaces (space_id)`,
+      `insert into invite_spaces (token, space_id, position) select token, space_id, 0 from invites where space_id is not null`,
+      `update invites set space_id = null`,
+    ],
+  },
+  {
+    // Admin controls (spec §4 Roles, built 2026-10-19). An admin removes a
+    // member from the org: the row stays, stamped, so attribution reads and
+    // an invite accepted by the same identity reactivates it. Null = active.
+    id: '043-member-removed-at',
+    statements: [`alter table members add column if not exists removed_at text`],
+  },
+  {
+    // The org's settings an admin sets (spec §4 Roles, 2026-10-19): who may
+    // invite. One row per org once set; no row = members may.
+    id: '044-org-settings',
+    statements: [
+      `create table org_settings (
+        org_id text primary key,
+        invite_policy text not null default 'members' check (invite_policy in ('members', 'admins')),
+        set_by text not null,
+        set_at text not null
+      )`,
+    ],
+  },
+  {
+    // A message's summary (2026-10-25): the author's short version of a long
+    // body, shown first with "Show more". Content, so deletion blanks it.
+    id: '045-message-summary',
+    statements: [`alter table messages add column if not exists summary text`],
+  },
+  {
+    // Who has replied, on roots (2026-10-25, "managing sessions" in Main):
+    // the Threads view shows and filters by a thread's participants. Same
+    // recompute as reply_count; the backfill is refreshReplyStats over all.
+    id: '046-reply-authors',
+    statements: [
+      `alter table messages add column if not exists reply_authors jsonb not null default '[]'::jsonb`,
+      `update messages r set reply_authors = s.authors
+        from (select thread_root, jsonb_agg(author_member_id order by first_offset) as authors
+              from (select thread_root, author_member_id, min(stream_offset) as first_offset
+                    from messages where thread_root is not null and deleted_at is null
+                    group by thread_root, author_member_id) a
+              group by thread_root) s
+        where r.id = s.thread_root`,
+    ],
+  },
+  {
+    // Managed agents (spec §8 Maritime, 2026-10-26): the hosting Rowboat's own account runs for an agent.
+    // One row per managed agent, written before the platform is asked (so an interrupted creation is found),
+    // bound to its member once the member exists. The platform's agent id and the end-user key Rowboat named it by.
+    id: '047-agent-hosting',
+    statements: [
+      `create table agent_hosting (
+        org_id text not null,
+        id text not null,
+        agent_id text,
+        provider text not null,
+        status text not null,
+        external_id text,
+        external_user_id text not null,
+        kind text not null,
+        display_name text not null,
+        error text,
+        created_by text not null,
+        created_at text not null,
+        updated_at text not null,
+        primary key (org_id, id)
+      )`,
+      `create unique index agent_hosting_agent on agent_hosting (org_id, agent_id) where agent_id is not null`,
+      `create index agent_hosting_status on agent_hosting (org_id, status)`,
+    ],
+  },
+  {
+    // Personal agents (spec §4 Agent members, 2026-10-26): only the owner may
+    // invoke one, add it to a space or DM it. Written once at creation, like
+    // the kind and connection; every existing agent is a channel agent.
+    id: '048-agent-personal',
+    statements: [
+      `alter table members add column if not exists personal boolean not null default false`,
+      `alter table members add constraint members_personal_check check (kind = 'agent' or not personal)`,
+    ],
+  },
+  {
+    // Trial credit, then the owner's key (spec §8 Maritime, 2026-10-27): who pays for a managed agent's model calls.
+    // Rows so far: Claude Code already runs on its owner's Anthropic key; the rest are on Rowboat's credit, with a
+    // trial that ends thirty days after creation unless something closes it first.
+    id: '049-agent-hosting-funding',
+    statements: [
+      `alter table agent_hosting add column funding text not null default 'trial'`,
+      `alter table agent_hosting add column trial_ends_at text`,
+      `alter table agent_hosting add column trial_closed_at text`,
+      `alter table agent_hosting add column trial_closed_reason text`,
+      `alter table agent_hosting add column llm_provider text`,
+      `alter table agent_hosting add column llm_key_hint text`,
+      `alter table agent_hosting add column llm_model text`,
+      `alter table agent_hosting add column llm_set_by text`,
+      `alter table agent_hosting add column llm_set_at text`,
+      `update agent_hosting set funding = 'own', llm_provider = 'anthropic', llm_key_hint = '', llm_set_by = created_by, llm_set_at = created_at where kind = 'claude-code'`,
+      `update agent_hosting set trial_ends_at = to_char((created_at::timestamptz + interval '30 days') at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') where funding = 'trial'`,
+    ],
+  },
+  {
+    // The inline view (2026-10-25): the stream read with replies pages every
+    // message of a space by offset, which the roots-only index cannot serve.
+    id: '050-messages-space-offset',
+    statements: [`create index if not exists messages_space_offset on messages (space_id, stream_offset)`],
+  },
+  {
+    // Thread follow-ups (spec §8, 2026-10-27): a reply that mentions nobody
+    // invokes the agent its author last invoked there, unless its author sent
+    // it to people only. Kept so Ro, reading the message later, tags no agent.
+    id: '051-message-people-only',
+    statements: [`alter table messages add column if not exists people_only boolean not null default false`],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

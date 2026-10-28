@@ -1,3 +1,4 @@
+import { isOrgView, type OrgView } from '@/lib/spaces-navigation'
 import type { RailSelection } from '@/lib/spaces-selection'
 
 // The web app's addresses: the desktop's Spaces navigation (an org, a space,
@@ -7,7 +8,7 @@ import type { RailSelection } from '@/lib/spaces-selection'
 // /s/<space>/a/<asset>), under the org's slug.
 //
 //   /<org>                      the org (its first space opens)
-//   /<org>/activity | /browse   an org-level surface
+//   /<org>/activity | /browse | /agents   an org-level surface
 //   /<org>/s/<space>            the stream
 //   …/discussions | …/files     the space's lists
 //   …/t/<root>                  a thread
@@ -19,7 +20,7 @@ import type { RailSelection } from '@/lib/spaces-selection'
 export interface WebRoute {
     orgKey?: string
     spaceId?: string
-    view?: 'activity' | 'browse'
+    view?: OrgView
     rail: RailSelection
 }
 
@@ -29,7 +30,7 @@ export function parseRoute(pathname: string): WebRoute {
     const parts = pathname.split('/').filter(Boolean).map(decodeURIComponent)
     const [orgKey, section, spaceId, kind, id] = parts
     if (!orgKey) return { rail: GENERAL }
-    if (section === 'activity' || section === 'browse') return { orgKey, view: section, rail: GENERAL }
+    if (isOrgView(section)) return { orgKey, view: section, rail: GENERAL }
     if (section !== 's' || !spaceId) return { orgKey, rail: GENERAL }
     const rail: RailSelection =
         kind === 'discussions' ? { kind: 'discussions' }
@@ -41,7 +42,7 @@ export function parseRoute(pathname: string): WebRoute {
     return { orgKey, spaceId, rail }
 }
 
-export function routePath(orgKey: string, target: { spaceId?: string; view?: 'activity' | 'browse'; rail?: RailSelection }): string {
+export function routePath(orgKey: string, target: { spaceId?: string; view?: OrgView; rail?: RailSelection }): string {
     const org = `/${encodeURIComponent(orgKey)}`
     if (target.view) return `${org}/${target.view}`
     if (!target.spaceId) return org

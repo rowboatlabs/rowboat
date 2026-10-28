@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import * as oauthClient from '../auth/oauth-client.js';
 import { ensureRowboatSession } from '../auth/oauth-flows.js';
 import { getSessionAccessToken, readSession } from '../auth/tokens.js';
-import { parseInviteLink, SpacesClient, SpacesRequestError } from '@x/spaces-client';
+import { generatedOrgSlug, parseInviteLink, SpacesClient, SpacesRequestError } from '@x/spaces-client';
 import {
   applyManagedListing,
   dropSessionOrgs,
@@ -249,23 +249,6 @@ export async function apexUrl(): Promise<string> {
 }
 
 /**
- * The org's address is generated, never chosen (decision 2026-09-07: names
- * are display-only; the address is opaque). The name-derived prefix keeps
- * logs and DB rows legible; the random suffix is ALWAYS appended — never try
- * the bare name — so creation reveals nothing about taken slugs and the
- * clean namespace stays free for a future vanity claim. Prefix 35 + '-' + 4
- * fits the server's 40-char slug cap.
- */
-function generatedSlug(name: string): string {
-  const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
-  const prefix =
-    name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 35).replace(/-+$/, '') || 'server';
-  let suffix = '';
-  for (let i = 0; i < 4; i++) suffix += alphabet[Math.floor(Math.random() * alphabet.length)];
-  return `${prefix}-${suffix}`;
-}
-
-/**
  * Self-serve org creation on the managed deployment: the account session is
  * the identity (the apex trusts the Rowboat login desk; a local-stack apex
  * on some other desk gets its own dance, as before), POST the org, and —
@@ -292,7 +275,7 @@ export async function createOrgOnDeployment(input: {
     const res = await fetch(`${apex}/v1/orgs`, {
       method: 'POST',
       headers: { authorization: `Bearer ${await bearer()}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ name: input.name, slug: generatedSlug(input.name) }),
+      body: JSON.stringify({ name: input.name, slug: generatedOrgSlug(input.name) }),
     });
     const body = (await res.json().catch(() => ({}))) as {
       message?: string;
@@ -338,6 +321,14 @@ export async function resolveInviteLink(url: string): Promise<{ baseUrl: string;
 }
 
 /**
+ * Who the accept made us. An invite that joined no space (2026-10-19: an org
+ * with no default, nothing listed) carries no membership to read it from.
+ */
+async function memberIdAfterAccept(client: SpacesClient, result: AcceptInviteResult): Promise<string> {
+  return result.membership?.memberId ?? (await client.me()).member.id;
+}
+
+/**
  * The full join: parse → identity (the account session for a managed org —
  * signing in to Rowboat once if there is none; this install's own dance for
  * a foreign org it has no working auth on) → accept (the bind ceremony
@@ -374,7 +365,7 @@ export async function joinViaInviteLink(input: {
       name: health.org.name,
       address: health.org.address,
       issuer,
-      memberId: result.membership.memberId,
+      memberId: await memberIdAfterAccept(client, result),
     });
     invalidateManagedOrgsSync();
     return { org, result };
@@ -390,7 +381,7 @@ export async function joinViaInviteLink(input: {
     address: health.org.address,
     issuer: dance.issuer,
     clientId: dance.clientId,
-    memberId: result.membership.memberId,
+    memberId: await memberIdAfterAccept(client, result),
     tokens: dance.tokens,
   });
   return { org, result };

@@ -2,7 +2,7 @@ import { useSpaceAccess } from '@/lib/spaces-access'
 import { useReactionReadMark } from '@/hooks/use-reaction-read-mark'
 import { MESSAGE_PROSE } from '@/components/spaces/message-prose'
 import { memo, useState } from 'react'
-import { Bookmark, BookmarkCheck, Bot, ChevronRight, Copy, Forward, Link as LinkIcon, Loader2, MessageSquare, MessageSquareText, MoreHorizontal, Pencil, Pin, PinOff, Quote, SmilePlus, Square, Trash2, X } from 'lucide-react'
+import { Bookmark, BookmarkCheck, Bot, ChevronRight, Copy, CornerDownRight, Forward, Link as LinkIcon, Loader2, MessageSquare, MessageSquareText, MoreHorizontal, Pencil, Pin, PinOff, Quote, SmilePlus, Square, Trash2, X } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -22,6 +22,7 @@ import { MessageLinkPreview } from '@/components/spaces/link-preview-card'
 import { ApprovalCard } from '@/components/spaces/approval-card'
 import { PollCard } from '@/components/spaces/poll-card'
 import { SpaceMarkdown, useSpaceRefs } from '@/components/spaces/space-markdown'
+import { isLongBody } from '@/lib/spaces-conventions'
 import { frequentEmoji, noteEmojiUsed } from '@/lib/emoji-data'
 import { PIN_EMOJI } from '@/lib/spaces-corpus'
 import {
@@ -83,8 +84,8 @@ function ReactionChips({ message, memberNames, selfMemberId, onReact, onPickerOp
                                 aria-pressed={mine}
                                 aria-label={`${group.emoji}, ${group.memberIds.length} reactions, ${joinNames(group.memberIds.map(nameOf))}${mine ? ", including you" : ""}`}
                                 className={cn(
-                                    'spaces-reaction inline-flex items-center gap-1 rounded-full border transition-colors',
-                                    mine ? 'border-[var(--stream-link)] bg-[var(--stream-mention-wash)]' : 'border-border bg-background hover:border-foreground/30',
+                                    'spaces-reaction inline-flex items-center gap-1 rounded-full border',
+                                    mine ? 'border-[var(--stream-link)] bg-[var(--stream-mention-wash)]' : 'border-border bg-background hover:border-foreground/30 hover:bg-accent',
                                 )}
                             >
                                 <span key={group.memberIds.length} className="text-base leading-none">{group.emoji}</span>
@@ -116,7 +117,7 @@ function ReactionChips({ message, memberNames, selfMemberId, onReact, onPickerOp
                 <button
                     type="button"
                     title="Add reaction"
-                    className="spaces-reaction spaces-reaction-add inline-flex items-center justify-center rounded-full border border-border bg-background text-muted-foreground hover:text-foreground"
+                    className="spaces-reaction spaces-reaction-add inline-flex items-center justify-center rounded-full border border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground"
                 >
                     <SmilePlus className="size-3.5" />
                 </button>
@@ -141,7 +142,7 @@ export interface ThreadRowData {
 }
 
 function MessageRowImpl({
-    message, memberNames, spaceNames, continuation, thread, onOpenThread, onPrefetchThread, onOpenAgentChat, onOpenResponseChat, onStopAgent, onReplyInThread, onAskRowboat, onCopyLink, onReact, onDelete, onEdit, onQuoteReply, onForward, onToggleSave, saved, onRetryFailed, onDiscardFailed, onVotePoll, onRemovePollVote, onEndPoll, dense, selfMemberId, orgId, visible,
+    message, memberNames, spaceNames, continuation, thread, inline, inThread, threadOpen, arriving, onOpenThread, onPrefetchThread, onOpenAgentChat, onOpenResponseChat, onStopAgent, onReplyInThread, onAskRowboat, onCopyLink, onReact, onDelete, onEdit, onQuoteReply, onForward, onToggleSave, saved, onRetryFailed, onDiscardFailed, onVotePoll, onRemovePollVote, onEndPoll, dense, selfMemberId, orgId, visible,
 }: {
     message: spaces.Message & { pending?: boolean; failed?: boolean }
     orgId?: string
@@ -154,6 +155,26 @@ function MessageRowImpl({
     continuation: boolean
     /** Present when a thread hangs under this message (stream only). */
     thread?: ThreadRowData | null
+    /**
+     * The space shows replies inline (2026-10-25): there are no threads here,
+     * so Reply is plain Reply and nothing opens a pane.
+     */
+    inline?: boolean
+    /**
+     * Inline, a reply's line quoting what it answers, Discord-reply style:
+     * the author and first line of the message it replies to (or the
+     * discussion's title); clicking lands on that message in the stream.
+     */
+    inThread?: { author?: string; label: string; onClick: () => void } | null
+    // Spaces redesign (2026-10-21): the reply line stays tinted while its
+    // thread is the one open beside the stream, so the reader sees which
+    // root the pane belongs to.
+    /** This row's thread is the one open in the thread pane. */
+    threadOpen?: boolean
+    // Spaces redesign (2026-10-21): rows that land live at the tail rise in;
+    // the stream decides which (never the first paint or an older page).
+    /** The row arrived live — play the entrance once. */
+    arriving?: boolean
     onOpenThread?: (rootMessageId: string) => void
     /** Hover = intent: warm the thread's replies so the click paints instantly. */
     onPrefetchThread?: (rootMessageId: string) => void
@@ -197,8 +218,8 @@ function MessageRowImpl({
     /** Marks thread rows; message geometry stays consistent across both panes. */
     dense?: boolean
 }) {
-    const { member } = useSpaceAccess()
-    if (!member) {
+    const { writable } = useSpaceAccess()
+    if (!writable) {
         onAskRowboat = undefined
         onStopAgent = undefined
         onReplyInThread = undefined
@@ -233,6 +254,11 @@ function MessageRowImpl({
     // `initial` seeds the editor once; `text` is its live markdown; `baseline`
     // is what an untouched draft serializes to (see MessageEditBox.onChange).
     const [edit, setEdit] = useState<{ initial: string; text: string; images: ImageEmbed[]; baseline: string | null } | null>(null)
+    // A long body shows collapsed until the reader asks (2026-10-25): its
+    // summary when the author wrote one, else its first lines.
+    const [expanded, setExpanded] = useState(false)
+    const long = isLongBody(message.body)
+    const collapsed = long && !expanded
     const refs = useSpaceRefs()
     // A thumbnail address for an extracted embed: the org's blob links render
     // through the app:// cache (their https wire form doesn't), anything
@@ -271,6 +297,9 @@ function MessageRowImpl({
     // would jump to the viewport edge.
     const [pickerOpen, setPickerOpen] = useState(false)
     const [menuOpen, setMenuOpen] = useState(false)
+    // The entrance class comes off once it has played: a row hidden and shown
+    // again (the kept-alive stream) must not rise a second time.
+    const [entered, setEntered] = useState(false)
 
     // What "Copy message" copies: mentions resolved to names, image embeds
     // dropped — their app:// addresses mean nothing outside the app. Empty
@@ -303,7 +332,9 @@ function MessageRowImpl({
             className={cn(
                 'spaces-message group/msg relative flex items-start',
                 continuation ? 'spaces-message--continuation' : 'spaces-message--start',
+                arriving && !entered && 'spaces-message--arriving',
             )}
+            onAnimationEnd={arriving && !entered ? (e) => { if (e.target === e.currentTarget) setEntered(true) } : undefined}
         >
             {continuation ? (
                 <span title={formatFullTimestamp(message.postedAt)} className={cn('shrink-0 pt-1 text-right text-[11px] leading-[22px] tabular-nums text-muted-foreground/0 group-hover/msg:text-muted-foreground', gutter)}>
@@ -317,6 +348,14 @@ function MessageRowImpl({
                 </MemberProfilePopover>
             )}
             <div className="min-w-0 flex-1">
+                {inThread && message.threadRoot !== undefined && (
+                    <button type="button" title="Go to the message this replies to" className="flex max-w-full items-center gap-1 text-xs text-muted-foreground hover:text-[var(--stream-link)]"
+                        onClick={inThread.onClick}>
+                        <CornerDownRight className="size-3 shrink-0" aria-hidden />
+                        {inThread.author && <span className="shrink-0 font-medium">{inThread.author}</span>}{' '}
+                        <span className="truncate">{inThread.label}</span>
+                    </button>
+                )}
                 {!continuation && (
                     <div className="flex flex-wrap items-baseline gap-x-2 text-xs">
                         <MemberProfilePopover id={message.author.memberId}>
@@ -344,7 +383,7 @@ function MessageRowImpl({
                         <span title={formatFullTimestamp(message.postedAt)} className="text-muted-foreground">{formatFeedTime(message.postedAt)}</span>
                     </div>
                 )}
-                {member && edit !== null ? (
+                {writable && edit !== null ? (
                     <div className="mt-1">
                         <MessageEditBox
                             initial={edit.initial}
@@ -396,11 +435,30 @@ function MessageRowImpl({
                     />
                 ) : (
                     <div className={cn(MESSAGE_PROSE, message.pending && 'opacity-60')}>
-                        <SpaceMarkdown body={message.body} />
-                        {message.editedAt && (
-                            <span title={formatFullTimestamp(message.editedAt)} className="text-[10.5px] text-muted-foreground/70">(edited)</span>
+                        {long && message.summary ? (
+                            // The author's summary first; expanded, it stays on top as the TL;DR.
+                            <div data-summary className={cn(!collapsed && 'mb-2 border-l-2 border-border pl-3 text-muted-foreground')}>
+                                <SpaceMarkdown body={message.summary} />
+                            </div>
+                        ) : null}
+                        {collapsed && !message.summary ? (
+                            <div data-clamped className="relative max-h-[13.5rem] overflow-hidden">
+                                <SpaceMarkdown body={message.body} />
+                                <span aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-background to-transparent" />
+                            </div>
+                        ) : !collapsed ? (
+                            <SpaceMarkdown body={message.body} />
+                        ) : null}
+                        {long && (
+                            <button type="button" aria-expanded={expanded} onClick={() => setExpanded((v) => !v)}
+                                className="mt-0.5 text-xs font-medium text-[var(--stream-link)] hover:underline">
+                                {expanded ? 'Show less' : 'Show more'}
+                            </button>
                         )}
-                        <MessageLinkPreview body={message.body} messageId={message.id} />
+                        {message.editedAt && (
+                            <span title={formatFullTimestamp(message.editedAt)} className="ml-1 text-[10.5px] text-muted-foreground/70">(edited)</span>
+                        )}
+                        {!collapsed && <MessageLinkPreview body={message.body} messageId={message.id} />}
                     </div>
                 )}
                 {message.failed && (
@@ -436,14 +494,15 @@ function MessageRowImpl({
                         type="button"
                         onClick={() => onOpenThread(thread.rootMessageId)}
                         onMouseEnter={() => onPrefetchThread?.(thread.rootMessageId)}
+                        data-open={threadOpen || undefined}
                         className={cn(
-                            'spaces-reply-link group/thread mt-1 flex w-fit max-w-full flex-wrap items-center gap-x-2 gap-y-1 rounded border border-transparent px-1 py-1 text-left text-xs transition-colors hover:border-border hover:bg-[var(--rowboat-raised)]',
+                            'spaces-reply-link mt-1 flex w-fit max-w-full flex-wrap items-center gap-x-2 gap-y-1 text-left text-xs',
                             thread.archived && 'opacity-60',
                         )}
                     >
                         <MessageSquare className="size-3 text-muted-foreground" />
                         {thread.title && <span className="max-w-48 truncate font-semibold">{thread.title}</span>}
-                        <span className={cn('font-bold text-[var(--stream-link)]', thread.title && 'font-normal text-muted-foreground')}>
+                        <span className="font-semibold text-[var(--stream-link)]">
                             {thread.replyCount} {thread.replyCount === 1 ? 'reply' : 'replies'}
                         </span>
                         {thread.unreadCount > 0 && <span className="font-semibold text-[var(--rowboat-attention)]">New replies</span>}
@@ -463,7 +522,7 @@ function MessageRowImpl({
                         {thread.unreadCount > 0 ? (
                             <span className="size-1.5 rounded-full bg-foreground" />
                         ) : (
-                            <ChevronRight className="size-3 text-muted-foreground transition-transform group-hover/thread:translate-x-0.5" />
+                            <ChevronRight className="spaces-reply-link-go size-3.5 text-muted-foreground" />
                         )}
                     </button>
                 )}
@@ -501,13 +560,13 @@ function MessageRowImpl({
                 )}
             </div>
             {showActions && (
-                <div className={cn('spaces-message-actions absolute right-4 flex items-center rounded-md border border-border bg-[var(--rowboat-raised)] p-1 shadow-sm', (pickerOpen || menuOpen) && 'spaces-message-actions--open')}>
+                <div className={cn('spaces-message-actions absolute right-4 flex items-center gap-0.5 rounded-[10px] border border-border bg-[var(--rowboat-raised)] p-[3px]', (pickerOpen || menuOpen) && 'spaces-message-actions--open')}>
                     {onReact && (
                         <ReactionPicker onPick={(emoji) => onReact?.(message, emoji)} onOpenChange={setPickerOpen}>
                             <button
                                 type="button"
                                 title="Add reaction"
-                                className={cn('inline-flex size-8 items-center justify-center rounded text-muted-foreground', ICON_HOVER)}
+                                className={cn('inline-flex size-8 items-center justify-center rounded-[7px] text-muted-foreground', ICON_HOVER)}
                             >
                                 <SmilePlus className="size-3.5" />
                             </button>
@@ -518,9 +577,9 @@ function MessageRowImpl({
                         // and a bare glyph made people hunt for it.
                         <button
                             type="button"
-                            title={thread && thread.replyCount > 0 ? 'Open thread' : 'Reply in thread'}
+                            title={inline ? 'Reply' : thread && thread.replyCount > 0 ? 'Open thread' : 'Reply in thread'}
                             onClick={() => (thread && thread.replyCount > 0 && onOpenThread ? onOpenThread(thread.rootMessageId) : onReplyInThread(message))}
-                            className={cn('inline-flex h-8 items-center gap-1.5 rounded px-2 text-xs font-medium text-muted-foreground', ICON_HOVER)}
+                            className={cn('inline-flex h-8 items-center gap-1.5 rounded-[7px] px-2 text-xs font-medium text-muted-foreground', ICON_HOVER)}
                         >
                             <MessageSquare className="size-3.5" />
                             {thread && thread.replyCount > 0 ? 'Open' : 'Reply'}
@@ -531,7 +590,7 @@ function MessageRowImpl({
                             type="button"
                             title="Ask @rowboat about this"
                             onClick={() => onAskRowboat(message)}
-                            className={cn('inline-flex size-8 items-center justify-center rounded text-muted-foreground', ICON_HOVER)}
+                            className={cn('inline-flex size-8 items-center justify-center rounded-[7px] text-muted-foreground', ICON_HOVER)}
                         >
                             <Bot className="size-3.5" />
                         </button>
@@ -539,7 +598,7 @@ function MessageRowImpl({
                     {(onCopyLink || canDelete || canEdit || canQuote || canForward || canPin || canSave || canOpenResponseChat) && (
                         <DropdownMenu onOpenChange={setMenuOpen}>
                             <DropdownMenuTrigger asChild>
-                                <button type="button" title="More" className={cn('inline-flex size-8 items-center justify-center rounded text-muted-foreground', ICON_HOVER)}>
+                                <button type="button" title="More" className={cn('inline-flex size-8 items-center justify-center rounded-[7px] text-muted-foreground', ICON_HOVER)}>
                                     <MoreHorizontal className="size-3.5" />
                                 </button>
                             </DropdownMenuTrigger>
@@ -641,7 +700,7 @@ function MessageRowImpl({
                     <ContextMenuItem
                         onSelect={() => (thread && thread.replyCount > 0 && onOpenThread ? onOpenThread(thread.rootMessageId) : onReplyInThread(message))}
                     >
-                        <MessageSquare className="size-3.5 mr-2" /> {thread && thread.replyCount > 0 ? 'Open thread' : 'Reply in thread'}
+                        <MessageSquare className="size-3.5 mr-2" /> {inline ? 'Reply' : thread && thread.replyCount > 0 ? 'Open thread' : 'Reply in thread'}
                     </ContextMenuItem>
                 )}
                 {canQuote && (
@@ -731,6 +790,11 @@ export const MessageRow = memo(MessageRowImpl, (prev: MessageRowProps, next: Mes
     prev.visible === next.visible &&
     prev.dense === next.dense &&
     prev.saved === next.saved &&
+    prev.threadOpen === next.threadOpen &&
+    prev.inline === next.inline &&
+    prev.inThread?.label === next.inThread?.label &&
+    prev.inThread?.author === next.inThread?.author &&
+    prev.arriving === next.arriving &&
     prev.memberNames === next.memberNames &&
     prev.spaceNames === next.spaceNames &&
     threadRowEqual(prev.thread, next.thread),
@@ -739,8 +803,9 @@ export const MessageRow = memo(MessageRowImpl, (prev: MessageRowProps, next: Mes
 export function DayDivider({ label }: { label: string }) {
     return (
         <div className="spaces-day-divider flex items-center gap-3">
+            {/* Spaces redesign (2026-10-21): hairlines and a quiet label — the pill read as a control. */}
             <span className="h-px flex-1 bg-border" />
-            <span className="rounded-full border border-border bg-background px-4 py-1 text-[13px] font-semibold">{label}</span>
+            <span className="text-[11.5px] font-semibold text-muted-foreground">{label}</span>
             <span className="h-px flex-1 bg-border" />
         </div>
     )

@@ -2,6 +2,7 @@ import type { ActivityKind } from '@rowboat/spaces-protocol';
 import type {
   AgentCredential,
   AgentHook,
+  AgentHosting,
   AgentKey,
   Attribution,
   ConnectorCapabilities,
@@ -12,7 +13,10 @@ import type {
   InvocationState,
   BlobInfo,
   ChangeSet,
+  InvitePolicy,
   Member,
+  MemberRole,
+  OrgSettings,
   Membership,
   MentionStamps,
   Message,
@@ -98,7 +102,8 @@ export interface StoredOrgImage {
 
 export interface StoredInvite {
   token: string;
-  spaceId: string;
+  /** The spaces it lists, in the order given; empty = the org and its default spaces only (2026-10-19). */
+  spaceIds: string[];
   createdBy: string;
   createdAt: string;
   expiresAt?: string;
@@ -130,6 +135,20 @@ export interface StoredAgentKey extends AgentKey {
 export interface StoredAgentCredential extends AgentCredential {
   agentId: string;
   sealed: string;
+}
+
+/**
+ * A managed agent's hosting as stored (spec §8 Maritime, 2026-10-26): what its
+ * owner sees, plus the row's own id, the member it is bound to once that
+ * exists, the end-user key Rowboat named the agent by on the platform, and
+ * what was asked for.
+ */
+export interface StoredAgentHosting extends AgentHosting {
+  id: string;
+  agentId?: string;
+  externalUserId: string;
+  kind: string;
+  displayName: string;
 }
 
 /** An alert hook as stored (spec §8 Alerts, 2026-10-03): what its owner sees, plus the hash of its secret. */
@@ -226,6 +245,8 @@ export interface Store {
   // members (org-level)
   getMember(id: string): Promise<Member | undefined>;
   putMember(member: Member): Promise<void>;
+  /** Switch an agent between channel and personal (2026-10-27): the one write of the flag after creation. */
+  setAgentPersonal(id: string, personal: boolean): Promise<void>;
   /** The whole org roster — operator-side reads only (the mentions backfill). */
   listAllMembers(): Promise<Member[]>;
   /** A space's roster in join order — one statement (2026-09-22). */
@@ -250,6 +271,27 @@ export interface Store {
    * refuses the next sign-in (policy.ts canSignIn). Idempotent.
    */
   deactivateMember(memberId: string, at: string): Promise<void>;
+  /**
+   * An admin removes a member from the org (spec §4 Roles, 2026-10-19): the
+   * row stays, stamped removed_at, and an admin's role drops to member so a
+   * removed admin never counts toward, or comes back as, an admin. Push
+   * tokens go; keys of the member (an agent) and of agents they own are
+   * revoked. The identity row stays: it is how an invite finds the same row
+   * again (reactivateMember). Idempotent.
+   */
+  removeMemberFromOrg(memberId: string, at: string): Promise<void>;
+  /** Clear removed_at: the same identity accepted an invite (2026-10-19). */
+  reactivateMember(memberId: string): Promise<void>;
+  /**
+   * Set the admin bit. Demoting the org's last active admin answers
+   * 'last_admin' and writes nothing, decided under a row lock so two admins
+   * demoting each other cannot both pass (spec §4 Roles: at least one admin).
+   */
+  setMemberRole(memberId: string, role: MemberRole): Promise<'ok' | 'last_admin'>;
+
+  // org settings (2026-10-19): one row per org once an admin sets one; no row = the defaults.
+  getOrgSettings(): Promise<OrgSettings>;
+  setInvitePolicy(policy: InvitePolicy, by: string, at: string): Promise<void>;
 
   // spaces — `kind` (migration 014) rides the row; a direct space also
   // stores its direct key, and putSpace MUST refuse a second direct space
@@ -261,6 +303,8 @@ export interface Store {
   listSpacesFor(memberId: string, opts?: { includeDirect?: boolean }): Promise<Space[]>;
   /** Every space on the org, DMs included — operator-side reads only (the mentions backfill). */
   listAllSpaces(): Promise<Space[]>;
+  /** The org's default spaces (spec §5 answer 3), oldest first — archived ones included; the caller skips them. */
+  listDefaultSpaces(): Promise<Space[]>;
   /** How many spaces of each kind the org holds — what makes it a group chat (policy.ts isGroupChat). */
   countSpacesByKind(): Promise<{ shared: number; direct: number }>;
   /** The DM whose participants encode to `directKey` (directKeyFor), if it exists. */
@@ -351,26 +395,28 @@ export interface Store {
    * (when given) — still returned oldest first.
    */
   listStream(spaceId: string, opts?: MessageWindow): Promise<Message[]>;
+  /** The inline view (2026-10-25): every message, roots and replies, by offset, same window semantics as listStream. */
+  listConversation(spaceId: string, opts?: MessageWindow): Promise<Message[]>;
   /** One flat thread's replies (threadRoot = rootMessageId), same window semantics as listStream. */
   listThread(spaceId: string, rootMessageId: string, opts?: MessageWindow): Promise<Message[]>;
   listMessagesBySpace(spaceId: string): Promise<Message[]>;
   appendMessage(message: Message): Promise<void>;
   /**
    * Recompute a root's reply denorm (replyCount = live replies, lastReplyAt =
-   * newest reply) from the truth. Called inside the space lock whenever a
+   * newest reply, replyAuthors = who replied) from the truth. Called inside the space lock whenever a
    * reply is appended or tombstoned — recompute beats deltas because deletes
    * and replays can't drift it.
    */
   refreshReplyStats(spaceId: string, rootMessageId: string): Promise<void>;
   /**
-   * Tombstone: blanks the row's body and sets deletedAt — and redacts the
+   * Tombstone: blanks the row's body and summary and sets deletedAt — and redacts the
    * stored `message` event the same way. That event rewrite is the one
    * mutation the log allows: a deleted body must be unrecoverable, replay
    * included. The message_deleted event itself is appended by the service.
    */
   markMessageDeleted(spaceId: string, messageId: string, deletedAt: string): Promise<void>;
-  /** Body + the re-stamped addresses (mentions.ts), row and stored event alike; search text follows the body. */
-  markMessageEdited(spaceId: string, messageId: string, body: string, editedAt: string, stamps: MentionStamps): Promise<void>;
+  /** Body, summary (absent = none) + the re-stamped addresses (mentions.ts), row and stored event alike; search text follows them. */
+  markMessageEdited(spaceId: string, messageId: string, body: string, editedAt: string, stamps: MentionStamps, summary?: string): Promise<void>;
   /** Stamps only (the backfill): derived data, no content change, no event. */
   restampMessage(spaceId: string, messageId: string, stamps: MentionStamps): Promise<void>;
 
@@ -510,6 +556,15 @@ export interface Store {
   /** The agent key a connector hands its agent's workspaces: which key, and its sealed secret. */
   getConnectorKey(agentId: string): Promise<{ keyId: string; sealed: string } | undefined>;
   putConnectorKey(agentId: string, keyId: string, sealed: string, at: string): Promise<void>;
+
+  // --- managed agents (spec §8 Maritime, 2026-10-26) ---
+  getAgentHosting(agentId: string): Promise<StoredAgentHosting | undefined>;
+  getHosting(id: string): Promise<StoredAgentHosting | undefined>;
+  listAgentHostings(agentIds: string[]): Promise<StoredAgentHosting[]>;
+  /** Every hosting row in one of these states: what the worker drives. */
+  listHostingsByStatus(statuses: readonly string[]): Promise<StoredAgentHosting[]>;
+  /** Insert or replace a hosting row by its id. */
+  putHosting(hosting: StoredAgentHosting): Promise<void>;
 
   // --- invocations (spec §8 Invoking agent members, 2026-09-30) ---
   /** A new invocation, with its triggering message's offset: the queue's order. */

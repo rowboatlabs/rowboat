@@ -156,3 +156,19 @@ export function mergeMessages<M extends spaces.Message>(existing: readonly M[], 
     for (const m of incoming) byId.set(m.id, m)
     return [...byId.values()].sort((a, b) => a.offset - b.offset)
 }
+
+// ---------------------------------------------------------------------------
+// Long messages (2026-10-25, the threads discussion in Main): a body past
+// these shows collapsed — its summary when the author wrote one, else its
+// first lines — with "Show more". Counted on the source, so the call is the
+// same in every pane and needs no layout.
+// ---------------------------------------------------------------------------
+
+export const LONG_MESSAGE_LINES = 8
+export const LONG_MESSAGE_CHARS = 700
+
+export function isLongBody(body: string): boolean {
+    const text = body.replace(/!\[[^\]]*\]\([^)]*\)/g, '').trim()
+    return text.length > LONG_MESSAGE_CHARS || text.split('\n').filter((line) => line.trim().length > 0).length > LONG_MESSAGE_LINES
+}
+

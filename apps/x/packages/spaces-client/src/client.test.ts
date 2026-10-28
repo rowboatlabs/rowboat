@@ -45,6 +45,14 @@ afterAll(async () => {
 describe('SpacesClient', () => {
   let spaceId: string;
 
+  it('edits your own name and title', async () => {
+    const member = await gagan.updateProfile({ displayName: 'Gagan P', title: 'Engineer' });
+    expect(member).toMatchObject({ id: 'gagan', displayName: 'Gagan P', title: 'Engineer' });
+    expect((await gagan.me()).member).toEqual(member);
+    const cleared = await gagan.updateProfile({ displayName: 'Gagan', title: '' });
+    expect(cleared.title).toBeUndefined();
+  });
+
   it('health probe reports the org', async () => {
     const health = await ramnique.health();
     expect(health.ok).toBe(true);
@@ -56,7 +64,7 @@ describe('SpacesClient', () => {
     spaceId = space.id;
     expect((await ramnique.listSpaces()).map((s) => s.id)).toContain(spaceId);
 
-    const invite = await ramnique.createInvite(spaceId);
+    const invite = await ramnique.createInvite({ spaceIds: [spaceId] });
     const resolved = await gagan.resolveInvite(invite.token);
     expect(resolved.state).toBe('ok');
     await gagan.acceptInvite(invite.token);
@@ -305,7 +313,7 @@ describe('SpacesClient', () => {
     expect(again).toMatchObject({ created: false, space: { id: opened.space.id } });
     expect((await ramnique.listSpaces()).some((s) => s.id === opened.space.id)).toBe(false);
     expect((await gagan.listSpaces({ includeDirect: true })).some((s) => s.id === opened.space.id)).toBe(true);
-    await expect(ramnique.createInvite(opened.space.id)).rejects.toMatchObject({ code: 'invalid_request' });
+    await expect(ramnique.createInvite({ spaceIds: [opened.space.id] })).rejects.toMatchObject({ code: 'invalid_request' });
     await expect(gagan.leaveSpace(opened.space.id)).rejects.toMatchObject({ code: 'invalid_request' });
     // Your own id = your self-DM, one participant.
     const notes = await ramnique.openDirect('ramnique');
@@ -453,7 +461,7 @@ describe('SpacesLive', () => {
 
   it('whiteboard frames round-trip: opaque payload out, sender-stamped frame in', async () => {
     const space = await ramnique.createSpace('Board Space');
-    const invite = await ramnique.createInvite(space.id);
+    const invite = await ramnique.createInvite({ spaceIds: [space.id] });
     await gagan.acceptInvite(invite.token);
 
     const watcher = new SpacesLive({ baseUrl: harbor.url, token: 'dev-ramnique' });
@@ -531,7 +539,7 @@ async function waitFor(pred: () => boolean, label: string, timeoutMs = 3000): Pr
 describe('read state', () => {
   it('marks are org-owned offsets: posting reads, marking clears, the snapshot agrees', async () => {
     const space = await ramnique.createSpace('Read marks');
-    const invite = await ramnique.createInvite(space.id);
+    const invite = await ramnique.createInvite({ spaceIds: [space.id] });
     await gagan.acceptInvite(invite.token);
 
     const { message } = await ramnique.postMessage(space.id, { body: 'hello', actingMode: 'direct' });

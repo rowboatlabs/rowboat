@@ -92,7 +92,7 @@ async function loadMembers(orgId: string, spaceId: string, force = false): Promi
         const res = await window.ipc.invoke('spaces:listMembers', { orgId, spaceId })
         membersCacheOnly.delete(k)
         lastLoadedAt.set(k, Date.now())
-        setMembers(k, res.members)
+        if (!membersDirty.has(k)) setMembers(k, res.members)
     } catch {
         // org unreachable — cached names (or ids) stand until a retry.
     } finally {
@@ -147,13 +147,26 @@ async function loadOrgRoster(orgId: string, spaceIds: readonly string[]): Promis
         const res = await window.ipc.invoke('spaces:listOrgMembers', { orgId })
         membersCacheOnly.delete(k)
         lastLoadedAt.set(k, Date.now())
-        setMembers(k, res.members)
+        if (!membersDirty.has(k)) setMembers(k, res.members)
     } catch {
         // Org unreachable, or an older org without the route: the per-space
         // rosters the app has already fetched stand in for the directory.
         if (!memberState.has(k) || membersCacheOnly.has(k)) setMembers(k, unionOfRosters(orgId, spaceIds))
     } finally {
         membersLoading.delete(k)
+        if (membersDirty.delete(k)) void loadOrgRoster(orgId, spaceIds)
+    }
+}
+
+// Update every loaded roster without adding someone to a space they never joined
+// (2026-10-22, profile_updated). In-flight reads are retried to avoid stale rollback.
+export function applyProfileUpdate(orgId: string, member: spaces.Member): void {
+    for (const k of membersLoading) {
+        if (k === orgKey(orgId) || k.startsWith(`${orgId}/`)) membersDirty.add(k)
+    }
+    for (const [k, members] of memberState) {
+        if (k !== orgKey(orgId) && !k.startsWith(`${orgId}/`)) continue
+        if (members.some(m => m.id === member.id)) setMembers(k, members.map(m => m.id === member.id ? member : m))
     }
 }
 
@@ -205,6 +218,28 @@ export function useOrgRoster(orgId: string, spaceIds: readonly string[]): spaces
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [orgId, idsKey])
     return state.get(orgKey(orgId)) ?? EMPTY_MEMBERS
+}
+
+/**
+ * The rosters of several spaces of one org at once (the Agents page asks which
+ * of your spaces each agent is in, 2026-10-21). Same store and cache-then-
+ * refresh contract as useSpaceMembers; spaces not loaded yet map to [].
+ */
+export function useSpaceRosters(orgId: string, spaceIds: readonly string[]): ReadonlyMap<string, spaces.Member[]> {
+    const idsKey = spaceIds.join('|')
+    for (const id of spaceIds) hydrateMembers(key(orgId, id))
+    const state = useSyncExternalStore(subscribeMembers, () => memberState)
+    useEffect(() => {
+        for (const id of spaceIds) prefetchMembers(orgId, id)
+        // The joined key IS the dependency — the array identity changes every render.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [orgId, idsKey])
+    return useMemo(() => {
+        const out = new Map<string, spaces.Member[]>()
+        for (const id of spaceIds) out.set(id, state.get(key(orgId, id)) ?? EMPTY_MEMBERS)
+        return out
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [state, orgId, idsKey])
 }
 
 /**

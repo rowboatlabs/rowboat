@@ -29,7 +29,7 @@ beforeAll(async () => {
   await store.putMember({ id: 'harshv01', displayName: 'Harsh Verma', role: 'member', kind: 'human' });
   const space = await service.createSpace(ram, 'Search Space');
   spaceId = space.id;
-  const invite = await service.createInvite(ram, spaceId);
+  const invite = await service.createInvite(ram, { spaceIds: [spaceId] });
   await service.acceptInvite(harsh, invite.token);
 });
 

@@ -136,16 +136,18 @@ function updateMenuItem(): MenuItemConstructorOptions {
   }
 }
 
-/** Ordered as the dock is. Number keys cover its nine primary destinations. */
+/** Ordered as the sidebar is, top to bottom; ⌘1–⌘9 count down it
+ *  (renumbered 2026-10-21 to follow the redesigned sidebar). */
 const GO_ITEMS: ReadonlyArray<{ label: string; type: string; accelerator?: string }> = [
-  { label: "Todo", type: "home", accelerator: "CmdOrCtrl+1" },
-  { label: "Spaces", type: "spaces", accelerator: "CmdOrCtrl+2" },
-  { label: "Email", type: "email", accelerator: "CmdOrCtrl+3" },
-  { label: "Meetings", type: "meetings", accelerator: "CmdOrCtrl+5" },
-  { label: "Brain", type: "knowledge-view", accelerator: "CmdOrCtrl+6" },
-  { label: "Apps", type: "apps", accelerator: "CmdOrCtrl+7" },
-  { label: "Background Agents", type: "bg-tasks", accelerator: "CmdOrCtrl+8" },
-  { label: "Projects", type: "workspace", accelerator: "CmdOrCtrl+9" },
+  { label: "Assistant", type: "chat", accelerator: "CmdOrCtrl+1" },
+  { label: "Email", type: "email", accelerator: "CmdOrCtrl+2" },
+  { label: "Meetings", type: "meetings", accelerator: "CmdOrCtrl+3" },
+  { label: "Todo", type: "home", accelerator: "CmdOrCtrl+4" },
+  { label: "Brain", type: "knowledge-view", accelerator: "CmdOrCtrl+5" },
+  { label: "Projects", type: "workspace", accelerator: "CmdOrCtrl+6" },
+  { label: "Background Agents", type: "bg-tasks", accelerator: "CmdOrCtrl+7" },
+  { label: "Apps", type: "apps", accelerator: "CmdOrCtrl+8" },
+  { label: "Spaces", type: "spaces", accelerator: "CmdOrCtrl+9" },
   { label: "Chat History", type: "chat-history" },
   { label: "Live Notes", type: "live-notes" },
   { label: "Graph", type: "graph" },
@@ -265,7 +267,10 @@ function rebuildMenu(): void {
       { type: "separator" },
       {
         label: "Toggle Sidebar",
-        accelerator: "CmdOrCtrl+\\",
+        // ⌘B since 2026-10-21 (⌘\ still works). Display-only: the renderer
+        // binds it, so ⌘B keeps meaning bold inside text editors.
+        accelerator: "CmdOrCtrl+B",
+        registerAccelerator: false,
         click: () => sendToRenderer("menu:toggleSidebar", null),
       },
       {

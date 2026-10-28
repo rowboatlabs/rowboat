@@ -26,7 +26,7 @@ import { fetchLinkPreview, peekLinkPreview, previewUrls } from '@/lib/spaces/lin
 const TAIL_ROWS = 8;
 const TAIL_WAIT_MS = 700;
 import { SpacesClient } from '@/lib/spaces/client';
-import { memberLabel, useProfiles } from '@/lib/spaces/profiles';
+import { isDeparted, isOthersPersonalAgent, memberLabel, useProfiles } from '@/lib/spaces/profiles';
 import { blockMember, reportMessage, useBlockedIds } from '@/lib/spaces/moderation';
 import { SpacesLive } from '@x/spaces-client';
 import { useColors } from '@/theme/colors';
@@ -285,7 +285,7 @@ export default function SpaceChatScreen() {
     if (sending) return false;
     setSending(true);
     try {
-      const message = await postMessageReliably(client, space, { body }, me);
+      const { message } = await postMessageReliably(client, space, { body }, me);
       foldMessage(message);
       // Your own message: always land on it, wherever you were scrolled.
       // (2026-10-05) The old animated scroll started BEFORE the new row was
@@ -586,7 +586,7 @@ export default function SpaceChatScreen() {
         <SpaceComposer
           ref={composerRef}
           placeholder={`Message #${title ?? ''}`}
-          members={[...members.values()].filter((m) => !m.deactivatedAt)}
+          members={[...members.values()].filter((m) => !isDeparted(m) && !isOthersPersonalAgent(m, me))}
           me={me}
           sending={sending}
           onSend={send}

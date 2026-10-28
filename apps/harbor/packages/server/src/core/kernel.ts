@@ -1,4 +1,4 @@
-import type { ActingMode, Attribution, Membership, ServerFrame, Space, SpaceEvent } from '@rowboat/spaces-protocol';
+import type { ActingMode, Attribution, Member, Membership, ServerFrame, Space, SpaceEvent } from '@rowboat/spaces-protocol';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { monotonicFactory } from 'ulid';
 import { HarborError } from '../errors.js';
@@ -63,6 +63,14 @@ export class Kernel {
     return new Date().toISOString();
   }
 
+  // Profile changes are org facts, sent only to active org members after persistence (2026-10-22).
+  async publishProfile(member: Member): Promise<void> {
+    const frame: ServerFrame = { kind: 'profile_updated', member, at: this.now() };
+    for (const recipient of await this.store.listAllMembers()) {
+      if (!recipient.removedAt && !recipient.deactivatedAt) this.hub.publishToMember(recipient.id, frame);
+    }
+  }
+
   guardWrite(): void {
     enforce(canWrite(this));
   }
@@ -73,14 +81,24 @@ export class Kernel {
     return space;
   }
 
+  /**
+   * Whether the caller is in the org now: a member row that was neither
+   * deactivated nor removed (2026-10-19). A removed member's open socket
+   * still names them, so browsing open spaces asks this, not the row alone.
+   */
+  async isActiveOrgMember(ctx: ActorCtx): Promise<boolean> {
+    const member = await this.store.getMember(ctx.memberId);
+    return !!member && member.deactivatedAt === undefined && member.removedAt === undefined;
+  }
+
   async requireOrgMember(ctx: ActorCtx): Promise<void> {
-    if (!(await this.store.getMember(ctx.memberId))) throw new HarborError('not_a_member', 'you are not a member of this org');
+    if (!(await this.isActiveOrgMember(ctx))) throw new HarborError('not_a_member', 'you are not a member of this org');
   }
 
   async requireReadableSpace(ctx: ActorCtx, spaceId: string): Promise<Space> {
     const space = await this.requireSpace(spaceId);
     const membership = await this.store.getMembership(spaceId, ctx.memberId);
-    const orgMember = membership ? true : !!(await this.store.getMember(ctx.memberId));
+    const orgMember = membership ? true : await this.isActiveOrgMember(ctx);
     enforce(canReadSpace(space, membership, orgMember));
     return space;
   }

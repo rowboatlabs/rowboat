@@ -42,7 +42,7 @@ export interface TagInput {
   here: boolean;
   /** Agents with a turn queued or running in this thread: a tag would only queue another. */
   busyAgents: ReadonlySet<string>;
-  /** False past the hop limit: a tag could not start an agent's turn. */
+  /** False past the hop limit, where a tag could not start an agent's turn, and for a reply sent to people only (2026-10-27). */
   agentsAllowed: boolean;
 }
 
@@ -60,14 +60,16 @@ function names(text: string, name: string): boolean {
  * The members Jev is asked about, strongest first: those the message names,
  * then those who wrote in the thread, then the rest. Never the author, Jev,
  * anyone already tagged, an agent already at work in the thread, an agent
- * past the hop limit, or a person when @here already reached everyone.
+ * past the hop limit, a personal agent (only its owner invokes it, so Ro's
+ * tag would be refused; 2026-10-26), or a person when @here already reached
+ * everyone.
  */
 export function selectCandidates(input: TagInput): Member[] {
   const tagged = new Set(input.mentioned);
   const wrote = new Set(input.thread.map((m) => m.authorId));
   const eligible = input.members.filter((m) => {
     if (m.id === input.message.authorId || m.id === input.jevId || tagged.has(m.id)) return false;
-    if (m.kind === 'agent') return input.agentsAllowed && !input.busyAgents.has(m.id);
+    if (m.kind === 'agent') return m.personal !== true && input.agentsAllowed && !input.busyAgents.has(m.id);
     return !input.here;
   });
   const rank = (m: Member) => (names(input.message.text, m.displayName) ? 0 : wrote.has(m.id) ? 1 : 2);

@@ -156,6 +156,8 @@ async function dispatch(
       // The same row /v1/me serves.
       return { member: await service.me(ctx), org: { name: service.org.name, address: service.org.address } };
     }
+    case 'update_profile':
+      return { member: await service.updateProfile(ctx, args as { displayName?: string; title?: string }) };
     case 'list_members': {
       const a = args as { spaceId?: string };
       const members = a.spaceId !== undefined
@@ -191,6 +193,28 @@ async function dispatch(
       return { deleted: true };
     case 'unarchive_space':
       return { space: await service.unarchiveSpace(ctx, (args as { spaceId: string }).spaceId, attribution) };
+    case 'set_default_space': {
+      const a = args as { spaceId: string; isDefault: boolean };
+      return { space: await service.setDefaultSpace(ctx, a.spaceId, { isDefault: a.isDefault, ...attribution }) };
+    }
+    case 'set_space_visibility': {
+      const a = args as { spaceId: string; visibility: 'private' | 'open' };
+      return { space: await service.setSpaceVisibility(ctx, a.spaceId, { visibility: a.visibility, ...attribution }) };
+    }
+    case 'remove_member': {
+      const a = args as { spaceId: string; memberId: string };
+      return service.removeMember(ctx, a.spaceId, a.memberId, attribution);
+    }
+    case 'remove_org_member':
+      return { member: await service.removeOrgMember(ctx, (args as { memberId: string }).memberId, attribution) };
+    case 'set_member_role': {
+      const a = args as { memberId: string; role: 'admin' | 'member' };
+      return { member: await service.setMemberRole(ctx, a.memberId, { role: a.role, ...attribution }) };
+    }
+    case 'get_org_settings':
+      return { settings: await service.getOrgSettings(ctx) };
+    case 'set_invite_policy':
+      return { settings: await service.updateOrgSettings(ctx, { invitePolicy: (args as { invitePolicy: 'members' | 'admins' }).invitePolicy }) };
     case 'add_members': {
       const a = args as { spaceId: string; memberIds: string[] };
       return { memberships: await service.addMembers(ctx, a.spaceId, { memberIds: a.memberIds, ...attribution }) };
@@ -201,8 +225,8 @@ async function dispatch(
       return { left: true };
     }
     case 'create_invite': {
-      const a = args as { spaceId: string; expiresInHours?: number };
-      return service.createInvite(ctx, a.spaceId, a.expiresInHours);
+      const a = args as { spaceIds?: string[]; spaceId?: string; expiresInHours?: number };
+      return service.createInvite(ctx, a);
     }
     case 'list_spaces': {
       const a = args as { includeDirect?: boolean };
@@ -223,8 +247,9 @@ async function dispatch(
       };
     }
     case 'read_stream': {
-      const a = args as { spaceId: string; beforeOffset?: number; afterOffset?: number; aroundOffset?: number; limit?: number };
+      const a = args as { spaceId: string; beforeOffset?: number; afterOffset?: number; aroundOffset?: number; limit?: number; includeReplies?: boolean };
       const { messages, topics, hasMore, hasMoreAfter } = await service.listStream(ctx, a.spaceId, {
+        ...(a.includeReplies ? { replies: true } : {}),
         ...(a.beforeOffset !== undefined ? { beforeOffset: a.beforeOffset } : {}),
         ...(a.afterOffset !== undefined ? { afterOffset: a.afterOffset } : {}),
         ...(a.aroundOffset !== undefined ? { aroundOffset: a.aroundOffset } : {}),
@@ -341,12 +366,14 @@ async function dispatch(
         spaceId: string;
         threadRoot?: string;
         body: string;
+        summary?: string;
         poll?: z.infer<typeof NewPoll>;
         agentOptions?: Record<string, Record<string, string | boolean>>;
       };
       const { message, invocations } = await service.postMessage(ctx, a.spaceId, {
         ...(a.threadRoot ? { threadRoot: a.threadRoot } : {}),
         body: a.body,
+        ...(a.summary ? { summary: a.summary } : {}),
         ...(a.poll !== undefined ? { poll: a.poll } : {}),
         ...(a.agentOptions ? { agentOptions: a.agentOptions } : {}),
         actingMode: actor.actingMode,
@@ -368,8 +395,14 @@ async function dispatch(
     case 'stop_invocation':
       return { invocation: await service.cancelInvocation(ctx, (args as { invocationId: string }).invocationId) };
     case 'edit_message': {
-      const a = args as { spaceId: string; messageId: string; body: string };
-      return { message: await service.editMessage(ctx, a.spaceId, a.messageId, { body: a.body, ...attribution }) };
+      const a = args as { spaceId: string; messageId: string; body: string; summary?: string | null };
+      return {
+        message: await service.editMessage(ctx, a.spaceId, a.messageId, {
+          body: a.body,
+          ...(a.summary !== undefined ? { summary: a.summary } : {}),
+          ...attribution,
+        }),
+      };
     }
     case 'delete_message': {
       const a = args as { spaceId: string; messageId: string };
@@ -493,5 +526,9 @@ async function spaceNamesFor(service: HarborService, ctx: ActorCtx): Promise<Map
 }
 
 function relabel(message: Message, names: ReadonlyMap<string, string>, spaceNames?: ReadonlyMap<string, string>): Message {
-  return { ...message, body: relabelMentions(message.body, names, spaceNames) };
+  return {
+    ...message,
+    body: relabelMentions(message.body, names, spaceNames),
+    ...(message.summary ? { summary: relabelMentions(message.summary, names, spaceNames) } : {}),
+  };
 }
