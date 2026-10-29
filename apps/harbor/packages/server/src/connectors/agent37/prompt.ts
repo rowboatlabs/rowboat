@@ -1,4 +1,4 @@
-import { mentionToken, relabelMentions, type Invocation, type Message } from '@rowboat/spaces-protocol';
+import { instructionsSection, mentionToken, relabelMentions, type Invocation, type Message } from '@rowboat/spaces-protocol';
 import { downloadLine, leadingMentionOf, namingAttachments, requestMarker, standingParagraph, type Attachment } from '../thread-prompt.js';
 
 // The input the Agent37 connector sends into a thread's session (spec §8
@@ -32,6 +32,8 @@ export function buildPrompt(input: {
   const request = readable(invocation.trigger.body.replace(leadingMentionOf(input.agentId), ''));
 
   const parts = [request || '(no text)'];
+  // The owner's instructions (2026-10-29, agent personalities), where the shared buildPrompt puts them: Agent37 has no system prompt.
+  if (invocation.instructions) parts.push(instructionsSection(invocation.instructions));
   if (input.context.length > 0) {
     parts.push(['Earlier in this thread:', ...input.context.map((m) => `${token(m.author.memberId)}: ${readable(m.body)}`)].join('\n'));
   }
