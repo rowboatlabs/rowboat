@@ -70,6 +70,14 @@ export const Invocation = z.object({
   depth: z.number().int().nonnegative(),
   /** The values the invoker picked for the connector's declared options. */
   options: InvocationOptionValues.optional(),
+  /**
+   * The agent's instructions from its owner (Member.instructions, 2026-10-29),
+   * as they are when the invocation reaches its connector: only on what the
+   * connector receives (its live frame and its listing), never on what a
+   * space sees. A connector gives them to its agent as best it can: a system
+   * prompt where the agent takes one, else ahead of the request.
+   */
+  instructions: z.string().optional(),
   /** Set when this invocation is a person's answer to one that is waiting in the same conversation. */
   answers: InvocationId.optional(),
   state: InvocationState,

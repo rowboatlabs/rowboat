@@ -122,8 +122,19 @@ export function environmentTag(body: string): string | undefined {
   return [...body.matchAll(ENV_TAG_RE)][0]?.[1]?.trim() || undefined;
 }
 
+/** The owner's instructions, as a section the agent reads before the request (2026-10-29, agent personalities). */
+export function instructionsSection(instructions: string): string {
+  return ['Your instructions from your owner. Follow them in everything you do here:', instructions.trim()].join('\n');
+}
+
 export function buildPrompt(input: {
   invocation: Invocation;
+  /**
+   * Leave the owner's instructions out: the connector gave them to the agent
+   * as its system prompt (a local Claude Code, 2026-10-29). Otherwise they
+   * lead the message.
+   */
+  instructionsInSystemPrompt?: boolean;
   agentId: string;
   /** Earlier messages the workspace has not seen, oldest first (never the trigger itself). */
   context: Message[];
@@ -141,6 +152,9 @@ export function buildPrompt(input: {
   // The environment tag is for the connector, not the coding agent; then a command it frees can lead.
   const request = readable(invocation.trigger.body.replace(ENV_TAG_RE, ' ').trim().replace(leadingMentionOf(input.agentId), ''));
   const parts = [request || '(no text)'];
+  // The owner's instructions, when the agent has no system prompt of ours to carry them (2026-10-29): right
+  // after the request, which stays first so a leading command still works.
+  if (invocation.instructions && !input.instructionsInSystemPrompt) parts.push(instructionsSection(invocation.instructions));
   if (input.context.length > 0) {
     parts.push(
       ['Earlier in this thread:', ...input.context.map((m) => `${token(m.author.memberId)}: ${readable(m.body)}`)].join('\n'),

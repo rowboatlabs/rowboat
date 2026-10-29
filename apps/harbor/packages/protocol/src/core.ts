@@ -34,6 +34,9 @@ export type MemberRole = z.infer<typeof MemberRole>;
 export const MemberKind = z.enum(['human', 'agent']);
 export type MemberKind = z.infer<typeof MemberKind>;
 
+/** How long an agent's instructions may be (2026-10-29): room for a page of guidance, not a manual. */
+export const AGENT_INSTRUCTIONS_MAX = 4000;
+
 export const Member = z.object({
   id: MemberId,
   /** Display-only, org-scoped, not unique. Attribution keys on `id`, never on names. */
@@ -72,6 +75,14 @@ export const Member = z.object({
    */
   personal: z.boolean().optional(),
   /**
+   * An agent's instructions from its owner (2026-10-29, agent personalities):
+   * how it should behave, in its owner's words, which its connector gives the
+   * agent with every invocation (Invocation.instructions). Optional, set only
+   * by the owner, read by every org member like the rest of the profile.
+   * Absent for people and for agents without any.
+   */
+  instructions: z.string().min(1).max(AGENT_INSTRUCTIONS_MAX).optional(),
+  /**
    * When the person deleted their account (2026-10-08, App Store 5.1.1(v)).
    * The member stays, name and all, so their messages keep their author;
    * clients mark them deactivated and leave them out of pickers. Harbor
@@ -107,6 +118,17 @@ export type OrgSettings = z.infer<typeof OrgSettings>;
  * left out is left alone. Both are trimmed; a name must keep a character, and
  * an empty title clears it. The avatar has its own byte route.
  */
+/**
+ * An agent's profile, set by its owner (2026-10-29): its description (the
+ * profile's title, shown wherever it is listed) and its instructions. A field
+ * left out is left alone; an empty one clears it.
+ */
+export const UpdateAgentProfile = z.object({
+  title: z.string().max(128).optional(),
+  instructions: z.string().max(AGENT_INSTRUCTIONS_MAX).optional(),
+});
+export type UpdateAgentProfile = z.infer<typeof UpdateAgentProfile>;
+
 export const UpdateProfile = z.object({
   displayName: z.string().max(128).optional(),
   title: z.string().max(128).optional(),

@@ -12,7 +12,7 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { ActingMode, AgentCredential, AgentHook, AgentKey, AgentKeySecret, AgentListing, Attribution, InvitePolicy, Member, MemberRole, Membership, Message, OrgSettings, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic, UpdateProfile,
+import { ActingMode, AgentCredential, AgentHook, AgentKey, AgentKeySecret, AgentListing, Attribution, InvitePolicy, Member, MemberRole, Membership, Message, OrgSettings, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic, UpdateAgentProfile, UpdateProfile,
   AgentHosting,
   HostingEnvVar,
   HostingExecution,
@@ -742,6 +742,18 @@ export const routes = {
     path: '/v1/agents/:agentId/name',
     params: z.object({ agentId: MemberId }),
     request: z.object({ displayName: z.string().max(128) }),
+    response: z.object({ agent: Member }),
+  },
+  /**
+   * Set an agent's description and instructions (spec §4 Agent members,
+   * 2026-10-29): its owner only, like its name. A field left out is left
+   * alone; an empty one clears it. Render face only, like renameAgent.
+   */
+  setAgentProfile: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/profile',
+    params: z.object({ agentId: MemberId }),
+    request: UpdateAgentProfile,
     response: z.object({ agent: Member }),
   },
   /**

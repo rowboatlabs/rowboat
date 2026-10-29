@@ -11,6 +11,7 @@ import { AgentTabs, ConfirmButton, DangerRow, DangerZone, Empty, FormCard, Row, 
 import { refreshAgentCapabilities } from '@/hooks/use-space-invocations'
 import { refreshOrgRoster, useOrgRoster } from '@/hooks/use-space-members'
 import { LocalAgentSection } from '@/components/spaces/local-agent'
+import { PersonalitySection } from '@/components/spaces/agent-personality'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { BUILT_IN_CONNECTION, LLM_PROVIDER_INFO, LLM_PROVIDERS_FOR_KIND, LOCAL_CONNECTION, PLATFORMS, setupFor } from '@/lib/agent-kinds'
 import { toast } from '@/lib/toast'
@@ -137,6 +138,8 @@ export function AgentPage({ org, listing, isAdmin, onChanged }: {
             content: (
                 <>
                     {hosting && <HostingOverview orgId={org.id} agent={agent} hosting={hosting} canManage={canManage} state={hostingState} onChanged={onChanged} />}
+                    {/* Keyed on the saved values: a save elsewhere resets the form to them. */}
+                    {agent.ownerId && <PersonalitySection key={`${agent.title ?? ''}|${agent.instructions ?? ''}`} orgId={org.id} agent={agent} canEdit={mine} onSaved={onChanged} />}
                     {isLocal && <LocalAgentSection orgId={org.id} agent={agent} mine={mine} ownerName={ownerName} />}
                     {agent.ownerId && !isLocal && <AccessSection orgId={org.id} agent={agent} canSwitch={mine} onChanged={onChanged} />}
                     {isLocal && (

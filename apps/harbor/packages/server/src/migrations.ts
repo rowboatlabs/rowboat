@@ -1174,6 +1174,16 @@ export const MIGRATIONS: Migration[] = [
     id: '051-message-people-only',
     statements: [`alter table messages add column if not exists people_only boolean not null default false`],
   },
+  {
+    // Agent personalities (spec §4 Agent members, 2026-10-29): an agent's
+    // instructions from its owner, which its connector gives it with every
+    // invocation. Agents only; none until an owner writes some.
+    id: '052-agent-instructions',
+    statements: [
+      `alter table members add column if not exists instructions text`,
+      `alter table members add constraint members_instructions_check check (kind = 'agent' or instructions is null)`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

@@ -26,7 +26,7 @@ import { enforce, isAuthor } from '../policy.js';
 import { parseSearchQuery } from '../search.js';
 import type { MessageWindow, StoredPollVote, StoredReaction } from '../store.js';
 import type { Assets } from './assets.js';
-import type { InvocationOutbox, Invocations } from './invocations.js';
+import { forPeople, type InvocationOutbox, type Invocations } from './invocations.js';
 import { Kernel, type ActorCtx } from './kernel.js';
 
 // The conversation (the annotation model, spec §7): one stream of root
@@ -367,7 +367,7 @@ export class Feed {
       if (depth > 0) await this.k.store.putMessageHops(spaceId, message.id, depth);
       const invocations = await this.invocations.onMessage(ctx, space, message, input.agentOptions, depth, outbox);
       if (finishing && this.invocations) await this.invocations.finishWithin(finishing, outbox);
-      return { message, invocations };
+      return { message, invocations: invocations.map(forPeople) };
     };
     const result = await this.k.lockedAs(ctx, spaceId, async () => {
       if (opts.finishes) {

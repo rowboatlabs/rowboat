@@ -6,6 +6,7 @@ import {
   LOCAL_CONNECTION,
   attachmentLinks,
   buildPrompt,
+  instructionsSection,
   type Approval,
   type ApprovalChoice,
   type Invocation,
@@ -308,7 +309,10 @@ class LocalAgentRunner {
     heartbeat.unref?.();
 
     try {
-      const prompt = await this.prompt(invocation, signal);
+      // The owner's instructions (2026-10-29): Claude Code takes them as its system prompt; Codex takes
+      // none from us, so they lead its message instead.
+      const asSystemPrompt = record.kind === 'claude-code' && Boolean(invocation.instructions);
+      const prompt = await this.prompt(invocation, signal, asSystemPrompt);
       activity = `Starting ${label}`;
       await report(true);
 
@@ -331,6 +335,7 @@ class LocalAgentRunner {
         },
         signal,
         mcpServers: [this.spacesTools()],
+        ...(asSystemPrompt ? { systemPromptAppend: instructionsSection(invocation.instructions!) } : {}),
       });
 
       if (signal.aborted || result.stopReason === 'cancelled') {
@@ -358,7 +363,7 @@ class LocalAgentRunner {
    * coding connectors build theirs. Files are saved on this computer and
    * listed by path: the agent is right here.
    */
-  private async prompt(invocation: Invocation, signal: AbortSignal): Promise<string> {
+  private async prompt(invocation: Invocation, signal: AbortSignal, instructionsInSystemPrompt: boolean): Promise<string> {
     const { spaceId, threadRootId } = invocation.conversation;
     const roster = await this.client.orgRoster().catch(() => ({ members: [] as Member[] }));
     const names = new Map(roster.members.map((m) => [m.id, m.displayName]));
@@ -378,6 +383,7 @@ class LocalAgentRunner {
 
     const text = buildPrompt({
       invocation,
+      instructionsInSystemPrompt,
       agentId: this.agentId,
       context,
       names,

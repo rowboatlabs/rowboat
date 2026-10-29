@@ -172,6 +172,14 @@ describe('the Agent37 connector', () => {
     reports.mockRestore();
   });
 
+  it('gives the agent its owner’s instructions right after the request, since Agent37 takes no system prompt', async () => {
+    expect((await org.as('dev-ramnique').put(`/v1/agents/${hermes.id}/profile`, { instructions: 'Answer in one sentence.' })).status).toBe(200);
+    const { invocations } = await org.post(`${mention(hermes)} is the ledger closed?`);
+    expect((await org.ended(invocations[0]!.id)).state).toBe('done');
+    expect(String(sent().at(-1)!.input)).toContain(`${mention(hermes)} is the ledger closed?\n\nYour instructions from your owner. Follow them in everything you do here:\nAnswer in one sentence.`);
+    await org.as('dev-ramnique').put(`/v1/agents/${hermes.id}/profile`, { instructions: '' });
+  });
+
   it('a follow-up goes into the same session, with only what it has not heard', async () => {
     const { message } = await org.post(`${mention(hermes)} start a plan`);
     await until(async () => (await org.replies(message.id, hermes)).length === 1, 'the first answer');

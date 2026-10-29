@@ -4179,6 +4179,18 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), agentId: z.string(), displayName: z.string() }),
     res: z.object({ agent: z.custom<SpacesTypes.Member>() }),
   },
+  // An agent's description and instructions (2026-10-29, harbor setAgentProfile): its owner only.
+  // A field left out is left alone; an empty one clears it.
+  'spaces:setAgentProfile': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), title: z.string().optional(), instructions: z.string().optional() }),
+    res: z.object({ agent: z.custom<SpacesTypes.Member>() }),
+  },
+  // Describe → Write (2026-10-29): a light Rowboat model writes an agent's instructions from a few words.
+  // Desktop only: it runs in core, on the app's own models.
+  'spaces:writeAgentInstructions': {
+    req: z.object({ name: z.string(), kind: z.string().optional(), brief: z.string() }),
+    res: z.object({ instructions: z.string() }),
+  },
   // Switching an agent between channel and personal (2026-10-27, harbor setAgentPersonal): its owner only.
   'spaces:setAgentPersonal': {
     req: z.object({ orgId: z.string(), agentId: z.string(), personal: z.boolean() }),

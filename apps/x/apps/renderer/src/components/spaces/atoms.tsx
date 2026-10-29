@@ -165,6 +165,13 @@ export function MemberProfilePopover({ id, children }: { id: string; children: R
                             )}
                         </div>
                         {member?.title && <p className="break-words text-sm text-muted-foreground">{member.title}</p>}
+                        {/* An agent's personality, readable by everyone (2026-10-29). */}
+                        {member?.kind === 'agent' && member.instructions && (
+                            <details className="group text-xs">
+                                <summary className="cursor-pointer select-none text-muted-foreground hover:text-foreground">Personality</summary>
+                                <p className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words leading-relaxed text-foreground">{member.instructions}</p>
+                            </details>
+                        )}
                         {member?.role === 'member' && <p className="text-xs text-muted-foreground">Member</p>}
                         <div className={cn('text-xs', isHere ? 'text-emerald-600' : 'text-muted-foreground')}>
                             {isHere ? 'Here now' : 'Away'}

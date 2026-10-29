@@ -121,6 +121,14 @@ const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
         case 'spaces:localAgents': return { agents: [], defaultCwd: '/Users/me/code/rowboat' }
         case 'codeMode:checkAgentStatus': return { claude: { installed: claudeInstalled, signedIn: true }, codex: { installed: false, signedIn: false } }
         case 'dialog:openDirectory': return { path: '/Users/me/code/site' }
+        // Agent personalities (2026-10-29).
+        case 'spaces:writeAgentInstructions': return { instructions: `You are ${args.name}, a terse reviewer.\n- Run the tests first.` }
+        case 'spaces:setAgentProfile': {
+            const a = listing.find((l) => l.agent.id === args.agentId)!.agent
+            const agent = { ...a, ...(args.title ? { title: args.title } : {}), ...(args.instructions ? { instructions: args.instructions } : {}) } as spaces.Member
+            listing = listing.map((l) => (l.agent.id === args.agentId ? { ...l, agent } : l))
+            return { agent }
+        }
         case 'codeMode:provisionEngine': return provisionFails ? { success: false, error: 'download failed' } : { success: true }
         case 'spaces:addLocalAgent': {
             const agent = { id: 'new', displayName: args.displayName, role: 'member', kind: 'agent', ownerId: 'me', agentKind: args.kind, agentConnection: 'local', personal: true } as spaces.Member
@@ -199,6 +207,35 @@ describe('AgentsDialog', () => {
         expect(await screen.findByRole('heading', { name: "Ramnique's Claude Code" })).toBeInTheDocument()
         expect(toast).toHaveBeenCalledWith("Ramnique's Claude Code added", 'success', 2000)
         expect(screen.queryByText(/only time its key is shown/)).toBeNull()
+    })
+
+    it('gives a new agent a description and a personality written from a few words, both optional (2026-10-29)', async () => {
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        await screen.findByText('Hermes')
+        await newAgent('local')
+        await screen.findByText('Claude Code is ready on this computer')
+        fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Reviews pull requests' } })
+        expect(screen.getByRole('button', { name: 'Write' })).toBeDisabled()
+        fireEvent.change(screen.getByLabelText('Describe its personality'), { target: { value: 'a terse reviewer' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Write' }))
+        await waitFor(() => expect(screen.getByLabelText('Personality')).toHaveValue("You are Ramnique's Claude Code, a terse reviewer.\n- Run the tests first."))
+        expect(invoke).toHaveBeenCalledWith('spaces:writeAgentInstructions', { name: "Ramnique's Claude Code", kind: 'Claude Code', brief: 'a terse reviewer' })
+        // Editable after it is written.
+        fireEvent.change(screen.getByLabelText('Personality'), { target: { value: 'You are terse.' } })
+        expect(screen.getByRole('button', { name: 'Rewrite' })).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Add agent' }))
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:setAgentProfile', { orgId: 'org-1', agentId: 'new', title: 'Reviews pull requests', instructions: 'You are terse.' }))
+        // Its page shows them, for its owner to change.
+        expect(await screen.findByDisplayValue('You are terse.')).toBeInTheDocument()
+    })
+
+    it('saves no profile when both are left empty', async () => {
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        await screen.findByText('Hermes')
+        await newAgent('connect')
+        fireEvent.click(screen.getByRole('button', { name: 'Add agent' }))
+        await screen.findByRole('heading', { name: 'Connect Hermes' })
+        expect(invoke).not.toHaveBeenCalledWith('spaces:setAgentProfile', expect.anything())
     })
 
     it('enables a local Codex during setup, then adds it', async () => {

@@ -63,6 +63,17 @@ export type InvocationOutbox = Array<
   { to: 'agent'; memberId: string; frame: ServerFrame } | { to: 'space'; spaceId: string; frame: ServerFrame }
 >;
 
+/**
+ * An invocation as people see it (2026-10-29): without its agent's
+ * instructions, which are for the agent's connector. Everyone can read them
+ * on the agent's profile; they need not ride every state change in a space.
+ */
+export function forPeople(invocation: Invocation): Invocation {
+  if (invocation.instructions === undefined) return invocation;
+  const { instructions: _forTheAgent, ...rest } = invocation;
+  return rest;
+}
+
 export class Invocations {
   constructor(private readonly k: Kernel) {}
 
@@ -113,6 +124,8 @@ export class Invocations {
         where: { spaceKind: space.kind, spaceName: space.name },
         depth,
         ...(options && Object.keys(options).length > 0 ? { options } : {}),
+        // What its connector gives the agent (2026-10-29); people never see it on an invocation (forPeople).
+        ...(agent.instructions && !refusal ? { instructions: agent.instructions } : {}),
         state: 'refused',
         ...(refusal ? { refusal } : {}),
         createdAt: now,
@@ -162,12 +175,29 @@ export class Invocations {
     }
   }
 
+  /**
+   * The agent's instructions as they are now, on invocations its connector
+   * lists (Invocation.instructions, 2026-10-29). A delivered one already
+   * carries them from when it became pending; the listing brings an edit made
+   * since.
+   */
+  private async withInstructions(invocations: Invocation[]): Promise<Invocation[]> {
+    const found = new Map<string, string | undefined>();
+    const out: Invocation[] = [];
+    for (const invocation of invocations) {
+      if (!found.has(invocation.agentId)) found.set(invocation.agentId, (await this.k.store.getMember(invocation.agentId))?.instructions);
+      const instructions = found.get(invocation.agentId);
+      out.push(instructions ? { ...invocation, instructions } : invocation);
+    }
+    return out;
+  }
+
   // --- the connector's operations: on an agent's own key, about its own invocations ---
 
   /** The agent's delivered, unfinished invocations: what a reconnecting connector picks up. */
   async listForAgent(ctx: ActorCtx): Promise<Invocation[]> {
     this.requireConnector(ctx);
-    return this.k.store.listInvocationsForAgent(ctx.memberId, LIVE);
+    return this.withInstructions(await this.k.store.listInvocationsForAgent(ctx.memberId, LIVE));
   }
 
   /** pending → working. Idempotent for one already acknowledged; a cancelled one must be dropped. */
@@ -279,7 +309,7 @@ export class Invocations {
 
   async listForSpace(ctx: ActorCtx, spaceId: string, threadRootId?: string): Promise<Invocation[]> {
     await this.k.requireReadableSpace(ctx, spaceId);
-    return this.k.store.listSpaceInvocations(spaceId, threadRootId ?? null, LIST_LIMIT);
+    return (await this.k.store.listSpaceInvocations(spaceId, threadRootId ?? null, LIST_LIMIT)).map(forPeople);
   }
 
   /**
@@ -290,6 +320,10 @@ export class Invocations {
    * A finished invocation is returned as it is.
    */
   async cancel(ctx: ActorCtx, id: string): Promise<Invocation> {
+    return forPeople(await this.cancelInner(ctx, id));
+  }
+
+  private async cancelInner(ctx: ActorCtx, id: string): Promise<Invocation> {
     const found = await this.k.store.getInvocation(id);
     if (!found) throw new HarborError('not_found', 'no such invocation');
     await this.k.requireReadableSpace(ctx, found.conversation.spaceId);
@@ -492,7 +526,10 @@ export class Invocations {
     if (all.some((i) => LIVE.includes(i.state) && !i.answers)) return;
     const next = all.find((i) => i.state === 'queued');
     if (!next) return;
-    const pending: Invocation = { ...next, state: 'pending', updatedAt: this.k.now() };
+    // Delivered with its agent's instructions as they are now: an edit while it queued applies (2026-10-29).
+    const { instructions: _queued, ...rest } = next;
+    const instructions = (await this.k.store.getMember(agentId))?.instructions;
+    const pending: Invocation = { ...rest, ...(instructions ? { instructions } : {}), state: 'pending', updatedAt: this.k.now() };
     await this.k.store.putInvocation(pending);
     this.announce(pending, out);
   }
@@ -500,7 +537,7 @@ export class Invocations {
   /** Tell the space every change; tell the agent when one is ready for it. */
   private announce(invocation: Invocation, out: InvocationOutbox): void {
     const spaceId = invocation.conversation.spaceId;
-    out.push({ to: 'space', spaceId, frame: { kind: 'invocation_state', spaceId, invocation } });
+    out.push({ to: 'space', spaceId, frame: { kind: 'invocation_state', spaceId, invocation: forPeople(invocation) } });
     if (invocation.state === 'pending') out.push({ to: 'agent', memberId: invocation.agentId, frame: { kind: 'invocation', invocation } });
   }
 

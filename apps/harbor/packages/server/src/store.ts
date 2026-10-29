@@ -247,6 +247,8 @@ export interface Store {
   putMember(member: Member): Promise<void>;
   /** Switch an agent between channel and personal (2026-10-27): the one write of the flag after creation. */
   setAgentPersonal(id: string, personal: boolean): Promise<void>;
+  /** An agent's description (its title) and instructions, both whole: null clears one (2026-10-29). */
+  setAgentProfile(id: string, profile: { title: string | null; instructions: string | null }): Promise<void>;
   /** The whole org roster — operator-side reads only (the mentions backfill). */
   listAllMembers(): Promise<Member[]>;
   /** A space's roster in join order — one statement (2026-09-22). */

@@ -556,6 +556,11 @@ export class SpacesClient {
     return (await this.request('PUT', `/v1/agents/${encodeURIComponent(agentId)}/name`, routes.renameAgent.response, { displayName })).agent;
   }
 
+  /** Set an agent's description and instructions: its owner only; a field left out is left alone, an empty one clears it (api.ts setAgentProfile, 2026-10-29). */
+  async setAgentProfile(agentId: string, profile: { title?: string; instructions?: string }): Promise<Member> {
+    return (await this.request('PUT', `/v1/agents/${encodeURIComponent(agentId)}/profile`, routes.setAgentProfile.response, profile)).agent;
+  }
+
   /** Switch an agent this member owns between channel and personal (api.ts setAgentPersonal, 2026-10-27). */
   async setAgentPersonal(agentId: string, personal: boolean): Promise<Member> {
     return (await this.request('PUT', `/v1/agents/${encodeURIComponent(agentId)}/personal`, routes.setAgentPersonal.response, { personal })).agent;
