@@ -9,6 +9,7 @@ import {
   type Approval,
   type ApprovalChoice,
   type Invocation,
+  type InvocationOption,
   type Member,
   type Message,
 } from '@rowboat/spaces-protocol';
@@ -18,6 +19,7 @@ import type { SpacesLocalAgent } from '@x/shared/dist/spaces.js';
 import { WorkDir } from '../config/config.js';
 import type { ApprovalPolicy, CodeRunEvent, CodingAgent, PermissionAsk, PermissionDecision } from '../code-mode/acp/types.js';
 import type { CodeModeManager } from '../code-mode/acp/manager.js';
+import type { CodeAgentModelOptions } from '../code-mode/acp/client.js';
 import * as orgs from './orgs.js';
 
 // Local agents (Harbor spec §4 Agent members, 2026-10-28): the owner's own
@@ -137,6 +139,21 @@ export function decisionFor(choice: ApprovalChoice): PermissionDecision {
   return 'reject';
 }
 
+/**
+ * The composer's Model and Effort for a local agent (2026-10-29): the engine's
+ * own lists, as code mode's picker shows them, under the keys Maritime's
+ * runtimes use. A list that is only "Default" offers no choice and is left out
+ * (Codex folds effort into its models). Pure; tested.
+ */
+export function optionsFor(choices: CodeAgentModelOptions): InvocationOption[] {
+  const select = (key: string, label: string, list: CodeAgentModelOptions['models']): InvocationOption[] => {
+    const usable = list.filter((c) => c.value.length > 0 && c.value.length <= 256).slice(0, 100);
+    if (usable.length < 2) return [];
+    return [{ type: 'select', key, label, choices: usable.map((c) => ({ id: c.value, label: clip(c.label || c.value, 128) })) }];
+  };
+  return [...select('model', 'Model', choices.models), ...select('effort', 'Effort', choices.efforts)];
+}
+
 const MAX_BODY = 65_536;
 const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 
@@ -195,10 +212,31 @@ class LocalAgentRunner {
         void this.sweep();
       } else if (status === 'closed' && this.status !== 'error') this.setStatus('offline');
     });
-    // Stop is offered on its invocations; no options of its own yet.
-    void this.client.declareCapabilities({ stop: true, options: [] }).catch((err) => this.fail(err));
+    void this.declareCapabilities();
     this.sweepTimer = setInterval(() => void this.sweep(), SWEEP_MS);
     this.sweepTimer.unref?.();
+  }
+
+  /**
+   * Stop at once, then the engine's models and efforts once it has listed them
+   * (2026-10-29): listing starts the engine for a moment, and an agent must not
+   * wait on that to be stoppable. In order, so the fuller declaration lands last.
+   * An engine that cannot list them keeps the composer's options off.
+   */
+  private async declareCapabilities(): Promise<void> {
+    try {
+      await this.client.declareCapabilities({ stop: true, options: [] });
+      const kind = this.record()?.kind;
+      if (!kind) return;
+      const choices = await (await resolveManager()).listModelOptions(ENGINE[kind]).catch((err) => {
+        console.warn(`[spaces] ${ENGINE_LABEL[kind]} did not list its models: ${err instanceof Error ? err.message : String(err)}`);
+        return undefined;
+      });
+      const options = choices ? optionsFor(choices) : [];
+      if (options.length > 0 && !this.stopped) await this.client.declareCapabilities({ stop: true, options });
+    } catch (err) {
+      this.fail(err);
+    }
   }
 
   stop(): void {
@@ -314,12 +352,18 @@ class LocalAgentRunner {
 
       const reply = new ReplyCollector();
       const manager = await resolveManager();
+      // What the invoker picked in the composer, or its owner's default (2026-10-29); code mode applies each per turn.
+      const picked = (key: string) => (typeof invocation.options?.[key] === 'string' ? (invocation.options[key] as string) : undefined);
+      const model = picked('model');
+      const effort = picked('effort');
       const result = await manager.runPrompt({
         runId: `spaces-local-${this.agentId}-${threadRootId}`,
         agent: ENGINE[record.kind],
         cwd: record.cwd,
         prompt,
         policy: record.policy,
+        ...(model ? { model } : {}),
+        ...(effort ? { effort } : {}),
         ask: (ask) => this.ask(invocation, ask, signal),
         onEvent: (event) => {
           reply.add(event);

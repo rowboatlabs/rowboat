@@ -35,6 +35,11 @@ vi.mock('../di/lazy-resolve.js', () => ({
   lazyResolve: async (token: string) => {
     if (token !== 'codeModeManager') throw new Error(`unexpected ${token}`);
     return {
+      // What code mode's picker would list for Claude Code (2026-10-29).
+      listModelOptions: async () => ({
+        models: [{ value: 'default', label: 'Default' }, { value: 'opus', label: 'Opus' }, { value: 'sonnet', label: 'Sonnet' }],
+        efforts: [{ value: 'default', label: 'Default' }, { value: 'high', label: 'High' }],
+      }),
       runPrompt: (args: unknown) => {
         h.prompts.push(args);
         return h.turn(args);
@@ -50,7 +55,7 @@ const setTurn = (fn: (args: RunPromptArgs) => Promise<{ stopReason: string; sess
   h.turn = fn as typeof h.turn;
 };
 
-import { ReplyCollector, activityOf, addLocalAgent, decisionFor, forgetLocalAgent, listLocalAgents, stopLocalAgents, updateLocalAgent } from './local-agents.js';
+import { ReplyCollector, activityOf, addLocalAgent, decisionFor, forgetLocalAgent, listLocalAgents, optionsFor, stopLocalAgents, updateLocalAgent } from './local-agents.js';
 
 let spaceId: string;
 let agentId: string;
@@ -120,6 +125,16 @@ describe('adding one', () => {
   it('is online on the roster while this computer runs it', async () => {
     expect((await gagan.orgRoster()).online).toEqual([agentId]);
   });
+
+  it('offers Stop, and its engine’s models and efforts in the composer', async () => {
+    await until(async () => (await gagan.getAgentCapabilities(agentId)).capabilities.options.length === 2, 'the options');
+    const { capabilities } = await gagan.getAgentCapabilities(agentId);
+    expect(capabilities.stop).toBe(true);
+    expect(capabilities.options).toEqual([
+      { type: 'select', key: 'model', label: 'Model', choices: [{ id: 'default', label: 'Default' }, { id: 'opus', label: 'Opus' }, { id: 'sonnet', label: 'Sonnet' }] },
+      { type: 'select', key: 'effort', label: 'Effort', choices: [{ id: 'default', label: 'Default' }, { id: 'high', label: 'High' }] },
+    ]);
+  });
 });
 
 describe('a mention', () => {
@@ -135,6 +150,12 @@ describe('a mention', () => {
     expect(args.mcpServers).toEqual([{ type: 'http', name: 'rowboat-spaces', url: `${harbor.url}/mcp`, headers: [{ name: 'Authorization', value: expect.stringMatching(/^Bearer rbk_/) }] }]);
     const thread = await gagan.listThread(spaceId, message.id);
     expect(thread.messages.map((m) => [m.author.memberId, m.body])).toEqual([[agentId, 'The retry is missing.']]);
+  });
+
+  it('runs the model and effort picked in the composer', async () => {
+    const { message } = await gagan.postMessage(spaceId, { body: mention('think hard'), actingMode: 'direct', agentOptions: { [agentId]: { model: 'opus', effort: 'high' } } });
+    await settled(message.id, 'done');
+    expect(prompts[0]).toMatchObject({ model: 'opus', effort: 'high' });
   });
 
   it('hears what the thread said since it last spoke', async () => {
@@ -237,6 +258,13 @@ describe('the pure parts', () => {
     expect(activityOf({ type: 'tool_call', id: 'a', title: 'Run npm test' })).toBe('Run npm test');
     expect(activityOf({ type: 'plan', entries: [{ content: 'Read', status: 'completed' }, { content: 'Fix the retry', status: 'in_progress' }] })).toBe('Fix the retry');
     expect(activityOf({ type: 'thought' })).toBeUndefined();
+  });
+
+  it('offers a list only when it has a choice beyond Default', () => {
+    const only = [{ value: 'default', label: 'Default' }];
+    // Codex: models, and effort folded into them.
+    expect(optionsFor({ models: [...only, { value: 'gpt-5.5', label: 'GPT-5.5' }], efforts: [] }).map((o) => o.key)).toEqual(['model']);
+    expect(optionsFor({ models: only, efforts: only })).toEqual([]);
   });
 
   it('maps a card’s choice onto the engine’s', () => {
