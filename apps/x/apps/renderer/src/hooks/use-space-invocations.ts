@@ -162,12 +162,13 @@ export function useAgentCapabilities(orgId: string | undefined, agentIds: readon
         () => capabilitiesVersion,
     )
     const idsKey = agentIds.join('|')
+    // On every render, not only when the agents change (2026-10-29): a connector can declare more after it
+    // first connects (a local agent's models arrive seconds after its Stop), and a list read in between
+    // would otherwise stick. loadCapabilities does nothing while the cached one is under a minute old.
     useEffect(() => {
         if (!orgId) return
         for (const id of agentIds) void loadCapabilities(orgId, id)
-        // The joined key IS the dependency — the array identity changes every render.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [orgId, idsKey])
+    })
     return useMemo(() => {
         const out = new Map<string, spaces.ConnectorCapabilities>()
         if (!orgId) return out
