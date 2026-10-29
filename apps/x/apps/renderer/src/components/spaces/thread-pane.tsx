@@ -1367,6 +1367,7 @@ export function ThreadPane({
                 busy={false}
                 onSend={post}
                 onDraftChange={(draft) => setDraftMentions(mentionsAnyone(draft))}
+                {...(followUp && !peopleOnly ? { followUpAgentId: followUp.id } : {})}
                 onSchedule={!LOCAL_RUNTIME ? undefined : async (body, at) => {
                     clearStagedThreadDraft(draftKey)
                     await invokeSpace('spaces:schedule', {
