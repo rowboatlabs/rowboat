@@ -6,7 +6,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import { cn } from '@/lib/utils'
 import { Anchor, Archive, ArchiveRestore, ArrowDown, ArrowLeft, ArrowUp, Bell, BellOff, Bot, FileText, Link as LinkIcon, Loader2, MessageSquareOff, MoreHorizontal, Maximize2, Minimize2, Paperclip, Pencil, ShieldAlert, Square, Tag, Unlink, X } from 'lucide-react'
 import type { spaces } from '@x/shared'
-import { followUpAgentId, mentionsAnyone, messageUrl } from '@x/shared/dist/spaces.js'
+import { mentionsAnyone, messageUrl } from '@x/shared/dist/spaces.js'
 import { copySpacesLink } from '@/lib/spaces-copy-link'
 import { Button } from '@/components/ui/button'
 import {
@@ -31,9 +31,8 @@ import {
 } from '@/lib/spaces-thread-draft'
 import { AUTO_TOAST, collectRouteCandidates, routeDraft, routeThreadLabel } from '@/lib/spaces-auto-route'
 import { agentOptionsPayload, postStreamMessage } from '@/lib/spaces-post'
-import { noteInvocations, useSpaceInvocations } from '@/hooks/use-space-invocations'
-import { useSpaceMembers } from '@/hooks/use-space-members'
-import { isOthersPersonalAgent } from '@/lib/spaces-direct'
+import { noteInvocations } from '@/hooks/use-space-invocations'
+import { useFollowUpAgent } from '@/hooks/use-follow-up-agent'
 import { FollowUpLine } from '@/components/spaces/follow-up-line'
 import { getStreamState, jumpToLatest } from '@/hooks/use-space-chat'
 import { AutoBanner } from '@/components/spaces/auto-banner'
@@ -623,16 +622,8 @@ export function ThreadPane({
 
     // Thread follow-ups (Harbor spec §8, 2026-10-27): a reply that mentions
     // nobody goes to the agent you last invoked here. The line above the
-    // composer names it; its × sends the next reply to people only. Not shown
-    // for someone else's personal agent, which would refuse it anyway.
-    const roster = useSpaceMembers(org.id, space.id)
-    const invocationsByMessage = useSpaceInvocations(org.id, space.id)
-    const followUp = useMemo(() => {
-        const members = new Map(roster.map((m) => [m.id, m]))
-        const id = followUpAgentId([...invocationsByMessage.values()].flat(), rootMessageId, org.memberId, members)
-        const agent = id ? members.get(id) : undefined
-        return agent && !isOthersPersonalAgent(agent, org.memberId) ? agent : undefined
-    }, [roster, invocationsByMessage, rootMessageId, org.memberId])
+    // composer names it; its × sends the next reply to people only.
+    const followUp = useFollowUpAgent(org.id, space.id, rootMessageId, org.memberId)
     const [peopleOnly, setPeopleOnly] = useState(false)
     const [draftMentions, setDraftMentions] = useState(false)
 

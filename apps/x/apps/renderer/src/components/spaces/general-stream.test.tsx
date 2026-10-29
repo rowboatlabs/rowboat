@@ -15,7 +15,20 @@ import type { SpacePresence, StreamState } from '@/hooks/use-space-chat'
 // off while detached, pages forward from the bottom edge, and snaps back
 // through the pill. jsdom has no layout, so the list's geometry is faked.
 
-vi.mock('@/components/spaces/composer', () => ({ Composer: ({ onSend }: { onSend: (body: string) => void }) => <button onClick={() => onSend('on it')}>Send</button> }))
+const composer = vi.hoisted(() => ({ onDraftChange: undefined as ((draft: string) => void) | undefined }))
+const followUp = vi.hoisted(() => ({ byRoot: new Map<string, { id: string; displayName: string }>(), roots: [] as (string | undefined)[] }))
+vi.mock('@/components/spaces/composer', () => ({
+    Composer: ({ onSend, onDraftChange }: { onSend: (body: string) => void; onDraftChange?: (draft: string) => void }) => {
+        composer.onDraftChange = onDraftChange
+        return <button onClick={() => onSend('on it')}>Send</button>
+    },
+}))
+vi.mock('@/hooks/use-follow-up-agent', () => ({
+    useFollowUpAgent: (_org: string, _space: string, rootMessageId: string | undefined) => {
+        followUp.roots.push(rootMessageId)
+        return rootMessageId ? followUp.byRoot.get(rootMessageId) : undefined
+    },
+}))
 vi.mock('@/lib/spaces-post', () => ({ agentOptionsPayload: () => ({}), postStreamMessage: vi.fn(), postInlineReply: vi.fn() }))
 vi.mock('@/components/spaces/message-row', () => ({
     DayDivider: () => null,
@@ -368,6 +381,86 @@ describe('inline view (2026-10-25)', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Send' }))
         await vi.waitFor(() => expect(postStreamMessage).toHaveBeenCalledTimes(1))
         expect(postInlineReply).toHaveBeenCalledTimes(1)
+    })
+
+    it('names the agent the reply goes to, and its × sends one reply to people only (Harbor spec §8, 2026-10-29)', async () => {
+        followUp.byRoot.set('root', { id: 'hermes', displayName: 'Hermes' })
+        try {
+            renderInline([root, reply(4, 'root'), msg(5)])
+            fireEvent.click(await screen.findByRole('button', { name: 'Reply to r4' }))
+            expect(followUp.roots).toContain('root')
+            expect(screen.getByRole('status')).toHaveTextContent('to Hermes')
+            // A mention decides who it goes to: the agent part hides.
+            act(() => composer.onDraftChange!('[@Alex](#member:alex) can you?'))
+            expect(screen.queryByRole('status')).toBeNull()
+            act(() => composer.onDraftChange!('plain'))
+            fireEvent.click(screen.getByRole('button', { name: 'Send to people only, not Hermes' }))
+            expect(screen.getByRole('status')).toHaveTextContent('To people only')
+            fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+            await vi.waitFor(() => expect(postInlineReply).toHaveBeenCalledTimes(1))
+            expect(vi.mocked(postInlineReply).mock.calls[0]![5]).toBe(true)
+            // The × held for that reply only.
+            fireEvent.click(screen.getByRole('button', { name: 'Reply to r4' }))
+            expect(screen.getByRole('status')).toHaveTextContent('to Hermes')
+            fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+            await vi.waitFor(() => expect(postInlineReply).toHaveBeenCalledTimes(2))
+            expect(vi.mocked(postInlineReply).mock.calls[1]![5]).toBe(false)
+        } finally {
+            followUp.byRoot.clear()
+        }
+    })
+
+    describe('implicit reply to the agent thread at the bottom (2026-10-29)', () => {
+        const wrap = (messages: spaces.Message[], patch: Partial<StreamState> = {}) => (
+            <SpaceAccessContext.Provider value={{ member: true, writable: true, join: () => {}, joining: false } as never}>
+                <GeneralStream org={org} space={space} stream={streamOf(messages, patch)} presence={presence} memberNames={new Map()} onOpenThread={vi.fn()} />
+            </SpaceAccessContext.Provider>
+        )
+        const bar = () => screen.queryByText(/Replying to/)
+        beforeEach(() => followUp.byRoot.set('root', { id: 'hermes', displayName: 'Hermes' }))
+        afterEach(() => followUp.byRoot.clear())
+
+        it('replies to it without a click', async () => {
+            render(wrap([root, reply(4, 'root', 'hermes')]))
+            await screen.findByText('body 4')
+            expect(bar()).toHaveTextContent('Replying to Fix the login bug')
+            expect(screen.getByRole('status')).toHaveTextContent('to Hermes')
+            fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+            await vi.waitFor(() => expect(postInlineReply).toHaveBeenCalledTimes(1))
+            expect(vi.mocked(postInlineReply).mock.calls[0]![2]).toEqual({ rootMessageId: 'root', label: 'Fix the login bug' })
+            expect(postStreamMessage).not.toHaveBeenCalled()
+        })
+
+        it('is not offered for a thread without the person\'s agent, or off the tail', async () => {
+            const { rerender } = render(wrap([root, reply(4, 'other')]))
+            await screen.findByText('body 4')
+            expect(bar()).toBeNull()
+            rerender(wrap([root, reply(4, 'root', 'hermes')], { hasMoreAfter: true }))
+            expect(bar()).toBeNull()
+        })
+
+        it('"New message instead" posts to the stream, until a newer message lands at the bottom', async () => {
+            const { rerender } = render(wrap([root, reply(4, 'root', 'hermes')]))
+            await screen.findByText('body 4')
+            fireEvent.click(screen.getByRole('button', { name: 'New message instead' }))
+            expect(bar()).toBeNull()
+            fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+            await vi.waitFor(() => expect(postStreamMessage).toHaveBeenCalledTimes(1))
+            expect(postInlineReply).not.toHaveBeenCalled()
+            rerender(wrap([root, reply(4, 'root', 'hermes'), reply(5, 'root', 'hermes')]))
+            expect(bar()).toHaveTextContent('Replying to Fix the login bug')
+        })
+
+        it('locks the target while typing, and frees it when the box empties', async () => {
+            const { rerender } = render(wrap([root, reply(4, 'root', 'hermes')]))
+            await screen.findByText('body 4')
+            act(() => composer.onDraftChange!('so about that'))
+            // Someone posts something unrelated mid-sentence: the reply stays put.
+            rerender(wrap([root, reply(4, 'root', 'hermes'), msg(6)]))
+            expect(bar()).toHaveTextContent('Replying to Fix the login bug')
+            act(() => composer.onDraftChange!(''))
+            expect(bar()).toBeNull()
+        })
     })
 
     it('clicking a quote lands on the message it answers, in the stream', async () => {

@@ -4,7 +4,7 @@ import { useSpaceAccess, JoinSpacePrompt, canActInSpace } from '@/lib/spaces-acc
 import { startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowDown, ArrowUp, CornerDownRight, Loader2, X } from 'lucide-react'
 import type { autoRoute, spaces } from '@x/shared'
-import { mentionToken, messageUrl } from '@x/shared/dist/spaces.js'
+import { mentionToken, mentionsAnyone, messageUrl } from '@x/shared/dist/spaces.js'
 import { copySpacesLink } from '@/lib/spaces-copy-link'
 import { Composer, type AgentOptions } from '@/components/spaces/composer'
 import { ForwardDialog } from '@/components/spaces/forward-dialog'
@@ -39,6 +39,7 @@ import type { BannerChip } from '@/components/spaces/auto-banner'
 import { readThreadDraft, stageThreadDraft } from '@/lib/spaces-thread-draft'
 import { agentOptionsPayload, postInlineReply, postStreamMessage } from '@/lib/spaces-post'
 import { noteInvocations } from '@/hooks/use-space-invocations'
+import { useFollowUpAgent } from '@/hooks/use-follow-up-agent'
 import { AutoBanner } from '@/components/spaces/auto-banner'
 import { ThreadPickerDialog } from '@/components/spaces/thread-picker-dialog'
 import { FindBanner } from '@/components/spaces/find-banner'
@@ -153,6 +154,39 @@ export function GeneralStream({
     useEffect(() => {
         if (!inline) setReplyingTo(null)
     }, [inline, org.id, space.id])
+    // An implicit reply (2026-10-29, "inline thread ui" in Main): inline the
+    // stream reads as one chat, so when its newest message belongs to a thread
+    // where the person invoked an agent, the box starts out replying there.
+    // The target locks at the first keystroke (a message landing mid-sentence
+    // must not move the reply) and frees when the box empties. "New message
+    // instead" (or Esc) dismisses it until a newer message lands at the bottom.
+    const bottom = stream.messages.at(-1)
+    const bottomRoot = inline && !stream.hasMoreAfter && bottom && !bottom.failed ? (bottom.threadRoot ?? bottom.id) : undefined
+    const [dismissedFor, setDismissedFor] = useState<string | null>(null)
+    const [locked, setLocked] = useState<{ rootMessageId: string | null } | null>(null)
+    const candidateRoot = locked ? locked.rootMessageId ?? undefined : bottom && dismissedFor === bottom.id ? undefined : bottomRoot
+    // Who the reply goes to (Harbor spec §8, 2026-10-29): the agent the person
+    // last invoked in that thread, named on the Replying-to bar like the
+    // thread pane's follow-up line. Its × holds for one reply, and another
+    // target resets it.
+    const targetRoot = replyingTo?.rootMessageId ?? candidateRoot
+    const followUp = useFollowUpAgent(org.id, space.id, targetRoot, org.memberId)
+    const implicitTo = !replyingTo && candidateRoot !== undefined && followUp !== undefined ? candidateRoot : undefined
+    const replyRoot = replyingTo?.rootMessageId ?? implicitTo
+    const [peopleOnly, setPeopleOnly] = useState(false)
+    const [draftMentions, setDraftMentions] = useState(false)
+    useEffect(() => {
+        setPeopleOnly(false)
+    }, [replyRoot])
+    const dismissImplicit = () => {
+        if (bottom) setDismissedFor(bottom.id)
+        if (locked) setLocked({ rootMessageId: null })
+    }
+    // Cancelling a picked reply means a new message: no implicit one steps in.
+    const cancelReply = () => {
+        setReplyingTo(null)
+        dismissImplicit()
+    }
     /** What a reply quotes: the discussion's title, else the root's first line, with its author when known. */
     const quoteFor = (rootMessageId: string): { author?: string; label: string } => {
         const topic = stream.topicsByRoot.get(rootMessageId)
@@ -525,10 +559,11 @@ export function GeneralStream({
     }
 
     const post = async (body: string, agent?: AgentOptions): Promise<void | 'keep'> => {
-        // A reply picked in the inline view goes to its thread; Auto has nothing to decide.
-        if (replyingTo) {
+        // A reply picked, or shown implicitly, in the inline view goes to its thread; Auto has nothing to decide.
+        if (replyRoot !== undefined) {
             if (detachedRef.current) await snapToLatest()
-            postInlineReply(org, space, replyingTo, body, agent)
+            const thread = replyingTo ?? { rootMessageId: replyRoot, label: quoteFor(replyRoot).label }
+            postInlineReply(org, space, thread, body, agent, peopleOnly && followUp !== undefined && !mentionsAnyone(body))
             setReplyingTo(null)
             return
         }
@@ -1240,13 +1275,46 @@ export function GeneralStream({
                     chips={tagChips}
                 />
             )}
-            {writable && replyingTo && (
+            {writable && replyRoot !== undefined && (
                 <div className="mx-4 mb-1 flex items-center gap-2 rounded-md bg-muted px-3 py-1.5 text-xs text-muted-foreground">
                     <CornerDownRight className="size-3 shrink-0" aria-hidden />
-                    <span className="min-w-0 flex-1 truncate">Replying to <span className="font-medium text-foreground">{replyingTo.label}</span></span>
-                    <button type="button" aria-label="Cancel reply" className="shrink-0 rounded p-0.5 hover:bg-background hover:text-foreground" onClick={() => setReplyingTo(null)}>
-                        <X className="size-3.5" />
-                    </button>
+                    <span className="min-w-0 flex-1 truncate">Replying to <span className="font-medium text-foreground">{replyingTo ? replyingTo.label : threadLineFor(replyRoot)}</span></span>
+                    {followUp && !draftMentions && (
+                        <span role="status" className="flex shrink-0 items-center gap-1">
+                            <span aria-hidden className="text-muted-foreground/60">·</span>
+                            {peopleOnly ? (
+                                <>
+                                    <span>To people only</span>
+                                    <button type="button" className="text-foreground hover:underline" onClick={() => setPeopleOnly(false)}>
+                                        Include {followUp.displayName}
+                                    </button>
+                                </>
+                            ) : (
+                                <>
+                                    <span>to <span className="font-medium text-foreground">{followUp.displayName}</span></span>
+                                    <button
+                                        type="button"
+                                        aria-label={`Send to people only, not ${followUp.displayName}`}
+                                        title="Send to people only"
+                                        className="rounded p-0.5 hover:bg-background hover:text-foreground"
+                                        onClick={() => setPeopleOnly(true)}
+                                    >
+                                        <X className="size-3" />
+                                    </button>
+                                </>
+                            )}
+                            <span aria-hidden className="ml-1 h-3 w-px bg-border" />
+                        </span>
+                    )}
+                    {replyingTo ? (
+                        <button type="button" aria-label="Cancel reply" className="shrink-0 rounded p-0.5 hover:bg-background hover:text-foreground" onClick={cancelReply}>
+                            <X className="size-3.5" />
+                        </button>
+                    ) : (
+                        <button type="button" className="shrink-0 text-foreground hover:underline" onClick={dismissImplicit}>
+                            New message instead
+                        </button>
+                    )}
                 </div>
             )}
             {writable ? <Composer
@@ -1261,12 +1329,15 @@ export function GeneralStream({
                 submit={submit}
                 onDraftChange={(draft) => {
                     setCurrentDraft(draft)
+                    setDraftMentions(mentionsAnyone(draft))
+                    if (!draft) setLocked(null)
+                    else setLocked((prev) => prev ?? { rootMessageId: implicitTo ?? null })
                     // An emptied box starts over: nothing declined any more.
                     if (!draft && declined.size > 0) setDeclined(new Set())
                 }}
                 onEscape={() => {
-                    if (replyingTo) {
-                        setReplyingTo(null)
+                    if (replyRoot !== undefined) {
+                        cancelReply()
                         return true
                     }
                     if (!verdict) return false
