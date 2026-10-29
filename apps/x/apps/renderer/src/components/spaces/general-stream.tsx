@@ -4,7 +4,7 @@ import { useSpaceAccess, JoinSpacePrompt, canActInSpace } from '@/lib/spaces-acc
 import { startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowDown, ArrowUp, CornerDownRight, Loader2, X } from 'lucide-react'
 import type { autoRoute, spaces } from '@x/shared'
-import { mentionToken, messageUrl } from '@x/shared/dist/spaces.js'
+import { mentionToken, mentionsAnyone, messageUrl } from '@x/shared/dist/spaces.js'
 import { copySpacesLink } from '@/lib/spaces-copy-link'
 import { Composer, type AgentOptions } from '@/components/spaces/composer'
 import { ForwardDialog } from '@/components/spaces/forward-dialog'
@@ -39,6 +39,7 @@ import type { BannerChip } from '@/components/spaces/auto-banner'
 import { readThreadDraft, stageThreadDraft } from '@/lib/spaces-thread-draft'
 import { agentOptionsPayload, postInlineReply, postStreamMessage } from '@/lib/spaces-post'
 import { noteInvocations } from '@/hooks/use-space-invocations'
+import { useFollowUpAgent } from '@/hooks/use-follow-up-agent'
 import { AutoBanner } from '@/components/spaces/auto-banner'
 import { ThreadPickerDialog } from '@/components/spaces/thread-picker-dialog'
 import { FindBanner } from '@/components/spaces/find-banner'
@@ -153,6 +154,16 @@ export function GeneralStream({
     useEffect(() => {
         if (!inline) setReplyingTo(null)
     }, [inline, org.id, space.id])
+    // Who the reply goes to (Harbor spec §8; inline since 2026-10-29, "inline
+    // thread ui" in Main): the agent the person last invoked in that thread,
+    // named on the Replying-to bar like the thread pane's follow-up line. Its
+    // × holds for one reply, and picking another message resets it.
+    const followUp = useFollowUpAgent(org.id, space.id, replyingTo?.rootMessageId, org.memberId)
+    const [peopleOnly, setPeopleOnly] = useState(false)
+    const [draftMentions, setDraftMentions] = useState(false)
+    useEffect(() => {
+        setPeopleOnly(false)
+    }, [replyingTo?.rootMessageId])
     /** What a reply quotes: the discussion's title, else the root's first line, with its author when known. */
     const quoteFor = (rootMessageId: string): { author?: string; label: string } => {
         const topic = stream.topicsByRoot.get(rootMessageId)
@@ -528,7 +539,7 @@ export function GeneralStream({
         // A reply picked in the inline view goes to its thread; Auto has nothing to decide.
         if (replyingTo) {
             if (detachedRef.current) await snapToLatest()
-            postInlineReply(org, space, replyingTo, body, agent)
+            postInlineReply(org, space, replyingTo, body, agent, peopleOnly && followUp !== undefined && !mentionsAnyone(body))
             setReplyingTo(null)
             return
         }
@@ -1244,6 +1255,33 @@ export function GeneralStream({
                 <div className="mx-4 mb-1 flex items-center gap-2 rounded-md bg-muted px-3 py-1.5 text-xs text-muted-foreground">
                     <CornerDownRight className="size-3 shrink-0" aria-hidden />
                     <span className="min-w-0 flex-1 truncate">Replying to <span className="font-medium text-foreground">{replyingTo.label}</span></span>
+                    {followUp && !draftMentions && (
+                        <span role="status" className="flex shrink-0 items-center gap-1">
+                            <span aria-hidden className="text-muted-foreground/60">·</span>
+                            {peopleOnly ? (
+                                <>
+                                    <span>To people only</span>
+                                    <button type="button" className="text-foreground hover:underline" onClick={() => setPeopleOnly(false)}>
+                                        Include {followUp.displayName}
+                                    </button>
+                                </>
+                            ) : (
+                                <>
+                                    <span>to <span className="font-medium text-foreground">{followUp.displayName}</span></span>
+                                    <button
+                                        type="button"
+                                        aria-label={`Send to people only, not ${followUp.displayName}`}
+                                        title="Send to people only"
+                                        className="rounded p-0.5 hover:bg-background hover:text-foreground"
+                                        onClick={() => setPeopleOnly(true)}
+                                    >
+                                        <X className="size-3" />
+                                    </button>
+                                </>
+                            )}
+                            <span aria-hidden className="ml-1 h-3 w-px bg-border" />
+                        </span>
+                    )}
                     <button type="button" aria-label="Cancel reply" className="shrink-0 rounded p-0.5 hover:bg-background hover:text-foreground" onClick={() => setReplyingTo(null)}>
                         <X className="size-3.5" />
                     </button>
@@ -1261,6 +1299,7 @@ export function GeneralStream({
                 submit={submit}
                 onDraftChange={(draft) => {
                     setCurrentDraft(draft)
+                    setDraftMentions(mentionsAnyone(draft))
                     // An emptied box starts over: nothing declined any more.
                     if (!draft && declined.size > 0) setDeclined(new Set())
                 }}

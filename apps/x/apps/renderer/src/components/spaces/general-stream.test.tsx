@@ -15,7 +15,20 @@ import type { SpacePresence, StreamState } from '@/hooks/use-space-chat'
 // off while detached, pages forward from the bottom edge, and snaps back
 // through the pill. jsdom has no layout, so the list's geometry is faked.
 
-vi.mock('@/components/spaces/composer', () => ({ Composer: ({ onSend }: { onSend: (body: string) => void }) => <button onClick={() => onSend('on it')}>Send</button> }))
+const composer = vi.hoisted(() => ({ onDraftChange: undefined as ((draft: string) => void) | undefined }))
+const followUp = vi.hoisted(() => ({ agent: undefined as { id: string; displayName: string } | undefined, roots: [] as (string | undefined)[] }))
+vi.mock('@/components/spaces/composer', () => ({
+    Composer: ({ onSend, onDraftChange }: { onSend: (body: string) => void; onDraftChange?: (draft: string) => void }) => {
+        composer.onDraftChange = onDraftChange
+        return <button onClick={() => onSend('on it')}>Send</button>
+    },
+}))
+vi.mock('@/hooks/use-follow-up-agent', () => ({
+    useFollowUpAgent: (_org: string, _space: string, rootMessageId: string | undefined) => {
+        followUp.roots.push(rootMessageId)
+        return rootMessageId ? followUp.agent : undefined
+    },
+}))
 vi.mock('@/lib/spaces-post', () => ({ agentOptionsPayload: () => ({}), postStreamMessage: vi.fn(), postInlineReply: vi.fn() }))
 vi.mock('@/components/spaces/message-row', () => ({
     DayDivider: () => null,
@@ -368,6 +381,33 @@ describe('inline view (2026-10-25)', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Send' }))
         await vi.waitFor(() => expect(postStreamMessage).toHaveBeenCalledTimes(1))
         expect(postInlineReply).toHaveBeenCalledTimes(1)
+    })
+
+    it('names the agent the reply goes to, and its × sends one reply to people only (Harbor spec §8, 2026-10-29)', async () => {
+        followUp.agent = { id: 'hermes', displayName: 'Hermes' }
+        try {
+            renderInline([root, reply(4, 'root')])
+            fireEvent.click(await screen.findByRole('button', { name: 'Reply to r4' }))
+            expect(followUp.roots).toContain('root')
+            expect(screen.getByRole('status')).toHaveTextContent('to Hermes')
+            // A mention decides who it goes to: the agent part hides.
+            act(() => composer.onDraftChange!('[@Alex](#member:alex) can you?'))
+            expect(screen.queryByRole('status')).toBeNull()
+            act(() => composer.onDraftChange!('plain'))
+            fireEvent.click(screen.getByRole('button', { name: 'Send to people only, not Hermes' }))
+            expect(screen.getByRole('status')).toHaveTextContent('To people only')
+            fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+            await vi.waitFor(() => expect(postInlineReply).toHaveBeenCalledTimes(1))
+            expect(vi.mocked(postInlineReply).mock.calls[0]![5]).toBe(true)
+            // The × held for that reply only.
+            fireEvent.click(screen.getByRole('button', { name: 'Reply to r4' }))
+            expect(screen.getByRole('status')).toHaveTextContent('to Hermes')
+            fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+            await vi.waitFor(() => expect(postInlineReply).toHaveBeenCalledTimes(2))
+            expect(vi.mocked(postInlineReply).mock.calls[1]![5]).toBe(false)
+        } finally {
+            followUp.agent = undefined
+        }
     })
 
     it('clicking a quote lands on the message it answers, in the stream', async () => {

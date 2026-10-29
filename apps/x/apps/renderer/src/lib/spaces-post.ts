@@ -48,17 +48,19 @@ export function postStreamMessage(org: OrgWithSpaces, space: spaces.Space, body:
 // A reply sent from the inline view (2026-10-25): it lands in the stream the
 // same optimistic way, and in its thread on the org. Replying follows the
 // thread and reads it up to the reply (the org's rule); mirrored here.
+// peopleOnly is the follow-up line's × (Harbor spec §8, 2026-10-29).
 export function postInlineReply(
     org: OrgWithSpaces,
     space: spaces.Space,
     thread: { rootMessageId: string; label: string },
     body: string,
     agent?: RowboatTurnOptions & { members?: AgentMemberOptions },
+    peopleOnly?: boolean,
 ): void {
     if (!canActInSpace(org.id, space.id)) return
     const pending = buildPendingMessage(space.id, org.memberId, body, thread.rootMessageId)
     ingestStreamMessage(org.id, space.id, pending)
-    void invokeSpace('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: thread.rootMessageId, body, ...agentOptionsPayload(agent) })
+    void invokeSpace('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: thread.rootMessageId, body, ...agentOptionsPayload(agent), ...(peopleOnly ? { peopleOnly: true } : {}) })
         .then((result) => {
             resolvePendingStreamMessage(org.id, space.id, pending.id, result.message)
             noteInvocations(org.id, space.id, result.invocations)
