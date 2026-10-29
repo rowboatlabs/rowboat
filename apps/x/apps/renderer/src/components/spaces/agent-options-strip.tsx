@@ -18,15 +18,17 @@ import { cn } from '@/lib/utils'
 
 export type AgentOptionValues = Record<string, Record<string, string | boolean>>
 
-export function AgentOptionsStrip({ draft, values, onChange }: {
+export function AgentOptionsStrip({ draft, values, onChange, followUpAgentId }: {
     draft: string
     values: AgentOptionValues
     onChange: (next: AgentOptionValues) => void
+    /** The agent a thread reply goes to without a mention (2026-10-29): offered as if mentioned. */
+    followUpAgentId?: string
 }) {
     const refs = useSpaceRefs()
     const { byId } = useSpaceProfiles()
     const names = useMemberNames()
-    const addressed = new Set([...mentionedMemberIds(draft), ...(refs?.directWith ? [refs.directWith] : [])])
+    const addressed = new Set([...mentionedMemberIds(draft), ...(refs?.directWith ? [refs.directWith] : []), ...(followUpAgentId ? [followUpAgentId] : [])])
     const agentIds = [...addressed].filter((id) => byId.get(id)?.kind === 'agent')
     const caps = useAgentCapabilities(refs?.orgId, agentIds)
     const defaults = useAgentOptionDefaults(refs?.orgId, agentIds)

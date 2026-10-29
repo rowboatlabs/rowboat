@@ -27,6 +27,7 @@ import '@/styles/space-composer.css'
 import { noteEmojiUsed, replaceShortcodes, searchEmoji, type EmojiEntry } from '@/lib/emoji-data'
 import { containsRowboatAddress, mentionedMemberIds } from '@/lib/spaces-mentions'
 import { AgentOptionsStrip, type AgentOptionValues } from '@/components/spaces/agent-options-strip'
+import { mentionsAnyone } from '@x/shared/dist/spaces.js'
 import type { AutoRouteMode } from '@/lib/spaces-auto-route'
 import { draftStorageKey } from '@/lib/spaces-thread-draft'
 import { schedulePresets } from '@/lib/spaces-schedule'
@@ -118,7 +119,7 @@ async function formatTranscript(raw: string): Promise<string> {
     }
 }
 
-export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, autoFocus, onType, seed, draftKey, commands = [], autoRoute, submit, onDraftChange, onEscape }: {
+export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, autoFocus, onType, seed, draftKey, commands = [], autoRoute, submit, onDraftChange, onEscape, followUpAgentId }: {
     placeholder: string
     /**
      * Post the message. Resolve 'keep' to leave the draft in the box (the
@@ -158,6 +159,12 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     onDraftChange?: (draft: string) => void
     /** Esc with no popover open. Return true to consume it (a pane closing its notice). */
     onEscape?: () => boolean
+    /**
+     * The agent a reply that mentions nobody goes to (a thread follow-up,
+     * 2026-10-27): its options are offered and sent as if the draft mentioned
+     * it (2026-10-29). Absent when the reply goes to people only.
+     */
+    followUpAgentId?: string
 }) {
     const [draft, setDraft] = useState(() => (draftKey ? window.localStorage.getItem(draftStorageKey(draftKey)) ?? '' : ''))
     // Picked options for mentioned agent members; sticky for the session, sent only for agents the text mentions.
@@ -460,6 +467,8 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
      */
     const agentOptionsFor = (text: string): AgentOptions | undefined => {
         const mentionedIds = new Set(mentionedMemberIds(text))
+        // A follow-up reaches its agent without a mention: its picks go with it.
+        if (followUpAgentId && !mentionsAnyone(text)) mentionedIds.add(followUpAgentId)
         const members = Object.fromEntries(Object.entries(memberOptions).filter(([id]) => mentionedIds.has(id)))
         const rowboat = containsRowboatAddress(text)
         if (!rowboat && Object.keys(members).length === 0) return undefined
@@ -1093,7 +1102,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                                 )}
                             </>
                         )}
-                        <AgentOptionsStrip draft={draft} values={memberOptions} onChange={setMemberOptions} />
+                        <AgentOptionsStrip draft={draft} values={memberOptions} onChange={setMemberOptions} {...(followUpAgentId && !mentionsAnyone(draft) ? { followUpAgentId } : {})} />
                         {mentioned && (
                             <>
                                 <span className="mx-0.5 h-4 w-px bg-border" />

@@ -150,6 +150,20 @@ describe('AgentOptionsStrip', () => {
         expect(onChange).toHaveBeenCalledWith({ echo: { environment: 'api' } })
     })
 
+    it('offers the options of the agent a thread reply follows up with, though the draft mentions no one (2026-10-29)', async () => {
+        const echo = { id: 'echo', displayName: 'Echo', role: 'member', kind: 'agent' } as spaces.Member
+        render(
+            <SpaceRefsProvider refs={{ orgId: 'org-strip-follow', orgAddress: 'x', spaceId: 'S' }}>
+                <SpaceMembersProvider members={names}>
+                    <SpaceProfilesProvider members={[echo]} here={new Set()} selfId="harsh">
+                        <AgentOptionsStrip draft="and the tests?" values={{}} onChange={vi.fn()} followUpAgentId="echo" />
+                    </SpaceProfilesProvider>
+                </SpaceMembersProvider>
+            </SpaceRefsProvider>,
+        )
+        expect(await screen.findByTitle('Echo Env')).toBeInTheDocument()
+    })
+
     it('shows the owner’s defaults preselected, and sends an explicit off for a toggle that defaults on', async () => {
         const onChange = vi.fn()
         const coder = { id: 'coder', displayName: 'Coder', role: 'member', kind: 'agent' } as spaces.Member
