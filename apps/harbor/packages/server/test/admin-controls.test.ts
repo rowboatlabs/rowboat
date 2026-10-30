@@ -221,13 +221,13 @@ describe('promote and demote admins', () => {
 describe('the invite policy', () => {
   it('members by default; an admin restricts it to admins, and then members can’t invite', async () => {
     const spaceId = await newSpace('Invites', 'private', ['gagan']);
-    expect((await gagan().get('/v1/org/settings')).body.settings).toEqual({ invitePolicy: 'members' });
+    expect((await gagan().get('/v1/org/settings')).body.settings).toEqual({ invitePolicy: 'members', jevEnabled: true });
     expect((await gagan().post('/v1/invites', { spaceId })).status).toBe(200);
 
     expect((await gagan().patch('/v1/org/settings', { invitePolicy: 'admins' })).status).toBe(403);
     const set = await admin().patch('/v1/org/settings', { invitePolicy: 'admins' });
     expect(set.status).toBe(200);
-    expect(set.body.settings).toEqual({ invitePolicy: 'admins' });
+    expect(set.body.settings).toEqual({ invitePolicy: 'admins', jevEnabled: true });
 
     const refusedInvite = await gagan().post('/v1/invites', { spaceId });
     expect(refusedInvite.status).toBe(403);
@@ -237,8 +237,8 @@ describe('the invite policy', () => {
     expect((await gagan().post(`/v1/spaces/${spaceId}/members`, { memberIds: ['arjun'], ...direct })).status).toBe(200);
 
     expect((await refused(gaganAgent, 'create_invite', { spaceId })).code).toBe('forbidden');
-    expect(await call(gaganAgent, 'get_org_settings', {})).toEqual({ settings: { invitePolicy: 'admins' } });
-    expect(await call(ramAgent, 'set_invite_policy', { invitePolicy: 'members' })).toEqual({ settings: { invitePolicy: 'members' } });
+    expect(await call(gaganAgent, 'get_org_settings', {})).toEqual({ settings: { invitePolicy: 'admins', jevEnabled: true } });
+    expect(await call(ramAgent, 'set_invite_policy', { invitePolicy: 'members' })).toEqual({ settings: { invitePolicy: 'members', jevEnabled: true } });
     expect((await gagan().post('/v1/invites', { spaceId })).status).toBe(200);
   });
 });

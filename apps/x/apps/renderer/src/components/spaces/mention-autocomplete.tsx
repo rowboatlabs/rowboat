@@ -14,7 +14,8 @@ import { isAgentOffline, useAgentsOnline, useOrgRoster, useSpaceMembers } from '
 import { useSpacesOrgs } from '@/hooks/use-spaces'
 import { assetWireUrl } from '@/lib/spaces-presentation'
 import { byRank, matchRank } from '@/lib/mention-rank'
-import { isDeparted, isOthersPersonalAgent } from '@/lib/spaces-direct'
+import { isDeparted, isOthersPersonalAgent, isSwitchedOff } from '@/lib/spaces-direct'
+import { useOrgSettings } from '@/hooks/use-org-settings'
 
 // The @ autocomplete behind every mention surface — the composer and the
 // inline message editor. The hook owns the popup's whole lifecycle off the
@@ -98,6 +99,7 @@ export function useMentionAutocomplete(editor: Editor | null) {
 
     // A local agent whose owner's computer isn't running it says so (2026-10-28): the mention waits until it is.
     const online = useAgentsOnline(orgId)
+    const settings = useOrgSettings(orgId)
     const agentHint = (m: spaces.Member) => `${agentLabel(m.agentKind, m.agentConnection)}${m.personal ? ' · personal' : ''}${isAgentOffline(m, online) ? ' · offline' : ''}`
     const candidates = useMemo<MentionCandidate[]>(() => {
         if (!match) return []
@@ -115,7 +117,8 @@ export function useMentionAutocomplete(editor: Editor | null) {
         const rank = (m: spaces.Member) => (!q || m.id.toLowerCase().startsWith(q) ? 0 : matchRank(m.displayName, q))
         // Nobody names a deleted account (2026-10-13); a DM keeps one as a member.
         // Someone else's personal agent is left out too (2026-10-26): it answers its owner only.
-        const pickable = (m: spaces.Member) => !isDeparted(m) && !isOthersPersonalAgent(m, selfMemberId)
+        // So is Ro while an admin has it off (2026-10-30).
+        const pickable = (m: spaces.Member) => !isDeparted(m) && !isOthersPersonalAgent(m, selfMemberId) && !isSwitchedOff(m, settings)
         people.push(...byRank(spaceMembers.filter(pickable).map((m) => {
             const hint = m.id === selfMemberId ? 'you' : m.kind === 'agent' ? agentHint(m) : undefined
             return { row: { id: m.id, label: m.displayName, ...(hint ? { hint } : {}) }, rank: rank(m) }
@@ -160,7 +163,7 @@ export function useMentionAutocomplete(editor: Editor | null) {
         return [...[...people, ...spaceRows].slice(0, MAX_ROWS - fileQuota), ...files].slice(0, MAX_ROWS)
     // agentHint reads `online`; it changes with it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [match, spaceMembers, orgRoster, org, listings, spaceId, selfMemberId, online])
+    }, [match, spaceMembers, orgRoster, org, listings, spaceId, selfMemberId, online, settings])
 
     // Reset the highlighted row whenever the query changes (adjust-on-change, not an effect).
     const query = match?.query ?? null

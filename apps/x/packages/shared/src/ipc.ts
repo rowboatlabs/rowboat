@@ -3976,6 +3976,11 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), invitePolicy: z.enum(['members', 'admins']) }),
     res: z.object({ settings: z.custom<SpacesTypes.OrgSettings>() }),
   },
+  // Ro on or off for the org (2026-10-30, harbor spec §8 Jev): admin only.
+  'spaces:setJevEnabled': {
+    req: z.object({ orgId: z.string(), jevEnabled: z.boolean() }),
+    res: z.object({ settings: z.custom<SpacesTypes.OrgSettings>() }),
+  },
   // Default spaces (2026-10-19, harbor setDefaultSpace): admin only, open
   // spaces only. Everyone an invite admits joins every default.
   'spaces:setDefaultSpace': {

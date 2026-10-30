@@ -4,11 +4,11 @@ import { copySpacesLink } from '@/lib/spaces-copy-link'
 import { Bot, Check, ChevronsUpDown, Hash, Link as LinkIcon, LogIn, Plus, Trash2, UserPlus } from 'lucide-react'
 import { OrgMonogram } from '@/components/spaces/atoms'
 import {
-    DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator,
+    DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator,
     DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useOrgRoster } from '@/hooks/use-space-members'
-import { setInvitePolicy, useOrgSettings } from '@/hooks/use-org-settings'
+import { setInvitePolicy, setJevEnabled, useOrgSettings } from '@/hooks/use-org-settings'
 import { toast } from '@/lib/toast'
 import { useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { isGroupChat, serverLandingSpaceId } from '@/lib/spaces-navigation'
@@ -31,8 +31,17 @@ export function ServerSwitcher({ org, onOpenSpace, onOpenAgents, onMenuOpenChang
     const [addingChannel, setAddingChannel] = useState(false)
     // Who may create invite links is the org's admins' to set (harbor admin controls, 2026-10-19).
     const spaceIds = useMemo(() => org.spaces.map((s) => s.id), [org.spaces])
-    const isAdmin = useOrgRoster(org.id, spaceIds).find((m) => m.id === org.memberId)?.role === 'admin'
-    const { invitePolicy } = useOrgSettings(org.id)
+    const roster = useOrgRoster(org.id, spaceIds)
+    const isAdmin = roster.find((m) => m.id === org.memberId)?.role === 'admin'
+    const { invitePolicy, jevEnabled } = useOrgSettings(org.id)
+    // Ro on or off for the org (harbor spec §8 Jev, 2026-10-30): an admin's switch,
+    // offered only where the deployment gave the org a Ro.
+    const hasJev = roster.some((m) => m.agentKind === 'jev' && !m.removedAt)
+    const toggleJev = (next: boolean) => {
+        setJevEnabled(org.id, next).catch((err: unknown) => {
+            toast(err instanceof Error ? err.message : 'Could not turn Ro on or off', 'error')
+        })
+    }
     const changeInvitePolicy = (next: string) => {
         if (next !== 'members' && next !== 'admins') return
         setInvitePolicy(org.id, next).catch((err: unknown) => {
@@ -90,6 +99,10 @@ export function ServerSwitcher({ org, onOpenSpace, onOpenAgents, onMenuOpenChang
                         </DropdownMenuRadioGroup>
                     </DropdownMenuSubContent>
                 </DropdownMenuSub>}
+                {isAdmin && hasJev && <DropdownMenuCheckboxItem checked={jevEnabled} onCheckedChange={(next) => toggleJev(next === true)}
+                    onSelect={(event) => event.preventDefault()}>
+                    Ro tags who a message needs
+                </DropdownMenuCheckboxItem>}
                 <DropdownMenuSeparator />
                 {/* The dialogs are hosted once in App (lib/server-dialog.ts); a finished one lands in the new server itself. */}
                 <DropdownMenuItem onSelect={() => openServerDialog({ kind: 'create' })}><Plus className="size-4" /> Create a group chat</DropdownMenuItem>
