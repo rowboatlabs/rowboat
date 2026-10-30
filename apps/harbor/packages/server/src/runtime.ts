@@ -3,7 +3,6 @@ import { getRequestListener } from '@hono/node-server';
 import { bindAuth, type AuthDriver, type OrgAuth } from './auth.js';
 import type { BlobStore } from './blobs.js';
 import { HostedConnectors } from './connectors/host.js';
-import { jevApiKey } from './connectors/jev/index.js';
 import { maritimeProvisioner } from './connectors/maritime/provisioning.js';
 import type { HostingProvider } from './core/hosting.js';
 import { buildHttpApp } from './http.js';
@@ -110,8 +109,9 @@ export async function buildOrgRuntime(input: OrgRuntimeInput): Promise<OrgRuntim
       input.hosting?.trialMs !== undefined ? { trialMs: input.hosting.trialMs } : {},
     );
   }
-  // Jev (spec §8 Jev, 2026-10-07): every org has it once the deployment has its key.
-  if (jevApiKey()) await service.ensureJev();
+  // Ro is retired (spec §8 Jev, 2026-10-30, Arjun's call): before the org
+  // serves anything, it leaves every space and the org, once.
+  await service.retireJev();
   await connectors.startAll();
   if (provider) service.startHosting(input.hosting?.tickMs);
   const auth = bindAuth(input.auth, store);

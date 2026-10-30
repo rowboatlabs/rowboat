@@ -550,6 +550,28 @@ export class Spaces {
     return (await this.k.store.getMember(memberId))!;
   }
 
+  /**
+   * An agent Harbor itself ran, taken out of the org by Harbor (Ro, spec §8
+   * Jev, retired 2026-10-30): as `removeOrgMember` does, but no person acts,
+   * so the agent leaves each space itself (`left`, as `leaveSpace` writes).
+   */
+  async retireAgent(memberId: string): Promise<void> {
+    const target = await this.k.store.getMember(memberId);
+    if (!target || target.removedAt !== undefined) return;
+    const at = this.k.now();
+    await this.k.store.removeMemberFromOrg(memberId, at);
+    for (const space of await this.k.store.listSpacesFor(memberId)) {
+      await this.k.locked(space.id, async () => {
+        const membership = await this.k.store.getMembership(space.id, memberId);
+        if (!membership) return;
+        await this.k.store.deleteMembership(space.id, memberId);
+        await this.k.store.deleteReadMarks(space.id, memberId);
+        await this.k.appendNext(space.id, at, { type: 'membership', membership, action: 'left' });
+      });
+    }
+    await this.tellOrg(at);
+  }
+
   /** Promote or demote an admin; the store keeps the last one (store.setMemberRole). */
   async setMemberRole(ctx: ActorCtx, memberId: string, input: SetMemberRoleInput): Promise<Member> {
     const target = await this.k.store.getMember(memberId);

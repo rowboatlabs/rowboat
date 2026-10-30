@@ -15,7 +15,7 @@ import { PgStore } from './pg-store.js';
 import { buildOrgRuntime, type OrgRuntime } from './runtime.js';
 import type { SqlDb } from './sql.js';
 import { attachLive } from './ws.js';
-import { HARBOR_RUN_CONNECTIONS, BUILT_IN_CONNECTION } from '@rowboat/spaces-protocol';
+import { HARBOR_RUN_CONNECTIONS } from '@rowboat/spaces-protocol';
 
 // The multi-org deployment (spec §4 "Deployment and tenancy"): one process,
 // 1..N orgs, resolved from the Host header (X-Forwarded-Host wins — every
@@ -210,14 +210,10 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
   // An org's runtime is otherwise built on its first request, but the
   // connectors Harbor runs (spec §8 Connectors, 2026-09-30) must pick up
   // their agents' mentions after a restart whether or not anyone visits:
-  // build, at boot, the runtime of every org that has such an agent. Jev is
-  // in every org with the key (spec §8 Jev, 2026-10-07), so only the orgs
-  // where someone has added it to a space are woken for it.
+  // build, at boot, the runtime of every org that has such an agent.
   const connectorOrgs = await options.db.query<{ org_id: string }>(
-    `select distinct m.org_id from members m
-     where m.kind = 'agent' and (m.agent_connection = any($1::text[]) or (m.agent_connection = $2 and exists (
-       select 1 from memberships ms join spaces s on s.id = ms.space_id where ms.member_id = m.id and s.org_id = m.org_id)))`,
-    [[...HARBOR_RUN_CONNECTIONS], BUILT_IN_CONNECTION],
+    `select distinct m.org_id from members m where m.kind = 'agent' and m.agent_connection = any($1::text[])`,
+    [[...HARBOR_RUN_CONNECTIONS]],
   );
   for (const { org_id } of connectorOrgs) {
     const org = await directory.getById(org_id);

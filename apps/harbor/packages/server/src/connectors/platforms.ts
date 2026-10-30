@@ -1,4 +1,4 @@
-import { BUILT_IN_CONNECTION, HARBOR_RUN_CONNECTIONS, type Member, type ServerFrame } from '@rowboat/spaces-protocol';
+import { type Member, type ServerFrame } from '@rowboat/spaces-protocol';
 import type { ActorCtx } from '../core/kernel.js';
 import type { CredentialTarget } from '../core/agents.js';
 import type { HarborService } from '../service.js';
@@ -6,7 +6,6 @@ import { agent37Platform } from './agent37/index.js';
 import { attioPlatform } from './attio/index.js';
 import { calPlatform } from './cal/index.js';
 import { conductorPlatform } from './conductor/index.js';
-import { jevPlatform } from './jev/index.js';
 import { maritimePlatform } from './maritime/index.js';
 import { posthogPlatform } from './posthog/index.js';
 import { replicasPlatform } from './replicas/index.js';
@@ -29,8 +28,6 @@ export interface ConnectorEnv {
   ctx: ActorCtx;
   /** The agent's own frames (invocation, invocation_stop), as its live connection would get them. */
   subscribe(fn: (frame: ServerFrame) => void): () => void;
-  /** A space's frames, as a live connection subscribed to it gets them: Jev reads every message (spec §8 Jev). */
-  subscribeSpace(spaceId: string, fn: (frame: ServerFrame) => void): () => void;
   /** The platform's credential, unsealed for this call. Never kept, logged, or put in a message. */
   credential(): Promise<string>;
   /** The platform refused the credential: marks it rejected; true only the first time, until it is replaced. */
@@ -71,7 +68,7 @@ export interface ConnectorPlatform {
   alert?(payload: unknown): string | undefined;
 }
 
-/** One entry per connection in HARBOR_RUN_CONNECTIONS, and Jev's, the one built in (2026-10-07). */
+/** One entry per connection in HARBOR_RUN_CONNECTIONS. */
 export const PLATFORMS: Record<string, ConnectorPlatform> = {
   replicas: replicasPlatform(),
   agent37: agent37Platform(),
@@ -80,8 +77,5 @@ export const PLATFORMS: Record<string, ConnectorPlatform> = {
   posthog: posthogPlatform(),
   cal: calPlatform(),
   attio: attioPlatform(),
-  [BUILT_IN_CONNECTION]: jevPlatform(),
 };
 
-/** Every connection whose connector Harbor runs: the platforms it calls, and the agent it is. */
-export const HOSTED_CONNECTIONS: readonly string[] = [...HARBOR_RUN_CONNECTIONS, BUILT_IN_CONNECTION];

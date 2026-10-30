@@ -120,16 +120,14 @@ export class Agents {
   }
 
   /**
-   * Jev (spec §8 Jev, 2026-10-07): built into the org, never added by a
-   * person, so it has no owner, takes no keys, and is in no space until
-   * someone adds it. Created on the first boot with the deployment's key;
-   * a read-only org gets it once it can write again.
+   * Ro, the Jev agent Harbor was (spec §8 Jev, retired 2026-10-30): no person
+   * can remove it, so Harbor does, once per org. Listing skips removed
+   * members, so a later boot finds none and writes nothing.
    */
-  async ensureJev(): Promise<Member | undefined> {
-    const existing = (await this.k.store.listAgentsByConnection([BUILT_IN_CONNECTION])).find((a) => a.agentKind === JEV_KIND);
-    if (existing || this.k.readOnly) return existing;
-    // People meet it as Ro (2026-10-07, Arjun's call): Jev is the model it runs on, not its name.
-    return this.spaces.createAgent({ displayName: 'Ro', agentKind: JEV_KIND, agentConnection: BUILT_IN_CONNECTION });
+  async retireJev(): Promise<void> {
+    for (const jev of await this.k.store.listAgentsByConnection([BUILT_IN_CONNECTION])) {
+      if (jev.agentKind === JEV_KIND) await this.spaces.retireAgent(jev.id);
+    }
   }
 
   /** Replace a platform agent's credential: the owner only, checked with the platform first; clears a rejection. */
@@ -187,7 +185,7 @@ export class Agents {
    * amended 2026-10-27): the owner only. Like a rename, an org fact with no
    * event. The invocation rule reads the flag when a message arrives, so what
    * is already queued finishes and everything asked after follows the new
-   * setting; Jev's candidates read it the same way.
+   * setting.
    */
   async setPersonal(ctx: ActorCtx, agentId: string, input: { personal: boolean }): Promise<Member> {
     const agent = await this.agent(agentId);

@@ -544,13 +544,9 @@ export class Invocations {
   /**
    * The depth an agent a new message mentions is invoked at (spec §8). A
    * person's post is 0; an agent's hands work on, one hop deeper than the
-   * deepest turn it is running. Jev's tags (`relayOf`, spec §8 Jev,
-   * 2026-10-07) complete the mentions of the message they answer, so they
-   * take that message's depth: an agent and Jev passing work along still
-   * stop at the hop limit.
+   * deepest turn it is running.
    */
-  async handOffDepth(ctx: ActorCtx, spaceId: string, relayOf?: string): Promise<number> {
-    if (relayOf) return this.k.store.getMessageHops(spaceId, relayOf);
+  async handOffDepth(ctx: ActorCtx): Promise<number> {
     if (!ctx.agent) return 0;
     const live = await this.k.store.listInvocationsForAgent(ctx.memberId, LIVE);
     return 1 + live.reduce((max, i) => Math.max(max, i.depth), 0);
