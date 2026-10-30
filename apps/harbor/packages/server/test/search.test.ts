@@ -215,4 +215,12 @@ describe('extractSearchText', () => {
     expect(out).toContain('draft only');
     expect(out).not.toContain('count');
   });
+
+  it('keeps string leaves inside JSON arrays', () => {
+    const out = extractSearchText('data.json', JSON.stringify({ tags: ['quarterly', 'roadmap'], rows: [['Budget 2027']] }));
+    expect(out).toContain('quarterly');
+    expect(out).toContain('roadmap');
+    expect(out).toContain('Budget 2027');
+    expect(extractSearchText('list.json', '["launch checklist"]')).toContain('launch checklist');
+  });
 });
