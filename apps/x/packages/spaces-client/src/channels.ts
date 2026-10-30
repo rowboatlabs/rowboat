@@ -25,7 +25,7 @@ export type HarborChannel =
   | 'spaces:createAgentKey' | 'spaces:revokeAgentKey' | 'spaces:renameAgent' | 'spaces:setAgentPersonal' | 'spaces:setAgentProfile'
   | 'spaces:managedAgentKinds' | 'spaces:createManagedAgent' | 'spaces:deleteManagedAgent' | 'spaces:setHostingLlm'
   | 'spaces:getHosting' | 'spaces:setHostingEnv' | 'spaces:deleteHostingEnv' | 'spaces:hostingPower'
-  | 'spaces:runHostingCommand' | 'spaces:getHostingCommand' | 'spaces:cancelHostingCommand' | 'spaces:openHostingConsole' | 'spaces:getHostingLogs'
+  | 'spaces:runHostingCommand' | 'spaces:getHostingCommand' | 'spaces:cancelHostingCommand' | 'spaces:openHostingConsole' | 'spaces:checkHostingSignIn' | 'spaces:revokeHostingSignIn' | 'spaces:getHostingLogs'
   | 'spaces:listHostingFiles' | 'spaces:readHostingFile' | 'spaces:writeHostingFile' | 'spaces:makeHostingDir' | 'spaces:moveHostingFile' | 'spaces:deleteHostingFile'
   | 'spaces:listHostingSkills' | 'spaces:installHostingSkill' | 'spaces:removeHostingSkill'
   | 'spaces:listHostingTriggers' | 'spaces:createHostingTrigger' | 'spaces:updateHostingTrigger' | 'spaces:deleteHostingTrigger'
@@ -163,6 +163,8 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit 
     'spaces:getHostingCommand': async (args) => ({ execution: await getClient(args.orgId).getHostingCommand(args.agentId, args.executionId) }),
     'spaces:cancelHostingCommand': async (args) => ({ execution: await getClient(args.orgId).cancelHostingCommand(args.agentId, args.executionId) }),
     'spaces:openHostingConsole': async (args) => ({ console: await getClient(args.orgId).openHostingConsole(args.agentId) }),
+    'spaces:checkHostingSignIn': async (args) => getClient(args.orgId).checkHostingSignIn(args.agentId),
+    'spaces:revokeHostingSignIn': async (args) => ({ hosting: await getClient(args.orgId).revokeHostingSignIn(args.agentId) }),
     'spaces:getHostingLogs': async ({ orgId, agentId, ...opts }) => getClient(orgId).getHostingLogs(agentId, opts),
     'spaces:listHostingFiles': async (args) => getClient(args.orgId).listHostingFiles(args.agentId, args.path ?? '/'),
     'spaces:readHostingFile': async (args) => getClient(args.orgId).readHostingFile(args.agentId, args.path),

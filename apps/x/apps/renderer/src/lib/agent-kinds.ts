@@ -100,10 +100,12 @@ export const MANAGED_KINDS: ReadonlyArray<{ kind: string; description: string }>
  * page offers, with how each is named and what its keys look like.
  */
 export const LLM_PROVIDERS_FOR_KIND: Readonly<Record<string, readonly ('openai' | 'anthropic' | 'openrouter')[]>> = { hermes: ['openai', 'anthropic', 'openrouter'], codex: ['openai'], 'claude-code': ['anthropic'] }
-export const LLM_PROVIDER_INFO: Readonly<Record<'openai' | 'anthropic' | 'openrouter', { label: string; keyPlaceholder: string; modelPlaceholder: string }>> = {
+export const LLM_PROVIDER_INFO: Readonly<Record<'openai' | 'anthropic' | 'openrouter' | 'chatgpt', { label: string; keyPlaceholder: string; modelPlaceholder: string }>> = {
     openai: { label: 'OpenAI', keyPlaceholder: 'sk-…', modelPlaceholder: 'gpt-5.4' },
     anthropic: { label: 'Anthropic', keyPlaceholder: 'sk-ant-…', modelPlaceholder: 'claude-sonnet-4-5' },
     openrouter: { label: 'OpenRouter', keyPlaceholder: 'sk-or-…', modelPlaceholder: 'anthropic/claude-sonnet-4-5' },
+    /** Not a key: the owner's ChatGPT plan, signed in to from the Terminal tab (2026-10-30); never offered in the key form. */
+    chatgpt: { label: 'ChatGPT', keyPlaceholder: '', modelPlaceholder: 'gpt-5.5' },
 }
 
 /** A platform instance as people see it: its name, then its id. */

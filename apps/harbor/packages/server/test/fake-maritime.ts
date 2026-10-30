@@ -59,6 +59,8 @@ export class FakeMaritime {
   readonly power: Array<{ agentId: string; action: string }> = [];
   /** Rowboat's credit (2026-10-27), per agent id: the cap that applies, the spend this period, and whether the cap is reached. */
   readonly spend = new Map<string, { limit: number | null; spent: number; reached: boolean }>();
+  /** Agents whose Codex holds a ChatGPT sign-in (2026-10-30): what `codex login status` answers; `codex logout` takes it away. */
+  readonly signIns = new Set<string>();
   /** End users by external id, with what was last put and whether a policy was set. */
   readonly endUsers = new Map<string, { body: Record<string, unknown>; policy?: Record<string, unknown>; agentId?: string }>();
   /** What the next submitted turn does (a one-line Hermes answer by default). */
@@ -378,7 +380,7 @@ export class FakeMaritime {
         script,
         files: {
           out: script.match(/> '([^']+\.jsonl)'/)?.[1],
-          err: script.match(/2> '([^']+\.err)'/)?.[1],
+          err: script.match(/2>>? '([^']+\.err)'/)?.[1],
           last: script.match(/-o '([^']+)'/)?.[1],
           prompt: script.match(/(?:--query-file|cat) '([^']+\.prompt)'/)?.[1],
         },
@@ -389,7 +391,16 @@ export class FakeMaritime {
         // Not a turn: a command from the page, or a readiness check. It ran, and said what it echoed.
         const echoed = script.match(/echo ([A-Za-z0-9_-]+)/)?.[1] ?? '';
         const failed = /\bfalse\b|exit 1/.test(script);
-        Object.assign(execution, { status: failed ? 'failed' : 'completed', exitCode: failed ? 1 : 0, stdout: echoed ? `${echoed}\n` : `ran: ${script}\n`, stderr: '' });
+        if (/codex login status/.test(script)) {
+          // Codex's own words on its sign-in (2026-10-30).
+          const signedIn = this.signIns.has(agentId!);
+          Object.assign(execution, { status: 'completed', exitCode: signedIn ? 0 : 1, stdout: signedIn ? 'Logged in using ChatGPT\n' : 'Not logged in\n', stderr: '' });
+        } else if (/codex logout/.test(script)) {
+          this.signIns.delete(agentId!);
+          Object.assign(execution, { status: 'completed', exitCode: 0, stdout: 'Successfully logged out\n', stderr: '' });
+        } else {
+          Object.assign(execution, { status: failed ? 'failed' : 'completed', exitCode: failed ? 1 : 0, stdout: echoed ? `${echoed}\n` : `ran: ${script}\n`, stderr: '' });
+        }
         const { executionId, status, exitCode, stdout, stderr } = execution;
         return send(200, body?.detached ? { executionId, status: 'running' } : { executionId, status, exitCode, stdout, stderr });
       }

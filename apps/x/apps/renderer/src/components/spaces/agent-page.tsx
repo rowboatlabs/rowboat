@@ -223,7 +223,20 @@ export function AgentPage({ org, listing, isAdmin, onChanged }: {
         })
     }
 
-    if (hosting && ready && canManage) tabs.push(...vmTabs({ orgId: org.id, agent, hermes, state: hostingState }))
+    // The Terminal is where a Codex's owner signs in to their ChatGPT plan (2026-10-30): Harbor is asked when a session ends, or on the screen's own button.
+    const signIn =
+        hosting && ready && canManage && agent.agentKind === 'codex' && hosting.llm?.provider !== 'chatgpt'
+            ? async () => {
+                  const found = await window.ipc.invoke('spaces:checkHostingSignIn', { orgId: org.id, agentId: agent.id })
+                  if (found.signedIn) {
+                      hostingState.setSpend(undefined)
+                      toast(`${agent.displayName} now runs on your ChatGPT plan`, 'success')
+                      await onChanged()
+                  }
+                  return found.signedIn
+              }
+            : undefined
+    if (hosting && ready && canManage) tabs.push(...vmTabs({ orgId: org.id, agent, hermes, state: hostingState, ...(signIn ? { signIn } : {}) }))
 
     if (setup.alerts) {
         tabs.push({
@@ -249,6 +262,7 @@ export function AgentPage({ org, listing, isAdmin, onChanged }: {
             />,
         )
     }
+    if (hosting && ready && canManage && hosting.llm?.provider === 'chatgpt') danger.push(<SignOutRow key="sign-out" orgId={org.id} agent={agent} onChanged={onChanged} />)
     if (hosting && canManage && !gone) danger.push(<DeleteAgentRow key="agent" orgId={org.id} agent={agent} onChanged={onChanged} />)
     if (danger.length > 0) {
         tabs.push({
@@ -308,12 +322,12 @@ function AccessSection({ orgId, agent, canSwitch, onChanged }: { orgId: string; 
 }
 
 /** The VM's tabs on a ready managed agent's page: one per part of the machine, Skills and Automations for Hermes only. */
-function vmTabs({ orgId, agent, hermes, state }: { orgId: string; agent: spaces.Member; hermes: boolean; state: HostingState }): AgentTab[] {
+function vmTabs({ orgId, agent, hermes, state, signIn }: { orgId: string; agent: spaces.Member; hermes: boolean; state: HostingState; signIn?: () => Promise<boolean> }): AgentTab[] {
     const agentId = agent.id
     const tabs: AgentTab[] = [
         { id: 'environment', label: 'Environment', icon: <SlidersHorizontal />, count: state.env?.length, content: <EnvScreen orgId={orgId} agentId={agentId} state={state} /> },
         { id: 'commands', label: 'Commands', icon: <Terminal />, content: <CommandsScreen orgId={orgId} agentId={agentId} /> },
-        { id: 'terminal', label: 'Terminal', icon: <SquareTerminal />, content: <TerminalScreen orgId={orgId} agentId={agentId} agentName={agent.displayName} /> },
+        { id: 'terminal', label: 'Terminal', icon: <SquareTerminal />, content: <TerminalScreen orgId={orgId} agentId={agentId} agentName={agent.displayName} {...(signIn ? { signIn } : {})} /> },
         { id: 'logs', label: 'Logs', icon: <ScrollText />, content: <LogsScreen orgId={orgId} agentId={agentId} /> },
         { id: 'files', label: 'Files', icon: <Folder />, content: <FilesScreen key={state.filesEpoch} orgId={orgId} agentId={agentId} home={HOME[agent.agentKind ?? ''] ?? '/'} /> },
     ]
@@ -402,11 +416,16 @@ function FundingBlock({ orgId, agent, hosting, state, canManage, onChanged }: {
 }) {
     const kind = agent.agentKind ?? ''
     const providers = LLM_PROVIDERS_FOR_KIND[kind] ?? []
+    // A ChatGPT sign-in (2026-10-30): Codex's owner makes it on the Terminal tab, and Harbor finds it when asked.
+    const signInKind = kind === 'codex'
+    const llm = hosting.llm
+    const plan = llm?.provider === 'chatgpt'
     const [editing, setEditing] = useState(false)
-    const [provider, setProvider] = useState<spaces.LlmProvider>(hosting.llm?.provider ?? providers[0] ?? 'openai')
+    const [provider, setProvider] = useState<spaces.LlmProvider>(llm && llm.provider !== 'chatgpt' ? llm.provider : (providers[0] ?? 'openai'))
     const [apiKey, setApiKey] = useState('')
-    const [model, setModel] = useState(hosting.llm?.model ?? '')
+    const [model, setModel] = useState(llm?.model ?? '')
     const [busy, setBusy] = useState(false)
+    const [checking, setChecking] = useState(false)
     const ready = hosting.status === 'ready'
     const closed = hosting.funding === 'trial' ? hosting.trial?.closedReason : undefined
     const spend = state.spend
@@ -429,8 +448,34 @@ function FundingBlock({ orgId, agent, hosting, state, canManage, onChanged }: {
         }
     }
 
+    const checkSignIn = async () => {
+        if (checking) return
+        setChecking(true)
+        try {
+            const found = await window.ipc.invoke('spaces:checkHostingSignIn', { orgId, agentId: agent.id })
+            if (found.signedIn) {
+                state.setSpend(undefined)
+                toast(`${agent.displayName} now runs on your ChatGPT plan`, 'success')
+                await onChanged()
+            } else {
+                toast(`No ChatGPT sign-in on ${agent.displayName}'s VM yet. Run codex login --device-auth on the Terminal tab first.`, 'error')
+            }
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not check the sign-in', 'error')
+        } finally {
+            setChecking(false)
+        }
+    }
+
+    const checkButton = canManage && !editing && signInKind && !plan && (
+        <Button size="sm" variant="outline" disabled={!ready || checking} onClick={() => void checkSignIn()}>
+            {checking && <Loader2 className="size-3.5 animate-spin" />}
+            Check sign-in
+        </Button>
+    )
+
     const form = editing && (
-        <FormCard title={hosting.funding === 'own' ? 'Replace the key' : 'Your API key'} onSubmit={() => void save()}>
+        <FormCard title={llm && !plan ? 'Replace the key' : 'Your API key'} onSubmit={() => void save()}>
             <div className="flex flex-wrap items-center gap-1.5">
                 {providers.length > 1 ? (
                     <select aria-label="Provider" value={provider} disabled={busy} onChange={(e) => setProvider(e.target.value as spaces.LlmProvider)} className="h-8 rounded-md border border-border bg-background px-2 text-xs">
@@ -451,24 +496,36 @@ function FundingBlock({ orgId, agent, hosting, state, canManage, onChanged }: {
                     Cancel
                 </Button>
             </div>
-            <p className="text-[11px] text-muted-foreground">The key goes to {agent.displayName}'s environment on Maritime and nowhere else; Rowboat keeps its last characters. {hosting.funding === 'trial' ? 'The trial ends the moment it is saved.' : ''}</p>
+            <p className="text-[11px] text-muted-foreground">
+                The key goes to {agent.displayName}'s environment on Maritime and nowhere else; Rowboat keeps its last characters.{' '}
+                {hosting.funding === 'trial' ? 'The trial ends the moment it is saved.' : plan ? `${agent.displayName} is signed out of ChatGPT first; the key is what it runs on from then on.` : ''}
+            </p>
         </FormCard>
     )
 
     if (hosting.funding === 'own') {
-        const llm = hosting.llm
         return (
             <div role="group" aria-label="Model access" className="flex flex-col gap-2">
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-border p-3">
+                <div className={`flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border p-3 ${llm ? 'border-border' : 'border-destructive/40 bg-destructive/5'}`}>
                     <div className="min-w-0 flex-1 basis-56">
-                        <p className="text-sm font-semibold text-foreground">Runs on your {llm ? LLM_PROVIDER_INFO[llm.provider].label : ''} key{llm?.keyHint ? ` ${llm.keyHint}` : ''}</p>
-                        <p className="text-[11px] text-muted-foreground">{llm?.model ? `Model ${llm.model}. ` : ''}You pay the provider; Rowboat pays for the machine.</p>
+                        <p className="text-sm font-semibold text-foreground">
+                            {plan ? 'Runs on your ChatGPT plan' : llm ? `Runs on your ${LLM_PROVIDER_INFO[llm.provider].label} key${llm.keyHint ? ` ${llm.keyHint}` : ''}` : 'No model access'}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground">
+                            {plan
+                                ? 'Signed in from the Terminal tab. Your plan covers the model; Rowboat pays for the machine.'
+                                : llm
+                                  ? `${llm.model ? `Model ${llm.model}. ` : ''}You pay the provider; Rowboat pays for the machine.`
+                                  : `${agent.displayName} answers nothing until you add your own API key${signInKind ? ' or sign in with ChatGPT from the Terminal tab' : ''}.`}
+                        </p>
                     </div>
+                    {checkButton}
                     {canManage && !editing && (
-                        <Button size="sm" variant="outline" disabled={!ready} onClick={() => setEditing(true)}>
-                            Replace key
+                        <Button size="sm" variant={llm ? 'outline' : 'default'} disabled={!ready} onClick={() => setEditing(true)}>
+                            {plan ? 'Use a key instead' : llm ? 'Replace key' : 'Add your API key'}
                         </Button>
                     )}
+                    {!canManage && !llm && <Tag tone="warn">owner needed</Tag>}
                 </div>
                 {form}
             </div>
@@ -484,8 +541,8 @@ function FundingBlock({ orgId, agent, hosting, state, canManage, onChanged }: {
                     <p className="text-sm font-semibold text-foreground">{closed === 'exhausted' ? 'Trial credit used up' : closed === 'expired' ? 'Trial ended' : "On Rowboat's trial credit"}</p>
                     <p className="text-[11px] text-muted-foreground">
                         {closed
-                            ? `${agent.displayName} answers nothing until you add your own API key.`
-                            : `${spend ? `${money(spend.spentCents)}${limit ? ` of ${money(limit)}` : ''} used this month. ` : ''}Ends ${when(hosting.trial?.endsAt)}, or the moment you add your own key. There to try ${agent.displayName}; it runs on your key from then on.`}
+                            ? `${agent.displayName} answers nothing until you add your own API key${signInKind ? ', or sign in with ChatGPT from the Terminal tab and check here' : ''}.`
+                            : `${spend ? `${money(spend.spentCents)}${limit ? ` of ${money(limit)}` : ''} used this month. ` : ''}Ends ${when(hosting.trial?.endsAt)}, or the moment you add your own key${signInKind ? ' or sign in with ChatGPT from the Terminal tab' : ''}. There to try ${agent.displayName}; it runs on your ${signInKind ? 'key or plan' : 'key'} from then on.`}
                     </p>
                     {pct !== undefined && !closed && (
                         <div role="progressbar" aria-label="Trial credit used" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} className="mt-1.5 h-1.5 w-full max-w-64 overflow-hidden rounded bg-muted">
@@ -493,6 +550,7 @@ function FundingBlock({ orgId, agent, hosting, state, canManage, onChanged }: {
                         </div>
                     )}
                 </div>
+                {checkButton}
                 {canManage && !editing && (
                     <Button size="sm" disabled={!ready} onClick={() => setEditing(true)}>
                         <KeyRound className="size-3.5" /> Add your API key
@@ -502,6 +560,29 @@ function FundingBlock({ orgId, agent, hosting, state, canManage, onChanged }: {
             </div>
             {form}
         </div>
+    )
+}
+
+/** Sign a Codex out of its owner's ChatGPT plan, on the Danger zone: it answers nothing until a key or a new sign-in. */
+function SignOutRow({ orgId, agent, onChanged }: { orgId: string; agent: spaces.Member; onChanged: () => Promise<void> }) {
+    const [busy, setBusy] = useState(false)
+    const signOut = async () => {
+        if (busy) return
+        setBusy(true)
+        try {
+            await window.ipc.invoke('spaces:revokeHostingSignIn', { orgId, agentId: agent.id })
+            toast(`${agent.displayName} is signed out of ChatGPT`, 'success')
+            await onChanged()
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not sign out', 'error')
+        } finally {
+            setBusy(false)
+        }
+    }
+    return (
+        <DangerRow title="Sign out of ChatGPT" note={`Runs codex logout on the VM. ${agent.displayName} answers nothing until you sign in again from the Terminal tab or add an API key.`}>
+            <ConfirmButton label="Sign out" confirmLabel="Confirm sign out" busy={busy} onConfirm={() => void signOut()} />
+        </DangerRow>
     )
 }
 

@@ -262,7 +262,8 @@ export type HostingStatus = z.infer<typeof HostingStatus>;
  */
 export const HostingFunding = z.enum(['trial', 'own']);
 export type HostingFunding = z.infer<typeof HostingFunding>;
-export const LlmProvider = z.enum(['openai', 'anthropic', 'openrouter']);
+/** Where an agent's model access is from: a provider its owner holds a key for, or `chatgpt`, the ChatGPT plan its owner signed Codex in to from the Terminal (2026-10-30; no key, so `keyHint` is empty). */
+export const LlmProvider = z.enum(['openai', 'anthropic', 'openrouter', 'chatgpt']);
 export type LlmProvider = z.infer<typeof LlmProvider>;
 /** The providers each managed kind runs on with its owner's key; the first is the one offered first. */
 export const LLM_PROVIDERS: Readonly<Record<string, readonly LlmProvider[]>> = { hermes: ['openai', 'anthropic', 'openrouter'], codex: ['openai'], 'claude-code': ['anthropic'] };
@@ -270,12 +271,12 @@ export const HostingTrial = z.object({
   /** When the trial ends by time, whatever is left of its credit. */
   endsAt: z.iso.datetime(),
   closedAt: z.iso.datetime().optional(),
-  closedReason: z.enum(['exhausted', 'expired', 'own_key']).optional(),
+  closedReason: z.enum(['exhausted', 'expired', 'own_key', 'sign_in']).optional(),
 });
 export type HostingTrial = z.infer<typeof HostingTrial>;
 export const HostingLlm = z.object({
   provider: LlmProvider,
-  /** The key's last characters: enough to recognise it, never to use it. */
+  /** The key's last characters: enough to recognise it, never to use it; empty for a sign-in. */
   keyHint: z.string().max(16),
   /** The runtime's default model from then on, when the owner named one. */
   model: z.string().max(128).optional(),

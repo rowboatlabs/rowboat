@@ -2,12 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { RefreshCw } from 'lucide-react'
+import { Loader2, RefreshCw } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import { fail } from '@/components/spaces/agent-hosting-state'
 import { ScreenHeader, Tag } from '@/components/spaces/agent-tabs'
 import { useTheme } from '@/contexts/theme-context'
+import { toast } from '@/lib/toast'
 
 // The VM's shell, live (2026-10-30). Harbor mints a short-lived console token for
 // the agent's own end user on Maritime, and the browser opens Maritime's terminal
@@ -16,6 +17,10 @@ import { useTheme } from '@/contexts/theme-context'
 // down answered with `pong`). Keystrokes go down as the bytes themselves.
 // Nothing of the session passes through Harbor, so the org's edge never sees
 // what is typed, and a dropped socket is reopened with a new token.
+//
+// A Codex's owner signs in to their ChatGPT plan here (2026-10-30), which
+// Harbor cannot see happen: given `signIn`, the page's own check, the screen
+// runs it once a connected session ends, and on its button.
 
 type Link = 'connecting' | 'connected' | 'disconnected'
 
@@ -39,7 +44,7 @@ function control(text: string): { type?: string; data?: string } | null {
     }
 }
 
-export function TerminalScreen({ orgId, agentId, agentName }: { orgId: string; agentId: string; agentName: string }) {
+export function TerminalScreen({ orgId, agentId, agentName, signIn }: { orgId: string; agentId: string; agentName: string; signIn?: () => Promise<boolean> }) {
     const { resolvedTheme } = useTheme()
     const containerRef = useRef<HTMLDivElement>(null)
     const termRef = useRef<Terminal | null>(null)
@@ -47,6 +52,22 @@ export function TerminalScreen({ orgId, agentId, agentName }: { orgId: string; a
     const wsRef = useRef<WebSocket | null>(null)
     const [link, setLink] = useState<Link>('connecting')
     const [session, setSession] = useState(0)
+    const [checking, setChecking] = useState(false)
+    const signInRef = useRef(signIn)
+    useEffect(() => {
+        signInRef.current = signIn
+    }, [signIn])
+
+    const checkSignIn = () => {
+        if (!signIn || checking) return
+        setChecking(true)
+        signIn()
+            .then((found) => {
+                if (!found) toast(`No ChatGPT sign-in on ${agentName}'s VM yet. Run codex login --device-auth here first.`, 'error')
+            })
+            .catch((err: unknown) => fail(err, 'Could not check the sign-in'))
+            .finally(() => setChecking(false))
+    }
 
     // The terminal lives as long as the screen; sessions come and go beneath it.
     useEffect(() => {
@@ -101,6 +122,14 @@ export function TerminalScreen({ orgId, agentId, agentName }: { orgId: string; a
         if (!term) return
         let ws: WebSocket | null = null
         let gone = false
+        let connected = false
+        let asked = false
+        // Once a connected session ends, the owner may have signed in: the page's check, if any, runs once.
+        const afterSession = () => {
+            if (!connected || asked) return
+            asked = true
+            void signInRef.current?.().catch(() => undefined)
+        }
         setLink('connecting')
         void (async () => {
             let opened: spaces.HostingConsole
@@ -118,6 +147,7 @@ export function TerminalScreen({ orgId, agentId, agentName }: { orgId: string; a
             wsRef.current = ws
             ws.onopen = () => {
                 if (gone) return
+                connected = true
                 setLink('connected')
                 fitRef.current?.fit()
                 sendResize(ws, term)
@@ -143,6 +173,7 @@ export function TerminalScreen({ orgId, agentId, agentName }: { orgId: string; a
                 wsRef.current = null
                 setLink('disconnected')
                 term.write(`\r\n\x1b[2m[disconnected${event.reason ? `: ${event.reason}` : ''}]\x1b[0m\r\n`)
+                afterSession()
             }
         })()
         return () => {
@@ -152,23 +183,34 @@ export function TerminalScreen({ orgId, agentId, agentName }: { orgId: string; a
                 ws.onclose = null
                 ws.close()
             }
+            afterSession()
         }
     }, [orgId, agentId, session])
 
     const status = link === 'connecting' ? 'Opening a console…' : link === 'connected' ? 'Connected. Leaving the page ends the session.' : 'Disconnected.'
     return (
         <>
-            <ScreenHeader title="Terminal" note={`A live shell on ${agentName}'s VM, as root, over Maritime's own terminal socket. Interactive logins such as codex login --device-auth work here.`} />
+            <ScreenHeader
+                title="Terminal"
+                note={`A live shell on ${agentName}'s VM, as root, over Maritime's own terminal socket. Interactive logins such as codex login --device-auth work here.${signIn ? ' Once signed in, press Check sign-in, or leave it to run when this session ends.' : ''}`}
+            />
             <div className="flex items-center gap-2">
                 <Tag tone={link === 'connected' ? 'accent' : link === 'connecting' ? 'muted' : 'warn'}>{link}</Tag>
                 <p role="status" className="text-[11px] text-muted-foreground">
                     {status}
                 </p>
-                {link === 'disconnected' && (
-                    <Button type="button" variant="outline" size="sm" className="ml-auto" onClick={() => setSession((s) => s + 1)}>
-                        <RefreshCw className="size-3" /> Reconnect
-                    </Button>
-                )}
+                <div className="ml-auto flex items-center gap-1.5">
+                    {signIn && (
+                        <Button type="button" variant="outline" size="sm" disabled={checking} onClick={checkSignIn}>
+                            {checking && <Loader2 className="size-3 animate-spin" />} Check sign-in
+                        </Button>
+                    )}
+                    {link === 'disconnected' && (
+                        <Button type="button" variant="outline" size="sm" onClick={() => setSession((s) => s + 1)}>
+                            <RefreshCw className="size-3" /> Reconnect
+                        </Button>
+                    )}
+                </div>
             </div>
             <div
                 ref={containerRef}
