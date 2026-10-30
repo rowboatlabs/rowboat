@@ -15,6 +15,7 @@ import { avatarColorClass, initials, orgMonogram } from '@/lib/spaces-presentati
 import { toast } from '@/lib/toast'
 import { copySpacesLink } from '@/lib/spaces-copy-link'
 import { MemberAdminActions } from '@/components/spaces/member-admin'
+import { isOthersPersonalAgent } from '@/lib/spaces-direct'
 
 // Shared atoms for the Spaces surfaces: identity visuals, the segmented
 // control, and the @rowboat trigger. The server dialogs live in server-dialogs.tsx.
@@ -126,6 +127,8 @@ export function MemberProfilePopover({ id, children }: { id: string; children: R
     const name = member?.displayName ?? names.get(id) ?? id
     const [editing, setEditing] = useState(false)
     const isHere = here.has(id)
+    // Someone else's personal agent answers its owner only (2026-10-30): no Mention or Message for it.
+    const reachable = !member || !isOthersPersonalAgent(member, selfId ?? undefined)
     const copyId = () => {
         void navigator.clipboard.writeText(id).then(
             () => toast('Member id copied', 'success'),
@@ -180,7 +183,7 @@ export function MemberProfilePopover({ id, children }: { id: string; children: R
                 </div>
                 <div className="flex flex-col gap-2 text-sm">
                     {id === selfId && refs && member?.kind !== 'agent' && <button type="button" className="rounded-md border px-3 py-2 text-left font-medium hover:bg-accent" onClick={() => { setOpen(false); setEditing(true) }}>Edit profile</button>}
-                    {id !== selfId && message && (
+                    {id !== selfId && reachable && message && (
                         <button
                             type="button"
                             onClick={message}
@@ -191,7 +194,7 @@ export function MemberProfilePopover({ id, children }: { id: string; children: R
                             <span className="truncate">Message</span>
                         </button>
                     )}
-                    {id !== selfId && (
+                    {id !== selfId && reachable && (
                         <button
                             type="button"
                             onClick={mention}

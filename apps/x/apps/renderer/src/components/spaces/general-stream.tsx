@@ -49,7 +49,8 @@ import { toast } from '@/lib/toast'
 import { toast as notify } from 'sonner'
 import * as analytics from '@/lib/analytics'
 import { containsRowboatAddress } from '@/lib/spaces-mentions'
-import { directAvatarId, isSelfDirect } from '@/lib/spaces-direct'
+import { directAvatarId, isOthersPersonalAgent, isSelfDirect } from '@/lib/spaces-direct'
+import { useSpaceMembers } from '@/hooks/use-space-members'
 
 // The space's one stream: ROOT messages in order; each message's flat thread
 // lives behind its reply chip (annotation model — replying creates nothing,
@@ -505,6 +506,9 @@ export function GeneralStream({
     // stripped, so tagging never re-asks Jev. Every gesture is logged: Jev
     // learns nothing from them, but the threshold can.
     const tagSuggestions = useTagSuggestionsEnabled()
+    // A tag is a mention, so Auto never offers someone else's personal agent (2026-10-30), as Jev doesn't.
+    const roster = useSpaceMembers(org.id, space.id)
+    const untaggable = useMemo(() => new Set(roster.filter((m) => isOthersPersonalAgent(m, org.memberId)).map((m) => m.id)), [roster, org.memberId])
     const [currentDraft, setCurrentDraft] = useState('')
     const [declined, setDeclined] = useState<ReadonlySet<string>>(() => new Set())
     const HERE_TOKEN = mentionToken({ kind: 'here' })
@@ -587,7 +591,7 @@ export function GeneralStream({
                 draft: body,
                 ...(authorName ? { authorName } : {}),
                 candidates: collectRouteCandidates(org.id, space.id, stream, memberNames, spaceNames),
-                members: [...memberNames].map(([id, name]) => ({ id, name })),
+                members: [...memberNames].filter(([id]) => !untaggable.has(id)).map(([id, name]) => ({ id, name })),
                 senderId: org.memberId,
                 // A direct space has nobody to tag.
                 suggestTags: tagSuggestions && space.kind !== 'direct',

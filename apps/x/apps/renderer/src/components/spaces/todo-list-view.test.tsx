@@ -90,6 +90,28 @@ describe('todo list files', () => {
         expect(await screen.findByText('Their new item')).toBeInTheDocument()
     })
 
+    it('offers no one else’s personal agent as an assignee, since assigning mentions it (2026-10-30)', async () => {
+        const roster = [
+            { id: 'harsh', displayName: 'Harsh', role: 'member', kind: 'human' },
+            { id: 'theirs', displayName: 'Their Claude', role: 'member', kind: 'agent', personal: true, ownerId: 'harsh' },
+            { id: 'mine', displayName: 'My Claude', role: 'member', kind: 'agent', personal: true, ownerId: 'me' },
+        ]
+        invoke.mockImplementation(async (channel) => {
+            if (channel === 'spaces:readAsset') return { ...asset }
+            if (channel === 'spaces:listMembers') return { members: roster }
+            throw new Error(`Unexpected channel ${channel}`)
+        })
+        // The picker is cmdk, which measures its list.
+        vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} })
+        Element.prototype.scrollIntoView ??= () => {}
+        render(<FileColumn org={{ ...org, memberId: 'me' }} space={{ ...space, id: 'space-assign' }} assetId="list" memberNames={new Map()} refreshTick={0} onChanged={vi.fn()} />)
+        await screen.findByRole('heading', { name: 'Backlog' })
+        fireEvent.click(screen.getAllByRole('button', { name: 'Assign' })[0]!)
+        expect(await screen.findByText('My Claude')).toBeInTheDocument()
+        expect(screen.getByText('Harsh')).toBeInTheDocument()
+        expect(screen.queryByText('Their Claude')).not.toBeInTheDocument()
+    })
+
     it('remembers the board view per reader, without touching the file', async () => {
         render(column())
         fireEvent.click(await screen.findByRole('radio', { name: /Board/ }))

@@ -2,6 +2,7 @@ import { SpaceAccessContext } from '@/lib/spaces-access'
 import { markStreamRead, markThreadRead } from '@/lib/spaces-read-state'
 import { postInlineReply, postStreamMessage } from '@/lib/spaces-post'
 import { setStreamView } from '@/lib/spaces-stream-view'
+import { setAutoRouteMode } from '@/lib/spaces-auto-route'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { spaces } from '@x/shared'
@@ -65,7 +66,7 @@ vi.mock('@/hooks/use-space-chat', () => ({
     updateStreamMessage: vi.fn(),
     usePresenceSender: () => ({ onType: vi.fn() }),
 }))
-vi.mock('@/hooks/use-spaces', () => ({ useSpaceNames: () => new Map() }))
+vi.mock('@/hooks/use-spaces', () => ({ useSpaceNames: () => new Map(), getSpaceFeed: () => ({ topics: [] }) }))
 vi.mock('@/lib/spaces-compose', () => ({ subscribeComposeInsert: () => () => {} }))
 vi.mock('@/lib/spaces-read-state', () => ({
     getSpaceReadState: () => null,
@@ -492,3 +493,31 @@ describe('inline view (2026-10-25)', () => {
     })
 })
 
+describe('GeneralStream Auto tags', () => {
+    it('never offers someone else’s personal agent to tag, and still offers your own (2026-10-30)', async () => {
+        const roster = [
+            { id: 'harsh', displayName: 'Harsh', role: 'member', kind: 'human' },
+            { id: 'theirs', displayName: 'Their Claude', role: 'member', kind: 'agent', personal: true, ownerId: 'harsh' },
+            { id: 'mine', displayName: 'My Claude', role: 'member', kind: 'agent', personal: true, ownerId: 'me' },
+        ]
+        const invoke = vi.fn<(channel: string, args?: unknown) => Promise<unknown>>(async (channel) => {
+            if (channel === 'typesafe:isConfigured') return { configured: true }
+            if (channel === 'spaces:listMembers') return { members: roster }
+            if (channel === 'spaces:autoRoute') return { destination: 'stream', reason: 'new_subject' }
+            return {}
+        })
+        Object.defineProperty(window, 'ipc', { configurable: true, value: { invoke } })
+        setAutoRouteMode('preview')
+        window.dispatchEvent(new Event('focus'))
+        const tagSpace = { ...space, id: 'space-tags' }
+        const names = new Map(roster.map((m) => [m.id, m.displayName]))
+        render(<GeneralStream org={org} space={tagSpace} stream={streamOf(range(1, 3))} presence={presence} memberNames={names} onOpenThread={vi.fn()} />)
+        await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:listMembers', expect.objectContaining({ spaceId: 'space-tags' })))
+        await act(async () => {})
+        fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+        await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:autoRoute', expect.anything()))
+        const request = invoke.mock.calls.find(([channel]) => channel === 'spaces:autoRoute')![1] as { members: { id: string }[] }
+        expect(request.members.map((m) => m.id)).toEqual(['harsh', 'mine'])
+        setAutoRouteMode('off')
+    })
+})
