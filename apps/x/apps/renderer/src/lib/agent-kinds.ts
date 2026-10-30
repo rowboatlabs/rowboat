@@ -121,6 +121,22 @@ export function kindInfo(kind: string | undefined): { label: string; logo?: Logo
     return (kind && KINDS[kind]) || { label: 'Agent' }
 }
 
+/**
+ * Who may open an agent's page — the one the Agents page and the DM's menu
+ * both open (2026-10-30). Its owner gets its setup and keys; an admin gets
+ * its keys, to revoke them. Nobody else: `listAgents` (api.ts) answers with
+ * the agents the caller manages, so another member's page would come back
+ * empty. An agent Harbor itself is (Ro) has no keys and no page.
+ */
+export function canManageAgent(member: { kind?: string; agentConnection?: string }, who: { mine: boolean; isAdmin: boolean }): boolean {
+    return member.kind === 'agent' && member.agentConnection !== BUILT_IN_CONNECTION && (who.mine || who.isAdmin)
+}
+
+/** "Manage bot" or "Manage agent": a bot runs a service's commands, and the app says so (2026-10-03). */
+export function manageAgentLabel(kind: string | undefined): string {
+    return isBot(kind) ? 'Manage bot' : 'Manage agent'
+}
+
 /** "Hermes", "Claude Code · via Replicas", "PostHog bot", or "Agent". */
 export function agentLabel(kind: string | undefined, connection: string | undefined): string {
     const platform = connection ? PLATFORMS[connection] : undefined
