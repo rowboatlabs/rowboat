@@ -110,6 +110,16 @@ it('opens a DM with another member from the profile panel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Message' }))
     expect(openDirect).toHaveBeenCalledWith('profile-org', 'other')
 })
+it('offers no Mention or Message for someone else’s personal agent, and both to its owner (2026-10-30)', () => {
+    const agent = { id: 'claude', displayName: 'Claude Code', role: 'member', kind: 'agent', agentConnection: 'local', personal: true, ownerId: 'owner' } as spaces.Member
+    profile(agent, 'me')
+    expect(screen.queryByRole('button', { name: 'Mention' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Message' })).not.toBeInTheDocument()
+    cleanup()
+    profile(agent, 'owner')
+    expect(screen.getByRole('button', { name: 'Mention' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Message' })).toBeInTheDocument()
+})
 it('loads photos through the selected org and falls back to initials on decode failure', async () => {
     const { container } = render(<MemberAvatar id="me" name="Harsh V" orgId="avatar-org" avatarUrl={'https://org/v1/images/' + 'b'.repeat(64)} />)
     await waitFor(() => expect(container.querySelector('img')).toBeTruthy())

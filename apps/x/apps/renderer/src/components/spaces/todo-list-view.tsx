@@ -3,7 +3,7 @@ import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Columns3, GripVertical, More
 import { invokeSpace } from '@/lib/spaces-invoke'
 import { canActInSpace, useSpaceAccess } from '@/lib/spaces-access'
 import { useSpaceMembers } from '@/hooks/use-space-members'
-import { isDeparted } from '@/lib/spaces-direct'
+import { isDeparted, isOthersPersonalAgent } from '@/lib/spaces-direct'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 import { MemberAvatar } from '@/components/spaces/atoms'
@@ -37,9 +37,11 @@ function viewKey(orgId: string, spaceId: string, assetId: string): string {
  * succession chain. A clean merge adopts the merged text; a conflict re-reads
  * and applies the same action to what is there now.
  */
-export function TodoListView({ orgId, spaceId, assetId, content, version, onSaved }: {
+export function TodoListView({ orgId, spaceId, selfMemberId, assetId, content, version, onSaved }: {
     orgId: string
     spaceId: string
+    /** Who is reading: their own personal agent may be assigned, anyone else's not. */
+    selfMemberId: string
     assetId: string
     content: string
     version: number
@@ -131,7 +133,8 @@ export function TodoListView({ orgId, spaceId, assetId, content, version, onSave
         () => pending.reduce<TodoDoc>((d, edit) => edit(d) ?? d, parseTodoList(server.content)),
         [server.content, pending],
     )
-    const roster = useMemo(() => members.filter((m) => !isDeparted(m)), [members])
+    // An assignee is a mention, so someone else's personal agent is left out (2026-10-30).
+    const roster = useMemo(() => members.filter((m) => !isDeparted(m) && !isOthersPersonalAgent(m, selfMemberId)), [members, selfMemberId])
     const names = useMemo(() => new Map(members.map((m) => [m.id, m.displayName])), [members])
 
     // Drag and drop is the browser's own (HTML5): an item carries its ref,

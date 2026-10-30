@@ -903,6 +903,7 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
                             key={`${org.id}:${space.id}:${assetId}`}
                             orgId={org.id}
                             spaceId={space.id}
+                            selfMemberId={org.memberId}
                             assetId={assetId}
                             content={asset.content}
                             version={asset.version}
