@@ -10,7 +10,7 @@ import { MemberAvatar } from '@/components/spaces/atoms'
 import { RemoveFromOrgDialog } from '@/components/spaces/member-admin'
 import { isAgentOffline, refreshOrgRoster, useAgentsOnline, useOrgRoster, useSpaceRosters } from '@/hooks/use-space-members'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
-import { BUILT_IN_CONNECTION, agentLabel, kindInfo } from '@/lib/agent-kinds'
+import { BUILT_IN_CONNECTION, agentLabel, canManageAgent, kindInfo } from '@/lib/agent-kinds'
 import { initials } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
@@ -218,7 +218,7 @@ function AgentCard({ orgId, agent, owner, spaceNames, isAdmin, onOpenSettings, o
     const yours = owner === 'you'
     const builtIn = agent.agentConnection === BUILT_IN_CONNECTION
     // The owner's settings, or an admin's off switch (revoking keys); Ro has no keys.
-    const canOpen = !builtIn && (yours || isAdmin)
+    const canOpen = canManageAgent(agent, { mine: yours, isAdmin })
     const canRemove = isAdmin && !builtIn
     // A local agent whose owner's computer isn't running it (2026-10-28).
     const offline = isAgentOffline(agent, useAgentsOnline(orgId))

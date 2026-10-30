@@ -12,7 +12,7 @@ import { isTodoListPath, NEW_TODO_LIST_CONTENT } from '@/lib/todo-list'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import type { SecondaryRailPeek } from '@/components/secondary-rail'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { Archive, ArchiveRestore, Bookmark, Check, ChevronDown, ChevronLeft, ChevronRight, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Lock, Link as LinkIcon, Loader2, MessagesSquare, PanelLeft, PenTool, Plus, Rows3, Star, Trash2, UserPlus, Users } from 'lucide-react'
+import { Archive, ArchiveRestore, Bookmark, Bot, Check, ChevronDown, ChevronLeft, ChevronRight, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Lock, Link as LinkIcon, Loader2, MessagesSquare, PanelLeft, PenTool, Plus, Rows3, Star, Trash2, UserPlus, Users } from 'lucide-react'
 import { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -20,6 +20,8 @@ import { MemberAvatar, OrgMonogram } from '@/components/spaces/atoms'
 import { openServerDialog } from '@/lib/server-dialog'
 import { isGroupChat, type OrgView } from '@/lib/spaces-navigation'
 import { AgentsView } from '@/components/spaces/agents-view'
+import { AgentsDialog } from '@/components/spaces/agents-dialog'
+import { canManageAgent, manageAgentLabel } from '@/lib/agent-kinds'
 import { BookmarksPanel } from '@/components/spaces/bookmarks'
 import { FileColumn, TrashDialog, UploadFilesDialog } from '@/components/spaces/files-tab'
 import { GeneralStream } from '@/components/spaces/general-stream'
@@ -376,6 +378,18 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     const isSelf = isSelfDirect(space, org.memberId)
     const directOtherId = directAvatarId(space, org.memberId)
     const spaceTitle = isDirect ? directLabel(space, members, org.memberId) : space.name
+    // Manage it from its own DM (2026-10-30): a conversation with an agent is
+    // where you notice it needs a key or a setup step, so the menu opens the
+    // same page the Agents page does, for whoever may open it.
+    const directAgent = useMemo(() => {
+        if (!isDirect || isSelf) return null
+        const other = profiles.find((m) => m.id === directOtherId)
+        // An agent that is gone from the server keeps its DM, but has no page left.
+        if (!other || other.removedAt || other.deactivatedAt) return null
+        if (!canManageAgent(other, { mine: other.ownerId === org.memberId, isAdmin: selfIsAdmin })) return null
+        return other
+    }, [isDirect, isSelf, profiles, directOtherId, org.memberId, selfIsAdmin])
+    const [manageAgentOpen, setManageAgentOpen] = useState(false)
 
     // The artifacts rail: open by default when a thread has artifacts, collapsed
     // when it has none; a per-thread pin remembers a manual toggle.
@@ -1073,6 +1087,11 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                 </div>
                             </div>
                             <div className="spaces-menu-sep" />
+                            {directAgent && (
+                                <button type="button" className="spaces-menu-row" onClick={() => { setTitleMenuOpen(false); setManageAgentOpen(true) }}>
+                                    <Bot /> {manageAgentLabel(directAgent.agentKind)}
+                                </button>
+                            )}
                             <button type="button" className="spaces-menu-row" onClick={() => setTitleMenuView('bookmarks')}>
                                 <Bookmark /> Pinned & saved <ChevronRight className="ml-auto" />
                             </button>
@@ -1423,6 +1442,9 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
             {canAdminSpace && <DeleteSpaceDialog orgId={org.id} space={space} open={deleteOpen} onOpenChange={setDeleteOpen} />}
             {canAdminSpace && <SpaceVisibilityDialog orgId={org.id} orgName={org.name} space={space} open={visibilityOpen} onOpenChange={setVisibilityOpen} />}
             {writable && scheduledOpen && <ScheduledDialog orgId={org.id} spaceId={space.id} onClose={() => setScheduledOpen(false)} />}
+            {directAgent && (
+                <AgentsDialog org={org} open={manageAgentOpen} onOpenChange={setManageAgentOpen} start={{ name: 'agent', agentId: directAgent.id }} />
+            )}
             {writable && !isDirect && (
                 <AddMembersDialog org={org} space={space} members={members} open={addMembersOpen} onOpenChange={setAddMembersOpen} />
             )}
