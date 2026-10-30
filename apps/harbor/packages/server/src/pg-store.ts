@@ -601,11 +601,19 @@ export class PgStore implements Store {
   }
 
   async getOrgSettings(): Promise<OrgSettings> {
-    const rows = await this.sql.query<{ invite_policy: InvitePolicy }>(
-      'select invite_policy from org_settings where org_id = $1',
+    const rows = await this.sql.query<{ invite_policy: InvitePolicy; jev_enabled: boolean }>(
+      'select invite_policy, jev_enabled from org_settings where org_id = $1',
       [this.orgId],
     );
-    return { invitePolicy: rows[0]?.invite_policy ?? 'members' };
+    return { invitePolicy: rows[0]?.invite_policy ?? 'members', jevEnabled: rows[0]?.jev_enabled ?? true };
+  }
+
+  async setJevEnabled(enabled: boolean, by: string, at: string): Promise<void> {
+    await this.sql.query(
+      `insert into org_settings (org_id, jev_enabled, set_by, set_at) values ($1, $2, $3, $4)
+       on conflict (org_id) do update set jev_enabled = excluded.jev_enabled, set_by = excluded.set_by, set_at = excluded.set_at`,
+      [this.orgId, enabled, by, at],
+    );
   }
 
   async setInvitePolicy(policy: InvitePolicy, by: string, at: string): Promise<void> {

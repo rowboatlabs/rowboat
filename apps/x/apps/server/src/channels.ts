@@ -305,6 +305,7 @@ export const RPC_CHANNELS = [
   'spaces:setMemberRole',
   'spaces:getOrgSettings',
   'spaces:setInvitePolicy',
+  'spaces:setJevEnabled',
   'spaces:openDirect',
   'spaces:listMembers',
   'spaces:createInvite',

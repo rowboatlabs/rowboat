@@ -611,6 +611,11 @@ export class SpacesClient {
     return (await this.request('PATCH', routes.updateOrgSettings.path, routes.updateOrgSettings.response, { invitePolicy })).settings;
   }
 
+  /** Turn Ro on or off for the org, admin only (api.ts updateOrgSettings, 2026-10-30). */
+  async setJevEnabled(jevEnabled: boolean): Promise<OrgSettings> {
+    return (await this.request('PATCH', routes.updateOrgSettings.path, routes.updateOrgSettings.response, { jevEnabled })).settings;
+  }
+
   /** The org roster: every member, people and agents, sorted by displayName (api.ts listOrgMembers; org-wide since 2026-09-29). */
   async listOrgMembers(): Promise<Member[]> {
     return (await this.orgRoster()).members;

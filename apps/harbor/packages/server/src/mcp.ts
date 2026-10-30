@@ -215,6 +215,8 @@ async function dispatch(
       return { settings: await service.getOrgSettings(ctx) };
     case 'set_invite_policy':
       return { settings: await service.updateOrgSettings(ctx, { invitePolicy: (args as { invitePolicy: 'members' | 'admins' }).invitePolicy }) };
+    case 'set_jev_enabled':
+      return { settings: await service.updateOrgSettings(ctx, { jevEnabled: (args as { jevEnabled: boolean }).jevEnabled }) };
     case 'add_members': {
       const a = args as { spaceId: string; memberIds: string[] };
       return { memberships: await service.addMembers(ctx, a.spaceId, { memberIds: a.memberIds, ...attribution }) };

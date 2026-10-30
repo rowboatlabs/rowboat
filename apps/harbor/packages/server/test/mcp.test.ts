@@ -89,6 +89,7 @@ describe('agent face (MCP)', () => {
       'search_space',
       'set_default_space',
       'set_invite_policy',
+      'set_jev_enabled',
       'set_member_role',
       'set_space_visibility',
       'stop_invocation',

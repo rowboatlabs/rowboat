@@ -3,7 +3,8 @@ import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Columns3, GripVertical, More
 import { invokeSpace } from '@/lib/spaces-invoke'
 import { canActInSpace, useSpaceAccess } from '@/lib/spaces-access'
 import { useSpaceMembers } from '@/hooks/use-space-members'
-import { isDeparted, isOthersPersonalAgent } from '@/lib/spaces-direct'
+import { isDeparted, isOthersPersonalAgent, isSwitchedOff } from '@/lib/spaces-direct'
+import { useOrgSettings } from '@/hooks/use-org-settings'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 import { MemberAvatar } from '@/components/spaces/atoms'
@@ -133,8 +134,9 @@ export function TodoListView({ orgId, spaceId, selfMemberId, assetId, content, v
         () => pending.reduce<TodoDoc>((d, edit) => edit(d) ?? d, parseTodoList(server.content)),
         [server.content, pending],
     )
-    // An assignee is a mention, so someone else's personal agent is left out (2026-10-30).
-    const roster = useMemo(() => members.filter((m) => !isDeparted(m) && !isOthersPersonalAgent(m, selfMemberId)), [members, selfMemberId])
+    // An assignee is a mention, so someone else's personal agent is left out (2026-10-30), and Ro while it is off.
+    const settings = useOrgSettings(orgId)
+    const roster = useMemo(() => members.filter((m) => !isDeparted(m) && !isOthersPersonalAgent(m, selfMemberId) && !isSwitchedOff(m, settings)), [members, selfMemberId, settings])
     const names = useMemo(() => new Map(members.map((m) => [m.id, m.displayName])), [members])
 
     // Drag and drop is the browser's own (HTML5): an item carries its ref,
