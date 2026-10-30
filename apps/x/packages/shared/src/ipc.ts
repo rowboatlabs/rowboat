@@ -4076,6 +4076,11 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), agentId: z.string(), executionId: z.string() }),
     res: z.object({ execution: z.custom<SpacesTypes.HostingExecution>() }),
   },
+  /** A console into a managed agent's VM (2026-10-30): the platform's terminal socket and a token that opens it for a few minutes. */
+  'spaces:openHostingConsole': {
+    req: z.object({ orgId: z.string(), agentId: z.string() }),
+    res: z.object({ console: z.custom<SpacesTypes.HostingConsole>() }),
+  },
   'spaces:getHostingLogs': {
     req: z.object({ orgId: z.string(), agentId: z.string(), limit: z.number().optional(), before: z.string().optional(), level: z.string().optional() }),
     res: z.object({ logs: z.array(z.custom<SpacesTypes.HostingLogLine>()), nextBefore: z.string().optional() }),

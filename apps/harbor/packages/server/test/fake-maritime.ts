@@ -132,7 +132,7 @@ export class FakeMaritime {
     if (req.headers.authorization !== `Bearer ${GOOD_KEY}`) return send(401, { detail: 'Invalid or expired API key' });
     if (this.refuse && (!this.refuse.paths || this.refuse.paths.test(path))) return send(this.refuse.status, this.refuse.body);
 
-    const endUser = path.match(/^\/api\/v1\/end-users\/([^/]+)(?:\/(agents|policy))?$/);
+    const endUser = path.match(/^\/api\/v1\/end-users\/([^/]+)(?:\/(agents|policy|tokens))?$/);
     if (endUser) {
       const [, externalId, what] = endUser;
       const record = this.endUsers.get(externalId!);
@@ -158,6 +158,15 @@ export class FakeMaritime {
         this.env.set(created.id, new Map(vars.map((v) => [v.key, { value: v.value, isSecret: v.isSecret === true }])));
         this.endUsers.set(externalId!, { ...(record ?? { body: {} }), agentId: created.id });
         return send(201, created);
+      }
+      if (req.method === 'POST' && what === 'tokens') {
+        // A delegated token for the end user's own client (`/docs/sdk/end-users`): one agent, chosen scopes, a short life.
+        if (!record) return send(404, { detail: 'End user not found' });
+        const agentId = typeof body?.agentId === 'string' ? body.agentId : record.agentId;
+        if (!agentId || agentId !== record.agentId) return send(404, { detail: 'Agent not found for this end user' });
+        const scopes = Array.isArray(body?.scopes) ? (body.scopes as string[]) : ['chat'];
+        const ttl = typeof body?.ttlSeconds === 'number' ? body.ttlSeconds : 900;
+        return send(201, { token: `eu_${externalId}_${++this.sequence}`, agentId, scopes, expiresAt: new Date(Date.now() + ttl * 1000).toISOString() });
       }
       if (req.method === 'PUT' && what === 'policy') {
         this.endUsers.set(externalId!, { ...(record ?? { body: {} }), policy: (body?.policy as Record<string, unknown>) ?? {} });

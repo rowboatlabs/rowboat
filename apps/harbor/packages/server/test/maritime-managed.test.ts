@@ -242,6 +242,28 @@ describe('managed Maritime agents', () => {
     expect((await me.get(`/v1/agents/${agent.id}/hosting/commands/nope`)).status).toBe(404);
   });
 
+  it('opens a console into the VM: the platform’s terminal socket and a console-scoped end-user token, for the owner only', async () => {
+    const { agent } = (await org.as('dev-ramnique').post('/v1/agents/managed', { displayName: 'Console', kind: 'codex' })).body as { agent: Member };
+    await org.hostingStatus(agent.id, 'ready');
+    const me = org.as('dev-ramnique');
+    const opened = await me.post(`/v1/agents/${agent.id}/hosting/console`);
+    expect(opened.status).toBe(200);
+    // Minted for this agent's own end user, with the console scope and the fifteen-minute life.
+    const externalUserId = fake.received.filter((r) => r.method === 'POST' && r.path.endsWith('/agents')).at(-1)!.path.split('/')[4]!;
+    const minted = fake.received.filter((r) => r.method === 'POST' && r.path.endsWith('/tokens'));
+    expect(minted).toHaveLength(1);
+    expect(minted[0]!.path).toBe(`/api/v1/end-users/${externalUserId}/tokens`);
+    const agentId = (minted[0]!.body as { agentId: string }).agentId;
+    expect(agentId).toMatch(/^agt-m\d+$/);
+    expect(minted[0]!.body).toEqual({ agentId, scopes: ['console'], ttlSeconds: 900 });
+    expect(opened.body.console).toEqual({ url: `${fake.url.replace(/^http/, 'ws')}/api/agents/${agentId}/terminal`, token: expect.stringMatching(/^eu_/), expiresAt: expect.any(String) });
+    // Each opening is a new token.
+    const again = await me.post(`/v1/agents/${agent.id}/hosting/console`);
+    expect(again.body.console.token).not.toBe(opened.body.console.token);
+    // Harsh is a member, not the owner: no console for him.
+    expect((await org.as('dev-harsh').post(`/v1/agents/${agent.id}/hosting/console`)).status).toBe(403);
+  });
+
   it('reads the VM’s logs, newest first, paged by the platform’s cursor', async () => {
     const { agent } = (await org.as('dev-ramnique').post('/v1/agents/managed', { displayName: 'Logger', kind: 'hermes' })).body as { agent: Member };
     await org.hostingStatus(agent.id, 'ready');

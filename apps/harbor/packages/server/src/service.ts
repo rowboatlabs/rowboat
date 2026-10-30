@@ -257,6 +257,9 @@ export class HarborService {
   cancelHostingCommand(ctx: ActorCtx, agentId: string, executionId: string) {
     return this.hosting.cancel(ctx, agentId, executionId);
   }
+  openHostingConsole(ctx: ActorCtx, agentId: string) {
+    return this.hosting.console(ctx, agentId);
+  }
   getHostingLogs(ctx: ActorCtx, agentId: string, opts: { limit?: number; before?: string; level?: string }) {
     return this.hosting.logs(ctx, agentId, opts);
   }

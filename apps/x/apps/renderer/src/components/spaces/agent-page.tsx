@@ -1,10 +1,11 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Bell, Clock, Folder, KeyRound, LayoutDashboard, ListChecks, Loader2, ScrollText, SlidersHorizontal, Sparkles, Terminal, Trash2, TriangleAlert } from 'lucide-react'
+import { Bell, Clock, Folder, KeyRound, LayoutDashboard, ListChecks, Loader2, ScrollText, SlidersHorizontal, Sparkles, SquareTerminal, Terminal, Trash2, TriangleAlert } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { CommandsScreen, EnvScreen, FilesScreen, HostingDangerRows, LogsScreen, MachineBlock, SkillsScreen, TriggersScreen } from '@/components/spaces/agent-hosting'
 import { HOME, useHostingState, type HostingState } from '@/components/spaces/agent-hosting-state'
+import { TerminalScreen } from '@/components/spaces/agent-terminal'
 import { AccessChoice } from '@/components/spaces/agent-access'
 import { ConnectAgent, CopyField } from '@/components/spaces/agent-setup'
 import { AgentTabs, ConfirmButton, DangerRow, DangerZone, Empty, FormCard, Row, Rows, ScreenHeader, Tag, type AgentTab } from '@/components/spaces/agent-tabs'
@@ -312,6 +313,7 @@ function vmTabs({ orgId, agent, hermes, state }: { orgId: string; agent: spaces.
     const tabs: AgentTab[] = [
         { id: 'environment', label: 'Environment', icon: <SlidersHorizontal />, count: state.env?.length, content: <EnvScreen orgId={orgId} agentId={agentId} state={state} /> },
         { id: 'commands', label: 'Commands', icon: <Terminal />, content: <CommandsScreen orgId={orgId} agentId={agentId} /> },
+        { id: 'terminal', label: 'Terminal', icon: <SquareTerminal />, content: <TerminalScreen orgId={orgId} agentId={agentId} agentName={agent.displayName} /> },
         { id: 'logs', label: 'Logs', icon: <ScrollText />, content: <LogsScreen orgId={orgId} agentId={agentId} /> },
         { id: 'files', label: 'Files', icon: <Folder />, content: <FilesScreen key={state.filesEpoch} orgId={orgId} agentId={agentId} home={HOME[agent.agentKind ?? ''] ?? '/'} /> },
     ]
