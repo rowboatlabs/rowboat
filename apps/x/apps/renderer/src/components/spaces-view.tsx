@@ -12,7 +12,7 @@ import { isTodoListPath, NEW_TODO_LIST_CONTENT } from '@/lib/todo-list'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import type { SecondaryRailPeek } from '@/components/secondary-rail'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { Archive, ArchiveRestore, Bookmark, Check, ChevronDown, ChevronLeft, ChevronRight, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Lock, Link as LinkIcon, Loader2, MessagesSquare, PanelLeft, PenTool, Plus, Rows3, Star, Trash2, UserPlus, Users } from 'lucide-react'
+import { Archive, ArchiveRestore, Bookmark, Bot, Check, ChevronDown, ChevronLeft, ChevronRight, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Lock, Link as LinkIcon, Loader2, MessagesSquare, PanelLeft, PenTool, Plus, Rows3, Star, Trash2, UserPlus, Users } from 'lucide-react'
 import { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -20,6 +20,8 @@ import { MemberAvatar, OrgMonogram } from '@/components/spaces/atoms'
 import { openServerDialog } from '@/lib/server-dialog'
 import { isGroupChat, type OrgView } from '@/lib/spaces-navigation'
 import { AgentsView } from '@/components/spaces/agents-view'
+import { AgentsDialog } from '@/components/spaces/agents-dialog'
+import { BUILT_IN_CONNECTION } from '@/lib/agent-kinds'
 import { BookmarksPanel } from '@/components/spaces/bookmarks'
 import { FileColumn, TrashDialog, UploadFilesDialog } from '@/components/spaces/files-tab'
 import { GeneralStream } from '@/components/spaces/general-stream'
@@ -963,6 +965,12 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     const mayInvite = canInvite(useOrgSettings(org.id), selfIsAdmin)
     const spaceMemberIds = useMemo(() => members.map((m) => m.id), [members])
     const [deleteOpen, setDeleteOpen] = useState(false)
+    // Manage agent from its DM (2026-10-30): the same settings the Agents page
+    // opens, for whoever may open them there — its owner, or an admin (keys);
+    // Ro has none.
+    const directAgent = isDirect && !isSelf ? profiles.find((m) => m.id === directOtherId && m.kind === 'agent') : undefined
+    const canManageAgent = !!directAgent && directAgent.agentConnection !== BUILT_IN_CONNECTION && (directAgent.ownerId === org.memberId || selfIsAdmin)
+    const [manageAgentOpen, setManageAgentOpen] = useState(false)
     const [unarchiving, setUnarchiving] = useState(false)
     const unarchive = async () => {
         setUnarchiving(true)
@@ -1094,6 +1102,11 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                             {isDirect && (
                                 <button type="button" className="spaces-menu-row" onClick={() => { setTitleMenuOpen(false); void copySpacesLink(spaces.memberUrl(org.address, directOtherId)) }}>
                                     <LinkIcon /> Copy member link
+                                </button>
+                            )}
+                            {canManageAgent && (
+                                <button type="button" className="spaces-menu-row" onClick={() => { setTitleMenuOpen(false); setManageAgentOpen(true) }}>
+                                    <Bot /> Manage agent
                                 </button>
                             )}
                             <button type="button" className="spaces-menu-row" onClick={() => { setTitleMenuOpen(false); void copySpacesLink(spaces.orgUrl(org.address)) }}>
@@ -1419,6 +1432,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                 </div>
                 </div>
             </div>
+            {canManageAgent && directAgent && <AgentsDialog org={org} open={manageAgentOpen} onOpenChange={setManageAgentOpen} start={{ name: 'agent', agentId: directAgent.id }} />}
             {canAdminSpace && <ArchiveSpaceDialog orgId={org.id} space={space} open={archiveOpen} onOpenChange={setArchiveOpen} />}
             {canAdminSpace && <DeleteSpaceDialog orgId={org.id} space={space} open={deleteOpen} onOpenChange={setDeleteOpen} />}
             {canAdminSpace && <SpaceVisibilityDialog orgId={org.id} orgName={org.name} space={space} open={visibilityOpen} onOpenChange={setVisibilityOpen} />}
