@@ -95,6 +95,8 @@ const PLAN: spaces.InvocationOption = { type: 'toggle', key: 'plan_first', label
 let machineStatus = 'active'
 let envVars: spaces.HostingEnvVar[] = []
 let consoles = 0
+// A ChatGPT sign-in (2026-10-30): whether the stand-in VM holds one when Harbor is asked.
+let signedIn = false
 let triggerList: spaces.HostingTrigger[] = []
 let installedSkills: spaces.HostingSkill[] = []
 const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
@@ -142,6 +144,17 @@ const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
         case 'spaces:deleteHostingEnv': envVars = envVars.filter((v) => v.key !== args.key); return { env: envVars }
         case 'spaces:runHostingCommand': return { execution: { id: 'x1', status: 'running' } }
         case 'spaces:openHostingConsole': return { console: { url: 'wss://api.maritime.sh/api/agents/agt-m1/terminal', token: `eu_console_${++consoles}`, expiresAt: '2026-10-30T06:00:00Z' } }
+        case 'spaces:checkHostingSignIn': {
+            const plan = hosting('ready', { funding: 'own', trial: { endsAt: '2026-11-25T10:00:00Z', closedAt: '2026-10-30T10:00:00Z', closedReason: 'sign_in' }, llm: { provider: 'chatgpt', keyHint: '', setBy: 'me', setAt: '2026-10-30T10:00:00Z' } })
+            if (signedIn) listing = listing.map((l) => (l.agent.id === args.agentId ? { ...l, hosting: plan } : l))
+            return { hosting: signedIn ? plan : (listing.find((l) => l.agent.id === args.agentId)?.hosting ?? hosting('ready')), signedIn }
+        }
+        case 'spaces:revokeHostingSignIn': {
+            const out = hosting('ready', { funding: 'own', trial: { endsAt: '2026-11-25T10:00:00Z', closedAt: '2026-10-30T10:00:00Z', closedReason: 'sign_in' } })
+            listing = listing.map((l) => (l.agent.id === args.agentId ? { ...l, hosting: out } : l))
+            signedIn = false
+            return { hosting: out }
+        }
         case 'spaces:getHostingCommand': return { execution: { id: 'x1', status: 'completed', exitCode: 0, stdout: `ran ${'echo hello'}\n` } }
         case 'spaces:cancelHostingCommand': return { execution: { id: 'x1', status: 'cancelled' } }
         case 'spaces:getHostingLogs': return { logs: [{ id: 'l1', level: 'info', message: 'gateway booted', timestamp: '2026-10-27T10:00:00Z', source: 'agent' }] }
@@ -195,6 +208,7 @@ const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
 
 beforeEach(() => {
     consoles = 0
+    signedIn = false
     FakeSocket.instances = []
     term.write.mockClear()
     vi.stubGlobal('WebSocket', FakeSocket)
@@ -1091,6 +1105,64 @@ describe('AgentsDialog', () => {
         fireEvent.click(await screen.findByRole('button', { name: /Cc/ }))
         expect(await screen.findByText('Runs on your Anthropic key …ab12')).toBeInTheDocument()
         expect(screen.queryByText(/trial/)).toBeNull()
+    })
+
+    // A ChatGPT sign-in (2026-10-30): made on the Terminal tab, found when Harbor is asked, and the agent runs on it.
+    it('a Codex on trial offers Check sign-in; found, it runs on the ChatGPT plan; the Danger zone signs it out', async () => {
+        const cx = { ...jarvis, id: 'cx', displayName: 'Cx', agentKind: 'codex' } as spaces.Member
+        listing = [{ agent: cx, keys: [key('k1', 'cx')], hosting: hosting('ready') }]
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        fireEvent.click(await screen.findByRole('button', { name: /Cx/ }))
+        const access = await screen.findByRole('group', { name: 'Model access' })
+        expect(within(access).getByText(/or sign in with ChatGPT from the Terminal tab/)).toBeInTheDocument()
+        // Nothing there yet: said so, and the trial goes on.
+        fireEvent.click(within(access).getByRole('button', { name: 'Check sign-in' }))
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:checkHostingSignIn', { orgId: 'org-1', agentId: 'cx' }))
+        await waitFor(() => expect(toast).toHaveBeenCalledWith("No ChatGPT sign-in on Cx's VM yet. Run codex login --device-auth on the Terminal tab first.", 'error'))
+        expect(within(access).getByText("On Rowboat's trial credit")).toBeInTheDocument()
+        // Signed in from the Terminal meanwhile: found.
+        signedIn = true
+        fireEvent.click(within(access).getByRole('button', { name: 'Check sign-in' }))
+        expect(await screen.findByText('Runs on your ChatGPT plan')).toBeInTheDocument()
+        await waitFor(() => expect(toast).toHaveBeenCalledWith('Cx now runs on your ChatGPT plan', 'success'))
+        expect(screen.queryByText(/trial credit/)).toBeNull()
+        expect(screen.getByRole('button', { name: 'Use a key instead' })).toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: 'Check sign-in' })).toBeNull()
+        // The Danger zone signs it out, after asking once more; the agent then has no model access.
+        fireEvent.click(screen.getByRole('tab', { name: 'Danger zone' }))
+        fireEvent.click(await screen.findByRole('button', { name: 'Sign out' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Confirm sign out' }))
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:revokeHostingSignIn', { orgId: 'org-1', agentId: 'cx' }))
+        fireEvent.click(screen.getByRole('tab', { name: 'Overview' }))
+        expect(await screen.findByText('No model access')).toBeInTheDocument()
+        expect(screen.getByText(/Cx answers nothing until you add your own API key or sign in with ChatGPT/)).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Check sign-in' })).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Add your API key' })).toBeInTheDocument()
+    })
+
+    it('the Terminal tab on a Codex has its own Check sign-in, and asks Harbor once when a session ends', async () => {
+        const cx = { ...jarvis, id: 'cx', displayName: 'Cx', agentKind: 'codex' } as spaces.Member
+        listing = [{ agent: cx, keys: [key('k1', 'cx')], hosting: hosting('ready') }]
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        fireEvent.click(await screen.findByRole('button', { name: /Cx/ }))
+        fireEvent.click(await screen.findByRole('tab', { name: 'Terminal' }))
+        await waitFor(() => expect(FakeSocket.instances).toHaveLength(1))
+        const ws = FakeSocket.instances[0]!
+        act(() => ws.open())
+        expect(await screen.findByText('Connected. Leaving the page ends the session.')).toBeInTheDocument()
+        expect(screen.getByText(/Once signed in, press Check sign-in/)).toBeInTheDocument()
+        // Its own button, nothing there yet.
+        fireEvent.click(screen.getByRole('button', { name: 'Check sign-in' }))
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:checkHostingSignIn', { orgId: 'org-1', agentId: 'cx' }))
+        await waitFor(() => expect(toast).toHaveBeenCalledWith("No ChatGPT sign-in on Cx's VM yet. Run codex login --device-auth here first.", 'error'))
+        // The session ends after the owner signed in: asked once more, and found.
+        signedIn = true
+        act(() => ws.close(1000, ''))
+        await waitFor(() => expect(invoke.mock.calls.filter(([c]) => c === 'spaces:checkHostingSignIn')).toHaveLength(2))
+        await waitFor(() => expect(toast).toHaveBeenCalledWith('Cx now runs on your ChatGPT plan', 'success'))
+        expect(await screen.findByText('Runs on your ChatGPT plan')).toBeInTheDocument()
+        // On the plan now: the Terminal has nothing to check.
+        expect(screen.queryByRole('button', { name: 'Check sign-in' })).toBeNull()
     })
 
     it('lets an admin revoke someone else’s agent’s key, but not mint one', async () => {

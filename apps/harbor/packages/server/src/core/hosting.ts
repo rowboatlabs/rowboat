@@ -47,6 +47,14 @@ import type { Spaces } from './spaces.js';
 // next month. The owner's key goes to the agent's environment on the
 // platform with what its runtime needs to use it; Harbor keeps the provider
 // and the key's last characters.
+//
+// A sign-in instead of a key (2026-10-30): Codex's owner can sign it in to
+// their ChatGPT plan from the Terminal tab, which Harbor cannot see happen,
+// and Codex honours the sign-in only on its built-in provider while the
+// platform's config names its proxy. Asked, Harbor has the runtime say
+// whether a sign-in is there; found, the agent runs on it from then on, the
+// trial closed `sign_in`, and the turn script forces Codex's own provider
+// (it asks before every turn not on a key, so the record follows the VM).
 
 export interface ProvisionInput {
   hostingId: string;
@@ -111,6 +119,14 @@ export interface HostingOps {
   setLlm(input: { kind: string; provider: LlmProvider; apiKey: string; model?: string }): Promise<void>;
   /** A trial over with no key: the platform's cap for this agent goes to zero, for good; the platform then keeps it asleep. */
   stopFunding(): Promise<void>;
+  /** The platform's cap for this agent lifted, so it may wake: for a check on an agent a closed trial holds asleep. */
+  liftCap(): Promise<void>;
+  /** Whether the runtime on the VM holds a sign-in to a plan of its owner's, as the runtime itself reports it; nothing for a kind without one. */
+  signIn(kind: string): Promise<'chatgpt' | undefined>;
+  /** The sign-in found is what the agent runs on from now: the proxy token replaced by a dud, the provider recorded for the turn script, the platform's config pointed at the runtime's own provider, the cap lifted. */
+  useSignIn(input: { kind: string }): Promise<void>;
+  /** The sign-in removed from the VM, and the provider cleared for the turn script. */
+  signOut(kind: string): Promise<void>;
 }
 
 /** The platform said no, in its own words; `gone` when it no longer has the thing asked about. */
@@ -137,6 +153,11 @@ const DEPLOY_TIMEOUT_MS = 20 * 60_000;
 /** How long a deployed agent may refuse a command before the hosting fails. */
 const CHECK_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_TICK_MS = 10_000;
+/** What a Codex on its owner's ChatGPT plan answers, as a failed turn, when the sign-in is found gone. */
+export const SIGN_IN_GONE_MESSAGE = "My owner's ChatGPT sign-in is gone. Sign in again from my Terminal tab, or add an API key on my page.";
+/** The kinds whose owner can sign in to a plan from the Terminal (2026-10-30): Codex's `codex login`. */
+const SIGN_IN_KINDS: ReadonlySet<string> = new Set(['codex']);
+
 /** How long a trial lasts if nothing closes it first. */
 const TRIAL_MS = 30 * 24 * 60 * 60_000;
 
@@ -372,11 +393,14 @@ export class Hosting {
   async setLlm(ctx: ActorCtx, agentId: string, input: { provider: LlmProvider; apiKey: string; model?: string }): Promise<AgentHosting> {
     const { row, ops } = await this.managed(ctx, agentId);
     const allowed = LLM_PROVIDERS[row.kind] ?? [];
+    if (input.provider === 'chatgpt') throw new HarborError('invalid_request', 'a ChatGPT plan takes no key: sign in from the Terminal tab');
     if (!allowed.includes(input.provider)) throw new HarborError('invalid_request', `${row.kind} does not run on ${input.provider}; it takes ${allowed.join(', ')}`);
     const apiKey = input.apiKey.trim();
     if (apiKey.length < 8) throw new HarborError('invalid_request', 'that is not an API key');
     const model = input.model?.trim() || undefined;
     this.k.guardWrite();
+    // Codex honours a ChatGPT sign-in over a key on its built-in provider: the sign-in goes first, so the key is what it runs on.
+    if (row.llm?.provider === 'chatgpt') await this.platform(() => ops.signOut(row.kind));
     await this.platform(() => ops.setLlm({ kind: row.kind, provider: input.provider, apiKey, ...(model ? { model } : {}) }));
     const at = this.k.now();
     const next: StoredAgentHosting = {
@@ -410,6 +434,71 @@ export class Hosting {
     await ops.stopFunding();
     const at = this.k.now();
     const next: StoredAgentHosting = { ...row, trial: { ...(row.trial ?? { endsAt: at }), closedAt: at, closedReason: reason }, updatedAt: at };
+    await this.k.store.putHosting(next);
+    return next;
+  }
+
+  /**
+   * A sign-in from the Terminal (2026-10-30), asked about by the page when a
+   * Terminal session ends or by its button: Harbor has the runtime say whether
+   * one is there, and the record follows. A closed trial holds the cap at zero
+   * and the platform keeps the VM asleep, so the cap is lifted for the asking
+   * and put back when nothing is found.
+   */
+  async checkSignIn(ctx: ActorCtx, agentId: string): Promise<{ hosting: AgentHosting; signedIn: boolean }> {
+    const { row, ops } = await this.managed(ctx, agentId);
+    if (!SIGN_IN_KINDS.has(row.kind)) throw new HarborError('invalid_request', `${row.kind} has no sign-in to a plan; it takes a key`);
+    this.k.guardWrite();
+    const held = row.funding === 'trial' && !!row.trial?.closedAt;
+    if (held) await this.platform(() => ops.liftCap());
+    let found: 'chatgpt' | undefined;
+    try {
+      found = await this.platform(() => ops.signIn(row.kind));
+    } finally {
+      if (held && !found) await this.platform(() => ops.stopFunding()).catch(() => undefined);
+    }
+    const next = await this.recordSignIn(row, ops, ctx.memberId, found);
+    return { hosting: publicShape(next), signedIn: found !== undefined };
+  }
+
+  /** The owner signs the agent out: the sign-in goes from the VM, and the agent answers nothing until a key or a new sign-in. */
+  async revokeSignIn(ctx: ActorCtx, agentId: string): Promise<AgentHosting> {
+    const { row, ops } = await this.managed(ctx, agentId);
+    if (!SIGN_IN_KINDS.has(row.kind)) throw new HarborError('invalid_request', `${row.kind} has no sign-in to a plan; it takes a key`);
+    this.k.guardWrite();
+    await this.platform(() => ops.signOut(row.kind));
+    return publicShape(await this.recordSignIn(row, ops, ctx.memberId, undefined));
+  }
+
+  /** The connector saw the turn script's own answer on the sign-in: the record follows it, and says whether it moved. */
+  async observeSignIn(agentId: string, state: 'chatgpt' | 'none'): Promise<'adopted' | 'dropped' | undefined> {
+    const row = await this.k.store.getAgentHosting(agentId);
+    if (!row || !this.provider || row.status !== 'ready' || !row.externalId || !SIGN_IN_KINDS.has(row.kind)) return undefined;
+    const found = state === 'chatgpt' ? 'chatgpt' : undefined;
+    const next = await this.recordSignIn(row, this.provider.manage(row.externalId, row.externalUserId), row.createdBy, found);
+    if (next === row) return undefined;
+    return found ? 'adopted' : 'dropped';
+  }
+
+  /** The record after what the VM said: on the sign-in from now (the platform set up for it first), or no longer on it; untouched when it already said so. */
+  private async recordSignIn(row: StoredAgentHosting, ops: HostingOps, by: string, found: 'chatgpt' | undefined): Promise<StoredAgentHosting> {
+    const at = this.k.now();
+    if (found) {
+      if (row.funding === 'own' && row.llm?.provider === found) return row;
+      await this.platform(() => ops.useSignIn({ kind: row.kind }));
+      const next: StoredAgentHosting = {
+        ...row,
+        funding: 'own',
+        ...(row.trial ? { trial: row.trial.closedAt ? row.trial : { ...row.trial, closedAt: at, closedReason: 'sign_in' } } : {}),
+        llm: { provider: found, keyHint: '', setBy: by, setAt: at },
+        updatedAt: at,
+      };
+      await this.k.store.putHosting(next);
+      return next;
+    }
+    if (row.llm?.provider !== 'chatgpt') return row;
+    const { llm: _gone, ...rest } = row;
+    const next: StoredAgentHosting = { ...rest, updatedAt: at };
     await this.k.store.putHosting(next);
     return next;
   }

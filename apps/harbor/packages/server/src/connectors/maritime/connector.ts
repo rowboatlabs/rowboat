@@ -3,7 +3,7 @@ import { HarborError } from '../../errors.js';
 import type { ConnectorEnv, RunningConnector } from '../platforms.js';
 import { quietly, requestPrompt, sleep } from '../common/request.js';
 import { MaritimeError, type Execution, type MaritimeApi } from './api.js';
-import { trialOverMessage } from '../../core/hosting.js';
+import { SIGN_IN_GONE_MESSAGE, trialOverMessage } from '../../core/hosting.js';
 import { RUNTIMES, type Runtime, type TurnReading } from './runtimes.js';
 
 // The Maritime connector (spec §8 Connectors, Maritime, 2026-10-26): one per
@@ -348,6 +348,12 @@ export class MaritimeConnector implements RunningConnector {
   }
 
   private async finish(invocation: Invocation, record: ThreadRecord, reading: TurnReading): Promise<void> {
+    if (reading.signIn) {
+      // The turn script's own answer on a sign-in to a plan (Codex, 2026-10-30): Harbor's record follows it, and a sign-in found gone is the failure's reason.
+      const state = reading.signIn;
+      const moved = await this.safe(() => this.env.service.noteHostingSignIn(this.env.agent.id, state), undefined);
+      if (moved === 'dropped' && reading.failure) reading = { ...reading, failure: SIGN_IN_GONE_MESSAGE };
+    }
     const { spaceId, threadRootId } = invocation.conversation;
     const next: ThreadRecord = { ...record, ...(reading.session ? { session: reading.session } : {}) };
     let posted: Message | undefined;

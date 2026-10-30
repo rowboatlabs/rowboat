@@ -25,8 +25,19 @@ export const LLM_SETUP: Record<'openai' | 'anthropic' | 'openrouter', { keyVar: 
   openrouter: { keyVar: 'OPENROUTER_API_KEY', baseUrl: 'https://openrouter.ai/api/v1' },
 };
 
-/** What takes the platform's proxy token's place when the owner's key is for another provider: a value the proxy refuses. */
+/** What takes the platform's proxy token's place when the owner's key is for another provider, or the owner signed in to a plan: a value the proxy refuses. */
 export const PROXY_TOKEN_DUD = 'disabled-by-rowboat-owner-key';
+
+// Codex's sign-in (2026-10-30), kept by the template under /data/.codex: Codex's own word on whether one is there, and
+// the line in the template's config that sends a signed-in Codex to the platform's proxy anyway. The template writes
+// that line when no sign-in was there at boot and leaves it out when one was (its server.js, read 2026-10-30), so
+// dropping it is what the template's next boot would do; the marker on the first line stays, so that boot still writes.
+const CODEX_SIGN_IN_STATUS = 'CODEX_HOME=/data/.codex codex login status 2>&1';
+const CODEX_SIGNED_IN = /Logged in using ChatGPT/;
+const CODEX_CONFIG_OWN_PROVIDER = `f=/data/.codex/config.toml; if [ -f "$f" ] && head -n 1 "$f" | grep -q 'managed-by: maritime'; then sed -i '/^model_provider = /d' "$f"; fi; true`;
+const CODEX_SIGN_OUT = 'CODEX_HOME=/data/.codex codex logout 2>&1; true';
+/** A sign-in command is a process on the VM, not a model call: seconds, more when the VM has to wake first. */
+const SIGN_IN_TIMEOUT_S = 60;
 
 export interface MaritimeProvisionerOptions {
   /** Rowboat's `mk_` key for its Maritime account: deploy, secrets and manage scopes. */
@@ -129,6 +140,25 @@ export function maritimeOps(api: MaritimeApi, agentId: string, externalUserId: s
     const a = await api.agent(agentId);
     return { status: a.status, ...(a.tier ? { tier: a.tier } : {}) };
   };
+  /** Environment variables set or replaced, after one listing. */
+  const putter = async () => {
+    const have = new Set((await api.listEnv(agentId)).map((v) => v.key));
+    return async (key: string, value: string, isSecret: boolean) => {
+      if (have.has(key)) await api.updateEnv(agentId, key, { value, isSecret });
+      else {
+        await api.createEnv(agentId, { key, value, isSecret });
+        have.add(key);
+      }
+    };
+  };
+  /** The gateway and the templates read the new environment without waiting for a restart; asleep, the next start reads it anyway. */
+  const reload = async () => {
+    try {
+      await api.reloadEnv(agentId);
+    } catch (err) {
+      if (!(err instanceof MaritimeError)) throw err;
+    }
+  };
   return {
     machine: () => refusing(machine),
     env: () => refusing(async () => shapeEnv(await api.listEnv(agentId))),
@@ -203,11 +233,8 @@ export function maritimeOps(api: MaritimeApi, agentId: string, externalUserId: s
     // templates read the new environment without waiting for a restart.
     setLlm: ({ provider, apiKey, model }) =>
       refusing(async () => {
-        const have = new Set((await api.listEnv(agentId)).map((v) => v.key));
-        const put = async (key: string, value: string, isSecret: boolean) => {
-          if (have.has(key)) await api.updateEnv(agentId, key, { value, isSecret });
-          else await api.createEnv(agentId, { key, value, isSecret });
-        };
+        if (provider === 'chatgpt') throw new MaritimeError(0, undefined, 'a ChatGPT plan takes no key');
+        const put = await putter();
         const { keyVar, baseUrl } = LLM_SETUP[provider];
         await put(keyVar, apiKey, true);
         if (provider === 'openai') await put('OPENAI_BASE_URL', baseUrl, false);
@@ -215,14 +242,36 @@ export function maritimeOps(api: MaritimeApi, agentId: string, externalUserId: s
         await put('ROWBOAT_LLM_PROVIDER', provider, false);
         await put('ROWBOAT_LLM_MODEL', model ?? '', false);
         await api.setSpendLimit(agentId, null);
-        try {
-          await api.reloadEnv(agentId);
-        } catch (err) {
-          // Asleep: the next start reads the environment anyway.
-          if (!(err instanceof MaritimeError)) throw err;
-        }
+        await reload();
       }),
     stopFunding: () => refusing(() => api.setSpendLimit(agentId, 0)),
+    liftCap: () => refusing(() => api.setSpendLimit(agentId, null)),
+    // The owner's sign-in (2026-10-30): Codex says whether one is there; on it, the same setup as a key of another
+    // provider's (the proxy token a dud, so nothing bills the trial, and the cap lifted), the provider for the turn
+    // script, and the template's config pointed at Codex's own provider so the Terminal's Codex uses the sign-in too.
+    signIn: (kind) =>
+      refusing(async () => {
+        if (kind !== 'codex') return undefined;
+        const run = await api.exec(agentId, ['sh', '-c', CODEX_SIGN_IN_STATUS], { detached: false, timeoutSeconds: SIGN_IN_TIMEOUT_S });
+        return CODEX_SIGNED_IN.test(`${run.stdout ?? ''}\n${run.stderr ?? ''}`) ? 'chatgpt' : undefined;
+      }),
+    useSignIn: ({ kind }) =>
+      refusing(async () => {
+        const put = await putter();
+        await put('OPENAI_API_KEY', PROXY_TOKEN_DUD, true);
+        await put('ROWBOAT_LLM_PROVIDER', 'chatgpt', false);
+        await put('ROWBOAT_LLM_MODEL', '', false);
+        if (kind === 'codex') await api.exec(agentId, ['sh', '-c', CODEX_CONFIG_OWN_PROVIDER], { detached: false, timeoutSeconds: SIGN_IN_TIMEOUT_S });
+        await api.setSpendLimit(agentId, null);
+        await reload();
+      }),
+    signOut: (kind) =>
+      refusing(async () => {
+        if (kind === 'codex') await api.exec(agentId, ['sh', '-c', CODEX_SIGN_OUT], { detached: false, timeoutSeconds: SIGN_IN_TIMEOUT_S });
+        const put = await putter();
+        await put('ROWBOAT_LLM_PROVIDER', '', false);
+        await reload();
+      }),
   };
 }
 

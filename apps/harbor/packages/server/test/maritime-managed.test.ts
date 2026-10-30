@@ -5,7 +5,7 @@ import { maritimePlatform } from '../src/connectors/maritime/index.js';
 import { HERMES_IMAGE, maritimeProvisioner } from '../src/connectors/maritime/provisioning.js';
 import { PLATFORMS } from '../src/connectors/platforms.js';
 import { startHarbor, type RunningHarbor } from '../src/server.js';
-import { AGENT_ID, FakeMaritime, GOOD_KEY, hermesTurn } from './fake-maritime.js';
+import { AGENT_ID, codexTurn, FakeMaritime, GOOD_KEY, hermesTurn } from './fake-maritime.js';
 import { freshStore, restClient } from './helpers.js';
 
 // Managed Maritime agents (spec §8 Maritime, 2026-10-26), end to end: a real
@@ -403,6 +403,113 @@ describe('managed Maritime agents', () => {
     fake.nextTurn = hermesTurn('Back.');
     const back = await org.post(`${mention(agent)} back?`);
     expect((await org.ended(back.invocations[0]!.id)).state).toBe('done');
+  });
+
+  // The owner's ChatGPT sign-in (2026-10-30): made from the Terminal, found when asked, and the agent runs on it.
+  it('finds a ChatGPT sign-in on a Codex when asked, runs the agent on it from then on, and signs it out again', async () => {
+    const me = org.as('dev-ramnique');
+    const { agent } = (await me.post('/v1/agents/managed', { displayName: 'Cx', kind: 'codex' })).body as { agent: Member };
+    await org.hostingStatus(agent.id, 'ready');
+    await me.post(`/v1/spaces/${org.spaceId}/members`, { memberIds: [agent.id], actingMode: 'direct' });
+    const vm = agent.agentInstance!;
+    const execs = () => fake.received.filter((x) => x.method === 'POST' && x.path === `/api/agents/${vm}/exec`).map((x) => String((x.body as { command: string[] }).command[2]));
+    // Nothing there yet: Codex is asked, and the trial goes on.
+    const none = await me.post(`/v1/agents/${agent.id}/hosting/sign-in`);
+    expect(none.status).toBe(200);
+    expect(none.body).toMatchObject({ signedIn: false, hosting: { funding: 'trial' } });
+    expect(execs().at(-1)).toContain('codex login status');
+    expect(fake.env.get(vm)?.get('ROWBOAT_LLM_PROVIDER')).toBeUndefined();
+    // Signed in from the Terminal: found, and set up as a key of another provider's would be, plus the template's config.
+    fake.signIns.add(vm);
+    const found = await me.post(`/v1/agents/${agent.id}/hosting/sign-in`);
+    expect(found.body).toMatchObject({ signedIn: true, hosting: { funding: 'own', llm: { provider: 'chatgpt', keyHint: '', setBy: 'ramnique' }, trial: { closedReason: 'sign_in' } } });
+    expect(fake.env.get(vm)!.get('OPENAI_API_KEY')).toEqual({ value: 'disabled-by-rowboat-owner-key', isSecret: true });
+    expect(fake.env.get(vm)!.get('ROWBOAT_LLM_PROVIDER')?.value).toBe('chatgpt');
+    expect(fake.spend.get(vm)?.limit).toBeNull();
+    expect(execs().at(-1)).toContain("sed -i '/^model_provider = /d'");
+    expect((await org.listing(agent.id))?.hosting?.llm?.provider).toBe('chatgpt');
+    // Asked again: already on it, nothing re-done.
+    const before = fake.received.length;
+    expect((await me.post(`/v1/agents/${agent.id}/hosting/sign-in`)).body).toMatchObject({ signedIn: true, hosting: { llm: { provider: 'chatgpt' } } });
+    expect(execs().at(-1)).toContain('codex login status');
+    expect(fake.received.slice(before).filter((x) => x.method === 'PUT' && /llm-spend-limit|\/env\//.test(x.path))).toHaveLength(0);
+    // A turn: the script asks Codex itself and, signed in, forces Codex's own provider; the trial check is behind it.
+    fake.nextTurn = codexTurn('On my plan.', { stderr: 'rowboat-sign-in: chatgpt\n' });
+    const { invocations } = await org.post(`${mention(agent)} hi`);
+    expect((await org.ended(invocations[0]!.id)).state).toBe('done');
+    const script = fake.submits().at(-1)!.script;
+    expect(script).toContain(`elif codex login status 2>&1 | grep -q 'ChatGPT'; then OWN='-c model_provider="openai"'; unset OPENAI_BASE_URL;`);
+    expect(script).toContain("2>> '/data/rowboat/");
+    // A key takes no `chatgpt`; Hermes has no sign-in; Harsh is not the owner.
+    expect((await me.put(`/v1/agents/${agent.id}/hosting/llm`, { provider: 'chatgpt', apiKey: 'not-a-key-at-all' })).status).toBe(400);
+    const { agent: hermes } = (await me.post('/v1/agents/managed', { displayName: 'Hm', kind: 'hermes' })).body as { agent: Member };
+    await org.hostingStatus(hermes.id, 'ready');
+    expect((await me.post(`/v1/agents/${hermes.id}/hosting/sign-in`)).status).toBe(400);
+    expect((await org.as('dev-harsh').post(`/v1/agents/${agent.id}/hosting/sign-in`)).status).toBe(403);
+    expect((await org.as('dev-harsh').delete(`/v1/agents/${agent.id}/hosting/sign-in`)).status).toBe(403);
+    // A key instead: Codex is signed out first, since it would honour the sign-in over the key.
+    const keyed = fake.received.length;
+    expect((await me.put(`/v1/agents/${agent.id}/hosting/llm`, { provider: 'openai', apiKey: 'sk-proj-openai-key-9999' })).body.hosting).toMatchObject({ funding: 'own', llm: { provider: 'openai', keyHint: '…9999' } });
+    expect(fake.received.slice(keyed).some((x) => x.method === 'POST' && x.path === `/api/agents/${vm}/exec` && /codex logout/.test(JSON.stringify(x.body)))).toBe(true);
+    expect(fake.signIns.has(vm)).toBe(false);
+    // Signed in again, then signed out from the page: Codex forgets the sign-in, the record says no access, the trial stays closed.
+    fake.signIns.add(vm);
+    expect((await me.post(`/v1/agents/${agent.id}/hosting/sign-in`)).body.hosting).toMatchObject({ llm: { provider: 'chatgpt' } });
+    const out = await me.delete(`/v1/agents/${agent.id}/hosting/sign-in`);
+    expect(out.status).toBe(200);
+    expect(out.body.hosting).toMatchObject({ funding: 'own', trial: { closedReason: 'sign_in' } });
+    expect(out.body.hosting.llm).toBeUndefined();
+    expect(execs().at(-1)).toContain('codex logout');
+    expect(fake.signIns.has(vm)).toBe(false);
+    expect(fake.env.get(vm)!.get('ROWBOAT_LLM_PROVIDER')?.value).toBe('');
+  });
+
+  it('a Codex turn that finds the sign-in itself moves the record; one that finds it gone says so', async () => {
+    const me = org.as('dev-ramnique');
+    const { agent } = (await me.post('/v1/agents/managed', { displayName: 'Cy', kind: 'codex' })).body as { agent: Member };
+    await org.hostingStatus(agent.id, 'ready');
+    await me.post(`/v1/spaces/${org.spaceId}/members`, { memberIds: [agent.id], actingMode: 'direct' });
+    const vm = agent.agentInstance!;
+    // On trial, no sign-in: the script's line says none, and nothing moves.
+    fake.nextTurn = codexTurn('Trial.', { stderr: 'rowboat-sign-in: none\n' });
+    const first = await org.post(`${mention(agent)} hi`);
+    expect((await org.ended(first.invocations[0]!.id)).state).toBe('done');
+    expect((await org.listing(agent.id))?.hosting).toMatchObject({ funding: 'trial' });
+    // The owner signed in meanwhile: the turn ran on the plan, and the record follows.
+    fake.nextTurn = codexTurn('Plan.', { stderr: 'rowboat-sign-in: chatgpt\n' });
+    const second = await org.post(`${mention(agent)} again`);
+    expect((await org.ended(second.invocations[0]!.id)).state).toBe('done');
+    expect((await org.listing(agent.id))?.hosting).toMatchObject({ funding: 'own', llm: { provider: 'chatgpt', setBy: 'ramnique' }, trial: { closedReason: 'sign_in' } });
+    expect(fake.env.get(vm)!.get('OPENAI_API_KEY')).toEqual({ value: 'disabled-by-rowboat-owner-key', isSecret: true });
+    expect(fake.spend.get(vm)?.limit).toBeNull();
+    // Signed out from the Terminal: the turn fails, with the agent's own words for it, and the record says no access.
+    fake.nextTurn = {
+      lines: [JSON.stringify({ type: 'thread.started', thread_id: '01a1-thread' }), JSON.stringify({ type: 'turn.failed', error: { message: 'Not logged in' } })],
+      stderr: 'rowboat-sign-in: none\nError: not logged in\n',
+      exitCode: 1,
+    };
+    const third = await org.post(`${mention(agent)} still there?`);
+    const ended = await org.ended(third.invocations[0]!.id);
+    expect(ended.state).toBe('failed');
+    expect(ended.error).toBe("My owner's ChatGPT sign-in is gone. Sign in again from my Terminal tab, or add an API key on my page.");
+    expect((await org.listing(agent.id))?.hosting?.llm).toBeUndefined();
+  });
+
+  it('a Codex whose trial is over is woken for the asking: the cap lifted, and put back when no sign-in is found', async () => {
+    const me = org.as('dev-ramnique');
+    const { agent } = (await me.post('/v1/agents/managed', { displayName: 'Cz', kind: 'codex' })).body as { agent: Member };
+    await org.hostingStatus(agent.id, 'ready');
+    const vm = agent.agentInstance!;
+    fake.spend.set(vm, { limit: 500, spent: 512, reached: true });
+    expect((await me.get(`/v1/agents/${agent.id}/hosting`)).body.hosting.trial).toMatchObject({ closedReason: 'exhausted' });
+    expect(fake.spend.get(vm)?.limit).toBe(0);
+    const caps = () => fake.received.filter((x) => x.method === 'PUT' && x.path === `/api/agents/${vm}/llm-spend-limit`).map((x) => (x.body as { monthlyLimitCents: number | null }).monthlyLimitCents);
+    const asked = caps().length;
+    expect((await me.post(`/v1/agents/${agent.id}/hosting/sign-in`)).body).toMatchObject({ signedIn: false, hosting: { funding: 'trial', trial: { closedReason: 'exhausted' } } });
+    expect(caps().slice(asked)).toEqual([null, 0]);
+    fake.signIns.add(vm);
+    expect((await me.post(`/v1/agents/${agent.id}/hosting/sign-in`)).body).toMatchObject({ signedIn: true, hosting: { funding: 'own', llm: { provider: 'chatgpt' }, trial: { closedReason: 'exhausted' } } });
+    expect(fake.spend.get(vm)?.limit).toBeNull();
   });
 
   it('deletes: keys go at once, the platform’s end user goes in the background, and only the owner or an admin may', async () => {

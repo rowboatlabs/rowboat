@@ -260,6 +260,17 @@ export class HarborService {
   openHostingConsole(ctx: ActorCtx, agentId: string) {
     return this.hosting.console(ctx, agentId);
   }
+  /** A sign-in to a plan made from the Terminal (2026-10-30): asked, Harbor has the VM say whether one is there, and the agent runs on it from then on. */
+  checkHostingSignIn(ctx: ActorCtx, agentId: string) {
+    return this.hosting.checkSignIn(ctx, agentId);
+  }
+  revokeHostingSignIn(ctx: ActorCtx, agentId: string) {
+    return this.hosting.revokeSignIn(ctx, agentId);
+  }
+  /** For a managed agent's connector after a turn: what the turn script said about the sign-in. */
+  noteHostingSignIn(agentId: string, state: 'chatgpt' | 'none') {
+    return this.hosting.observeSignIn(agentId, state);
+  }
   getHostingLogs(ctx: ActorCtx, agentId: string, opts: { limit?: number; before?: string; level?: string }) {
     return this.hosting.logs(ctx, agentId, opts);
   }

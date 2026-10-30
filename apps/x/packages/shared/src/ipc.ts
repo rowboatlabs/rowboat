@@ -4081,6 +4081,14 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), agentId: z.string() }),
     res: z.object({ console: z.custom<SpacesTypes.HostingConsole>() }),
   },
+  'spaces:checkHostingSignIn': {
+    req: z.object({ orgId: z.string(), agentId: z.string() }),
+    res: z.object({ hosting: z.custom<SpacesTypes.AgentHosting>(), signedIn: z.boolean() }),
+  },
+  'spaces:revokeHostingSignIn': {
+    req: z.object({ orgId: z.string(), agentId: z.string() }),
+    res: z.object({ hosting: z.custom<SpacesTypes.AgentHosting>() }),
+  },
   'spaces:getHostingLogs': {
     req: z.object({ orgId: z.string(), agentId: z.string(), limit: z.number().optional(), before: z.string().optional(), level: z.string().optional() }),
     res: z.object({ logs: z.array(z.custom<SpacesTypes.HostingLogLine>()), nextBefore: z.string().optional() }),

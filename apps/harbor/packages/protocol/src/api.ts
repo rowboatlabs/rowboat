@@ -627,6 +627,20 @@ export const routes = {
     params: z.object({ agentId: MemberId }),
     response: z.object({ console: HostingConsole }),
   },
+  /** A sign-in to a plan made from the Terminal (2026-10-30), which Harbor cannot see happen: asked, Harbor has the runtime say whether one is there, and records what it finds. */
+  checkHostingSignIn: {
+    method: 'POST',
+    path: '/v1/agents/:agentId/hosting/sign-in',
+    params: z.object({ agentId: MemberId }),
+    response: z.object({ hosting: AgentHosting, signedIn: z.boolean() }),
+  },
+  /** The sign-in removed from the VM: the agent has no model access until its owner signs in again or adds a key. */
+  revokeHostingSignIn: {
+    method: 'DELETE',
+    path: '/v1/agents/:agentId/hosting/sign-in',
+    params: z.object({ agentId: MemberId }),
+    response: z.object({ hosting: AgentHosting }),
+  },
   /** The VM's logs as the platform keeps them, newest first; `before` pages back by the platform's cursor. */
   getHostingLogs: {
     method: 'GET',

@@ -36,6 +36,8 @@ export interface TurnReading {
   failure?: string;
   /** The session the next turn in this thread resumes. */
   session?: string;
+  /** What the turn script found about a sign-in to a plan (Codex, 2026-10-30), when it looked: its line in the stderr file. */
+  signIn?: 'chatgpt' | 'none';
 }
 
 export interface Runtime {
@@ -88,7 +90,20 @@ const oneLine = (s: string, max: number) => {
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 };
 
-const stderrTail = (err: string | undefined) => (err ?? '').trim().split('\n').filter(Boolean).slice(-3).join(' ').slice(0, 600);
+const stderrTail = (err: string | undefined) =>
+  (err ?? '')
+    .trim()
+    .split('\n')
+    .filter((line) => line && !line.startsWith(SIGN_IN_MARK))
+    .slice(-3)
+    .join(' ')
+    .slice(0, 600);
+/** The turn script's own line on a sign-in, first in the stderr file (Codex, 2026-10-30). */
+const SIGN_IN_MARK = 'rowboat-sign-in: ';
+const signInOf = (err: string | undefined): 'chatgpt' | 'none' | undefined => {
+  const found = /^rowboat-sign-in: (chatgpt|none)$/m.exec(err ?? '')?.[1];
+  return found === 'chatgpt' || found === 'none' ? found : undefined;
+};
 
 /** The MCP server every runtime gets: Spaces, acting as this agent. */
 const mcpJson = (orgUrl: string) =>
@@ -172,8 +187,12 @@ const codex: Runtime = {
       `PROMPT="$(cat ${q(input.promptPath)})"`,
       // The owner's own key (2026-10-27): Codex's built-in openai provider on OPENAI_API_KEY and OPENAI_BASE_URL, which
       // Harbor set with the key, instead of the template's provider on the platform's proxy; the owner's model when the turn picked none.
-      `OWN=""; [ "$ROWBOAT_LLM_PROVIDER" = openai ] && OWN='-c model_provider="openai"'; ${input.model ? '' : '[ -z "$ROWBOAT_LLM_MODEL" ] || OWN="$OWN -m $ROWBOAT_LLM_MODEL"; '}true`,
-      `codex exec ${input.session ? `resume ${q(input.session)}` : ''} --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox -o ${q(input.lastPath)} $OWN ${flags} -- "$PROMPT" > ${q(input.outPath)} 2> ${q(input.errPath)}`,
+      // The owner's ChatGPT sign-in (2026-10-30): Codex honours one on its built-in provider only, and the template's
+      // config names its own, so a turn not on a key asks Codex whether a sign-in is there and forces the built-in
+      // provider when it is, the proxy's address unset with it. Its answer goes first into the stderr file, for Harbor.
+      `OWN=""; if [ "$ROWBOAT_LLM_PROVIDER" = openai ]; then OWN='-c model_provider="openai"'; elif codex login status 2>&1 | grep -q 'ChatGPT'; then OWN='-c model_provider="openai"'; unset OPENAI_BASE_URL; echo '${SIGN_IN_MARK}chatgpt' > ${q(input.errPath)}; else echo '${SIGN_IN_MARK}none' > ${q(input.errPath)}; fi`,
+      `${input.model ? '' : '[ -z "$ROWBOAT_LLM_MODEL" ] || OWN="$OWN -m $ROWBOAT_LLM_MODEL"; '}true`,
+      `codex exec ${input.session ? `resume ${q(input.session)}` : ''} --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox -o ${q(input.lastPath)} $OWN ${flags} -- "$PROMPT" > ${q(input.outPath)} 2>> ${q(input.errPath)}`,
     ].join('\n');
   },
   read(out, last, err, exitCode) {
@@ -183,11 +202,13 @@ const codex: Runtime = {
     const failed = all.find((e) => e.type === 'turn.failed' || e.type === 'error');
     const messages = all.filter((e) => e.type === 'item.completed' && obj(e.item)?.type === 'agent_message');
     const answer = (last ?? str(obj(messages.at(-1)?.item)?.text) ?? '').trim();
+    const signIn = signInOf(err);
+    const seen = { ...(session ? { session } : {}), ...(signIn ? { signIn } : {}) };
     if (failed || (exitCode !== undefined && exitCode !== null && exitCode !== 0)) {
       const reason = str(obj(failed?.error)?.message) ?? str(failed?.message) ?? stderrTail(err) ?? 'Codex stopped with an error';
-      return { ...(answer ? { answer } : {}), failure: reason, ...(session ? { session } : {}) };
+      return { ...(answer ? { answer } : {}), failure: reason, ...seen };
     }
-    return { ...(answer ? { answer } : {}), ...(session ? { session } : {}) };
+    return { ...(answer ? { answer } : {}), ...seen };
   },
   activity(out) {
     for (const e of events(out).reverse()) {
