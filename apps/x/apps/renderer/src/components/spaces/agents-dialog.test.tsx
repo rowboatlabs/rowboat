@@ -1,9 +1,61 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { spaces } from '@x/shared'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 
 vi.mock('@/lib/toast', () => ({ toast: vi.fn() }))
+
+// The Terminal tab: xterm needs a real canvas, so a stand-in records what the screen does with it.
+const term = { open: vi.fn(), loadAddon: vi.fn(), write: vi.fn(), focus: vi.fn(), dispose: vi.fn(), onData: vi.fn(() => ({ dispose: vi.fn() })), cols: 80, rows: 24, options: {} as Record<string, unknown> }
+vi.mock('@xterm/xterm', () => ({
+    Terminal: vi.fn(function Terminal() {
+        return term
+    }),
+}))
+vi.mock('@xterm/addon-fit', () => ({
+    FitAddon: vi.fn(function FitAddon() {
+        return { fit: vi.fn() }
+    }),
+}))
+vi.mock('@/contexts/theme-context', () => ({ useTheme: () => ({ theme: 'light', resolvedTheme: 'light', setTheme: vi.fn() }) }))
+
+/** Maritime's terminal socket as the test sees it: what was sent, and frames it can push. */
+class FakeSocket {
+    static instances: FakeSocket[] = []
+    static readonly CONNECTING = 0
+    static readonly OPEN = 1
+    static readonly CLOSING = 2
+    static readonly CLOSED = 3
+    readyState = FakeSocket.CONNECTING
+    binaryType = 'blob'
+    sent: Array<string | Uint8Array> = []
+    onopen: ((ev: Event) => void) | null = null
+    onmessage: ((ev: MessageEvent) => void) | null = null
+    onclose: ((ev: CloseEvent) => void) | null = null
+    onerror: ((ev: Event) => void) | null = null
+    readonly url: string
+    constructor(url: string) {
+        this.url = url
+        FakeSocket.instances.push(this)
+    }
+    send(data: string | Uint8Array) {
+        this.sent.push(data)
+    }
+    close(code?: number, reason?: string) {
+        this.readyState = FakeSocket.CLOSED
+        this.onclose?.({ code, reason: reason ?? '' } as CloseEvent)
+    }
+    open() {
+        this.readyState = FakeSocket.OPEN
+        this.onopen?.(new Event('open'))
+    }
+    text(data: string) {
+        this.onmessage?.({ data } as MessageEvent)
+    }
+    bytes(data: Uint8Array) {
+        this.onmessage?.({ data: data.buffer } as MessageEvent)
+    }
+}
 
 import { AgentsDialog } from './agents-dialog'
 import { toast } from '@/lib/toast'
@@ -42,6 +94,7 @@ const PLAN: spaces.InvocationOption = { type: 'toggle', key: 'plan_first', label
 // The management area (2026-10-27): what the stand-in Harbor says about a managed VM.
 let machineStatus = 'active'
 let envVars: spaces.HostingEnvVar[] = []
+let consoles = 0
 let triggerList: spaces.HostingTrigger[] = []
 let installedSkills: spaces.HostingSkill[] = []
 const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
@@ -88,6 +141,7 @@ const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
         }
         case 'spaces:deleteHostingEnv': envVars = envVars.filter((v) => v.key !== args.key); return { env: envVars }
         case 'spaces:runHostingCommand': return { execution: { id: 'x1', status: 'running' } }
+        case 'spaces:openHostingConsole': return { console: { url: 'wss://api.maritime.sh/api/agents/agt-m1/terminal', token: `eu_console_${++consoles}`, expiresAt: '2026-10-30T06:00:00Z' } }
         case 'spaces:getHostingCommand': return { execution: { id: 'x1', status: 'completed', exitCode: 0, stdout: `ran ${'echo hello'}\n` } }
         case 'spaces:cancelHostingCommand': return { execution: { id: 'x1', status: 'cancelled' } }
         case 'spaces:getHostingLogs': return { logs: [{ id: 'l1', level: 'info', message: 'gateway booted', timestamp: '2026-10-27T10:00:00Z', source: 'agent' }] }
@@ -140,6 +194,10 @@ const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
 })
 
 beforeEach(() => {
+    consoles = 0
+    FakeSocket.instances = []
+    term.write.mockClear()
+    vi.stubGlobal('WebSocket', FakeSocket)
     invoke.mockClear()
     joinedSpaces.clear()
     window.localStorage.clear()
@@ -859,7 +917,7 @@ describe('AgentsDialog', () => {
         const machine = await openJarvis()
         expect(within(machine).getByText('active')).toBeInTheDocument()
         expect(within(machine).getByText('always on tier · as Maritime sees it')).toBeInTheDocument()
-        expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Overview', 'Environment1', 'Commands', 'Logs', 'Files', 'Skills', 'Automations', 'Danger zone'])
+        expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Overview', 'Environment1', 'Commands', 'Terminal', 'Logs', 'Files', 'Skills', 'Automations', 'Danger zone'])
         fireEvent.click(within(machine).getByRole('button', { name: 'Sleep' }))
         await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:hostingPower', { orgId: 'org-1', agentId: 'jv', action: 'sleep' }))
         expect(await within(machine).findByRole('button', { name: 'Wake' })).toBeInTheDocument()
@@ -902,6 +960,35 @@ describe('AgentsDialog', () => {
         await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:runHostingCommand', { orgId: 'org-1', agentId: 'jv', command: 'echo hello' }))
         expect(await screen.findByLabelText('Command output', {}, { timeout: 3000 })).toHaveTextContent('ran echo hello')
         expect(screen.getByText('Exited 0.')).toBeInTheDocument()
+    })
+
+    it('the Terminal tab is a live shell: Harbor mints a console token, the browser opens Maritime’s socket with it, and a drop offers Reconnect', async () => {
+        await openJarvis()
+        fireEvent.click(screen.getByRole('tab', { name: 'Terminal' }))
+        expect(await screen.findByText('Opening a console…')).toBeInTheDocument()
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:openHostingConsole', { orgId: 'org-1', agentId: 'jv' }))
+        await waitFor(() => expect(FakeSocket.instances).toHaveLength(1))
+        const ws = FakeSocket.instances[0]!
+        expect(ws.url).toBe('wss://api.maritime.sh/api/agents/agt-m1/terminal?token=eu_console_1')
+        expect(ws.binaryType).toBe('arraybuffer')
+        act(() => ws.open())
+        expect(await screen.findByText('Connected. Leaving the page ends the session.')).toBeInTheDocument()
+        // The size goes up first; the platform's pings are answered; its bytes are the terminal's.
+        expect(ws.sent[0]).toBe(JSON.stringify({ type: 'resize', cols: 80, rows: 24 }))
+        act(() => ws.text(JSON.stringify({ type: 'ping' })))
+        expect(ws.sent.at(-1)).toBe(JSON.stringify({ type: 'pong' }))
+        act(() => ws.bytes(new TextEncoder().encode('# ')))
+        expect(Array.from(term.write.mock.calls.at(-1)![0] as Uint8Array)).toEqual([35, 32])
+        // Keystrokes go down as bytes.
+        const onData = (term.onData.mock.calls.at(-1) as unknown as [(data: string) => void])[0]
+        act(() => onData('ls\n'))
+        expect(Array.from(ws.sent.at(-1) as Uint8Array)).toEqual([108, 115, 10])
+        // A drop says so; Reconnect asks Harbor for a new token and opens a new socket.
+        act(() => ws.close(1006, 'gone'))
+        expect(await screen.findByText('Disconnected.')).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }))
+        await waitFor(() => expect(FakeSocket.instances).toHaveLength(2))
+        expect(FakeSocket.instances[1]!.url).toBe('wss://api.maritime.sh/api/agents/agt-m1/terminal?token=eu_console_2')
     })
 
     it('logs, files, skills and automations load when their tab is chosen; removing is on the Danger zone', async () => {

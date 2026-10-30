@@ -124,7 +124,7 @@ function shapeEnv(rows: Array<{ key: string; value: string; isSecret: boolean; w
 }
 
 /** The management calls on one Maritime agent, in the protocol's shapes. */
-export function maritimeOps(api: MaritimeApi, agentId: string): HostingOps {
+export function maritimeOps(api: MaritimeApi, agentId: string, externalUserId: string): HostingOps {
   const machine = async () => {
     const a = await api.agent(agentId);
     return { status: a.status, ...(a.tier ? { tier: a.tier } : {}) };
@@ -156,6 +156,13 @@ export function maritimeOps(api: MaritimeApi, agentId: string): HostingOps {
     run: (command, timeoutSeconds) => refusing(async () => shapeExecution(await api.exec(agentId, ['sh', '-c', command], { detached: true, timeoutSeconds }))),
     execution: (executionId) => refusing(async () => shapeExecution(await api.execution(agentId, executionId))),
     cancel: (executionId) => refusing(async () => shapeExecution(await api.cancelExecution(agentId, executionId))),
+    console: (ttlSeconds) =>
+      refusing(async () => {
+        // The dashboard's own terminal is this socket with a session token; an end-user token
+        // scoped `console` opens it the same way (`/docs/sdk/end-users`), for this one agent.
+        const minted = await api.mintEndUserToken(externalUserId, { agentId, scopes: ['console'], ttlSeconds });
+        return { url: `${api.base.replace(/^http/, 'ws')}/api/agents/${encodeURIComponent(agentId)}/terminal`, token: minted.token, expiresAt: minted.expiresAt };
+      }),
     logs: (opts) =>
       refusing(async () => {
         const rows = await api.logs(agentId, opts);
@@ -290,8 +297,8 @@ export function maritimeProvisioner(options: MaritimeProvisionerOptions): Hostin
     credential() {
       return options.apiKey;
     },
-    manage(externalId) {
-      return maritimeOps(api, externalId);
+    manage(externalId, externalUserId) {
+      return maritimeOps(api, externalId, externalUserId);
     },
   };
 }

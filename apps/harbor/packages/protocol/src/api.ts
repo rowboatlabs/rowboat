@@ -15,6 +15,7 @@ import {
 import { ActingMode, AgentCredential, AgentHook, AgentKey, AgentKeySecret, AgentListing, Attribution, InvitePolicy, Member, MemberRole, Membership, Message, OrgSettings, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic, UpdateAgentProfile, UpdateProfile,
   AgentHosting,
   HostingEnvVar,
+  HostingConsole,
   HostingExecution,
   HostingFileEntry,
   HostingLogLine,
@@ -618,6 +619,13 @@ export const routes = {
     path: '/v1/agents/:agentId/hosting/commands/:executionId',
     params: z.object({ agentId: MemberId, executionId: z.string().min(1).max(128) }),
     response: z.object({ execution: HostingExecution }),
+  },
+  /** A console into the VM (2026-10-30): the platform's terminal socket and a short-lived token that opens it, as root, for the owner or an admin. Each call mints a new token. */
+  openHostingConsole: {
+    method: 'POST',
+    path: '/v1/agents/:agentId/hosting/console',
+    params: z.object({ agentId: MemberId }),
+    response: z.object({ console: HostingConsole }),
   },
   /** The VM's logs as the platform keeps them, newest first; `before` pages back by the platform's cursor. */
   getHostingLogs: {

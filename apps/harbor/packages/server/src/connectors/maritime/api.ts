@@ -121,12 +121,24 @@ export interface MaritimeApi {
   createEndUserAgent(externalId: string, input: CreateAgentInput): Promise<MaritimeAgent>;
   /** Replace the end user's policy (caps and sizing), applied to every agent it owns. */
   setEndUserPolicy(externalId: string, policy: Record<string, number>): Promise<void>;
+  /** A short-lived token the end user's own client opens one of its agents with (`POST /api/v1/end-users/{id}/tokens`): `console` opens the terminal socket and `/exec`. */
+  mintEndUserToken(externalId: string, input: { agentId: string; scopes: string[]; ttlSeconds: number }): Promise<MaritimeEndUserToken>;
+  /** Where the API is, for the sockets that hang off it. */
+  readonly base: string;
   /** The LLM cap that applies to the agent and what it spent this period (`/api/agents/{id}/llm-spend-limit`). */
   spendLimit(agentId: string): Promise<MaritimeSpendLimit>;
   /** The agent's own monthly cap, over the end user's: 0 is nothing, null is no cap of its own. */
   setSpendLimit(agentId: string, monthlyLimitCents: number | null): Promise<void>;
   /** Delete the end user with its agents; the platform finishes in the background. 404 counts as done. */
   deleteEndUser(externalId: string): Promise<void>;
+}
+
+/** A minted end-user token, as `POST …/tokens` answers; `token` is shown once. */
+export interface MaritimeEndUserToken {
+  token: string;
+  agentId: string;
+  scopes: string[];
+  expiresAt: string;
 }
 
 /** The agent's LLM cap and spend this period, as `GET …/llm-spend-limit` answers. */
@@ -190,6 +202,7 @@ export function maritimeApi(key: string, base = MARITIME_API): MaritimeApi {
   });
 
   return {
+    base,
     async agent(agentId) {
       return shape(await call<Record<string, unknown>>(`/api/agents/${id(agentId)}`));
     },
@@ -319,6 +332,14 @@ export function maritimeApi(key: string, base = MARITIME_API): MaritimeApi {
     },
     async setEndUserPolicy(externalId, policy) {
       await call<unknown>(`/api/v1/end-users/${id(externalId)}/policy`, { method: 'PUT', body: { policy } });
+    },
+    async mintEndUserToken(externalId, input) {
+      const body = await call<Record<string, unknown>>(`/api/v1/end-users/${id(externalId)}/tokens`, {
+        method: 'POST',
+        body: { agentId: input.agentId, scopes: input.scopes, ttlSeconds: input.ttlSeconds },
+      });
+      if (typeof body.token !== 'string' || typeof body.expiresAt !== 'string') throw new MaritimeError(0, undefined, detailOf(body) ?? 'Maritime minted no token');
+      return { token: body.token, agentId: String(body.agentId ?? input.agentId), scopes: Array.isArray(body.scopes) ? body.scopes.map(String) : input.scopes, expiresAt: body.expiresAt };
     },
     async spendLimit(agentId) {
       const body = await call<Record<string, unknown>>(`/api/agents/${id(agentId)}/llm-spend-limit`);

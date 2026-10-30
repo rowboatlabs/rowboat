@@ -5,6 +5,7 @@ import {
   type AgentHosting,
   type AgentKeySecret,
   type HostingEnvVar,
+  type HostingConsole,
   type HostingExecution,
   type HostingFileEntry,
   type HostingFunding,
@@ -69,7 +70,7 @@ export interface HostingProvider {
   /** The platform credential the agent's connector presents: the deployment's own key. */
   credential(): string;
   /** The management calls on one agent's VM, by the platform's id for it. */
-  manage(externalId: string): HostingOps;
+  manage(externalId: string, externalUserId: string): HostingOps;
 }
 
 /**
@@ -88,6 +89,8 @@ export interface HostingOps {
   run(command: string, timeoutSeconds: number): Promise<HostingExecution>;
   execution(executionId: string): Promise<HostingExecution>;
   cancel(executionId: string): Promise<HostingExecution>;
+  /** A way into the VM's shell: the platform's terminal socket and a token that opens it for `ttlSeconds`. */
+  console(ttlSeconds: number): Promise<HostingConsole>;
   logs(opts: { limit: number; before?: string; level?: string }): Promise<{ logs: HostingLogLine[]; nextBefore?: string }>;
   files(path: string): Promise<HostingFileEntry[]>;
   readFile(path: string): Promise<string | undefined>;
@@ -149,6 +152,8 @@ const EXTERNAL_PREFIX = 'rowboat-';
 const FILE_READ_MAX = 1_000_000;
 /** The default for a command run from the page; the route caps at an hour. */
 const COMMAND_TIMEOUT_S = 600;
+/** How long a console token opens the VM's terminal for (2026-10-30): the socket, once open, outlives it. */
+const CONSOLE_TTL_S = 900;
 /** The kinds whose VM has skills and triggers the platform manages (Hermes's gateway runs both). */
 const SKILLED_KINDS: ReadonlySet<string> = new Set(['hermes']);
 
@@ -328,7 +333,7 @@ export class Hosting {
     if (!row.externalId || row.status === 'creating') throw new HarborError('invalid_request', 'the agent is still being created');
     if (row.status === 'deleting' || row.status === 'deleted') throw new HarborError('invalid_request', 'the agent has been deleted from the platform');
     if (kinds && !kinds.has(row.kind)) throw new HarborError('invalid_request', `${row.kind} agents have none on Maritime`);
-    return { row, ops: this.provider.manage(row.externalId) };
+    return { row, ops: this.provider.manage(row.externalId, row.externalUserId) };
   }
 
   /** A platform call, with its refusal turned into Harbor's error. */
@@ -397,7 +402,7 @@ export class Hosting {
   async closeTrial(agentId: string, reason: 'exhausted' | 'expired'): Promise<void> {
     const row = await this.k.store.getAgentHosting(agentId);
     if (!row || !this.provider || row.funding !== 'trial' || row.trial?.closedAt || !row.externalId) return;
-    await this.endTrial(row, this.provider.manage(row.externalId), reason);
+    await this.endTrial(row, this.provider.manage(row.externalId, row.externalUserId), reason);
   }
 
   /** The platform first, so nothing more goes on Rowboat's credit even if the record is not reached. */
@@ -438,6 +443,13 @@ export class Hosting {
   async execution(ctx: ActorCtx, agentId: string, executionId: string): Promise<HostingExecution> {
     const { ops } = await this.managed(ctx, agentId);
     return this.platform(() => ops.execution(executionId));
+  }
+
+  /** A console into the VM (2026-10-30): a token good for CONSOLE_TTL_S, minted anew on each call, for the owner or an admin. */
+  async console(ctx: ActorCtx, agentId: string): Promise<HostingConsole> {
+    const { ops } = await this.managed(ctx, agentId);
+    this.k.guardWrite();
+    return this.platform(() => ops.console(CONSOLE_TTL_S));
   }
 
   async cancel(ctx: ActorCtx, agentId: string, executionId: string): Promise<HostingExecution> {
@@ -559,7 +571,7 @@ export class Hosting {
     for (const row of await this.k.store.listHostingsByStatus(['ready'])) {
       if (row.funding !== 'trial' || !row.trial || row.trial.closedAt || !row.externalId || Date.parse(row.trial.endsAt) > Date.now()) continue;
       try {
-        await this.endTrial(row, provider.manage(row.externalId), 'expired');
+        await this.endTrial(row, provider.manage(row.externalId, row.externalUserId), 'expired');
       } catch (err) {
         console.log('[harbor] hosting: could not end an expired trial', { id: row.id, error: (err as Error).message });
       }

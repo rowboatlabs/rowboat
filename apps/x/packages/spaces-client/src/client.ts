@@ -16,6 +16,7 @@ import {
   type HostingEnvVar,
   HostingSpend,
   LlmProvider,
+  type HostingConsole,
   type HostingExecution,
   type HostingFileEntry,
   type HostingLogLine,
@@ -485,6 +486,10 @@ export class SpacesClient {
   }
   async cancelHostingCommand(agentId: string, executionId: string): Promise<HostingExecution> {
     return (await this.request('DELETE', this.hostingPath(agentId, `/commands/${encodeURIComponent(executionId)}`), routes.cancelHostingCommand.response)).execution;
+  }
+  /** A console into the VM: the platform's terminal socket and a short-lived token that opens it; each call mints a new one. */
+  async openHostingConsole(agentId: string): Promise<HostingConsole> {
+    return (await this.request('POST', this.hostingPath(agentId, '/console'), routes.openHostingConsole.response)).console;
   }
   async getHostingLogs(agentId: string, opts: { limit?: number; before?: string; level?: string } = {}): Promise<{ logs: HostingLogLine[]; nextBefore?: string }> {
     const q = new URLSearchParams();

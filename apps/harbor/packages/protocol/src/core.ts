@@ -348,6 +348,15 @@ export const HostingExecution = z.object({
 });
 export type HostingExecution = z.infer<typeof HostingExecution>;
 
+/** A console into the VM (2026-10-30): the platform's terminal socket and a token that opens it for a few minutes, as root. */
+export const HostingConsole = z.object({
+  /** The WebSocket to open (`wss://…/api/agents/{id}/terminal`); the token goes on it as `?token=`. */
+  url: z.string().max(1024),
+  token: z.string().max(4096),
+  expiresAt: z.string(),
+});
+export type HostingConsole = z.infer<typeof HostingConsole>;
+
 export const HostingLogLine = z.object({
   id: z.string().max(128),
   level: z.string().max(32),
