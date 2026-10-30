@@ -34,6 +34,7 @@ import { copySpaceFile, downloadSpaceFile, spaceFileCopyLabel } from '@/lib/spac
 import { readSpaceDraft, writeSpaceDraft, type SpaceDraft } from '@/lib/space-drafts'
 import { ClippedText, MemberAvatar } from '@/components/spaces/atoms'
 import { uploadInputFor } from '@/lib/spaces-upload'
+import { revealOnMount } from '@/lib/reveal-on-mount'
 
 // Files: the tree (README first) and the file column — rendered file
 // with one-tap checkboxes, Edit → draft→apply (merged / conflict handled),
@@ -60,14 +61,14 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
     /** Files (by id) with a change by someone else (or an agent) since the read mark. */
     unreadAssetIds: ReadonlySet<string>
     onOpenFile: (assetId: string) => void
-    /** When set, shows the new-file input (prefilled with the prefix) at the bottom of the tree. */
+    /** When set, shows the new-file input (prefilled with the prefix) at the top of the tree, or at the top of the prefix's folder. */
     creating: { prefix: string } | null
     /** The one path-shaped ask: a file that does not exist yet (the owner creates it, then opens it by id). */
     onCreateFile: (path: string) => void
     onCancelCreate: () => void
-    /** A folder row's "New file" — asks the owner to open the create input with this prefix. */
+    /** A folder row's "New file" (from a menu) — asks the owner to open the create input with this prefix once the menu has closed. */
     onStartCreate?: (prefix: string) => void
-    /** When true, shows the new-folder input at the bottom of the tree. */
+    /** When true, shows the new-folder input at the top of the tree. */
     creatingFolder?: boolean
     onCreateFolder?: (path: string) => void
     onCancelCreateFolder?: () => void
@@ -142,11 +143,45 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
             return next
         })
 
+    // New-file focus (2026-10-27): the name input opens where the file will
+    // land — the top of the tree, or the top of the folder it was asked from
+    // (its folders open) — and scrolls into view, so a long tree never hides it.
+    const dirPaths = useMemo(() => {
+        const paths = new Set<string>()
+        const walk = (nodes: FileTreeNode[]) => nodes.forEach((n) => { if (n.kind === 'dir') { paths.add(n.path); walk(n.children) } })
+        walk(tree)
+        return paths
+    }, [tree])
+    const creatingInFolder = !!creating && dirPaths.has(creating.prefix.replace(/\/$/, ''))
+    const newFileInput = (style?: React.CSSProperties) => (
+        <div style={style} className="flex items-center gap-1 px-1 pt-1">
+            <Input
+                autoFocus
+                ref={revealOnMount}
+                value={newPath}
+                placeholder="path/to/file.md"
+                className="h-7 text-xs"
+                onChange={(e) => setNewPath(e.target.value)}
+                onKeyDown={(e) => {
+                    if (e.key === 'Enter' && newPath.trim()) {
+                        onCreateFile(newPath.trim())
+                        setNewPath('')
+                    }
+                    if (e.key === 'Escape') onCancelCreate()
+                }}
+            />
+            <Button size="icon" variant="ghost" className="size-7" onClick={onCancelCreate}>
+                <X className="size-3.5" />
+            </Button>
+        </div>
+    )
+
     const renderNode = (node: FileTreeNode, depth: number): ReactNode => {
         // Spaces redesign (2026-10-21): the tree is the Files page's body now, at the app's 14px row size.
         const pad = { paddingLeft: `${10 + depth * 18}px` }
         if (node.kind === 'dir') {
-            const open = !collapsed.has(node.path)
+            const creatingHere = creating?.prefix === `${node.path}/`
+            const open = !!creating?.prefix.startsWith(`${node.path}/`) || !collapsed.has(node.path)
             const empty = node.children.length === 0
             return (
                 <div key={node.path}>
@@ -168,7 +203,7 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                                     <ClippedText text={node.name} />
                                 </button>
                             </ContextMenuTrigger>
-                            <ContextMenuContent>
+                            <ContextMenuContent onCloseAutoFocus={(e) => e.preventDefault()}>
                                 <ContextMenuItem disabled={!writable} onSelect={() => onStartCreate?.(`${node.path}/`)}>
                                     <Plus className="size-3.5 mr-2" /> New file
                                 </ContextMenuItem>
@@ -192,7 +227,7 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                                     <MoreHorizontal className="size-3.5" />
                                 </button>
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
+                            <DropdownMenuContent align="end" onCloseAutoFocus={(e) => e.preventDefault()}>
                                 <DropdownMenuItem disabled={!writable} onClick={() => onStartCreate?.(`${node.path}/`)}>
                                     <Plus className="size-3.5 mr-2" /> New file
                                 </DropdownMenuItem>
@@ -212,8 +247,9 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                             {/* Indent guide: a faint dotted line under the folder's icon
                                 column, spanning its children — nesting reads without carets. */}
                             <span aria-hidden className="pointer-events-none absolute bottom-1 top-0 border-l border-dotted border-foreground/25" style={{ left: `${10 + depth * 18 + 8}px` }} />
+                            {creatingHere && newFileInput({ paddingLeft: `${10 + (depth + 1) * 18}px` })}
                             {node.children.map((child) => renderNode(child, depth + 1))}
-                            {empty && (
+                            {empty && !creatingHere && (
                                 <div style={{ paddingLeft: `${10 + (depth + 1) * 18}px` }} className="py-1 pr-2 text-xs italic text-muted-foreground/70">
                                     empty — files added here keep it
                                 </div>
@@ -354,33 +390,11 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                     onClose={() => setDeleting(null)}
                 />
             )}
-            {tree.map((node) => renderNode(node, 0))}
-            {tree.length === 0 && !creating && !creatingFolder && <div className="px-3 py-10 text-sm text-muted-foreground">No files yet. Use New, or drop files here.</div>}
-            {creating && (
-                <div className="flex items-center gap-1 px-1 pt-1">
-                    <Input
-                        autoFocus
-                        value={newPath}
-                        placeholder="path/to/file.md"
-                        className="h-7 text-xs"
-                        onChange={(e) => setNewPath(e.target.value)}
-                        onKeyDown={(e) => {
-                            if (e.key === 'Enter' && newPath.trim()) {
-                                onCreateFile(newPath.trim())
-                                setNewPath('')
-                            }
-                            if (e.key === 'Escape') onCancelCreate()
-                        }}
-                    />
-                    <Button size="icon" variant="ghost" className="size-7" onClick={onCancelCreate}>
-                        <X className="size-3.5" />
-                    </Button>
-                </div>
-            )}
             {creatingFolder && (
                 <div className="flex items-center gap-1 px-1 pt-1">
                     <Input
                         autoFocus
+                        ref={revealOnMount}
                         value={newFolder}
                         placeholder="folder or folder/subfolder"
                         className="h-7 text-xs"
@@ -399,6 +413,9 @@ export function FileTree({ orgId, orgAddress, spaceId, entries, draftFolders = [
                     </Button>
                 </div>
             )}
+            {creating && !creatingInFolder && newFileInput()}
+            {tree.map((node) => renderNode(node, 0))}
+            {tree.length === 0 && !creating && !creatingFolder && <div className="px-3 py-10 text-sm text-muted-foreground">No files yet. Use New, or drop files here.</div>}
         </div>
     )
 }
