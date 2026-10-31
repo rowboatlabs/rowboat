@@ -126,7 +126,22 @@ export async function readdir(
   const dirPath = resolveWorkspacePath(relPath);
   const entries: Array<z.infer<typeof workspace.DirEntry>> = [];
 
+  // Real paths of directories on the current recursion chain, so a symlink
+  // pointing back at an ancestor (e.g. an Obsidian vault linked into
+  // knowledge/) can't loop forever.
+  const ancestors = new Set<string>();
+
   async function readDir(currentPath: string, currentRelPath: string): Promise<void> {
+    const realCurrent = await fs.realpath(currentPath).catch(() => currentPath);
+    ancestors.add(realCurrent);
+    try {
+      await readDirEntries(currentPath, currentRelPath);
+    } finally {
+      ancestors.delete(realCurrent);
+    }
+  }
+
+  async function readDirEntries(currentPath: string, currentRelPath: string): Promise<void> {
     const items = await fs.readdir(currentPath, { withFileTypes: true });
 
     for (const item of items) {
@@ -146,25 +161,43 @@ export async function readdir(
         }
       }
 
+      // Symlinks are followed: classify by what they point at. Dangling
+      // links are skipped.
+      let isDir = item.isDirectory();
+      let isFile = item.isFile();
+      if (item.isSymbolicLink()) {
+        try {
+          const target = await fs.stat(itemPath);
+          isDir = target.isDirectory();
+          isFile = target.isFile();
+        } catch {
+          continue;
+        }
+      }
+
       let itemKind: z.infer<typeof workspace.NodeKind>;
       let itemStat: { size: number; mtimeMs: number } | undefined;
 
-      if (item.isDirectory()) {
+      if (isDir) {
         itemKind = 'dir';
         if (opts?.includeStats) {
-          const stats = await fs.lstat(itemPath);
+          const stats = await fs.stat(itemPath);
           itemStat = { size: stats.size, mtimeMs: stats.mtimeMs };
         }
         entries.push({ name: item.name, path: itemRelPath, kind: itemKind, stat: itemStat });
 
-        // Recurse if recursive is true
+        // Recurse if recursive is true, unless this directory is one of its
+        // own ancestors (symlink cycle)
         if (opts?.recursive) {
-          await readDir(itemPath, itemRelPath);
+          const realItem = await fs.realpath(itemPath).catch(() => itemPath);
+          if (!ancestors.has(realItem)) {
+            await readDir(itemPath, itemRelPath);
+          }
         }
-      } else if (item.isFile()) {
+      } else if (isFile) {
         itemKind = 'file';
         if (opts?.includeStats) {
-          const stats = await fs.lstat(itemPath);
+          const stats = await fs.stat(itemPath);
           itemStat = { size: stats.size, mtimeMs: stats.mtimeMs };
         }
         entries.push({ name: item.name, path: itemRelPath, kind: itemKind, stat: itemStat });
