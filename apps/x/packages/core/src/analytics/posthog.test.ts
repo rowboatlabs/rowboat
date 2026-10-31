@@ -36,6 +36,9 @@ import {
   identify,
   isFeatureEnabled,
   _resetStateForTesting,
+  getAnalyticsEnabled,
+  setAnalyticsEnabled,
+  setPersonProperties,
 } from './posthog.js';
 
 describe('posthog telemetry opt-out (issue #415)', () => {
@@ -153,4 +156,75 @@ describe('posthog telemetry opt-out (issue #415)', () => {
       expect(defaultTrue).toBe(true);
     });
   });
+});
+
+describe('Advanced analytics consent compatibility', () => {
+  const originalEnv = { ...process.env };
+  afterEach(() => {
+    process.env = { ...originalEnv };
+    _resetStateForTesting();
+  });
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSettings = {};
+    _resetStateForTesting();
+    delete process.env.DO_NOT_TRACK;
+    delete process.env.ROWBOAT_TELEMETRY_DISABLED;
+    process.env.POSTHOG_KEY = 'phc_test';
+  });
+
+  it('captures by default', () => {
+    capture('evt');
+    expect(mockPostHogInstance.capture).toHaveBeenCalledTimes(1);
+  });
+
+  it('never captures when the persisted setting is opted out', async () => {
+    mockSettings.analyticsEnabled = false;
+    expect(getAnalyticsEnabled()).toBe(false);
+    capture('evt');
+    identify('user');
+    setPersonProperties({ plan: 'test' });
+    expect(await isFeatureEnabled('flag', true)).toBe(true);
+    expect(mockPostHogInstance.capture).not.toHaveBeenCalled();
+    expect(mockPostHogInstance.identify).not.toHaveBeenCalled();
+    expect(mockPostHogInstance.alias).not.toHaveBeenCalled();
+    expect(mockPostHogInstance.isFeatureEnabled).not.toHaveBeenCalled();
+  });
+
+  it('stops capturing immediately after opting out, and resumes on opt-in', async () => {
+    capture('before');
+    await setAnalyticsEnabled(false);
+    expect(mockSettings).toMatchObject({ analyticsEnabled: false, telemetryOptOut: true });
+    capture('during');
+    expect(mockPostHogInstance.capture).toHaveBeenCalledTimes(1);
+    await setAnalyticsEnabled(true);
+    capture('after');
+    expect(mockPostHogInstance.capture).toHaveBeenCalledTimes(2);
+  });
+  it('honours a setting changed by another process after initialization', async () => {
+    capture('before');
+    mockSettings.analyticsEnabled = false;
+    mockPostHogInstance.identify.mockClear();
+    identify('user');
+    setPersonProperties({ plan: 'test' });
+    expect(mockPostHogInstance.identify).not.toHaveBeenCalled();
+    expect(mockPostHogInstance.alias).not.toHaveBeenCalled();
+    capture('during');
+    expect(await isFeatureEnabled('flag', true)).toBe(true);
+    expect(mockPostHogInstance.isFeatureEnabled).not.toHaveBeenCalled();
+    expect(mockPostHogInstance.capture).toHaveBeenCalledTimes(1);
+    mockSettings.analyticsEnabled = true;
+    capture('after');
+    expect(mockPostHogInstance.capture).toHaveBeenCalledTimes(2);
+  });
+  it('keeps environment opt-outs effective when either setting opts in', async () => {
+    process.env.DO_NOT_TRACK = '1';
+    await setAnalyticsEnabled(true);
+    expect(getAnalyticsEnabled()).toBe(false);
+    setTelemetryOptedOut(false);
+    expect(isTelemetryOptedOut()).toBe(true);
+    capture('blocked');
+    expect(mockPostHogInstance.capture).not.toHaveBeenCalled();
+  });
+
 });
