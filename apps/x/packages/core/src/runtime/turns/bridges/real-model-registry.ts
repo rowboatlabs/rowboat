@@ -11,7 +11,7 @@ import type { z } from "zod";
 import type { LlmProvider } from "@x/shared/dist/models.js";
 import type { AssistantContentPart } from "@x/shared/dist/message.js";
 import type { JsonValue, ModelDescriptor, TurnUsage } from "@x/shared/dist/turns.js";
-import { convertFromMessages } from "../../assembly/message-encoding.js";
+import { convertFromMessages, demoteReasoningInModelMessages } from "../../assembly/message-encoding.js";
 import { resolveProviderConfig } from "../../../models/defaults.js";
 import { createProvider } from "../../../models/models.js";
 import { isReasoningModel } from "../../../models/models-dev.js";
@@ -105,7 +105,9 @@ export class RealModelRegistry implements IModelRegistry {
             // wraps tool output as tool-result parts. Deterministic and
             // per-message, so composed requests are byte-stable.
             encodeMessages: (messages) =>
-                convertFromMessages(messages) as unknown as JsonValue[],
+                convertFromMessages(messages, {
+                    demoteReasoning: providerConfig.flavor === "openai-compatible",
+                }) as unknown as JsonValue[],
             stream: (request) =>
                 this.run(
                     model,
@@ -216,10 +218,16 @@ export class RealModelRegistry implements IModelRegistry {
             messages: request.messages,
         });
 
+        // Defense-in-depth: OpenAI-compatible providers (such as Groq) strictly
+        // reject assistant messages containing reasoning_content in history (#463).
+        const messages = flavor === "openai-compatible"
+            ? demoteReasoningInModelMessages(prompt.messages as ModelMessage[])
+            : prompt.messages as ModelMessage[];
+
         const result = this.invoke({
             model,
             ...(prompt.system === undefined ? {} : { system: prompt.system }),
-            messages: prompt.messages as ModelMessage[],
+            messages,
             tools,
             abortSignal: request.signal,
             ...generationParams,
