@@ -363,7 +363,7 @@ export class Feed {
       if (!this.invocations) return { message, invocations: [] };
       // Recorded before the answer below finishes its turn: Jev may tag
       // someone for this message later, at this depth (spec §8 Jev, 2026-10-07).
-      const depth = await this.invocations.handOffDepth(ctx, spaceId, opts.relayOf);
+      const depth = await this.invocations.handOffDepth(ctx, spaceId, message.threadRoot ?? message.id, opts.relayOf);
       if (depth > 0) await this.k.store.putMessageHops(spaceId, message.id, depth);
       const invocations = await this.invocations.onMessage(ctx, space, message, input.agentOptions, depth, outbox);
       if (finishing && this.invocations) await this.invocations.finishWithin(finishing, outbox);

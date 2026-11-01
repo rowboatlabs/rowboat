@@ -38,4 +38,20 @@ describe('turn activity snapshots and live updates', () => {
         expect(current()?.state).toBe('done')
         expect(current()?.activityHistory).toBeUndefined()
     })
+
+    it('keeps the newest lines of a long turn and no more, as Harbor does', async () => {
+        const invoke = vi.fn().mockResolvedValue({ invocations: [] })
+        ;(window as unknown as { ipc: unknown }).ipc = { invoke }
+        const { result } = renderHook(() => useSpaceInvocations('long-org', 'space'))
+        const current = () => result.current.get('message')?.[0]
+        const reports = 130
+        for (let n = 0; n < reports; n += 1) {
+            const id = String(n).padStart(4, '0')
+            act(() => feed.listener?.({ orgId: 'long-org', frame: { kind: 'invocation_state', spaceId: 'space', invocation: invocation(`2026-11-01T10:00:0${n % 10}.000Z`, { activity: `Step ${id}` }), activityEntry: entry(id) } }))
+        }
+        const history = current()?.activityHistory ?? []
+        expect(history).toHaveLength(100)
+        expect(history.at(0)?.id).toBe(String(reports - 100).padStart(4, '0'))
+        expect(history.at(-1)?.id).toBe(String(reports - 1).padStart(4, '0'))
+    })
 })

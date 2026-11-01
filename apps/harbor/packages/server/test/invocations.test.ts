@@ -198,6 +198,22 @@ describe('in-memory turn activity', () => {
     expect((await listed(id)).activityHistory?.map((e) => e.activity)).toEqual(['Committed']);
     await hermes.report(id, { state: 'done' });
   });
+
+  it('keeps only the newest lines of a long turn: a connector reports on its own key, as often as it likes', async () => {
+    const id = (await post('dev-harsh', `${mention(hermes.agent)} a long turn`)).invocations[0]!.id;
+    await hermes.ack(id);
+    const reports = 130;
+    for (let n = 0; n < reports; n += 1) {
+      expect((await hermes.report(id, { state: 'working', activity: `step ${n}` })).status).toBe(200);
+    }
+    const history = (await listed(id)).activityHistory!;
+    // The app's card scrolls to the end, so the newest are the ones it needs; 100 is the cap.
+    expect(history).toHaveLength(100);
+    expect(history.at(0)?.activity).toBe(`step ${reports - 100}`);
+    expect(history.at(-1)?.activity).toBe(`step ${reports - 1}`);
+    await hermes.report(id, { state: 'done' });
+    expect((await listed(id)).activityHistory).toBeUndefined();
+  }, 60_000);
 });
 
 describe('the queue', () => {
@@ -374,6 +390,40 @@ describe('who may invoke', () => {
       for (const c of chain) c.close();
     }
   });
+
+  it('counts a hand-off from the turn it belongs to, not the deepest turn the agent is running elsewhere', async () => {
+    const [x, y, z, busy, helper] = await Promise.all(['Relay X', 'Relay Y', 'Relay Z', 'Busy', 'Helper'].map(async (n) => {
+      const { agent, key } = await addAgent('harsh', n);
+      return Connector.start(agent, key);
+    })) as [Connector, Connector, Connector, Connector, Connector];
+    try {
+      // One thread runs Busy at the hop limit: harsh → X → Y → Z → Busy.
+      const start = await post('dev-harsh', `${mention(x.agent)} start the chain`);
+      const deepThread = start.message.id;
+      let deep = start.invocations[0]!;
+      for (const [from, to] of [[x, y], [y, z], [z, busy]] as const) {
+        await from.ack(deep.id);
+        deep = (await post(from.key, `${mention(to.agent)} over to you`, { threadRoot: deepThread })).invocations[0]!;
+      }
+      expect(deep.depth).toBe(3);
+      await busy.ack(deep.id);
+
+      // A fresh thread, a person's own request: Busy's hand-off there is the first hop, not the fifth.
+      const fresh = await post('dev-harsh', `${mention(busy.agent)} something new`);
+      const freshTurn = fresh.invocations[0]!;
+      expect(freshTurn.depth).toBe(0);
+      await busy.ack(freshTurn.id);
+      const handOff = (await post(busy.key, `${mention(helper.agent)} can you look?`, { threadRoot: fresh.message.id })).invocations[0]!;
+      expect(handOff).toMatchObject({ state: 'pending', depth: 1 });
+
+      // Outside any turn of its own, the deepest still counts: a chain cannot escape the limit by changing rooms.
+      const elsewhere = await post('dev-harsh', 'a thread Busy is not working in');
+      const beyond = (await post(busy.key, `${mention(helper.agent)} and here?`, { threadRoot: elsewhere.message.id })).invocations[0]!;
+      expect(beyond).toMatchObject({ state: 'refused', refusal: { reason: 'hop_limit' } });
+    } finally {
+      for (const c of [x, y, z, busy, helper]) c.close();
+    }
+  }, 60_000);
 });
 
 describe('cancel and stop', () => {

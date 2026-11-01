@@ -10,6 +10,9 @@ import { subscribeSpacesFeed } from '@/lib/spaces-feed'
 
 const EMPTY: ReadonlyMap<string, spaces.Invocation> = new Map()
 
+/** The lines of one turn kept here, as Harbor keeps them (core/invocations.ts ACTIVITY_LINES). */
+const ACTIVITY_LINES = 100
+
 let state: ReadonlyMap<string, ReadonlyMap<string, spaces.Invocation>> = new Map()
 const listeners = new Set<() => void>()
 const loading = new Set<string>()
@@ -39,7 +42,11 @@ function fold(k: string, incoming: readonly spaces.Invocation[]): void {
         // A snapshot can finish after newer live frames. Merge by Harbor's monotonic
         // entry ids so it fills earlier history without losing or duplicating lines (2026-11-01).
         const entries = new Map([...(prev?.activityHistory ?? []), ...(invocation.activityHistory ?? [])].map((entry) => [entry.id, entry]))
-        next.set(current.id, { ...current, activityHistory: [...entries.values()].sort((a, b) => a.id.localeCompare(b.id)) })
+        const history = [...entries.values()].sort((a, b) => a.id.localeCompare(b.id))
+        // Harbor keeps the newest lines of a turn and no more (ACTIVITY_LINES); the live
+        // frames arrive one at a time, so a long turn grows here unless we keep the same
+        // many (2026-11-01). The card scrolls to the end, so the newest are the ones shown.
+        next.set(current.id, { ...current, activityHistory: history.slice(-ACTIVITY_LINES) })
     }
     const all = new Map(state)
     all.set(k, next)

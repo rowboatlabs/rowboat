@@ -43,6 +43,18 @@ const WORKING_TIMEOUT_MS = 30 * 60 * 1000;
 const LIST_LIMIT = 100;
 
 /**
+ * Turn activity is Harbor's memory, and a connector reports on its own key as
+ * often as it likes, so it is bounded on both axes (2026-11-01). The newest
+ * lines of a turn are the ones a late viewer needs — the app's card scrolls to
+ * the end — so older ones fall off at ACTIVITY_LINES, and the whole turn is
+ * forgotten at ACTIVITY_TURNS, oldest report first. Unbounded, one agent key
+ * reporting in a loop grows the instance without limit and ships the lot to
+ * every reader of the space's listing.
+ */
+const ACTIVITY_LINES = 100;
+const ACTIVITY_TURNS = 500;
+
+/**
  * The owner's defaults that still fit what the connector declares (spec §8
  * Invocation options, 2026-10-01): a default for an option it no longer
  * declares, or a choice it no longer offers, is skipped rather than sent.
@@ -199,8 +211,27 @@ export class Invocations {
       id: this.k.ulid(), at: invocation.updatedAt, state: invocation.state, activity: invocation.activity,
     };
     entries.push(entry);
+    if (entries.length > ACTIVITY_LINES) entries.splice(0, entries.length - ACTIVITY_LINES);
+    // Re-inserted, so the map reads oldest report first: what forget() drops.
+    this.activityHistory.delete(invocation.id);
     this.activityHistory.set(invocation.id, entries);
+    if (this.activityHistory.size > ACTIVITY_TURNS) this.forgetOldestActivity();
     return entry;
+  }
+
+  /**
+   * Make room: a turn that stopped reporting is one Harbor would call failed
+   * anyway (WORKING_TIMEOUT_MS), and nothing else frees a turn that never
+   * reaches a terminal state — a connector that died, a space deleted under
+   * it. Quiet turns go first, then the least recent until the cap holds.
+   */
+  private forgetOldestActivity(): void {
+    const quietBefore = Date.parse(this.k.now()) - WORKING_TIMEOUT_MS;
+    for (const [id, entries] of this.activityHistory) {
+      const quiet = Date.parse(entries.at(-1)!.at) <= quietBefore;
+      if (!quiet && this.activityHistory.size <= ACTIVITY_TURNS) return;
+      this.activityHistory.delete(id);
+    }
   }
 
   private withActivityHistory(invocation: Invocation): Invocation {
@@ -578,16 +609,25 @@ export class Invocations {
   /**
    * The depth an agent a new message mentions is invoked at (spec §8). A
    * person's post is 0; an agent's hands work on, one hop deeper than the
-   * deepest turn it is running. Jev's tags (`relayOf`, spec §8 Jev,
+   * turn the post belongs to. Jev's tags (`relayOf`, spec §8 Jev,
    * 2026-10-07) complete the mentions of the message they answer, so they
    * take that message's depth: an agent and Jev passing work along still
    * stop at the hop limit.
+   *
+   * The turn a post belongs to is the one in its conversation (2026-11-01).
+   * An agent runs a turn per conversation at once, and reading the deepest
+   * of all of them spent a fresh thread's hop budget on a deep chain
+   * elsewhere: a hand-off in a new thread was refused while the agent stayed
+   * busy in an old one. Posting outside any turn of its own — a connector's
+   * DM to its owner — still counts from the deepest, which is what keeps a
+   * chain from escaping the limit by changing rooms.
    */
-  async handOffDepth(ctx: ActorCtx, spaceId: string, relayOf?: string): Promise<number> {
+  async handOffDepth(ctx: ActorCtx, spaceId: string, threadRootId: string, relayOf?: string): Promise<number> {
     if (relayOf) return this.k.store.getMessageHops(spaceId, relayOf);
     if (!ctx.agent) return 0;
     const live = await this.k.store.listInvocationsForAgent(ctx.memberId, LIVE);
-    return 1 + live.reduce((max, i) => Math.max(max, i.depth), 0);
+    const here = live.filter((i) => i.conversation.spaceId === spaceId && i.conversation.threadRootId === threadRootId);
+    return 1 + (here.length > 0 ? here : live).reduce((max, i) => Math.max(max, i.depth), 0);
   }
 
   /** One of the calling agent's own invocations, as it stands. */
