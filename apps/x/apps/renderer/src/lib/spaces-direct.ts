@@ -86,6 +86,15 @@ export function isDeparted(member: Pick<spaces.Member, 'deactivatedAt' | 'remove
 }
 
 /**
+ * Ro while an admin has it off (2026-10-30, Harbor's `OrgSettings.jevEnabled`):
+ * it tags no one, so the agent list and every picker leave it out, as for a
+ * departed member. Its old messages still show it by name.
+ */
+export function isSwitchedOff(member: Pick<spaces.Member, 'agentKind'>, settings: Pick<spaces.OrgSettings, 'jevEnabled'>): boolean {
+    return member.agentKind === 'jev' && !settings.jevEnabled
+}
+
+/**
  * Someone else's personal agent (Harbor spec §4 Agent members, 2026-10-26):
  * only its owner can mention it, add it or DM it, so everyone else's pickers
  * leave it out. It still shows on rosters and on its replies.

@@ -158,6 +158,9 @@ export class JevConnector implements RunningConnector {
     if (Date.now() - Date.parse(message.postedAt) > CATCH_UP_MS) return 'done';
     const api = this.api();
     if (!api) return 'done';
+    // Off (spec §8 Jev, 2026-10-30): the message is passed over, not held, so
+    // turning Ro on again never tags what was said while it was off.
+    if (!(await service.getOrgSettings(ctx)).jevEnabled) return 'done';
     const spaceId = message.spaceId;
     const space = (await service.listSpaces(ctx)).find((s) => s.id === spaceId);
     if (!space || space.kind !== 'shared') return 'done';

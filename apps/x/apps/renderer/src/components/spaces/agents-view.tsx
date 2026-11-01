@@ -12,6 +12,8 @@ import { isAgentOffline, refreshOrgRoster, useAgentsOnline, useOrgRoster, useSpa
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { BUILT_IN_CONNECTION, agentLabel, kindInfo } from '@/lib/agent-kinds'
 import { initials } from '@/lib/spaces-presentation'
+import { isSwitchedOff } from '@/lib/spaces-direct'
+import { useOrgSettings } from '@/hooks/use-org-settings'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 import { LOCAL_RUNTIME } from '@/lib/feature-flags'
@@ -66,10 +68,12 @@ export function AgentsView({ org }: { org: OrgWithSpaces }) {
 
     const isAdmin = roster.find((m) => m.id === org.memberId)?.role === 'admin'
     const names = useMemo(() => new Map(roster.map((m) => [m.id, m.displayName])), [roster])
+    const settings = useOrgSettings(org.id)
     const agents = useMemo(
-        () => roster.filter((m) => m.kind === 'agent' && !m.removedAt && !m.deactivatedAt)
+        // Ro while an admin has it off is left out (2026-10-30); the org menu turns it back on.
+        () => roster.filter((m) => m.kind === 'agent' && !m.removedAt && !m.deactivatedAt && !isSwitchedOff(m, settings))
             .sort((a, b) => a.displayName.localeCompare(b.displayName)),
-        [roster],
+        [roster, settings],
     )
     const mine = agents.filter((a) => a.ownerId === org.memberId)
     const others = agents.filter((a) => a.ownerId !== org.memberId)

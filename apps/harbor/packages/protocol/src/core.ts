@@ -110,6 +110,12 @@ export type InvitePolicy = z.infer<typeof InvitePolicy>;
 /** The org's settings any member may read and an admin sets (2026-10-19). */
 export const OrgSettings = z.object({
   invitePolicy: InvitePolicy.default('members'),
+  /**
+   * Whether Ro, the built-in Jev agent, is on (spec §8 Jev, 2026-10-30): off,
+   * it tags no one and clients leave it out of their agent lists and pickers.
+   * It keeps its spaces, so on again it carries on there.
+   */
+  jevEnabled: z.boolean().default(true),
 });
 export type OrgSettings = z.infer<typeof OrgSettings>;
 

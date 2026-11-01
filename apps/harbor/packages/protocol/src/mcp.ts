@@ -262,7 +262,7 @@ export const setMemberRole = tool({
 
 export const getOrgSettings = tool({
   name: 'get_org_settings',
-  description: "The org's settings: invitePolicy says who may create invite links (members, or admins only).",
+  description: "The org's settings: invitePolicy says who may create invite links (members, or admins only); jevEnabled says whether Ro, the built-in agent that tags whoever a message needs, is on.",
   input: z.object({}),
   output: z.object({ settings: OrgSettings }),
 });
@@ -273,6 +273,16 @@ export const setInvitePolicy = tool({
     'Set who may create invite links: members (anyone) or admins (admins only). Admins only. ' +
     'The same value is a no-op. Only when your person asked for it.',
   input: z.object({ invitePolicy: InvitePolicy }),
+  output: z.object({ settings: OrgSettings }),
+});
+
+export const setJevEnabled = tool({
+  name: 'set_jev_enabled',
+  description:
+    'Turn Ro, the built-in agent that tags whoever a message needs, on or off for the org. Admins only. ' +
+    'Off, it tags no one and apps leave it out of agent lists and pickers. The same value is a no-op. ' +
+    'Only when your person asked for it.',
+  input: z.object({ jevEnabled: z.boolean() }),
   output: z.object({ settings: OrgSettings }),
 });
 
@@ -806,6 +816,7 @@ export const mcpTools = [
   setMemberRole,
   getOrgSettings,
   setInvitePolicy,
+  setJevEnabled,
   createInvite,
   readStream,
   readThread,

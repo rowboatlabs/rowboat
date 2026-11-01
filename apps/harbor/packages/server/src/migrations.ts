@@ -1184,6 +1184,12 @@ export const MIGRATIONS: Migration[] = [
       `alter table members add constraint members_instructions_check check (kind = 'agent' or instructions is null)`,
     ],
   },
+  {
+    // Ro's switch (spec §8 Jev, 2026-10-30): an admin turns it off for the
+    // org. On until then, as every org has had it.
+    id: '053-org-settings-jev-enabled',
+    statements: [`alter table org_settings add column if not exists jev_enabled boolean not null default true`],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

@@ -9,7 +9,8 @@ import {
   type SpaceMentionTarget,
   type SpacesMentionTargets,
 } from '@/lib/mention-targets'
-import { isDeparted, isOthersPersonalAgent } from '@/lib/spaces-direct'
+import { isDeparted, isOthersPersonalAgent, isSwitchedOff } from '@/lib/spaces-direct'
+import { useOrgsSettings } from '@/hooks/use-org-settings'
 
 /**
  * What the assistant composer's @ menu can name in Spaces: every shared
@@ -29,6 +30,7 @@ export function useSpacesMentionTargets(): SpacesMentionTargets {
   )
   const rosters = useOrgRosters(rosterOrgs)
   const boardsByOrg = useOrgBoards(rosterOrgs)
+  const settingsOf = useOrgsSettings(rosterOrgs.map((o) => o.id))
   return useMemo(() => {
     if (orgs.length === 0) return EMPTY_SPACES_MENTION_TARGETS
     const spaces: SpaceMentionTarget[] = []
@@ -43,11 +45,11 @@ export function useSpacesMentionTargets(): SpacesMentionTargets {
         }
       }
       for (const member of rosters.get(org.id) ?? []) {
-        // Someone else's personal agent can't be messaged (2026-10-26), so it isn't offered.
-        if (member.id === org.memberId || isDeparted(member) || isOthersPersonalAgent(member, org.memberId)) continue
+        // Someone else's personal agent can't be messaged (2026-10-26), so it isn't offered; nor Ro while it is off (2026-10-30).
+        if (member.id === org.memberId || isDeparted(member) || isOthersPersonalAgent(member, org.memberId) || isSwitchedOff(member, settingsOf(org.id))) continue
         members.push({ kind: 'member', orgId: org.id, orgName: org.name, memberId: member.id, displayName: member.displayName })
       }
     }
     return { spaces, boards, members }
-  }, [orgs, rosters, boardsByOrg])
+  }, [orgs, rosters, boardsByOrg, settingsOf])
 }

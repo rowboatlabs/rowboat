@@ -5,7 +5,8 @@ import { Input } from '@/components/ui/input'
 import { AgentBadge, MemberAvatar } from '@/components/spaces/atoms'
 import { useOrgRoster } from '@/hooks/use-space-members'
 import { refreshSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
-import { isDeparted, isOthersPersonalAgent, isSelfDirect, otherParticipant } from '@/lib/spaces-direct'
+import { isDeparted, isOthersPersonalAgent, isSelfDirect, isSwitchedOff, otherParticipant } from '@/lib/spaces-direct'
+import { useOrgSettings } from '@/hooks/use-org-settings'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 
@@ -36,6 +37,7 @@ export function NewDirectDialog({ org, open, onOpenChange, onOpened }: {
         }
         return set
     }, [org.directs, org.memberId])
+    const settings = useOrgSettings(org.id)
     // You are always first: notes to self is the one DM everyone has.
     const candidates = useMemo(() => {
         const q = query.trim().toLowerCase()
@@ -43,11 +45,11 @@ export function NewDirectDialog({ org, open, onOpenChange, onOpened }: {
         const self = me && (!q || 'you'.includes(q) || 'me'.includes(q) || me.displayName.toLowerCase().includes(q)) ? [me] : []
         const others = roster
             // A deleted account, or someone else's personal agent, is never offered
-            // (2026-10-13, 2026-10-26): Harbor refuses the DM.
-            .filter((m) => m.id !== org.memberId && !isDeparted(m) && !isOthersPersonalAgent(m, org.memberId) && (!q || m.displayName.toLowerCase().includes(q)))
+            // (2026-10-13, 2026-10-26): Harbor refuses the DM. Nor is Ro while it is off (2026-10-30).
+            .filter((m) => m.id !== org.memberId && !isDeparted(m) && !isOthersPersonalAgent(m, org.memberId) && !isSwitchedOff(m, settings) && (!q || m.displayName.toLowerCase().includes(q)))
             .sort((a, b) => Number(existing.has(b.id)) - Number(existing.has(a.id)))
         return self.concat(others)
-    }, [roster, org.memberId, query, existing])
+    }, [roster, org.memberId, query, existing, settings])
 
     useEffect(() => {
         if (!open) return

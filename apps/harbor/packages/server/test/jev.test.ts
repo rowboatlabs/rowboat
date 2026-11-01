@@ -184,6 +184,28 @@ describe('Jev', () => {
     expect(fake.calls.at(-1)!.state.members.some((m) => m.name === 'Scribe')).toBe(false);
   });
 
+  it('is off when an admin turns it off: it tags no one, keeps its spaces, and on again tags only what comes after (2026-10-30)', async () => {
+    await db.store.setMemberRole('ramnique', 'admin'); // no seed space here, so no one is admin yet
+    expect((await as('dev-harsh').patch('/v1/org/settings', { jevEnabled: false })).status).toBe(403);
+    const off = await as('dev-ramnique').patch('/v1/org/settings', { jevEnabled: false });
+    expect(off.body.settings).toMatchObject({ jevEnabled: false });
+    expect((await as('dev-harsh').get('/v1/org/settings')).body.settings).toMatchObject({ jevEnabled: false });
+    const calls = fake.calls.length;
+    const unheard = await post('Harsh, can you look at the refund bug?');
+    await settle();
+    expect(fake.calls.length).toBe(calls);
+    expect(await jevReplies(unheard.id)).toEqual([]);
+    const members = (await as('dev-harsh').get(`/v1/spaces/${spaceId}/members`)).body.members as Member[];
+    expect(members.some((m) => m.id === jev.id)).toBe(true);
+
+    await as('dev-ramnique').patch('/v1/org/settings', { jevEnabled: true });
+    const heard = await post('Gagan, can you look at the refund bug?');
+    const [reply] = await tagged(heard.id);
+    expect(reply!.body).toBe('cc [@Gagan](#member:gagan)');
+    await settle();
+    expect(await jevReplies(unheard.id)).toEqual([]);
+  });
+
   it('carries the hand-off depth: an agent naming another in plain text hands it work one hop on', async () => {
     const { agent: alpha, key: alphaKey } = await addAgent('Alpha');
     const { agent: beta, key: betaKey } = await addAgent('Beta');

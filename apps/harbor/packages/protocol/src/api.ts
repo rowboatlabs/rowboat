@@ -272,7 +272,7 @@ export const routes = {
     path: '/v1/org/logo',
     response: z.object({ logoUrl: z.string().url().optional() }),
   },
-  /** The org's settings (2026-10-19): today, who may invite. Any member reads them. */
+  /** The org's settings (2026-10-19): who may invite, and whether Ro is on (2026-10-30). Any member reads them. */
   getOrgSettings: {
     method: 'GET',
     path: '/v1/org/settings',
@@ -286,7 +286,7 @@ export const routes = {
   updateOrgSettings: {
     method: 'PATCH',
     path: '/v1/org/settings',
-    request: z.object({ invitePolicy: InvitePolicy.optional() }),
+    request: z.object({ invitePolicy: InvitePolicy.optional(), jevEnabled: z.boolean().optional() }),
     response: z.object({ settings: OrgSettings }),
   },
   /**

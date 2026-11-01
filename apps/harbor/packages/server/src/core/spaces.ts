@@ -571,9 +571,13 @@ export class Spaces {
   async updateOrgSettings(ctx: ActorCtx, input: UpdateOrgSettingsInput): Promise<OrgSettings> {
     enforce(canSetOrgSettings(await this.me(ctx)));
     const current = await this.k.store.getOrgSettings();
-    if (input.invitePolicy === undefined || input.invitePolicy === current.invitePolicy) return current;
+    const policy = input.invitePolicy !== undefined && input.invitePolicy !== current.invitePolicy ? input.invitePolicy : undefined;
+    const jev = input.jevEnabled !== undefined && input.jevEnabled !== current.jevEnabled ? input.jevEnabled : undefined;
+    if (policy === undefined && jev === undefined) return current;
     const at = this.k.now();
-    await this.k.store.setInvitePolicy(input.invitePolicy, ctx.memberId, at);
+    if (policy !== undefined) await this.k.store.setInvitePolicy(policy, ctx.memberId, at);
+    // Ro's switch (spec §8 Jev, 2026-10-30): its connector reads it per message.
+    if (jev !== undefined) await this.k.store.setJevEnabled(jev, ctx.memberId, at);
     await this.tellOrg(at);
     return this.k.store.getOrgSettings();
   }

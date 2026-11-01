@@ -294,6 +294,8 @@ export interface Store {
   // org settings (2026-10-19): one row per org once an admin sets one; no row = the defaults.
   getOrgSettings(): Promise<OrgSettings>;
   setInvitePolicy(policy: InvitePolicy, by: string, at: string): Promise<void>;
+  /** Ro on or off for the org (spec §8 Jev, 2026-10-30). */
+  setJevEnabled(enabled: boolean, by: string, at: string): Promise<void>;
 
   // spaces — `kind` (migration 014) rides the row; a direct space also
   // stores its direct key, and putSpace MUST refuse a second direct space
