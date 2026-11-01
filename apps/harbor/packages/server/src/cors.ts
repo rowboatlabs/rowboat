@@ -15,7 +15,7 @@ export function webCors(origins: readonly string[]): MiddlewareHandler {
   if (allowed.size === 0) return async (_c, next) => next();
   return cors({
     origin: (origin) => (allowed.has(origin) ? origin : null),
-    allowMethods: ['GET', 'POST', 'PUT', 'DELETE'],
+    allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
     allowHeaders: ['authorization', 'content-type', 'x-blob-sha256'],
     credentials: true,
     exposeHeaders: ['WWW-Authenticate'],

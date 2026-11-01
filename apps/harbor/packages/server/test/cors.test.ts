@@ -106,4 +106,29 @@ describe('the apex', () => {
     expect(res.status).toBe(204);
     expect(res.headers.get('access-control-allow-origin')).toBe(WEB);
   });
+
+  it('lets the web app preflight PATCH and turn Ro off and on', async () => {
+    const url = `${dep.url}/v1/org/settings`;
+    const res = await preflight(url, WEB, {
+      'x-forwarded-host': 'acme.test',
+      'access-control-request-method': 'PATCH',
+    });
+    expect(res.status).toBe(204);
+    expect(res.headers.get('access-control-allow-origin')).toBe(WEB);
+    expect(res.headers.get('access-control-allow-credentials')).toBe('true');
+    expect(res.headers.get('access-control-allow-methods')?.split(',')).toContain('PATCH');
+
+    const token = await as.mint({ sub: 'sub-ram' });
+    const headers = { origin: WEB, authorization: `Bearer ${token}`, 'content-type': 'application/json', 'x-forwarded-host': 'acme.test' };
+    for (const jevEnabled of [false, true]) {
+      const changed = await fetch(url, { method: 'PATCH', headers, body: JSON.stringify({ jevEnabled }) });
+      expect(changed.status).toBe(200);
+      expect(changed.headers.get('access-control-allow-origin')).toBe(WEB);
+      expect(await changed.json()).toMatchObject({ settings: { jevEnabled } });
+
+      const saved = await fetch(url, { headers });
+      expect(saved.status).toBe(200);
+      expect(await saved.json()).toMatchObject({ settings: { jevEnabled } });
+    }
+  });
 });
