@@ -178,6 +178,71 @@ describe('the Maritime connector with Hermes', () => {
     await vi.waitFor(async () => expect(await org.reactions(message.id)).toEqual([expect.objectContaining({ emoji: '✅', memberIds: [scout.id] })]));
   });
 
+  it('answers and accepts a follow-up while the catalogue is stalled, then publishes the refreshed choices', async () => {
+    // Establish a completed refresh in this test before stalling the next one (2026-11-01).
+    fake.files.set('/opt/data/rowboat/models.json', JSON.stringify({ models: ['baseline-a', 'baseline-b'] }));
+    fake.nextTurn = hermesTurn('Initial catalogue ready.');
+    const initial = await org.post(`${mention(scout)} initialise the catalogue`);
+    await org.ended(initial.invocations[0]!.id);
+    await until(async () => {
+      const { body } = await org.as('dev-harsh').get(`/v1/agents/${scout.id}/capabilities`);
+      return body.capabilities.options.find((o: { key: string }) => o.key === 'model')?.choices[0]?.id === 'baseline-a';
+    }, 'initial catalogue');
+    const before = fake.catalogs().length;
+    fake.holdCatalog = true;
+    try {
+      fake.nextTurn = hermesTurn('Ready before the catalogue.');
+      const { message, invocations } = await org.post(`${mention(scout)} check the deploy`);
+      const catalog = await until(async () => fake.catalogs().slice(before).find((e) => e.status === 'running'), 'stalled catalogue');
+      expect((await org.invocation(invocations[0]!.id))?.state).toBe('done');
+      expect((await org.thread(message.id)).map((m) => m.body)).toEqual(['Ready before the catalogue.']);
+      const submission = fake.received.find((r) => r.path.endsWith('/exec') && JSON.stringify(r.body?.command).includes('/rowboat/models.json'))!;
+      expect(submission.body).toMatchObject({ detached: true, timeout: 45 });
+
+      fake.nextTurn = hermesTurn('The follow-up also finishes.');
+      const followup = await org.post(`${mention(scout)} and the tests?`, { threadRoot: message.id });
+      expect((await org.ended(followup.invocations[0]!.id)).state).toBe('done');
+      expect(catalog.status).toBe('running');
+      expect(fake.catalogs()).toHaveLength(before + 1);
+      expect(fake.lastPrompt()).not.toContain('Earlier in this thread:');
+
+      fake.files.set('/opt/data/rowboat/models.json', JSON.stringify({ models: ['fast-model', 'deep-model'] }));
+      Object.assign(catalog, { status: 'completed', exitCode: 0 });
+      await until(async () => {
+        const { body } = await org.as('dev-harsh').get(`/v1/agents/${scout.id}/capabilities`);
+        return body.capabilities.options.find((o: { key: string }) => o.key === 'model')?.choices[0]?.id === 'fast-model';
+      }, 'new model choices');
+      expect((await org.thread(message.id)).filter((m) => m.author.memberId === scout.id).map((m) => m.body)).toEqual([
+        'Ready before the catalogue.', 'The follow-up also finishes.',
+      ]);
+    } finally {
+      fake.holdCatalog = false;
+      for (const e of fake.catalogs()) if (e.status === 'running') Object.assign(e, { status: 'completed', exitCode: 0 });
+    }
+  });
+
+  it('a failed turn still refreshes the catalogue, and a timed-out refresh preserves the turn error and prior choices', async () => {
+    const before = fake.catalogs().length;
+    const choices = (await org.as('dev-harsh').get(`/v1/agents/${scout.id}/capabilities`)).body.capabilities.options;
+    fake.holdCatalog = true;
+    try {
+      fake.nextTurn = { lines: [JSON.stringify({ type: 'result', error: 'Model unavailable', exit_code: 1 })], exitCode: 1 };
+      const { message, invocations } = await org.post(`${mention(scout)} try an unavailable model`);
+      const catalog = await until(async () => fake.catalogs().slice(before).find((e) => e.status === 'running'), 'catalogue after failed turn');
+      expect(await org.invocation(invocations[0]!.id)).toMatchObject({ state: 'failed', error: 'Model unavailable' });
+      const readsBefore = fake.received.length;
+      fake.files.set('/opt/data/rowboat/models.json', JSON.stringify({ models: ['unfinished-a', 'unfinished-b'] }));
+      Object.assign(catalog, { status: 'failed', exitCode: 124 });
+      await until(async () => fake.received.slice(readsBefore).some((r) => r.method === 'GET' && r.path.endsWith(`/exec/${catalog.executionId}`)), 'refresh timeout read');
+      expect((await org.as('dev-harsh').get(`/v1/agents/${scout.id}/capabilities`)).body.capabilities.options).toEqual(choices);
+      expect(await org.invocation(invocations[0]!.id)).toMatchObject({ state: 'failed', error: 'Model unavailable' });
+      expect(await org.thread(message.id)).toEqual([]);
+    } finally {
+      fake.holdCatalog = false;
+      for (const e of fake.catalogs()) if (e.status === 'running') Object.assign(e, { status: 'failed', exitCode: 124 });
+    }
+  });
+
   it('settles a follow-up reaction on its trigger and preserves other members’ reactions', async () => {
     const root = await org.post('A job for Scout');
     fake.nextTurn = { lines: [], hold: true };
@@ -306,7 +371,7 @@ describe('the Maritime connector with the coding agents', () => {
     fake.agent = { ...fake.agent, framework: 'custom', templateId: 'codex', status: 'sleeping' };
     const codex = await org.agent('Codex', 'codex');
     const reports = vi.spyOn(org.harbor.service, 'updateInvocation');
-    // Models come from the harness (2026-11-01): nothing is listed before a turn, Effort only; the turn leaves Codex's own catalog on the VM.
+    // Models come from the harness (2026-11-01): Effort only before a turn; separate maintenance reads Codex's own catalog.
     await vi.waitFor(async () => expect((await org.harbor.service.getAgentCapabilities(codex.id)).options.map((o) => o.key)).toEqual(['effort']));
     fake.files.set(
       '/data/rowboat/models.json',
@@ -327,14 +392,15 @@ describe('the Maritime connector with the coding agents', () => {
     expect(first).toContain(`-c 'mcp_servers.rowboat.url="http://localhost:`);
     expect(first).toContain(`-c 'mcp_servers.rowboat.bearer_token_env_var="ROWBOAT_AGENT_KEY"'`);
     expect(first).toContain('export CODEX_HOME=/data/.codex');
-    expect(first).toContain('cp "$CODEX_HOME/models_cache.json" /data/rowboat/models.json');
-    // The catalog the turn left is the composer's Model option from then on: listed models by priority, hidden ones out.
+    expect(first).not.toContain('models_cache.json');
+    // The refreshed catalog becomes the composer's Model option: listed models by priority, hidden ones out.
     await vi.waitFor(async () =>
       expect((await org.harbor.service.getAgentCapabilities(codex.id)).options).toEqual([
         { type: 'select', key: 'model', label: 'Model', choices: [{ id: 'gpt-6.1-sol', label: 'GPT-6.1-Sol' }, { id: 'gpt-6-sol', label: 'GPT-6-Sol' }] },
         { type: 'select', key: 'effort', label: 'Effort', choices: [{ id: 'low', label: 'Low' }, { id: 'medium', label: 'Medium' }, { id: 'high', label: 'High' }] },
       ]),
     );
+    expect(fake.catalogs().at(-1)!.script).toContain('cp "$CODEX_HOME/models_cache.json" /data/rowboat/models.json');
     expect(fake.submits().at(-1)!.files.prompt).toBe(`/data/rowboat/${invocations[0]!.id}.prompt`);
     expect((await org.thread(message.id)).find((m) => m.author.memberId === codex.id)!.body).toBe('Tests pass.');
     await vi.waitFor(async () => expect(await org.reactions(message.id)).toEqual([expect.objectContaining({ emoji: '✅', memberIds: [codex.id] })]));

@@ -1,33 +1,27 @@
 import { describe, expect, it } from 'vitest';
 import { RUNTIMES } from '../src/connectors/maritime/runtimes.js';
 
-// Model lists come from the harness (2026-11-01): each turn leaves the harness's own list on the VM, the runtime
-// reads it into the composer's choices, and nothing is listed in Harbor itself.
+// Model lists come from the harness (2026-11-01), in a separate execution after the turn is settled.
+// The runtime reads them into the composer's choices, and nothing is listed in Harbor itself.
 const input = { orgUrl: 'http://localhost:1', agentKey: 'rbk_x', promptPath: '/p', outPath: '/o.jsonl', errPath: '/e.err', lastPath: '/l' };
 const EFFORT = { type: 'select', key: 'effort', label: 'Effort', choices: [{ id: 'low', label: 'Low' }, { id: 'medium', label: 'Medium' }, { id: 'high', label: 'High' }] };
 
 describe('model lists from the harness', () => {
-  it('each turn script leaves the harness’s list where the connector reads it, after the turn, whether the turn passed or failed', () => {
+  it('keeps catalogue work out of every turn script, while preserving each runtime’s catalogue source', () => {
     for (const runtime of Object.values(RUNTIMES)) {
-      const script = runtime.command(input);
-      // The CLI runs with -e off, its exit code kept, the list left, then the script exits with the CLI's code.
-      expect(script.indexOf('set +e')).toBeGreaterThan(0);
-      expect(script.indexOf('set +e')).toBeLessThan(script.indexOf('TURN_EXIT=$?'));
-      expect(script.indexOf('TURN_EXIT=$?')).toBeLessThan(script.indexOf(runtime.modelsPath));
-      expect(script.trimEnd().endsWith('exit $TURN_EXIT')).toBe(true);
+      expect(runtime.command(input)).not.toContain(runtime.modelsPath);
+      expect(runtime.command(input)).not.toContain('provider_model_ids');
+      expect(runtime.modelsCommand()).toContain(runtime.modelsPath);
     }
-    const codex = RUNTIMES.codex!.command(input);
-    expect(codex).toContain(`cp "$CODEX_HOME/models_cache.json" ${RUNTIMES.codex!.modelsPath}`);
+    const codex = RUNTIMES.codex!.modelsCommand();
+    expect(codex).toContain('models_cache.json');
     expect(codex).toContain('"$OPENAI_BASE_URL/models"');
-    expect(codex.indexOf('codex exec')).toBeLessThan(codex.indexOf('models_cache.json'));
-    const claude = RUNTIMES['claude-code']!.command(input);
+    const claude = RUNTIMES['claude-code']!.modelsCommand();
     expect(claude).toContain('/v1/models?limit=100');
     expect(claude).toContain('${ANTHROPIC_BASE_URL:-https://api.anthropic.com}');
-    expect(claude.indexOf('$CLI -p')).toBeLessThan(claude.indexOf('/v1/models'));
-    const hermes = RUNTIMES.hermes!.command(input);
+    const hermes = RUNTIMES.hermes!.modelsCommand();
     expect(hermes).toContain('provider_model_ids');
-    expect(hermes).toContain(`> ${RUNTIMES.hermes!.modelsPath}.tmp`);
-    expect(hermes.indexOf('hermes chat')).toBeLessThan(hermes.indexOf('provider_model_ids'));
+    expect(hermes).toContain('HERMES_HOME=/opt/data HOME=/opt/data');
   });
 
   it('Codex’s catalog: listed models by priority, hidden ones left out; a plain models endpoint too', () => {

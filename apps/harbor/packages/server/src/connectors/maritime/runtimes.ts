@@ -53,7 +53,9 @@ export interface Runtime {
   activity(out: string): string | undefined;
   /** The composer's options: the runtime's own (Effort), and Model from the list the harness left on the VM, when there is a choice. */
   options(models: ModelChoice[]): InvocationOption[];
-  /** Where the turn script leaves the harness's own model list, as the harness or its provider wrote it. */
+  /** A separate, best-effort catalogue execution after the turn is settled (2026-11-01). */
+  modelsCommand(): string;
+  /** Where the catalogue execution leaves the harness's own model list. */
   modelsPath: string;
   /** That file read into choices; nothing when it is not one. */
   models(text: string): ModelChoice[];
@@ -66,9 +68,9 @@ export interface ModelChoice {
 }
 
 // Models are never listed in Harbor (2026-11-01): the ChatGPT backend, the API, Rowboat's proxy and each owner's
-// provider all serve different sets, and they change on their own schedule. Each turn leaves the harness's own
-// list on the VM (Codex's catalog file, Hermes's provider catalog, Anthropic's models endpoint for Claude Code),
-// the connector reads it after the turn and declares it, and the composer shows "default" until someone picks.
+// provider all serve different sets, and they change on their own schedule. After settling a turn, a separate
+// execution leaves the harness's own list on the VM (Codex's catalog file, Hermes's provider catalog, Anthropic's
+// models endpoint for Claude Code). Catalogue latency must never hold up the answer (2026-11-01).
 
 /** The Model option only when there is a choice to make (as local agents do, local-agents.ts), at most what the protocol takes. */
 function modelOption(models: ModelChoice[]): InvocationOption[] {
@@ -181,14 +183,7 @@ const hermes: Runtime = {
       // The rowboat-spaces skill, once: without it the first turn of every session fetches it from GitHub (seen on prod 2026-10-26).
       `{ [ -d /opt/data/skills/rowboat-spaces ] || ls -d /opt/data/skills/*/rowboat-spaces >/dev/null 2>&1; } || run hermes skills install rowboatlabs/rowboat/skills/rowboat-spaces --yes >/dev/null 2>&1 || true`,
       'cd /opt/data/workspace',
-      // The turn's own exit code is the execution's, after the model list below: a failed turn still leaves the list.
-      'set +e',
       `run hermes chat --query-file ${q(input.promptPath)} --oneshot --format stream-json -c ${q(input.session ?? 'rowboat')} --create-if-missing ${flags} > ${q(input.outPath)} 2> ${q(input.errPath)}`,
-      'TURN_EXIT=$?',
-      'set -e',
-      // The harness's own model list (2026-11-01), for the composer: after the turn, so the answer is not held up, and never fatal.
-      `printf '%s\\n' ${q(HERMES_MODELS_PY)} > /opt/data/rowboat/models.py; run timeout 30 python /opt/data/rowboat/models.py > /opt/data/rowboat/models.json.tmp 2>/dev/null && mv /opt/data/rowboat/models.json.tmp /opt/data/rowboat/models.json || true`,
-      'exit $TURN_EXIT',
     ].join('\n');
   },
   // The thread's session is its name (`-c`), kept from the first turn; the id a result reports is not read back.
@@ -210,6 +205,13 @@ const hermes: Runtime = {
     return undefined;
   },
   options: (models) => [...modelOption(models), { type: 'select', key: 'effort', label: 'Effort', choices: EFFORTS }],
+  modelsCommand: () => [
+    'set -e',
+    'export HERMES_HOME=/opt/data HOME=/opt/data',
+    'export PATH="/command:/opt/hermes/bin:/opt/hermes/.venv/bin:$PATH"',
+    'if [ "$(id -u)" = 0 ] && [ -x /command/s6-setuidgid ]; then run() { /command/s6-setuidgid hermes env HERMES_HOME=/opt/data HOME=/opt/data PATH="$PATH" "$@"; }; else run() { "$@"; }; fi',
+    `printf '%s\\n' ${q(HERMES_MODELS_PY)} > /opt/data/rowboat/models.py; run timeout 30 python /opt/data/rowboat/models.py > /opt/data/rowboat/models.json.tmp 2>/dev/null && mv /opt/data/rowboat/models.json.tmp /opt/data/rowboat/models.json || true`,
+  ].join('\n'),
   modelsPath: '/opt/data/rowboat/models.json',
   models(text) {
     const doc = obj(parse(text));
@@ -243,17 +245,7 @@ const codex: Runtime = {
       // provider when it is, the proxy's address unset with it. Its answer goes first into the stderr file, for Harbor.
       `OWN=""; if [ "$ROWBOAT_LLM_PROVIDER" = openai ]; then OWN='-c model_provider="openai"'; elif codex login status 2>&1 | grep -q 'ChatGPT'; then OWN='-c model_provider="openai"'; unset OPENAI_BASE_URL; echo '${SIGN_IN_MARK}chatgpt' > ${q(input.errPath)}; else echo '${SIGN_IN_MARK}none' > ${q(input.errPath)}; fi`,
       `${input.model ? '' : '[ -z "$ROWBOAT_LLM_MODEL" ] || OWN="$OWN -m $ROWBOAT_LLM_MODEL"; '}true`,
-      // The turn's own exit code is the execution's, after the model list below: a turn that failed on its model (seen
-      // 2026-11-01, a ChatGPT account refusing the template's model) still leaves the list Codex fetched before it asked.
-      'set +e',
       `codex exec ${input.session ? `resume ${q(input.session)}` : ''} --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox -o ${q(input.lastPath)} $OWN ${flags} -- "$PROMPT" > ${q(input.outPath)} 2>> ${q(input.errPath)}`,
-      'TURN_EXIT=$?',
-      'set -e',
-      // The harness's own model list (2026-11-01), for the composer: the catalog Codex fetched for its identity (its
-      // models_cache.json, refreshed each run: the ChatGPT set after a sign-in), or, where Codex kept none (the
-      // platform's proxy as a custom provider), what the proxy's models endpoint lists. After the turn, never fatal.
-      `cp "$CODEX_HOME/models_cache.json" /data/rowboat/models.json 2>/dev/null || { [ -n "$OPENAI_BASE_URL" ] && curl -sf -m 15 "$OPENAI_BASE_URL/models" -H "Authorization: Bearer $OPENAI_API_KEY" > /data/rowboat/models.json.tmp && mv /data/rowboat/models.json.tmp /data/rowboat/models.json; } || true`,
-      'exit $TURN_EXIT',
     ].join('\n');
   },
   read(out, last, err, exitCode) {
@@ -284,6 +276,13 @@ const codex: Runtime = {
     return undefined;
   },
   options: (models) => [...modelOption(models), { type: 'select', key: 'effort', label: 'Effort', choices: EFFORTS }],
+  modelsCommand: () => [
+    'set -e',
+    'export CODEX_HOME=/data/.codex',
+    // Match the turn’s account routing (2026-11-01): a ChatGPT sign-in must not fall back to the platform proxy.
+    'if [ "$ROWBOAT_LLM_PROVIDER" != openai ] && codex login status 2>&1 | grep -q ChatGPT; then unset OPENAI_BASE_URL; fi',
+    `cp "$CODEX_HOME/models_cache.json" /data/rowboat/models.json 2>/dev/null || { [ -n "$OPENAI_BASE_URL" ] && curl -sf -m 15 "$OPENAI_BASE_URL/models" -H "Authorization: Bearer $OPENAI_API_KEY" > /data/rowboat/models.json.tmp && mv /data/rowboat/models.json.tmp /data/rowboat/models.json; } || true`,
+  ].join('\n'),
   modelsPath: '/data/rowboat/models.json',
   // Codex's catalog (`models`: slug, display_name, visibility, priority), or a plain models endpoint (`data`: id).
   models(text) {
@@ -319,15 +318,7 @@ const claudeCode: Runtime = {
       '[ -n "$CLI" ] || { echo "no Claude Code CLI found in this VM" >&2; exit 127; }',
       `PROMPT="$(cat ${q(input.promptPath)})"`,
       `OWN=""; ${input.model ? '' : '[ -z "$ROWBOAT_LLM_MODEL" ] || OWN="--model $ROWBOAT_LLM_MODEL"; '}true`,
-      // The turn's own exit code is the execution's, after the model list below: a failed turn still leaves the list.
-      'set +e',
       `$CLI -p --output-format stream-json --verbose --dangerously-skip-permissions --mcp-config /data/rowboat/mcp.json $OWN ${flags} -- "$PROMPT" > ${q(input.outPath)} 2> ${q(input.errPath)}`,
-      'TURN_EXIT=$?',
-      'set -e',
-      // The harness's own model list (2026-11-01), for the composer: Claude Code lists none itself, so Anthropic's models
-      // endpoint on the owner's key, kept a day. After the turn, never fatal.
-      `f=/data/rowboat/models.json; if [ -n "$ANTHROPIC_API_KEY" ] && { [ ! -s "$f" ] || [ -n "$(find "$f" -mmin +1440 2>/dev/null)" ]; }; then curl -sf -m 15 "\${ANTHROPIC_BASE_URL:-https://api.anthropic.com}/v1/models?limit=100" -H "x-api-key: $ANTHROPIC_API_KEY" -H "anthropic-version: 2023-06-01" > "$f.tmp" && mv "$f.tmp" "$f" || true; fi`,
-      'exit $TURN_EXIT',
     ].join('\n');
   },
   read(out, _last, err, exitCode) {
@@ -347,6 +338,10 @@ const claudeCode: Runtime = {
     return undefined;
   },
   options: (models) => modelOption(models),
+  modelsCommand: () => [
+    'set -e',
+    `f=/data/rowboat/models.json; if [ -n "$ANTHROPIC_API_KEY" ] && { [ ! -s "$f" ] || [ -n "$(find "$f" -mmin +1440 2>/dev/null)" ]; }; then curl -sf -m 15 "\${ANTHROPIC_BASE_URL:-https://api.anthropic.com}/v1/models?limit=100" -H "x-api-key: $ANTHROPIC_API_KEY" -H "anthropic-version: 2023-06-01" > "$f.tmp" && mv "$f.tmp" "$f" || true; fi`,
+  ].join('\n'),
   modelsPath: '/data/rowboat/models.json',
   models(text) {
     const doc = obj(parse(text));
