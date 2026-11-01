@@ -449,6 +449,7 @@ export class MaritimeConnector implements RunningConnector {
     const reported = await this.safe(() => this.env.service.updateInvocation(this.env.ctx, invocation.id, update), undefined);
     // Only a confirmed terminal state clears the working reaction; shutdown leaves it for recovery (spec §8, 2026-11-01).
     if (reported?.state === 'failed' || reported?.state === 'cancelled') await this.react(invocation, '👀', 'remove');
+    if (reported?.state === 'failed') await this.react(invocation, '⚠️');
   }
 
   private async fail(invocation: Invocation, error: string): Promise<void> {

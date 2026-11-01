@@ -263,7 +263,7 @@ describe('the Maritime connector with Hermes', () => {
     fake.nextTurn = { lines: [JSON.stringify({ type: 'result', session_id: 'local-x', exit_code: 1, text: '', error: 'No API key configured for openai' })], exitCode: 1 };
     const { message, invocations } = await org.post(`${mention(scout)} break please`);
     expect(await org.ended(invocations[0]!.id)).toMatchObject({ state: 'failed', error: 'No API key configured for openai' });
-    await vi.waitFor(async () => expect(await org.reactions(message.id)).toEqual([]));
+    await vi.waitFor(async () => expect(await org.reactions(message.id)).toEqual([expect.objectContaining({ emoji: '⚠️', memberIds: [scout.id] })]));
   });
 
   it('starts an agent Maritime says is in an error state, once, then runs the turn', async () => {
@@ -282,8 +282,8 @@ describe('the Maritime connector with Hermes', () => {
     expect((await org.ended(b.invocations[0]!.id)).state).toBe('failed');
     fake.refuse = undefined;
     await vi.waitFor(async () => {
-      expect(await org.reactions(a.message.id)).toEqual([]);
-      expect(await org.reactions(b.message.id)).toEqual([]);
+      expect(await org.reactions(a.message.id)).toEqual([expect.objectContaining({ emoji: '⚠️', memberIds: [scout.id] })]);
+      expect(await org.reactions(b.message.id)).toEqual([expect.objectContaining({ emoji: '⚠️', memberIds: [scout.id] })]);
     });
     const dm = (await org.as('dev-ramnique').post('/v1/direct', { memberId: scout.id })).body.space.id;
     const stream = (await org.as('dev-ramnique').get(`/v1/spaces/${dm}/stream`)).body.messages as Message[];
