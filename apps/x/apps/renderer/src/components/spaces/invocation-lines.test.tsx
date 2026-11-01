@@ -207,3 +207,55 @@ describe('AgentOptionsStrip', () => {
         expect(onChange).toHaveBeenCalledWith({ claude: { model: 'haiku-4-5', effort: 'max' } })
     })
 })
+
+
+describe('activity popover', () => {
+    const history = (count: number): spaces.InvocationActivity[] => Array.from({ length: count }, (_, i) => ({
+        id: String(i), at: NOW, state: 'working', activity: `is running step ${i + 1}`,
+    }))
+    function tree(count: number, state: spaces.InvocationState = 'working') {
+        return <SpaceMembersProvider members={names}>
+            <SpaceInvocationsProvider byMessage={new Map([['m1', [invocation('turn-history', state, { activity: `is running step ${count}`, activityHistory: history(count) })]]])} orgId="popover-org" selfId="harsh" isAdmin={false}>
+                <InvocationLines messageId="m1" />
+            </SpaceInvocationsProvider>
+        </SpaceMembersProvider>
+    }
+
+    it('opens on focus with earlier activity and preserves the current line formatting', async () => {
+        render(tree(3))
+        const trigger = screen.getByRole('button', { name: 'Echo activity for this turn' })
+        fireEvent.focus(trigger)
+        const region = await screen.findByRole('region', { name: 'Echo activity history' })
+        expect(region.textContent).toContain('Echo is running step 1')
+        expect(region.textContent).toContain('Echo is running step 3')
+        fireEvent.keyDown(trigger, { key: 'Escape' })
+        await waitFor(() => expect(screen.queryByRole('region', { name: 'Echo activity history' })).toBeNull())
+    })
+
+    it('follows new entries, holds the position when scrolled up, resumes at the bottom, and closes on completion', async () => {
+        const height = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(1000)
+        const client = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(200)
+        try {
+            const { rerender } = render(tree(3))
+            fireEvent.click(screen.getByRole('button', { name: 'Echo activity for this turn' }))
+            const region = await screen.findByRole('region', { name: 'Echo activity history' })
+            expect(region.scrollTop).toBe(1000)
+            height.mockReturnValue(1200)
+            rerender(tree(4))
+            expect(region.scrollTop).toBe(1200)
+            fireEvent.scroll(region, { target: { scrollTop: 150 } })
+            height.mockReturnValue(1400)
+            rerender(tree(5))
+            expect(region.scrollTop).toBe(150)
+            fireEvent.scroll(region, { target: { scrollTop: 1200 } })
+            height.mockReturnValue(1600)
+            rerender(tree(6))
+            expect(region.scrollTop).toBe(1600)
+            rerender(tree(6, 'done'))
+            expect(screen.queryByRole('region', { name: 'Echo activity history' })).toBeNull()
+        } finally {
+            height.mockRestore()
+            client.mockRestore()
+        }
+    })
+})

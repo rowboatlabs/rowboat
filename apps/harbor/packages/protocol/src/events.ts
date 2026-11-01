@@ -3,7 +3,7 @@ import { ChangeSet } from './changeset.js';
 import { Attribution, Member, Membership, Message, MessageDeletion, MessageEdit, PollEnd, PollVote, Reaction, Space, SpaceKind, Topic, TopicRemoval } from './core.js';
 import { AssetId, MemberId, MessageId, SpaceId, StreamOffset } from './ids.js';
 import { Approval } from './approval.js';
-import { Invocation, InvocationId } from './invocation.js';
+import { Invocation, InvocationActivity, InvocationId } from './invocation.js';
 
 // Decision 2 (CONTRACT.md): one WebSocket per org, per-space subscriptions,
 // offset-based catch-up. Subscribing with `afterOffset` replays durable events
@@ -353,7 +353,7 @@ export const ServerFrame = z.discriminatedUnion('kind', [
    * never replayed; listInvocations is the snapshot. Older clients ignore
    * unknown frame kinds by contract.
    */
-  z.object({ kind: z.literal('invocation_state'), spaceId: SpaceId, invocation: Invocation }),
+  z.object({ kind: z.literal('invocation_state'), spaceId: SpaceId, invocation: Invocation, activityEntry: InvocationActivity.optional() }),
   /**
    * To every org member's connections (local agents, 2026-10-28): an agent
    * whose connector holds its own key (anything Harbor does not run) opened

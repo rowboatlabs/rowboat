@@ -29,7 +29,17 @@ function fold(k: string, incoming: readonly spaces.Invocation[]): void {
     const next = new Map(state.get(k) ?? EMPTY)
     for (const invocation of incoming) {
         const prev = next.get(invocation.id)
-        if (!prev || prev.updatedAt <= invocation.updatedAt) next.set(invocation.id, invocation)
+        const prevFinished = prev && ['done', 'failed', 'cancelled', 'refused'].includes(prev.state)
+        const current = prev && (prevFinished || prev.updatedAt > invocation.updatedAt) ? prev : invocation
+        if (current.state !== 'working' && current.state !== 'waiting') {
+            const { activityHistory: _finished, ...rest } = current
+            next.set(current.id, rest)
+            continue
+        }
+        // A snapshot can finish after newer live frames. Merge by Harbor's monotonic
+        // entry ids so it fills earlier history without losing or duplicating lines (2026-11-01).
+        const entries = new Map([...(prev?.activityHistory ?? []), ...(invocation.activityHistory ?? [])].map((entry) => [entry.id, entry]))
+        next.set(current.id, { ...current, activityHistory: [...entries.values()].sort((a, b) => a.id.localeCompare(b.id)) })
     }
     const all = new Map(state)
     all.set(k, next)
@@ -59,7 +69,7 @@ function wire(): void {
     subscribeSpacesFeed((event) => {
         if (!('frame' in event)) return
         const frame = event.frame
-        if (frame.kind === 'invocation_state') fold(key(event.orgId, frame.spaceId), [frame.invocation])
+        if (frame.kind === 'invocation_state') fold(key(event.orgId, frame.spaceId), [{ ...frame.invocation, ...(frame.activityEntry ? { activityHistory: [frame.activityEntry] } : {}) }])
         else if (frame.kind === 'subscribed' && loaded.has(key(event.orgId, frame.spaceId))) void load(event.orgId, frame.spaceId)
     })
 }
