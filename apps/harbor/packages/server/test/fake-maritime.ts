@@ -65,6 +65,8 @@ export class FakeMaritime {
   readonly endUsers = new Map<string, { body: Record<string, unknown>; policy?: Record<string, unknown>; agentId?: string }>();
   /** What the next submitted turn does (a one-line Hermes answer by default). */
   nextTurn: Turn | undefined;
+  /** Hold catalogue maintenance independently of turns, to exercise reply latency (2026-11-01). */
+  holdCatalog = false;
   /** How many wakes answer 429 awake_limit_reached before one succeeds. */
   awakeLimit = 0;
   refuse: { status: number; body: unknown; paths?: RegExp } | undefined;
@@ -90,7 +92,10 @@ export class FakeMaritime {
     return this.received.filter((r) => r.method === 'POST' && /^\/api\/v1\/end-users\/[^/]+\/agents$/.test(r.path)).at(-1)?.body;
   }
   submits(): FakeExecution[] {
-    return [...this.executions.values()];
+    return [...this.executions.values()].filter((e) => !e.script.includes('/rowboat/models.json'));
+  }
+  catalogs(): FakeExecution[] {
+    return [...this.executions.values()].filter((e) => e.script.includes('/rowboat/models.json'));
   }
   starts(): Received[] {
     return this.received.filter((r) => r.method === 'POST' && r.path === `/api/agents/${AGENT_ID}/start`);
@@ -387,6 +392,10 @@ export class FakeMaritime {
         generation: 0,
       };
       this.executions.set(execution.executionId, execution);
+      if (script.includes('/rowboat/models.json')) {
+        if (!this.holdCatalog) Object.assign(execution, { status: 'completed', exitCode: 0 });
+        return send(200, { executionId: execution.executionId, status: execution.status, exitCode: execution.exitCode });
+      }
       if (!execution.files.out && !execution.files.last) {
         // Not a turn: a command from the page, or a readiness check. It ran, and said what it echoed.
         const echoed = script.match(/echo ([A-Za-z0-9_-]+)/)?.[1] ?? '';

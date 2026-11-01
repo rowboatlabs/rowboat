@@ -34,6 +34,8 @@ const RETRY_FOR_MS = 5 * 60_000;
 const WAKE_WITHIN_MS = 10 * 60_000;
 /** The detached execution's own timeout: an hour, Maritime's detached default. */
 const EXEC_TIMEOUT_S = 3600;
+/** Catalogue maintenance is bounded independently of the already settled turn (2026-11-01). */
+const CATALOG_TIMEOUT_S = 45;
 export interface PollTiming {
   pollMs: number;
 }
@@ -71,9 +73,10 @@ export class MaritimeConnector implements RunningConnector {
   private stopped = false;
   private readonly stopping = new AbortController();
   private declared = '';
-  /** The harness's own model list, as the last turn left it on the VM (runtimes.ts `modelsPath`): the composer's Model option. */
+  /** The harness's own model list, as the last catalogue refresh left it on the VM (runtimes.ts `modelsPath`): the composer's Model option. */
   private models: ModelChoice[] = [];
   private modelsText = '';
+  private refreshingModels = false;
 
   constructor(
     private readonly env: ConnectorEnv,
@@ -108,7 +111,7 @@ export class MaritimeConnector implements RunningConnector {
   // --- intake -------------------------------------------------------------------------
 
   private async boot(): Promise<void> {
-    // The list declared before a restart stands until the next turn reads the harness's file: nothing here wakes the VM.
+    // The list declared before a restart stands until the next turn's maintenance reads the harness's file: nothing here wakes the VM.
     const earlier = await this.safe(() => this.env.service.getAgentCapabilities(this.env.agent.id), undefined);
     const model = earlier?.options.find((o) => o.key === 'model');
     if (model?.type === 'select') this.models = model.choices.map((c) => ({ id: c.id, label: c.label }));
@@ -381,15 +384,36 @@ export class MaritimeConnector implements RunningConnector {
     await this.refreshModels();
   }
 
-  /** After a turn: the harness's own model list, as the turn script left it on the VM; a changed list is declared. */
+  /**
+   * After settling the turn (2026-11-01): catalogue work has its own execution, so provider latency
+   * cannot delay the answer or the next invocation. One refresh per agent avoids competing file writes.
+   * Failures keep the last usable choices; neither retries nor errors belong to the completed turn.
+   */
   private async refreshModels(): Promise<void> {
-    const text = await this.safe(async () => (await this.api()).readFile(this.maritimeAgentId, this.runtime.modelsPath), undefined);
-    if (!text || text === this.modelsText) return;
-    this.modelsText = text;
-    const models = this.runtime.models(text);
-    if (models.length === 0) return;
-    this.models = models;
-    await this.declare();
+    if (this.stopped || this.refreshingModels) return;
+    this.refreshingModels = true;
+    try {
+      await this.safe(async () => {
+        const api = await this.api();
+        let execution = await api.exec(this.maritimeAgentId, ['sh', '-c', this.runtime.modelsCommand()], { detached: true, timeoutSeconds: CATALOG_TIMEOUT_S });
+        const deadline = Date.now() + CATALOG_TIMEOUT_S * 1000;
+        while (!this.stopped && execution.status === 'running' && Date.now() < deadline) {
+          await sleep(this.timing.pollMs, this.stopping.signal);
+          if (this.stopped) return;
+          execution = await api.execution(this.maritimeAgentId, execution.executionId);
+        }
+        if (this.stopped || execution.status !== 'completed' || execution.exitCode !== 0) return;
+        const text = await api.readFile(this.maritimeAgentId, this.runtime.modelsPath);
+        if (!text || text === this.modelsText) return;
+        const models = this.runtime.models(text);
+        if (models.length === 0) return;
+        this.modelsText = text;
+        this.models = models;
+        await this.declare();
+      }, undefined);
+    } finally {
+      this.refreshingModels = false;
+    }
   }
 
   private async cancelled(invocation: Invocation, record?: ThreadRecord): Promise<void> {
