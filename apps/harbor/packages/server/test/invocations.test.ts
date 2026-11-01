@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { routes, type Invocation, type Member, type ServerFrame } from '@rowboat/spaces-protocol';
 import type { RunningHarbor } from '../src/server.js';
 import { agentClient, liveClient, restClient, startTestHarbor, type LiveClient } from './helpers.js';
@@ -131,6 +131,72 @@ describe('progress', () => {
     } finally {
       watcher.close();
     }
+  });
+});
+
+describe('in-memory turn activity', () => {
+  async function listed(id: string) {
+    const response = await as('dev-ramnique').get(`/v1/spaces/${spaceId}/invocations`);
+    expect(response.status).toBe(200);
+    return (response.body.invocations as Invocation[]).find((i) => i.id === id)!;
+  }
+
+  it('snapshots all reported lines for a late viewer, streams only new lines, and never persists history', async () => {
+    const watcher = await liveClient(harbor, 'dev-ramnique');
+    try {
+      watcher.send({ kind: 'subscribe', spaceId });
+      await watcher.until((fs) => fs.some((f) => f.kind === 'subscribed'), 'subscribed');
+      const { invocations } = await post('dev-harsh', `${mention(hermes.agent)} activity history`);
+      const id = invocations[0]!.id;
+      await hermes.ack(id);
+      for (const activity of ['Reading files', 'Reading files', 'Running tests', 'Reading files']) {
+        expect((await hermes.report(id, { state: 'working', activity })).status).toBe(200);
+      }
+      await hermes.report(id, { state: 'waiting', activity: 'Which branch?' });
+      const snapshot = await listed(id);
+      expect(snapshot.activityHistory?.map((e) => e.activity)).toEqual(['Reading files', 'Running tests', 'Reading files', 'Which branch?']);
+      expect(snapshot.activityHistory?.at(-1)?.state).toBe('waiting');
+      const entries = () => watcher.frames.flatMap((f) => f.kind === 'invocation_state' && f.invocation.id === id && f.activityEntry ? [f.activityEntry] : []);
+      await watcher.until(() => entries().length === 4, 'four activity entries');
+      expect(entries()).toEqual(snapshot.activityHistory);
+      expect(new Set(entries().map((e) => e.id)).size).toBe(4);
+      expect((await harbor.store.getInvocation(id))?.activityHistory).toBeUndefined();
+      expect(watcher.frames.filter((f) => f.kind === 'invocation_state' && f.invocation.id === id).every((f) => f.kind !== 'invocation_state' || f.invocation.activityHistory === undefined)).toBe(true);
+      expect((await listed(id)).activityHistory).toEqual(snapshot.activityHistory);
+      expect((await as('dev-gagan').get(`/v1/spaces/${spaceId}/invocations`)).status).toBe(403);
+      await hermes.report(id, { state: 'done' });
+      expect((await listed(id)).activityHistory).toBeUndefined();
+    } finally {
+      watcher.close();
+    }
+  });
+
+  it.each(['done', 'failed', 'cancelled'] as const)('clears history on %s and isolates simultaneous turns', async (state) => {
+    const first = (await post('dev-harsh', `${mention(hermes.agent)} first`)).invocations[0]!;
+    const second = (await post('dev-harsh', `${mention(hermes.agent)} second`)).invocations[0]!;
+    await hermes.report(first.id, { state: 'working', activity: 'First task' });
+    await hermes.report(second.id, { state: 'working', activity: 'Second task' });
+    await hermes.report(first.id, { state });
+    expect((await listed(first.id)).activityHistory).toBeUndefined();
+    expect((await listed(second.id)).activityHistory?.map((e) => e.activity)).toEqual(['Second task']);
+    await hermes.report(second.id, { state: 'done' });
+  });
+
+  it('does not record a report whose transaction rolls back', async () => {
+    const id = (await post('dev-harsh', `${mention(hermes.agent)} rollback`)).invocations[0]!.id;
+    await hermes.report(id, { state: 'working', activity: 'Committed' });
+    const lock = harbor.store.withSpaceLock.bind(harbor.store);
+    const failCommit = vi.spyOn(harbor.store, 'withSpaceLock').mockImplementationOnce((space, fn) => lock(space, async () => {
+      await fn();
+      throw new Error('simulated rollback');
+    }));
+    try {
+      expect((await hermes.report(id, { state: 'working', activity: 'Never committed' })).status).toBe(500);
+    } finally {
+      failCommit.mockRestore();
+    }
+    expect((await listed(id)).activityHistory?.map((e) => e.activity)).toEqual(['Committed']);
+    await hermes.report(id, { state: 'done' });
   });
 });
 

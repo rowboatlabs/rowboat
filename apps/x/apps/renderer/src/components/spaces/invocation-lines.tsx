@@ -1,11 +1,12 @@
 import { useSpaceAccess, canActInSpace } from '@/lib/spaces-access'
-import { createContext, useContext, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useContext, useMemo, useState, useLayoutEffect, useRef, type ReactNode } from 'react'
 import { AlertCircle, Ban, Clock, ExternalLink, Hand, Loader2, XCircle } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { useMemberNames } from '@/components/spaces/member-text'
 import { noteInvocations, useAgentCapabilities } from '@/hooks/use-space-invocations'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 
 // The line under a message that invoked an agent (Harbor spec §8, 2026-09-30):
 // what the agent is doing about it right now — queued, working with its
@@ -66,7 +67,7 @@ export function InvocationLines({ messageId }: { messageId: string }) {
                 return (
                     <div key={invocation.id} data-invocation={invocation.state} className={cn('flex items-center gap-1.5 text-[12.5px]', tone)}>
                         {invocation.state === 'working' ? <TypingDots /> : <Icon className="size-3.5 shrink-0" />}
-                        <span className="min-w-0 truncate">{text}</span>
+                        <ActivityPopover invocation={invocation} name={name} text={text} />
                         {invocation.link && (
                             <button type="button" onClick={() => window.open(invocation.link)} className="inline-flex shrink-0 items-center gap-0.5 underline-offset-2 hover:underline">
                                 Open <ExternalLink className="size-3" />
@@ -92,6 +93,45 @@ export function InvocationLines({ messageId }: { messageId: string }) {
             })}
         </div>
     )
+}
+
+function ActivityPopover({ invocation, name, text }: { invocation: spaces.Invocation; name: string; text: string }) {
+    const [open, setOpen] = useState(false)
+    if (!RUNNING.includes(invocation.state)) return <span className="min-w-0 truncate">{text}</span>
+    return <HoverCard open={open} onOpenChange={setOpen} openDelay={200} closeDelay={250}>
+        <HoverCardTrigger asChild>
+            <button type="button" className="min-w-0 truncate text-left" aria-label={`${name} activity for this turn`} aria-expanded={open} onClick={() => setOpen(!open)}>
+                {text}
+            </button>
+        </HoverCardTrigger>
+        <HoverCardContent align="start" side="top" className="w-[min(32rem,calc(100vw-2rem))] p-3">
+            <div className="mb-2 text-xs font-medium">{name} · This turn</div>
+            <ActivityHistory invocation={invocation} name={name} />
+        </HoverCardContent>
+    </HoverCard>
+}
+
+function ActivityHistory({ invocation, name }: { invocation: spaces.Invocation; name: string }) {
+    const scrollRef = useRef<HTMLDivElement>(null)
+    const following = useRef(true)
+    const entries = invocation.activityHistory ?? []
+    useLayoutEffect(() => {
+        const viewport = scrollRef.current
+        if (viewport && following.current) viewport.scrollTop = viewport.scrollHeight
+    }, [entries])
+    return <div ref={scrollRef} role="region" aria-label={`${name} activity history`} tabIndex={0}
+        className="max-h-72 overflow-y-auto overscroll-contain [overflow-anchor:none]"
+        onScroll={(event) => {
+            const viewport = event.currentTarget
+            following.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 8
+        }}>
+        <ol className="space-y-2 text-[12.5px] text-muted-foreground">
+            {entries.map((entry) => <li key={entry.id} className="whitespace-pre-wrap break-words">
+                {describe({ ...invocation, state: entry.state, activity: entry.activity }, name).text}
+            </li>)}
+            {entries.length === 0 && <li>{describe(invocation, name).text}</li>}
+        </ol>
+    </div>
 }
 
 /** The same three pulsing dots as a person typing (TypingIndicator). */

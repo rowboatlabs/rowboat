@@ -7,6 +7,7 @@ import {
   type ApprovalDecision,
   type ApprovalRequest,
   type Invocation,
+  type InvocationActivity,
   type InvocationOptionValues,
   type InvocationState,
   type InvocationUpdate,
@@ -75,6 +76,10 @@ export function forPeople(invocation: Invocation): Invocation {
 }
 
 export class Invocations {
+  // Record only after commit, beside live delivery: rolled-back reports must never
+  // enter history, and terminal frames free it on every exit path (2026-11-01).
+  private readonly activityHistory = new Map<string, InvocationActivity[]>();
+
   constructor(private readonly k: Kernel) {}
 
   // --- the trigger: Feed.postMessage calls this inside its space lock ------------
@@ -171,8 +176,37 @@ export class Invocations {
   flush(out: InvocationOutbox): void {
     for (const item of out) {
       if (item.to === 'agent') this.k.hub.publishToMember(item.memberId, item.frame);
-      else this.k.hub.publish(item.spaceId, item.frame);
+      else {
+        if (item.frame.kind === 'invocation_state') {
+          const entry = this.recordActivity(item.frame.invocation);
+          this.k.hub.publish(item.spaceId, { ...item.frame, ...(entry ? { activityEntry: entry } : {}) });
+        } else this.k.hub.publish(item.spaceId, item.frame);
+      }
     }
+  }
+
+  private recordActivity(invocation: Invocation): InvocationActivity | undefined {
+    if (TERMINAL.has(invocation.state)) {
+      this.activityHistory.delete(invocation.id);
+      return;
+    }
+    if ((invocation.state !== 'working' && invocation.state !== 'waiting') || !invocation.activity) return;
+    const entries = this.activityHistory.get(invocation.id) ?? [];
+    const last = entries.at(-1);
+    // Connectors repeat their latest line as a heartbeat (2026-11-01).
+    if (last?.state === invocation.state && last.activity === invocation.activity) return;
+    const entry: InvocationActivity = {
+      id: this.k.ulid(), at: invocation.updatedAt, state: invocation.state, activity: invocation.activity,
+    };
+    entries.push(entry);
+    this.activityHistory.set(invocation.id, entries);
+    return entry;
+  }
+
+  private withActivityHistory(invocation: Invocation): Invocation {
+    const visible = forPeople(invocation);
+    if (invocation.state !== 'working' && invocation.state !== 'waiting') return visible;
+    return { ...visible, activityHistory: [...(this.activityHistory.get(invocation.id) ?? [])] };
   }
 
   /**
@@ -309,7 +343,7 @@ export class Invocations {
 
   async listForSpace(ctx: ActorCtx, spaceId: string, threadRootId?: string): Promise<Invocation[]> {
     await this.k.requireReadableSpace(ctx, spaceId);
-    return (await this.k.store.listSpaceInvocations(spaceId, threadRootId ?? null, LIST_LIMIT)).map(forPeople);
+    return (await this.k.store.listSpaceInvocations(spaceId, threadRootId ?? null, LIST_LIMIT)).map((i) => this.withActivityHistory(i));
   }
 
   /**
@@ -320,7 +354,7 @@ export class Invocations {
    * A finished invocation is returned as it is.
    */
   async cancel(ctx: ActorCtx, id: string): Promise<Invocation> {
-    return forPeople(await this.cancelInner(ctx, id));
+    return this.withActivityHistory(await this.cancelInner(ctx, id));
   }
 
   private async cancelInner(ctx: ActorCtx, id: string): Promise<Invocation> {

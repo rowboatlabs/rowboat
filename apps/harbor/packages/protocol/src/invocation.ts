@@ -56,6 +56,15 @@ export type InvocationOption = z.infer<typeof InvocationOption>;
 export const InvocationOptionValues = z.record(InvocationOptionKey, z.union([z.string().max(256), z.boolean()]));
 export type InvocationOptionValues = z.infer<typeof InvocationOptionValues>;
 
+// A committed progress line, identified across snapshots and live frames (2026-11-01).
+export const InvocationActivity = z.object({
+  id: z.string(),
+  at: z.iso.datetime(),
+  state: z.enum(['working', 'waiting']),
+  activity: z.string().max(200),
+});
+export type InvocationActivity = z.infer<typeof InvocationActivity>;
+
 export const Invocation = z.object({
   id: InvocationId,
   /** The agent member invoked. */
@@ -83,6 +92,8 @@ export const Invocation = z.object({
   state: InvocationState,
   /** One ephemeral line: what it is doing ("Running tests"), or what it waits for. */
   activity: z.string().max(200).optional(),
+  // Only on people's snapshots: Harbor memory, never stored with the invocation (2026-11-01).
+  activityHistory: z.array(InvocationActivity).optional(),
   /** The connector's own view of the run ("Open in Replicas"). Harbor keeps no traces. */
   link: z.string().url().optional(),
   error: z.string().max(1000).optional(),
