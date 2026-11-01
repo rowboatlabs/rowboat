@@ -371,6 +371,8 @@ export class MaritimeConnector implements RunningConnector {
       const body = reading.answer ?? 'Finished on Maritime.';
       try {
         posted = (await this.env.service.answerInvocation(this.env.ctx, invocation.id, body)).message;
+        await this.react(invocation, '👀', 'remove');
+        await this.react(invocation, '✅');
       } catch (err) {
         if (!(err instanceof HarborError)) throw err; // already finished: a replay posts nothing
       }
@@ -444,7 +446,10 @@ export class MaritimeConnector implements RunningConnector {
   }
 
   private async report(invocation: Invocation, update: InvocationUpdate): Promise<void> {
-    await this.safe(() => this.env.service.updateInvocation(this.env.ctx, invocation.id, update), undefined);
+    const reported = await this.safe(() => this.env.service.updateInvocation(this.env.ctx, invocation.id, update), undefined);
+    // Only a confirmed terminal state clears the working reaction; shutdown leaves it for recovery (spec §8, 2026-11-01).
+    if (reported?.state === 'failed' || reported?.state === 'cancelled') await this.react(invocation, '👀', 'remove');
+    if (reported?.state === 'failed') await this.react(invocation, '⚠️');
   }
 
   private async fail(invocation: Invocation, error: string): Promise<void> {
@@ -454,9 +459,9 @@ export class MaritimeConnector implements RunningConnector {
     if (record.turn?.invocationId === invocation.id) await this.save(spaceId, threadRootId, { ...record, turn: undefined });
   }
 
-  private async react(invocation: Invocation, emoji: string): Promise<void> {
+  private async react(invocation: Invocation, emoji: string, action: 'add' | 'remove' = 'add'): Promise<void> {
     await this.safe(
-      () => this.env.service.reactToMessage(this.env.ctx, invocation.conversation.spaceId, invocation.trigger.messageId, { emoji, action: 'add', actingMode: 'direct' }),
+      () => this.env.service.reactToMessage(this.env.ctx, invocation.conversation.spaceId, invocation.trigger.messageId, { emoji, action, actingMode: 'direct' }),
       undefined,
     );
   }
