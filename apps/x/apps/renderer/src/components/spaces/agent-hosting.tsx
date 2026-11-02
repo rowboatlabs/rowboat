@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { FileText, Folder, Loader2, Play, RefreshCw, Square } from 'lucide-react'
-import type { spaces } from '@x/shared'
+import { spaces } from '@x/shared'
+import { arrayBufferToBase64 } from '@/lib/spaces-upload'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -172,7 +173,7 @@ export function CommandsScreen({ orgId, agentId }: { orgId: string; agentId: str
                 setExecution(next)
             } catch (err) {
                 fail(err, 'Lost the command')
-                setExecution((e) => (e ? { ...e, status: 'failed' } : e))
+                setExecution((e) => (e ? { ...e, status: 'failed', reason: 'Could not retrieve the result. Check VM logs before retrying.' } : e))
             }
         }, COMMAND_POLL_MS)
         return () => clearInterval(timer)
@@ -197,7 +198,7 @@ export function CommandsScreen({ orgId, agentId }: { orgId: string; agentId: str
             fail(err, 'Could not stop the command')
         }
     }
-    const outcome = !execution ? '' : running ? 'Running…' : execution.status === 'cancelled' ? 'Stopped.' : `Exited ${execution.exitCode ?? '?'}.`
+    const outcome = !execution ? '' : running ? 'Running…' : execution.status === 'cancelled' ? 'Stopped.' : spaces.hostingExecutionFailure(execution) ?? `Exited ${execution.exitCode ?? '?'}.`
     return (
         <>
             <ScreenHeader title="Commands" note="One command at a time, as root on the VM. Not a shell: nothing persists between commands. Ten minutes at most." />
@@ -222,7 +223,7 @@ export function CommandsScreen({ orgId, agentId }: { orgId: string; agentId: str
             {execution && (
                 <div className="flex flex-col gap-1.5">
                     <div className="flex items-center gap-2">
-                        <Tag tone={running ? 'accent' : execution.exitCode === 0 ? 'muted' : 'warn'}>{running ? 'running' : execution.status === 'cancelled' ? 'stopped' : `exit ${execution.exitCode ?? '?'}`}</Tag>
+                        <Tag tone={running ? 'accent' : execution.exitCode === 0 ? 'muted' : 'warn'}>{running ? 'running' : execution.status === 'cancelled' ? 'stopped' : execution.status !== 'completed' ? execution.status : `exit ${execution.exitCode ?? '?'}`}</Tag>
                         <p role="status" className="text-[11px] text-muted-foreground">{outcome}</p>
                         {!running && (
                             <RowAction className="ml-auto" onClick={() => setExecution(null)}>
@@ -328,8 +329,17 @@ export function LogsScreen({ orgId, agentId }: { orgId: string; agentId: string 
 /** The VM's files: a directory at a time; a text file opens to edit; new folder, rename. Delete is on the Danger zone. */
 export function FilesScreen({ orgId, agentId, home }: { orgId: string; agentId: string; home: string }) {
     const [path, setPath] = useState(home)
+    const [directoryDraft, setDirectoryDraft] = useState(home)
+    const picker = useRef<HTMLInputElement>(null)
+    const uploading = useRef(false)
+    const [uploadStatus, setUploadStatus] = useState<string | null>(null)
+    const [uploadErrors, setUploadErrors] = useState<string[]>([])
     const [entries, setEntries] = useState<spaces.HostingFileEntry[] | null>(null)
     const [open, setOpen] = useState<{ path: string; content: string; truncated: boolean } | null>(null)
+    const [preview, setPreview] = useState<{ path: string; url: string; mime: string } | null>(null)
+    const [fileError, setFileError] = useState<string | null>(null)
+    const [dragging, setDragging] = useState(false)
+    useEffect(() => () => { if (preview) URL.revokeObjectURL(preview.url) }, [preview])
     const [draft, setDraft] = useState('')
     const [busy, setBusy] = useState(false)
     const [renaming, setRenaming] = useState<{ from: string; to: string } | null>(null)
@@ -341,6 +351,7 @@ export function FilesScreen({ orgId, agentId, home }: { orgId: string; agentId: 
             try {
                 const page = await window.ipc.invoke('spaces:listHostingFiles', { orgId, agentId, path: dir })
                 setPath(page.path)
+                setDirectoryDraft(page.path)
                 setEntries([...page.entries].sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'dir' ? -1 : 1)))
             } catch (err) {
                 fail(err, 'Could not list the files')
@@ -354,14 +365,73 @@ export function FilesScreen({ orgId, agentId, home }: { orgId: string; agentId: 
         void list(home)
     }, [list, home])
 
+    const upload = async (files: File[]) => {
+        if (busy || uploading.current || !files.length) return
+        uploading.current = true
+        setBusy(true)
+        setUploadErrors([])
+        const destination = path
+        const errors: string[] = []
+        let count = 0
+        for (const [index, file] of files.entries()) {
+            setUploadStatus(`Uploading ${index + 1} of ${files.length}: ${file.name}`)
+            try {
+                if (file.size > spaces.MAX_HOSTING_UPLOAD_BYTES) throw new Error('Files must be 100 MB or smaller')
+                const bytes = arrayBufferToBase64(await file.arrayBuffer())
+                await window.ipc.invoke('spaces:uploadHostingFile', { orgId, agentId, directory: destination, name: file.name, bytes })
+                count++
+            } catch (err) {
+                errors.push(`${file.name}: ${err instanceof Error ? err.message : 'Upload failed'}`)
+            }
+        }
+        if (count) toast(`Uploaded ${count} ${count === 1 ? 'file' : 'files'}`, 'success')
+        setUploadErrors(errors)
+        await list(destination)
+        setUploadStatus(null)
+        uploading.current = false
+        setBusy(false)
+    }
+
+    const fileBlob = async (file: string) => {
+        const result = await window.ipc.invoke('spaces:downloadHostingFile', { orgId, agentId, path: file })
+        const bytes = Uint8Array.from(atob(result.bytes), c => c.charCodeAt(0))
+        return { blob: new Blob([bytes], { type: result.mime }), mime: result.mime }
+    }
+    const download = async (file: string) => {
+        setBusy(true)
+        setFileError(null)
+        try {
+            const { blob } = await fileBlob(file)
+            const url = URL.createObjectURL(blob)
+            const link = document.createElement('a')
+            link.href = url
+            link.download = file.split('/').pop() || 'download'
+            document.body.appendChild(link)
+            link.click()
+            link.remove()
+            // Let the browser consume the URL before releasing it (2026-11-02).
+            setTimeout(() => URL.revokeObjectURL(url), 1000)
+        } catch (err) {
+            setFileError(err instanceof Error ? err.message : 'Could not download the file')
+        } finally { setBusy(false) }
+    }
     const read = async (file: string) => {
         setBusy(true)
+        setOpen(null)
+        setPreview(null)
+        setFileError(null)
         try {
+            if (/\.(png|jpe?g|gif|webp|pdf)$/i.test(file)) {
+                const { blob, mime } = await fileBlob(file)
+                if (mime === 'application/octet-stream') throw new Error('Preview is unavailable for this file. Download it to open it on your computer.')
+                setPreview({ path: file, mime, url: URL.createObjectURL(blob) })
+                return
+            }
             const got = await window.ipc.invoke('spaces:readHostingFile', { orgId, agentId, path: file })
             setOpen(got)
             setDraft(got.content)
         } catch (err) {
-            fail(err, 'Could not read the file')
+            setFileError(err instanceof Error ? err.message : 'Could not read the file')
         } finally {
             setBusy(false)
         }
@@ -396,24 +466,51 @@ export function FilesScreen({ orgId, agentId, home }: { orgId: string; agentId: 
     const dir = path.replace(/\/+$/, '')
     const parent = dir.split('/').slice(0, -1).join('/') || '/'
     return (
-        <>
+        <div className="flex flex-col gap-4" aria-label="Agent files" onDragOver={(event) => {
+            if (!Array.from(event.dataTransfer.types).includes('Files')) return
+            event.preventDefault()
+            event.dataTransfer.dropEffect = busy || entries === null ? 'none' : 'copy'
+            setDragging(true)
+        }} onDragLeave={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false)
+        }} onDrop={(event) => {
+            event.preventDefault()
+            setDragging(false)
+            if (busy || entries === null) return
+            if (Array.from(event.dataTransfer.items ?? []).some(item => item.webkitGetAsEntry?.()?.isDirectory)) {
+                setUploadErrors(['Folders cannot be uploaded. Select individual files.'])
+                return
+            }
+            void upload(Array.from(event.dataTransfer.files))
+        }}>
+            {dragging && <p role="status">{busy ? 'Wait for the current operation to finish.' : `Drop files to upload into ${path}`}</p>}
             <ScreenHeader
                 title="Files"
-                note="The VM's volume. Text files open to edit."
+                note={`Upload files from your computer into ${path} (up to 100 MB each). Drop files here to upload. Text files open to edit.`}
                 action={
-                    <Button size="sm" variant="outline" disabled={busy || folder !== null} onClick={() => setFolder('')}>
-                        New folder
-                    </Button>
+                    <div className="flex gap-2">
+                        <input ref={picker} type="file" multiple className="hidden" aria-label="Choose files to upload" disabled={busy || entries === null} onChange={(event) => {
+                            const files = Array.from(event.target.files ?? [])
+                            event.target.value = ''
+                            void upload(files)
+                        }} />
+                        <Button size="sm" variant="outline" disabled={busy || entries === null} onClick={() => picker.current?.click()}>
+                            {uploadStatus && <Loader2 className="size-3.5 animate-spin" />} Upload files
+                        </Button>
+                        <Button size="sm" variant="outline" disabled={busy || folder !== null} onClick={() => setFolder('')}>
+                            New folder
+                        </Button>
+                    </div>
                 }
             />
             <form
                 className="flex items-center gap-1.5"
                 onSubmit={(e) => {
                     e.preventDefault()
-                    void list(path)
+                    if (!busy) void list(directoryDraft)
                 }}
             >
-                <Input value={path} onChange={(e) => setPath(e.target.value)} aria-label="Directory" className="h-8 min-w-0 flex-1 font-mono text-xs" spellCheck={false} />
+                <Input value={directoryDraft} disabled={busy} onChange={(e) => setDirectoryDraft(e.target.value)} aria-label="Directory" className="h-8 min-w-0 flex-1 font-mono text-xs" spellCheck={false} />
                 <Button type="submit" size="sm" variant="outline" disabled={busy}>Go</Button>
                 {path !== '/' && (
                     <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => void list(parent)}>
@@ -421,6 +518,8 @@ export function FilesScreen({ orgId, agentId, home }: { orgId: string; agentId: 
                     </Button>
                 )}
             </form>
+            {uploadStatus && <p role="status" className="text-xs text-muted-foreground">{uploadStatus}</p>}
+            {uploadErrors.length > 0 && <div role="alert" className="text-xs text-destructive">{uploadErrors.map((message, i) => <p key={i}>{message}</p>)}</div>}
             {folder !== null && (
                 <FormCard title={`New folder in ${dir || '/'}`} onSubmit={() => folder.trim() && void act(() => window.ipc.invoke('spaces:makeHostingDir', { orgId, agentId, path: `${dir}/${folder.trim()}` }), 'Could not make the folder')}>
                     <div className="flex flex-wrap items-center gap-1.5">
@@ -442,6 +541,7 @@ export function FilesScreen({ orgId, agentId, home }: { orgId: string; agentId: 
                                 <span className="truncate">{e.name}{e.kind === 'dir' ? '/' : ''}</span>
                                 {e.size !== undefined && <span className="ml-auto shrink-0 text-muted-foreground">{e.size} B</span>}
                             </button>
+                            {e.kind === 'file' && <RowAction disabled={busy} onClick={() => void download(e.path)}>Download <span className="sr-only">{e.name}</span></RowAction>}
                             {renaming?.from === e.path ? (
                                 <form
                                     className="flex items-center gap-1"
@@ -461,6 +561,16 @@ export function FilesScreen({ orgId, agentId, home }: { orgId: string; agentId: 
                     ))}
                 </Rows>
             )}
+            {fileError && <p role="alert" className="text-sm text-destructive">{fileError}</p>}
+            {preview && <div className="overflow-hidden rounded-lg border border-border">
+                <div className="flex items-center gap-2 border-b p-2">
+                    <span className="min-w-0 flex-1 truncate font-mono text-xs">{preview.path}</span>
+                    <Button size="xs" variant="ghost" onClick={() => setPreview(null)}>Close preview</Button>
+                </div>
+                {preview.mime === 'application/pdf'
+                    ? <iframe src={preview.url} title="PDF preview" className="h-96 w-full border-0 bg-white" onError={() => setFileError('Could not preview this PDF. Download it to open it on your computer.')} />
+                    : <img src={preview.url} alt={preview.path.split('/').pop()} className="max-h-96 max-w-full object-contain" onError={() => setFileError('Could not preview this image. Download it to open it on your computer.')} />}
+            </div>}
             {open && (
                 <div className="overflow-hidden rounded-lg border border-border">
                     <div className="flex items-center gap-2 border-b border-border bg-muted/40 py-1.5 pr-1.5 pl-3">
@@ -475,7 +585,7 @@ export function FilesScreen({ orgId, agentId, home }: { orgId: string; agentId: 
                     <Textarea value={draft} onChange={(e) => setDraft(e.target.value)} aria-label="File content" className="min-h-40 rounded-none border-0 font-mono text-xs focus-visible:ring-0" spellCheck={false} />
                 </div>
             )}
-        </>
+        </div>
     )
 }
 

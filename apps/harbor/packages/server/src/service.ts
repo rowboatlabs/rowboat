@@ -261,6 +261,9 @@ export class HarborService {
     return this.hosting.console(ctx, agentId);
   }
   /** A sign-in to a plan made from the Terminal (2026-10-30): asked, Harbor has the VM say whether one is there, and the agent runs on it from then on. */
+  startHostingSignIn(ctx: ActorCtx, agentId: string) {
+    return this.hosting.startSignIn(ctx, agentId);
+  }
   checkHostingSignIn(ctx: ActorCtx, agentId: string) {
     return this.hosting.checkSignIn(ctx, agentId);
   }
@@ -277,8 +280,14 @@ export class HarborService {
   listHostingFiles(ctx: ActorCtx, agentId: string, path: string) {
     return this.hosting.files(ctx, agentId, path);
   }
+  downloadHostingFile(ctx: ActorCtx, agentId: string, path: string) {
+    return this.hosting.downloadFile(ctx, agentId, path);
+  }
   readHostingFile(ctx: ActorCtx, agentId: string, path: string) {
     return this.hosting.readFile(ctx, agentId, path);
+  }
+  uploadHostingFile(ctx: ActorCtx, agentId: string, input: { directory: string; name: string }, read: () => Promise<Uint8Array>) {
+    return this.hosting.uploadFile(ctx, agentId, input, read);
   }
   writeHostingFile(ctx: ActorCtx, agentId: string, path: string, content: string) {
     return this.hosting.writeFile(ctx, agentId, path, content);

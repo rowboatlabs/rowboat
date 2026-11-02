@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { HostingEnvVar, HostingFileEntry, HostingLogLine, HostingSkill, HostingTrigger } from '@rowboat/spaces-protocol';
 import { PlatformRefusal, type HostingOps, type HostingProvider, type ProvisionInput } from '../../core/hosting.js';
 import { MARITIME_API, MaritimeError, maritimeApi, type CreateAgentInput, type Execution, type MaritimeApi } from './api.js';
@@ -34,10 +35,10 @@ export const PROXY_TOKEN_DUD = 'disabled-by-rowboat-owner-key';
 // Codex with a ChatGPT account"). The template writes the provider line when no sign-in was there at boot and leaves
 // it out when one was (its server.js, read 2026-10-30), so dropping it is what the template's next boot would do; the
 // model line goes with it, so Codex falls to its own default for the account. The marker on the first line stays.
-const CODEX_SIGN_IN_STATUS = 'CODEX_HOME=/data/.codex codex login status 2>&1';
+const CODEX_SIGN_IN_STATUS = 'CODEX_HOME=/data/.codex codex login status -c cli_auth_credentials_store=\'"file"\' 2>&1';
 const CODEX_SIGNED_IN = /Logged in using ChatGPT/;
 const CODEX_CONFIG_OWN_PROVIDER = `f=/data/.codex/config.toml; if [ -f "$f" ] && head -n 1 "$f" | grep -q 'managed-by: maritime'; then sed -i '/^model_provider = /d; /^model = /d' "$f"; fi; true`;
-const CODEX_SIGN_OUT = 'CODEX_HOME=/data/.codex codex logout 2>&1; true';
+const CODEX_SIGN_OUT = 'CODEX_HOME=/data/.codex codex logout -c cli_auth_credentials_store=\'"file"\' 2>&1; true';
 /** A sign-in command is a process on the VM, not a model call: seconds, more when the VM has to wake first. */
 const SIGN_IN_TIMEOUT_S = 60;
 
@@ -72,6 +73,8 @@ function shapeExecution(e: Execution) {
     ...(e.exitCode !== undefined ? { exitCode: e.exitCode } : {}),
     ...(e.stdout !== undefined ? { stdout: e.stdout } : {}),
     ...(e.stderr !== undefined ? { stderr: e.stderr } : {}),
+    ...(e.reason !== undefined ? { reason: e.reason } : {}),
+    ...(e.signal !== undefined ? { signal: e.signal } : {}),
   };
 }
 
@@ -202,7 +205,9 @@ export function maritimeOps(api: MaritimeApi, agentId: string, externalUserId: s
         const last = logs.at(-1);
         return { logs, ...(logs.length >= opts.limit && last ? { nextBefore: last.id || last.timestamp } : {}) };
       }),
+    uploadFile: (directory, name, bytes) => refusing(() => api.uploadFile(agentId, directory, name, bytes)),
     files: (path) => refusing(async () => shapeFiles(await api.listFiles(agentId, path), path)),
+    downloadFile: (path) => refusing(() => api.downloadFile(agentId, path)),
     readFile: (path) => refusing(() => api.readFile(agentId, path)),
     writeFile: (path, content) => refusing(() => api.writeFile(agentId, path, content)),
     mkdir: (path) => refusing(() => api.mkdir(agentId, path)),
@@ -251,6 +256,35 @@ export function maritimeOps(api: MaritimeApi, agentId: string, externalUserId: s
     // The owner's sign-in (2026-10-30): Codex says whether one is there; on it, the same setup as a key of another
     // provider's (the proxy token a dud, so nothing bills the trial, and the cap lifted), the provider for the turn
     // script, and the template's config pointed at Codex's own provider so the Terminal's Codex uses the sign-in too.
+    // Guided device login (spec §8 Maritime, 2026-11-02): detached exec exposes no live output,
+    // so each attempt has its own instructions file, never the credential cache.
+    startSignIn: (unfunded) => refusing(async () => {
+      if (unfunded) {
+        const put = await putter();
+        await put('OPENAI_API_KEY', PROXY_TOKEN_DUD, true);
+        await api.setSpendLimit(agentId, null);
+        await reload();
+      }
+      try {
+        await api.start(agentId);
+      } catch (err) {
+        if (!(err instanceof MaritimeError && err.alreadyRunning)) throw err;
+      }
+      const outputPath = `/data/rowboat/sign-in-${randomUUID()}.txt`;
+      await api.writeFile(agentId, outputPath, '');
+      const script = [
+        'set -e',
+        'umask 077',
+        'export CODEX_HOME=/data/.codex',
+        'unset OPENAI_API_KEY OPENAI_BASE_URL CODEX_API_KEY CODEX_ACCESS_TOKEN',
+        `chmod 600 '${outputPath}'`,
+        `exec > '${outputPath}' 2>&1`,
+        // A VM-wide lock prevents two browsers replacing each other's pending login.
+        'exec flock -n /data/rowboat/codex-sign-in.lock codex -c cli_auth_credentials_store=\'"file"\' -c forced_login_method=\'"chatgpt"\' login --device-auth',
+      ].join('\n');
+      const execution = shapeExecution(await api.exec(agentId, ['sh', '-c', script], { detached: true, timeoutSeconds: 900 }));
+      return { execution, outputPath };
+    }),
     signIn: (kind) =>
       refusing(async () => {
         if (kind !== 'codex') return undefined;

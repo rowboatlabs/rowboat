@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Bell, Clock, Folder, KeyRound, LayoutDashboard, ListChecks, Loader2, ScrollText, SlidersHorizontal, Sparkles, SquareTerminal, Terminal, Trash2, TriangleAlert } from 'lucide-react'
 import type { spaces } from '@x/shared'
+import { CodexSignIn } from '@/components/spaces/codex-sign-in'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { CommandsScreen, EnvScreen, FilesScreen, HostingDangerRows, LogsScreen, MachineBlock, SkillsScreen, TriggersScreen } from '@/components/spaces/agent-hosting'
@@ -477,6 +478,13 @@ function FundingBlock({ orgId, agent, hosting, state, canManage, onChanged }: {
         </Button>
     )
 
+    const guidedSignIn = canManage && signInKind && !editing && (
+        <CodexSignIn orgId={orgId} agentId={agent.id} connected={plan} disabled={!ready} onChanged={async () => {
+            state.setSpend(undefined)
+            await onChanged()
+        }} />
+    )
+
     const form = editing && (
         <FormCard title={llm && !plan ? 'Replace the key' : 'Your API key'} onSubmit={() => void save()}>
             <div className="flex flex-wrap items-center gap-1.5">
@@ -516,7 +524,7 @@ function FundingBlock({ orgId, agent, hosting, state, canManage, onChanged }: {
                         </p>
                         <p className="text-[11px] text-muted-foreground">
                             {plan
-                                ? 'Signed in from the Terminal tab. Your plan covers the model; Rowboat pays for the machine.'
+                                ? 'Your plan covers the model; Rowboat pays for the machine.'
                                 : llm
                                   ? `${llm.model ? `Model ${llm.model}. ` : ''}You pay the provider; Rowboat pays for the machine.`
                                   : `${agent.displayName} answers nothing until you add your own API key${signInKind ? ' or sign in with ChatGPT from the Terminal tab' : ''}.`}
@@ -531,6 +539,7 @@ function FundingBlock({ orgId, agent, hosting, state, canManage, onChanged }: {
                     {!canManage && !llm && <Tag tone="warn">owner needed</Tag>}
                 </div>
                 {form}
+                {guidedSignIn}
             </div>
         )
     }
@@ -562,6 +571,7 @@ function FundingBlock({ orgId, agent, hosting, state, canManage, onChanged }: {
                 {!canManage && closed && <Tag tone="warn">owner needed</Tag>}
             </div>
             {form}
+            {guidedSignIn}
         </div>
     )
 }

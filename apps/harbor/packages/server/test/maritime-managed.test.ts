@@ -165,6 +165,26 @@ describe('managed Maritime agents', () => {
     expect(fake.submits().at(-1)!.script).toContain('hermes chat --query-file');
   });
 
+  it('preserves execution diagnostics and fails turns even when they produced partial answers', async () => {
+    const me = org.as('dev-ramnique');
+    const { agent } = (await me.post('/v1/agents/managed', { displayName: 'Failures', kind: 'codex' })).body as { agent: Member };
+    await org.hostingStatus(agent.id, 'ready');
+    await me.post(`/v1/spaces/${org.spaceId}/members`, { memberIds: [agent.id], actingMode: 'direct' });
+    for (const [details, expected] of [
+      [{ status: 'timed_out' as const, exitCode: -1 }, 'time limit'],
+      [{ status: 'lost' as const, reason: 'vm_replaced' }, 'VM was replaced'],
+      [{ status: 'completed' as const, signal: 'SIGKILL', exitCode: 137 }, 'may have run out of memory'],
+    ] as const) {
+      fake.nextTurn = codexTurn('Partial answer', details);
+      const { invocations } = await org.post(`${mention(agent)} run this task`);
+      const ended = await org.ended(invocations[0]!.id);
+      expect(ended).toMatchObject({ state: 'failed', error: expect.stringContaining(expected) });
+      const execution = fake.submits().filter(e => e.files.out).at(-1)!;
+      const result = await me.get(`/v1/agents/${agent.id}/hosting/commands/${execution.executionId}`);
+      expect(result.body.execution).toMatchObject(details);
+    }
+  });
+
   it('creates Codex from Maritime’s template, and Claude Code with the person’s Anthropic key in its environment', async () => {
     const codex = await org.as('dev-ramnique').post('/v1/agents/managed', { displayName: 'Coder', kind: 'codex', env: [{ key: 'GH_TOKEN', value: 'ghp_x' }] });
     expect(codex.status).toBe(200);
@@ -406,6 +426,90 @@ describe('managed Maritime agents', () => {
   });
 
   // The owner's ChatGPT sign-in (2026-10-30): made from the Terminal, found when asked, and the agent runs on it.
+  it('uploads binary files to the selected folder, refuses collisions and gates writes', async () => {
+    const me = org.as('dev-ramnique');
+    const { agent } = (await me.post('/v1/agents/managed', { displayName: 'Uploads', kind: 'codex' })).body as { agent: Member };
+    await org.hostingStatus(agent.id, 'ready');
+    const directory = '/data/upload-test';
+    await me.post(`/v1/agents/${agent.id}/hosting/files/mkdir`, { path: directory });
+    const endpoint = (name: string) => `${org.harbor.url}/v1/agents/${agent.id}/hosting/files/upload?${new URLSearchParams({ directory, name })}`;
+    const bytes = new Uint8Array([0, 255, 137, 80, 78, 71, 13, 10, 128]);
+    const upload = (name: string, token = 'dev-ramnique', content = bytes) => fetch(endpoint(name), { method: 'PUT', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/octet-stream' }, body: content });
+    const response = await upload('résumé image.png');
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ path: `${directory}/résumé image.png`, size: bytes.length });
+    expect(fake.uploads.get(`${directory}/résumé image.png`)).toEqual(bytes);
+    const downloadPath = `/v1/agents/${agent.id}/hosting/files/download?path=${encodeURIComponent(`${directory}/résumé image.png`)}`;
+    const downloaded = await me.get(downloadPath);
+    expect(downloaded.status).toBe(200);
+    expect(Buffer.from(downloaded.body.bytes, 'base64')).toEqual(Buffer.from(bytes));
+    expect(downloaded.body.mime).toBe('application/octet-stream');
+    expect((await org.as('dev-harsh').get(downloadPath)).status).toBe(403);
+    expect((await me.get(`/v1/agents/${agent.id}/hosting/files/content?path=${encodeURIComponent(`${directory}/résumé image.png`)}`)).status).toBe(400);
+    expect((await me.get(`/v1/agents/${agent.id}/hosting/files/download?path=/missing`)).status).toBe(404);
+    await upload('report.pdf', 'dev-ramnique', new TextEncoder().encode('%PDF-1.7 example'));
+    expect((await me.get(`/v1/agents/${agent.id}/hosting/files/download?path=${directory}/report.pdf`)).body.mime).toBe('application/pdf');
+    expect((await me.get(`/v1/agents/${agent.id}/hosting/files/content?path=${directory}/report.pdf`)).status).toBe(400);
+
+    expect((await me.get(`/v1/agents/${agent.id}/hosting/files?path=${directory}`)).body.entries).toContainEqual(expect.objectContaining({ name: 'résumé image.png', size: bytes.length }));
+    expect((await upload('résumé image.png')).status).toBe(400);
+    expect((await upload('other.png', 'dev-harsh')).status).toBe(403);
+    expect(fake.uploads.has(`${directory}/other.png`)).toBe(false);
+    expect((await upload('../escape.png')).status).toBe(400);
+    expect((await upload('empty.txt', 'dev-ramnique', new Uint8Array())).status).toBe(200);
+    fake.refuse = { status: 503, body: { detail: 'Upload unavailable' }, paths: /files\/upload/ };
+    try {
+      const failed = await upload('failed.pdf');
+      expect(failed.status).toBe(400);
+      expect((await failed.json()).message).toContain('Upload unavailable');
+      expect(fake.uploads.has(`${directory}/failed.pdf`)).toBe(false);
+    } finally { fake.refuse = undefined; }
+    await expect(org.harbor.service.uploadHostingFile({ memberId: 'ramnique' }, agent.id, { directory, name: 'oversized.zip' }, async () => new Uint8Array(100_000_001))).rejects.toMatchObject({ code: 'payload_too_large' });
+  });
+
+  it('starts guided login, exposes live instructions, cancels without adoption, and gates access', async () => {
+    const me = org.as('dev-ramnique');
+    const { agent } = (await me.post('/v1/agents/managed', { displayName: 'Guided', kind: 'codex' })).body as { agent: Member };
+    await org.hostingStatus(agent.id, 'ready');
+    const path = `/v1/agents/${agent.id}/hosting/sign-in/start`;
+    expect((await org.as('dev-harsh').post(path)).status).toBe(403);
+    const started = await me.post(path);
+    expect(started.status).toBe(200);
+    const { execution, outputPath } = started.body;
+    expect(execution.status).toBe('running');
+    expect(fake.power).toContainEqual({ agentId: agent.agentInstance, action: 'start' });
+    expect((await org.listing(agent.id))?.hosting?.funding).toBe('trial');
+    const file = await me.get(`/v1/agents/${agent.id}/hosting/files/content?path=${encodeURIComponent(outputPath)}`);
+    expect(file.body.content).toContain('ABCD-EFGHI');
+    expect(fake.executions.get(execution.id)?.stdout).toBe('');
+    expect((await me.post(`/v1/agents/${agent.id}/hosting/sign-in`)).body.signedIn).toBe(false);
+    const cancelled = await me.delete(`/v1/agents/${agent.id}/hosting/commands/${execution.id}`);
+    expect(cancelled.body.execution.status).toBe('cancelled');
+    expect((await org.listing(agent.id))?.hosting?.funding).toBe('trial');
+    const again = await me.post(path);
+    expect(again.body.outputPath).not.toBe(outputPath);
+    fake.signIns.add(agent.agentInstance!);
+    expect((await me.post(`/v1/agents/${agent.id}/hosting/sign-in`)).body).toMatchObject({ signedIn: true, hosting: { funding: 'own', llm: { provider: 'chatgpt' } } });
+    const { agent: hermes } = (await me.post('/v1/agents/managed', { displayName: 'No login', kind: 'hermes' })).body;
+    await org.hostingStatus(hermes.id, 'ready');
+    expect((await me.post(`/v1/agents/${hermes.id}/hosting/sign-in/start`)).status).toBe(400);
+  });
+
+  it('can start login after trial exhaustion without restoring the proxy credential or trial', async () => {
+    const me = org.as('dev-ramnique');
+    const { agent } = (await me.post('/v1/agents/managed', { displayName: 'Exhausted login', kind: 'codex' })).body as { agent: Member };
+    await org.hostingStatus(agent.id, 'ready');
+    fake.spend.set(agent.agentInstance!, { limit: 500, spent: 500, reached: true });
+    await me.get(`/v1/agents/${agent.id}/hosting`);
+    expect((await org.listing(agent.id))?.hosting?.trial?.closedReason).toBe('exhausted');
+    const started = await me.post(`/v1/agents/${agent.id}/hosting/sign-in/start`);
+    expect(started.status).toBe(200);
+    expect(fake.env.get(agent.agentInstance!)?.get('OPENAI_API_KEY')?.value).toBe('disabled-by-rowboat-owner-key');
+    expect(fake.spend.get(agent.agentInstance!)?.limit).toBeNull();
+    await me.delete(`/v1/agents/${agent.id}/hosting/commands/${started.body.execution.id}`);
+    expect((await org.listing(agent.id))?.hosting).toMatchObject({ funding: 'trial', trial: { closedReason: 'exhausted' } });
+  });
+
   it('finds a ChatGPT sign-in on a Codex when asked, runs the agent on it from then on, and signs it out again', async () => {
     const me = org.as('dev-ramnique');
     const { agent } = (await me.post('/v1/agents/managed', { displayName: 'Cx', kind: 'codex' })).body as { agent: Member };
@@ -439,7 +543,7 @@ describe('managed Maritime agents', () => {
     const { invocations } = await org.post(`${mention(agent)} hi`);
     expect((await org.ended(invocations[0]!.id)).state).toBe('done');
     const script = fake.submits().at(-1)!.script;
-    expect(script).toContain(`elif codex login status 2>&1 | grep -q 'ChatGPT'; then OWN='-c model_provider="openai"'; unset OPENAI_BASE_URL;`);
+    expect(script).toContain('unset OPENAI_API_KEY OPENAI_BASE_URL CODEX_API_KEY CODEX_ACCESS_TOKEN');
     expect(script).toContain("2>> '/data/rowboat/");
     // A key takes no `chatgpt`; Hermes has no sign-in; Harsh is not the owner.
     expect((await me.put(`/v1/agents/${agent.id}/hosting/llm`, { provider: 'chatgpt', apiKey: 'not-a-key-at-all' })).status).toBe(400);

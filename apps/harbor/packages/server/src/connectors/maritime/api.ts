@@ -1,3 +1,5 @@
+import { MAX_HOSTING_UPLOAD_BYTES } from '@rowboat/spaces-protocol';
+
 // The Maritime API, as its OpenAPI documents it (https://api.maritime.sh/openapi.json,
 // read 2026-10-24) and as measured on 2026-10-26 (the plan's section 11), for
 // the Maritime connector (spec §8 Connectors). Only what the connector calls:
@@ -73,11 +75,13 @@ export interface MaritimeAgent {
 /** One execution (`POST /exec` with `detached`), as submitted, polled and cancelled. */
 export interface Execution {
   executionId: string;
-  /** `running`, `completed`, `cancelled`, `failed`. */
+  /** `running`, `completed`, `cancelled`, `failed`, `timed_out`, `lost`. */
   status: string;
   exitCode?: number | null;
   stdout?: string;
   stderr?: string;
+  reason?: string;
+  signal?: string;
 }
 
 export interface MaritimeApi {
@@ -90,8 +94,10 @@ export interface MaritimeApi {
   execution(agentId: string, executionId: string): Promise<Execution>;
   cancelExecution(agentId: string, executionId: string): Promise<Execution>;
   /** Write a UTF-8 text file on the agent's volume, creating or replacing it. Wakes a sleeping agent. */
+  uploadFile(agentId: string, directory: string, name: string, bytes: Uint8Array): Promise<void>;
   writeFile(agentId: string, path: string, content: string): Promise<void>;
   /** Read a file on the agent as text; undefined when there is no such file. */
+  downloadFile(agentId: string, path: string): Promise<Uint8Array | undefined>;
   readFile(agentId: string, path: string): Promise<string | undefined>;
   // --- managing a VM (the management area, 2026-10-27): the shapes are Maritime's, passed through lightly ---
   restart(agentId: string): Promise<MaritimeAgent>;
@@ -172,13 +178,13 @@ export interface CreateAgentInput {
 export function maritimeApi(key: string, base = MARITIME_API): MaritimeApi {
   const headers = { authorization: `Bearer ${key}`, 'user-agent': USER_AGENT };
 
-  async function call<T>(path: string, init: { method?: string; body?: unknown; timeoutMs?: number; text?: boolean } = {}): Promise<T> {
+  async function call<T>(path: string, init: { method?: string; body?: unknown; form?: FormData; timeoutMs?: number; text?: boolean; binary?: boolean } = {}): Promise<T> {
     let res: Response;
     try {
       res = await fetch(`${base}${path}`, {
         method: init.method ?? 'GET',
         headers: { ...headers, ...(init.body !== undefined ? { 'content-type': 'application/json' } : {}) },
-        ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
+        ...(init.form ? { body: init.form } : init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
         redirect: 'error',
         signal: AbortSignal.timeout(init.timeoutMs ?? 30_000),
       });
@@ -186,6 +192,24 @@ export function maritimeApi(key: string, base = MARITIME_API): MaritimeApi {
       throw new MaritimeError(0, undefined, `Maritime could not be reached: ${(err as Error).message}`);
     }
     if (!res.ok) throw await refusal(res);
+    if (init.binary) {
+      const reader = res.body?.getReader();
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      if (reader) try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          size += value.byteLength;
+          if (size > MAX_HOSTING_UPLOAD_BYTES) {
+            await reader.cancel();
+            throw new MaritimeError(413, 'payload_too_large', 'Files must be 100 MB or smaller');
+          }
+          chunks.push(value);
+        }
+      } finally { reader.releaseLock(); }
+      return Buffer.concat(chunks, size) as T;
+    }
     if (init.text) return (await res.text()) as T;
     if (res.status === 204) return undefined as T;
     return (await res.json()) as T;
@@ -225,8 +249,22 @@ export function maritimeApi(key: string, base = MARITIME_API): MaritimeApi {
     async cancelExecution(agentId, executionId) {
       return execution(await call<Record<string, unknown>>(`/api/agents/${id(agentId)}/exec/${id(executionId)}`, { method: 'DELETE' }));
     },
+    async uploadFile(agentId, directory, name, bytes) {
+      const form = new FormData();
+      form.set('dest_dir', directory);
+      form.set('file', new Blob([new Uint8Array(bytes)], { type: 'application/octet-stream' }), name);
+      await call<unknown>(`/api/agents/${id(agentId)}/files/upload`, { method: 'POST', form, timeoutMs: 120_000 });
+    },
     async writeFile(agentId, path, content) {
       await call<unknown>(`/api/agents/${id(agentId)}/files/write`, { method: 'PUT', body: { path, content }, timeoutMs: 60_000 });
+    },
+    async downloadFile(agentId, path) {
+      try {
+        return await call<Uint8Array>(`/api/agents/${id(agentId)}/files/download?path=${id(path)}`, { binary: true, timeoutMs: 120_000 });
+      } catch (err) {
+        if (err instanceof MaritimeError && err.gone) return undefined;
+        throw err;
+      }
     },
     async readFile(agentId, path) {
       try {
@@ -381,6 +419,8 @@ function execution(body: Record<string, unknown>): Execution {
     ...(typeof body.exitCode === 'number' || body.exitCode === null ? { exitCode: body.exitCode as number | null } : {}),
     ...(typeof body.stdout === 'string' ? { stdout: body.stdout } : {}),
     ...(typeof body.stderr === 'string' ? { stderr: body.stderr } : {}),
+    ...(typeof body.reason === 'string' ? { reason: body.reason } : {}),
+    ...(typeof body.signal === 'string' ? { signal: body.signal } : {}),
   };
 }
 

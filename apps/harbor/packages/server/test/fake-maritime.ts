@@ -19,11 +19,16 @@ export interface Turn {
   stderr?: string;
   /** Don't finish it: the execution stays running until the test plays it. */
   hold?: boolean;
+  status?: FakeExecution['status'];
+  reason?: string;
+  signal?: string;
 }
 
 export interface FakeExecution {
   executionId: string;
-  status: 'running' | 'completed' | 'cancelled' | 'failed';
+  status: 'running' | 'completed' | 'cancelled' | 'failed' | 'timed_out' | 'lost';
+  reason?: string;
+  signal?: string;
   exitCode: number | null;
   stdout: string;
   stderr: string;
@@ -45,6 +50,7 @@ export const AGENT_ID = 'agt-1';
 export class FakeMaritime {
   readonly received: Received[] = [];
   readonly files = new Map<string, string>();
+  readonly uploads = new Map<string, Uint8Array>();
   /** Directories made through the files API, so an empty one lists. */
   readonly dirs = new Set<string>();
   readonly executions = new Map<string, FakeExecution>();
@@ -123,14 +129,22 @@ export class FakeMaritime {
     if (turn.last !== undefined && execution.files.last) this.files.set(execution.files.last, turn.last);
     if (turn.stderr) append(execution.files.err, turn.stderr);
     execution.exitCode = turn.exitCode ?? 0;
-    execution.status = execution.exitCode === 0 ? 'completed' : 'completed';
+    execution.status = turn.status ?? 'completed';
+    execution.reason = turn.reason;
+    execution.signal = turn.signal;
     execution.stderr = turn.stderr ?? '';
   }
 
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', this.url);
     const path = url.pathname;
-    const body = await readJson(req);
+    let form: FormData | undefined;
+    let body: Record<string, unknown> | undefined;
+    if (req.headers['content-type']?.startsWith('multipart/form-data')) {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(chunk as Buffer);
+      form = await new Response(Buffer.concat(chunks), { headers: { 'content-type': req.headers['content-type'] } }).formData();
+    } else body = await readJson(req);
     this.received.push({ method: req.method ?? 'GET', path, body });
     const send = (status: number, json: unknown) => {
       res.writeHead(status, { 'content-type': 'application/json' });
@@ -266,6 +280,16 @@ export class FakeMaritime {
       const from = before ? all.findIndex((l) => l.id === before) + 1 : 0;
       return send(200, all.slice(from, from + limit));
     }
+    if (req.method === 'POST' && rest === 'files/upload') {
+      const file = form?.get('file');
+      const directory = form?.get('dest_dir');
+      if (!(file instanceof File) || typeof directory !== 'string') return send(400, { detail: 'file and dest_dir required' });
+      const path = `${directory.replace(/\/$/, '')}/${file.name}`;
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      this.uploads.set(path, bytes);
+      this.files.set(path, Buffer.from(bytes).toString('latin1'));
+      return send(200, { ok: true, path, name: file.name, size: file.size });
+    }
     if (req.method === 'GET' && rest.startsWith('files/list')) {
       const dir = url.searchParams.get('path') ?? '/';
       const base = dir.endsWith('/') ? dir : `${dir}/`;
@@ -392,6 +416,11 @@ export class FakeMaritime {
         generation: 0,
       };
       this.executions.set(execution.executionId, execution);
+      if (script.includes('login --device-auth')) {
+        const outputPath = script.match(/exec > '([^']+)'/)?.[1];
+        if (outputPath) this.files.set(outputPath, 'Open https://auth.openai.com/codex/device and enter ABCD-EFGHI');
+        return send(200, { executionId: execution.executionId, status: 'running' });
+      }
       if (script.includes('/rowboat/models.json')) {
         if (!this.holdCatalog) Object.assign(execution, { status: 'completed', exitCode: 0 });
         return send(200, { executionId: execution.executionId, status: execution.status, exitCode: execution.exitCode });
@@ -432,7 +461,7 @@ export class FakeMaritime {
         execution.exitCode = -1;
       }
       const { executionId, status, exitCode, stdout, stderr } = execution;
-      return send(200, { executionId, status, ...(status === 'running' ? {} : { exitCode }), stdout, stderr });
+      return send(200, { executionId, status, ...(status === 'running' ? {} : { exitCode }), stdout, stderr, reason: execution.reason, signal: execution.signal });
     }
     if (req.method === 'PUT' && rest === 'files/write') {
       this.agent.status = 'active';
@@ -443,7 +472,7 @@ export class FakeMaritime {
       const file = this.files.get(url.searchParams.get('path') ?? '');
       if (file === undefined) return send(404, { detail: 'File not found' });
       res.writeHead(200, { 'content-type': 'text/plain' });
-      res.end(file);
+      res.end(this.uploads.get(url.searchParams.get('path') ?? '') ?? file);
       return;
     }
     return send(404, { detail: 'Not Found' });

@@ -1,4 +1,6 @@
 import {
+  MAX_HOSTING_UPLOAD_BYTES,
+  routes,
   LLM_PROVIDERS,
   MARITIME_AGENTS,
   type AgentCredential,
@@ -101,7 +103,9 @@ export interface HostingOps {
   console(ttlSeconds: number): Promise<HostingConsole>;
   logs(opts: { limit: number; before?: string; level?: string }): Promise<{ logs: HostingLogLine[]; nextBefore?: string }>;
   files(path: string): Promise<HostingFileEntry[]>;
+  downloadFile(path: string): Promise<Uint8Array | undefined>;
   readFile(path: string): Promise<string | undefined>;
+  uploadFile(directory: string, name: string, bytes: Uint8Array): Promise<void>;
   writeFile(path: string, content: string): Promise<void>;
   mkdir(path: string): Promise<void>;
   move(from: string, to: string): Promise<void>;
@@ -121,7 +125,9 @@ export interface HostingOps {
   stopFunding(): Promise<void>;
   /** The platform's cap for this agent lifted, so it may wake: for a check on an agent a closed trial holds asleep. */
   liftCap(): Promise<void>;
-  /** Whether the runtime on the VM holds a sign-in to a plan of its owner's, as the runtime itself reports it; nothing for a kind without one. */
+  /** Guided login (2026-11-02): a closed trial must never regain proxy credit just to authenticate. */
+  startSignIn(unfunded: boolean): Promise<{ execution: HostingExecution; outputPath: string }>;
+  /** Whether the runtime holds a sign-in to its owner's plan. */
   signIn(kind: string): Promise<'chatgpt' | undefined>;
   /** The sign-in found is what the agent runs on from now: the proxy token replaced by a dud, the provider recorded for the turn script, the platform's config pointed at the runtime's own provider, the cap lifted. */
   useSignIn(input: { kind: string }): Promise<void>;
@@ -438,6 +444,15 @@ export class Hosting {
     return next;
   }
 
+  async startSignIn(ctx: ActorCtx, agentId: string): Promise<{ execution: HostingExecution; outputPath: string }> {
+    const { row, ops } = await this.managed(ctx, agentId, SIGN_IN_KINDS);
+    this.k.guardWrite();
+    if (row.status !== 'ready') throw new HarborError('invalid_request', 'wait until the agent is ready');
+    const expired = row.funding === 'trial' && !row.trial?.closedAt && Date.parse(row.trial?.endsAt ?? '') <= Date.parse(this.k.now());
+    if (expired) await this.platform(() => this.endTrial(row, ops, 'expired'));
+    return this.platform(() => ops.startSignIn(row.funding === 'trial' && (!!row.trial?.closedAt || expired)));
+  }
+
   /**
    * A sign-in from the Terminal (2026-10-30), asked about by the page when a
    * Terminal session ends or by its button: Harbor has the runtime say whether
@@ -564,11 +579,40 @@ export class Hosting {
     return { path, entries };
   }
 
+  async downloadFile(ctx: ActorCtx, agentId: string, path: string): Promise<{ path: string; bytes: string; mime: string }> {
+    const { ops } = await this.managed(ctx, agentId);
+    const bytes = await this.platform(() => ops.downloadFile(path));
+    if (bytes === undefined) throw new HarborError('not_found', 'no such file on the agent');
+    return { path, bytes: Buffer.from(bytes).toString('base64'), mime: hostingFileMime(bytes) };
+  }
+
   async readFile(ctx: ActorCtx, agentId: string, path: string): Promise<{ path: string; content: string; truncated: boolean }> {
     const { ops } = await this.managed(ctx, agentId);
-    const content = await this.platform(() => ops.readFile(path));
-    if (content === undefined) throw new HarborError('not_found', 'no such file on the agent');
+    const bytes = await this.platform(() => ops.downloadFile(path));
+    if (bytes === undefined) throw new HarborError('not_found', 'no such file on the agent');
+    let content: string;
+    try {
+      content = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+      if (hostingFileMime(bytes) !== 'application/octet-stream' || /[\x00-\x08\x0e-\x1f]/.test(content)) throw new Error('binary');
+    } catch {
+      throw new HarborError('invalid_request', 'This is a binary file. Download it instead of editing it as text.');
+    }
     return { path, content: content.slice(0, FILE_READ_MAX), truncated: content.length > FILE_READ_MAX };
+  }
+
+  async uploadFile(ctx: ActorCtx, agentId: string, input: { directory: string; name: string }, read: () => Promise<Uint8Array>): Promise<{ path: string; size: number }> {
+    const { ops } = await this.managed(ctx, agentId);
+    this.k.guardWrite();
+    const parsed = routes.uploadHostingFile.query.safeParse(input);
+    if (!parsed.success) throw new HarborError('invalid_path', 'choose a directory and a plain file name');
+    const directory = input.directory.replace(/\/+$/, '') || '/';
+    const entries = await this.platform(() => ops.files(directory));
+    if (entries.some((e) => e.name === input.name)) throw new HarborError('invalid_request', 'A file or folder with this name already exists. Rename your file before uploading.');
+    // Authorize before reading a large body; preserve bytes rather than decoding text (2026-11-02).
+    const bytes = await read();
+    if (bytes.byteLength > MAX_HOSTING_UPLOAD_BYTES) throw new HarborError('payload_too_large', 'Files must be 100 MB or smaller');
+    await this.platform(() => ops.uploadFile(directory, input.name, bytes));
+    return { path: `${directory === '/' ? '' : directory}/${input.name}`, size: bytes.byteLength };
   }
 
   async writeFile(ctx: ActorCtx, agentId: string, path: string, content: string): Promise<void> {
@@ -714,4 +758,15 @@ export class Hosting {
   private async fail(row: StoredAgentHosting, error: string): Promise<void> {
     await this.k.store.putHosting({ ...row, status: 'failed', error: error.slice(0, 1000), updatedAt: this.k.now() });
   }
+}
+
+/** Preview only recognized passive formats, never a filename's claimed type (2026-11-02). */
+function hostingFileMime(bytes: Uint8Array): string {
+  const b = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (b.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10]))) return 'image/png';
+  if (b[0] === 255 && b[1] === 216 && b[2] === 255) return 'image/jpeg';
+  if (/^GIF8[79]a/.test(b.subarray(0, 6).toString('ascii'))) return 'image/gif';
+  if (b.subarray(0, 4).toString() === 'RIFF' && b.subarray(8, 12).toString() === 'WEBP') return 'image/webp';
+  if (b.subarray(0, 5).toString() === '%PDF-') return 'application/pdf';
+  return 'application/octet-stream';
 }

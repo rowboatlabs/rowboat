@@ -10,7 +10,7 @@ export async function uploadInputFor(file: File): Promise<{ bytes?: string; file
   return { bytes: arrayBufferToBase64(await file.arrayBuffer()) }
 }
 
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
+export function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer)
   let binary = ''
   const chunk = 0x8000

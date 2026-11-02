@@ -1069,7 +1069,7 @@ describe('AgentsDialog', () => {
         await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:setHostingLlm', { orgId: 'org-1', agentId: 'jv', provider: 'anthropic', apiKey: 'sk-ant-api03-mine-wxyz', model: 'claude-sonnet-4-5' }))
         expect(await screen.findByText('Runs on your Anthropic key …wxyz')).toBeInTheDocument()
         expect(screen.getByText(/Model claude-sonnet-4-5/)).toBeInTheDocument()
-        expect(screen.queryByText(/trial credit/)).toBeNull()
+        expect(screen.queryByText("On Rowboat's trial credit")).toBeNull()
         expect(screen.getByRole('button', { name: 'Replace key' })).toBeInTheDocument()
     })
 
@@ -1115,6 +1115,7 @@ describe('AgentsDialog', () => {
         fireEvent.click(await screen.findByRole('button', { name: /Cx/ }))
         const access = await screen.findByRole('group', { name: 'Model access' })
         expect(within(access).getByText(/or sign in with ChatGPT from the Terminal tab/)).toBeInTheDocument()
+        expect(within(access).getByRole('button', { name: 'Sign in with ChatGPT' })).toBeEnabled()
         // Nothing there yet: said so, and the trial goes on.
         fireEvent.click(within(access).getByRole('button', { name: 'Check sign-in' }))
         await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:checkHostingSignIn', { orgId: 'org-1', agentId: 'cx' }))
@@ -1125,7 +1126,7 @@ describe('AgentsDialog', () => {
         fireEvent.click(within(access).getByRole('button', { name: 'Check sign-in' }))
         expect(await screen.findByText('Runs on your ChatGPT plan')).toBeInTheDocument()
         await waitFor(() => expect(toast).toHaveBeenCalledWith('Cx now runs on your ChatGPT plan', 'success'))
-        expect(screen.queryByText(/trial credit/)).toBeNull()
+        expect(screen.queryByText("On Rowboat's trial credit")).toBeNull()
         expect(screen.getByRole('button', { name: 'Use a key instead' })).toBeInTheDocument()
         // On the plan, a check is still offered: it sets the VM up again (the way a newer setup reaches an agent signed in before it).
         expect(screen.queryByRole('button', { name: 'Check sign-in' })).toBeNull()

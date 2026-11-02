@@ -627,7 +627,13 @@ export const routes = {
     params: z.object({ agentId: MemberId }),
     response: z.object({ console: HostingConsole }),
   },
-  /** A sign-in to a plan made from the Terminal (2026-10-30), which Harbor cannot see happen: asked, Harbor has the runtime say whether one is there, and records what it finds. */
+  /** Guided login (spec §8 Maritime, 2026-11-02): the instructions file exposes output while detached exec is still running. */
+  startHostingSignIn: {
+    method: 'POST',
+    path: '/v1/agents/:agentId/hosting/sign-in/start',
+    params: z.object({ agentId: MemberId }),
+    response: z.object({ execution: HostingExecution, outputPath: z.string() }),
+  },
   checkHostingSignIn: {
     method: 'POST',
     path: '/v1/agents/:agentId/hosting/sign-in',
@@ -657,6 +663,13 @@ export const routes = {
     query: z.object({ path: z.string().max(2048).optional() }),
     response: z.object({ path: z.string(), entries: z.array(HostingFileEntry) }),
   },
+  downloadHostingFile: {
+    method: 'GET',
+    path: '/v1/agents/:agentId/hosting/files/download',
+    params: z.object({ agentId: MemberId }),
+    query: z.object({ path: z.string().min(1).max(2048) }),
+    response: z.object({ path: z.string(), bytes: z.string(), mime: z.string() }),
+  },
   readHostingFile: {
     method: 'GET',
     path: '/v1/agents/:agentId/hosting/files/content',
@@ -664,6 +677,17 @@ export const routes = {
     query: z.object({ path: z.string().min(1).max(2048) }),
     /** Text only, up to 1 MB; `truncated` when the file was longer. */
     response: z.object({ path: z.string(), content: z.string(), truncated: z.boolean() }),
+  },
+  /** Raw binary body; metadata stays in the query (spec §8 Maritime, 2026-11-02). */
+  uploadHostingFile: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/hosting/files/upload',
+    params: z.object({ agentId: MemberId }),
+    query: z.object({
+      directory: z.string().min(1).max(2048).regex(/^\//).refine((v) => !v.includes('\0') && !v.split('/').includes('..'), 'invalid directory'),
+      name: z.string().min(1).max(255).refine((v) => !/[\/\\\x00-\x1f\x7f]/.test(v) && v !== '.' && v !== '..', 'expected a file name, not a path'),
+    }),
+    response: z.object({ path: z.string(), size: z.number().int().nonnegative() }),
   },
   writeHostingFile: {
     method: 'PUT',

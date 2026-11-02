@@ -1,6 +1,7 @@
 import type { ActivityKind, ActivityPage } from '@rowboat/spaces-protocol';
 import {
   routes,
+  MAX_HOSTING_UPLOAD_BYTES,
   type AcceptInviteResult,
   type Asset,
   type BlobInfo,
@@ -488,6 +489,9 @@ export class SpacesClient {
     return (await this.request('DELETE', this.hostingPath(agentId, `/commands/${encodeURIComponent(executionId)}`), routes.cancelHostingCommand.response)).execution;
   }
   /** A sign-in to a plan made from the Terminal (2026-10-30): asked, Harbor has the VM say whether one is there; the agent runs on it from then on. */
+  async startHostingSignIn(agentId: string): Promise<{ execution: HostingExecution; outputPath: string }> {
+    return this.request('POST', this.hostingPath(agentId, '/sign-in/start'), routes.startHostingSignIn.response);
+  }
   async checkHostingSignIn(agentId: string): Promise<{ hosting: AgentHosting; signedIn: boolean }> {
     return this.request('POST', this.hostingPath(agentId, '/sign-in'), routes.checkHostingSignIn.response);
   }
@@ -508,8 +512,16 @@ export class SpacesClient {
   async listHostingFiles(agentId: string, path: string): Promise<{ path: string; entries: HostingFileEntry[] }> {
     return this.request('GET', this.hostingPath(agentId, `/files?path=${encodeURIComponent(path)}`), routes.listHostingFiles.response);
   }
+  async downloadHostingFile(agentId: string, path: string): Promise<{ path: string; bytes: string; mime: string }> {
+    return this.request('GET', this.hostingPath(agentId, `/files/download?path=${encodeURIComponent(path)}`), routes.downloadHostingFile.response);
+  }
   async readHostingFile(agentId: string, path: string): Promise<{ path: string; content: string; truncated: boolean }> {
     return this.request('GET', this.hostingPath(agentId, `/files/content?path=${encodeURIComponent(path)}`), routes.readHostingFile.response);
+  }
+  async uploadHostingFile(agentId: string, directory: string, name: string, bytes: Uint8Array): Promise<{ path: string; size: number }> {
+    if (bytes.byteLength > MAX_HOSTING_UPLOAD_BYTES) throw new Error('Files must be 100 MB or smaller');
+    const query = new URLSearchParams(routes.uploadHostingFile.query.parse({ directory, name }));
+    return this.putBytes(this.hostingPath(agentId, `/files/upload?${query}`), routes.uploadHostingFile.response, bytes, { 'content-type': 'application/octet-stream' });
   }
   async writeHostingFile(agentId: string, path: string, content: string): Promise<void> {
     await this.request('PUT', this.hostingPath(agentId, '/files/content'), routes.writeHostingFile.response, { path, content });
