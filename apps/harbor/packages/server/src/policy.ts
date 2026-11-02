@@ -331,10 +331,10 @@ export function canSuperAgentCreate(agent: Member): Decision {
   return { code: 'forbidden', message: 'only a super agent can create agents; an admin makes one on the agent’s page' };
 }
 
-/** A super agent deleting: one an admin allowed to, and only an agent it created. */
+/** A super agent deleting: only an agent it created. */
 export function canSuperAgentDelete(agent: Member, requestedBy: string | undefined): Decision {
-  if (!(agent.kind === 'agent' && agent.superAgent?.canDelete && agent.ownerId !== undefined)) {
-    return { code: 'forbidden', message: 'this agent isn’t allowed to delete agents' };
+  if (!(agent.kind === 'agent' && agent.superAgent && agent.ownerId !== undefined)) {
+    return { code: 'forbidden', message: 'only a super agent can delete agents' };
   }
   if (requestedBy !== agent.id) return { code: 'forbidden', message: 'a super agent deletes only the agents it created' };
   return null;

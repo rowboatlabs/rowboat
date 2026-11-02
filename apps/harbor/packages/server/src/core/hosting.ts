@@ -745,12 +745,25 @@ export class Hosting {
   }
 
   private async move(row: StoredAgentHosting, status: StoredAgentHosting['status']): Promise<void> {
+    if (await this.movedOn(row)) return;
     const next: StoredAgentHosting = { ...row, status, updatedAt: this.k.now() };
     delete next.error;
     await this.k.store.putHosting(next);
   }
 
   private async fail(row: StoredAgentHosting, error: string): Promise<void> {
+    if (await this.movedOn(row)) return;
     await this.k.store.putHosting({ ...row, status: 'failed', error: error.slice(0, 1000), updatedAt: this.k.now() });
+  }
+
+  /**
+   * The row changed while the platform answered (2026-11-02): a delete landed
+   * during a check, say. The worker's stale copy must not write over it, or
+   * a deleted agent reads ready and its machine is never removed.
+   */
+  private async movedOn(row: StoredAgentHosting): Promise<boolean> {
+    if (!row.agentId) return false;
+    const current = await this.k.store.getAgentHosting(row.agentId);
+    return current !== undefined && current.status !== row.status;
   }
 }

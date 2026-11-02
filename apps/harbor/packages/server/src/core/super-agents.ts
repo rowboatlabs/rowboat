@@ -61,7 +61,7 @@ export class SuperAgents {
     const displayName = input.displayName.trim();
     const action: ApprovalAction = { kind: 'create_agent', displayName, agentKind: input.kind, ...(input.connection ? { connection: input.connection } : {}) };
     const setup = ownerSetsUp(action);
-    if (!setup && superAgent.superAgent?.approval === 'never') return { status: 'done', ...(await this.createNow(superAgent, input.spaceId, action)) };
+    if (!setup && superAgent.superAgent?.askBeforeCreate === false) return { status: 'done', ...(await this.createNow(superAgent, input.spaceId, action)) };
     const owner = await this.k.store.getMember(superAgent.ownerId!);
     const ownerName = owner?.displayName ?? 'its owner';
     const what = input.connection ? `${kindLabel(input.kind)} on ${CONNECTION_LABELS[input.connection] ?? input.connection}` : kindLabel(input.kind);
@@ -114,7 +114,7 @@ export class SuperAgents {
     if (!target || !row) throw new HarborError('not_found', 'no such agent');
     await this.k.requireMember(ctx, input.spaceId);
     const action: ApprovalAction = { kind: 'delete_agent', agentId: target.id };
-    if (superAgent.superAgent?.approval === 'never') {
+    if (superAgent.superAgent?.askBeforeDelete === false) {
       return { status: 'done', agent: target, hosting: await this.hosting.deleteForSuperAgent(superAgent, target.id) };
     }
     const owner = await this.k.store.getMember(superAgent.ownerId!);

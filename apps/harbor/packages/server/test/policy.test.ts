@@ -220,22 +220,22 @@ describe('policy', () => {
     expect(agentsManagedBy(owner)).toBe('owned');
   });
 
-  it('super agents (2026-11-02): an admin grants it to an owned agent; it creates for its owner, deletes only its own when allowed, and its owner decides', () => {
+  it('super agents (2026-11-02): an admin grants it to an owned agent; it creates for its owner, deletes only its own, and its owner decides', () => {
     const person = (id: string, role: Member['role'] = 'member'): Member => ({ id, displayName: id, role, kind: 'human' });
     const owner = person('harsh');
     const admin = person('ramnique', 'admin');
     const hermes: Member = { id: 'hermes', displayName: 'Hermes', role: 'member', kind: 'agent', ownerId: 'harsh' };
     const ro: Member = { id: 'ro', displayName: 'Ro', role: 'member', kind: 'agent' };
-    const boss: Member = { ...hermes, superAgent: { approval: 'always', canDelete: false } };
-    const deleter: Member = { ...hermes, superAgent: { approval: 'never', canDelete: true } };
+    const boss: Member = { ...hermes, superAgent: { askBeforeCreate: true, askBeforeDelete: true } };
+    const deleter: Member = { ...hermes, superAgent: { askBeforeCreate: false, askBeforeDelete: false } };
     expect(canSetSuperAgent(admin, hermes)).toBeNull();
     expect(canSetSuperAgent(owner, hermes)).toMatchObject({ code: 'forbidden' });
     expect(canSetSuperAgent(admin, ro)).toMatchObject({ code: 'invalid_request' });
     expect(canSetSuperAgent(admin, owner)).toMatchObject({ code: 'invalid_request' });
     expect(canSuperAgentCreate(hermes)).toMatchObject({ code: 'forbidden' });
     expect(canSuperAgentCreate(boss)).toBeNull();
-    expect(canSuperAgentCreate({ ...ro, superAgent: { approval: 'never', canDelete: true } })).toMatchObject({ code: 'forbidden' });
-    expect(canSuperAgentDelete(boss, 'hermes')).toMatchObject({ code: 'forbidden' });
+    expect(canSuperAgentCreate({ ...ro, superAgent: { askBeforeCreate: false, askBeforeDelete: false } })).toMatchObject({ code: 'forbidden' });
+    expect(canSuperAgentDelete(hermes, 'hermes')).toMatchObject({ code: 'forbidden' });
     expect(canSuperAgentDelete(deleter, 'hermes')).toBeNull();
     expect(canSuperAgentDelete(deleter, 'someone-else')).toMatchObject({ code: 'forbidden' });
     expect(canSuperAgentDelete(deleter, undefined)).toMatchObject({ code: 'forbidden' });

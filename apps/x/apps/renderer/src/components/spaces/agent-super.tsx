@@ -5,18 +5,14 @@ import { toast } from '@/lib/toast'
 
 // Super agents (Harbor spec §4 Agent members, 2026-11-02): an admin lets an
 // agent create agents to hand work to, which belong to its owner; the owner
-// fills in anything secret on a card in the thread. Per agent, the admin
-// chooses whether the owner approves a request that needs nothing more (on
-// by default) and whether it may delete the agents it created. Everyone else
-// reads what it may do.
+// fills in anything secret on a card in the thread. Per agent, two plain
+// switches (named in Arjun's words, 2026-11-02): ask permission before
+// creating, and before deleting one it created. Everyone else reads them.
 
-type Setting = { approval: 'always' | 'never'; canDelete: boolean }
-const DEFAULT: Setting = { approval: 'always', canDelete: false }
-
-function describe(s: Setting, ownerName: string): string {
-    const approval = s.approval === 'always' ? `${ownerName} approves each one in the thread` : `${ownerName} sets up only the ones that need a key`
-    return `It can create agents for ${ownerName} to hand work to. ${approval}${s.canDelete ? '. It can delete the ones it created' : ''}.`
-}
+type Setting = { askBeforeCreate: boolean; askBeforeDelete: boolean }
+const DEFAULT: Setting = { askBeforeCreate: true, askBeforeDelete: true }
+const CREATE_LABEL = 'Ask permission before creating agents'
+const DELETE_LABEL = 'Ask permission before deleting agents it creates'
 
 export function SuperAgentSection({ orgId, agent, isAdmin, ownerName, onChanged }: {
     orgId: string
@@ -26,7 +22,7 @@ export function SuperAgentSection({ orgId, agent, isAdmin, ownerName, onChanged 
     onChanged: () => Promise<void>
 }) {
     const [busy, setBusy] = useState(false)
-    const current: Setting | null = agent.superAgent ? { approval: agent.superAgent.approval, canDelete: agent.superAgent.canDelete } : null
+    const current: Setting | null = agent.superAgent ? { askBeforeCreate: agent.superAgent.askBeforeCreate, askBeforeDelete: agent.superAgent.askBeforeDelete } : null
     const save = async (next: Setting | null) => {
         if (busy) return
         setBusy(true)
@@ -40,52 +36,39 @@ export function SuperAgentSection({ orgId, agent, isAdmin, ownerName, onChanged 
         }
     }
 
+    const intro = `Lets it create agents for ${ownerName} and hand them work.`
     if (!isAdmin) {
         if (!current) return null
         return (
             <div className="flex flex-col gap-0.5">
                 <h3 className="text-sm font-semibold text-foreground">Super agent</h3>
-                <p className="text-xs leading-snug text-muted-foreground">{describe(current, ownerName)}</p>
+                <p className="text-xs leading-snug text-muted-foreground">{intro}</p>
+                <ul className="mt-1 flex flex-col gap-0.5 text-xs text-foreground">
+                    <li>{CREATE_LABEL}: {current.askBeforeCreate ? 'on' : 'off'}</li>
+                    <li>{DELETE_LABEL}: {current.askBeforeDelete ? 'on' : 'off'}</li>
+                </ul>
             </div>
         )
     }
     return (
         <div className="flex flex-col gap-2">
-            <Toggle
-                label="Super agent"
-                note={current ? describe(current, ownerName) : `Let it create agents to hand work to. They belong to ${ownerName}, who fills in any keys they need.`}
-                checked={current !== null}
-                disabled={busy}
-                onChange={(on) => void save(on ? DEFAULT : null)}
-            />
+            <Toggle label="Super agent" note={intro} checked={current !== null} disabled={busy} onChange={(on) => void save(on ? DEFAULT : null)} />
             {current && (
                 <div className="ml-1 flex flex-col gap-2 border-l border-border pl-3">
-                    <Toggle
-                        label="Ask its owner first"
-                        note={`Hermes and Codex on Rowboat wait for ${ownerName} to allow them on a card in the thread. Agents that need a key always wait for ${ownerName} to set them up.`}
-                        checked={current.approval === 'always'}
-                        disabled={busy}
-                        onChange={(on) => void save({ ...current, approval: on ? 'always' : 'never' })}
-                    />
-                    <Toggle
-                        label="Can delete what it creates"
-                        note="Only the agents it created, never any other."
-                        checked={current.canDelete}
-                        disabled={busy}
-                        onChange={(on) => void save({ ...current, canDelete: on })}
-                    />
+                    <Toggle label={CREATE_LABEL} checked={current.askBeforeCreate} disabled={busy} onChange={(on) => void save({ ...current, askBeforeCreate: on })} />
+                    <Toggle label={DELETE_LABEL} checked={current.askBeforeDelete} disabled={busy} onChange={(on) => void save({ ...current, askBeforeDelete: on })} />
                 </div>
             )}
         </div>
     )
 }
 
-function Toggle({ label, note, checked, disabled, onChange }: { label: string; note: string; checked: boolean; disabled: boolean; onChange: (on: boolean) => void }) {
+function Toggle({ label, note, checked, disabled, onChange }: { label: string; note?: string; checked: boolean; disabled: boolean; onChange: (on: boolean) => void }) {
     return (
         <label className="flex items-start justify-between gap-3">
             <span className="flex min-w-0 flex-col gap-0.5">
                 <span className="text-sm font-semibold text-foreground">{label}</span>
-                <span className="text-xs leading-snug text-muted-foreground">{note}</span>
+                {note && <span className="text-xs leading-snug text-muted-foreground">{note}</span>}
             </span>
             <Switch aria-label={label} checked={checked} disabled={disabled} onCheckedChange={onChange} />
         </label>

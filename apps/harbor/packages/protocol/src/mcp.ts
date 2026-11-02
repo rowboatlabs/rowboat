@@ -822,7 +822,7 @@ export const createAgent = tool({
 export const deleteAgent = tool({
   name: 'delete_agent',
   description:
-    'Delete a managed agent you created: only for a super agent an admin allowed to delete. Its keys stop at ' +
+    'Delete an agent Rowboat runs that you created (only for a super agent; never any other). Its keys stop at ' +
     'once and its machine is removed. Pass the thread you are working in, as with create_agent: when your ' +
     'owner must approve, the card goes there and the result is "pending".',
   input: z.object({ spaceId: SpaceId, threadRootId: MessageId, agentId: MemberId, reason: z.string().min(1).max(1000) }),

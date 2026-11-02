@@ -38,14 +38,15 @@ export type MemberKind = z.infer<typeof MemberKind>;
 export const AGENT_INSTRUCTIONS_MAX = 4000;
 
 /**
- * What an admin allows a super agent (spec §4 Agent members, 2026-11-02).
- * `approval: 'always'` (the default) puts each create or delete on a card in
- * the thread for the super agent's owner to allow; `never` acts at once.
- * `canDelete` lets it delete the managed agents it created, and no others.
+ * How a super agent asks (spec §4 Agent members, 2026-11-02, the two switches
+ * renamed the same day): `askBeforeCreate` puts each agent Rowboat runs on its
+ * trial credit on a card for the owner to allow; `askBeforeDelete` does the
+ * same for deleting one it created. Both on by default; off, Harbor acts at
+ * once. An agent that needs its owner's details always waits for them.
  */
 export const SuperAgent = z.object({
-  approval: z.enum(['always', 'never']).default('always'),
-  canDelete: z.boolean().default(false),
+  askBeforeCreate: z.boolean().default(true),
+  askBeforeDelete: z.boolean().default(true),
 });
 export type SuperAgent = z.infer<typeof SuperAgent>;
 
@@ -88,7 +89,7 @@ export const Member = z.object({
   personal: z.boolean().optional(),
   /**
    * A super agent (spec §4 Agent members, 2026-11-02): an agent an admin let
-   * create managed agents, and delete the ones it created when `canDelete`.
+   * create agents, and delete the managed ones it created.
    * Absent = an ordinary agent, which creates none. Set only by an admin.
    */
   superAgent: SuperAgent.optional(),

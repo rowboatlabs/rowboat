@@ -251,8 +251,8 @@ export class Agents {
   async setSuper(ctx: ActorCtx, agentId: string, input: { superAgent: SuperAgent | null }): Promise<Member> {
     const agent = await this.agent(agentId);
     enforce(canSetSuperAgent(await this.actor(ctx), agent));
-    const next = input.superAgent ? { approval: input.superAgent.approval, canDelete: input.superAgent.canDelete } : null;
-    const current = agent.superAgent ? { approval: agent.superAgent.approval, canDelete: agent.superAgent.canDelete } : null;
+    const next = input.superAgent ? { askBeforeCreate: input.superAgent.askBeforeCreate, askBeforeDelete: input.superAgent.askBeforeDelete } : null;
+    const current = agent.superAgent ? { askBeforeCreate: agent.superAgent.askBeforeCreate, askBeforeDelete: agent.superAgent.askBeforeDelete } : null;
     if (JSON.stringify(current) === JSON.stringify(next)) return agent; // idempotent no-op: no write
     this.k.guardWrite();
     await this.k.store.setAgentSuper(agentId, next);

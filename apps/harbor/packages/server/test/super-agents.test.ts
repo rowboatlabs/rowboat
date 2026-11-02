@@ -120,8 +120,8 @@ describe('making a super agent', () => {
     expect((await as('dev-ramnique').put('/v1/agents/harsh/super', { superAgent: {} })).status).toBe(404);
     const made = await setSuper({});
     expect(made.status).toBe(200);
-    expect(made.body.agent.superAgent).toEqual({ approval: 'always', canDelete: false });
-    expect((await setSuper({ approval: 'always', canDelete: false })).body.agent.superAgent).toEqual({ approval: 'always', canDelete: false });
+    expect(made.body.agent.superAgent).toEqual({ askBeforeCreate: true, askBeforeDelete: true });
+    expect((await setSuper({ askBeforeCreate: true, askBeforeDelete: true })).body.agent.superAgent).toEqual({ askBeforeCreate: true, askBeforeDelete: true });
   });
 });
 
@@ -176,15 +176,25 @@ describe('creating, with its owner’s approval', () => {
   });
 
   describe('deleting', () => {
-    it('is refused until the admin allows it, and then only for what it created', async () => {
+    it('asks its owner first by default, and only ever for what it created', async () => {
       const { rootId } = await turn();
-      expect(await refused('delete_agent', { spaceId, threadRootId: rootId, agentId: created, reason: 'done' })).toMatch(/isn’t allowed to delete/);
-      await setSuper({ approval: 'never', canDelete: true });
       const own = await as('dev-harsh').post('/v1/agents/managed', { displayName: 'Mine', kind: 'hermes' });
       expect(own.status).toBe(200);
       expect(await refused('delete_agent', { spaceId, threadRootId: rootId, agentId: own.body.agent.id, reason: 'tidy' })).toMatch(/only the agents it created/);
-      const deleted = await call('delete_agent', { spaceId, threadRootId: rootId, agentId: created, reason: 'done' });
-      expect(deleted).toMatchObject({ status: 'done', agent: { id: created }, hosting: { status: 'deleting' } });
+      const asked = await call('delete_agent', { spaceId, threadRootId: rootId, agentId: created, reason: 'done' });
+      expect(asked).toMatchObject({ status: 'pending', approval: { action: { kind: 'delete_agent', agentId: created }, choices: ['allow_once', 'deny'] } });
+      const decided = await decide(asked.approval!, 'allow_once');
+      expect(decided.body.approval).toMatchObject({ state: 'allowed', outcome: { agentId: created } });
+      expect(['deleting', 'deleted']).toContain((await listing(created))?.hosting?.status);
+    });
+
+    it('deletes at once when the admin turned asking off', async () => {
+      await setSuper({ askBeforeCreate: true, askBeforeDelete: false });
+      const { rootId } = await turn();
+      const asked = await call('create_agent', { spaceId, threadRootId: rootId, displayName: 'Temp', kind: 'hermes', reason: 'short job' });
+      const temp = (await decide(asked.approval!, 'allow_once')).body.approval.outcome.agentId as string;
+      const deleted = await call('delete_agent', { spaceId, threadRootId: rootId, agentId: temp, reason: 'done' });
+      expect(deleted).toMatchObject({ status: 'done', agent: { id: temp }, hosting: { status: 'deleting' } });
     });
   });
 });
@@ -197,7 +207,7 @@ describe('creating without approval', () => {
   });
 
   it('acts at once when the admin waived it', async () => {
-    await setSuper({ approval: 'never', canDelete: false });
+    await setSuper({ askBeforeCreate: false, askBeforeDelete: true });
     const result = await call('create_agent', { spaceId, threadRootId: rootId, displayName: 'Quick', kind: 'hermes', reason: 'now' });
     expect(result).toMatchObject({ status: 'done', agent: { displayName: 'Quick', ownerId: 'harsh' }, hosting: { requestedBy: boss.id } });
     expect(await inSpace(result.agent!.id)).toBe(true);
@@ -212,7 +222,7 @@ describe('creating without approval', () => {
 describe('setup cards: agents that need their owner’s details', () => {
   beforeAll(async () => {
     // Approval waived: a setup card is still its owner's to fill in.
-    await setSuper({ approval: 'never', canDelete: true });
+    await setSuper({ askBeforeCreate: false, askBeforeDelete: false });
   });
 
   async function card(kind: string, connection?: string) {
