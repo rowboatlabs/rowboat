@@ -206,9 +206,13 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           sudo apt-get update && sudo apt-get install -y flatpak flatpak-builder
-          flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-          flatpak install -y flathub org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
-          flatpak-builder --force-clean --repo=build-repo build-dir packaging/flatpak/com.rowboatlabs.Rowboat.yaml
+          # The runner user cannot configure or install into the system Flatpak
+          # install (2026-11-02: "Flatpak system operation ConfigureRemote not
+          # allowed for user" on ubuntu-latest). Everything stays in the user
+          # session so the cache below also hits.
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install -y --user flathub org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
+          flatpak-builder --user --force-clean --repo=build-repo build-dir packaging/flatpak/com.rowboatlabs.Rowboat.yaml
           mkdir -p apps/x/apps/main/out/make
           flatpak build-bundle build-repo "apps/x/apps/main/out/make/Rowboat-${VERSION}-x64.flatpak" com.rowboatlabs.Rowboat
 
