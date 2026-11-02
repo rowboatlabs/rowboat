@@ -17,6 +17,7 @@ import { useParentHeader } from '@/lib/use-parent-header';
 import { pickProfileImage } from '@/lib/spaces/profile-image';
 import { loadValue, peekValue, saveValue } from '@/lib/spaces/cache';
 import { isNetworkError } from '@/lib/spaces/errors';
+import { canInvite, takeSpacesChanged, useOrgSettings } from '@/lib/spaces/invites';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BottomSheet } from '@/components/bottom-sheet';
 import { useColors } from '@/theme/colors';
@@ -372,8 +373,11 @@ function OrgCard({ org, onSwitch, mode = 'home', query = '' }: { org: SpacesOrg;
   // Coming back from a chat: the marks moved, so the badges must too.
   useFocusEffect(
     useCallback(() => {
-      if (spaces !== null) client.unread().then(setUnread).catch(() => {});
-    }, [client, spaces !== null]),
+      // A new space, or one joined from Browse, reloads the list.
+      if (takeSpacesChanged(org.address)) void load();
+      else if (spaces !== null) client.unread().then(setUnread).catch(() => {});
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- spaces !== null stands for spaces
+    }, [client, load, org.address, spaces !== null]),
   );
 
   // The dot-and-count rule (desktop unread-badge.tsx): grey dot + unread count
@@ -398,6 +402,9 @@ function OrgCard({ org, onSwitch, mode = 'home', query = '' }: { org: SpacesOrg;
         : directs.find((d) => d.participants?.length === 2 && d.participants.includes(memberId) && d.participants.includes(org.memberId)),
     [directs, org.memberId],
   );
+
+  // Under an admins-only invite policy a member's invite is refused, so Invite hides.
+  const mayInvite = canInvite(useOrgSettings(client, org.address), org.role);
 
   const [openingDm, setOpeningDm] = useState<string | null>(null);
   const blockedIds = useBlockedIds(org.address);
@@ -430,13 +437,13 @@ function OrgCard({ org, onSwitch, mode = 'home', query = '' }: { org: SpacesOrg;
     // with a deleted account, but the history you share stays readable.
     const existing = dmWith(m.id);
     if (existing) {
-      router.push({ pathname: '/spaces/chat', params: { org: org.address, space: existing.id, title, me: org.memberId } });
+      router.push({ pathname: '/spaces/chat', params: { org: org.address, space: existing.id, title, me: org.memberId, kind: 'direct' } });
       return;
     }
     setOpeningDm(m.id);
     try {
       const { space } = await client.openDirect(m.id);
-      router.push({ pathname: '/spaces/chat', params: { org: org.address, space: space.id, title, me: org.memberId } });
+      router.push({ pathname: '/spaces/chat', params: { org: org.address, space: space.id, title, me: org.memberId, kind: 'direct' } });
     } catch (err) {
       // A one-off refusal, not the screen's state: an alert the user dismisses.
       Alert.alert("Couldn't open a conversation", friendlyError(err));
@@ -544,8 +551,21 @@ function OrgCard({ org, onSwitch, mode = 'home', query = '' }: { org: SpacesOrg;
                 </CardRow>
               );
             })}
-            {shownSpaces.length === 0 ? (
+            {shownSpaces.length === 0 && mode !== 'home' ? (
               <Text style={{ ...type.body, color: colors.tertiaryLabel, padding: 14 }}>No spaces in this org yet.</Text>
+            ) : null}
+            {/* New space and Browse (2026-11-02): last rows of the list, as Slack does. */}
+            {mode === 'home' ? (
+              <>
+                <CardRow first={shownSpaces.length === 0} onPress={() => router.push({ pathname: '/spaces/new-space', params: { org: org.address, me: org.memberId } })}>
+                  <Glyph icon="sf:plus" />
+                  <Text style={{ flex: 1, ...type.body, color: colors.secondaryLabel }}>New space</Text>
+                </CardRow>
+                <CardRow onPress={() => router.push({ pathname: '/spaces/browse', params: { org: org.address, me: org.memberId } })}>
+                  <Glyph icon="sf:safari" />
+                  <Text style={{ flex: 1, ...type.body, color: colors.secondaryLabel }}>Browse spaces</Text>
+                </CardRow>
+              </>
             ) : null}
           </Card>
           )}
@@ -580,6 +600,16 @@ function OrgCard({ org, onSwitch, mode = 'home', query = '' }: { org: SpacesOrg;
           </Card>
           )}
         </View>
+      ) : null}
+      {/* An invite is to the org (harbor, 2026-10-19), so it sits with the org, under everything. */}
+      {mode === 'home' && mayInvite ? (
+        <Card>
+          <CardRow first onPress={() => router.push({ pathname: '/spaces/invite', params: { org: org.address } })}>
+            <Glyph icon="sf:person.badge.plus" />
+            <Text numberOfLines={1} style={{ flex: 1, ...type.body, color: colors.label }}>Invite people to {org.name}</Text>
+            <Chevron />
+          </CardRow>
+        </Card>
       ) : null}
       {mode === 'search' && q && (shownSpaces?.length ?? 0) === 0 && shownMembers.length === 0 ? (
         <Text style={{ ...type.body, textAlign: 'center', color: colors.tertiaryLabel, paddingTop: 24 }}>No spaces or people match “{query.trim()}”</Text>

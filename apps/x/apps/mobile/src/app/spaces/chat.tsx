@@ -7,7 +7,7 @@ import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useHeaderHeight } from 'expo-router/react-navigation';
 import { useKeyboardVisible } from '@/lib/use-keyboard-visible';
-import type { Member, Message } from '@rowboat/spaces-protocol';
+import type { Member, Message, Space } from '@rowboat/spaces-protocol';
 import { spaces } from '@x/shared';
 
 import { MessageActionSheet, MessageRow, applyReaction } from '@/components/space-message';
@@ -39,8 +39,11 @@ export default function SpaceChatScreen() {
   const insets = useSafeAreaInsets();
   const keyboardVisible = useKeyboardVisible();
   const account = useSpacesAccount();
-  const params = useLocalSearchParams<{ org: string; space: string; title: string; me: string }>();
+  const params = useLocalSearchParams<{ org: string; space: string; title: string; me: string; kind?: string }>();
   const { org, space, title, me } = params;
+  // A DM's membership is fixed, so it has no Members button (2026-11-02). Home
+  // says so in the params; other ways in fall back to the cached space list.
+  const direct = params.kind === 'direct' || peekValue<Space[]>(`spaces:${org}`)?.find((s) => s.id === space)?.kind === 'direct';
 
   const client = useMemo(
     () => new SpacesClient({ baseUrl: `https://${org}`, token: (opts) => account.getAccessToken(opts) }),
@@ -486,6 +489,11 @@ export default function SpaceChatScreen() {
           title: title ?? 'Space',
           headerRight: () => (
             <View style={{ flexDirection: 'row', gap: 18 }}>
+              {direct ? null : (
+                <Pressable hitSlop={10} onPress={() => router.push({ pathname: '/spaces/members', params: { org, space, title, me } })}>
+                  <Image source="sf:person.2" style={{ width: 24, height: 20 }} contentFit="contain" tintColor={colors.label} />
+                </Pressable>
+              )}
               <Pressable hitSlop={10} onPress={() => router.push({ pathname: '/spaces/search', params: { org, space, title, me } })}>
                 <Image source="sf:magnifyingglass" style={{ width: 20, height: 20 }} tintColor={colors.label} />
               </Pressable>
