@@ -95,11 +95,14 @@ export function ApprovalCard({ approval, orgId, selfMemberId, memberNames }: {
                 <ShieldAlert className="size-4 shrink-0 text-amber-500" />
                 <span className="min-w-0 flex-1">{shown.title}</span>
             </div>
-            {shown.detail.trim() && (
+            {/* An agent's detail is the exact action (a command, a diff); a super agent's request is Harbor's own sentence (2026-11-02). */}
+            {shown.detail.trim() && (shown.action ? (
+                <p className="mt-2 text-xs leading-snug text-foreground">{shown.detail}</p>
+            ) : (
                 <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border/60 bg-background px-2.5 py-2 font-mono text-xs leading-relaxed text-foreground">
                     {shown.detail}
                 </pre>
-            )}
+            ))}
             {shown.reason && <p className="mt-2 text-xs leading-snug text-muted-foreground">Why: {shown.reason}</p>}
 
             {shown.state === 'open' ? (

@@ -39,7 +39,7 @@ describe('SuperAgentSection', () => {
     it('shows everyone else what it may do, and nothing for an ordinary agent', () => {
         render(<SuperAgentSection orgId="org-1" agent={{ ...boss, superAgent: { approval: 'never', canDelete: true } }} isAdmin={false} ownerName="Harsh" onChanged={onChanged} />)
         expect(screen.queryByRole('switch')).toBeNull()
-        expect(screen.getByText('It can create Hermes and Codex agents for Harsh, without asking first, and delete the ones it created.')).toBeInTheDocument()
+        expect(screen.getByText('It can create agents for Harsh to hand work to. Harsh sets up only the ones that need a key. It can delete the ones it created.')).toBeInTheDocument()
         cleanup()
         const { container } = render(<SuperAgentSection orgId="org-1" agent={boss} isAdmin={false} ownerName="Harsh" onChanged={onChanged} />)
         expect(container).toBeEmptyDOMElement()
