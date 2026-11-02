@@ -125,6 +125,13 @@ export function saveValue<T>(name: string, value: T): void {
   void AsyncStorage.setItem(key, JSON.stringify(value)).catch(() => {});
 }
 
+export function removeValue(name: string): void {
+  const key = valueKey(name);
+  // Remembered as gone, so a load before the disk delete lands can't revive it.
+  values.set(key, undefined);
+  void AsyncStorage.removeItem(key).catch(() => {});
+}
+
 /** How much of a stream is kept for the instant/offline paint. */
 export const STREAM_CACHE_LIMIT = 100;
 

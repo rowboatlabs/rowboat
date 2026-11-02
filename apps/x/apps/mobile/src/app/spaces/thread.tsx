@@ -544,6 +544,7 @@ export default function SpaceThreadScreen() {
           onPickMedia={uploadMedia}
           onEdit={saveEdit}
           onDraftChange={(draft) => setDraftMentions(spaces.mentionsAnyone(draft))}
+          draftKey={`${org}:${space}:${root}`}
         />
       </View>
 

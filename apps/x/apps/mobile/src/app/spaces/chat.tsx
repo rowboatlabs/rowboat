@@ -613,6 +613,7 @@ export default function SpaceChatScreen() {
           onSend={send}
           onPickMedia={uploadMedia}
           onEdit={saveEdit}
+          draftKey={`${org}:${space}`}
         />
         )}
       </View>
