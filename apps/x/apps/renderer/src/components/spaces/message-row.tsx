@@ -585,16 +585,6 @@ function MessageRowImpl({
                             {thread && thread.replyCount > 0 ? 'Open' : 'Reply'}
                         </button>
                     )}
-                    {onAskRowboat && (
-                        <button
-                            type="button"
-                            title="Ask @rowboat about this"
-                            onClick={() => onAskRowboat(message)}
-                            className={cn('inline-flex size-8 items-center justify-center rounded-[7px] text-muted-foreground', ICON_HOVER)}
-                        >
-                            <Bot className="size-3.5" />
-                        </button>
-                    )}
                     {(onCopyLink || canDelete || canEdit || canQuote || canForward || canPin || canSave || canOpenResponseChat) && (
                         <DropdownMenu onOpenChange={setMenuOpen}>
                             <DropdownMenuTrigger asChild>
