@@ -83,3 +83,45 @@ describe("workspace.writeFile etag guard", () => {
     expect(recreated.stat.size).toBe(6);
   });
 });
+
+describe("workspace.readdir symlinks", () => {
+  async function makeVault() {
+    const vault = path.join(tmpDir, "vault");
+    await fs.mkdir(path.join(vault, "sub"), { recursive: true });
+    await fs.writeFile(path.join(vault, "a.md"), "# a");
+    await fs.writeFile(path.join(vault, "sub", "b.md"), "# b");
+    await fs.mkdir(path.join(workspaceDir, "knowledge"), { recursive: true });
+    return vault;
+  }
+
+  it("lists and recurses into a symlinked directory", async () => {
+    const vault = await makeVault();
+    await fs.symlink(vault, path.join(workspaceDir, "knowledge", "vault"), "dir");
+    const workspace = await loadWorkspace();
+    const entries = await workspace.readdir("knowledge", { recursive: true, allowedExtensions: [".md", ""] });
+    const paths = entries.map((e) => `${e.kind}:${e.path}`);
+    expect(paths).toContain("dir:knowledge/vault");
+    expect(paths).toContain("file:knowledge/vault/a.md");
+    expect(paths).toContain("file:knowledge/vault/sub/b.md");
+  });
+
+  it("lists a symlinked file as a file and skips dangling links", async () => {
+    const vault = await makeVault();
+    await fs.symlink(path.join(vault, "a.md"), path.join(workspaceDir, "knowledge", "link.md"));
+    await fs.symlink(path.join(tmpDir, "missing.md"), path.join(workspaceDir, "knowledge", "dangling.md"));
+    const workspace = await loadWorkspace();
+    const entries = await workspace.readdir("knowledge", { includeStats: true });
+    expect(entries.map((e) => `${e.kind}:${e.name}`)).toEqual(["file:link.md"]);
+    expect(entries[0].stat?.size).toBe(3);
+  });
+
+  it("terminates on a symlink cycle", async () => {
+    const vault = await makeVault();
+    await fs.symlink(vault, path.join(workspaceDir, "knowledge", "vault"), "dir");
+    await fs.symlink(workspaceDir, path.join(vault, "loop"), "dir");
+    const workspace = await loadWorkspace();
+    const entries = await workspace.readdir("knowledge", { recursive: true });
+    expect(entries.length).toBeLessThan(50);
+    expect(entries.map((e) => e.path)).toContain("knowledge/vault/a.md");
+  });
+});
