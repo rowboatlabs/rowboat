@@ -144,6 +144,7 @@ const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
         case 'spaces:deleteHostingEnv': envVars = envVars.filter((v) => v.key !== args.key); return { env: envVars }
         case 'spaces:runHostingCommand': return { execution: { id: 'x1', status: 'running' } }
         case 'spaces:openHostingConsole': return { console: { url: 'wss://api.maritime.sh/api/agents/agt-m1/terminal', token: `eu_console_${++consoles}`, expiresAt: '2026-10-30T06:00:00Z' } }
+        case 'spaces:startHostingSignIn': return { execution: { id: 'login', status: 'running' }, outputPath: '/data/login.txt' }
         case 'spaces:checkHostingSignIn': {
             const plan = hosting('ready', { funding: 'own', trial: { endsAt: '2026-11-25T10:00:00Z', closedAt: '2026-10-30T10:00:00Z', closedReason: 'sign_in' }, llm: { provider: 'chatgpt', keyHint: '', setBy: 'me', setAt: '2026-10-30T10:00:00Z' } })
             if (signedIn) listing = listing.map((l) => (l.agent.id === args.agentId ? { ...l, hosting: plan } : l))
@@ -822,6 +823,41 @@ describe('AgentsDialog', () => {
         await screen.findByText('Hermes · via Maritime · Channel · Yours · 1 key')
     }, 10_000)
 
+    it('offers ChatGPT sign-in during Codex creation and waits for verification before adding it to spaces', async () => {
+        managedKinds = ['codex']
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        await newAgent('rowboat')
+        fireEvent.click(await screen.findByRole('radio', { name: 'Sign in with ChatGPT' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Create agent' }))
+        await screen.findByRole('heading', { name: 'Finish creating Codex' })
+        expect(screen.getByRole('status')).toHaveTextContent('Preparing the agent')
+        expect(invoke).not.toHaveBeenCalledWith('spaces:openDirect', expect.objectContaining({ memberId: 'new' }))
+        listing = listing.map(item => item.agent.id === 'new' ? { ...item, hosting: hosting('ready') } : item)
+        const login = await screen.findByRole('button', { name: 'Sign in with ChatGPT' }, { timeout: 4000 })
+        fireEvent.click(login)
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:startHostingSignIn', { orgId: 'org-1', agentId: 'new' }))
+        signedIn = true
+        await screen.findByRole('heading', { name: 'Codex' }, { timeout: 4000 })
+        expect(invoke).toHaveBeenCalledWith('spaces:checkHostingSignIn', { orgId: 'org-1', agentId: 'new' })
+        expect(invoke).toHaveBeenCalledWith('spaces:openDirect', { orgId: 'org-1', memberId: 'new' })
+        expect(invoke.mock.calls.filter(([channel]) => channel === 'spaces:createManagedAgent')).toHaveLength(1)
+    }, 10000)
+
+    it('requires an OpenAI key when selected and applies it after the new VM is ready', async () => {
+        managedKinds = ['codex']
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        await newAgent('rowboat')
+        fireEvent.click(await screen.findByRole('radio', { name: 'Use an OpenAI API key' }))
+        expect(screen.getByRole('button', { name: 'Create agent' })).toBeDisabled()
+        fireEvent.change(screen.getByLabelText('OpenAI API key'), { target: { value: 'sk-test-creation' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Create agent' }))
+        await screen.findByRole('heading', { name: 'Finish creating Codex' })
+        expect(invoke).not.toHaveBeenCalledWith('spaces:setHostingLlm', expect.anything())
+        listing = listing.map(item => item.agent.id === 'new' ? { ...item, hosting: hosting('ready') } : item)
+        await screen.findByRole('heading', { name: 'Codex' }, { timeout: 4000 })
+        expect(invoke).toHaveBeenCalledWith('spaces:setHostingLlm', { orgId: 'org-1', agentId: 'new', provider: 'openai', apiKey: 'sk-test-creation' })
+    }, 10000)
+
     it('creates Claude Code with the person’s Anthropic key and environment variables, which travel once', async () => {
         managedKinds = ['hermes', 'claude-code', 'codex']
         render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
@@ -1015,7 +1051,7 @@ describe('AgentsDialog', () => {
         fireEvent.click(screen.getByRole('tab', { name: 'Files' }))
         const files = await screen.findByRole('list', { name: 'Files' })
         expect(invoke).toHaveBeenCalledWith('spaces:listHostingFiles', { orgId: 'org-1', agentId: 'jv', path: '/opt/data' })
-        fireEvent.click(within(files).getByRole('button', { name: /config\.yaml/ }))
+        fireEvent.click(within(files).getByRole('button', { name: /^config\.yaml/ }))
         expect(await screen.findByLabelText('File content')).toHaveValue('model: gpt-5.4')
 
         fireEvent.click(screen.getByRole('tab', { name: 'Skills' }))
@@ -1115,7 +1151,7 @@ describe('AgentsDialog', () => {
         fireEvent.click(await screen.findByRole('button', { name: /Cx/ }))
         const access = await screen.findByRole('group', { name: 'Model access' })
         expect(within(access).getByText(/or sign in with ChatGPT from the Terminal tab/)).toBeInTheDocument()
-        expect(within(access).getByRole('button', { name: 'Sign in with ChatGPT' })).toBeEnabled()
+        expect(within(access).queryByRole('button', { name: 'Sign in with ChatGPT' })).not.toBeInTheDocument()
         // Nothing there yet: said so, and the trial goes on.
         fireEvent.click(within(access).getByRole('button', { name: 'Check sign-in' }))
         await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:checkHostingSignIn', { orgId: 'org-1', agentId: 'cx' }))
