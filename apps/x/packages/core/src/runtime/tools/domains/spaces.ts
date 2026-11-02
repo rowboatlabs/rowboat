@@ -27,7 +27,7 @@
 
 import path from "node:path";
 import { z } from "zod";
-import { blobLinkUrl, mcpTools, readOnlyMcpToolNames } from "@rowboat/spaces-protocol";
+import { agentOnlyMcpToolNames, blobLinkUrl, mcpTools, readOnlyMcpToolNames } from "@rowboat/spaces-protocol";
 import { isSpacesAvailable } from "../../assembly/connections.js";
 import { BuiltinToolsSchema } from "../types.js";
 
@@ -143,7 +143,8 @@ function projectedTool(def: (typeof mcpTools)[number]): BuiltinTool {
 }
 
 const projectedTools: Record<string, BuiltinTool> = {};
-for (const def of mcpTools) projectedTools[def.name] = projectedTool(def);
+// The agent-only tools (super agents, 2026-11-02) are left out: this assistant acts as its person, never as an agent member.
+for (const def of mcpTools) if (!agentOnlyMcpToolNames.has(def.name)) projectedTools[def.name] = projectedTool(def);
 
 // --- blob bridge ----------------------------------------------------------------
 

@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createAgent37Instance, kindOfTemplate, listAgent37Instances } from './agent37.js';
+import { kindOfTemplate } from '../src/connectors/agent37/api.js';
+import { createAgent37Instance, listAgent37Instances } from '../src/connectors/agent37/setup.js';
 
-// The app's side of adding an Agent37 agent (2026-10-05): find or create its instance with the person's key.
+// Setting up an Agent37 agent (2026-10-05; in Harbor since 2026-11-02): find or create its instance with the person's key.
 
 const reply = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 

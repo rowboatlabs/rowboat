@@ -4006,23 +4006,22 @@ export const ipcSchemas = {
       instance: z.string().optional(),
       // Only its owner may use it (Harbor spec §4 Agent members, 2026-10-26).
       personal: z.boolean().optional(),
+      // A super agent's setup card this completes (2026-11-02).
+      request: z.string().optional(),
     }),
     res: z.object({ agent: z.custom<SpacesTypes.Member>(), key: z.custom<SpacesTypes.AgentKeySecret>() }),
   },
-  // Adding an Agent37 agent (2026-10-05): find or create its instance with the
-  // key being pasted, before Harbor is asked to add it. The key is not kept.
-  'spaces:agent37Instances': {
-    req: z.object({ key: z.string() }),
-    res: z.object({ instances: z.array(z.object({ id: z.string(), name: z.string().nullable(), template: z.string(), status: z.string(), kind: z.string().optional() })) }),
+  // The Add flow's platform setup (2026-11-02, harbor listSetupInstances /
+  // createSetupInstance): the instances a pasted key reaches on Agent37 or
+  // Maritime, and a new Agent37 instance, through the org's Harbor so the web
+  // app can do it too. The key is not kept.
+  'spaces:setupInstances': {
+    req: z.object({ orgId: z.string(), connection: z.string(), key: z.string() }),
+    res: z.object({ instances: z.array(z.custom<SpacesTypes.PlatformInstance>()) }),
   },
-  'spaces:agent37CreateInstance': {
-    req: z.object({ key: z.string(), kind: z.string(), name: z.string(), monthlyBudgetUsd: z.number(), autoSleep: z.boolean() }),
-    res: z.object({ instance: z.object({ id: z.string(), name: z.string().nullable(), template: z.string(), status: z.string(), kind: z.string().optional() }) }),
-  },
-  // Adding a Maritime agent (2026-10-26): list the agents the key being pasted reaches, before Harbor is asked to add one. The key is not kept.
-  'spaces:maritimeAgents': {
-    req: z.object({ key: z.string() }),
-    res: z.object({ agents: z.array(z.object({ id: z.string(), name: z.string(), framework: z.string(), templateId: z.string().nullable(), status: z.string(), kind: z.string().optional() })) }),
+  'spaces:createSetupInstance': {
+    req: z.object({ orgId: z.string(), connection: z.string(), key: z.string(), kind: z.string(), name: z.string(), monthlyBudgetUsd: z.number(), autoSleep: z.boolean() }),
+    res: z.object({ instance: z.custom<SpacesTypes.PlatformInstance>() }),
   },
   // Managed agents (2026-10-26): the kinds this org's Harbor creates on Rowboat's own
   // Maritime account (none when the deployment has no key: no Create button), creating
@@ -4040,6 +4039,7 @@ export const ipcSchemas = {
       anthropicApiKey: z.string().optional(),
       env: z.array(z.object({ key: z.string(), value: z.string(), secret: z.boolean().optional() })).optional(),
       personal: z.boolean().optional(),
+      request: z.string().optional(),
     }),
     res: z.object({ agent: z.custom<SpacesTypes.Member>(), key: z.custom<SpacesTypes.AgentKeySecret>(), hosting: z.custom<SpacesTypes.AgentHosting>() }),
   },
@@ -4212,6 +4212,11 @@ export const ipcSchemas = {
   // Switching an agent between channel and personal (2026-10-27, harbor setAgentPersonal): its owner only.
   'spaces:setAgentPersonal': {
     req: z.object({ orgId: z.string(), agentId: z.string(), personal: z.boolean() }),
+    res: z.object({ agent: z.custom<SpacesTypes.Member>() }),
+  },
+  // Making an agent a super agent, or ordinary again with null (2026-11-02, harbor setAgentSuper): admins only.
+  'spaces:setAgentSuper': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), superAgent: z.object({ askBeforeCreate: z.boolean(), askBeforeDelete: z.boolean() }).nullable() }),
     res: z.object({ agent: z.custom<SpacesTypes.Member>() }),
   },
   // Add existing org members, people or agents, to a space the caller is in

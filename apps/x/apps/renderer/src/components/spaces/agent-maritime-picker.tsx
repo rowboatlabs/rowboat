@@ -9,7 +9,8 @@ import { cn } from '@/lib/utils'
 // Which Maritime agent a new agent is (Harbor spec §8 Connectors, Maritime,
 // 2026-10-26). A Maritime agent is one VM with a persistent volume, so a
 // Rowboat agent is exactly one: the person picks one of the agents their key
-// reaches. The app talks to Maritime with the key being pasted, then adds the
+// reaches. The org's Harbor talks to Maritime with the key being pasted
+// (since 2026-11-02, so the web app can too), then the app adds the
 // agent with the Maritime agent's id; its template decides the kind, and an
 // agent made from an image, whose record names no runtime, takes the kind the
 // person picks. Creating agents on Maritime from here is the managed flow,
@@ -17,16 +18,17 @@ import { cn } from '@/lib/utils'
 
 export interface FoundAgent {
     id: string
-    name: string
-    framework: string
-    templateId: string | null
+    name: string | null
+    /** Its template, or its framework when it has none. */
+    template: string
     status: string
     kind?: string
 }
 
 const KINDS = ['hermes', 'claude-code', 'codex']
 
-export function MaritimeAgentPicker({ credential, choice, onChoice }: {
+export function MaritimeAgentPicker({ orgId, credential, choice, onChoice }: {
+    orgId: string
     /** The Maritime key being pasted; the picker lists what it reaches. */
     credential: string
     choice: InstanceChoice | null
@@ -46,7 +48,7 @@ export function MaritimeAgentPicker({ credential, choice, onChoice }: {
         setError(null)
         onChoice(null)
         try {
-            const { agents: list } = await window.ipc.invoke('spaces:maritimeAgents', { key })
+            const { instances: list } = await window.ipc.invoke('spaces:setupInstances', { orgId, connection: 'maritime', key })
             setFound({ key, agents: list })
             if (list.length === 1) onChoice({ type: 'existing', id: list[0]!.id, kind: list[0]!.kind ?? 'hermes', name: list[0]!.name })
         } catch (err) {
@@ -93,7 +95,7 @@ export function MaritimeAgentPicker({ credential, choice, onChoice }: {
                                 <span className="min-w-0 truncate">{a.name || a.id}</span>
                             </span>
                             <span className="shrink-0 text-[11px] text-muted-foreground">
-                                {a.kind ? `${kindInfo(a.kind).label} · ${a.status}` : `${a.templateId ?? a.framework} · ${a.status}`}
+                                {a.kind ? `${kindInfo(a.kind).label} · ${a.status}` : `${a.template} · ${a.status}`}
                             </span>
                         </button>
                     ))}

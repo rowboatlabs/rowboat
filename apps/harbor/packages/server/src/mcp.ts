@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { mcpTools, NewPoll, type ActingMode, type ReadAssetResult, type ActivityItem, type ActivityKind, type SearchKind, relabelMentions, type Message } from '@rowboat/spaces-protocol';
+import { agentOnlyMcpToolNames, mcpTools, NewPoll, type ActingMode, type ReadAssetResult, type ActivityItem, type ActivityKind, type SearchKind, relabelMentions, type Message } from '@rowboat/spaces-protocol';
 import { z } from 'zod';
 import { authenticateRequest, wwwAuthenticate, type OrgAuth } from './auth.js';
 import { HarborError } from './errors.js';
@@ -83,7 +83,8 @@ function buildMcpServer(service: HarborService, actor: McpActor, origin: string)
   const server = new Server({ name: 'harbor-stub', version: '0.0.1' }, { capabilities: { tools: {} } });
 
   server.setRequestHandler(ListToolsRequestSchema, () => ({
-    tools: mcpTools.map((t) => ({
+    // A person's assistant never acts as a super agent (2026-11-02): it isn't shown those tools.
+    tools: mcpTools.filter((t) => actor.agent || !agentOnlyMcpToolNames.has(t.name)).map((t) => ({
       name: t.name,
       description: t.description,
       inputSchema: z.toJSONSchema(t.input) as { type: 'object' },
@@ -499,6 +500,11 @@ async function dispatch(
       }
       return { topic: await service.manageTopic(ctx, a.spaceId, a.topicId, action) };
     }
+    // --- super agents (spec §4 Agent members, 2026-11-02) ----------------------
+    case 'create_agent':
+      return service.superAgentCreate(ctx, args as { spaceId: string; threadRootId: string; displayName: string; kind: string; connection?: string; reason: string });
+    case 'delete_agent':
+      return service.superAgentDelete(ctx, args as { spaceId: string; threadRootId: string; agentId: string; reason: string });
     case 'search_space': {
       const a = args as { spaceId: string; query: string; kinds?: SearchKind[]; limit?: number };
       return service.search(ctx, a.spaceId, a.query, {

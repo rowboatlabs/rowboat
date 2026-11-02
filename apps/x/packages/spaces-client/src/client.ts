@@ -35,6 +35,8 @@ import {
   type ApprovalClose,
   type InvitePolicy,
   type Member,
+  type SuperAgent,
+  type PlatformInstance,
   type MemberRole,
   type OrgSettings,
   type Membership,
@@ -571,6 +573,19 @@ export class SpacesClient {
   /** Set an agent's description and instructions: its owner only; a field left out is left alone, an empty one clears it (api.ts setAgentProfile, 2026-10-29). */
   async setAgentProfile(agentId: string, profile: { title?: string; instructions?: string }): Promise<Member> {
     return (await this.request('PUT', `/v1/agents/${encodeURIComponent(agentId)}/profile`, routes.setAgentProfile.response, profile)).agent;
+  }
+
+  /** The Add flow's platform setup through Harbor (api.ts listSetupInstances / createSetupInstance, 2026-11-02): the key is not kept. */
+  async setupInstances(connection: string, key: string): Promise<PlatformInstance[]> {
+    return (await this.request('POST', `/v1/setup/${encodeURIComponent(connection)}/instances`, routes.listSetupInstances.response, { key })).instances;
+  }
+  async createSetupInstance(connection: string, input: { key: string; kind: string; name: string; monthlyBudgetUsd: number; autoSleep: boolean }): Promise<PlatformInstance> {
+    return (await this.request('POST', `/v1/setup/${encodeURIComponent(connection)}/instances/new`, routes.createSetupInstance.response, input)).instance;
+  }
+
+  /** Make an agent a super agent, or ordinary again with null (api.ts setAgentSuper, 2026-11-02): admins only. */
+  async setAgentSuper(agentId: string, superAgent: SuperAgent | null): Promise<Member> {
+    return (await this.request('PUT', `/v1/agents/${encodeURIComponent(agentId)}/super`, routes.setAgentSuper.response, { superAgent })).agent;
   }
 
   /** Switch an agent this member owns between channel and personal (api.ts setAgentPersonal, 2026-10-27). */
